@@ -88,8 +88,9 @@ describe('a collection literal splices `Sequence` and erases `Nothing`', () => {
 describe('a set-kind lazy collection holds distinct elements', () => {
   test('`Join` of two sets deduplicates across the operands', () => {
     const j = ce.box(['Join', ['Set', 5, 2, 10, 18], ['Set', 1, 2, 3]]);
-    // The documented answer: `2` appears once, not twice.
-    expect(elementsOf(j)).toEqual(['5', '2', '10', '18', '1', '3']);
+    // The documented answer: `2` appears once, not twice. Each set is
+    // walked in its canonical order.
+    expect(elementsOf(j)).toEqual(['2', '5', '10', '18', '1', '3']);
     expect(j.evaluate().count).toBe(6);
   });
 

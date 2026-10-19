@@ -44,7 +44,16 @@ describe('A UNIT WITH A FRACTION EXPONENT', () => {
     const q1 = ce
       .box(['Power', ['Quantity', 4, 'm'], ['Rational', -1, 2]])
       .evaluate();
-    expect(q1.latex).toBe('\\frac{1}{2}\\,\\mathrm{1/m^{1/2}}');
+    expect(q1.latex).toBe(
+      '\\qty[parse-numbers=false]{\\frac{1}{2}}{1/m^{1/2}}'
+    );
+    // The magnitude `1/2` is not a number literal, so the quantity is written
+    // with `\qty`, which parses back as a quantity with the same magnitude
+    // and the same unit dimension.
+    const back1 = ce.parse(q1.latex);
+    expect(back1.operator).toBe('Quantity');
+    expect(back1.op1.json).toEqual(['Rational', 1, 2]);
+    expect(unitDimension(back1)).toEqual(['List', -0.5, 0, 0, 0, 0, 0, 0, 0]);
     expect(unitDimension(ce.parse('3\\,\\mathrm{1/m^{1/2}}'))).toEqual([
       'List',
       -0.5,

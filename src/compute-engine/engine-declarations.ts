@@ -3097,8 +3097,10 @@ export function assignFn(
     // the inner operator definition wholesale — which drops the minted marker
     // — so an in-place assignment would leave the type still resolving with
     // nothing able to build a value of it. Refuse it, in the shape of the
-    // constant-reassignment error: the host route throws, the `Assign`
-    // operator route surfaces it as an `Error` value.
+    // constant-reassignment error: it throws, on the host route
+    // (`ce.assign`) and on the `Assign` operator route alike (user decision
+    // 2026-10-18: `ce.parse('\\pi := 3').evaluate()` throws to the host). The
+    // Epsil interpreter catches the throw and reports it as an `Error` value.
     // A SHADOWING assignment is fine: it binds a new name in the current
     // scope and leaves the declaration's own scope untouched.
     // Carve-outs (§4.5b D13): a NOMINAL constructor-function install returned
@@ -3553,7 +3555,8 @@ export function assignFn(
     // place — `const k = (n) => n + 1` then `k = (s) => s` replaced `k`
     // silently, and `ce.assign('Pi', (x) => 2x)` turned the engine's own
     // system-scope `Pi` into that operator. Same message on both routes, so
-    // the `Assign` operator surfaces the same error value for either shape.
+    // the `Assign` operator throws the same error for either shape (a value or
+    // a function literal), and Epsil reports the same `Error` value.
     if (isValueDef(def) && def.value.isConstant)
       throw Error(`Cannot assign a value to the constant "${id}"`);
     // updateDef removes def.value and sets def.operator — no separate

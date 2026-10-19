@@ -1009,6 +1009,27 @@ export interface IComputeEngine {
    * @internal */
   _epsilDeclarationRoute: boolean;
 
+  /** Called with each NESTED statement and its value, after the statement
+   * evaluated: a statement of a statement list (a `Block` body, a function
+   * body, an `if` branch, a loop body) that carries `sourceOffsets`, that
+   * is, a statement written in Epsil source. Called by `evaluateStatements`
+   * and `evaluateStatementsAsync` (`function-utils.ts`), at the same place
+   * as the debugger's statement-result hook.
+   *
+   * Set by `executeEpsil` for the duration of its evaluation loop, so that
+   * a nested statement whose value is discarded and holds an error (an
+   * `Error` cell in a list built in a loop) is reported as a diagnostic, as
+   * a top-level statement is. `undefined` (the default) outside a run.
+   *
+   * This is a field of the engine, and not a module-global hook such as
+   * the debugger's, because the engine code that calls it and the Epsil
+   * code that sets it can be in two different bundles (the UMD builds are
+   * self-contained), and each bundle then has its own copy of a module
+   * variable. The engine object is the one value both bundles share.
+   * @internal */
+  _epsilStatementResultHook:
+    ((statement: Expression, result: Expression) => void) | undefined;
+
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should
    * not proceed, or `undefined` when no time limit is active. A derived view
    * of `_deadlineFrame` (which adds attribution); prefer passing

@@ -3360,9 +3360,10 @@ describe('Factorial above the exact digit cap', () => {
 });
 
 describe('Factorial2 digit cap (review pins)', () => {
-  test('a negative integer still answers NaN', () => {
-    expect(ce.box(['Factorial2', -3]).evaluate().isNaN).toBe(true);
-    expect(ce.box(['Factorial2', -1]).evaluate().isNaN).toBe(true);
+  test('a negative integer takes the backward-recurrence value', () => {
+    expect(ce.box(['Factorial2', -3]).evaluate().toString()).toBe('-1');
+    expect(ce.box(['Factorial2', -1]).evaluate().toString()).toBe('1');
+    expect(ce.box(['Factorial2', -2]).evaluate().toString()).toBe('~oo');
   });
   test('above the cap the numeric route is a big decimal, +oo at machine precision', () => {
     // mpmath.fac2(10**15) = 6.835170808228122422077323e+7282852759048381

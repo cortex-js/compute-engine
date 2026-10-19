@@ -44,10 +44,11 @@ function materialized(expr: Expression): Expression {
 }
 
 // Each source is a value to spread, written in Epsil and in MathJSON, with
-// the elements it contributes, in order.
+// the elements it contributes, in order. A canonical set stores its elements
+// in the canonical order, so `{3, 1}` contributes `1, 3`.
 const SOURCES: [string, string, MathJson, string][] = [
   ['a list', '[3, 1, 1]', ['List', 3, 1, 1], '3,1,1'],
-  ['a set', '{3, 1}', ['Set', 3, 1], '3,1'],
+  ['a set', '{3, 1}', ['Set', 3, 1], '1,3'],
   ['a range', '1..3', ['Range', 1, 3], '1,2,3'],
   [
     'a lazy Map',
@@ -57,9 +58,11 @@ const SOURCES: [string, string, MathJson, string][] = [
   ],
 ];
 
-/** The string of a set with the distinct elements of `elements`, in order. */
+/** The string of a set with the distinct elements of `elements` (integers),
+ * in the canonical order of a set: increasing. */
 function setString(elements: string): string {
   const distinct = [...new Set(elements.split(','))];
+  distinct.sort((a, b) => Number(a) - Number(b));
   return `Set(${distinct.join(', ')})`;
 }
 
@@ -142,9 +145,9 @@ describe('A list literal with a spread is a list', () => {
   test('two spreads', () => {
     expect(
       epsil('let a = {3, 1}\nlet b = [1, 2]\n[...a, ...b]').toString()
-    ).toBe('[3,1,1,2]');
+    ).toBe('[1,3,1,2]');
     expect(epsil('g(a, b) = [...a, ...b]\ng({3, 1}, 1..2)').toString()).toBe(
-      '[3,1,1,2]'
+      '[1,3,1,2]'
     );
     const ce = new ComputeEngine();
     ce.assign('a', ce.box(['Set', 3, 1]));
@@ -152,7 +155,7 @@ describe('A list literal with a spread is a list', () => {
     const v = materialized(
       ce.box(['List', ['Spread', 'a'], ['Spread', 'b'], 0])
     );
-    expect(v.json).toEqual(['List', 3, 1, 1, 2, 0]);
+    expect(v.json).toEqual(['List', 1, 3, 1, 2, 0]);
   });
 
   test('spread of a call result', () => {
@@ -191,7 +194,7 @@ describe('A list literal with a spread is a list', () => {
     const ce = new ComputeEngine();
     ce.assign('s', ce.box(['Set', 3, 1]));
     const expr = ce.box(['List', ['Spread', 's'], 3, 3]);
-    expect(expr.evaluate().toString()).toBe('[3,1,3,3]');
+    expect(expr.evaluate().toString()).toBe('[1,3,3,3]');
     expect(expr.evaluate().count).toBe(4);
   });
 });
@@ -270,12 +273,12 @@ describe('Join and Append over an operand that may hold a set', () => {
       [
         'Join',
         (s) => ['Join', s, ['List', 5, 3]],
-        { list: '[3,1,1,5,3]', set: 'Set(3, 1, 5)', range: '[1,2,3,5,3]' },
+        { list: '[3,1,1,5,3]', set: 'Set(1, 3, 5)', range: '[1,2,3,5,3]' },
       ],
       [
         'Append',
         (s) => ['Append', s, 5],
-        { list: '[3,1,1,5]', set: 'Set(3, 1, 5)', range: '[1,2,3,5]' },
+        { list: '[3,1,1,5]', set: 'Set(1, 3, 5)', range: '[1,2,3,5]' },
       ],
     ];
 
@@ -324,7 +327,7 @@ describe('Join and Append over an operand that may hold a set', () => {
     expect(expr.evaluate({ materialization: true }).operator).toBe('List');
     ce.assign('Q', ce.box(['Set', 3, 1]));
     expect(expr.evaluate({ materialization: true }).operator).toBe('Set');
-    expect(expr.evaluate().toString()).toBe('Set(3, 1, 5)');
+    expect(expr.evaluate().toString()).toBe('Set(1, 3, 5)');
   });
 
   // The same rule reaches `Map`, which keeps the kind of its source: over a
@@ -348,7 +351,7 @@ describe('Join and Append over an operand that may hold a set', () => {
         .box(['Join', ['Set', 3, 1], ['List', 5, 3]])
         .evaluate()
         .toString()
-    ).toBe('Set(3, 1, 5)');
+    ).toBe('Set(1, 3, 5)');
   });
 });
 
@@ -358,7 +361,7 @@ describe('Element reads of a list literal with a spread of a collection that is 
   // dictionary or a lazy view over a set, which have no positional `at`:
   // such an operand is read by position through its iterator.
   const HELD: [string, MathJson, string[]][] = [
-    ['a set', ['Set', 3, 1], ['3', '1']],
+    ['a set', ['Set', 3, 1], ['1', '3']],
     [
       'a dictionary',
       ['Dictionary', ['Tuple', "'x'", 1], ['Tuple', "'y'", 2]],
@@ -367,7 +370,7 @@ describe('Element reads of a list literal with a spread of a collection that is 
     [
       'a lazy Map over a set',
       ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], ['Set', 3, 1]],
-      ['6', '2'],
+      ['2', '6'],
     ],
   ];
   for (const [name, value, elements] of HELD) {
@@ -472,7 +475,7 @@ describe('Only the sources decide the kind of an abstract-typed node', () => {
       ['Function', ['Join', 'acc', ['List', 'x']], 'acc', 'x'],
       'seed',
     ]);
-    const expected = '[Set(7, 1),Set(7, 1),Set(7, 1, 2)]';
+    const expected = '[Set(1, 7),Set(1, 7),Set(1, 2, 7)]';
     expect(e.evaluate().toString()).toBe(expected);
     expect(e.evaluate({ materialization: true }).toString()).toBe(expected);
   });
@@ -496,9 +499,9 @@ describe('Join over an operand whose type says nothing', () => {
     expect(e.evaluate({ materialization: true }).toString()).toBe('[1,2,0]');
     ce.assign('q', ce.box(['Set', 1, 2]));
     expect(e.isIndexedCollection).toBe(false);
-    expect(e.evaluate().toString()).toBe('Set(1, 2, 0)');
+    expect(e.evaluate().toString()).toBe('Set(0, 1, 2)');
     expect(e.evaluate({ materialization: true }).toString()).toBe(
-      'Set(1, 2, 0)'
+      'Set(0, 1, 2)'
     );
   });
 
@@ -563,7 +566,7 @@ describe('A spread of an absent operand', () => {
         .box(['Set', ['Spread', ['Range', 1, 3]], 0])
         .evaluate()
         .toString()
-    ).toBe('Set(1, 2, 3, 0)');
+    ).toBe('Set(0, 1, 2, 3)');
     expect(
       ce
         .box(['SetFrom', ['List', 1, 2, 2]])

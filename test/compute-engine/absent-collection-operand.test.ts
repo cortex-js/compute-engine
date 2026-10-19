@@ -447,7 +447,7 @@ describe('Join and the set operators over an absent collection', () => {
         .box(['Union', ['Set', 1, 'Missing'], T])
         .evaluate()
         .toString()
-    ).toBe('Set(1, "Missing", 2, 3)');
+    ).toBe('Set(1, 2, 3, "Missing")');
     // A removed value that is absent is still refused.
     expect(ce.box(['SetMinus', S, 'Missing']).isValid).toBe(false);
   });

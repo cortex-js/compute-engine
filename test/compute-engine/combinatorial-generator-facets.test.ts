@@ -295,8 +295,10 @@ describe('1. PowerSet and CartesianProduct count a value at once', () => {
     expect(ms).toBeLessThan(FAST_MS);
     expect(count).toBe('1');
     // The walk gives each subset with its elements in the order of the base,
-    // and `isSame` compares a `Set` element by element.
-    expect(evaluate(['Count', ['PowerSet', SIXTY], ['Set', 2, 1]])).toBe('0');
+    // and `isSame` compares two sets without regard to the order of their
+    // elements, so `{2, 1}` is the subset `{1, 2}`.
+    expect(evaluate(['Count', ['PowerSet', SIXTY], ['Set', 2, 1]])).toBe('1');
+    expect(evaluate(['Count', ['PowerSet', SIXTY], ['Set', 61, 1]])).toBe('0');
     expect(evaluate(['Count', ['PowerSet', SIXTY], 'EmptySet'])).toBe('1');
     expect(evaluate(['Count', ['PowerSet', SIXTY], 5])).toBe('0');
   });

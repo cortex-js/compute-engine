@@ -47,7 +47,8 @@ function heldSetError(operator: string): string {
       "'indexed_collection'",
       "'set<integer>'",
     ],
-    ['Set', 3, 1],
+    // The canonical set stores its elements in the canonical order.
+    ['Set', 1, 3],
     ['ErrorTrace', ['ErrorFrame', `'${operator}'`, 1]],
   ]);
 }
@@ -76,7 +77,7 @@ describe('DeleteAt, ReplaceAt and Insert refuse a held set', () => {
 
   test('the literal set keeps its error in place', () => {
     expect(ce.box(['DeleteAt', ['Set', 3, 1], 1]).toString()).toBe(
-      'DeleteAt(Error(ErrorCode("incompatible-type", "indexed_collection", "set<integer>"), Set(3, 1)), 1)'
+      'DeleteAt(Error(ErrorCode("incompatible-type", "indexed_collection", "set<integer>"), Set(1, 3)), 1)'
     );
   });
 
@@ -122,7 +123,7 @@ describe('Differences is declared on indexed_collection', () => {
     const expr = ce.box(['Differences', ['Set', 3, 1]]);
     expect(expr.isValid).toBe(false);
     expect(expr.toString()).toBe(
-      'Differences(Error(ErrorCode("incompatible-type", "indexed_collection", "set<integer>"), Set(3, 1)))'
+      'Differences(Error(ErrorCode("incompatible-type", "indexed_collection", "set<integer>"), Set(1, 3)))'
     );
   });
 

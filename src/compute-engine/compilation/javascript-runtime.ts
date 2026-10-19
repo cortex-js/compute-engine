@@ -3607,7 +3607,13 @@ export const SYS_HELPERS = {
   // not), the same value an embedded `~oo` literal compiles to.
   factorial: (x: number): number =>
     Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1),
-  factorial2,
+  // `n!!` of a negative odd integer is the value of the backward
+  // recurrence (`(-3)!! = -1`, `(-5)!! = 1/3`), which the shared helper
+  // computes. A negative even integer is a pole: the interpreter returns
+  // ComplexInfinity, whose float projection is `Infinity`, while the shared
+  // helper answers `NaN` there.
+  factorial2: (x: number): number =>
+    Number.isInteger(x) && x < 0 && x % 2 === 0 ? Infinity : factorial2(x),
   // Γ has a pole at every non-positive integer; the shared numeric helper
   // answers `NaN` there, but the compiled lane spells a pole as `Infinity`
   // (the float projection of the interpreter's `~oo`), the same value a

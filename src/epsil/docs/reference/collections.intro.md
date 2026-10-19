@@ -15,12 +15,13 @@ element types.
 | range        | `1..10`                | Numbers from a start to an end, with an optional step.      |
 | string       | `"hello"`              | The characters of the text, in order.                       |
 
-A set literal removes duplicates. The empty set is `{}`, and the empty
-dictionary is `{->}`:
+A set literal removes duplicates and stores its elements in the canonical
+order, so two sets with the same elements are written, printed and walked
+alike. The empty set is `{}`, and the empty dictionary is `{->}`:
 
 ```epsil
 {3, 1, 3, 2}
-// ➔ Set(3, 1, 2)
+// ➔ Set(1, 2, 3)
 ```
 
 Collections are **immutable**. An operation never changes a collection: it

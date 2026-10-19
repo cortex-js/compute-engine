@@ -562,6 +562,65 @@ export function order(a: Expression, b: Expression): number {
   );
 }
 
+/**
+ * The elements of a canonical set literal, in the canonical order.
+ *
+ * The elements of a set are not ordered, but the operators that walk a set
+ * (`ListFrom`, `Reduce`, `String`, serialization...) read its elements in the
+ * order in which they are stored. So that two sets that are `isSame` give the
+ * same result to every operator, a canonical set stores its elements in one
+ * order that does not depend on the written order: `{2, 1}` and `{x, 1}` are
+ * stored as `{1, 2}` and `{1, x}`.
+ *
+ * The order is `order()`, the order of the operands of the other commutative
+ * operators. `order()` gives a tie (`0`) for some elements that are
+ * different (`[1, 2]` and `[3, 4]`: two lists with the same leaf count), and
+ * a stable sort would then keep their written order. Such a tie is broken
+ * by `setElementTieOrder()`, so the order is total on elements whose
+ * MathJSON is different.
+ *
+ * The caller removes the elements that are `isSame` as an earlier element
+ * first: `isSame` elements (the rational `1/2` and the float `0.5`) can have
+ * different digests, and they must not both be in the set.
+ */
+export function sortSetElements(
+  xs: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (xs.length < 2) return xs;
+  return [...xs].sort(setElementOrder);
+}
+
+/** `order()`, with its ties broken by `setElementTieOrder()`. */
+function setElementOrder(a: Expression, b: Expression): number {
+  return order(a, b) || setElementTieOrder(a, b);
+}
+
+/**
+ * The order of two elements that `order()` ties. A function application
+ * comes after any other element. Two applications compare by operator name,
+ * then operand by operand (with `setElementOrder()`), then by operand count,
+ * so `[1, 2]` comes before `[3, 4]`. Anything else compares by `digest`, a
+ * key of the MathJSON tree. Each step is a total order, so their sequence is
+ * a total order too: the result does not depend on the written order.
+ */
+function setElementTieOrder(a: Expression, b: Expression): number {
+  const fa = isFunction(a);
+  const fb = isFunction(b);
+  if (fa !== fb) return fa ? 1 : -1;
+  if (fa && fb) {
+    if (a.operator !== b.operator) return a.operator < b.operator ? -1 : 1;
+    const n = Math.min(a.nops, b.nops);
+    for (let i = 0; i < n; i++) {
+      const r = setElementOrder(a.ops[i], b.ops[i]);
+      if (r !== 0) return r;
+    }
+    if (a.nops !== b.nops) return a.nops - b.nops;
+  }
+  const da = a.digest;
+  const db = b.digest;
+  return da < db ? -1 : da > db ? 1 : 0;
+}
+
 /** Return a version of the expression with its arguments sorted in
  * canonical order
  */

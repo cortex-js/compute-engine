@@ -29,6 +29,7 @@ import {
 import {
   isFunction,
   isString,
+  isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
@@ -136,6 +137,11 @@ export function executeEpsil(
   // host re-entering the interpreter) leaves the outer batch intact.
   const enclosingBatch = ce._epsilBatchId;
   ce._epsilBatchId = ++epsilBatchCounter;
+  // The nested-statement hook the evaluation loop installs (see
+  // `nestedStatementReporter`). The loop restores it when it ends; this
+  // restores it too when the run ends with an exception. Restored rather
+  // than cleared, so a nested run leaves the outer run's hook in place.
+  const enclosingStatementHook = ce._epsilStatementResultHook;
   try {
     // A program runs with no iteration limit: a loop written by its author
     // runs until it ends, and the host's time budget is the bound. A limit
@@ -146,6 +152,7 @@ export function executeEpsil(
     return executeEpsilBatch(ce, source, options);
   } finally {
     ce._epsilBatchId = enclosingBatch;
+    ce._epsilStatementResultHook = enclosingStatementHook;
   }
 }
 
@@ -279,6 +286,8 @@ function executeEpsilBatch(
 
   let value: BoxedExpression = ce.Nothing;
   let valueRange: [number, number] | undefined;
+  // The statement whose value is `value`: the last statement that ran.
+  let valueStatement: MathJsonExpression | undefined;
 
   // Names already surfaced as `unknown-function` — one diagnostic per unknown
   // name per program run, not per occurrence.
@@ -295,6 +304,19 @@ function executeEpsilBatch(
   // (`variableRedeclarationDiagnostic`); this is the behavior it describes.
   const declaredAtTopLevel = new Set<string>();
 
+  // A NESTED statement (in a loop body, a function body, an `if` branch)
+  // whose value is discarded and holds an error is reported as a
+  // `runtime-error` diagnostic too, by a hook the engine calls after each
+  // such statement. Installed for the evaluation loop only: the static pass
+  // above evaluates no statement.
+  const enclosingStatementHook = ce._epsilStatementResultHook;
+  ce._epsilStatementResultHook = nestedStatementReporter(
+    ce,
+    statements,
+    defSites,
+    diagnostics
+  );
+
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
     // "Errors are values": a runtime problem becomes an `["Error", …]` value.
@@ -304,6 +326,7 @@ function executeEpsilBatch(
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
     valueRange = statementRange(stmt, source);
+    valueStatement = stmt;
     // The name a top-level `let` of this statement re-declares, if any (see
     // `declaredAtTopLevel`).
     let redeclared: string | undefined;
@@ -390,7 +413,14 @@ function executeEpsilBatch(
     // The same holds for a binding of an absence marker (`let Missing =
     // 3`): the static pass reports it at the binding, and the statement's
     // `absence-marker-binding` error value is that same problem.
-    const markerError = value.errors[0];
+    // The walks of the value below run outside the per-statement `try`, and
+    // nothing may throw to the host from them: a value can be nested so
+    // deeply that a recursive walk (`errors`, `json`) overflows the stack.
+    // A walk that throws is reported as a diagnostic of the statement
+    // (`reportWalkFailure`), and the advisory result it was computing is
+    // dropped.
+    const walkFailure = { error: undefined as unknown };
+    const markerError = walkValue(walkFailure, () => value.errors[0]);
     const markerCode =
       isFunction(markerError, 'Error') &&
       isFunction(markerError.op1, 'ErrorCode')
@@ -419,41 +449,20 @@ function executeEpsilBatch(
             d.message[1] === markerName
         ));
     if (i < statements.length - 1 && !reportedStatically) {
-      const errors = value.errors;
-      if (errors.length > 0) {
-        // An error that BUBBLED out of a subexpression carries a breadcrumb
-        // of `(operator, operand index)` frames (engine design §2a). Rendered
-        // compactly as `%1`, it recovers the context the bare error lost; the
-        // statement range below supplies the source anchoring.
-        const frames = errorFrameChain(errors[0].json);
-        const description = describeError(errors[0].json);
-        const range = narrowErrorRange(
-          ce,
-          errors[0].json,
-          stmt,
-          statementRange(stmt, source)
-        );
-        const diagnostic = makeDiagnostic(
-          cancellation !== undefined
-            ? ['evaluation-canceled', cancellation, errors[0].toString()]
-            : // `%2` (the frame chain) is `''` when the error was raised in
-              // place, so `%3` — the machine-readable engine error code,
-              // which keys extended docs (`epsil doc <code>`) — has a
-              // stable position.
-              ['runtime-error', description, frames, errorCode(errors[0].json)],
-          range
-        );
-        // A call that did not match its callee's signature gets the signature
-        // and the callee's definition site as notes — the context the bare
-        // "a required argument is missing" leaves the reader to hunt for.
-        const notes = signatureNotes(ce, errors[0].json, {
-          definitionSites: defSites,
-          primaryRange: range,
-          boxedError: errors[0],
-        });
-        if (notes.length > 0) diagnostic.notes = notes;
-        diagnostics.push(diagnostic);
-      }
+      walkValue(walkFailure, () => {
+        const errors = value.errors;
+        if (errors.length > 0)
+          diagnostics.push(
+            errorValueDiagnostic(
+              ce,
+              errors[0],
+              stmt,
+              statementRange(stmt, source),
+              defSites,
+              cancellation
+            )
+          );
+      });
     }
 
     // An expired TIME budget ends the program: the deadline belongs to the
@@ -467,7 +476,10 @@ function executeEpsilBatch(
     // per-construct configuration, not a shared budget: the next statement
     // gets a fresh allowance, so a breach there is an ordinary error value
     // and the program continues (see `docs/TIMEOUT-MODEL.md` §9).
-    if (cancellation === 'timeout' || cancellation === 'step-budget') break;
+    if (cancellation === 'timeout' || cancellation === 'step-budget') {
+      reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
+      break;
+    }
 
     // "Did you mean?" — calling an unknown function stays *silently* symbolic
     // (an inert `["Quartile", …]` value), so the user never learns it did not
@@ -476,15 +488,20 @@ function executeEpsilBatch(
     // returned value is unchanged (still symbolic); this is advisory. Source
     // ranges are lost from the evaluated tree, so the *statement's* range is
     // attached.
-    scanUnknownFunctions(
-      ce,
-      value.json,
-      reportedUnknowns,
-      diagnostics,
-      stmt,
-      source
+    walkValue(walkFailure, () =>
+      scanUnknownFunctions(
+        ce,
+        value.json,
+        reportedUnknowns,
+        diagnostics,
+        stmt,
+        source
+      )
     );
+    reportWalkFailure(ce, walkFailure, stmt, source, defSites, diagnostics);
   }
+
+  ce._epsilStatementResultHook = enclosingStatementHook;
 
   // PENDING CONFORMANCES (protocols design P3). A conformance declared without
   // an implementation block is *pending*, and the state persists across
@@ -531,14 +548,27 @@ function executeEpsilBatch(
   // the notes that would have travelled on a diagnostic are returned beside
   // it — computed here because only this function has the engine, the raw AST
   // and the source together, exactly as for `valueRange`.
+  const notesFailure = { error: undefined as unknown };
   const valueNotes =
-    value.errors.length > 0
-      ? signatureNotes(ce, value.errors[0].json, {
-          definitionSites: defSites,
-          primaryRange: valueRange,
-          boxedError: value.errors[0],
-        })
-      : [];
+    walkValue(notesFailure, () => {
+      const errors = value.errors;
+      return errors.length > 0
+        ? signatureNotes(ce, errors[0].json, {
+            definitionSites: defSites,
+            primaryRange: valueRange,
+            boxedError: errors[0],
+          })
+        : [];
+    }) ?? [];
+  if (valueStatement !== undefined)
+    reportWalkFailure(
+      ce,
+      notesFailure,
+      valueStatement,
+      source,
+      defSites,
+      diagnostics
+    );
 
   return {
     value,
@@ -546,6 +576,61 @@ function executeEpsilBatch(
     ...(valueRange === undefined ? {} : { valueRange }),
     ...(valueNotes.length === 0 ? {} : { valueNotes }),
   };
+}
+
+/**
+ * The result of `walk`, a walk of the value of a statement that runs outside
+ * the per-statement `try` of {@link executeEpsil}, or `undefined` when the
+ * walk throws. The first exception is kept in `failure`, for
+ * {@link reportWalkFailure}. A recursive walk of a deeply nested value can
+ * overflow the stack (a `RangeError`), and a program must never throw to its
+ * host.
+ */
+function walkValue<T>(
+  failure: { error: unknown },
+  walk: () => T
+): T | undefined {
+  try {
+    return walk();
+  } catch (e) {
+    if (failure.error === undefined) failure.error = e;
+    return undefined;
+  }
+}
+
+/**
+ * Report the exception that a walk of the value of `stmt` threw
+ * ({@link walkValue}), if any, as a diagnostic at the statement: a
+ * `runtime-error` with the message of the exception, or an
+ * `evaluation-canceled` diagnostic when the exception is a cancellation (the
+ * host's time budget expired during the walk). The exception is cleared, so
+ * that it is reported once, and a diagnostic equal to one already reported
+ * (the walks of the final value fail as the walks of its statement did) is
+ * not added again.
+ */
+function reportWalkFailure(
+  ce: ComputeEngine,
+  failure: { error: unknown },
+  stmt: MathJsonExpression,
+  source: string,
+  defSites: ReturnType<typeof definitionSites>,
+  diagnostics: ParsingDiagnostic[]
+): void {
+  const e = failure.error;
+  if (e === undefined) return;
+  failure.error = undefined;
+  const message = e instanceof Error ? e.message : String(e);
+  const diagnostic = errorValueDiagnostic(
+    ce,
+    ce.box(['Error', { str: message }]),
+    stmt,
+    statementRange(stmt, source),
+    defSites,
+    cancellationCause(e)
+  );
+  const key = JSON.stringify([diagnostic.message, diagnostic.range]);
+  if (!diagnostics.some((d) => JSON.stringify([d.message, d.range]) === key))
+    diagnostics.push(diagnostic);
 }
 
 /**
@@ -638,6 +723,275 @@ function narrowErrorRange(
     calleeSlotNamesResolver(ce),
     frameOrderOf(errorCode(error))
   );
+}
+
+/**
+ * The diagnostic for a statement whose value holds the error `error` and is
+ * discarded: a non-final top-level statement, or a nested statement (see
+ * {@link nestedStatementReporter}). A cap breach (`cancellation`, top level
+ * only) is an `evaluation-canceled` diagnostic that carries the cause;
+ * every other problem is a `runtime-error` diagnostic.
+ *
+ * `fallback` is the range of the statement; it is narrowed to the innermost
+ * frame of the error's breadcrumb that maps onto the source.
+ */
+function errorValueDiagnostic(
+  ce: ComputeEngine,
+  error: BoxedExpression,
+  stmt: MathJsonExpression,
+  fallback: [number, number],
+  defSites: ReturnType<typeof definitionSites>,
+  cancellation?: CancellationCause
+): ParsingDiagnostic {
+  // An error that BUBBLED out of a subexpression carries a breadcrumb
+  // of `(operator, operand index)` frames (engine design §2a). Rendered
+  // compactly as `%1`, it recovers the context the bare error lost; the
+  // statement range below supplies the source anchoring.
+  const frames = errorFrameChain(error.json);
+  const description = describeError(error.json);
+  const range = narrowErrorRange(ce, error.json, stmt, fallback);
+  const diagnostic = makeDiagnostic(
+    cancellation !== undefined
+      ? ['evaluation-canceled', cancellation, error.toString()]
+      : // `%2` (the frame chain) is `''` when the error was raised in
+        // place, so `%3` — the machine-readable engine error code,
+        // which keys extended docs (`epsil doc <code>`) — has a
+        // stable position.
+        ['runtime-error', description, frames, errorCode(error.json)],
+    range
+  );
+  // A call that did not match its callee's signature gets the signature
+  // and the callee's definition site as notes — the context the bare
+  // "a required argument is missing" leaves the reader to hunt for.
+  const notes = signatureNotes(ce, error.json, {
+    definitionSites: defSites,
+    primaryRange: range,
+    boxedError: error,
+  });
+  if (notes.length > 0) diagnostic.notes = notes;
+  return diagnostic;
+}
+
+/**
+ * What happens to the value of a NESTED statement: a statement of a
+ * `Block` (a function body, a loop body, an `if` branch, a `do` block)
+ * that is written in the source.
+ *
+ * - `discarded`: nothing reads the value. This is a statement that is not
+ *   the last one of its block (the block continues with the next
+ *   statement), or the last statement of a loop body (a loop runs for
+ *   effect, and starts the next iteration). The body of a `while let` loop
+ *   is a loop body too.
+ * - `returned`: the last statement of a function body. The value is the
+ *   value of the call, and the expression that made the call reads it.
+ * - `passed`: the last statement of any other block, for example an `if`
+ *   branch. The value is the value of the block, so it becomes the value of
+ *   the enclosing statement (the `if`), and that statement decides.
+ */
+type NestedStatementRole = 'discarded' | 'returned' | 'passed';
+
+type NestedStatementSite = {
+  stmt: MathJsonExpression;
+  range: [number, number];
+  role: NestedStatementRole;
+};
+
+/**
+ * Every nested statement of the program that carries a source range, keyed
+ * by that range (`"start:end"`), with its role. Two statements with the
+ * same range map to `null`: the key does not tell them apart, so neither is
+ * reported.
+ *
+ * Read from the RAW tree, because the evaluated statements keep only their
+ * source range, not their place in the program.
+ */
+function nestedStatementSites(
+  statements: ReadonlyArray<MathJsonExpression>
+): Map<string, NestedStatementSite | null> {
+  const sites = new Map<string, NestedStatementSite | null>();
+  // `parent` is the operator of the node that holds `node`, and `index` the
+  // place of `node` among its operands (0 for the first). `loopBody` is true
+  // when the value of `node` is the value of one iteration of a loop, which
+  // the loop discards.
+  const visit = (
+    node: MathJsonExpression,
+    parent: string,
+    index: number,
+    loopBody: boolean
+  ): void => {
+    const ops = operands(node);
+    const head = operator(node);
+    if (head === 'Block') {
+      ops.forEach((stmt, j) => {
+        const range = sourceOffsetsOf(stmt);
+        if (range === undefined) return;
+        // The body of a function literal is the FIRST operand of
+        // `Function`.
+        const role: NestedStatementRole =
+          j < ops.length - 1 || loopBody
+            ? 'discarded'
+            : parent === 'Function' && index === 0
+              ? 'returned'
+              : 'passed';
+        const key = `${range[0]}:${range[1]}`;
+        sites.set(key, sites.has(key) ? null : { stmt, range, role });
+      });
+    }
+    ops.forEach((op, j) => {
+      // The body of a loop is the FIRST operand of `Loop`. A `while let`
+      // loop is a `Loop` whose body is a `Match`
+      // (`Loop(Match(subject, MatchCase(pattern, guard, body),
+      // MatchCase(_, Break)))`): the value of the `Match` is the value of
+      // the case that matched, the last operand of a `MatchCase`, so the
+      // loop discards the value of that case body too. No statement holds
+      // the `Match` there, so the body's last statement is marked
+      // `discarded` itself.
+      const opLoopBody =
+        head === 'Loop'
+          ? j === 0
+          : head === 'Match'
+            ? loopBody && j > 0
+            : head === 'MatchCase'
+              ? loopBody && j === ops.length - 1
+              : false;
+      visit(op, head, j, opLoopBody);
+    });
+  };
+  for (const stmt of statements) visit(stmt, '', 0, false);
+  return sites;
+}
+
+/**
+ * True when the evaluated statement `boxed` is plausibly the raw statement
+ * `raw`: the same operator and, for an assignment or a declaration, the
+ * same target name.
+ *
+ * The source range alone does not identify a statement of THIS program: a
+ * function that an earlier program declared on the same engine (an earlier
+ * notebook cell) runs its body statements here too, and their ranges index
+ * the earlier source. Such a statement can have the same range as a
+ * statement of this program; this check rejects most of these. A statement
+ * whose operator canonicalization changes (`a - b` becomes `Add`) is
+ * rejected too, and is then not reported.
+ */
+function isSameStatement(
+  boxed: BoxedExpression,
+  raw: MathJsonExpression
+): boolean {
+  const name = symbol(raw);
+  if (name !== null) return isSymbol(boxed) && boxed.symbol === name;
+  const head = operator(raw);
+  if (head === '' || boxed.operator !== head) return false;
+  if (head !== 'Assign' && head !== 'Declare') return true;
+  const target = symbol(operand(raw, 1));
+  if (target === null) return true;
+  const written = isFunction(boxed) ? boxed.op1 : undefined;
+  return isSymbol(written) && written.symbol === target;
+}
+
+/**
+ * The hook `executeEpsil` installs on the engine
+ * (`_epsilStatementResultHook`) for its evaluation loop. The engine calls it
+ * after each nested statement written in the source evaluates.
+ *
+ * A top-level statement whose value is discarded (any statement but the
+ * last) and holds an error is reported by the loop of `executeEpsilBatch`.
+ * The same problem in a nested statement would vanish too: a loop or a
+ * block stops only on a value whose operator is `Error`, and a value that
+ * only HOLDS an error (a list built in a loop with one failed cell,
+ * `[...fs, g("a")]`) is an ordinary value. The cell stays in the value (a
+ * collection keeps a failed cell, `docs/ERROR-MODEL.md` §3), so this hook
+ * reports it, and changes nothing that the program computes.
+ *
+ * Which statements report: a nested statement whose value is DISCARDED
+ * (see {@link NestedStatementRole}) and holds at least one error
+ * (`value.errors`, as for a top-level statement). A value whose operator is
+ * `Error`, `Return`, `Break` or `Continue` is never discarded: it ends the
+ * block and becomes its value, so the enclosing statement deals with it.
+ *
+ * Where the report goes: the range of the statement, narrowed by the
+ * error's breadcrumb as at the top level. When the value was PASSED up from
+ * the last statement of an inner block (the branch of an `if` that is the
+ * last statement of a loop body), the report goes to that inner statement,
+ * which is where the value was made. The value is matched by identity: a
+ * block and an `if` return the value of their statement unchanged. A value
+ * returned from a function body is not followed into the function.
+ *
+ * How often: once per source range. A loop body or a function body runs
+ * its statements many times, and a problem in one of them is one problem.
+ * The first report of a range is kept.
+ */
+function nestedStatementReporter(
+  ce: ComputeEngine,
+  statements: ReadonlyArray<MathJsonExpression>,
+  defSites: ReturnType<typeof definitionSites>,
+  diagnostics: ParsingDiagnostic[]
+): (statement: BoxedExpression, result: BoxedExpression) => void {
+  const sites = nestedStatementSites(statements);
+  const reported = new Set<string>();
+  // The site where a value passed up from an inner block was made.
+  const madeAt = new WeakMap<BoxedExpression, NestedStatementSite>();
+  const hook = (statement: BoxedExpression, result: BoxedExpression): void => {
+    // `isValid` is false exactly when the value holds an `Error`, and it is
+    // memoized on each node, so this test does not walk a list again on
+    // each iteration of the loop that grows it.
+    if (result.isValid) return;
+    const head = result.operator;
+    if (
+      head === 'Error' ||
+      head === 'Return' ||
+      head === 'Break' ||
+      head === 'Continue'
+    )
+      return;
+    const offsets = statement.sourceOffsets;
+    if (offsets === undefined) return;
+    const key = `${offsets[0]}:${offsets[1]}`;
+    const site = sites.get(key);
+    if (site === undefined || site === null) return;
+    if (!isSameStatement(statement, site.stmt)) return;
+    if (site.role === 'returned') return;
+    if (site.role === 'passed') {
+      // The innermost statement that made the value is recorded first.
+      if (!madeAt.has(result)) madeAt.set(result, site);
+      return;
+    }
+    const origin = madeAt.get(result) ?? site;
+    const originKey = `${origin.range[0]}:${origin.range[1]}`;
+    if (reported.has(originKey)) return;
+    reported.add(originKey);
+    // Building the diagnostic reads definitions and serializes the error;
+    // the hook is removed while it runs, so that nothing it evaluates is
+    // reported as a statement of the program.
+    ce._epsilStatementResultHook = undefined;
+    try {
+      // `errors` walks the value by recursion, so a deeply nested value can
+      // overflow the stack. (A list that grows in a loop by `[...fs, x]`
+      // stays one flat list, also with a failed cell: `canonicalJoin()`
+      // splices a `ListJoin` operand. A value nested in other ways still can
+      // be deep.)
+      const errors = result.errors;
+      if (errors.length > 0)
+        diagnostics.push(
+          errorValueDiagnostic(
+            ce,
+            errors[0],
+            origin.stmt,
+            origin.range,
+            defSites
+          )
+        );
+    } catch (e) {
+      // A report is advisory: a failure while it is built must not become
+      // the value of the statement, which is what an exception thrown into
+      // the engine here would do. A cap breach (the host's time budget) is
+      // not a failure of the report, and goes on.
+      if (cancellationCause(e) !== undefined) throw e;
+    } finally {
+      ce._epsilStatementResultHook = hook;
+    }
+  };
+  return hook;
 }
 
 /**

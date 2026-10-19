@@ -224,8 +224,10 @@ import {
   isString,
   isCharacter,
   isSymbol,
+  isUnorderedSet,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { sortSetElements } from '../boxed-expression/order.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import { typeMembership } from './sets.js';
 import { isRingConstant } from './ring-constructions.js';
@@ -7142,6 +7144,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
+    // The elements of a set are not ordered: `isSame` compares two set
+    // literals without regard to the order of their elements, so a set
+    // pattern must match them in any order too (`{1, _a}` matches `{2, 1}`).
+    // `commutativeMatch` makes `match()` try permutations of the operands
+    // without the canonical operand sort that `commutative` would impose:
+    // a set keeps the order in which its elements were written. A two-operand
+    // set-builder is still matched by position (see `isUnorderedSet`, which
+    // `match()` reads).
+    commutativeMatch: true,
 
     signature: '(any*) -> set',
     type: (ops, context) => {
@@ -17970,13 +17981,33 @@ function canonicalSet(
   if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
 
   // Check that each element is only present once. (`Nothing` was already
-  // erased by the `flatten` call above.)
+  // erased by the `flatten` call above.) Two `isSame` elements always have
+  // the same hash, so an element is compared only with the elements already
+  // kept that have its hash: the cost is linear in the number of elements
+  // when their hashes are distinct, where a comparison with every element
+  // kept was quadratic (20,000 elements took about 3 s).
   const set: Expression[] = [];
-  const has = (x: Expression) => set.some((y) => y.isSame(x));
+  const kept = new Map<number, Expression[]>();
+  for (const op of ops) {
+    const h = op.hash;
+    const bucket = kept.get(h);
+    if (bucket === undefined) kept.set(h, [op]);
+    else if (bucket.some((y) => y.isSame(op))) continue;
+    else bucket.push(op);
+    set.push(op);
+  }
 
-  for (const op of ops) if (!has(op)) set.push(op);
-
-  return engine._fn('Set', set);
+  // The elements are stored in the canonical order, not in the written
+  // order, so every operator that walks the set (`ListFrom`, `Reduce`,
+  // `String`...) gives the same result for two sets that are `isSame`
+  // (`sortSetElements`). A two-element set with an `Element` or `Condition`
+  // operand keeps its written order: `isSame` compares it by position, and
+  // sorting `{Element(k, S), 2k}` would give `{2k, Element(k, S)}`, which is
+  // read as a set-builder (see `isUnorderedSet`).
+  return engine._fn(
+    'Set',
+    isUnorderedSet('Set', set) ? sortSetElements(set) : set
+  );
 }
 
 /**
@@ -18768,23 +18799,43 @@ function canonicalJoin(
       undefined,
       () => true
     ) ?? ops;
-  if (args.some((x) => !x.isValid)) return ce._fn(head, args);
+  // An invalid operand is kept in place: it is an error operand (a failed
+  // validation, a failed computation), or a collection literal that keeps a
+  // failed cell (`docs/ERROR-MODEL.md` §3). The splice of a same-head
+  // operand and the fold of literal operands below are exact rewrites of the
+  // structure, so they also apply to such a join and keep every failed cell
+  // in its position. Without them, an accumulator loop whose list holds a
+  // failed cell (`fs = [...fs, g("a")]`) built a join with one more level of
+  // nesting at each turn, and at about a thousand turns a recursive walk of
+  // the value overflowed the stack. Only the check of keyed operands, which
+  // can replace the whole join with an error, needs valid operands.
+  const allValid = args.every((x) => x.isValid);
 
-  const source = args[0];
-  const joined =
-    source !== undefined &&
-    isFunction(source, head) &&
-    source.isCanonical &&
-    // Defensive: a `Join` or a `ListJoin` never types as a tuple
-    // (`joinResultType` returns a list/set/record/dictionary/collection, and
-    // a `ListJoin` is a list), but an atomic operand must never be spliced.
-    !isAtomicJoinOperand(source)
-      ? [...source.ops, ...args.slice(1)]
-      : args;
+  // Same-head splice. `Join` splices only its FIRST operand (Change 2 of
+  // `docs/COLLECTIONS-MODEL.md`). A `ListJoin` splices a same-head operand
+  // at any position: its result is a list whatever its operands hold, and a
+  // `ListJoin` operand is a list whose elements are spliced, so
+  // `ListJoin(a, ListJoin(b, c))` and `ListJoin(a, b, c)` have the same
+  // elements in the same order.
+  // Defensive: a `Join` or a `ListJoin` never types as a tuple
+  // (`joinResultType` returns a list/set/record/dictionary/collection, and
+  // a `ListJoin` is a list), but an atomic operand must never be spliced.
+  const spliced = (
+    op: Expression | undefined
+  ): op is Expression & FunctionInterface =>
+    op !== undefined &&
+    isFunction(op, head) &&
+    op.isCanonical &&
+    !isAtomicJoinOperand(op);
+  let joined: ReadonlyArray<Expression> = args;
+  if (head === 'ListJoin') {
+    if (args.some(spliced))
+      joined = args.flatMap((op) => (spliced(op) ? op.ops : [op]));
+  } else if (spliced(args[0])) joined = [...args[0].ops, ...args.slice(1)];
 
   // A `Join` with a dictionary or a record operand is keyed, and an element
   // that can never be a key-value entry makes it an error at once.
-  if (head === 'Join') {
+  if (head === 'Join' && allValid) {
     const refused = keyedJoinNonEntryError(ce, joined);
     if (refused !== undefined) return refused;
   }
@@ -18810,7 +18861,64 @@ function canonicalJoin(
   const folded = foldLiteralListJoin(ce, joined, head === 'ListJoin');
   if (folded !== undefined) return folded;
 
+  // A `ListJoin` that stays a lazy view (some operand is not a literal)
+  // merges each run of adjacent `List` literal operands into one literal:
+  // `ListJoin(xs, [1], [2])` is `ListJoin(xs, [1, 2])`. The elements of a
+  // `List` operand are kept as they are, so the elements of the join and
+  // their order do not change. This keeps the number of operands bounded in
+  // a loop that appends to a list with an infinite spread
+  // (`xs = [...xs, k]` with `xs` holding `[...1..oo]`).
+  if (head === 'ListJoin') joined = mergeAdjacentListLiterals(ce, joined);
+
   return ce._fn(head, joined);
+}
+
+/**
+ * The operands of a `ListJoin`, with each run of adjacent canonical `List`
+ * literal operands merged into one `List` literal, as long as the merged
+ * literal holds at most `ce.maxCollectionSize` elements (the bound of the
+ * fold in `canonicalJoin`). The operands that are not `List` literals keep
+ * their position. When nothing merges, `ops` is returned as it is.
+ */
+function mergeAdjacentListLiterals(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  const isListLiteral = (
+    op: Expression | undefined
+  ): op is Expression & FunctionInterface =>
+    op !== undefined && isFunction(op, 'List') && op.isCanonical;
+  if (!ops.some((op, i) => isListLiteral(op) && isListLiteral(ops[i + 1])))
+    return ops;
+  // Each run of `List` literals is collected, with its number of elements,
+  // and becomes one `List` at the end. A run of one literal keeps that
+  // literal.
+  type Run = { lists: (Expression & FunctionInterface)[]; size: number };
+  const result: (Expression | Run)[] = [];
+  let run: Run | undefined;
+  for (const op of ops) {
+    if (!isListLiteral(op)) {
+      result.push(op);
+      run = undefined;
+    } else if (
+      run !== undefined &&
+      run.size + op.nops <= ce.maxCollectionSize
+    ) {
+      run.lists.push(op);
+      run.size += op.nops;
+    } else {
+      run = { lists: [op], size: op.nops };
+      result.push(run);
+    }
+  }
+  return result.map((part) => {
+    if (!('lists' in part)) return part;
+    if (part.lists.length === 1) return part.lists[0];
+    return ce._fn(
+      'List',
+      part.lists.flatMap((x) => x.ops)
+    );
+  });
 }
 
 /**

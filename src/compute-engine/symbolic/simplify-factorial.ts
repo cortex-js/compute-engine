@@ -121,10 +121,14 @@ export function simplifyFactorial2(x: Expression): RuleStep | undefined {
 
   // Odd case: (2n+1)!! → (2n+1)! / (2^n · n!)
   // The argument is `Add(2n, 1)`; recover `n` as (arg - 1) / 2.
+  // The identity holds only for n ≥ 0, so n must be proven non-negative: a
+  // negative odd argument has a finite rational value (`(-1)!! = 1`,
+  // `(-3)!! = -1`), while the right side is `~oo/~oo` there, since `n!` and
+  // `(2n+1)!` are poles at a negative integer.
   const bo = baseOffset(arg);
   if (bo && bo.offset === 1) {
     const n = bo.base.div(2);
-    if (n.isInteger === true && n.isNonNegative !== false) {
+    if (n.isInteger === true && n.isNonNegative === true) {
       const denom = ce._fn('Multiply', [
         ce._fn('Power', [ce.number(2), n]),
         ce._fn('Factorial', [n]),
@@ -138,7 +142,8 @@ export function simplifyFactorial2(x: Expression): RuleStep | undefined {
   }
 
   // Even case: (2n)!! → 2^n · n!
-  // The argument is `2n`; recover `n` as arg / 2.
+  // The argument is `2n`; recover `n` as arg / 2. The identity also holds
+  // for a negative integer n: both sides are the pole `~oo`.
   const n = arg.div(2);
   if (n.isInteger === true && n.isNonNegative !== false) {
     return {

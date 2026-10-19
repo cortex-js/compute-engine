@@ -22,8 +22,10 @@ import {
   isNumber,
   isString,
   isSymbol,
+  isUnorderedSet,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { sortSetElements } from '../boxed-expression/order.js';
 import { checkArity, validateArguments } from '../boxed-expression/validate.js';
 import { asBigint } from '../boxed-expression/numerics.js';
 import {
@@ -1721,7 +1723,26 @@ function union(
   }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
-  return ce._fn('Set', elements);
+  return literalSet(ce, elements);
+}
+
+/**
+ * The literal set of `elements`, which hold no two `isSame` elements, stored
+ * in the canonical order as the canonical `Set` handler stores them
+ * (`sortSetElements`). The operands of `Union`, `Intersection`, `SetMinus`
+ * and `SymmetricDifference` can be lists, and their results are built from
+ * parts, so the elements arrive in an order that depends on the written
+ * operands. A two-element set with an `Element` or `Condition` operand keeps
+ * its order, as in the canonical handler (`isUnorderedSet`).
+ */
+function literalSet(
+  ce: ComputeEngine,
+  elements: ReadonlyArray<Expression>
+): Expression {
+  return ce._fn(
+    'Set',
+    isUnorderedSet('Set', elements) ? sortSetElements(elements) : elements
+  );
 }
 
 function intersection(
@@ -1794,7 +1815,7 @@ function intersection(
     if (unique.every((e) => !e.isSame(elem))) unique.push(elem);
 
   if (unique.length === 0) return ce.symbol('EmptySet');
-  return ce._fn('Set', unique);
+  return literalSet(ce, unique);
 }
 
 /**
@@ -2202,7 +2223,7 @@ function setMinus(
   }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
-  return ce._fn('Set', elements);
+  return literalSet(ce, elements);
 }
 
 /** `SymmetricDifference(a, b)` = elements in `a` or `b` but not both. Only
@@ -2226,7 +2247,7 @@ function symmetricDifference(
       elements.push(elem);
 
   if (elements.length === 0) return ce.symbol('EmptySet');
-  return ce._fn('Set', elements);
+  return literalSet(ce, elements);
 }
 
 function imaginaryIterator(

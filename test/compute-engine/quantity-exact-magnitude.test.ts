@@ -219,10 +219,18 @@ describe('A FLOAT OPERAND OF QUANTITY ARITHMETIC GIVES A FLOAT', () => {
 });
 
 describe('SERIALIZATION OF A SUM MAGNITUDE', () => {
-  test('the sum is parenthesized, and the LaTeX round-trips', () => {
+  test('the sum is written with \\qty, and the LaTeX round-trips', () => {
     const q = ce.box(['Quantity', ['Add', 1, 'Pi'], 'm']);
     expect(q.toString()).toBe('(1 + pi) m');
-    expect(q.latex).toBe('\\left(1+\\pi\\right)\\,\\mathrm{m}');
+    expect(q.latex).toBe('\\qty[parse-numbers=false]{1+\\pi}{m}');
     expect(ce.parse(q.latex).json).toEqual(['Quantity', ['Add', 1, 'Pi'], 'm']);
+  });
+
+  test('the parenthesized form still parses as a quantity', () => {
+    expect(ce.parse('\\left(1+\\pi\\right)\\,\\mathrm{m}').json).toEqual([
+      'Quantity',
+      ['Add', 1, 'Pi'],
+      'm',
+    ]);
   });
 });

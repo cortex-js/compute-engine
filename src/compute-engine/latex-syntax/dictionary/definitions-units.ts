@@ -28,6 +28,8 @@ import {
   machineValue,
   rationalValue,
   matchesSymbol,
+  isNumberExpression,
+  isNumberObject,
 } from '../../../math-json/utils.js';
 import type {
   LatexDictionary,
@@ -635,16 +637,98 @@ function unitFactorsToMathrm(expr: MathJsonExpression): string | null {
   return `${numText || '1'}/${denText}`;
 }
 
+/**
+ * True if the MathJSON expression is a finite real number literal: `3`,
+ * `-3`, `2.5`, `{ num: "1.5e30" }`. A rational, a radical, a complex number,
+ * a symbol such as `Pi`, and the non-finite literals `NaN` and `oo` are not.
+ */
+function isFiniteRealNumberLiteral(expr: MathJsonExpression): boolean {
+  if (typeof expr === 'number') return Number.isFinite(expr);
+  if (!isNumberExpression(expr)) return false;
+  const text = isNumberObject(expr) ? String(expr.num) : expr;
+  return !/^[+-]?(nan|oo|infinity)$/i.test(text);
+}
+
+/**
+ * The LaTeX of a quantity, given the content of `\mathrm{...}` for its unit.
+ *
+ * A magnitude that is a finite real number literal is written before the
+ * unit: `3\,\mathrm{m}`. A measurement (`5.1 ± 0.2`) is written the same
+ * way, in parentheses, so that the unit applies to the whole measurement:
+ * `\left(5.1\pm0.2\right)\,\mathrm{cm}`. The parser reads these two forms
+ * back as a quantity.
+ *
+ * Any other magnitude (`2\sqrt{2}`, `\frac{1}{64}`, `\pi`, `x`, `1+\pi`, a
+ * complex number) is written with the siunitx command `\qty`:
+ * `\qty[parse-numbers=false]{2\sqrt{2}}{m}`. Juxtaposed with a unit, such a
+ * magnitude parses as a product (`2\sqrt{2}\,\mathrm{m}` is
+ * `2·√2·m`), but the parser reads the first argument of `\qty` as a LaTeX
+ * expression, so the `\qty` form parses back as the same quantity. The
+ * option `parse-numbers=false` is necessary for real siunitx: without it,
+ * siunitx reads the first argument as a number and stops with an
+ * "invalid-number" error on a token such as `\sqrt` or `\frac`. With it,
+ * siunitx typesets the argument as math. The unit argument is the same text
+ * as the content of `\mathrm{...}` (`m/s^{2}`, `kg\cdot m`), which siunitx
+ * typesets as a literal unit.
+ */
+function serializeQuantity(
+  serializer: Serializer,
+  magnitude: MathJsonExpression,
+  unitStr: string
+): string {
+  if (isFiniteRealNumberLiteral(magnitude))
+    return joinLatex([
+      serializer.serialize(magnitude),
+      '\\,',
+      `\\mathrm{${unitStr}}`,
+    ]);
+  if (operator(magnitude) === 'Measurement')
+    return joinLatex([
+      `\\left(${serializer.serialize(magnitude)}\\right)`,
+      '\\,',
+      `\\mathrm{${unitStr}}`,
+    ]);
+  return `\\qty[parse-numbers=false]{${serializer.serialize(magnitude)}}{${unitStr}}`;
+}
+
 // ---------------------------------------------------------------------------
 // siunitx shared parse helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Parse `\qty{value}{unit}` or `\SI{value}{unit}`.
+ * Skip the optional argument of a siunitx command, the key-value options in
+ * `\qty[parse-numbers=false]{…}{…}`. The options change only how siunitx
+ * typesets the quantity, so they are read as raw tokens and dropped. Braces
+ * inside the options are balanced, so a `]` inside a braced value does not
+ * end them. When there is no `[`, or the `]` is missing, the parser index is
+ * not changed.
+ */
+function skipSiunitxOptions(parser: Parser): void {
+  const saved = parser.index;
+  while (parser.peek === '<space>') parser.nextToken();
+  if (!parser.match('[')) {
+    parser.index = saved;
+    return;
+  }
+  let depth = 0;
+  while (!parser.atEnd) {
+    const token = parser.peek;
+    parser.nextToken();
+    if (token === ']' && depth === 0) return;
+    if (token === '<{>') depth++;
+    else if (token === '<}>') depth--;
+  }
+  parser.index = saved;
+}
+
+/**
+ * Parse `\qty{value}{unit}` or `\SI{value}{unit}`, with optional siunitx
+ * options before the value (`\qty[parse-numbers=false]{2\sqrt{2}}{m}`).
  * First braced group is a math expression (magnitude), second is raw
  * text (unit).  Returns `['Quantity', value, unit]` or `null`.
  */
 function parseSiunitxQuantity(parser: Parser): MathJsonExpression | null {
+  skipSiunitxOptions(parser);
   const value = parser.parseGroup();
   if (value === null) return null;
 
@@ -659,6 +743,7 @@ function parseSiunitxQuantity(parser: Parser): MathJsonExpression | null {
  * Single braced group of raw text.  Returns the unit expression or `null`.
  */
 function parseSiunitxUnit(parser: Parser): MathJsonExpression | null {
+  skipSiunitxOptions(parser);
   return readBracedUnit(parser);
 }
 
@@ -737,10 +822,9 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
         const magnitudeValue = machineValue(magnitude);
         if (magnitudeValue === null) {
           // Fall back to default serialization if we can't get a numeric value
-          const magLatex = serializer.serialize(magnitude);
           const unitStr = unitToMathrm(unit);
           if (unitStr === null) return serializer.serializeFunction(expr);
-          return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);
+          return serializeQuantity(serializer, magnitude, unitStr);
         }
 
         // Convert to degrees
@@ -762,23 +846,10 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
         return `${degrees}°`;
       }
 
-      // Fall through to default Quantity serialization.  A Measurement
-      // magnitude (`5.1 ± 0.2`) is wrapped in parentheses so the unit applies
-      // to the whole measurement: `(5.1 \pm 0.2)\,\mathrm{cm}`.  A sum
-      // magnitude is wrapped for the same reason: `(1+\pi)\,\mathrm{m}`,
-      // not `1+\pi\,\mathrm{m}`, which parses as `1 + π m`.
+      // Fall through to default Quantity serialization.
       const unitStr = unitToMathrm(unit);
       if (unitStr === null) return serializer.serializeFunction(expr);
-      let magLatex = serializer.serialize(magnitude);
-      const magOperator = operator(magnitude);
-      if (
-        magOperator === 'Measurement' ||
-        magOperator === 'Add' ||
-        magOperator === 'Subtract'
-      )
-        magLatex = `\\left(${magLatex}\\right)`;
-
-      return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);
+      return serializeQuantity(serializer, magnitude, unitStr);
     },
   },
 ];

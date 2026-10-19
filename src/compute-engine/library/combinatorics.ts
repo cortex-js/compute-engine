@@ -20,8 +20,10 @@ import {
   isString,
   isSymbol,
   indeterminateFormAnswer,
+  isUnorderedSet,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { sortSetElements } from '../boxed-expression/order.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
 import {
   broadcastOperandType,
@@ -876,18 +878,26 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           return kleeneEvery(x.ops, (elem) => base.contains(elem));
         },
         // The iterator gives the empty subset as the symbol `EmptySet`, and
-        // every other subset as a `Set` of its elements in the order of the
-        // base. A `Set` is therefore the same as one subset for each way to
-        // find its elements, in the same order, at increasing positions of
-        // the base. No walk of the 2ⁿ subsets is necessary.
+        // every other subset as a `Set` of its elements in the canonical
+        // order (`powerSetBase`). `isSame` compares two set literals without regard to the
+        // order of their elements, so a `Set` is the same as each subset
+        // that holds the same elements in any order (`subsetSameCount`). A
+        // two-element `Set` with an `Element` or `Condition` operand is the
+        // exception, compared by position (`isUnorderedSet`): it is the
+        // same as one subset for each way to find its elements, in the same
+        // order, at increasing positions of that order (`embeddingCount`). No
+        // walk of the 2ⁿ subsets is necessary.
         countOf: (expr, target) => {
           if (!isFunction(expr)) return undefined;
           const base = expr.ops[0];
           if (!isWalkableFiniteCollection(base)) return undefined;
           if (isSymbol(target, 'EmptySet')) return 1;
           if (!isFunction(target, 'Set') || target.nops === 0) return 0;
+          const all = powerSetBase(base);
           return normalizeCount(
-            embeddingCount([...base.each()] as Expression[], target.ops)
+            isUnorderedSet('Set', target.ops)
+              ? subsetSameCount(all, target.ops)
+              : embeddingCount(all, target.ops)
           );
         },
         count: (expr) => {
@@ -1216,11 +1226,22 @@ function* cartesianProductIterator(
   }
 }
 
+/**
+ * The elements of the base of a `PowerSet`, in the canonical order of a set
+ * (`sortSetElements`). A subset lists the elements it takes in this order, so
+ * each subset is stored as the canonical `Set` handler would store it, and
+ * two power sets of `isSame` bases walk the same subsets in the same order.
+ * The `countOf` facet reads the same order.
+ */
+function powerSetBase(base: Expression): Expression[] {
+  return [...sortSetElements([...base.each()] as Expression[])];
+}
+
 function* powerSetIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
-  const elements = [...expr.ops[0].each()] as Expression[];
+  const elements = powerSetBase(expr.ops[0]);
   const n = elements.length;
   const ce = expr.engine;
 
@@ -1731,6 +1752,40 @@ function permutationSameCount(
     for (const x of all) if (x.isSame(parts[p])) m += 1;
     if (m < c) return 0n;
     for (let i = 0; i < c; i++) total *= BigInt(m - i);
+  }
+  return total;
+}
+
+/**
+ * The number of subsets in the walk of `powerSetIterator` over the elements
+ * `all` that are the same as the set whose elements are `parts`.
+ *
+ * Each subset is a `Set` of the elements at some positions of `all`, and
+ * `isSame` compares two set literals without regard to the order of their
+ * elements, as multisets (see `isUnorderedSet`). For each group of parts that
+ * are the same as each other (`c` parts), with `m` elements of `all` that are
+ * the same as them, a matching subset takes `c` of these `m` positions:
+ * `C(m, c)` choices. A part with no such element gives `0`.
+ */
+function subsetSameCount(
+  all: ReadonlyArray<Expression>,
+  parts: ReadonlyArray<Expression>
+): bigint {
+  const done: boolean[] = new Array(parts.length).fill(false);
+  let total = 1n;
+  for (let p = 0; p < parts.length; p++) {
+    if (done[p]) continue;
+    let c = 0;
+    for (let q = p; q < parts.length; q++) {
+      if (!done[q] && parts[q].isSame(parts[p])) {
+        done[q] = true;
+        c += 1;
+      }
+    }
+    let m = 0;
+    for (const x of all) if (x.isSame(parts[p])) m += 1;
+    if (m < c) return 0n;
+    total *= smallBinomial(m, c);
   }
   return total;
 }

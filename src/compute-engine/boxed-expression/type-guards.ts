@@ -222,6 +222,45 @@ export function isFunction(
   );
 }
 
+/**
+ * Are these the operands of a `Set` whose ORDER is not significant?
+ *
+ * The elements of a set are not ordered, so `isSame` compares two set
+ * literals as multisets of elements (`Set(2, 1)` is the same as `Set(1, 2)`)
+ * and `hash` combines their hashes with an order-independent operation. The
+ * two must use this one test, so that two sets that `isSame` accepts always
+ * hash alike.
+ *
+ * A set-builder (a comprehension) is not a literal set: its two operands are
+ * a body and an indexing set (`Set(2k, Element(k, S))`,
+ * `Set(Element(k, S), Condition(p))`), and their positions give them their
+ * meaning. Any two-operand `Set` with an `Element` or a `Condition` operand
+ * is therefore compared by position. This test is wider than the
+ * comprehension test of the `Set` operator (a literal `{x, k ∈ S}` is
+ * compared by position too), but it reads only the operator names of the
+ * operands, so two sets with the same elements always give the same answer.
+ *
+ * A set with an ellipsis (a `ContinuationPlaceholder` element, from
+ * `\{a_1, a_2, \dots, a_n\}`) is a notation for a progression: the ellipsis
+ * stands between the elements around it, so their positions carry meaning
+ * too, and the set is compared by position.
+ *
+ * The canonical `Set` handler sorts the elements of a set only when this
+ * test is `true`.
+ */
+export function isUnorderedSet(
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (operator !== 'Set') return false;
+  if (ops.length < 2) return false;
+  if (ops.some((op) => isContinuationOperand(op))) return false;
+  if (ops.length > 2) return true;
+  return !ops.some(
+    (op) => isFunction(op, 'Element') || isFunction(op, 'Condition')
+  );
+}
+
 export function isString(
   expr: Expression | null | undefined
 ): expr is Expression & StringInterface {

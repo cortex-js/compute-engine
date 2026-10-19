@@ -164,6 +164,7 @@ import {
   isFoldBarrierProduct,
   nanOperandAnswer,
   indeterminateFormAnswer,
+  isUnorderedSet,
 } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -566,6 +567,45 @@ function hasSurplusOperands(
   const sig = def.signature.type;
   if (typeof sig === 'string' || sig.kind !== 'signature') return false;
   return ops.length > arityBounds(sig).max;
+}
+
+/**
+ * For an `Error` value that the evaluation of a function expression returned,
+ * the expression whose evaluation returned it most recently.
+ *
+ * The handler of a selecting operator (`If`, `Which`, `And`, `Coalesce`, …)
+ * returns the error of the operand it evaluated as a bare value, and the
+ * breadcrumb frame of the operator is added afterwards
+ * (`_deferredErrorFrame()`). When the error was made by the evaluation of
+ * the operand, and not when the operand was boxed — the body of a user
+ * function called in a branch, `If(c, g("a"), 0)` — no operand holds it, and
+ * this record is what names the operand. A nested evaluation records the
+ * error first and the evaluation that encloses it records it again after it,
+ * so the record is the outermost evaluation that returned it, which is the
+ * operand that the handler evaluated. The map holds its keys weakly, so a
+ * record goes away with its error.
+ *
+ * A record lives as long as its error, so it can be from an EARLIER
+ * evaluation: the error that `g("a")` returned, assigned to `y`, is the value
+ * of the branch `y` of `If(c, g("a"), y)`, and its record names the operand
+ * `g("a")`, which the handler did not evaluate. Each record has a `stamp`,
+ * the value of `errorRecordCount` after it was made. The selecting operator
+ * reads `errorRecordCount` when its evaluation begins, and uses a record only
+ * when its stamp is larger: a record that was made during that evaluation.
+ */
+const errorEvaluatedFrom = new WeakMap<
+  Expression,
+  { node: Expression; stamp: number }
+>();
+
+/** The number of records made in `errorEvaluatedFrom`. It only increases. */
+let errorRecordCount = 0;
+
+/** Record that the evaluation of `node` returned `result`, when `result` is
+ * an `Error` value that is not `node` itself (see `errorEvaluatedFrom`). */
+function recordEvaluatedError(node: Expression, result: Expression): void {
+  if (result !== node && result.operator === 'Error')
+    errorEvaluatedFrom.set(result, { node, stamp: ++errorRecordCount });
 }
 
 export class BoxedFunction
@@ -1204,6 +1244,19 @@ export class BoxedFunction
       // The same fold the boxed operands would give — each element's hash IS
       // the hash of `engine.number(v)` — computed without keeping the boxes.
       for (const v of store) h = ((h << 1) ^ this.engine.number(v).hash) | 0;
+    } else if (isUnorderedSet(this._operator, this._ops)) {
+      // `isSame` compares the elements of a set literal in any order, so
+      // their hashes are combined with an operation that does not depend on
+      // the order: a sum of each hash after a bit mix. The mix keeps two
+      // different multisets of hashes from colliding as easily as a plain
+      // sum would, and a sum (not a XOR) keeps a repeated element of a raw
+      // set from cancelling itself.
+      for (const op of this._ops) {
+        let x = op.hash;
+        x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+        x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
+        h = (h + (x ^ (x >>> 16))) | 0;
+      }
     } else {
       for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
     }
@@ -3275,6 +3328,7 @@ export class BoxedFunction
       // it (see `resultHoldsNoIncompleteWalk()`).
       if (resultHoldsNoIncompleteWalk(result))
         takeBackIncompleteWalks(walksBefore);
+      recordEvaluatedError(this, result);
       return options?.numericApproximation
         ? indeterminateAsNaN(result)
         : result;
@@ -3899,9 +3953,12 @@ export class BoxedFunction
       throw error;
     }
     return promise
-      .then((result) =>
-        options?.numericApproximation ? indeterminateAsNaN(result) : result
-      )
+      .then((result) => {
+        recordEvaluatedError(this, result);
+        return options?.numericApproximation
+          ? indeterminateAsNaN(result)
+          : result;
+      })
       .finally(() => {
         this.engine._inFlightAsyncEvaluations -= 1;
         releaseKeptEagerSourceValues(this.engine);
@@ -5442,7 +5499,10 @@ export class BoxedFunction
    * a `Coalesce` waiting on a value — yields nothing here and stays inert
    * with its diagnostic in place, which is the point of deferring.
    */
-  private _resultError(result: Expression): Expression | undefined {
+  private _resultError(
+    result: Expression,
+    since: number
+  ): Expression | undefined {
     if (isFunction(result, 'Error')) {
       // A bare error IS already this node's value, so there is nothing to
       // absorb — except a breadcrumb for a SELECTING operator, whose handler
@@ -5457,7 +5517,7 @@ export class BoxedFunction
       // the same error still adds its own frame (`markErrorFramedByNode()`,
       // `error-value.ts`).
       if (isErrorFramedByNode(result, this)) return undefined;
-      return withErrorFrames(result, [this._deferredErrorFrame(result)]);
+      return withErrorFrames(result, [this._deferredErrorFrame(result, since)]);
     }
     return errorValue(result);
   }
@@ -5473,14 +5533,29 @@ export class BoxedFunction
    * breadcrumb frames from hops taken inside the operand
    * (`If(Sin(<error>), 1, 2)` returns it with `{Sin, 1}` already recorded).
    *
-   * Two operands carrying byte-identical errors are indistinguishable this
-   * way, and so is an error the handler minted itself rather than took from
-   * an operand. Both fall back to operand 1 — the position every selecting
-   * operator in the library always demands (the condition of `If`/`Which`,
-   * the first operand of `And`/`Or`/`Coalesce`) — so the operator hop is
-   * recorded even when the exact position is not recoverable.
+   * An error that the EVALUATION of an operand made is held by no operand:
+   * the branch `g("a")` of `If(n = 2, g("a"), n)`, where `g` is a user
+   * function whose body fails, is valid when it is boxed. Such an error is
+   * found first, by the record of the evaluation that returned it
+   * (`errorEvaluatedFrom`): when that evaluation is the evaluation of an
+   * operand of this node, the frame names that operand, which is the branch
+   * the handler took. This also tells apart two operands that hold
+   * byte-identical errors. `since` is the value of `errorRecordCount` when
+   * the evaluation of this node began; a record with a stamp that is not
+   * larger was made by an earlier evaluation, and is not used.
+   *
+   * An error the handler minted itself rather than took from an operand
+   * falls back to operand 1 — the position every selecting operator in the
+   * library always demands (the condition of `If`/`Which`, the first operand
+   * of `And`/`Or`/`Coalesce`) — so the operator hop is recorded even when
+   * the exact position is not recoverable.
    */
-  private _deferredErrorFrame(err: Expression): ErrorFrame {
+  private _deferredErrorFrame(err: Expression, since: number): ErrorFrame {
+    const origin = errorEvaluatedFrom.get(err);
+    if (origin !== undefined && origin.stamp > since) {
+      const index = this._ops.indexOf(origin.node);
+      if (index >= 0) return { operator: this._operator, index: index + 1 };
+    }
     const core = errorOpsWithoutTrace(err);
     for (let i = 0; i < this._ops.length; i++) {
       const op = this._ops[i];
@@ -5546,9 +5621,11 @@ export class BoxedFunction
         };
       }
       return () => {
+        // Read before the evaluation, for `_deferredErrorFrame()`.
+        const since = errorRecordCount;
         const result = compute();
         if (result.isValid) return result;
-        if (selecting) return this._resultError(result) ?? result;
+        if (selecting) return this._resultError(result, since) ?? result;
         return (
           this._refusedArgumentError(result) ?? errorValue(result) ?? result
         );
@@ -5566,8 +5643,9 @@ export class BoxedFunction
       };
     }
     return () => {
+      const since = errorRecordCount;
       const result = compute();
-      return this._errorAfterHandler(result) ?? result;
+      return this._errorAfterHandler(result, since) ?? result;
     };
   }
 
@@ -5580,7 +5658,10 @@ export class BoxedFunction
    * error of its operands, as when the handler does not run. The breadcrumb
    * then names the operands of this node, and not the internal form of the
    * handler result (the `Multiply` handler can answer a `Divide`). */
-  private _errorAfterHandler(result: Expression): Expression | undefined {
+  private _errorAfterHandler(
+    result: Expression,
+    since: number
+  ): Expression | undefined {
     if (
       !result.isValid &&
       this._holdsRefusedCall() &&
@@ -5590,7 +5671,7 @@ export class BoxedFunction
       const err = this._firstOperandError();
       if (err !== undefined) return err;
     }
-    return this._resultError(result);
+    return this._resultError(result, since);
   }
 
   private _computeValueUnabsorbed(
@@ -6665,8 +6746,20 @@ export class BoxedFunction
       // value of a restricted list whose condition is not decided — is first
       // read back as that restricted list (`regroupRestrictedCells`).
       //
-      {
-        const threaded = threadConditionalOperands(this, def, tail, options);
+      // The cheap test of the lift is made first, so that an application with
+      // no `When`, `Which` or `List` operand does not create the steps.
+      if (
+        tail.some(
+          (x) =>
+            isFunction(x, 'When') ||
+            isFunction(x, 'Which') ||
+            isFunction(x, 'List')
+        )
+      ) {
+        const threaded = runMaterialization(
+          threadConditionalOperands(this, def, tail, options),
+          options
+        );
         if (threaded) return threaded;
       }
 
@@ -6846,9 +6939,10 @@ export class BoxedFunction
         };
       }
       return async () => {
+        const since = errorRecordCount;
         const result = await compute();
         if (result.isValid) return result;
-        if (selecting) return this._resultError(result) ?? result;
+        if (selecting) return this._resultError(result, since) ?? result;
         return (
           this._refusedArgumentError(result) ?? errorValue(result) ?? result
         );
@@ -6862,8 +6956,9 @@ export class BoxedFunction
       };
     }
     return async () => {
+      const since = errorRecordCount;
       const result = await compute();
-      return this._errorAfterHandler(result) ?? result;
+      return this._errorAfterHandler(result, since) ?? result;
     };
   }
 
@@ -7565,14 +7660,16 @@ export class BoxedFunction
       const isPostEvalBroadcastOperand = (x: Expression): boolean =>
         isKnownFinitenessBroadcast(x) ||
         (def.lazy !== true && isUnknownLengthBroadcast(x));
-      // The lazy `Map` returned here applies its mapping SYNCHRONOUSLY on
-      // `at`/iteration, so take the lazy arm only when the per-element call is
-      // sync-applicable: the operator has a synchronous `evaluate` handler, or
-      // this is a function-literal application (`lambdaBroadcast`, always sync).
-      // An operator with ONLY an `evaluateAsync` handler would otherwise yield
-      // inert per-element results and bypass async cancellation, so it falls
-      // through to the async materialization/inert behavior below.
-      const isSyncApplicable = lambdaBroadcast || def.evaluate !== undefined;
+      // An operator with ONLY an `evaluateAsync` handler is broadcast here
+      // too, as in the pre-evaluation step 2a: each cell is evaluated with
+      // `evaluateAsync()`. Before, this step did not run for such an
+      // operator, and its handler received the whole list:
+      // `AsyncOnly([1, 2] {0<t})` with `t = 1` gave `NaN`, where
+      // `AsyncOnly([1, 2])` gave `[AsyncOnly(1), AsyncOnly(2)]` evaluated
+      // cell by cell. Past the eager threshold the value is the lazy `Map`
+      // that step 2a gives for the same collection: its mapping applies
+      // synchronously on `at`, and `materialization` evaluates each element
+      // with `evaluateAsync()` (`materializeAsync()`).
       const postEvalBroadcast =
         (lambdaBroadcast ||
           // As on the sync path: an `'evaluated-operands'` exemption means
@@ -7583,7 +7680,6 @@ export class BoxedFunction
             !hasSurplusOperands(def, tail) &&
             // A set has no positions (mirrors the sync path).
             unindexedOperandBroadcast(def, tail) !== 'veto')) &&
-        isSyncApplicable &&
         !skipBroadcastForVectorOps(def, false, tail) &&
         !pointIsOneLegOf(this.operator, tail) &&
         tail.some(isPostEvalBroadcastOperand);
@@ -7809,25 +7905,22 @@ export class BoxedFunction
       // 3b-cond/ Thread over conditional values (`When`/`Which`) — the async
       // twin of the sync step 4c, with the same rules
       // (`threadConditionalOperands`): `Sin(When(3, c))` is `When(Sin(3), c)`
-      // on both routes. The lift applies the operator to the values with the
-      // synchronous `evaluate()`, so it does not run for an operator that has
-      // only an `evaluateAsync` handler: that operator keeps the conditional
-      // operand. An operator with a synchronous handler, a function literal,
-      // and a lazy collection operator (no handler: its value is a view that
-      // its collection handlers read) are lifted.
-      // The lift runs after an `await`, so the context of this evaluation
+      // on both routes. On this route each application of the operator to
+      // the values is evaluated with `evaluateAsync()`
+      // (`runMaterializationAsync()`), so an operator that has only an
+      // `evaluateAsync` handler is lifted too: its handler gets the value,
+      // not the conditional operand.
+      // The lift resumes after an `await`, so the context of this evaluation
       // (the scope of an enclosing `Sum` index, for example) is put in place
-      // for it. A lazy operator's held operands are evaluated by the lift
-      // with `evaluate()`, which cannot run an asynchronous-only descendant:
-      // those are awaited first, as for the handler in step 5
+      // for each of its steps. A lazy operator's held operands are evaluated
+      // by the lift with `evaluate()`, which cannot run an asynchronous-only
+      // descendant: those are awaited first, as for the handler in step 5
       // (`awaitAsyncOnlyDescendants`).
       //
       // A cheap test first, the same one as the lift makes: only a `When`, a
       // `Which` or a `List` operand can be lifted, so an application with
       // none of them awaits nothing here.
       if (
-        (isSyncApplicable ||
-          (def.evaluate === undefined && def.evaluateAsync === undefined)) &&
         tail.some(
           (x) =>
             isFunction(x, 'When') ||
@@ -7843,8 +7936,10 @@ export class BoxedFunction
           def.holdClass !== 'quote'
             ? await awaitAsyncOnlyDescendants(tail, options)
             : tail;
-        const threaded = this.engine.withEvaluationContext(options, () =>
-          threadConditionalOperands(this, def, threadTail, options)
+        const threaded = await runMaterializationAsync(
+          this.engine,
+          threadConditionalOperands(this, def, threadTail, options),
+          options
         );
         if (threaded) return threaded;
       }
@@ -9323,18 +9418,28 @@ const CONDITIONAL_THREADING_SKIP = new Set([
  * flag selects; at those positions a `List` whose every cell has the same
  * condition is first read back as that restricted list
  * (`regroupRestrictedCells`).
+ *
+ * The lift is written once for the two routes, as steps
+ * (`ConditionalThreadingSteps`): it yields each application of the operator
+ * to the values, and it receives the value of that application back. The
+ * synchronous route runs the steps with `runMaterialization()`, which
+ * evaluates each application with `evaluate()`, and the asynchronous route
+ * with `runMaterializationAsync()`, which evaluates it with
+ * `evaluateAsync()`. So an operator that has only an `evaluateAsync`
+ * handler is lifted on the asynchronous route too: `AsyncOnly(1 {0<t})` is
+ * `AsyncOnly(1) {0<t}` there, with the handler applied to `1`.
  */
-function threadConditionalOperands(
+function* threadConditionalOperands(
   expr: BoxedFunction,
   def: BoxedOperatorDefinition,
   tail: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined
-): Expression | undefined {
+): ConditionalThreadingSteps {
   const ce = expr.engine;
   if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(expr.operator)) {
     if (!tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which')))
       return undefined;
-    return threadConditional(
+    return yield* threadConditional(
       ce,
       expr.operator,
       tail,
@@ -9370,7 +9475,7 @@ function threadConditionalOperands(
     )
   )
     return undefined;
-  return threadConditional(
+  return yield* threadConditional(
     ce,
     expr.operator,
     regrouped,
@@ -9504,8 +9609,11 @@ function restrictCells(
  * evaluated here and no longer holds a conditional, where the folded
  * application of the already-evaluated tail is returned to avoid re-evaluating
  * the operands.
+ *
+ * Each application of `op` to the values is yielded, not evaluated here: the
+ * runner of the steps evaluates it (see `threadConditionalOperands`).
  */
-function threadConditional(
+function* threadConditional(
   ce: ComputeEngine,
   op: string,
   rawTail: ReadonlyArray<Expression>,
@@ -9514,7 +9622,7 @@ function threadConditional(
   application: Expression,
   propagate: boolean,
   threadsAt?: (i: number) => boolean
-): Expression | undefined {
+): ConditionalThreadingSteps {
   const tail = lazy
     ? rawTail.map((x) => x.evaluate(operandOptions(options)))
     : rawTail;
@@ -9538,7 +9646,7 @@ function threadConditional(
         ? guards
         : guards.filter((g, k) => guards.findIndex((h) => h.isSame(g)) === k);
     const guard = distinct.length === 1 ? distinct[0] : ce._fn('And', distinct);
-    const inner = ce._fn(op, stripped).evaluate(options);
+    const inner = yield ce._fn(op, stripped);
     // An error of the inner application (two points of different widths) is
     // an error whatever the condition, as it is once the condition holds.
     if (
@@ -9645,7 +9753,7 @@ function threadConditional(
           : combo.conds.length === 1
             ? combo.conds[0]
             : ce._fn('And', combo.conds);
-      resultOps.push(cond, ce._fn(op, combo.value).evaluate(options));
+      resultOps.push(cond, yield ce._fn(op, combo.value));
     }
     return ce._fn('Which', resultOps).evaluate(options);
   }
@@ -9683,11 +9791,7 @@ function threadConditional(
     // `[NaN, NaN, NaN]` when `c` is false). The cell type of THIS
     // application, `missing | tuple<…>`, says each cell is a point, and an
     // absent point is `Missing`.
-    return markAbsentPointCells(
-      ce,
-      application,
-      ce._fn(op, tail).evaluate(options)
-    );
+    return markAbsentPointCells(ce, application, yield ce._fn(op, tail));
   }
 
   return undefined;
@@ -14157,14 +14261,23 @@ function materializeAsync(
  * evaluation of an element throws is thrown into the walk at the `yield`, so
  * the walk handles it as it handles an error of its own iterator.
  */
-type MaterializationSteps = Generator<Expression, Expression, Expression>;
+type MaterializationSteps<R = Expression> = Generator<
+  Expression,
+  R,
+  Expression
+>;
+
+/** The steps of the conditional-value lift (`threadConditionalOperands`):
+ * the same protocol as `MaterializationSteps`, with `undefined` as the
+ * result when there is nothing to lift. */
+type ConditionalThreadingSteps = MaterializationSteps<Expression | undefined>;
 
 /** Run the steps of a materialization, and evaluate each element that they
  * yield with `evaluate(options)`. */
-function runMaterialization(
-  steps: MaterializationSteps,
+function runMaterialization<R>(
+  steps: MaterializationSteps<R>,
   options: Partial<EvaluateOptions> | undefined
-): Expression {
+): R {
   let step = steps.next();
   while (!step.done) {
     let value: Expression;
@@ -14185,11 +14298,11 @@ function runMaterialization(
  * resumption runs in the evaluation context that `options` carry
  * (`withEvaluationContext()`): the host capability registry and the scopes
  * of the enclosing scoped operators. */
-async function runMaterializationAsync(
+async function runMaterializationAsync<R>(
   ce: ComputeEngine,
-  steps: MaterializationSteps,
+  steps: MaterializationSteps<R>,
   options: Partial<EvaluateOptions> | undefined
-): Promise<Expression> {
+): Promise<R> {
   let step = ce.withEvaluationContext(options, () => steps.next());
   while (!step.done) {
     let value: Expression;

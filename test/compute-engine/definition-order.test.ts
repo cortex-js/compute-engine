@@ -417,16 +417,21 @@ describe('definition order does not change semantics', () => {
       expect((ce.lookupDefinition('a') as any).operator).toBeDefined();
       expect(ce._anyVersion).toBeGreaterThan(generation);
 
-      // Each dependent kept its previous definition (the application of the
-      // placeholder `a`; evaluated now, that one-argument call to the
-      // two-parameter `a` reports the missing argument)...
+      // Each dependent kept its previous literal (the application of the
+      // placeholder `a`), for a later retry. But it gives no value from that
+      // literal: its rebuilt body is invalid, so an application stays
+      // unevaluated, as `g(3)` does when `a` is declared first and the
+      // definition of `g` is refused. Before, the previous literal applied
+      // the two-parameter `a` to one argument and gave `Error("missing")`...
       const literal = (name: string) =>
         (ce.lookupDefinition(name) as any).operator._lambdaLiteral.toString();
       expect(literal('g')).toEqual('(t) => 2a(t)');
       expect(literal('h')).toEqual('(t) => 2a(t) + 1');
-      expect(ce.parse('g(3)').evaluate().toString()).toEqual(
-        'Error("missing")'
-      );
+      expect(ce.parse('g(3)').evaluate().toString()).toEqual('g(3)');
+      const calleeFirst = new ComputeEngine();
+      declareArity2(calleeFirst);
+      calleeFirst.parse('g(t)\\coloneq 2a(t)').evaluate();
+      expect(calleeFirst.parse('g(3)').evaluate().toString()).toEqual('g(3)');
       // ...and BOTH are still waiting, so a later redefinition can retry them.
       // The first failure used to abort the loop over a queue that had already
       // been drained, losing every dependent after it.

@@ -493,7 +493,7 @@ describe('Count OF A SET OPERATION WITH AN INFINITE OPERAND', () => {
 
   test('the walk of Intersection(Integers, {2, 1}) ends', () => {
     const expr = ce._fn('Intersection', [box('Integers'), box(['Set', 2, 1])]);
-    expect([...expr.each()].map((x) => x.json)).toEqual([2, 1]);
+    expect([...expr.each()].map((x) => x.json)).toEqual([1, 2]);
   });
 });
 
@@ -674,7 +674,7 @@ describe('A SET OPERATION WITH AN UNDECIDED MEMBERSHIP IS NOT WALKED', () => {
     };
     expect(take(['Intersection', 'Integers', ['Set', 2, 1]], 5)).toEqual([
       true,
-      [2, 1],
+      [1, 2],
     ]);
     expect(take(['Intersection', 'Integers', 'RealNumbers'], 3)).toEqual([
       true,

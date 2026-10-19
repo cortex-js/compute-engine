@@ -2,6 +2,51 @@
 
 ### Behavior Changes
 
+- **Sets are not ordered**. A canonical set stores its elements in the canonical
+  order, as `Add` stores its terms: `{2, 1}` and `{x, 1}` are stored, printed
+  and walked as `{1, 2}` and `{1, x}`, and `ListFrom({2, 1})` is `[1, 2]`.
+  `isSame` compares two sets without regard to the order of their elements, and
+  their hashes agree, so `Count(PowerSet({1, 2, 3}), {2, 1})` is `1`, as
+  `Element` already said. Every operator that reads the elements of a set in
+  order (`ListFrom`, `Reduce`, `String`, a mask in `When`) gives the same result
+  for two sets with the same elements, so a rewrite that relies on `isSame`
+  cannot change a value. The results of `Union`, `Intersection`, `SetMinus`,
+  `SymmetricDifference` and the subsets of `PowerSet` are in the same order. A
+  set pattern matches the elements in any order. A set-builder (`{2k | k ∈ S}`),
+  a two-element set with an `Element` or `Condition` operand, a set with an
+  ellipsis (`\{a_1, a_2, \dots, a_n\}`), and a structural or raw set keep their
+  written order. A set of effectful elements runs them in the canonical order.
+  Building a large set literal no longer takes quadratic time (20,000 elements:
+  2.8 s before, 12 ms now).
+
+- **`Factorial2` at a negative integer uses the usual extension**: the value of
+  the recurrence `n!! = n·(n−2)!!` run backwards from `1!! = 1`. For an odd
+  `n < 0` it is `(−1)^((|n|−1)/2)/(|n|−2)!!`: `(−1)!! = 1`, `(−3)!! = −1`,
+  `(−5)!! = 1/3`. Every even negative integer is a pole, `~oo`, as for `Gamma`.
+  Before, all of these were `NaN`. `.N()` and the compiled JavaScript and
+  interval targets agree (JavaScript writes a pole as `Infinity`), and the
+  result type for an integer that can be negative is `rational | ~oo`. The
+  exported `factorial2()` of `src/numerics.ts` gives the recurrence value for an
+  odd negative integer. The simplification `(2n+1)!! → (2n+1)!/(2^n·n!)`
+  requires `n ≥ 0` to be proven.
+
+- **A quantity whose magnitude is not a number literal is written with siunitx**
+  : an exact radical, a rational, `π`, a symbol, a sum or a complex number gives
+  `\qty[parse-numbers=false]{2\sqrt{2}}{m}`, which parses back as the same
+  quantity; `2\sqrt{2}\,\mathrm{m}` and `\frac{1}{64}\,\mathrm{m}` parsed as
+  products. The option `parse-numbers=false` lets real siunitx typeset a
+  magnitude that is not a number. The parser skips the options of `\qty`, `\SI`,
+  `\unit` and `\si`. A negative number before a unit (`-3\,\mathrm{m}`) parses
+  as the quantity `−3 m`, not the product `−3·m`.
+
+- **Epsil reports an error held by a nested statement** . A statement inside a
+  loop body, a function body, an `if` branch or a `do` block reports a
+  `runtime-error` diagnostic when its value holds an error and nothing reads
+  that value, for example `for i in [1, 2] { fs = [...fs, g("a")] }` with
+  `g(x) = 1/x`. Before, only a top-level statement was checked. Each source
+  location reports once, however often a loop or a call runs it, and the values
+  do not change: the list keeps its failed cell, and the loop continues.
+
 - **A quantity whose unit LaTeX cannot express round-trips.** The LaTeX of a
   quantity whose unit has a non-numeric exponent was the text of its MathJSON
   array: `Quantity(1, Power(m, n + 1))` gave `\mathrm{m^{Add,n,1}}`. Such a
@@ -20,10 +65,10 @@
   no else branch is written `\operatorname{If}(c, x)`; it was an empty string,
   so `Block(If(k = 2, a ≔ 5); a)` lost the statement in a LaTeX round trip.
 
-- **A `Tabulate` with a dimension that is not positive is empty** (user decision
-  2026-10-18 on empty `Table` ranges): `Tabulate(f, 0)` and `Tabulate(f, -2)`
-  are `[]`, and `Table(k, {k, 1, n})` is `[]` once `n := 0`. The compilation
-  still declines a constant dimension that is not positive.
+- **A `Tabulate` with a dimension that is not positive is empty**:
+  `Tabulate(f, 0)` and `Tabulate(f, -2)` are `[]`, and `Table(k, {k, 1, n})` is
+  `[]` once `n := 0`. The compilation still declines a constant dimension that
+  is not positive.
 
 - **Compiled statement forms.** On WGSL, an `If`, `When` or `Which` whose branch
   assigns a variable, used as a statement of a block that is not the block's
@@ -48,18 +93,17 @@
   local copy of a boolean input as a `float`.
 
 - **The GLSL and WGSL code writes a local copy of an input that the body
-  assigns** (user decision 2026-10-18). With `ce.declare('u', 'real')`,
-  `u ≔ u + 1` compiled to `u = u + 1.0`, which is not valid when `u` is a
-  uniform. It now compiles to `float _tv1 = u; _tv1 = _tv1 + 1.0; return _tv1;`
-  (`var _tv1: f32 = u;` in WGSL). This also applies to `compileFunction()`, to
-  an input that `vars` maps, and to a chained assignment, which was refused
-  before. A body that calls a user function that reads the written input fails
-  closed. Python `compile()` also writes a local copy (`_tv1 = u`,
-  `_tv1 = _tv1 + 1`): the plain `u = u + 1` raised `UnboundLocalError` when a
-  host ran it in a function with `u` as a global. `freeSymbolTypes` reports the
-  declared type of a written input (a complex `u` was reported as `unknown`),
-  and `freeSymbols` no longer lists a local that an assignment in a block
-  declares.
+  assigns**. With `ce.declare('u', 'real')`, `u ≔ u + 1` compiled to
+  `u = u + 1.0`, which is not valid when `u` is a uniform. It now compiles to
+  `float _tv1 = u; _tv1 = _tv1 + 1.0; return _tv1;` (`var _tv1: f32 = u;` in
+  WGSL). This also applies to `compileFunction()`, to an input that `vars` maps,
+  and to a chained assignment, which was refused before. A body that calls a
+  user function that reads the written input fails closed. Python `compile()`
+  also writes a local copy (`_tv1 = u`, `_tv1 = _tv1 + 1`): the plain
+  `u = u + 1` raised `UnboundLocalError` when a host ran it in a function with
+  `u` as a global. `freeSymbolTypes` reports the declared type of a written
+  input (a complex `u` was reported as `unknown`), and `freeSymbols` no longer
+  lists a local that an assignment in a block declares.
 
 - **Python: two different symbols stay two different names.** Python reads an
   identifier in its NFKC form, so `ﬁ` and `fi` were one variable. A lone name
@@ -81,20 +125,18 @@
   `PrimitiveRootList` and `DigitCount` now map over a list (`Divisors([6, 8])`
   is `[[1,2,3,6],[1,2,4,8]]`; it was an `incompatible-type` error), and so do
   `Degrees` and `DMS` (`Degrees([30, 90])` is `[π/6, π/2]`). `Boole` maps over a
-  list (user decision 2026-10-18): `Boole([True, False])` is `[1, 0]`. The Gamma
-  family is no longer typed `real` when its argument can be a pole: for
-  `x: real`, `Gamma(x)` is typed `infinity | real`, because `Gamma(-1)` is
-  `~oo`.
+  list: `Boole([True, False])` is `[1, 0]`. The Gamma family is no longer typed
+  `real` when its argument can be a pole: for `x: real`, `Gamma(x)` is typed
+  `infinity | real`, because `Gamma(-1)` is `~oo`.
 
-- **Collection operators: sets, comparators and empty tables** (user decisions
-  2026-10-18). A positional view refused for a set or a dictionary
-  (`Reverse(c)`, `Take(c, 1)`, `Drop`, `Rest`, `Most`, `Slice`, `RotateLeft`,
-  `RotateRight`, `Zip`) gives the bare `Error` with its frame, as `Sort(c)`
-  does; it gave `Reverse(Error(…))`. `Sort` and `Ordering` refuse a comparator
-  whose parameter type does not accept every element:
-  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` was `[3, 1.5, 2]`.
-  `Table(k², {k, 1, 0})` and `Table(k², {k, 2, 0})` are `[]`; a count-down needs
-  an explicit negative step (the second one gave `[4, 1, 0]`).
+- **Collection operators: sets, comparators and empty tables**. A positional
+  view refused for a set or a dictionary (`Reverse(c)`, `Take(c, 1)`, `Drop`,
+  `Rest`, `Most`, `Slice`, `RotateLeft`, `RotateRight`, `Zip`) gives the bare
+  `Error` with its frame, as `Sort(c)` does; it gave `Reverse(Error(…))`. `Sort`
+  and `Ordering` refuse a comparator whose parameter type does not accept every
+  element: `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` was
+  `[3, 1.5, 2]`. `Table(k², {k, 1, 0})` and `Table(k², {k, 2, 0})` are `[]`; a
+  count-down needs an explicit negative step (the second one gave `[4, 1, 0]`).
 
 - **`Solve` over the complex numbers no longer returns a partial family.** An
   equation whose roots need two integer parameters stays unevaluated:
@@ -103,56 +145,53 @@
   Over the real numbers, and with no domain, the families are unchanged.
 
 - **Under `.N()`, the direct application of a function literal gives the value
-  of its body with the arguments as written**, as a lazy `Map` does (user
-  decision 2026-10-18). At machine precision `Apply(x ↦ Sin(x), Pi).N()` was
-  `1.2246467991473532e-16` and is now `0`; `f((25! − 1)/24!).N()` with
-  `f := x ↦ Numerator(x)` was `25` and is now the exact numerator. An argument
-  that contains a sum, a product, a loop or a user-function call is still
-  approximated once, so `f(Sum(1/k, k, 1, 10000)).N()` is as fast as before. A
-  broadcast over a lazy `Map` operand reads its elements numerically:
-  `Sin(Map(Sin, [H])).N()` with `H = Sum(1/k, k, 1, 6000)` took 5 s and takes
-  less than 0.1 s.
+  of its body with the arguments as written**, as a lazy `Map` does . At machine
+  precision `Apply(x ↦ Sin(x), Pi).N()` was `1.2246467991473532e-16` and is now
+  `0`; `f((25! − 1)/24!).N()` with `f := x ↦ Numerator(x)` was `25` and is now
+  the exact numerator. An argument that contains a sum, a product, a loop or a
+  user-function call is still approximated once, so
+  `f(Sum(1/k, k, 1, 10000)).N()` is as fast as before. A broadcast over a lazy
+  `Map` operand reads its elements numerically: `Sin(Map(Sin, [H])).N()` with
+  `H = Sum(1/k, k, 1, 6000)` took 5 s and takes less than 0.1 s.
 
 - **A finite collection whose count is known only after a callback is applied
   answers `Count`, `Length`, `IsEmpty`, `Last`, a negative index, `Reverse`,
-  `Most`, `RotateLeft` and `RotateRight`** (user decision 2026-10-18):
+  `Most`, `RotateLeft` and `RotateRight`** :
   `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` is `3`. Each read walks the collection
   once; a collection larger than `maxCollectionSize` stays unevaluated.
   `Take(FlatMap([1, 2], x ↦ []), 1)` is `[]`. A `FlatMap` whose callback returns
   a collection that cannot be listed yet (`Join([x], v)` with a valueless `v`)
   stays unevaluated; it was listed without the elements of `v`.
 
-- **`Sum` and `Product` accept the iterator `{i, n}`** (user decision
-  2026-10-18), from 1 to `n`, as `Table` does: `Sum(k^2, {k, 3})` is `14`. The
-  LaTeX specification `(i, 1, 10)` is read as a tuple:
-  `\mathrm{Sum}(i, (i,1,10))` is `55` (it was
+- **`Sum` and `Product` accept the iterator `{i, n}`** , from 1 to `n`, as
+  `Table` does: `Sum(k^2, {k, 3})` is `14`. The LaTeX specification `(i, 1, 10)`
+  is read as a tuple: `\mathrm{Sum}(i, (i,1,10))` is `55` (it was
   `Sum(Complex(0,1), Error("missing"))`), and `\mathrm{Integrate}(x, (x,0,1))`
   is `1/2` (the bounds were dropped). In `\lim_{x\to a+1^+}`, the direction
   marker applies to the whole point. A limit at a symbolic point is the generic
   answer (`lim_{x→a} 1/x` is `1/a`), except when that answer has a jump at a
-  value of the parameter (user decision 2026-10-18): `lim_{x→a} |x|/x` was
-  `|a|/a`, which is not the limit at `a = 0`; it stays unevaluated unless the
-  sign of `a` or an assumption `a ≠ 0` is known.
+  value of the parameter : `lim_{x→a} |x|/x` was `|a|/a`, which is not the limit
+  at `a = 0`; it stays unevaluated unless the sign of `a` or an assumption
+  `a ≠ 0` is known.
 
 - **Compiled code that assigns an input no longer changes the caller's `vars`
-  object** (user decision 2026-10-18): the JavaScript and interval-js code
-  writes a local copy of that object, also when the object is frozen; the copy
-  does not call a getter of the object, and its cost does not grow with the
-  number of properties of the object. Python `compileFunction()` reads such a
-  name from the module global into a local (it raised `UnboundLocalError`), also
-  when a parameter is named `globals`. `e^{iπx}`, `Exp(iπx)` and `e^{−iπx}` with
-  an undeclared `x` compile with the angle in half-turns: `e^{iπx}` at `x = 1`
-  is exactly `−1`.
+  object**: the JavaScript and interval-js code writes a local copy of that
+  object, also when the object is frozen; the copy does not call a getter of the
+  object, and its cost does not grow with the number of properties of the
+  object. Python `compileFunction()` reads such a name from the module global
+  into a local (it raised `UnboundLocalError`), also when a parameter is named
+  `globals`. `e^{iπx}`, `Exp(iπx)` and `e^{−iπx}` with an undeclared `x` compile
+  with the angle in half-turns: `e^{iπx}` at `x = 1` is exactly `−1`.
 
-- **The integer functions of number theory and combinatorics map over lists**
-  (user decision 2026-10-17). `NthPrime`, `NextPrime`, `Totient`, `MoebiusMu`,
-  `DivisorSigma`, `JacobiSymbol`, `Fibonacci`, `BellNumber`, `Binomial`,
-  `Pochhammer`, `Stirling`, the figurate predicates, `Divides`,
-  `GammaRegularized`, `BetaRegularized`, `Mandelbrot`, `Julia`, `Rationalize`
-  and the other element-wise integer functions are broadcastable:
-  `NthPrime([1, 2, 3])` is `[2, 3, 5]`. `IsSquare`, `IsTriangular`,
-  `IsOctahedral`, `IsCenteredSquare`, `IsHappy` and `IsAbundant` of a symbol now
-  stay unevaluated; they answered `False`.
+- **The integer functions of number theory and combinatorics map over lists** .
+  `NthPrime`, `NextPrime`, `Totient`, `MoebiusMu`, `DivisorSigma`,
+  `JacobiSymbol`, `Fibonacci`, `BellNumber`, `Binomial`, `Pochhammer`,
+  `Stirling`, the figurate predicates, `Divides`, `GammaRegularized`,
+  `BetaRegularized`, `Mandelbrot`, `Julia`, `Rationalize` and the other
+  element-wise integer functions are broadcastable: `NthPrime([1, 2, 3])` is
+  `[2, 3, 5]`. `IsSquare`, `IsTriangular`, `IsOctahedral`, `IsCenteredSquare`,
+  `IsHappy` and `IsAbundant` of a symbol now stay unevaluated; they answered
+  `False`.
 
 - **`Solve` gaps.** `√x = i` gives `[-1]`, and `√x = -i` gives `[]`. A float
   residual is compared with the size of the terms of the equation, so an
@@ -168,55 +207,52 @@
   `x^{2.0} + 3x + 2 = 0` shows the step to integer exponents and the float
   roots.
 
-- **`Solve` of a periodic equation returns its families of solutions** (user
-  decision 2026-10-17). With no domain, or over the real or the complex numbers,
-  a trigonometric equation gives one family `x₀ + T·t` for each class of
-  solutions, with a fresh integer parameter `t` (the names of the integer
-  solver): `Solve(sin(x) = 1/2, x)` is `[2πt + π/6, 2πt + 5π/6]`, where it was
-  `[π/6, 5π/6]`. Families with the same solutions become one (`sin(x) = 0` gives
-  `[πt]`). Each factor of a product gives families with its own period
-  (`sin(2x)·cos(3x) = 0` gives `[πt/2, π/6 + πt/3]`), and a polynomial factor
-  gives its solutions (`(x − 1)·sin(x) = 0` gives `[1, πt]`). The common
-  solutions of several equations (`[sin(2x) = 0, cos(x) = −1]` gives
-  `[π + 2πt]`, where it was `[π, −π]`) and the alternatives of an `Or` are
-  families too. With a side condition, an assumption on the unknown or a type
-  narrower than `real`, a periodic equation stays unevaluated, because a family
-  cannot remove some of its members; these cases gave only some of the solutions
-  before. Over a bounded domain, the result is unchanged. A host that reads
-  numbers from the list must replace `t` with integers, or give a bounded
-  domain. `expr.solve()` still returns the principal solutions (user decision
-  2026-10-18).
+- **`Solve` of a periodic equation returns its families of solutions** . With no
+  domain, or over the real or the complex numbers, a trigonometric equation
+  gives one family `x₀ + T·t` for each class of solutions, with a fresh integer
+  parameter `t` (the names of the integer solver): `Solve(sin(x) = 1/2, x)` is
+  `[2πt + π/6, 2πt + 5π/6]`, where it was `[π/6, 5π/6]`. Families with the same
+  solutions become one (`sin(x) = 0` gives `[πt]`). Each factor of a product
+  gives families with its own period (`sin(2x)·cos(3x) = 0` gives
+  `[πt/2, π/6 + πt/3]`), and a polynomial factor gives its solutions
+  (`(x − 1)·sin(x) = 0` gives `[1, πt]`). The common solutions of several
+  equations (`[sin(2x) = 0, cos(x) = −1]` gives `[π + 2πt]`, where it was
+  `[π, −π]`) and the alternatives of an `Or` are families too. With a side
+  condition, an assumption on the unknown or a type narrower than `real`, a
+  periodic equation stays unevaluated, because a family cannot remove some of
+  its members; these cases gave only some of the solutions before. Over a
+  bounded domain, the result is unchanged. A host that reads numbers from the
+  list must replace `t` with integers, or give a bounded domain. `expr.solve()`
+  still returns the principal solutions.
 
 - **Under `.N()`, the elementary functions read an exact non-integer operand
-  with ten guard digits** (user decision 2026-10-18), as the special functions
-  do: `Ln`, `Exp`, `Log`, the trigonometric and hyperbolic functions and their
-  inverses, `Arctan2`, `Sinc`, `Haversine`, `InverseHaversine`, `Power`, `Sqrt`
-  and `Root`. The last digit is now correctly rounded: at 50 digits
-  `Ln(1/3).N()` ends in `…227`, not `…228`, and `Sech(1/3).N()` was off by up to
-  4 units in the last place. A float or integer operand is read as before. A
-  nested call no longer adds guard digits at each level (`Erf` nested 12 deep
-  took 0.4 s and now takes 7 ms).
+  with ten guard digits**, as the special functions do: `Ln`, `Exp`, `Log`, the
+  trigonometric and hyperbolic functions and their inverses, `Arctan2`, `Sinc`,
+  `Haversine`, `InverseHaversine`, `Power`, `Sqrt` and `Root`. The last digit is
+  now correctly rounded: at 50 digits `Ln(1/3).N()` ends in `…227`, not `…228`,
+  and `Sech(1/3).N()` was off by up to 4 units in the last place. A float or
+  integer operand is read as before. A nested call no longer adds guard digits
+  at each level (`Erf` nested 12 deep took 0.4 s and now takes 7 ms).
 
-- **A lazy `Map` under `.N()` gives the same values as the direct call** (user
-  decision 2026-10-18). Each element is passed to the callback as written, and
-  the application is evaluated under the numeric request, so `Map(f, [v]).N()`
-  is `[f(v).N()]`: the element is no longer evaluated exactly first.
-  `At(Map(Sin, [H]), 1).N()` with `H = Sum(1/k, k, 1, 6000)` took 5.6 s and now
-  takes about 60 ms; `Map(Sin, [Pi]).N()` is `[0]`;
-  `Map(Floor, [(25! − 1)/24!]).N()` is `[24]`. A user function used by name as a
-  callback is applied without boxing an application for each element (user
-  decision 2026-10-17).
+- **A lazy `Map` under `.N()` gives the same values as the direct call** (. Each
+  element is passed to the callback as written, and the application is evaluated
+  under the numeric request, so `Map(f, [v]).N()` is `[f(v).N()]`: the element
+  is no longer evaluated exactly first. `At(Map(Sin, [H]), 1).N()` with
+  `H = Sum(1/k, k, 1, 6000)` took 5.6 s and now takes about 60 ms;
+  `Map(Sin, [Pi]).N()` is `[0]`; `Map(Floor, [(25! − 1)/24!]).N()` is `[24]`. A
+  user function used by name as a callback is applied without boxing an
+  application for each element .
 
 - **A lazy `Filter`, `TakeWhile`, `DropWhile` or `Dedup` gives the value of each
   source element.** With `x := 5`, `First(Filter([x], y ↦ y > 0))` is `5` (it
   was `x`), `5 ∈ Filter([x], y ↦ y > 0)` is `True` (it was `False`), and
   `Dedup([x, 5])` is `[5]`. `Count`, `Length`, `IsEmpty` and `Contains` of a
   `Sort`, `Reverse` or `RandomShuffle` of a set give the same error as the
-  wrapper itself (user decision 2026-10-18). `Sort` and `Ordering` refuse a
-  comparator whose declared parameter type is disjoint from the element type
-  (user decision 2026-10-17). `Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` is
-  `[1, 1, 2]`, and `Sum(Reverse(FlatMap(…)))` no longer reads a `FlatMap` with
-  no count as empty (it gave `0`).
+  wrapper itself . `Sort` and `Ordering` refuse a comparator whose declared
+  parameter type is disjoint from the element type .
+  `Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` is `[1, 1, 2]`, and
+  `Sum(Reverse(FlatMap(…)))` no longer reads a `FlatMap` with no count as empty
+  (it gave `0`).
 
 - **A collection read by position, or walked to an answer, no longer gives a
   wrong value when a count is missing.** A view that is read by position gives
@@ -224,11 +260,11 @@
   `Take(Partition(FlatMap([1, 2, 3], x ↦ [x, x]), 2), 1)` is `[[1, 1]]` (it was
   `[]`, and `IsEmpty` of it was `True`), and `Take(Cycle(FlatMap(…)), 8)` cycles
   the source. A read of a collection whose walk meets an inner collection that
-  cannot be computed stays unevaluated (user decision 2026-10-18): with a
-  valueless `v`, `At(FlatMap([1, 2], x ↦ Join([x], v)), 2)` was `2`, and
-  `IndexOf`, `Find`, `Any`, `All`, `CountIf`, `Max`, `Reduce`, `Contains` and
-  `Sum` (`Sum(Take(…, 3))` was `0`) no longer answer from the elements before
-  `v`. The operators that keep every element of their source (`Tally`, `Unique`,
+  cannot be computed stays unevaluated: with a valueless `v`,
+  `At(FlatMap([1, 2], x ↦ Join([x], v)), 2)` was `2`, and `IndexOf`, `Find`,
+  `Any`, `All`, `CountIf`, `Max`, `Reduce`, `Contains` and `Sum`
+  (`Sum(Take(…, 3))` was `0`) no longer answer from the elements before `v`. The
+  operators that keep every element of their source (`Tally`, `Unique`,
   `GroupBy`, `ChunkBy`, `Chunk`, `Position`, `Partition` with a predicate,
   `StartsWith`, `EndsWith`, `RangeOf`, `ContainsSequence`) list at most
   `maxCollectionSize` elements of a lazy source and stay unevaluated for a
@@ -244,27 +280,27 @@
   whose count is not known walks the source once:
   `Count(Take(FlatMap(Range(1, 2000), x ↦ [x]), 2000))` takes milliseconds.
 
-- **Compiled code agrees with the interpreter in more cases** (user decisions
-  2026-10-17 and 2026-10-18). Python `compile()` refuses a selection that mixes
-  a `Break`, `Continue` or loop branch with a value branch
-  (`If(x > 0, Break, 1)` lost its `else` value). In compiled JavaScript, a
-  missing point or string in a list cell of `When` or `Which` is `undefined`; a
-  missing number stays `NaN`. `Sinh`, `Cosh`, `Tanh`, `Csch`, `Sech` and `Coth`
-  of `i·π·x` reduce the angle exactly on every target: `Csch(iπx)` at `x = 1` is
-  the pole `{re: ∞, im: ∞}`, where it was `{re: NaN, im: ∞}`. GLSL and WGSL
-  compile `At` over a list of points (an index out of range gives a vector of
-  `NaN`). WGSL `compileFunction()` compiles a nested block that ends with an
-  assignment. The inner target of a chained assignment in a loop body is a local
-  of the loop, so compiled JavaScript no longer writes the caller's `vars`; a
-  shader refuses it when an engine scope binds the name.
+- **Compiled code agrees with the interpreter in more cases**. Python
+  `compile()` refuses a selection that mixes a `Break`, `Continue` or loop
+  branch with a value branch (`If(x > 0, Break, 1)` lost its `else` value). In
+  compiled JavaScript, a missing point or string in a list cell of `When` or
+  `Which` is `undefined`; a missing number stays `NaN`. `Sinh`, `Cosh`, `Tanh`,
+  `Csch`, `Sech` and `Coth` of `i·π·x` reduce the angle exactly on every target:
+  `Csch(iπx)` at `x = 1` is the pole `{re: ∞, im: ∞}`, where it was
+  `{re: NaN, im: ∞}`. GLSL and WGSL compile `At` over a list of points (an index
+  out of range gives a vector of `NaN`). WGSL `compileFunction()` compiles a
+  nested block that ends with an assignment. The inner target of a chained
+  assignment in a loop body is a local of the loop, so compiled JavaScript no
+  longer writes the caller's `vars`; a shader refuses it when an engine scope
+  binds the name.
 
 - **`NSolve` is new, `Table` accepts `{i, n}`, and one-sided limits at a
-  symbolic point resolve** (user decision 2026-10-17). `NSolve(eq, x)` takes the
-  operands of `Solve` and gives each solution as a float. `Table` accepts the
-  Mathematica iterator `{i, n}` (`i` from 1 to `n`), and in LaTeX the specs
-  `(i, n)`, `(i, lo, hi)` and `(i, lo, hi, step)`. `lim_{x→a⁺} 1/(x−a)` is `+∞`,
-  `lim_{x→a⁺} ln(x−a)` is `−∞`; a limit whose sign depends on a parameter stays
-  unevaluated. `e^{−1/x}` at `0⁺` is `0`, and `1/√x` at `0⁺` is `+∞`.
+  symbolic point resolve**. `NSolve(eq, x)` takes the operands of `Solve` and
+  gives each solution as a float. `Table` accepts the Mathematica iterator
+  `{i, n}` (`i` from 1 to `n`), and in LaTeX the specs `(i, n)`, `(i, lo, hi)`
+  and `(i, lo, hi, step)`. `lim_{x→a⁺} 1/(x−a)` is `+∞`, `lim_{x→a⁺} ln(x−a)` is
+  `−∞`; a limit whose sign depends on a parameter stays unevaluated. `e^{−1/x}`
+  at `0⁺` is `0`, and `1/√x` at `0⁺` is `+∞`.
 
 - **Compiled code of an assignment whose value is not a plain expression agrees
   with the interpreter.** `t ≔ (u ≔ s)` compiles as two statements, with `u` a
@@ -284,9 +320,9 @@
   that is not a Python identifier. On interval-js, `[1, Missing]` compiles as
   `[1, Undefined]` does.
 
-- **interval-js: one result shape, and `partial` when an arm has no value**
-  (user decision 2026-10-18). The compiled runner gives every scalar as a kinded
-  result: a constant, a bare variable and a block that returns a local give
+- **interval-js: one result shape, and `partial` when an arm has no value** .
+  The compiled runner gives every scalar as a kinded result: a constant, a bare
+  variable and a block that returns a local give
   `{ kind: 'interval', value: { lo, hi } }`, as a computed value does, at every
   depth of a list or point. An absent value is `{ kind: 'empty' }`. A
   conditional whose condition is undecided and one of whose arms has no value
@@ -295,8 +331,8 @@
   whole cell.
 
 - **An operator whose answer depends on the order of a collection refuses a
-  set** (user decision 2026-10-18). `TakeWhile`, `DropWhile`, `Find`,
-  `Position`, `Partition`, `Chunk`, `ChunkBy` and `Scan` give
+  set** . `TakeWhile`, `DropWhile`, `Find`, `Position`, `Partition`, `Chunk`,
+  `ChunkBy` and `Scan` give
   `Error(incompatible-type, indexed_collection, set<…>)` for a set, written or
   held by a symbol: `TakeWhile(Set(3, 1), x > 2)` gave `Set(3)`. The result of
   `TakeWhile` and `DropWhile` is a list (or a string), never a set. A
@@ -306,13 +342,13 @@
   `[]`.
 
 - **A complex value with an infinite real part and a finite imaginary part is
-  the real infinity** (user decision 2026-10-18).
-  `["Complex", "PositiveInfinity", 1]` and `ce.number({ re: -Infinity, im: 2 })`
-  are `+oo` and `-oo`; such a value reported `isFinite === true`, `0·(∞ + i)`
-  was `0` and `2·(∞ + i)` was `NaN` (now `Indeterminate` and `+oo`). A value
-  with an infinite imaginary part is still `~oo`. The limits that tend to
-  `∞ + iθ` are `+oo` on every route: `Arcosh(−∞)`, `Ln(−∞)`, `Log(−∞, 10)`
-  (`-oo` for a base between 0 and 1), `CoshIntegral(−∞)` and `LambertW(±∞, k)`.
+  the real infinity** . `["Complex", "PositiveInfinity", 1]` and
+  `ce.number({ re: -Infinity, im: 2 })` are `+oo` and `-oo`; such a value
+  reported `isFinite === true`, `0·(∞ + i)` was `0` and `2·(∞ + i)` was `NaN`
+  (now `Indeterminate` and `+oo`). A value with an infinite imaginary part is
+  still `~oo`. The limits that tend to `∞ + iθ` are `+oo` on every route:
+  `Arcosh(−∞)`, `Ln(−∞)`, `Log(−∞, 10)` (`-oo` for a base between 0 and 1),
+  `CoshIntegral(−∞)` and `LambertW(±∞, k)`.
 
 - **Quantity arithmetic keeps an exact magnitude exact** (user decision
   2026-10-17). `evaluate()` of `Quantity(3, m)·π` is `3π m`, and of
@@ -325,34 +361,32 @@
   it was `0 m`. A quantity with a sum magnitude prints as `(1 + π) m`.
 
 - **`SVD` and `SingularValues` of an exact matrix stay unevaluated under
-  `evaluate()`** (user decision 2026-10-17); `.N()` gives the floats. A matrix
-  with a float entry is still decomposed, and the exact `SingularValues` of a
-  matrix whose Gram matrix is at most 2×2 is unchanged.
+  `evaluate()`** ; `.N()` gives the floats. A matrix with a float entry is still
+  decomposed, and the exact `SingularValues` of a matrix whose Gram matrix is at
+  most 2×2 is unchanged.
 
-- **Special functions of an exact operand are correctly rounded under `.N()`**
-  (user decision 2026-10-17). An exact operand (`1/3`, `√2`, `π`) of `Gamma`,
-  `GammaLn`, `LogGamma`, `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`,
-  `HurwitzZeta`, `DirichletEta`, `DirichletBeta`, `LerchPhi`, `LambertW`,
-  `PolyLog`, `BarnesG`, `LogBarnesG`, `EllipticK`, `EllipticE`,
-  `Hypergeometric2F1`, `Hypergeometric1F1`, `AGM`, `Erf`, `Erfc`, `Erfi`,
-  `ErfInv`, `FresnelS` and `FresnelC` is read with 10 guard digits: at 50
-  digits, `HurwitzZeta(3, 1/3).N()` and `Digamma(1/3).N()` had a wrong last
-  digit.
+- **Special functions of an exact operand are correctly rounded under `.N()`** .
+  An exact operand (`1/3`, `√2`, `π`) of `Gamma`, `GammaLn`, `LogGamma`,
+  `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`, `HurwitzZeta`,
+  `DirichletEta`, `DirichletBeta`, `LerchPhi`, `LambertW`, `PolyLog`, `BarnesG`,
+  `LogBarnesG`, `EllipticK`, `EllipticE`, `Hypergeometric2F1`,
+  `Hypergeometric1F1`, `AGM`, `Erf`, `Erfc`, `Erfi`, `ErfInv`, `FresnelS` and
+  `FresnelC` is read with 10 guard digits: at 50 digits,
+  `HurwitzZeta(3, 1/3).N()` and `Digamma(1/3).N()` had a wrong last digit.
 
 - **An Epsil program whose only statement is a `do { … }` block runs the block
-  in its own scope** (user decision 2026-10-18), as when the block follows
-  another statement: `do { let Pi = 3; Pi }` gives `3` instead of refusing a
-  global declaration of `Pi`. The parser wraps such a program in a second
-  `Block`, and the serializer writes it back as the block alone.
+  in its own scope** , as when the block follows another statement:
+  `do { let Pi = 3; Pi }` gives `3` instead of refusing a global declaration of
+  `Pi`. The parser wraps such a program in a second `Block`, and the serializer
+  writes it back as the block alone.
 
-- **Removing `commutative` from `Add` or `Multiply` keeps the operand order**
-  (user decision 2026-10-18).
+- **Removing `commutative` from `Add` or `Multiply` keeps the operand order** .
   `ce.declare('Add', { commutative: false }, { extend: true })` no longer
   throws; the extension removes the inherited ordering handler, and `b + a`
   stays `b + a` in the canonical form. The library `evaluate` handler still
   collects like terms, so `evaluate()` of a symbolic sum may still reorder it.
 
-- **The operand of a kept `Delimiter` is canonical** (user decision 2026-10-17).
+- **The operand of a kept `Delimiter` is canonical** .
   `["Delimiter", ["Add", 1, 2, "x"], "'[]'"]` is `[x + 3]`, not `[1 + 2 + x]`
   marked canonical.
 
@@ -363,10 +397,9 @@
   `[(1, 2), NaN]`); a number arm still gives `NaN`. The compile pre-pass pushes
   a literal index through such a selection and through `When`.
 
-- **A `Set` literal lists its finite lazy elements** (user decision 2026-10-17).
-  `{Map(f, [1, 2])}` evaluates to `{[f(1), f(2)]}`; the callback runs at
-  evaluation, not at boxing. Equal elements are then merged. Infinite or very
-  large elements stay lazy.
+- **A `Set` literal lists its finite lazy elements** . `{Map(f, [1, 2])}`
+  evaluates to `{[f(1), f(2)]}`; the callback runs at evaluation, not at boxing.
+  Equal elements are then merged. Infinite or very large elements stay lazy.
 
 - **An operator that reads a collection by position refuses a set** (user
   decision 2026-10-17). With `c: collection<integer>` assigned `Set(3, 1)`,
@@ -378,25 +411,23 @@
   is refused when it is boxed. A `PointList` component that is a point is
   refused: `PointList([1, 2], (5, 6))` gave `[(1, (5, 6)), (2, (5, 6))]`.
 
-- **A function defined only on integers gives a float for a float argument**
-  (user decision 2026-10-17). `Fibonacci(5.0)` is `5.0`, `Totient(10.0)` is
-  `4.0` and `BernoulliB(4.0)` is `-0.0333…`; they gave the exact `5`, `4` and
-  `-1/30`. This applies to the number-theory and combinatorics integer functions
-  (`NthPrime`, `PrimePi`, `Lucas`, `CatalanNumber`, `BellNumber`, `PowerMod`,
-  …), to the exact special values of `HurwitzZeta(0.0, 2)` and
-  `LerchPhi(0.0, 1, 1)`, and to every number of a list or tuple result (user
-  decision 2026-10-18): `Divisors(12.0)` is `[1.0, 2.0, 3.0, 4.0, 6.0, 12.0]`,
-  and so are `PrimeFactors`, `FactorInteger`, `IntegerDigits`, `ExtendedGCD`,
-  `ContinuedFraction`, `PowerModList` and `PrimitiveRootList`. A non-integer
-  float (`Fibonacci(5.5)`) is still an error. `.N()` of `BernoulliB(4)`,
-  `FromContinuedFraction([2, 3])` and `RationalReconstruction(6, 11)` is now a
-  float; it was the exact rational.
+- **A function defined only on integers gives a float for a float argument** .
+  `Fibonacci(5.0)` is `5.0`, `Totient(10.0)` is `4.0` and `BernoulliB(4.0)` is
+  `-0.0333…`; they gave the exact `5`, `4` and `-1/30`. This applies to the
+  number-theory and combinatorics integer functions (`NthPrime`, `PrimePi`,
+  `Lucas`, `CatalanNumber`, `BellNumber`, `PowerMod`, …), to the exact special
+  values of `HurwitzZeta(0.0, 2)` and `LerchPhi(0.0, 1, 1)`, and to every number
+  of a list or tuple result (user decision 2026-10-18): `Divisors(12.0)` is
+  `[1.0, 2.0, 3.0, 4.0, 6.0, 12.0]`, and so are `PrimeFactors`, `FactorInteger`,
+  `IntegerDigits`, `ExtendedGCD`, `ContinuedFraction`, `PowerModList` and
+  `PrimitiveRootList`. A non-integer float (`Fibonacci(5.5)`) is still an error.
+  `.N()` of `BernoulliB(4)`, `FromContinuedFraction([2, 3])` and
+  `RationalReconstruction(6, 11)` is now a float; it was the exact rational.
 
-- **A `complex.js` value is a float** (user decision 2026-10-17). A `Complex`
-  object holds two doubles, so `ce.number(new Complex(2, 3))` is the float
-  `2.0 + 3.0i` (`isExact` is `false`), and `new Complex(2, 0)` the float `2.0`.
-  For an exact Gaussian integer, use `ce.number({ re: 2, im: 3 })` or
-  `ce.box(["Complex", 2, 3])`.
+- **A `complex.js` value is a float** . A `Complex` object holds two doubles, so
+  `ce.number(new Complex(2, 3))` is the float `2.0 + 3.0i` (`isExact` is
+  `false`), and `new Complex(2, 0)` the float `2.0`. For an exact Gaussian
+  integer, use `ce.number({ re: 2, im: 3 })` or `ce.box(["Complex", 2, 3])`.
 
 - **A float in a list literal makes the cells of a product or sum `real`** (user
   decision 2026-10-17). `[1.0, 2] / 3` evaluates to `[0.333…, 2/3]` but was
@@ -406,31 +437,30 @@
   typed `vector<integer^2>`.
 
 - **A complex value beside a real infinity gives the infinity in `Sum` and
-  `Mean`, as in `Add`** (user decision 2026-10-17). `Sum([1+i, +oo])` gave the
-  complex number `Infinity + i`, and `Mean([1+i, +oo])` gave `NaN`; both give
-  `+oo`. Data with both `+oo` and `-oo` gives `Indeterminate`.
+  `Mean`, as in `Add`** . `Sum([1+i, +oo])` gave the complex number
+  `Infinity + i`, and `Mean([1+i, +oo])` gave `NaN`; both give `+oo`. Data with
+  both `+oo` and `-oo` gives `Indeterminate`.
 
 - **`Map` accepts `Subtract`, `Negate`, `Multiply` and `Divide` as bare names
-  over points** (user decision 2026-10-17). `Map(Subtract, Ps, Ps)` with
-  `Ps = [(1, 2), (3, 4)]` was an `incompatible-type` error; it gives
-  `[(0, 0), (0, 0)]`, typed as a list of points.
+  over points** . `Map(Subtract, Ps, Ps)` with `Ps = [(1, 2), (3, 4)]` was an
+  `incompatible-type` error; it gives `[(0, 0), (0, 0)]`, typed as a list of
+  points.
 
 - **A compiled call of a user function with the wrong number of arguments
-  declines** (user decision 2026-10-17). With `a := (x, y, z) ↦ x + y + z`,
-  compiled JavaScript gave `6` for `a(1, 2, 3, 4)`, where the interpreter gives
-  an `unexpected-argument` error; the call now declines on every target and the
-  interpreter answers it. The Python and WGSL `compileFunction()` accept a block
-  whose last statement is an assignment (`Block(s ≔ x; t ≔ s)` returns `t`, as
-  `compile()` does). WGSL refuses an assignment to a function parameter, which
-  WGSL does not allow, and Python refuses a function or parameter name that is
-  not a Python identifier.
+  declines** . With `a := (x, y, z) ↦ x + y + z`, compiled JavaScript gave `6`
+  for `a(1, 2, 3, 4)`, where the interpreter gives an `unexpected-argument`
+  error; the call now declines on every target and the interpreter answers it.
+  The Python and WGSL `compileFunction()` accept a block whose last statement is
+  an assignment (`Block(s ≔ x; t ≔ s)` returns `t`, as `compile()` does). WGSL
+  refuses an assignment to a function parameter, which WGSL does not allow, and
+  Python refuses a function or parameter name that is not a Python identifier.
 
 - **The interpreter fallback of a compiled function spells an absent value as
-  the compiled code does** (user decision 2026-10-17). A bare `Undefined` gives
-  `undefined` on JavaScript, a written `Missing` gives `NaN` on Python, and a
-  present number on interval-js is `{ kind: 'interval', value: { lo, hi } }`. On
-  interval-js, a written `Missing` or `Undefined` and an `At` whose index
-  selects nothing give `{ kind: 'empty' }` instead of `{ lo: NaN, hi: NaN }`.
+  the compiled code does** . A bare `Undefined` gives `undefined` on JavaScript,
+  a written `Missing` gives `NaN` on Python, and a present number on interval-js
+  is `{ kind: 'interval', value: { lo, hi } }`. On interval-js, a written
+  `Missing` or `Undefined` and an `At` whose index selects nothing give
+  `{ kind: 'empty' }` instead of `{ lo: NaN, hi: NaN }`.
 
 - **A global declaration of a library constant is refused** (user decision
   2026-10-17). `ce.declare('Pi', …)` in the global scope, a `Declare` there, and
@@ -452,16 +482,16 @@
   marks a float.
 
 - **A juxtaposition with a function-typed factor is checked like the explicit
-  product** (user decision 2026-10-17). After `f(x)` is parsed, `fy` and `2f`
-  give the same `incompatible-type` error as `f\times y` and `2\times f`; they
-  were products. An application (`f(x)`, `2f(x)`, `\sin x`) does not change. A
-  bar used as the set-builder separator (`\{x | x \ne 0\}`) gives one
+  product** . After `f(x)` is parsed, `fy` and `2f` give the same
+  `incompatible-type` error as `f\times y` and `2\times f`; they were products.
+  An application (`f(x)`, `2f(x)`, `\sin x`) does not change. A bar used as the
+  set-builder separator (`\{x | x \ne 0\}`) gives one
   `expected-set-builder-separator` error that names `\mid`, instead of two
   unrelated errors.
 
 - **In Epsil, each run of a block gets its `let` and `const` bindings when it
-  starts, as in JavaScript** (user decision 2026-10-17). A closure created
-  before the `let` of a local reads the binding of its own run:
+  starts, as in JavaScript** . A closure created before the `let` of a local
+  reads the binding of its own run:
   `let fs = []; for i in [1, 2] { fs = [...fs, () => k]; let k = i }; [fs[1](), fs[2]()]`
   gives `[1, 2]`, not `[k, 1]`. Using a local before its `let` or `const` has
   run in the block, by a read or a write, is the error
@@ -469,7 +499,7 @@
   symbol. Top-level statements are not affected.
 
 - **Extending `Add` or `Multiply` so that the library canonical handler is
-  removed also removes the `lazy` flag** (user decision 2026-10-17).
+  removed also removes the `lazy` flag** .
   `ce.declare('Add', { associative: false }, { extend: true })` then `(a+b)+c`
   gave `["Add", ["Delimiter", ["Add", "a", "b"]], "c"]`; the operands are now
   canonicalized, as for an `Add` declared from scratch.
@@ -516,53 +546,53 @@
   initializes a uniform to 0).
 
 - **Under `.N()`, the last statement of a user-function body gets the numeric
-  request** (user decision 2026-10-18). With `f := x ↦ (z := 1; ⌊x⌋)`,
-  `f((25! − 1)/24!).N()` is `24`, not `25`: a jump in the last statement reads
-  the exact argument. The statements before the last one still run exactly
-  (`a := √2; a^2` gives `2`). A `Block` evaluated with a numeric request passes
-  it to its last statement in the same way. An early `Return` in an earlier
-  statement, and a jump in an earlier statement, still read the float.
+  request** . With `f := x ↦ (z := 1; ⌊x⌋)`, `f((25! − 1)/24!).N()` is `24`, not
+  `25`: a jump in the last statement reads the exact argument. The statements
+  before the last one still run exactly (`a := √2; a^2` gives `2`). A `Block`
+  evaluated with a numeric request passes it to its last statement in the same
+  way. An early `Return` in an earlier statement, and a jump in an earlier
+  statement, still read the float.
 
 - **A logical connective with an absent operand is typed `missing` or
-  `boolean | missing`** (user decision 2026-10-18). `And(True, Missing)` and
-  `Not(Missing)` evaluate to `Missing`, but were typed `boolean`. The type of
-  `And`, `Or`, `Not`, `Xor`, `Equivalent`, `Implies`, `Nand` and `Nor` now holds
-  every value the connective can give: `missing` when the result is always
-  `Missing` (`And(True, Missing)`), `boolean | missing` when it may be (an
-  operand typed `boolean | missing`, an `Undefined` operand), and `boolean` when
-  an operand decides (`And(False, Missing)` is `False`). The negated comparisons
+  `boolean | missing`** . `And(True, Missing)` and `Not(Missing)` evaluate to
+  `Missing`, but were typed `boolean`. The type of `And`, `Or`, `Not`, `Xor`,
+  `Equivalent`, `Implies`, `Nand` and `Nor` now holds every value the connective
+  can give: `missing` when the result is always `Missing`
+  (`And(True, Missing)`), `boolean | missing` when it may be (an operand typed
+  `boolean | missing`, an `Undefined` operand), and `boolean` when an operand
+  decides (`And(False, Missing)` is `False`). The negated comparisons
   (`NotLess`, …) and a broadcast follow: `And([True, False], Missing)` is typed
   `list<boolean | missing>`.
 
 - **`Solve` reads an integer-valued float exponent as a degree, and lists every
-  root of a non-integer power** (user decision 2026-10-18).
-  `x^{2.0} + 3x + 2 = 0` gives `-1.0` and `-2.0`, and
-  `x^{4.0} - 5x^{2.0} + 4 = 0` gives four roots; they were not solved. As for an
-  integer exponent, the complex roots are listed: `x^{3.0} = -8` gives `-2.0`
-  and `1.0 ± 1.732i`. `Degree`, `Factor` and the other polynomial operations
-  still refuse a float exponent. A power with a non-integer exponent equal to a
-  constant now gives all the roots of the principal value: `x^{5/2} = -4`,
-  `x^{3/2} = -8` and `x^{2.5} = -4` gave `[]` (no solution), although
-  `4^{2/5}·e^{±2πi/5}` are roots of the first, and `x^{2.5} = 4` gave only
-  `4^{0.4}`, without `4^{0.4}·e^{±0.8πi}`. For an unknown declared `real`, only
-  real roots are kept (`y^{5/2} = -4` gives `[]`), and `x^{-0.5} = -4` gives
-  `[]`. When the list cannot be given (an exponent above 64 in absolute value),
-  there is no answer, where before there was an incomplete list.
+  root of a non-integer power** . `x^{2.0} + 3x + 2 = 0` gives `-1.0` and
+  `-2.0`, and `x^{4.0} - 5x^{2.0} + 4 = 0` gives four roots; they were not
+  solved. As for an integer exponent, the complex roots are listed:
+  `x^{3.0} = -8` gives `-2.0` and `1.0 ± 1.732i`. `Degree`, `Factor` and the
+  other polynomial operations still refuse a float exponent. A power with a
+  non-integer exponent equal to a constant now gives all the roots of the
+  principal value: `x^{5/2} = -4`, `x^{3/2} = -8` and `x^{2.5} = -4` gave `[]`
+  (no solution), although `4^{2/5}·e^{±2πi/5}` are roots of the first, and
+  `x^{2.5} = 4` gave only `4^{0.4}`, without `4^{0.4}·e^{±0.8πi}`. For an
+  unknown declared `real`, only real roots are kept (`y^{5/2} = -4` gives `[]`),
+  and `x^{-0.5} = -4` gives `[]`. When the list cannot be given (an exponent
+  above 64 in absolute value), there is no answer, where before there was an
+  incomplete list.
 
 - **A compiled rounding function of a loop index plus an exact constant gives
-  the interpreter's value** (user decision 2026-10-18).
-  `Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)` at `x = 1` compiled to 81 (52650
-  with bounds 1 to 300), because the constant was the double `25.0`; it now
-  gives 78 (52350), as the interpreter does. `Floor(k + c)` compiles as
-  `k + Floor(c)` with `Floor(c)` computed exactly; `Ceil`, `Round`, `Truncate`
-  and `Fract` work the same way (`Truncate` becomes a selection on the sign, and
-  a `Round` whose constant may be a tie declines). An operand with only integer
-  variables that cannot be rewritten (`Floor(k·π)`) now declines. An operand
-  with a real variable keeps its float code on every target (`⌊πx⌋`,
-  `⌊x + 1/3⌋`), so `⌊x + (25! − 1)/24!⌋` at `x = 1` still compiles to 26.
+  the interpreter's value** . `Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)` at
+  `x = 1` compiled to 81 (52650 with bounds 1 to 300), because the constant was
+  the double `25.0`; it now gives 78 (52350), as the interpreter does.
+  `Floor(k + c)` compiles as `k + Floor(c)` with `Floor(c)` computed exactly;
+  `Ceil`, `Round`, `Truncate` and `Fract` work the same way (`Truncate` becomes
+  a selection on the sign, and a `Round` whose constant may be a tie declines).
+  An operand with only integer variables that cannot be rewritten (`Floor(k·π)`)
+  now declines. An operand with a real variable keeps its float code on every
+  target (`⌊πx⌋`, `⌊x + 1/3⌋`), so `⌊x + (25! − 1)/24!⌋` at `x = 1` still
+  compiles to 26.
 
 - **A signature declared with `ce.declare()` is a contract for an Epsil
-  `function` statement** (user decision 2026-10-18). After
+  `function` statement** . After
   `ce.declare('h', { signature: '(integer) pure -> integer', evaluate: … })`,
   `function h(x: integer) -> integer { x }` replaces the body and keeps the
   declared signature; it added a clause and gave
@@ -604,22 +634,22 @@
   `~oo` includes it: `Floor(w)` with `w: number` is typed
   `infinity | integer | nan`.
 
-- **A sequence definition on a constant is refused** (user decision 2026-10-17).
-  With `F` declared as a constant, `F_0 := 1` and `F_n := F_{n-1} + 1` now throw
-  the error that `ce.assign('F', 5)` gives, and `F` keeps its value. Before, the
-  complete sequence replaced the constant and its value was lost.
+- **A sequence definition on a constant is refused** . With `F` declared as a
+  constant, `F_0 := 1` and `F_n := F_{n-1} + 1` now throw the error that
+  `ce.assign('F', 5)` gives, and `F` keeps its value. Before, the complete
+  sequence replaced the constant and its value was lost.
 
-- **A length type parameter accepts the length 0** (user decision 2026-10-17).
-  With `type permutation<N> = list<integer^N>`, `permutation([])` is typed
+- **A length type parameter accepts the length 0** . With
+  `type permutation<N> = list<integer^N>`, `permutation([])` is typed
   `permutation<0>`; it was `permutation<integer<1..>>`, a positive length for a
   value of length 0. An unsolved length now reads `integer<0..>`,
   `where N: integer` admits 0, and the empty list is a value of every one-axis
   list type of any length, such as `vector<integer>`.
 
-- **A comparison with an `Undefined` operand is typed `boolean | missing`**
-  (user decision 2026-10-17). `Less(Undefined, 3)` evaluates to `Missing`, as
-  `Less(Missing, 3)` does, but its type was `boolean`. This applies to `Less`,
-  `LessEqual`, `Greater`, `GreaterEqual`, `Equal` and `NotEqual`.
+- **A comparison with an `Undefined` operand is typed `boolean | missing`** .
+  `Less(Undefined, 3)` evaluates to `Missing`, as `Less(Missing, 3)` does, but
+  its type was `boolean`. This applies to `Less`, `LessEqual`, `Greater`,
+  `GreaterEqual`, `Equal` and `NotEqual`.
 
 - **A runaway recursion always ends with the engine's recursion error.** A user
   function that calls itself without end (`f(n) := n f(n-1)`, then `f(2)`) now
@@ -659,26 +689,25 @@
   to `(2000/3)√13·i`.
 
 - **Compiled jump functions of an exact constant give the interpreter's value
-  also with `constantFold: false`** (user decision 2026-10-17). Compiled code of
-  `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Mod`, `Remainder`, `Chop`,
-  `Sign`, `Heaviside` and the comparisons, applied to a closed exact operand,
-  computed the operand as a double under `constantFold: false` and in the
-  compiled body of a `Map`, and a double can be on the other side of the jump:
-  `Floor((25! − 1)/24!)` compiled to `25` (now `24`), and `Fract(π·10^30)` to
-  `0` (now `0.50288…`). Such an operand is now computed exactly, so the compiled
-  code holds the result. On Python, a comparison of closed exact numbers now
-  compiles to `True` or `False`: `(25! − 1)/24! < 25` compiled to `25 < 25`,
-  which is `False`.
+  also with `constantFold: false`** . Compiled code of `Floor`, `Ceil`, `Round`,
+  `Truncate`, `Fract`, `Mod`, `Remainder`, `Chop`, `Sign`, `Heaviside` and the
+  comparisons, applied to a closed exact operand, computed the operand as a
+  double under `constantFold: false` and in the compiled body of a `Map`, and a
+  double can be on the other side of the jump: `Floor((25! − 1)/24!)` compiled
+  to `25` (now `24`), and `Fract(π·10^30)` to `0` (now `0.50288…`). Such an
+  operand is now computed exactly, so the compiled code holds the result. On
+  Python, a comparison of closed exact numbers now compiles to `True` or
+  `False`: `(25! − 1)/24! < 25` compiled to `25 < 25`, which is `False`.
 
 - **`Join` or `Append` of a dictionary and an element that can never be a
-  key-value entry is an error at once** (user decision 2026-10-17).
-  `Join(Dictionary(x: 1), [2, 3])` evaluated to the unevaluated `Join`, typed
-  `record`, and the error appeared only when its elements were read (to print
-  it, or to build a `Dictionary` from it). Now the expression is
-  `Error(incompatible-type, tuple<string, any>, 2)` when it is boxed, as are
-  `Join([2, 3], Dictionary(x: 1))`, `Append(Dictionary(x: 1), 2)`, a tuple of
-  literals that is not a pair with a string key (`(1, 2)`), and a string or a
-  `Range` that is not empty, joined to a dictionary
+  key-value entry is an error at once** . `Join(Dictionary(x: 1), [2, 3])`
+  evaluated to the unevaluated `Join`, typed `record`, and the error appeared
+  only when its elements were read (to print it, or to build a `Dictionary` from
+  it). Now the expression is `Error(incompatible-type, tuple<string, any>, 2)`
+  when it is boxed, as are `Join([2, 3], Dictionary(x: 1))`,
+  `Append(Dictionary(x: 1), 2)`, a tuple of literals that is not a pair with a
+  string key (`(1, 2)`), and a string or a `Range` that is not empty, joined to
+  a dictionary
   (`Error(incompatible-type, collection<tuple<string, any>>, range)`). An empty
   operand contributes nothing: `Join(Dictionary(x: 1), "")` is `{x: 1}`. A
   symbol operand is checked when the expression is evaluated, with the value it
@@ -722,11 +751,11 @@
 ### Performance
 
 - **`.N()` over a list with an element that may evaluate to `Nothing` no longer
-  evaluates the other elements exactly** (user decision 2026-10-17). With
-  `H = Sum(1/k, k, 1, 6000)`, `Floor([If(c, 1, Nothing), H]).N()` takes 66 ms
-  (it took 7 s) and `Count(Map(Sin, [If(c, 1, Nothing), H])).N()` takes 1 ms (it
-  took 11 s). The results do not change: the kept elements are read as written,
-  so a function with a jump still gets the exact value of an exact element.
+  evaluates the other elements exactly** . With `H = Sum(1/k, k, 1, 6000)`,
+  `Floor([If(c, 1, Nothing), H]).N()` takes 66 ms (it took 7 s) and
+  `Count(Map(Sin, [If(c, 1, Nothing), H])).N()` takes 1 ms (it took 11 s). The
+  results do not change: the kept elements are read as written, so a function
+  with a jump still gets the exact value of an exact element.
 
 - **Compiling an expression that holds the same subexpression object at many
   positions is linear.** A boxed expression can be a graph: `e = Add(e, e)`
@@ -785,6 +814,39 @@
   statement form.
 
 ### Issues Resolved
+
+- **A list with a failed cell stays flat, and Epsil does not throw.** A list
+  that holds a failed cell and grows in a loop (`fs = [...fs, g("a")]`) stays
+  one list. Before, each turn added one level of `ListJoin`, and at about 1000
+  turns `executeEpsil` threw a `RangeError` to the host. A join of list literals
+  folds to one list also when a cell failed, a `ListJoin` operand is spliced at
+  any position, and adjacent list literals of a lazy `ListJoin` merge; the
+  failed cells stay in their positions. A walk of a statement value that throws
+  in `executeEpsil` becomes a diagnostic. An error made when the taken branch of
+  `If`, `Which` or `Coalesce` is evaluated (a call of a user function whose body
+  fails) has the frame of that branch; it had the frame of the condition, and
+  the Epsil diagnostic underlined the condition.
+
+- **Review fixes.** `Factorial2` at an odd negative integer keeps a value that a
+  double can hold: `(-303)!!` is about `-8.85e-310` on the `.N()` and compiled
+  JavaScript routes, not `-0`, and the `interval-js` enclosure of `n!!` contains
+  the true value (it is widened by the rounding error of the product; an
+  underflowed value keeps its sign and is not the exact point `0`). A `Set`
+  pattern no longer matches a set-builder (`Set(2k, Element(k, S))`) with its
+  body and indexing set swapped. In Epsil, the last statement of a `while let`
+  body is a loop body statement, and a discarded error there is reported. An
+  `If`, `Which` or `Coalesce` that returns an error made by an earlier
+  evaluation no longer names an operand that it did not evaluate.
+
+- **Asynchronous evaluation and definition order.** An operator that has only an
+  `evaluateAsync` handler is threaded over a conditional value on the
+  asynchronous route: `AsyncOnly(1 {0<t})` gives the handler's value of `1`
+  under the condition, where it gave `NaN`, and a list operand is mapped cell by
+  cell, where the handler got the whole list. When `g(t) := 2a(t)` is defined
+  before `a(x, y) := x + y` and the rebuilt body of `g` is a type error, `g(1)`
+  stays unevaluated, as when `a` is defined first; it gave a value from the
+  earlier body (`2·(y ↦ 1 + y)`). A later valid definition of `a` still repairs
+  `g`.
 
 - **Combinatorial generators answer without a walk.** `Permutations` and
   `Combinations` compute an element from its position and a position from an
@@ -1071,15 +1133,15 @@
   `effectsDeclared` flag to `false` while its signature still said `pure`.
 
 - **Under `.N()`, `If` and the other lazy operators in a user-function body read
-  the exact argument** (user decision 2026-10-17). `If`, `Which`, `When`,
-  `Pipe`, `ForAll` and `Exists` evaluated the operands they hold exactly, so a
-  comparison or a `Floor` inside read the float bound to the parameter:
-  `c((25! − 1)/24!).N()` with `c := x ↦ If(x < 25, 0, 1)` gave 1, and
-  `g((25! − 1)/24!).N()` with `g := x ↦ If(True, Floor(x), 0)` gave 25. They now
-  pass the numeric request to these operands, so the comparison and `Floor` read
-  the exact argument again, as at the top level: the results are 0 and 24.
-  `Floor(x) = 24` in such a body is now `True`. At the top level,
-  `If(True, √2).N()` is now `1.414…`, as `Which(True, √2).N()` already was, and
+  the exact argument** . `If`, `Which`, `When`, `Pipe`, `ForAll` and `Exists`
+  evaluated the operands they hold exactly, so a comparison or a `Floor` inside
+  read the float bound to the parameter: `c((25! − 1)/24!).N()` with
+  `c := x ↦ If(x < 25, 0, 1)` gave 1, and `g((25! − 1)/24!).N()` with
+  `g := x ↦ If(True, Floor(x), 0)` gave 25. They now pass the numeric request to
+  these operands, so the comparison and `Floor` read the exact argument again,
+  as at the top level: the results are 0 and 24. `Floor(x) = 24` in such a body
+  is now `True`. At the top level, `If(True, √2).N()` is now `1.414…`, as
+  `Which(True, √2).N()` already was, and
   `If(Σ_{k=1}^{10000} 1/k < 10, 0, 1).N()` no longer evaluates its condition
   exactly (28 s before, 0.1 s now).
 
@@ -9810,24 +9872,23 @@ These changes apply to non-strict parsing only
   gives `[1, NaN]`); a value held under a type that admits a point or a string
   (`tuple<number, number> | list<…>`) is still one value. A `collection<T>` or
   `set<T>` carrier keeps the wider type, because it can hold an infinite set.
-- **A list literal with a spread is always a list** (user decision 2026-09-29).
-  Its canonical form is the new operator `ListJoin`: `[...a, 0]` is
-  `ListJoin(a, [0])`, where it was `Join(a, [0])`. With `g(a) = [...a, 0]`,
-  `g({9, 8})` is `[9, 8, 0]`, where it was `Set(9, 8, 0)`. `ListJoin` is lazy,
-  keeps the elements of each operand in their order, and keeps duplicates that
-  come from different operands. `.json`, `toString()` and LaTeX show the new
-  head; Epsil writes it back as `[...a, 0]`. A stored `Join(a, [0])` keeps its
-  meaning: the result takes the kind of its operands. `[...Missing, 0]` is
-  `Missing`, where it was `[Missing, 0]`.
+- **A list literal with a spread is always a list** . Its canonical form is the
+  new operator `ListJoin`: `[...a, 0]` is `ListJoin(a, [0])`, where it was
+  `Join(a, [0])`. With `g(a) = [...a, 0]`, `g({9, 8})` is `[9, 8, 0]`, where it
+  was `Set(9, 8, 0)`. `ListJoin` is lazy, keeps the elements of each operand in
+  their order, and keeps duplicates that come from different operands. `.json`,
+  `toString()` and LaTeX show the new head; Epsil writes it back as `[...a, 0]`.
+  A stored `Join(a, [0])` keeps its meaning: the result takes the kind of its
+  operands. `[...Missing, 0]` is `Missing`, where it was `[Missing, 0]`.
 - **`Join` and `Append` over an operand that may hold a set have a type that
-  admits it, and their value no longer depends on the materialization option**
-  (user decision 2026-09-29). With `P` declared `collection<number>`,
-  `Join(P, [5])` is typed `collection<number>`, where it was `list<number>`;
-  with `P` holding `Set(3, 1)`, `evaluate({materialization: true})` gives
-  `Set(3, 1, 5)`, as `evaluate()` does, where it gave `[3, 1, 5]`. The kind of
-  the result follows the values the SOURCES hold: every operand of `Join`, the
-  first operand of `Append` (`Append(acc, s)` with `s` holding a set stays a
-  list when `acc` holds a list). Compiled JavaScript that reads such a join
+  admits it, and their value no longer depends on the materialization option** .
+  With `P` declared `collection<number>`, `Join(P, [5])` is typed
+  `collection<number>`, where it was `list<number>`; with `P` holding
+  `Set(3, 1)`, `evaluate({materialization: true})` gives `Set(3, 1, 5)`, as
+  `evaluate()` does, where it gave `[3, 1, 5]`. The kind of the result follows
+  the values the SOURCES hold: every operand of `Join`, the first operand of
+  `Append` (`Append(acc, s)` with `s` holding a set stays a list when `acc`
+  holds a list). Compiled JavaScript that reads such a join
   (`Length(Join(a, [0]))` in a function body) still compiles.
 - **A user function that passes its parameter, alone, to an operator that reads
   a collection whole receives a list argument whole** (user decision
@@ -9848,9 +9909,9 @@ These changes apply to non-strict parsing only
   parameter with a declared type. The compiled JavaScript agrees with the
   interpreter on each of these.
 - **An element-wise operator over an operand declared with an abstract
-  collection type is typed `broadcastable<R>`** (user decision 2026-09-29). With
-  `P` declared `collection<number>` and no value, `Sin(P)`, `P + 1` and `P > 1`
-  were typed `number`, `collection<number> | integer` and `boolean`; they are
+  collection type is typed `broadcastable<R>`** . With `P` declared
+  `collection<number>` and no value, `Sin(P)`, `P + 1` and `P > 1` were typed
+  `number`, `collection<number> | integer` and `boolean`; they are
   `broadcastable<number>`, `broadcastable<number>` and `broadcastable<boolean>`,
   the scalar or an indexed collection of it, because `P` can hold a list, which
   the operator maps over, or a set, which it does not. A `P` that holds a value
@@ -10577,11 +10638,10 @@ These changes apply to non-strict parsing only
   evaluated at the default precision; a machine number is now always inexact,
   and exact integers are the exact class, as `ce.number(2)` already was.
   `2.0^2`, `\ln(1.0)`, `2.0!`, `\sinh(0.0)`, `4^{0.5}` and similar results of a
-  float operand are floats at every precision (user decision 2026-09-27).
-  `\max(2.0, 3)` still returns its operand `3` as given, and
-  `\operatorname{sign}(2.0)` is still the integer `1`, as in Mathematica. A
-  consequence at machine precision: `(1.5+1.5)·(1/7)` is the float
-  `0.42857142857142855`, not the exact `3/7`. Also: `x^{0.5}` stays
+  float operand are floats at every precision . `\max(2.0, 3)` still returns its
+  operand `3` as given, and `\operatorname{sign}(2.0)` is still the integer `1`,
+  as in Mathematica. A consequence at machine precision: `(1.5+1.5)·(1/7)` is
+  the float `0.42857142857142855`, not the exact `3/7`. Also: `x^{0.5}` stays
   `Power(x, 0.5)` (only an exact `1/2` becomes `\sqrt{x}`), as `x^{1.0}` already
   stayed; a float `0` is no identity in a sum (`0.0 - 2` is the float `-2`);
   `\gcd(4.0, 6)` is the float `2`; the statistics of float data are floats
@@ -10591,24 +10651,23 @@ These changes apply to non-strict parsing only
   because re-boxing it with `ce.list(...)` would make it exact.
 
 - **`Integrate` of a tuple integrates each coordinate.** `\int_0^1 (x, 2x)\,dx`
-  stayed unevaluated; it is `(1/2, 1)`, as `\sum_{n=1}^3 (n, 2n)` is `(6, 12)`
-  (user decision 2026-09-27). The indefinite integral gives `(x^2/2, x^2)`, and
-  a list bound gives one tuple per element of the bound
-  (`\int_0^{[1,2,3]} (x, 2x)\,dx` is `[(1/2, 1), (2, 4), (9/2, 9)]`).
+  stayed unevaluated; it is `(1/2, 1)`, as `\sum_{n=1}^3 (n, 2n)` is `(6, 12)` .
+  The indefinite integral gives `(x^2/2, x^2)`, and a list bound gives one tuple
+  per element of the bound (`\int_0^{[1,2,3]} (x, 2x)\,dx` is
+  `[(1/2, 1), (2, 4), (9/2, 9)]`).
 - **`Implies`, `Nand`, `Nor`, `Xor` and `Equivalent` follow the three-valued
-  rules of `And` and `Or` for an absent operand** (user decision 2026-09-27). An
-  operand that decides the result wins (`Implies(Missing, True)` is `True`; it
-  was `Missing`); beside an unknown symbol the expression stays symbolic
-  (`Nand(A, Missing)` was `Missing`), as `And(A, Missing)` does; the result is
-  `Missing` only when the other operands are decided and do not decide it
-  (`Nand(True, Missing)`). The same rule decides an implication beside an
-  unknown: `Implies(A, True)` and `Implies(False, A)` are `True` (they stayed
-  unevaluated).
+  rules of `And` and `Or` for an absent operand** . An operand that decides the
+  result wins (`Implies(Missing, True)` is `True`; it was `Missing`); beside an
+  unknown symbol the expression stays symbolic (`Nand(A, Missing)` was
+  `Missing`), as `And(A, Missing)` does; the result is `Missing` only when the
+  other operands are decided and do not decide it (`Nand(True, Missing)`). The
+  same rule decides an implication beside an unknown: `Implies(A, True)` and
+  `Implies(False, A)` are `True` (they stayed unevaluated).
 - **Compiled JavaScript spells an absent point, tuple or list `undefined` in
   arithmetic.** `2·P` and `P + Q` with an absent point `P` gave `NaN` and
   `[NaN, NaN]`; they give `undefined`, as a read of the absent point already did
-  and as the interpreter fallback does (user decision 2026-09-27). A coordinate
-  read (`PointX(P)`) stays `NaN`.
+  and as the interpreter fallback does . A coordinate read (`PointX(P)`) stays
+  `NaN`.
 
 - **A user binding shadows a capitalized library name.** `let Pi = 3; Pi` was
   `Pi` (π) and is now `3`; so for `ExponentialE`, `Missing`, `Undefined`,
@@ -10882,10 +10941,10 @@ These changes apply to non-strict parsing only
   `Map(\sin, [-1, 2])` was typed `vector<integer^2>` (the source type was copied
   because a bare symbol callback reads as `unknown`); it is `vector<number^2>`,
   from `Sin`'s signature, and a declared or assigned function's result type is
-  used the same way (user decision 2026-09-27). The source type is still copied
-  when the callback is an undeclared symbol. Also, `.N()` of such a `Map` did
-  not numericize (`[sin(-1), sin(2)]` stayed symbolic while the lambda form gave
-  floats); it does now.
+  used the same way . The source type is still copied when the callback is an
+  undeclared symbol. Also, `.N()` of such a `Map` did not numericize
+  (`[sin(-1), sin(2)]` stayed symbolic while the lambda form gave floats); it
+  does now.
 - **A list-valued integrand distributes over the integral.**
   `\int_0^1\int_0^{G} xy\,dx\,dy` with `G = [1, 2, 3]` stayed unevaluated (the
   outer integral had a list-valued integrand); it is `[1/4, 1, 9/4]`, one
@@ -10903,18 +10962,18 @@ These changes apply to non-strict parsing only
   the exact `1`. A float coefficient within one unit in the last place of a
   fraction `p/q` with `q` in the recognizer's table (1, 2, 3, 4, 5, 6, 8,
   10, 12) is now read as that fraction on the `e^{iθ}` route and in `Sin`, `Cos`
-  and `Tan` (user decision 2026-09-27): radian `e^{0.25i\pi}` is
-  `√2/2 + √2/2·i`, `\sin(0.3\pi)` is `1/4 + √5/4`. A float that is not a special
-  angle stays a float (`e^{0.35i\pi}`), and `.N()` is unchanged. Found on the
-  way: in degree and gradian mode `e^{0.35i\pi}` came out as the symbolic
-  `cos(63) + i·sin(63)` for a float input; it is now a float.
+  and `Tan` : radian `e^{0.25i\pi}` is `√2/2 + √2/2·i`, `\sin(0.3\pi)` is
+  `1/4 + √5/4`. A float that is not a special angle stays a float
+  (`e^{0.35i\pi}`), and `.N()` is unchanged. Found on the way: in degree and
+  gradian mode `e^{0.35i\pi}` came out as the symbolic `cos(63) + i·sin(63)` for
+  a float input; it is now a float.
 
 - **`Xor` and `Equivalent` accept an absent operand.** `Xor(True, Missing)` and
   `Equivalent(True, Missing)` were `incompatible-type` errors, and
   `Xor(True, Undefined)` stayed as `¬Undefined`, while `And`, `Or`, `Not`,
   `Implies`, `Nand` and `Nor` answer `Missing` for an absent operand. The two
-  now do the same (user decision 2026-09-27); a decided result is unchanged
-  (`Xor(True, False)` is `True`, `Xor(True, B)` is `¬B`).
+  now do the same ; a decided result is unchanged (`Xor(True, False)` is `True`,
+  `Xor(True, B)` is `¬B`).
 
 - **Complex division in the interpreter no longer overflows or underflows.**
   `1/(10^{308}+10^{308}i)` evaluated numerically to `0` and

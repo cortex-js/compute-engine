@@ -22,6 +22,7 @@ import {
   isCharacter,
   isDictionary,
   isObject,
+  isUnorderedSet,
 } from './type-guards.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
@@ -325,6 +326,10 @@ export function same(
     // `same(b,a)`, breaking the equivalence relation this is a key for.
     const innerA = extendBinders(boundA, boundVariableBindings(a));
     const innerB = extendBinders(boundB, boundVariableBindings(b));
+    // The elements of a set literal are not ordered: `Set(2, 1)` is the same
+    // as `Set(1, 2)`. `isUnorderedSet` is the test `hash` uses too.
+    if (isUnorderedSet(a.operator, a.ops) && isUnorderedSet(b.operator, b.ops))
+      return sameUnordered(a.ops, b.ops, innerA, innerB, syntactic);
     return a.ops.every((op, i) =>
       same(op, b.ops[i], innerA, innerB, syntactic)
     );
@@ -417,6 +422,57 @@ export function same(
   }
 
   return false;
+}
+
+/**
+ * Do `xs` and `ys` hold the same elements, in any order, each element as many
+ * times on one side as on the other (multiset equality under `same`)?
+ *
+ * The two arrays have the same length. A canonical `Set` has no two `same`
+ * elements (its canonical handler removes them), so for canonical sets this
+ * is set equality. A raw `Set` keeps its duplicates, and comparing the
+ * counts keeps `isSame` syntactic: `Set(1, 1)` and `Set(1)` are different
+ * expressions, as their operand counts are different.
+ *
+ * The cost is linear in the number of elements when their hashes are
+ * distinct. The leading elements that match by position are consumed first
+ * (the common case is two copies of the same set). The other elements of
+ * `ys` go in buckets by hash: two `same` elements always have the same hash,
+ * so an element of `xs` is compared only with the elements of its bucket.
+ * Taking the first `same` element of the bucket is correct because `same` is
+ * an equivalence relation: any two candidates that are `same` as one element
+ * are `same` as each other, so the choice cannot prevent a later match.
+ */
+function sameUnordered(
+  xs: ReadonlyArray<Expression>,
+  ys: ReadonlyArray<Expression>,
+  boundA: BinderMap | undefined,
+  boundB: BinderMap | undefined,
+  syntactic: boolean
+): boolean {
+  const n = xs.length;
+  let start = 0;
+  while (start < n && same(xs[start], ys[start], boundA, boundB, syntactic))
+    start += 1;
+  if (start === n) return true;
+  const buckets = new Map<number, Expression[]>();
+  for (let i = start; i < n; i++) {
+    const y = ys[i];
+    const bucket = buckets.get(y.hash);
+    if (bucket === undefined) buckets.set(y.hash, [y]);
+    else bucket.push(y);
+  }
+  for (let i = start; i < n; i++) {
+    const x = xs[i];
+    const bucket = buckets.get(x.hash);
+    if (bucket === undefined) return false;
+    const j = bucket.findIndex((y) => same(x, y, boundA, boundB, syntactic));
+    if (j < 0) return false;
+    // Remove the matched element: each element of `ys` matches once.
+    bucket[j] = bucket[bucket.length - 1];
+    bucket.pop();
+  }
+  return true;
 }
 
 /**

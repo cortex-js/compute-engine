@@ -319,7 +319,7 @@ describe('a set comprehension on the async route', () => {
       'k',
       ['Element', 'k', ['Set', ['AsyncOnly', 1], 2]],
     ]);
-    expect((await s.evaluateAsync()).toString()).toBe('Set(10, 2)');
+    expect((await s.evaluateAsync()).toString()).toBe('Set(2, 10)');
     // The synchronous route evaluates an extracted value too.
     local.assign('x', local.number(5));
     expect(
@@ -327,7 +327,7 @@ describe('a set comprehension on the async route', () => {
         .box(['Set', 'k', ['Element', 'k', ['Set', 'x', 2]]])
         .evaluate()
         .toString()
-    ).toBe('Set(5, 2)');
+    ).toBe('Set(2, 5)');
   });
 
   test('forwards numericApproximation to the body on both routes', async () => {

@@ -658,6 +658,11 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;
 
+  /** See `IComputeEngine._epsilStatementResultHook`. @internal */
+  _epsilStatementResultHook:
+    ((statement: Expression, result: Expression) => void) | undefined =
+    undefined;
+
   /** Capture the registry's state and return a rollback thunk restoring it.
    *
    * For the Epsil STATIC PRE-PASS, which canonicalizes every top-level

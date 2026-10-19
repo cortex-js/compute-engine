@@ -130,7 +130,7 @@ describe('Evaluated value of a kind-preserving operator over a declared collecti
     const name = declared('collection<number>', ['Set', 3, 1]);
     const r = ce.box(['Map', DOUBLE, name]).evaluate();
     expect(r.isIndexedCollection).toBe(false);
-    expect(r.toString()).toBe('Set(6, 2)');
+    expect(r.toString()).toBe('Set(2, 6)');
   });
 
   test('the result kind follows a later assignment', () => {
@@ -164,9 +164,9 @@ describe('Evaluated value of a kind-preserving operator over a declared collecti
         .box(['Join', name, ['List', 5]])
         .evaluate()
         .toString()
-    ).toBe('Set(3, 1, 5)');
+    ).toBe('Set(1, 3, 5)');
     expect(ce.box(['Append', name, 5]).evaluate().toString()).toBe(
-      'Set(3, 1, 5)'
+      'Set(1, 3, 5)'
     );
     for (const json of [
       ['Join', name, ['List', 5]],
@@ -176,7 +176,7 @@ describe('Evaluated value of a kind-preserving operator over a declared collecti
       expect(expr.type.toString()).toBe('collection<number>');
       const r = expr.evaluate({ materialization: true });
       expect(r.operator).toBe('Set');
-      expect(r.toString()).toBe('Set(3, 1, 5)');
+      expect(r.toString()).toBe('Set(1, 3, 5)');
     }
   });
 });

@@ -272,8 +272,8 @@ describe('the Gamma family is typed with its pole value', () => {
     ['Factorial', 'k', 'infinity | integer'],
     ['Factorial', 'p', 'real'], // no negative integer
     ['Factorial', 'q', 'integer'],
-    ['Factorial2', 'x', 'nan | real'],
-    ['Factorial2', 'k', 'integer | nan'],
+    ['Factorial2', 'x', 'infinity | real'],
+    ['Factorial2', 'k', 'infinity | rational'],
     ['Factorial2', 'q', 'integer'],
   ])('%s(%s) is typed %s', (op, arg, type) => {
     expect(ce.box([op, arg]).type.toString()).toBe(type);
@@ -297,7 +297,7 @@ describe('the Gamma family is typed with its pole value', () => {
     ['Trigamma', [-1, 0, 0.5]],
     ['GammaLn', [-1, 0, -0.5, 4]],
     ['Factorial', [-1, -2, -0.5, 3]],
-    ['Factorial2', [-1, -3, 4]],
+    ['Factorial2', [-1, -2, -3, -5, 4]],
   ])('%s at real points', (op, points) => {
     const claim = ce.box([op, 'x']).type;
     for (const v of points) {

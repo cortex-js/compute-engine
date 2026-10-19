@@ -65,6 +65,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     }
   }
 
+  // For a symbolic upper bound `b`, the closed forms below are the generic
+  // answer, as in Mathematica: they fire without a proof that `b ≥ a − 1`.
+  // They equal the finite sum for `b ≥ a − 1`; below that they give the
+  // continuation of the closed form, not the empty sum 0 (user decision
+  // 2026-10-19). A numeric empty range is handled above.
   // If body doesn't depend on index: Sum(c, [n, a, b]) → (b - a + 1) * c
   if (!dependsOnIndex(body)) {
     const count = upper.sub(lower).add(ce.One).simplify();

@@ -22,6 +22,7 @@ import {
   isSymbol,
   isString,
   isObject,
+  isUnorderedSet,
 } from './type-guards.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 
@@ -323,7 +324,19 @@ function matchOnce(
       // matchPermutations is false. The flag is decoupled from canonical
       // sorting so the ordered, short-circuit `And`/`Or` still match
       // commutatively.
-      const matchPerms = options.matchPermutations ?? true;
+      //
+      // A `Set` admits permutation matching, except a two-operand set-builder
+      // (`Set(2k, Element(k, S))`), whose operands are a body and an indexing
+      // set: `isSame` compares it by position, and the matcher must agree.
+      // Both sides must be unordered sets: a pattern with no `Element` or
+      // `Condition` operand (`Set(_spec, 2k)`) must not match a set-builder
+      // subject with its body and indexing set swapped.
+      const matchPerms =
+        (options.matchPermutations ?? true) &&
+        (operator !== 'Set' ||
+          (isUnorderedSet(operator, pattern.ops) &&
+            isFunction(expr) &&
+            isUnorderedSet(operator, expr.ops)));
       // Note: the pattern operator may have no definition, e.g. a user-defined
       // function in a rule pattern (rules are boxed in a scope that only
       // inherits from the system scope)

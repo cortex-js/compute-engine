@@ -63,7 +63,7 @@ function heldSetError(operator: string): string {
       "'indexed_collection'",
       "'set<integer>'",
     ],
-    ['Set', 3, 1, 5],
+    ['Set', 1, 3, 5], // the canonical order of a set
     ['ErrorTrace', ['ErrorFrame', `'${operator}'`, 1]],
   ]);
 }
@@ -82,7 +82,7 @@ describe('a set written in the call is refused when the call is boxed', () => {
           "'indexed_collection'",
           "'set<integer>'",
         ],
-        ['Set', 3, 1, 5],
+        ['Set', 1, 3, 5], // the canonical order of a set
       ])
     );
     expect(expr.evaluate().isValid).toBe(false);

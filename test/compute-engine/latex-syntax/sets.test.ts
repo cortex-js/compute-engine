@@ -999,13 +999,13 @@ describe('A BAR AS THE SET-BUILDER SEPARATOR', () => {
       test('an absolute value inside a set is not affected', () => {
         expect(ce.parse('\\{2|x|, 3\\}', { strict }).json).toEqual([
           'Set',
-          ['Multiply', 2, ['Abs', 'x']],
           3,
+          ['Multiply', 2, ['Abs', 'x']],
         ]);
         expect(ce.parse('\\{|x|, 3\\}', { strict }).json).toEqual([
           'Set',
-          ['Abs', 'x'],
           3,
+          ['Abs', 'x'],
         ]);
         expect(ce.parse('\\{|x|\\}', { strict }).json).toEqual([
           'Set',

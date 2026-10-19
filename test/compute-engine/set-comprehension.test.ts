@@ -102,10 +102,10 @@ describe('Comprehension collection handlers', () => {
   });
 
   test('equal substituted bodies collapse (a set is a set)', () => {
-    // {k mod 2 : k ∈ 1..4} = {1, 0}
+    // {k mod 2 : k ∈ 1..4} = {0, 1}, in the canonical order
     const s = ce.expr(['Set', ['Mod', 'k', 2], ['Element', 'k', ['Range', 1, 4]]]);
     expect(s.count).toBe(2);
-    expect(s.evaluate().json).toEqual(['Set', 1, 0]);
+    expect(s.evaluate().json).toEqual(['Set', 0, 1]);
   });
 
   test('empty comprehension', () => {

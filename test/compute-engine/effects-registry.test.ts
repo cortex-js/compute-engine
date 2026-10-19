@@ -469,8 +469,10 @@ describe('an evaluation keeps the registry it started with', () => {
       'which',
       'list1',
       'list2',
-      'set1',
+      // A canonical set stores its elements in the canonical order, where
+      // strings come in decreasing order: `Print("set2")` comes first.
       'set2',
+      'set1',
       'fn 9',
       'if-list',
       'which-list',

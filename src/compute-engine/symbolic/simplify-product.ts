@@ -54,6 +54,11 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
 
   const bodyUnknowns = new Set(body.unknowns);
 
+  // For a symbolic upper bound `b`, the closed forms below are the generic
+  // answer, as in Mathematica: they fire without a proof that `b ≥ a − 1`.
+  // They equal the finite product for `b ≥ a − 1`; below that they give the
+  // continuation of the closed form, not the empty product 1 (user decision
+  // 2026-10-19). A numeric empty range is handled above.
   // If body doesn't depend on index: Product(c, [n, a, b]) → c^(b - a + 1)
   if (!bodyUnknowns.has(index)) {
     const count = upper.sub(lower).add(ce.One).simplify();

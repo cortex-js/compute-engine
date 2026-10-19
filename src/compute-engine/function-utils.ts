@@ -119,7 +119,10 @@ import {
   signatureEffects,
 } from '../common/type/utils.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
-import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
+import {
+  _BoxedValueDefinition,
+  journalDefinitionRecord,
+} from './boxed-expression/boxed-value-definition.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
@@ -1036,6 +1039,49 @@ function installRebuiltLiteral(
   }
 }
 
+/**
+ * Make the operator definition `def` give no value: the rebuild of its body,
+ * against the new definition of a name that the body reads, gave an invalid
+ * body.
+ *
+ * The definition constructor refuses an invalid body, so `def` keeps its
+ * previous literal, and it stays registered, so that a later definition of
+ * the name retries it. But the previous literal was made when the name had no
+ * definition, and an application of it reads the new definition of the name:
+ * with `g(t) := 2a(t)` before `a(x, y) := x + y`, `g(1)` multiplied 2 by the
+ * partial application of `a` and gave `2·(y ↦ 1 + y)`. In the other order,
+ * the definition of `g` is refused and `g(1)` stays `g(1)`. So the
+ * evaluation handlers of `def` are replaced by a handler that gives no value,
+ * and an application of `def` stays unevaluated, as in the other order. A
+ * later rebuild that succeeds installs a new body with `_update()`, which
+ * replaces these handlers.
+ *
+ * This is an in-place change of a definition, as in `installRebuiltLiteral`:
+ * it is recorded for an open rollback frame and for the checkpoint journal,
+ * it advances the version of the definition, and it is reported as a repair
+ * event, so that a memoized result of an application of `def` is not used.
+ */
+function holdDependentWithInvalidBody(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition
+): void {
+  const frame = activeRollbackFrame(ce);
+  if (frame !== undefined) {
+    const snapshot = def._rederivationSnapshot();
+    frame.record({
+      undo: () => def._restoreRederivationSnapshot(snapshot),
+    });
+  }
+  journalDefinitionRecord(ce, def, 'redefine');
+  def._writeVersion += 1;
+  def.evaluate = () => undefined;
+  def.evaluateAsync = undefined;
+  ce._noteStateEvent({
+    kind: 'binding-repair',
+    ...(isScratchBinding(ce, def) ? { scratch: true } : {}),
+  });
+}
+
 /** The name a dependent definition is installed under. Both definition classes
  * are constructed with it (`_BoxedOperatorDefinition`,
  * `_BoxedValueDefinition`), but it is not on the public definition interfaces,
@@ -1262,6 +1308,13 @@ function repairWave(
               ? new DependentRebuildError(bodyError, (error as Error).message)
               : error,
         };
+        // The previous body is kept for a later retry, but it must not give
+        // a value: a definition made now has the invalid rebuilt body. The
+        // test is on the body itself, not on `bodyError`: `errorValue()`
+        // does not report an error inside a collection literal, and
+        // `(2, a(t, Error("missing")))` is invalid all the same.
+        if (rebuilt !== undefined && !rebuilt.isValid && 'signature' in def)
+          holdDependentWithInvalidBody(ce, def);
         registerProvisionalDependents(ce, literal, def);
       }
     }
@@ -2209,6 +2262,13 @@ export function evaluateStatements(
       op.sourceOffsets !== undefined
     )
       debugStatementResultHook(op, result);
+    // The Epsil interpreter's hook, with the same guard: it reports a
+    // nested statement whose value is discarded and holds an error.
+    if (
+      ce._epsilStatementResultHook !== undefined &&
+      op.sourceOffsets !== undefined
+    )
+      ce._epsilStatementResultHook(op, result);
     // Short-circuit on a control-flow result — whether the statement was a
     // literal `Break`/`Continue`/`Return` or *evaluated to* one (e.g.
     // `If(cond, Break)`). The control-flow expression itself is the block's
@@ -2358,6 +2418,11 @@ export async function evaluateStatementsAsync(
       op.sourceOffsets !== undefined
     )
       debugStatementResultHook(op, result);
+    if (
+      ce._epsilStatementResultHook !== undefined &&
+      op.sourceOffsets !== undefined
+    )
+      ce._epsilStatementResultHook(op, result);
     const h = result.operator;
     if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
       break;

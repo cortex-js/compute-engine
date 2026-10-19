@@ -65,7 +65,7 @@ describe('Spread of a parameter in a function body (Tycho item 331)', () => {
   });
 
   test('Epsil: set literal with a spread parameter', () => {
-    expect(epsil('g(a) = {...a, 0}\ng([9, 9])')).toBe('["Set",9,0]');
+    expect(epsil('g(a) = {...a, 0}\ng([9, 9])')).toBe('["Set",0,9]');
   });
 
   test('box route: the parameter is inferred as a collection', () => {
@@ -86,7 +86,7 @@ describe('Spread of a parameter in a function body (Tycho item 331)', () => {
     ce.assign('g', ce.box(['Function', ['Set', ['Spread', 'a'], 0], 'a']));
     expect(
       JSON.stringify(ce.box(['g', ['List', 9, 9]]).evaluate().json)
-    ).toBe('["Set",9,0]');
+    ).toBe('["Set",0,9]');
   });
 
   test('ce.function and LaTeX routes', () => {

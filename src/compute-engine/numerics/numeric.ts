@@ -375,9 +375,34 @@ export function factorial(n: number): number {
   return val;
 }
 
+/**
+ * The double factorial `n!!` of an integer `n`, as a double. A non-integer
+ * is `NaN`.
+ *
+ * A negative integer takes the value of the recurrence `n!! = n·(n-2)!!`
+ * run backwards from `1!! = 1`: for an odd `n < 0`,
+ * `n!! = (-1)^((|n|-1)/2) / (|n|-2)!!` (`(-1)!! = 1`, `(-3)!! = -1`,
+ * `(-5)!! = 1/3`). An even `n < 0` is a pole and is `NaN` here, as for
+ * `factorial()` and `gamma()`; the compiled JavaScript runtime spells that
+ * pole `Infinity`.
+ */
 export function factorial2(n: number): number {
-  if (!Number.isInteger(n) || n < 0) return NaN;
-  if (n < 0) return NaN;
+  if (!Number.isInteger(n)) return NaN;
+  if (n < 0) {
+    if (n % 2 === 0) return NaN;
+    const m = -n;
+    // `±1 / (m-2)!!` is formed by dividing by `3, 5, …, m-2` one at a time,
+    // not as the reciprocal of `(m-2)!!`: that product overflows to
+    // `Infinity` from `m = 303`, and its reciprocal is then `0` although the
+    // true value is a representable subnormal down to about `m = 315`. Each
+    // quotient is larger in magnitude than the final value, so no step
+    // underflows before the result does. Once the quotient is `±0`, every
+    // later quotient is `±0` too, and the loop stops there: this bounds it
+    // to about 170 steps whatever `m` is.
+    let result = ((m - 1) / 2) % 2 === 0 ? 1 : -1;
+    for (let k = 3; k <= m - 2 && result !== 0; k += 2) result /= k;
+    return result;
+  }
   if (n <= 1) return 1;
 
   let result = n;

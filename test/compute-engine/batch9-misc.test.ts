@@ -146,6 +146,32 @@ describe('LaTeX round trip of every unit of the registry', () => {
     expect(failures).toEqual([]);
   });
 
+  test('Quantity(√2, unit), a quotient and a power of each unit', () => {
+    // A magnitude that is not a number literal is written with `\qty`, not
+    // juxtaposed with `\mathrm{...}`. The quotient `s/s` is the number 1, a
+    // unit with no unit form, so that quantity keeps the function form.
+    const failures: string[] = [];
+    for (const sym of symbols) {
+      const u = { sym };
+      for (const unit of [
+        u,
+        ['Divide', u, 's'],
+        ['Power', u, 2],
+      ] as MathJsonExpression[]) {
+        for (const magnitude of [
+          ['Sqrt', 2],
+          ['Rational', 1, 64],
+          'Pi',
+        ] as MathJsonExpression[]) {
+          const q = ce.box(['Quantity', magnitude, unit]);
+          if (q.latex.includes('\\,\\mathrm{') || !ce.parse(q.latex).isSame(q))
+            failures.push(q.latex);
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
   test('the ohm sign and the angstrom sign are the units Ω and Å', () => {
     expect(ce.parse('3\\,\\mathrm{\u2126}').json).toEqual([
       'Quantity',

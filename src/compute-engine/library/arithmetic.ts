@@ -343,11 +343,10 @@ const POWER_EXPONENT_CARRIER_TYPE = parseType('complex | signed_infinity');
 // The values of `n!` for an integer `n` of unknown sign: an integer for
 // `n ≥ 0`, and a pole (`~oo`) for `n < 0`.
 const INTEGER_OR_COMPLEX_INFINITY_TYPE = parseType('integer | ~oo');
-// The values of `n!!` for an integer `n` of unknown sign: an integer for
-// `n ≥ 0`, and `NaN` for `n < 0` (the evaluate handler of `Factorial2`).
-const INTEGER_OR_NAN_TYPE = parseType('integer | nan');
-// The values of `x!!` for a real `x` that can be a negative integer.
-const REAL_OR_NAN_TYPE = parseType('real | nan');
+// The values of `n!!` for an integer `n` that can be at most `-2`: an integer
+// for `n ≥ -1`, a rational for an odd `n ≤ -3` (`(-5)!! = 1/3`), and a pole
+// (`~oo`) for an even `n ≤ -2` (the evaluate handler of `Factorial2`).
+const RATIONAL_OR_COMPLEX_INFINITY_TYPE = parseType('rational | ~oo');
 // The values of `GammaLn(x)` for a real `x` that can be a pole of Γ: the
 // value at a pole is `+oo`.
 const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
@@ -4208,6 +4207,52 @@ function bigFactorial2FromGamma(ce: ComputeEngine, n: number): BigDecimal {
 }
 
 /**
+ * n!! for a negative integer n, the value of the recurrence
+ * `n!! = n·(n-2)!!` run backwards from `1!! = 1`.
+ *
+ * - An even n is a pole: the unsigned `~oo`, for an exact and a float
+ *   argument alike (as `Factorial` answers at its poles).
+ * - An odd n is the rational `(-1)^((m-1)/2) / (m-2)!!` with `m = |n|`
+ *   (`(-1)!! = 1`, `(-3)!! = -1`, `(-5)!! = 1/3`, `(-7)!! = -1/15`).
+ *   The denominator `(m-2)!!` is an exact big-integer product. Above the
+ *   exact digit cap of `Factorial2` the value stays symbolic on the exact
+ *   route; under `numericApproximation` or for a float argument it is the
+ *   float reciprocal of the Γ-based denominator (`bigFactorial2FromGamma`)
+ *   above machine precision, and a signed float zero at machine precision,
+ *   where the denominator overflows a double.
+ *
+ * A float argument (`(-3.0)!!`) and `numericApproximation` give a float.
+ */
+function negativeFactorial2(
+  x: Expression,
+  n: number,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const ce = x.engine;
+  if (n % 2 === 0) return ce.ComplexInfinity;
+  const m = -n;
+  const sign = ((m - 1) / 2) % 2 === 0 ? 1 : -1;
+  const numeric = numericApproximation === true || hasFloatOperand([x]);
+  if (m === 1) return numeric ? asFloat(ce.One) : ce.One;
+  if (estimatedFactorialDigits(m - 2) / 2 > MAX_EXACT_FACTORIAL_DIGITS) {
+    if (!numeric) return undefined;
+    if (!bignumPreferred(ce))
+      return asFloat(ce.number(sign / factorial2(m - 2)));
+    const d = bigFactorial2FromGamma(ce, m - 2);
+    return ce.number(
+      ce._numericValue(BigDecimal.ONE.div(sign < 0 ? d.neg() : d))
+    );
+  }
+  const d = run(
+    bigFactorial2(ce.bignum(m - 2)),
+    ce._timeRemaining,
+    ce._deadlineFrame
+  ).toBigInt();
+  const result = ce.number([BigInt(sign), d]);
+  return numeric ? asFloat(result) : result;
+}
+
+/**
  * Γ(z) for a complex z: the double from `gammaComplex`, or, where that
  * double underflows or overflows, exp(ln Γ(z)) with a big-decimal modulus
  * (`boxExpOfComplexLog`).
@@ -6386,8 +6431,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | infinity) -> number',
       examples: ['[Factorial2(7), Factorial2(8)]'],
       nanBehavior: 'propagate',
-      // Same shape as `Factorial` above: the negative-integer branch widens
-      // the claim to `number`, and on a compound operand that negative sign
+      // Same shape as `Factorial` above: the negative-integer branch claims
+      // `rational | ~oo`, and on a compound operand that negative sign
       // is an operator `sgn` handler's to prove — carried by the
       // descriptor's sign fact (open item O7 of
       // `docs/plans/2026-08-22-type-handlers-on-types.md`). A provably-NaN
@@ -6402,36 +6447,49 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           nonNegativeSign(s) === true
         )
           return BoxedType.forResult('integer', context.engine._typeResolver);
+        // A negative integer `n` has the value of the backward recurrence
+        // (see `evaluate`): a rational for an odd `n`, a pole (`~oo`) for an
+        // even `n`.
         if (
           x !== undefined &&
           factsOf(x.type).integer &&
           negativeSign(s) === true
         )
-          return BoxedType.forResult('number', context.engine._typeResolver);
-        // The value at a negative integer is `NaN` (see `evaluate`), so a
-        // real claim for an argument that can be one gains the `nan` arm:
-        // `integer | nan` for an integer of unknown sign, `real | nan` for
-        // a real.
+          return BoxedType.forResult(
+            RATIONAL_OR_COMPLEX_INFINITY_TYPE,
+            context.engine._typeResolver
+          );
+        // The poles are the even integers `n ≤ -2`, so a real claim for an
+        // argument that can be one of them gains the `~oo` arm:
+        // `rational | ~oo` for an integer, `real | ~oo` for a real. An
+        // integer that cannot be at most `-2` is at least `-1`, and
+        // `(-1)!! = 0!! = 1!! = 1`, so its value is an integer.
         const t = numericTypeHandlerOnTypes([x]);
         if (x === undefined)
           return BoxedType.forResult(t, context.engine._typeResolver);
+        if (factsOf(x.type).integer && t === 'real')
+          return BoxedType.forResult(
+            realOrPoleOnTypes(t, x, -2, RATIONAL_OR_COMPLEX_INFINITY_TYPE) === t
+              ? 'integer'
+              : RATIONAL_OR_COMPLEX_INFINITY_TYPE,
+            context.engine._typeResolver
+          );
         return BoxedType.forResult(
-          realOrPoleOnTypes(
-            t,
-            x,
-            -1,
-            factsOf(x.type).integer ? INTEGER_OR_NAN_TYPE : REAL_OR_NAN_TYPE
-          ),
+          realOrPoleOnTypes(t, x, -2, REAL_OR_COMPLEX_INFINITY_TYPE),
           context.engine._typeResolver
         );
       },
-      // Positive for x ≥ 0; NaN at negative integers (see evaluate). A
-      // negative non-integer stays symbolic (its continuation value can be a
-      // positive real, e.g. (-1/2)!!), so make no claim.
+      // Positive for x ≥ 0. At a negative even integer the value is a pole
+      // (`~oo`, unsigned). At a negative odd integer `n` the sign is
+      // `(-1)^((|n|-1)/2)`, so it alternates (`(-1)!! = 1`, `(-3)!! = -1`)
+      // and no claim is made without the value. A negative non-integer
+      // stays symbolic (its continuation value can be a positive real, e.g.
+      // (-1/2)!!), so make no claim.
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
-          : (x.isNegative && x.isInteger) || x.isExtendedReal === false
+          : (x.isNegative && x.isInteger && x.isEven === true) ||
+              x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
       evaluate: (ops, { numericApproximation }) => {
@@ -6457,6 +6515,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isInteger !== true) return undefined;
         const n = toInteger(x);
         if (n === null) return undefined;
+        // A negative integer takes the value of the recurrence
+        // `n!! = n·(n-2)!!` run backwards from `1!! = 1`, that is
+        // `(n-2)!! = n!!/n`: `(-1)!! = 1`, `(-3)!! = -1`, `(-5)!! = 1/3`,
+        // `(-7)!! = -1/15`. In closed form, for an odd `n < 0`,
+        // `n!! = (-1)^((|n|-1)/2) / (|n|-2)!!`. Going from `0!! = 1` to
+        // `(-2)!!` divides by 0, so every even `n < 0` is a pole, the
+        // unsigned `~oo` (as `Gamma` and `Factorial` answer at their
+        // poles). These values agree with the analytic continuation
+        // `2^(x/2)·(2/π)^((1-cos(πx))/4)·Γ(x/2+1)`, whose poles are the
+        // poles of `Γ(x/2+1)`.
+        if (n < 0) return negativeFactorial2(x, n, numericApproximation);
         const ce = x.engine;
         // `n!!` has about half the digits of `n!`. Above the exact digit
         // cap the bignum loop below (one step per two integers up to `n`,
@@ -6464,13 +6533,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // stays symbolic on the exact route. Under `numericApproximation`
         // it is a float, as for `Factorial`: from Γ to `ce.precision`
         // digits above machine precision (`bigFactorial2FromGamma`), and
-        // `+oo` at machine precision, where a double cannot hold it. The
-        // cap asks only for a non-negative `n`: the digit estimate is
-        // `Infinity` for a negative one, whose kernels answer NaN below.
-        if (
-          n >= 0 &&
-          estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
-        ) {
+        // `+oo` at machine precision, where a double cannot hold it.
+        if (estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS) {
           if (!numericApproximation && !hasFloatOperand([x])) return undefined;
           if (!bignumPreferred(ce)) return ce.number(factorial2(n));
           return ce.number(ce._numericValue(bigFactorial2FromGamma(ce, n)));

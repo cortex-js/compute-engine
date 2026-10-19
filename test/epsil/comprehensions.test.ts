@@ -240,7 +240,7 @@ describe('EPSIL COMPREHENSIONS — evaluation', () => {
   });
 
   test('a set comprehension deduplicates', () => {
-    expect(run('{x % 3 for x in 1..10}')).toBe('Set(1, 2, 0)');
+    expect(run('{x % 3 for x in 1..10}')).toBe('Set(0, 1, 2)');
   });
 
   test('a dictionary comprehension over (key, value) pairs', () => {

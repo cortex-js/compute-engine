@@ -250,8 +250,9 @@ export function errorWhere(err: Expression): Expression | undefined {
  *
  * The evaluation of a SELECTING operator (`If`, `Which`, `And`, …) adds a
  * frame to an `Error` that its handler returns (`_resultError()` in
- * `boxed-function.ts`): it looks for the operand that holds the error, and
- * when no operand holds it, it records operand 1. That is wrong for an error
+ * `boxed-function.ts`): it looks for the operand whose evaluation returned
+ * the error, then for the operand that holds it, and when neither is found,
+ * it records operand 1. That is wrong for an error
  * that the handler made about another operand and that already names it, such
  * as the `unexpected-argument` error of {@link surplusOperandError}. A handler
  * records such an error here with its own node, and the evaluation of that

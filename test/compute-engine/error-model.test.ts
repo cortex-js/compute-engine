@@ -3275,7 +3275,8 @@ describe('ERROR-MODEL §3 — an evaluation-time refusal of a collection operand
               "'indexed_collection'",
               "'set<integer>'",
             ],
-            set,
+            // The canonical set stores its elements in the canonical order.
+            ['Set', 1, 3],
             ['ErrorTrace', ['ErrorFrame', `'${head}'`, 1]],
           ]);
           // The same error that the literal operand gets.

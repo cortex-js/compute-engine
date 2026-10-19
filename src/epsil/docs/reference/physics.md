@@ -41,13 +41,13 @@ Elementary electric charge
 
 ### gasConstant
 
-MathJSON `GasConstant` · constant `value` = `8.314462618 J/mol⋅K`
+MathJSON `GasConstant` · constant `value` = `8.314462618 J/(mol⋅K)`
 
 Molar gas constant
 
 ### gravitationalConstant
 
-MathJSON `GravitationalConstant` · constant `value` = `6.6743e-11 m^3/kg⋅s^2`
+MathJSON `GravitationalConstant` · constant `value` = `6.6743e-11 m^3/(kg⋅s^2)`
 
 Newtonian constant of gravitation
 
@@ -77,7 +77,7 @@ Standard acceleration due to gravity
 
 ### stefanBoltzmannConstant
 
-MathJSON `StefanBoltzmannConstant` · constant `value` = `5.670374419e-8 W/m^2⋅K^4`
+MathJSON `StefanBoltzmannConstant` · constant `value` = `5.670374419e-8 W/(m^2⋅K^4)`
 
 Stefan-Boltzmann constant
 

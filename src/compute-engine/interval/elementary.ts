@@ -1377,18 +1377,74 @@ function factorialRaw(x: Interval | IntervalResult): IntervalResult {
 }
 
 /**
- * Double factorial on an interval.
+ * Double factorial on an interval. Each endpoint is rounded to the nearest
+ * integer, and the result encloses `n!!` for every integer `n` between the
+ * rounded endpoints.
+ *
+ * A negative integer takes the value of the backward recurrence
+ * (`(-1)!! = 1`, `(-3)!! = -1`, `(-5)!! = 1/3`), and every even negative
+ * integer is a pole. From `-1` up the values `1, 1, 1, 2, 3, 8, …` do not
+ * decrease, so the rounded endpoints bound them. An interval that reaches
+ * below `-1` holds a pole unless both endpoints round to the same odd
+ * integer.
  */
 function factorial2Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (xVal.lo < 0) return { kind: 'empty' };
-  const fLo = scalarFactorial2(Math.round(xVal.lo));
-  const fHi = scalarFactorial2(Math.round(xVal.hi));
-  if (!Number.isFinite(fLo) || !Number.isFinite(fHi))
-    return ok({ lo: Math.min(fLo, fHi), hi: Math.max(fLo, fHi) });
-  return ok({ lo: fLo, hi: fHi });
+  const nLo = Math.round(xVal.lo);
+  if (nLo <= -2) {
+    // An unbounded interval holds infinitely many poles.
+    if (!Number.isFinite(nLo)) return { kind: 'singular' };
+    const nHi = Math.round(xVal.hi);
+    if (nLo === nHi && nLo % 2 !== 0) return ok(factorial2PointEnclosure(nLo));
+    // `nLo` is even, or `nLo` is odd and `nLo + 1 ≤ nHi` is even.
+    return { kind: 'singular', at: nLo % 2 === 0 ? nLo : nLo + 1 };
+  }
+  const fLo = factorial2PointEnclosure(Math.round(xVal.lo));
+  const fHi = factorial2PointEnclosure(Math.round(xVal.hi));
+  if (!Number.isFinite(fLo.lo) || !Number.isFinite(fHi.hi))
+    return ok({
+      lo: Math.min(fLo.lo, fHi.lo),
+      hi: Math.max(fLo.hi, fHi.hi),
+    });
+  return ok({ lo: fLo.lo, hi: fHi.hi });
+}
+
+/**
+ * An enclosure of `n!!` at an integer `n` that is not a pole.
+ *
+ * `scalarFactorial2()` multiplies (for `n ≥ 0`) or divides (for an odd
+ * `n < 0`) about `|n|/2` times, and each step rounds once. A value that is a
+ * safe integer is exact: every partial product was an integer below 2^53. Any
+ * other value is moved outward by one ulp per rounding step, plus two ulps of
+ * margin. One rounding step adds at most half an ulp, and a division by
+ * `k ≥ 3` makes the error of the earlier steps smaller, so this bound holds
+ * in the subnormal range too.
+ *
+ * For an odd `n < 0` the sign of `n!!` is known, `(-1)^((|n|-1)/2)`, and the
+ * true value is never `0`. When the quotient underflowed to `±0`, the
+ * enclosure keeps the true sign and is not a point at `0`.
+ */
+function factorial2PointEnclosure(n: number): Interval {
+  const v = scalarFactorial2(n);
+  // `-0` is a safe integer, but here it is an underflowed quotient.
+  if ((v !== 0 && Number.isSafeInteger(v)) || !Number.isFinite(v))
+    return { lo: v, hi: v };
+  // One ulp of a normal `v` is at most `ε·|v|`, and one ulp of a subnormal
+  // `v` is `Number.MIN_VALUE`, so `d` is at least `steps` ulps of `v`.
+  const steps = Math.ceil(Math.abs(n) / 2) + 2;
+  const d = Math.max(
+    Math.abs(v) * (steps * Number.EPSILON),
+    steps * Number.MIN_VALUE
+  );
+  let lo = nextDown(v - d);
+  let hi = nextUp(v + d);
+  if (n < 0) {
+    if ((-n - 1) % 4 === 0) lo = Math.max(lo, 0);
+    else hi = Math.min(hi, -0);
+  }
+  return { lo, hi };
 }
 
 // Cap on the number of integer grid points enumerated for the integer-valued

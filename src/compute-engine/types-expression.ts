@@ -2021,8 +2021,14 @@ export interface Expression {
   /** Fast exact structural/symbolic equality check.
    *
    * Returns `true` if the expression is structurally identical to `rhs`.
-   * For symbols with value bindings, follows the binding (e.g., if `one = 1`,
-   * then `ce.symbol('one').isSame(1)` is `true`).
+   * The value of a symbol is never followed: if `one` is assigned `1`,
+   * `ce.symbol('one').isSame(1)` is `false`.
+   *
+   * The elements of a set literal are not ordered, so two sets with the same
+   * elements in a different order are the same:
+   * `ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
+   * set-builder (`Set(body, Element(k, S))`) compares its two operands by
+   * position.
    *
    * Accepts JavaScript primitives: `number`, `bigint`, `boolean`, `string`.
    *

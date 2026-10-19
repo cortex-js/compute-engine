@@ -111,28 +111,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
-- An error inside a spread list in an Epsil loop
-  (`for i in [1, 2] { fs = [...fs, g("a")] }` with `g(x) = 1/x`) gives an
-  unevaluated `ListJoin` holding the error and no `runtime-error`; the same
-  expression outside a loop is reported. The unevaluated `ListJoin` is the
-  designed value (a collection keeps a failed cell, `docs/ERROR-MODEL.md` §3).
-  The missing report is because Epsil checks the embedded errors of a value
-  (`value.errors`) only for a top-level statement, and a loop stops only on a
-  value whose head is `Error`. A decision is needed: (A) a nested statement
-  reports its embedded errors as diagnostics and the loop continues; (B) a
-  nested statement with an embedded error stops the loop; (C) no change. If
-  nothing is decided, (C) stays.
-- `ce.parse('\\pi := 3').evaluate()` throws
-  `Cannot assign a value to the constant "Pi"` to the host, where comments in
-  `engine-declarations.ts` (near lines 3101 and 3554) say the `Assign` operator
-  gives an `Error` value. A decision is needed. (A) The `Assign` operator
-  returns the error as a value for every constant target; Epsil output does not
-  change (it already catches the throw and makes that value), but the sequence
-  route (`F_0 := 1` on a constant, which throws like `ce.assign('F', 5)` by the
-  decision of 2026-10-17) and about 11 tests (`sequences.test.ts`,
-  `undeclare.test.ts`, `declare-destructure.test.ts`) change. (B) Keep the throw
-  and correct the two comments. If nothing is decided, (B) stays; (A) gives a
-  program its errors as values.
 - A declaration of `Pi` is refused in the global scope only (since 2026-10-18),
   so that a function parameter, a `Sum` index or a block local can still be
   named `Pi`. In such a nested scope, a result that the engine builds with the
@@ -149,73 +127,45 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   is applied). A decision is needed on what such a sum means (an error, or a
   difference of temperatures).
 
-### Smaller defects found on 2026-10-18 (batch 8) (OPEN, small)
+### Smaller defects found on 2026-10-18 (batch 10) (OPEN, small)
 
-- With `g(t) := 2a(t)` defined before `a(x, y) := x + y`, the definition of `a`
-  is now the `incompatible-type` error value, but `g` keeps its earlier
-  provisional definition, so `g(1)` gives `2·(y ↦ 1 + y)`. The test "the error
-  surfaces and no dependent is dropped" requires that `g` keeps its definition;
-  a dependent whose rebuilt body is a type error must not give a value from the
-  old body.
-
-- An operator that has only an `evaluateAsync` handler is not threaded on the
-  asynchronous route: for a broadcastable `AsyncOnly` with only an
-  `evaluateAsync` handler, `AsyncOnly(1{0<t})` gives `AsyncOnly(1) {0<t}` with
-  `evaluate()`, but `evaluateAsync()` passes the `When` to the handler, which
-  gives `NaN`. The asynchronous step that threads a condition
-  (`threadConditionalOperands`, `boxed-function.ts`) runs only for an operator
-  with a synchronous handler; an asynchronous copy of `threadConditional` is
-  needed.
-- In the Python loop form of a `Sum` whose body is a statement, an implicit
-  local of the body (`t` in `Block(t ≔ k + 1, t·t)`) is a variable of the whole
-  Python function, as in the Python `Loop` form. The value differs from the
-  interpreter only when code after the `Sum` reads `t` and no enclosing scope
-  declares it.
-
-### Questions found on 2026-10-18 (batch 8) (OPEN, decision)
-
-- **Exact quantity magnitudes in LaTeX.** `2\sqrt{2}\,\mathrm{m}` and
-  `\frac{1}{64}\,\mathrm{m}` parse as a product, not a `Quantity`, because the
-  parser accepts only a number literal, a measurement or a parenthesized sum as
-  the magnitude (`invisible-operator.ts`), so an exact quantity does not
-  round-trip. Should the serializer put a non-literal magnitude in parentheses,
-  and the parser accept it?
-- **Should `isSame` ignore the order of the elements of a `Set`?** Today
-  `Set(2, 1).isSame(Set(1, 2))` is `false`. So
-  `Element(Set(2, 1), PowerSet(Set(1, 2, 3)))` is `True` (set semantics), but
-  `Count(PowerSet(Set(1, 2, 3)), Set(2, 1))` is `0` (`isSame` semantics). If
-  nothing is decided, `isSame` keeps the order.
-- **`Factorial2` at a negative integer** gives `NaN` on the exact route. The
-  usual extension gives `(−1)!! = 1` and `(−3)!! = −1`, with poles at the even
-  negative integers. If nothing is decided, `NaN` stays (the type of
-  `Factorial2` follows it).
-
-### A walk over a collection of more than 2^53 elements does not end (OPEN, decision — found 2026-10-18)
-
-`S = Permutations(Range(1, 25))` has 25! elements, a count that is a `bigint`.
-The operators that keep every element of a source stay unevaluated over such a
-source since 2026-10-18 (they list at most `maxCollectionSize` elements). The
-generators `Permutations` and `Combinations` compute an element from its
-position and a position from an element, so `Element`, `At`, `IndexOf`, `First`,
-`Last` and `Count(S, v)` answer at once. The operators that walk the source with
-an arbitrary predicate and keep no element do not end: `CountIf`, `Any`, `All`,
-`Find`, `Reduce`, `Sum`, `Max`, `MaxBy`, and `DropWhile(S, x ↦ True)` when it is
-walked. They run until the host stops them: no time limit applies unless the
-host calls `ce.withTimeLimit()`. `ListFrom`, `SetFrom` and `TupleFrom` over a
-huge source whose count is not known also list it with no limit (the test
-`TupleFrom(Range(1, 300000))` in `test/compute-engine/collections.test.ts`
-requires a list of 300,000 elements, more than `maxCollectionSize`).
-
-Options:
-
-- **A.** Before a walk that must reach the end, stay unevaluated when the count
-  of the source is a `bigint`. Such a walk cannot finish. An early answer is
-  lost: today `Any(S, x ↦ True)` gives `True` at once; with option A it stays
-  unevaluated.
-- **B.** No change. A host that needs a limit runs the evaluation inside
-  `ce.withTimeLimit({ ms }, () => …)`.
-
-If nothing is decided, option B stays.
+- A unit has more than one tree for the same value:
+  `Power(Quantity(4, m), -1/2).evaluate()` gives the unit
+  `Power(Power(m, 1/2), -1)`, and the parse of its LaTeX gives
+  `Divide(1, Sqrt(m))`. The dimension is the same, but `isSame` is `false`. The
+  evaluated and the parsed unit trees also differ with the magnitude `3`. The
+  unit needs one canonical form.
+- The `eq` handler of `Set` (the `Equal` comparison) and the duplicate removal
+  of `Union` (`library/sets.ts`) compare each element with every element of the
+  other set, so their time grows with the square of the size. Its results are
+  correct. `isSame` of two sets uses hash buckets since 2026-10-18; `Equal` can
+  do the same for elements whose comparison is syntactic.
+- Nested assumptions hide a sign: with `b` declared `integer`, `assume(b ≥ 0)`
+  in one scope and `assume(b > 0)` in a nested scope, `b.isGreater(0)` and
+  `b.isPositive` are both `undefined`; they must be `true`. With `b` declared
+  `integer<0..>` and only the inner assumption, both are `true`.
+- `isGreaterEqual` does not read a type bound: with `p` declared `integer<0..>`,
+  `p.isGreaterEqual(0)` is `undefined`, while `p.isNonNegative` is `true`.
+- An error in an `else if` branch is underlined on the whole statement:
+  `locateError()` (`src/epsil/error-location.ts`) matches the frames
+  (`If argument 2`, `If argument 3`, which are correct) by operator name and
+  gives up when the name occurs twice. It must walk the frames from the
+  outermost one down from the statement node.
+- On the host route a list that holds a failed cell is typed `error`, so
+  `ce.assign('fs', [Error(…)])` makes `fs` a scalar, `ListJoin(fs, [2])` gives
+  `[[Error(…)], 2]`, and a declared `list` refuses the value. The Epsil route is
+  not affected. The rule that an invalid expression has the type `error` must
+  not make a collection with a failed cell a non-collection.
+- A list where every cell failed is slow to grow in a loop: 3200 turns of
+  `fs = [...fs, g("a")]` take 11.5 s, against 0.7 s when only one cell failed,
+  because each turn evaluates every `Error` cell of the list again.
+- With `f := x ↦ AsyncOnly(x)` (an operator with only an `evaluateAsync`
+  handler), `f(1{0<t})` gives `AsyncOnly(1) {0 < t}` on the asynchronous route,
+  while `AsyncOnly(1{0<t})` gives the handler's value under the condition. An
+  application whose argument has a free symbol runs its body synchronously,
+  because its recursion guard is the synchronous one (the `awaiting` test in
+  `function-utils.ts`); the recursion guard of an awaited application must
+  accept such an argument.
 
 ### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
 

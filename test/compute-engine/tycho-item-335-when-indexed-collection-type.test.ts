@@ -229,7 +229,9 @@ describe('TYCHO ITEM 335: CARRIERS THAT ARE NOT ZIPPED, AND NON-LIST MASKS', () 
     expect(e.type.toString()).toBe('list<number>');
     const staticType = e.type.type;
     const v = e.evaluate();
-    expect(v.toString()).toBe('[1,NaN]');
+    // A canonical set stores its elements in the canonical order:
+    // `{True, False}` is `{False, True}`, so the mask is `[False, True]`.
+    expect(v.toString()).toBe('[NaN,2]');
     expect(isSubtype(v.type.type, staticType)).toBe(true);
   });
 
@@ -242,7 +244,8 @@ describe('TYCHO ITEM 335: CARRIERS THAT ARE NOT ZIPPED, AND NON-LIST MASKS', () 
       const staticType = e.type.type;
       ce.assign('M', ce.box(['Set', 'True', 'False']));
       const v = e.evaluate();
-      expect(v.toString()).toBe('[1,NaN]');
+      // The set is `{False, True}` in the canonical order.
+      expect(v.toString()).toBe('[NaN,2]');
       expect(isSubtype(v.type.type, staticType)).toBe(true);
     }
   });
