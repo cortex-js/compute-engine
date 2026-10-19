@@ -1,6 +1,7 @@
 import type {
   Type,
   TypeParameter,
+  TypeReference,
   TypeResolver,
   TypeString,
   TypeVariance,
@@ -30,17 +31,70 @@ import { CACHE_STATS, recordCache } from '../cache-stats.js';
  * highly effective.
  *
  * Cached `Type` objects are deep-frozen: they are shared across all callers,
- * so they must be immutable. Calls with a `typeResolver` are not cached —
- * type references resolve differently per scope.
+ * so they must be immutable. A call with a `typeResolver` is served from here
+ * when its string does not need the resolver; a string that names a declared
+ * type goes in {@link RESOLVED_TYPE_CACHE} instead.
  */
 const TYPE_CACHE = new Map<TypeString, Type>();
 const TYPE_CACHE_MAX_SIZE = 2048;
+
+/**
+ * Memoization cache for the type strings that NAME a declared type
+ * (`(integer_partition) -> number` after
+ * `ce.declareType('integer_partition', …)`): their parse needs a resolver, so
+ * {@link TYPE_CACHE} cannot hold them.
+ *
+ * Each entry records every name the parse resolved and the value the resolver
+ * returned for it. Such a parse reads nothing else from the resolver (see the
+ * conditions in {@link cacheResolvedResult}), so its result is a function of the
+ * string and of those values: an entry is served only after the CURRENT
+ * resolver returns the same value (by identity) for each recorded name, and
+ * each such record is still not generic. The check needs no version counter
+ * and works across resolver objects: the engine wraps its resolver in
+ * short-lived objects (a `Self`-aware resolver per protocol member, for
+ * example) that answer the same for every other name, and those share the
+ * entry. A name that resolves differently (another engine's record, a name
+ * removed by a rollback, a redeclaration as a generic type) fails the check,
+ * and the string is parsed again.
+ *
+ * The entries are held by the FIRST record the parse resolved (its ANCHOR), in
+ * a `WeakMap`: an entry holds its engine's records, and must not keep a
+ * discarded engine's type registry alive. This also lets two engines that
+ * declare the same type name keep one entry each. The names a string resolves
+ * depend only on the string, so {@link RESOLVED_NAMES} maps a string to them
+ * (it holds no engine state); a lookup resolves the first name with the
+ * current resolver to find the anchor.
+ */
+type ResolvedEntry = {
+  type: Type;
+  deps: ReadonlyArray<readonly [name: string, value: unknown]>;
+};
+const RESOLVED_TYPE_CACHE = new WeakMap<
+  object,
+  Map<TypeString, ResolvedEntry>
+>();
+/** The names, in parse order, that a string in {@link RESOLVED_TYPE_CACHE}
+ * resolves. Bounded like {@link TYPE_CACHE}. */
+const RESOLVED_NAMES = new Map<TypeString, readonly string[]>();
 
 function deepFreeze<T>(obj: T): T {
   if (obj === null || typeof obj !== 'object') return obj;
   if (Object.isFrozen(obj)) return obj;
   Object.freeze(obj);
   for (const value of Object.values(obj)) deepFreeze(value);
+  return obj;
+}
+
+/** Like {@link deepFreeze}, but leaves every type REFERENCE record (and what it
+ * holds) mutable. A record is owned by its engine's type registry, which
+ * fills and replaces its fields in place (a forward reference is fulfilled,
+ * a type is redeclared): freezing it would break that registry. */
+function freezeAroundReferences<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Object.isFrozen(obj)) return obj;
+  if ((obj as { kind?: unknown }).kind === 'reference') return obj;
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) freezeAroundReferences(value);
   return obj;
 }
 
@@ -126,14 +180,26 @@ export function parseType(
   // placeholder instead of throwing, and its resolver-aware parse registers
   // the forward reference as a side effect — so such a result is discarded
   // and the resolver-aware parse runs. A string that NAMES a user type bare
-  // throws on the first attempt and falls through the same way; both shapes
-  // appear at declaration sites, not in per-box hot paths.
+  // throws on the first attempt and falls through the same way, but only
+  // once: its resolver-aware result is memoized in RESOLVED_TYPE_CACHE (such
+  // strings do occur on repeated routes, such as one `ce.declare` per function
+  // with the same signature), and a known string skips the first attempt.
   if (typeResolver !== undefined) {
-    try {
-      const r = parseTypeUncached(s, undefined, undefined);
-      if (!r.sawForwardRef) return cacheResult(s, r.type);
-    } catch {}
-    return parseTypeUncached(s, typeResolver, undefined).type;
+    const names = RESOLVED_NAMES.get(s);
+    if (names !== undefined) {
+      const entry = currentResolvedEntry(s, names, typeResolver);
+      if (entry !== undefined) {
+        if (CACHE_STATS) recordCache('typeParse', 'hit');
+        return entry.type;
+      }
+      if (CACHE_STATS) recordCache('typeParse', 'missDependency');
+    } else {
+      try {
+        const r = parseTypeUncached(s, undefined, undefined);
+        if (!r.sawForwardRef) return cacheResult(s, r.type);
+      } catch {}
+    }
+    return cacheResolvedResult(s, typeResolver, names === undefined);
   }
 
   const r = parseTypeUncached(s, undefined, undefined);
@@ -192,12 +258,138 @@ function cacheResult(s: TypeString, type: Type): Type {
   return type;
 }
 
+/** True if a type reference RECORD (as opposed to the bare name some
+ * syntax-check resolvers return). */
+function isReferenceRecord(value: unknown): value is TypeReference {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'reference'
+  );
+}
+
+/** The entry for `s` that `typeResolver` can be served, if any: the one held
+ * by the record its first name resolves to now, provided `typeResolver` still
+ * resolves every name of the entry as it did when the entry was stored (so the
+ * stored parse is the parse it would give now). */
+function currentResolvedEntry(
+  s: TypeString,
+  names: readonly string[],
+  typeResolver: TypeResolver
+): ResolvedEntry | undefined {
+  try {
+    const anchor = typeResolver.resolve(names[0]);
+    if (typeof anchor !== 'object' || anchor === null) return undefined;
+    const entry = RESOLVED_TYPE_CACHE.get(anchor)?.get(s);
+    if (entry === undefined) return undefined;
+    for (const [name, value] of entry.deps) {
+      if (typeResolver.resolve(name) !== value) return undefined;
+      // A record redeclared as GENERIC makes a bare use of its name an arity
+      // error, and the record is the same object: check it as well.
+      if (isReferenceRecord(value) && value.typeParams !== undefined)
+        return undefined;
+    }
+    return entry;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parse `s` with `typeResolver` and, when the result depends on the resolver
+ * only through the values of the names it resolves, memoize it in
+ * {@link RESOLVED_TYPE_CACHE}. `cold` is true when `s` had no entry for any
+ * resolver (for the cache statistics).
+ *
+ * That is the case when the parse:
+ * - registers no forward reference (`type X`), which is a side effect on the
+ *   registry;
+ * - has no `where` clause, whose validation asks the resolver's conformance
+ *   oracle, which reads the protocol registry;
+ * - resolves no GENERIC record: an application of a generic alias is expanded
+ *   from the record's current body, and its arguments are checked against the
+ *   current bounds;
+ * - gets the same value each time it resolves a name (the parser and the type
+ *   builder both resolve each name). A resolver that returns a new object at
+ *   each call (the permissive resolver of the Epsil serializer) could never
+ *   match a stored entry;
+ * - resolves its first name to an object, which holds the entry.
+ *
+ * Every other resolved name contributes the value the resolver returned for it
+ * (the engine's record object, unchanged), so the result is the same for any
+ * resolver that returns the same values.
+ */
+function cacheResolvedResult(
+  s: TypeString,
+  typeResolver: TypeResolver,
+  cold: boolean
+): Type {
+  const deps = new Map<string, unknown>();
+  let forwarded = false;
+  let unstable = false;
+  const recording: TypeResolver = {
+    get names() {
+      return typeResolver.names;
+    },
+    resolve: (name) => {
+      const value = typeResolver.resolve(name);
+      if (deps.has(name) && deps.get(name) !== value) unstable = true;
+      deps.set(name, value);
+      return value;
+    },
+    forward: (name) => {
+      forwarded = true;
+      return typeResolver.forward(name);
+    },
+  };
+  // The conformance oracle is optional, and its ABSENCE is meaningful (a
+  // `where … is P` clause is then rejected), so copy it only if present.
+  if (typeResolver.conformsTo !== undefined)
+    recording.conformsTo = typeResolver.conformsTo;
+
+  const r = parseTypeUncached(s, recording, undefined);
+  const anchor = deps.values().next().value;
+  if (
+    forwarded ||
+    unstable ||
+    r.sawForwardRef ||
+    r.sawWhereClause ||
+    typeof anchor !== 'object' ||
+    anchor === null ||
+    [...deps.values()].some(
+      (value) => isReferenceRecord(value) && value.typeParams !== undefined
+    )
+  ) {
+    if (CACHE_STATS) recordCache('typeParse', 'declineStore');
+    return r.type;
+  }
+
+  // Same bound and overflow policy as `TYPE_CACHE` (see `cacheResult()`), for
+  // the name table and for the entries held by one record.
+  if (RESOLVED_NAMES.size >= TYPE_CACHE_MAX_SIZE) {
+    if (CACHE_STATS) recordCache('typeParse', 'evictClear');
+    RESOLVED_NAMES.clear();
+  }
+  RESOLVED_NAMES.set(s, [...deps.keys()]);
+  let held = RESOLVED_TYPE_CACHE.get(anchor);
+  if (held === undefined) {
+    held = new Map();
+    RESOLVED_TYPE_CACHE.set(anchor, held);
+  } else if (held.size >= TYPE_CACHE_MAX_SIZE) {
+    if (CACHE_STATS) recordCache('typeParse', 'evictClear');
+    held.clear();
+  }
+  if (CACHE_STATS && cold) recordCache('typeParse', 'missCold');
+  held.set(s, { type: freezeAroundReferences(r.type), deps: [...deps] });
+  return r.type;
+}
+
 function parseTypeUncached(
   s: TypeString,
   typeResolver: TypeResolver | undefined,
   typeVars: readonly TypeParameter[] | undefined,
   options?: ParseTypeOptions
-): { type: Type; sawForwardRef: boolean } {
+): { type: Type; sawForwardRef: boolean; sawWhereClause: boolean } {
   try {
     const parser = new Parser(s, {
       typeResolver,
@@ -212,7 +404,11 @@ function parseTypeUncached(
     // so a type string without a clause pays nothing.
     if (parser.sawWhereClause) validateDeclaredType(type, typeResolver);
 
-    return { type, sawForwardRef: parser.sawForwardRef };
+    return {
+      type,
+      sawForwardRef: parser.sawForwardRef,
+      sawWhereClause: parser.sawWhereClause,
+    };
   } catch (error) {
     const wrapped = new Error(
       `Failed to parse type "${s}": ${

@@ -220,13 +220,14 @@ describe('declareSumType skips a same-statement re-registration', () => {
   ];
 
   test('the second registration leaves the union, variants and variant LIST untouched', () => {
-    // Two witnesses, one per no-op tier. The `def` references (union and
-    // variant) prove the inner per-name `declareType` registrations returned
-    // early — the replace path re-parses each body into a fresh type object.
     // The `_sumVariants` ARRAY identity proves the SUM-level fast path fired:
     // a full sum run rebuilds that array (`variants.map(…)`) after the union
     // fulfilment, even when every inner `declareType` no-ops, so an unchanged
     // array reference can only mean `declareSumType` itself returned early.
+    // The `def` checks only confirm that the definitions are unchanged; they
+    // do not prove an early return, because `parseType` memoizes both bodies
+    // (`va | vb` names the same records, `integer` is a primitive) and a
+    // full replacement gets the same objects back.
     const origin = { batch: 1, statementId: {} };
     declareSumType(ce, 's', variants, { fromStatement: true, origin });
     const union = ce._typeRegistry['s']!.def;
@@ -244,18 +245,21 @@ describe('declareSumType skips a same-statement re-registration', () => {
 
   test('a LATER batch still REPLACES the whole variant set', () => {
     // The notebook gesture for sums: a later batch must re-declare for real,
-    // so the union's `def` is rebuilt.
+    // so the variant LIST is rebuilt. (The union `def` is not a witness: the
+    // body `va | vb` names the same two records, which a replacement updates
+    // in place, so `parseType` returns its memoized union both times.)
     declareSumType(ce, 's', variants, {
       fromStatement: true,
       origin: { batch: 1, statementId: {} },
     });
-    const union = ce._typeRegistry['s']!.def;
+    const variantList = ce._typeRegistry['s']!._sumVariants;
+    expect(variantList).toBeDefined();
 
     declareSumType(ce, 's', variants, {
       fromStatement: true,
       origin: { batch: 2, statementId: {} },
     });
-    expect(ce._typeRegistry['s']!.def).not.toBe(union);
+    expect(ce._typeRegistry['s']!._sumVariants).not.toBe(variantList);
   });
 });
 
