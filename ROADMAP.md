@@ -109,29 +109,22 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Smaller defects found on 2026-10-19 by the review of pull request 445 (OPEN, small)
+### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
-`npx tsx benchmarks/audit/integration-families.ts` lists every definite
-integral of its case tables that gives a right exact value which `simplify()`
-cannot reduce to the reference (48 runs on 2026-10-19). Most come from the two
-gaps below.
+The report of `npx tsx benchmarks/audit/integration-families.ts` lists the
+exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
+2026-10-19). All 8 come from Rubi results:
 
-- On an infinite or half-infinite interval, a definite integral of a real
-  integrand can still give a complex value when the antiderivative is singular,
-  or crosses a branch cut, inside the interval. On a finite interval such a
-  value is refused (`hasImaginaryPart` and `provenRealOnInterval` in
-  `library/calculus.ts`), but the proof that the integrand is real
-  (`continuousRange` in `symbolic/definite-integrate.ts`) needs finite bounds.
-  A proof on `[a, ∞)` could split the interval at a finite point and enclose
-  the integrand on the tail with a change of variable such as `x = a + t/(1−t)`.
-- `simplify()` does not rationalize a denominator of the form `(a + b√c)²`:
-  `−π(12 − 7√3)/(3 − 2√3)²` stays as it is, and its value is `π√3/3`. The
-  definite route returns this form for `∫₀^π 1/(2 + cos x) dx`, and for every
-  integral `∫₀^π 1/(a + b cos x) dx` with `a > |b|`.
-- `simplify()` does not combine a sum of logarithms of positive rationals:
-  `−2 ln 2 − 2 ln(3/2) + 2 ln 3` stays as it is, and its value is `0`. The
-  definite route returns `3/2 − 2 ln(3/2) + 2 ln 3 − ln 2 + ln(1/2)` for
-  `∫_{1/2}^2 (1 + x²)/(x² + x³) dx`, which is `3/2`.
+- `simplify()` applies the rules to some operands of a sum only
+  (`simplifyOperands` in `boxed-expression/simplify.ts`); a call with a
+  positive constant argument keeps its form. So
+  `−(√2/2)·arctan(−1/(3+2√2)) + (√2/2)·arctan(1/(3+2√2))` becomes
+  `(√2/2)·arctan(3−2√2) + (√2/2)·arctan(1/(3+2√2))`: the sign moves out of the
+  first argument, which is then rationalized, but the second argument is not,
+  and the two equal terms do not combine.
+- Rubi's value of `∫ (1+x²)/(x²+x⁹) dx` on `[1/b, b]` holds
+  `Hypergeometric2F1` terms that cancel. `simplify()` has no rule that relates
+  `₂F₁(1, 1/7; 8/7; −z)` to `₂F₁(1, 1/7; 8/7; −1/z)`.
 
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
@@ -216,31 +209,33 @@ gaps below.
   arithmetic, so the result is `6 J`. If nothing is decided, (A) stays.
   Recommendation: (A), because arithmetic keeps the units it combines and
   `UnitSimplify` does the rest.
+- **`Any`, `All`, `Or` and `And` with a failed operand.** Membership does not
+  depend on the order of the cells: `3 ∈ [1, 1/"a", 3]` is `True`. `Any` and
+  `All` combine the answers in order, as `Or` and `And` do, so
+  `Any([1, 1/"a", 3], u ↦ u > 2)` is the error, because `Or(Error, True)` is
+  the error (while `Or(True, Error)` is `True`). (A) Keep this. (B) Make the four operators independent of order
+  (three-valued logic): a `True` operand of `Or` (a `False` operand of `And`)
+  decides, also after a failed operand. If nothing is decided, (A) stays.
+  Recommendation: (B), because a definite answer that does not depend on the
+  failed value is the rule everywhere else in the error model; it changes `Or`
+  and `And`, so it needs a decision.
+- **Equality of two quantities of different dimensions.** `6 W = 6 m` and
+  `6 W ≠ 6 m` stay unevaluated, and `isEqual()` gives `undefined`, although a
+  power is never equal to a length. (A) Keep this. (B) `Equal` gives `False`,
+  `NotEqual` gives `True` and `isEqual()` gives `false`; `Less` and `LessEqual`
+  stay unevaluated, because order has no meaning across dimensions. This is
+  what the engine does for a string against a number. (C) The comparison gives
+  an `incompatible-type` error; this breaks `Filter` over a list of mixed
+  quantities. If nothing is decided, (A) stays. Recommendation: (B).
 
-### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
+### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
-`Block(Assign(k, 2), Multiply(k, x))`, with no `Declare(k)`, assigns the `k`
-outside the block: with `k := 5` before, `k` is `2` after the block is
-evaluated. It serializes to `k\coloneq2; kx`, and the parser makes each
-`\coloneq` target in a block a local variable, so that LaTeX parses back as
-`Block(Declare(k), Assign(k, 2), Multiply(k, x))`, which leaves the outer `k` at
-`5`. LaTeX has no spelling for "assign the outer variable" in a block. A block
-that declares its locals (which is what Tycho emits) round-trips.
-
-The choice:
-
-- (a) Give the outer assignment a LaTeX spelling (for example
-  `\operatorname{global} k\coloneq2`) that the parser reads back without a
-  `Declare`.
-- (b) Accept the change and document that a block serialized to LaTeX makes
-  every assigned name local.
-- (c) Make the canonical form of a `Block` declare each name it assigns, so the
-  MathJSON and LaTeX routes agree (this changes the meaning of existing MathJSON
-  input that assigns an outer variable from a block).
-
-If nothing is decided, the round trip keeps changing the meaning of such a
-block. Related: "Typed `Declare` does not survive a LaTeX round trip" (a
-decision for the first consumer that needs it).
+- Two quantities whose unit scale is stored as a float with no exact value
+  (`in`, `ft`, `mi`, `lb`, `eV`, `Da`, `au`, the angle units, and the prefixes
+  Y, R and Q) are compared within the tolerance even when both magnitudes are
+  exact: `1 Ym = (10^24 + 1) m` is `True`. The unit table would need an exact
+  scale for each such unit (for example the prefixes as powers of ten), as
+  `exactUnitConversion()` (`numerics/unit-data.ts`) has for the other units.
 
 ### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
 
@@ -5625,15 +5620,6 @@ is in git history. The only items deliberately left open:
     `ExtendedGCD`, `ContinuedFraction`, `IntegerDigits`, `PrimitiveRootList`,
     `DigitCount`), which need a correct broadcast type lift first. Both are
     bullets of "Smaller defects found on 2026-10-18 (batch 7)".
-- **Typed `Declare` does not survive a LaTeX round trip (RULED DEMAND-GATED
-  2026-08-12).** A standalone `["Declare","s","'number'"]` round-trips typed
-  since 2026-09-29 (`\mathrm{Declare}(s, \text{number})`), but a leading
-  `Declare` in an outer `Block` still vanishes
-  (`Block(Declare(s,'number'), Assign(s,1))` serializes to `s\coloneq1`): LaTeX
-  has no spelling for a type annotation, no consumer round-trips typed
-  declarations through LaTeX today (Tycho emits untyped ones), and the first
-  real consumer's usage should pick the notation. Re-open when one appears;
-  until then the drop is silent — the accepted cost of not guessing a notation.
 - **Dispatch admission residues, no witness (recorded 2026-08-12 with the
   multi-clause dispatch fix).** `accepts` (`value-membership.ts`), like
   `valueComponent`, reads `t.def` directly instead of `aliasDefinitionAt(t)`, so

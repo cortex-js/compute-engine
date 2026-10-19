@@ -4,7 +4,9 @@ import {
   isEligibleRealRewrite,
   onBranchCut,
 } from '../function-properties/index.js';
-import { toBigint } from '../boxed-expression/numerics.js';
+import { asRational, toBigint } from '../boxed-expression/numerics.js';
+import { gcd } from '../numerics/numeric-bigint.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 /** Whether `logBase` is Euler's number — `Log(x, e)` is `Ln(x)`. */
@@ -207,6 +209,212 @@ function combineLogGroup(
  */
 function isNonNegativeLogArgument(a: Expression): boolean {
   return a.isNonNegative === true || isFunction(a, 'Abs');
+}
+
+/** An exact rational number literal as a pair of bigints, or `undefined`. */
+function bigRational(e: Expression): [bigint, bigint] | undefined {
+  // A float that holds an integer (`2.0`) is not exact: it must not become
+  // the exact rational 2.
+  if (!isNumber(e) || !e.isExact) return undefined;
+  const r = asRational(e);
+  if (r === undefined) return undefined;
+  return [BigInt(r[0]), BigInt(r[1])];
+}
+
+/**
+ * A term `k·ln(u)` of a sum, where `k` is an exact rational (`1` for `ln(u)`,
+ * `-1` for `-ln(u)`) and `u` is an exact positive rational or surd `r√c`, as
+ * a list of terms `k·ln(r)` with `r` rational: `k·ln(r√c)` is
+ * `k·ln(r) + (k/2)·ln(c)`. A term `ln(1)` is left out. Returns `undefined`
+ * for a term of any other form.
+ */
+function rationalLogTerm(
+  t: Expression
+): Array<{ k: [bigint, bigint]; r: [bigint, bigint] }> | undefined {
+  let k: [bigint, bigint] = [1n, 1n];
+  if (isFunction(t, 'Negate')) {
+    const inner = rationalLogTerm(t.op1);
+    return inner?.map(({ k, r }) => ({ k: [-k[0], k[1]], r }));
+  }
+  if (isFunction(t, 'Multiply') && t.nops === 2) {
+    const c = bigRational(t.op1);
+    if (c === undefined) return undefined;
+    k = c;
+    t = t.op2;
+  }
+  if (!isFunction(t, 'Ln') || !isNumber(t.op1)) return undefined;
+  const nv = t.op1.numericValue;
+  let r: [bigint, bigint] | undefined;
+  let radical = 1n;
+  if (nv instanceof ExactNumericValue && !nv.isComplex) {
+    r = [BigInt(nv.rational[0]), BigInt(nv.rational[1])];
+    radical = BigInt(nv.radical);
+  } else r = bigRational(t.op1);
+  if (r === undefined || r[0] <= 0n || r[1] <= 0n) return undefined;
+  const result: Array<{ k: [bigint, bigint]; r: [bigint, bigint] }> = [];
+  if (r[0] !== r[1]) result.push({ k, r });
+  if (radical > 1n) result.push({ k: [k[0], 2n * k[1]], r: [radical, 1n] });
+  return result;
+}
+
+/** Whether the term `t` is `ln u`, `log u` or one of them times a factor or
+ * negated. */
+function isLogarithmTerm(t: Expression): boolean {
+  if (isFunction(t, 'Negate')) return isLogarithmTerm(t.op1);
+  if (isFunction(t, 'Multiply'))
+    return t.ops.some((f) => f.operator === 'Ln' || f.operator === 'Log');
+  return t.operator === 'Ln' || t.operator === 'Log';
+}
+
+/** Whether the logarithm in the term `t` (`ln u`, `k·ln u`, `−k·ln u`) has a
+ * surd argument `r√c`. */
+function hasSurdLogArgument(t: Expression): boolean {
+  if (isFunction(t, 'Negate')) return hasSurdLogArgument(t.op1);
+  if (isFunction(t, 'Multiply') && t.nops === 2) t = t.op2;
+  if (!isFunction(t, 'Ln') || !isNumber(t.op1)) return false;
+  const nv = t.op1.numericValue;
+  return nv instanceof ExactNumericValue && nv.radical > 1;
+}
+
+/**
+ * Combine the terms `k·ln(u)` of a sum, where each `k` is an exact rational
+ * and each `u` an exact positive rational or surd `r√c`, into one term
+ * `(1/L)·ln(R)`, into one term `k·ln(q)`, or into `0`:
+ * `−2 ln 2 − 2 ln(3/2) + 2 ln 3` is `0`, `ln 2 + (1/2) ln 3` is
+ * `(1/2) ln 12`, and `3 ln(√3)` is `(3/2) ln 3`. Every argument is positive,
+ * so `k·ln(u) = ln(u^k)` holds and no branch of the logarithm is involved.
+ *
+ * The numerators and denominators are written over a coprime base, built
+ * with `gcd` only, so no integer is factored into primes: from `{12, 18}`
+ * the base is `{2, 3}` (`12 = 2²·3`, `18 = 2·3²`). The coefficient of each
+ * element of the base is the sum of the exponents weighted by the `k`.
+ *
+ * Returns the new sum, or `undefined` when fewer than two terms have this
+ * form and none has a surd argument, when there are more than 32 of them,
+ * when the sum has another logarithm, or when the combined logarithm would
+ * need an exponent above 64 or more than 256 bits.
+ */
+function combineRationalLogarithms(
+  ce: Expression['engine'],
+  terms: ReadonlyArray<Expression>
+): Expression | undefined {
+  const logs: Array<{
+    index: number;
+    k: [bigint, bigint];
+    r: [bigint, bigint];
+  }> = [];
+  const indices = new Set<number>();
+  let surd = false;
+  for (let i = 0; i < terms.length; i++) {
+    const parts = rationalLogTerm(terms[i]);
+    if (!parts) continue;
+    indices.add(i);
+    for (const part of parts) logs.push({ index: i, ...part });
+    if (isFunction(terms[i]) && hasSurdLogArgument(terms[i])) surd = true;
+  }
+  // Two logarithms to combine, or one logarithm of a surd to rewrite as
+  // logarithms of rationals (`3 ln(√3)` is `(3/2) ln 3`).
+  if ((indices.size < 2 && !surd) || logs.length > 32) return undefined;
+  // Another logarithm in the sum (`ln x`, `log_2 3`) is left to the general
+  // combination of `ln a ± ln b`, which runs after this rule: if this rule
+  // combined only the rational part and its step were not kept, that
+  // combination would not run for the sum.
+  if (terms.some((t, i) => !indices.has(i) && isLogarithmTerm(t)))
+    return undefined;
+
+  // A coprime base of every numerator and denominator: while two elements
+  // `a`, `b` share a factor `g = gcd(a, b)`, replace them with `a/g`, `g`
+  // and `b/g`. Each original integer is then a product of powers of the
+  // elements of the base.
+  let base: bigint[] = [];
+  for (const { r } of logs) for (const n of r) if (n > 1n) base.push(n);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    base = [...new Set(base)];
+    search: for (let i = 0; i < base.length; i++)
+      for (let j = i + 1; j < base.length; j++) {
+        const g = gcd(base[i], base[j]);
+        if (g === 1n) continue;
+        const parts = [base[i] / g, g, base[j] / g].filter((n) => n > 1n);
+        base = [...base.filter((_, m) => m !== i && m !== j), ...parts];
+        changed = true;
+        break search;
+      }
+  }
+
+  // The coefficient of `ln(q)` for each element `q` of the base, as a
+  // rational [numerator, denominator].
+  const coef = new Map<bigint, [bigint, bigint]>();
+  const addTo = (q: bigint, num: bigint, den: bigint) => {
+    const [a, b] = coef.get(q) ?? [0n, 1n];
+    let n = a * den + num * b;
+    let d = b * den;
+    const g = gcd(n, d);
+    if (g > 1n) [n, d] = [n / g, d / g];
+    if (d < 0n) [n, d] = [-n, -d];
+    coef.set(q, [n, d]);
+  };
+  for (const { k, r } of logs) {
+    for (const [n, sign] of [
+      [r[0], 1n],
+      [r[1], -1n],
+    ] as const) {
+      let rest = n;
+      for (const q of base) {
+        let e = 0n;
+        while (rest % q === 0n) {
+          rest /= q;
+          e += 1n;
+        }
+        if (e > 0n) addTo(q, sign * e * k[0], k[1]);
+      }
+    }
+  }
+
+  const others = terms.filter((_, i) => !indices.has(i));
+  const nonzero = [...coef].filter(([, [n]]) => n !== 0n);
+  if (nonzero.length === 1) {
+    // One logarithm: `k·ln(q)`, so `(3/2) ln 3`, not `(1/2) ln 27`, and no
+    // power of `q` is computed.
+    const [qBase, [n, d]] = nonzero[0];
+    const ln = ce.function('Ln', [ce.number(qBase)]);
+    others.push(
+      n === d ? ln : ce.function('Multiply', [ce.number([n, d]), ln])
+    );
+  } else if (nonzero.length > 1) {
+    // (1/L)·ln(R), with L the common denominator of the coefficients. The
+    // integers of R are bounded before they are computed: an exponent above
+    // 64, or more than 256 bits in all, declines the rule, so
+    // `10²⁰ ln 2 + ln 3` keeps its form and no huge integer is built.
+    let L = 1n;
+    for (const [, [, d]] of nonzero) L = (L * d) / gcd(L, d);
+    let bits = 0n;
+    const exponents: Array<[bigint, bigint]> = [];
+    for (const [qBase, [n, d]] of nonzero) {
+      const e = (n * L) / d;
+      const size = e < 0n ? -e : e;
+      if (size > 64n) return undefined;
+      bits += size * BigInt(qBase.toString(2).length);
+      if (bits > 256n) return undefined;
+      exponents.push([qBase, e]);
+    }
+    let num = 1n;
+    let den = 1n;
+    for (const [qBase, e] of exponents) {
+      if (e > 0n) num *= qBase ** e;
+      else den *= qBase ** -e;
+    }
+    // `ln(num/den)`, as the combination of `ln a ± ln b` writes it
+    // (`combineLogGroup()`): `ln 2 − ln 3` is `ln(2/3)`.
+    const ln = ce.function('Ln', [ce.number([num, den])]);
+    others.push(
+      L === 1n ? ln : ce.function('Multiply', [ce.number([1n, L]), ln])
+    );
+  }
+  if (others.length === 0) return ce.Zero;
+  if (others.length === 1) return others[0];
+  return ce.function('Add', others);
 }
 
 export function simplifyLog(x: Expression): RuleStep | undefined {
@@ -781,6 +989,13 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
   // Handle Add for logarithm combination: ln(x) + ln(y) -> ln(xy), ln(x) - ln(y) -> ln(x/y)
   // Note: Subtract is canonicalized to Add with Negate, so we handle both cases here
   if (op === 'Add' && x.ops.length >= 2) {
+    const rationalLogs = combineRationalLogarithms(ce, x.ops);
+    if (rationalLogs !== undefined)
+      return {
+        value: rationalLogs,
+        because: 'combine logarithms of positive rationals',
+      };
+
     // Look for Ln and Log terms, tracking whether they're negated
     // positive: true means ln(x), false means -ln(x) which represents subtraction
     const lnTerms: Array<{

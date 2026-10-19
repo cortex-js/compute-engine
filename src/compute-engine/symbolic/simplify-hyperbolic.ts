@@ -93,7 +93,7 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
 
     // Odd/even function properties with negation: f(-x) = -f(x) for an odd
     // function, f(-x) = f(x) for an even function. The argument is
-    // `Negate(x)` or a negative number.
+    // `Negate(x)` or a finite negative constant (`negatedArgument()`).
     const negated = negatedArgument(arg);
     if (negated) {
       if (ODD_HYPERBOLIC.has(op)) return oddEvenStep(op, negated, true, ce);

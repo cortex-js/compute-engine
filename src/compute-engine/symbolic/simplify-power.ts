@@ -334,6 +334,223 @@ function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
   return result;
 }
 
+/** An exact rational `[numerator, denominator]`, reduced, denominator > 0. */
+type BigQ = [bigint, bigint];
+
+function bigGcd(a: bigint, b: bigint): bigint {
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a < 0n ? -a : a;
+}
+
+function q(n: bigint, d: bigint = 1n): BigQ {
+  if (d < 0n) [n, d] = [-n, -d];
+  const g = bigGcd(n, d);
+  return g > 1n ? [n / g, d / g] : [n, d];
+}
+const qAdd = (x: BigQ, y: BigQ) => q(x[0] * y[1] + y[0] * x[1], x[1] * y[1]);
+const qMul = (x: BigQ, y: BigQ) => q(x[0] * y[0], x[1] * y[1]);
+const qNeg = (x: BigQ): BigQ => [-x[0], x[1]];
+
+/**
+ * An element `a + b√c` of a quadratic field, with `a`, `b` rational and `c`
+ * a square-free integer greater than 1, or `c = 1` when `b = 0` (a rational
+ * that fixes no field yet).
+ */
+type Quadratic = { a: BigQ; b: BigQ; c: bigint };
+
+/** The common field of `x` and `y`, or `undefined` for two different fields. */
+function commonField(x: Quadratic, y: Quadratic): bigint | undefined {
+  if (x.c === 1n) return y.c;
+  if (y.c === 1n || y.c === x.c) return x.c;
+  return undefined;
+}
+
+function quadMul(x: Quadratic, y: Quadratic): Quadratic | undefined {
+  const c = commonField(x, y);
+  if (c === undefined) return undefined;
+  return {
+    a: qAdd(qMul(x.a, y.a), qMul(qMul(x.b, y.b), [c, 1n])),
+    b: qAdd(qMul(x.a, y.b), qMul(x.b, y.a)),
+    c,
+  };
+}
+
+function quadAdd(x: Quadratic, y: Quadratic): Quadratic | undefined {
+  const c = commonField(x, y);
+  if (c === undefined) return undefined;
+  return { a: qAdd(x.a, y.a), b: qAdd(x.b, y.b), c };
+}
+
+/** `1/(a + b√c) = (a − b√c)/(a² − b²c)`, or `undefined` for 0. */
+function quadInv(x: Quadratic): Quadratic | undefined {
+  const norm = qAdd(qMul(x.a, x.a), qNeg(qMul(qMul(x.b, x.b), [x.c, 1n])));
+  if (norm[0] === 0n) return undefined;
+  const inv: BigQ = [norm[1], norm[0]];
+  return {
+    a: qMul(x.a, q(inv[0], inv[1])),
+    b: qMul(qNeg(x.b), q(inv[0], inv[1])),
+    c: x.c,
+  };
+}
+
+/**
+ * `e` as an element `a + b√c` of a quadratic field: an exact rational, an
+ * exact surd `r√c`, or a sum, product, quotient or small integer power of those,
+ * all in the same field `Q(√c)`. Returns `undefined` for anything else.
+ */
+function asQuadratic(e: Expression, depth = 0): Quadratic | undefined {
+  if (depth > 8) return undefined;
+  if (isNumber(e)) {
+    // A float that holds an integer (`2.0`) is not exact: it must not become
+    // the exact rational 2.
+    if (!e.isExact) return undefined;
+    const nv = e.numericValue;
+    if (nv instanceof ExactNumericValue && !nv.isComplex) {
+      const r = q(BigInt(nv.rational[0]), BigInt(nv.rational[1]));
+      return nv.radical > 1
+        ? { a: [0n, 1n], b: r, c: BigInt(nv.radical) }
+        : { a: r, b: [0n, 1n], c: 1n };
+    }
+    const r = asRational(e);
+    return r === undefined
+      ? undefined
+      : { a: q(BigInt(r[0]), BigInt(r[1])), b: [0n, 1n], c: 1n };
+  }
+  if (!isFunction(e)) return undefined;
+  const ops = e.ops.map((op) => asQuadratic(op, depth + 1));
+  if (ops.some((op) => op === undefined)) return undefined;
+  const [x, y] = ops as Quadratic[];
+  switch (e.operator) {
+    case 'Negate':
+      return { a: qNeg(x.a), b: qNeg(x.b), c: x.c };
+    case 'Add':
+      return (ops as Quadratic[]).reduce<Quadratic | undefined>(
+        (acc, op) => (acc ? quadAdd(acc, op) : undefined),
+        { a: [0n, 1n], b: [0n, 1n], c: 1n }
+      );
+    case 'Multiply':
+      return (ops as Quadratic[]).reduce<Quadratic | undefined>(
+        (acc, op) => (acc ? quadMul(acc, op) : undefined),
+        { a: [1n, 1n], b: [0n, 1n], c: 1n }
+      );
+    case 'Divide': {
+      const inv = quadInv(y);
+      return inv ? quadMul(x, inv) : undefined;
+    }
+    case 'Power': {
+      // A small integer power only: `(a + b√c)^n` for |n| ≤ 8. A higher
+      // power gives large coefficients that cancel when the result is
+      // evaluated numerically (`(1 + √2)^10` is `3363 + 2378√2`).
+      if (y.c !== 1n || y.b[0] !== 0n || y.a[1] !== 1n) return undefined;
+      const n = y.a[0];
+      if (n < -8n || n > 8n) return undefined;
+      const base = n < 0n ? quadInv(x) : x;
+      if (!base) return undefined;
+      let acc: Quadratic | undefined = { a: [1n, 1n], b: [0n, 1n], c: 1n };
+      for (let i = 0n; i < (n < 0n ? -n : n); i++)
+        acc = acc ? quadMul(acc, base) : undefined;
+      return acc;
+    }
+  }
+  return undefined;
+}
+
+/** The factors of a product (`Negate` contributes the factor `−1`). */
+function productFactors(e: Expression): Expression[] {
+  if (isFunction(e, 'Negate'))
+    return [e.engine.NegativeOne, ...productFactors(e.op1)];
+  if (isFunction(e, 'Multiply')) return e.ops.flatMap(productFactors);
+  return [e];
+}
+
+/**
+ * Rationalize a quotient whose denominator is in a quadratic field, by
+ * computing in `Q(√c)`: `1/(a + b√c) = (a − b√c)/(a² − b²c)`. The factors of
+ * the numerator and of the denominator that are in the field (rationals,
+ * surds `r√c`, and their sums, products and small integer powers) are
+ * combined into one element `A + B√c`; the other factors (`π`, a symbol) are
+ * kept. For example
+ *   −π(12 − 7√3)/(3 − 2√3)²  →  (√3/3)·π,
+ *   (12 − 7√3)/(3(7 − 4√3))  →  √3/3.
+ *
+ * `rationalizeRadicalDenominator()` handles a two-term denominator of two
+ * different surds (`√3 − √2`), which is not in one quadratic field; this
+ * function handles a denominator that is a power or a product of field
+ * elements, and a numerator that is a product with other factors.
+ *
+ * Returns `undefined` when the denominator has no factor with a radical in
+ * the field, or when the numerical check of the field element fails. A
+ * factor in another field (`√2` next to `√3`) is kept as it is.
+ */
+function rationalizeQuadraticQuotient(x: Expression): Expression | undefined {
+  if (!isFunction(x, 'Divide')) return undefined;
+  const ce = x.engine;
+  let value: Quadratic = { a: [1n, 1n], b: [0n, 1n], c: 1n };
+  let denominatorHasRadical = false;
+  const numFactors: Expression[] = [];
+  const denFactors: Expression[] = [];
+  // The factors combined into `value`, for the numeric check below.
+  const fieldNum: Expression[] = [];
+  const fieldDen: Expression[] = [];
+  for (const [factors, inDenominator] of [
+    [productFactors(x.op1), false],
+    [productFactors(x.op2), true],
+  ] as const) {
+    for (const f of factors) {
+      const field = asQuadratic(f);
+      const factor = field && inDenominator ? quadInv(field) : field;
+      const next = factor ? quadMul(value, factor) : undefined;
+      if (next) {
+        value = next;
+        (inDenominator ? fieldDen : fieldNum).push(f);
+        if (inDenominator && field!.b[0] !== 0n) denominatorHasRadical = true;
+      } else (inDenominator ? denFactors : numFactors).push(f);
+    }
+  }
+  if (!denominatorHasRadical) return undefined;
+
+  const rational = (r: BigQ) =>
+    r[1] === 1n ? ce.number(r[0]) : ce.number([r[0], r[1]]);
+  const element = ce.function('Add', [
+    rational(value.a),
+    ce.function('Multiply', [
+      rational(value.b),
+      ce.function('Sqrt', [ce.number(value.c)]),
+    ]),
+  ]);
+  const numerator =
+    numFactors.length === 0
+      ? element
+      : ce.function('Multiply', [element, ...numFactors]);
+  const result =
+    denFactors.length === 0
+      ? numerator
+      : ce.function('Divide', [
+          numerator,
+          denFactors.length === 1
+            ? denFactors[0]
+            : ce.function('Multiply', denFactors),
+        ]);
+
+  // Numeric safety check of the field element alone, real and imaginary
+  // parts: the other factors can hold a symbol, which has no numeric value.
+  const product = (fs: Expression[]) =>
+    fs.length === 0
+      ? ce.One
+      : fs.length === 1
+        ? fs[0]
+        : ce.function('Multiply', fs);
+  const expected = ce
+    .function('Divide', [product(fieldNum), product(fieldDen)])
+    .N();
+  const actual = element.N();
+  if (!isNumber(expected) || !isNumber(actual)) return undefined;
+  const d = Math.hypot(expected.re - actual.re, expected.im - actual.im);
+  if (!(d <= 1e-9 * (1 + Math.hypot(expected.re, expected.im))))
+    return undefined;
+  return result;
+}
+
 /**
  * Return `true` if the same-base powers `factors` (each one `base^e` for an
  * exponent `e` in `exponents`, or the bare `base` for `e = 1`) can be
@@ -1141,7 +1358,8 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // Rationalize a two-term radical denominator: num / (p + q) ->
     // num·(p − q) / (p² − q²). E.g. (√3+√2)/(√3−√2) → 5 + 2√6.
-    const rationalized = rationalizeRadicalDenominator(x);
+    const rationalized =
+      rationalizeRadicalDenominator(x) ?? rationalizeQuadraticQuotient(x);
     if (rationalized !== undefined) {
       return {
         value: rationalized,

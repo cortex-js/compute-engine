@@ -965,9 +965,9 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hyperbolic trig simplifications
   simplifyHyperbolic,
 
-  // Odd special functions: f(-x) = -f(x), for `Negate(x)` and for a negative
-  // number. Each function is entire and odd, so the identity is true for
-  // every complex x.
+  // Odd special functions: f(-x) = -f(x), for `Negate(x)` and for a finite
+  // negative constant (`negatedArgument()`). Each function is entire and odd,
+  // so the identity is true for every complex x.
   (x): RuleStep | undefined => {
     if (!ODD_SPECIAL_FUNCTIONS.has(x.operator) || !isFunction(x))
       return undefined;

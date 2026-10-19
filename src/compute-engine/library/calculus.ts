@@ -918,6 +918,28 @@ function hasImaginaryPart(e: Expression): boolean {
 }
 
 /**
+ * Whether `e` is a sum with a term that is not real while the sum itself is
+ * real: `iπ/2 + artanh(2)`, where the imaginary parts cancel.
+ */
+function hasNonRealTerms(e: Expression): boolean {
+  return (
+    isFunction(e, 'Add') &&
+    isNumber(e.N()) &&
+    !hasImaginaryPart(e) &&
+    e.ops.some(hasImaginaryPart)
+  );
+}
+
+/** Whether the numeric values of `a` and `b` agree to 10⁻⁹, relative. */
+function sameNumericValue(a: Expression, b: Expression): boolean {
+  const x = a.N();
+  const y = b.N();
+  if (!isNumber(x) || !isNumber(y)) return false;
+  const d = Math.hypot(x.re - y.re, x.im - y.im);
+  return Number.isFinite(d) && d <= 1e-9 * Math.max(1, Math.hypot(y.re, y.im));
+}
+
+/**
  * Whether `integrand` is proven real on the closed interval between the exact
  * bounds `lower` and `upper`. `continuousRange` encloses its values with exact
  * interval arithmetic, and declines each operation that could leave the
@@ -934,7 +956,9 @@ function provenRealOnInterval(
   upper: Expression
 ): boolean {
   if (!finiteConstant(lower) || !finiteConstant(upper)) return false;
-  const order = exactSign(integrand.engine.function('Subtract', [upper, lower]));
+  const order = exactSign(
+    integrand.engine.function('Subtract', [upper, lower])
+  );
   if (order === undefined) return false;
   const [lo, hi] = order < 0 ? [upper, lower] : [lower, upper];
   return continuousRange(integrand, variable, lo, hi) !== undefined;
@@ -5319,6 +5343,51 @@ volumes
                 ) {
                   antideriv = alternative;
                   providerEndpoint = undefined;
+                }
+              } else if (hasNonRealTerms(candidate)) {
+                // A real value written with terms that are not real, whose
+                // imaginary parts cancel: with Rubi loaded,
+                // `∫₂^∞ 1/(x²−1) dx` was `iπ/2 + artanh(2)`, which is
+                // `ln(3)/2`. Use the built-in primitive when its value at the
+                // bounds is the same number with real terms only.
+                const alternative = antiderivative(integrand, variable);
+                let value =
+                  alternative.isValid &&
+                  !alternative.has('Integrate') &&
+                  !hasVariableSign(alternative, variable)
+                    ? ce
+                        .expr([
+                          'EvaluateAt',
+                          ['Function', alternative, variable],
+                          lower,
+                          upper,
+                        ])
+                        .evaluate({ numericApproximation })
+                    : undefined;
+                // An indeterminate form at an infinite bound (`∞ − ∞`) is
+                // resolved as a limit, as the endpoint evaluation below does.
+                if (value?.isNaN === true)
+                  value = improperEndpointValue(
+                    alternative,
+                    variable,
+                    lower,
+                    upper,
+                    ce,
+                    numericApproximation ?? false
+                  );
+                if (
+                  value !== undefined &&
+                  value.isValid &&
+                  value.isNaN !== true &&
+                  value.isFinite === true &&
+                  !value.has(['EvaluateAt', 'Limit', 'Integrate']) &&
+                  !hasImaginaryPart(value) &&
+                  !hasNonRealTerms(value) &&
+                  exactExpression(value) === exactExpression(candidate) &&
+                  sameNumericValue(value, candidate)
+                ) {
+                  antideriv = alternative;
+                  providerEndpoint = value;
                 }
               }
             }

@@ -6,16 +6,16 @@ Run on 2026-10-19, Node v26.9.0, CE from source, 30 s per case, 19 s in total. A
 
 | Suite | Configuration | Runs | exact | inexact | wrong | unverified | unevaluated | timeout | error | Reduced | Time (s) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| competition | CE | 60 | 60 |  |  |  |  |  |  | 60 | 2.7 |
-| competition | CE+Rubi | 60 | 60 |  |  |  |  |  |  | 60 | 10.7 |
-| families | CE | 168 | 168 |  |  |  |  |  |  | 156 | 1.4 |
-| families | CE+Rubi | 168 | 168 |  |  |  |  |  |  | 154 | 2.9 |
-| reciprocal | CE | 42 | 42 |  |  |  |  |  |  | 36 | 0.3 |
-| reciprocal | CE+Rubi | 42 | 42 |  |  |  |  |  |  | 28 | 0.4 |
+| competition | CE | 60 | 60 |  |  |  |  |  |  | 60 | 2.8 |
+| competition | CE+Rubi | 60 | 60 |  |  |  |  |  |  | 60 | 11.1 |
+| families | CE | 168 | 168 |  |  |  |  |  |  | 168 | 1.3 |
+| families | CE+Rubi | 168 | 168 |  |  |  |  |  |  | 166 | 2.7 |
+| reciprocal | CE | 42 | 42 |  |  |  |  |  |  | 42 | 0.3 |
+| reciprocal | CE+Rubi | 42 | 42 |  |  |  |  |  |  | 36 | 0.4 |
 | polynomials | CE | 7 | 7 |  |  |  |  |  |  | 7 | 0.0 |
 | polynomials | CE+Rubi | 7 | 7 |  |  |  |  |  |  | 7 | 0.0 |
-| composed | CE | 12 | 12 |  |  |  |  |  |  | 11 | 0.1 |
-| composed | CE+Rubi | 12 | 12 |  |  |  |  |  |  | 11 | 0.2 |
+| composed | CE | 12 | 12 |  |  |  |  |  |  | 12 | 0.1 |
+| composed | CE+Rubi | 12 | 12 |  |  |  |  |  |  | 12 | 0.2 |
 
 ## Wrong values
 
@@ -35,66 +35,26 @@ The value is right and exact, but `simplify()` cannot show that `result − refe
 
 | Suite | Configuration | Case | Grade | Result |
 |---|---|---|---|---|
-| families | CE | rational trig a=2, b=-1 | exact | `-(pi * (12 - 7sqrt(3))) / (-3 + 2sqrt(3))^2` |
-| families | CE | rational trig a=2, b=-1 (reversed bounds) | exact | `(pi * (12 - 7sqrt(3))) / (-3 + 2sqrt(3))^2` |
-| families | CE | rational trig a=2, b=1 | exact | `-(pi * (12 - 7sqrt(3))) / (3 - 2sqrt(3))^2` |
-| families | CE | rational trig a=2, b=1 (reversed bounds) | exact | `(pi * (12 - 7sqrt(3))) / (3 - 2sqrt(3))^2` |
-| families | CE | rational trig a=3, b=-1 | exact | `-(pi * (24 - 17sqrt(2))) / (2(-4 + 3sqrt(2))^2)` |
-| families | CE | rational trig a=3, b=-1 (reversed bounds) | exact | `(pi * (24 - 17sqrt(2))) / (2(-4 + 3sqrt(2))^2)` |
-| families | CE | rational trig a=3, b=1 | exact | `-(pi * (24 - 17sqrt(2))) / (2(4 - 3sqrt(2))^2)` |
-| families | CE | rational trig a=3, b=1 (reversed bounds) | exact | `(pi * (24 - 17sqrt(2))) / (2(4 - 3sqrt(2))^2)` |
-| families | CE | rational trig a=5, b=-1 | exact | `-(pi * (120 - 49sqrt(6))) / (2(-12 + 5sqrt(6))^2)` |
-| families | CE | rational trig a=5, b=-1 (reversed bounds) | exact | `(pi * (120 - 49sqrt(6))) / (2(-12 + 5sqrt(6))^2)` |
-| families | CE | rational trig a=5, b=1 | exact | `-(pi * (120 - 49sqrt(6))) / (2(12 - 5sqrt(6))^2)` |
-| families | CE | rational trig a=5, b=1 (reversed bounds) | exact | `(pi * (120 - 49sqrt(6))) / (2(12 - 5sqrt(6))^2)` |
-| families | CE+Rubi | rational trig a=2, b=-1 | exact | `-(pi * (12 - 7sqrt(3))) / (-3 + 2sqrt(3))^2` |
-| families | CE+Rubi | rational trig a=2, b=-1 (reversed bounds) | exact | `(pi * (12 - 7sqrt(3))) / (-3 + 2sqrt(3))^2` |
-| families | CE+Rubi | rational trig a=2, b=1 | exact | `-(pi * (12 - 7sqrt(3))) / (3 - 2sqrt(3))^2` |
-| families | CE+Rubi | rational trig a=2, b=1 (reversed bounds) | exact | `(pi * (12 - 7sqrt(3))) / (3 - 2sqrt(3))^2` |
-| families | CE+Rubi | rational trig a=3, b=-1 | exact | `-(pi * (24 - 17sqrt(2))) / (2(-4 + 3sqrt(2))^2)` |
-| families | CE+Rubi | rational trig a=3, b=-1 (reversed bounds) | exact | `(pi * (24 - 17sqrt(2))) / (2(-4 + 3sqrt(2))^2)` |
-| families | CE+Rubi | rational trig a=3, b=1 | exact | `-(pi * (24 - 17sqrt(2))) / (2(4 - 3sqrt(2))^2)` |
-| families | CE+Rubi | rational trig a=3, b=1 (reversed bounds) | exact | `(pi * (24 - 17sqrt(2))) / (2(4 - 3sqrt(2))^2)` |
-| families | CE+Rubi | rational trig a=5, b=-1 | exact | `-(pi * (120 - 49sqrt(6))) / (2(-12 + 5sqrt(6))^2)` |
-| families | CE+Rubi | rational trig a=5, b=-1 (reversed bounds) | exact | `(pi * (120 - 49sqrt(6))) / (2(-12 + 5sqrt(6))^2)` |
-| families | CE+Rubi | rational trig a=5, b=1 | exact | `-(pi * (120 - 49sqrt(6))) / (2(12 - 5sqrt(6))^2)` |
-| families | CE+Rubi | rational trig a=5, b=1 (reversed bounds) | exact | `(pi * (120 - 49sqrt(6))) / (2(12 - 5sqrt(6))^2)` |
 | families | CE+Rubi | half-angle chart split | exact | `-sqrt(2)/2 * arctan(-1 / (3 + 2sqrt(2))) + sqrt(2)/4 * pi + sqrt(2)/2 * arctan(1 / (3 + 2sqrt(2)))` |
 | families | CE+Rubi | half-angle chart split (reversed bounds) | exact | `-sqrt(2)/2 * arctan(1 / (3 + 2sqrt(2))) - sqrt(2)/4 * pi + sqrt(2)/2 * arctan(-1 / (3 + 2sqrt(2)))` |
-| reciprocal | CE | reciprocal rational degree 3, bound 2 | exact | `3/2 - 2ln(3/2) + 2ln(3) - ln(2) + ln(1/2)` |
-| reciprocal | CE | reciprocal rational degree 3, bound 2 (reversed bounds) | exact | `-3/2 - 2ln(3) + 2ln(3/2) - ln(1/2) + ln(2)` |
-| reciprocal | CE | reciprocal rational degree 3, bound 5 | exact | `24/5 - 2ln(6/5) + 2ln(6) - ln(5) + ln(1/5)` |
-| reciprocal | CE | reciprocal rational degree 3, bound 5 (reversed bounds) | exact | `-24/5 - 2ln(6) + 2ln(6/5) - ln(1/5) + ln(5)` |
-| reciprocal | CE | reciprocal rational degree 3, bound 2022 | exact | `4088483/2022 - 2ln(2023/2022) + 2ln(7) + 4ln(17) - ln(2022) + ln(1/2022)` |
-| reciprocal | CE | reciprocal rational degree 3, bound 2022 (reversed bounds) | exact | `-4088483/2022 - 4ln(17) - 2ln(7) + 2ln(2023/2022) - ln(1/2022) + ln(2022)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 2 | exact | `3/2 - 2ln(3/2) + 2ln(3) - ln(2) + ln(1/2)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 2 (reversed bounds) | exact | `-3/2 - 2ln(3) + 2ln(3/2) - ln(1/2) + ln(2)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 5 | exact | `24/5 - 2ln(6/5) + 2ln(6) - ln(5) + ln(1/5)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 5 (reversed bounds) | exact | `-24/5 - 2ln(6) + 2ln(6/5) - ln(1/5) + ln(5)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 2022 | exact | `4088483/2022 - 2ln(2023/2022) + 2ln(7) + 4ln(17) - ln(2022) + ln(1/2022)` |
-| reciprocal | CE+Rubi | reciprocal rational degree 3, bound 2022 (reversed bounds) | exact | `-4088483/2022 - 4ln(17) - 2ln(7) + 2ln(2023/2022) - ln(1/2022) + ln(2022)` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 2 | exact | `3/2 + 2Hypergeometric2F1(1, 1/7, 8/7, -128) - 32/3 * Hypergeometric2F1(1, 6/7, 13/7, -128) - 1/2 * Hypergeometric2F1(1, 1/7, 8/7, -1/128) + 1/384 * Hypergeomet…` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 2 (reversed bounds) | exact | `-3/2 - 2Hypergeometric2F1(1, 1/7, 8/7, -128) - 1/384 * Hypergeometric2F1(1, 6/7, 13/7, -1/128) + 1/2 * Hypergeometric2F1(1, 1/7, 8/7, -1/128) + 32/3 * Hypergeo…` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 5 | exact | `24/5 + 5Hypergeometric2F1(1, 1/7, 8/7, -78125) - 15625/6 * Hypergeometric2F1(1, 6/7, 13/7, -78125) - 1/5 * Hypergeometric2F1(1, 1/7, 8/7, -1/78125) + 1/93750 *…` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 5 (reversed bounds) | exact | `-24/5 - 5Hypergeometric2F1(1, 1/7, 8/7, -78125) - 1/93750 * Hypergeometric2F1(1, 6/7, 13/7, -1/78125) + 1/5 * Hypergeometric2F1(1, 1/7, 8/7, -1/78125) + 15625/…` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 2022 | exact | `4088483/2022 - 11390312966219493984Hypergeometric2F1(1, 6/7, 13/7, -138187276906174901013888) + 2022Hypergeometric2F1(1, 1/7, 8/7, -138187276906174901013888) -…` |
 | reciprocal | CE+Rubi | reciprocal rational degree 9, bound 2022 (reversed bounds) | exact | `-4088483/2022 - 2022Hypergeometric2F1(1, 1/7, 8/7, -138187276906174901013888) + 11390312966219493984Hypergeometric2F1(1, 6/7, 13/7, -138187276906174901013888) …` |
-| reciprocal | CE+Rubi | reciprocal logarithmic moment 9 | exact | `-2/9 * ln(2) - 1/9 * ln(4921) + 1/9 * ln(19684/19683) - ln(1/3) + ln(3)` |
-| reciprocal | CE+Rubi | reciprocal logarithmic moment 9 (reversed bounds) | exact | `-1/9 * ln(19684/19683) + 1/9 * ln(4921) + 2/9 * ln(2) - ln(3) + ln(1/3)` |
-| composed | CE | negative-trig-powers | exact | `16/3 + 3ln(sqrt(3))` |
-| composed | CE+Rubi | negative-trig-powers | exact | `16/3 - 3ln(sqrt(2)/2) + 3ln(sqrt(3)/2) - 3/2 * ln(1/4) + 3/2 * ln(1/2)` |
 
 ## Slowest runs
 
 | Suite | Configuration | Case | Grade | Time (ms) |
 |---|---|---|---|---:|
-| competition | CE+Rubi | tangent reflection | exact | 2074 |
-| competition | CE+Rubi | tangent reflection (reversed bounds) | exact | 1966 |
-| competition | CE+Rubi | large odd trig power | exact | 1418 |
-| competition | CE+Rubi | large odd trig power (reversed bounds) | exact | 1371 |
-| competition | CE+Rubi | cosine product | exact | 935 |
-| competition | CE+Rubi | cosine product (reversed bounds) | exact | 857 |
-| competition | CE+Rubi | mixed sine cosine | exact | 649 |
-| competition | CE | mixed sine cosine | exact | 639 |
-| competition | CE+Rubi | mixed sine cosine (reversed bounds) | exact | 592 |
-| competition | CE | cosine product (reversed bounds) | exact | 564 |
+| competition | CE+Rubi | tangent reflection | exact | 2097 |
+| competition | CE+Rubi | tangent reflection (reversed bounds) | exact | 2043 |
+| competition | CE+Rubi | large odd trig power | exact | 1585 |
+| competition | CE+Rubi | large odd trig power (reversed bounds) | exact | 1475 |
+| competition | CE+Rubi | cosine product | exact | 871 |
+| competition | CE+Rubi | cosine product (reversed bounds) | exact | 820 |
+| competition | CE+Rubi | mixed sine cosine | exact | 686 |
+| competition | CE+Rubi | mixed sine cosine (reversed bounds) | exact | 646 |
+| competition | CE | mixed sine cosine (reversed bounds) | exact | 636 |
+| competition | CE | mixed sine cosine | exact | 616 |

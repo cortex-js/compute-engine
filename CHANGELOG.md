@@ -2,6 +2,26 @@
 
 ### Behavior Changes
 
+- In a block written in LaTeX, `k \coloneq v` still declares a local `k`. A
+  new keyword, `let` (`\operatorname{let}`, `\text{let}`), writes a
+  declaration with a type, `\operatorname{let} s\colon integer\coloneq 1`,
+  and a declaration with no value, `\operatorname{let} s`. A bare `Assign` in
+  a block, which changes a `k` outside the block, is written
+  `\mathrm{Assign}(k, v)` and reads back without a `Declare`: it was written
+  `k\coloneq v`, which read back as a local, so a LaTeX round trip left the
+  outer `k` unchanged. A typed `Declare` in a block was dropped and is written
+  with `let` (user decision 2026-10-19). `let` also works in a `where` clause
+  and in a row of a one-column `cases` block. A function defined as
+  `f(x)\coloneq\left(j\coloneq x; j\right)` has the block as its body; the
+  body was a block inside a block. `\mathrm{let}` is now a keyword, so a symbol
+  named `let` is read as one, as `if` and `where` already are. After `let`,
+  `=` is also the assignment, as in Epsil (`\operatorname{let} k = 2`), and a
+  type that is not one (`\operatorname{let} s\colon\mathbb{Z}`) is an
+  `invalid-type` error. A name is declared once per block:
+  `x\coloneq 1; x\coloneq x+1; x` is `2` (it was a `variable-redeclaration`
+  error). The rows of a one-column `cases` block are read as a `;` list is, so
+  a `k\coloneq v` row declares a local `k` (it changed the `k` outside).
+
 - Assigning a value to a constant has a stable error code, and `epsil check`
   reports it. `ce.assign()` and the `Assign` operator still throw
   `Cannot assign a value to the constant "c"`, and the error now has
@@ -10,11 +30,13 @@
   `constant-assignment` and a note on the `const`; before, `epsil check`
   reported nothing and the run reported a `runtime-error` whose code was the
   message text. The check covers a `const` of the program at any depth and each
-  name of a destructuring `const`, wherever the assignment is; a `let`, a
-  parameter or a loop variable that shadows the constant is not reported, and
-  the run does not report the problem a second time. A constant the check cannot
-  see (a library constant such as `Pi`, or one from an earlier program) is
-  reported by the run with the code `constant-assignment`. The error value is
+  name of a destructuring `const`, wherever the assignment is, also in the body
+  of a function defined before the `const`. A `let`, a parameter or a loop
+  variable that shadows the constant is not reported. The run reports each
+  assignment once: it does not repeat an assignment that the check reported,
+  and it reports an assignment that the check could not see, such as an
+  assignment to a library constant (`Pi`) or to a constant of an earlier
+  program. The error value is
   `["Error", ["ErrorCode", "constant-assignment", "c"]]`.
 
 - A unit has one canonical form: its unit symbols with exact exponents, those
@@ -48,9 +70,18 @@
   needs the value of every cell gives the error of the failed cell: `Sum`,
   `Product`, `Max`, `Min`, `Mean` and the other statistics, `Sort`, `ArgMax`
   and `MaxBy`. A comprehension guard that fails on an element keeps the error
-  in that position, as `Filter` does; before, the element was removed. The list
-  still carries its error (`isValid` is `false`), and it still does not
-  compile. A `Tuple` or `Dictionary` with a failed cell is not changed.
+  in that position, as `Filter` does; before, the element was removed. The same
+  rules apply when the failed cell is a list that holds the error:
+  `Mean([[1, 1/"a"], 2])` is the error, and `Map(u ↦ 1, [[1, 1/"a"], [3]])` is
+  `[1, 1]`. Membership and equality give the error when the answer depends on a
+  failed cell: `2 ∈ [1, 1/"a"]` and `[1, 1/"a"] = [1, 1/"a"]` are the error,
+  while `1 ∈ [1, 1/"a"]` is `True` and `[1, 1/"a"] = [2, 1/"a"]` is `False`.
+  `IndexOf`, `Count` with a value, `Unique`, `Tally`, `Union`, `Intersection`,
+  `SetMinus` and `SymmetricDifference` follow the same rule, and so does
+  `Dedup`: `Dedup([1, 1/"a", 1])` is the error, because whether a neighbor is
+  a duplicate depends on the value of the failed cell. The list still
+  carries its error (`isValid` is `false`), and it still does not compile. A
+  `Tuple` or `Dictionary` with a failed cell is not changed.
 - A point divided by a matrix is the matrix of the point divided by each cell,
   as a point times a matrix is: `(1, 2) / [[1, 2], [3, 4]]` is
   `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]` (it stayed unevaluated and
@@ -65,6 +96,43 @@
 
 ### Bug Fixes
 
+- In Epsil, a `function` statement in a function body works when its name is
+  also the name of a library constant. `function o() { function i() { 2 }; i() }`
+  then `o()` gave `Error(ErrorCode("constant-assignment", "i"))` instead of
+  `2`; the same happened for `e`, `Pi` and the other library constants. The
+  definition was written to the library constant instead of making a binding
+  local to the call. It is now local to each call of the outer function, as at
+  the top level, and the library constant outside the body does not change.
+- Two quantities whose units have the same dimension compare by their physical
+  value on every route. `isEqual()`, `isIdenticallyEqual()`, `is()`, `isLess()`,
+  `isLessEqual()`, `isGreater()` and `isGreaterEqual()` gave `undefined` or
+  `false` for `1000 m` and `1 km`, because the unit symbols counted as unknowns;
+  now they agree with `Equal`. `NotEqual` is the negation of `Equal`
+  (`1000 m ≠ 1 km` is `False`, `6 W ≠ 7 W` is `True`; both stayed unevaluated).
+  `Max`, `Min`, `Clamp` and `Sort` order such quantities with no tolerance:
+  `Max(1 km, 999 m)` and `Max([1 km, 999 m])` are `1 km` (they stayed
+  unevaluated). The comparison converts both quantities to the finer of the two
+  units, so `1 eV = 2 eV` is `False` (it was `True`, because the difference in
+  joules was smaller than the tolerance). It applies temperature offsets:
+  `0 °C = 273.15 K` is `True` and `0 °C < 1 K` is `False` (they were `False`
+  and `True`). Two exact magnitudes are compared with exact arithmetic, also
+  when they are too large for a double (`10^400 m < 10^401 m`) or when their
+  double cancels: `1 m = (1 + 10^-16) m` is `False`. Under `.N()`, the exact
+  magnitude of a quantity decides, as it does for a number:
+  `1 m < (1 + 10^-30) m` is `True`. The conversion is exact between two
+  identical units and for every unit defined by an exact decimal number (`in`,
+  `ft`, `mi`, `lb`, `eV` and all SI prefixes); the angle units and `Da` are
+  compared within the tolerance. A magnitude with no numeric value or a complex
+  value, even with a very small imaginary part, leaves the comparison
+  unevaluated: `x m = y m` was `True` and `x m < y m` was `False`. Quantities of different dimensions,
+  and a quantity and a plain number, stay unevaluated.
+- `Sort` and `Ordering` of a lazy source give the error of an element that
+  fails: with `h(2)` an error, `Sort(Map(h, [2]))` was `[Error(…)]` and
+  `Sort(Map(h, [3, 2, 1]))` stayed unevaluated. Each element of the source is
+  read once. A membership test (`Element`, `NotElement`, `Contains`) over a
+  lazy source that computes a failed element gives that element's error when
+  it finds no match: `5 ∈ Map(h, [1, 2])` was `False`. A `Range` or an
+  `Interval` keeps its arithmetic test, and an infinite source is not walked.
 - `Count(xs, p)` gives the error when the predicate fails on an element, as
   `CountIf` does. Before, it counted that element as selected: with
   `h(2)` failing, `Count([1, 2, 3], (u) => h(u) > 0)` was `3`.
@@ -135,6 +203,22 @@
   is refused: the built-in antiderivative or an exact reduction gives the
   value, and otherwise the integral stays unevaluated. A correct complex value
   is kept: `∫₋₁³ √x dx` is `2√3 + (2/3)i`.
+
+- `simplify()` reduces more exact constants:
+  - A sum of logarithms of positive rationals or surds with rational
+    coefficients: `−2 ln 2 − 2 ln(3/2) + 2 ln 3` is `0` (it stayed as it
+    was), and `ln 2 + (1/2) ln 3` is `(1/2) ln 12`.
+  - A quotient whose denominator is a power or a product of `a + b√c`:
+    `(12 − 7√3)/(3 − 2√3)²` is `−√3/3`, and `−π(12 − 7√3)/(3 − 2√3)²` is
+    `(√3/3)·π`. So the value of `∫₀^π 1/(2 + cos x) dx` simplifies to
+    `π√3/3`.
+  - An odd or even function of a negative constant that is not one number:
+    `arctan(−3 + 2√2)` is `−arctan(3 − 2√2)`, so
+    `arctan(−3 + 2√2) + arctan(3 − 2√2)` is `0`.
+- With the Rubi rules loaded, a definite integral whose Rubi value is real but
+  written with terms that are not real gets the form of the built-in
+  antiderivative: `∫₂^∞ 1/(x² − 1) dx` is `ln(3)/2` (it was
+  `iπ/2 + artanh(2)`).
 
 ### Performance
 

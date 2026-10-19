@@ -1,3 +1,4 @@
+import { negatedArgument } from '../symbolic/simplify-trig.js';
 import {
   CancellationError,
   checkDeadline,
@@ -110,7 +111,8 @@ const ODD_EVEN_FUNCTIONS = new Set([
 
 /**
  * Check if an expression contains a call f(-x) of an odd or even function
- * f, where the argument is `Negate(x)` or a finite negative real number. In
+ * f, where the argument is `Negate(x)` or a finite constant with a negative
+ * value (`−1/2`, `−3 + 2√2`; see `negatedArgument()`). In
  * a sum or a product, such an operand must be simplified, so that the sign
  * moves out of the argument: then `f(1) - f(-1)` becomes `2f(1)` and
  * `f(x) + f(-x)` becomes `0` for an odd f. A user definition that shadows
@@ -123,10 +125,8 @@ function containsNegatedOddEvenCall(expr: Expression): boolean {
     expr.nops === 1 &&
     !shadowsLibraryName(expr.engine, expr.operator)
   ) {
-    const arg = expr.op1;
-    if (isFunction(arg, 'Negate')) return true;
-    if (isNumber(arg) && arg.isNegative === true && arg.isFinite === true)
-      return true;
+    // The arguments that `negatedArgument()` rewrites.
+    if (negatedArgument(expr.op1) !== undefined) return true;
   }
   return expr.ops.some((op) => containsNegatedOddEvenCall(op));
 }

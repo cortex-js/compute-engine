@@ -189,3 +189,18 @@ test('a correct complex value is kept when the integrand is not proven real', ()
   expect(value.N().re).toBeCloseTo(2 * Math.sqrt(3), 12);
   expect(value.N().im).toBeCloseTo(2 / 3, 12);
 });
+
+test('a provider value with terms that are not real gives way to the built-in primitive', () => {
+  // Rubi's primitive of 1/(x² − 1) is −artanh(x). On [2, ∞) its value at the
+  // bounds is iπ/2 + artanh(2): real, but written with terms that are not
+  // real. The built-in primitive gives the same value as ln(3)/2.
+  const ce = new ComputeEngine();
+  const integrand = ce.box(['Divide', 1, ['Subtract', ['Power', 'x', 2], 1]]);
+  const key = JSON.stringify(integrand.json);
+  ce._integrationProvider = (f) =>
+    JSON.stringify(f.json) === key ? ce.box(['Negate', ['Artanh', 'x']]) : null;
+  const value = ce
+    .box(['Integrate', integrand, ['Limits', 'x', 2, 'PositiveInfinity']])
+    .evaluate();
+  expect(value.toString()).toBe('1/2 * ln(3)');
+});
