@@ -4567,8 +4567,13 @@ function spellcheckSymbols(expr: Expression): Record<string, string> {
   const { symbols, operators } = getKnownNames(expr.engine);
   const suggestions: Record<string, string> = {};
 
-  const visit = (expr: Expression): void => {
+  // `bound` holds the parameters of the enclosing function literals. A
+  // parameter is a known name in the body of its literal, although it is not
+  // in the scope of the engine: `Filter(xs, y ↦ y > 0)` reported
+  // `Unknown symbol "y". Did you mean "x"?`.
+  const visit = (expr: Expression, bound: ReadonlySet<string>): void => {
     if (isSymbol(expr) && !expr.symbol.startsWith('_')) {
+      if (bound.has(expr.symbol)) return;
       if (!(expr.symbol in suggestions) && !symbols.includes(expr.symbol)) {
         const match = fuzzyStringMatch(expr.symbol, symbols);
         if (match) suggestions[expr.symbol] = match;
@@ -4579,11 +4584,20 @@ function spellcheckSymbols(expr: Expression): Record<string, string> {
         const match = fuzzyStringMatch(operator, operators);
         if (match) suggestions[operator] = match;
       }
-      for (const op of expr.ops) visit(op);
+      let inner = bound;
+      if (operator === 'Function') {
+        const names = new Set(bound);
+        for (const param of expr.ops.slice(1)) {
+          const p = isFunction(param, 'Typed') ? param.op1 : param;
+          if (isSymbol(p)) names.add(p.symbol);
+        }
+        inner = names;
+      }
+      for (const op of expr.ops) visit(op, inner);
     }
   };
 
-  visit(expr);
+  visit(expr, new Set());
   return suggestions;
 }
 

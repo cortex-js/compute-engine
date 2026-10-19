@@ -389,7 +389,8 @@ export class Product {
             // that correctly stays `~oo`, so `-2·~oo` and `-(2·~oo)` used to
             // disagree. An infinity with a non-zero imaginary part is exactly
             // the undirected one: a real ±∞ has `im === 0`, and a value like
-            // `∞ + i` (finite imaginary part) is not `isInfinity` at all.
+            // `∞ + i` (finite imaginary part) boxes to the real `+∞`
+            // (`canonicalNumber()`).
             //
             // A NON-REAL coefficient reaches the same place from the other
             // side: it turns a real ±∞ off the real line, and the product

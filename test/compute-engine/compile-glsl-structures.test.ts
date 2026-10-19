@@ -96,7 +96,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).toContain('for (int i = 1; i <= 5; i++)');
       // The int loop counter is consumed as a float in float math (CO-P1-2):
       // `float(i)`, not a bare `i` (which is a GLSL int/float type mismatch).
-      expect(code).toContain('acc = acc + float(i)');
+      // `acc` is an input, so the loop writes a local copy of it.
+      expect(code).toContain('float _tv1 = acc;');
+      expect(code).toContain('_tv1 = _tv1 + float(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');

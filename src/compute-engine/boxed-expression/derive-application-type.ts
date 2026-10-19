@@ -560,7 +560,8 @@ export function deriveApplicationType(
             answered,
             def,
             operands.map((d) => d.type)
-          )
+          ),
+          false
         )
       );
   }
@@ -612,7 +613,8 @@ export function deriveApplicationType(
           lazy: def.lazy,
         }) ??
         functionResult(sig) ??
-        'unknown'
+        'unknown',
+      true
     )
   );
 
@@ -621,7 +623,11 @@ export function deriveApplicationType(
   // broadcastable operator over a collection operand evaluates element-wise,
   // so the handler's scalar per-element result is re-shaped to the
   // collection. Shared logic, `broadcast-lift-type.ts`.
-  function lift(perElement: Type): Type {
+  // `fromSignature` is `true` when `perElement` is the declared result of
+  // the signature, which is solved against the cells of a collection
+  // operand, and `false` when a type handler answered it from the whole
+  // operands (`BroadcastLiftInput.sigResultIsPerElement`).
+  function lift(perElement: Type, fromSignature: boolean): Type {
     const hooks = broadcastLiftHooks;
     if (hooks === undefined) return perElement;
     const mappable = hooks.mappableSlot(def);
@@ -676,6 +682,7 @@ export function deriveApplicationType(
         def,
         views,
         sigResult: perElement,
+        sigResultIsPerElement: fromSignature,
         mappable: mappable === 'no-plan' ? undefined : mappable,
         broadcastsOverTuples: hooks.broadcastsOverTuples(operator, def),
         armwiseTupleArms: hooks.typesTupleArmsAsCells(operator, def),

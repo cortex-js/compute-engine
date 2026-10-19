@@ -85,9 +85,12 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
   });
 
   test('a block that assigns a function gives the same result on each run', () => {
-    // The assignment of a function literal installs the function when the
-    // block is canonicalized, so the read before the assignment already
-    // applies it on the first run.
+    // `fn` has no value when `r ≔ fn(3)` runs, so `r` holds the unevaluated
+    // `fn(3)`. The function is not installed before its `Assign` runs. The
+    // read of `r` in the last statement evaluates the stored value again,
+    // when `fn` has a value, so it gives `6`: a stored value reads the
+    // symbols that were assigned after it was stored (see
+    // `symbol-value-scoping.test.ts`).
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',

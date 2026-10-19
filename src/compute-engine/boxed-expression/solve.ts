@@ -27,6 +27,7 @@ import {
 import { asExactSmallInteger, asSmallInteger } from './numerics.js';
 import type { Complex } from 'complex.js';
 import {
+  aberthRoots,
   durandKernerRoots,
   realPolynomialRoots,
 } from '../numerics/polynomial-roots.js';
@@ -919,6 +920,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // sinh and tanh are bijective (tanh onto (−1, 1); out-of-range candidates
   // are dropped by `validateRoots`), so a single branch each. cosh is even, so
   // it needs both ±arcosh branches for a complete finite solution set.
+  // This holds for a real unknown only (`hasRealUnknown()`): over the complex
+  // numbers, sinh and cosh have the period `2πi` and tanh the period `πi`,
+  // thus `sinh(x) = 0` has the roots `iπk` for each integer `k`, not only `0`.
   //
 
   // a·sinh(x) + b = 0  =>  x = arsinh(-b/a)
@@ -927,7 +931,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Arsinh', ['Divide', ['Negate', '__b'], '__a']],
     id: 'solve.hyperbolic-sine',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) =>
+      filter(sub) && hasRealUnknown(sub) && !sub.__a.isSame(0),
   },
 
   // sinh(x) + b = 0  =>  x = arsinh(-b)
@@ -936,7 +941,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Arsinh', ['Negate', '__b']],
     id: 'solve.hyperbolic-sine-unit',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => filter(sub) && hasRealUnknown(sub),
   },
 
   // a·cosh(x) + b = 0  =>  x = arcosh(-b/a)  (positive branch)
@@ -950,7 +955,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) =>
+      filter(sub) && hasRealUnknown(sub) && !sub.__a.isSame(0),
   },
 
   // Second solution for cosh: x = -arcosh(-b/a)  (since cosh(-x) = cosh(x))
@@ -963,7 +969,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-negative-branch',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) =>
+      filter(sub) && hasRealUnknown(sub) && !sub.__a.isSame(0),
   },
 
   // cosh(x) + b = 0  =>  x = arcosh(-b)  (positive branch)
@@ -977,7 +984,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-unit',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => filter(sub) && hasRealUnknown(sub),
   },
 
   // Second solution for cosh(x) + b = 0: x = -arcosh(-b)
@@ -990,7 +997,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-cosine-unit-negative-branch',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => filter(sub) && hasRealUnknown(sub),
   },
 
   // a·tanh(x) + b = 0  =>  x = artanh(-b/a)
@@ -1005,7 +1012,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-tangent',
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+    condition: (sub) =>
+      filter(sub) && hasRealUnknown(sub) && !sub.__a.isSame(0),
   },
 
   // tanh(x) + b = 0  =>  x = artanh(-b)
@@ -1018,7 +1026,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.hyperbolic-tangent-unit',
     useVariations: true,
-    condition: filter,
+    condition: (sub) => filter(sub) && hasRealUnknown(sub),
   },
 
   // a·sin(x) + b·cos(x) = 0  =>  tan(x) = -b/a  =>  x = arctan(-b/a)
@@ -1178,15 +1186,14 @@ function withoutTemplates(
  * (`withExactIntegerExponents()`): `x^{2.0} + 3x + 2 = 0` is solved as
  * `x^2 + 3x + 2 = 0`, and its roots are changed to floats. Such an exponent
  * can still come from a step of the solver (clearing the denominator of
- * `x^{-0.5}` gives `x^{0.0}`), or be larger than `MAX_FLOAT_DEGREE` (or
- * than `MAX_FLOAT_POWER_DEGREE` in a pure power of the unknown). The
+ * `x^{-0.5}` gives `x^{0.0}`), or be larger than `MAX_FLOAT_DEGREE` in an
+ * equation that is not a pure power of the unknown. The
  * pattern matcher compares number literals by value: without this test, the
  * literal `2` of the quadratic templates matches the float `2.0`, and the
  * templates give exact roots for an equation that has a float.
  * The general power template `solve.power` does not read a degree and is
- * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so
- * `x^{20000.0} = 2^{20000}` has the float root `2.0`. The template `solve.power-negative-root` is kept
- * too: it reads only the parity of `n`, and gives the second root `-2.0`.
+ * kept: its root `(-b/a)^(1/n)` is a float for a float `n`. The template
+ * `solve.power-negative-root` is kept too: it reads only the parity of `n`.
  */
 function hasFloatPowerOfUnknown(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
@@ -1201,22 +1208,42 @@ function hasFloatPowerOfUnknown(expr: Expression): boolean {
 }
 
 /**
- * The largest absolute value of an integer-valued float exponent that
- * `withExactIntegerExponents()` changes to an integer, by default. The time
- * of the polynomial root finder grows fast with the degree. A larger float
- * exponent is left to the float-exponent strategies, which give at most two
- * roots, or no answer (`x^{100.0} + x = 2`).
+ * The largest degree of a polynomial whose roots are found numerically
+ * (`numericPolynomialRoots()`), when it has no closed form. The Aberth
+ * iteration takes about 25 ms at the degree 1000, but the check of each root
+ * against the equation and the comparison of each pair of roots take a time
+ * that grows as the square of the degree: `x^{1000} + x = 2` takes about
+ * 0.8 s, `x^{2000} + x = 2` about 2.7 s.
  */
-const MAX_FLOAT_DEGREE = 64;
+const MAX_NUMERIC_DEGREE = 1000;
 
 /**
- * The largest integer-valued float exponent `n` that is read as a degree in
- * a pure power of the unknown, `k·x^{n.0} + c = 0`. The `n` roots of such an
- * equation have a direct formula (`rootsOfScaledIntegerPower()`), whose time
- * grows as `n`: `x^{10000.0} = 2` takes about 5 s. A larger exponent gives
- * at most two roots, as above.
+ * The largest product of the degree and the number of terms of a polynomial
+ * whose roots are found numerically. The check of each root evaluates each
+ * term of the equation: a polynomial of degree 100 with 101 terms takes
+ * about 0.6 s, of degree 200 with 201 terms about 2.7 s, of degree 1000 with
+ * 10 terms about 1.3 s.
  */
-const MAX_FLOAT_POWER_DEGREE = 10000;
+const MAX_NUMERIC_ROOT_WORK = 10000;
+
+/**
+ * The largest absolute value of an integer-valued float exponent that
+ * `withExactIntegerExponents()` changes to an integer, by default: the
+ * largest degree of the numeric polynomial root finder. A larger float
+ * exponent is left to the float-exponent strategies, which give no answer
+ * for such a polynomial (`x^{1001.0} + x = 2`).
+ */
+const MAX_FLOAT_DEGREE = MAX_NUMERIC_DEGREE;
+
+/**
+ * The largest degree `n` of a pure power of the unknown, `k·xⁿ + c = 0`,
+ * whose `n` roots are given (`nthRoots()`). The direct formula takes about
+ * 0.45 ms for each root: `x^{10000} = 2` takes about 4.5 s, and
+ * `x^{100000} = 2` took about one minute before this limit. Above it, the
+ * equation is not solved, except for an unknown declared real, which has at
+ * most two real roots whatever the degree.
+ */
+const MAX_POWER_DEGREE = 10000;
 
 /**
  * `expr` with each power whose base contains the unknown `x` and whose
@@ -2421,7 +2448,8 @@ function solveByPowerGcdSubstitution(
   // declared real, only the real roots of `xᵍ = u` are given when `u` is
   // real (`nthRoots()`).
   const realOnly = isRealUnknown(ce, x);
-  for (const uRoot of uRoots) xRoots.push(...nthRoots(ce, uRoot, g, realOnly));
+  for (const uRoot of uRoots)
+    xRoots.push(...nthRoots(ce, uRoot, g, realOnly, stats));
   adoptChildStats(stats, child);
   return xRoots;
 }
@@ -2680,7 +2708,12 @@ function solveByGeneratorSubstitution(
     // The flags of the recursive calls, combined.
     const combined = childStats();
     try {
-      ce.declare(uName, 'real');
+      // Over the complex numbers, the generator takes values that are not
+      // real (`sin(x) = 2πi` for a complex `x`), and the equation in `u`
+      // must give all of its complex roots: `e^{sin(x)} = 1` is `e^u = 1`,
+      // whose roots are `2πik` for each integer `k`, not only `0`. Thus `u`
+      // has the type of the unknown there (see `isComplexUnknown()`).
+      ce.declare(uName, isComplexUnknown(ce, x) ? 'complex' : 'real');
       u = ce.symbol(uName);
       // The generator must capture *every* occurrence of x for the
       // substitution to yield an equation purely in u.
@@ -4209,14 +4242,12 @@ export function findUnivariateRoots(
   // The canonical form of the new equation must not have such an exponent
   // again, else the recursive call does not end.
   // A pure power `k·x^{n.0} + c = 0` has a direct formula for its `n` roots
-  // (`rootsOfScaledIntegerPower()`), thus a larger exponent is a degree
-  // there: `x^{100.0} = 2` has 100 roots.
+  // (`rootsOfScaledIntegerPower()`), thus each integer-valued float exponent
+  // is a degree there: `x^{2000.0} = 2` has 2000 roots. Above
+  // `MAX_POWER_DEGREE`, the roots are not given (`nthRoots()`), except for
+  // an unknown declared real.
   {
-    const anyDegree = withExactIntegerExponents(
-      expr,
-      x,
-      MAX_FLOAT_POWER_DEGREE
-    );
+    const anyDegree = withExactIntegerExponents(expr, x, Infinity);
     const exact =
       anyDegree !== null &&
       scaledIntegerPower(
@@ -4247,7 +4278,7 @@ export function findUnivariateRoots(
   // than `n` (about 15 s for `x^{256} = 2`).
   {
     const f = isFunction(expr, 'Equal') ? expr.op1.sub(expr.op2) : expr;
-    const roots = rootsOfScaledIntegerPower(f, x);
+    const roots = rootsOfScaledIntegerPower(f, x, stats);
     if (roots !== null) {
       if (isFunction(expr, 'Equal'))
         traceStep(trace, 'solve.move-terms', asEquation(f, x));
@@ -4663,18 +4694,32 @@ export function findUnivariateRoots(
         result = [...productRoots];
       }
     }
+    // When the polynomial route cannot give all the roots (`stats.partial`:
+    // a degree above the limits of the numeric root finder, a symbolic
+    // coefficient with no closed form), the root templates are not matched.
+    // They have no template for a degree of 3 or more other than a pure
+    // power, which the polynomial route solves, thus they cannot give all
+    // the roots either. And the time of the commutative matcher grows
+    // exponentially with the number of terms: `x^{28} + … + x + 1 = 2`
+    // took 18 s.
+    let polynomialDeclined = false;
     if (
       result.length === 0 &&
       polyExpr !== null &&
       polynomialDegree(polyExpr, x) >= 2
-    )
-      result = solvePolynomialByCoefficients(polyExpr, x, trace, stats);
+    ) {
+      const polyStats = stats ?? childStats();
+      const partialBefore = polyStats.partial === true;
+      result = solvePolynomialByCoefficients(polyExpr, x, trace, polyStats);
+      polynomialDeclined =
+        result.length === 0 && !partialBefore && polyStats.partial === true;
+    }
     // The polynomial came from squaring a square-root equation: its
     // complex roots are not solutions of the original equation.
     if (squared && polyExpr !== originalExpr)
       result = [...realRootsOfSquaredEquation(ce, x, result)];
 
-    if (result.length === 0) {
+    if (result.length === 0 && !polynomialDeclined) {
       for (const e of exprs) {
         const matches = matchRootsSteps(e);
         traceMatches(matches);
@@ -4695,7 +4740,7 @@ export function findUnivariateRoots(
     // e.g. exp(x) -> y, then solve for y
 
     let harmonized: Expression[] = [];
-    if (result.length === 0) {
+    if (result.length === 0 && !polynomialDeclined) {
       harmonized = exprs.flatMap((expr) => harmonize(expr));
       for (const h of harmonized) {
         const matches = matchRootsSteps(h);
@@ -4704,7 +4749,7 @@ export function findUnivariateRoots(
       }
     }
 
-    if (result.length === 0) {
+    if (result.length === 0 && !polynomialDeclined) {
       // Expand the original and harmonized forms (harmonization may produce
       // factored forms like `x(x+2) - 1` whose roots only match once
       // expanded), then harmonize once more
@@ -5099,7 +5144,8 @@ function realRootsOfAbsEquation(
  * `rootsOfPolynomialFactor()`: exactly when it has a closed form, else all
  * its complex roots numerically, with the exact quadratic factors recovered.
  * The result holds every root, or `stats.partial` is set (a root that cannot
- * be given: a symbolic coefficient with no closed form, a degree above 12).
+ * be given: a symbolic coefficient with no closed form, a degree above the
+ * limits of `numericPolynomialRoots()`).
  * The roots are sorted (`sortRoots()`). Extracted from the former
  * post-matcher fallback so it can run as a fast path *before* the matcher.
  */
@@ -5190,7 +5236,17 @@ function solvePolynomialByCoefficients(
       }
     }
 
-    const added = rootsOfPolynomialFactor(rest, x, stats, realOnly);
+    // The quotient by the rational roots can have more terms than the
+    // polynomial (`(xⁿ + x − 2)/(x − 1)` has `n` terms), but the check of
+    // each numeric root evaluates the terms of the equation: the limit of
+    // `numericPolynomialRoots()` reads the number of terms of the polynomial.
+    const added = rootsOfPolynomialFactor(
+      rest,
+      x,
+      stats,
+      realOnly,
+      coeffs.filter((c) => !c.isSame(0)).length
+    );
     for (const root of added) {
       // A root found twice is listed once: a rational root that a float
       // coefficient did not let divide out exactly comes back from the
@@ -5288,14 +5344,17 @@ function isRealUnknown(ce: ComputeEngine, x: string): boolean {
  * A list of roots is an answer only when it holds every root, thus
  * `stats.partial` is set when a root cannot be given: a polynomial of degree
  * 3 or more with a symbolic coefficient and no closed form above
- * (`x³ + a·x + 1`), a degree above 12, or a numeric root finder that does
- * not converge.
+ * (`x³ + a·x + 1`), a degree above the limits of `numericPolynomialRoots()`
+ * (which reads `terms`, the number of terms of the polynomial whose roots
+ * are checked, when it is given), or a numeric root finder that does not
+ * converge.
  */
 function rootsOfPolynomialFactor(
   coeffs: ReadonlyArray<Expression>,
   x: string,
   stats?: RootStats,
-  realOnly = false
+  realOnly = false,
+  terms?: number
 ): Expression[] {
   const m = coeffs.length - 1;
   if (m <= 0) return [];
@@ -5308,7 +5367,8 @@ function rootsOfPolynomialFactor(
       ce,
       ce.function('Divide', [coeffs[0].neg(), coeffs[m]]),
       m,
-      realOnly
+      realOnly,
+      stats
     );
   const byGcd = solveByPowerGcdSubstitution(
     fromCoefficients([...coeffs], x),
@@ -5316,7 +5376,7 @@ function rootsOfPolynomialFactor(
     stats
   );
   if (byGcd !== null) return [...byGcd];
-  return numericPolynomialRoots(coeffs, x, stats);
+  return numericPolynomialRoots(coeffs, x, stats, terms);
 }
 
 /**
@@ -5331,12 +5391,13 @@ function rootsOfPolynomialFactor(
  */
 function rootsOfScaledIntegerPower(
   expr: Expression,
-  x: string
+  x: string,
+  stats?: RootStats
 ): Expression[] | null {
   const power = scaledIntegerPower(expr, x);
   if (power === null) return null;
   const ce = expr.engine;
-  return sortRoots(nthRoots(ce, power.r, power.n, isRealUnknown(ce, x)));
+  return sortRoots(nthRoots(ce, power.r, power.n, isRealUnknown(ce, x), stats));
 }
 
 /**
@@ -5391,12 +5452,21 @@ function scaledIntegerPower(
  * that does not decide makes the list no answer (`filterRootsByType()`):
  * `x³ = a` with a real `x` has the answer `∛a`. (For an even `n` and a
  * negative `c`, `Root(c, n)` is not real, and the type filter decides it.)
+ * With `realOnly` and a number `c`, only the real roots are built: `ⁿ√c`
+ * for an odd `n`, `±ⁿ√|c|` for an even `n` and `c > 0`, none for an even `n`
+ * and `c < 0`, and none for a `c` that is not real. The other roots are not
+ * real, and building them takes a time that grows as `n`.
+ *
+ * Above the degree `MAX_POWER_DEGREE`, when the roots are not only the real
+ * roots above, they are not built: the list is empty and `stats.partial`
+ * is set (the list is not an answer).
  */
 function nthRoots(
   ce: ComputeEngine,
   c: Expression,
   n: number,
-  realOnly = false
+  realOnly = false,
+  stats?: RootStats
 ): Expression[] {
   if (n === 1) return [c];
   if (c.isSame(0)) return [ce.Zero];
@@ -5404,6 +5474,18 @@ function nthRoots(
   if (realOnly && !isNumber(c) && isRealForSolve(c) === true) {
     const r = ce.function('Root', [c, nExpr]);
     return n % 2 === 0 ? [r, r.neg()] : [r];
+  }
+  if (realOnly && isNumber(c)) {
+    if (c.im !== 0) return [];
+    const negative = c.isNegative === true;
+    if (negative && n % 2 === 0) return [];
+    const r = ce.function('Root', [negative ? c.neg() : c, nExpr]);
+    if (negative) return [r.neg()];
+    return n % 2 === 0 ? [r, r.neg()] : [r];
+  }
+  if (n > MAX_POWER_DEGREE) {
+    if (stats) stats.partial = true;
+    return [];
   }
   const halfTurn = halfTurnAngle(ce);
   // The root at the angle `turns` half turns divided by `n`.
@@ -5479,12 +5561,13 @@ function isZeroCoefficient(c: Expression): boolean {
 }
 
 /**
- * All the roots of a polynomial of degree 3 to 12 with numeric coefficients
- * (`coeffs`, ascending), found with the Durand–Kerner iteration
- * (`durandKernerRoots()`). The roots are floats (`ce.number()`, real when
- * the imaginary part is only rounding error), except when two of them are
- * the root set of a quadratic factor with rational coefficients: that
- * factor is then divided out exactly and its roots come from the quadratic
+ * All the roots of a polynomial of degree 3 to `MAX_NUMERIC_DEGREE` with
+ * numeric coefficients (`coeffs`, ascending), found with the Durand–Kerner
+ * iteration (`durandKernerRoots()`) up to the degree 12 and with the Aberth
+ * iteration (`aberthRoots()`) above it. The roots are floats (`ce.number()`,
+ * real when the imaginary part is only rounding error), except when two of
+ * them are the root set of a quadratic factor with rational coefficients:
+ * that factor is then divided out exactly and its roots come from the quadratic
  * formula. By Gauss's lemma, a monic quadratic factor over the rationals of
  * a polynomial with integer coefficients has coefficients whose
  * denominators divide the leading coefficient `aₙ`: the candidate factor
@@ -5494,27 +5577,39 @@ function isZeroCoefficient(c: Expression): boolean {
  * `x⁵ + x + 1 = (x² + x + 1)(x³ − x² + 1)`.
  *
  * `stats.partial` is set, and the list is empty, when a coefficient is not a
- * finite real number, when the degree is above 12, or when the iteration
+ * finite real number, when the degree is above `MAX_NUMERIC_DEGREE`, when
+ * the degree times `terms` (the number of terms of the polynomial whose
+ * roots are checked, by default the number of the coefficients that are not
+ * 0) is above `MAX_NUMERIC_ROOT_WORK`, or when the iteration
  * does not converge: the roots cannot all be given.
  */
 function numericPolynomialRoots(
   coeffs: ReadonlyArray<Expression>,
   x: string,
-  stats?: RootStats
+  stats?: RootStats,
+  terms = coeffs.filter((c) => !c.isSame(0)).length
 ): Expression[] {
   const ce = coeffs[0].engine;
   const partial = (): Expression[] => {
     if (stats) stats.partial = true;
     return [];
   };
-  if (coeffs.length - 1 > 12) return partial();
+  const degree = coeffs.length - 1;
+  if (degree > MAX_NUMERIC_DEGREE || degree * terms > MAX_NUMERIC_ROOT_WORK)
+    return partial();
   const nums: number[] = [];
   for (const c of coeffs) {
     const v = c.N();
     if (!Number.isFinite(v.re) || v.im !== 0) return partial();
     nums.push(v.re);
   }
-  const numeric = durandKernerRoots(nums, ce._deadline);
+  // The Durand–Kerner iteration is kept for the degrees up to 12, which it
+  // solved before the Aberth iteration was added: the order of the roots
+  // it gives is kept. It does not converge at a high degree.
+  const numeric =
+    degree <= 12
+      ? durandKernerRoots(nums, ce._deadline)
+      : aberthRoots(nums, ce._deadline);
   if (numeric === null) return partial();
 
   const result: Expression[] = [];
@@ -5566,7 +5661,10 @@ function numericPolynomialRoots(
   // closed form of its own (a quadratic, a pure power): `(x² + x + 1)(x² − 2)`
   // leaves `x² − 2`, whose roots `±√2` are exact.
   if (rest !== coeffs)
-    return [...result, ...rootsOfPolynomialFactor(rest, x, stats)];
+    return [
+      ...result,
+      ...rootsOfPolynomialFactor(rest, x, stats, false, terms),
+    ];
   for (const z of remaining)
     result.push(
       Math.abs(z.im) <= 1e-8 * (1 + Math.abs(z.re))

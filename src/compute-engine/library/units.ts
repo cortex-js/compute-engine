@@ -14,6 +14,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   convertUnit,
+  unitConversionCoefficients,
   convertCompoundUnit,
   dimensionsEqual,
   parseUnitDSL,
@@ -67,6 +68,21 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
     // A symbolic exponent (`m^n`) has no numeric value: `.re` is `NaN`.
     if (!base || exp === undefined || Number.isNaN(exp)) return null;
     return ['Power', base, exp];
+  }
+
+  // A canonical unit with a fraction exponent can be a root: the canonical
+  // form of `m^(1/2)` is `Sqrt(m)`, and of `m^(1/3)` is `Root(m, 3)`.
+  if (op === 'Sqrt') {
+    const base = boxedToUnitExpression(expr.op1);
+    return base ? ['Power', base, 0.5] : null;
+  }
+
+  if (op === 'Root') {
+    const base = boxedToUnitExpression(expr.op1);
+    const n = expr.op2?.re;
+    if (!base || n === undefined || !Number.isInteger(n) || n === 0)
+      return null;
+    return ['Power', base, 1 / n];
   }
 
   return null;
@@ -193,8 +209,12 @@ function convertQuantity(
     const c0 = convertUnit(0, fromSymbol, toSymbol);
     const c1 = convertUnit(1, fromSymbol, toSymbol);
     if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
-      if (c0 === null || c1 === null) return ce.error('incompatible-type');
-      const convertedMag = affineMagnitude(ce, magExpr, c1 - c0, c0);
+      // The coefficients of the conversion are computed from exact data:
+      // `c1 − c0` loses digits for a temperature (`degC → degF` gives
+      // `1.7999999999999972`).
+      const map = unitConversionCoefficients(fromSymbol, toSymbol);
+      if (map === null) return ce.error('incompatible-type');
+      const convertedMag = affineMagnitude(ce, magExpr, map.factor, map.offset);
       // A unit name is not a variable: it must not be declared in the
       // current scope.
       const r = ce._fn('Quantity', [

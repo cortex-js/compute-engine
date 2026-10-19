@@ -437,10 +437,20 @@ export class MachineNumericValue extends NumericValue {
 
   div(other: SmallInteger | NumericValue): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
+    // A division by 0, a JavaScript `0` or a numeric value 0, has the same
+    // answer as in `ExactNumericValue.div()`: `0/0` is NaN, a complex value
+    // over 0 is the complex infinity, and a real value over 0 is the
+    // infinity with the sign of the value (`2.5/0 = ∞`, `−2.5/0 = −∞`).
+    const divideByZero = () => {
+      if (this.isZero) return this.clone(NaN);
+      if (this.isComplex) return this.clone({ re: 0, im: Infinity });
+      return this.clone(this.decimal < 0 ? -Infinity : Infinity);
+    };
+
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
-      if (other === 0) return this.clone(NaN);
+      if (other === 0) return divideByZero();
       return this.clone({
         re: this.decimal / other,
         im: this.im / other,
@@ -449,7 +459,7 @@ export class MachineNumericValue extends NumericValue {
 
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
-    if (other.isZero) return this.clone(this.isZero ? NaN : Infinity);
+    if (other.isZero) return divideByZero();
 
     if (!this.isComplex && !other.isComplex) {
       const x = other.re;

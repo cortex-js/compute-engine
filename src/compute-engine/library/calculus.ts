@@ -3163,8 +3163,14 @@ function numericLimitValue(
   x: Expression,
   dir: Expression | undefined
 ): Expression | undefined {
-  let target = x.N().re;
+  const point = x.N();
+  let target = point.re;
   if (Number.isNaN(target)) return undefined;
+  // The extrapolation samples the function at real arguments only. At a
+  // point that is not real it would sample near the real part of the point
+  // and answer a wrong value: `lim_{x→i} 1/(x² + 1)` gave `1`, the value at
+  // 0. A limit at such a point is declined.
+  if (point.im !== 0 && !Number.isNaN(point.im)) return undefined;
   const direction = dir ? dir.re : 1;
 
   // The extrapolation reaches an infinite point through positive arguments

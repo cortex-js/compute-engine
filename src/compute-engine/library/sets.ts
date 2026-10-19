@@ -2260,7 +2260,11 @@ function complexIterator(
       if (done) return { value: undefined, done: true };
       const [re, im] = value;
       return {
-        value: self.engine.number({ re, im }),
+        // The exact complex number `re + im·i`, with two rational parts. A
+        // `Complex` object would be a float, as it holds two doubles.
+        value: self.engine.number(
+          self.engine._numericValue({ rational: re, imRational: im })
+        ),
         done: false,
       };
     },

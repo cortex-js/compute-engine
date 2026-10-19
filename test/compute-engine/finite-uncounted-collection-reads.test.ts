@@ -117,7 +117,9 @@ describe('a walk that misses elements does not answer', () => {
     ['Function', ['Join', ['List', 'x'], 'v'], 'x'],
   ];
   // The inner `Reverse` over a `FlatMap` cannot be walked: its source has no
-  // count. Before, the walk read it as empty: `Take(…, 3)` was `[]`.
+  // count, and the list of its source misses the elements of `v`. Before,
+  // the walk read it as empty: `Take(…, 3)` was `[]`. (Over a source that can
+  // be listed, the inner `Reverse` is walked: see the next test.)
   const reversed = [
     'FlatMap',
     ['List', 1, 2],
@@ -125,11 +127,36 @@ describe('a walk that misses elements does not answer', () => {
       'Function',
       [
         'Reverse',
-        ['FlatMap', ['List', 'x'], ['Function', ['List', 'y', 'y'], 'y']],
+        [
+          'FlatMap',
+          ['List', 'x'],
+          ['Function', ['Join', ['List', 'y'], 'v'], 'y'],
+        ],
       ],
       'x',
     ],
   ];
+
+  test('an inner Reverse over a source that can be listed is walked', () => {
+    const listable = [
+      'FlatMap',
+      ['List', 1, 2],
+      [
+        'Function',
+        [
+          'Reverse',
+          ['FlatMap', ['List', 'x'], ['Function', ['List', 'y', 'y'], 'y']],
+        ],
+        'x',
+      ],
+    ];
+    expect(
+      ce
+        .box(['Take', listable, 3])
+        .evaluate({ materialization: true })
+        .toString()
+    ).toBe('[1,1,2]');
+  });
 
   test('the materialization keeps the lazy form', () => {
     for (const fm of [joined, reversed]) {

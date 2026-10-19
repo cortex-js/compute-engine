@@ -2510,12 +2510,31 @@ const TOP_LEVEL_RUN = {};
  * The function call that the current run of a block is part of: the scope
  * of the innermost call frame on the evaluation-context stack (the
  * `freshScope` that `makeLambda` in `function-utils.ts` makes for each call
- * and pushes as a `'call'` frame), or `TOP_LEVEL_RUN` outside any call.
+ * and pushes as a `'call'` frame).
+ *
+ * Outside any call, the key of the asynchronous evaluation that the run is
+ * part of: the outermost activation on the stack (a copy of the scope of a
+ * scoped node, made for one asynchronous evaluation of the node,
+ * `asyncScopeActivation`, `boxed-expression/boxed-function.ts`), other than
+ * the current scope. Asynchronous evaluations that run at the same time
+ * share one evaluation number (`topLevelEvaluationEpoch`), so without this
+ * key, a run in one of them read the locals of a run in another:
+ * `Promise.all` of three `evaluateAsync()` of one `Sum` of a block gave
+ * `3t + 6`, `3t + 15` and `3t + 24`.
+ *
+ * `TOP_LEVEL_RUN` when there is neither.
  */
 function callActivationKey(ce: ComputeEngine): object {
   const stack = ce._evalContextStack;
   for (let i = stack.length - 1; i >= 0; i--)
     if (stack[i].name === 'call') return stack[i].lexicalScope;
+  const current = ce.context.lexicalScope;
+  for (const frame of stack)
+    if (
+      frame.lexicalScope !== current &&
+      scopeActivationTemplate(frame.lexicalScope) !== undefined
+    )
+      return frame.lexicalScope;
   return TOP_LEVEL_RUN;
 }
 
@@ -2543,8 +2562,11 @@ function callActivationKey(ce: ComputeEngine): object {
  *   the block in that call made some) are put back. A recursive call that
  *   runs the block again then does not reset the locals of the calls around
  *   it for their next runs. The block scope is one object for all the
- *   calls, so while the recursive call runs, the enclosing run reads the
- *   locals of the recursive call.
+ *   calls. When the block is in the body of a function literal, an
+ *   application of the literal that starts while another one runs saves the
+ *   bindings and values of the block scope, and puts them back when it ends
+ *   (`enterNestedBodyScopes`, `function-utils.ts`). So after a recursive
+ *   call, the enclosing run reads its own locals again.
  *
  *   A binding that the block scope held before its first run (a function
  *   clause installed at canonicalization) is kept, and so is a local of a
@@ -2558,9 +2580,10 @@ function callActivationKey(ce: ComputeEngine): object {
  * `boxed-expression/boxed-function.ts`). The copy holds what the block scope
  * held when the run started, so a binding of the activation is kept only
  * when the binding of the same name in the block scope carries the mark, or
- * when the run is in the same evaluation and call as the last run. A local
- * that an asynchronous run makes stays in its activation. (The body of a
- * loop runs on the synchronous route on both routes.)
+ * when the run is in the same evaluation and call as the last synchronous
+ * run. The locals that an asynchronous run makes stay out of the block scope:
+ * they are kept for the next asynchronous run of the same evaluation and
+ * call in `asyncRunLocals` (`beginAsyncRun`, `endAsyncRun`).
  */
 function sweepCanonicalizationBindings(ce: ComputeEngine): void {
   const scope = ce.context.lexicalScope;
@@ -2598,6 +2621,16 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
   const epoch = topLevelEvaluationEpoch(ce);
   const key = callActivationKey(ce);
   const state = blockRunStates.get(template);
+  // An asynchronous run: the bindings that the activation copied from the
+  // block scope were made by synchronous runs. They are kept only for a run
+  // of the same evaluation and call, and the state of the synchronous runs is
+  // not changed. The locals of the earlier asynchronous runs come from
+  // `asyncRunLocals` (`beginAsyncRun`).
+  if (scope !== template) {
+    if (state === undefined || state.epoch !== epoch || state.key !== key)
+      for (const [name, def] of madeByRuns) remove(name, def);
+    return;
+  }
   if (state === undefined || state.epoch !== epoch) {
     for (const [name, def] of madeByRuns) remove(name, def);
     blockRunStates.set(template, { epoch, key, saved: new WeakMap() });
@@ -2618,6 +2651,124 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
     }
   }
   state.key = key;
+}
+
+/**
+ * The implicit locals that the asynchronous runs of a block made, keyed by
+ * the block scope, then by the run key (`callActivationKey`) of the
+ * evaluation and call that the runs are part of. Only the entries of one
+ * evaluation number (`topLevelEvaluationEpoch`) are kept: asynchronous
+ * evaluations that run at the same time share that number, and are told
+ * apart by the run key. The inner map is weak, so the entry of a call or an
+ * evaluation goes away with its scope.
+ */
+const asyncRunLocals = new WeakMap<
+  Scope,
+  { epoch: number; byKey: WeakMap<object, Map<string, BoxedDefinition>> }
+>();
+
+/** An asynchronous run of a block, from `beginAsyncRun` to `endAsyncRun`. */
+type AsyncRun = {
+  activation: Scope;
+  template: Scope;
+  epoch: number;
+  key: object;
+};
+
+/**
+ * Whether `def`, the binding of `name` in a scope of a block, is an implicit
+ * local that a run of the block made: not a binding that the block scope
+ * held before its first run (its `_blockTemplate` mark), not a `let` or
+ * `const` local (`_declaredByStatement`, which `createBlockLocals` makes
+ * again at each run), and not a binding with no value.
+ */
+function isImplicitRunLocal(
+  template: Scope,
+  name: string,
+  def: BoxedDefinition
+): boolean {
+  type Marks = { _declaredByStatement?: boolean; _blockTemplate?: boolean };
+  return (
+    (def as Marks)._declaredByStatement !== true &&
+    !('value' in def && def.value.value === undefined) &&
+    (template.bindings.get(name) as Marks | undefined)?._blockTemplate !== true
+  );
+}
+
+/**
+ * At the start of an asynchronous run of a block, after
+ * `sweepCanonicalizationBindings`, put in the activation of the run (a copy
+ * of the block scope made for the run, `asyncScopeActivation`,
+ * `boxed-expression/boxed-function.ts`) the implicit locals that the last
+ * asynchronous run of the same evaluation and call made. Return the run, for
+ * `endAsyncRun`, or `undefined` when the run is not in an activation, or is
+ * part of no call and no asynchronous evaluation that can run the block
+ * again (`TOP_LEVEL_RUN`).
+ *
+ * An implicit local keeps its value from one run of the block to the next
+ * inside one evaluation and one function call (see
+ * `sweepCanonicalizationBindings`). A synchronous run writes it into the
+ * block scope itself. An asynchronous run writes it into its activation, and
+ * the next run copies the block scope, not that activation. So the locals
+ * are kept here between the runs. Without this, each asynchronous run
+ * started with no value for the local: with an operator that has only an
+ * `evaluateAsync` handler in the body, `Sum(Block(t ≔ t + 1; …; t), k, 1, 3)`
+ * gave `3t + 3` with `evaluateAsync()` and `3t + 6` with `evaluate()`. They
+ * are not written into the block scope, because an asynchronous evaluation
+ * that runs at the same time copies the block scope too, and must not read
+ * them.
+ */
+function beginAsyncRun(ce: ComputeEngine): AsyncRun | undefined {
+  const activation = ce.context.lexicalScope;
+  const template = scopeActivationTemplate(activation);
+  if (template === undefined) return undefined;
+  const key = callActivationKey(ce);
+  if (key === TOP_LEVEL_RUN) return undefined;
+  const run: AsyncRun = {
+    activation,
+    template,
+    epoch: topLevelEvaluationEpoch(ce),
+    key,
+  };
+  const entry = asyncRunLocals.get(template);
+  const stored = entry?.epoch === run.epoch ? entry.byKey.get(key) : undefined;
+  if (stored === undefined) return run;
+  // Replace the implicit locals that the activation holds (the sweep kept
+  // the ones that the synchronous runs of this evaluation and call made)
+  // with the ones of the last asynchronous run.
+  const bindings = activation.bindings;
+  const write = (name: string, def: BoxedDefinition | undefined): void => {
+    // Checkpoint journal (funnel 4): a direct write of the scope map, as in
+    // `sweepCanonicalizationBindings`.
+    journalCheckpointMapEntry(ce, bindings, name, name, 'declare');
+    if (def === undefined) bindings.delete(name);
+    else bindings.set(name, def);
+    noteScopeDeclaration(activation);
+  };
+  for (const [name, def] of [...bindings])
+    if (!stored.has(name) && isImplicitRunLocal(template, name, def))
+      write(name, undefined);
+  for (const [name, def] of stored)
+    if (bindings.get(name) !== def) write(name, def);
+  return run;
+}
+
+/**
+ * At the end of an asynchronous run of a block, keep the implicit locals of
+ * its activation for the next asynchronous run of the same evaluation and
+ * call (see `beginAsyncRun`).
+ */
+function endAsyncRun(run: AsyncRun | undefined): void {
+  if (run === undefined) return;
+  let entry = asyncRunLocals.get(run.template);
+  if (entry === undefined || entry.epoch !== run.epoch) {
+    entry = { epoch: run.epoch, byKey: new WeakMap() };
+    asyncRunLocals.set(run.template, entry);
+  }
+  const locals = new Map<string, BoxedDefinition>();
+  for (const [name, def] of run.activation.bindings)
+    if (isImplicitRunLocal(run.template, name, def)) locals.set(name, def);
+  entry.byKey.set(run.key, locals);
 }
 
 /** Evaluate a Block expression. */
@@ -2694,17 +2845,25 @@ async function evaluateBlockAsync(
   const ce = options.engine;
   if (ops.length === 0) return ce.Nothing;
   sweepCanonicalizationBindings(ce);
-  const result = await evaluateStatementsAsync(
-    ce,
-    ops,
-    options.signal,
-    options._effects,
-    options._contextStack,
-    // The numeric request reaches the last statement only, as in
-    // `evaluateBlock`.
-    options.numericApproximation ? true : undefined,
-    options._precisionWindow
-  );
+  // Before the first `await`, while the activation of this run is still the
+  // current lexical scope.
+  const run = beginAsyncRun(ce);
+  let result: Expression;
+  try {
+    result = await evaluateStatementsAsync(
+      ce,
+      ops,
+      options.signal,
+      options._effects,
+      options._contextStack,
+      // The numeric request reaches the last statement only, as in
+      // `evaluateBlock`.
+      options.numericApproximation ? true : undefined,
+      options._precisionWindow
+    );
+  } finally {
+    endAsyncRun(run);
+  }
   // `resolveEscapingLambda` reads the block scope as the current lexical
   // scope. It runs after an `await`, so the context stack of this evaluation
   // (which holds the block scope) must be put in place explicitly.

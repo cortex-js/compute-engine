@@ -285,22 +285,44 @@ export function finiteUncountedIsEmpty(xs: Expression): boolean | undefined {
 /**
  * The views that read their source by a position computed from the count of
  * the source: `Reverse` reads it from the end, `Most` up to its count minus
- * one, and the rotations from an offset taken modulo the count. Over a finite
- * source with no count, such a view cannot be enumerated (see
- * `enumerableFromSmallSource()`, `library/collections.ts`). See
- * {@link viewOverListedSource}.
+ * one, the rotations from an offset taken modulo the count, and `Insert`,
+ * `DeleteAt` and `ReplaceAt` at an index checked against the count. Over a
+ * finite source with no count, the position cannot be computed, so such a
+ * view reads the list of its source (see {@link viewOverListedSource} and
+ * `walkOfListedSource()`, `library/collections.ts`).
  */
 const VIEWS_THAT_NEED_THE_SOURCE_COUNT = new Set([
   'Reverse',
   'Most',
   'RotateLeft',
   'RotateRight',
+  'Insert',
+  'DeleteAt',
+  'ReplaceAt',
 ]);
 
 /**
+ * True when `expr` is a view that reads its source by a position computed
+ * from the count of the source (`VIEWS_THAT_NEED_THE_SOURCE_COUNT`), and its
+ * source is a finite indexed collection with no
+ * count whose walk can list it (see `walkCanAnswerCount()`). Such a view
+ * reads its elements from the list of the source
+ * ({@link viewOverListedSource}). The test does not walk the source.
+ */
+export function viewCanListSource(expr: Expression): boolean {
+  if (!isFunction(expr) || expr.nops === 0) return false;
+  if (!VIEWS_THAT_NEED_THE_SOURCE_COUNT.has(expr.operator)) return false;
+  const source = expr.op1;
+  if (source.count !== undefined) return false;
+  if (!walkCanAnswerCount(source)) return false;
+  return source.isIndexedCollection === true;
+}
+
+/**
  * For the materialization of a view that reads its source by a position
- * computed from the count of the source (`Reverse`, `Most`, `RotateLeft`,
- * `RotateRight`), over a finite indexed source with no count: the same view
+ * computed from the count of the source (`VIEWS_THAT_NEED_THE_SOURCE_COUNT`:
+ * `Reverse`, `Most`, `RotateLeft`, `RotateRight`, `Insert`, `DeleteAt`,
+ * `ReplaceAt`), over a finite indexed source with no count: the same view
  * over the LIST of the elements of the source, listed once by
  * `listFiniteUncountedCollection()`. So
  * `Reverse(FlatMap([1, 2, 3], x ↦ [x, x]))` materializes as
@@ -314,13 +336,8 @@ const VIEWS_THAT_NEED_THE_SOURCE_COUNT = new Set([
 export function viewOverListedSource(
   expr: Expression
 ): Expression | null | undefined {
-  if (!isFunction(expr) || expr.nops === 0) return undefined;
-  if (!VIEWS_THAT_NEED_THE_SOURCE_COUNT.has(expr.operator)) return undefined;
-  const source = expr.op1;
-  if (source.count !== undefined) return undefined;
-  if (!walkCanAnswerCount(source)) return undefined;
-  if (source.isIndexedCollection !== true) return undefined;
-  const listed = listFiniteUncountedCollection(source);
+  if (!viewCanListSource(expr) || !isFunction(expr)) return undefined;
+  const listed = listFiniteUncountedCollection(expr.op1);
   if (listed === undefined) return null;
   const ce = expr.engine;
   return ce._fn(expr.operator, [ce._fn('List', listed), ...expr.ops.slice(1)]);
@@ -3542,10 +3559,22 @@ export function lazyMapNumericApproximation(
     // application returns rewrites symbol operands only
     // (`bindingKeyedSubs`, `function-utils.ts`), so it does not reach that
     // head either. The literal itself has no name to lose.
+    //
+    // The assignment of a function literal to a local of a `Block` can make
+    // an OPERATOR definition, which keeps the literal it applies
+    // (`_lambdaLiteral`). That literal is read too: without it,
+    // `Block(h := x ↦ 2·Numerator(x), Map(h, [3/7])).N()` was
+    // `[h(3/7)]`, where `evaluate()` gives `[6]`. A literal that is not
+    // canonical (an `evaluate` handler written in MathJSON) is not read: it
+    // is not bound to the scope where it was defined.
     boundLiteral = (() => {
       if (!isSymbol(fn)) return undefined;
       const def = ce.lookupDefinition(fn.symbol);
-      const value = isValueDef(def) ? def.value.value : undefined;
+      const value = isValueDef(def)
+        ? def.value.value
+        : isOperatorDef(def) && def.operator._lambdaLiteral?.isCanonical
+          ? def.operator._lambdaLiteral
+          : undefined;
       return value !== undefined && isFunction(value, 'Function')
         ? value
         : undefined;

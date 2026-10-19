@@ -44,6 +44,46 @@ export class TypeCompatibilityError extends Error {
   }
 }
 
+/**
+ * Raised when a definition that read a name before the name was a function is
+ * rebuilt when the name becomes a function, and the rebuilt body is invalid.
+ * With `g(t) := 2a(t)` defined first, `a(t)` is read as a product; the
+ * definition `a(x, y) := x + y` rebuilds the body of `g`, where `a(t)` is now
+ * a partial application (a function), so `2a(t)` is a type error. The
+ * dependent keeps its previous definition (`repairWave`, `function-utils.ts`).
+ *
+ * The host routes (`ce.assign`, `ce.declare`) let this throw. The
+ * `DefineFunction` and `Assign` operator routes answer with `errorValue`, the
+ * first error of the rebuilt body, so a program gets the same error value in
+ * either order of the two definitions: when `a` is defined first, the
+ * definition of `g` evaluates to that error.
+ */
+export class DependentRebuildError extends Error {
+  /** Identifies the class by STRING, not `instanceof` (see
+   * {@link TypeCompatibilityError}). */
+  readonly name = 'DependentRebuildError';
+
+  constructor(
+    /** The first error of the rebuilt body, with its breadcrumb. */
+    readonly errorValue: Expression,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+/** True when `e` is a {@link DependentRebuildError}, checked by name so the
+ * test survives a host/plugin bundle boundary. */
+export function isDependentRebuildError(
+  e: unknown
+): e is DependentRebuildError {
+  return (
+    e instanceof Error &&
+    (e as Error).name === 'DependentRebuildError' &&
+    'errorValue' in e
+  );
+}
+
 /** True when `e` is a {@link TypeCompatibilityError}, checked by name so the
  * test survives a host/plugin bundle boundary. */
 export function isTypeCompatibilityError(

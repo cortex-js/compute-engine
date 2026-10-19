@@ -525,35 +525,29 @@ describe('TAKE', () => {
 
     expect(evaluate(['Take', dict, 1])).toMatchInlineSnapshot(`
       [
-        "Take",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'indexed_collection'",
-            "record{x: integer, y: integer, z: integer}"
-          ],
-          {dict: {x: 1; y: 2; z: 3}}
+          "ErrorCode",
+          "incompatible-type",
+          "'indexed_collection'",
+          "record{x: integer, y: integer, z: integer}"
         ],
-        1
+        {dict: {x: 1; y: 2; z: 3}},
+        ["ErrorTrace", ["ErrorFrame", "'Take'", 1]]
       ]
     `);
 
     expect(evaluate(['Take', dictShorthand, 1])).toMatchInlineSnapshot(`
       [
-        "Take",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'indexed_collection'",
-            "record{x: integer, y: integer, z: integer}"
-          ],
-          {dict: {x: 1; y: 2; z: 3}}
+          "ErrorCode",
+          "incompatible-type",
+          "'indexed_collection'",
+          "record{x: integer, y: integer, z: integer}"
         ],
-        1
+        {dict: {x: 1; y: 2; z: 3}},
+        ["ErrorTrace", ["ErrorFrame", "'Take'", 1]]
       ]
     `);
   });
@@ -799,18 +793,15 @@ describe('DROP 2', () => {
 
     expect(evaluate(['Drop', dict, 2])).toMatchInlineSnapshot(`
       [
-        "Drop",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'indexed_collection'",
-            "record{x: integer, y: integer, z: integer}"
-          ],
-          {dict: {x: 1; y: 2; z: 3}}
+          "ErrorCode",
+          "incompatible-type",
+          "'indexed_collection'",
+          "record{x: integer, y: integer, z: integer}"
         ],
-        2
+        {dict: {x: 1; y: 2; z: 3}},
+        ["ErrorTrace", ["ErrorFrame", "'Drop'", 1]]
       ]
     `);
   });
@@ -941,19 +932,15 @@ describe('SLICE (2,3)', () => {
 
     expect(evaluate(['Slice', dict, 2, 3])).toMatchInlineSnapshot(`
       [
-        "Slice",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'indexed_collection'",
-            "record{x: integer, y: integer, z: integer}"
-          ],
-          {dict: {x: 1; y: 2; z: 3}}
+          "ErrorCode",
+          "incompatible-type",
+          "'indexed_collection'",
+          "record{x: integer, y: integer, z: integer}"
         ],
-        2,
-        3
+        {dict: {x: 1; y: 2; z: 3}},
+        ["ErrorTrace", ["ErrorFrame", "'Slice'", 1]]
       ]
     `);
   });
@@ -1199,19 +1186,15 @@ describe('SLICE -1,1', () => {
   test('dict', () =>
     expect(evaluate(['Slice', dict, -1, 1])).toMatchInlineSnapshot(`
       [
-        "Slice",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'indexed_collection'",
-            "record{x: integer, y: integer, z: integer}"
-          ],
-          {dict: {x: 1; y: 2; z: 3}}
+          "ErrorCode",
+          "incompatible-type",
+          "'indexed_collection'",
+          "record{x: integer, y: integer, z: integer}"
         ],
-        -1,
-        1
+        {dict: {x: 1; y: 2; z: 3}},
+        ["ErrorTrace", ["ErrorFrame", "'Slice'", 1]]
       ]
     `));
 

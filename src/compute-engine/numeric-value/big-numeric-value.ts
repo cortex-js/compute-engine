@@ -571,7 +571,8 @@ export class BigNumericValue extends NumericValue {
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
-      if (other === 0) return this.clone(NaN);
+      // The same answer as for a numeric value 0 below
+      if (other === 0) return this.div(this.clone(0));
       if (!this.isComplex) return this.clone(this.decimal.div(other));
       return this.clone({
         re: this.decimal.div(other),

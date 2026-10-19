@@ -1057,6 +1057,17 @@ export interface BroadcastLiftInput {
   readonly views: ReadonlyArray<BroadcastOperandView>;
   /** The per-element result the handler (or the signature) computed. */
   readonly sigResult: Type;
+  /** `true` when `sigResult` is the declared result of the signature (no
+   * type handler answered). The signature is solved against the CELLS of a
+   * collection operand (`threadable`), so its result is the result for one
+   * element as it stands, a collection result included: `FactorInteger` of
+   * one integer is a list. `false` or absent when a type handler answered:
+   * the handler saw the whole collection operand and may have answered a
+   * collection type for it (`Negate` echoes the operand's type), so a
+   * collection answer is not taken as the result for one element without a
+   * second call at the cells (`perElementCollection` in
+   * `broadcastLiftType`). */
+  readonly sigResultIsPerElement?: boolean;
   /** Whether slot `i` maps a collection argument element-wise. `undefined`
    * when the signature declares no `broadcastable<T>` slot (then every slot
    * maps). */
@@ -1083,8 +1094,10 @@ export interface BroadcastLiftInput {
    * (`abstractCollectionCell`). `cells[i]` is the cell type of operand `i`,
    * or `undefined` for an operand that is not such a trigger: that operand
    * is described exactly as for the main handler call. `undefined` when the
-   * handler declines. Read only by arm 2, when an abstract collection
-   * operand is what makes the result possibly a collection. */
+   * handler declines. Read by arm 2, when an abstract collection operand is
+   * what makes the result possibly a collection, and by arms 0 and 1 when
+   * the main answer is a collection type, with each trigger typed as its
+   * leaf cell (`perElementCollection` in `broadcastLiftType`). */
   readonly abstractCellResult?: (
     cells: ReadonlyArray<Type | undefined>
   ) => Type | undefined;
@@ -1127,6 +1140,60 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   if (skipBroadcastForVectorOpsOnViews(def, hasTensors, views))
     return undefined;
 
+  // A handler declared with the `'collection-result'` exemption computes
+  // its own collection typing (`matrix + scalar` is `matrix`); its
+  // collection-bearing result is not re-wrapped.
+  const handlerOwnsCollectionTyping =
+    def.broadcastExemptions.includes('collection-result');
+  const deferToHandler =
+    handlerOwnsCollectionTyping &&
+    (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
+      (typeof sigResult !== 'string' &&
+        sigResult.kind === 'union' &&
+        sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE))));
+
+  // The result for ONE element, when that result is itself a collection
+  // (or a tuple): `ComplexRoots(8, 3)` is a list of three roots, so
+  // `ComplexRoots([1, 8], 3)` is a list of two such lists. `undefined` when
+  // the per-element result is not a collection, or when that cannot be
+  // shown, and the lift then unwraps one rank of `sigResult` as before.
+  // A collection answer of a type handler is ambiguous: the handler saw
+  // the whole collection operand, and some handlers answer the operand's
+  // collection type (`Negate` echoes it). So the handler is called again
+  // with each trigger (`isTrigger`) typed as its leaf cell
+  // (`broadcastCellType`), and only a collection answer of that call is
+  // the result for one element. A declared result
+  // (`sigResultIsPerElement`) is solved against the cells already.
+  const perElementCollection = (
+    isTrigger: (v: BroadcastOperandView, i: number) => boolean
+  ): Type | undefined => {
+    if (deferToHandler) return undefined;
+    if (broadcastElementType(sigResult) === sigResult) return undefined;
+    if (input.sigResultIsPerElement === true)
+      return resolveTypeAlias(sigResult);
+    // An operand that is not retyped but MAY be a collection (an
+    // application typed `unknown`, a `broadcastable<E>` operand) can make
+    // the answer at the cells a collection too (`broadcastable<number>`),
+    // and that collection is not the result for one element.
+    if (
+      views.some(
+        (v, i) =>
+          !isTrigger(v, i) &&
+          (isPossiblyCollectionTypedView(v) ||
+            abstractCollectionCell(v.type) !== undefined)
+      )
+    )
+      return undefined;
+    const answer = input.abstractCellResult?.(
+      views.map((v, i) =>
+        isTrigger(v, i) ? broadcastCellType(v.type) : undefined
+      )
+    );
+    if (answer === undefined || broadcastElementType(answer) === answer)
+      return undefined;
+    return resolveTypeAlias(answer);
+  };
+
   // Arm 0 (tuple): the typing twin of the component-wise tuple broadcast.
   // The value is a `Tuple` of one per-component result, so the type is a
   // tuple of that many copies of the per-component type. A tuple whose
@@ -1136,7 +1203,11 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     const arity = tupleBroadcastArityOnViews(views);
     if (arity === 'unknown-components') return 'tuple';
     if (arity !== undefined) {
-      const element = broadcastElementType(sigResult);
+      // The cells of the component-wise broadcast are the components of the
+      // tuple operands; a scalar operand is the same in every cell.
+      const element =
+        perElementCollection((v) => isTupleShapedType(v.type)) ??
+        broadcastElementType(sigResult);
       return {
         kind: 'tuple',
         elements: Array.from({ length: arity }, () => ({
@@ -1154,17 +1225,6 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   const cellResult = hasTupleBranch(sigResult)
     ? resolveTypeAlias(sigResult)
     : broadcastElementType(sigResult);
-  // A handler declared with the `'collection-result'` exemption computes
-  // its own collection typing (`matrix + scalar` is `matrix`); its
-  // collection-bearing result is not re-wrapped.
-  const handlerOwnsCollectionTyping =
-    def.broadcastExemptions.includes('collection-result');
-  const deferToHandler =
-    handlerOwnsCollectionTyping &&
-    (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
-      (typeof sigResult !== 'string' &&
-        sigResult.kind === 'union' &&
-        sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE))));
 
   // Arm 1 (statically-visible collection): a materialized finite indexed
   // collection, an operand typed as an unbounded list / indexed collection,
@@ -1294,20 +1354,27 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // number type, so it answered a wide cell (`2u` gave `number` for
     // `u: real | list<real>`). Typed again from the union's cell, it answers
     // the narrow one (`real`).
+    // A per-element result that is a collection is the cell as it stands,
+    // and is not unwrapped (`perElementCollection`).
+    const elementCollection = perElementCollection((v) =>
+      broadcasting.includes(v)
+    );
     const unionCell =
+      elementCollection === undefined &&
       input.unionCellResult !== undefined &&
       types.every((t) => scalarOrListUnionCellType(t) !== undefined)
         ? input.unionCellResult()
         : undefined;
     const loneUnionResult = loneUnionBroadcastResultType(
       types,
-      unionCell === undefined
-        ? cellResult
-        : // A tuple result is the structured value of one cell, as for
-          // `cellResult` above: it is not unwrapped.
-          hasTupleBranch(unionCell)
-          ? resolveTypeAlias(unionCell)
-          : broadcastElementType(unionCell)
+      elementCollection ??
+        (unionCell === undefined
+          ? cellResult
+          : // A tuple result is the structured value of one cell, as for
+            // `cellResult` above: it is not unwrapped.
+            hasTupleBranch(unionCell)
+            ? resolveTypeAlias(unionCell)
+            : broadcastElementType(unionCell))
     );
     if (loneUnionResult !== undefined) return loneUnionResult;
 
@@ -1323,23 +1390,28 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       return resolveTypeAlias(sigResult);
 
     // A list of points under a tuple-broadcasting head: each cell is a
-    // tuple of the per-component result.
+    // tuple of the per-component result. A per-component result that is a
+    // collection or a tuple is such a component too
+    // (`perElementCollection`); a collection or tuple `cellResult` is not
+    // known to be one, and is not wrapped.
+    const perComponent = elementCollection ?? cellResult;
     if (
       input.broadcastsOverTuples &&
-      !hasTupleBranch(cellResult) &&
-      !isSubtype(cellResult, COLLECTION_SHAPE_TYPE)
+      (elementCollection !== undefined ||
+        (!hasTupleBranch(cellResult) &&
+          !isSubtype(cellResult, COLLECTION_SHAPE_TYPE)))
     ) {
       const arity = pointListArityOfTypes(types);
       if (arity !== undefined)
         return broadcastShapedResultType(types, {
           kind: 'tuple',
           elements: Array.from({ length: arity }, () => ({
-            type: cellResult as Type,
+            type: perComponent,
           })),
         });
     }
 
-    return broadcastShapedResultType(types, cellResult);
+    return broadcastShapedResultType(types, perComponent);
   }
 
   // Arm 2 (possibly a collection): the operand's collection-ness is not
@@ -1460,12 +1532,17 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     const abstractCell = abstractTrigger
       ? input.abstractCellResult?.(abstractCells.map((c) => c?.cell))
       : undefined;
+    // The handler typed `abstractCell` at the leaf cells, so a collection or
+    // a tuple answer is the result for one element and is not unwrapped. A
+    // declared per-element result that is a collection is kept the same way
+    // (`perElementCollection`, which calls no handler when no operand is
+    // retyped).
     let elements =
       abstractCell === undefined
-        ? cellResult
-        : hasTupleBranch(abstractCell)
-          ? resolveTypeAlias(abstractCell)
-          : broadcastElementType(abstractCell);
+        ? (perElementCollection(() => false) ?? cellResult)
+        : broadcastElementType(abstractCell) === abstractCell
+          ? abstractCell
+          : resolveTypeAlias(abstractCell);
     // A trigger whose element is itself an indexed collection is mapped to
     // its leaves, so the per-leaf result is wrapped back to the rank of that
     // element (`AbstractCollectionCell.nestedElement`).

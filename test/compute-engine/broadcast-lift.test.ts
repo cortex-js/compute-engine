@@ -242,8 +242,17 @@ describe('BROADCAST LIFT Phase 2 — declared type agrees with the broadcast val
 describe('BROADCAST LIFT Phase 1 — boundaries not crossed', () => {
   const ce = new ComputeEngine();
 
-  test('Boole of a boolean list still rejects (no boolean→number lift)', () => {
+  // `Boole` maps over a list of booleans (user decision 2026-10-18): the
+  // bracket is applied to each element. No other operator reads a boolean
+  // as a number, so the boundary stays closed for `Sin`.
+  test('Boole of a boolean list maps over the list', () => {
     const e = ce.box(['Boole', ['List', true, false, true]]);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('[1,0,1]');
+  });
+
+  test('Sin of a boolean list still rejects', () => {
+    const e = ce.box(['Sin', ['List', true, false]]);
     expect(e.isValid).toBe(false);
   });
 

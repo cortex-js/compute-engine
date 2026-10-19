@@ -23,10 +23,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { symbolicLimit } from './limit.js';
+import { isEntireIn, symbolicLimit } from './limit.js';
 import { laurentData, freshSymbol } from './series.js';
 import { differentiate } from './derivative.js';
-import { sym } from '../boxed-expression/type-guards.js';
+import { expandAll } from '../boxed-expression/expand.js';
+import { isNumber, sym } from '../boxed-expression/type-guards.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
@@ -34,7 +35,7 @@ import {
   nonzeroResidueConstant,
   polynomialExponentialSingularity,
 } from './essential-residue.js';
-import { exactlyEqual } from './contour.js';
+import { exactComplexParts, exactlyEqual, exactSign } from './contour.js';
 
 // The base `Expression` type only exposes operands after a type guard; the
 // boxed objects always have an `ops` getter (see limit.ts for the same idiom).
@@ -113,6 +114,25 @@ export function residue(
   // it (`reciprocalOfExpr` re-expands to `W + 2m`). Larger windows only
   // inflate the exact symbolic γ/ζ(k) coefficient arithmetic (the Γ
   // coefficients grow quickly with order).
+  // A branch point or a point on a branch cut has no Laurent expansion, so
+  // no residue. The probing of `lim (x − a)ⁿ·f` below cannot see a branch
+  // point: it reads `lim x·(√x/x) = 0` as a simple pole with residue 0. The
+  // Laurent kernel cannot see a cut: it expands `1/√(x² − 2)` at 1, where
+  // `x² − 2 = −1` is on the cut of `√`, as an analytic function.
+  if (hasBranchPointAt(body, varName, point)) return undefined;
+
+  // At a point with a radical (`√2`), the Laurent kernel reads a
+  // coefficient as 0 only when `evaluate()` folds it to the number 0, and
+  // `(√2 + 1)² − 3 − 2√2` does not fold. It then reads the pole of
+  // 1/((x + 1)² − 3 − 2√2) at √2 as an analytic point. At such a point, the
+  // exact Taylor method for a quotient of entire functions runs first. At a
+  // rational point or a float, the values of a polynomial fold, and the
+  // kernel is used first.
+  if (!(isNumber(point) && (point.isRational === true || !point.isExact))) {
+    const quotient = quotientPoleResidue(body, varName, point, ce);
+    if (quotient !== undefined) return quotient;
+  }
+
   const lau = laurentData(body, varName, point, ce, 4);
   if (lau) {
     if (lau.v >= 0) return ce.Zero; // analytic or removable — residue 0
@@ -157,6 +177,9 @@ export function residue(
   const special = specialFunctionResidue(body, varName, point, ce);
   if (special !== undefined) return special;
 
+  const quotient = quotientPoleResidue(body, varName, point, ce);
+  if (quotient !== undefined) return quotient;
+
   const x = ce.symbol(varName);
   const xMinusA = ce.function('Subtract', [x, point]);
 
@@ -181,12 +204,26 @@ export function residue(
   let order: number | undefined;
   let simpleLimit: Expression | undefined;
   for (let n = 1; n <= MAX_ORDER; n++) {
-    const L = symbolicLimit(shifted(n), varName, point, undefined, ce);
-    if (L !== undefined && L.isFinite === true) {
+    checkDeadline(ce._deadlineFrame);
+    const raw = symbolicLimit(shifted(n), varName, point, undefined, ce);
+    const L = finiteLimit(raw);
+    if (L !== undefined) {
       order = n;
       simpleLimit = L;
       break;
     }
+    // A constant limit that is not known to be infinite, but that cannot be
+    // proved finite (`tan(a)/(3a²)` at a point that is not real): the order
+    // of the pole cannot be decided. The limits at the next orders do not
+    // help, and their expressions grow at each order, so stop.
+    if (
+      raw !== undefined &&
+      raw.isFinite !== false &&
+      raw.isNaN !== true &&
+      !raw.has(varName) &&
+      raw.unknowns.length === 0
+    )
+      return undefined;
   }
 
   if (order === undefined) return undefined;
@@ -198,13 +235,279 @@ export function residue(
   // cancelled fraction across each differentiation.
   let g: Expression = shifted(order);
   for (let k = 0; k < order - 1; k++) {
+    checkDeadline(ce._deadlineFrame);
     const d = differentiate(g, varName);
     if (d === undefined) return undefined;
     g = frac(d);
   }
-  const L = symbolicLimit(g, varName, point, undefined, ce);
-  if (L === undefined || L.isFinite !== true) return undefined;
+  const L = finiteLimit(symbolicLimit(g, varName, point, undefined, ce));
+  if (L === undefined) return undefined;
   return ce.function('Divide', [L, ce.number(factorialBig(order - 1))]);
+}
+
+/**
+ * Whether `e` has a branch point or a branch cut at `varName = point`, so
+ * that it is not analytic there:
+ *
+ * - a root, a logarithm or a power with an exponent that is not an integer,
+ *   of an argument that is 0 at the point: `√x`, `ln x` and `x^(1/3)` at 0,
+ *   `√(x² − 2)` at √2. The value of the argument must be the number 0 or be
+ *   proved exactly 0 (`exactlyEqual()`).
+ * - a square root (or a root of even index), a logarithm or a power with an
+ *   exponent that is not an integer, of an argument that is a negative real
+ *   number at the point. The principal branch of each has its cut on the
+ *   negative real axis, and a nonconstant argument crosses the cut near
+ *   such a point: `√(x² − 2)` at 1, where `x² − 2 = −1`. The value of the
+ *   argument must be proved negative (`isNegative`, or exact parts with an
+ *   imaginary part 0 and a negative real part).
+ */
+function hasBranchPointAt(
+  e: Expression,
+  varName: string,
+  point: Expression
+): boolean {
+  if (!e.has(varName)) return false;
+  const args = oo(e);
+  const op = e.operator;
+  let arg: Expression | undefined;
+  let cut = false;
+  if (op === 'Sqrt' || op === 'Ln' || op === 'Log') {
+    arg = args[0];
+    cut = true;
+  } else if (op === 'Root') {
+    arg = args[0];
+    const n = args[1];
+    cut = !(isNumber(n) && n.isOdd === true);
+  } else if (op === 'Power') {
+    const k = args[1];
+    if (!(isNumber(k) && k.isInteger === true)) {
+      arg = args[0];
+      cut = true;
+    }
+  }
+  if (arg !== undefined && arg.has(varName)) {
+    const v = arg.subs({ [varName]: point }).evaluate();
+    const ce = e.engine;
+    if (v.isSame(0) || exactlyEqual(v, ce.Zero) === true) return true;
+    if (cut && isNegativeReal(v)) return true;
+  }
+  return args.some((a) => hasBranchPointAt(a, varName, point));
+}
+
+/** Whether the constant `v` is proved to be a negative real number. */
+function isNegativeReal(v: Expression): boolean {
+  if (v.isNegative === true) return true;
+  if (v.unknowns.length > 0) return false;
+  const parts = exactComplexParts(v);
+  if (parts === undefined) return false;
+  return (
+    exactlyEqual(parts.y, v.engine.Zero) === true && exactSign(parts.x) === -1
+  );
+}
+
+/**
+ * Residue of `body` at a pole that comes from a zero of its denominator,
+ * when its numerator and its denominator are entire functions
+ * (`isEntireIn`), from the Taylor coefficients of the numerator and of the
+ * denominator at the point. The Laurent kernel declines a point that is a sum (`1 + √2`,
+ * `1/2 + (√3/2)i`), and the probing of `lim (x − a)ⁿ·f` there is slow,
+ * because each L'Hôpital step differentiates a larger expression.
+ *
+ * Write `body` as `N/D` (`numeratorDenominator`), and let `nⱼ = N⁽ʲ⁾(a)/j!`
+ * and `dⱼ = D⁽ʲ⁾(a)/j!` be the Taylor coefficients at the point `a`. When
+ * `d₀ = … = dₘ₋₁ = 0` and `dₘ ≠ 0`, `D` has a zero of order `m`, and with
+ * `t = x − a`
+ *
+ *     N/D = t⁻ᵐ · (n₀ + n₁t + …) / (dₘ + dₘ₊₁t + …)
+ *
+ * The residue is the coefficient `cₘ₋₁` of the power series of the
+ * quotient on the right, with `c_k = (n_k − Σᵢ₌₁ᵏ dₘ₊ᵢ·c_{k−i}) / dₘ`. A zero
+ * of `N` at the point needs no special case: the formula then gives the
+ * residue of the reduced pole, or 0 for a removable point.
+ *
+ * The point must be a finite exact constant: then each coefficient is
+ * finite, because `N` and `D` are entire. Each `dⱼ` must be decided exactly
+ * to be 0 or not 0 (`exactlyEqual()`). The coefficients of `N` need no such
+ * test, so `sin(a)` is a valid coefficient although `exactComplexParts()`
+ * cannot compute its parts at a point that is not real. Returns `undefined`
+ * otherwise, when `D` is not 0 at the point, and when the order is greater
+ * than `MAX_ORDER`.
+ */
+function quotientPoleResidue(
+  body: Expression,
+  varName: string,
+  point: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  // The point must be a finite exact constant. A derivative of an entire
+  // function is entire, so its value at such a point is finite.
+  if (point.unknowns.length > 0 || exactComplexParts(point) === undefined)
+    return undefined;
+  const [num, den] = body.numeratorDenominator;
+  if (!den.has(varName)) return undefined;
+  // Both parts must be analytic at the point, so that their Taylor
+  // coefficients are the values of their derivatives there. A numerator
+  // with a branch point (`√x` at 0) has no such coefficients.
+  if (!isEntireIn(num, varName) || !isEntireIn(den, varName)) return undefined;
+
+  // The Taylor coefficients of `g` at the point, in order. Each call of
+  // `next()` returns the next coefficient, or `undefined` when it is not an
+  // exact finite constant.
+  const taylor = (g: Expression) => {
+    let h: Expression | undefined = undefined;
+    let j = 0;
+    let factorial = 1n;
+    return (): Expression | undefined => {
+      checkDeadline(ce._deadlineFrame);
+      if (h === undefined) h = g;
+      else {
+        const d = differentiate(h, varName);
+        if (d === undefined) return undefined;
+        h = d;
+        j += 1;
+        factorial *= BigInt(j);
+      }
+      // `evaluate()` does not expand a power of a sum, so the value is
+      // expanded: `(1 + √2)³` becomes `7 + 5√2`. The coefficients then stay
+      // small in the arithmetic below.
+      const v = expandAll(h.subs({ [varName]: point }).evaluate()).evaluate();
+      if (!v.isValid || v.isNaN === true || v.isFinite === false)
+        return undefined;
+      return factorial === 1n
+        ? v
+        : ce.function('Divide', [v, ce.number(factorial)]).evaluate();
+    };
+  };
+
+  // The order `m` of the zero of `D`, then the coefficients dₘ … d₂ₘ₋₁.
+  const nextD = taylor(den);
+  let order = 0;
+  const dCoeffs: Expression[] = [];
+  for (; order <= MAX_ORDER; order++) {
+    const d = nextD();
+    if (d === undefined) return undefined;
+    const zero = exactlyEqual(d, ce.Zero);
+    if (zero === undefined) return undefined;
+    if (zero === false) {
+      dCoeffs.push(d);
+      break;
+    }
+  }
+  if (order === 0 || order > MAX_ORDER) return undefined;
+  while (dCoeffs.length < order) {
+    const d = nextD();
+    if (d === undefined) return undefined;
+    dCoeffs.push(d);
+  }
+
+  const nextN = taylor(num);
+  const nCoeffs: Expression[] = [];
+  for (let j = 0; j < order; j++) {
+    const n = nextN();
+    if (n === undefined) return undefined;
+    nCoeffs.push(n);
+  }
+
+  const c: Expression[] = [];
+  for (let k = 0; k < order; k++) {
+    const terms: Expression[] = [nCoeffs[k]];
+    for (let i = 1; i <= k; i++)
+      terms.push(
+        ce.function('Negate', [ce.function('Multiply', [dCoeffs[i], c[k - i]])])
+      );
+    c.push(
+      ce.function('Divide', [ce.function('Add', terms), dCoeffs[0]]).evaluate()
+    );
+  }
+  return readableValue(c[order - 1]);
+}
+
+/**
+ * The limit `L` when it is known to be finite, or `undefined`.
+ *
+ * At a point that is a sum, the limit can be an exact constant whose
+ * `isFinite` is `undefined`: the residue of 1/(x³ + 1) at
+ * x = 1/2 + (√3/2)i is the limit `1/(3(1/2 + (√3/2)i)²)`, and `evaluate()`
+ * does not expand the power of the sum. Such a constant is accepted when
+ * `isFiniteConstant()` proves it finite.
+ */
+function finiteLimit(L: Expression | undefined): Expression | undefined {
+  if (L === undefined || L.isFinite === true) return L;
+  if (L.isFinite === false || L.isNaN === true) return undefined;
+  if (L.unknowns.length > 0 || !isFiniteConstant(L)) return undefined;
+  return readableValue(L);
+}
+
+/**
+ * Whether the constant `c` is proved finite: a finite number literal or
+ * constant symbol, or a sum, a product, a power with a nonnegative integer
+ * exponent, `exp`, `sin`, `cos`, `sinh`, `cosh` or a root of finite
+ * constants, or a quotient whose denominator is proved not 0
+ * (`exactlyEqual()`). Any other constant is finite when its exact real and
+ * imaginary parts can be computed (`exactComplexParts()` computes a quotient
+ * only when it proves that the denominator is not 0). `sin(a)` for a point
+ * `a` that is not real is finite by the first rule, although
+ * `exactComplexParts()` cannot compute its parts.
+ */
+function isFiniteConstant(c: Expression): boolean {
+  if (c.isFinite === true) return true;
+  if (c.isFinite === false || c.isNaN === true) return false;
+  const ops = oo(c);
+  const ce = c.engine;
+  switch (c.operator) {
+    case 'Add':
+    case 'Subtract':
+    case 'Negate':
+    case 'Multiply':
+    case 'Exp':
+    case 'Sin':
+    case 'Cos':
+    case 'Sinh':
+    case 'Cosh':
+    case 'Sqrt':
+    case 'Root':
+      if (ops.length > 0 && ops.every(isFiniteConstant)) return true;
+      break;
+    case 'Power': {
+      const [base, k] = ops;
+      if (sym(base) === 'ExponentialE' && isFiniteConstant(k)) return true;
+      if (isNumber(k) && k.isInteger === true && isFiniteConstant(base)) {
+        if (k.isNonNegative === true) return true;
+        if (exactlyEqual(base, ce.Zero) === false) return true;
+      }
+      break;
+    }
+    case 'Divide':
+      if (
+        isFiniteConstant(ops[0]) &&
+        isFiniteConstant(ops[1]) &&
+        exactlyEqual(ops[1], ce.Zero) === false
+      )
+        return true;
+      break;
+  }
+  return exactComplexParts(c) !== undefined;
+}
+
+/**
+ * The finite constant `c` in a form in which its value can be read. When
+ * the exact real and imaginary parts of `c` can be computed
+ * (`exactComplexParts()`), a value that is not real is returned as
+ * `re + im·i`: `1/(3(1/2 + (√3/2)i)²)` becomes `−1/6 − (√3/6)i`, and a value
+ * whose two parts are 0 is returned as 0. Any other value is returned
+ * unchanged: the real part that `exactComplexParts()` builds is not
+ * reduced.
+ */
+function readableValue(c: Expression): Expression {
+  if (c.unknowns.length > 0) return c;
+  const parts = exactComplexParts(c);
+  if (parts === undefined) return c;
+  const ce = c.engine;
+  if (exactlyEqual(parts.y, ce.Zero) === true)
+    return exactlyEqual(parts.x, ce.Zero) === true ? ce.Zero : c;
+  return ce
+    .function('Add', [parts.x, ce.function('Multiply', [parts.y, ce.I])])
+    .evaluate();
 }
 
 // Special functions with simple poles whose closed-form residues the generic

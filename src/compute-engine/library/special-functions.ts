@@ -203,23 +203,15 @@ const ELLIPTIC_E_DOMAIN: RealDomain = {
  * formulas the engine does not implement — `₂F₁(1, 1; 2; z) → 0` as
  * `z → ∞` while `₂F₁(−1, 1; 2; z)` diverges — so the application stays
  * SYMBOLIC on both routes, the same class as `Zeta(3)` (a value with no
- * closed form here). An anonymous infinity (`∞ + i`) is `NaN`, as for
- * every special-function head.
+ * closed form here).
  *
- * Returns `ce.NaN` for an anonymous infinity, `null` when the application
- * must stay symbolic, and `undefined` when every operand is finite (or not
- * a number literal) and the handler may go on.
+ * Returns `null` when the application must stay symbolic, and `undefined`
+ * when every operand is finite (or not a number literal) and the handler
+ * may go on.
  */
-function symbolicAtInfinity(
-  ops: ReadonlyArray<Expression>,
-  ce: IComputeEngine
-): Expression | null | undefined {
+function symbolicAtInfinity(ops: ReadonlyArray<Expression>): null | undefined {
   let infinite = false;
-  for (const op of ops) {
-    const point = infinitePoint(op);
-    if (point === 'anonymous') return ce.NaN;
-    if (point !== undefined) infinite = true;
-  }
+  for (const op of ops) if (infinitePoint(op) !== undefined) infinite = true;
   return infinite ? null : undefined;
 }
 
@@ -239,7 +231,7 @@ function symbolicAtInfinity(
  * - `AGM(0, ∞) = 0`: zero is an annihilator of the AGM (`AGM(0, b) = 0`
  *   identically, since the geometric mean is 0 from the first step), so
  *   the value is 0 whatever the other operand does.
- * - Two infinite operands, and an anonymous infinity: `NaN`.
+ * - Two infinite operands: `NaN`.
  *
  * A non-literal partner (a symbol) leaves the application symbolic.
  */
@@ -251,7 +243,6 @@ function agmValueAtInfinity(
   const pa = infinitePoint(a);
   const pb = infinitePoint(b);
   if (pa === undefined && pb === undefined) return undefined;
-  if (pa === 'anonymous' || pb === 'anonymous') return ce.NaN;
   if (pa !== undefined && pb !== undefined) return ce.NaN;
   const [point, partner] = pa !== undefined ? [pa, b] : [pb, a];
   if (!isNumber(partner)) return undefined;
@@ -452,8 +443,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `K(m) ≈ ln(4√−m)/√−m → 0` in every direction (K(10⁶) = 0.0016 −
       // 0.008i, K(−10⁶) = 0.008), so `±∞` and `~oo` all answer 0 (ruling
       // recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
-      // Phase F batch 8); an anonymous infinity (`∞ + i`) is `NaN`. `NaN`
-      // propagates (explicit: the carrier is not a subtype of `complex`).
+      // Phase F batch 8). `NaN` propagates (explicit: the carrier is not a
+      // subtype of `complex`).
       // No `canonical` handler, so a proven off-carrier operand is
       // rejected at boxing.
       signature: '(complex | infinity) -> number',
@@ -481,7 +472,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           return engine.Pi.div(2);
         }
         const point = infinitePoint(m);
-        if (point === 'anonymous') return engine.NaN;
         if (point !== undefined) return engine.Zero;
         return shouldNumericize(numericApproximation, m)
           ? applyN(
@@ -513,8 +503,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // value in a non-real direction, which the engine spells `~oo`
       // (`i·∞` boxes to `~oo`);
       // `E(~oo) = ~oo` (the modulus grows without bound in every
-      // direction); an anonymous infinity is `NaN`. The incomplete form
-      // stays symbolic at an infinite operand (`symbolicAtInfinity`).
+      // direction). The incomplete form stays symbolic at an infinite operand (`symbolicAtInfinity`).
       signature: '(complex | infinity, (complex | infinity)?) -> number',
       nanBehavior: 'propagate',
       // Complete E(m): real on m ≤ 1 (E(1) = 1), finite complex for m > 1.
@@ -536,7 +525,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           const [phi, m] = ops;
           if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
             return engine.Zero;
-          const held = symbolicAtInfinity(ops, engine);
+          const held = symbolicAtInfinity(ops);
           if (held !== undefined) return held ?? undefined;
           return shouldNumericize(numericApproximation, phi, m)
             ? applyN(
@@ -561,7 +550,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           return engine.Pi.div(2);
         }
         const point = infinitePoint(m);
-        if (point === 'anonymous') return engine.NaN;
         if (point === '-oo') return engine.PositiveInfinity;
         if (point !== undefined) return engine.ComplexInfinity;
         return shouldNumericize(numericApproximation, m)
@@ -604,7 +592,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // F(0|m) = 0 exactly
         if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
           return engine.Zero;
-        const held = symbolicAtInfinity([phi, m], engine);
+        const held = symbolicAtInfinity([phi, m]);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, phi, m)
           ? applyN([phi, m], ellipticF, undefined, ellipticFComplex)
@@ -641,7 +629,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           // Π(n; 0|m) = 0 exactly
           if (isNumber(phi) && !phi.isComplex && phi.isSame(0))
             return engine.Zero;
-          const held = symbolicAtInfinity(ops, engine);
+          const held = symbolicAtInfinity(ops);
           if (held !== undefined) return held ?? undefined;
           return shouldNumericize(numericApproximation, n, phi, m)
             ? applyN(
@@ -652,7 +640,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               )
             : undefined;
         }
-        const held = symbolicAtInfinity(ops, engine);
+        const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
@@ -724,7 +712,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const z = ops[3];
         if (isNumber(z) && !z.isComplex && z.isSame(0))
           return floatIfFloatOperand(ops, engine.One);
-        const held = symbolicAtInfinity(ops, engine);
+        const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
@@ -768,7 +756,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           y.isSame(0)
         )
           return engine.One;
-        const held = symbolicAtInfinity(ops, engine);
+        const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(ops, appellF1, undefined, appellF1Complex)
@@ -832,7 +820,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // decided before the infinity hold below.
         if (isNumber(z) && !z.isComplex && z.isSame(0))
           return floatIfFloatOperand(ops, engine.Zero);
-        const held = symbolicAtInfinity(ops, engine);
+        const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
         // Exact reductions (see `polylogReduce`). Evaluate the reduced form so
         // an inexact argument still numericizes (exactness contract). Some
@@ -1098,7 +1086,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const z = ops[2];
         if (isNumber(z) && !z.isComplex && z.isSame(0))
           return floatIfFloatOperand(ops, engine.One);
-        const held = symbolicAtInfinity(ops, engine);
+        const held = symbolicAtInfinity(ops);
         if (held !== undefined) return held ?? undefined;
         return shouldNumericize(numericApproximation, ...ops)
           ? applyN(
@@ -1140,7 +1128,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const j = asSmallInteger(ops[0]);
         if (j === null || j < 1 || j > 4) return undefined;
         if (ops[3] !== undefined && !ops[3].isSame(0)) return undefined;
-        const held = symbolicAtInfinity([ops[1], ops[2]], engine);
+        const held = symbolicAtInfinity([ops[1], ops[2]]);
         if (held !== undefined) return held ?? undefined;
         if (!shouldNumericize(numericApproximation, ops[1], ops[2]))
           return undefined;
@@ -1168,8 +1156,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // the engine spells `~oo` (`i·∞` boxes to `~oo`): `η(~oo) = 0`, the
       // Fungrim identity 6b9935. A real infinity lies
       // outside the domain, like every real τ, and stays symbolic as they
-      // do; an anonymous infinity is `NaN`. `NaN` propagates (explicit:
-      // the carrier is not a subtype of `complex`); no `canonical`
+      // do. `NaN` propagates (explicit: the carrier is not a subtype of `complex`); no `canonical`
       // handler, so a proven off-carrier operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
@@ -1181,7 +1168,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: ([tau], { numericApproximation, engine }) => {
         const point = infinitePoint(tau);
-        if (point === 'anonymous') return engine.NaN;
         if (point === '~oo') return engine.Zero;
         if (point !== undefined) return undefined;
         return shouldNumericize(numericApproximation, tau)
@@ -1206,8 +1192,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // with the same reading as `DedekindEta`'s: the cusp `i·∞` is spelled
       // `~oo` and `E_s(~oo) = 1` for a valid weight (the Fungrim identity
       // ad9ba2; the kernel already answered 1 there, by computing with the
-      // nome q = 0), a real infinity stays symbolic like every real τ, and
-      // an anonymous infinity is `NaN`. `NaN` propagates (explicit); no
+      // nome q = 0), and a real infinity stays symbolic like every real τ.
+      // `NaN` propagates (explicit); no
       // `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature: '(number, complex | infinity) -> number',
@@ -1224,7 +1210,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const s = asSmallInteger(ops[0]);
         if (s === null || s < 2 || s % 2 !== 0) return undefined;
         const point = infinitePoint(ops[1]);
-        if (point === 'anonymous') return engine.NaN;
         if (point === '~oo') return engine.One;
         if (point !== undefined) return undefined;
         if (!shouldNumericize(numericApproximation, ops[1])) return undefined;
@@ -1248,8 +1233,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // the signed infinities (`Ei(+∞) = +∞`, `Ei(−∞) = 0`, both verified
       // numerically: Ei(100) = 2.7·10⁴¹, Ei(−100) = −3.7·10⁻⁴⁶). At `~oo`
       // there is no value — `Ei(z) ≈ e^z/z` grows to the right and decays
-      // to the left — so the answer is `NaN`, as it is for an anonymous
-      // infinity. `NaN` propagates (explicit: the carrier is not a subtype
+      // to the left — so the answer is `NaN`. `NaN` propagates (explicit: the carrier is not a subtype
       // of `complex`); no `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
@@ -1288,8 +1272,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.Zero;
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1311,7 +1294,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // (li(−10⁴) = −1067 + 428i), an infinite value in a non-real
       // direction, which the engine spells `~oo`. At
       // `~oo` there is no value (`ln(~oo) = ~oo` and `Ei(~oo)` has none):
-      // `NaN`, as for an anonymous infinity. A negative or non-real FINITE
+      // `NaN`. A negative or non-real FINITE
       // argument stays symbolic (no kernel on that side of the axis, a
       // capability gap). `NaN` propagates (explicit: the carrier is not a
       // subtype of `complex`); no `canonical` handler, so a proven
@@ -1361,8 +1344,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.ComplexInfinity;
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
         if (x.isComplex || x.isNegative) return undefined;

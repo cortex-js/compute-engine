@@ -28,6 +28,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
+import { exactlyEqual } from './contour.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions
@@ -439,8 +440,18 @@ function substituteAtFinitePoint(
   // limit's answer: the LIMIT can still exist through the directed
   // strategies (the inner limit of `1/x²` is `+∞`, and `Ln(+∞) = +∞`),
   // so decline and let the caller fall through to them.
+  //
+  // A subterm whose value at the point is 0, although that value does not
+  // fold to the number literal 0 (see `isUnfoldedZero`), is replaced by 0
+  // before the substitution. Otherwise `1/(x³ + 1)` at x = 1/2 + (√3/2)i
+  // substitutes to `1/(1 + (1/2 + (√3/2)i)³)`, which reads as a finite value
+  // but is `1/0`, and `(x − a)/(x³ + 1)` substitutes to `0`, although it is
+  // `0/0`. With the replacement they give `~∞` and `NaN`, which are not read
+  // as a limit, and the caller uses L'Hôpital or the pole resolution.
   const substituteAndCheck = (expr: Expression): Expression | undefined => {
-    const at = expr.subs({ [x]: a }).evaluate();
+    const at = replaceExactZeros(expr, x, a, ce)
+      .subs({ [x]: a })
+      .evaluate();
     return at.isValid ? at : undefined;
   };
   let current = e;
@@ -485,6 +496,171 @@ function substituteAtFinitePoint(
     const value = jumpReplacementValue(jump, s, x, a, ce);
     if (value === undefined) return undefined;
     current = replaceSubterm(current, jump, value);
+  }
+  return undefined;
+}
+
+/**
+ * Whether the constant `c` is exactly 0 although it is not the number
+ * literal 0. `evaluate()` does not expand a power of a sum, so at
+ * x = 1/2 + (√3/2)i the value of x³ + 1 stays the sum
+ * `1 + (1/2 + (√3/2)i)³`, which is 0, and at x = 1 + √2 the value of
+ * x² − 3 − 2√2 stays `(1 + √2)² − 3 − 2√2`, which is 0. The test computes
+ * the exact real and imaginary parts of `c` (`exactlyEqual()`), so it never
+ * reads a value that is only near 0 as 0. It answers `false` when the parts
+ * cannot be computed exactly, and for an expression with an unknown.
+ */
+function isUnfoldedZero(c: Expression): boolean {
+  if (isNumber(c) || !isFunction(c) || c.unknowns.length > 0) return false;
+  return exactlyEqual(c, c.engine.Zero) === true;
+}
+
+/**
+ * `e` with each largest subterm that contains `x` and whose value at
+ * `x = a` is an exact zero that does not fold to the number literal 0 (see
+ * `isUnfoldedZero`) replaced by 0. `e` itself when there is no such
+ * subterm.
+ *
+ * When the point is a rational number literal or a float and `e` has no
+ * algebraic constant that is not rational (`hasIrrationalAlgebraic`), `e`
+ * is returned at once, without the walk (which evaluates each subterm).
+ * There, the value of a polynomial or a rational function folds to a
+ * number literal, and an exact zero that does not fold could come only
+ * from an identity of transcendental functions (`sin²x + cos²x − 1`),
+ * which `exactlyEqual()` cannot prove. With a radical or `i`, the walk is
+ * necessary: `(x + 1)² − 3 − 2√2` does not fold at √2, and
+ * `(1 + √2 + t)³ − (3 + 2√2)(1 + √2 + t)` does not fold at t = 0 (the
+ * limit at a point that is a sum is taken at 0 after a shift).
+ */
+function replaceExactZeros(
+  e: Expression,
+  x: string,
+  a: Expression,
+  ce: ComputeEngine
+): Expression {
+  if (
+    isNumber(a) &&
+    (a.isRational === true || !a.isExact) &&
+    !hasIrrationalAlgebraic(a) &&
+    !hasIrrationalAlgebraic(e)
+  )
+    return e;
+  return replaceExactZerosWalk(e, x, a, ce);
+}
+
+function replaceExactZerosWalk(
+  e: Expression,
+  x: string,
+  a: Expression,
+  ce: ComputeEngine
+): Expression {
+  if (!isFunction(e) || !e.has(x)) return e;
+  if (isUnfoldedZero(e.subs({ [x]: a }).evaluate())) return ce.Zero;
+  const ops = e.ops.map((op) => replaceExactZerosWalk(op, x, a, ce));
+  if (ops.every((op, i) => op === e.ops[i])) return e;
+  return ce.function(e.operator, ops);
+}
+
+/**
+ * Whether `e` contains an algebraic constant that is not rational: an exact
+ * number literal that is not rational (`√2`, an exact complex number), the
+ * imaginary unit, a root, or a power whose exponent is a number literal
+ * that is not an integer (`2^(1/3)`). The test reads the structure only;
+ * it evaluates nothing.
+ */
+function hasIrrationalAlgebraic(e: Expression): boolean {
+  if (isNumber(e)) return e.isExact && e.isRational !== true;
+  if (isSymbol(e)) return e.symbol === 'ImaginaryUnit';
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'Sqrt' || op === 'Root') return true;
+  if (op === 'Power' && isNumber(e.op2) && e.op2.isInteger !== true)
+    return true;
+  return e.ops.some(hasIrrationalAlgebraic);
+}
+
+/**
+ * Whether `e` is an entire function of `x`: a polynomial in `x`, or a
+ * function built from `x` and constants with `+`, `×`, powers with a
+ * nonnegative integer exponent, `exp`, `sin`, `cos`, `sinh` and `cosh`.
+ * Such a function is analytic at each point, so its Taylor coefficients at
+ * a point are the values of its derivatives there, and the order of a zero
+ * is the number of derivatives that are 0 at the point.
+ */
+export function isEntireIn(e: Expression, x: string): boolean {
+  if (!e.has(x)) return true;
+  if (isSymbol(e)) return true;
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'Power') {
+    if (isSymbol(e.op1) && e.op1.symbol === 'ExponentialE')
+      return isEntireIn(e.op2, x);
+    const k = e.op2;
+    return (
+      !k.has(x) &&
+      isNumber(k) &&
+      k.isInteger === true &&
+      k.isNonNegative === true &&
+      isEntireIn(e.op1, x)
+    );
+  }
+  if (!ENTIRE_HEADS.has(op)) return false;
+  return e.ops.every((arg) => isEntireIn(arg, x));
+}
+
+const ENTIRE_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Sinh',
+  'Cosh',
+]);
+
+/**
+ * The leading Laurent term of `n0 / den` at `x = a`, where `n0` is the
+ * nonzero limit of the numerator and `den` is an entire function of `x`
+ * (`isEntireIn`) that is 0 at the point. The order `k`
+ * of the zero of `den` is the smallest `k` with a nonzero `den⁽ᵏ⁾(a)`, so
+ * `n0 / den` is `n0 · k! / den⁽ᵏ⁾(a) · (x − a)⁻ᵏ + …`. This decides the pole
+ * when the Laurent kernel declines the point: the kernel declines a point
+ * that is a sum (`1 + √2`, `1/2 + (√3/2)i`), because `evaluate()` does not
+ * fold the coefficients that are 0 there.
+ *
+ * Each derivative value must be decided exactly: a value that is 0 must be
+ * the number 0 or an exact zero (`isUnfoldedZero`), and the first value
+ * that is not 0 must be proved nonzero (`exactlyEqual()`) and be finite.
+ * `undefined` otherwise, and when the order is greater than 8.
+ */
+function leadingPoleTerm(
+  n0: Expression,
+  den: Expression,
+  x: string,
+  a: Expression,
+  ce: ComputeEngine
+): { v: number; coeff: (p: number) => Expression } | undefined {
+  let g = den;
+  let factorial = 1;
+  for (let k = 1; k <= 8; k++) {
+    const dg = differentiate(g, x);
+    if (dg === undefined) return undefined;
+    g = dg;
+    factorial *= k;
+    const c = g.subs({ [x]: a }).evaluate();
+    if (!c.isValid || c.isNaN === true || c.isInfinity === true)
+      return undefined;
+    if (c.isSame(0) || isUnfoldedZero(c)) continue;
+    if (!isNumber(c) && exactlyEqual(c, ce.Zero) !== false) return undefined;
+    const lead = ce
+      .function('Divide', [
+        ce.function('Multiply', [n0, ce.number(factorial)]),
+        c,
+      ])
+      .evaluate();
+    return { v: -k, coeff: () => lead };
   }
   return undefined;
 }
@@ -905,6 +1081,25 @@ function limitOfQuotientAtFinite(
     const sd = rootSignNear(den, x, a, dir, ce);
     if (sn !== 0 && sd !== undefined)
       return sn * sd > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
+  // A nonzero numerator over an entire denominator (`isEntireIn`) that is
+  // exactly 0 at the point: a pole, whose order and leading coefficient come
+  // from the derivatives of the denominator (`leadingPoleTerm`). It resolves
+  // to a signed infinity under the same rule as the Laurent pole resolution
+  // (`signedPoleInfinity`).
+  if (
+    n0 &&
+    d0 &&
+    d0.isSame(0) &&
+    isDefiniteValue(n0, x) &&
+    !n0.isSame(0) &&
+    isEntireIn(den, x)
+  ) {
+    const L = leadingPoleTerm(n0, den, x, a, ce);
+    if (L) {
+      const inf = signedPoleInfinity(L, dir, ce);
+      if (inf) return inf;
+    }
   }
   return undefined;
 }
@@ -1935,6 +2130,10 @@ function asRatio(
   ce: ComputeEngine
 ): { num: Expression; den: Expression } | undefined {
   if (e.operator === 'Divide') return { num: o1(e), den: o2(e) };
+  // b⁻ᵏ form: canonicalization writes `1/(x² − 2)²` as `(x² − 2)^(−2)`,
+  // and the quotient strategies read it as `1 / (x² − 2)²`.
+  if (e.operator === 'Power' && o2(e).isNegative === true)
+    return { num: ce.One, den: ce.function('Power', [o1(e), o2(e).neg()]) };
   // a · b⁻¹ form
   if (e.operator === 'Multiply') {
     const num: Expression[] = [];

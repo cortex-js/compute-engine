@@ -213,10 +213,9 @@ function provablyNaN(d: OperandDescriptor): boolean {
  * The literal gate is the twin of that function's `isNumber` gate: a
  * symbol or a compound expression answers `undefined` even when its type
  * proves it infinite, and the type-channel arms of the handlers below
- * decide for it instead. A literal at one of the three named infinities
- * carries the matching singleton type; an anonymous infinity (`∞ + i`)
- * carries the `infinity` tier, which is the arm left once the three
- * singletons have been tested.
+ * decide for it instead. A literal at one of the three infinities carries
+ * the matching singleton type, and no other infinite number literal exists
+ * (see `infinitePoint`).
  */
 function infinitePointOfDescriptor(
   d: OperandDescriptor
@@ -227,7 +226,7 @@ function infinitePointOfDescriptor(
   if (isSubtype(t, SIGNED_INFINITY_TYPE)) {
     return isSubtype(t, { kind: 'value', value: Infinity }) ? '+oo' : '-oo';
   }
-  return isSubtype(t, 'infinity') ? 'anonymous' : undefined;
+  return undefined;
 }
 
 /**

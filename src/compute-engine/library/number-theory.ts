@@ -336,6 +336,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.',
       signature: '(integer) -> list<tuple<integer, integer>>',
+      broadcastable: true,
       examples: ['FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]'],
       // Complete precondition: any integer (0 and ±1 have defined
       // degenerate factorizations) — see `canEnumerate` (types-definitions.ts).
@@ -440,6 +441,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.',
       signature: '(integer) -> list<integer>',
+      broadcastable: true,
       examples: ['Divisors(12)  // [1, 2, 3, 4, 6, 12]'],
       // Complete precondition (the evaluate guard on the ground operand) —
       // see `canEnumerate` (types-definitions.ts).
@@ -573,6 +575,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.',
       signature: '(integer) -> list<integer>',
+      broadcastable: true,
       examples: ['PrimeFactors(360)  // [2, 3, 5]'],
       // Complete precondition — see `Divisors`.
       canEnumerate: (expr) =>
@@ -818,6 +821,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).',
       signature: '(integer, integer) -> tuple<integer, integer, integer>',
+      broadcastable: true,
       examples: ['ExtendedGCD(12, 18)  // (6, -1, 1)'],
       // Complete precondition (the evaluate guard on both ground operands):
       // two integers always yield the Bézout tuple.
@@ -992,6 +996,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 10.
       signature: '(real, integer?) -> list<integer>',
+      broadcastable: true,
       nanBehavior: ['reject', 'reject'],
       requires: ([, n]) => {
         // Decided for an INTEGER literal only: a non-integer value is outside
@@ -1113,6 +1118,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.',
       signature: '(integer, integer?, integer?) -> list<integer>',
+      broadcastable: true,
       examples: ['IntegerDigits(255, 16)  // [15, 15]'],
       // Complete precondition, mirroring every decline in the evaluate
       // handler: integer `n`, integer base >= 2 (default 10), digit-count cap,
@@ -1178,9 +1184,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
       signature: '(integer, integer?, integer?) -> integer | list<integer>',
+      broadcastable: true,
+      // One count, or the list of the counts of every digit.
       type: ([, , digit], context) =>
         BoxedType.forResult(
-          digit !== undefined ? 'integer' : 'list',
+          digit !== undefined ? 'integer' : 'list<integer>',
           context.engine._typeResolver
         ),
       examples: ['DigitCount(122, 10, 2)  // 2'],
@@ -1509,6 +1517,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.',
       signature: '(integer) -> list<integer>',
+      broadcastable: true,
       examples: [
         'PrimitiveRootList(7)  // [3, 5]',
         'PrimitiveRootList(8)  // []',

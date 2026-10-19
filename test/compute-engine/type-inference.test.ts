@@ -96,11 +96,13 @@ describe('TYPE INFERENCE FOR TRIG FUNCTIONS', () => {
 });
 
 describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
-  it('Gamma of real → real', () => {
+  it('Gamma of real → real, or ~oo at a pole', () => {
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
     const expr = localCe.parse('\\Gamma(x)');
-    expect(expr.type.toString()).toBe('real');
+    // `Gamma(-1)` is `~oo`, so a real argument adds the `~oo` arm (stored
+    // as `infinity`).
+    expect(expr.type.toString()).toBe('infinity | real');
   });
 
   it('Floor returns integer', () => {

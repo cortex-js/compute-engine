@@ -190,9 +190,7 @@ function binomialBigint(
  * - `C(n, ~oo)`: `Indeterminate` (`NaN` for a float `n`). The modulus wanders between 0 and `+∞` with the
  *   direction (`C(5, 10⁶·e^{i}) = 10¹¹⁴⁸⁰⁴⁸` against
  *   `C(5, −10⁶) = 1.5·10⁻⁴⁴`).
- * - Two infinite operands: `Indeterminate`. An anonymous infinity such as
- *   `∞ + i` in either slot (a float literal): `NaN`, the uniform rule of the
- *   special-function heads.
+ * - Two infinite operands: `Indeterminate`.
  *
  * `Indeterminate` is the exact answer to a form with no value; a float
  * operand makes it `NaN` (`indeterminateFormAnswer()`).
@@ -208,7 +206,6 @@ function binomialValueAtInfinity(
   const pn = infinitePoint(n);
   const pk = infinitePoint(k);
   if (pn === undefined && pk === undefined) return undefined;
-  if (pn === 'anonymous' || pk === 'anonymous') return ce.NaN;
 
   // The zero function: `C(n, k) = 0` for every negative integer `k`.
   if (pk === undefined && isNegativeIntegerLiteral(k)) return ce.Zero;
@@ -508,8 +505,7 @@ function negativeGammaSign(
  * - `(a)_{~oo}`: `Indeterminate` (`NaN` for a float `a`). `|Γ(a+k)|` decays like `e^{−π|Im k|/2}` in the
  *   imaginary direction and diverges along the positive real axis, so the
  *   modulus has no limit.
- * - Two infinite operands: `Indeterminate`. An anonymous infinity such as
- *   `∞ + i` in either slot (a float literal): `NaN`.
+ * - Two infinite operands: `Indeterminate`.
  *
  * `Indeterminate` is the exact answer to a form with no value; a float
  * operand makes it `NaN` (`indeterminateFormAnswer()`).
@@ -522,7 +518,6 @@ function pochhammerValueAtInfinity(
   const pa = infinitePoint(a);
   const pk = infinitePoint(k);
   if (pa === undefined && pk === undefined) return undefined;
-  if (pa === 'anonymous' || pk === 'anonymous') return ce.NaN;
   if (pa !== undefined && pk !== undefined)
     return indeterminateFormAnswer(ce, [a, k]);
 
@@ -1126,15 +1121,24 @@ function* powerSetIterator(
   const n = elements.length;
   const ce = expr.engine;
 
-  const total = 1 << n; // 2ⁿ subsets
-  for (let mask = 0; mask < total; mask++) {
+  // The 2ⁿ subsets are listed in the order of a binary counter whose bit `i`
+  // tells whether element `i` is in the subset. The counter is an array of
+  // bits, not a number: the bit operators of JavaScript use 32 bits, so
+  // `1 << n` wrapped for a set of 32 or more elements (`1 << 33` is `2`), and
+  // the walk ended after the first subsets.
+  const bits: boolean[] = new Array(n).fill(false);
+  while (true) {
     const subset: Expression[] = [];
-    for (let i = 0; i < n; i++) {
-      if ((mask & (1 << i)) !== 0) {
-        subset.push(elements[i]);
-      }
-    }
+    for (let i = 0; i < n; i++) if (bits[i]) subset.push(elements[i]);
     yield subset.length === 0 ? ce.symbol('EmptySet') : ce._fn('Set', subset);
+    // Add one to the counter. A carry past the last bit ends the walk.
+    let i = 0;
+    while (i < n && bits[i]) {
+      bits[i] = false;
+      i += 1;
+    }
+    if (i === n) return;
+    bits[i] = true;
   }
 }
 
@@ -1306,21 +1310,42 @@ function* permutationsIterator(
   const k = kExpr ? toIntegerOperand(kExpr) : all.length;
   if (k === null || k < 0 || k > all.length) return;
 
-  function* permute(
-    prefix: Expression[],
-    rest: Expression[]
-  ): Generator<Expression[]> {
-    if (prefix.length === k) {
-      yield prefix;
-      return;
-    }
-    for (let i = 0; i < rest.length; i++) {
-      const next = rest.slice();
-      const [item] = next.splice(i, 1);
-      yield* permute([...prefix, item], next);
-    }
+  // The arrangements are listed in the order of the indices of their
+  // elements in the source: `[1, 2, 3]`, `[1, 3, 2]`, `[2, 1, 3]`, …. The
+  // walk is a loop over `idx`, the indices of the arrangement, and not a
+  // recursion: a recursion of depth `k` exceeded the call stack for a long
+  // arrangement (`First(Permutations(Range(1, 5000)))`).
+  if (k === 0) {
+    yield innerRun(ce, xs, []);
+    return;
   }
-  for (const perm of permute([], all)) yield innerRun(ce, xs, perm);
+  const n = all.length;
+  const used: boolean[] = new Array(n).fill(false);
+  // `idx[p]` is the index of the element at position `p`, or -1 when no
+  // element is chosen there yet.
+  const idx: number[] = new Array(k).fill(-1);
+  let p = 0;
+  while (p >= 0) {
+    // Choose the next unused index after the current one at position `p`.
+    if (idx[p] >= 0) used[idx[p]] = false;
+    let j = idx[p] + 1;
+    while (j < n && used[j]) j += 1;
+    if (j >= n) {
+      // No index is left at this position: go back one position.
+      idx[p] = -1;
+      p -= 1;
+      continue;
+    }
+    idx[p] = j;
+    used[j] = true;
+    if (p === k - 1)
+      yield innerRun(
+        ce,
+        xs,
+        idx.map((i) => all[i])
+      );
+    else p += 1;
+  }
 }
 
 /** Stream the `k`-element combinations of a (finite) collection, in
@@ -1355,19 +1380,27 @@ function* combinationsIterator(
   const k = k0;
   if (k > all.length) return;
 
-  function* combine(
-    start: number,
-    combo: Expression[]
-  ): Generator<Expression[]> {
-    if (combo.length === k) {
-      yield combo;
-      return;
-    }
-    for (let i = start; i < all.length; i++) {
-      yield* combine(i + 1, [...combo, all[i]]);
-    }
+  // The combinations are listed in the order of the indices of their
+  // elements in the source: `[1, 2]`, `[1, 3]`, `[2, 3]`. The walk is a loop
+  // over `idx`, the increasing indices of the combination, and not a
+  // recursion: a recursion of depth `k` exceeded the call stack for a long
+  // combination (`First(Combinations(Range(1, 5000), 5000))`).
+  const n = all.length;
+  const idx = Array.from({ length: k }, (_, i) => i);
+  while (true) {
+    yield innerRun(
+      ce,
+      xs,
+      idx.map((i) => all[i])
+    );
+    // The last position whose index can still increase: the index at
+    // position `i` is at most `n - k + i`.
+    let i = k - 1;
+    while (i >= 0 && idx[i] === n - k + i) i -= 1;
+    if (i < 0) return;
+    idx[i] += 1;
+    for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
   }
-  for (const combo of combine(0, [])) yield innerRun(ce, xs, combo);
 }
 
 /**

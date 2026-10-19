@@ -302,8 +302,7 @@ function gammaIsPositiveAt(a: Expression): boolean {
  * - `Q(−∞, z)`: `Indeterminate`. `Q` is identically 0 at every negative integer `a`
  *   (a pole of `Γ(a)`) and diverges to `−∞` between consecutive poles
  *   (`Q(−10⁶−¼, 2) = −7·10^5264672`), so there is no limit.
- * - `~oo` in either slot, or two infinite operands: `Indeterminate`. An
- *   anonymous infinity such as `∞ + i` (a float literal): `NaN`.
+ * - `~oo` in either slot, or two infinite operands: `Indeterminate`.
  *
  * `Indeterminate` is the exact answer to a form with no value; a float
  * operand makes it `NaN` (`indeterminateFormAnswer()`). `Q(a, −∞)` for a
@@ -318,7 +317,6 @@ function gammaRegularizedValueAtInfinity(
   const pa = infinitePoint(a);
   const pz = infinitePoint(z);
   if (pa === undefined && pz === undefined) return undefined;
-  if (pa === 'anonymous' || pz === 'anonymous') return ce.NaN;
   if (pa !== undefined && pz !== undefined)
     return indeterminateFormAnswer(ce, [a, z]);
   if (pz === '+oo') return isProvablyFinite(a) ? ce.Zero : undefined;
@@ -402,8 +400,8 @@ function gammaRegularizedSeries(
  *   `I_1(a, b) = 1` hold for every positive `a` and `b`, so they hold in the
  *   limit as well. Anywhere else — a symbolic `x`, a complex `x`, a real `x`
  *   outside `[0, 1]` — nothing is established and the answer stays symbolic.
- * - Every other infinite point (an infinite `x`; `−∞`, `~oo` or an anonymous
- *   infinity in `a` or `b`; an unproven finite partner) is outside that
+ * - Every other infinite point (an infinite `x`; `−∞` or `~oo` in `a` or
+ *   `b`; an unproven finite partner) is outside that
  *   region and stays SYMBOLIC, as the corresponding finite points do. A
  *   capability gap must not be reported as an indeterminate value: for
  *   integer `a` and `b`, `I_x(a, b)` is a polynomial in `x` with a perfectly

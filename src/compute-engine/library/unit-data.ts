@@ -14,6 +14,7 @@ export {
   getUnitScale,
   areCompatibleUnits,
   convertUnit,
+  unitConversionCoefficients,
   getExpressionDimension,
   getExpressionScale,
   parseUnitDSL,

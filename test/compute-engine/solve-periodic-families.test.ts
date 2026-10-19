@@ -416,3 +416,97 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
     expect(solve('\\frac{\\sin(x)}{x} = 0').operator).toBe('Solve');
   });
 });
+
+// Over the complex numbers, a periodic family can be only a part of the
+// roots. `e^{sin x} = 1` holds when `sin x = 2πik` for an integer `k`: the
+// roots are `arcsin(2πik) + 2πm` and `π − arcsin(2πik) + 2πm`, with two
+// integer parameters. A list of families has one parameter, thus it cannot
+// hold these roots, and the equation stays unevaluated. The answer was
+// `[πt]`, the roots with `k = 0` only.
+describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
+  const overC = (eq: unknown): Expression =>
+    ce.box(['Solve', eq, ['Element', 'x', 'ComplexNumbers']] as any).evaluate();
+
+  test('e^{sin x} = 1 has roots that are not in a family', () => {
+    // `z = arcsin(2πi)` is a root that is not real, thus not in `[πt]`
+    const z = ce.parse('\\arcsin(2\\pi i)').N();
+    expect(Math.abs(z.im)).toBeGreaterThan(1);
+    const value = ce.box(['Exp', ['Sin', z]]).N();
+    expect(Math.hypot(value.re - 1, value.im)).toBeLessThan(1e-12);
+
+    expect(overC(['Equal', ['Exp', ['Sin', 'x']], 1]).operator).toBe('Solve');
+    expect(
+      overC(['Equal', ['Exp', ['Multiply', 2, ['Sin', 'x']]], 1]).operator
+    ).toBe('Solve');
+    expect(
+      overC(['Equal', ['Exp', ['Cos', 'x']], 'ExponentialE']).operator
+    ).toBe('Solve');
+    // Over the real numbers and with no domain, `sin x = 2πik` has a real
+    // root only for `k = 0`: the families are all the roots
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Exp', ['Sin', 'x']], 1],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[pi * t]');
+    expect(solve('e^{\\sin(x)} = 1').toString()).toBe('[pi * t]');
+  });
+
+  test('a hyperbolic function has an imaginary period', () => {
+    // `sinh(iπ) = 0` and `cosh(2πi) = 1`: over the complex numbers, the
+    // roots are not only the real ones
+    const s = ce.box(['Sinh', ['Multiply', 'ImaginaryUnit', 'Pi']]).N();
+    expect(Math.hypot(s.re, s.im)).toBeLessThan(1e-12);
+    const c = ce
+      .box([
+        'Cosh',
+        ['Add', ['Arcosh', 2], ['Multiply', 2, 'ImaginaryUnit', 'Pi']],
+      ])
+      .N();
+    expect(Math.hypot(c.re - 2, c.im)).toBeLessThan(1e-12);
+    expect(overC(['Equal', ['Sinh', 'x'], 0]).operator).toBe('Solve');
+    expect(overC(['Equal', ['Cosh', 'x'], 2]).operator).toBe('Solve');
+    expect(overC(['Equal', ['Tanh', 'x'], ['Rational', 1, 2]]).operator).toBe(
+      'Solve'
+    );
+    // Over the real numbers, the roots are unchanged
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Sinh', 'x'], 0],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[0]');
+    expect(solve('\\cosh(x) = 2').toString()).toBe('[arcosh(2),-arcosh(2)]');
+  });
+
+  test('the families of sin(x) = c hold all the complex roots', () => {
+    // `sin z = c` has the roots `arcsin(c) + 2πk` and `π − arcsin(c) + 2πk`
+    // for each complex `c`
+    const result = overC(['Equal', ['Sin', 'x'], 'ImaginaryUnit']);
+    expect(result.toString()).toBe(
+      '[2pi * t + arcsin(i),2pi * t + pi - arcsin(i)]'
+    );
+    for (const family of result.ops!) {
+      for (const k of [-2, 0, 3]) {
+        const z = family.subs({ t: k }).N();
+        const v = ce.box(['Sin', z]).N();
+        expect(Math.hypot(v.re, v.im - 1)).toBeLessThan(1e-12);
+      }
+    }
+    expect(
+      overC([
+        'Equal',
+        ['Power', ['Sin', 'x'], 2],
+        ['Rational', 1, 4],
+      ]).toString()
+    ).toBe('[pi * t - 1/6 * pi,pi * t + 1/6 * pi]');
+  });
+});

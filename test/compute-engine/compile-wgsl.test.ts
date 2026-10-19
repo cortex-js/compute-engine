@@ -565,7 +565,9 @@ describe('WGSL COMPILATION', () => {
       expect(code).toContain('for (var i: i32 = 1; i <= 5; i++)');
       // The i32 loop counter is consumed as a float in float math (CO-P1-2):
       // `f32(i)`, not a bare `i` (which is a WGSL i32/f32 type mismatch).
-      expect(code).toContain('acc = acc + f32(i)');
+      // `acc` is an input, so the loop writes a local copy of it.
+      expect(code).toContain('var _tv1: f32 = acc;');
+      expect(code).toContain('_tv1 = _tv1 + f32(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');

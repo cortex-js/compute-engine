@@ -1613,10 +1613,30 @@ export interface CompileTarget<Expr = unknown> {
    * - Python `compileFunction()` starts the function with a local of the
    *   same name, initialized from the module global, for each written name
    *   that is not a parameter (a parameter is a local already).
+   * - The GLSL and WGSL `compile()` and `compileFunction()` and the Python
+   *   `compile()` compile the expression a second time, with each written
+   *   name read and written as a local copy (`inputLocals`) that starts with
+   *   the value of the input. On these routes the set also records a written
+   *   `vars` key, by its name: it is an input that the host gives too.
    *
    * Survives the compiler's `{ ...target }` spreads by reference.
    */
   inputWrites?: Set<MathJsonSymbol>;
+
+  /**
+   * The local copy of each input that the body writes: the name of the free
+   * symbol, mapped to the identifier of a local variable that the target
+   * declares before the body, with the value of the input. The `var` hook of
+   * the target resolves each read of the name to the local, and an `Assign`
+   * of the name writes the same local (`BaseCompiler.assignLValue`). A shader
+   * cannot write an input (a uniform is read-only), and a Python body that
+   * assigns a global name makes it a local of the enclosing function, so a
+   * read before the write fails. The local avoids both, and the value that
+   * the host gives (a uniform, a Python name) does not change. The
+   * interpreter changes the engine's binding, which is not a value of the
+   * host.
+   */
+  inputLocals?: ReadonlyMap<MathJsonSymbol, string>;
 
   /**
    * Mutable per-compile registry for user-defined functions — a symbol whose

@@ -302,6 +302,8 @@ import {
   numericTypeHandler as numericTypeHandlerOnTypes,
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
   gammaPoleType as gammaPoleTypeOnTypes,
+  realOrPole as realOrPoleOnTypes,
+  REAL_OR_COMPLEX_INFINITY_TYPE,
   extremumType as extremumTypeOnTypes,
   elementExtremumType as elementExtremumTypeOnTypes,
   extremumRangeType as extremumRangeTypeOnTypes,
@@ -340,6 +342,18 @@ const INTEGER_PREDICATE_CARRIER_TYPE = parseType('complex | nan');
  * `Power` evaluate handler enforces it — see the comment on the `Power`
  * signature. */
 const POWER_EXPONENT_CARRIER_TYPE = parseType('complex | signed_infinity');
+
+// The values of `n!` for an integer `n` of unknown sign: an integer for
+// `n ≥ 0`, and a pole (`~oo`) for `n < 0`.
+const INTEGER_OR_COMPLEX_INFINITY_TYPE = parseType('integer | ~oo');
+// The values of `n!!` for an integer `n` of unknown sign: an integer for
+// `n ≥ 0`, and `NaN` for `n < 0` (the evaluate handler of `Factorial2`).
+const INTEGER_OR_NAN_TYPE = parseType('integer | nan');
+// The values of `x!!` for a real `x` that can be a negative integer.
+const REAL_OR_NAN_TYPE = parseType('real | nan');
+// The values of `GammaLn(x)` for a real `x` that can be a pole of Γ: the
+// value at a pole is `+oo`.
+const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
 
 /**
  * Above this many decimal digits an exact factorial is impractical to
@@ -3398,11 +3412,6 @@ function literalPredicateType(
  *   and stayed inert, which `docs/ERROR-MODEL.md` §1 forbids as the
  *   terminal answer to a decided question.
  *
- * - An "anonymous" infinity such as `∞ + i` (a complex literal with an
- *   infinite component, which neither `isInfinity` nor `isFinite` reports)
- *   carries no usable direction and is a float literal, so the value is
- *   `NaN`, the uniform rule for every special-function head of this file.
- *
  * The four heads declare the carrier `complex | infinity`, so every one of
  * these points is IN the carrier and the answer is a value, never a
  * boxing error (the Γ-family convention: the direction with a limit gets
@@ -3432,8 +3441,7 @@ export function infiniteGammaFamilyValue(
  *   ψ₃ = 2·10⁻¹⁸). The Fungrim identity 1cbe83 states the same.
  * - `−∞` and `~∞`: no limit — the poles at the non-positive integers
  *   accumulate there, and between consecutive poles ψ₁ returns to ≈ π²
- *   (ψ₁(−10⁶ − ½) = 9.87) — so the value is `Indeterminate`. An anonymous
- *   infinity (`∞ + i`, a float literal) is `NaN`.
+ *   (ψ₁(−10⁶ − ½) = 9.87) — so the value is `Indeterminate`.
  * - A pole (a non-positive integer): `~∞` for every order. Near `−k`,
  *   `ψ⁽ⁿ⁾(x) ≈ (−1)ⁿ⁺¹ n!/(x + k)ⁿ⁺¹`; the engine spells such a pole
  *   `~∞` whatever the parity of n + 1, exactly as it folds `1/0²` to
@@ -3486,8 +3494,7 @@ function polygammaValueAtExceptionalPoint(
  *   whose modulus grows without bound in the imaginary direction: an
  *   infinite value in a non-real direction, which the engine spells `~∞`
  *   (`i·∞` itself boxes to `~∞`).
- * - `~∞`: `Indeterminate` (an anonymous infinity, a float literal: `NaN`).
- *   Every Bessel function grows
+ * - `~∞`: `Indeterminate`. Every Bessel function grows
  *   exponentially in some direction of the complex plane and decays in
  *   another (`J_n(iy) = iⁿ I_n(y)`), so there is no value at the
  *   direction-less point.
@@ -3509,8 +3516,7 @@ function besselValueAtExceptionalPoint(
   const point = infinitePoint(x);
   // The order is read as an expression too: a float order
   // (`BesselJ(0.0, ~oo)`) makes the answer `NaN`.
-  if (point === '~oo' || point === 'anonymous')
-    return indeterminateFormAnswer(ce, [orderExpr, x]);
+  if (point === '~oo') return indeterminateFormAnswer(ce, [orderExpr, x]);
   if (point === '+oo') return kind === 'I' ? ce.PositiveInfinity : ce.Zero;
   if (point === '-oo') {
     if (kind === 'J' || kind === 'Y') return ce.Zero;
@@ -3635,8 +3641,7 @@ function evaluateBessel(
  *   `|x|^(−1/4)`, so both tend to 0 (Ai(−10⁶) = −0.002). `Ai′` and `Bi′`
  *   oscillate with an amplitude that GROWS like `|x|^(1/4)` (Ai′(−10⁶) =
  *   17.7), so they have no limit: `Indeterminate`.
- * - `~∞`: `Indeterminate` (an anonymous infinity, a float literal: `NaN`)
- *   — the Airy functions grow
+ * - `~∞`: `Indeterminate` — the Airy functions grow
  *   exponentially in some sectors of the complex plane and decay in others.
  */
 function airyValueAtInfinity(
@@ -3698,8 +3703,6 @@ function evaluateAiry(
  * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8;
  * each limit verified numerically at 10², 10⁴, 10⁶):
  *
- * - An anonymous infinity (`∞ + i`) in either slot: `NaN`, the uniform
- *   rule for every special-function head.
  * - When the other operand is a positive integer m, the exact rational
  *   form `B(a, m) = (m−1)!/(a(a+1)⋯(a+m−1))` holds at every point, and its
  *   denominator is infinite at `±∞` and at `~∞` alike: the value is 0.
@@ -3737,7 +3740,6 @@ function betaValueAtInfinity(
   const pa = infinitePoint(a);
   const pb = infinitePoint(b);
   if (pa === undefined && pb === undefined) return undefined;
-  if (pa === 'anonymous' || pb === 'anonymous') return ce.NaN;
   const positiveInteger = (x: Expression): boolean =>
     isNumber(x) &&
     infinitePoint(x) === undefined &&
@@ -3821,7 +3823,7 @@ function betaAtPositiveInfinity(b: Expression, ce: ComputeEngine): Expression {
  *   Γ(0, −1000) = −2.0·10⁴³¹ − πi, Γ(−1, −100) = 2.7·10³⁹ + πi,
  *   Γ(−3, −1000) = 2.0·10⁴²² + 0.52i.
  * - `~∞` or two infinite operands: `Indeterminate` (`Γ(∞, ∞)` is an
- *   indeterminate form); an anonymous infinity (a float literal): `NaN`.
+ *   indeterminate form).
  */
 function incompleteGammaValueAtInfinity(
   s: Expression,
@@ -3850,8 +3852,7 @@ function incompleteGammaValueAtInfinity(
   if (pz !== undefined)
     return isNumber(s) ? indeterminateFormAnswer(ce, [s, z]) : undefined;
   // s is the infinite operand and z is finite.
-  if (ps === '~oo' || ps === 'anonymous')
-    return indeterminateFormAnswer(ce, [s, z]);
+  if (ps === '~oo') return indeterminateFormAnswer(ce, [s, z]);
   if (!isNumber(z) || z.isComplex || z.isPositive !== true) return undefined;
   if (ps === '+oo') return ce.PositiveInfinity;
   if (z.isGreaterEqual(1) === true) return ce.Zero;
@@ -4263,7 +4264,7 @@ function isFiniteNumberLiteral(
  * - ζ(+∞, a) for a real a > 0: every term (k + a)^(−s) with k + a > 1 goes
  *   to 0, the term a^(−s) goes to 0, 1 or +∞ as a > 1, a = 1 or a < 1.
  * - ζ(s, +∞) = 0 for Re(s) > 1: the series tail vanishes.
- * - ζ(−∞, a), ζ(~oo, a) and an anonymous infinite s have no limit, the same
+ * - ζ(−∞, a) and ζ(~oo, a) have no limit, the same
  *   decision as the one-operand `Zeta` (the values at the negative integers
  *   are Bernoulli polynomials, which oscillate and grow without bound).
  */
@@ -6179,9 +6180,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           negativeSign(s) === true
         )
           return BoxedType.forResult('number', context.engine._typeResolver);
-        // Otherwise it is Γ(x+1); type it like `Gamma`.
+        // Otherwise it is Γ(x+1); type it like `Gamma`. An argument that can
+        // be a negative integer can land on a pole, so a real claim gains
+        // the `~oo` arm: `integer | ~oo` for an integer of unknown sign,
+        // `real | ~oo` for a real.
+        const t = numericTypeHandlerOnTypes([x]);
+        if (x === undefined)
+          return BoxedType.forResult(t, context.engine._typeResolver);
         return BoxedType.forResult(
-          numericTypeHandlerOnTypes([x]),
+          realOrPoleOnTypes(
+            t,
+            x,
+            -1,
+            factsOf(x.type).integer
+              ? INTEGER_OR_COMPLEX_INFINITY_TYPE
+              : REAL_OR_COMPLEX_INFINITY_TYPE
+          ),
           context.engine._typeResolver
         );
       },
@@ -6218,10 +6232,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNaN === true) return ce.NaN;
 
         // An infinite argument is a decided question as well: `+∞` at `+∞`,
-        // NaN at `−∞`, at the unsigned `~∞` and at an anonymous infinity
-        // such as `∞ + i` (no limit in any of those). This runs BEFORE the
-        // complex arm below, which would otherwise hand `∞ + i` to the
-        // complex kernel.
+        // NaN at `−∞` and at the unsigned `~∞` (no limit in either). This
+        // runs BEFORE the complex arm below, which would otherwise hand
+        // `~∞` to the complex kernel.
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
 
@@ -6294,7 +6307,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A `NaN` argument propagates — see the synchronous handler above.
         if (x.isNaN === true) return ce.NaN;
 
-        // `(±∞)!`, `(~∞)!` and `(∞ + i)!` — see the synchronous handler
+        // `(±∞)!` and `(~∞)!` — see the synchronous handler
         // above (this arm runs before the complex one for the same reason).
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
@@ -6398,8 +6411,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           negativeSign(s) === true
         )
           return BoxedType.forResult('number', context.engine._typeResolver);
+        // The value at a negative integer is `NaN` (see `evaluate`), so a
+        // real claim for an argument that can be one gains the `nan` arm:
+        // `integer | nan` for an integer of unknown sign, `real | nan` for
+        // a real.
+        const t = numericTypeHandlerOnTypes([x]);
+        if (x === undefined)
+          return BoxedType.forResult(t, context.engine._typeResolver);
         return BoxedType.forResult(
-          numericTypeHandlerOnTypes([x]),
+          realOrPoleOnTypes(
+            t,
+            x,
+            -1,
+            factsOf(x.type).integer ? INTEGER_OR_NAN_TYPE : REAL_OR_NAN_TYPE
+          ),
           context.engine._typeResolver
         );
       },
@@ -6568,12 +6593,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // literal only.
         if (x.type.matches('real')) return true;
         if (!isNumber(x)) return undefined;
-        // Only the two SIGNED infinities are decided here. An anonymous
-        // infinity is outside the carrier, and the carrier — not this
-        // predicate — refuses it (a `false` would put the marker where the
-        // carrier error belongs for a value a symbol holds, because the
-        // partiality gate runs before the dispatch conformance re-test).
-        // `~oo` is not decided here because under `.N()` it can be the
+        // Only the two SIGNED infinities are decided here. `~oo` is not
+        // decided here because under `.N()` it can be the
         // float of an operand whose exact value is finite
         // (`1/(√(10⁴⁰ + 1) − 10²⁰)`): the handler reads the exact operand
         // first.
@@ -6676,8 +6697,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The carrier is every number except NaN, on both slots: every finite
       // complex point has a value (a pole, `~oo`, at the non-positive
       // integers), and every infinity is in the carrier with the Γ-family
-      // values — `Γ(+∞) = +∞`, `NaN` at `−∞`, `~oo` and an anonymous
-      // infinity (`infiniteGammaFamilyValue`); the incomplete form's
+      // values — `Γ(+∞) = +∞`, `NaN` at `−∞` and `~oo`
+      // (`infiniteGammaFamilyValue`); the incomplete form's
       // infinite points are `incompleteGammaValueAtInfinity`'s. `NaN`
       // propagates (explicit: the carrier is not a subtype of `complex`, so
       // the policy derived from the signature would be `reject`). The
@@ -6760,9 +6781,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | infinity) -> number',
       examples: ['N(GammaLn(100))'],
       nanBehavior: 'propagate',
+      // The value at a pole of Γ is `+oo`.
       type: (ops, context) =>
         BoxedType.forResult(
-          gammaPoleTypeOnTypes(ops[0]),
+          gammaPoleTypeOnTypes(ops[0], REAL_OR_POSITIVE_INFINITY_TYPE),
           context.engine._typeResolver
         ),
 
@@ -6798,8 +6820,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       // Carrier, NaN policy, result and seam as for `Gamma` (see there).
-      // The values at the exceptional points — `ψ(+∞) = +∞`, `NaN` at `−∞`,
-      // `~oo` and an anonymous infinity, `~oo` at the poles — are
+      // The values at the exceptional points — `ψ(+∞) = +∞`, `NaN` at `−∞`
+      // and `~oo`, `~oo` at the poles — are
       // `polygammaValueAtExceptionalPoint`'s, answered on both routes. A
       // non-real finite argument uses the complex kernel of `PolyGamma`
       // (`polygammaComplex` of order 0).
@@ -6896,12 +6918,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (x !== undefined && factsOf(x.type).nan)
         )
           return undefined;
-        return BoxedType.forResult(
+        if (
           x !== undefined &&
-            factsOf(x.type).integer &&
-            nonPositiveSign(operandSgnOnTypes(x)) === true
-            ? 'number'
-            : numericTypeHandlerOnTypes([n, x]),
+          factsOf(x.type).integer &&
+          nonPositiveSign(operandSgnOnTypes(x)) === true
+        )
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        const t = numericTypeHandlerOnTypes([n, x]);
+        if (x === undefined)
+          return BoxedType.forResult(t, context.engine._typeResolver);
+        // The order -1 is `LogGamma` (see `evaluate`), which is complex at
+        // a negative argument (`PolyGamma(-1, -1/2)` has the imaginary part
+        // `-π`): an order that can be negative with an argument that is not
+        // provably positive claims `number`.
+        if (
+          t === 'real' &&
+          (n === undefined || nonNegativeSign(operandSgnOnTypes(n)) !== true) &&
+          positiveSign(operandSgnOnTypes(x)) !== true
+        )
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        // Otherwise a real argument that can land on a pole adds the `~oo`
+        // arm (`realOrPole`).
+        return BoxedType.forResult(
+          realOrPoleOnTypes(t, x, 0, REAL_OR_COMPLEX_INFINITY_TYPE),
           context.engine._typeResolver
         );
       },
@@ -6960,8 +6999,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // carrier: `ζ(+∞) = 1` (ζ(100) = 1 to 30 digits), and
       // `Indeterminate` at `−∞` (the trivial zeros at the even negative
       // integers alternate with values like ζ(−10⁶ − ½) = −10^4767531: no
-      // limit) and at `~oo`; `NaN` at an anonymous infinity (a float
-      // literal). `NaN` propagates (explicit: the carrier is
+      // limit) and at `~oo`. `NaN` propagates (explicit: the carrier is
       // not a subtype of `complex`). No `canonical` handler, so a proven
       // off-carrier operand is rejected at boxing. The two-argument form
       // keeps the generic `specialFunctionType` claim below rather than the
@@ -7016,8 +7054,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(x)) {
           const point = infinitePoint(x);
           if (point === '+oo') return engine.One;
-          // No limit at `−∞` or `~oo`: the indeterminate form (`NaN` for an
-          // anonymous infinity such as `∞ + i`, a float literal).
+          // No limit at `−∞` or `~oo`: the indeterminate form.
           if (point !== undefined) return indeterminateFormAnswer(engine, [x]);
           if (!x.isComplex && x.isSame(1)) return engine.ComplexInfinity;
         }
@@ -7292,9 +7329,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // imaginary part tending to π), an infinite real part with a finite
       // imaginary offset, and such a value is the real infinity `+∞`;
       // `W(~oo) = ~oo` by the modulus rule
-      // (|W(z)| grows without bound in every direction); an anonymous
-      // infinity is `NaN`. The `~oo` and anonymous-infinity answers hold
-      // for every branch (`W_k(z) ≈ ln z + 2πik` has an infinite modulus
+      // (|W(z)| grows without bound in every direction). The `~oo` answer
+      // holds for every branch (`W_k(z) ≈ ln z + 2πik` has an infinite modulus
       // in every direction on every branch). On a branch k ≠ 0 the real
       // infinities follow the `W₀(−∞)` treatment: `W_k(x) ≈ ln x + 2πik`
       // for x → +∞ and `W_k(−x) ≈ ln x + (2k + 1)πi` for x → +∞
@@ -7336,7 +7372,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           const point = infinitePoint(x);
           if (point !== undefined) {
-            if (point === 'anonymous') return engine.NaN;
             if (point === '~oo') return engine.ComplexInfinity;
             // `+∞` and `−∞` on every branch: the real part of `W_k(±x)` grows
             // like `ln x` and the imaginary part tends to a finite multiple of

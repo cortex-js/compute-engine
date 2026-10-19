@@ -414,7 +414,11 @@ describe('a block local that is read before it has a value', () => {
     const r = compile(ce.box(json));
     expect(r.success).toBe(true);
     expect(r.run!({ x: 3 })).toBe(4);
-    expect(compile(ce.box(json), { to: 'wgsl' }).success).toBe(true);
+    expect(compile(ce.box(json), { to: 'glsl' }).success).toBe(true);
+    // WGSL has no expression form for the `If` whose branches assign: it
+    // was `select(y = 2.0, y = 1.0, 0.0 < x);`, which no WGSL compiler
+    // accepts, behind `success: true`. It now declines.
+    expect(compile(ce.box(json), { to: 'wgsl' }).success).toBe(false);
   });
 
   test('an outer variable is still the input', () => {

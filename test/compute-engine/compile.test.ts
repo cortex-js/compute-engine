@@ -5702,15 +5702,23 @@ describe('the expression-only GPU routes decline statement bodies', () => {
 
   it('compile() — the statement-capable route — is unchanged', () => {
     // The escape hatch the message names still emits the statement block.
+    // `s` is declared in the engine, so it is an input of the shader, which
+    // the code cannot write: the body writes a local copy of `s`
+    // (`CompileTarget.inputLocals`). The copy is written before it is read,
+    // so it has no initial value. Before, the code was `s = x;\nreturn s;`.
     for (const target of gpuTargets()) {
       const r = target.compile(engineWithX().box(ASSIGN_THEN_VALUE));
       expect(r.success).toBe(true);
-      expect(r.code).toBe('s = x;\nreturn s;');
+      expect(r.code).toBe(
+        target instanceof WGSLTarget
+          ? 'var _tv1: f32;\n_tv1 = x;\nreturn _tv1;'
+          : 'float _tv1;\n_tv1 = x;\nreturn _tv1;'
+      );
     }
-    // And it still emits the assignment WGSL declines above, and the
-    // declaration both languages now decline.
+    // And it still emits the assignment WGSL declines above, as statements
+    // (it was `s = x`), and the declaration both languages now decline.
     expect(new WGSLTarget().compile(engineWithX().box(ASSIGN_ONLY)).code).toBe(
-      's = x'
+      'var _tv1: f32;\n_tv1 = x;\nreturn _tv1;'
     );
     expect(new GLSLTarget().compile(engineWithX().box(DECLARE_ONLY)).code).toBe(
       'float s'
@@ -5735,8 +5743,10 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       ['Assign', 's', 'x'],
       ['Assign', 't', 's'],
     ];
+    // `s` is declared in `engineWithX()`: the body writes a local copy of
+    // the input `s`.
     expect(wgsl.compile(engineWithX().box(ASSIGN_ASSIGN)).code).toBe(
-      'var t: f32;\ns = x;\nt = s;\nreturn t;'
+      'var _tv1: f32;\nvar t: f32;\n_tv1 = x;\nt = _tv1;\nreturn t;'
     );
     // An engine where `s` has no declaration either.
     const e = new ComputeEngine();
@@ -5750,7 +5760,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     // GLSL is unchanged: an assignment is an expression there, so
     // `return s = x;` is valid GLSL.
     expect(glsl.compile(engineWithX().box(ASSIGN_ASSIGN)).code).toBe(
-      'float t;\ns = x;\nreturn t = s;'
+      'float _tv1;\nfloat t;\n_tv1 = x;\nreturn t = _tv1;'
     );
     expect(glsl.compile(e.box(ASSIGN_ONLY)).code).toBe(
       'float s;\nreturn s = x;'
@@ -5783,11 +5793,25 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     // Assignment: declined on WGSL only, single-line branch — emitted
     // `return s = x;` before.
     expect(() =>
+      wgsl.compileFunction(
+        engineWithX().box(['Assign', 's', 'x']),
+        'f',
+        'float',
+        [['x', 'float']]
+      )
+    ).toThrow(
+      /Could not compile with `compileFunction\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    );
+    // The block `Block(s ≔ x)` writes the input `s` (declared in the
+    // engine), so the body writes a local copy of `s` and returns it: a
+    // body of several statements, which is accepted. It was the single line
+    // `s = x`, which was declined.
+    expect(
       wgsl.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', 'float', [
         ['x', 'float'],
       ])
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    ).toBe(
+      'fn f(x: f32) -> f32 {\n  var _tv1: f32;\n  _tv1 = x;\n  return _tv1;\n}'
     );
     // Assignment: ACCEPTED on WGSL in the multi-line branch. The block hook
     // emits a last assignment as the statement followed by `return <name>;`,
@@ -5806,7 +5830,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         [['x', 'float']]
       )
     ).toBe(
-      'fn f(x: f32) -> f32 {\n  var t: f32;\n  s = x;\n  t = s;\n  return t;\n}'
+      'fn f(x: f32) -> f32 {\n  var _tv1: f32;\n  var t: f32;\n  _tv1 = x;\n  t = _tv1;\n  return t;\n}'
     );
   });
 
@@ -5851,14 +5875,14 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   });
 
   it('GLSL compileFunction() keeps an assignment body — it IS an expression there', () => {
-    // The control for the WGSL decline above: byte-identical to before the
-    // gate.
+    // The control for the WGSL decline above. The body writes a local copy
+    // of the input `s` (declared in the engine); it was `return s = x;`.
     const glsl = new GLSLTarget();
     expect(
       glsl.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', 'float', [
         ['x', 'float'],
       ])
-    ).toBe('float f(float x) {\n  return s = x;\n}');
+    ).toBe('float f(float x) {\n  float _tv1;\n  _tv1 = x;\n  return _tv1;\n}');
     expect(
       glsl.compileFunction(
         engineWithX().box([
@@ -5870,7 +5894,9 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         'float',
         [['x', 'float']]
       )
-    ).toBe('float f(float x) {\n  float t;\n  s = x;\n  return t = s;\n}');
+    ).toBe(
+      'float f(float x) {\n  float _tv1;\n  float t;\n  _tv1 = x;\n  return t = _tv1;\n}'
+    );
   });
 });
 
@@ -6124,9 +6150,12 @@ describe('the expression-only Python route declines statement bodies', () => {
 
   it('compile() — the raw statement route — is unchanged', () => {
     // The control for all four declines above: `compile()` never claimed an
-    // expression, and still emits exactly what it did.
+    // expression. `s` is declared in the engine, so the code writes a local
+    // copy of the input `s` (it was `s = x`).
     const python = new PythonTarget();
-    expect(python.compile(engineWithX().box(ASSIGN_ONLY)).code).toBe('s = x');
+    expect(python.compile(engineWithX().box(ASSIGN_ONLY)).code).toBe(
+      '_tv1 = x'
+    );
     expect(python.compile(engineWithX().box(DECLARE_ONLY)).code).toBe('');
   });
 

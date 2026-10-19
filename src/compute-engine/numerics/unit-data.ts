@@ -16,6 +16,8 @@
  * `parsePrefixedUnit` rather than stored explicitly.
  */
 
+import { gcd } from './numeric-bigint.js';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -45,6 +47,14 @@ interface UnitEntry {
    * Only used by degC and degF.
    */
   offset?: number;
+  /**
+   * The exact values of `scale` and `offset`, as fractions
+   * `[numerator, denominator]`, for a unit whose `scale` or `offset` is not
+   * exact as a machine number (`5/9`, `459.67`). `convertUnit()` combines
+   * these fractions exactly into the affine map of a conversion, and rounds
+   * only at the end: `20 degC` is `68 degF`, not `67.99999999999994 degF`.
+   */
+  exact?: { scale: [number, number]; offset: [number, number] };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +179,18 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
 
   // ---- Temperature units with affine offset ----
   // To convert to kelvin: K = (value + offset) * scale
-  'degC': { dimension: [0, 0, 0, 0, 1, 0, 0, 0], scale: 1, offset: 273.15 },
-  'degF': { dimension: [0, 0, 0, 0, 1, 0, 0, 0], scale: 5 / 9, offset: 459.67 },
+  'degC': {
+    dimension: [0, 0, 0, 0, 1, 0, 0, 0],
+    scale: 1,
+    offset: 273.15,
+    exact: { scale: [1, 1], offset: [27315, 100] },
+  },
+  'degF': {
+    dimension: [0, 0, 0, 0, 1, 0, 0, 0],
+    scale: 5 / 9,
+    offset: 459.67,
+    exact: { scale: [5, 9], offset: [45967, 100] },
+  },
 
   // ---- Non-SI accepted for use with SI ----
   'min': { dimension: [0, 0, 1, 0, 0, 0, 0, 0], scale: 60 },
@@ -418,6 +438,20 @@ export function convertUnit(
   // Dimensional compatibility check
   if (!dimensionsEqual(from.dimension, to.dimension)) return null;
 
+  // A conversion with an offset (a temperature) uses the exact affine map
+  // `value → (A·value + B)/D`, so that it rounds only at the end.
+  if (from.offset !== undefined || to.offset !== undefined) {
+    const map = exactAffineMap(from, to);
+    if (map) {
+      const result = (value * map.a + map.b) / map.d;
+      // Near the largest float, `value·A` can overflow although the result
+      // is finite (`1e308 degF` is about `5.56e307 degC`): the quotients are
+      // then taken first.
+      if (Number.isFinite(result) || !Number.isFinite(value)) return result;
+      return value * (map.a / map.d) + map.b / map.d;
+    }
+  }
+
   // Affine conversion: SI_value = (value + offset) * scale
   // Then: result = SI_value / to.scale - to.offset
   const fromOffset = from.offset ?? 0;
@@ -425,6 +459,109 @@ export function convertUnit(
 
   const siValue = (value + fromOffset) * from.scale;
   return siValue / to.scale - toOffset;
+}
+
+/**
+ * The factor and the offset of the affine map `x → factor·x + offset` that
+ * converts a value from `fromUnit` to `toUnit`, or `null` when the units are
+ * unknown or dimensionally incompatible.
+ *
+ * For a conversion with an offset (a temperature) the two coefficients are
+ * computed from the exact data of the units and rounded once: `degC → degF`
+ * is `x → 1.8x + 32`. The difference `convertUnit(1) − convertUnit(0)` of two
+ * rounded values loses digits (`1.7999999999999972`).
+ */
+export function unitConversionCoefficients(
+  fromUnit: string,
+  toUnit: string
+): { factor: number; offset: number } | null {
+  const from = resolveUnit(fromUnit);
+  const to = resolveUnit(toUnit);
+  if (!from || !to) return null;
+  if (!dimensionsEqual(from.dimension, to.dimension)) return null;
+  if (from.offset !== undefined || to.offset !== undefined) {
+    const map = exactAffineMap(from, to);
+    if (map) return { factor: map.a / map.d, offset: map.b / map.d };
+  }
+  const c0 = convertUnit(0, fromUnit, toUnit)!;
+  const c1 = convertUnit(1, fromUnit, toUnit)!;
+  return { factor: c1 - c0, offset: c0 };
+}
+
+/**
+ * The scale and the offset of `entry` as exact fractions of integers, or
+ * `null` when they are not known exactly.
+ *
+ * A unit with an `exact` field gives it. A unit with no offset and a scale
+ * that is an integer (`kK`) or the machine number nearest to the reciprocal
+ * of an integer (`mK` is `1/1000`) gives that integer fraction.
+ */
+function exactScaleAndOffset(
+  entry: UnitEntry
+): { scale: [bigint, bigint]; offset: [bigint, bigint] } | null {
+  if (entry.exact) {
+    const { scale, offset } = entry.exact;
+    return {
+      scale: [BigInt(scale[0]), BigInt(scale[1])],
+      offset: [BigInt(offset[0]), BigInt(offset[1])],
+    };
+  }
+  if (entry.offset !== undefined) return null;
+  const s = entry.scale;
+  if (Number.isInteger(s)) return { scale: [BigInt(s), 1n], offset: [0n, 1n] };
+  const r = Math.round(1 / s);
+  if (Number.isInteger(r) && r !== 0 && 1 / r === s)
+    return { scale: [1n, BigInt(r)], offset: [0n, 1n] };
+  return null;
+}
+
+/**
+ * The exact affine map of the conversion from `from` to `to`, as three
+ * integers `a`, `b`, `d` such that the converted value is `(a·x + b)/d`.
+ * Returns `null` when the data of a unit are not exact, or when an integer is
+ * too large to be a safe machine integer.
+ *
+ * The value in the coherent SI unit is `(x + o₁)·s₁`, and the value in the
+ * target unit is that divided by `s₂`, minus `o₂`. So the factor is
+ * `k = s₁/s₂` and the constant is `c = o₁·k − o₂`.
+ */
+function exactAffineMap(
+  from: UnitEntry,
+  to: UnitEntry
+): { a: number; b: number; d: number } | null {
+  const f = exactScaleAndOffset(from);
+  const t = exactScaleAndOffset(to);
+  if (!f || !t) return null;
+  // k = kn/kd
+  const kn = f.scale[0] * t.scale[1];
+  const kd = f.scale[1] * t.scale[0];
+  // c = (o₁n·kn·o₂d − o₂n·o₁d·kd) / (o₁d·kd·o₂d)
+  const cn = f.offset[0] * kn * t.offset[1] - t.offset[0] * f.offset[1] * kd;
+  const cd = f.offset[1] * kd * t.offset[1];
+  // Common denominator: k = (kn·cd)/(kd·cd) and c = (cn·kd)/(kd·cd)
+  let a = kn * cd;
+  let b = cn * kd;
+  let d = kd * cd;
+  if (d < 0n) {
+    a = -a;
+    b = -b;
+    d = -d;
+  }
+  const g = gcd(gcd(a, b), d);
+  if (g > 1n) {
+    a /= g;
+    b /= g;
+    d /= g;
+  }
+  const result = { a: Number(a), b: Number(b), d: Number(d) };
+  if (
+    !Number.isSafeInteger(result.a) ||
+    !Number.isSafeInteger(result.b) ||
+    !Number.isSafeInteger(result.d) ||
+    result.d === 0
+  )
+    return null;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,8 +614,8 @@ export function getExpressionDimension(
   if (op === 'Power') {
     if (expr.length !== 3) return null;
     const d = getExpressionDimension(expr[1]);
-    const exp = expr[2];
-    if (!d || typeof exp !== 'number') return null;
+    const exp = unitExponentValue(expr[2]);
+    if (!d || exp === null) return null;
     return d.map((v) => v * exp) as DimensionVector;
   }
 
@@ -524,8 +661,8 @@ export function getExpressionScale(expr: UnitExpression): number | null {
   if (op === 'Power') {
     if (expr.length !== 3) return null;
     const s = getExpressionScale(expr[1]);
-    const exp = expr[2];
-    if (s === null || typeof exp !== 'number') return null;
+    const exp = unitExponentValue(expr[2]);
+    if (s === null || exp === null) return null;
     return Math.pow(s, exp);
   }
 
@@ -571,8 +708,8 @@ export function flattenUnitFactors(
     }
     if (op === 'Power') {
       if (e.length !== 3) return false;
-      const n = e[2];
-      if (typeof n !== 'number') return false;
+      const n = unitExponentValue(e[2]);
+      if (n === null) return false;
       return walk(e[1], exp * n);
     }
     return false;
@@ -713,17 +850,56 @@ export function unitExpressionFromFactors(
  * Parse a unit token like `"s^2"` into a MathJSON expression.
  * A plain unit (no `^`) stays as a string; `"s^2"` becomes
  * `["Power", "s", 2]`.
+ *
+ * The exponent is an integer (`s^-2`), a decimal number (`m^0.5` is
+ * `["Power", "m", 0.5]`) or a fraction, which may be in parentheses
+ * (`m^(1/2)` is `["Power", "m", ["Rational", 1, 2]]`). Any other exponent
+ * text leaves the token unchanged, so that it is not a known unit:
+ * `m^2s` is not read as `m^2`.
  */
 function parseUnitToken(token: string): UnitExpression {
   const caretIdx = token.indexOf('^');
   if (caretIdx === -1) return token;
 
   const base = token.slice(0, caretIdx);
-  const expStr = token.slice(caretIdx + 1);
-  const exp = parseInt(expStr, 10);
-  if (isNaN(exp)) return token;
+  let expStr = token.slice(caretIdx + 1).trim();
+  if (expStr.startsWith('(') && expStr.endsWith(')'))
+    expStr = expStr.slice(1, -1).trim();
 
-  return ['Power', base, exp];
+  if (/^[+-]?\d+$/.test(expStr)) return ['Power', base, parseInt(expStr, 10)];
+
+  if (/^[+-]?(\d+\.\d*|\.\d+)$/.test(expStr))
+    return ['Power', base, parseFloat(expStr)];
+
+  const fraction = expStr.match(/^([+-]?\d+)\s*\/\s*(\d+)$/);
+  if (fraction) {
+    const n = parseInt(fraction[1], 10);
+    const d = parseInt(fraction[2], 10);
+    if (d === 0) return token;
+    if (n % d === 0) return ['Power', base, n / d];
+    return ['Power', base, ['Rational', n, d]];
+  }
+
+  return token;
+}
+
+/**
+ * The numeric value of the exponent of a `["Power", base, exp]` unit
+ * expression: a number, or a fraction `["Rational", n, d]` (as the unit DSL
+ * gives for `m^(1/2)`). Returns `null` for any other exponent.
+ */
+function unitExponentValue(exp: unknown): number | null {
+  if (typeof exp === 'number') return exp;
+  if (
+    Array.isArray(exp) &&
+    exp.length === 3 &&
+    exp[0] === 'Rational' &&
+    typeof exp[1] === 'number' &&
+    typeof exp[2] === 'number' &&
+    exp[2] !== 0
+  )
+    return exp[1] / exp[2];
+  return null;
 }
 
 /**
@@ -771,8 +947,10 @@ function parseDSLGroup(s: string): UnitExpression | null {
   if (slashIdx !== -1) {
     const numStr = s.slice(0, slashIdx).trim();
     const denStr = s.slice(slashIdx + 1).trim();
-    const num = parseDSLGroup(numStr);
     const den = parseDSLGroup(denStr);
+    // A numerator `1` is not a unit: `1/s` is `s^-1`.
+    if (numStr === '1') return den ? ['Power', den, -1] : null;
+    const num = parseDSLGroup(numStr);
     if (!num || !den) return null;
     return ['Divide', num, den];
   }
@@ -807,7 +985,9 @@ function parseDSLGroup(s: string): UnitExpression | null {
  * Grammar:
  * - `*` = multiplication
  * - `/` = division (everything after `/` is in denominator)
- * - `^N` = power (integer exponent)
+ * - `^N` = power (an integer, a decimal number, or a fraction such as
+ *   `^(1/2)`)
+ * - `1/x` = the reciprocal of `x` (`["Power", x, -1]`)
  * - `(...)` = grouping
  * - Simple units (no operators) stay as strings.
  *

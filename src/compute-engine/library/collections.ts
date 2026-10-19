@@ -62,6 +62,8 @@ import {
   finiteUncountedIsEmpty,
   innerCollectionCannotBeWalked,
   listFiniteUncountedCollection,
+  viewCanListSource,
+  viewOverListedSource,
 } from '../collection-utils.js';
 import {
   MeasuredWalk,
@@ -893,9 +895,10 @@ function refusedOperandError(
 /**
  * The `incompatible-type` error that `Sort` and `Ordering` answer at
  * evaluation when their callback is a COMPARATOR (two parameters) with a
- * declared parameter type that is disjoint from the element type of the
- * evaluated source, or `undefined` when the comparator is admissible or its
- * types are not known.
+ * declared parameter type that does not accept every element: the element
+ * type of the evaluated source is not a subtype of the parameter type. The
+ * answer is `undefined` when the comparator is admissible or its types are
+ * not known.
  *
  * The comparator option of the declared signature is `(any, any) any ->
  * number | boolean`, because the type language allows a type variable in only
@@ -903,7 +906,11 @@ function refusedOperandError(
  * it. So the static check does not see the element type for a comparator,
  * and `Sort([3, 1, 2], (a: string, b: string) ↦ Length(a) − Length(b))`
  * was admitted: each application failed on its arguments, the failed result
- * read as "greater", and the sort answered an arbitrary order. This check refuses that case when the source is known. The error has
+ * read as "greater", and the sort answered an arbitrary order. This check
+ * refuses that case when the source is known. A parameter type that accepts
+ * only some of the elements is refused too (`Sort([3, 1.5, 2], (a: integer,
+ * b: integer) ↦ b − a)`): the comparator cannot be applied to `1.5`, and the
+ * sort answered the source unchanged. The error has
  * the shape the static check gives for a sort key with the wrong parameter
  * type: the expected arrow with the element type, the actual type of the
  * callback, and the frame of the operator at operand 2.
@@ -912,8 +919,19 @@ function refusedOperandError(
  * inferred from the body, and an inferred type is a guess
  * (`widenUnannotatedLiteralParams`). An absent element (`Missing`) is not
  * passed to the comparator (it sorts last), so the `missing` part of the
- * element type is ignored.
+ * element type is ignored. An element type that is not known (`unknown`,
+ * `any`) is not judged either.
  */
+/** `t` with a top-level `nan` arm removed (`nan` alone is `never`). */
+function withoutNanArm(t: Type): Type {
+  if (t === 'nan') return 'never';
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  const arms = t.types.filter((x) => x !== 'nan');
+  if (arms.length === t.types.length) return t;
+  if (arms.length === 0) return 'never';
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
 function comparatorParameterError(
   ce: ComputeEngine,
   operator: string,
@@ -930,11 +948,28 @@ function comparatorParameterError(
   if (freeTypeVariables(fnType).size > 0) return undefined;
   const elt = collectionElementType(xs.type.type);
   if (elt === undefined) return undefined;
-  const element = stripMissingFromType(elt);
-  if (element === 'never' || freeTypeVariables(element).size > 0)
+  // A `NaN` element, like a missing one, is put last by the sort and is
+  // never passed to the comparator (`nanLastOrder()`), so the `nan` arm of
+  // the element type is not checked: `Sort([2, 1, NaN], (a: real, b: real) ↦
+  // b − a)` is accepted.
+  const element = withoutNanArm(stripMissingFromType(elt));
+  if (
+    element === 'never' ||
+    element === 'unknown' ||
+    element === 'any' ||
+    freeTypeVariables(element).size > 0
+  )
     return undefined;
+  // A source with unknowns (`[3, x, 2]`, `x` with no value) is typed from a
+  // guess for `x`, and `x` can hold a value that the parameter type accepts.
+  // So only a parameter type that is disjoint from the element type is
+  // refused for such a source.
+  const refuses =
+    xs.unknowns.length > 0
+      ? (t: Type) => provablyDisjoint(t, element)
+      : (t: Type) => !isSubtype(element, t);
   const params = fnType.args ?? [];
-  if (!params.some((p) => provablyDisjoint(p.type, element))) return undefined;
+  if (!params.some((p) => refuses(p.type))) return undefined;
   const expected: Type = {
     kind: 'signature',
     args: [{ type: element }, { type: element }],
@@ -2392,22 +2427,88 @@ function finitenessOfSource(xs: Expression): boolean | undefined {
  * its callback): `at()` turns a negative index into a positive one only with
  * a known count. So such a view is not enumerable either; answering the
  * source's enumerability made `Sum(Reverse(FlatMap([1, 2, 3], x ↦ [x, x])))`
- * answer `0`.
+ * answer `0`. An infinite source cannot be walked either: an infinite
+ * collection has no last element, and the position of a rotation is taken
+ * modulo the count (`Any(Reverse(Range(1, ∞)), x ↦ x > 0)` answered
+ * `False`). The exception is a finite source that the walk of the view can
+ * list first (`viewCanListSource()`): the view then walks the list of the
+ * source (`walkOfListedSource()`), and it can be enumerated.
+ *
+ * A source whose finiteness is not known can be enumerable: an eager operator
+ * (`Divisors(12)`) is read through its evaluated value. When the walk of the
+ * view cannot read such a source (the `FlatMap` of a callback that returns
+ * `Join([x], v)` for a valueless `v`), it records that it missed elements
+ * (`noteIncompleteWalk()`), so that its consumer stays unevaluated.
  */
 function enumerableFromSmallSource(expr: Expression): boolean | undefined {
   if (!isFunction(expr)) return undefined;
+  if (viewCanListSource(expr)) return true;
   if (!sourceCountIsKnownIfFinite(expr.op1)) return false;
   return expr.op1.isEnumerableCollection;
 }
 
 /**
+ * The walk of a view that reads its source by a position computed from the
+ * count of the source (`Reverse`, `Most`, `RotateLeft`, `RotateRight`,
+ * `Insert`, `DeleteAt`, `ReplaceAt`), over a finite source with no count
+ * (`FlatMap([1, 2], x ↦ [x, x])`, whose count needs the results of its
+ * callback), or `undefined` for another view.
+ *
+ * The iterator of such a view reads its source by position, so it cannot
+ * walk such a source. A consumer that holds its operand and walks it (`Sum`,
+ * `Reduce`) then stayed unevaluated. This walk lists the source once
+ * (`viewOverListedSource()`) and walks the same view over that list. The
+ * `count` and `at` facets of the view do not use it: they do not apply a
+ * callback.
+ *
+ * When the source cannot be listed (an inner collection that cannot be
+ * walked, more than `maxCollectionSize` elements), or when the view over the
+ * list cannot be enumerated (an index outside the list, `Insert(…, 9, 0)`
+ * over a source of 4 elements), the walk yields nothing and records that it
+ * missed elements (`noteIncompleteWalk()`), so that its consumer stays
+ * unevaluated and does not read an empty collection.
+ */
+function walkOfListedSource(
+  expr: Expression
+): Iterator<Expression, undefined> | undefined {
+  const listed = viewOverListedSource(expr);
+  if (listed === undefined) return undefined;
+  if (listed === null || listed.isEnumerableCollection !== true) {
+    noteIncompleteWalk();
+    return { next: () => ({ value: undefined, done: true }) };
+  }
+  return listed.each();
+}
+
+/**
+ * The elements of `xs` for an eager handler that rebuilds the collection
+ * (`Insert`, `DeleteAt`, `ReplaceAt`), or `undefined` when the handler must
+ * leave `xs` to its lazy `collection` handlers.
+ *
+ * A source with a count is read when it has at most
+ * `MAX_SIZE_EAGER_COLLECTION` elements. A finite source with no count
+ * (`FlatMap([1, 2], x ↦ [x, x])`, whose count needs the results of its
+ * callback) is listed once (`listFiniteUncountedCollection()`): the lazy
+ * handlers read the source by position and need its count, so without the
+ * list the expression stayed unevaluated. When the list cannot be made (an
+ * inner collection that cannot be walked, more than `maxCollectionSize`
+ * elements), the answer is `undefined`.
+ */
+function eagerElementsOf(xs: Expression): Expression[] | undefined {
+  const size = xs.count;
+  if (size === undefined) return listFiniteUncountedCollection(xs);
+  if (size > MAX_SIZE_EAGER_COLLECTION) return undefined;
+  return Array.from(xs.each()) as Expression[];
+}
+
+/**
  * False when `xs` has a count that a walk by position cannot use: a `bigint`
- * count, or no count for a collection that is known to be finite. See
- * `enumerableFromSmallSource()`.
+ * count, an infinite count, or no count for a collection that is known to be
+ * finite. See `enumerableFromSmallSource()`.
  */
 function sourceCountIsKnownIfFinite(xs: Expression): boolean {
   const count = xs.count;
-  if (typeof count === 'bigint') return false;
+  if (typeof count === 'bigint' || count === Infinity) return false;
   return count !== undefined || xs.isFiniteCollection !== true;
 }
 
@@ -9893,6 +9994,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // leaves membership UNDECIDED: answering `false` would be an unsound
         // definite answer about an element the predicate could not judge.
         if (predicateErrorValue(applied)) return undefined;
+        // A boolean result that is neither `True` nor `False` (`0 < z` for a
+        // `z` with no value) is an undecided verdict, not a malformed
+        // predicate: the membership is undecided too, and `z ∈ Filter([z],
+        // y ↦ y > 0)` stays unevaluated.
+        if (applied.isValid && applied.type.matches('boolean'))
+          return undefined;
         // Any other non-boolean result is a malformed predicate. Report it the
         // way every other Filter facet does — `each`/`count`/`isEmpty` all
         // throw this exact message, as do the sibling predicate consumers
@@ -10169,6 +10276,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Only the source is threaded: the reducer is not a value, and
+    // the initial value is one element of the result.
+    threadsConditionals: [0],
     // Design D phase 2: `Reduce`'s contextual slot verbatim — the reducer is
     // `(accumulator, element)`, the element is stamped from the source and the
     // accumulator stays bare (see `Reduce` for why a fold never stamps its
@@ -10436,6 +10549,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The predicate is not threaded: it is not a value.
+    threadsConditionals: [0],
     // Design D phase 1: the element-of link lives in the SIGNATURE (mirrors
     // `Filter`). The RESULT stays with the `type:` handler: a string for a
     // string source, a list otherwise (`orderedRunResultType`), which the
@@ -10608,6 +10726,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The predicate is not threaded: it is not a value.
+    threadsConditionals: [0],
     // Design D phase 1: as `TakeWhile` — the result stays with the `type:`
     // handler (§7 rule 1), and the source must have positions: the dropped
     // prefix is read in the order of the source, and a set has no order.
@@ -13004,9 +13127,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: refusingUnindexedSource({
       // The walk below reads the source by position up to its count, so it
       // yields nothing for a finite source with no count (see
-      // `enumerableFromSmallSource()`); a `bigint` count is walked.
+      // `enumerableFromSmallSource()`), except a source that the walk can
+      // list first (`walkOfListedSource()`); a `bigint` count is walked.
       isEnumerable: (expr) =>
         isFunction(expr) &&
+        !viewCanListSource(expr) &&
         expr.op1.count === undefined &&
         expr.op1.isFiniteCollection === true
           ? false
@@ -13034,7 +13159,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const count = expr.op1.count;
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
+        // An eager source (`Divisors(12)`) has a count once it is evaluated
+        // (`countOfSource()`).
+        const count = expr.op1.count ?? countOfSource(expr.op1);
         // A source count that is not a safe integer (a `bigint`) is larger
         // than every index this walk can reach, so the walk reads the source
         // from its first element and never reaches the element it omits. It
@@ -13052,8 +13182,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           };
         }
         const l = count;
-        if (l === undefined || l <= 1)
+        if (l === undefined) {
+          // The source cannot be read by position: the walk misses its
+          // elements (see `enumerableFromSmallSource()`).
+          if (expr.op1.isEmptyCollection !== true) noteIncompleteWalk();
           return { next: () => ({ value: undefined, done: true }) };
+        }
+        if (l <= 1) return { next: () => ({ value: undefined, done: true }) };
 
         let index = 1;
         const last = l - 1;
@@ -13347,6 +13482,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
         // Walk `op1` from the last element to the first using negative
         // (from-the-end) indices, so this works even when `op1.count` isn't
         // known upfront. Termination must be based on `.at()` returning
@@ -13360,7 +13498,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return {
           next: () => {
             const value = expr.op1.at(index);
-            if (value === undefined) return { value: undefined, done: true };
+            if (value === undefined) {
+              // A first read that finds nothing, in a source with no count
+              // that is not known to be empty, is a read the source cannot
+              // answer: the walk misses its elements (see
+              // `enumerableFromSmallSource()`).
+              if (
+                index === -1 &&
+                expr.op1.count === undefined &&
+                expr.op1.isEmptyCollection !== true
+              )
+                noteIncompleteWalk();
+              return { value: undefined, done: true };
+            }
             index -= 1;
             return { value, done: false };
           },
@@ -13423,13 +13573,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
       // larger — or unknown-length — sources stay symbolic and are served
-      // lazily by the `collection` handlers below (Tycho item 52).
-      const size = xs.count;
-      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
-        return undefined;
+      // lazily by the `collection` handlers below (Tycho item 52). A finite
+      // source with no count is listed first (`eagerElementsOf()`).
+      const all = eagerElementsOf(xs);
+      if (all === undefined) return undefined;
       const index = toInteger(idx);
       if (index === null || index === 0) return undefined;
-      const all = Array.from(xs.each()) as Expression[];
       const n = all.length;
       // Convert the 1-based `index` (negative counts from the end, with -1
       // appending) to a 0-based gap position in 0..n.
@@ -13454,8 +13603,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // integer), the walk yields nothing, so the view is not enumerable:
       // answering the source's enumerability let a consumer read the empty
       // walk as an empty collection.
+      // A finite source with no count is listed by the walk
+      // (`walkOfListedSource()`).
       isEnumerable: (expr) =>
-        insertPosition(expr) === undefined ? false : enumerableFromSource(expr),
+        viewCanListSource(expr)
+          ? true
+          : insertPosition(expr) === undefined
+            ? false
+            : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `insertPositionOf`.
@@ -13473,6 +13628,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         insertPosition(expr) === undefined ? undefined : false,
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A source that the walk lists (`walkOfListedSource()`) is finite.
+        if (viewCanListSource(expr)) return true;
         const n = expr.op1.count;
         if (n === undefined || insertPositionOf(expr, n) === undefined)
           return undefined;
@@ -13492,6 +13649,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       iterator: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
         const g = insertPosition(expr);
         if (g === undefined) return undefined;
         const source = expr.op1.each();
@@ -13552,6 +13712,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The index is threaded too, as for `Insert`. Only the collection
+    // strips `missing`: an absent index is refused.
+    threadsConditionals: [0, 1],
+    missingStrip: [0],
     signature:
       '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)',
     evaluate: ([xs, idx], { engine: ce }) => {
@@ -13560,13 +13727,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
-      // handlers below (Tycho item 52).
-      const size = xs.count;
-      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
-        return undefined;
+      // handlers below (Tycho item 52). A finite source with no count is
+      // listed first (`eagerElementsOf()`).
+      const all = eagerElementsOf(xs);
+      if (all === undefined) return undefined;
       const index = toInteger(idx);
       if (index === null) return undefined;
-      const all = Array.from(xs.each()) as Expression[];
       const n = all.length;
       // Convert the 1-based `index` (negative counts from the end) to a 0-based
       // position in 0..n-1.
@@ -13587,8 +13753,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // integer), the walk yields nothing, so the view is not enumerable:
       // answering the source's enumerability let a consumer read the empty
       // walk as an empty collection.
+      // A finite source with no count is listed by the walk
+      // (`walkOfListedSource()`).
       isEnumerable: (expr) =>
-        targetPosition(expr) === undefined ? false : enumerableFromSource(expr),
+        viewCanListSource(expr)
+          ? true
+          : targetPosition(expr) === undefined
+            ? false
+            : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -13611,6 +13783,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A source that the walk lists (`walkOfListedSource()`) is finite.
+        if (viewCanListSource(expr)) return true;
         const n = expr.op1.count;
         if (n === undefined || targetPositionOf(expr, n) === undefined)
           return undefined;
@@ -13628,6 +13802,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       iterator: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
         const g = targetPosition(expr);
         if (g === undefined) return undefined;
         const source = expr.op1.each();
@@ -13687,13 +13864,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
-      // handlers below (Tycho item 52).
-      const size = xs.count;
-      if (size === undefined || size > MAX_SIZE_EAGER_COLLECTION)
-        return undefined;
+      // handlers below (Tycho item 52). A finite source with no count is
+      // listed first (`eagerElementsOf()`).
+      const all = eagerElementsOf(xs);
+      if (all === undefined) return undefined;
       const index = toInteger(idx);
       if (index === null) return undefined;
-      const all = Array.from(xs.each()) as Expression[];
       const n = all.length;
       let i0: number;
       if (index > 0) {
@@ -13714,8 +13890,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // integer), the walk yields nothing, so the view is not enumerable:
       // answering the source's enumerability let a consumer read the empty
       // walk as an empty collection.
+      // A finite source with no count is listed by the walk
+      // (`walkOfListedSource()`).
       isEnumerable: (expr) =>
-        targetPosition(expr) === undefined ? false : enumerableFromSource(expr),
+        viewCanListSource(expr)
+          ? true
+          : targetPosition(expr) === undefined
+            ? false
+            : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -13736,6 +13918,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A source that the walk lists (`walkOfListedSource()`) is finite.
+        if (viewCanListSource(expr)) return true;
         const n = expr.op1.count;
         if (targetPositionOf(expr, n) === undefined) return undefined;
         return isFiniteCount(n);
@@ -13752,6 +13936,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       iterator: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
         const g = targetPosition(expr);
         if (g === undefined) return undefined;
         const source = expr.op1.each();
@@ -13774,6 +13961,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the left by n positions.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The count is not threaded.
+    threadsConditionals: [0],
     // Per-kind result rule (`docs/STRING_ROADMAP.md`, "Signature refinement",
     // Phase 0b). A single `(T) -> T where T: indexed_collection` bound would
     // promise kind-preservation for EVERY indexed kind, and the runtime cannot
@@ -13844,11 +14036,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const l = smallCount(expr.op1);
-        if (l === undefined || l <= 0)
-          return { next: () => ({ value: undefined, done: true }) };
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
+        // An eager source (`Divisors(12)`) has a count once it is evaluated
+        // (`countOfSource()`).
+        const l = countOfSource(expr.op1);
         const offset = integerParam(expr.op2);
-        if (offset === null)
+        // With no count, or with an offset that has no value, the walk
+        // cannot compute a position: it misses the elements of the source
+        // (see `enumerableFromSmallSource()`).
+        if (
+          (l === undefined && expr.op1.isEmptyCollection !== true) ||
+          (offset === null && (l === undefined || l > 0))
+        )
+          noteIncompleteWalk();
+        if (l === undefined || l <= 0 || offset === null)
           return { next: () => ({ value: undefined, done: true }) };
         let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
@@ -13891,6 +14094,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Rotate the elements of the collection to the right by n positions.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The count is not threaded.
+    threadsConditionals: [0],
     // Per-kind result rule and leading string-preserving arm: see
     // `RotateLeft`, including its re-segmentation caveat (rejoining the
     // rotated characters can merge or split grapheme clusters, so the result
@@ -13912,6 +14120,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         return smallCount(expr.op1);
       },
+      // See `RotateLeft`. Without this handler the finiteness was read from
+      // the count, which a finite source with no count does not have
+      // (`FlatMap([1, 2], x ↦ [x, x])`), so `Sum(RotateRight(…, 1))` stayed
+      // unevaluated while `Sum(RotateLeft(…, 1))` did not.
+      isFinite: (expr) => {
+        if (!isFunction(expr) || integerParam(expr.op2) === null)
+          return undefined;
+        return finitenessOfSource(expr.op1);
+      },
       // NOT gated on the offset: a rotation is a permutation, so membership is
       // offset-INVARIANT. `false` here is the DEFINITIVE "not a member" answer
       // (the indeterminate one is `undefined`), so gating it made
@@ -13927,11 +14144,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const l = smallCount(expr.op1);
-        if (l === undefined || l <= 0)
-          return { next: () => ({ value: undefined, done: true }) };
+        // A finite source with no count: see `walkOfListedSource()`.
+        const listed = walkOfListedSource(expr);
+        if (listed) return listed;
+        // An eager source (`Divisors(12)`) has a count once it is evaluated
+        // (`countOfSource()`).
+        const l = countOfSource(expr.op1);
         const offset = integerParam(expr.op2);
-        if (offset === null)
+        // With no count, or with an offset that has no value, the walk
+        // cannot compute a position: it misses the elements of the source
+        // (see `enumerableFromSmallSource()`).
+        if (
+          (l === undefined && expr.op1.isEmptyCollection !== true) ||
+          (offset === null && (l === undefined || l > 0))
+        )
+          noteIncompleteWalk();
+        if (l === undefined || l <= 0 || offset === null)
           return { next: () => ({ value: undefined, done: true }) };
         let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
@@ -14031,6 +14259,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.',
     ],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Both collections are threaded; the start position is not.
+    threadsConditionals: [0, 1],
     // The span is returned rather than a start index because it feeds slicing
     // and replacement directly: `Slice(xs, RangeOf(xs, needle))` yields the
     // same element sequence as `needle`. The law is stated element-wise, not
@@ -14103,6 +14336,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Unlike `Contains`, which tests membership of a single element, the needle is read as a sequence: `ContainsSequence("abc", "ab")` is `True` while `Contains("abc", "ab")` is `False`.',
     ],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Both collections are threaded.
+    threadsConditionals: true,
     signature:
       '(indexed_collection<T>, indexed_collection<T>) -> boolean where T',
     evaluate: ([xs, needle], { engine: ce }) => {
@@ -14129,6 +14367,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the prefix is matched character by character, so a prefix that would end inside a grapheme cluster does not match. An empty prefix matches everything.',
     ],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Both collections are threaded.
+    threadsConditionals: true,
     signature:
       '(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T',
     evaluate: ([xs, prefix], { engine: ce }) => {
@@ -14151,6 +14394,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a string the suffix is matched character by character, so a suffix that would begin inside a grapheme cluster does not match. An empty suffix matches everything.',
     ],
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Both collections are threaded.
+    threadsConditionals: true,
     signature:
       '(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T',
     evaluate: ([xs, suffix], { engine: ce }) => {
@@ -14177,6 +14425,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found. Stays unevaluated when the collection cannot be searched (a symbol with no value, an unbounded source with no match).',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The predicate is not threaded: it is not a value.
+    threadsConditionals: [0],
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The result type is unchanged.
     // An index is a position, so the collection must be indexed (see
@@ -14281,6 +14534,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The predicate is not threaded: it is not a value.
+    threadsConditionals: [0],
     // Compatibility admission (`docs/TYPE-SYSTEM.md`): the predicate slot is
     // an honest arrow. Admission is by
     // COMPATIBILITY, not subtyping (a narrower named predicate, a
@@ -14598,6 +14856,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The key function is not threaded: it is not a value.
+    threadsConditionals: [0],
     signature:
       '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
@@ -14642,6 +14905,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. The key function is not threaded: it is not a value.
+    threadsConditionals: [0],
     signature:
       '(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T',
     canonical: (ops, { engine }) => {
@@ -14957,7 +15225,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // literal integer 1, no step). Canonicalize to
       // `Tabulate(Function(expr, v₁, …), n₁, …)`; `Tabulate` applies the
       // function to 1-based indices, matching the iterator semantics.
-      if (parsed.every((s) => s.step === undefined && s.lo.isSame(1))) {
+      // An upper bound that is a number literal below 1 is an empty range,
+      // and `Tabulate` with a dimension that is not positive stays
+      // unevaluated (its compilation declines it too). Such a spec takes the
+      // general route below, whose `Range` with step 1 is empty:
+      // `Table(k², {k, 1, 0})` is `[]`, as in Mathematica.
+      if (
+        parsed.every(
+          (s) =>
+            s.step === undefined &&
+            s.lo.isSame(1) &&
+            !(isNumber(s.hi) && s.hi.re < 1)
+        )
+      ) {
         const fn = ce._fn('Function', [ops[0], ...parsed.map((s) => s.index)], {
           canonical: false,
         });
@@ -14970,14 +15250,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the tree raw and canonicalize it in a single top-down pass so each
       // `Function`'s parameters shadow their index symbols (keeping the inner
       // body symbolic).
+      // The default step is `1`, and it is written in the `Range`: a `Range`
+      // with no step counts DOWN when its upper bound is below its lower
+      // bound (`Range(2, 0)` is `[2, 1, 0]`), but an iterator spec with no
+      // step is empty then (`Table(k², {k, 2, 0})` is `[]`, as in
+      // Mathematica). A count-down needs an explicit negative step.
       let acc: Expression = ops[0];
       for (let k = parsed.length - 1; k >= 0; k--) {
         const s = parsed[k];
-        const range = ce._fn(
-          'Range',
-          s.step ? [s.lo, s.hi, s.step] : [s.lo, s.hi],
-          { canonical: false }
-        );
+        const range = ce._fn('Range', [s.lo, s.hi, s.step ?? ce.One], {
+          canonical: false,
+        });
         const fn = ce._fn('Function', [acc, s.index], { canonical: false });
         acc = ce._fn('Map', [fn, range], { canonical: false });
       }
@@ -15245,6 +15528,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
+    // An absent collection answers `Missing`, as every collection operator
+    // answers for an absent operand (user decision 2026-09-25). Declared
+    // here because the second parameter is a union of a number and a
+    // function, which the default policy (`signatureParamsPropagateAbsence`)
+    // does not read: without it `Partition(Missing, 2)`, and a restricted
+    // collection whose condition fails, were `incompatible-type` errors.
+    // Only the collection strips `missing`: an absent size is refused.
+    missingBehavior: 'propagate',
+    missingStrip: [0],
     // The source must have positions: a chunk or a window is a run of
     // consecutive elements, and the two predicate groups keep the order of
     // the source. A set has no order: `Partition(Set(3, 1, 5), 2)` gave
@@ -16326,6 +16618,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['ListFrom({1, 2}, 3..4)'],
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Every operand is a collection, and every one is threaded.
+    threadsConditionals: true,
     // An absent collection answers `Missing` — see `SetFrom`.
     missingBehavior: 'propagate',
     signature: '(value*) -> list',
@@ -16422,6 +16719,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['SetFrom([1, 2, 2, 3])'],
     description: 'Create a set from the elements of a collection.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Every operand is a collection, and every one is threaded.
+    threadsConditionals: true,
     // An absent collection answers `Missing`, as the other collection
     // operators do for an absent collection (user decision 2026-09-26):
     // `SetFrom(Join(Missing, [0]))`, the canonical form of the set literal
@@ -16475,6 +16777,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['TupleFrom([1, 2, 3])'],
     description: 'Create a tuple from the elements of a collection.',
     complexity: 8200,
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is computed
+    // on the present collection and re-wrapped, absent as a whole once `c`
+    // fails. Every operand is a collection, and every one is threaded.
+    threadsConditionals: true,
     // An absent collection answers `Missing` — see `SetFrom`.
     missingBehavior: 'propagate',
     signature: '(value*) -> tuple',

@@ -1806,7 +1806,11 @@ describe('PYTHON TARGET', () => {
         expect(python.compile(arms(wrapped, ['Continue'])).code).toBe(
           expected
         );
-        expect(expected).toMatch(/^if x == x:\n/);
+        // The loop arm assigns the input `x`, so the code reads and writes a
+        // local copy of `x`.
+        expect(expected).toMatch(
+          bare === loop ? /^_tv1 = x\nif _tv1 == _tv1:\n/ : /^if x == x:\n/
+        );
       }
       // A nested selection that mixes the two kinds is refused too.
       expect(() =>

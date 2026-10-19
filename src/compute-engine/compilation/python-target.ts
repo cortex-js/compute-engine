@@ -217,6 +217,141 @@ function pythonCheckBindingName(id: string): string {
 const PYTHON_IDENTIFIER = /^[\p{XID_Start}_]\p{XID_Continue}*$/u;
 
 /**
+ * The identifier that the Python code uses for the identifier `id`.
+ *
+ * Python reads each identifier in its NFKC normal form, so two identifiers
+ * with the same NFKC form are one name: `ﬁ` (the ligature U+FB01) and `fi`
+ * are the same variable. An identifier that NFKC changes is therefore
+ * written with each character that NFKC changes replaced by `_u<hex>_`, the
+ * hexadecimal code point of the character: `ﬁ` is written `_uFB01_`. When
+ * the result is still changed by NFKC (a letter followed by a combining mark
+ * that NFKC composes), every character that is not ASCII is replaced. The
+ * result is then made of characters that NFKC does not change. An
+ * identifier that NFKC does not change is returned unchanged.
+ */
+function pythonNfkcSafeName(id: string): string {
+  if (id.normalize('NFKC') === id) return id;
+  const escape = (c: string): string =>
+    `_u${c.codePointAt(0)!.toString(16).toUpperCase()}_`;
+  let out = '';
+  for (const c of id) out += c.normalize('NFKC') === c ? c : escape(c);
+  if (out.normalize('NFKC') === out) return out;
+  out = '';
+  for (const c of id) out += c.codePointAt(0)! < 0x80 ? c : escape(c);
+  return out;
+}
+
+/**
+ * The string literals of the Python source `code` (double-quoted, as this
+ * target writes a string value, or single-quoted, as some lowerings write a
+ * constant string) alternate with the other parts of the source. Returns
+ * the parts: an even index is source, an odd index is a string literal.
+ */
+function pythonSplitStringLiterals(code: string): string[] {
+  return code.split(/("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/);
+}
+
+/** The identifier tokens of a Python source without string literals. */
+const PYTHON_IDENTIFIER_TOKEN = /[\p{XID_Start}_]\p{XID_Continue}*/gu;
+
+/**
+ * Write the Python source `body` so that two different identifiers stay
+ * two different names in Python.
+ *
+ * Python reads each identifier in its NFKC normal form, so two identifiers
+ * with the same NFKC form are one variable: the symbols `ﬁ` (the ligature
+ * U+FB01) and `fi` of `ﬁ + fi` were the same name in the compiled code. An
+ * identifier whose NFKC form no other identifier of the code has is kept as
+ * it is written (`𝑥 + 1` stays `𝑥 + 1`, which Python reads as `x + 1`), so
+ * the names that the result reports (`freeSymbols`) are the names that the
+ * code reads.
+ *
+ * In a group of two or more identifiers with the same NFKC form, one is
+ * kept and each other one is renamed: to `pythonNfkcSafeName()` of it, with
+ * a suffix `_1`, `_2`, … when that name has the NFKC form of another
+ * identifier of the code. The kept identifier is the one that the host
+ * refers to by its name, when there is one (`hostNames()`: a free symbol,
+ * which the host gives as a global, the name of the function), else the
+ * one that NFKC does not change. A bound name (a parameter, a local, an
+ * index) can be renamed, because the host does not refer to it by name.
+ * The compilation fails when two identifiers of a group are host names: the
+ * host cannot give them two values. The tokens of the `vars` sources of the
+ * caller (`callerSources`) are host names too, kept as the caller wrote
+ * them.
+ *
+ * `outside` are the identifiers that the caller of this function writes
+ * outside `body` (a parameter, the name of a function): the returned
+ * `name()` gives the identifier to write for each of them.
+ *
+ * `hostNames()` is called only when there is a group.
+ */
+function pythonDistinctIdentifiers(
+  body: string,
+  options: {
+    outside?: ReadonlyArray<string>;
+    callerSources?: ReadonlyArray<string>;
+    hostNames: () => Iterable<string>;
+  }
+): { body: string; name: (id: string) => string } {
+  const parts = pythonSplitStringLiterals(body);
+  const tokens = new Set<string>(options.outside ?? []);
+  for (let i = 0; i < parts.length; i += 2)
+    for (const t of parts[i].match(PYTHON_IDENTIFIER_TOKEN) ?? [])
+      tokens.add(t);
+  const byForm = new Map<string, string[]>();
+  for (const t of tokens) {
+    const form = t.normalize('NFKC');
+    const group = byForm.get(form);
+    if (group === undefined) byForm.set(form, [t]);
+    else group.push(t);
+  }
+  const groups = [...byForm].filter(([, group]) => group.length > 1);
+  const renamed = new Map<string, string>();
+  const name = (id: string): string => renamed.get(id) ?? id;
+  if (groups.length === 0) return { body, name };
+  const host = new Set<string>(options.hostNames());
+  for (const source of options.callerSources ?? [])
+    for (const part of pythonSplitStringLiterals(source).filter(
+      (_, i) => i % 2 === 0
+    ))
+      for (const t of part.match(PYTHON_IDENTIFIER_TOKEN) ?? []) host.add(t);
+  const usedForms = new Set(byForm.keys());
+  for (const [form, group] of groups) {
+    const hosted = group.filter((t) => host.has(t));
+    if (hosted.length > 1)
+      throw new Error(
+        `Could not compile to Python: the inputs "${hosted[0]}" and ` +
+          `"${hosted[1]}" are the same name for Python ("${form}"), because ` +
+          `Python reads each identifier in its NFKC normal form, so the host ` +
+          `cannot give them two values. Rename one of them, or map it to ` +
+          `another name with \`vars\` (fail closed, D6).`
+      );
+    const kept = hosted[0] ?? group.find((t) => t === form) ?? group[0];
+    for (const t of group) {
+      if (t === kept) continue;
+      const base = pythonNfkcSafeName(t);
+      let written = base;
+      for (let k = 1; usedForms.has(written.normalize('NFKC')); k++)
+        written = `${base}_${k}`;
+      usedForms.add(written.normalize('NFKC'));
+      renamed.set(t, written);
+    }
+  }
+  for (let i = 0; i < parts.length; i += 2)
+    parts[i] = parts[i].replace(PYTHON_IDENTIFIER_TOKEN, name);
+  return { body: parts.join(''), name };
+}
+
+/** The `vars` sources of the caller that are spliced into the code. */
+function pythonVarsSources(
+  vars: Record<string, unknown> | undefined
+): string[] {
+  return Object.values(vars ?? {}).filter(
+    (v): v is string => typeof v === 'string'
+  );
+}
+
+/**
  * Python mathematical constants, keyed by MathJSON symbol.
  *
  * Referenced both by the target's `var` resolver and — so an assigned value is
@@ -886,7 +1021,21 @@ function compilePythonSumProduct(
     };
   }
 
+  // The body is the element of a generator expression, which takes an
+  // EXPRESSION. A body that is an assignment or a declaration
+  // (`statementBodyHead`), or that compiles to several statements (a block
+  // with a local: `Block(t ≔ t + k; t)`), has no form there: it gave
+  // `sum(t = k + t ⏎ return t for k in …)`, a Python syntax error. Python
+  // has no statement position to hoist a loop to, so the compilation fails.
+  const statementError = (): Error =>
+    new Error(
+      `Could not compile \`${kind}\`: the body is a statement or a block of ` +
+        `statements, and the Python lowering of \`${kind}\` is a generator ` +
+        `expression, whose element is an expression.`
+    );
+  if (statementBodyHead(body) !== undefined) throw statementError();
   const bodyCode = BaseCompiler.compile(body, idxTarget);
+  if (bodyCode.includes('\n')) throw statementError();
   const gen = `${bodyCode} ${forClauses.join(' ')}`;
   return kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
 }
@@ -6026,8 +6175,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
 
   private compileOrThrow(
     expr: Expression,
-    options: CompilationOptions<Expression> = {}
+    options: CompilationOptions<Expression> = {},
+    writtenInputs?: ReadonlyArray<string>
   ): CompilationResult<'python'> {
+    const source = expr;
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
@@ -6041,11 +6192,18 @@ export class PythonTarget implements LanguageTarget<Expression> {
       readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
     });
     const vars = options.vars as Record<string, string> | undefined;
+    const resolveVar = this.makeVarResolver(vars);
+    // The local copy of each input that the body writes (the second
+    // compilation, see below).
+    const inputLocals = new Map<string, string>();
     // Root compilation boundary: fresh, deterministic numbering for the
     // generated temporaries, seeded with the names this compilation must not
     // reuse (see `NamingContext`).
     const target = this.createTarget({
-      var: this.makeVarResolver(vars),
+      var: (id) => inputLocals.get(id) ?? resolveVar(id),
+      // See `CompileTarget.inputWrites`.
+      inputWrites: new Set<string>(),
+      inputLocals,
       // A `vars`-mapped symbol is a live runtime input: the constant folder
       // must never fold a subtree that mentions one, even when the symbol
       // has an engine value (`CompileTarget.varsKeys`).
@@ -6070,8 +6228,42 @@ export class PythonTarget implements LanguageTarget<Expression> {
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
+    for (const name of writtenInputs ?? [])
+      inputLocals.set(name, BaseCompiler.tempVar(target));
     pythonAssertReturnableSelection('compile()', expr, true);
-    let code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
+    let body = BaseCompiler.compileCseRoot(expr, target);
+    // The body assigns an input (`u ≔ u + 1`, when an engine scope binds
+    // `u`). The code has no `def`, and a host runs it in a context that this
+    // target does not know: at the top level of a module, or in a function
+    // that the host writes around it. In a function, an assignment of `u`
+    // makes `u` a local of the whole function, so a read of `u` before the
+    // write raised `UnboundLocalError` when `u` is a global of the host. A
+    // write also changed the value that the host gave. The expression is
+    // compiled again, with each written input read and written as a local
+    // copy that starts with the value of the input (`_tv1 = u`). The copy
+    // reads `u` in each of these contexts: a global, a parameter of the
+    // host's function, or a variable of an enclosing function. The
+    // initialization is not emitted when the first statement that names the
+    // copy is a write that always runs (`pythonWrittenFirst`). The Python
+    // target spells a free symbol with its own name (`pythonCheckIdentifier`),
+    // so a recorded spelling is the name of the symbol.
+    if (writtenInputs === undefined && target.inputWrites!.size > 0)
+      return this.compileOrThrow(source, options, [...target.inputWrites!]);
+    const initializations = [...inputLocals]
+      .filter(([, local]) => !pythonWrittenFirst(body, local))
+      .map(([name, local]) => `${local} = ${resolveVar(name) ?? name}`);
+    if (initializations.length > 0)
+      body = [...initializations, body].join('\n');
+    body = pythonDistinctIdentifiers(body, {
+      callerSources: pythonVarsSources(vars),
+      hostNames: () =>
+        BaseCompiler.analyzeReferences(
+          expr,
+          target,
+          vars ? new Set(Object.keys(vars)) : undefined
+        ).freeSymbols,
+    }).body;
+    let code = withPythonHelpers(body);
     if (this.includeImports) code = this.withImports(code);
 
     const result: CompilationResult<'python'> = {
@@ -6146,7 +6338,17 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // helper/import preamble — those lines are the route's own, not the
     // body's.
     pythonAssertExpressionOnly('compileToSource()', body);
-    const code = withPythonHelpers(body);
+    const code = withPythonHelpers(
+      pythonDistinctIdentifiers(body, {
+        callerSources: pythonVarsSources(vars),
+        hostNames: () =>
+          BaseCompiler.analyzeReferences(
+            expr,
+            target,
+            vars ? new Set(Object.keys(vars)) : undefined
+          ).freeSymbols,
+      }).body
+    );
     return this.includeImports ? this.withImports(code) : code;
   }
 
@@ -6193,6 +6395,21 @@ export class PythonTarget implements LanguageTarget<Expression> {
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
     let body = BaseCompiler.compileCseRoot(expr, target);
     pythonAssertReturnedBlock('compileFunction()', expr, body);
+    // Two different names stay two different Python identifiers
+    // (`pythonDistinctIdentifiers`). The function name and the parameters
+    // are written outside the body, with the same replacement. The host
+    // refers to the function and to the module globals by name, not to the
+    // parameters.
+    const ids = pythonDistinctIdentifiers(body, {
+      outside: [functionName, ...parameters],
+      hostNames: () => [
+        functionName,
+        ...BaseCompiler.analyzeReferences(expr, target).freeSymbols.filter(
+          (s) => !parameters.includes(s)
+        ),
+      ],
+    });
+    body = ids.body;
     // A free symbol that is not a parameter is read as a module global. When
     // the body also assigns it (an input that an engine scope binds, as in
     // `u ≔ u + 1`), Python makes the name a local of the whole function, and
@@ -6212,7 +6429,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // `__import__` itself is refused (fail closed) when the expression or the
     // parameters use it.
     const writtenGlobals = [...target.inputWrites!].filter(
-      (name) => !parameters.includes(name) && !pythonWrittenFirst(body, name)
+      (name) =>
+        !parameters.includes(name) && !pythonWrittenFirst(body, ids.name(name))
     );
     if (writtenGlobals.length > 0) {
       if (
@@ -6222,16 +6440,18 @@ export class PythonTarget implements LanguageTarget<Expression> {
         throw new Error(
           `"__import__" cannot be used as a symbol or parameter name in a Python function that assigns a module global. Rename it before compiling to Python (fail closed).`
         );
+      // Python stores a global under the NFKC form of its name (`ﬁ = 1`
+      // stores `fi`), so the key of the lookup is that form.
       body = [
         ...writtenGlobals.map(
           (name) =>
-            `${name} = __import__("builtins").globals().get(${JSON.stringify(name)})`
+            `${ids.name(name)} = __import__("builtins").globals().get(${JSON.stringify(ids.name(name).normalize('NFKC'))})`
         ),
         /^return\b/.test(body) || body.includes('\n') ? body : `return ${body}`,
       ].join('\n');
     }
 
-    const params = parameters.join(', ');
+    const params = parameters.map(ids.name).join(', ');
     let code = '';
 
     if (this.includeImports) {
@@ -6271,7 +6491,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       code += `${PYTHON_LIST_UPDATE_HELPER}\n`;
     if (body.includes('_ce_predicate(')) code += `${PYTHON_PREDICATE_HELPER}\n`;
 
-    code += `def ${functionName}(${params}):\n`;
+    code += `def ${ids.name(functionName)}(${params}):\n`;
 
     if (docstring) {
       code += `    r"""${docstring}"""\n`;
@@ -6415,7 +6635,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
             `lambda — use compileFunction instead.`
         );
 
-    const params = parameters.join(', ');
-    return `lambda ${params}: ${body}`;
+    // Two different names stay two different Python identifiers
+    // (`pythonDistinctIdentifiers`).
+    const ids = pythonDistinctIdentifiers(body, {
+      outside: parameters,
+      hostNames: () =>
+        BaseCompiler.analyzeReferences(expr, target).freeSymbols.filter(
+          (s) => !parameters.includes(s)
+        ),
+    });
+    const params = parameters.map(ids.name).join(', ');
+    return `lambda ${params}: ${ids.body}`;
   }
 }

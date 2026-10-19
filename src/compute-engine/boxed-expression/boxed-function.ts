@@ -5054,6 +5054,68 @@ export class BoxedFunction
   }
 
   /**
+   * True when this node is a collection view that can refuse its source for
+   * having no positions: a collection head (`Reverse`, `Take`, `Rest`,
+   * `Zip`, …) that is not a collection literal (`List`, `Set`, `Tuple`) and
+   * not an observer. See {@link _refusedUnindexedSourceError}.
+   */
+  private _mayRefuseUnindexedSource(): boolean {
+    if (!isCollectionHead(this)) return false;
+    if (COLLECTION_LITERAL_HEADS.has(this._operator)) return false;
+    const def = this._def ?? undefined;
+    return !(
+      def !== undefined &&
+      isOperatorDef(def) &&
+      def.operator.inspectsErrors
+    );
+  }
+
+  /**
+   * The error of a positional collection view (`Reverse`, `Take`, `Drop`,
+   * `Rest`, `Most`, `Slice`, the rotations, `Zip`) whose collection operand
+   * has no positions (a set, a dictionary), with this node's hop on its
+   * breadcrumb — or `undefined` when `result` is not that shape.
+   *
+   * The declared `indexed_collection` parameter refuses such an operand when
+   * the call is boxed: the operand is replaced by an `incompatible-type`
+   * error (`Reverse(Error(…, Set(1, 2, 3)))`). The same happens when the
+   * view is boxed again after its operand is evaluated (`Reverse(c)` with
+   * `c := Set(1, 2, 3)`). A collection head does not bubble the error of an
+   * operand, because a failed element of a collection stays in its place.
+   * But the refused source is not an element: no part of the view can be
+   * computed. So the value of the view is the error itself, with the frame
+   * of the view, as for an operator with an `evaluate` handler (`Sort(c)`,
+   * `First(c)`).
+   *
+   * Only an error with no breadcrumb is read: the one that the boxing of
+   * this node made. An error with a breadcrumb was made somewhere else.
+   */
+  private _refusedUnindexedSourceError(
+    result: Expression
+  ): Expression | undefined {
+    if (!isFunction(result) || result.operator !== this._operator)
+      return undefined;
+    const ops = result.ops;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (!isFunction(op, 'Error') || op.nops !== 2) continue;
+      const code = op.op1;
+      if (!isFunction(code, 'ErrorCode') || code.nops < 2) continue;
+      const [kind, expected] = code.ops;
+      if (!isString(kind) || kind.string !== 'incompatible-type') continue;
+      if (
+        !isString(expected) ||
+        !expected.string.startsWith('indexed_collection')
+      )
+        continue;
+      const source = op.op2;
+      if (!source.isCollection || source.isIndexedCollection) continue;
+      return errorValue(op, { operator: this._operator, index: i + 1 });
+    }
+    return undefined;
+  }
+
+  /**
    * The error carried by a broadcast LIFT that has just been evaluated
    * (`evaluateBroadcastLiftsOnce`), with this node's hop on its breadcrumb,
    * or `undefined` when no lifted operand evaluated to one.
@@ -5409,7 +5471,14 @@ export class BoxedFunction
       // an undecided selection in the result is returned as it is
       // (`errorValue` does not descend into them).
       const selecting = this._defersErrorAbsorption();
-      if (!selecting && !this._absorbsEvaluatedOperandError()) return compute;
+      if (!selecting && !this._absorbsEvaluatedOperandError()) {
+        if (!this._mayRefuseUnindexedSource()) return compute;
+        return () => {
+          const result = compute();
+          if (result.isValid) return result;
+          return this._refusedUnindexedSourceError(result) ?? result;
+        };
+      }
       return () => {
         const result = compute();
         if (result.isValid) return result;
@@ -5423,7 +5492,13 @@ export class BoxedFunction
     // (`_absorbsErrorAfterHandler`): the handler runs on the invalid tree,
     // and only an error that reached its RESULT — i.e. one a selection
     // actually demanded — bubbles.
-    if (!this._absorbsErrorAfterHandler()) return compute;
+    if (!this._absorbsErrorAfterHandler()) {
+      if (!this._mayRefuseUnindexedSource()) return compute;
+      return () => {
+        const result = compute();
+        return this._refusedUnindexedSourceError(result) ?? result;
+      };
+    }
     return () => {
       const result = compute();
       return this._errorAfterHandler(result) ?? result;
@@ -5910,6 +5985,27 @@ export class BoxedFunction
           !materializesAfterOperands(this, def, options)
         )
           return materialize(this, def, options);
+      }
+
+      //
+      // 3a/ A view that reads its source by a position computed from the
+      // count of the source (`Reverse`, `Most`, `RotateLeft`, `RotateRight`)
+      // cannot be enumerated over a finite source with no count
+      // (`FlatMap([1, 2], x ↦ [x, x])`), so a consumer of its value (`Sum`,
+      // `Max`, `First`) stayed unevaluated. Its evaluation lists the source
+      // ONCE, and the value is the same view over that list
+      // (`viewOverListedSource()`), which a consumer can walk. When the
+      // source cannot be listed, the evaluation continues as before. The
+      // materialization of step 3 does the same listing.
+      //
+      if (
+        materialization === false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !isDisplayPreviewOf(this, options)
+      ) {
+        const listedView = viewOverListedSource(this);
+        if (listedView) return listedView.evaluate(options);
       }
 
       //
@@ -6721,7 +6817,14 @@ export class BoxedFunction
     // Late error absorption, mirroring `_computeValue` — both branches.
     if (this.isValid) {
       const selecting = this._defersErrorAbsorption();
-      if (!selecting && !this._absorbsEvaluatedOperandError()) return compute;
+      if (!selecting && !this._absorbsEvaluatedOperandError()) {
+        if (!this._mayRefuseUnindexedSource()) return compute;
+        return async () => {
+          const result = await compute();
+          if (result.isValid) return result;
+          return this._refusedUnindexedSourceError(result) ?? result;
+        };
+      }
       return async () => {
         const result = await compute();
         if (result.isValid) return result;
@@ -6731,7 +6834,13 @@ export class BoxedFunction
         );
       };
     }
-    if (!this._absorbsErrorAfterHandler()) return compute;
+    if (!this._absorbsErrorAfterHandler()) {
+      if (!this._mayRefuseUnindexedSource()) return compute;
+      return async () => {
+        const result = await compute();
+        return this._refusedUnindexedSourceError(result) ?? result;
+      };
+    }
     return async () => {
       const result = await compute();
       return this._errorAfterHandler(result) ?? result;
@@ -7154,6 +7263,20 @@ export class BoxedFunction
           !materializesAfterOperands(this, def, options)
         )
           return await materializeAsync(this, def, options);
+      }
+
+      // A view that reads its source by a position computed from the count
+      // of the source, over a finite source with no count: mirrors the sync
+      // path's step 3a. The source is listed once, and the value is the same
+      // view over that list (`viewOverListedSource()`).
+      if (
+        materialization === false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !isDisplayPreviewOf(this, options)
+      ) {
+        const listedView = viewOverListedSource(this);
+        if (listedView) return await listedView.evaluateAsync(options);
       }
 
       //
@@ -10289,10 +10412,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // literal has its OWN broadcast arm below, and an annotated literal
     // assigned bare now derives `broadcastable` from `paramsAreScalar`
     // (`engine-declarations.ts`), so it would otherwise be captured HERE. The
-    // two arms disagree on a collection-valued result: this one applies
-    // `broadcastElementType` (unwrapping it), the lambda arm deliberately does
-    // not — `f := (x: number) -> list<number>` applied to `[1,2]` evaluates to
+    // lambda arm types the result from the body of the literal, and keeps a
+    // collection-valued result as the result for one element:
+    // `f := (x: number) -> list<number>` applied to `[1,2]` evaluates to
     // `[[1,1],[2,2]]` and must type `list<list<number>>`, not `vector<2>`.
+    // This arm keeps such a result only when it is shown to be the result
+    // for one element (`perElementCollection` in `broadcastLiftType`).
     // A DECLARED `broadcastable<T>` parameter is an elementwise contract too
     // (Option A, ratified 2026-08-08 — Tycho defect 157(1)), so its application
     // must type exactly like the inferred path: definite collection → `list<R>`
@@ -10345,6 +10470,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
         def,
         views: expr.ops.map(viewOfExpression),
         sigResult,
+        sigResultIsPerElement: !typeHandlerAnswered,
         mappable:
           declaredSlots === undefined
             ? undefined
@@ -10904,6 +11030,31 @@ function applyFunctionLiteralWith(
     return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
   }
 
+  if (!value || value.type.isUnknown) {
+    // The cached `_def` may be a function-typed *value* placeholder (created
+    // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
+    // definition `f(x) = …` inside a function body) while the runtime
+    // `ce.assign` created an *operator* definition, which
+    // `_getSymbolValue` cannot read. If the symbol now resolves to an
+    // operator definition, dispatch through it, with the operands as they
+    // were written: the operator definition evaluates them itself, and
+    // under `.N()` it records them behind the activations of its function
+    // literal, so that the body reads an exact argument as written. The
+    // approximated operands lost it: `Block(h := x ↦ Floor(x), h((25! −
+    // 1)/24!)).N()` was 25, where the correct value is 24. Otherwise stay
+    // symbolic over the evaluated operands.
+    const opDef = expr.engine.lookupDefinition(expr.operator);
+    if (opDef && isOperatorDef(opDef)) {
+      const call = expr.engine.function(expr.operator, expr.ops);
+      return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
+    }
+    const evaluated =
+      evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
+    return expr._withParseScope(() =>
+      expr.engine.function(expr.operator, evaluated)
+    );
+  }
+
   // The arguments are operands: evaluated without `materialization`
   // (`operandOptions`), so a body that reads a lazy argument as a collection
   // reads the whole collection, not its display preview. The body itself
@@ -10913,18 +11064,6 @@ function applyFunctionLiteralWith(
   // The breadcrumb of a surplus argument (`ApplyOptions.arityFrame`): this
   // call's head, whose first argument is its first operand.
   const arityFrame = { operator: expr.operator, firstArgumentIndex: 1 };
-  if (!value || value.type.isUnknown) {
-    // The cached `_def` may be a function-typed *value* placeholder (created
-    // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
-    // definition `f(x) = …` inside a function body) while the runtime
-    // `ce.assign` created an *operator* definition, which
-    // `_getSymbolValue` cannot read. If the symbol now resolves to an
-    // operator definition, dispatch through it; otherwise stay symbolic.
-    const opDef = expr.engine.lookupDefinition(expr.operator);
-    if (opDef && isOperatorDef(opDef))
-      return expr.engine.function(expr.operator, ops).evaluate(options);
-    return expr._withParseScope(() => expr.engine.function(expr.operator, ops));
-  }
 
   // Broadcast if any operand is a finite indexed collection and the
   // function's parameter types are scalar. Zip operands and apply
@@ -12711,6 +12850,13 @@ function zipLiftingUnindexed(
 }
 
 /**
+ * The collection literals. Their operands are elements, so an error in one
+ * of them is a failed element and is never the refusal of a source (see
+ * `_refusedUnindexedSourceError()`).
+ */
+const COLLECTION_LITERAL_HEADS = new Set(['List', 'Set', 'Tuple']);
+
+/**
  * The `incompatible-type` error for an operand that is a collection with no
  * positions (a set, an interval, a dictionary — see
  * `isUnindexedCollectionOperand`) at a NUMERIC parameter of a built-in
@@ -13285,6 +13431,20 @@ function heldEagerSources(
   const sources: HeldEagerSource[] = [];
   if (isCollectionSourceOperator(expr.operator)) {
     ops.forEach((x, index) => {
+      // A restricted collection, `[1,3,5]{0<t}`, is one held `When` over the
+      // list, and step 4c threads it whole at a position the operator
+      // threads (`threadsConditionals`): the operation is computed on the
+      // list and the result is restricted by the condition. Such an operand
+      // is not a source here. The held `When` presents its cells through
+      // its collection handlers, but it is not an indexed collection, so
+      // the test for a collection without positions below refused it with
+      // an `incompatible-type` error before step 4c could thread it:
+      // `ArgMax([1,3,5]{0<t})` and `Scan([1,3,5]{0<t}, Add)` were errors.
+      if (
+        def.threadsConditionalsAt(index) &&
+        (isFunction(x, 'When') || isFunction(x, 'Which'))
+      )
+        return;
       const held = isHeldEagerSource(x);
       // A collection without positions (a set held by a symbol of a wider
       // declared type) at a slot that reads its source by position is a

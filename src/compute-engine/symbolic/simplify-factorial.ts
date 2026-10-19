@@ -3,11 +3,10 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 
 /**
- * True when `x` is a number literal at a non-finite point — `NaN`, one of the
- * three named infinities, or an "anonymous" infinity such as `∞ + i`. The
- * infinity test goes through `infinitePoint`, not through `isFinite`: an
- * anonymous infinity reports `isFinite === true`, and a finite bignum beyond
- * the double range projects `re` to `Infinity`.
+ * True when `x` is a number literal at a non-finite point — `NaN` or one of
+ * the three infinities. The infinity test goes through `infinitePoint`,
+ * which asks the numeric value: a finite bignum beyond the double range
+ * projects `re` to `Infinity`, and it is finite.
  */
 function isNonFiniteLiteral(x: Expression): boolean {
   return isNumber(x) && (x.isNaN === true || infinitePoint(x) !== undefined);
@@ -16,12 +15,11 @@ function isNonFiniteLiteral(x: Expression): boolean {
 /**
  * True when `x` is a number literal that `Binomial`'s evaluate handler
  * answers `NaN` for whatever the other operand is: the `NaN` literal (which
- * propagates) and an anonymous infinity. The three named infinities are NOT
- * in this set — `C(±∞, 0)` and `C(~oo, 0)` are `1`, the value the
- * `C(n, 0) → 1` rewrite gives.
+ * propagates). The three infinities are NOT in this set — `C(±∞, 0)` and
+ * `C(~oo, 0)` are `1`, the value the `C(n, 0) → 1` rewrite gives.
  */
 function isIndeterminateLiteral(x: Expression): boolean {
-  return isNumber(x) && (x.isNaN === true || infinitePoint(x) === 'anonymous');
+  return isNumber(x) && x.isNaN === true;
 }
 
 /**
@@ -77,8 +75,8 @@ export function simplifyBinomial(x: Expression): RuleStep | undefined {
   const ce = x.engine;
 
   // C(n, 0) → 1. Holds at the three named infinities too (C(±∞, 0) and
-  // C(~oo, 0) are 1), so only the points whose value is NaN whatever the
-  // second operand — the NaN literal and an anonymous infinity — are excluded.
+  // C(~oo, 0) are 1), so only the point whose value is NaN whatever the
+  // second operand (the NaN literal) is excluded.
   if (k.isSame(0) && !isIndeterminateLiteral(n))
     return { value: ce.One, because: 'C(n,0) -> 1' };
 

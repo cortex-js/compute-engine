@@ -118,11 +118,11 @@ import { guardDigitsN } from './exact-operands-under-n.js';
  * Whether a `Hypot` leg has an infinite magnitude, which makes the hypotenuse
  * `+∞` whatever the other leg is — a NaN leg included.
  *
- * A leg is infinite when it is a number literal at any infinite point — `±∞`,
- * the unsigned `~oo`, or an anonymous directed infinity such as `∞ + i`, all
- * of which have modulus `+∞` — or when it is a fixed-arity point with such a
- * component: a point enters the sum of squares through its own norm, and an
- * infinite component makes that norm `+∞`, so `Hypot((∞, NaN), 2)` is `+∞`
+ * A leg is infinite when it is a number literal at any infinite point — `±∞`
+ * or the unsigned `~oo`, all of which have modulus `+∞` — or when it is a
+ * fixed-arity point with such a component: a point enters the sum of squares
+ * through its own norm, and an infinite component makes that norm `+∞`, so
+ * `Hypot((∞, NaN), 2)` is `+∞`
  * exactly as `Norm((∞, NaN))` is. One rule holds for every Euclidean norm: an
  * infinite leg dominates a NaN leg. IEEE 754 agrees —
  * `Math.hypot(Infinity, NaN)` is `Infinity` — and the compiled code emits
@@ -276,6 +276,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Convert an angle in degrees.',
       /* = Pi / 180 */
       signature: '(real) -> real',
+      broadcastable: true,
       // A non-real or non-finite argument flows through the linear conversion
       // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
       type: (ops, context) =>
@@ -390,6 +391,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // component is provably real and the wide `number` otherwise, which
       // is what the declared result says.
       signature: '(number, number?, number?) -> number',
+      broadcastable: true,
       type: (ops, context) =>
         BoxedType.forResult(
           numericTypeHandlerOnTypes(ops),
@@ -485,9 +487,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // and it is why the carrier is `infinity` rather than the signed
       // pair: `|~oo| = +∞` by definition of the point at infinity, so
       // `Hypot(~oo, 3)` is `+∞`, the answer every Euclidean norm gives an
-      // infinite component. The `infinity` type also brings in an anonymous
-      // directed infinity such as `∞ + i`, whose modulus is `+∞` as well.
-      // Finite complex operands stay OUT of the carrier.
+      // infinite component. Finite complex operands stay OUT of the carrier.
       //
       // The result is `real | +oo`: `+∞` is the ONLY infinite value a norm
       // can take — it is non-negative — and `-oo` is admitted as an
@@ -1466,8 +1466,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // decided in each handler), explicit `nanBehavior: 'propagate'` (the
       // carrier is not a subtype of `complex`, so the derived policy would
       // be `reject`), the wide `number` result (the compiled lanes read
-      // it), and boxing as the seam (no `canonical` handler). At `~oo` and
-      // at an anonymous infinity (`∞ + i`) none of the four has a value —
+      // it), and boxing as the seam (no `canonical` handler). At `~oo` none
+      // of the four has a value —
       // `Si(iy) = i·Shi(y)` diverges while `Si(±∞) = ±π/2` — so all four
       // answer `NaN` there (ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
@@ -1504,8 +1504,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           // (`holdsShadowedPi()`).
           return holdsShadowedPi(ce, v) ? undefined : v;
         }
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
@@ -1580,8 +1579,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           // (`holdsShadowedPi()`).
           return holdsShadowedPi(ce, v) ? undefined : v;
         }
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -1649,8 +1647,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo') return ce.PositiveInfinity;
         if (point === '-oo') return ce.NegativeInfinity;
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0))
           return floatIfFloatOperand([x], ce.Zero);
@@ -1717,8 +1714,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         // `Chi(−∞)` tends to `∞ + iπ`, which is the real infinity `+∞`.
         if (point === '+oo' || point === '-oo') return ce.PositiveInfinity;
-        // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
-        // infinity such as `∞ + i`, a float literal).
+        // No limit at `~oo`: the indeterminate form.
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
         if (!x.isComplex && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;

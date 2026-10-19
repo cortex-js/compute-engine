@@ -245,6 +245,7 @@ import {
 } from '../boxed-expression/effects-inference.js';
 import {
   declaredTypeError,
+  isDependentRebuildError,
   isTypeCompatibilityError,
   typeCompatibilityErrorValue,
 } from '../boxed-expression/type-compatibility-error.js';
@@ -5844,6 +5845,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
           if (isTypeCompatibilityError(e))
             return typeCompatibilityErrorValue(ce, e);
+          // The definition is installed, but a definition that waited on
+          // this name could not be rebuilt: its error is the value.
+          if (isDependentRebuildError(e)) return e.errorValue;
           throw e;
         }
         return ce.Nothing;
@@ -6529,6 +6533,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
           if (isTypeCompatibilityError(e))
             return typeCompatibilityErrorValue(ce, e);
+          // As in `DefineFunction`: the assignment is installed, but a
+          // definition that waited on this name could not be rebuilt.
+          if (isDependentRebuildError(e)) return e.errorValue;
           throw e;
         }
         return val;

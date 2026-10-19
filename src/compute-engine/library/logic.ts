@@ -939,6 +939,10 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     description:
       'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
     signature: '(boolean) -> integer',
+    // `Boole([True, False])` is `[1, 0]`: the bracket applies to each
+    // element of a list of booleans. No other operator reads a boolean as a
+    // number.
+    broadcastable: true,
     evaluate: (args, { engine: ce }) => {
       // Only a definite truth value resolves; an undetermined predicate
       // (e.g. `Equal(x, y)` with free symbols) stays symbolic instead of 0.

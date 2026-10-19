@@ -2,6 +2,61 @@
 
 ### Behavior Changes
 
+- **The GLSL and WGSL code writes a local copy of an input that the body
+  assigns** (user decision 2026-10-18). With `ce.declare('u', 'real')`,
+  `u ≔ u + 1` compiled to `u = u + 1.0`, which is not valid when `u` is a
+  uniform. It now compiles to `float _tv1 = u; _tv1 = _tv1 + 1.0; return _tv1;`
+  (`var _tv1: f32 = u;` in WGSL). This also applies to `compileFunction()`, to
+  an input that `vars` maps, and to a chained assignment, which was refused
+  before. A body that calls a user function that reads the written input fails
+  closed. Python `compile()` also writes a local copy (`_tv1 = u`,
+  `_tv1 = _tv1 + 1`): the plain `u = u + 1` raised `UnboundLocalError` when a
+  host ran it in a function with `u` as a global. `freeSymbolTypes` reports the
+  declared type of a written input (a complex `u` was reported as `unknown`),
+  and `freeSymbols` no longer lists a local that an assignment in a block
+  declares.
+
+- **Python: two different symbols stay two different names.** Python reads an
+  identifier in its NFKC form, so `ﬁ` and `fi` were one variable. A lone name
+  that NFKC changes is kept as written (`𝑥 + 1`). In a group of names that
+  Python reads as one, a parameter, a local or an index is renamed
+  (`def f(_uFB01_, fi)`), and two inputs fail closed (map one of them with
+  `vars`). A written global in `compileFunction()` is read by the NFKC form of
+  its name. WGSL declines an `If`, `When` or `Which` whose branch assigns a
+  variable (it was `select(t = 2.0, t = 1.0, 0.0 < x)`, which no WGSL compiler
+  accepts), and Python declines a `Sum` or `Product` whose body is an assignment
+  or a block of statements (it was a generator expression that holds
+  statements). `freeSymbols` no longer lists the inner target of a chained
+  assignment (`w` in `t ≔ (w ≔ t + i)`) when the code declares it as a local.
+
+- **An element-wise operator whose result for one element is a list gives a list
+  of lists, and its type says so.** `ComplexRoots([1, 8], 3)` was typed
+  `vector<2>` and is now `list<list<number>^2>`. `FactorInteger`, `Divisors`,
+  `PrimeFactors`, `ExtendedGCD`, `ContinuedFraction`, `IntegerDigits`,
+  `PrimitiveRootList` and `DigitCount` now map over a list (`Divisors([6, 8])`
+  is `[[1,2,3,6],[1,2,4,8]]`; it was an `incompatible-type` error), and so do
+  `Degrees` and `DMS` (`Degrees([30, 90])` is `[π/6, π/2]`). `Boole` maps over a
+  list (user decision 2026-10-18): `Boole([True, False])` is `[1, 0]`. The Gamma
+  family is no longer typed `real` when its argument can be a pole: for
+  `x: real`, `Gamma(x)` is typed `infinity | real`, because `Gamma(-1)` is
+  `~oo`.
+
+- **Collection operators: sets, comparators and empty tables** (user decisions
+  2026-10-18). A positional view refused for a set or a dictionary
+  (`Reverse(c)`, `Take(c, 1)`, `Drop`, `Rest`, `Most`, `Slice`, `RotateLeft`,
+  `RotateRight`, `Zip`) gives the bare `Error` with its frame, as `Sort(c)`
+  does; it gave `Reverse(Error(…))`. `Sort` and `Ordering` refuse a comparator
+  whose parameter type does not accept every element:
+  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` was `[3, 1.5, 2]`.
+  `Table(k², {k, 1, 0})` and `Table(k², {k, 2, 0})` are `[]`; a count-down needs
+  an explicit negative step (the second one gave `[4, 1, 0]`).
+
+- **`Solve` over the complex numbers no longer returns a partial family.** An
+  equation whose roots need two integer parameters stays unevaluated:
+  `Solve(e^{sin x} = 1, x ∈ ℂ)` gave `[πt]` and missed the roots where
+  `sin x = 2πik`, and `Solve(sinh x = 0, x ∈ ℂ)` gave `[0]` and missed `iπk`.
+  Over the real numbers, and with no domain, the families are unchanged.
+
 - **Under `.N()`, the direct application of a function literal gives the value
   of its body with the arguments as written**, as a lazy `Map` does (user
   decision 2026-10-18). At machine precision `Apply(x ↦ Sin(x), Pi).N()` was
@@ -61,12 +116,12 @@
   gives `[]`: the residual of a square root is compared with the size of the
   root, not of its argument. `k·xⁿ + c = 0` is solved by a direct formula:
   `x^{256} = 2` takes 0.4 s, where it took 15 s, and an integer-valued float
-  exponent up to 10000 in a pure power is a degree; with `a := 0`, `x^3 = a`
-  gives `[0]` once. Over a bounded domain, a product of periodic factors gives
-  the roots of each factor: `sin(x)·sin(a·x) = 0` with
-  `a = 2000000001/2000000000` over [0, 10] gives its seven roots. At the default
-  verbosity, `explain('solve')` for `x^{2.0} + 3x + 2 = 0` shows the step to
-  integer exponents and the float roots.
+  exponent in a pure power is a degree; with `a := 0`, `x^3 = a` gives `[0]`
+  once. Over a bounded domain, a product of periodic factors gives the roots of
+  each factor: `sin(x)·sin(a·x) = 0` with `a = 2000000001/2000000000` over [0,
+  10] gives its seven roots. At the default verbosity, `explain('solve')` for
+  `x^{2.0} + 3x + 2 = 0` shows the step to integer exponents and the float
+  roots.
 
 - **`Solve` of a periodic equation returns its families of solutions** (user
   decision 2026-10-17). With no domain, or over the real or the complex numbers,
@@ -686,6 +741,88 @@
 
 ### Issues Resolved
 
+- **A function local to a `Block` reads an exact argument as written under
+  `.N()`**, as a global function does:
+  `Block(h := x ↦ Floor(x), h((25! − 1)/24!)).N()` is `24` (it was `25`), and
+  `Block(h := x ↦ 2·Numerator(x), h(3/7)).N()` is `6` (it was `0.857…`). `Map`
+  with the name of such a local as its callback applies it under `.N()`
+  (`[h(3/7)]` before). Under `.N()`, a call of a function with an exact argument
+  uses the application memo: 200 calls of `f(3/7).N()` take 4 ms instead of 430
+  ms.
+
+- **A block run asynchronously keeps its implicit locals from one run to the
+  next.** With an operator that has only an `evaluateAsync` handler in the body,
+  `Sum(Block(t ≔ t + 1; …; t), k, 1, 3)` gave `3t + 3` with `evaluateAsync()`
+  and `3t + 6` with `evaluate()`; both routes now give `3t + 6`.
+
+- **`Residue` and `Limit` at a pole that is a sum** (`1 + √2`, `1/2 + (√3/2)i`).
+  `Residue(1/(x³+1), x, 1/2+(√3/2)i)` gave `0` and is `−1/6 − (√3/6)i`;
+  `Residue(1/(x²−(3+2√2)), x, 1+√2)` gave `0` and is `1/(2(1+√2))`.
+  `Limit(1/(x³+1), x→1/2+(√3/2)i)` gave `1/(1+(1/2+(√3/2)i)³)`, which is `1/0`;
+  it stays unevaluated, as a two-sided limit at a simple pole does. One-sided
+  limits and limits at a pole of even order give `±∞` at such points.
+  `Residue(√x/x, x, 0)` and `Residue(1/ln x, x, 0)` (branch points) no longer
+  give `0`. A numeric `Limit` or `NLimit` at a point that is not real no longer
+  gives the limit near the real part of the point (`lim_{x→i} 1/(x²+1)` gave
+  `1`). `Residue` of a function whose numerator is entire but not a polynomial
+  (`sin(x)/(x³+1)²` at a complex root) gives its value at once, and `Residue` at
+  a point on the branch cut of `√`, `ln` or a fractional power (`1/√(x²−2)` at
+  `1`, `ln(x)/(x+1)` at `−1`) stays unevaluated (it gave `0` and `ln(−1)`).
+
+- **A collection operator over a restricted list `[1,3,5]{0<t}` threads the
+  condition**: the operation is computed on the list and the result is
+  restricted by the condition. Before, `TakeWhile`, `DropWhile`, `Scan`,
+  `ArgMax`, `ArgMin` and `Differences` gave an `incompatible-type` error,
+  `DeleteAt` was refused when boxed, `IndexWhere` stayed unevaluated, `CountIf`
+  threw, `RotateLeft` and `RotateRight` gave a `Set`, `RangeOf` gave `Nothing`,
+  `ContainsSequence`, `StartsWith` and `EndsWith` gave `False`, and `ListFrom`,
+  `SetFrom` and `TupleFrom` gave a list of restricted cells. `Partition` of an
+  absent collection is `Missing` (it was an `incompatible-type` error).
+
+- **Views over a source with no count.** `Reverse`, `Most`, `RotateLeft`,
+  `RotateRight`, `Insert`, `DeleteAt` and `ReplaceAt` over a finite source with
+  no count (`FlatMap([1, 2], x ↦ [x, x])`) list the source once:
+  `Sum(Reverse(FlatMap(…)))` is `6`, and `Insert(FlatMap(…), 1, 0)` is
+  `[0, 1, 1, 2, 2]`. `Sum(RotateLeft(Divisors(12)))` was `0`. A view that cannot
+  read its source (an infinite source for `Reverse`, a rotation by an offset
+  with no value) stays unevaluated, where `Any` answered `False`. `Permutations`
+  and `Combinations` no longer exceed the call stack
+  (`First(Permutations(Range(1, 5000)))` was an internal error), and `PowerSet`
+  walks a set of 32 or more elements (it stopped after two subsets).
+  `z ∈ Filter([z], y ↦ y > 0)` stays unevaluated (it threw), and a predicate
+  error no longer gives a spelling hint about a parameter of the predicate.
+
+- **`Solve` of polynomials and powers of a high degree.** A polynomial with no
+  closed form has its roots found numerically up to the degree 1000 (the degree
+  12 before), with the Aberth iteration above the degree 12: `x^{65.0} + x = 2`
+  and `x^{500} + 3x^2 − x + 7 = 0` give all their roots, where they gave no
+  answer. A polynomial whose degree times its number of terms is above 10000
+  still gives no answer, now at once (`1 + x + … + x^{40} = 2` did not end). For
+  an unknown declared real, or over `RealNumbers`, a pure power gives its real
+  roots without building the others: `r^{1000} = 2` takes 1 ms, where it took
+  1.1 s. For another unknown, a pure power of a degree above 10000 stays
+  unevaluated (`x^{100000} = 2` took about one minute; `x^{20000.0} = 2` gave
+  only the two real roots).
+
+- **Units.** A unit with a fraction exponent serializes and parses:
+  `Quantity(4, m)^(1/2)` is `2\,\mathrm{m^{1/2}}` (it was `2\,\mathrm{}`), and
+  `\mathrm{m^{0.5}}` parses as `m^0.5`, not `m^0`. A power of a compound unit is
+  written factor by factor: `(m/s)^2` is `m^{2}/s^{2}`, where `m/s^{2}` was a
+  different unit. `\mathrm{m^{2}s}` is no longer read as `m^2`. A temperature
+  conversion is correctly rounded: `UnitConvert(Quantity(20, degC), degF)` is
+  `68` (it was `67.99999999999994`), and `(20 ± 1) degC` is `(68 ± 1.8) degF`.
+
+- **Numerics.** The enumeration of a number set gives each value once:
+  `ComplexNumbers` enumerates exact values with rational parts and reaches every
+  such value (it gave `0` five times and floats), `RationalNumbers` enumerates
+  `0` once, and `PositiveNumbers` no longer enumerates `0`.
+  `cantorEnumerateComplexNumbers()` yields pairs of fractions
+  `[[n, d], [n, d]]`. Division by a JavaScript `0` in the float lane of a
+  numeric value gives the same answer as division by a numeric value `0`. With
+  `g(t) = 2a(t)` defined before `a(x, y) = x + y`, the definition of `a`
+  evaluates to the `incompatible-type` error of the rebuilt body of `g`, as in
+  the other order; it threw "Invalid function".
+
 - **Numerics.** `e^{iθ}`, `cos θ` and `sin θ` of an exact multiple of π/12 above
   machine precision are correctly rounded (`e^{−7iπ/6}.N()` had a real part one
   unit high in the last digit). A hyperbolic function of a float `i·y` has the
@@ -708,14 +845,49 @@
   LaTeX round trip changed the tree. A body that is a single symbol keeps the
   function literal, which is the canonical form of `\frac{d}{dx}f`.
 
+- **More trees keep their shape in a LaTeX round trip with `prettify: false`**
+  (Tycho ledger row 390; user decision 2026-10-18: a round trip with
+  `prettify: false` must give the same tree).
+  - A `Range` with a step: `a..b..c` gives the second element, and the step is
+    read back as `b − a`. `Range(0.6, 5, 0.20000000000000007)` was written
+    `0.6..0.8..5` and read back with a step of `0.2`; the second element is now
+    the exact decimal sum, `0.6..0.80000000000000007..5`. A symbolic step after
+    a start that is not an integer came back as a sum that is not collected;
+    such a range, and one with a machine number above 2^53, is now written
+    `\operatorname{Range}(a, c, s)`.
+  - An explicit product with a variable named `d` is not a differential:
+    `\frac{\mathrm{d}\cdot y}{\mathrm{d}x}` and
+    `\frac{\mathrm{d}y}{\mathrm{d}\cdot x}` are divisions (they parsed as
+    derivatives). A quotient of products of such a variable, `(d·y)/(d·x)`, is
+    written `\frac{dy}{d\cdot x}` (it was written `\frac{dy}{dx}`, which reads
+    as a derivative), and a denominator that is a symbol whose name starts with
+    `d` is written in parentheses. `\frac{dy}{\mathrm{d}}` is a division (it was
+    `D(y, _upright)`), and so is `\frac{dy}{\delta}` (it was a derivative with
+    respect to `elta`): only a symbol named `d` and one letter (`\mathrm{dx}`)
+    is read as a differential.
+  - In `\frac{\mathrm{d}^2f(x)}{\mathrm{d}x^2}`, `f(x)` is the application of
+    `f`; it was read as the product of `f` and `x`.
+  - A derivative of a function symbol, `D(x ↦ f, x)`, is written
+    `\frac{\mathrm{d}f}{\mathrm{d}x}` with `prettify: false` too (it was written
+    with a block, `\frac{\mathrm{d}\left(f;\right)}{\mathrm{d}x}`), and a
+    function literal whose body is one statement is written `x\mapsto f` (it was
+    `x\mapsto\left(f;\right)`; Tycho ledger row 394).
+  - The dividend or the divisor of `Mod` is written in parentheses when it is a
+    product written with `\times` or `\cdot` (Tycho ledger row 395): a
+    structural `Mod(a·2, 1)` was written `a\times2\bmod1`, which parsed back as
+    `a·(2 mod 1)`. It is `(a\times2)\bmod1`.
+  - A negative machine number whose shortest spelling has an exponent is written
+    with its sign in front (Tycho ledger row 393): `-1.5e-7` was written
+    `0.000\,00-15`, which parsed back as `-15 + 0.0`. It is `-0.000\,000\,15`.
+
 - **`D` of a block that assigns local variables is computed.**
   `\frac{\mathrm{d}}{\mathrm{d}x}\left(k\coloneq2; kx^2\right)` stayed
   unevaluated and is `4x`: the values of the locals are put into the last
   statement, which is then differentiated. This also applies to a user function
   whose body is such a block, and to a partial derivative given in the
-  `derivative` key of an operator definition. A block that assigns a variable
-  it does not declare, reads a local before it has a value, calls a local
-  function, or assigns a value that is not pure (`Random()`) stays unevaluated.
+  `derivative` key of an operator definition. A block that assigns a variable it
+  does not declare, reads a local before it has a value, calls a local function,
+  or assigns a value that is not pure (`Random()`) stays unevaluated.
 
 - **On `interval-js`, each arm of a `Which` or an `If` is evaluated where it can
   be selected** (Tycho ledger row 392).

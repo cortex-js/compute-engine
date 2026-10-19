@@ -15,6 +15,8 @@
  *   as a module global. For a global, the function starts with a local `u`
  *   initialized from the global: without it, the read of `u` before the
  *   write raised `UnboundLocalError`.
+ * - Python `compile()` (code with no `def`) reads and writes a local copy of
+ *   `u` with a generated name, which starts with the value of `u`.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
@@ -293,6 +295,130 @@ describe('PYTHON: A NAME THAT COLLIDES WITH THE GLOBALS LOOKUP', () => {
         execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
       );
       expect(out).toEqual([6, 5, 3, 2]);
+    }
+  );
+});
+
+describe('PYTHON compile(): AN INPUT THAT THE BODY ASSIGNS', () => {
+  // The code of `compile()` has no `def`. A host runs it in a function that
+  // it writes around the code, or at the top level of a module. In a
+  // function, the plain `u = u + 1` made `u` a local of the function, and the
+  // read of `u` raised `UnboundLocalError` when `u` is a global. The code now
+  // writes a local copy of `u` that starts with the value of `u`, which reads
+  // a global, a parameter of the host's function and a variable of an
+  // enclosing function alike.
+  const py = new PythonTarget();
+  const box = (src: any) => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'real');
+    return ce.box(src);
+  };
+
+  test('the code writes a local copy of the input', () => {
+    expect(py.compile(box(['Assign', 'u', ['Add', 'u', 1]])).code).toBe(
+      '_tv1 = u\n_tv1 = _tv1 + 1'
+    );
+    expect(
+      py.compile(
+        box(['Block', ['Assign', 'u', ['Add', 'u', 1]], ['Multiply', 2, 'u']])
+      ).code
+    ).toBe('_tv1 = u\n_tv1 = _tv1 + 1\nreturn 2 * _tv1');
+  });
+
+  test('a write before any read does not read the input', () => {
+    expect(
+      py.compile(box(['Block', ['Assign', 'u', 3], ['Multiply', 'u', 2]])).code
+    ).toBe('_tv1 = 3\nreturn 2 * _tv1');
+  });
+
+  test('an input that `vars` maps starts with the mapped source', () => {
+    expect(
+      py.compile(box(['Block', ['Assign', 'u', ['Add', 'u', 1]], 'u']), {
+        vars: { u: 'p["u"]' },
+      }).code
+    ).toBe('_tv1 = p["u"]\n_tv1 = _tv1 + 1\nreturn _tv1');
+  });
+
+  (TEST_PYTHON === undefined ? it.skip : it)(
+    'the code run in a function, with u as a global or a parameter, gives the interpreter value',
+    () => {
+      const indent = (code: string) =>
+        code
+          .split('\n')
+          .map((l) => `    ${l}`)
+          .join('\n');
+      let program = 'import json\nu = 5.0\nout = []\n';
+      PROGRAMS.forEach(([, src], k) => {
+        const code = py.compile(box(src)).code;
+        program += `def g${k}():\n${indent(code)}\n`;
+        program += `def p${k}(u):\n${indent(code)}\n`;
+        program += `out.append([g${k}(), p${k}(5.0), u])\n`;
+      });
+      program += 'print(json.dumps(out))\n';
+      const out = JSON.parse(
+        execFileSync(TEST_PYTHON!, ['-c', program], { encoding: 'utf8' })
+      ) as [number | null, number | null, number][];
+      PROGRAMS.forEach(([name, src], k) => {
+        // A root assignment is a statement: the function gives `None`.
+        const v = src[0] === 'Assign' ? null : interpreted(src);
+        expect([name, ...out[k]]).toEqual([name, v, v, 5]);
+      });
+    }
+  );
+});
+
+describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
+  // The Python lowering of `Sum`/`Product` is a generator expression, whose
+  // element is an expression. A body with an assignment gave
+  // `sum(_tv1 = k + _tv1 ⏎ return _tv1 for k in range(1, 4))`, a syntax
+  // error. The compilation now fails closed, and the fallback runs the
+  // interpreter.
+  const py = new PythonTarget();
+  const limits = ['Limits', 'k', 1, 3];
+  const PROGRAMS: [string, boolean, any][] = [
+    [
+      'a block that writes an input',
+      true,
+      ['Sum', ['Block', ['Assign', 'u', ['Add', 'u', 'k']], 'u'], limits],
+    ],
+    [
+      'a block with a local',
+      false,
+      [
+        'Sum',
+        ['Block', ['Assign', 't', ['Add', 'k', 1]], ['Multiply', 't', 't']],
+        limits,
+      ],
+    ],
+    [
+      'an assignment',
+      false,
+      ['Product', ['Block', ['Assign', 't', ['Add', 'k', 1]]], limits],
+    ],
+  ];
+  for (const [name, declareU, src] of PROGRAMS)
+    test(name, () => {
+      const ce = new ComputeEngine();
+      if (declareU) ce.declare('u', 'real');
+      expect(() => py.compile(ce.box(src))).toThrow(
+        /the Python lowering of `(Sum|Product)` is a generator expression/
+      );
+      const r = py.compile(ce.box(src), { fallback: true });
+      expect(r.success).toBe(false);
+    });
+
+  (TEST_PYTHON === undefined ? it.skip : it)(
+    'a block whose value is an expression still runs',
+    () => {
+      const ce = new ComputeEngine();
+      const src = ['Sum', ['Block', ['Multiply', 'k', 'k']], limits];
+      const code = py.compile(ce.box(src)).code;
+      const out = execFileSync(
+        TEST_PYTHON!,
+        ['-c', `import json\nprint(json.dumps(${code}))`],
+        { encoding: 'utf8' }
+      );
+      expect(JSON.parse(out)).toBe(ce.box(src).evaluate().re);
     }
   );
 });

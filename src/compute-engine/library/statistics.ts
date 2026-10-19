@@ -522,8 +522,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // solutions — and stays SYMBOLIC (a capability gap, the `LambertW`
       // off-branch precedent; ruled 2026-09-02, batch 9 of
       // `docs/plans/2026-08-30-error-model-implementation.md`). Every
-      // infinity is decided: erfinv has no limit there, so `±∞`, `~oo` and
-      // an anonymous infinity answer NaN. `NaN` propagates (explicit: the
+      // infinity is decided: erfinv has no limit there, so `±∞` and `~oo`
+      // answer NaN. `NaN` propagates (explicit: the
       // carrier is not below `complex`).
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
@@ -572,8 +572,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(x)) return undefined;
         if (x.isNaN === true) return ce.NaN;
         // No limit at any infinity: the indeterminate form on both routes
-        // (`NaN` for an anonymous infinity such as `∞ + i`, a float literal;
-        // the real kernel used to answer NaN for ±∞ and the others stayed
+        // (the real kernel used to answer NaN for ±∞, and `~oo` stayed
         // inert).
         if (infinitePoint(x) !== undefined)
           return indeterminateFormAnswer(ce, [x]);

@@ -516,4 +516,77 @@ describe('COMPILE reference analysis of a declaration', () => {
     expect(r.freeSymbols).toEqual(['z']);
     expect(r.run({ z: 2 })).toBe(3);
   });
+
+  // An assignment that the canonical form hoists into the scope of the block
+  // declares a local of the block, which the generated code declares too:
+  // it was listed as free (`v` below).
+  it('does not list a local that an assignment declares as a free symbol', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'real');
+    for (const to of ['javascript', 'glsl', 'wgsl'] as const) {
+      expect(
+        compile(ce.box(['Block', ['Assign', 'v', 2], ['Multiply', 'v', 'x']]), {
+          to,
+        }).freeSymbols
+      ).toEqual(['x']);
+      // `u` is bound outside the expression: a write of `u` is a write of
+      // the input, which stays free.
+      expect(
+        compile(
+          ce.box([
+            'Block',
+            ['Assign', 'v', 2],
+            ['Assign', 'u', ['Add', 'u', 'v']],
+          ]),
+          { to }
+        ).freeSymbols
+      ).toEqual(['u']);
+    }
+  });
+
+  // The inner target of a chained assignment in a loop body is a local of
+  // the body, which the generated code declares: it was listed as free
+  // (`w` below, not declared).
+  it('does not list the inner target of a chained assignment as a free symbol', () => {
+    const range = ['Element', 'i', ['Range', 1, 3]];
+    const chained = ['Assign', 't', ['Assign', 'w', ['Add', 't', 'i']]];
+    for (const to of ['javascript', 'glsl', 'python'] as const) {
+      for (const body of [chained, ['Block', chained]]) {
+        const ce = new ComputeEngine();
+        expect(
+          compile(
+            ce.box(['Block', ['Assign', 't', 0], ['Loop', body, range], 't']),
+            { to }
+          ).freeSymbols
+        ).toEqual([]);
+      }
+      // A read of `w` after the loop reads the input `w`.
+      const ce = new ComputeEngine();
+      expect(
+        compile(
+          ce.box([
+            'Block',
+            ['Assign', 't', 0],
+            ['Loop', ['Block', chained], range],
+            ['Add', 't', 'w'],
+          ]),
+          { to }
+        ).freeSymbols
+      ).toEqual(['w']);
+      // A `w` that an engine scope binds is an input.
+      const declared = new ComputeEngine();
+      declared.declare('w', 'real');
+      expect(
+        compile(
+          declared.box([
+            'Block',
+            ['Assign', 't', 0],
+            ['Loop', chained, range],
+            't',
+          ]),
+          { to }
+        ).freeSymbols
+      ).toEqual(['w']);
+    }
+  });
 });

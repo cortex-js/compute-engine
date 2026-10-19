@@ -17218,9 +17218,9 @@ export class BaseCompiler {
    * index (`boundVars`), or a local of an enclosing compiled block or
    * function (`boundVars`, or `localShapeFrameOf` on the shader targets).
    * A name that an engine scope outside the expression binds is not
-   * declared either: it is written as an input, or the compilation fails on
-   * a shader target (`chainedAmbientWrite`). Each other name gets one
-   * declaration, as in the block route (`withImplicitLocalDeclares`).
+   * declared either: it is written as an input (`chainedAmbientWrite`).
+   * Each other name gets one declaration, as in the block route
+   * (`withImplicitLocalDeclares`).
    */
   private static chainedLocalDeclares(
     stmts: ReadonlyArray<Expression>,
@@ -17237,7 +17237,7 @@ export class BaseCompiler {
         declared.has(name) ||
         target.boundVars?.has(name) ||
         BaseCompiler.localShapeFrameOf(name) !== undefined ||
-        BaseCompiler.chainedAmbientWrite(lhs, target)
+        BaseCompiler.chainedAmbientWrite(lhs)
       )
         return [];
       declared.add(name);
@@ -17317,7 +17317,7 @@ export class BaseCompiler {
       if (!scope.bindings.has(name)) {
         if (!chained.has(name)) continue;
         if (BaseCompiler.scopeChainBinds(scope.parent, name)) {
-          if (BaseCompiler.chainedAmbientWrite(lhs, target)) continue;
+          if (BaseCompiler.chainedAmbientWrite(lhs)) continue;
           if (BaseCompiler.localShapeFrameOf(name) !== undefined) continue;
         }
       }
@@ -17352,29 +17352,19 @@ export class BaseCompiler {
    * current evaluation context, such as the global scope after
    * `ce.declare('u', 'real')` or `ce.assign('u', 2)`). The interpreter then
    * changes that binding, and the name is an input of the compiled code.
-   * The JavaScript and Python targets write it as a free name, in a local
-   * copy of the input (`CompileTarget.inputWrites`). A
-   * shader target cannot write an input (a uniform is read-only, and a
-   * shader does not give a value back to the engine), and a local of the same
-   * name would give a later read of the name a different value from the
-   * interpreter's, so the compilation fails.
+   * The targets write it as a free name, in a local copy of the input
+   * (`CompileTarget.inputWrites`): the vars object of the JavaScript
+   * targets, a local variable of the shader and Python targets
+   * (`CompileTarget.inputLocals`). A shader cannot write an input, because a
+   * uniform is read-only.
    */
   private static chainedAmbientWrite(
-    lhs: Expression & { symbol: string },
-    target: CompileTarget<Expression>
+    lhs: Expression & { symbol: string }
   ): boolean {
-    const name = lhs.symbol;
-    if (!BaseCompiler.scopeChainBinds(lhs.engine.context.lexicalScope, name))
-      return false;
-    if (target.language === 'glsl' || target.language === 'wgsl')
-      throw new Error(
-        `Could not compile \`Assign\`: the chained assignment writes ` +
-          `"${name}", which an engine scope outside the expression binds ` +
-          `(a declaration or an assigned value). The interpreter changes ` +
-          `that binding, and on the ${target.language} target "${name}" is an ` +
-          `input, which the shader cannot write.`
-      );
-    return true;
+    return BaseCompiler.scopeChainBinds(
+      lhs.engine.context.lexicalScope,
+      lhs.symbol
+    );
   }
 
   /** Whether `scope` or one of its parents binds `name`. */
@@ -17580,6 +17570,23 @@ export class BaseCompiler {
       const spelled = target.mangleId ? target.mangleId(name) : name;
       target.inputWrites?.add(spelled);
       return spelled;
+    }
+    // The local copy of an input that the body writes: reads and writes of
+    // the name both use it (`CompileTarget.inputLocals`).
+    if (target.inputLocals?.get(name) === resolved) return resolved;
+    // A `vars` key that no binding of the expression shadows names an input
+    // that the host gives (a uniform, a Python name). A target that keeps a
+    // local copy of each written input records it, and compiles the
+    // expression again with the copy, so this emission of the write is not
+    // kept.
+    if (
+      target.inputLocals !== undefined &&
+      target.varsKeys?.has(name) === true &&
+      target.boundVars?.has(name) !== true &&
+      BaseCompiler.localShapeFrameOf(name) === undefined
+    ) {
+      target.inputWrites?.add(name);
+      return resolved;
     }
     if (resolved === name) return resolved;
     // A vars-object member access naming this very symbol (`_.s`) is the only
@@ -34064,12 +34071,33 @@ export class BaseCompiler {
     // function-literal body: an occurrence there is not an occurrence in
     // `expr`, so it is not recorded in `occurrences`.
     let indirectDepth = 0;
+    // The symbols that are the target of an `Assign`. Such a symbol is not
+    // read, and it has no type of its own (the target of `u ≔ u + 1` is
+    // `unknown` where the read `u` is `complex`), so a read of the same name
+    // that the walk meets later replaces it in `occurrences`.
+    const assignTargets = new Set<Expression>();
+    // The inner targets of the chained assignment statement `stmt`
+    // (`t ≔ (w ≔ t + i)`) that the compiled code declares as locals of the
+    // statement list: those that no engine scope outside the expression binds
+    // (`chainedAmbientWrite`). They were reported as free symbols: `w`
+    // above, when `w` is not declared.
+    const chainedLocals = (stmt: Expression | undefined): string[] => {
+      const names: string[] = [];
+      let value = isFunction(stmt, 'Assign') ? stmt.ops[1] : undefined;
+      while (isFunction(value, 'Assign') && isSymbol(value.ops[0])) {
+        if (!BaseCompiler.chainedAmbientWrite(value.ops[0]))
+          names.push(value.ops[0].symbol);
+        value = value.ops[1];
+      }
+      return names;
+    };
     const addFree = (e: Expression & { symbol: string }): void => {
       free.add(e.symbol);
+      if (occurrences === undefined || indirectDepth !== 0) return;
+      const recorded = occurrences.get(e.symbol);
       if (
-        occurrences !== undefined &&
-        indirectDepth === 0 &&
-        !occurrences.has(e.symbol)
+        recorded === undefined ||
+        (assignTargets.has(recorded) && !assignTargets.has(e))
       )
         occurrences.set(e.symbol, e);
     };
@@ -34349,6 +34377,7 @@ export class BaseCompiler {
       // below would otherwise strip `.ops` from `e` in the fall-through.
       const h = e.operator;
       const ops: ReadonlyArray<Expression> = e.ops;
+      if (h === 'Assign' && isSymbol(ops[0])) assignTargets.add(ops[0]);
 
       // The two compile-path protocol intercepts that do NOT key on the head
       // alone — mirrored here, or their operands are analyzed as ordinary
@@ -34693,7 +34722,9 @@ export class BaseCompiler {
         h === 'Loop' ||
         h === 'Comprehension'
       ) {
-        const indices: string[] = [];
+        // A loop body that is one chained assignment declares its inner
+        // targets as locals of the body (`chainedLocalDeclares`).
+        const indices: string[] = h === 'Loop' ? chainedLocals(ops[0]) : [];
         const limitExprs: Expression[] = [];
         for (const clause of ops.slice(1)) {
           if (isFunction(clause)) {
@@ -34720,7 +34751,9 @@ export class BaseCompiler {
         return;
       }
       if (h === 'Block') {
-        const locals: string[] = [];
+        // The inner targets of a chained assignment statement are locals of
+        // the block (`withImplicitLocalDeclares`).
+        const locals: string[] = ops.flatMap(chainedLocals);
         // A destructuring declare (`let (x, y) = …`) binds every symbol leaf
         // of its tuple pattern (`_` binds nothing; patterns nest).
         const collectPatternLeaves = (p: Expression): void => {
@@ -34740,6 +34773,17 @@ export class BaseCompiler {
             // supplies; without this the program's own function name was
             // reported as a free symbol.
             if (isSymbol(stmt.ops[0])) locals.push(stmt.ops[0].symbol);
+          } else if (
+            isFunction(stmt, 'Assign') &&
+            isSymbol(stmt.ops[0]) &&
+            e.localScope?.bindings.has(stmt.ops[0].symbol)
+          ) {
+            // An assignment that the canonical form hoisted into the scope
+            // of the block (`v ≔ 2` with no outer `v`) declares a local of
+            // the block, which the generated code declares too
+            // (`withImplicitLocalDeclares`). It was reported as a free
+            // symbol: `Block(v ≔ 2; v·x)` reported `v` and `x`.
+            locals.push(stmt.ops[0].symbol);
           }
         const inner = locals.length ? union(bound, locals) : bound;
         // Typed block locals extend the declared-type frame (the mirror of

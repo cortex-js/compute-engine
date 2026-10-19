@@ -1,7 +1,8 @@
 /**
  * `Sort` and `Ordering` refuse, when they are evaluated, a comparator (a
  * callback with two parameters) with a declared parameter type that is
- * disjoint from the element type of the source.
+ * disjoint from the element type of the source, or, for a source with no
+ * unknowns, a parameter type that does not accept every element.
  *
  * The comparator option of the signature is `(any, any) any -> number |
  * boolean`: the type language allows a type variable in one option of a
@@ -113,11 +114,12 @@ describe('comparators that are not refused', () => {
     ).toEqual(['List', 3, 2, 1]);
   });
 
-  test('a parameter type that overlaps the element type', () => {
-    // `integer` and the element type of `[3, 1.5, 2]` share the integers,
-    // so they are not disjoint and the run-time check does not apply.
+  test('a source with a symbol that has no value', () => {
+    // The element type of `[3, x, 2]` is a guess for `x`, and `x` can hold
+    // an integer. Only a disjoint parameter type is refused for such a
+    // source.
     const result = ce
-      .box(['Sort', ['List', 3, 1.5, 2], integerComparator])
+      .box(['Sort', ['List', 3, 'x', 2], integerComparator])
       .evaluate();
     expect(result.operator).not.toBe('Error');
   });
@@ -129,5 +131,44 @@ describe('comparators that are not refused', () => {
       ['Function', ['Length', 'a'], ['Typed', 'a', "'string'"]],
     ]);
     expect(JSON.stringify(result.json)).toMatch(/incompatible-type/);
+  });
+});
+
+describe('a comparator with a parameter type that does not accept every element', () => {
+  const ce = new ComputeEngine();
+
+  test('Sort and Ordering refuse it', () => {
+    // Decision (third set): a typed comparator must accept every element.
+    // `integer` does not accept `1.5`, an element of `[3, 1.5, 2]`. The sort
+    // answered the source unchanged.
+    for (const op of ['Sort', 'Ordering']) {
+      const result = ce
+        .box([op, ['List', 3, 1.5, 2], integerComparator])
+        .evaluate();
+      expect(result.operator).toBe('Error');
+      expect(JSON.stringify(result.json)).toMatch(
+        /\(real, real\) any -> boolean \| number/
+      );
+    }
+  });
+});
+
+describe('a NaN element is not checked against the comparator', () => {
+  // The sort puts each NaN last and never passes it to the comparator, so a
+  // comparator typed `real` sorts a list that holds NaN.
+  test('Sort with a NaN element and a real comparator', () => {
+    const engine = new ComputeEngine();
+    const cmp = [
+      'Function',
+      ['Subtract', 'b', 'a'],
+      ['Typed', 'a', 'real'],
+      ['Typed', 'b', 'real'],
+    ];
+    expect(
+      engine
+        .box(['Sort', ['List', 2, 1, 'NaN'], cmp] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[2,1,NaN]');
   });
 });

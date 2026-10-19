@@ -241,8 +241,8 @@ const MAX_POINT_LIST_DOT = 10000;
  * norm `+∞` whatever the other components are — a NaN component included.
  *
  * A norm sums the squared moduli of its components. `|·|` of any infinity is
- * `+∞` (`|~∞| = +∞` by definition of the point at infinity, and `|∞ + i| = +∞`
- * too), and an infinite magnitude dominates in the sum: IEEE 754 makes
+ * `+∞` (`|~∞| = +∞` by definition of the point at infinity), and an infinite
+ * magnitude dominates in the sum: IEEE 754 makes
  * `Math.hypot(Infinity, NaN)` return `Infinity` for the same reason, and the
  * compiled code follows that rule, so any other answer here would make the
  * interpreter and the compiled code disagree. This test therefore runs BEFORE
@@ -250,8 +250,7 @@ const MAX_POINT_LIST_DOT = 10000;
  * the domination.
  *
  * `infinitePoint` reads the numeric VALUE, so it accepts every infinity —
- * `±∞`, `~∞` and an anonymous directed infinity such as `∞ + i` — and it
- * answers `undefined` for NaN, for a finite literal, and for a component that
+ * `±∞` and `~∞` — and it answers `undefined` for NaN, for a finite literal, and for a component that
  * is not a number literal at all (a symbol, a collection). A component whose
  * infiniteness is merely unknown proves nothing and leaves the ordinary
  * computation to decide.

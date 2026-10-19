@@ -109,36 +109,30 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Which value-preserving serializer rewrites are allowed at the structural tier (OPEN, decision — Tycho ledger row 390, filed 2026-10-18)
-
-The user allowed two shapes on 2026-08-04 (a product with a fraction factor
-written as one fraction, and the `(a)(b)^{-1}` fallback). Tycho's audit finds 58
-more trees whose round trip keeps the value but not the tree, all from the
-serializer writing a power or a root as one fraction: a power of a quotient
-written out (`Power(Divide(v, 3.6), 2)` → `\frac{v^2}{12.96}`), a negative
-symbolic exponent as a quotient (`Power(n, −k)` → `Divide(1, Power(n, k))`), the
-root of a reciprocal (`\sqrt{\frac{1}{2\pi}}` → `\frac{\sqrt{2}}{2\sqrt{\pi}}`),
-and constant factors folded into the coefficient. Tycho asks for a decision per
-shape: allowed, or a defect. Nothing in Tycho depends on it today.
-
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
-- `cantorEnumerateComplexNumbers()` (`numerics/numeric.ts`, exported from
-  `src/numerics.ts`) yields `0` several times and gives doubles, not fractions,
-  for rational parts, so `ComplexNumbers` enumerates `0, 0, 0, 0, 0, 1+i, …` and
-  `1/2 + i` as a float.
-- The internal float lane of `NumericValue`: `x.div(0)` with a JavaScript `0`
-  gives `NaN`, while `x.div(<numeric value 0>)` gives `~oo` (no boxed route
-  reaches it: `(2.0+3.0i)/0` is `~oo`).
 - An error inside a spread list in an Epsil loop
   (`for i in [1, 2] { fs = [...fs, g("a")] }` with `g(x) = 1/x`) gives an
   unevaluated `ListJoin` holding the error and no `runtime-error`; the same
-  expression outside a loop is reported.
-- With `a(x, y) := x + y` and `g(t) := 2a(t)`, the type error of the body
-  (`a(t)` is a partial application, a function) is an error value when `a` is
-  defined first, and a thrown "Invalid function" when `g` is defined first.
-- `ce.parse('\\pi := 3').evaluate()` throws to the host, where a comment in
-  `engine-declarations.ts` says the `Assign` operator gives an `Error` value.
+  expression outside a loop is reported. The unevaluated `ListJoin` is the
+  designed value (a collection keeps a failed cell, `docs/ERROR-MODEL.md` §3).
+  The missing report is because Epsil checks the embedded errors of a value
+  (`value.errors`) only for a top-level statement, and a loop stops only on a
+  value whose head is `Error`. A decision is needed: (A) a nested statement
+  reports its embedded errors as diagnostics and the loop continues; (B) a
+  nested statement with an embedded error stops the loop; (C) no change. If
+  nothing is decided, (C) stays.
+- `ce.parse('\\pi := 3').evaluate()` throws
+  `Cannot assign a value to the constant "Pi"` to the host, where comments in
+  `engine-declarations.ts` (near lines 3101 and 3554) say the `Assign` operator
+  gives an `Error` value. A decision is needed. (A) The `Assign` operator
+  returns the error as a value for every constant target; Epsil output does not
+  change (it already catches the throw and makes that value), but the sequence
+  route (`F_0 := 1` on a constant, which throws like `ce.assign('F', 5)` by the
+  decision of 2026-10-17) and about 11 tests (`sequences.test.ts`,
+  `undeclare.test.ts`, `declare-destructure.test.ts`) change. (B) Keep the throw
+  and correct the two comments. If nothing is decided, (B) stays; (A) gives a
+  program its errors as values.
 - A declaration of `Pi` is refused in the global scope only (since 2026-10-18),
   so that a function parameter, a `Sum` index or a block local can still be
   named `Pi`. In such a nested scope, a result that the engine builds with the
@@ -154,65 +148,98 @@ shape: allowed, or a defect. Nothing in Tycho depends on it today.
   result unit is the one with the largest scale, and the offset of each operand
   is applied). A decision is needed on what such a sum means (an error, or a
   difference of temperatures).
-- Lazy operators over a list with a condition (`[1,3,5]{0<t}`, which boxes to a
-  `When`) do not thread the condition. `TakeWhile`, `DropWhile`, `Scan`,
-  `ArgMax` and `Differences` give
-  `Error(incompatible-type, indexed_collection, missing | vector<…>)`, where the
-  correct result is the operation on `[1,3,5]` under the condition `0<t`. The
-  cause: step 2c'' of the evaluation in `boxed-function.ts` (`heldEagerSources`,
-  `settleHeldEagerSources`) refuses the `When` before step 4c threads the
-  condition. `DeleteAt([1,3,5]{0<t}, 1)` is refused at boxing, because its
-  definition has no `threadsConditionals` or `missingStrip` flag (`Insert` has
-  them). `IndexWhere` over such a list stays unevaluated.
-  `Take([1,3,5]{0<t}, 1)` gives an unevaluated `Take(…) {0<t}`.
-- The Python target normalizes identifiers with NFKC, so `ﬁ` (one ligature
-  character) and `fi` become the same name in compiled Python. Two different
-  symbols must stay two different names.
-- Since 2026-10-18, `∞ + i` boxes to `+oo`, so no value is an infinity with an
-  "anonymous" direction of this kind. The branches for `'anonymous'` are now
-  code that no input reaches: `ErfInv` in `library/statistics.ts`, and branches
-  in `library/combinatorics.ts`, `library/distributions.ts`,
-  `library/special-functions.ts`, `library/trigonometry.ts`,
-  `library/linear-algebra.ts`, `boxed-expression/arithmetic-mul-div.ts` and the
-  `LambertW` handler. Remove them.
-- `Power(Quantity(2, m), 1/2)` serializes its unit as `\mathrm{}` (empty), and
-  `\mathrm{m^{0.5}}` parses back as `m^0`. The correct unit is `m^{1/2}` (or
-  `m^{0.5}`) in both directions.
-- `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the correct
-  value is `68`. The cause: the conversion data in `unit-data.ts` are floats.
 
-### Decisions of 2026-10-18 (third set) that wait for implementation (OPEN, decided 2026-10-18)
+### Smaller defects found on 2026-10-18 (batch 8) (OPEN, small)
 
-- **The shader targets copy an input into a local before they write it.** When
-  an engine scope binds `u` (for example `ce.declare('u', 'real')`) and the
-  expression assigns `u` (`u ≔ u + 1`), the GLSL and WGSL code today is
-  `u = u + 1.0;`, which is invalid when `u` is a uniform. Decision: the shader
-  code writes a local copy of `u` that starts with the value of the input, as
-  the JavaScript target does since 2026-10-18.
-- **`Boole` maps over a list.** `Boole([True, False])` is refused today.
-  Decision: it gives `[1, 0]`. The test "Boole of a boolean list still rejects"
-  in `test/compute-engine/broadcast-lift.test.ts` changes with it. No other
-  operator starts to convert a boolean to a number.
-- **A typed comparator must accept every element.** Today
-  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` is accepted, because
-  `integer` overlaps `number`, and the order of the result is arbitrary (`1.5`
-  is not an integer). `Sort` refuses only a comparator whose parameter type is
-  disjoint from the element type. Decision: `Sort` and `Ordering` refuse a typed
-  comparator unless the element type is a subtype of its parameter type, so this
-  example gives an error.
-- **A positional operator refused for a set gives the bare `Error`.** With `c` a
-  set, `Reverse(c)`, `Take(c, 1)`, `Drop(c, 1)`, `Rest(c)` and `Most(c)` today
-  give the operator with the error inside (`Reverse(Error(…))`), while `Sort(c)`
-  gives the bare `Error` with its `ErrorTrace` frame. Decision: every positional
-  operator refused for a set gives the bare `Error` with its frame, as `Sort`
-  does.
-- **A `Table` with an empty range gives `[]`.** Today `Table(k², {k, 1, 0})`
-  stays unevaluated (the fast route gives `Tabulate(fn, 0)`), and
-  `Table(k², {k, 2, 0})` counts down and gives `[4, 1, 0]`. Decision: when the
-  upper bound is below the lower bound and the step is positive (the default
-  step is 1), `Table` gives `[]`, as Mathematica gives `{}`. A count-down needs
-  an explicit negative step. The compile route still declines a `Tabulate` with
-  a zero dimension.
+- `2\operatorname{Numerator}(x)` parses to `Tuple(2, Numerator(x))`, not to a
+  product; the same for `Denominator` and `x\operatorname{Numerator}(x)`
+  (`2\operatorname{Abs}(x)` is a `Multiply`). The cause: `Numerator` is typed
+  `(number) -> number | nothing`, and the product test in
+  `boxed-expression/invisible-operator.ts` ignores a `missing` part of a type
+  (`typeIgnoringAbsence`) but not a `nothing` part.
+- `evaluateAsync()` has no step that threads a condition (step 4c of the
+  synchronous evaluation in `boxed-function.ts`): `sin(3{0<t})` gives
+  `sin(3{0<t})` on the asynchronous route and `sin(3){0<t}` on the synchronous
+  route, and restricted lists under `evaluateAsync()` stay unevaluated or give
+  errors. A fix: an asynchronous step after step 3b that calls
+  `threadConditional` when the operator has a synchronous `evaluate` handler
+  (the `isSyncApplicable` guard of step 3b).
+- `Sum` declares an unknown function name in its own scope when it evaluates a
+  term, so a later assignment in the body writes that binding and the value is
+  kept for the next evaluation:
+  `Sum(Block(If(k = 2, h ≔ (z ↦ 2z)); h(k)), k, 1, 3)` gives `10 + h(1)` on the
+  first evaluation and `12` on the second.
+- `Residue` at a complex algebraic pole of a function whose numerator is
+  analytic at the point but not entire stays unevaluated or is slow:
+  `ln(x)/(x³+1)²`, `tan(x)/(x³+1)` and `√x/(x³+1)³` at `1/2 + (√3/2)i` stay
+  unevaluated (they gave a wrong `0` before 2026-10-18), and
+  `Residue(arctan(x)/(x² − 3 − 2√2)², x, 1 + √2)` is correct but takes about 5
+  s. The exact Taylor route of `residue.ts` (`quotientPoleResidue`) accepts only
+  an entire numerator; it must also accept a numerator proved analytic at the
+  point (for `ln` and `√`, an argument proved off the branch cut).
+- The Laurent kernel (`symbolic/series.ts`, `holdsSum()`) declines every point
+  that is a sum, so `lim_{x→(1+√2)⁺} ln(x² − 3 − 2√2)` stays unevaluated; the
+  correct value is `−∞`. The `isSame(0)` tests of `series.ts` need an exact zero
+  test at such points.
+- Two compiled forms decline where a statement form is needed (they gave invalid
+  code before 2026-10-18; with the fallback the interpreter runs): an `If`,
+  `When` or `Which` whose branch assigns a variable on WGSL needs a statement
+  `if (…) { … } else { … }` (the block statement dispatcher of
+  `base-compiler.ts`), and a Python `Sum` or `Product` whose body is an
+  assignment or a block of statements needs a `for` loop with an accumulator
+  before the expression, as the GLSL and WGSL targets write.
+- The subtype test of nested dimensions (`common/type/subtype.ts`, the list
+  branch) removes only one outer dimension: `matrix<integer^(2x2)>` is not a
+  subtype of `list<list>` or `list<list<unknown>>`, and `list<complex^(1x2x3)>`
+  is not a subtype of `list<list<number>^(1x2)>`, so a correct value can fail a
+  correct type.
+- With `z` not assigned, `Filter([z], y ↦ y > 0).evaluate()` gives the error
+  `Filter predicate must return "True" or "False"`, and `Count` or `CountIf` of
+  it throws. By the decision of 2026-10-18 that every reader of a walk that
+  missed elements stays unevaluated, the walk must record an incomplete walk and
+  the expression stay unevaluated (`Element` does since 2026-10-18).
+- `Table(k, {k, 1, n})` is `Tabulate(f, n)`; with `n := 0` it stays
+  `Tabulate(f, 0)`, where the decision of 2026-10-18 gives `[]`. Making
+  `Tabulate(f, 0)` evaluate to `[]` makes the compile test "Tabulate with a
+  statically non-positive dimension fails closed" fail (the compiler folds the
+  constant `[]` before its decline); the compile route must still decline.
+- The commutative matching of the root templates of `Solve` (`match.ts`) takes a
+  time that grows exponentially with the number of terms of an `Add`:
+  `x^0 + … + x^{24} = 2` took 2 s and `… + x^{28}` 18 s. Since 2026-10-18 it is
+  skipped when the polynomial route declines, but an equation that is not a
+  polynomial and has many terms still takes this time.
+- With `g(t) := 2a(t)` defined before `a(x, y) := x + y`, the definition of `a`
+  is now the `incompatible-type` error value, but `g` keeps its earlier
+  provisional definition, so `g(1)` gives `2·(y ↦ 1 + y)`. The test "the error
+  surfaces and no dependent is dropped" requires that `g` keeps its definition;
+  a dependent whose rebuilt body is a type error must not give a value from the
+  old body.
+- Unreachable tests of an infinite component remain in `boxed-number.ts` (near
+  line 867), `logarithm.ts` (near line 66, `'directed-inf'`) and the `Sqrt`
+  handler of `library/arithmetic.ts`, since no value is an anonymous infinity.
+  The comment "Installed even when the rebuilt literal is INVALID" in
+  `repairWave` (`function-utils.ts`) is false for an operator definition.
+
+- The fallback of the unit serializer (`unitToMathrm()`,
+  `latex-syntax/dictionary/definitions-units.ts`, used when the unit is not a
+  product of powers with numeric exponents) writes a compound exponent with
+  `String()` of its MathJSON array: `Quantity(1, Power(m, n + 1))` gives
+  `\mathrm{m^{Add,n,1}}`, and an infinite exponent gives
+  `\mathrm{m^{Multiply,1e+200,1e+200}}`. Such a unit must be serialized with the
+  LaTeX of its exponent, or outside `\mathrm{}`.
+
+### Questions found on 2026-10-18 (batch 8) (OPEN, decision)
+
+- **Exact quantity magnitudes in LaTeX.** `2\sqrt{2}\,\mathrm{m}` and
+  `\frac{1}{64}\,\mathrm{m}` parse as a product, not a `Quantity`, because the
+  parser accepts only a number literal, a measurement or a parenthesized sum as
+  the magnitude (`invisible-operator.ts`), so an exact quantity does not
+  round-trip. Should the serializer put a non-literal magnitude in parentheses,
+  and the parser accept it?
+- **`Factorial2` at a negative integer** gives `NaN` on the exact route. The
+  usual extension gives `(−1)!! = 1` and `(−3)!! = −1`, with poles at the even
+  negative integers. If nothing is decided, `NaN` stays (the type of
+  `Factorial2` follows it).
 
 ### A walk over a collection of more than 2^53 elements does not end (OPEN, decision — found 2026-10-18)
 
@@ -222,9 +249,9 @@ source since 2026-10-18 (they list at most `maxCollectionSize` elements). The
 operators that walk the source and keep no element do not end: `Count(S, v)`,
 `CountIf`, `Any`, `All`, `Find`, `IndexOf`, `Contains`, `Reduce`, `Sum`, `Max`,
 `MaxBy`, and `DropWhile(S, x ↦ True)` when it is walked. They run until the host
-stops them, because `ce.timeLimit` is not set by default. `ListFrom`, `SetFrom`
-and `TupleFrom` over a huge source whose count is not known also list it with no
-limit (the test `TupleFrom(Range(1, 300000))` in
+stops them: no time limit applies unless the host calls `ce.withTimeLimit()`.
+`ListFrom`, `SetFrom` and `TupleFrom` over a huge source whose count is not
+known also list it with no limit (the test `TupleFrom(Range(1, 300000))` in
 `test/compute-engine/collections.test.ts` requires a list of 300,000 elements,
 more than `maxCollectionSize`).
 
@@ -234,33 +261,10 @@ Options:
   of the source is a `bigint`. Such a walk cannot finish. An early answer is
   lost: today `Any(S, x ↦ True)` gives `True` at once; with option A it stays
   unevaluated.
-- **B.** No change. A host that needs a limit sets `ce.timeLimit`.
+- **B.** No change. A host that needs a limit runs the evaluation inside
+  `ce.withTimeLimit({ ms }, () => …)`.
 
 If nothing is decided, option B stays.
-
-### A function local to a `Block` loses its written arguments under `.N()` (OPEN, wrong value — found 2026-10-18)
-
-`Block(hF := x ↦ Floor(x), hF((25! − 1)/24!)).N()` gives `25`; the correct value
-is `24`. `Block(hLoc := x ↦ 2·Numerator(x), hLoc(3/7)).N()` gives `0.857…`; the
-correct value is `6`. Under `.N()`, a function applied to an exact argument must
-read the argument as written, not its rounded value. The cause: in
-`applyFunctionLiteralWith` (`boxed-expression/boxed-function.ts`), the branch
-`if (!value || value.type.isUnknown)` sends the evaluated operands to the
-operator definition. The fix: pass `expr.ops` (the written operands), as the
-`operatorCallee` branch does. A related defect:
-`Block(hLoc2 := x ↦ 2·Numerator(x), Map(hLoc2, [3/7])).N()` gives
-`[hLoc2(3/7)]`, while `evaluate()` gives `[6]`: the name of the callback is read
-outside its `Block`.
-
-### `Residue` and `Limit` at an algebraic pole do not see the pole (OPEN, wrong value — found 2026-10-18)
-
-`Residue(1/(x³+1), x, 1/2+(√3/2)i)` gives `0`; the correct value is
-`−1/6 − (√3/6)i`. `Limit(1/(x³+1), x → 1/2+(√3/2)i)` gives
-`1/(1+(1/2+(√3/2)i)³)`, which is `1/0`; the correct value is `~oo`.
-`Residue(1/(x² − (3+2√2)), x, 1+√2)` gives `0`; the correct value is `(√2−1)/2`.
-The cause: the fallbacks in `residue.ts` and `limit.ts` substitute the point
-into the expression and do not see that the denominator is `0` there
-(`simplify()` and `ExpandAll` of the denominator find the `0`).
 
 ### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
 
@@ -296,6 +300,14 @@ decision for the first consumer that needs it).
   time limit (`ce._deadline`, read in `boxed-expression/solve.ts`), so under
   load it gives no answer. The test must not depend on the speed of the machine:
   raise the time limit for this test, or find why this equation takes so long.
+- `isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
+  derivative parsed from `\frac{\mathrm{d}f}{\mathrm{d}x}`, although their
+  `.json` is the same (`["D", ["Function", ["Block", "f"], "x"], "x"]`). The
+  parsed form and `ce.box(["D", "f", "x"])` are the same; only the box route of
+  the explicit function literal differs, and even the occurrences of `x` and `f`
+  compare different (`sameBinding`, `boxed-expression/compare.ts`). Found
+  2026-10-18 with Tycho ledger row 394. Find which binding the box route gives
+  `x` and `f` inside the literal, and make the two routes agree.
 - `D` of a `Sum` or a `Product` stays unevaluated:
   `D(Sum(k·x^k, Limits(k, 1, 3)), x)` is not computed; the correct value is
   `1 + 4x + 9x²`. `differentiateNode` (`symbolic/derivative.ts`) has no branch
@@ -303,74 +315,6 @@ decision for the first consumer that needs it).
   variable is the sum of the derivatives of its body; the new body must be bound
   by the index of the sum (build it through the binding-site mechanism, not with
   `ce.symbol`).
-- `Sum(Reverse(FlatMap([1, 2], x ↦ [x, x])))` stays unevaluated; the correct
-  value is `6`. The same is true of other consumers of `Reverse`, `Most`,
-  `RotateLeft` and `RotateRight` over a source with no count: the view reports
-  that it cannot be enumerated. A plain `evaluate()` of the view must list its
-  source (in `_computeValue`, `boxed-expression/boxed-function.ts`).
-- `Insert` and two other eager handlers in `library/collections.ts` (the checks
-  `size === undefined`) stay unevaluated over a source with no count, for
-  example `Insert(FlatMap([1, 2], x ↦ [x, x]), 1, 0)`. They must list the source
-  first.
-- `First(Permutations(Range(1, 5000)))` gives
-  `internal-error: Maximum call stack size exceeded`; the correct value is the
-  list `[1, 2, …, 5000]` (with `Range(1, 5)` the result is `[1,2,3,4,5]`). The
-  cause: the `permute` iterator in `library/combinatorics.ts` recurses to a
-  depth of k (the length of the permutation). It must iterate.
-- `Degrees` and `DMS` (`library/trigonometry.ts`) apply element by element, but
-  they do not have the `broadcastable` definition flag, so the result has no
-  broadcast count.
-- The broadcast type lift is wrong when the result for one element is a
-  collection: `ComplexRoots([1, 8], 3)` is typed `vector<2>`, but its value is a
-  2×3 matrix; `NumeratorDenominator((0.5, 0.25))` is typed
-  `tuple<number, number>`, but its value is a tuple of tuples
-  (`broadcast-lift-type.ts`). When this is correct, `FactorInteger`, `Divisors`,
-  `PrimeFactors`, `ExtendedGCD`, `ContinuedFraction`, `IntegerDigits`,
-  `PrimitiveRootList` and `DigitCount` can get the `broadcastable` flag.
-- The Gamma family is typed `real` at a pole: for `x: real`, `Gamma(x)`,
-  `Factorial(k)`, `Digamma(x)`, `GammaLn(x)` and `Factorial2(k)` are typed
-  `real`, but `Gamma(-1)` is `~oo`, which is not real. The cause:
-  `numericTypeHandlerOnTypes` (`library/special-functions.ts`).
-- `Solve(x^{65.0} + x = 2, x)` gives no answer. An integer-valued float exponent
-  is read as a degree only up to 64 (`withExactIntegerExponents`,
-  `boxed-expression/solve.ts`), because the numeric root finder is too slow at a
-  high degree. A pure power (`x^{65.0} = 2`) uses the direct formula since
-  2026-10-18, but a polynomial with other terms does not.
-- An exact pure power has no limit on its degree: `Solve(x^{100000} = 2, x)`
-  takes about one minute. For an unknown declared `real`, `r^{1000} = 2` builds
-  1000 complex roots and then removes all but the real ones (1.1 s). The direct
-  route of `Solve` must generate only the real roots when the domain is real.
-- The Python `compile()` (code with no `def`) of `u ≔ u + 1`, when an engine
-  scope binds `u`, gives the plain text `u = u + 1`. If a host runs this code
-  inside a function with `u` as a global, Python raises `UnboundLocalError`.
-- Under `.N()`, the direct application of a function with its written arguments
-  does not use the application memo. A body with no recursion that is called
-  many times with the same rational argument is evaluated again at each call.
-
-### Smaller defects found on 2026-10-18 (batch 6) (OPEN, small)
-
-- **Over ℂ, a periodic family can miss complex roots.**
-  `Solve(e^{sin x} = 1, x ∈ ℂ)` gives `[πt]`. The roots where `sin z = 2πik`
-  with an integer `k ≠ 0` are missing. The cause: the ℂ route of `Solve` inverts
-  `exp` on the principal branch only (`exp(w) = 1` gives `w = 0`, not
-  `w = 2πik`).
-- **`Element` over a lazy `Filter` with an unknown element throws.** With `z`
-  not assigned, `z ∈ Filter([z], y ↦ y > 0)` throws "Filter predicate must
-  return True or False". The correct result is an unevaluated `Element` (the
-  sign of `z` is not known). The message also has a wrong hint:
-  `Unknown symbol "y". Did you mean "x"?`.
-- **Limits of the per-run block locals (since 2026-10-18).** An implicit local
-  of a block starts fresh at each top-level evaluation and at each function
-  call. Two cases remain: (1) a recursive call that runs the same nested block
-  reads the implicit locals of the recursive call until its own next run of the
-  block (`let` locals have the same limit, `createBlockLocals` in
-  `library/control-structures.ts`); (2) an implicit local made in an
-  asynchronous run stays in the scope copy of that run.
-- **A function assigned in a block is visible before its `Assign` statement.**
-  In `Block(r ≔ fn(3); fn ≔ (z ↦ 2z); (r, fn(3)))`, `r` is `6` on the first run.
-  The correct value of `r` is `fn(3)` (unevaluated), because `fn` has no value
-  when `r` is assigned. The cause: `Assign` installs a function literal when the
-  block is canonicalized, not when the statement runs.
 
 ### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
 

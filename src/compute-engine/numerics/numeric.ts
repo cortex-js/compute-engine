@@ -834,14 +834,20 @@ export function limit(
   return val;
 }
 
+/**
+ * Every rational number exactly once, as a reduced fraction
+ * `[numerator, denominator]` with a positive denominator: `0`, then for each
+ * height `s = |n| + d` from 2 up, the fractions of that height with their
+ * negatives: `0, 1, -1, 1/2, -1/2, 2, -2, 1/3, …`.
+ */
 export function* cantorEnumerateRationals(): Generator<[number, number]> {
   yield [0, 1];
 
-  for (let s = 1; ; s++) {
-    // s = sum of numerator + denominator
-    for (let n = 0; n <= s; n++) {
+  for (let s = 2; ; s++) {
+    // s = sum of numerator + denominator. The numerator starts at 1: the
+    // only fraction with a numerator 0 is `0/1`, which is yielded first.
+    for (let n = 1; n < s; n++) {
       const d = s - n;
-      if (d === 0) continue;
 
       // Reduce fraction by skipping if not coprime
       if (gcd(n, d) !== 1) continue;
@@ -852,16 +858,21 @@ export function* cantorEnumerateRationals(): Generator<[number, number]> {
   }
 }
 
+/**
+ * Every non-negative rational number exactly once, as a reduced fraction
+ * `[numerator, denominator]`: `0, 1, 1/2, 2, 1/3, 3, …`. The first value is
+ * `0`, so a caller that skips the first value enumerates the positive
+ * rational numbers.
+ */
 export function* cantorEnumeratePositiveRationals(): Generator<
   [number, number]
 > {
   yield [0, 1];
 
-  for (let s = 1; ; s++) {
+  for (let s = 2; ; s++) {
     // s = sum of numerator + denominator
-    for (let n = 0; n <= s; n++) {
+    for (let n = 1; n < s; n++) {
       const d = s - n;
-      if (d === 0) continue;
 
       // Reduce fraction by skipping if not coprime
       if (gcd(n, d) !== 1) continue;
@@ -871,27 +882,27 @@ export function* cantorEnumeratePositiveRationals(): Generator<
   }
 }
 
-export function* cantorEnumerateComplexNumbers(): Generator<[number, number]> {
-  yield [0, 0];
+/**
+ * Every complex number with rational real and imaginary parts exactly once,
+ * as a pair `[re, im]` of reduced fractions `[numerator, denominator]`.
+ *
+ * The pairs are enumerated along the diagonals of the grid of indexes of
+ * `cantorEnumerateRationals()`: the pair `(r_i, r_j)` comes at the diagonal
+ * `i + j`. So every pair of rationals is reached, and none twice:
+ * `0, i, 1, -i, 1+i, -1, i/2, 1-i, -1+i, 1/2, …`.
+ */
+export function* cantorEnumerateComplexNumbers(): Generator<
+  [[number, number], [number, number]]
+> {
+  const rationals: [number, number][] = [];
+  const source = cantorEnumerateRationals();
+  const rational = (k: number): [number, number] => {
+    while (rationals.length <= k) rationals.push(source.next().value!);
+    return rationals[k];
+  };
 
-  for (let s = 1; ; s++) {
-    for (let na = 0; na <= s; na++) {
-      const da = s - na;
-      if (da === 0 || gcd(na, da) !== 1) continue;
-      const a = na / da;
-
-      for (let nb = 0; nb <= s; nb++) {
-        const db = s - nb;
-        if (db === 0 || gcd(nb, db) !== 1) continue;
-        const b = nb / db;
-
-        // Yield all sign combinations
-        yield [a, b];
-        yield [-a, b];
-        yield [a, -b];
-        yield [-a, -b];
-      }
-    }
+  for (let k = 0; ; k++) {
+    for (let i = 0; i <= k; i++) yield [rational(i), rational(k - i)];
   }
 }
 

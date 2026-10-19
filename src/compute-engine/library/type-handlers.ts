@@ -107,6 +107,14 @@ const NON_NEGATIVE_REAL_OR_SIGNED_INFINITY_TYPE = parseType(
 );
 
 /**
+ * The finite reals with the unsigned infinity `~oo`: the values of a
+ * real-valued function with poles where the value is `~oo` (`Gamma(-1)`,
+ * `Digamma(0)`), for an argument that can land on a pole. Parsed once at
+ * module load.
+ */
+export const REAL_OR_COMPLEX_INFINITY_TYPE = parseType('real | ~oo');
+
+/**
  * The sign of an operand as a `'types'`-shape handler may read it.
  *
  * The descriptor already computed the audited pure-source cascade: the
@@ -892,8 +900,10 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * `PolyGamma`): poles at the non-positive integers, where the value is `~oo`
  * (`+∞` for `GammaLn`) — not representable by any finite type nor by
  * `+oo | -oo` (for `~oo`), so a *provably* non-positive-integer
- * argument claims `number`. An integer of unknown sign keeps the
- * generic-point convention (via `numericTypeHandler`).
+ * argument claims `number`. A real argument that can land on a pole claims
+ * the real values with the value at the pole, `pole` (`real | ~oo`, or
+ * `real | +oo` for `GammaLn`): see `realOrPole`. A real argument with no
+ * pole (a positive one) claims `real`.
  *
  * NARROWER THAN THE EXPRESSION SHAPE WHEN THE SIGN IS ONLY A `sgn`
  * HANDLER'S: the pole gate widens the claim to `number` on a PROVEN
@@ -918,13 +928,53 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * same).
  */
 export function gammaPoleType(
-  x: OperandDescriptor | undefined
+  x: OperandDescriptor | undefined,
+  pole: Type = REAL_OR_COMPLEX_INFINITY_TYPE
 ): Type | undefined {
   if (!x) return 'number';
   const f = factsOf(x.type);
   if (f.nan) return undefined;
   if (f.integer && nonPositiveSign(operandSgn(x)) === true) return 'number';
-  return numericTypeHandler([x]);
+  return realOrPole(numericTypeHandler([x]), x, 0, pole);
+}
+
+/**
+ * The real claim `t` of a function with a pole at each integer `n ≤ max`,
+ * widened to `pole` (a union of `real` with the value at the pole, such as
+ * `real | ~oo`) when the argument `x` can be such an integer. A bare `real`
+ * is a finiteness promise, so it cannot cover the pole: for `x: real`,
+ * `Gamma(x)` is `real | ~oo`, because `Gamma(-1)` is `~oo`. A positive
+ * argument, or a range with no integer `n ≤ max` (`real<-0.9..-0.1>`), has
+ * no pole, and the claim stays `real`. A claim other than `real` is
+ * returned as it is.
+ */
+export function realOrPole(
+  t: Type,
+  x: OperandDescriptor,
+  max: number,
+  pole: Type
+): Type {
+  return t === 'real' && mayBeIntegerAtMost(x, max) ? pole : t;
+}
+
+/**
+ * Whether the value of `x` can be an integer `n ≤ max`, for `max` 0 or a
+ * negative integer. Read from the literal value, then from the sign, then
+ * from the bounds of the type. `true` when none of them excludes it.
+ */
+function mayBeIntegerAtMost(x: OperandDescriptor, max: number): boolean {
+  const v = operandLiteralValue(x);
+  if (v !== undefined) return Number.isInteger(v) && v <= max;
+  const s = operandSgn(x);
+  if (max < 0 ? nonNegativeSign(s) === true : positiveSign(s) === true)
+    return false;
+  const b = typeBounds(x.type);
+  // The greatest integer `n ≤ max` that the upper bound admits, then a test
+  // of that integer against the lower bound.
+  let top = Math.min(max, Math.floor(b.hi));
+  if (top === b.hi && b.hiOpen === true) top -= 1;
+  if (top < b.lo || (top === b.lo && b.loOpen === true)) return false;
+  return true;
 }
 
 /**

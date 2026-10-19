@@ -1,6 +1,5 @@
 import type { Expression } from '../global-types.js';
 import { isNumber } from './type-guards.js';
-import { hasInfiniteComponent } from './logarithm.js';
 
 /**
  * Which infinite point a number literal is, or `undefined` for a finite
@@ -9,14 +8,16 @@ import { hasInfiniteComponent } from './logarithm.js';
  * - `'+oo'` and `'-oo'`: the two signed real infinities.
  * - `'~oo'`: the unsigned complex infinity (the point at infinity of the
  *   Riemann sphere, which has no direction).
- * - `'anonymous'`: a number literal with an infinite component that is not
- *   one of the three named infinities. `ce.number()` does not make one: a
- *   value with an infinite imaginary part is `~oo`, and a value with an
- *   infinite real part and a finite imaginary part (`∞ + i`) is `±∞`
- *   (`canonicalNumber()`). The case is kept as a defensive answer. The test
- *   is asked of the numeric value, never of the machine projections,
- *   because a finite bignum beyond the double range (`10^1000`) projects
- *   `re` to `Infinity` (`hasInfiniteComponent`).
+ *
+ * No other infinite number literal exists. Every boxed number is
+ * normalized by `canonicalNumber()` (`boxed-number.ts`): a value with an
+ * infinite imaginary part is `~oo` (the numeric-value constructors set
+ * the real part to the infinite imaginary part), a value with an infinite
+ * real part and a finite imaginary part (`∞ + i`) is `±∞`
+ * (`infiniteRealPart()`), and a value with a NaN part is `NaN`. A finite
+ * bignum beyond the double range (`10^1000`) is finite: the test reads
+ * `isInfinity`, which asks the numeric value, never the machine
+ * projections.
  *
  * The special-function heads (the Γ family, the polygammas, `Zeta`, the
  * Bessel and Airy functions, the trigonometric integrals, the elliptic
@@ -25,28 +26,24 @@ import { hasInfiniteComponent } from './logarithm.js';
  * `.N()` alike, instead of by whatever the numeric kernel happens to return
  * for an `Infinity` argument.
  */
-export type InfinitePoint = '+oo' | '-oo' | '~oo' | 'anonymous';
+export type InfinitePoint = '+oo' | '-oo' | '~oo';
 
 export function infinitePoint(x: Expression): InfinitePoint | undefined {
   if (!isNumber(x)) return undefined;
-  if (x.isInfinity === true) {
-    if (x.isPositive === true) return '+oo';
-    if (x.isNegative === true) return '-oo';
-    return '~oo';
-  }
-  if (x.isNaN === true) return undefined;
-  return hasInfiniteComponent(x.numericValue) ? 'anonymous' : undefined;
+  if (x.isInfinity !== true) return undefined;
+  if (x.isPositive === true) return '+oo';
+  if (x.isNegative === true) return '-oo';
+  return '~oo';
 }
 
 /**
  * Whether the literal is a real number literal at one of the two real
  * infinities or at a finite point — that is, an operand with no imaginary
- * part. `~oo` and the anonymous infinities are NOT real.
+ * part. `~oo` is NOT real.
  */
 export function isRealLiteral(x: Expression): boolean {
   if (!isNumber(x)) return false;
-  const p = infinitePoint(x);
-  if (p === '~oo' || p === 'anonymous') return false;
+  if (infinitePoint(x) === '~oo') return false;
   return !x.isComplex;
 }
 

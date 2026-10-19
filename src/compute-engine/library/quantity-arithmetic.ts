@@ -26,6 +26,7 @@ import {
 } from './units.js';
 import {
   convertUnit,
+  unitConversionCoefficients,
   convertCompoundUnit,
   dimensionsEqual,
   isDimensionless,
@@ -80,8 +81,10 @@ function unitSymbol(q: QuantityExpr): string | null {
  * A magnitude that has a numeric value (not a `Measurement`, not symbolic)
  * is converted with expression arithmetic only when the conversion keeps an
  * exact value exact (see `isExactConversion()`). Otherwise the result is a
- * float, and the conversion is numeric: with an offset (a temperature), `f`
- * is the difference of two floats and loses digits (`degC → degF` gives
+ * float, and the conversion is numeric. For two unit symbols, the expression
+ * arithmetic reads `f` and `c` from `unitConversionCoefficients()`, which
+ * computes them from exact data: the difference `convert(1) − convert(0)` of
+ * two floats loses digits for a temperature (`degC → degF` gives
  * `1.7999999999999972`).
  */
 function convertMagnitude(
@@ -105,7 +108,9 @@ function convertMagnitude(
     if (c0 === null || c1 === null) return undefined;
     if (numeric && !isExactConversion(c0, c1))
       return numericResult(convertUnit(mag.re, opSymbol, targetSymbol));
-    return affineMagnitude(ce, mag, c1 - c0, c0);
+    const map = unitConversionCoefficients(opSymbol, targetSymbol);
+    if (map === null) return undefined;
+    return affineMagnitude(ce, mag, map.factor, map.offset);
   }
   if (!opUE || !targetUE) return undefined;
   const c0 = convertCompoundUnit(0, opUE, targetUE);
@@ -689,20 +694,31 @@ export function quantityPower(
   if (n === undefined || isSymbolicValue(exp)) return undefined;
   if (!magIsMeasurement && mag === undefined) return undefined;
 
-  // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
+  // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b). A root
+  // is a power too: the canonical form of `m^(1/2)` is `Sqrt(m)`, and of
+  // `m^(1/3)` is `Root(m, 3)`. The product of the exponents is exact for
+  // exact exponents: `(m^(1/3))^2` is `m^(2/3)`, not `m^0.6666666666666666`.
   const unit = base.op2;
+  let innerBase: Expression | undefined;
+  let innerExp: Expression | undefined;
+  if (isFunction(unit, 'Power') && isNumber(unit.op2)) {
+    innerBase = unit.op1;
+    innerExp = unit.op2;
+  } else if (isFunction(unit, 'Sqrt')) {
+    innerBase = unit.op1;
+    innerExp = ce.number([1, 2]);
+  } else if (isFunction(unit, 'Root') && isNumber(unit.op2)) {
+    innerBase = unit.op1;
+    innerExp = ce.function('Divide', [ce.One, unit.op2]).evaluate();
+  }
   let resultUnit: Expression;
-  if (isFunction(unit, 'Power')) {
-    const innerExp = unit.op2?.re;
-    if (innerExp !== undefined) {
-      const combined = innerExp * n;
-      resultUnit =
-        combined === 1
-          ? unit.op1
-          : ce._fn('Power', [unit.op1, ce.number(combined)]);
-    } else {
-      resultUnit = ce._fn('Power', [unit, exp]);
-    }
+  if (innerBase && innerExp) {
+    const combined = ce.function('Multiply', [innerExp, exp]).evaluate();
+    resultUnit = combined.isSame(1)
+      ? innerBase
+      : ce._fn('Power', [innerBase, combined]);
+  } else if (isFunction(unit, 'Power')) {
+    resultUnit = ce._fn('Power', [unit, exp]);
   } else {
     resultUnit = n === 1 ? unit : ce._fn('Power', [unit, exp]);
   }

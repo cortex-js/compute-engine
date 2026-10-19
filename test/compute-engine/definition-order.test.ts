@@ -385,11 +385,11 @@ describe('definition order does not change semantics', () => {
       // function (a partial application, typed `(unknown) -> number`). So the
       // body `2a(t)` is a product with a function factor: the signature check
       // of `Multiply` makes the factor an `incompatible-type` error, as it
-      // does for `2\times a(t)`. Either order reports that error. When the
-      // callee comes first, the assignment of `g` evaluates to the error.
-      // When the caller comes first, the rebuild of the body of `g` is
-      // rejected, and the error surfaces from the definition of `a` (see the
-      // next test).
+      // does for `2\times a(t)`. Either order gives that error as a value.
+      // When the callee comes first, the assignment of `g` evaluates to the
+      // error. When the caller comes first, the rebuild of the body of `g` is
+      // rejected, and the assignment of `a` evaluates to the error. The host
+      // route `ce.declare` throws it (see the next test).
       const calleeFirst = new ComputeEngine();
       calleeFirst.parse('a(x,y)\\coloneq x+y').evaluate();
       const assigned = calleeFirst.parse('g(t)\\coloneq 2a(t)').evaluate();
@@ -398,9 +398,9 @@ describe('definition order does not change semantics', () => {
 
       const callerFirst = new ComputeEngine();
       callerFirst.parse('g(t)\\coloneq 2a(t)').evaluate();
-      expect(() => callerFirst.parse('a(x,y)\\coloneq x+y').evaluate()).toThrow(
-        /incompatible-type/
-      );
+      const repaired = callerFirst.parse('a(x,y)\\coloneq x+y').evaluate();
+      expect(repaired.operator).toBe('Error');
+      expect(JSON.stringify(repaired.json)).toContain('incompatible-type');
     });
 
     test('the error surfaces and no dependent is dropped', () => {

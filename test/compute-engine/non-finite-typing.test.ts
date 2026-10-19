@@ -542,7 +542,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('generic real symbol stays a generic (finite) point', () => {
       expect(typeOf(['Sin', 'x_r'])).toBe('real');
       expect(typeOf(['Ceil', 'x_r'])).toBe('integer');
-      expect(typeOf(['Gamma', 'x_r'])).toBe('real');
+      // `Gamma(-1)` is `~oo`: a real argument can land on a pole, so the
+      // claim adds the `~oo` arm (stored as `infinity`).
+      expect(typeOf(['Gamma', 'x_r'])).toBe('infinity | real');
     });
 
     test('rounding a finite complex is a boxing error (Phase F extended-real carrier)', () => {

@@ -11,8 +11,9 @@
  *   caller's `vars` object.
  * - When an engine scope outside the expression binds `u`
  *   (`ce.declare('u', 'real')`), the interpreter changes that binding. A
- *   shader target cannot write an input, so the compilation fails on both
- *   routes.
+ *   shader target cannot write an input (a uniform), so the code writes a
+ *   local copy of `u` that starts with the value of the input, on both
+ *   routes. The compilation failed before.
  * - WGSL `compileFunction()` compiles `Block(s ≔ x; Block(t ≔ s + 1))`, as
  *   GLSL does.
  */
@@ -108,16 +109,27 @@ describe('SHADERS: CHAINED ASSIGNMENT IN A LOOP BODY', () => {
         expect(code.indexOf(local)).toBeGreaterThan(code.indexOf('for'));
       });
 
-      test(`${to}, ${name}: a u that an engine scope binds declines`, () => {
+      test(`${to}, ${name}: a u that an engine scope binds is a local copy`, () => {
         const ce = new ComputeEngine();
         ce.declare('u', 'real');
         const expr = ce.box(program(body, 't') as any);
         // The interpreter changes the engine's `u`.
         expect(expr.evaluate().toString()).toBe('6');
         expect(ce.box('u').evaluate().toString()).toBe('6');
-        expect(() =>
-          compile(ce.box(program(body, 't') as any), { to, fallback: false })
-        ).toThrow(/an engine scope outside the expression binds/);
+        // A new engine: after the evaluation, `u` has a value, which the
+        // compiled code reads as a constant.
+        const ce2 = new ComputeEngine();
+        ce2.declare('u', 'real');
+        const code = (
+          compile(ce2.box(program(body, 't') as any), {
+            to,
+            fallback: false,
+          }) as any
+        ).code as string;
+        expect(code.split('\n')[0]).toBe(
+          to === 'glsl' ? 'float _tv1 = u;' : 'var _tv1: f32 = u;'
+        );
+        expect(code).not.toMatch(/(^|[^\w.])u\s*=[^=]/m);
       });
     }
 });

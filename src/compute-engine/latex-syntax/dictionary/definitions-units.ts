@@ -26,6 +26,7 @@ import {
   operator,
   symbol,
   machineValue,
+  rationalValue,
 } from '../../../math-json/utils.js';
 import type {
   LatexDictionary,
@@ -119,10 +120,17 @@ function readBracedText(parser: Parser): string | null {
     }
 
     // `^` followed by `{...}` is common LaTeX notation for exponents.
-    // We want to collect `^{2}` as `^2`.
+    // We want to collect `^{2}` as `^2`. A fraction exponent keeps its
+    // group as parentheses, `^{1/2}` as `^(1/2)`: without them the unit DSL
+    // reads `m^1/2` as `m^1` divided by `2`.
     if (token === '^') {
       text += '^';
       parser.nextToken();
+      if (parser.peek === '<{>') {
+        const exp = readExponentGroup(parser);
+        if (exp === null) return null;
+        text += exp.includes('/') ? `(${exp})` : exp;
+      }
       continue;
     }
 
@@ -131,6 +139,27 @@ function readBracedText(parser: Parser): string | null {
   }
 
   // If we ran out of tokens without closing the group, return null
+  return null;
+}
+
+/**
+ * Read the `{...}` group of an exponent, the next token, as raw text, with the
+ * spaces and the nested braces removed: `{1/2}` is `1/2` and `{-1}` is `-1`.
+ * Returns `null` when the group is not closed.
+ */
+function readExponentGroup(parser: Parser): string | null {
+  if (!parser.match('<{>')) return null;
+  let exp = '';
+  let depth = 0;
+  while (!parser.atEnd) {
+    const token = parser.peek;
+    parser.nextToken();
+    if (token === '<}>') {
+      if (depth === 0) return exp;
+      depth--;
+    } else if (token === '<{>') depth++;
+    else if (token !== '<space>') exp += token;
+  }
   return null;
 }
 
@@ -395,7 +424,10 @@ const parseUnitExpression: ExpressionParseHandler = (
   if (!UNIT_BLOCKLIST.has(text.trim())) {
     const exp = readExponentSuffix(parser);
     if (exp !== null) {
-      const withExp = resolveUnitText(`${text}^${exp}`);
+      // A fraction exponent is grouped, as in `readBracedText()`.
+      const withExp = resolveUnitText(
+        `${text}^${exp.includes('/') ? `(${exp})` : exp}`
+      );
       if (withExp !== null) return ['__unit__', withExp];
       parser.index = afterBrace;
     }
@@ -429,6 +461,9 @@ const parseUnitExpression: ExpressionParseHandler = (
  * - `['Multiply', 'kg', 'm']`  →  `'kg\\cdot m'`
  */
 function unitToMathrm(expr: MathJsonExpression): string {
+  const factors = unitFactorsToMathrm(expr);
+  if (factors !== null) return factors;
+
   // Simple symbol
   const sym = symbol(expr);
   if (sym !== null) return sym;
@@ -471,6 +506,130 @@ function unitToMathrm(expr: MathJsonExpression): string {
   }
 
   return '';
+}
+
+/**
+ * The exponent of a unit factor: an exact fraction `[n, d]` with `d > 0`, or
+ * a machine number for a float exponent.
+ */
+type UnitFactorExponent = [number, number] | number;
+
+function readUnitFactorExponent(
+  expr: MathJsonExpression | null
+): UnitFactorExponent | null {
+  const r = rationalValue(expr);
+  if (r !== null && r[1] !== 0) return r[1] < 0 ? [-r[0], -r[1]] : r;
+  const v = machineValue(expr);
+  if (v === null || !Number.isFinite(v)) return null;
+  return Number.isInteger(v) ? [v, 1] : v;
+}
+
+/**
+ * The product of two exponents, or `null` when it is not a finite number.
+ * A fraction whose numerator or denominator is not a safe integer is
+ * written as a float: `gcd()` of an `Infinity` (the product of the
+ * exponents of `Power(Power(m, 1e200), 1e200)`) never ended, because
+ * `Infinity % 1` is `NaN`.
+ */
+function multiplyUnitFactorExponents(
+  a: UnitFactorExponent,
+  b: UnitFactorExponent
+): UnitFactorExponent | null {
+  if (typeof a === 'number' || typeof b === 'number') {
+    const x = typeof a === 'number' ? a : a[0] / a[1];
+    const y = typeof b === 'number' ? b : b[0] / b[1];
+    return Number.isFinite(x * y) ? x * y : null;
+  }
+  const n = a[0] * b[0];
+  const d = a[1] * b[1];
+  if (!Number.isSafeInteger(n) || !Number.isSafeInteger(d)) {
+    const v = n / d;
+    return Number.isFinite(v) ? v : null;
+  }
+  const g = gcd(Math.abs(n), d);
+  return [n / g, d / g];
+}
+
+function gcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a === 0 ? 1 : a;
+}
+
+function isNegativeUnitFactorExponent(e: UnitFactorExponent): boolean {
+  return typeof e === 'number' ? e < 0 : e[0] < 0;
+}
+
+function unitFactorExponentToString(e: UnitFactorExponent): string {
+  if (typeof e === 'number') return String(e);
+  return e[1] === 1 ? String(e[0]) : `${e[0]}/${e[1]}`;
+}
+
+/**
+ * The content of `\mathrm{...}` for a unit expression, written as a product
+ * of unit symbols with exponents: the factors with a positive exponent, then
+ * `/` and the factors with a negative exponent. With no positive factor the
+ * numerator is `1` (`1/mol`). The unit DSL of `parseUnitDSL()` reads this
+ * text back as the same unit.
+ *
+ * An exponent applies to every factor of its base, so `(m/s)^2` is written
+ * `m^{2}/s^{2}`: the text `m/s^{2}` is `m/s²`. A fraction exponent is written
+ * as a fraction: `Sqrt(m)` is `m^{1/2}`.
+ *
+ * Returns `null` for a unit expression that is not a product of powers of
+ * unit symbols with numeric exponents (for example `m^n`).
+ */
+function unitFactorsToMathrm(expr: MathJsonExpression): string | null {
+  const factors: [string, UnitFactorExponent][] = [];
+
+  const walk = (
+    e: MathJsonExpression | null,
+    exp: UnitFactorExponent | null
+  ): boolean => {
+    if (e === null || exp === null) return false;
+    const sym = symbol(e);
+    if (sym !== null) {
+      factors.push([sym, exp]);
+      return true;
+    }
+    const op = operator(e);
+    if (op === 'Multiply') {
+      if (!Array.isArray(e)) return false;
+      for (let i = 1; i < e.length; i++) if (!walk(e[i], exp)) return false;
+      return true;
+    }
+    if (op === 'Divide') {
+      const num = operand(e, 1);
+      const den = operand(e, 2);
+      // The `1` of a reciprocal unit, `Divide(1, s)`, is not a factor.
+      if (machineValue(num) !== 1 && !walk(num, exp)) return false;
+      return walk(den, multiplyUnitFactorExponents(exp, [-1, 1]));
+    }
+    let inner: UnitFactorExponent | null = null;
+    if (op === 'Power') inner = readUnitFactorExponent(operand(e, 2));
+    else if (op === 'Square') inner = [2, 1];
+    else if (op === 'Sqrt') inner = [1, 2];
+    else if (op === 'Root') {
+      const n = machineValue(operand(e, 2));
+      if (n !== null && Number.isInteger(n) && n > 0) inner = [1, n];
+    }
+    if (inner === null) return false;
+    return walk(operand(e, 1), multiplyUnitFactorExponents(exp, inner));
+  };
+
+  if (!walk(expr, [1, 1]) || factors.length === 0) return null;
+
+  const write = ([sym, e]: [string, UnitFactorExponent]) => {
+    const s = unitFactorExponentToString(e);
+    return s === '1' ? sym : `${sym}^{${s}}`;
+  };
+  const num = factors.filter(([, e]) => !isNegativeUnitFactorExponent(e));
+  const den = factors.filter(([, e]) => isNegativeUnitFactorExponent(e));
+  const numText = num.map(write).join('\\cdot ');
+  if (den.length === 0) return numText;
+  const denText = den
+    .map(([sym, e]) => write([sym, typeof e === 'number' ? -e : [-e[0], e[1]]]))
+    .join('\\cdot ');
+  return `${numText || '1'}/${denText}`;
 }
 
 // ---------------------------------------------------------------------------

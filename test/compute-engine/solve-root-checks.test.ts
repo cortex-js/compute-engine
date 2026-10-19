@@ -258,6 +258,139 @@ describe('Solve of a pure power with a large degree', () => {
   });
 });
 
+// A polynomial of a high degree with no closed form has its roots found
+// numerically, with the Aberth iteration above the degree 12. Before, the
+// degree was limited to 12, and an integer-valued float exponent was read as
+// a degree only up to 64: `x^{65.0} + x = 2` gave no answer.
+describe('Solve of a polynomial with a high degree', () => {
+  // Each root is a root of the polynomial with the terms `terms` (pairs of a
+  // degree and a coefficient), within the rounding error of the
+  // evaluation, and the roots are different. The polynomial is evaluated
+  // with machine numbers, independently of the engine.
+  function checkPolynomialRoots(s: string, terms: [number, number][]): void {
+    const n = Math.max(...terms.map(([k]) => k));
+    const solutions = ce.parse(s).solve('x')!;
+    expect(solutions).not.toBeNull();
+    expect(solutions.length).toBe(n);
+    const seen = new Set<string>();
+    for (const root of solutions) {
+      const z = root.N();
+      let re = 0;
+      let im = 0;
+      let size = 0;
+      const r = Math.hypot(z.re, z.im);
+      const t = Math.atan2(z.im, z.re);
+      for (const [k, a] of terms) {
+        re += a * r ** k * Math.cos(k * t);
+        im += a * r ** k * Math.sin(k * t);
+        size += Math.abs(a) * r ** k;
+      }
+      expect(Math.hypot(re, im) / size).toBeLessThan(1e-12);
+      seen.add(`${z.re.toFixed(8)},${z.im.toFixed(8)}`);
+    }
+    expect(seen.size).toBe(n);
+  }
+
+  test('an integer-valued float exponent above 64 in a polynomial', () => {
+    const terms: [number, number][] = [
+      [65, 1],
+      [1, 1],
+      [0, -2],
+    ];
+    checkPolynomialRoots('x^{65.0} + x = 2', terms);
+    const solutions = ce.parse('x^{65.0} + x = 2').solve('x')!;
+    expect(solutions.every((r) => r.isExact === false)).toBe(true);
+  });
+
+  test('the degrees 100 and 500', () => {
+    checkPolynomialRoots('2x^{100} - x^{99} + 5 = 0', [
+      [100, 2],
+      [99, -1],
+      [0, 5],
+    ]);
+    checkPolynomialRoots('x^{500} + 3x^2 - x + 7 = 0', [
+      [500, 1],
+      [2, 3],
+      [1, -1],
+      [0, 7],
+    ]);
+  });
+
+  test('a degree 30 with all its terms', () => {
+    const terms = Array.from({ length: 31 }, (_, k): [number, number] => [
+      k,
+      (k % 7) + 1,
+    ]);
+    checkPolynomialRoots(
+      `${terms.map(([k, a]) => `${a}x^{${k}}`).join('+')} = 0`,
+      terms
+    );
+  });
+
+  test('above the limits, there is no answer', () => {
+    // The check of each root takes a time that grows as the square of the
+    // degree, and as the product of the degree and the number of terms
+    expect(ce.parse('x^{1001.0} + x = 2').solve('x')).toBeNull();
+    const terms = Array.from({ length: 151 }, (_, k) => `x^{${k}}`).join('+');
+    expect(ce.parse(`${terms} = 2`).solve('x')).toBeNull();
+  });
+});
+
+// The `n` roots of a pure power are not all built for an unknown declared
+// real: only the real roots are. Above the degree 10000, the roots of a pure
+// power of a complex unknown are not given: `x^{100000} = 2` took about one
+// minute.
+describe('Solve of a pure power with a very large degree', () => {
+  const engine = new ComputeEngine();
+  engine.declare('r', 'real');
+  const realRoots = (s: string): string[] | undefined =>
+    engine
+      .parse(s)
+      .solve('r')
+      ?.map((r) => r.toString());
+
+  test('a real unknown gets its real roots only', () => {
+    expect(realRoots('r^{1000} = 2')).toEqual([
+      '-root(1000)(2)',
+      'root(1000)(2)',
+    ]);
+    expect(realRoots('r^{100000} = 2')).toEqual([
+      '-root(100000)(2)',
+      'root(100000)(2)',
+    ]);
+    expect(realRoots('r^{1001} = -2')).toEqual(['-root(1001)(2)']);
+    expect(realRoots('r^{1000} = -2')).toEqual([]);
+    expect(realRoots('r^{3} = 2i')).toEqual([]);
+    expect(realRoots('r^{100000.0} = 2')).toEqual([
+      '-1.00000693149582830565',
+      '1.00000693149582830565',
+    ]);
+  });
+
+  test('a real domain gets the real roots only', () => {
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Power', 'x', 100000], 2],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[-root(100000)(2),root(100000)(2)]');
+  });
+
+  test('a complex unknown above the degree 10000 gets no answer', () => {
+    expect(ce.parse('x^{10001} = 2').solve('x')).toBeNull();
+    expect(
+      ce.parse('\\operatorname{Solve}(x^{100000} = 2, x)').evaluate().operator
+    ).toBe('Solve');
+    // Before, the two real roots `±2^{1/20000}` were the answer
+    expect(ce.parse('x^{20000.0} = 2').solve('x')).toBeNull();
+    expect(ce.parse('x^{40000} - 3x^{20000} + 2 = 0').solve('x')).toBeNull();
+  });
+});
+
 // A step that changes only the exactness of a number changes the state of
 // the equation: the curation of `explain('solve')` keeps it.
 describe("explain('solve') keeps a step that changes the exactness", () => {

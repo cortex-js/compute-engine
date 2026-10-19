@@ -104,6 +104,7 @@ import type { FunctionSignature, Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
 import {
+  DependentRebuildError,
   GENERIC_ANNOTATION_COVERAGE_MESSAGE,
   GENERIC_PARTIAL_APPLICATION_MESSAGE,
   INVALID_SIGNATURE_MARKER_MESSAGE,
@@ -1213,11 +1214,12 @@ function repairWave(
       rebuilds.set(def, spent + 1);
       REPAIRING.add(def);
       guarded.push(def);
+      let rebuilt: Expression | undefined;
       try {
         // Re-canonicalized in the scope the literal was built in: its free
         // symbols must resolve exactly as they did then, except for the one that
         // has since become a function.
-        const rebuilt = ce._inScope(info.scope, () =>
+        rebuilt = ce._inScope(info.scope, () =>
           canonicalFunctionLiteralArguments(ce, info.ops)
         );
         // Installed even when the rebuilt literal is INVALID: a fresh parse made
@@ -1244,7 +1246,19 @@ function repairWave(
             cascade.push({ name: installedName, def });
         }
       } catch (error) {
-        firstError ??= { error };
+        // When the definition constructor refuses an invalid body, the error
+        // carries the first error of the body, which the operator routes
+        // give as the value of the statement (`DependentRebuildError`).
+        const bodyError =
+          rebuilt !== undefined && error instanceof Error
+            ? errorValue(rebuilt)
+            : undefined;
+        firstError ??= {
+          error:
+            bodyError !== undefined
+              ? new DependentRebuildError(bodyError, (error as Error).message)
+              : error,
+        };
         registerProvisionalDependents(ce, literal, def);
       }
     }
@@ -4609,6 +4623,26 @@ function makeLambda(
       : undefined;
 
   /**
+   * The part of an application memo key that `args` give, or `undefined`
+   * when the application is not memoized: an argument is not a number
+   * literal, the application runs the statements of a loop, or the body is
+   * not pure. Purity is read per application (see `invoke`). The part
+   * says whether the assumptions are hidden right now, and spells `-0`
+   * apart from `0`, which `JSON.stringify` would collapse.
+   */
+  const applicationMemoArgs = (
+    args: ReadonlyArray<Expression>,
+    iterationStatements: ReadonlyArray<Expression> | undefined
+  ): string | undefined =>
+    iterationStatements === undefined &&
+    args.every((a) => isNumber(a)) &&
+    isPureComputedEffects(effectsOf(body))
+      ? `${ce._factsHidden() ? 'H' : ''}|${args
+          .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
+          .join('|')}`
+      : undefined;
+
+  /**
    * Under `.N()`, the value of an application whose written arguments
    * (`ApplyOptions.exactSources`, `exactArgumentSources`) are not all
    * equal to their approximations: the `.N()` of the body with the written
@@ -4660,6 +4694,35 @@ function makeLambda(
     // it applies library operators only, and no scoped operator.
     if (options.awaitStatements && !isCheapWrittenArgument(onlyStatement))
       return undefined;
+    // The application memo, as on the ordinary route (`invoke`): a body
+    // with no recursion that is called many times with the same exact
+    // argument under `.N()` (`f(3/7)` in each term of a sum) is evaluated
+    // once. The key is spelled from the written values, and it starts with
+    // `W`, so it never matches an entry of an exact request (`E`) or of an
+    // ordinary numeric request (`N`), whose arguments are the
+    // approximations. No key is made when the substitution below can
+    // decline for a reason that changes from one call to the next (held
+    // arguments, the statements of a loop, an active debugger): an entry is
+    // stored only after the substitution succeeded.
+    const memoArgs =
+      options.holdArguments ||
+      debugStatementHook !== undefined ||
+      debugStatementResultHook !== undefined
+        ? undefined
+        : applicationMemoArgs(values, iterationStatements);
+    const memoKey =
+      memoArgs === undefined
+        ? undefined
+        : `W${ce.precision}:${ce._requestedPrecision ?? ''}${memoArgs}`;
+    const hit =
+      memoKey === undefined
+        ? undefined
+        : validApplicationMemo(ce, fnExpr)?.results.get(memoKey);
+    if (hit !== undefined)
+      return options.awaitStatements
+        ? (Promise.resolve(hit) as unknown as Expression)
+        : hit;
+    const sequenceStopsBefore = sequenceReadStopCount();
     // The substituted body is canonicalized and evaluated in a scope whose
     // parent is the scope where the literal was defined, as a call frame
     // is: a name of the body that is not a parameter (a local of the
@@ -4681,6 +4744,14 @@ function makeLambda(
     }
     if (result === undefined) return undefined;
     result = bodyResultValue(result);
+    // A read of a sequence term that was stopped in this application is not
+    // memoized, as on the ordinary route (`sequence-read-stops.ts`).
+    if (
+      memoKey !== undefined &&
+      result.isValid &&
+      sequenceReadStopCount() === sequenceStopsBefore
+    )
+      applicationMemoForStore(ce, fnExpr)?.results.set(memoKey, result);
     // The lambda is typed synchronous: a `Promise` comes back only for the
     // caller that set `awaitStatements`.
     if (options.awaitStatements)
@@ -5176,14 +5247,7 @@ function makeLambda(
     // float (a body `N(Pi)`), and the body of a function that a numeric
     // request applies runs through the exact route first.
     const precisionKey = `${ce.precision}:${ce._requestedPrecision ?? ''}`;
-    const memoArgs =
-      iterationStatements === undefined &&
-      evaluatedArgs.every((a) => isNumber(a)) &&
-      isPureComputedEffects(effectsOf(body))
-        ? `${ce._factsHidden() ? 'H' : ''}|${evaluatedArgs
-            .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
-            .join('|')}`
-        : undefined;
+    const memoArgs = applicationMemoArgs(evaluatedArgs, iterationStatements);
     const numeric = options?.numericApproximation === true;
     const memoKey =
       memoArgs === undefined
