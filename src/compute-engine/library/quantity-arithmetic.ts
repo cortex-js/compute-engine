@@ -35,7 +35,6 @@ import {
   isDimensionless,
   getExpressionScale,
   getExpressionDimension,
-  findNamedUnit,
   flattenUnitFactors,
   cancelUnitFactors,
   unitExpressionFromFactors,
@@ -574,9 +573,12 @@ function cancelCompoundUnit(ue: UnitExpression): {
 }
 
 /**
- * Try to simplify a compound unit to a named derived unit.
- * E.g. Multiply(N, m) → J, Divide(kg, Multiply(m, Power(s, 2))) → Pa.
- * If no simplification is found, returns the Quantity as-is.
+ * Combine the compound unit of a product or a quotient of quantities. Unit
+ * factors with the same dimension cancel (`km/m` → `1000`, `m·s/in`), and a
+ * dimensionless unit gives a plain number. The other units are kept in the
+ * canonical unit form (see `canonicalUnit()`): a unit is not renamed, so
+ * `Multiply(N, m)` stays `N·m` and does not become `J`. Only `UnitSimplify`
+ * replaces a compound unit with a named derived unit.
  *
  * `mag` is the result of machine-number arithmetic with a float operand, so
  * the magnitude is boxed as a float, also when its value is an integer.
@@ -590,9 +592,8 @@ function simplifyQuantityUnit(
   let ue = boxedToUnitExpression(unit);
 
   // First, structurally cancel any repeated unit factors that share a
-  // dimension (e.g. in/in, m·s/in).  This runs before the named-unit logic so
-  // that a fully-cancelled unit collapses to a scalar and a partially-cancelled
-  // unit still gets a chance at findNamedUnit below.
+  // dimension (e.g. in/in, m·s/in), so that a fully-cancelled unit collapses
+  // to a scalar.
   if (ue) {
     const cancelled = cancelCompoundUnit(ue);
     // The cancellation adds the exponents as machine numbers, and a sum can
@@ -610,10 +611,9 @@ function simplifyQuantityUnit(
       if (cancelled.rebuilt === null) return float(mag);
       // A unit name is not a variable: box the rebuilt unit resolve-only, so
       // that a unit name with no definition is not declared in the current
-      // scope. The named unit below is boxed the same way. The rebuilt unit
-      // has exact exponents when the exponents of `unit` are exact:
-      // `m^(2/3)·m^(2/3)` is `m^(4/3)`, not `m^1.3333333333333333` (see
-      // `canonicalUnitFromFactorMap()`).
+      // scope. The rebuilt unit has exact exponents when the exponents of
+      // `unit` are exact: `m^(2/3)·m^(2/3)` is `m^(4/3)`, not
+      // `m^1.3333333333333333` (see `canonicalUnitFromFactorMap()`).
       unit =
         canonicalUnitFromFactorMap(ce, cancelled.factors, unit) ??
         ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
@@ -628,17 +628,6 @@ function simplifyQuantityUnit(
       if (isDimensionless(dim)) {
         const scale = getExpressionScale(ue);
         if (scale !== null) return float(mag * scale);
-      }
-      const match = findNamedUnit(dim);
-      if (match) {
-        // findNamedUnit only returns scale=1 units, so just multiply mag by
-        // the compound unit's scale to get the magnitude in the named unit.
-        const scale = getExpressionScale(ue);
-        if (scale !== null)
-          return ce._fn('Quantity', [
-            float(mag * scale),
-            ce.symbol(match, { autoDeclare: false }),
-          ]);
       }
     }
   }
@@ -689,15 +678,6 @@ function simplifyQuantityUnitMeasurement(
       if (isDimensionless(dim)) {
         const scale = getExpressionScale(ue);
         if (scale !== null) return scaleMagnitude(ce, mag, scale);
-      }
-      const match = findNamedUnit(dim);
-      if (match) {
-        const scale = getExpressionScale(ue);
-        if (scale !== null)
-          return ce._fn('Quantity', [
-            scaleMagnitude(ce, mag, scale),
-            ce.symbol(match, { autoDeclare: false }),
-          ]);
       }
     }
   }

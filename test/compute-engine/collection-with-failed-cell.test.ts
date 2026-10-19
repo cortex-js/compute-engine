@@ -106,15 +106,13 @@ describe('A VARIABLE THAT HOLDS A LIST WITH A FAILED CELL (HOST ROUTE)', () => {
     expect(ce.box(['At', 'fs', 3]).evaluate().toString()).toBe('3');
   });
 
-  test('Length stays inert', () => {
-    // An invalid list is not a collection to `Length` (`isCollection` is
-    // `false` for an invalid tree): the "container vs. cell validity"
-    // question of `docs/ERROR-MODEL.md` §7 is deferred.
+  test('Length counts the failed cell', () => {
+    // A list literal with a failed cell is a collection that can be
+    // iterated (`docs/ERROR-MODEL.md` §3): `Length` reads its count, which
+    // does not demand the value of any cell.
     const ce = new ComputeEngine();
     ce.assign('fs', ['List', 1, ERR, 3]);
-    expect(ce.box(['Length', 'fs']).evaluate().toString()).toBe(
-      `Length([1,${ERR_TEXT},3])`
-    );
+    expect(ce.box(['Length', 'fs']).evaluate().toString()).toBe('3');
   });
 
   test('a variable declared list accepts the value', () => {

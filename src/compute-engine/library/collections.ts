@@ -112,7 +112,14 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
-import { withErrorFrames } from '../boxed-expression/error-value.js';
+import { DISPLAY_MATERIALIZATION } from '../boxed-expression/abstract-boxed-expression.js';
+import {
+  failedCellError,
+  firstFailedElementError,
+  isInvalidNonCollection,
+  mayHoldFailedElement,
+  withErrorFrames,
+} from '../boxed-expression/error-value.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   isIndexReadTuple,
@@ -5695,14 +5702,15 @@ function unrestricted(e: Expression): Expression {
  * element-wise restriction whose condition is false) is not a point and not a
  * scalar, so it cannot decide: `PointX([Missing, (1, 2)])` is the list of
  * x-coordinates `[Missing, 1]`, as `PointX([(1, 2), Missing])` is
- * `[1, Missing]`.
+ * `[1, Missing]`. A failed cell (an element that is, or holds, an `Error`)
+ * cannot decide either: `PointX([<error>, (1, 2)])` is `[<error>, 1]`.
  */
 function firstPresentElement(xs: Expression): Expression | undefined {
   const all = isFunction(xs, 'List');
   let first: Expression | undefined;
   for (const e of xs.each()) {
     if (first === undefined) first = e;
-    if (!all || !isAbsentSymbol(e)) return e;
+    if (!all || (!isAbsentSymbol(e) && e.isValid)) return e;
   }
   return first;
 }
@@ -6093,6 +6101,11 @@ function pointComponentOf(
       .evaluate();
   const component = e.at(position);
   if (component !== undefined) return component;
+  // A failed cell (an element that is, or holds, an `Error`) that is not a
+  // point has no coordinate to read: the read demands its value, so the
+  // cell of the result is the error, not the absence marker.
+  const failed = failedCellError(e);
+  if (failed !== undefined) return failed;
   if (e.isCollection) return absenceMarker(ce, e);
   // Only a POINT-shaped symbolic element keeps the accessor. The broadcast
   // was decided by the first element, so a later element may be anything —
@@ -9283,8 +9296,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
       // hits its iteration limit) stays inert rather than collapsing to False.
       const found = xs.contains(value);
-      if (found === undefined) return undefined;
-      return found ? ce.True : ce.False;
+      // An undecided search stays undecided, unless a failed cell of an
+      // invalid collection is what leaves it undecided. A valid lazy view
+      // whose own `contains` handler declines stays undecided too, also
+      // when the reason is an error: the `contains` handler of `Filter`
+      // declines when its predicate gives an error for the searched value
+      // (a predicate that fails, or a typed parameter that refuses the
+      // value). The predicate did not judge that value, so the membership
+      // is not known (`test/compute-engine/filter-predicate-errors.test.ts`).
+      if (found === undefined && xs.isValid) return undefined;
+      if (found === true) return ce.True;
+      // A failed cell (an element that is, or holds, an `Error`) could hold
+      // the value: only a match among the valid cells decides, otherwise the
+      // answer is the error of the cell (`Contains([1, <error>], 2)`).
+      // A walk that stopped before the end leaves the answer undecided.
+      const failed = firstFailedElementError(xs);
+      if (failed === 'incomplete') return undefined;
+      if (failed !== undefined) return failed;
+      return found === undefined ? undefined : ce.False;
     },
   },
 
@@ -9464,7 +9493,58 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `.isFunction` is the TYPE property (a function literal, or a symbol
       // bound to one), not the `isFunction()` structural guard.
       if (what.isFunction === true) {
-        const n = engine.function('Filter', [xs, what]).count;
+        const filtered = engine.function('Filter', [xs, what]);
+        // `Filter` keeps an element whose predicate answers an error in
+        // place, as that error. The count of the `Filter` counts it as a
+        // selected element, but a count has no cell to hold an error, so the
+        // answer is the error, as `CountIf` answers. The walk below is the
+        // walk of the iterator of `Filter` (same source, same verdicts, same
+        // finiteness and enumerability requirements, same limits), done here
+        // so that it can read the verdict of each element. It cannot read
+        // the elements that `Filter` emits instead: a failed cell that the
+        // predicate selects (`[2, <error>]` for `u ↦ True`, or any failed
+        // cell for `IsError`) is emitted as itself, and it is counted.
+        if (
+          isFunction(filtered, 'Filter') &&
+          filtered.isFiniteCollection === true &&
+          isEnumerableSource(filtered.op1)
+        ) {
+          const limit = engine.iterationLimit;
+          const f = applicable(filtered.op2);
+          try {
+            let n = 0;
+            // The rejected elements since the last selected one: as for
+            // `Filter`, only an unbroken run of rejections is limited.
+            let sinceSelected = 0;
+            for (const x of walkedSource(filtered.op1).each()) {
+              const applied = f([selectedElementValue(x)]);
+              if (applied === undefined)
+                throw invalidPredicateError(filtered.op2);
+              const verdict = selectionVerdict(applied);
+              if (verdict === 'True') {
+                sinceSelected = 0;
+                if (++n > limit) return undefined;
+                continue;
+              }
+              if (verdict !== 'False') {
+                const err = predicateErrorValue(applied);
+                if (err) return err;
+                if (isUndecidedVerdict(applied)) return undefined;
+                throw predicateResultError('Filter', filtered.op2);
+              }
+              if (++sinceSelected > limit) return undefined;
+            }
+            return engine.number(n);
+          } catch (e) {
+            if (
+              e instanceof CancellationError &&
+              e.cause === 'iteration-limit-exceeded'
+            )
+              return undefined;
+            throw e;
+          }
+        }
+        const n = filtered.count;
         return n === undefined ? undefined : engine.number(n);
       }
 
@@ -9487,7 +9567,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (c !== undefined) return engine.number(c);
       }
       let n = 0;
-      for (const x of xs.each()) if (x.isSame(what)) n += 1;
+      for (const x of xs.each()) {
+        // A failed cell could hold the value: the count depends on it.
+        const failed = failedCellError(x);
+        if (failed !== undefined) return failed;
+        if (x.isSame(what)) n += 1;
+      }
       return engine.number(n);
     },
     // Emptiness is read from pure sources only — never `isEmptyCollection`:
@@ -9580,7 +9665,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       if (ops[1] === undefined) return engine._fn('Any', [collection]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Any',
@@ -9623,7 +9708,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       if (ops[1] === undefined) return engine._fn('All', [collection]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'All',
@@ -9830,7 +9915,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (
         !fn ||
         collections.length === 0 ||
-        collections.some((c) => !c.isValid)
+        collections.some((c) => isInvalidNonCollection(c))
       ) {
         // Diagnose the former callback-last spelling: a call written with a
         // first operand that cannot be a function (a provable collection, or
@@ -10058,7 +10143,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
 
       return engine._fn('Filter', [collection, fn]);
     },
@@ -10364,7 +10449,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         source: collection,
       };
       const accepted = canonicalCallbackOperand(ops[1], arity);
-      if (!collection.isValid || !accepted) return null;
+      if (isInvalidNonCollection(collection) || !accepted) return null;
 
       const initial = ops[2]?.canonical;
       // The bare accumulator is typed to the fixpoint of the seed and the
@@ -10443,7 +10528,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
       const accepted = canonicalCallbackOperand(ops[0], arity);
       const initial = ops[1]?.canonical;
-      if (!accepted || !initial?.isValid || !collection.isValid) return null;
+      if (!accepted || !initial?.isValid || isInvalidNonCollection(collection))
+        return null;
       // As `Reduce`: the bare accumulator is typed to its fixpoint.
       const fn = refineFoldAccumulator(
         ops[0],
@@ -10523,7 +10609,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         source: collection,
       };
       const accepted = canonicalCallbackOperand(ops[1], arity);
-      if (!collection.isValid || !accepted) return null;
+      if (isInvalidNonCollection(collection) || !accepted) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
       // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
       // fold unseeded and diverge. Keep the (canonicalized) operand so the
@@ -10666,7 +10752,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops[0],
         'indexed_collection'
       );
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       // A source whose elements are PROVABLY not numbers (a string's
       // characters, a list of booleans) cannot be differenced: every element
       // of the result would be an `incompatible-type` error from `Subtract`.
@@ -10774,7 +10860,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
     },
     collection: refusingUnindexedSource({
@@ -10942,7 +11028,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
     },
     collection: refusingUnindexedSource({
@@ -11068,7 +11154,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
     },
     evaluate: (ops, { engine, materialization }) => {
@@ -14464,7 +14550,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       const gridIndex = unboundedIntegerRangeIndex(xs, value);
       if (gridIndex !== undefined) return ce.number(gridIndex);
-      const index = searchIndex(xs, (x) => x.isSame(value));
+      // A failed cell (an element that is, or holds, an `Error`) could hold
+      // the value: a match before the first failed cell decides the
+      // position, otherwise the answer is the error of that cell
+      // (`IndexOf([1, <error>, 3], 3)`).
+      const seen: { failed?: Expression } = {};
+      const index = searchIndex(xs, (x) => {
+        seen.failed = failedCellError(x);
+        return seen.failed !== undefined || x.isSame(value);
+      });
+      if (seen.failed !== undefined) return seen.failed;
       return index === undefined ? undefined : ce.number(index);
     },
   },
@@ -14931,7 +15026,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // element type (see `comparatorParameterError`).
       const cmpError = comparatorParameterError(ce, 'Ordering', xs, fn);
       if (cmpError) return cmpError;
-      const indices = sortedIndices(xs, fn);
+      // As for `Sort`: the order demands the value of every element, so a
+      // failed cell gives its error.
+      const source = sortSource(xs);
+      const failed = firstFailedElementError(source);
+      if (failed !== undefined && failed !== 'incomplete') return failed;
+      const indices = sortedIndices(source, fn);
       // `sortedIndices` returns `undefined` when the order cannot be decided —
       // a key that cannot be computed, or a pair of keys that compare neither
       // equal nor less in either direction (a list key; a NaN key sorts
@@ -14993,13 +15093,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // gets from the signature check (`Sort(Set(3, 1))`).
       if (!isString(xs) && xs.isIndexedCollection !== true)
         return refusedOperandError(ce, 'Sort', 1, 'indexed_collection', xs);
+      // A failed cell (an element that is, or holds, an `Error`) cannot be
+      // ordered: the order demands the value of every element, so the sort
+      // answers the error of the first failed cell, as `Max` does. The
+      // elements of a lazy source are read once (`sortSource()`), so that a
+      // failed element of a valid source (`Sort(Map(h, xs))`) is seen too.
+      // A source too large to be read into a list is checked as far as the
+      // bound of the walk (`'incomplete'`): a failed element after it makes
+      // the order undetermined, and the sort then stays unevaluated.
+      const source = sortSource(xs);
+      const failed = firstFailedElementError(source);
+      if (failed !== undefined && failed !== 'incomplete') return failed;
       // A comparator whose declared parameter type is disjoint from the
       // element type (see `comparatorParameterError`).
       const cmpError = comparatorParameterError(ce, 'Sort', xs, fn);
       if (cmpError) return cmpError;
-      const indices = sortedIndices(xs, fn);
+      const indices = sortedIndices(source, fn);
       if (!indices) return undefined;
-      const elements = indices.map((i) => xs.at(i)!);
+      const elements = indices.map((i) => source.at(i)!);
       // The string arm: a sorted string is a string. `Sort` is eager and has
       // no lazy collection handlers, so the join happens here rather than in
       // `evaluateStringPreservingCollection`. Re-segmentation caveat:
@@ -15036,7 +15147,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
     type: (ops, context) =>
@@ -15074,7 +15185,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (!collection.isValid || !fn) return null;
+      if (isInvalidNonCollection(collection) || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
     type: (ops, context) =>
@@ -15125,7 +15236,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops[0],
         'indexed_collection'
       );
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'ArgMax',
@@ -15169,7 +15280,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops[0],
         'indexed_collection'
       );
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'ArgMin',
@@ -15539,6 +15650,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const tallied = tally(ops[0]!);
       if (tallied === undefined) return undefined;
       const [values, counts] = tallied;
+      const failed = failedTallyError(values);
+      if (failed !== undefined) return failed;
       return ce.tuple(ce.function('List', values), ce.function('List', counts));
     },
   },
@@ -15575,6 +15688,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const tallied = tally(ops[0]!);
       if (tallied === undefined) return undefined;
       const [values] = tallied;
+      // Whether a failed cell is a duplicate of another element depends on
+      // its value, so the answer is its error (`failedTallyError()`).
+      const failed = failedTallyError(values);
+      if (failed !== undefined) return failed;
       // The string arm: `Unique` is eager and has no lazy collection handlers,
       // so the join happens here rather than in
       // `evaluateStringPreservingCollection`. Re-segmentation caveat:
@@ -15612,8 +15729,51 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       BoxedType.forResult(ops[0].type, context.engine._typeResolver),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      if (!collection.isValid) return null;
+      if (isInvalidNonCollection(collection)) return null;
       return engine._fn('Dedup', [collection]);
+    },
+    // Whether an element is a duplicate of the one before it can depend on
+    // the value of a failed cell (`dedupFailedCellWalk()`). A `Dedup` that
+    // must decide that is the error of the cell. Otherwise the handler
+    // gives the view over the value of its source (`dedupSource()`), so the
+    // source is evaluated once, or declines, and the view is evaluated (and
+    // materialized) as before. The display preview (`toString()`, `latex`)
+    // does not evaluate the source of a view, so the handlers decline for
+    // it. The asynchronous twin evaluates the source with `evaluateAsync()`
+    // and walks it with `runWalkAsync()`. It does not walk a source that
+    // holds an operator with only an `evaluateAsync` handler: a synchronous
+    // walk cannot run that operator, and the materialization of the view
+    // evaluates its elements asynchronously.
+    evaluate: ([source], { engine, materialization, numericApproximation }) => {
+      if (materialization === DISPLAY_MATERIALIZATION) return undefined;
+      // The source is evaluated with the numeric request of this evaluation,
+      // as the asynchronous twin does (`awaitedOperandOptions()`): under
+      // `.N()`, `Dedup([1/2, 0.5])` compares `0.5` with `0.5`.
+      const xs = dedupSource(source, () =>
+        source.evaluate({ numericApproximation })
+      );
+      const failed = runWalk(dedupFailedCellWalk(xs), engine);
+      if (failed !== undefined) return failed;
+      // A symbol keeps its name, except under `.N()`, where the view reads
+      // the numeric value of the symbol.
+      return xs === source || (isSymbol(source) && !numericApproximation)
+        ? undefined
+        : engine._fn('Dedup', [xs]);
+    },
+    evaluateAsync: async ([source], options) => {
+      if (options.materialization === DISPLAY_MATERIALIZATION) return undefined;
+      const value = isDedupValueSource(source)
+        ? source
+        : await source.evaluateAsync(awaitedOperandOptions(options));
+      const xs = dedupSource(source, () => value);
+      if (!holdsAsyncOnlyOperator(xs)) {
+        const failed = await runWalkAsync(dedupFailedCellWalk(xs), options);
+        if (failed !== undefined) return failed;
+      }
+      return xs === source ||
+        (isSymbol(source) && !options.numericApproximation)
+        ? undefined
+        : options.engine._fn('Dedup', [xs]);
     },
     collection: {
       isEnumerable: enumerableFromSource,
@@ -18582,6 +18742,106 @@ function eagerElements(xs: Expression): Expression[] | undefined {
   return walk.complete ? elements : undefined;
 }
 
+/** True when the held source of a `Dedup` is read as it is: a lazy view,
+ * walked as the iterator of `Dedup` walks it, or a string. */
+function isDedupValueSource(source: Expression): boolean {
+  return source.isLazyCollection === true || isString(source);
+}
+
+/**
+ * The collection that the failed-cell check of `Dedup` walks for its held
+ * source. `Dedup` holds its operand as written: a lazy view or a string is
+ * walked as it is, and any other source (a symbol, a list literal whose
+ * cell fails only when it is evaluated, `[1, h(2), 1]`) is read through
+ * its value, `evaluated()`. When that value is a collection, the handler
+ * gives `Dedup` over it, so that the source is evaluated once: an impure
+ * cell (`H(1)` with a counter) is not evaluated again by the
+ * materialization. A value that is not a collection gives the source as
+ * written, and the handler declines.
+ */
+function dedupSource(
+  source: Expression,
+  evaluated: () => Expression
+): Expression {
+  if (isDedupValueSource(source)) return source;
+  const value = evaluated();
+  return value.isCollection ? value : source;
+}
+
+/**
+ * A walk that gives the error of a failed cell of the finite source `xs`
+ * of a `Dedup` when deciding a duplicate needs its value, or `undefined`.
+ *
+ * `Dedup` compares each element with the element before it (`isSame()`).
+ * A failed cell (an element that is, or holds, an `Error`) next to an
+ * element that is not the same expression makes that comparison depend on
+ * the value of the cell: `Dedup([1, <error>, 1])` is `[1]` if the cell is
+ * `1`, and `[1, <error>, 1]` otherwise. So the answer is the error of the
+ * cell. Two cells that are the same expression have the same value, so
+ * `Dedup([<error>, <error>])` is `[<error>]`, and a source with one element
+ * has no comparison: `Dedup([<error>])` is `[<error>]`. `Unique` and
+ * `Tally` follow the same rule (`failedTallyError()`).
+ *
+ * The source is walked as the iterator of `Dedup` walks it
+ * (`walkedSource()`, `selectedElementValue()`), and only when it can hold
+ * a failed cell (`mayHoldFailedElement()`): a valid list literal or a
+ * `Range` is not walked. An infinite source, or a walk past
+ * `maxCollectionSize` elements or the iteration limit, decides nothing:
+ * its view stays as it is. Driven by `runWalk()` or `runWalkAsync()`.
+ */
+function dedupFailedCellWalk(
+  xs: Expression
+): Generator<undefined, Expression | undefined> | undefined {
+  if (!mayHoldFailedElement(xs) || xs.isFiniteCollection !== true)
+    return undefined;
+  if (!isEnumerableSource(xs)) return undefined;
+  const cap = xs.engine.maxCollectionSize;
+  return (function* (): Generator<undefined, Expression | undefined> {
+    let n = 0;
+    let previous: Expression | undefined;
+    try {
+      for (const x of walkedSource(xs).each()) {
+        if (++n > cap) return undefined;
+        const value = selectedElementValue(x);
+        if (previous !== undefined && !previous.isSame(value)) {
+          const failed = failedCellError(previous) ?? failedCellError(value);
+          if (failed !== undefined) return failed;
+        }
+        previous = value;
+        yield;
+      }
+    } catch (e) {
+      if (
+        e instanceof CancellationError &&
+        e.cause === 'iteration-limit-exceeded'
+      )
+        return undefined;
+      throw e;
+    }
+    return undefined;
+  })();
+}
+
+/**
+ * The error of the first failed cell (an element that is, or holds, an
+ * `Error`) among the distinct elements `values` of a tally, or `undefined`
+ * when there is none. Whether a failed cell is the same as another element
+ * depends on its value, so `Unique` and `Tally` answer its error. With one
+ * distinct element there is nothing to compare: `Unique([<error>])` and
+ * `Unique([<error>, <error>])` are `[<error>]` (two cells that are the same
+ * expression have the same value), as for `Dedup`.
+ */
+function failedTallyError(
+  values: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (values.length < 2) return undefined;
+  for (const x of values) {
+    const failed = failedCellError(x);
+    if (failed !== undefined) return failed;
+  }
+  return undefined;
+}
+
 /** The distinct elements of `collection` and the count of each, or
  * `undefined` when the walk does not give every element (see
  * {@link eagerElementWalk}). */
@@ -19448,7 +19708,10 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
       items as Expression[]
     );
     if (compiled !== undefined) return compiled;
-    return applicable(expr.op1)?.(items as Expression[]);
+    return (
+      applicable(expr.op1)?.(items as Expression[]) ??
+      failedArgumentError(items as Expression[])
+    );
   }
 
   // Gate on the SOURCE's indexed-ness (value-aware for a symbol
@@ -19467,7 +19730,26 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
   // Each at() access is its own micro-drain (see the zip form above).
   const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([item]);
   if (compiled !== undefined) return compiled;
-  return applicable(expr.op1)?.([item]);
+  return applicable(expr.op1)?.([item]) ?? failedArgumentError([item]);
+}
+
+/**
+ * The value of a `Map` cell whose mapping function gave no value because an
+ * argument is a failed cell that the application does not accept: a `Tuple`
+ * with a failed coordinate freezes the application (`docs/ERROR-MODEL.md`
+ * §3). The cell is then the error of that argument. Before, the cell was
+ * the absence marker `NaN`, a wrong value with no error:
+ * `Map(u ↦ 1, [(2, <error>)])` was `[NaN]`. `undefined` when no argument is
+ * a failed cell.
+ */
+function failedArgumentError(
+  items: ReadonlyArray<Expression>
+): Expression | undefined {
+  for (const x of items) {
+    const failed = failedCellError(x);
+    if (failed !== undefined) return failed;
+  }
+  return undefined;
 }
 
 /**
@@ -19637,8 +19919,12 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
         if (compiled !== undefined) return { value: compiled, done: false };
         // A mapping function that produced no value is a COMPUTATION
         // FAILURE, not an erasure: emit the position-preserving marker
-        // (`Nothing` here would silently shorten the result).
-        const v = f(items) ?? absenceMarker(expr.engine, expr);
+        // (`Nothing` here would silently shorten the result), or the
+        // error of a failed argument (`failedArgumentError()`).
+        const v =
+          f(items) ??
+          failedArgumentError(items) ??
+          absenceMarker(expr.engine, expr);
         return { value: v, done: false };
       },
     };
@@ -19657,7 +19943,10 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
         const compiled = auto?.([value]);
         if (compiled !== undefined) return { value: compiled, done: false };
         // See above: a failed mapping is the marker, not an erasure.
-        const v = f([value]) ?? absenceMarker(expr.engine, expr);
+        const v =
+          f([value]) ??
+          failedArgumentError([value]) ??
+          absenceMarker(expr.engine, expr);
         return { value: v, done: false };
       }
     },
@@ -20020,6 +20309,23 @@ export function fromRange(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
+/**
+ * The collection that `Sort` and `Ordering` read for the source `xs`. A lazy
+ * source (`Map(h, xs)`) computes an element each time that it is read, and a
+ * sort reads each element more than once, so the elements of a lazy source
+ * are read once, into a list. This also shows a failed element of a valid
+ * lazy source to `firstFailedElementError()`: with `h(2)` an error,
+ * `Sort(Map(h, [3, 2, 1]))` is that error. Before, the sort compared the
+ * error with the numbers and stayed unevaluated, and `Sort(Map(h, [2]))`
+ * was `[<error>]`. A source that is not lazy, and a lazy source too large
+ * for an eager walk (`eagerElements()`), is returned as it is.
+ */
+function sortSource(xs: Expression): Expression {
+  if (isString(xs) || xs.isLazyCollection !== true) return xs;
+  const elements = eagerElements(xs);
+  return elements === undefined ? xs : xs.engine._fn('List', elements);
+}
+
 export function sortedIndices(
   expr: Expression,
   fn: Expression | undefined = undefined
@@ -20241,6 +20547,10 @@ function* extremumBy(
     index += 1;
     const key = f ? f([item]) : item;
     if (key === undefined) return undefined;
+    // A failed cell, or a key computed from one, cannot be compared: the
+    // comparison demands its value, so the answer is its error, as for `Max`.
+    const failed = failedCellError(key);
+    if (failed !== undefined) return failed;
     const winner = want === 'index' ? ce.number(index) : item;
     if (bestKey === undefined) {
       bestKey = key;

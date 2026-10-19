@@ -505,12 +505,50 @@ export function unitConversionCoefficients(
 }
 
 /**
+ * The units of the table whose scale is NOT an exact decimal number, so
+ * that the decimal of its machine number is not its value:
+ * - the angle units, whose scale is computed from `Math.PI` (`deg` is
+ *   `π/180`);
+ * - `Da`, whose scale is a measured value (CODATA), not a value fixed by a
+ *   definition.
+ *
+ * Every other scale of the table is written as an exact decimal number that
+ * defines the unit (`in` is `0.0254 m`, `eV` is `1.602176634e-19 J`), or is
+ * given by an `exact` field (`degF`). A unit added to the table with a scale
+ * that is computed or measured must be added here.
+ */
+const INEXACT_SCALE_UNITS: ReadonlySet<UnitEntry> = new Set(
+  ['deg', 'grad', 'turn', 'arcmin', 'arcsec', 'Da'].map((u) => UNIT_TABLE[u])
+);
+
+/**
+ * The exact value of the decimal number that the machine number `x`
+ * stands for, as a fraction of two integers with a positive denominator:
+ * the shortest decimal that gives `x` back (`0.0254` is `254/10000`, `1e24`
+ * is `10²⁴`, not the integer `999999999999999983222784` of the machine
+ * number). This is the value of `x` only when `x` was written as that
+ * decimal number, not when it is the result of a computation (`Math.PI /
+ * 180`). `null` for a value that is not finite.
+ */
+export function decimalFraction(x: number): [bigint, bigint] | null {
+  if (!Number.isFinite(x)) return null;
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(String(x));
+  if (!m) return null;
+  const [, sign, int, frac = '', exp = '0'] = m;
+  let n = BigInt(int + frac);
+  if (sign === '-') n = -n;
+  const e = Number(exp) - frac.length;
+  return e >= 0 ? [n * 10n ** BigInt(e), 1n] : [n, 10n ** BigInt(-e)];
+}
+
+/**
  * The scale and the offset of `entry` as exact fractions of integers, or
  * `null` when they are not known exactly.
  *
- * A unit with an `exact` field gives it. A unit with no offset and a scale
- * that is an integer (`kK`) or the machine number nearest to the reciprocal
- * of an integer (`mK` is `1/1000`) gives that integer fraction.
+ * A unit with an `exact` field gives it. A unit with no offset gives the
+ * decimal number of its scale (see `decimalFraction()`), except a unit whose
+ * scale is not an exact decimal number (`INEXACT_SCALE_UNITS`): `in` is
+ * `254/10000`, `kK` is `1000`, `mK` is `1/1000`.
  */
 function exactScaleAndOffset(
   entry: UnitEntry
@@ -523,12 +561,10 @@ function exactScaleAndOffset(
     };
   }
   if (entry.offset !== undefined) return null;
-  const s = entry.scale;
-  if (Number.isInteger(s)) return { scale: [BigInt(s), 1n], offset: [0n, 1n] };
-  const r = Math.round(1 / s);
-  if (Number.isInteger(r) && r !== 0 && 1 / r === s)
-    return { scale: [1n, BigInt(r)], offset: [0n, 1n] };
-  return null;
+  if (INEXACT_SCALE_UNITS.has(entry)) return null;
+  const scale = decimalFraction(entry.scale);
+  if (scale === null) return null;
+  return { scale, offset: [0n, 1n] };
 }
 
 /**
@@ -683,6 +719,143 @@ export function getExpressionScale(expr: UnitExpression): number | null {
   }
 
   return null;
+}
+
+/** A fraction `[numerator, denominator]` of two integers. */
+type BigFraction = [bigint, bigint];
+
+/**
+ * The exact scale and offset of the unit `symbol`, or `null` when they are
+ * not known exactly (see `exactScaleAndOffset()`).
+ *
+ * A prefixed unit (`km`, `Ym`, `keV`) is the product of the exact value of
+ * its prefix (a power of ten) and the exact scale of its unit. The machine
+ * number of that product is rounded (`1e24 · 1e-3` is not `1e21`), so it is
+ * not read.
+ */
+function exactUnitData(
+  symbol: string
+): { scale: BigFraction; offset: BigFraction } | null {
+  const direct = UNIT_TABLE[symbol];
+  if (direct) return exactScaleAndOffset(direct);
+  const prefixed = parsePrefixedUnit(symbol);
+  if (!prefixed) return null;
+  const base = exactScaleAndOffset(prefixed.baseEntry);
+  const prefix = decimalFraction(prefixed.prefixScale);
+  if (!base || !prefix || base.offset[0] !== 0n) return null;
+  return {
+    scale: [prefix[0] * base.scale[0], prefix[1] * base.scale[1]],
+    offset: [0n, 1n],
+  };
+}
+
+/**
+ * The exact scale of the unit expression `expr` relative to coherent SI, as
+ * a fraction of two integers with a positive denominator, or `null` when the
+ * scale of a unit is not known exactly (`in`, `eV`, `deg`) or an exponent is
+ * not an integer. This is `getExpressionScale()` with exact arithmetic: the
+ * offset of a temperature unit is ignored, as it is there.
+ */
+function exactExpressionScale(expr: UnitExpression): BigFraction | null {
+  if (typeof expr === 'string') return exactUnitData(expr)?.scale ?? null;
+
+  if (!Array.isArray(expr) || expr.length < 2) return null;
+
+  const op = expr[0];
+
+  if (op === 'Multiply') {
+    let n = 1n;
+    let d = 1n;
+    for (let i = 1; i < expr.length; i++) {
+      const s = exactExpressionScale(expr[i]);
+      if (s === null) return null;
+      n *= s[0];
+      d *= s[1];
+    }
+    return [n, d];
+  }
+
+  if (op === 'Divide') {
+    if (expr.length !== 3) return null;
+    const sa = exactExpressionScale(expr[1]);
+    const sb = exactExpressionScale(expr[2]);
+    if (sa === null || sb === null || sb[0] === 0n) return null;
+    const n = sa[0] * sb[1];
+    const d = sa[1] * sb[0];
+    return d < 0n ? [-n, -d] : [n, d];
+  }
+
+  if (op === 'Power') {
+    if (expr.length !== 3) return null;
+    const s = exactExpressionScale(expr[1]);
+    const exp = unitExponentValue(expr[2]);
+    if (s === null || exp === null || !Number.isInteger(exp)) return null;
+    if (exp >= 0) return [s[0] ** BigInt(exp), s[1] ** BigInt(exp)];
+    if (s[0] === 0n) return null;
+    const n = s[1] ** BigInt(-exp);
+    const d = s[0] ** BigInt(-exp);
+    return d < 0n ? [-n, -d] : [n, d];
+  }
+
+  return null;
+}
+
+/**
+ * The exact affine map `v → factor·v + offset` that converts a value from
+ * the unit expression `fromUnit` to the unit expression `toUnit`, with the
+ * two coefficients as fractions of integers. Returns `null` when the units
+ * are unknown or have different dimensions, or when the data of a unit are
+ * not exact (see `exactExpressionScale()`).
+ *
+ * The offsets of the temperature units apply only between two unit symbols,
+ * as in `convertCompoundUnit()`: in a compound unit, a temperature unit is a
+ * temperature difference. The factor is always positive.
+ *
+ * The value in coherent SI is `(v + o₁)·s₁`, and the value in the target
+ * unit is that divided by `s₂`, minus `o₂`. So the factor is `k = s₁/s₂` and
+ * the offset is `o₁·k − o₂`.
+ */
+export function exactUnitConversion(
+  fromUnit: UnitExpression,
+  toUnit: UnitExpression
+): { factor: BigFraction; offset: BigFraction } | null {
+  const fromDim = getExpressionDimension(fromUnit);
+  const toDim = getExpressionDimension(toUnit);
+  if (!fromDim || !toDim || !dimensionsEqual(fromDim, toDim)) return null;
+
+  // Two identical units: the conversion is the identity, whatever the data
+  // of the unit (`in` to `in`, `Da` to `Da`, `m^(1/2)` to `m^(1/2)`). The
+  // dimension of the unit is known, so the unit is valid.
+  if (JSON.stringify(fromUnit) === JSON.stringify(toUnit))
+    return { factor: [1n, 1n], offset: [0n, 1n] };
+
+  let s1: BigFraction | null;
+  let s2: BigFraction | null;
+  let o1: BigFraction = [0n, 1n];
+  let o2: BigFraction = [0n, 1n];
+  if (typeof fromUnit === 'string' && typeof toUnit === 'string') {
+    const f = exactUnitData(fromUnit);
+    const t = exactUnitData(toUnit);
+    if (!f || !t) return null;
+    [s1, s2, o1, o2] = [f.scale, t.scale, f.offset, t.offset];
+  } else {
+    s1 = exactExpressionScale(fromUnit);
+    s2 = exactExpressionScale(toUnit);
+  }
+  if (s1 === null || s2 === null || s1[0] <= 0n || s2[0] <= 0n) return null;
+
+  const reduce = ([n, d]: BigFraction): BigFraction => {
+    const g = gcd(n < 0n ? -n : n, d);
+    return g > 1n ? [n / g, d / g] : [n, d];
+  };
+  // k = s₁/s₂, with a positive denominator because both scales are positive
+  const k = reduce([s1[0] * s2[1], s1[1] * s2[0]]);
+  // o₁·k − o₂
+  const offset = reduce([
+    o1[0] * k[0] * o2[1] - o2[0] * o1[1] * k[1],
+    o1[1] * k[1] * o2[1],
+  ]);
+  return { factor: k, offset };
 }
 
 // ---------------------------------------------------------------------------

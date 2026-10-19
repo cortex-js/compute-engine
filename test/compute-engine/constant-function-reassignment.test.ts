@@ -44,12 +44,20 @@ describe('CONSTANT — a function literal cannot replace a constant', () => {
     expect(ce.box('Pi').N().re).toBeCloseTo(Math.PI, 12);
   });
 
-  test('Epsil: a `const` function reassigned is a runtime error, binding kept', () => {
+  test('Epsil: a `const` function reassigned is refused, binding kept', () => {
     const { value, diagnostics } = run(
       'const k = (n) => n + 1\nk = (s) => s\nk(1)'
     );
-    expect(diagnostics.map((d) => [d.message[0], d.message[1]])).toEqual([
-      ['runtime-error', 'Cannot assign a value to the constant "k"'],
+    // The static check reports the refusal before the program runs, with
+    // the engine code, and the run does not report it a second time.
+    expect(
+      diagnostics.map((d) => [d.message[0], d.message[1], d.message[3]])
+    ).toEqual([
+      [
+        'static-type-error',
+        'cannot assign a value to the constant `k`',
+        'constant-assignment',
+      ],
     ]);
     expect(value.re).toBe(2);
   });

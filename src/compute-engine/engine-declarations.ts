@@ -162,6 +162,7 @@ import {
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
+import { ConstantAssignmentError } from './constant-assignment-error.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -3558,7 +3559,7 @@ export function assignFn(
     // the `Assign` operator throws the same error for either shape (a value or
     // a function literal), and Epsil reports the same `Error` value.
     if (isValueDef(def) && def.value.isConstant)
-      throw Error(`Cannot assign a value to the constant "${id}"`);
+      throw new ConstantAssignmentError(id);
     // updateDef removes def.value and sets def.operator — no separate
     // _setSymbolValue call needed to clear the old value.
     const callableBefore = defIsCallableShaped(def);
@@ -3771,8 +3772,7 @@ function assertAssignableValueDef(
   def: BoxedValueDefinition,
   value: Expression
 ): void {
-  if (def.isConstant)
-    throw Error(`Cannot assign a value to the constant "${id}"`);
+  if (def.isConstant) throw new ConstantAssignmentError(id);
 
   // A fact in force is a CONSTRAINT the new value has to satisfy: `assume(v >
   // 3)` refuses `assign(v, 1)`. Read from what the facts prove ON THEIR OWN,

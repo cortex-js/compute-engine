@@ -109,6 +109,26 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The result type of `Join` and `ListJoin` turns an absent element into `number` (OPEN, small — found 2026-10-19 by the tuple shape-test fix)
+
+The type handler of `Join` receives each operand type with `missing`
+replaced by `nan`. `derive-application-type.ts` (about line 536) does this
+for every operator that is not in `ABSENT_CELLS_STAY_MISSING` or
+`ABSENT_CELLS_PASS_THROUGH` (`boxed-expression/broadcast-lift-type.ts`).
+`Append` is in the pass-through set; `Join` and `ListJoin` are not. So the
+static type says that the result holds no absent element, while its value
+can hold one. Measured on 2026-10-19:
+
+- `L: list<integer | missing>`: `Join(L, [2])` and `ListJoin(L, [2])` are
+  typed `list<number>`, while `Append(L, 2)` is typed
+  `list<integer | missing>`.
+- `t := (1, Missing)` declared `tuple<integer, missing>`: `Join(t, [3, 4])` is
+  typed `list<number | tuple<number, number>>`.
+
+The likely fix is to add `Join` and `ListJoin` to the pass-through set.
+Measure the snapshot count of the full suite before landing it, because it
+can change the result type of many expressions.
+
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
 The report of `npx tsx benchmarks/audit/integration-families.ts` lists the
@@ -219,6 +239,21 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   Recommendation: (B), because a definite answer that does not depend on the
   failed value is the rule everywhere else in the error model; it changes `Or`
   and `And`, so it needs a decision.
+- **An Epsil assignment to a new name in a function body.**
+  `function g(k) { t = k + 1; t }` then `[g(1), g(2)]` gives `[g(1),g(2)]` and
+  the run-time error "writes outside a function require a declared `scope`
+  effect"; with `let t = k + 1` it gives `[2,3]`. At run time (since commit
+  `43f0073274628385c99877fbd93f3cbaa9018f9f`), an assignment in a `Block` to a
+  name that no outer scope declares makes a local of that block, so the write
+  does not leave the function; the effect inference (`sequence()`,
+  `effects-inference.ts`) still treats it as a write to an outer scope. (A)
+  Change the inference so that the names a `Block` binds count as declared:
+  the function above gives `[2,3]`. (B) Keep the error as an Epsil rule (a new
+  name in a function needs `let`), and change the message, which now says
+  "writes outside a function" for a write that does not leave the function.
+  If nothing is decided, the error stays. Recommendation: (A), because it
+  makes the static rule match what the run does; printing a view already
+  follows that rule (`previewRunsEffect()`, `boxed-expression/boxed-function.ts`).
 - **Equality of two quantities of different dimensions.** `6 W = 6 m` and
   `6 W ≠ 6 m` stay unevaluated, and `isEqual()` gives `undefined`, although a
   power is never equal to a length. (A) Keep this. (B) `Equal` gives `False`,
@@ -229,6 +264,18 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   quantities. If nothing is decided, (A) stays. Recommendation: (B).
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
+
+- Evaluating a `Comprehension` whose index is called like a function, such as
+  `[k2(1) for k2 in [a ↦ 0, a ↦ 1]]`, declares `k2` in the global scope. A
+  plain index, and the same shape in `Sum`, do not.
+- `Map` with a comprehension index as its callback does not apply the function
+  that the index holds: `[Map(q, [1]) for q in [a ↦ a + 1]]` is `[[q(1)]]`,
+  while `[q(1) for q in [a ↦ a + 1]]` is `[2]` and `Map(q, [1])` with
+  `q := a ↦ a + 1` in a `Block` is `[2]`.
+- Printing a view can still call an impure function through a chain of
+  symbols: `previewRunsEffect()` (`boxed-expression/boxed-function.ts`) reads
+  the function literals held by a symbol of the view, but not those of a symbol
+  that this value refers to.
 
 - Two quantities whose unit scale is stored as a float with no exact value
   (`in`, `ft`, `mi`, `lb`, `eV`, `Da`, `au`, the angle units, and the prefixes
@@ -254,6 +301,12 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   compare different (`sameBinding`, `boxed-expression/compare.ts`). Found
   2026-10-18 with Tycho ledger row 394. Find which binding the box route gives
   `x` and `f` inside the literal, and make the two routes agree.
+- The `nice-solidus` fraction style (`fractionStyle`, a public
+  `FractionStyle` value in `latex-syntax/types.ts`) writes
+  `{}^{a}\!\!/\!{}_{b}`, which the parser does not read: `x/10` reads back
+  as `Superscript(Error('missing'))`. Either the parser accepts that form, or
+  the documentation says the style is for display only and does not round-trip
+  (found 2026-10-19 by the review of the complex-coefficient fix).
 - `D` of a `Sum` or a `Product` stays unevaluated:
   `D(Sum(k·x^k, Limits(k, 1, 3)), x)` is not computed; the correct value is
   `1 + 4x + 9x²`. `differentiateNode` (`symbolic/derivative.ts`) has no branch

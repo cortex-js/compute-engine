@@ -30,8 +30,13 @@ import {
 } from '../boxed-expression/compare.js';
 import { holdsDoubles } from '../boxed-expression/machine-broadcast.js';
 import {
+  failedCellError,
+  isInvalidNonCollection,
+} from '../boxed-expression/error-value.js';
+import {
   isNumber,
   isFunction,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -57,47 +62,32 @@ import {
   exactCompareNumbers,
   isExactRealLiteral,
   exactRealValueOf,
+  readsRecordedParameter,
 } from '../boxed-expression/constraint-subject.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
-import { isQuantity } from './quantity-arithmetic.js';
-import { boxedToUnitExpression } from './units.js';
-import {
-  dimensionsEqual,
-  getExpressionDimension,
-  getExpressionScale,
-} from './unit-data.js';
+import { compareQuantities } from './quantity-compare.js';
 import {
   nonNumericOperandError,
   isAbsentScalarSymbol,
 } from '../boxed-expression/validate.js';
 
 /**
- * Compare two Quantity expressions.
- * Returns negative if a < b, 0 if equal, positive if a > b,
- * or null if incompatible or not both quantities.
+ * The order of two `Quantity` expressions by their physical value: `-1`,
+ * `0` or `1`, or `undefined` when they are not two quantities with units of
+ * the same dimension, or when a magnitude has no real numeric value. Two
+ * values within the engine tolerance are a tie, and a tie of two exact
+ * magnitudes is decided again exactly. A `Measurement` magnitude is compared
+ * through its nominal value, as a `Measurement` operand is. See
+ * `compareQuantities()`, which the methods `isEqual()`, `isLess()`… also
+ * use.
  */
-function quantityCompare(a: Expression, b: Expression): number | null {
-  if (!isQuantity(a) || !isQuantity(b)) return null;
-
-  const aMag = a.op1.re;
-  const bMag = b.op1.re;
-  if (aMag === undefined || bMag === undefined) return null;
-
-  const aUE = boxedToUnitExpression(a.op2);
-  const bUE = boxedToUnitExpression(b.op2);
-  if (!aUE || !bUE) return null;
-
-  // Check compatible dimensions
-  const aDim = getExpressionDimension(aUE);
-  const bDim = getExpressionDimension(bUE);
-  if (!aDim || !bDim || !dimensionsEqual(aDim, bDim)) return null;
-
-  // Convert both to SI
-  const aScale = getExpressionScale(aUE);
-  const bScale = getExpressionScale(bUE);
-  if (aScale === null || bScale === null) return null;
-
-  return aMag * aScale - bMag * bScale;
+function quantityCompare(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
+  return compareQuantities(a, b, {
+    tolerance: a.engine.tolerance,
+    exact: true,
+    nominal: true,
+  });
 }
 
 /**
@@ -363,6 +353,8 @@ function exactPairAtNearTie(
   rawB: Expression,
   b: Expression
 ): [Expression, Expression] | undefined {
+  if (isFunction(a, 'Quantity') && isFunction(b, 'Quantity'))
+    return exactQuantityPair(rawA, a, rawB, b);
   // An exact constant expression that is not a number (`π`,
   // `√(10⁶⁰ + 10⁴⁰) − 10³⁰`) is always compared by its exact form, also far
   // from a tie: its float at the working precision can be wrong by much more
@@ -388,6 +380,85 @@ function exactPairAtNearTie(
   const exactB = isExactRealLiteral(b) ? b : exactValueOrConstant(rawB);
   if (exactB === undefined) return undefined;
   return [exactA, exactB];
+}
+
+/**
+ * The two quantities `a` and `b` (the values of `rawA` and `rawB` under
+ * `.N()`) with the exact magnitudes of `rawA` and `rawB`, or `undefined`
+ * when a magnitude has no exact value. This is `exactPairAtNearTie()` for
+ * quantities: under `.N()`, `Quantity(1 + 10⁻³⁰, m)` has the magnitude
+ * `1`, and `1 m < (1 + 10⁻³⁰) m` must still be `True`, as it is with
+ * `evaluate()`.
+ *
+ * A magnitude that is an exact number literal or an exact constant
+ * expression as it is written is used at any distance from a tie: reading
+ * it costs no evaluation. A magnitude that needs an exact evaluation (a
+ * symbol with an exact value) is evaluated again only at a near tie: two
+ * quantities whose values in the finer unit are within
+ * `nearJumpTolerance()`, relative to the larger magnitude, of each other.
+ */
+function exactQuantityPair(
+  rawA: Expression,
+  a: Expression,
+  rawB: Expression,
+  b: Expression
+): [Expression, Expression] | undefined {
+  const u = exactQuantityOf(rawA, a, false);
+  const v = exactQuantityOf(rawB, b, false);
+  if (u !== undefined && v !== undefined) return [u, v];
+  if (!isFunction(a) || !isFunction(b)) return undefined;
+  const scale = Math.max(1, Math.abs(a.op1.re), Math.abs(b.op1.re));
+  const near = compareQuantities(a, b, {
+    tolerance: nearJumpTolerance(a.engine) * scale,
+    exact: false,
+    nominal: false,
+  });
+  if (near !== 0) return undefined;
+  const u1 = u ?? exactQuantityOf(rawA, a, true);
+  if (u1 === undefined) return undefined;
+  const v1 = v ?? exactQuantityOf(rawB, b, true);
+  if (v1 === undefined) return undefined;
+  return [u1, v1];
+}
+
+/**
+ * The quantity `value` (the value of `raw` under `.N()`) with the exact
+ * magnitude of `raw`, or `undefined`. `value` itself when its magnitude is
+ * exact. Otherwise `raw` gives the exact magnitude: a `Quantity` whose
+ * magnitude is an exact number literal or an exact constant expression, or,
+ * with `evaluate`, whose magnitude has an exact value
+ * (`exactRealValueOf()`), or, with `evaluate`, a pure expression whose exact
+ * evaluation is a quantity with an exact magnitude (a symbol that holds a
+ * quantity). An expression that reads a parameter bound to a float is not
+ * evaluated (`readsRecordedParameter()`): its exact evaluation is not its
+ * exact value.
+ */
+function exactQuantityOf(
+  raw: Expression,
+  value: Expression,
+  evaluate: boolean
+): Expression | undefined {
+  if (!isFunction(value, 'Quantity')) return undefined;
+  const isExact = (x: Expression) =>
+    isExactRealLiteral(x) || isExactConstantExpression(x);
+  if (isExact(value.op1)) return value;
+  const canonical = raw.isCanonical ? raw : raw.canonical;
+  if (isFunction(canonical, 'Quantity')) {
+    const m = canonical.op1;
+    const exact = isExact(m) ? m : evaluate ? exactRealValueOf(m) : undefined;
+    if (exact === undefined) return undefined;
+    return value.engine._fn('Quantity', [exact, value.op2]);
+  }
+  if (
+    !evaluate ||
+    !isTransitivelyPure(canonical) ||
+    readsRecordedParameter(canonical)
+  )
+    return undefined;
+  const exactValue = canonical.evaluate();
+  if (isFunction(exactValue, 'Quantity') && isExact(exactValue.op1))
+    return exactValue;
+  return undefined;
 }
 
 /**
@@ -467,28 +538,30 @@ function exactLiteralOrder(
  * relation — each the `False` branch of the corresponding handler's own
  * pairwise loop. */
 const CHAIN_PAIR_IS_FALSE = {
-  Equal: (ce: ComputeEngine) => (a: Expression, b: Expression) => {
+  Equal: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
-    if (q !== null) return Math.abs(q) > ce.tolerance;
+    if (q !== undefined) return q !== 0;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o !== 0;
     return eq(a, b) === false;
   },
   NotEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
+    const q = quantityCompare(a, b);
+    if (q !== undefined) return q === 0;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o === 0;
     return a.isEqual(b) === true;
   },
   Less: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
-    if (q !== null) return q >= 0;
+    if (q !== undefined) return q >= 0;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o >= 0;
     return (a.isLess(b) ?? compareFromAssumedBounds(a, b, true)) === false;
   },
   LessEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
-    if (q !== null) return q > 0;
+    if (q !== undefined) return q > 0;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o > 0;
     return (
@@ -633,8 +706,14 @@ function decideEqual(
     const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
     if (bc) return bc;
   }
+  // An operand that is not a collection value yet (`X` declared
+  // `list<number>` with no value) may still be any list: the comparison is
+  // undecided before any failed cell is read.
   if (undecidedCollectionComparison(ops))
     return inertRelation(ce, 'Equal', rawOps, ops);
+  const failed = failedCellComparison(ce, ops, false);
+  if (failed === 'undecided') return inertRelation(ce, 'Equal', rawOps, ops);
+  if (failed !== undefined) return failed;
   // One element pair with no answer makes the WHOLE comparison undecided
   // (user ruling of 2026-09-21): see `absentCollectionComparison`. The
   // answer is the absent marker `Missing`, which compiled code spells
@@ -657,8 +736,8 @@ function decideEqual(
     else {
       // Try quantity comparison first
       const qcmp = quantityCompare(lhs, arg);
-      if (qcmp !== null) {
-        if (Math.abs(qcmp) > ce.tolerance) return ce.False;
+      if (qcmp !== undefined) {
+        if (qcmp !== 0) return ce.False;
         lhs = arg;
         continue;
       }
@@ -709,8 +788,12 @@ function decideNotEqual(
     const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation);
     if (bc) return bc;
   }
+  // As for `Equal`: an unresolved collection operand comes first.
   if (undecidedCollectionComparison(ops))
     return inertRelation(ce, 'NotEqual', rawOps, ops);
+  const failed = failedCellComparison(ce, ops, true);
+  if (failed === 'undecided') return inertRelation(ce, 'NotEqual', rawOps, ops);
+  if (failed !== undefined) return failed;
   // The same undecided marker as `Equal`, never its negation (user ruling
   // of 2026-09-21): a comparison with no answer has no answer under
   // negation either, so `NotEqual` must not report a confident `True`
@@ -727,6 +810,12 @@ function decideNotEqual(
   for (const arg of ops!) {
     if (!lhs) lhs = arg;
     else {
+      // Two quantities compare by their physical value, as in `Equal`.
+      const qcmp = quantityCompare(lhs, arg);
+      if (qcmp !== undefined) {
+        if (qcmp === 0) return ce.False;
+        continue;
+      }
       const order = exactLiteralOrder(lhs, arg);
       const test = order !== undefined ? order === 0 : lhs.isEqual(arg);
       if (test === true) return ce.False;
@@ -783,7 +872,7 @@ function decideLess(
     const [lhs, rhs] = ops;
     // Try quantity comparison first
     const qcmp = quantityCompare(lhs, rhs);
-    if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
+    if (qcmp !== undefined) return qcmp < 0 ? ce.True : ce.False;
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -799,7 +888,7 @@ function decideLess(
     if (!lhs) lhs = arg;
     else {
       const qcmp = quantityCompare(lhs, arg);
-      if (qcmp !== null) {
+      if (qcmp !== undefined) {
         if (qcmp >= 0) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
@@ -843,7 +932,7 @@ function decideLessEqual(
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
     const qcmp = quantityCompare(lhs, rhs);
-    if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
+    if (qcmp !== undefined) return qcmp <= 0 ? ce.True : ce.False;
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -859,7 +948,7 @@ function decideLessEqual(
     if (!lhs) lhs = arg;
     else {
       const qcmp = quantityCompare(lhs, arg);
-      if (qcmp !== null) {
+      if (qcmp !== undefined) {
         if (qcmp > 0) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
@@ -1109,8 +1198,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           // Dimensioned quantities compare by their SI magnitude, like
           // `Equal` (`5 m ≡ 500 cm`).
           const qcmp = quantityCompare(lhs, arg);
-          if (qcmp !== null) {
-            if (Math.abs(qcmp) > ce.tolerance) return ce.False;
+          if (qcmp !== undefined) {
+            if (qcmp !== 0) return ce.False;
             lhs = arg;
             continue;
           }
@@ -2041,6 +2130,157 @@ function undecidedCollectionComparison(
   const unresolved = (op: Expression): boolean =>
     isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op);
   return ops.some(unresolved) && ops.some((op) => op.isCollection);
+}
+
+/**
+ * The verdict of `Equal` (`negate` false) or `NotEqual` (`negate` true) over
+ * operands of which one or more is a collection that holds a failed cell (an
+ * element that is, or holds, an `Error`), or `undefined` when no operand
+ * holds one.
+ *
+ * Each adjacent pair gets its own verdict (`failedCellEquality()`): equal,
+ * different, the error of a failed cell that the comparison reaches (the
+ * verdict depends on its value), or undecided. The pair verdicts combine as
+ * the chain does. A pair that refutes the chain decides it: a pair that is
+ * different makes `Equal` `False`, a pair that is equal makes `NotEqual`
+ * `False` (`NotEqual([1], [1], [2, <error>])` is `False`). Otherwise the
+ * answer is the error of the first pair that gives one, then `'undecided'`
+ * (the caller keeps the comparison inert) when a pair is undecided, and the
+ * value of the chain when every pair is decided.
+ *
+ * `isSame()` and `isEqual()` do not change: they compare the trees.
+ */
+function failedCellComparison(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  negate: boolean
+): Expression | 'undecided' | undefined {
+  if (!ops.some(holdsFailedCell)) return undefined;
+  const budget: WalkBudget = { left: ce.maxCollectionSize, exhausted: false };
+  let error: Expression | undefined;
+  let undecided = false;
+  for (let i = 1; i < ops.length; i++) {
+    const verdict = failedCellEquality(ops[i - 1], ops[i], budget);
+    if (verdict === (negate ? true : false)) return ce.False;
+    if (verdict === true || verdict === false) continue;
+    if (verdict === undefined) undecided = true;
+    else error ??= verdict;
+  }
+  // A walk that used up the budget did not see every pair, and a pair that
+  // it did not see could refute the chain: the answer is undecided, also
+  // when an earlier pair gave an error.
+  if (budget.exhausted) return 'undecided';
+  if (error !== undefined) return error;
+  if (undecided) return 'undecided';
+  // Every pair is decided and none refutes the chain. For `NotEqual`, every
+  // pair is different. For `Equal` this is not reached: a pair with an
+  // operand that holds a failed cell is never `true`.
+  return ce.True;
+}
+
+/** The pairs of elements that the walks of one `failedCellComparison()`
+ * may still compare, and whether a walk stopped because there were none
+ * left. */
+type WalkBudget = { left: number; exhausted: boolean };
+
+/** True when `x` is a collection that holds a failed cell. */
+function holdsFailedCell(x: Expression): boolean {
+  return !x.isValid && !isInvalidNonCollection(x);
+}
+
+/**
+ * The verdict of `failedCellComparison()` for two operands: `true` (equal),
+ * `false` (different), the error of a failed cell that the comparison
+ * reaches, or `undefined` (undecided).
+ *
+ * Two collections are different, with no walk, when the facts that `eq()`
+ * reads for two valid collections prove it: one is a set and the other is
+ * not, one is a string or a `Tuple` and the other is not, or their counts
+ * are known and differ, an infinite count included (`[1, <error>]` and
+ * `Range(1, 10^12)` or `Range(1, +oo)`). Otherwise two finite indexed
+ * collections are walked together, one element at a time, and the walk
+ * stops at the first pair of elements that are different. A walk that ends
+ * with no such pair is the error of the first failed cell that it met. Any
+ * other pair (two sets) is the error: whether a failed cell matches an
+ * element depends on its value.
+ *
+ * The walks of all the levels and of all the pairs of a chain share
+ * `budget`, at most `maxCollectionSize` pairs of elements. A walk that uses
+ * it up sets `budget.exhausted` and is undecided, since a pair that it did
+ * not see could still be different (the answer would then be `False`, not
+ * the error).
+ */
+function failedCellEquality(
+  a: Expression,
+  b: Expression,
+  budget: WalkBudget
+): boolean | Expression | undefined {
+  const aHolds = holdsFailedCell(a);
+  const bHolds = holdsFailedCell(b);
+  if (!aHolds && !bHolds) {
+    // A failed scalar cell (an `Error`) is equal to nothing that is known.
+    if (!a.isValid || !b.isValid)
+      return failedCellError(a) ?? failedCellError(b);
+    const order = exactLiteralOrder(a, b);
+    return order !== undefined ? order === 0 : eq(a, b);
+  }
+  const error = failedCellError(aHolds ? a : b);
+  if (!a.isCollection || !b.isCollection) return error;
+  // The kinds and the counts first: these prove a difference whatever the
+  // value of the failed cell.
+  if (a.type.matches('set<any>') !== b.type.matches('set<any>')) return false;
+  if (isString(a) !== isString(b)) return false;
+  if (isFunction(a, 'Tuple') !== isFunction(b, 'Tuple')) return false;
+  if (
+    a.isFiniteCollection !== undefined &&
+    b.isFiniteCollection !== undefined &&
+    a.isFiniteCollection !== b.isFiniteCollection
+  )
+    return false;
+  const countA = a.count;
+  const countB = b.count;
+  // A `bigint` count is compared as a number: two different counts that
+  // round to the same number are walked, and the walk is bounded.
+  if (
+    countA !== undefined &&
+    countB !== undefined &&
+    Number(countA) !== Number(countB)
+  )
+    return false;
+  // Two collections are compared cell by cell when both have positions. A
+  // set has none, so whether a failed cell matches an element of the other
+  // set depends on its value.
+  if (
+    a.isIndexedCollection !== true ||
+    b.isIndexedCollection !== true ||
+    a.isFiniteCollection !== true ||
+    b.isFiniteCollection !== true
+  )
+    return error;
+  const xs = a.each()[Symbol.iterator]();
+  const ys = b.each()[Symbol.iterator]();
+  let first: Expression | undefined;
+  let undecided = false;
+  while (true) {
+    const x = xs.next();
+    const y = ys.next();
+    if (x.done || y.done) {
+      if (x.done !== y.done) return false;
+      break;
+    }
+    if (--budget.left < 0) {
+      budget.exhausted = true;
+      return undefined;
+    }
+    const verdict = failedCellEquality(x.value, y.value, budget);
+    if (verdict === false) return false;
+    if (verdict === undefined) undecided = true;
+    else if (verdict !== true) first ??= verdict;
+  }
+  // An inner walk that used up the budget did not see every pair.
+  if (budget.exhausted) return undefined;
+  if (first !== undefined) return first;
+  return undecided ? undefined : error;
 }
 
 /**

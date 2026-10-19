@@ -307,9 +307,134 @@ first three in `_invalidValue()`,
   accepts it; one declared `list<number>` does not, because `error` is not
   a subtype of `number`. Giving containers a validity notion distinct from
   their cells (a valid list with invalid cells) is a possible future
-  refinement, not current behavior. Absorption looks at operands, not
-  arbitrarily deep through collection values: `Sin([err])` stays an inert
-  application of `Sin` to a list, while `Sin(err)` bubbles. The operands of
+  refinement, not current behavior.
+
+  **A `List` or `Set` literal with a failed cell is a collection that can be
+  iterated** (decided 2026-10-19). Although its tree is invalid,
+  `isCollection` is `true`, its count is the number of its cells, and a walk
+  of its elements (`each()`, `at()`) gives the failed cell as the value of
+  that element. A collection operator whose only errors sit in the cells of
+  such literals (`Map(f, [1, err])`, `Reverse([1, err])`) is a collection
+  too, typed by its own type handler. An operator that reads the cells gives
+  the failed cell to its body or callback, and the ordinary rules apply to
+  what the body computes with it:
+
+  - A positional operator keeps the cell: `Length([1, err, 3])` and
+    `Count([1, err, 3])` are `3`, `First([1, err, 3])` is `1`, `[1, err,
+    3][2]` is the error, and `Reverse`, `Take`, `Append` keep it in place.
+  - A loop runs one turn for each cell, a `Map`, a comprehension and a
+    broadcast give the cell to the body: `Map(u ↦ u + 1, [1, err, 3])`,
+    `[x + 1 for x in [1, err, 3]]`, `[1, err, 3] + 1` and `Sin([1, err, 3])`
+    are lists whose second cell is the error. A user function applied to the
+    failed cell is the error (rung 2), so its body does not run for that
+    cell. A selection keeps the error of a predicate or a guard in place:
+    `Filter([1, err, 3], x ↦ x > 1)` is `[err, 3]`, as is the comprehension
+    with the guard `x > 1`. An Epsil loop body that discards a value holding
+    the error reports it as a nested statement.
+  - An operator that demands the value of every cell answers the error of
+    the first failed cell: `Sum`, `Product`, `Reduce`, `Max`, `Min`, `Mean`
+    and the other statistics, `Sort`, `Ordering`, `ArgMax`, `MaxBy` and
+    their `Min` twins, and `CountIf`. `Sort` and `Ordering` read the
+    elements of a lazy source once, so a valid source that computes a failed
+    element gives its error too: with `h(2)` an error, `Sort(Map(h, [3, 2,
+    1]))` is that error.
+  - `Count(xs, p)` gives the error only when the verdict of `p` for an
+    element is an error. A failed cell that `p` selects is counted:
+    `Count([1, err, 3], IsError)` is `1`, and `Count([[2, err], [1]], u ↦
+    True)` is `2`. A user function applied to a bare failed cell is the
+    error (rung 2), so `Count([1, err, 3], u ↦ True)` is the error.
+  - **Membership and equality.** An answer that a valid cell decides is
+    given; an answer that depends on the value of a failed cell is that
+    cell's error. `Element(1, [1, err])`, `Contains([1, err], 1)` and `1 ∈
+    {1, err}` are `True`; `Element(2, [1, err])` and `NotElement(2, [1,
+    err])` are the error. `IndexOf(xs, v)` is the position of a match found
+    before the first failed cell, otherwise the error. `Count(xs, v)`,
+    `Union`, `Intersection`, `SetMinus` and `SymmetricDifference` are the
+    error, since whether a failed cell is the same as another element
+    depends on its value. `Unique` and `Tally` are the error only when
+    there are at least two distinct elements (by `isSame()`): with one,
+    nothing is compared, so `Unique([err])` and `Unique([err, err])` are
+    `[err]` (two cells that are the same expression have the same value).
+    Two collections are `Equal` (and not `NotEqual`) to the error when the
+    comparison reaches a failed cell, and `False` (`NotEqual`: `True`) when
+    their counts differ or two valid cells at the same position differ,
+    before or after the failed cell: `[1, err] = [1, err]` is the error,
+    `[1, err] = [2, err]` is `False`. The facts that decide the equality of
+    two valid collections come first, with no walk: a set and a sequence,
+    a string and another collection, or a `Tuple` and another collection
+    are never equal, and neither are two collections whose counts are
+    known and differ, an infinite count included (`[1, err] =
+    Range(1, 10^12)`, `[1, err] = Range(1, +oo)` and `{1, err} = [1, 2]`
+    are `False` at once). Otherwise the two collections are walked
+    together, and the walk stops at the first pair that differs. A
+    comparison that would walk more than `maxCollectionSize` pairs (all
+    levels of nesting and all pairs of a chain together) stays undecided,
+    also when it already met a failed cell, since a pair that it did not
+    see could still differ. A chain decides pair by pair: a pair that
+    differs makes `Equal` `False`, and a pair that is equal makes
+    `NotEqual` `False` (`NotEqual([1], [1], [2, err])` is `False`). An
+    operand that is not a collection value yet (`X` declared
+    `list<number>` with no value) keeps the comparison inert before any
+    failed cell is read. Two sets are compared by value, so a failed cell
+    makes their equality the error. `isSame()` and `isEqual()` do not change: they
+    compare the trees. A quantifier combines the answers in order, as `Or`
+    and `And` do (`Or(err > 0, True)` is the error), so `Any([1, err], x ↦ x
+    > 0)` is `True` and `All([1, err], x ↦ x > 5)` is `False` (decided by
+    the first cell), while `Any([1, err, 3], x ↦ x > 2)` is the error.
+    `Dedup` compares each element with the element before it, so a failed
+    cell next to an element that is not the same expression gives the
+    error: `Dedup([1, err, 1])` is the error (it is `[1]` if the cell is
+    `1`), while `Dedup([err])` and `Dedup([err, err])` are `[err]`. `Dedup`
+    evaluates a source that is not a lazy view once, with the numeric
+    request of the evaluation (`Dedup([1/2, 0.5]).N()` is `[0.5]`), and
+    works on that value, on the synchronous and the asynchronous route
+    alike. The same rules apply to a
+    valid lazy source that computes a failed element: with `h(2)` an error,
+    `Element(5, Map(h, [1, 2]))`, `Contains(Map(h, [1, 2]), 5)`,
+    `IndexOf(Map(h, [1, 2, 3]), 3)` and `Dedup(Map(h, [1, 2, 3]))` are that
+    error, and `Element(1, Map(h, [1, 2]))` is `True`. Only a source that
+    can hold a failed cell is read again for this check: an invalid
+    collection, or a view that evaluates something for each element (`Map`,
+    `Filter`, a comprehension), whose elements are memoized. A `Range` or an
+    `Interval` keeps its arithmetic test (`Element(0.5, Range(1, 10^6))` is
+    `False` with no walk), and an infinite source is not walked
+    (`Element(0, Map(h, Range(1, +oo)))` stays unevaluated). A `List` or
+    `Set` literal is read in full. A lazy view is read at most
+    `maxCollectionSize` elements, and a read that stops there leaves the
+    answer undecided, since a failed element can come later. A set
+    operation over several operands gives a definite error that it finds
+    in any operand, also when the walk of another operand stopped early.
+    The `contains` handler of a valid view decides alone when it declines:
+    `Filter` declines when its predicate gives an error for the searched
+    value, and the membership stays undecided. A search over
+    a valid source that its own handler leaves undecided stays undecided:
+    `Element(1.5, Filter([1.5, 2.5], (n: integer) ↦ n > 0))` stays
+    unevaluated.
+  - **A nested failed cell.** A cell that is itself a `List` or `Set`
+    holding an error (`[1, err]` in `[[1, err], 2]`) is a failed cell. An
+    operator that demands its value answers the first error at any depth of
+    the cell, never the inner list: `Mean([[1, err], 2])` and `Sort([[2,
+    err], [1]])` are the error. A function applied to such a cell receives
+    it as a value, as it receives any list (`Map(u ↦ 1, [[1, err], [3]])` is
+    `[1, 1]`), and a broadcast reaches the inner list (`[[1, err], 2] + 1`
+    is `[[2, err], 3]`). The helper is `failedCellError()`.
+
+  A `Tuple` is not included: it is one value (a point), so a failed
+  coordinate keeps the whole tuple frozen, and `f((1, err))` stays as it is.
+  A `Map` cell whose argument is such a tuple is the tuple's error:
+  `Map(u ↦ 1, [(2, err)])` is `[err]`, not the absence marker `NaN`.
+  A lazy operator holds its operands as written: a held `List` or `Set`
+  literal with a failed cell is bound when the operator reads it (the
+  `canonical` getter binds such a literal, while it keeps any other invalid
+  tree as it is), so `ce.box(["Sum", ["List", 1, ["Error", "'oops'"], 3]])`
+  is the error on the box route as on the parse route.
+  Compilation is unchanged: a tree that holds a failed cell does not compile.
+  The predicates are `isIterableWithFailedCells` and
+  `isInvalidNonCollection` (`boxed-expression/error-value.ts`).
+
+  Absorption looks at operands, not arbitrarily deep through collection
+  values: `Sin([err])` is not the error, it is the list `[err]` (the
+  broadcast gives the cell to `Sin`), while `Sin(err)` bubbles. The operands of
   a lazy view are cells too: the rule is keyed on the `collection` handler
   block, so a view such as `Take`, `Reverse` or `Rest` keeps an error in any
   of its operands in place, its source collection included — with `n := 5`,
@@ -1879,20 +2004,25 @@ document's history):
   decided is threaded by these three operators:
   `Union({1, 2}{c}, {2, 3})` is `{1, 2, 3}{c}`. An absent element inside a
   set is not changed: `Union({1, Missing}, {2})` keeps it as an element.
-- **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02.**
-  Should a collection whose cells include errors eventually be a *valid*
-  container of partially-invalid cells, with a type that says so
-  (`list<number | error>`; `Length` answers the length, `Sum` demands
-  every cell and answers the error, a plot draws the good cells)? Today
-  one error cell makes the whole tree invalid: `[1, Sin("a"), 3]` has
-  `isValid === false` and `isCollection === false`, and `Length` of it
-  stays inert. Its type is `list<unknown>` (it was `error` until
-  2026-10-19, and `ListJoin` then wrapped such a list as one element),
-  while a NaN or `~oo` cell is an ordinary value (`[1, 1/0, 3]` is the
-  valid `[1, ~oo, 3]`). Favored eventually by the 2026-08-25 review; it is
-  a design touching the type lattice (an `error` cell type) and every
-  collection consumer's per-cell demand, and no consumer has asked for it,
-  so it stays open with no change scheduled.
+- **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02; the
+  iteration part DECIDED 2026-10-19.** Should a collection whose cells
+  include errors eventually be a *valid* container of partially-invalid
+  cells, with a type that says so (`list<number | error>`)? Today one error
+  cell still makes the whole tree invalid: `[1, Sin("a"), 3]` has
+  `isValid === false`, and `.errors` lists the error. Its type is
+  `list<unknown>` (it was `error` until 2026-10-19, and `ListJoin` then
+  wrapped such a list as one element), while a NaN or `~oo` cell is an
+  ordinary value (`[1, 1/0, 3]` is the valid `[1, ~oo, 3]`). The behavior
+  this entry asked for is in place since 2026-10-19 without the validity
+  change: the list is a collection that can be iterated (`isCollection` is
+  `true`), so `Length` answers the length (`3`: the count is known, and
+  reading it demands no cell), `Sum` demands every cell and answers the
+  error, and a `Map`, a loop or a comprehension gives the failed cell to the
+  body (§3). Before, `isCollection` was `false` for the invalid tree, so
+  `Length` stayed inert, a loop ran no turn and `Map` returned the list
+  unchanged. What stays open is the validity of the container itself (a
+  `true` `isValid`, an `error` cell type in the lattice); no consumer has
+  asked for it, so no change is scheduled.
 - **FIXED 2026-09-02 (ruled the same day): `Length` and `Count` refuse a
   decided non-collection.** `Length(5)` and `Length(Missing)` — what
   `Length(First([]))` receives for an empty list — stayed inert on a

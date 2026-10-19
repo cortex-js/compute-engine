@@ -171,6 +171,14 @@ Each run of a block — a function call, an iteration of a loop body, a run of a
 
 Move the \`let\` before the first read or assignment, or give the local another name. The initializer of the \`let\` itself is not such a read: \`let t = t * 2\` in a nested block reads the OUTER \`t\`. Top-level statements of a program are not a block, so there a name declared later is an ordinary symbol until its \`let\` runs.`,
 
+  'constant-assignment': `A value was assigned to a constant: a name bound by \`const\`, or a constant of the library such as \`Pi\`. In \`const c = 1\` followed by \`c = 2\`, the assignment is refused and \`c\` keeps the value \`1\`. The same holds for an assignment of a function literal (\`const k = (n) => n + 1\` then \`k = (s) => s\`) and for each name of a destructuring assignment (\`(a, c) := (3, 4)\` writes neither \`a\` nor \`c\`).
+
+\`epsil check\` reports an assignment to a \`const\` of the same program (at any depth, and each name of a destructuring \`const\`) before anything runs, wherever the assignment is: at the top level, in a block, a loop body or a function body. A function defined before the \`const\` is included: its body finds the name when the function is called, so an assignment in it writes the constant when the call comes after the \`const\`. The run does not report it a second time. A constant that the check cannot see — one declared by an earlier program on the same engine, or a library constant — is reported when the assignment runs, as a \`runtime-error\` with this code.
+
+To change the value, declare the name with \`let\` instead of \`const\`. To hold a second value, choose another name, or declare a local that shadows the constant: \`let c = 2\` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as \`c[1] = 2\` is not an assignment to \`c\`, and is reported with another error.
+
+A host that calls \`ce.assign()\` on a constant gets a thrown error with the same message, whose \`code\` property is \`constant-assignment\`.`,
+
   'function-redefinition': `Two clauses of one function in a single program have the same dispatch domain, so the second would silently replace the first — \`f(x) = x\` followed by \`f(x) = 2 * x\`. Parameter NAMES are not part of a clause's identity: \`g(n) = n\` then \`g(m) = 2 * m\` collides all the same, so renaming a parameter never resolves this error.
 
 Only replacement is refused. Clauses that dispatch on genuinely different domains accumulate — a different arity (\`k(x)\` and \`k(x, y)\`), different parameter types (\`h(x: integer)\` and \`h(x: string)\`), or a literal pattern (\`g(0) = 99\` alongside \`g(x) = x\`). That is what multi-clause definitions are for.

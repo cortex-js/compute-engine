@@ -45,7 +45,7 @@ import type { SmallInteger } from '../numerics/types.js';
 
 import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
-import { cmp, eq, eqIdentical, same } from './compare.js';
+import { cmp, eq, eqIdentical, quantityOrder, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import {
   isSymbol,
@@ -881,6 +881,19 @@ export abstract class _BoxedExpression implements Expression {
       const otherVal = other.value;
       if (otherVal && otherVal !== (other as unknown))
         return this.is(otherVal, tolerance);
+    }
+
+    // Two quantities with units of the same dimension compare by their
+    // physical value within the tolerance: `1000 m` is `1 km`. Their unit
+    // symbols are free variables, so the check below would answer `false`.
+    if (other instanceof _BoxedExpression) {
+      const order = quantityOrder(
+        this,
+        other,
+        tolerance ?? this.engine.tolerance,
+        false
+      );
+      if (order !== undefined) return order === 0;
     }
 
     // Numeric fallback only when there are no free variables

@@ -64,7 +64,11 @@ import {
   tuplePatternNames,
 } from './boxed-expression/tuple-pattern.js';
 import { liveScopeOf } from './boxed-expression/ambient-chain.js';
-import { errorValue, withErrorFrames } from './boxed-expression/error-value.js';
+import {
+  errorValue,
+  isInvalidNonCollection,
+  withErrorFrames,
+} from './boxed-expression/error-value.js';
 import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
 import {
   listRecursionPlan,
@@ -5048,10 +5052,15 @@ function makeLambda(
       if (err !== undefined) return err;
       // Not dead: `errorValue` does NOT descend into collection values, so an
       // argument like `[1, "a" + 1]` is invalid without yielding an error to
-      // bubble. Such an application FREEZES — a collection keeps its failed
-      // cell in place, and the application of a function to it stays as
-      // written (`docs/ERROR-MODEL.md` §3) — so the body does not run for it.
-      if (ce.strict && !args.every((x) => x.isValid)) return undefined;
+      // bubble. A `List` or `Set` literal whose only errors are failed cells
+      // is a collection value (`isInvalidNonCollection()` is `false` for
+      // it): the body runs with it, as a `Map` callback receives the inner
+      // list of `[[1, "a" + 1], [3]]` and `(u) => 1` gives `1` for it. Any
+      // other invalid argument (a `Tuple` with a failed coordinate) FREEZES
+      // the application (`docs/ERROR-MODEL.md` §3), so the body does not
+      // run for it.
+      if (ce.strict && args.some((x) => isInvalidNonCollection(x)))
+        return undefined;
     }
 
     //
@@ -5178,7 +5187,8 @@ function makeLambda(
           );
           if (validated !== null) {
             // Any invalid operand: mismatch — return the inert application.
-            if (validated.some((x) => !x.isValid))
+            // A `List` or `Set` with a failed cell is a value (see step 2).
+            if (validated.some((x) => isInvalidNonCollection(x)))
               return ce._fn('Apply', [fnExpr, ...validated]);
             // All valid: an operand was substituted (e.g. devolved); proceed
             // with the substituted arguments.
@@ -5364,7 +5374,8 @@ function makeLambda(
       );
       if (validated !== null) {
         // Any invalid operand: mismatch — return the inert application.
-        if (validated.some((x) => !x.isValid))
+        // A `List` or `Set` with a failed cell is a value (see step 2).
+        if (validated.some((x) => isInvalidNonCollection(x)))
           return ce._fn('Apply', [fnExpr, ...validated]);
         // All valid: an operand was substituted (e.g. devolved); proceed with
         // the substituted arguments.

@@ -13,6 +13,7 @@ import {
   isDimensionless,
 } from '../../src/compute-engine/library/unit-data';
 import { boxedToUnitExpression } from '../../src/compute-engine/library/units';
+import type { MathJsonExpression } from '../../src/math-json/types';
 
 describe('UNITS LIBRARY', () => {
   test('Quantity operator is defined in the engine', () => {
@@ -249,13 +250,13 @@ describe('compound unit cancellation', () => {
     expect(boxedToUnitExpression(expr.op2)).toEqual(['Multiply', 'ft', 'in']);
   });
 
-  test('named derived unit still recognised (N·m → J)', () => {
+  test('a compound unit is not renamed (N·m stays N·m, not J)', () => {
     const expr = engine
       .expr(['Multiply', ['Quantity', 2, 'N'], ['Quantity', 3, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(6);
-    expect(expr.op2.symbol).toBe('J');
+    expect(expr.op2.json).toEqual(['Multiply', 'N', 'm']);
   });
 
   test('same-dimension division still yields a scalar (18 in / 3 ft)', () => {
@@ -1118,32 +1119,52 @@ describe('UNIT CANCELLATION', () => {
   });
 });
 
-describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
-  test('N * m simplifies to J', () => {
-    const expr = engine
-      .expr(['Multiply', ['Quantity', 5, 'N'], ['Quantity', 2, 'm']])
-      .evaluate();
+// Quantity arithmetic does not rename a compound unit: only `UnitSimplify`
+// replaces it with a named derived unit.
+describe('COMPOUND UNITS ARE NOT RENAMED BY ARITHMETIC', () => {
+  test('N * m stays N·m; UnitSimplify gives J', () => {
+    const product: MathJsonExpression = [
+      'Multiply',
+      ['Quantity', 5, 'N'],
+      ['Quantity', 2, 'm'],
+    ];
+    const expr = engine.expr(product).evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
-    expect(expr.op2.symbol).toBe('J');
+    expect(expr.op2.json).toEqual(['Multiply', 'N', 'm']);
+    const named = engine.expr(['UnitSimplify', product]).evaluate();
+    expect(named.op1.re).toBe(10);
+    expect(named.op2.symbol).toBe('J');
   });
 
-  test('J / m simplifies to N', () => {
-    const expr = engine
-      .expr(['Divide', ['Quantity', 100, 'J'], ['Quantity', 10, 'm']])
-      .evaluate();
+  test('J / m stays J/m; UnitSimplify gives N', () => {
+    const quotient: MathJsonExpression = [
+      'Divide',
+      ['Quantity', 100, 'J'],
+      ['Quantity', 10, 'm'],
+    ];
+    const expr = engine.expr(quotient).evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
-    expect(expr.op2.symbol).toBe('N');
+    expect(expr.op2.json).toEqual(['Divide', 'J', 'm']);
+    const named = engine.expr(['UnitSimplify', quotient]).evaluate();
+    expect(named.op1.re).toBe(10);
+    expect(named.op2.symbol).toBe('N');
   });
 
-  test('J / s simplifies to W', () => {
-    const expr = engine
-      .expr(['Divide', ['Quantity', 60, 'J'], ['Quantity', 2, 's']])
-      .evaluate();
+  test('J / s stays J/s; UnitSimplify gives W', () => {
+    const quotient: MathJsonExpression = [
+      'Divide',
+      ['Quantity', 60, 'J'],
+      ['Quantity', 2, 's'],
+    ];
+    const expr = engine.expr(quotient).evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(30);
-    expect(expr.op2.symbol).toBe('W');
+    expect(expr.op2.json).toEqual(['Divide', 'J', 's']);
+    const named = engine.expr(['UnitSimplify', quotient]).evaluate();
+    expect(named.op1.re).toBe(30);
+    expect(named.op2.symbol).toBe('W');
   });
 });
 

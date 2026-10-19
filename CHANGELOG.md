@@ -76,10 +76,15 @@
   `[1, 1]`. Membership and equality give the error when the answer depends on a
   failed cell: `2 ∈ [1, 1/"a"]` and `[1, 1/"a"] = [1, 1/"a"]` are the error,
   while `1 ∈ [1, 1/"a"]` is `True` and `[1, 1/"a"] = [2, 1/"a"]` is `False`.
-  `IndexOf`, `Count` with a value, `Unique`, `Tally`, `Union`, `Intersection`,
-  `SetMinus` and `SymmetricDifference` follow the same rule, and so does
-  `Dedup`: `Dedup([1, 1/"a", 1])` is the error, because whether a neighbor is
-  a duplicate depends on the value of the failed cell. The list still
+  The equality of two collections first checks the facts that decide the
+  equality of valid collections (a set and a list, different counts, a finite
+  and an infinite collection), then reads the cells only as far as needed, so
+  `[1, 1/"a"] = Range(1, 10^12)` is `False`.
+  `IndexOf`, `Count` with a value, `Union`, `Intersection`, `SetMinus` and
+  `SymmetricDifference` follow the same rule. `Unique`, `Tally` and `Dedup`
+  follow it when there is another element to compare: `Dedup([1, 1/"a", 1])`
+  is the error, because whether a neighbor is a duplicate depends on the value
+  of the failed cell, while `Unique([1/"a"])` is `[1/"a"]`. The list still
   carries its error (`isValid` is `false`), and it still does not compile. A
   `Tuple` or `Dictionary` with a failed cell is not changed.
 - A point divided by a matrix is the matrix of the point divided by each cell,
@@ -96,6 +101,52 @@
 
 ### Bug Fixes
 
+- A tuple whose type has an absent slot, such as a symbol declared
+  `tuple<integer, missing>`, is treated as a tuple. It was not, because the
+  bare type `tuple` admits value slots only. So `[...t, 5]` and `{...t, 5}`
+  spread it (they are now the `spread-tuple` error, as for any tuple), and
+  `Join(t, [3, 4])` with `t := (1, Missing)` had 4 elements (it now has 3, the
+  first of which is the tuple). `(1, 2) = p`, with `p` declared
+  `tuple<integer, integer | missing>` and no value, was `False`; it now stays
+  undecided, as for a tuple with value slots. A union of a number and such a
+  tuple joins with a list (`Join([3, 4], s)`), where it was an
+  `incompatible-type` error. A compiled `Dot` of a tuple of such tuples is
+  declined, as for other tuples of tuples.
+
+- A complex number whose imaginary coefficient is written as an inline
+  fraction keeps its value in a LaTeX round trip. At a deep level, or with an
+  inline `fractionStyle`, `Complex(1/10, 1/10)` was written
+  `1/10+1/10\imaginaryI`, which reads back as `1/10 + 1/(10i)`, the opposite
+  imaginary part. It is written `1/10+(1/10)\imaginaryI` (found by Tycho's
+  round-trip audit of its Desmos corpus, whose failing trees are now part of
+  `npm run check:roundtrip`).
+
+- A mixed number keeps its tree in a LaTeX round trip (Tycho ledger row 390).
+  `2\frac{1}{2}` is the sum `Add(2, 1/2)`, which was written `2+\frac{1}{2}`
+  with `prettify: false` and read back as `5/2`. It is written as the mixed
+  number whenever the parser rebuilds the same sum from it, with or without
+  `prettify`: `-2\frac{1}{2}` was written `-\frac{1}{2}-2`, and
+  `500\frac{999}{1000}` was written `500+\frac{999}{1000}`. The pretty
+  MathJSON of `-3\frac{1}{4}` is `["Add", -3, ["Rational", -1, 4]]` (it was
+  `["Subtract", ["Rational", -1, 4], 3]`). The fraction of a mixed number is
+  always written `\frac{…}{…}`: with an inline fraction style,
+  `-2\frac{1}{2}` was written `-21/2`. A fraction that is an integer is not a
+  mixed number: `2\frac{4}{2}` is `4` (it was the sum `Add(2, 2)`), and
+  `Add(2, Rational(3, 1))` is no longer written `2\frac{3}{1}`, which read
+  back as 6.
+
+- Printing an unevaluated lazy view does not run a side effect. `toString()`,
+  the `latex` getter and `toLatex()` evaluated the cells of a view over a list
+  literal to show a preview: printing `Dedup([1, H(1), 2])`, with `H` declared
+  `pure: false`, called `H` twice, a view over `Random()` printed a different
+  list each time, and a comprehension whose body assigns an outside variable
+  did the assignment. Such a view now prints as written
+  (`Reverse([1, H(1), 2])`), and its value comes from `.evaluate()`. A view
+  over pure functions, or one that writes only to its own local variables,
+  still shows its preview. The same holds when the view calls a comprehension
+  index or a callback parameter whose functions can be impure:
+  `[q(1) for q in [a ↦ H(a)]]` and `Map(w ↦ w(1), fs)`, with `fs` holding such
+  functions, print as written.
 - In Epsil, a `function` statement in a function body works when its name is
   also the name of a library constant. `function o() { function i() { 2 }; i() }`
   then `o()` gave `Error(ErrorCode("constant-assignment", "i"))` instead of

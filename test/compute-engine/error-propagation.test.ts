@@ -316,14 +316,13 @@ describe('ERROR PROPAGATION — rung 3: collections freeze, they never bubble', 
     );
   });
 
-  test('`Length` of a list with a failed cell is unchanged by rung 3', () => {
+  test('`Length` of a list with a failed cell counts the cell', () => {
+    // The list is a collection with a failed cell: `Length` reads its count
+    // and does not demand the value of any cell.
     const ce = new ComputeEngine();
     expect(
       ce.box(['Length', ['List', 1, ['Ln', { str: 'a' }], 3]]).evaluate().json
-    ).toEqual([
-      'Length',
-      ['List', 1, ['Ln', ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'string'"], "'a'"]], 3],
-    ]);
+    ).toEqual(3);
   });
 });
 
@@ -452,16 +451,26 @@ describe('ERROR PROPAGATION — collection-embedded errors do not bubble', () =>
   // An error inside a collection literal is an error in one ELEMENT, not a
   // failure of the collection: bubbling it would discard the whole list (and
   // every valid element in it) to report one cell. So `errorValue()` does not
-  // descend into `List`/`Set`/`Tuple`/`Dictionary`, and such an application
-  // freezes exactly as it did before rung 2.
-  test('`f([1, "a" + 1])` freezes, keeping the collection; the body never runs', () => {
+  // descend into `List`/`Set`/`Tuple`/`Dictionary`. An application over a
+  // `Tuple` freezes; a `List` or `Set` is a collection that can be iterated,
+  // so the operator reads its cells and the failed cell gives its error to
+  // the element it is in.
+  test('`f([1, "a" + 1])` keeps the collection and maps `f` over its cells', () => {
+    // The list is a collection with a failed cell. `f` is applied element
+    // by element: it runs for the cell `1`, and its application to the
+    // failed cell is that cell's error (rung 2), which the result keeps in
+    // place. The list itself does not bubble.
     const { ce, calls } = setup();
     const list: MathJsonExpression = ['List', 1, BAD];
-    const frozen =
-      'f([1,Error(ErrorCode("incompatible-type", "number", "string"), "a") + 1])';
-    expect(ce.box(['f', list]).evaluate().toString()).toBe(frozen);
-    expect(ce.box(['Pipe', list, 'f']).evaluate().toString()).toBe(frozen);
-    expect(calls()).toBe(0);
+    const mapped = ce.box(['f', list]).evaluate();
+    expect(mapped.operator).toBe('List');
+    expect(mapped.ops![0].toString()).toBe('99');
+    expect(mapped.ops![1].operator).toBe('Error');
+    expect(calls()).toBe(1);
+    const piped = ce.box(['Pipe', list, 'f']).evaluate();
+    expect(piped.operator).toBe('List');
+    expect(piped.ops![0].toString()).toBe('99');
+    expect(piped.ops![1].operator).toBe('Error');
   });
 
   test('a Tuple operand behaves the same', () => {

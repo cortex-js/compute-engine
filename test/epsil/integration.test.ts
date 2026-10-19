@@ -74,10 +74,12 @@ describe('EPSIL PHASE 4 — notebook integration', () => {
   });
 
   test('errors are values: a mid-program error does not halt later statements', () => {
-    // Reassigning a `const` is a runtime error. It surfaces as a value (never a
+    // Reassigning a `const` is an error. It surfaces as a value (never a
     // throw), the offending binding is unchanged, and the statements after it
-    // still execute. Because a mid-program statement's value is discarded,
-    // the problem is additionally surfaced as a `runtime-error` diagnostic.
+    // still execute. The static check reports the assignment before the
+    // program runs (a `static-type-error` with the engine code
+    // `constant-assignment`), so the run does not add a `runtime-error`
+    // diagnostic for the discarded value of the statement.
     const ce = new ComputeEngine();
     const program = ['const c = 1', 'c = 2', 'let d = 40', 'd + 2'].join('\n');
 
@@ -86,7 +88,8 @@ describe('EPSIL PHASE 4 — notebook integration', () => {
     });
 
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message[0]).toBe('runtime-error');
+    expect(diagnostics[0].message[0]).toBe('static-type-error');
+    expect(diagnostics[0].message[3]).toBe('constant-assignment');
     // The final statement (after the error) evaluated normally.
     expect(value.re).toBe(42);
     // The const kept its original value — the illegal reassignment was rejected.

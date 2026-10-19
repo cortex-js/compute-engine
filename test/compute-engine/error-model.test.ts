@@ -509,10 +509,15 @@ describe('ERROR-MODEL §3 — Error propagation', () => {
     }
   });
 
-  test('absorption looks at operands, not through collection values: Sin([err]) stays inert', () => {
+  test('absorption looks at operands, not through collection values: Sin([err]) maps the failed cell', () => {
+    // The list is a collection with a failed cell, so `Sin` is broadcast
+    // over it: the cell `Sin(err)` gives the error, which the result keeps
+    // in place. The application as a whole is not the error.
     const expr = ce.box(['Sin', ['List', ['Sin', { str: 'banana' }]]]);
-    expect(expr.evaluate().operator).toBe('Sin');
-    expect(isErrorValue(expr.evaluate())).toBe(false);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('List');
+    expect(isErrorValue(result)).toBe(false);
+    expect(isErrorValue(operand(result, 1))).toBe(true);
   });
 
   describe('observers see errors instead of bubbling them', () => {

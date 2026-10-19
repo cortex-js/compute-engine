@@ -1226,8 +1226,12 @@ function lookupInScope(
  *   CONSTRUCTOR definition: types are engine-global rather than scoped, so
  *   the definition has to reach the type's constructor.
  *
- * A BUILTIN is left alone too: `defineFunctionClause` already recognizes a
- * system-scope definition and shadows it rather than accumulating onto it.
+ * A BUILTIN (a system-scope definition) gets the shell too, as the canonical
+ * handler of `DefineFunction` gives it one at the top level. Without the
+ * shell, the single-clause install of `defineFunctionClause` assigns through
+ * the scope chain and reaches the builtin: for a library constant such as
+ * `e` or `i`, the assignment is refused (`function o() { function i() { 2 };
+ * i() }` gave the error `constant-assignment` on each call of `o`).
  */
 export function declareLocalClauseTarget(ce: IComputeEngine, id: string): void {
   const scope = ce.context.lexicalScope;
@@ -1235,8 +1239,6 @@ export function declareLocalClauseTarget(ce: IComputeEngine, id: string): void {
   if (ce._typeRegistry[id]?.def !== undefined) return;
   const existing = lookupInScope(ce, id);
   if (existing === undefined) return;
-  const systemScope = ce.contextStack[0]?.lexicalScope;
-  if (systemScope?.bindings.get(id) === existing) return;
   ce.declare(id, 'function');
 }
 

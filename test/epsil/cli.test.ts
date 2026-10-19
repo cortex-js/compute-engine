@@ -617,12 +617,16 @@ describe('Epsil CLI runtime error reporting', () => {
     // The final statement's problem stays in `value` (no diagnostic, by
     // design — errors are values); the CLI renders it as an annotated block
     // on stderr instead of printing a raw `Error(…)` on stdout.
-    expect(await main(['-e', 'const c = 1\nc = 2'], io)).toBe(1);
+    // (An assignment to a `const` is no longer such a problem: the static
+    // check reports it before the program runs.)
+    expect(await main(['-e', 'let half = (n) => n / 2\nhalf("ten")'], io)).toBe(
+      1
+    );
     expect(stdout()).toBe('');
     expect(stderr()).toContain('error: Runtime error:');
     expect(stderr()).toContain('--> 2:1');
-    expect(stderr()).toContain('2 | c = 2');
-    expect(stderr()).toContain('^^^^^');
+    expect(stderr()).toContain('2 | half("ten")');
+    expect(stderr()).toContain('^^^^^^^^^^^');
   });
 
   test('anchors the report on the statement that produced the value', async () => {
@@ -641,7 +645,9 @@ describe('Epsil CLI runtime error reporting', () => {
 
   test('machine output modes keep the error value on stdout', async () => {
     const { io, stdout } = makeIo();
-    expect(await main(['-e', 'const c = 1\nc = 2', '--json'], io)).toBe(1);
+    expect(
+      await main(['-e', 'let half = (n) => n / 2\nhalf("ten")', '--json'], io)
+    ).toBe(1);
     expect(JSON.parse(stdout())[0]).toBe('Error');
   });
 

@@ -285,8 +285,11 @@ import {
   defersErrorAbsorption,
   errorOpsWithoutTrace,
   errorValue,
+  failedCellsAreIterable,
   isCollectionHead,
   isErrorFramedByNode,
+  isInvalidNonCollection,
+  isIterableWithFailedCells,
   potentialErrorValue,
   withBroadcastFrame,
   withErrorFrames,
@@ -336,17 +339,23 @@ import {
 } from './validate.js';
 import {
   functionLiteralSignatureType,
+  inferFunctionLiteralEffects,
   namedLiteralSignatureType,
 } from './effects-inference.js';
 import {
+  functionLiteralParameterNames,
   functionLiteralParameterType,
   isScalarType,
 } from './function-literal.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
-import { isPureComputedEffects } from '../../common/type/effects.js';
+import {
+  isPureComputedEffects,
+  isPureEffectSet,
+} from '../../common/type/effects.js';
 import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
+import { noteConstantAssignmentSite } from '../constant-assignment-error.js';
 import {
   CancellationError,
   checkDeadline,
@@ -1859,7 +1868,15 @@ export class BoxedFunction
    * version of the expression in the current lexical scope.
    */
   get canonical(): Expression {
-    if (this.isCanonical || !this.isValid) return this;
+    // An invalid tree stays as it is, except a `List` or `Set` literal that
+    // holds a failed cell: it is a collection value that an operator reads
+    // cell by cell (`isIterableWithFailedCells()`), so it is bound like a
+    // valid literal. A lazy operator holds its operands raw and reads them
+    // through this getter: without it, `Sum([1, Error(…), 3])` boxed from
+    // MathJSON got an unbound list, which is not a collection, and an inner
+    // list of `[[1, Error(…)], 2] + 1` stayed raw in the broadcast.
+    if (this.isCanonical || (!this.isValid && !isIterableWithFailedCells(this)))
+      return this;
     // Thread the source position through (a raw statement's `.canonical` is
     // how a `Block`/`Loop` body canonicalizes — without this, no statement
     // inside a scoped operator can be mapped back to source). `latex` is
@@ -4306,7 +4323,11 @@ export class BoxedFunction
   }
 
   get isCollection(): boolean {
-    if (!this.isValid) return false;
+    // An invalid tree is not a collection, except a `List` or `Set` literal
+    // that holds a failed cell, and a collection operator whose only errors
+    // sit in the cells of such literals (`isInvalidNonCollection()`): a walk
+    // of their elements gives the failed cell as the value of that element.
+    if (isInvalidNonCollection(this)) return false;
     const def = this.baseDefinition?.collection;
 
     // A collection has at least a count handler and an iterator
@@ -4335,7 +4356,7 @@ export class BoxedFunction
   }
 
   get isIndexedCollection(): boolean {
-    if (!this.isValid) return false;
+    if (isInvalidNonCollection(this)) return false;
     const def = this.baseDefinition?.collection;
 
     // If there is no `at` handler, it is definitely not indexed
@@ -4393,7 +4414,7 @@ export class BoxedFunction
   }
 
   get isLazyCollection(): boolean {
-    if (!this.isValid) return false;
+    if (isInvalidNonCollection(this)) return false;
     if (this._optedOutOfCollection) return false;
     return this.baseDefinition?.collection?.isLazy?.(this) ?? false;
   }
@@ -4781,7 +4802,7 @@ export class BoxedFunction
   }
 
   get isEnumerableCollection(): boolean | undefined {
-    if (!this.isValid) return false;
+    if (isInvalidNonCollection(this)) return false;
     if (this.baseDefinition?.collection !== undefined) {
       // Handlers present: they own the answer. An instance that opted out of
       // being a collection has inert handlers and nothing to walk.
@@ -5408,16 +5429,24 @@ export class BoxedFunction
    *   absorb whatever its result carries (`_absorbsErrorAfterHandler`). This
    *   is what makes the demanded-operands rule hold under COMPOSITION:
    *   `1 + If(True, 5, <error>)` is `6` and `[If(True, 5, <error>)]` is
-   *   `[5]`, exactly as the bare `If` is `5`;
+   *   `[5]`, exactly as the bare `If` is `5`. The same answer is given
+   *   when every error that remains sits in a cell of a `List` or `Set`
+   *   literal (`failedCellsAreIterable`): such a literal is a collection
+   *   value, so the handler reads it and gives the failed cell as the value
+   *   of its element (`Length([1, <error>])` is `2`, `Map(f, [1, <error>])`
+   *   applies `f` to the error). An error that the handler demands is in its
+   *   result and bubbles from there.
    * - `'freeze'` — the errors that remain sit inside collection-literal
-   *   operands, which no error walk descends into (`f([1, <error>])`), so the
-   *   node keeps them in place and stays as it is.
+   *   operands, which no error walk descends into, and one of them is in a
+   *   `Tuple`, `Dictionary` or `KeyValuePair` literal (`f((1, <error>))`), so
+   *   the node keeps them in place and stays as it is.
    */
   private _operandErrorDisposition(): Expression | 'evaluate' | 'freeze' {
     const err = this._firstOperandError();
     if (err !== undefined) return err;
     if (this._ops.some((x) => potentialErrorValue(x) !== undefined))
       return 'evaluate';
+    if (failedCellsAreIterable(this)) return 'evaluate';
     return 'freeze';
   }
 
@@ -6161,13 +6190,15 @@ export class BoxedFunction
       // is not a collection value yet is materialized after its operands are
       // evaluated (`materializesAfterOperands`).
       //
+      // The display preview of a view over an operand that is not a
+      // collection value yet is the view as written. This test comes before
+      // the test for a node that can be absent: the type of such a view can
+      // include `missing`, and the evaluation of the operands (step 4) then
+      // evaluated the operand for the preview. It applies to a view with an
+      // `evaluate` handler too (`Dedup`): the handler declines for the
+      // preview, and the materialization of its result evaluated the operand.
+      if (previewHoldsEagerOperand(this, options)) return this;
       if (materialization !== false && !def.evaluate && this.isLazyCollection) {
-        // The display preview of a view over an operand that is not a
-        // collection value yet is the view as written. This test comes
-        // before the test for a node that can be absent: the type of such a
-        // view can include `missing`, and the evaluation of the operands
-        // (step 4) then evaluated the operand for the preview.
-        if (previewHoldsEagerOperand(this, options)) return this;
         if (
           !mayBeAbsentAsWhole(this) &&
           !materializesAfterOperands(this, def, options)
@@ -6901,6 +6932,10 @@ export class BoxedFunction
           () => tail
         );
       } catch (e) {
+        // An assignment to a constant keeps the source range of the
+        // `Assign` node that made it, so that Epsil can match it to the
+        // static report of the same assignment.
+        noteConstantAssignmentSite(e, this._operator, this.sourceOffsets);
         evalResult = handlerThrowToErrorValue(
           this.engine,
           e,
@@ -7407,13 +7442,15 @@ export class BoxedFunction
       // is evaluated the ordinary way (`mayBeAbsentAsWhole`), and a view over
       // an operand that is not a collection value yet is materialized after
       // its operands are evaluated (`materializesAfterOperands`).
+      // The display preview of a view over an operand that is not a
+      // collection value yet is the view as written. This test comes before
+      // the test for a node that can be absent: the type of such a view can
+      // include `missing`, and the evaluation of the operands (step 4) then
+      // evaluated the operand for the preview. It applies to a view with an
+      // `evaluate` handler too (`Dedup`): the handler declines for the
+      // preview, and the materialization of its result evaluated the operand.
+      if (previewHoldsEagerOperand(this, options)) return this;
       if (materialization !== false && !def.evaluate && this.isLazyCollection) {
-        // The display preview of a view over an operand that is not a
-        // collection value yet is the view as written. This test comes
-        // before the test for a node that can be absent: the type of such a
-        // view can include `missing`, and the evaluation of the operands
-        // (step 4) then evaluated the operand for the preview.
-        if (previewHoldsEagerOperand(this, options)) return this;
         if (
           !mayBeAbsentAsWhole(this) &&
           !materializesAfterOperands(this, def, options)
@@ -8226,6 +8263,9 @@ export class BoxedFunction
         if (value === undefined && operandsEvaluated)
           value = engine._fn(this._operator, [...handlerOps]);
       } catch (e) {
+        // As on the synchronous route: keep the source range of the `Assign`
+        // node that made an assignment to a constant.
+        noteConstantAssignmentSite(e, this._operator, this.sourceOffsets);
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
         // An error that a handler throws after it read a walk that missed
         // elements is not used either (the synchronous route does the same).
@@ -10230,10 +10270,11 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // type: `ListJoin(fs, [2])` with `fs := [Error(…)]` wrapped the list as
     // one element, and a variable declared `list` refused the value. A
     // literal that is not bound (a raw node) is typed `error` as before.
-    if (
-      (expr.operator !== 'List' && expr.operator !== 'Set') ||
-      expr.operatorDefinition === undefined
-    )
+    // A collection operator whose only errors sit in the cells of such
+    // literals (`Map(f, [1, <error>])`, `Reverse([1, <error>])`) is a
+    // collection too, typed by its own type handler: it materializes as a
+    // list when its source is a list, and not as a set.
+    if (isInvalidNonCollection(expr) || expr.operatorDefinition === undefined)
       return 'error';
   }
   // A call that its callee accepted has the type of the same call boxed
@@ -13940,13 +13981,219 @@ async function resolveHeldEagerSourcesAsync(
  * view does not evaluate its operands: `Join(src(1), [4])` prints
  * `\mathrm{Join}(\mathrm{src}(1), [4])`, and its value is printed after an
  * evaluation, which evaluates the operand once (step 4).
+ *
+ * A view whose evaluation has an effect (`previewRunsEffect`) prints as
+ * written too. Its operands can be collection values, but the walk of the
+ * preview evaluates each element it gives, and the facets and the handler of
+ * the view (`Dedup` compares its elements) evaluate the cells: printing
+ * `Dedup([1, H(1), 2])` with `H` declared `pure: false` called `H` twice,
+ * and a preview over `Random()` gave a different list at each print.
+ * Printing must not run a side effect, so `Reverse([1, H(1), 2])` prints
+ * `Reverse([1, H(1), 2])`.
  */
 function previewHoldsEagerOperand(
   expr: BoxedFunction,
   options: Partial<EvaluateOptions> | undefined
 ): boolean {
   if (!isDisplayPreviewOf(expr, options)) return false;
+  if (previewRunsEffect(expr)) return true;
   return expr.ops.some((x) => isTypedAsCollection(x) && isHeldEagerSource(x));
+}
+
+/**
+ * Whether the evaluation of the view `expr` can have an effect: a call of a
+ * function declared `pure: false`, a draw of `Random`, a write to a variable
+ * that `expr` does not declare itself.
+ *
+ * Two tests come first, because the runtime effects (`isPure`) count as
+ * pure a call of a callback parameter (`w ↦ w(1)`) and a function literal
+ * held as data, and the preview can call such a function:
+ * - a call of the index of an `Element` clause whose source is not proven to
+ *   supply only pure functions (see below);
+ * - a `Function` literal anywhere in `expr` whose inferred effects are not
+ *   pure: `Map(w ↦ w(1), [a ↦ H(a)])` called `H`.
+ *
+ * Then a view that is pure by the runtime effects has no effect. The
+ * runtime effects of the other views are conservative in two ways that are
+ * wrong for a preview:
+ * - the runtime effects report `scope` for each `Assign` and `Declare`, also
+ *   for a write to a local variable that a `Block` of the view declares
+ *   (`[(s := 2;) for n = 1..3]`). The inference of the effects of a function
+ *   literal with `expr` as its body decides instead: it reports `scope` only
+ *   for a write to a variable that the body does not declare (see "Scope
+ *   writes" in `docs/EFFECTS-MODEL.md`);
+ * - the runtime effects report `any` for a call of the index of an `Element`
+ *   clause (`[q(1) for q in [a ↦ 0, a ↦ a + 5]]`): the index has no
+ *   definition. The call of an index is pure only when each function that
+ *   the source of the index can supply is proven pure
+ *   (`indexCallVerdicts`). Such an index is a parameter of the function
+ *   literal, and the inference does not count the call of an unannotated
+ *   parameter. A call of any other index is an effect, tested first. That
+ *   test does not use the inference: the preview can run in the scope of
+ *   the view, where the index has a definition, and the inference then
+ *   counts its call as pure (`[q(1) for q in [a ↦ H(a)]]` called `H`).
+ */
+function previewRunsEffect(expr: BoxedFunction): boolean {
+  const ce = expr.engine;
+  const verdicts = indexCallVerdicts(expr);
+  for (const [index, pure] of verdicts)
+    if (!pure && callsIndex(expr, index)) return true;
+  if (heldFunctionLiterals(expr).some((f) => !isPreviewPureLiteral(f)))
+    return true;
+  if (expr.isPure) return false;
+  // The function literals of the view are proven pure above. The runtime
+  // effects and the inference both project the effects of a literal at an
+  // invoking position (the callback of a `Map`, of a `Tabulate`), and the
+  // inference does not know the block locals of the literal, so each
+  // literal is replaced by a literal with no body here.
+  // The parameters are boxed `raw`: a canonical symbol would declare an
+  // undeclared index in the current scope, and printing must not declare a
+  // symbol.
+  const literal = ce._fn('Function', [
+    withoutLiteralBodies(expr),
+    ...[
+      ...[...verdicts].filter(([, pure]) => pure).map(([index]) => index),
+      ...blockLocalParameters(expr, new Set(verdicts.keys())),
+    ].map((name) => ce.box(name, { form: 'raw' })),
+  ]);
+  return !isPureEffectSet(inferFunctionLiteralEffects(ce, literal).effects);
+}
+
+/**
+ * Whether the inferred effects of the function literal `f` are pure, when
+ * the block locals of `f` are not counted (`blockLocalParameters`).
+ *
+ * The inference counts a write as confined only after a `Declare` of the
+ * name. An assignment in a `Block` to a name that no outer scope declares
+ * makes a LOCAL of the block, with a new binding at each run of the block
+ * (`createBlockLocals`, `function-utils.ts`). So in
+ * `k ↦ Block(If(k = 2, h := (z ↦ 2z)), h(k))` the write to `h` and the call
+ * of `h` have no effect outside the call, but the inference reports a write
+ * to an outer `h` and a call of an unknown function.
+ */
+function isPreviewPureLiteral(f: Expression): boolean {
+  const ce = f.engine;
+  if (isPureEffectSet(inferFunctionLiteralEffects(ce, f).effects)) return true;
+  if (!isFunction(f, 'Function')) return false;
+  const params = new Set(f.ops.slice(1).flatMap(functionLiteralParameterNames));
+  const locals = blockLocalParameters(f, params);
+  if (locals.length === 0) return false;
+  const literal = ce._fn('Function', [
+    ...f.ops,
+    ...locals.map((name) => ce.box(name, { form: 'raw' })),
+  ]);
+  return isPureEffectSet(inferFunctionLiteralEffects(ce, literal).effects);
+}
+
+/**
+ * The names bound in the scope of a `Block` of `expr`, other than those of
+ * `exclude`, that can be parameters of a function literal with `expr` as its
+ * body for the inference of its effects.
+ *
+ * A name bound in the scope of a block is a local of the block: an
+ * assignment to a name that an outer scope declares writes the outer
+ * binding, and the block scope does not bind that name (`canonicalBlock()`,
+ * `library/control-structures.ts`). A parameter is confined at entry, so a
+ * write to it is not an effect, and the inference does not count the call
+ * of an unannotated parameter. A local that `expr` calls is a parameter only
+ * when no `Declare` binds it and each assignment to it is a `Function`
+ * literal, which `isPreviewPureLiteral` checks too: `h := H` followed by
+ * `h(1)` calls `H`.
+ */
+function blockLocalParameters(
+  expr: Expression,
+  exclude: ReadonlySet<string>
+): string[] {
+  const names = new Set<string>();
+  for (const block of expr.getSubexpressions('Block')) {
+    const bindings = block.localScope?.bindings;
+    if (bindings === undefined) continue;
+    for (const [name, def] of bindings)
+      if (isValueDef(def) && !exclude.has(name)) names.add(name);
+  }
+  const writes = (operator: string, name: string) =>
+    expr
+      .getSubexpressions(operator)
+      .filter((x) => isFunction(x) && x.op1.symbols.includes(name));
+  return [...names].filter(
+    (name) =>
+      !callsIndex(expr, name) ||
+      (writes('Declare', name).length === 0 &&
+        writes('Assign', name).every(
+          (x) =>
+            isFunction(x) && isSymbol(x.op1) && isFunction(x.op2, 'Function')
+        ))
+  );
+}
+
+/** `expr`, with the body of each `Function` literal replaced by `Nothing`.
+ * The parameters are kept. */
+function withoutLiteralBodies(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  const ce = expr.engine;
+  if (expr.operator === 'Function')
+    return ce._fn('Function', [ce.Nothing, ...expr.ops.slice(1)]);
+  const ops = expr.ops.map(withoutLiteralBodies);
+  if (ops.every((x, i) => x === expr.ops[i])) return expr;
+  return ce._fn(expr.operator, ops);
+}
+
+/**
+ * For each index of the `Element` clauses of `expr`, whether a call of the
+ * index is proven pure: the index is one symbol, and its source is a `List`
+ * or `Set` literal of `Function` literals whose inferred effects are pure.
+ * With `H` declared `pure: false`, a call of the index of
+ * `[q(1) for q in [a ↦ H(a)]]` is not pure, and neither is a call of an
+ * index whose source is a symbol, a view or any other expression: the
+ * functions such a source supplies are not known before the evaluation. A
+ * call of an index of two clauses is pure only when both clauses qualify.
+ */
+function indexCallVerdicts(expr: BoxedFunction): Map<string, boolean> {
+  const ce = expr.engine;
+  const verdicts = new Map<string, boolean>();
+  for (const clause of expr.getSubexpressions('Element')) {
+    if (!isFunction(clause)) continue;
+    const source = clause.op2;
+    const pure =
+      isSymbol(clause.op1) &&
+      (isFunction(source, 'List') || isFunction(source, 'Set')) &&
+      source.ops.every(
+        (f) =>
+          isFunction(f, 'Function') &&
+          isPureEffectSet(inferFunctionLiteralEffects(ce, f).effects)
+      );
+    for (const s of clause.op1.symbols)
+      verdicts.set(s, pure && (verdicts.get(s) ?? true));
+  }
+  return verdicts;
+}
+
+/**
+ * The `Function` literals of `expr`, and those of the values of the symbols
+ * of `expr`: with `fs := [a ↦ H(a)]`, the preview of `Map(w ↦ w(1), fs)`
+ * calls the literal of `fs`. Reading the value of a symbol does not
+ * evaluate anything. The values of the symbols in a value are not read.
+ */
+function heldFunctionLiterals(expr: Expression): Expression[] {
+  const ce = expr.engine;
+  const literals = [...expr.getSubexpressions('Function')];
+  for (const name of expr.symbols) {
+    const def = ce.lookupDefinition(name);
+    if (!isValueDef(def)) continue;
+    const value = def.value.value;
+    if (value !== undefined && value !== null)
+      literals.push(...value.getSubexpressions('Function'));
+  }
+  return literals;
+}
+
+/** Whether `expr` calls the symbol `name`: an application with `name` as
+ * its operator (`q(1)`), or an `Apply` of it (`Apply(q, 1)`). */
+function callsIndex(expr: Expression, name: string): boolean {
+  if (expr.getSubexpressions(name).length > 0) return true;
+  return expr
+    .getSubexpressions('Apply')
+    .some((x) => isFunction(x) && isSymbol(x.op1) && x.op1.symbol === name);
 }
 
 /**
@@ -14624,7 +14871,11 @@ function* materializationSteps(
   def: BoxedOperatorDefinition,
   options?: Partial<EvaluateOptions>
 ): MaterializationSteps {
-  if (!expr.isValid || options?.materialization === false) return expr;
+  // A view whose only errors sit in the cells of a `List` or `Set` literal
+  // is materialized like a valid one: each element it gives is a value,
+  // the failed cell included (`Reverse([1, <error>])` is `[<error>, 1]`).
+  if (isInvalidNonCollection(expr) || options?.materialization === false)
+    return expr;
 
   // A view that reads its source by a position computed from the count of
   // the source (`Reverse`, `Most`, `RotateLeft`, `RotateRight`) cannot walk a

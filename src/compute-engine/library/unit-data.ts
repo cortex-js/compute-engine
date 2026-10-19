@@ -15,6 +15,8 @@ export {
   areCompatibleUnits,
   convertUnit,
   unitConversionCoefficients,
+  exactUnitConversion,
+  decimalFraction,
   getExpressionDimension,
   getExpressionScale,
   parseUnitDSL,

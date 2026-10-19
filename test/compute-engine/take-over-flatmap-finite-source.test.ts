@@ -119,10 +119,14 @@ describe('the callback of the FlatMap is applied once for each element', () => {
   });
 
   test('the display of a Take of a FlatMap', () => {
-    // `evaluate()` keeps the lazy form, and its display materializes the
-    // first elements.
+    // `evaluate()` keeps the lazy form. Its callback calls `Tick`, which is
+    // declared `pure: false`, so the display prints the view as written and
+    // does not call `Tick`: printing never runs a side effect
+    // (`previewRunsEffect()`, `boxed-expression/boxed-function.ts`).
     const { ce, calls } = counting();
-    expect(take(ce).evaluate().toString()).toBe('[1]');
-    expect(calls()).toBe(1);
+    expect(take(ce).evaluate().toString()).toBe(
+      'Take(FlatMap([1,2], (x) => [Tick()]), 1)'
+    );
+    expect(calls()).toBe(0);
   });
 });

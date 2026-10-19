@@ -5,6 +5,7 @@ import {
 } from './utils.js';
 
 import { flatten } from './flatten.js';
+import { isInvalidNonCollection } from './error-value.js';
 import { order, sortAddTerms } from './order.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
 import { Type } from '../../common/type/types.js';
@@ -551,7 +552,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
  */
 export function addArray(xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
-  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+  if (xs.some(isInvalidNonCollection)) return xs[0].engine._fn('Add', xs);
 
   // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
   // this a notational sum; stay inert (do not fold via `Terms`).
@@ -684,7 +685,7 @@ export function addNEvaluated(
   numeric?: ReadonlyArray<boolean>
 ): Expression {
   console.assert(xs.length > 0);
-  if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
+  if (xs.some(isInvalidNonCollection)) return xs[0].engine._fn('Add', xs);
 
   // Ellipsis fold barrier: stay inert for a notational sum.
   if (xs.some((x) => isContinuationOperand(x)))

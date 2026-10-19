@@ -51,6 +51,7 @@ import {
   isInexactOperand,
 } from '../boxed-expression/type-guards.js';
 import { exactOrder } from '../boxed-expression/compare.js';
+import { failedCellError } from '../boxed-expression/error-value.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
@@ -2053,6 +2054,12 @@ function collectData(
       for (const v of op.each()) {
         walked += 1;
         sawData = true;
+        // A failed cell (an element that is, or holds, an `Error`) is a
+        // datum the statistic demands, so its error is the answer, as for
+        // `Sum` and `Max`. It outranks an absent datum: an error is a defect
+        // of the program, an absent datum is not.
+        const failed = failedCellError(v);
+        if (failed !== undefined) return failed;
         if (isAbsentValue(v)) absent = true;
         else if (v.isIndeterminate) indeterminate = true;
         else if (isRealConstantDatum(v)) data.push(v);

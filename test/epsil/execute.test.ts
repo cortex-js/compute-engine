@@ -229,9 +229,17 @@ describe('EPSIL EXECUTE — errors are values', () => {
   test('reassigning a const yields an Error value (no throw)', () => {
     const { value, diagnostics } = run('const c = 1\nc = 2');
     // The engine throws on a const reassignment; executeEpsil catches it and
-    // captures an `["Error", …]` value instead of propagating.
+    // captures an `["Error", …]` value, with the code `constant-assignment`,
+    // instead of propagating. The static check reports the assignment before
+    // the program runs.
     expect(value.operator).toBe('Error');
-    expect(diagnostics).toEqual([]);
+    expect(value.json).toEqual([
+      'Error',
+      ['ErrorCode', "'constant-assignment'", "'c'"],
+    ]);
+    expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
+      ['static-type-error', 'constant-assignment'],
+    ]);
   });
 });
 
@@ -385,14 +393,26 @@ describe('EPSIL EXECUTE — runtime problems in non-final statements', () => {
   });
 
   test('a mid-program const reassignment surfaces as a diagnostic', () => {
+    // The static check reports it, and the run does not report it again.
     const { value, diagnostics } = run('const c = 1\nc = 2\nc + 1');
     expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message[0]).toBe('static-type-error');
+    expect(diagnostics[0].message[3]).toBe('constant-assignment');
+    expect(value.re).toBe(2);
+  });
+
+  test('a mid-program runtime problem surfaces as a diagnostic', () => {
+    // A library constant: the static check does not report the assignment,
+    // so the run reports it, with the engine code.
+    const { value, diagnostics } = run('Pi = 3\n1 + 1');
+    expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].message[0]).toBe('runtime-error');
+    expect(diagnostics[0].message[3]).toBe('constant-assignment');
     expect(value.re).toBe(2);
   });
 
   test('a final-statement error stays in value, with no diagnostic', () => {
-    const { value, diagnostics } = run('const c = 1\nc = 2');
+    const { value, diagnostics } = run('let half = (n) => n / 2\nhalf("ten")');
     expect(diagnostics).toEqual([]);
     expect(value.operator).toBe('Error');
   });

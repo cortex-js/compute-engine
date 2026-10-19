@@ -39,6 +39,7 @@ import { narrowToFrames, traceFrames } from './error-location.js';
 import { signatureNotes } from './signature-notes.js';
 import {
   calleeSlotNamesResolver,
+  constantAssignmentError,
   describeError,
   errorCode,
   frameOrderOf,
@@ -325,6 +326,10 @@ function executeEpsilBatch(
     // reassigning a `const`, or a cap breach such as `timeLimit`/
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
+    // The name of the constant and the source range of the assignment, when
+    // the statement threw the engine's `ConstantAssignmentError`.
+    let constantName: string | undefined;
+    let constantSite: [number, number] | undefined;
     valueRange = statementRange(stmt, source);
     valueStatement = stmt;
     // The name a top-level `let` of this statement re-declares, if any (see
@@ -387,15 +392,20 @@ function executeEpsilBatch(
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       cancellation = cancellationCause(e);
+      constantName = constantAssignmentName(e);
+      constantSite = constantAssignmentSite(e);
       // A cancellation (cap breach) carries a machine-readable `cause` as a
       // second Error operand — additively, so the message operand (which hosts
       // may still string-match, e.g. "Operation canceled" /
-      // "Recursion limit exceeded") is unchanged. Non-cancellation throws keep
-      // the single-operand shape.
+      // "Recursion limit exceeded") is unchanged. An assignment to a constant
+      // becomes an error value with the code `constant-assignment`. Other
+      // throws keep the single-operand shape.
       value =
         cancellation !== undefined
           ? ce.box(['Error', { str: message }, { str: cancellation }])
-          : ce.box(['Error', { str: message }]);
+          : constantName !== undefined
+            ? ce.box(constantAssignmentError(constantName))
+            : ce.box(['Error', { str: message }]);
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;
     }
@@ -460,6 +470,31 @@ function executeEpsilBatch(
             d.message[0] === 'static-type-error' &&
             d.message[3] === 'invalid-clause-definition' &&
             d.range[0] === statementRange(stmt, source)[0]
+        )) ||
+      // An assignment to a `const` of the program: the static check reports
+      // it as a `static-type-error` with the engine code
+      // `constant-assignment`, at the range of the `Assign` node. The
+      // assignment can be in a function body that this statement calls. The
+      // engine records on the error the source range of the `Assign` node
+      // that made the write (`constantSite`). The run-time error is the
+      // problem of a static report only when the two ranges are the same and
+      // the report names the same constant. A match by name alone is not
+      // sufficient: the same name can be a constant of the program, a local
+      // constant of a function, and a constant outside the program (a library
+      // constant such as `Pi`, a constant of an earlier program), and a
+      // statement can make a write that the static check did not report. Such
+      // a write is reported here.
+      (markerError !== undefined &&
+        errorCode(markerError.json) === 'constant-assignment' &&
+        constantSite !== undefined &&
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'static-type-error' &&
+            d.message[3] === 'constant-assignment' &&
+            d.message[1] === describeError(markerError.json) &&
+            d.range[0] === constantSite?.[0] &&
+            d.range[1] === constantSite?.[1]
         ));
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
@@ -1416,6 +1451,32 @@ function cancellationCause(e: unknown): CancellationCause | undefined {
   )
     return cause;
   return undefined;
+}
+
+/** The name of the constant when `e` is the error that the engine throws
+ * for an assignment to a constant (`ConstantAssignmentError`), else
+ * `undefined`. The class is checked by name, since an `instanceof` fails
+ * across bundle boundaries. */
+function constantAssignmentName(e: unknown): string | undefined {
+  if (!(e instanceof Error) || e.name !== 'ConstantAssignmentError')
+    return undefined;
+  const name = (e as { constantName?: unknown }).constantName;
+  return typeof name === 'string' ? name : undefined;
+}
+
+/** The source range of the `Assign` node that made the write, when `e` is
+ * the error that the engine throws for an assignment to a constant and the
+ * node has source offsets, else `undefined` (see
+ * `ConstantAssignmentError.sourceOffsets`). */
+function constantAssignmentSite(e: unknown): [number, number] | undefined {
+  if (constantAssignmentName(e) === undefined) return undefined;
+  const site = (e as { sourceOffsets?: unknown }).sourceOffsets;
+  return Array.isArray(site) &&
+    site.length === 2 &&
+    typeof site[0] === 'number' &&
+    typeof site[1] === 'number'
+    ? [site[0], site[1]]
+    : undefined;
 }
 
 /** Build an execution-phase diagnostic. */

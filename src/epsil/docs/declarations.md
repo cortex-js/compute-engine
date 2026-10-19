@@ -191,7 +191,15 @@ c = 2
 ```
 
 `c = 2` still parses as a perfectly ordinary assignment; the failure happens at
-evaluation time, and its result is an error value.
+evaluation time, and its result is an error value. Because the `const` is in the
+same program, `epsil check` also reports the assignment before anything runs
+(`constant-assignment`), wherever it is: at the top level, in a block, a loop
+body or a function body. This holds for a `const` at any depth, and for each
+name of a destructuring `const`. A function defined before the `const` is
+included: its body finds the name when the function is called, so an
+assignment in it writes the constant when the call comes after the `const`.
+An assignment to a `let` or a parameter that shadows
+the constant is not reported.
 
 A declaration with no initializer declares the name without giving it a value:
 

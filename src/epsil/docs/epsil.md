@@ -55,8 +55,8 @@ Errors are ordinary values, so a program never throws to its host — a problem
 surfaces as an `Error` value or a diagnostic:
 
 ```epsil-live
-const answer = 42
-answer = 0
+let half = (n) => n / 2
+half("ten")
 ```
 
 ## Guide

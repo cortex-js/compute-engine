@@ -1,4 +1,5 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
+import { CancellationError } from '../../common/interruptible.js';
 import { isFunction, isNumber, isString } from './type-guards.js';
 
 /**
@@ -21,13 +22,179 @@ const STRUCTURAL_CONTAINERS = new Set(['Dictionary', 'KeyValuePair']);
  * Derived from the DEFINITION (the `collection` handler block the engine uses
  * to decide collection-ness everywhere else), not from a name list; the
  * literal set above only fills in the two structural containers that have no
- * such block. Deliberately NOT `expr.isCollection`, which is hard-wired to
- * `false` for an invalid expression — the only case that reaches here.
+ * such block. Deliberately NOT `expr.isCollection`, which is `false` for
+ * most invalid expressions (all but the literals of
+ * `isIterableWithFailedCells()`) — the only case that reaches here.
  */
 export function isCollectionHead(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   if (STRUCTURAL_CONTAINERS.has(expr.operator)) return true;
   return expr.baseDefinition?.collection !== undefined;
+}
+
+/**
+ * True when `expr` is a `List` or a `Set` literal. Such a literal is a
+ * collection that can be iterated also when it holds a failed cell (an
+ * element that is, or embeds, an `Error`): the error is a failure of that
+ * element, not of the container (`docs/ERROR-MODEL.md` §3). Its count is the
+ * number of its operands, and a walk of its elements gives the failed cell as
+ * the value of that element. A loop body, a `Map` callback or a comprehension
+ * body then receives an `Error` value, and the ordinary error rules apply to
+ * what it computes with it.
+ *
+ * The tree stays invalid (`isValid` is `false`, and `.errors` lists the
+ * error), so this is a test of the HEAD only: the caller has already found
+ * the tree invalid. A `Tuple` is not included: a tuple is one value (a
+ * point), not a sequence of independent elements, so a failed coordinate
+ * keeps the whole tuple frozen.
+ */
+export function isIterableWithFailedCells(expr: Expression): boolean {
+  return (
+    isFunction(expr) && (expr.operator === 'List' || expr.operator === 'Set')
+  );
+}
+
+/**
+ * True when `expr` is an invalid tree that is not a collection value: an
+ * operator that reads `expr` as a collection must decline (or keep the error
+ * in place), as for any other invalid operand.
+ *
+ * `false` for a valid tree, for a `List` or `Set` literal that holds a failed
+ * cell (`isIterableWithFailedCells()`), and for a collection operator (a view
+ * such as `Map`, `Take` or `Reverse`) whose only errors sit in the cells of
+ * such literals: these are collections that can be iterated, and their
+ * elements give the failed cell as a value.
+ */
+export function isInvalidNonCollection(expr: Expression): boolean {
+  if (expr.isValid || isIterableWithFailedCells(expr)) return false;
+  return !(isCollectionHead(expr) && failedCellsAreIterable(expr));
+}
+
+/**
+ * True when every `Error` in the operands of `expr` sits in a cell of a
+ * `List` or `Set` literal (`isIterableWithFailedCells()`), so that an
+ * operator can read such an operand as a collection value: `Length([1, err,
+ * 3])` counts it, `Map(f, [1, err, 3])` applies `f` to each cell.
+ *
+ * Read only when the error walks have found no error that bubbles (no error
+ * outside a collection literal, none under a selecting head): the errors
+ * that remain are inside collection literals. When one of them is inside a
+ * `Tuple`, a `Dictionary` or a `KeyValuePair` literal instead, the answer is
+ * `false`, and the node keeps the failed value frozen in place.
+ */
+export function failedCellsAreIterable(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  let found = false;
+  for (const op of expr.ops) {
+    if (op.isValid) continue;
+    if (isIterableWithFailedCells(op)) {
+      found = true;
+      continue;
+    }
+    if (isFunction(op, 'Error') || COLLECTION_OPERATORS.has(op.operator))
+      return false;
+    if (!failedCellsAreIterable(op)) return false;
+    found = true;
+  }
+  return found;
+}
+
+/**
+ * The error of a failed cell: the first `Error` at any depth of `cell`, or
+ * `undefined` when `cell` is valid. An operator that demands the value of a
+ * cell (`Sum`, `Max`, `Mean`, `Sort`) answers this error.
+ *
+ * Unlike `errorValue()`, this walk also goes into collection literals: the
+ * cell `[1, <error>]` of the list of lists `[[1, <error>], 2]` gives
+ * `<error>`. It never gives the cell itself, so `Mean([[1, <error>], 2])` is
+ * the error, not the inner list. An error found by `errorValue()` keeps the
+ * breadcrumb that `errorValue()` builds.
+ */
+export function failedCellError(cell: Expression): Expression | undefined {
+  if (cell.isValid) return undefined;
+  const err = errorValue(cell);
+  if (err !== undefined) return err;
+  if (isFunction(cell) && COLLECTION_OPERATORS.has(cell.operator)) {
+    for (const op of cell.ops) {
+      const inner = failedCellError(op);
+      if (inner !== undefined) return inner;
+    }
+  }
+  return cell.errors[0];
+}
+
+/**
+ * The error of the first failed element of the collection `xs` (an element
+ * that is, or holds, an `Error`: `failedCellError()`), `undefined` when `xs`
+ * has none or cannot be walked, or `'incomplete'` when the walk stopped
+ * before the end.
+ *
+ * An operator whose answer depends on the value of an element that it did
+ * not match answers this error when no valid element decides the answer:
+ * `Element(2, [1, <error>])` is the error (the failed cell could be `2`),
+ * while `Element(1, [1, <error>])` is `True`. On `'incomplete'`, a failed
+ * element may come after the elements that were read, so a definite answer
+ * such as `False` is not known.
+ *
+ * Only a finite `xs` that can hold a failed element is walked
+ * (`mayHoldFailedElement()`). A `List` or `Set` literal holds its elements
+ * in memory and is walked in full. Any other collection (a lazy view) is
+ * walked at most `maxCollectionSize` elements, and a walk that reaches that
+ * bound or the iteration limit is `'incomplete'`. A collection that cannot
+ * hold a failed element (a valid list literal, a `Range`, an `Interval`) is
+ * not walked, so an arithmetic membership test such as
+ * `Element(0.5, Range(1, 10^6))` stays a test with no walk.
+ */
+export function firstFailedElementError(
+  xs: Expression
+): Expression | 'incomplete' | undefined {
+  if (!mayHoldFailedElement(xs) || xs.isFiniteCollection !== true)
+    return undefined;
+  const literal =
+    (isFunction(xs, 'List') || isFunction(xs, 'Set')) &&
+    xs.isLazyCollection !== true;
+  const cap = xs.engine.maxCollectionSize;
+  let n = 0;
+  try {
+    for (const x of xs.each()) {
+      const failed = failedCellError(x);
+      if (failed !== undefined) return failed;
+      if (!literal && ++n >= cap) return 'incomplete';
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return 'incomplete';
+    throw e;
+  }
+  return undefined;
+}
+
+/**
+ * True when an element of the collection `xs` can be a failed cell:
+ *
+ * - `xs` is invalid: a `List` or `Set` literal that holds a failed cell, or
+ *   a view over one (`Reverse([1, <error>])`);
+ * - `xs` is a lazy view that computes its elements by evaluating something
+ *   for each element (`Map`, `Filter`, a comprehension: the operators that
+ *   set the `elementMemo` flag of their collection handlers), or a view
+ *   over one (`Take(Map(h, xs), 2)`). With `h(2)` an error, `Map(h, [1, 2])`
+ *   is valid but its second element is that error.
+ *
+ * A view that only reads the elements of valid sources (`Range`,
+ * `Interval`, `Take`, `Reverse` over a valid list) cannot. A second walk of
+ * an `elementMemo` view reads the memoized elements: it does not apply the
+ * function again.
+ */
+export function mayHoldFailedElement(xs: Expression): boolean {
+  if (!xs.isValid) return true;
+  if (!isFunction(xs)) return false;
+  if (xs.baseDefinition?.collection?.elementMemo === true) return true;
+  return xs.ops.some(
+    (op) => op.isLazyCollection === true && mayHoldFailedElement(op)
+  );
 }
 
 /**
@@ -98,9 +265,11 @@ export type ErrorFrame = { operator: string; index: number };
  * **Collections are not descended into.** An error inside a collection
  * literal is an error in one ELEMENT, not a failure of the collection: making
  * `f([1, "a" + 1])` bubble would discard the whole list (and every valid
- * element in it) to report one cell. Such an application freezes as before.
- * An invalid non-collection tree (`Error(…) + 1`) still bubbles its first
- * error. This is why the walk here is a bounded mirror of `.errors`
+ * element in it) to report one cell. Such an application reads the cells of
+ * a `List` or `Set` literal (`failedCellsAreIterable()`), and freezes over a
+ * `Tuple`, `Dictionary` or `KeyValuePair` literal. An invalid non-collection
+ * tree (`Error(…) + 1`) still bubbles its first error. This is why the walk
+ * here is a bounded mirror of `.errors`
  * (`getSubexpressions('Error')`, which descends everywhere) rather than a
  * call to it.
  *

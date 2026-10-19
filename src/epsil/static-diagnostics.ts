@@ -69,7 +69,7 @@ import {
 } from '../compute-engine/boxed-expression/type-guards.js';
 
 import type { ParsingDiagnostic } from './diagnostics.js';
-import { documentBindings } from './occurrences.js';
+import { documentBindings, type BindingGroup } from './occurrences.js';
 import { binderSitesOf } from './resolve-library-names.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
@@ -834,6 +834,41 @@ function canonicalizationDiagnostics(
   // the refusal (see `constantClauseDiagnostic()`).
   const constants = new Map<string, [number, number]>();
 
+  // The constants of this program, as the scope-aware walk of the program
+  // (`documentBindings()`) groups the occurrences of their names: each group
+  // of a `const` binding. The assignments to such a constant, which the run
+  // time refuses, are found once, when the constant is registered
+  // (`registerConstant()`), and each is reported with the statement that
+  // holds it. The walk is made only when the program declares a constant.
+  //
+  // A `const` in a function body or a block is registered here, before the
+  // walk of the statements: its assignments are in the same top-level
+  // statement as the declaration. A top-level `const` is registered when the
+  // walk reaches it, because the walk then knows whether the run time
+  // installs it (see below). Then the assignments to it in the function
+  // bodies of the earlier statements are reported at once (a function
+  // defined before the `const` writes the constant when it is called after
+  // it).
+  let constantWrites: ConstantWrites | undefined = undefined;
+  const topLevel = new Set(statements);
+  const localConstants = constantDeclarations(ast).filter(
+    (declaration) => !topLevel.has(declaration)
+  );
+  if (localConstants.length > 0) {
+    constantWrites = constantWritesOf(ce, ast, source, statements);
+    for (const declaration of localConstants) {
+      const range = statementRange(declaration, source);
+      for (const group of declaredGroups(constantWrites.byName, declaration))
+        if (
+          !isRefusedLocalConstant(
+            group,
+            constantWrites.byName.get(group.name) ?? []
+          )
+        )
+          registerConstant(constantWrites, group, range, -1);
+    }
+  }
+
   // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
   // where. A pass-local map, deliberately not the runtime batch stamp: the
   // static checker also runs with no batch at all (`epsil check` calls
@@ -874,7 +909,9 @@ function canonicalizationDiagnostics(
 
   diagnostics.push(...absenceMarkerBindingDiagnostics(ce, ast, source));
 
+  let statementIndex = -1;
   for (const statement of statements) {
+    statementIndex += 1;
     const redefinition = redefinitionDiagnostic(
       statement,
       source,
@@ -894,6 +931,8 @@ function canonicalizationDiagnostics(
       constants
     );
     if (constantClause !== undefined) diagnostics.push(constantClause);
+    if (constantWrites !== undefined)
+      diagnostics.push(...(constantWrites.pending.get(statementIndex) ?? []));
 
     // A rule (`name -> value`) passed where the callee expects a function is
     // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
@@ -1027,11 +1066,29 @@ function canonicalizationDiagnostics(
     if (declMismatch === undefined) registerPinnedSignature(ce, boxed, pinned);
 
     // A `const` declaration that the run time installs makes a later
-    // `function` statement for the same name a runtime error.
-    if (declMismatch === undefined) {
+    // `function` statement for the same name, and a later assignment to it,
+    // a runtime error. A `const` that re-declares a name of this program is
+    // refused at run time (`variable-redeclaration`), so the binding of the
+    // name stays the earlier one, which is not a constant when it is a
+    // `let`.
+    if (declMismatch === undefined && variableRedeclaration === undefined) {
       const name = constantDeclarationName(boxed);
       if (name !== undefined)
         constants.set(name, statementRange(statement, source));
+      // Each name of a destructuring `const` (`const (a, b) = t`) is a
+      // constant too.
+      if (isConstantDeclaration(statement)) {
+        const range = statementRange(statement, source);
+        constantWrites ??= constantWritesOf(ce, ast, source, statements);
+        // The assignments to the constant in the statements before it and in
+        // this statement (each is in a function body, see
+        // `writesFromFunctionBodies()`) are reported now. The assignments in
+        // the later statements are reported when the walk reaches them.
+        for (const group of declaredGroups(constantWrites.byName, statement))
+          diagnostics.push(
+            ...registerConstant(constantWrites, group, range, statementIndex)
+          );
+      }
     }
 
     // The statement's ASSIGNMENT type effect, visible to the LATER statements
@@ -2163,6 +2220,424 @@ function constantClauseDiagnostic(
   };
 }
 
+/**
+ * The data that the static pass uses to find the assignments to the
+ * constants of the program. Made once for the program, when the program
+ * declares a constant.
+ */
+type ConstantWrites = {
+  /** The binding groups of the scope-aware walk of the program
+   * (`documentBindings()`), by name. */
+  byName: Map<string, BindingGroup[]>;
+  /** The top-level statements, and the source range of each. */
+  statements: MathJsonExpression[];
+  statementRanges: [number, number][];
+  source: string;
+  /** The constants that are registered. */
+  registered: Set<BindingGroup>;
+  /** The source ranges of the function literals of the program. Made when
+   * a constant first needs them. */
+  functionRanges: [number, number][] | undefined;
+  /** The reports for the statements that the pass did not reach yet, by
+   * the index of the statement. */
+  pending: Map<number, ParsingDiagnostic[]>;
+};
+
+function constantWritesOf(
+  ce: ComputeEngine,
+  ast: MathJsonExpression,
+  source: string,
+  statements: MathJsonExpression[]
+): ConstantWrites {
+  const byName = new Map<string, BindingGroup[]>();
+  for (const group of documentBindings(ast, source, {
+    binderSites: (node) => binderSitesOf(ce, node, source),
+  })) {
+    const named = byName.get(group.name);
+    if (named === undefined) byName.set(group.name, [group]);
+    else named.push(group);
+  }
+  return {
+    byName,
+    statements,
+    statementRanges: statements.map((s) => statementRange(s, source)),
+    source,
+    registered: new Set(),
+    functionRanges: undefined,
+    pending: new Map(),
+  };
+}
+
+/** The index of the top-level statement that holds the source range
+ * `[start, end]`, else `-1`. The statements are in source order, so the
+ * search is a binary search on their start offsets. */
+function statementHolding(
+  writes: ConstantWrites,
+  start: number,
+  end: number
+): number {
+  const ranges = writes.statementRanges;
+  let low = 0;
+  let high = ranges.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (ranges[middle][0] <= start) {
+      found = middle;
+      low = middle + 1;
+    } else high = middle - 1;
+  }
+  return found >= 0 && end <= ranges[found][1] ? found : -1;
+}
+
+/**
+ * Register the constant of `group`, declared at the range `declared`, and
+ * find each assignment to it: a binding of a `const` declaration of this
+ * program, a top-level `const` or a `const` in a function body or a block.
+ * At run time the assignment throws (the engine's
+ * `ConstantAssignmentError`), and the binding keeps its value.
+ *
+ * The reports for the statements up to the statement of index `current`
+ * are returned, for the pass to report now. The reports for the later
+ * statements are kept in `writes.pending`, and the pass reports them when
+ * it reaches each statement. A `const` in a function body or a block is
+ * registered before the pass reaches any statement (`current` is `-1`).
+ *
+ * The scope-aware walk of the program (`documentBindings()`) records an
+ * assignment to a visible binding as a `write` occurrence of the group of
+ * that binding. So a write anywhere is found: at the top level (`c = 2`), in
+ * a block or a loop body (`if t { c = 2 }`), in a function body, and in each
+ * leaf of a destructuring assignment (`(a, c) := (3, 4)`). An assignment to
+ * a binding that shadows the constant (a `let c`, a parameter `c`, a loop
+ * variable `c`) is in the group of that binding, and is not reported. An
+ * indexed assignment (`c[1] = 2`) is not a `write` of `c`: it does not
+ * replace the binding (the engine refuses an indexed assignment to any
+ * binding, with another error).
+ *
+ * The walk resolves a write that comes before a `let` of the same name in
+ * an enclosing block to the outer binding, but at run time the write
+ * targets the local of the block and fails with `read-before-declaration`.
+ * Such a write is not reported here.
+ *
+ * An assignment in a function body that comes before the `const` is not a
+ * `write` of the group: the walk makes it a declaration of a new binding.
+ * But the function body finds the name when it runs, so the assignment
+ * writes the constant when the function is called after the `const`. Such
+ * assignments are reported too (`writesFromFunctionBodies()`).
+ *
+ * Each diagnostic is a `static-type-error` that carries the engine code
+ * `constant-assignment`, at the assignment, with a note on the `const`
+ * declaration. The description is the one the run time gives for the error
+ * value (`constantAssignmentError()`). `executeEpsil()` does not report the
+ * run-time error a second time when the engine reports the same
+ * assignment: the same source range of the `Assign` node.
+ *
+ * The cost is in proportion to the number of bindings with the name of the
+ * constant, not to the size of the program: a program of many constants is
+ * checked in linear time.
+ */
+function registerConstant(
+  writes: ConstantWrites,
+  group: BindingGroup,
+  declared: [number, number],
+  current: number
+): ParsingDiagnostic[] {
+  if (writes.registered.has(group)) return [];
+  writes.registered.add(group);
+  const named = writes.byName.get(group.name) ?? [];
+  const occurrences = group.occurrences.filter((occurrence) => {
+    if (occurrence.role !== 'write') return false;
+    const shadowed = named.some(
+      (other) =>
+        other !== group &&
+        other.kind !== 'free' &&
+        other.scope[0] <= occurrence.start &&
+        occurrence.end <= other.scope[1] &&
+        group.scope[0] <= other.scope[0] &&
+        other.scope[1] <= group.scope[1] &&
+        (other.scope[0] !== group.scope[0] || other.scope[1] !== group.scope[1])
+    );
+    return !shadowed;
+  });
+  occurrences.push(...writesFromFunctionBodies(writes, group, named));
+  occurrences.sort((a, b) => a.start - b.start);
+
+  const now: ParsingDiagnostic[] = [];
+  for (const occurrence of occurrences) {
+    const index = statementHolding(writes, occurrence.start, occurrence.end);
+    if (index < 0) continue;
+    const statement = writes.statements[index];
+    const assignment =
+      assignmentWriting(statement, occurrence.start) ?? statement;
+    const [start, end] = statementRange(assignment, writes.source);
+    const diagnostic: ParsingDiagnostic = {
+      severity: 'error',
+      message: [
+        'static-type-error',
+        describeError(constantAssignmentError(group.name)),
+        epsilSnippet(assignment),
+        'constant-assignment',
+      ],
+      range: [start, end, start],
+      notes: [
+        {
+          message: `\`${group.name}\` is declared constant here`,
+          range: declared,
+        },
+      ],
+    };
+    if (index <= current) now.push(diagnostic);
+    else {
+      const later = writes.pending.get(index);
+      if (later === undefined) writes.pending.set(index, [diagnostic]);
+      else later.push(diagnostic);
+    }
+  }
+  return now;
+}
+
+/**
+ * The assignments that write the constant of `group` when they run, but
+ * that the scope-aware walk does not record as a `write` of `group`: the
+ * assignments in a function body (a `function` statement or a function
+ * literal) that comes before the `const` in the scope of the constant.
+ * `named` holds the binding groups with the name of the constant.
+ *
+ * Where the `const` is not yet visible, the walk makes such an assignment
+ * the declaration of a new binding (a bare `c = 2` declares), in the
+ * innermost block. At run time a function body finds the name when the
+ * function is called. So when the call is after the `const`, the assignment
+ * writes the constant, and the engine refuses it:
+ *
+ * ```
+ * function f() scope -> integer { c = 2; 0 }
+ * const c = 1
+ * f()          // the assignment `c = 2` writes the constant
+ * ```
+ *
+ * The report does not depend on the calls: the assignment is reported also
+ * when the function is not called, or is called only before the `const`
+ * (then the assignment makes a local binding). The rule is that the
+ * assignment targets the constant of the program.
+ *
+ * Such a binding is reported when:
+ * - it has the name of the constant, and its scope is in the scope of the
+ *   constant and in a function body that is in the scope of the constant;
+ * - each of its declarations is an assignment (not a `let` or a `const`,
+ *   which make a real local binding);
+ * - no other binding of the name, other than such a binding, has a scope
+ *   that contains it and is in the scope of the constant. A `let`, a
+ *   parameter or a loop variable of the name in an enclosing scope of the
+ *   function is the binding that the assignment writes at run time.
+ *
+ * Each declaration and each `write` of such a binding is an assignment that
+ * is returned.
+ */
+function writesFromFunctionBodies(
+  writes: ConstantWrites,
+  group: BindingGroup,
+  named: BindingGroup[]
+): BindingGroup['occurrences'] {
+  const within = (inner: [number, number], outer: [number, number]) =>
+    outer[0] <= inner[0] && inner[1] <= outer[1];
+  const strictlyWithin = (inner: [number, number], outer: [number, number]) =>
+    within(inner, outer) && (inner[0] !== outer[0] || inner[1] !== outer[1]);
+  const candidates = named.filter(
+    (candidate) =>
+      candidate !== group &&
+      candidate.kind === 'variable' &&
+      strictlyWithin(candidate.scope, group.scope)
+  );
+  if (candidates.length === 0) return [];
+  // A binding whose every declaration is an assignment (`c = 2`).
+  const declaredByAssignment = (binding: BindingGroup) =>
+    binding.occurrences.every((o) => {
+      if (o.role !== 'definition') return true;
+      const index = statementHolding(writes, o.start, o.end);
+      return (
+        index >= 0 &&
+        assignmentWriting(writes.statements[index], o.start) !== undefined
+      );
+    });
+  writes.functionRanges ??= writes.statements.flatMap(functionLiteralRanges);
+  const functions = writes.functionRanges.filter((range) =>
+    strictlyWithin(range, group.scope)
+  );
+  const result: BindingGroup['occurrences'] = [];
+  for (const candidate of candidates) {
+    if (!functions.some((range) => within(candidate.scope, range))) continue;
+    if (!declaredByAssignment(candidate)) continue;
+    const shadowed = named.some(
+      (other) =>
+        other !== group &&
+        other !== candidate &&
+        other.kind !== 'free' &&
+        within(candidate.scope, other.scope) &&
+        strictlyWithin(other.scope, group.scope) &&
+        !(other.kind === 'variable' && declaredByAssignment(other))
+    );
+    if (shadowed) continue;
+    for (const occurrence of candidate.occurrences)
+      if (occurrence.role === 'definition' || occurrence.role === 'write')
+        result.push(occurrence);
+  }
+  return result;
+}
+
+/** The source ranges of the function literals (`Function` nodes) in the raw
+ * expression `expr`, at any depth. A `function` statement holds one too. */
+function functionLiteralRanges(expr: MathJsonExpression): [number, number][] {
+  const result: [number, number][] = [];
+  const visit = (node: MathJsonExpression): void => {
+    if (operator(node) === '') return;
+    if (operator(node) === 'Function') {
+      const span =
+        typeof node === 'object' && !Array.isArray(node)
+          ? (node as { sourceOffsets?: [number, number] }).sourceOffsets
+          : undefined;
+      if (span !== undefined) result.push(span);
+    }
+    for (const op of operands(node)) visit(op);
+  };
+  visit(expr);
+  return result;
+}
+
+/**
+ * The error value of an assignment to the constant `name`. The run time
+ * (`executeEpsil()`) makes this value from the `ConstantAssignmentError`
+ * that the engine throws, and the static check describes the same value, so
+ * both tiers describe the problem with the same words.
+ */
+export function constantAssignmentError(name: string): MathJsonExpression {
+  return [
+    'Error',
+    ['ErrorCode', { str: 'constant-assignment' }, { str: name }],
+  ];
+}
+
+/** Whether the raw node `node` is a `const` declaration:
+ * `["Declare", target, type?, ["Dictionary", …, ["KeyValuePair",
+ * "constant", "True"]]]`. */
+function isConstantDeclaration(node: MathJsonExpression): boolean {
+  if (operator(node) !== 'Declare') return false;
+  const ops = [...operands(node)];
+  const last = ops[ops.length - 1];
+  if (last === undefined || operator(last) !== 'Dictionary') return false;
+  return [...operands(last)].some(
+    (entry) =>
+      operator(entry) === 'KeyValuePair' &&
+      symbol(operand(entry, 1)) === 'constant' &&
+      symbol(operand(entry, 2)) === 'True'
+  );
+}
+
+/** Every `const` declaration in the raw program `ast`, at any depth, in
+ * source order. */
+function constantDeclarations(ast: MathJsonExpression): MathJsonExpression[] {
+  const result: MathJsonExpression[] = [];
+  const visit = (node: MathJsonExpression): void => {
+    if (operator(node) === '') return;
+    if (isConstantDeclaration(node)) result.push(node);
+    for (const op of operands(node)) visit(op);
+  };
+  visit(ast);
+  return result;
+}
+
+/** The names that the target of a declaration binds, each with the source
+ * offset of its name: a symbol, or each leaf of a `Tuple` pattern (`_`
+ * binds nothing). */
+function declarationLeaves(
+  target: MathJsonExpression | null
+): { name: string; start: number }[] {
+  if (target === null) return [];
+  if (operator(target) === 'Tuple')
+    return [...operands(target)].flatMap(declarationLeaves);
+  if (operator(target) === 'Typed')
+    return declarationLeaves(operand(target, 1));
+  const name = symbol(target);
+  const span =
+    typeof target === 'object' && !Array.isArray(target)
+      ? (target as { sourceOffsets?: [number, number] }).sourceOffsets
+      : undefined;
+  if (name === null || name === '_' || span === undefined) return [];
+  return [{ name, start: span[0] }];
+}
+
+/** The binding groups of the names that the declaration `declaration`
+ * binds: for each name, the group with a `definition` occurrence at the
+ * source offset of the name. */
+function declaredGroups(
+  byName: Map<string, BindingGroup[]>,
+  declaration: MathJsonExpression
+): BindingGroup[] {
+  const result: BindingGroup[] = [];
+  for (const leaf of declarationLeaves(operand(declaration, 1))) {
+    const group = (byName.get(leaf.name) ?? []).find((g) =>
+      g.occurrences.some(
+        (o) => o.role === 'definition' && o.start === leaf.start
+      )
+    );
+    if (group !== undefined) result.push(group);
+  }
+  return result;
+}
+
+/**
+ * Whether the run time refuses the `const` of `group`, which is in a
+ * function body or a block, as a re-declaration (`variable-redeclaration`,
+ * found when the block is canonicalized). Then the block or the function
+ * does not run, and the name is not a constant. Two cases:
+ * - The block declares the name a second time (a `let` or a `const` before
+ *   or after it): the scope-aware walk puts both declarations in one group.
+ * - The block is the body of a function that has a parameter of that name,
+ *   or of a loop whose variable has that name. The walk gives the parameter
+ *   or the loop variable a scope that ends where the body ends.
+ */
+function isRefusedLocalConstant(
+  group: BindingGroup,
+  groups: BindingGroup[]
+): boolean {
+  const definitions = group.occurrences.filter((o) => o.role === 'definition');
+  if (definitions.length > 1) return true;
+  return groups.some(
+    (other) =>
+      other !== group &&
+      other.name === group.name &&
+      (other.kind === 'parameter' || other.kind === 'loop') &&
+      other.scope[0] <= group.scope[0] &&
+      other.scope[1] === group.scope[1]
+  );
+}
+
+/** The innermost `Assign` node in `expr` whose target (or a leaf of a
+ * destructuring target) is the symbol written at the source offset
+ * `offset`. */
+function assignmentWriting(
+  expr: MathJsonExpression,
+  offset: number
+): MathJsonExpression | undefined {
+  if (operator(expr) === '') return undefined;
+  for (const op of operands(expr)) {
+    const nested = assignmentWriting(op, offset);
+    if (nested !== undefined) return nested;
+  }
+  if (operator(expr) !== 'Assign') return undefined;
+  const writes = (target: MathJsonExpression | null): boolean => {
+    if (target === null) return false;
+    const head = operator(target);
+    if (head === 'Tuple') return [...operands(target)].some(writes);
+    if (head === 'Typed') return writes(operand(target, 1));
+    const span =
+      typeof target === 'object' && !Array.isArray(target)
+        ? (target as { sourceOffsets?: [number, number] }).sourceOffsets
+        : undefined;
+    return symbol(target) !== null && span?.[0] === offset;
+  };
+  return writes(operand(expr, 1)) ? expr : undefined;
+}
+
 /** The name that `boxed` binds when it is a `const` declaration
  * (`["Declare", name, type?, {constant: True, …}]`), else `undefined`. */
 function constantDeclarationName(
@@ -3155,6 +3630,14 @@ export function describeError(error: MathJsonExpression): string {
           : `\`${name}\` is not a protocol function${type === undefined ? '' : ` on a value of type \`${type}\``}: write \`${name}(x)\` or \`x |> ${name}\``;
       break;
     }
+    case 'constant-assignment':
+      // Payload: [name]. The words of the message of the error that the
+      // engine throws (`ConstantAssignmentError`).
+      detail =
+        payload.length === 0
+          ? 'cannot assign a value to a constant'
+          : `cannot assign a value to the constant \`${payload[0]}\``;
+      break;
     default: {
       // A kebab-case code reads as words; a free-form message (a thrown
       // `Error`'s text captured as the cause) passes through verbatim.

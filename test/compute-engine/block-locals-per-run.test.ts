@@ -279,6 +279,6 @@ describe('a `const` function declared after a reference to its name', () => {
     expect(r.value.json).toEqual(6);
     expect(
       run('g(1)\nconst g = (x) => 2 * x\ng = 5')
-    ).toEqual(['Error', '\'Cannot assign a value to the constant "g"\'']);
+    ).toEqual(['Error', ['ErrorCode', "'constant-assignment'", "'g'"]]);
   });
 });

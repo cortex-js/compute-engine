@@ -14128,6 +14128,21 @@ function processMinMaxItem(
     if (nominal.isNaN) return [nominal, []];
     return [item, []];
   }
+  // A `Quantity` is a value when its magnitude is a value: `exactOrder`
+  // orders two quantities with units of the same dimension by their
+  // physical value, so `Max(1 km, 999 m)` is `1 km`. A quantity that cannot
+  // be ordered against the other values (units of another dimension, a
+  // number with no unit) stays in the unevaluated result, as a complex
+  // number does. The magnitude decides as a bare operand would: a complex or
+  // symbolic magnitude leaves the quantity in the unevaluated result, and a
+  // magnitude that is `NaN` absorbs.
+  if (isFunction(item, 'Quantity')) {
+    const [magnitude] = processMinMaxItem(item.op1, mode, walk);
+    if (magnitude === undefined || (isNumber(magnitude) && magnitude.isComplex))
+      return [undefined, [item]];
+    if (magnitude.isNaN) return [magnitude, []];
+    return [item, []];
+  }
   // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
   // value, and `exactOrder` orders it against the other values:
   // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex

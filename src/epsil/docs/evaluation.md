@@ -283,7 +283,9 @@ value produced by an earlier statement would otherwise vanish silently. Each
 *non-final* statement that evaluates to an error value therefore also emits
 a `runtime-error` diagnostic — for example an indexed assignment
 (`xs[2] = 9`, which is rejected: element assignment is not supported), or
-reassigning a `const` in the middle of a program.
+reassigning a library constant such as `Pi`. A problem that the static check
+already reported before the program ran, such as reassigning a `const` of the
+same program, is not reported a second time.
 
 A program constructs an error value of its own with `RuntimeError`:
 

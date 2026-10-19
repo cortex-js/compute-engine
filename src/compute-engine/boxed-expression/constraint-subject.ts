@@ -197,7 +197,7 @@ export function exactRealValueOf(
  * an exact evaluation, and `Floor(√x·√3)` at that `x` must still be `3`, not
  * the `2` of the floats `√3·√3 = 2.999…`.
  */
-function readsRecordedParameter(expr: Expression): boolean {
+export function readsRecordedParameter(expr: Expression): boolean {
   const ce = expr.engine;
   return expr.symbols.some((name) => {
     const def = ce.lookupDefinition(name);

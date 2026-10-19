@@ -32,10 +32,10 @@ describe('QUANTITY ARITHMETIC KEEPS AN EXACT MAGNITUDE EXACT', () => {
   test('multiplication of two quantities', () => {
     expect(
       evaluate(['Multiply', ['Quantity', 3, 'N'], ['Quantity', 'Pi', 'm']])
-    ).toBe('3pi J');
+    ).toBe('3pi N⋅m');
     expect(
       numeric(['Multiply', ['Quantity', 3, 'N'], ['Quantity', 'Pi', 'm']])
-    ).toBe('9.42477796076938 J');
+    ).toBe('9.42477796076938 N⋅m');
   });
 
   test('an integer power gives an exact rational', () => {

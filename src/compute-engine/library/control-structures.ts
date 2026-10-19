@@ -4691,6 +4691,21 @@ function* runNested(
     const guard = elem.ops[2];
     if (guard !== undefined && sym(guard) !== 'Nothing') {
       const verdict = guard.evaluate();
+      // A guard that evaluates to an error (the index holds a failed cell of
+      // the domain, `[x for x in [1, <error>] if x > 0]`) neither keeps nor
+      // skips the element: the error takes the place of the body value, as a
+      // `Filter` keeps the error of its predicate in place. A loop then stops
+      // on it, as on an error of its body.
+      const guardError = errorValue(verdict);
+      if (guardError !== undefined) {
+        state.count += 1;
+        if (state.count > ce.iterationLimit)
+          throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+        onLeaf(guardError);
+        yield guardError;
+        if (state.stopped) return;
+        continue;
+      }
       if (sym(verdict) !== 'True') {
         // A rejected element is an iteration too: it counts against the
         // iteration limit, or a guard that never accepts over an infinite

@@ -578,6 +578,20 @@ describe('the audited operators give the values of evaluate()', () => {
     ['Reduce, no seed', ['Reduce', ['Range', 1, 5], 'Add']],
     ['Fold', ['Fold', addK, small, ['Range', 1, 5]]],
     ['Fold, empty', ['Fold', addK, ['Add', 1, 2], ['List']]],
+    // `Dedup` checks its source for a failed cell on both routes.
+    ['Dedup', ['Dedup', ['List', 1, 1, 2]]],
+    // Under `N`, the source is evaluated with the numeric request on both
+    // routes: `[0.5, 1.414…]`, and `[1/2, 0.5]` is `[0.5]`.
+    [
+      'Dedup of exact numbers',
+      ['Dedup', ['List', ['Rational', 1, 2], ['Sqrt', 2]]],
+    ],
+    ['Dedup of 1/2 and 0.5', ['Dedup', ['List', ['Rational', 1, 2], 0.5]]],
+    ['Dedup, a failed cell', ['Dedup', ['List', 1, ['Divide', 1, "'a'"], 1]]],
+    [
+      'Dedup over a Map',
+      ['Dedup', ['Map', ['Function', ['Add', 'k', 1], 'k'], ['List', 1, 1, 2]]],
+    ],
   ];
   for (const [name, expr] of cases) {
     for (const numeric of [false, true]) {
@@ -631,6 +645,12 @@ describe('the audited twins stop where the synchronous handler stops', () => {
     ],
     // The unit stays as written: it is not evaluated.
     ['Quantity does not evaluate its unit', ['Quantity', 2, ['Probe', 3]], ''],
+    // The source is evaluated once.
+    [
+      'Dedup evaluates its source once',
+      ['Dedup', ['List', 1, ['Probe', 1], 2]],
+      '',
+    ],
     [
       'UnitConvert does not evaluate its target',
       ['UnitConvert', ['Quantity', 2, 'm'], ['Probe', 3]],

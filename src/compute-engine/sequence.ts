@@ -36,6 +36,7 @@ import {
   snapshotMemoDeps,
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
+import { ConstantAssignmentError } from './constant-assignment-error.js';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -1629,7 +1630,7 @@ export function _discardPendingSequencesOfScope(
 function assertNotConstant(ce: ComputeEngine, name: string): void {
   const def = pendingScopeOf(ce, name).bindings.get(name);
   if (def !== undefined && isValueDef(def) && def.value.isConstant)
-    throw Error(`Cannot assign a value to the constant "${name}"`);
+    throw new ConstantAssignmentError(name);
 }
 
 /**

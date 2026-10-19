@@ -219,17 +219,20 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
 
     test('a `const` binding keeps its FIRST signature', () => {
       // The run time refuses the reassignment of a constant and keeps the
-      // original binding (`Cannot assign a value to the constant`), so the
-      // static line against the first signature is a true prediction.
+      // original binding (`constant-assignment`), so the static line against
+      // the first signature is a true prediction.
       const src =
         'const k = (n: integer) => n + 1\nk = (s: string) => s\nk("a")';
-      expect(check(src).map((d) => d[1])).toEqual(['incompatible-type']);
-      // A whole run reports both: the static line, then the refused
-      // reassignment.
+      expect(check(src).map((d) => d[1])).toEqual([
+        'constant-assignment',
+        'incompatible-type',
+      ]);
+      // A whole run reports both static lines, and the run does not report
+      // the refused reassignment a second time.
       const { value, diagnostics } = run(src);
       expect(diagnostics.map((d) => d.message[0])).toEqual([
         'static-type-error',
-        'runtime-error',
+        'static-type-error',
       ]);
       expect(value.operator).toBe('Error');
     });

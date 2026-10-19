@@ -140,6 +140,9 @@ export function isInexactOperand(x: Expression): boolean {
   // with a float nominal is a float datum, so `Max(Measurement(1.5, 0.1),
   // Indeterminate)` is `NaN`, as `Max(1.5, Indeterminate)` is.
   if (isFunction(x, 'Measurement')) return isInexactOperand(x.op1);
+  // A `Quantity` is as inexact as its magnitude: `Max(Quantity(1.5, m),
+  // Indeterminate)` is `NaN`, as `Max(1.5, Indeterminate)` is.
+  if (isFunction(x, 'Quantity')) return isInexactOperand(x.op1);
   if (!isNumber(x) || x.isIndeterminate) return false;
   if (x.isNaN === true) return true;
   return x.isFinite === true && !x.isExact;

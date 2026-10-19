@@ -41,6 +41,48 @@ export function _setExpand(fn: ExpandFn) {
   _expand = fn;
 }
 
+// Lazy reference to break a circular dependency: the comparison of two
+// quantities reads the unit registry and the `Quantity` helpers of
+// `library/`, which import this module, and which `boxed-expression/` may
+// not import. The function is `compareQuantities()` of
+// `library/quantity-compare.ts`, and the options are its
+// `QuantityCompareOptions`. `src/compute-engine/index.ts` sets it.
+type QuantityOrderFn = (
+  a: Expression,
+  b: Expression,
+  options: { tolerance: number; exact: boolean; nominal: boolean }
+) => -1 | 0 | 1 | undefined;
+let _quantityOrder: QuantityOrderFn | undefined;
+/** @internal */
+export function _setQuantityOrder(fn: QuantityOrderFn) {
+  _quantityOrder = fn;
+}
+
+/**
+ * The order of two `Quantity` expressions by their physical value (`1000 m`
+ * and `1 km` are equal), or `undefined` when `a` or `b` is not a quantity,
+ * when their units have different dimensions, or when a magnitude has no
+ * real numeric value. See `compareQuantities()` in
+ * `library/quantity-compare.ts`. A `Measurement` magnitude gives
+ * `undefined`.
+ *
+ * With `exact`, two exact magnitudes are compared exactly, with no
+ * tolerance, as two exact numbers are compared by `eq()` and `cmp()`.
+ * `is()` keeps the tolerance and does not set it.
+ *
+ * @internal
+ */
+export function quantityOrder(
+  a: Expression,
+  b: number | Expression,
+  tolerance: number,
+  exact: boolean
+): -1 | 0 | 1 | undefined {
+  if (typeof b === 'number' || _quantityOrder === undefined) return undefined;
+  if (a.operator !== 'Quantity' || b.operator !== 'Quantity') return undefined;
+  return _quantityOrder(a, b, { tolerance, exact, nominal: false });
+}
+
 /**
  * Do two same-named symbols denote the same binding?
  *
@@ -592,6 +634,15 @@ function eqImpl(
   if (isObject(a) || isObject(b))
     return (a as Expression) === (b as Expression);
 
+  // Two quantities with units of the same dimension compare by their
+  // physical value: `1000 m` is equal to `1 km`, and `6 A·V` to `6 W`. Two
+  // exact magnitudes are compared exactly, as two exact numbers are. The
+  // unit symbols are unknowns, so the steps below cannot decide this. Two
+  // quantities with different dimensions (`6 W` and `6 m`) are not decided
+  // here.
+  const quantity = quantityOrder(aExact, bExact, a.engine.tolerance, true);
+  if (quantity !== undefined) return quantity === 0;
+
   // Two exact values, one of them an exact constant expression that is not
   // a number, are compared by enclosures at a raised precision, not by the
   // difference of their values at the working precision, which can cancel
@@ -937,8 +988,14 @@ export function cmp(
   b: number | Expression,
   tolerance: number = a.engine.tolerance
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // Two quantities with units of the same dimension are ordered by their
+  // physical value: `999 m` is less than `1 km`. See `quantityOrder()`.
+  const quantity = quantityOrder(a, b, tolerance, true);
+  if (quantity !== undefined)
+    return quantity < 0 ? '<' : quantity > 0 ? '>' : '=';
+
   // Two exact values, one of them an exact constant expression that is not
-  // a number (`π`, `√(10⁶⁰ + 10⁴⁰) − 10³⁰`), are ordered by enclosures at a
+  // a number (`π`,`√(10⁶⁰ + 10⁴⁰) − 10³⁰`), are ordered by enclosures at a
   // raised precision (`exactConstantOrder()`), not by their values at the
   // working precision: at 21 digits, `√(10⁶⁰ + 10⁴⁰) − 10³⁰` cancels to
   // `10¹⁰`, but its value is `4999999999.99…`. The first enclosure is at the
@@ -1476,6 +1533,43 @@ export function exactOrder(
   b: Expression,
   options?: { tieWithinTolerance?: boolean }
 ): -1 | 0 | 1 | undefined {
+  // Two quantities with units of the same dimension are ordered by their
+  // physical value: `Max(1 km, 999 m)` is `1 km`. The tolerance is 0, so the
+  // order is exact, as it is for two numbers here: two different values are
+  // never a tie, however close they are, and two exact magnitudes are
+  // compared with exact arithmetic when the unit conversion is exact (`3 dm`
+  // and `3/10 m` are a tie). `options.tieWithinTolerance` does not apply:
+  // the order of two quantities is decided or not known, and the tolerance
+  // tie below is only for two constants that a higher precision does not
+  // order. A `Measurement` magnitude is ordered by its nominal value, as a
+  // `Measurement` operand is below; two quantities with equal nominals are
+  // a tie only when they do not have two different uncertainties. Two
+  // quantities with units of different dimensions (`6 W` and `6 m`) are not
+  // ordered here: the steps below give `undefined` for them.
+  // See `compareQuantities()` in `library/quantity-compare.ts`.
+  if (
+    _quantityOrder !== undefined &&
+    isFunction(a, 'Quantity') &&
+    isFunction(b, 'Quantity')
+  ) {
+    const order = _quantityOrder(a, b, {
+      tolerance: 0,
+      exact: true,
+      nominal: true,
+    });
+    if (order !== undefined) {
+      const ma = a.op1;
+      const mb = b.op1;
+      if (
+        order === 0 &&
+        isFunction(ma, 'Measurement') &&
+        isFunction(mb, 'Measurement') &&
+        !(a.op2.isSame(b.op2) && ma.op2.isSame(mb.op2))
+      )
+        return undefined;
+      return order;
+    }
+  }
   // A `Measurement(v, σ)` is ordered by its nominal value `v`; the
   // uncertainty `σ` takes no part in the order, and two measurements with
   // equal nominals are a tie. This is the reading of the arithmetic rules for

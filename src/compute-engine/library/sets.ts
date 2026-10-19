@@ -80,6 +80,7 @@ import {
   cantorEnumerateRationals,
 } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { firstFailedElementError } from '../boxed-expression/error-value.js';
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
@@ -991,8 +992,23 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // COLLECTION makes the answer absent through the missing gate.
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.True;
-      if (result === false) return ce.False;
-      return undefined;
+      // An undecided membership stays undecided, unless a failed cell of an
+      // invalid collection is what leaves it undecided. A valid lazy view
+      // whose own `contains` handler declines stays undecided too, also
+      // when the reason is an error: the `contains` handler of `Filter`
+      // declines when its predicate gives an error for the searched value
+      // (a predicate that fails, or a typed parameter that refuses the
+      // value). The predicate did not judge that value, so the membership
+      // is not known (`test/compute-engine/filter-predicate-errors.test.ts`).
+      if (result === undefined && collection.isValid) return undefined;
+      // A failed cell (an element that is, or holds, an `Error`) could be
+      // the value: only a match among the valid cells decides, otherwise the
+      // answer is the error of the cell (`Element(2, [1, <error>])`).
+      // A walk that stopped before the end leaves the answer undecided.
+      const failed = firstFailedElementError(collection);
+      if (failed === 'incomplete') return undefined;
+      if (failed !== undefined) return failed;
+      return result === undefined ? undefined : ce.False;
     },
   },
 
@@ -1028,8 +1044,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // An absent value is an ordinary element to search for (see `Element`).
       const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.False;
-      if (result === false) return ce.True;
-      return undefined;
+      if (result === undefined && collection.isValid) return undefined;
+      // As for `Element`: a failed cell could be the value.
+      const failed = firstFailedElementError(collection);
+      if (failed === 'incomplete') return undefined;
+      if (failed !== undefined) return failed;
+      return result === undefined ? undefined : ce.True;
     },
   },
 
@@ -1677,10 +1697,37 @@ function subsetChain(
   return kleeneAnd(pairs);
 }
 
+/**
+ * The error of the first failed cell (an element that is, or holds, an
+ * `Error`) of a collection operand of a set operation, or `undefined`. The
+ * elements of the result of `Union`, `Intersection`, `SetMinus` and
+ * `SymmetricDifference` depend on whether a failed cell is the same as
+ * another element, which depends on its value: `Union({1, <error>}, {2})`
+ * is the error, as `Unique([1, <error>])` is. `'incomplete'` when the walk
+ * of an operand stopped before its end (`firstFailedElementError()`): the
+ * operation then stays unevaluated.
+ */
+function failedOperandError(
+  ops: ReadonlyArray<Expression>
+): Expression | 'incomplete' | undefined {
+  // An operand whose walk stopped early does not hide a definite error in a
+  // later operand: the order of the operands does not change the answer.
+  let incomplete = false;
+  for (const op of ops) {
+    const failed = firstFailedElementError(op);
+    if (failed === 'incomplete') incomplete = true;
+    else if (failed !== undefined) return failed;
+  }
+  return incomplete ? 'incomplete' : undefined;
+}
+
 function union(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  const failed = failedOperandError(ops);
+  if (failed === 'incomplete') return undefined;
+  if (failed !== undefined) return failed;
   // ops should be collections. Keep set-/collection-VALUED operands as sets —
   // including inert set-valued shells whose `isCollection` is false because
   // they carry no collection handler (e.g. `Interior(D)`, a Fungrim
@@ -1756,6 +1803,9 @@ function intersection(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  const failed = failedOperandError(ops);
+  if (failed === 'incomplete') return undefined;
+  if (failed !== undefined) return failed;
   // Stay symbolic unless every operand is a collection and one operand is
   // finite and enumerable (see below). Folding unknown symbols or tolerated
   // label operands (`H \cap K`, `AC \cap BD`) to literal elements produced
@@ -2183,6 +2233,9 @@ function setMinus(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  const failed = failedOperandError(ops);
+  if (failed === 'incomplete') return undefined;
+  if (failed !== undefined) return failed;
   // Compute the difference only when the source collection is finite and
   // enumerable; otherwise stay symbolic — the `contains`/iterator handlers
   // provide the semantics for infinite sets (e.g. SetMinus(ComplexNumbers, {0})).
@@ -2241,6 +2294,9 @@ function symmetricDifference(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
+  const failed = failedOperandError(ops);
+  if (failed === 'incomplete') return undefined;
+  if (failed !== undefined) return failed;
   const [a, b] = ops;
   if (!a || !b) return undefined;
   if (!isWalkableFiniteCollection(a) || !isWalkableFiniteCollection(b))
