@@ -1804,6 +1804,12 @@ function foldSeedType(
  */
 function accumulatorTypeIsImprecise(t: Type): boolean {
   if (isKindOpenOperandType(t)) return true;
+  // A tuple that index reads alone made (`isIndexReadTuple()`) does not
+  // prove the length of the accumulator: `(s, k) => q(s[1])` with
+  // `q: (integer) -> …` types `s` as `tuple<integer>`, a tuple of ONE
+  // integer, while the seed `[1, 0, 1]` gives it three. Kept, it typed the
+  // fold from that wrong length and excluded the seed (issue #454).
+  if (isIndexReadTuple(t)) return true;
   if (isAbstractCollectionTypeOf(t)) return true;
   const elt = collectionElementType(t);
   if (elt === undefined) return false;
@@ -4030,6 +4036,51 @@ function foldResultTypeD(
     return isSubtype(seed, 'number') ? absorb(widen(elt, seed)) : undefined;
   }
   return withFirst(absorb(callbackResultTypeD(op, engine)));
+}
+
+/**
+ * The result type of `Reduce(collection, f, initial)`: the fold's result
+ * type ({@link foldResultTypeD}), joined with the type of `initial` unless
+ * the collection is provably not empty.
+ *
+ * A seeded fold over an empty collection returns `initial` unchanged, and
+ * the combiner's result type does not have to admit it:
+ * `Fold((a, k) => "x", 0, Range(1, n, 1))` was typed `string` and gave `0`
+ * for `n = 0`. A collection that is provably not empty
+ * ({@link provablyNonEmptyCollection}) keeps the combiner's type.
+ */
+function seededFoldResultType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
+): Type | undefined {
+  const [coll, op, init] = ops;
+  const t = foldResultTypeD(coll, op, init, engine);
+  if (t === undefined || init === undefined) return t;
+  if (coll !== undefined && provablyNonEmptyCollection(coll)) return t;
+  if (isSubtype(init.type, t)) return t;
+  return reduceType({ kind: 'union', types: [t, init.type] });
+}
+
+/**
+ * True when the collection operand has at least one element whatever its
+ * free symbols hold:
+ * - a statically known shape whose first dimension is not zero (a literal
+ *   list);
+ * - a `Range` with no step and real bounds. Without a step, the range
+ *   counts toward its upper bound in either direction, so it holds at least
+ *   its lower bound: `Range(0)` is `[1, 0]` and `Range(3, 1)` is
+ *   `[3, 2, 1]`. With a step it can be empty: `Range(1, 0, 1)` is `[]`.
+ */
+function provablyNonEmptyCollection(coll: OperandDescriptor): boolean {
+  const n = coll.facts.shape?.[0];
+  if (n !== undefined && n > 0) return true;
+  const s = coll.structureOf?.();
+  return (
+    s?.kind === 'application' &&
+    s.head === 'Range' &&
+    (s.children.length === 1 || s.children.length === 2) &&
+    s.children.every((c) => isSubtype(c.type, 'real'))
+  );
 }
 
 /**
@@ -10263,7 +10314,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        parseType(foldResultTypeD(ops[0], ops[1], ops[2], engine) ?? 'unknown'),
+        parseType(seededFoldResultType(ops, engine) ?? 'unknown'),
         engine._typeResolver
       ),
 

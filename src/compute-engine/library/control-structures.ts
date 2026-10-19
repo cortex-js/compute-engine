@@ -366,14 +366,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           );
         // A condition that is only POSSIBLY a boolean collection selects
         // element-wise for some of its runtime values and picks a single arm
-        // for the others, so the honest result is `broadcastable` of the
-        // element-wise cell type. Without an else branch the scalar outcome is
-        // `Missing`, which `broadcastable` does not cover, so keep that arm.
+        // for the others, so the result is `broadcastable` of the element-wise
+        // cell type, joined with each arm that this type does not admit
+        // (`possiblyElementwiseResultType`). Without an else branch the scalar
+        // outcome is `Missing`, which `broadcastable` does not cover, so keep
+        // that arm.
         if (possiblyElementwiseCondition([cond?.type])) {
-          const broadcast: Type = {
-            kind: 'broadcastable',
-            elements: elementwiseCellType(armList, ifFalse !== undefined),
-          };
+          const broadcast = possiblyElementwiseResultType(
+            armList,
+            ifFalse !== undefined
+          );
           return BoxedType.forResult(
             ifFalse !== undefined
               ? broadcast
@@ -1028,8 +1030,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           );
         // A condition that is only POSSIBLY a boolean collection selects
         // element-wise for some of its runtime values and picks a single arm
-        // for the others: `broadcastable` of the element-wise cell type is the
-        // type that covers both.
+        // for the others: `broadcastable` of the element-wise cell type,
+        // joined with each arm that this type does not admit
+        // (`possiblyElementwiseResultType`), covers both.
         // Without a literal-`True` default clause no arm may be selected and
         // the value is `Missing` — keep that arm in the type, as the
         // else-less `If` does, and outside `widen` (which joins toward a
@@ -1038,13 +1041,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // may resolve to a scalar `False` at runtime, and the `Which` then
         // answers the scalar `Missing`.
         if (possiblyElementwiseCondition(conds.map((c) => c?.type))) {
-          const broadcast: Type = {
-            kind: 'broadcastable',
-            elements: elementwiseCellType(
-              arms.map((x) => x.type),
-              dflt >= 0
-            ),
-          };
+          const broadcast = possiblyElementwiseResultType(
+            arms.map((x) => x.type),
+            dflt >= 0
+          );
           return BoxedType.forResult(
             dflt >= 0
               ? broadcast
@@ -2099,6 +2099,34 @@ function elementwiseCellType(
   const joined = widen(...armTypes);
   if (isNumericValueType(joined)) return widen(joined, 'number');
   return reduceType({ kind: 'union', types: [joined, 'missing'] });
+}
+
+/**
+ * The result type of a selection whose condition is only POSSIBLY a boolean
+ * collection (`possiblyElementwiseCondition`): `broadcastable` of the
+ * element-wise cell type, joined with every arm that this type does not
+ * already admit.
+ *
+ * At runtime such a condition can also be a scalar boolean, and the
+ * selection then returns one arm WHOLE. A scalar arm, or a list arm whose
+ * elements are in the cell type, is admitted by `broadcastable<cell>`. An
+ * arm whose element type is `unknown` is not: `widen` treats `unknown` as
+ * "no information" and drops it from the cell. With `u: list` and
+ * `p: tuple<integer>`, `If(u[2] != 0, p, u)` was typed
+ * `broadcastable<tuple<integer>>`, while for `u = [1, 0, 3]` it returns
+ * `[1, 0, 3]` (issue #454).
+ */
+function possiblyElementwiseResultType(
+  arms: ReadonlyArray<Type>,
+  hasDefault: boolean
+): Type {
+  const broadcast: Type = {
+    kind: 'broadcastable',
+    elements: elementwiseCellType(arms, hasDefault),
+  };
+  const missed = arms.filter((t) => !isSubtype(t, broadcast));
+  if (missed.length === 0) return broadcast;
+  return reduceType({ kind: 'union', types: [broadcast, ...missed] });
 }
 
 /**

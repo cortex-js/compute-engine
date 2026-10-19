@@ -1,43 +1,143 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- A unit has one canonical form: its unit symbols with exact exponents, those
+  with a positive exponent over those with a negative exponent, in the canonical
+  order. Quantity arithmetic, `Quantity`, `UnitConvert` and the LaTeX parser
+  give this form, so an evaluated quantity and the parse of its LaTeX are the
+  same expression: `(4 m)^(-1/2)` is `Quantity(1/2, Divide(1, Sqrt(m)))` (it was
+  `Power(Power(m, 1/2), -1)`), `(m/s)^2` is `m^2/s^2`, and `m^(2/3)·m^(2/3)` is
+  `m^(4/3)` (it was `m^1.3333333333333333`). The unit of `AvogadroConstant` is
+  `Divide(1, mol)`, and the text form writes a reciprocal unit with a negative
+  exponent (`3 m^-1`).
+- A `List` or `Set` literal that keeps a failed cell (`[1, Error(…), 3]`) is
+  typed `list<unknown>` (it was `error`, so a variable that held it was a
+  scalar): with `fs := [Error(…)]`, `ListJoin(fs, [2])` is `[Error(…), 2]` (it
+  was `[[Error(…)], 2]`), and a variable declared `list` accepts the value. An
+  absent cell keeps its arm: `[Error(…), Missing]` is typed
+  `list<unknown | missing>`.
+- A point divided by a matrix is the matrix of the point divided by each cell,
+  as a point times a matrix is: `(1, 2) / [[1, 2], [3, 4]]` is
+  `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]` (it stayed unevaluated and
+  was typed `number`).
+- `isGreater`, `isGreaterEqual`, `isLess`, `isLessEqual` and the operators
+  `Greater`, `GreaterEqual`, `Less`, `LessEqual` read the range of a declared
+  type: with `p: integer<0..>`, `p.isGreaterEqual(0)` and `p ≥ 0` are `true`
+  (they were `undefined`). A float within the tolerance of a number is not
+  ordered strictly against it: `ce.number(1e-12).isGreater(0)` is `false`, as
+  `isEqual(0)` is `true` (it was `true`); an exact value is still ordered
+  exactly (`10^{-30} > 0`).
+
+### Bug Fixes
+
+- **#454** A `Fold` whose step reads its accumulator by index, such as `q(s[1])`
+  with `q: (integer) -> list<integer>`, is typed from its seed again. The index
+  read had typed the accumulator as a tuple of one integer, and the fold as
+  `broadcastable<tuple<integer>>`, so compiling the fold at a `list<integer>`
+  parameter, or compiling `acc + fold[1]`, threw. The fold with seed `[1, 0, 1]`
+  from the issue is now typed `list<integer | nan^3> | vector<integer^2>`.
+- An `If` or `Which` whose condition may be a list of booleans or a single
+  boolean keeps, in its type, each branch whose element type is not known. With
+  `u: list`, `If(u[2] != 0, p, u)` was typed `broadcastable<tuple<integer>>` for
+  `p: tuple<integer>`, but returns `u` itself when the condition is a single
+  `False`.
+- A seeded `Fold` or `Reduce` over a collection that can be empty includes the
+  type of the seed in its type: `Fold((a, k) => "x", 0, Range(1, n, 1))` was
+  typed `string`, but is `0` for `n = 0`.
+
+- Assumptions in nested scopes combine: with `assume(b ≥ 0)` and, in a nested
+  scope, `assume(b > 0)`, `b.isPositive` and `b.isGreater(0)` are `true` (they
+  were `undefined`), whatever the order of the two facts. With `p: integer<1..>`
+  and `assume(p ≥ 0)`, `p.isPositive` is `true`.
+- On the asynchronous route, a user function whose argument contains a free
+  symbol awaits its body: with `f := x ↦ AsyncOnly(x)`, where `AsyncOnly` has
+  only an `evaluateAsync` handler, `f(1 {0<t})` gives the value of
+  `AsyncOnly(1 {0<t})` (it gave `AsyncOnly(1) {0 < t}`). The application memo, a
+  list-producing recursion and a numeric evaluation no longer give the
+  synchronous answer for a body that applies such an operator. A recursion over
+  a free symbol still stays inert.
+- After a quantity with the unit newton (`\mathrm{N/A^{2}}`) is parsed, the
+  operator `N` still evaluates, and `(2 m)^n` is written `(2\,\mathrm{m})^{n}`,
+  so it parses back as the same expression.
+- A list of rows of points whose components have different types
+  (`[[(1, 1/2), (1/2, 1)], [(1, 4/3), (3/4, 1)]]`) is typed as a 2×2 matrix of
+  points (it was typed as a list of points), and a matrix of points plus a point
+  is typed as a matrix of points (its type held an extra `| tuple<…>`). A point
+  divided by a vector or matrix with a cell that can be zero has a type that
+  admits the division by zero: `(1, 2) / [1, 0]` is `[(1, 2), (~oo, ~oo)]`,
+  typed `list<tuple<infinity, infinity> | tuple<rational, rational>>`. The
+  product of a point and a tensor of rank 3 evaluates, as their quotient does,
+  and a product of a list of points, a matrix and scalar factors is typed as a
+  matrix of points.
+- A `Union` with more than 100 elements counts and lists a repeated element of a
+  list operand once (`Union(L, S).count` gave 297 for 150 distinct values).
+- Epsil: an error in the branch of an `else if`, or in any call whose operator
+  occurs more than once in the statement, is underlined on the branch or
+  argument that holds it (it was the whole statement). When the source does not
+  show which operand of a sum or product holds the error, the whole sum or
+  product is underlined, never an operand that cannot cause it. `epsil check`
+  reports a `function` statement for a name that an earlier `const` bound, with
+  the code `invalid-clause-definition`, and the run does not report it a second
+  time.
+
+### Performance
+
+- A type string that names a type declared with `ce.declareType`, such as the
+  signature `(integer_partition) -> number`, is parsed once and then read from a
+  cache. Before, it was parsed twice at every `ce.declare`. Declaring 1000
+  functions with such a signature takes about 10 ms, where it took about 47 ms
+  ([#453](https://github.com/cortex-js/compute-engine/issues/453)).
+
+- `Equal` of two sets, the duplicate removal of `Union`, and membership in a
+  literal set or list of 32 or more elements group the elements by hash: with
+  20,000 elements, set equality takes about 4 ms (it took 1.6 s), and the count
+  of a `Union` of two sets about 50 ms (it took about 3 minutes).
+- A list in which every cell failed is data: it evaluates to itself and is not
+  walked again at each use. In Epsil, 3200 turns of `fs = [...fs, g("a")]` with
+  a failing `g("a")` take about 3 s (they took about 20 s).
+
 ## 0.157.0 _2026-10-19_
 
 ### New Features
 
 - `NSolve(eq, x)` accepts the same arguments as `Solve` and returns numeric
   approximations of the solutions.
-- `Sum`, `Product` and `Table` accept the shorthand iterator `{i, n}`, from 1
-  to `n`: `Sum(k^2, {k, 3})` is `14`. LaTeX tuple iterators such as
+- `Sum`, `Product` and `Table` accept the shorthand iterator `{i, n}`, from 1 to
+  `n`: `Sum(k^2, {k, 3})` is `14`. LaTeX tuple iterators such as
   `\mathrm{Integrate}(x, (x,0,1))` also parse correctly.
 - More number theory and combinatorics functions operate element by element on
   lists: `NthPrime([1, 2, 3])` is `[2, 3, 5]`, and `Divisors([6, 8])` is
-  `[[1, 2, 3, 6], [1, 2, 4, 8]]`. `Boole`, `Degrees` and `DMS` also accept lists.
+  `[[1, 2, 3, 6], [1, 2, 4, 8]]`. `Boole`, `Degrees` and `DMS` also accept
+  lists.
 - Collections can provide three optional handlers, `countOf`, `indexOf` and
   `atBigint`. `Permutations` and `Combinations` use them to answer `Element`,
   `At`, `IndexOf` and `Count` without enumerating their elements.
 
 ### Behavior Changes
 
-- **Sets are unordered.** Equivalent sets now have the same canonical order
-  and compare equal with `isSame`: `{2, 1}` prints as `{1, 2}`, and
+- **Sets are unordered.** Equivalent sets now have the same canonical order and
+  compare equal with `isSame`: `{2, 1}` prints as `{1, 2}`, and
   `ListFrom({2, 1})` is `[1, 2]`. Set patterns match in any order. Set builders,
   ellipsis notation, and structural or raw sets retain their written order;
   effects in a canonical set run in canonical order.
 - Operations that depend on position, including `Take`, `Reverse`, `Sort`,
-  `Insert`, `Find`, `Partition` and `Scan`, consistently reject sets. Convert
-  a set to a list before using these operations.
-- `Solve` returns families for periodic equations:
-  `Solve(sin(x) = 1/2, x)` gives `[2πt + π/6, 2πt + 5π/6]`, with integer `t`.
-  Substitute integers for `t` or supply a bounded domain to obtain individual
-  values. `expr.solve()` still returns principal solutions. Cases whose full
-  families cannot be represented remain unevaluated, including unsupported
-  complex families and families requiring additional restrictions.
+  `Insert`, `Find`, `Partition` and `Scan`, consistently reject sets. Convert a
+  set to a list before using these operations.
+- `Solve` returns families for periodic equations: `Solve(sin(x) = 1/2, x)`
+  gives `[2πt + π/6, 2πt + 5π/6]`, with integer `t`. Substitute integers for `t`
+  or supply a bounded domain to obtain individual values. `expr.solve()` still
+  returns principal solutions. Cases whose full families cannot be represented
+  remain unevaluated, including unsupported complex families and families
+  requiring additional restrictions.
 - `Factorial2` supports negative integers: `(−1)!! = 1`, `(−3)!! = −1`, and
   `(−5)!! = 1/3`. Negative even integers give `~oo` instead of `NaN`.
-- Quantity arithmetic preserves exact magnitudes: `Quantity(3, m)·π` is
-  `3π m`, and `3 m / 2 m` is `3/2`. Use `.N()` for approximations. Conversions
-  by integer factors preserve exactness; other conversion factors give floats.
-- Integer functions preserve float inputs in their results: `Fibonacci(5.0)`
-  is `5.0`, and `Divisors(12.0)` contains floats. Non-integer inputs remain
-  errors where integers are required.
+- Quantity arithmetic preserves exact magnitudes: `Quantity(3, m)·π` is `3π m`,
+  and `3 m / 2 m` is `3/2`. Use `.N()` for approximations. Conversions by
+  integer factors preserve exactness; other conversion factors give floats.
+- Integer functions preserve float inputs in their results: `Fibonacci(5.0)` is
+  `5.0`, and `Divisors(12.0)` contains floats. Non-integer inputs remain errors
+  where integers are required.
 - Values supplied as `complex.js` objects are inexact. For an exact Gaussian
   integer, use `ce.number({ re: 2, im: 3 })` or `ce.box(["Complex", 2, 3])`.
 - Global declarations cannot replace library constants such as `Pi` or `True`.
@@ -53,8 +153,8 @@
   an infinite real part and finite imaginary part become signed real infinity.
   `Sum([1+i, +oo])` and `Mean([1+i, +oo])` both give `+oo`.
 - Epsil reports errors in nested statements, once per source location. Block
-  locals belong to each execution; reading or writing a `let` or `const`
-  before its declaration reports `read-before-declaration`.
+  locals belong to each execution; reading or writing a `let` or `const` before
+  its declaration reports `read-before-declaration`.
 - Products and quotients of square roots stay exact when the combined radicand
   is above 10⁶: `\sqrt{1009}\sqrt{1013}` is `√1009·√1013` instead of the float
   `1010.998…`, and `√1009/√1013` is no longer evaluated to `0.998…`. Use `.N()`
@@ -64,8 +164,8 @@
   `[(1, 2), Missing]` instead of `[(1, 2), NaN]`. A number branch still gives
   `NaN`.
 - `D(x ↦ a+b, x)` canonicalizes to `D(a+b, x)`, so a LaTeX round trip keeps the
-  same tree. A function literal whose body is a single symbol is kept
-  (Tycho row 391).
+  same tree. A function literal whose body is a single symbol is kept (Tycho row
+  391).
 - After `f(x)` is parsed, `fy` and `2f` report the same `incompatible-type`
   error as `f\times y` and `2\times f`; they were products. An application such
   as `2f(x)` does not change.
@@ -77,9 +177,9 @@
   key-value entry is an `incompatible-type` error when boxed:
   `Join(Dictionary(x: 1), [2, 3])` stayed an unevaluated `Join`.
 - After `ce.declare()` gives a function a signature, an Epsil `function`
-  statement for that name replaces the body and keeps the declared signature;
-  it added a clause. A statement with parameters outside the declaration
-  reports `invalid-clause-definition`.
+  statement for that name replaces the body and keeps the declared signature; it
+  added a clause. A statement with parameters outside the declaration reports
+  `invalid-clause-definition`.
 - `cantorEnumerateComplexNumbers()` yields pairs of fractions
   `[[n, d], [n, d]]`. The exported `factorial2()` gives the recurrence value for
   an odd negative integer.
@@ -88,8 +188,8 @@
 
 - Numeric evaluation of user functions, blocks and lazy `Map` now agrees with
   direct evaluation, including exact arguments near a rounding boundary:
-  `Map(Sin, [Pi]).N()` is `[0]`, and
-  `Map(Floor, [(25! − 1)/24!]).N()` is `[24]`.
+  `Map(Sin, [Pi]).N()` is `[0]`, and `Map(Floor, [(25! − 1)/24!]).N()` is
+  `[24]`.
 - Improved rounding of elementary and special functions at high precision,
   including exact rational arguments, complex angles and incomplete gamma and
   beta functions. Very small probability tails retain their significant digits
@@ -112,24 +212,24 @@
 - Filtering and deduplication use evaluated elements: with `x := 5`,
   `Dedup([x, 5])` is `[5]`. Sorting rejects comparators that cannot accept every
   element. Operations on restricted collections preserve their conditions.
-- `Tabulate` with a non-positive dimension and ascending `Table` ranges with
-  no elements return `[]`: `Table(k², {k, 2, 0})` is `[]`. Use an explicit
-  negative step to count down.
+- `Tabulate` with a non-positive dimension and ascending `Table` ranges with no
+  elements return `[]`: `Table(k², {k, 2, 0})` is `[]`. Use an explicit negative
+  step to count down.
 - Large `Permutations`, `Combinations` and `PowerSet` no longer overflow the
   stack or stop early. Permutations and combinations support direct indexing,
   membership and position queries without enumerating every element.
 - Quantity LaTeX round trips preserve symbolic magnitudes, fractional unit
-  powers, compound units and non-ASCII names such as `µm`, `Å` and `Ω`.
-  Exact magnitudes use siunitx, for example
-  `\qty[parse-numbers=false]{2\sqrt{2}}{m}`; unsupported unit notation uses
-  `Quantity(...)`. Temperature conversion gives `20 °C = 68 °F` accurately.
+  powers, compound units and non-ASCII names such as `µm`, `Å` and `Ω`. Exact
+  magnitudes use siunitx, for example `\qty[parse-numbers=false]{2\sqrt{2}}{m}`;
+  unsupported unit notation uses `Quantity(...)`. Temperature conversion gives
+  `20 °C = 68 °F` accurately.
 - LaTeX round trips preserve derivatives, range steps, blocks, products after
   sums or limits, and `If` without an else branch. Small negative numbers and
-  unit exponents print correctly, including with `prettify: false`
-  (Tycho rows 387–390 and 393–395).
+  unit exponents print correctly, including with `prettify: false` (Tycho rows
+  387–390 and 393–395).
 - Corrected result types for nested list broadcasting, absent points, logical
-  operations, float arithmetic, poles and zero-length collections. Invalid
-  point products and divisions consistently report errors.
+  operations, float arithmetic, poles and zero-length collections. Invalid point
+  products and divisions consistently report errors.
 - Compiled assignments preserve caller inputs and the caller's `vars` object.
   Python and shader targets handle more blocks, chained assignments and
   conditionals; unsupported forms decline compilation instead of producing
@@ -143,12 +243,12 @@
   (Tycho row 392).
 - Shader trigonometry is more accurate with large constant offsets. Supported
   GLSL sine hashes have improved accuracy within the reported `float32Bounds`;
-  inputs outside those bounds give NaN. Other sensitive `Mod`/`Fract` expressions
-  report `float32-unsafe-argument` warnings. `compileFunction()` and
+  inputs outside those bounds give NaN. Other sensitive `Mod`/`Fract`
+  expressions report `float32-unsafe-argument` warnings. `compileFunction()` and
   `compileShader()` return code without this metadata (Tycho rows 382 and 384).
-- Asynchronous evaluation preserves conditions, awaits operators with only
-  async handlers, and isolates concurrent call and block state. Function
-  redefinitions update dependent expressions consistently.
+- Asynchronous evaluation preserves conditions, awaits operators with only async
+  handlers, and isolates concurrent call and block state. Function redefinitions
+  update dependent expressions consistently.
 - Epsil handles recursive callbacks, standalone `do` scopes and lists containing
   errors without host exceptions. Unbounded recursion reports the engine's
   recursion limit consistently.
@@ -160,8 +260,8 @@
   now gives `24`. A rounding function of an integer variable that cannot be
   rewritten, such as `Floor(k·π)`, declines compilation.
 - An assignment used as an operand compiles correctly: `(t ≔ 1) + 2` compiled to
-  `t = 1 + 2`, which assigned 3. JavaScript and GLSL write `(t = 1) + 2`;
-  Python and WGSL decline.
+  `t = 1 + 2`, which assigned 3. JavaScript and GLSL write `(t = 1) + 2`; Python
+  and WGSL decline.
 - Sums and products with more than about 120,000 operands no longer throw,
   `NotGreater` evaluates, `Map` accepts `Subtract`, `Negate`, `Multiply` and
   `Divide` over points, and `-3\,\mathrm{m}` parses as the quantity `−3 m`.
@@ -183,17 +283,17 @@
 - User functions preserve exact arguments for rounding and comparisons under
   `.N()`: a function applying `Floor` to `(25! − 1)/24!` returns `24`.
 - Lazy `Map` and `Filter` evaluate impure list elements correctly. Numeric
-  rounding functions also preserve exact surviving elements when a list drops
-  an element that evaluates to `Nothing`.
-- `Range` membership and integer-grid `Linspace` samples remain exact beyond
-  the safe integer range.
+  rounding functions also preserve exact surviving elements when a list drops an
+  element that evaluates to `Nothing`.
+- `Range` membership and integer-grid `Linspace` samples remain exact beyond the
+  safe integer range.
 - Inverse trigonometric functions near complex branch points and `HurwitzZeta`
-  with severe cancellation remain symbolic when machine precision cannot
-  produce a reliable answer.
+  with severe cancellation remain symbolic when machine precision cannot produce
+  a reliable answer.
 - Corrected types for arithmetic on unions of numbers, points and lists,
   coordinate accessors, and parameters inferred from index reads.
-- Float half powers retain their float spelling in text output: `2^0.5`
-  prints as `2^(0.5)`.
+- Float half powers retain their float spelling in text output: `2^0.5` prints
+  as `2^(0.5)`.
 - Declarations inside blocks correctly update dependent expressions.
 
 ### Performance
@@ -206,8 +306,8 @@
 
 - `ce.undeclare(name)` removes a value or function binding from the current
   scope, including functions defined by multiple clauses.
-- `ce.tolerance = "auto"` makes tolerance follow the working precision.
-  An explicitly numeric tolerance now survives precision changes
+- `ce.tolerance = "auto"` makes tolerance follow the working precision. An
+  explicitly numeric tolerance now survives precision changes
   ([#449](https://github.com/cortex-js/compute-engine/issues/449)).
 - A new broadcast exemption, `'surplus-operands'`, makes a call with extra
   operands one error before any broadcast. `Numerator`, `Denominator` and
@@ -215,12 +315,12 @@
 
 ### Behavior Changes
 
-- Numeric element-wise operations on symbols typed `any` or `value` retain
-  types that allow point and collection results.
+- Numeric element-wise operations on symbols typed `any` or `value` retain types
+  that allow point and collection results.
 - Compiled predicates must return booleans. Invalid predicates fail compilation
   or report an error at run time instead of using truthiness.
-- Compiled numeric parameters receive a NaN default for absent arguments;
-  this can change the returned JavaScript function's `length` property.
+- Compiled numeric parameters receive a NaN default for absent arguments; this
+  can change the returned JavaScript function's `length` property.
 - Unit names such as `m`, `s` and `K` are no longer declared in the system
   scope, and a `Quantity` no longer declares its unit names. A function defined
   in a parent scope does not see a value that a host assigns to one of these
@@ -233,13 +333,14 @@
 ### Issues Resolved
 
 - Functions inferred from index reads accept list arguments again, including
-  `p ↦ p[1] + p[2]` ([#448](https://github.com/cortex-js/compute-engine/issues/448)).
-  Improved tuple, point, type-alias and overload handling throughout calls.
+  `p ↦ p[1] + p[2]`
+  ([#448](https://github.com/cortex-js/compute-engine/issues/448)). Improved
+  tuple, point, type-alias and overload handling throughout calls.
 - Async user functions, including multi-clause and recursive functions, await
   their bodies and preserve arguments across overlapping calls. Materializing
   async maps evaluates their elements asynchronously.
-- Lazy views evaluate their sources once; folds that build lazy accumulators
-  no longer become exponentially slower
+- Lazy views evaluate their sources once; folds that build lazy accumulators no
+  longer become exponentially slower
   ([#444](https://github.com/cortex-js/compute-engine/issues/444)).
 - Quantity arithmetic preserves symbols and exact roots: `3 m · x` is
   `Quantity(3x, m)`, and `sqrt(2 m²)` is `√2 m`. Repeated unit factors combine
@@ -254,8 +355,8 @@
   singularities more accurately and detects poles in exponential denominators.
 - Invalid `If` arity is reported correctly. Derivatives of unsupported blocks
   and lazy operators stay symbolic without executing their bodies.
-- Sequence definitions respect scopes and constants; removed sequences no
-  longer appear in `isSequence()` or `listSequences()`.
+- Sequence definitions respect scopes and constants; removed sequences no longer
+  appear in `isSequence()` or `listSequences()`.
 - Named and field calls follow redefinitions, parameter names and current
   bindings. Epsil static checks agree with these rules.
 - Shader sums and products support complex bodies. JavaScript complex mode
@@ -265,8 +366,8 @@
   names. Reusing a compilation target respects current variable mappings.
 - Point division by a list works in the interpreter and compiled JavaScript:
   `(1, 2)/[1, 2]` is `[(1, 2), (1/2, 1)]`.
-- Collection errors include their source trace without reporting failed
-  operands twice. Numerator and denominator operations report extra arguments
+- Collection errors include their source trace without reporting failed operands
+  twice. Numerator and denominator operations report extra arguments
   ([#442](https://github.com/cortex-js/compute-engine/issues/442), contributed
   by [enumeratio](https://github.com/enumeratio)).
 - Compiled JavaScript `Gamma(x, y)` computed `Γ(x)`; it now computes the upper
@@ -298,21 +399,21 @@
   `h([1, 2, 3])` is `14/3`.
 - Measurements propagate uncertainty through more numeric functions and
   statistics. Sorting, extrema and clamping compare their nominal values.
-- Matrix operations preserve float results when any entry is a float.
-  Exact integer powers are matrix powers; float powers are element-wise:
+- Matrix operations preserve float results when any entry is a float. Exact
+  integer powers are matrix powers; float powers are element-wise:
   `[[1,2],[3,4]]^2.0` is `[[1,4],[9,16]]` with float entries.
 - Float exponents retain their inexact meaning in simplification and polynomial
   operations; `0 / 2.5` is `0.0`.
 - Function results are checked against their declared result types.
 - `Append` and `Join` over a source whose type does not fix its kind are typed
-  `collection<T>`, not `list`: with `a` declared `any`, `Append(a, 1)` is
-  typed `collection<any>`.
+  `collection<T>`, not `list`: with `a` declared `any`, `Append(a, 1)` is typed
+  `collection<any>`.
 - Comparisons with a `Measurement` use its nominal value:
   `Less(Measurement(0.7468, 0.001), 1)` is `True`. `Floor`, `Ceil`, `Round`,
-  `Truncate` and `Mod` of a measurement return the bare result for its
-  nominal: `Floor(Measurement(0.7468, 0.001))` is `0`.
-- `ce.declare()` throws `The symbol "Sq" is already declared in this scope`
-  when `Sq` is an operator declared earlier without a `signature` (the second
+  `Truncate` and `Mod` of a measurement return the bare result for its nominal:
+  `Floor(Measurement(0.7468, 0.001))` is `0`.
+- `ce.declare()` throws `The symbol "Sq" is already declared in this scope` when
+  `Sq` is an operator declared earlier without a `signature` (the second
   declaration replaced the first). To change an existing definition, use
   `ce.declare(name, patch, { extend: true })`.
 - The `add` and `mul` rational helpers exported by
@@ -363,21 +464,20 @@
 - Compiled `HurwitzZeta`, `LerchPhi`, `PolyLog`, `EllipticK`, the complete
   `EllipticE`, `Hypergeometric2F1` and `LambertW` return complex values in
   `auto` and `complex` mode, where they returned `NaN`: compiled
-  `LerchPhi(3, 2, 1)` is `0.7734 - 1.1505i`. The GLSL and WGSL targets decline
-  a provably complex value
-  ([#434](https://github.com/cortex-js/compute-engine/issues/434),
-  contributed by [enumeratio](https://github.com/enumeratio)).
+  `LerchPhi(3, 2, 1)` is `0.7734 - 1.1505i`. The GLSL and WGSL targets decline a
+  provably complex value
+  ([#434](https://github.com/cortex-js/compute-engine/issues/434), contributed
+  by [enumeratio](https://github.com/enumeratio)).
 - `Transpose` of an operand with no known shape is typed `unknown`, so
-  `MatrixMultiply(q, Transpose(q))` with a free `q` stays unevaluated instead
-  of returning an `incompatible-type` error
-  ([#439](https://github.com/cortex-js/compute-engine/issues/439),
-  contributed by [enumeratio](https://github.com/enumeratio)).
+  `MatrixMultiply(q, Transpose(q))` with a free `q` stays unevaluated instead of
+  returning an `incompatible-type` error
+  ([#439](https://github.com/cortex-js/compute-engine/issues/439), contributed
+  by [enumeratio](https://github.com/enumeratio)).
 
 ### Performance
 
-- Faster arithmetic with complex factors and type queries for very large
-  integer literals
-  ([#431](https://github.com/cortex-js/compute-engine/issues/431),
+- Faster arithmetic with complex factors and type queries for very large integer
+  literals ([#431](https://github.com/cortex-js/compute-engine/issues/431),
   contributed by [enumeratio](https://github.com/enumeratio)).
 
 ## 0.153.0 _2026-10-13_
@@ -391,14 +491,13 @@
 ### Behavior Changes
 
 - Compiled JavaScript `run()` expects inputs in the declared shape and returns
-  results that callers must treat as read-only. Pass plain arrays; convert
-  typed arrays once with `Array.from()`. Keep entries numeric for real list
-  inputs, and copy returned arrays or complex objects before modifying them.
+  results that callers must treat as read-only. Pass plain arrays; convert typed
+  arrays once with `Array.from()`. Keep entries numeric for real list inputs,
+  and copy returned arrays or complex objects before modifying them.
 - `simplify()` folds pure constant subexpressions whose evaluation gives a
-  numeric literal, with default rules, custom rules or `rules: null`.
-  Exact symbolic values such as `Ln(2)` stay symbolic. Numeric relations
-  simplify to truth values:
-  `(3 < 4).simplify()` is `True`
+  numeric literal, with default rules, custom rules or `rules: null`. Exact
+  symbolic values such as `Ln(2)` stay symbolic. Numeric relations simplify to
+  truth values: `(3 < 4).simplify()` is `True`
   ([#306](https://github.com/cortex-js/compute-engine/issues/306)).
 - `Gamma(n)` evaluates exactly for positive integers: `Gamma(4)` is `6`
   ([#429](https://github.com/cortex-js/compute-engine/issues/429)).
@@ -408,8 +507,8 @@
   evaluates `code` without `run()` must include `preamble` (or `preambleOnce`
   once and `preamblePerCall` on every call). A `compile` hook must treat an
   array operand as read-only.
-- `CompilationResult.entryPlan` no longer has the per-entry checks
-  (`entries`). A runtime that loads an older stored plan ignores the field.
+- `CompilationResult.entryPlan` no longer has the per-entry checks (`entries`).
+  A runtime that loads an older stored plan ignores the field.
 - The `.pow()` method evaluates the root it builds from two number literals:
   `ce.number(-8).pow(ce.number([1, 3]))` is `-2`, not `Root(-8, 3)`
   ([#430](https://github.com/cortex-js/compute-engine/issues/430)).
@@ -443,9 +542,9 @@
 
 ### Behavior Changes
 
-- Provably divergent series evaluate to signed infinity:
-  `Σ_{n=1}^{∞} 1/n` is `+∞`. Comparisons with infinity remain undecided when
-  the other operand is not known to be finite
+- Provably divergent series evaluate to signed infinity: `Σ_{n=1}^{∞} 1/n` is
+  `+∞`. Comparisons with infinity remain undecided when the other operand is not
+  known to be finite
   ([#326](https://github.com/cortex-js/compute-engine/issues/326)).
 - `Reduce(…).N()` respects the engine's working precision.
 - An engine constructed with `precision: 'machine'` keeps the faster
@@ -453,9 +552,8 @@
 
 ### Issues Resolved
 
-- Infinite telescoping sums and Wallis products evaluate and simplify
-  correctly: `Σ_{k=1}^{∞} 1/(k(k+1))` is `1`, and
-  `2∏_{n=1}^{∞} 4n²/(4n²−1)` is `π`
+- Infinite telescoping sums and Wallis products evaluate and simplify correctly:
+  `Σ_{k=1}^{∞} 1/(k(k+1))` is `1`, and `2∏_{n=1}^{∞} 4n²/(4n²−1)` is `π`
   ([#323](https://github.com/cortex-js/compute-engine/issues/323), reported by
   [314systems](https://github.com/314systems)).
 - Equivalent spellings of sum and product bodies produce the same closed forms.
@@ -468,8 +566,8 @@
   [enumeratio](https://github.com/enumeratio)).
 - Async evaluation yields and honors cancellation inside relations, user
   functions and more lazy operators
-  ([#392](https://github.com/cortex-js/compute-engine/issues/392),
-  contributed by [enumeratio](https://github.com/enumeratio)).
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed
+  by [enumeratio](https://github.com/enumeratio)).
 
 ## 0.151.0 _2026-10-08_
 
@@ -483,8 +581,8 @@
 
 ### Issues Resolved
 
-- `GCD` and `LCM` return exact results for large integers:
-  `GCD(2^100, 2^50)` is `2^50`.
+- `GCD` and `LCM` return exact results for large integers: `GCD(2^100, 2^50)` is
+  `2^50`.
 - Mapping lambdas preserves errors and absent values consistently with named
   callbacks. Mapping a list of functions applies each function correctly.
 - Substitution reaches dictionary values, and dictionaries containing functions
@@ -511,32 +609,31 @@
 
 ### Behavior Changes
 
-- `Solve` returns every complex polynomial root when no domain is specified,
-  or when solving over the complex numbers. Supported closed forms remain
-  exact: `x³ − 2x + 1 = 0` gives `[1, (-1 + √5)/2, (-1 − √5)/2]`.
+- `Solve` returns every complex polynomial root when no domain is specified, or
+  when solving over the complex numbers. Supported closed forms remain exact:
+  `x³ − 2x + 1 = 0` gives `[1, (-1 + √5)/2, (-1 − √5)/2]`.
 - Compiled integer operations reject values outside the safe integer range
   instead of returning rounded answers. Compiled collection parameters reject
   unsupported string inputs.
 - Shader targets reject constant collections with more than 256 elements.
 - List literals with lazy spreads evaluate to ordinary lists.
-- Synchronous work that an `evaluateAsync` handler does after its first
-  `await` (`ce.box()`, `ce.parse()`, `evaluate()`, canonicalizing a held
-  operand) sees the global scope, not the index of an enclosing `Sum`. Run it
-  inside `ce.withEvaluationContext(options, fn)`.
-- `DSolve` writes a complex characteristic root and its conjugate as real
-  modes: `y''' - y = 0` gives
-  `c₂·e^(-x/2)·cos(√3x/2) + c₃·e^(-x/2)·sin(√3x/2)`.
-- In the lenient grammar, `√2 √3` and `√2 ∞` report `ambiguous-radical`
-  (Tycho row 367).
-- A shader target declines a constant collection of more than 256 elements
-  with the diagnostic code `inline-collection-too-large`, whose message names
-  the element count and the limit (Tycho row 368).
+- Synchronous work that an `evaluateAsync` handler does after its first `await`
+  (`ce.box()`, `ce.parse()`, `evaluate()`, canonicalizing a held operand) sees
+  the global scope, not the index of an enclosing `Sum`. Run it inside
+  `ce.withEvaluationContext(options, fn)`.
+- `DSolve` writes a complex characteristic root and its conjugate as real modes:
+  `y''' - y = 0` gives `c₂·e^(-x/2)·cos(√3x/2) + c₃·e^(-x/2)·sin(√3x/2)`.
+- In the lenient grammar, `√2 √3` and `√2 ∞` report `ambiguous-radical` (Tycho
+  row 367).
+- A shader target declines a constant collection of more than 256 elements with
+  the diagnostic code `inline-collection-too-large`, whose message names the
+  element count and the limit (Tycho row 368).
 
 ### Issues Resolved
 
 - Concurrent async evaluations keep separate scopes, and async handlers resume
-  in the correct scope. `N`, arithmetic, `Evaluate` and `ReleaseHold` yield
-  and await async-only operations
+  in the correct scope. `N`, arithmetic, `Evaluate` and `ReleaseHold` yield and
+  await async-only operations
   ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
 - Recursive functions accept whole collection arguments, lazy arguments retain
   caller bindings, and callbacks over named functions retain computed elements.
@@ -559,23 +656,22 @@
 
 ### Performance
 
-- Numeric sums and products scale better with many terms. Constant numeric
-  lists are cheaper to compile for interval evaluation.
+- Numeric sums and products scale better with many terms. Constant numeric lists
+  are cheaper to compile for interval evaluation.
 
 ## 0.149.0 _2026-10-07_
 
 ### Breaking Changes
 
-- **`Round(x, step)` now rounds to a multiple of `step`.** `Round(226, 10)`
-  is `230`; `Round(3.14159, 2)` is now `4`. To round to two decimal places,
-  use `Round(3.14159, 1/100)` for exact `157/50`, or
-  `Round(3.14159, 0.01)` for float `3.14`. Translate decimal-place arguments
-  from other tools accordingly
+- **`Round(x, step)` now rounds to a multiple of `step`.** `Round(226, 10)` is
+  `230`; `Round(3.14159, 2)` is now `4`. To round to two decimal places, use
+  `Round(3.14159, 1/100)` for exact `157/50`, or `Round(3.14159, 0.01)` for
+  float `3.14`. Translate decimal-place arguments from other tools accordingly
   ([#417](https://github.com/cortex-js/compute-engine/issues/417)).
 - **Negative `Take` and `Drop` counts work from the end.**
-  `Take([1, 2, 3, 4, 5], -2)` is `[4, 5]`, and `Drop(..., -2)` is
-  `[1, 2, 3]`. Strings behave similarly: `Take("hello", -2)` is `"lo"`.
-  Negative counts over infinite or unknown-length sources remain unevaluated
+  `Take([1, 2, 3, 4, 5], -2)` is `[4, 5]`, and `Drop(..., -2)` is `[1, 2, 3]`.
+  Strings behave similarly: `Take("hello", -2)` is `"lo"`. Negative counts over
+  infinite or unknown-length sources remain unevaluated
   ([#414](https://github.com/cortex-js/compute-engine/issues/414), reported by
   [enumeratio](https://github.com/enumeratio)).
 - **`expr.count` can return a `bigint`.** Its type is now
@@ -593,46 +689,46 @@
 
 - `ce.roundingTies` selects the tie rule for `Round`: `"away-from-zero"`
   (default), `"to-even"`, `"toward-zero"`, `"toward-positive-infinity"`, or
-  `"toward-negative-infinity"`. Compiled functions retain the rule selected
-  at compilation. `Remainder` keeps its existing tie rule
+  `"toward-negative-infinity"`. Compiled functions retain the rule selected at
+  compilation. `Remainder` keeps its existing tie rule
   ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested by
   [enumeratio](https://github.com/enumeratio)).
 - `Floor`, `Ceil` and `Truncate` accept a step: `Floor(226, 10)` is `220`,
-  `Ceil(226, 10)` is `230`, and `Truncate(-226, 10)` is `-220`. Exact steps
-  give exact results; float steps give floats
+  `Ceil(226, 10)` is `230`, and `Truncate(-226, 10)` is `-220`. Exact steps give
+  exact results; float steps give floats
   ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested by
   [enumeratio](https://github.com/enumeratio)).
 - Definite integration supports more piecewise functions, including `If`,
   `Which`, extrema and rounding functions: `∫₋₁¹ max(x, 0) dx` is `1/2`, and
   `∫₀³ floor(x) dx` is `3`
-  ([#413](https://github.com/cortex-js/compute-engine/pull/413), contributed
-  by [KingArth0r](https://github.com/KingArth0r)).
-- A `count` collection handler can return a `bigint` for any count;
-  `expr.count` converts a safe integer to a `number`
+  ([#413](https://github.com/cortex-js/compute-engine/pull/413), contributed by
+  [KingArth0r](https://github.com/KingArth0r)).
+- A `count` collection handler can return a `bigint` for any count; `expr.count`
+  converts a safe integer to a `number`
   ([#416](https://github.com/cortex-js/compute-engine/issues/416)).
 
 ### Behavior Changes
 
 - Running an Epsil program with `executeEpsil` or the `epsil` command removes
-  the engine's default iteration limit, so a loop runs until it ends. The
-  engine then keeps no limit for later evaluations, Epsil or not. To keep a
-  bound, assign `ce.iterationLimit` before running a program.
-- The branch `k` of `LambertW(z, k)` must be an integer:
-  `LambertW(-1, -0.1)` is an `incompatible-type` error. The branch can be
-  named: `lambertW(-0.1, branch: -1)` in Epsil, or
+  the engine's default iteration limit, so a loop runs until it ends. The engine
+  then keeps no limit for later evaluations, Epsil or not. To keep a bound,
+  assign `ce.iterationLimit` before running a program.
+- The branch `k` of `LambertW(z, k)` must be an integer: `LambertW(-1, -0.1)` is
+  an `incompatible-type` error. The branch can be named:
+  `lambertW(-0.1, branch: -1)` in Epsil, or
   `["LambertW", -0.1, ["NamedArgument", "'branch'", -1]]` in MathJSON
   ([#418](https://github.com/cortex-js/compute-engine/issues/418), reported by
   [enumeratio](https://github.com/enumeratio)).
-- `simplify()` combines powers with the same base in a product, as it does in
-  a quotient: `x^a·x^b` is `x^(a+b)`. `evaluate()` is unchanged
+- `simplify()` combines powers with the same base in a product, as it does in a
+  quotient: `x^a·x^b` is `x^(a+b)`. `evaluate()` is unchanged
   ([#415](https://github.com/cortex-js/compute-engine/issues/415), reported by
   [enumeratio](https://github.com/enumeratio)).
 - String operators accept a `character` wherever they accept a string:
   `ToUpperCase(s[1])` is no longer a type error. A symbol with no declared type
   used at such a parameter is inferred `character | string`, not `string`.
-- When the operand types do not select one signature of an overloaded
-  operator, the result type is the union of the possible results: with `s` of
-  unknown type, `Slice(s, 1, 2)` is typed `list | string`, not `list`.
+- When the operand types do not select one signature of an overloaded operator,
+  the result type is the union of the possible results: with `s` of unknown
+  type, `Slice(s, 1, 2)` is typed `list | string`, not `list`.
 - Effect inference is more precise. A local that nested functions only read
   needs no `scope` effect, a function has the effects of its `let` values
   (`let x = Random()` makes it `random`), and a dictionary has the effects of
@@ -640,9 +736,9 @@
 
 ### Issues Resolved
 
-- Exact range counts, extrema and statistics no longer depend on rounded
-  bounds. Large range statistics avoid enumeration:
-  `Sum(Range(1, 10^20))` can return its exact closed form.
+- Exact range counts, extrema and statistics no longer depend on rounded bounds.
+  Large range statistics avoid enumeration: `Sum(Range(1, 10^20))` can return
+  its exact closed form.
 - `Take` and `Drop` clamp very large or infinite counts to a finite source's
   length. Collection queries stay symbolic when elements cannot be determined.
 - Improved numeric stability for very small or large norms and complex values:
@@ -650,8 +746,8 @@
 - Float division avoids an extra rounding: `0.3/0.3` is `1`. Compiled rounding
   of large integers and `Remainder` ties agrees with the interpreter.
 - Exact list sums and differences, irrational integration bounds and
-  determinants retain exact values: `[√2, 2] + [1, 1]` is `[1 + √2, 3]`.
-  Matrix power rules no longer combine element-wise and matrix operations
+  determinants retain exact values: `[√2, 2] + [1, 1]` is `[1 + √2, 3]`. Matrix
+  power rules no longer combine element-wise and matrix operations
   ([#415](https://github.com/cortex-js/compute-engine/issues/415)).
 - Polynomial operators read assigned values. Type inference narrows unions
   correctly and no longer mistakes collection parameters for matrices.
@@ -660,8 +756,8 @@
   ([#412](https://github.com/cortex-js/compute-engine/issues/412), reported by
   [enumeratio](https://github.com/enumeratio)).
 - LaTeX preserves parentheses around primed expressions, recognizes Unicode
-  number-set letters, and accepts spaces before postfix operators. Epsil
-  reports `->` used in place of a lambda's `=>`
+  number-set letters, and accepts spaces before postfix operators. Epsil reports
+  `->` used in place of a lambda's `=>`
   ([#420](https://github.com/cortex-js/compute-engine/issues/420), reported by
   [enumeratio](https://github.com/enumeratio)).
 - Lenient parsing reports `ambiguous-radical` for `√2 x` (Tycho row 366).
@@ -672,8 +768,8 @@
 
 ### New Features
 
-- `N(x, [p, a])` accepts significant-digit and absolute-accuracy goals,
-  stopping when either is met. Use `PositiveInfinity` to disable one goal:
+- `N(x, [p, a])` accepts significant-digit and absolute-accuracy goals, stopping
+  when either is met. Use `PositiveInfinity` to disable one goal:
   `N([π, 1000π], [PositiveInfinity, 3])` is `[3.142, 3141.593]`. The engine's
   precision is preserved; results remain symbolic if a goal cannot be met
   ([#391](https://github.com/cortex-js/compute-engine/issues/391)).
@@ -688,20 +784,19 @@
   Arithmetic requires compatible moduli and invertible divisors.
   `QuotientRing(Integers, n)` now contains residue classes rather than integers
   ([#399](https://github.com/cortex-js/compute-engine/issues/399),
-  [#411](https://github.com/cortex-js/compute-engine/issues/411), contributed
-  by [enumeratio](https://github.com/enumeratio)).
+  [#411](https://github.com/cortex-js/compute-engine/issues/411), contributed by
+  [enumeratio](https://github.com/enumeratio)).
 - Contour integration supports circles, rectangles and simple polygons through
   `ce.contourIntegrate()`, `ContourIntegrate`, and LaTeX `\oint` notation.
   Reports include poles, residues and the integral. A pole on the contour gives
   `Indeterminate`; unsupported cases remain symbolic
   ([#410](https://github.com/cortex-js/compute-engine/pull/410)).
-- More real integrals evaluate exactly using residues:
-  `∫_{−∞}^{∞} sin(x)/x dx` is `π`, and `∫₀^{2π} dx/(2 + cos x)` is
-  `2π/√3`. Principal values must be requested explicitly with
-  `RealLineContour(True)`.
+- More real integrals evaluate exactly using residues: `∫_{−∞}^{∞} sin(x)/x dx`
+  is `π`, and `∫₀^{2π} dx/(2 + cos x)` is `2π/√3`. Principal values must be
+  requested explicitly with `RealLineContour(True)`.
 - Complex numeric evaluation now covers Bessel and Airy functions, `Sinc`,
-  Fresnel functions, and every integer branch of `LambertW`. Error functions
-  and trigonometric integrals also support imaginary-axis arguments.
+  Fresnel functions, and every integer branch of `LambertW`. Error functions and
+  trigonometric integrals also support imaginary-axis arguments.
 - `CompilationResult` has the new fields `runtimeVersion`, `preambleOnce`,
   `preamblePerCall`, `callCode`, `entryPlan` and `reconstructionDigits`.
   `createJavaScriptRuntime()` accepts the options `random`, `frame`,
@@ -715,8 +810,8 @@
 - `Solve` returns a list only when it can establish completeness. Otherwise it
   stays unevaluated, and `expr.solve()` returns `null`. Unsupported computed
   collections are type errors rather than empty solution lists.
-- `N` consistently returns inexact numbers, preserves `ce.precision`, and
-  rounds collection elements: `N([1/3, Pi], 4)` is `[0.3333, 3.142]`
+- `N` consistently returns inexact numbers, preserves `ce.precision`, and rounds
+  collection elements: `N([1/3, Pi], 4)` is `[0.3333, 3.142]`
   ([#391](https://github.com/cortex-js/compute-engine/issues/391),
   [#409](https://github.com/cortex-js/compute-engine/issues/409)).
 - Numeric operations reject set operands rather than pairing them by position.
@@ -735,8 +830,8 @@
   `ce.getSequenceCache()` holds only exact terms.
 - When the unknown has no declared type and no domain is given, `Solve` gives
   all roots of a polynomial, complex roots included (`x^2 + 1 = 0` is
-  `[i, −i]`), and only the real solutions of other equations. A parameter of
-  the equation with no declared type is real.
+  `[i, −i]`), and only the real solutions of other equations. A parameter of the
+  equation with no declared type is real.
 - `N(Measurement(v, δ), p)` keeps the uncertainty and rounds `v`, so
   `N(Integrate(…), p)` is a `Measurement`.
 - `Derivative(f)` is a function literal also when its closed form holds the
@@ -754,8 +849,8 @@
   ([#400](https://github.com/cortex-js/compute-engine/issues/400), contributed
   by [enumeratio](https://github.com/enumeratio)).
 - `Solve` respects bounded domains and angular units, solves more systems and
-  avoids incomplete root lists. Lambert W templates retain only real roots
-  where real solutions are required.
+  avoids incomplete root lists. Lambert W templates retain only real roots where
+  real solutions are required.
 - Improved real and complex special-function accuracy, including Bessel,
   Fresnel, error and integral functions. `LambertW(-1/e)` and
   `LambertW(-1/e, -1)` are exactly `-1`.
@@ -774,14 +869,14 @@
 - Simplification preserves list shape, respects user replacements of library
   functions, and applies angular identities only in radians. Integration also
   respects user function definitions and avoids unbounded searches.
-- Shader compilation supports function primes, fixed-length maps, vector
-  squares and more applied derivatives.
+- Shader compilation supports function primes, fixed-length maps, vector squares
+  and more applied derivatives.
 - A memoized sequence term is computed again when a symbol that its recurrence
   reads changes. A first read of a large index no longer overflows the call
   stack: `F_2000` of the Fibonacci recurrence gives its 418 digits.
 - `Arcosh(0)` and `Arcoth(0)` evaluate to `iπ/2`, and `EllipticK(0)` and
-  `EllipticE(0)` to `π/2`. A sum whose radical-coefficient terms cancel is
-  `0`: `(√2/4·x).sub(√2/4·x)` was `0·x`
+  `EllipticE(0)` to `π/2`. A sum whose radical-coefficient terms cancel is `0`:
+  `(√2/4·x).sub(√2/4·x)` was `0·x`
   ([#409](https://github.com/cortex-js/compute-engine/issues/409)).
 - `Count` of set operations is correct:
   `Count(SymmetricDifference({1, 2, 3}, {2, 3, 4}))` is `2`; it was `1`.
@@ -791,9 +886,9 @@
 - A product whose LaTeX ends with a symbol keeps a `\times` before a
   parenthesized factor: `2v\times(x+1)`. The form `2v(x+1)` read back as a call
   of `v`.
-- Compiled JavaScript calls the current value of a block-local function that
-  is assigned again: `let h = (k) => k + 1; h := (k) => k + 2; h(3)` gives `5`,
-  as in the interpreter. It gave `4`.
+- Compiled JavaScript calls the current value of a block-local function that is
+  assigned again: `let h = (k) => k + 1; h := (k) => k + 2; h(3)` gives `5`, as
+  in the interpreter. It gave `4`.
 
 ## 0.147.0 _2026-10-02_
 
@@ -817,8 +912,8 @@
 - An exact complex number divided by an exact number is one exact complex
   literal: `i/3` is `["Complex", 0, ["Rational", 1, 3]]`, and `2/i` is `-2i`.
 - Numeric routines return floats also when the value is an integer:
-  `NIntegrate(1, 0, 2)` is `2.0`, not `2`. This also applies to `NLimit`,
-  `ND`, `NDSolve`, `FindFit` and `FindRoot`.
+  `NIntegrate(1, 0, 2)` is `2.0`, not `2`. This also applies to `NLimit`, `ND`,
+  `NDSolve`, `FindFit` and `FindRoot`.
 - The rational eigenvalues of an exact matrix larger than 3×3 are exact, and
   `Eigenvectors` then gives exact vectors.
 
@@ -834,17 +929,17 @@
   order 30.
 - Numeric functions evaluate random operands once. NaN components propagate
   correctly through complex results.
-- Lenient parsing handles spaces and duplicate superscripts consistently;
-  primed function names and factorials serialize with correct grouping.
+- Lenient parsing handles spaces and duplicate superscripts consistently; primed
+  function names and factorials serialize with correct grouping.
 
 ## 0.146.0 _2026-10-02_
 
 ### New Features
 
 - Added modular roots and reconstruction: `PowerModList(3, 1/2, 11)` is
-  `[5, 6]`, `PowerMod(4, 1/2, 7)` is `2`, and
-  `RationalReconstruction(6, 11)` is `1/2`. Also added `PrimitiveRootList`
-  and a target-list form of `MultiplicativeOrder`.
+  `[5, 6]`, `PowerMod(4, 1/2, 7)` is `2`, and `RationalReconstruction(6, 11)` is
+  `1/2`. Also added `PrimitiveRootList` and a target-list form of
+  `MultiplicativeOrder`.
 - Added `DirichletEta`, `DirichletBeta`, `DirichletCharacter` and `DirichletL`:
   `DirichletEta(1)` is `ln 2`, `DirichletBeta(1)` is `π/4`, and
   `DirichletCharacter(5, 2, 2)` is `i`.
@@ -856,8 +951,7 @@
 - Added `ClausenCl(n, θ)`: `ClausenCl(2, π/2)` is `CatalanConstant`.
 - Added `StirlingS2` as an alias for `Stirling`.
 
-These additions were contributed by
-[enumeratio](https://github.com/enumeratio)
+These additions were contributed by [enumeratio](https://github.com/enumeratio)
 ([#395](https://github.com/cortex-js/compute-engine/issues/395)).
 
 ### Behavior Changes
@@ -902,10 +996,10 @@ These additions were contributed by
   operators retain their names and supported derivatives.
 - Missing arguments and invalid logarithm arity report normal expression errors.
   Restrictions with infinite condition lists no longer run out of memory.
-- `∫ ln(x + 1) dx` is `(x + 1)·ln(x + 1) − x`. It was
-  `(x + 1)·ln(x) − x + 1`, and `∫₀¹ ln(x + 1) dx` was `+∞`.
-- Compiled Python `Arccot` of a complex argument with a negative real part is
-  no longer off by `π`.
+- `∫ ln(x + 1) dx` is `(x + 1)·ln(x + 1) − x`. It was `(x + 1)·ln(x) − x + 1`,
+  and `∫₀¹ ln(x + 1) dx` was `+∞`.
+- Compiled Python `Arccot` of a complex argument with a negative real part is no
+  longer off by `π`.
 
 ## 0.145.0 _2026-10-01_
 
@@ -928,8 +1022,8 @@ These additions were contributed by
   `ce.parse(text, { strict: false, onAmbiguity: 'error' })` to turn ambiguous
   readings into expression errors; the default is `'report'`.
 - The new `exponentialE` serialization option sets how `ExponentialE` and `Exp`
-  are written. The `imaginaryUnit` option now also sets how `ImaginaryUnit`
-  and complex numbers are written. The defaults are `\exponentialE` and
+  are written. The `imaginaryUnit` option now also sets how `ImaginaryUnit` and
+  complex numbers are written. The defaults are `\exponentialE` and
   `\imaginaryI`.
 
 ### Behavior Changes
@@ -937,10 +1031,9 @@ These additions were contributed by
 - A name in parentheses is a factor: `(f)(x)` is a product.
 - Lenient parsing accepts `+-` as `±` and `-+` as `∓`.
 - Four diagnostic codes are renamed; update handlers that match them:
-  `letter-run-split` → `ambiguous-letter-run`,
-  `implicit-product-in-denominator` → `ambiguous-denominator`,
-  `spaced-digit-groups` → `ambiguous-digit-groups`, and
-  `letter-before-decimal` → `ambiguous-letter-decimal`.
+  `letter-run-split` → `ambiguous-letter-run`, `implicit-product-in-denominator`
+  → `ambiguous-denominator`, `spaced-digit-groups` → `ambiguous-digit-groups`,
+  and `letter-before-decimal` → `ambiguous-letter-decimal`.
 - LaTeX output uses standard notation for `LCM`, `Log2`, `Log10`, number sets
   and `Degrees` ([#345](https://github.com/cortex-js/compute-engine/issues/345),
   contributed by [enumeratio](https://github.com/enumeratio)).
@@ -950,15 +1043,15 @@ These additions were contributed by
   variable with positional arguments, or declare it with a signature that names
   its parameters.
 - Lenient parsing reads `mod`, `pow`, `trunc`, `Re` and `Im` before a
-  parenthesis as `Mod`, `Power`, `Truncate`, `Real` and `Imaginary`:
-  `mod(7, 3)` evaluates to `1`.
+  parenthesis as `Mod`, `Power`, `Truncate`, `Real` and `Imaginary`: `mod(7, 3)`
+  evaluates to `1`.
 
 ### Issues Resolved
 
-- Declared symbols mapped with `vars` remain run-time inputs even when they
-  have assigned values. Integrals over mapped inputs retain closed forms.
-  To force numeric quadrature with a mapping, use source other than a plain
-  read, such as `{ a: '(_.a)' }`.
+- Declared symbols mapped with `vars` remain run-time inputs even when they have
+  assigned values. Integrals over mapped inputs retain closed forms. To force
+  numeric quadrature with a mapping, use source other than a plain read, such as
+  `{ a: '(_.a)' }`.
 - Python and shader targets reject reserved identifier mappings and names.
 - Calls through record and dictionary fields respect declarations and named
   arguments. Caller symbols sharing parameter names retain their meaning
@@ -967,13 +1060,13 @@ These additions were contributed by
   selection includes required dependencies. Failed declarations restore the
   previous binding.
 - Derivatives and compilation respect unchanged copies of library definitions
-  ([#394](https://github.com/cortex-js/compute-engine/issues/394)).
-  Minimal library configurations can construct function literals.
+  ([#394](https://github.com/cortex-js/compute-engine/issues/394)). Minimal
+  library configurations can construct function literals.
 - Numeric integration uses adaptive quadrature even when an integrand cannot
   compile. Imaginary factors serialize without unnecessary parentheses.
-- A prefix `\mp` or `∓` has a reading: `\mp 1` is `MinusPlus(0, 1)`. Calls
-  whose arguments contain `Floor`, `Ceil`, `Round` or `Truncate` are no longer
-  much slower than in 0.141.0.
+- A prefix `\mp` or `∓` has a reading: `\mp 1` is `MinusPlus(0, 1)`. Calls whose
+  arguments contain `Floor`, `Ceil`, `Round` or `Truncate` are no longer much
+  slower than in 0.141.0.
 
 ## 0.144.0 _2026-10-01_
 
@@ -988,8 +1081,8 @@ These additions were contributed by
 
 ### Behavior Changes
 
-- `Solve` returns a free parameter for identities and remains symbolic when
-  it has no justified candidate root
+- `Solve` returns a free parameter for identities and remains symbolic when it
+  has no justified candidate root
   ([#397](https://github.com/cortex-js/compute-engine/issues/397)).
 - Exact rational `Range` bounds and steps produce exact elements
   ([#397](https://github.com/cortex-js/compute-engine/issues/397)).
@@ -1003,8 +1096,8 @@ These additions were contributed by
 
 - `Solve` handles more linear and logarithmic equations and preserves exact
   exponential roots: `Solve(eˣ = 3, x)` gives `ln(3)`.
-- Derivatives respect custom library definitions and user replacements:
-  after `Sinh(x) := 3x`, `D(Sinh(t), t)` is `3`
+- Derivatives respect custom library definitions and user replacements: after
+  `Sinh(x) := 3x`, `D(Sinh(t), t)` is `3`
   ([#393](https://github.com/cortex-js/compute-engine/issues/393)).
 - Library loading order and operator signature extensions behave consistently
   ([#393](https://github.com/cortex-js/compute-engine/issues/393),
@@ -1019,8 +1112,8 @@ These additions were contributed by
 
 - Faster compiled JavaScript range processing and scalar callbacks
   ([#387](https://github.com/cortex-js/compute-engine/issues/387),
-  [#388](https://github.com/cortex-js/compute-engine/issues/388)). Deeply
-  nested lenient exponents parse quickly.
+  [#388](https://github.com/cortex-js/compute-engine/issues/388)). Deeply nested
+  lenient exponents parse quickly.
 
 ## 0.143.0 _2026-10-01_
 
@@ -1028,8 +1121,8 @@ These additions were contributed by
 
 - `ReplaceAt`, `DeleteAt` and `Insert` compile to JavaScript and Python
   ([#386](https://github.com/cortex-js/compute-engine/issues/386)).
-- `Max`, `Min`, `Length`, `Count`, `Sum` and `Product` of an operand typed as
-  an abstract collection compile to JavaScript
+- `Max`, `Min`, `Length`, `Count`, `Sum` and `Product` of an operand typed as an
+  abstract collection compile to JavaScript
   ([#385](https://github.com/cortex-js/compute-engine/issues/385)).
 
 ### Behavior Changes
@@ -1050,12 +1143,12 @@ These additions were contributed by
   `Reduce([[1, 2], [3, 4]], Add).N()` is `[4, 6]`.
 - Compiled statistics no longer return incorrect values for nested lists, and
   annotated parameters validate absent arguments.
-- Arithmetic methods preserve assigned-variable dependencies; multiplication
-  by zero no longer hides an assigned NaN.
+- Arithmetic methods preserve assigned-variable dependencies; multiplication by
+  zero no longer hides an assigned NaN.
 - Corrected function assignment for parameters that admit missing values,
   dictionary-join diagnostics and missing operands of `Sum`/`Product`.
-- `HurwitzZeta` supports integer orders with arguments far left of the
-  imaginary axis. Simplification propagates NaN through extrema.
+- `HurwitzZeta` supports integer orders with arguments far left of the imaginary
+  axis. Simplification propagates NaN through extrema.
 
 ### Performance
 
@@ -1077,8 +1170,8 @@ These additions were contributed by
 
 ### Behavior Changes
 
-- Rounding, step functions and comparisons use exact operands under `.N()`.
-  Two exact numbers compare without tolerance, including near boundaries.
+- Rounding, step functions and comparisons use exact operands under `.N()`. Two
+  exact numbers compare without tolerance, including near boundaries.
 - Full materialization returns every element of a finite lazy collection
   ([#380](https://github.com/cortex-js/compute-engine/issues/380), reported by
   [enumeratio](https://github.com/enumeratio)).
@@ -1087,14 +1180,14 @@ These additions were contributed by
   are errors; numeric parameters still accept NaN.
 - Assignments store the current elements of lazy collections that depend on
   variables. Known valid literal indices no longer add an absent result type.
-- `Range`, `Linspace`, comprehensions and `Tabulate` are typed `list<T>`
-  (Tycho row 337).
-- A rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a comparison of
-  an exact constant expression is resolved under `evaluate()` by raising the
+- `Range`, `Linspace`, comprehensions and `Tabulate` are typed `list<T>` (Tycho
+  row 337).
+- A rounding function, `Fract`, `Mod`, `Sign`, `Heaviside` or a comparison of an
+  exact constant expression is resolved under `evaluate()` by raising the
   precision: `Floor(π·10³⁰)` is the exact integer
   `3141592653589793238462643383279`, and `Fract(π)` is `π − 3`.
-- To get the display preview from `evaluate()`, pass
-  `materialization: [5, 5]`. `toString()` and `.latex` still print the preview.
+- To get the display preview from `evaluate()`, pass `materialization: [5, 5]`.
+  `toString()` and `.latex` still print the preview.
 - To accept an absent argument at an annotated parameter, annotate it
   `T | missing` and test `isMissing(p)`, or remove the absent case at the call
   (`first(…) ?? fallback`).
@@ -1116,8 +1209,8 @@ These additions were contributed by
   symbolic. More special functions broadcast over lists
   ([#374](https://github.com/cortex-js/compute-engine/issues/374), contributed
   by [enumeratio](https://github.com/enumeratio)).
-- Interval enclosures for `Gamma`, `GammaLn`, `Binomial` and `Factorial`
-  contain their true values. Compiled binomial values agree outside `0 ≤ k ≤ n`
+- Interval enclosures for `Gamma`, `GammaLn`, `Binomial` and `Factorial` contain
+  their true values. Compiled binomial values agree outside `0 ≤ k ≤ n`
   ([#384](https://github.com/cortex-js/compute-engine/issues/384), reported by
   [enumeratio](https://github.com/enumeratio)).
 - Lazy operators and compiled JavaScript handle collections that may be absent.
@@ -1127,10 +1220,10 @@ These additions were contributed by
   collection functions and destructuring loop declarations compile correctly
   ([#369](https://github.com/cortex-js/compute-engine/issues/369), reported by
   [enumeratio](https://github.com/enumeratio); Tycho rows 338 and 339).
-- WGSL shaders using NaN or infinity compile in browsers. Shader `LerchPhi`
-  and `PolyLog` support more arguments and improved accuracy.
-- Unsupported searches remain symbolic instead of reporting index `0`.
-  Invalid infinite indices and indeterminate integrands return consistent values
+- WGSL shaders using NaN or infinity compile in browsers. Shader `LerchPhi` and
+  `PolyLog` support more arguments and improved accuracy.
+- Unsupported searches remain symbolic instead of reporting index `0`. Invalid
+  infinite indices and indeterminate integrands return consistent values
   ([#368](https://github.com/cortex-js/compute-engine/issues/368), reported by
   [enumeratio](https://github.com/enumeratio)).
 - Epsil serialization scales linearly with nesting depth. Nested function slots,
@@ -1138,19 +1231,19 @@ These additions were contributed by
   ([#379](https://github.com/cortex-js/compute-engine/issues/379),
   [#381](https://github.com/cortex-js/compute-engine/issues/381), reported by
   [enumeratio](https://github.com/enumeratio)).
-- Protocol dispatch binds `Self` to the selected implementation's type.
-  Compiled ranges no longer capture user variables named `i` or `_e`
+- Protocol dispatch binds `Self` to the selected implementation's type. Compiled
+  ranges no longer capture user variables named `i` or `_e`
   ([#362](https://github.com/cortex-js/compute-engine/issues/362), contributed
   by [enumeratio](https://github.com/enumeratio);
   [#367](https://github.com/cortex-js/compute-engine/issues/367), reported by
   [enumeratio](https://github.com/enumeratio)).
-- `Floor`, `Ceil`, `Round`, `Truncate` and `Fract` of an exact number are
-  exact: `Floor((25! − 1)/24!)` was `25` and is now `24`, and
-  `Fract((25! − 1)/3)` was `−1/3` and is now `2/3`
+- `Floor`, `Ceil`, `Round`, `Truncate` and `Fract` of an exact number are exact:
+  `Floor((25! − 1)/24!)` was `25` and is now `24`, and `Fract((25! − 1)/3)` was
+  `−1/3` and is now `2/3`
   ([#382](https://github.com/cortex-js/compute-engine/issues/382), reported by
   [enumeratio](https://github.com/enumeratio)).
-- A `Pipe` stage that uses no topic slot and whose value is not a function is
-  an `incompatible-type` error: `5 |> Max(3)` gave `3`.
+- A `Pipe` stage that uses no topic slot and whose value is not a function is an
+  `incompatible-type` error: `5 |> Max(3)` gave `3`.
 - `ce.number([n, 0])` is `~oo` for `n ≠ 0`, as `ce.box(["Rational", n, 0])` is;
   it was `NaN`. `ce.number([0, 0])` is `Indeterminate`.
 - The `materialization` option no longer truncates the operands of an eager
@@ -1184,8 +1277,8 @@ These additions were contributed by
 - `epsil --compile` compiles and runs JavaScript, using machine arithmetic.
   Unsupported constructs and unbound symbols report runtime errors.
 - `ce.withStepBudget({ steps, label }, fn)` bounds cooperative engine work.
-  Exhaustion throws `CancellationError` with cause `'step-budget'`
-  (Tycho row 326).
+  Exhaustion throws `CancellationError` with cause `'step-budget'` (Tycho row
+  326).
 - Added `LerchPhi(z, s, a)`, the Lerch transcendent, and support for non-integer
   and complex orders of `PolyLog`: `PolyLog(2.5, 0.5).N()` is about
   `0.5549972787175124`. Unsupported numeric cases remain symbolic
@@ -1194,8 +1287,8 @@ These additions were contributed by
 - `PolyGamma`, `Digamma` and `Trigamma` support complex arguments
   ([#340](https://github.com/cortex-js/compute-engine/issues/340), contributed
   by [enumeratio](https://github.com/enumeratio)).
-- Added exact eigenvalues for supported 2×2 and 3×3 matrices, plus evaluation
-  of `AdjugateMatrix` and `PseudoInverse`.
+- Added exact eigenvalues for supported 2×2 and 3×3 matrices, plus evaluation of
+  `AdjugateMatrix` and `PseudoInverse`.
 - `PolyLog` and `LerchPhi` compile to JavaScript, GLSL and WGSL for real
   operands.
 - `CancellationCause` gains `'step-budget'`, and `isTimeoutCancellation` is
@@ -1221,9 +1314,9 @@ These additions were contributed by
   MathJSON, so it reads back as a float; it was `2`. With `fractionalDigits: 0`
   (LaTeX) or `digits: {fractional: 0}` (MathJSON) the integer spelling is kept.
 - `-(2x)` canonicalizes to `Multiply(-2, x)`; it was `Negate(Multiply(2, x))`.
-  `-\frac{x}{2}` is `Multiply(-1/2, x)`, the same expression as
-  `-\frac{1}{2}x` ([#345](https://github.com/cortex-js/compute-engine/issues/345),
-  contributed by [enumeratio](https://github.com/enumeratio)).
+  `-\frac{x}{2}` is `Multiply(-1/2, x)`, the same expression as `-\frac{1}{2}x`
+  ([#345](https://github.com/cortex-js/compute-engine/issues/345), contributed
+  by [enumeratio](https://github.com/enumeratio)).
 - `Beta(2, 3)`, `Zeta(3)` and `Lb(x)` serialize to LaTeX as `\mathrm{B}(2, 3)`,
   `\zeta(3)` and `\log_2(x)`. A negative numeric fraction writes its sign in
   front: `Rational(-1, 2)` is `-\frac{1}{2}`, `Divide(x, -4)` is `-\frac{x}{4}`.
@@ -1248,21 +1341,21 @@ These additions were contributed by
   Complex `Arcosh` and incomplete gamma select correct values
   ([#353](https://github.com/cortex-js/compute-engine/issues/353),
   [#354](https://github.com/cortex-js/compute-engine/issues/354);
-  [#340](https://github.com/cortex-js/compute-engine/issues/340), contributed
-  by [enumeratio](https://github.com/enumeratio)).
+  [#340](https://github.com/cortex-js/compute-engine/issues/340), contributed by
+  [enumeratio](https://github.com/enumeratio)).
 - Unknown-length indexing stays symbolic, collection restrictions retain their
-  types, and list and set spreads use the supplied argument's elements
-  (Tycho rows 331, 334 and 335).
+  types, and list and set spreads use the supplied argument's elements (Tycho
+  rows 331, 334 and 335).
 - Derivatives, negative large numbers, beta and zeta functions, logarithms and
-  matrix rank serialize correctly. Epsil handles `a * 2n` and library names
-  in the MCP compile tool
+  matrix rank serialize correctly. Epsil handles `a * 2n` and library names in
+  the MCP compile tool
   ([#345](https://github.com/cortex-js/compute-engine/issues/345), contributed
   by [enumeratio](https://github.com/enumeratio); Tycho row 333).
-- A compiled `for` loop over a list of complex values reads the loop variable
-  as complex. It read it as real, so comparisons on it were false and divisions
+- A compiled `for` loop over a list of complex values reads the loop variable as
+  complex. It read it as real, so comparisons on it were false and divisions
   gave `NaN` (Tycho row 332).
-- More exact special values: `Log(1/8, 2)` and `Lb(1/8)` are `-3`, `Sinc(Pi)`
-  is exactly `0`, `Arccot(1)` is `π/4`, and `ComplexRoots(1, 4)` is
+- More exact special values: `Log(1/8, 2)` and `Lb(1/8)` are `-3`, `Sinc(Pi)` is
+  exactly `0`, `Arccot(1)` is `π/4`, and `ComplexRoots(1, 4)` is
   `[1, i, -1, -i]`.
 
 ### Performance
@@ -1274,8 +1367,8 @@ These additions were contributed by
 
 ### New Features
 
-- `ce.number({ re, im })` accepts JavaScript numbers or `BigDecimal` values
-  for each component.
+- `ce.number({ re, im })` accepts JavaScript numbers or `BigDecimal` values for
+  each component.
 - `isComplex` is public on the number-literal interface.
 
 ### Behavior Changes
@@ -1283,12 +1376,12 @@ These additions were contributed by
 - Decimal spellings consistently produce floats at machine precision, and a
   float operand makes numeric results inexact.
 - `Integrate` applies coordinate by coordinate to tuples.
-- More logical connectives use three-valued logic for absent operands.
-  Compiled absent points, tuples and lists use `undefined` in arithmetic.
+- More logical connectives use three-valued logic for absent operands. Compiled
+  absent points, tuples and lists use `undefined` in arithmetic.
 - User bindings shadow capitalized library names. Binding `Nothing`, `Missing`
   or `Undefined` is an error.
-- `Length` of an infinite collection is `+oo`. `StringFrom` of text or a
-  symbol returns its text.
+- `Length` of an infinite collection is `+oo`. `StringFrom` of text or a symbol
+  returns its text.
 - `serializeEpsil` writes the lowercase spelling of a library name:
   `["Sin", "x"]` is `sin(x)` and `"Pi"` is `pi`. The new option
   `libraryNames: 'mathjson'` restores the previous output, and the new `isBound`
@@ -1324,15 +1417,15 @@ These additions were contributed by
 
 ### Behavior Changes
 
-- Decimal literals such as `1.0` and `0.0` consistently remain floats.
-  `1.0/3` is a float, and `x^1.0` retains its exponent. Integer-valued
-  `BigDecimal` inputs to `ce.number()` are exact.
-- Derivative LaTeX puts the differentiand in the numerator:
-  `D(x², x)` is `\frac{\mathrm{d}x^2}{\mathrm{d}x}`, preserving the meaning
-  when other terms follow it.
+- Decimal literals such as `1.0` and `0.0` consistently remain floats. `1.0/3`
+  is a float, and `x^1.0` retains its exponent. Integer-valued `BigDecimal`
+  inputs to `ce.number()` are exact.
+- Derivative LaTeX puts the differentiand in the numerator: `D(x², x)` is
+  `\frac{\mathrm{d}x^2}{\mathrm{d}x}`, preserving the meaning when other terms
+  follow it.
 - A float `0` or `±1` produced by a computation is kept: `0.5·2x` evaluates to
-  `1x` (it was `x`), `0.5x + 0.5x` is `1.0·x`, and `0.0 + x` stays `x + 0.0`.
-  A float `0` still absorbs a product: `0.0x` is the float `0`.
+  `1x` (it was `x`), `0.5x + 0.5x` is `1.0·x`, and `0.0 + x` stays `x + 0.0`. A
+  float `0` still absorbs a product: `0.0x` is the float `0`.
 - `GCD`, `LCM` and `Factorial2` of big integers are exact at the default
   precision. They were floats.
 - Compiled comparisons with a `Missing` or `Undefined` operand give the
@@ -1365,17 +1458,17 @@ These additions were contributed by
 
 ### New Features
 
-- `Zeta` supports complex orders and a second argument; added `HurwitzZeta`.
-  For positive real base points, `Zeta(s, a)` agrees with `HurwitzZeta(s, a)`.
-  `Zeta(2, 1/2)` is exactly `π²/2`. Complex and two-argument numeric values
-  use machine precision in this release. Both compile for real operands
+- `Zeta` supports complex orders and a second argument; added `HurwitzZeta`. For
+  positive real base points, `Zeta(s, a)` agrees with `HurwitzZeta(s, a)`.
+  `Zeta(2, 1/2)` is exactly `π²/2`. Complex and two-argument numeric values use
+  machine precision in this release. Both compile for real operands
   ([#340](https://github.com/cortex-js/compute-engine/issues/340), contributed
   by [enumeratio](https://github.com/enumeratio)).
 
 ### Issues Resolved
 
-- Hyperbolic special values evaluate and simplify: `Sinh(0)` is `0`,
-  `Cosh(0)` is `1`, and `Coth(0)` and `Csch(0)` are `ComplexInfinity`
+- Hyperbolic special values evaluate and simplify: `Sinh(0)` is `0`, `Cosh(0)`
+  is `1`, and `Coth(0)` and `Csch(0)` are `ComplexInfinity`
   ([#341](https://github.com/cortex-js/compute-engine/issues/341), contributed
   by [enumeratio](https://github.com/enumeratio)).
 - More number theory functions evaluate on large prime squares.
@@ -1403,8 +1496,8 @@ These additions were contributed by
 
 ### Performance
 
-- Functions with `unknown` parameters no longer cause slow type updates in
-  other functions.
+- Functions with `unknown` parameters no longer cause slow type updates in other
+  functions.
 
 ## 0.137.1 _2026-09-26_
 
@@ -1424,9 +1517,9 @@ These additions were contributed by
 - Function literals broadcast over collections like named functions. Tuple
   arguments remain whole where appropriate, and unequal list lengths report
   dimension errors. Pipe stages follow the same rules as direct calls.
-- Absent numeric collection reads return NaN; operations over absent
-  collections return the appropriate absent result. Searches find explicit
-  NaN, `Missing` and `Undefined` entries.
+- Absent numeric collection reads return NaN; operations over absent collections
+  return the appropriate absent result. Searches find explicit NaN, `Missing`
+  and `Undefined` entries.
 - A predicate returning `Missing` does not select an element. Membership remains
   symbolic when an unknown element could change the result.
 - A user function mapped over lists of different lengths reports
@@ -1435,20 +1528,20 @@ These additions were contributed by
 
 ### Issues Resolved
 
-- Numeric powers, roots and exponentials retain very small complex results
-  and handle exact values beyond double range. At machine precision, integers
-  beyond double range approximate to signed infinity.
+- Numeric powers, roots and exponentials retain very small complex results and
+  handle exact values beyond double range. At machine precision, integers beyond
+  double range approximate to signed infinity.
 - Nonconvergent infinite series remain symbolic. Range extrema and membership
   handle endpoints correctly.
-- Matrix norms and eigenvalue routines handle extreme entry magnitudes;
-  repeated eigenvalues receive a basis of eigenvectors.
-- Reductions preserve absent entries, sorting by a key puts them last, and
-  joins with unresolved conditional operands remain symbolic.
-- Multiple integrals evaluate scalar bounds once. Rebuilt sums, products,
-  loops and comprehensions retain index types.
+- Matrix norms and eigenvalue routines handle extreme entry magnitudes; repeated
+  eigenvalues receive a basis of eigenvectors.
+- Reductions preserve absent entries, sorting by a key puts them last, and joins
+  with unresolved conditional operands remain symbolic.
+- Multiple integrals evaluate scalar bounds once. Rebuilt sums, products, loops
+  and comprehensions retain index types.
 - Compiled JavaScript handles complex division and recursive complex matrices.
-  Python norm, coordinate and absent-operand handling is more consistent;
-  shader and interval targets handle poles and tiny angles more reliably.
+  Python norm, coordinate and absent-operand handling is more consistent; shader
+  and interval targets handle poles and tiny angles more reliably.
 - `((2·10^{30}+1)/10^{30})·2^x` no longer simplifies to `2^{x+1}`.
 - Compiled JavaScript: a `Sum` with a square root that is real by its type no
   longer gives `NaN`.
@@ -1458,18 +1551,18 @@ These additions were contributed by
 ### Issues Resolved
 
 - Function result types follow their bodies for `nan | real` arguments.
-- Multiplying a list by a factor that may be NaN retains NaN in the element type.
+- Multiplying a list by a factor that may be NaN retains NaN in the element
+  type.
 
 ## 0.136.1 _2026-09-25_
 
 ### Behavior Changes
 
-- Arithmetic methods treat `Missing` and `Undefined` as NaN rather than
-  dropping them. Numeric out-of-range reads and traces of absent values also
-  return NaN.
+- Arithmetic methods treat `Missing` and `Undefined` as NaN rather than dropping
+  them. Numeric out-of-range reads and traces of absent values also return NaN.
 - `Sort` and `Ordering` put absent elements last.
-- `SVD` returns singular values in descending order and handles a wider range
-  of entry magnitudes.
+- `SVD` returns singular values in descending order and handles a wider range of
+  entry magnitudes.
 - Canonicalization no longer removes an absent operand from arithmetic:
   `Multiply(0, 2, Missing)` and `Divide(Missing, Missing)` are `NaN` (they were
   `0` and `1`).
@@ -1479,14 +1572,14 @@ These additions were contributed by
 - Small singular values are retained for matrices with widely varying entries.
 - Negative even roots preserve their principal complex values;
   `ce.number(-8).root(-3)` is `−1/2`.
-- Point subtraction propagates absent values as `Missing`. Collection
-  selection and reordering preserve absent entries in their result types.
+- Point subtraction propagates absent values as `Missing`. Collection selection
+  and reordering preserve absent entries in their result types.
 - Restricted points, lists and point lists compile correctly for interval
   evaluation. JavaScript sorting, out-of-range reads and restricted point
   arithmetic agree with the interpreter.
 - Arithmetic retains existing errors instead of replacing them with new ones.
-- At high precision, the square root of a negative real is imaginary: `√(−4)`
-  is `2i` (it was `NaN`).
+- At high precision, the square root of a negative real is imaginary: `√(−4)` is
+  `2i` (it was `NaN`).
 
 ## 0.136.0 _2026-09-25_
 
@@ -1498,25 +1591,25 @@ These additions were contributed by
 ### Behavior Changes
 
 - A false numeric restriction gives NaN; an undecided restriction over a list
-  remains a single restricted value. Operations on absent collections return
-  the absent value appropriate to their result.
+  remains a single restricted value. Operations on absent collections return the
+  absent value appropriate to their result.
 - `Undefined` elements and arithmetic operands are typed as absent.
 - `Dot([1, Missing], [1, 1])` is NaN.
-- `Csc` and `Cot` of a tiny nonzero angle give a signed infinity:
-  `Csc(5e-324)` is `+oo` and `Csc(-5e-324)` is `-oo` (both were `~oo`), also in
-  compiled JavaScript and Python.
+- `Csc` and `Cot` of a tiny nonzero angle give a signed infinity: `Csc(5e-324)`
+  is `+oo` and `Csc(-5e-324)` is `-oo` (both were `~oo`), also in compiled
+  JavaScript and Python.
 
 ### Issues Resolved
 
-- Exact complex roots and exponentials retain symbolic values:
-  `√i` is `(√2/2)(1+i)`. Imaginary integer literals are exact.
+- Exact complex roots and exponentials retain symbolic values: `√i` is
+  `(√2/2)(1+i)`. Imaginary integer literals are exact.
 - Rational numeric approximation is correctly rounded at machine precision.
-  Trigonometric functions handle large exact integers, large multiples of π
-  and exact special angles correctly.
+  Trigonometric functions handle large exact integers, large multiples of π and
+  exact special angles correctly.
 - Number literals follow precision changes, large doubles use exponent notation,
   and `ComplexInfinity` has a consistent MathJSON form.
-- Perfect-power roots of large integers evaluate. `Artanh` near zero and
-  `Zeta` near its pole retain small differences.
+- Perfect-power roots of large integers evaluate. `Artanh` near zero and `Zeta`
+  near its pole retain small differences.
 - Points, matrices and lists preserve absent coordinates and elements;
   coordinate operations, norms and mapped functions return NaN or `Missing`
   consistently with their result types.
@@ -1571,9 +1664,9 @@ These additions were contributed by
 
 ### Issues Resolved
 
-- Restricted points and point lists work with `Distance`, `Norm`, `Dot`,
-  `Cross` and coordinate accessors. False restrictions give `Missing`;
-  numeric restrictions applied element by element preserve absent cells.
+- Restricted points and point lists work with `Distance`, `Norm`, `Dot`, `Cross`
+  and coordinate accessors. False restrictions give `Missing`; numeric
+  restrictions applied element by element preserve absent cells.
 - Compiled point arithmetic, norms and distance agree with the interpreter.
   Free-symbol reports correctly exclude block locals, and compilation failures
   give clearer reasons.
@@ -1595,19 +1688,20 @@ These additions were contributed by
 
 - Ordering functions distinguish nearby values without tolerance:
   `Max(1e-12, 2e-12)` is `2e-12`. Relational comparisons retain their tolerance.
-  `Sort` and `Ordering` stay symbolic when order is undecidable and put NaN last.
+  `Sort` and `Ordering` stay symbolic when order is undecidable and put NaN
+  last.
 - `Rgb` preserves extended sRGB channels. Color output uses gamut mapping:
-  `ColorToString(Oklch(0.7, 0.4, 30))` is `#ff5843`.
-  Added `GamutMap(color, gamut?)` and Display P3 output. `Hsv` and `Hsl`
-  clamp saturation, value and lightness and normalize hue.
+  `ColorToString(Oklch(0.7, 0.4, 30))` is `#ff5843`. Added
+  `GamutMap(color, gamut?)` and Display P3 output. `Hsv` and `Hsl` clamp
+  saturation, value and lightness and normalize hue.
 - Only safe JavaScript integers are boxed as exact integers. Use a bigint or
   numeric string for an exact large integer. Float trigonometric arguments
   remain inexact; use `Sin(Pi)` for an exact special value.
 - `Norm(A, 2)` is the matrix spectral norm. Use `Norm(A)` or
   `Norm(A, "Frobenius")` for the Frobenius norm.
 - Compiled JavaScript linear algebra checks whether real inputs contain complex
-  entries. `mode: 'complex'` selects complex computation;
-  `entryChecks: false` disables entry checks.
+  entries. `mode: 'complex'` selects complex computation; `entryChecks: false`
+  disables entry checks.
 - Symbolic integration supports a `stepBudget` option in `loadIntegrationRules`.
   Caller deadlines propagate as cancellation errors through compilation,
   integration and differentiation.
@@ -1616,8 +1710,8 @@ These additions were contributed by
   `_gpu_oklch_to_srgb()`.
 - A value is a pole of `Tan`, `Cot`, `Sec` or `Csc` when the argument is within
   about 100 ulps of a pole: `Cot(1e-13)` is `1e13` (it was `~oo`), and
-  `cot(1000π)` is `~oo`. Compiled code gives `Infinity` (JavaScript) or
-  `np.inf` (Python) at a pole.
+  `cot(1000π)` is `~oo`. Compiled code gives `Infinity` (JavaScript) or `np.inf`
+  (Python) at a pole.
 - On GLSL and WGSL, `Mandelbrot` and `Julia` take `complex` points, passed as
   `vec2`.
 
@@ -1630,22 +1724,23 @@ These additions were contributed by
 
 ### Issues Resolved
 
-- Exact complex arithmetic and matrix entries retain exact values:
-  `√2·(1+i)` is `√2 + √2i`, and `(√2(1+i))²` is `4i`.
+- Exact complex arithmetic and matrix entries retain exact values: `√2·(1+i)` is
+  `√2 + √2i`, and `(√2(1+i))²` is `4i`.
 - Very small differences and exact values outside float64 range are preserved;
   values near integers are no longer silently rounded to them.
 - Matrix decompositions retain imaginary components and handle extreme entry
   magnitudes more reliably. Unsupported complex decompositions stay symbolic.
-- Statistics accept real constants: `Median([π, 3, e])` is `3`.
-  `Mode` breaks ties by the smallest value under `.N()` as well.
+- Statistics accept real constants: `Median([π, 3, e])` is `3`. `Mode` breaks
+  ties by the smallest value under `.N()` as well.
 - Degree literals evaluate correctly in every angular mode. Equality proofs,
   dictionary equality and dependent expression types update consistently.
 - Compiled code preserves global bindings, evaluates random operands once and
   validates unsupported complex operands. Python complex operations and branch
   handling, shader complex roots and interval degree literals are corrected.
-- Numeric integration of an everywhere-NaN integrand returns NaN promptly.
-  Color conversion no longer rounds channels prematurely to 8 bits.
-- `Timing` consistently documents its result as time in microseconds, then value.
+- Numeric integration of an everywhere-NaN integrand returns NaN promptly. Color
+  conversion no longer rounds channels prematurely to 8 bits.
+- `Timing` consistently documents its result as time in microseconds, then
+  value.
 - Compiled Python gave `2 * x + z` for `2(x + z)`.
 - `determinant()` of the `numerics` entry point no longer throws a `TypeError`
   for a matrix of size 3 or more.
@@ -1654,34 +1749,33 @@ These additions were contributed by
 
 - Faster symbolic sums, expansion, numeric arithmetic over large lists and
   repeated derivatives. `Expand((x+y+z+1)^32)` is about 2.7× faster.
-- Monte Carlo integration of 10 million samples takes about 0.4 s instead of
-  3.6 s.
+- Monte Carlo integration of 10 million samples takes about 0.4 s instead of 3.6
+  s.
 
 ## 0.133.0 _2026-09-22_
 
 ### Breaking Changes
 
 - **`StringFrom` decodes non-negative integers as Unicode code points.**
-  `StringFrom(65)` is `"A"`, and `StringFrom([127467, 127479])` is `"🇫🇷"`.
-  Use `StringFrom(65, "default")` for decimal text. The empty list gives `""`.
+  `StringFrom(65)` is `"A"`, and `StringFrom([127467, 127479])` is `"🇫🇷"`. Use
+  `StringFrom(65, "default")` for decimal text. The empty list gives `""`.
 - **Collection equality propagates absent elements.**
-  `Equal([1, Missing], [1, Missing])` is `Missing`, as is `NotEqual`.
-  A length mismatch remains `False`; `.isEqual()` and `IdenticallyEqual`
-  still recognize structurally identical collections.
+  `Equal([1, Missing], [1, Missing])` is `Missing`, as is `NotEqual`. A length
+  mismatch remains `False`; `.isEqual()` and `IdenticallyEqual` still recognize
+  structurally identical collections.
 
 ### Behavior Changes
 
 - `Undefined` behaves as an absent value like `Missing`: numeric operations
-  return NaN, `IsMissing(Undefined)` is `True`, and `Coalesce(Undefined, 2)`
-  is `2`.
+  return NaN, `IsMissing(Undefined)` is `True`, and `Coalesce(Undefined, 2)` is
+  `2`.
 - Scalar callbacks broadcast over collection elements in more collection
   operations: with `f(x) := 2x` declared `(number) -> number`,
-  `Map(f, [[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`. Predicates requiring
-  a single boolean still reject collection results.
+  `Map(f, [[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`. Predicates requiring a
+  single boolean still reject collection results.
 - Element-wise operations preserve empty lists: `Sin([])` is `[]`.
-- `RandomChoice` on a string returns a string:
-  `RandomChoice("abc", 5)` has five characters. Use `Characters(...)` to
-  recover a list of characters.
+- `RandomChoice` on a string returns a string: `RandomChoice("abc", 5)` has five
+  characters. Use `Characters(...)` to recover a list of characters.
 - Stored expressions preserve their original bindings inside functions and
   loops, including in compiled code.
 - At machine precision, element-wise operations over lists of more than a
@@ -1699,15 +1793,15 @@ These additions were contributed by
   preserve undecided and absent values correctly.
 - Compiled `Missing` and `Undefined` use the target's absent value rather than
   becoming free variables. Functions with unknown signatures track their bodies.
-- Restricted assignments respect assumptions. Nested function-call notation
-  and repeated ellipses parse correctly.
-- Epsil sum types can implement protocols under the sum type's name.
-  `FindFit` and `FindRoot` attribute setup timeouts to the setup phase.
+- Restricted assignments respect assumptions. Nested function-call notation and
+  repeated ellipses parse correctly.
+- Epsil sum types can implement protocols under the sum type's name. `FindFit`
+  and `FindRoot` attribute setup timeouts to the setup phase.
 
 ### Performance
 
-- Faster arithmetic and coordinate access over large lists: `Sum(Sin(L))`
-  over 10,000 numbers takes about 2 ms instead of 58 ms.
+- Faster arithmetic and coordinate access over large lists: `Sum(Sin(L))` over
+  10,000 numbers takes about 2 ms instead of 58 ms.
 - Faster factoring of deeply nested quotients.
 
 ## 0.132.3 _2026-09-20_
@@ -1715,10 +1809,10 @@ These additions were contributed by
 ### Improvements
 
 - `Max` and `Min` of scalars and collections compile on `interval-js`, including
-  `Max(0, Min(1, L))`. Empty collections contribute no elements:
-  `Min(1, [])` is `1`.
-- Faster point-coordinate access; `PointZ` over 10,000 points takes about
-  79 ms instead of 165 ms.
+  `Max(0, Min(1, L))`. Empty collections contribute no elements: `Min(1, [])` is
+  `1`.
+- Faster point-coordinate access; `PointZ` over 10,000 points takes about 79 ms
+  instead of 165 ms.
 - Recompiling an integral after a symbolic search timeout avoids repeating the
   search across compatible type declarations and scopes.
 
@@ -1734,16 +1828,16 @@ These additions were contributed by
 - Faster compiled arithmetic over point lists: a 7,225-point coordinate
   calculation takes about 0.14 ms instead of 2.55 ms. Shader targets support
   more point lists with coordinates computed at run time.
-- Repeated compilation of an integral skips a symbolic search that already
-  timed out, then uses numeric integration. Changes to assignments,
-  assumptions, angular units or precision permit a new search.
+- Repeated compilation of an integral skips a symbolic search that already timed
+  out, then uses numeric integration. Changes to assignments, assumptions,
+  angular units or precision permit a new search.
 
 ### Issues Resolved
 
 - More JavaScript operations compile over lists mixing real and complex values,
   including `Abs`, `Divide`, `Power`, `Real`, `Exp` and `Sign`.
-- Compiled complex arithmetic agrees with the interpreter at poles:
-  `1/(0·i)` is `~oo`, its absolute value is `+∞`, and its reciprocal is `0`.
+- Compiled complex arithmetic agrees with the interpreter at poles: `1/(0·i)` is
+  `~oo`, its absolute value is `+∞`, and its reciprocal is `0`.
 - Compiled coordinate reads detect incompatible point dimensions and preserve
   user variable mappings and operator overrides.
 
@@ -1751,16 +1845,16 @@ These additions were contributed by
 
 ### Resolved Issues
 
-- `resolveApplication` callbacks preserve range precedence, including offsets
-  in range bounds. Returning `undefined` no longer changes `f(x)+1...n` into
+- `resolveApplication` callbacks preserve range precedence, including offsets in
+  range bounds. Returning `undefined` no longer changes `f(x)+1...n` into
   `f(x)+(1...n)`.
 
 ## 0.132.0 _2026-09-19_
 
 ### New Features
 
-- `resolveApplication(context)` lets a parser host choose whether `f(x)` is
-  a call or a product. Return `apply`, `multiply` or `undefined`; explicit
+- `resolveApplication(context)` lets a parser host choose whether `f(x)` is a
+  call or a product. Return `apply`, `multiply` or `undefined`; explicit
   declarations, parameters and `resolveSymbol` facts take precedence.
 
 ### Behavior Changes
@@ -1771,9 +1865,9 @@ These additions were contributed by
 
 ### Resolved Issues
 
-- Lenient parsing reads a letter run before parentheses as one name:
-  `foo(x)` is `["foo", "x"]`. Without parentheses, `foo` remains `f·o·o`;
-  Greek constants retain their splitting rules, as in `pix(3)`.
+- Lenient parsing reads a letter run before parentheses as one name: `foo(x)` is
+  `["foo", "x"]`. Without parentheses, `foo` remains `f·o·o`; Greek constants
+  retain their splitting rules, as in `pix(3)`.
 
 ## 0.131.3 _2026-09-18_
 
