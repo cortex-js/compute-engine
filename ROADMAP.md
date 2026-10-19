@@ -202,15 +202,15 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   `[x for x in [1, g("a"), 3]]` stays unevaluated. `docs/ERROR-MODEL.md` §3 says
   a collection with a failed cell is "preserved and iterable". (A) A loop, a
   `Map` and a comprehension read every cell and give the failed cell to the body
-  as the value. (B) The operator answers the error. If nothing is decided, the
-  silent loop with no turn stays.
+  as the value. (B) The operator answers the error. User decision 2026-10-19:
+  (A).
 - **`epsil check` and an assignment to a `const`.** With `const c = 1` then
   `c = 2`, `epsil check` reports nothing, and the run reports a `runtime-error`
   whose code is the bare message `Cannot assign a value to the constant "c"`
   (not a stable code). A `function` statement on a `const` is reported by both.
   (A) Report the assignment statically, with a new engine code such as
-  `constant-assignment`. (B) Keep it a run-time problem only. If nothing is
-  decided, (B) stays.
+  `constant-assignment`. (B) Keep it a run-time problem only. User decision
+  2026-10-19: (A).
 - **A derived unit named from its dimensions.** `(2 m/s)·(3 m/s)` evaluates to
   `6 Gy`: `findNamedUnit()` names any unit with the dimensions m²/s² as gray,
   although the sievert has the same dimensions and a squared velocity is not a

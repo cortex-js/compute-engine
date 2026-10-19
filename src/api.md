@@ -1236,9 +1236,9 @@ as `ce.number(2)` is the exact `2`: a part is an integer when it is a
 exponent is at most `10^6` (also at machine precision, and also outside
 the double range). When a part has a fraction, is a `number` past the
 safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
-the result is a float. The same rule applies to a `Complex` given to
-`ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
-`2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+the result is a float. A `Complex` given to `ce.number()` or `ce.box()`
+does not follow this rule: it holds two doubles, so it is always a
+float (`ce.number(new Complex(2, 3))` is the float `2.0 + 3.0i`).
 
 ```js
 ce.precision = 30;
@@ -5133,6 +5133,29 @@ Return `undefined` if the membership cannot be determined.
 
 <MemberCard>
 
+##### BaseCollectionHandlers.countOf? {#countof}
+
+```ts
+optional countOf?: (collection, target) => number | bigint | undefined;
+```
+
+Return the number of elements of the collection that are structurally
+the same as `target` (the `isSame()` comparison), without a walk of the
+collection. `Count(xs, v)` reads it.
+
+Give this handler when the collection can have more elements than a
+walk can visit (a combinatorial generator such as `Permutations` has
+`n!` elements): without it, `Count(xs, v)` walks every element. A count
+that is not a safe integer is returned as a `bigint`.
+
+Return `undefined` when the count cannot be computed without a walk.
+The answer must be the one a walk that compares each element with
+`isSame()` gives.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BaseCollectionHandlers.subsetOf? {#subsetof}
 
 ```ts
@@ -5219,6 +5242,48 @@ indexWhere: (collection, predicate) => number | undefined;
 Return the index of the first element that matches the predicate.
 
 If no element matches the predicate, return `undefined`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IndexedCollectionHandlers.atBigint? {#atbigint}
+
+```ts
+optional atBigint?: (collection, index) => Expression | undefined;
+```
+
+Return the element at a 1-based position given as a `bigint`.
+
+The position is positive. A negative position is converted before the
+call: it counts from the end, so it is `count + index + 1`.
+
+`at()` takes a `number`, which cannot hold a position larger than
+`Number.MAX_SAFE_INTEGER` exactly. Give this handler when the collection
+can have more elements than that (its `count` can be a `bigint`): it is
+used for such a position, and for a negative position when the count is
+a `bigint`. Without it, these positions have no element.
+
+If the position is outside the collection, return `undefined`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IndexedCollectionHandlers.indexOf? {#indexof}
+
+```ts
+optional indexOf?: (collection, target) => number | bigint | undefined;
+```
+
+Return the 1-based position of the first element that is structurally
+the same as `target` (the `isSame()` comparison), without a walk of the
+collection. `IndexOf(xs, v)` reads it.
+
+Return `0` when no element is the same as `target`, and `undefined` when
+the position cannot be computed without a walk. A position that is not a
+safe integer is returned as a `bigint`. The answer must be the one a walk
+that compares each element with `isSame()` gives.
 
 </MemberCard>
 
@@ -8437,6 +8502,21 @@ For example use `\Bigl(` for the top level, and `\bigl(` or `(` for others.
 
 <MemberCard>
 
+##### Serializer.depth {#depth}
+
+```ts
+readonly depth: number;
+```
+
+How deeply the expression being written is nested: 0 for the expression
+`serialize()` was called on, 1 for one of its operands, and so on. Unlike
+`level`, no serializer adjusts it, so it tells whether the expression is
+an operand of another one.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Serializer.serialize {#serialize-1}
 
 ```ts
@@ -8546,6 +8626,30 @@ numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-buil
 ```ts
 indexStyle: (expr, level) => "subscript" | "bracket";
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### Serializer.serializeAtDepth() {#serializeatdepth}
+
+```ts
+serializeAtDepth(expr, depth): string
+```
+
+Serialize `expr` as if it stood at nesting `depth` (0 for the root), for
+a serializer that writes the same expression again in another form, or
+for an operand whose parent already writes the parentheses it would add.
+
+####### expr
+
+  \| [`MathJsonExpression`](#mathjsonexpression)
+  \| `null`
+  \| `undefined`
+
+####### depth
+
+`number`
 
 </MemberCard>
 
@@ -12305,9 +12409,9 @@ as `ce.number(2)` is the exact `2`: a part is an integer when it is a
 exponent is at most `10^6` (also at machine precision, and also outside
 the double range). When a part has a fraction, is a `number` past the
 safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
-the result is a float. The same rule applies to a `Complex` given to
-`ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
-`2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+the result is a float. A `Complex` given to `ce.number()` or `ce.box()`
+does not follow this rule: it holds two doubles, so it is always a
+float (`ce.number(new Complex(2, 3))` is the float `2.0 + 3.0i`).
 
 ```js
 ce.precision = 30;
@@ -15756,8 +15860,12 @@ If this is an equation, solve the equation for the variables in vars.
 Otherwise, solve the equation `this = 0` for the variables in vars.
 
 For univariate equations, returns an array of solutions (roots). For a
-trigonometric equation, the array holds the principal roots, which
-represent the periodic families of roots. Returns `null` when the solver
+trigonometric equation, the array holds the principal roots: one root of
+each family of roots in one period, with no free parameter
+(`sin(x) = 1/2` gives `[π/6, 5π/6]`). This is different from the `Solve`
+operator, which gives the families themselves with a fresh integer
+parameter `t` (`[π/6 + 2πt, 5π/6 + 2πt]`), so that its list holds every
+root. Returns `null` when the solver
 cannot solve the equation, and also when it can find only a part of the
 roots: when the unknown is in a function that the solver cannot invert
 and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`), or in a factor of
@@ -16425,8 +16533,14 @@ isSame(rhs): boolean
 Fast exact structural/symbolic equality check.
 
 Returns `true` if the expression is structurally identical to `rhs`.
-For symbols with value bindings, follows the binding (e.g., if `one = 1`,
-then `ce.symbol('one').isSame(1)` is `true`).
+The value of a symbol is never followed: if `one` is assigned `1`,
+`ce.symbol('one').isSame(1)` is `false`.
+
+The elements of a set literal are not ordered, so two sets with the same
+elements in a different order are the same:
+`ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
+set-builder (`Set(body, Element(k, S))`) compares its two operands by
+position.
 
 Accepts JavaScript primitives: `number`, `bigint`, `boolean`, `string`.
 
