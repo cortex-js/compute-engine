@@ -1377,17 +1377,18 @@ function differentiateNode(
     return ce._fn('D', [expr.op1, ce.symbol(v)]).neg();
   }
 
-  // Block - just differentiate the content. A block of one statement has the
-  // value of that statement. A block of several statements has the value of
-  // the last one, but the statements before it can assign the local
-  // variables it reads (`Block(a := 2, a·x)`), so differentiating the last
-  // statement alone is not correct: decline.
+  // Block - differentiate its value. A block of one statement has the value
+  // of that statement. A block of several statements has the value of the
+  // last one, but the statements before it can assign the local variables it
+  // reads (`Block(a := 2, a·x)`), so the last statement alone is not its
+  // value: `blockValue()` substitutes the assigned values first, and the
+  // derivative stays unevaluated when the block is not a plain sequence of
+  // local declarations and assignments.
   if (expr.operator === 'Block') {
-    if (expr.nops !== 1) return undefined;
-    recordD(trace, expr, v, 'derivative.rewrite', () =>
-      dPlaceholder(expr.op1, v)
-    );
-    return differentiate(expr.op1, v, depth + 1, trace);
+    const value = blockValue(ce, expr, v);
+    if (value === undefined) return undefined;
+    recordD(trace, expr, v, 'derivative.rewrite', () => dPlaceholder(value, v));
+    return differentiate(value, v, depth + 1, trace);
   }
 
   // List/Tuple (vector/matrix/point literal): these are containers, not
@@ -2316,8 +2317,8 @@ function differentiateWithDerivativeKey(
  * evaluated, so an exact form such as `ln(10)` stays exact.
  *
  * Returns `undefined` when `entry` is not a function literal with one named
- * parameter for each argument, or when its body is a block of several
- * statements (such a block has no single value to substitute into).
+ * parameter for each argument, or when its body is a block that
+ * `blockValue()` cannot reduce to a single expression.
  */
 function partialFromFunctionLiteral(
   ce: Expression['engine'],
@@ -2335,10 +2336,12 @@ function partialFromFunctionLiteral(
   let body = literal.ops[0];
   // The canonical form of a function literal wraps its body in a scoped
   // `Block`. A block with a single statement has the value of that
-  // statement.
+  // statement; a block that assigns local variables first has the value of
+  // its last statement with those values substituted.
   if (isFunction(body, 'Block')) {
-    if (body.nops !== 1) return undefined;
-    body = body.op1;
+    const value = blockValue(ce, body);
+    if (value === undefined) return undefined;
+    body = value;
   }
   // `subs()` is not capture-avoiding: an argument with a free symbol that
   // has the name of a variable bound inside the body (the index `k` of a
@@ -2350,6 +2353,83 @@ function partialFromFunctionLiteral(
     map[n] = args[i];
   });
   return body.subs(map);
+}
+
+/** The statements that make a block more than a sequence of local
+ * assignments followed by a value: control flow and assignments. */
+const BLOCK_EFFECT_OPERATORS = [
+  'Assign',
+  'Declare',
+  'Return',
+  'Break',
+  'Continue',
+];
+
+/**
+ * The value of `block` as one expression: its last statement, with each
+ * local variable replaced by the value the statements before it assign.
+ * `Block(Declare(k), Assign(k, 2), k·x)` has the value `2x`.
+ *
+ * Returns `undefined` when the block is not a plain sequence of local
+ * declarations and assignments followed by an expression:
+ * - a statement other than `Declare(k)` (with no type and no initial value)
+ *   or `Assign(k, value)` before the last one, or an assignment to a name
+ *   the block does not declare (it changes a variable outside the block);
+ * - a declaration of the differentiation variable `v` (it would shadow it);
+ * - a local name that is still in an expression after the substitution: a
+ *   local read before it is assigned, a name read before it is declared,
+ *   or a local function called by name (`subs()` replaces symbols, not the
+ *   name of a called function);
+ * - an assigned value that is not pure (`Random()`): substituting it into
+ *   each use would evaluate it more than once;
+ * - control flow or an assignment inside a value or the last statement;
+ * - a binder (the index of a `Sum`, the parameter of a function literal)
+ *   with the name of a local, which a substitution by name cannot handle.
+ */
+function blockValue(
+  ce: Expression['engine'],
+  block: Expression,
+  v?: string
+): Expression | undefined {
+  if (!isFunction(block, 'Block') || block.nops === 0) return undefined;
+  if (block.nops === 1) return block.op1;
+  const locals = new Set<string>();
+  // No prototype: a local named `toString` must not find an inherited value.
+  const values: Record<string, Expression> = Object.create(null);
+  const substitute = (e: Expression): Expression | undefined => {
+    if (e.has(BLOCK_EFFECT_OPERATORS)) return undefined;
+    for (const name of collectBinderNames(e))
+      if (locals.has(name)) return undefined;
+    const assigned = Object.values(values);
+    let result = e;
+    if (assigned.length > 0) {
+      result = renameCapturingBinders(ce, result, assigned);
+      result = result.subs(values);
+    }
+    // The values hold no local name, so a local name that is left was not
+    // substituted: the block cannot be reduced to one expression.
+    for (const name of locals) if (result.has(name)) return undefined;
+    return result;
+  };
+  const statements = block.ops;
+  for (const statement of statements.slice(0, -1)) {
+    if (isFunction(statement, 'Declare') && statement.nops === 1) {
+      const name = sym(statement.op1);
+      if (!name || name === v || locals.has(name)) return undefined;
+      locals.add(name);
+      continue;
+    }
+    if (isFunction(statement, 'Assign') && statement.nops === 2) {
+      const name = sym(statement.op1);
+      if (!name || !locals.has(name)) return undefined;
+      const value = substitute(statement.op2);
+      if (value === undefined || value.isPure === false) return undefined;
+      values[name] = value;
+      continue;
+    }
+    return undefined;
+  }
+  return substitute(statements[statements.length - 1]);
 }
 
 /**

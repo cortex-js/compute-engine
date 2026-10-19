@@ -262,8 +262,47 @@ The cause: the fallbacks in `residue.ts` and `limit.ts` substitute the point
 into the expression and do not see that the denominator is `0` there
 (`simplify()` and `ExpandAll` of the denominator find the `0`).
 
+### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
+
+`Block(Assign(k, 2), Multiply(k, x))`, with no `Declare(k)`, assigns the `k`
+outside the block: with `k := 5` before, `k` is `2` after the block is
+evaluated. It serializes to `k\coloneq2; kx`, and the parser makes each
+`\coloneq` target in a block a local variable, so that LaTeX parses back as
+`Block(Declare(k), Assign(k, 2), Multiply(k, x))`, which leaves the outer `k` at
+`5`. LaTeX has no spelling for "assign the outer variable" in a block. A block
+that declares its locals (which is what Tycho emits) round-trips.
+
+The choice:
+
+- (a) Give the outer assignment a LaTeX spelling (for example
+  `\operatorname{global} k\coloneq2`) that the parser reads back without a
+  `Declare`.
+- (b) Accept the change and document that a block serialized to LaTeX makes
+  every assigned name local.
+- (c) Make the canonical form of a `Block` declare each name it assigns, so the
+  MathJSON and LaTeX routes agree (this changes the meaning of existing MathJSON
+  input that assigns an outer variable from a block).
+
+If nothing is decided, the round trip keeps changing the meaning of such a
+block. Related: "Typed `Declare` does not survive a LaTeX round trip" (a
+decision for the first consumer that needs it).
+
 ### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
 
+- The test "a parameter whose type is not declared is real" in
+  `test/compute-engine/solve.test.ts` failed once in a full run on 2026-10-18
+  (at commit `3bdee13b3`, full suite with the default workers) and passes alone:
+  `Solve((x-1)(\tan(3x)-a)=0, x)` returned `null`. `Solve` stops at the engine's
+  time limit (`ce._deadline`, read in `boxed-expression/solve.ts`), so under
+  load it gives no answer. The test must not depend on the speed of the machine:
+  raise the time limit for this test, or find why this equation takes so long.
+- `D` of a `Sum` or a `Product` stays unevaluated:
+  `D(Sum(k·x^k, Limits(k, 1, 3)), x)` is not computed; the correct value is
+  `1 + 4x + 9x²`. `differentiateNode` (`symbolic/derivative.ts`) has no branch
+  for a big operator. The derivative of a sum whose bounds do not depend on the
+  variable is the sum of the derivatives of its body; the new body must be bound
+  by the index of the sum (build it through the binding-site mechanism, not with
+  `ce.symbol`).
 - `Sum(Reverse(FlatMap([1, 2], x ↦ [x, x])))` stays unevaluated; the correct
   value is `6`. The same is true of other consumers of `Reverse`, `Most`,
   `RotateLeft` and `RotateRight` over a source with no count: the view reports

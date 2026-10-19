@@ -708,6 +708,15 @@
   LaTeX round trip changed the tree. A body that is a single symbol keeps the
   function literal, which is the canonical form of `\frac{d}{dx}f`.
 
+- **`D` of a block that assigns local variables is computed.**
+  `\frac{\mathrm{d}}{\mathrm{d}x}\left(k\coloneq2; kx^2\right)` stayed
+  unevaluated and is `4x`: the values of the locals are put into the last
+  statement, which is then differentiated. This also applies to a user function
+  whose body is such a block, and to a partial derivative given in the
+  `derivative` key of an operator definition. A block that assigns a variable
+  it does not declare, reads a local before it has a value, calls a local
+  function, or assigns a value that is not pure (`Random()`) stays unevaluated.
+
 - **On `interval-js`, each arm of a `Which` or an `If` is evaluated where it can
   be selected** (Tycho ledger row 392).
   `\begin{cases}0 & x\ge1\\ \arccos x & \text{otherwise}\end{cases}` over [0.99,
