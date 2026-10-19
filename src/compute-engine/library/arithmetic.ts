@@ -458,6 +458,7 @@ import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
+import { MeasuredWalk } from '../boxed-expression/incomplete-walks.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -9829,6 +9830,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 10.
       signature: '(real, real<0..>?) -> rational',
+      broadcastable: true,
       nanBehavior: ['propagate', 'reject'],
       examples: [
         'Rationalize(1.75)  // 7/4',
@@ -10986,6 +10988,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['PreIncrement(5)'],
       description: 'Increment a number by one.',
       signature: '(number) -> number',
+      broadcastable: true,
       // The value `x + 1`, built with `ce.function` (the `.add()` method folds
       // exact literals to a float). It had no evaluate handler, so
       // `PreIncrement(5)` stayed unevaluated.
@@ -11000,6 +11003,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['PreDecrement(5)'],
       description: 'Decrement a number by one.',
       signature: '(number) -> number',
+      broadcastable: true,
       // The value `x − 1`, built with `ce.function` (the `.add()` method folds
       // exact literals to a float). It had no evaluate handler, so
       // `PreDecrement(5)` stayed unevaluated.
@@ -12171,8 +12175,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // are elements.
           let walked = 0;
           const nonFinite = new NonFiniteTerm();
+          // A walk that meets an inner collection that it cannot walk ends
+          // early and misses elements (see `MeasuredWalk`), so its sum is not
+          // the sum: `Sum(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3))` was `0`
+          // for a valueless `v`. The sum then stays unevaluated.
+          const walk = new MeasuredWalk(() => source.each());
           const result = run(
-            reduceCollection(source, new SumTerms(), (acc, x) => {
+            reduceCollection(walk, new SumTerms(), (acc, x) => {
               walked += 1;
               const term = x.evaluate({ numericApproximation });
               if (numericApproximation)
@@ -12184,6 +12193,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             engine._timeRemaining,
             engine._deadlineFrame
           );
+          if (walk.missedElements) return undefined;
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
           const sum = finishSum(engine, result, numericApproximation);
@@ -12343,9 +12353,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             numericApproximation
           );
           if (closedForm !== undefined) return closedForm;
-          // Decline read off the fold's own walk — see the sync handler.
+          // Decline read off the fold's own walk — see the sync handler. A
+          // walk that missed elements is measured as in the sync handler.
           let walked = 0;
           const nonFinite = new NonFiniteTerm();
+          const walk = new MeasuredWalk(() => first.each());
           const result = await runAsync(
             // The elements are evaluated synchronously, and `runAsync`
             // suspends this handler between time slices: every step must run
@@ -12354,7 +12366,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             withEvaluationEffects(
               engine,
               effects,
-              reduceCollection(first, new SumTerms(), (acc, x) => {
+              reduceCollection(walk, new SumTerms(), (acc, x) => {
                 walked += 1;
                 const term = x.evaluate({ numericApproximation });
                 if (numericApproximation)
@@ -12370,6 +12382,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             signal,
             engine._deadlineFrame
           );
+          if (walk.missedElements) return undefined;
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
           // After the `await`: the correction of the accumulator rounds at
@@ -13100,17 +13113,19 @@ async function numericOfFoldAsync(
   );
 }
 
-/** Generator-based reducer over a finite collection. Yields between
- * iterations so callers can wrap it with `run`/`runAsync` for timeout
- * and cancellation. Caller is responsible for finiteness checks.
+/** Generator-based reducer over the elements of a finite collection. Yields
+ * between iterations so callers can wrap it with `run`/`runAsync` for
+ * timeout and cancellation. Caller is responsible for finiteness checks.
+ * The elements are an iterable, so that the caller can pass a
+ * `MeasuredWalk` and read after the fold whether the walk missed elements.
  */
 function* reduceCollection<T>(
-  collection: Expression,
+  elements: Iterable<Expression>,
   init: T,
   combine: (acc: T, x: Expression) => T
 ): Generator<T, T> {
   let acc = init;
-  for (const x of collection.each()) {
+  for (const x of elements) {
     acc = combine(acc, x);
     yield acc;
   }

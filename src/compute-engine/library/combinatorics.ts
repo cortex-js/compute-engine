@@ -21,7 +21,12 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
-import { operandNonFiniteNumber, operandSgn } from './type-handlers.js';
+import {
+  broadcastOperandType,
+  operandNonFiniteNumber,
+  operandSgn,
+} from './type-handlers.js';
+import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { apply2, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   infinitePoint,
@@ -273,6 +278,26 @@ function binomialPoleValue(
 }
 
 /**
+ * The descriptor of ONE element of an operand of a broadcastable operator
+ * (`Binomial`, `Choose`, `Pochhammer`).
+ *
+ * Over a collection operand, such an operator is applied element by element,
+ * and the code that types the application wraps the shape of the collection
+ * around the answer of the `type` handler. So the handler describes one
+ * element, and its tests must read the element type: `list<integer>` is not
+ * a subtype of `integer`. The facts are those of the element type, because
+ * the facts of the operand describe the whole collection. A scalar operand is
+ * returned unchanged.
+ */
+function broadcastElementOperand(
+  d: OperandDescriptor | undefined
+): OperandDescriptor | undefined {
+  if (d === undefined) return undefined;
+  const t = broadcastOperandType(d);
+  return t === d.type ? d : describeType(t);
+}
+
+/**
  * Shared evaluate logic for `Binomial` and `Choose` — the two names must
  * agree everywhere both are defined, so both handlers delegate here.
  *
@@ -302,9 +327,11 @@ function binomialPoleValue(
 // sign fact carries it (open item O7 of
 // `docs/plans/2026-08-22-type-handlers-on-types.md`).
 function binomialType(
-  n: OperandDescriptor | undefined,
-  k: OperandDescriptor | undefined
+  nOperand: OperandDescriptor | undefined,
+  kOperand: OperandDescriptor | undefined
 ): Type | undefined {
+  const n = broadcastElementOperand(nOperand);
+  const k = broadcastElementOperand(kOperand);
   // A provably-NaN operand DECLINES: a handler answer is never widened, so
   // answering `number` here would suppress any sharper claim the framework
   // can derive. (What that buys today is recorded on `specialFunctionType`
@@ -628,6 +655,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // operands and infer the same type for a fresh symbol. See `Binomial`
       // for what the carrier and the explicit `nanBehavior` say.
       signature: '(n:complex | infinity, m:complex | infinity) -> number',
+      broadcastable: true,
       nanBehavior: 'propagate',
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
@@ -645,6 +673,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
       signature: '(integer) -> integer',
+      broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -703,6 +732,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // off-carrier operand is rejected at BOXING; with every numeric point
       // in the carrier, that seam only ever sees a non-number.
       signature: '(complex | infinity, complex | infinity) -> number',
+      broadcastable: true,
       nanBehavior: 'propagate',
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
@@ -723,6 +753,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `NaN` rather than a boxing error. `NaN` propagates (explicit: the
       // carrier is not a subtype of `complex`).
       signature: '(complex | infinity, complex | infinity) -> number',
+      broadcastable: true,
       nanBehavior: 'propagate',
       // (a)_k with a provably non-negative integer k is a finite product of
       // k terms: integer for integer a, real for real a. Any other k reaches
@@ -731,7 +762,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `sgn` handler on a compound operand — a proof the descriptor's sign
       // fact carries (open item O7 of
       // `docs/plans/2026-08-22-type-handlers-on-types.md`).
-      type: ([a, k], context) => {
+      type: ([aOperand, kOperand], context) => {
+        const a = broadcastElementOperand(aOperand);
+        const k = broadcastElementOperand(kOperand);
         // A provably-NaN operand declines, as `binomialType` does and for the
         // same reason: a handler answer is never widened.
         if ((a && isSubtype(a.type, 'nan')) || (k && isSubtype(k.type, 'nan')))
@@ -992,6 +1025,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
       signature: '(integer) -> integer',
+      broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Derangements are defined only for non-negative integers; stay
         // symbolic for anything else rather than rounding the argument.
@@ -1023,6 +1057,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
       signature: '(integer) -> integer',
+      broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Bell numbers count set partitions, defined only for non-negative
         // integers; stay symbolic rather than rounding the argument.

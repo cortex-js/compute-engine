@@ -705,14 +705,6 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
       0.1,
       7,
     ],
-    // Roots: π/2 and the eight multiples of π/13 in the interval. The
-    // solver finds only π/2.
-    [
-      'sin(13x) cos x = 0',
-      ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
-      0.05,
-      2,
-    ],
   ];
 
   test.each(incomplete)('%s stays unevaluated', (_name, lhs, lo, hi) => {
@@ -722,6 +714,69 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
       ['Element', 'x', ['Interval', lo, hi]],
     ]);
     expect(isUnevaluated(expr)).toBe(true);
+  });
+
+  // The solver gives only `π/2` for the whole product. Each factor gives
+  // its own roots in the domain, and their union is the answer.
+  test('sin(13x) cos x = 0 over [0.05, 2] → π/2 and the multiples of π/13', () => {
+    const actual = solutions(
+      ce.box([
+        'Solve',
+        [
+          'Equal',
+          ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
+          0,
+        ],
+        ['Element', 'x', ['Interval', 0.05, 2]],
+      ])
+    );
+    const expected = [1, 2, 3, 4, 5, 6, 7, 8]
+      .map((k) => (k * Math.PI) / 13)
+      .concat([Math.PI / 2])
+      .sort((a, b) => a - b);
+    expect(actual.length).toBe(expected.length);
+    for (const [i, v] of actual.entries())
+      expect(v).toBeCloseTo(expected[i], 12);
+  });
+
+  // The two factors have near-equal periods: their product has the period
+  // `4000000000π`, and its principal roots give only a part of the roots.
+  // Each factor gives its own roots, and two roots that are `1.6·10^-9`
+  // apart (`π/a` and `π`) are two roots.
+  test('sin(x) sin(a x) = 0 over [0, 10] with a = 2000000001/2000000000', () => {
+    const a: Expression = ['Rational', 2000000001, 2000000000];
+    const result = ce
+      .box([
+        'Solve',
+        ['Equal', ['Multiply', ['Sin', 'x'], ['Sin', ['Multiply', a, 'x']]], 0],
+        ['Element', 'x', ['Interval', 0, 10]],
+      ])
+      .evaluate();
+    expect(result.toString()).toBe(
+      '[0,2000000000/2000000001 * pi,pi,4000000000/2000000001 * pi,2pi,2000000000/666666667 * pi,3pi]'
+    );
+  });
+
+  test('sin(x) sin(3x/2) = 0 over [0, 10] → the union of the two families', () => {
+    const actual = solutions(
+      ce.box([
+        'Solve',
+        [
+          'Equal',
+          [
+            'Multiply',
+            ['Sin', 'x'],
+            ['Sin', ['Multiply', ['Rational', 3, 2], 'x']],
+          ],
+          0,
+        ],
+        ['Element', 'x', ['Interval', 0, 10]],
+      ])
+    );
+    const expected = [0, 2 / 3, 1, 4 / 3, 2, 8 / 3, 3].map((k) => k * Math.PI);
+    expect(actual.length).toBe(expected.length);
+    for (const [i, v] of actual.entries())
+      expect(v).toBeCloseTo(expected[i], 12);
   });
 
   test('sin(x) sin(√2 x) = 0 over [1, 4] → π/√2, π', () => {
@@ -761,19 +816,27 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
 
   // Near x = 10^8, a tolerance proportional to |x| (10^-6·|x| = 100) let a
   // root that is not in the list match a root that is.
-  test('a partial list near 10^8 is not an answer', () => {
+  test('a product near 10^8: each factor gives all its roots', () => {
     // Roots: the multiples of π/13 and the odd multiples of π/2. The solver
-    // finds only some of them.
-    expect(
-      isUnevaluated(
-        solve(
-          ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
-          0,
-          100000000,
-          100000007
-        )
+    // finds only some of them for the whole product, but each factor gives
+    // all its roots in the domain: 29 multiples of π/13 and 2 odd multiples
+    // of π/2.
+    const product = solutions(
+      solve(
+        ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
+        0,
+        100000000,
+        100000007
       )
-    ).toBe(true);
+    );
+    const expected = [
+      ...Array.from({ length: 29 }, (_, i) => ((413802853 + i) * Math.PI) / 13),
+      (63661979 * Math.PI) / 2,
+      (63661981 * Math.PI) / 2,
+    ].sort((a, b) => a - b);
+    expect(product.length).toBe(expected.length);
+    for (const [i, v] of product.entries())
+      expect(v).toBeCloseTo(expected[i], 6);
     // Roots: four multiples of π/13. The root finder gives the principal
     // roots of sin(13x) = 0 (0 and π/13, period 2π/13), and the expansion
     // gives all four.
@@ -804,21 +867,23 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
   // sample of the scan.
   test('a root that touches zero next to an end of the domain', () => {
     // Roots: 6π/13 ≈ 1.449966 (sin(13x)^2 touches zero) and π/2. The solver
-    // finds only π/2.
-    expect(
-      isUnevaluated(
-        solve(
-          [
-            'Multiply',
-            ['Power', ['Sin', ['Multiply', 13, 'x']], 2],
-            ['Cos', 'x'],
-          ],
-          0,
-          1.4499,
-          1.6
-        )
+    // finds only π/2 for the whole product, but each factor gives all its
+    // roots in the domain.
+    const product = solutions(
+      solve(
+        [
+          'Multiply',
+          ['Power', ['Sin', ['Multiply', 13, 'x']], 2],
+          ['Cos', 'x'],
+        ],
+        0,
+        1.4499,
+        1.6
       )
-    ).toBe(true);
+    );
+    expect(product.length).toBe(2);
+    expect(product[0]).toBeCloseTo((6 * Math.PI) / 13, 12);
+    expect(product[1]).toBeCloseTo(Math.PI / 2, 12);
     // The root π is in the first cell of the scan, and it is in the list.
     const actual = solutions(solve(['Power', ['Sin', 'x'], 2], 0, 3.1415, 3.2));
     expect(actual).toEqual([Math.PI]);

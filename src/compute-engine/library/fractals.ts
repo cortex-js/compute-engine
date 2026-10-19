@@ -48,6 +48,7 @@ export const FRACTALS_LIBRARY: SymbolDefinitions[] = [
         'Smooth escape-time value for the Mandelbrot set. Returns 1 for points inside the set, values in [0,1) for escaping points.',
       complexity: 1200,
       signature: '(complex, integer) -> real',
+      broadcastable: true,
       evaluate: ([c, maxIter], { engine: ce }) => {
         const cp = getComplexParts(c);
         const n = getMaxIter(maxIter);
@@ -61,6 +62,7 @@ export const FRACTALS_LIBRARY: SymbolDefinitions[] = [
         'Smooth escape-time value for a Julia set with parameter c. Returns 1 for points inside the set, values in [0,1) for escaping points.',
       complexity: 1200,
       signature: '(complex, complex, integer) -> real',
+      broadcastable: true,
       evaluate: ([z, c, maxIter], { engine: ce }) => {
         const zp = getComplexParts(z);
         const cp = getComplexParts(c);

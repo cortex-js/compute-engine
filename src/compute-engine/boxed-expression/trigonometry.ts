@@ -1243,6 +1243,8 @@ export function evalTrig(
     hyperbolicOfImaginaryAngle(name, raw) ??
     circularOfExactAngle(ce, name, raw);
   if (exact !== undefined) return exact;
+  const imaginary = hyperbolicOfImaginaryFloat(name, op);
+  if (imaginary !== undefined) return imaginary;
 
   switch (name) {
     case 'Arccos':
@@ -2391,6 +2393,10 @@ export function imaginaryHalfTurns(
   return reduceRational([p, q]);
 }
 
+/** The extra digits with which `cosSinHalfTurns` computes a big-decimal
+ * cosine or sine before it rounds it to the working precision. */
+const COS_SIN_GUARD_DIGITS = 10;
+
 /**
  * `cos(πp/q)` and `sin(πp/q)` for an exact rational `p/q`: doubles at
  * machine precision (`cosSinPiRational()`), big decimals at the working
@@ -2420,19 +2426,33 @@ function cosSinHalfTurns(
   const needS = need === 'both' || (need === 'sin') !== odd;
   let c: BigDecimal = BigDecimal.ZERO;
   let s: BigDecimal = BigDecimal.ZERO;
-  if (tn === 0n) {
-    c = BigDecimal.ONE;
-    s = BigDecimal.ZERO;
-  } else if (at * 4n === td) {
-    c = BigDecimal.TWO.sqrt().div(BigDecimal.TWO);
-    s = tn < 0n ? c.neg() : c;
-  } else if (at * 6n === td) {
-    if (needC) c = new BigDecimal(3).sqrt().div(BigDecimal.TWO);
-    s = tn < 0n ? BigDecimal.HALF.neg() : BigDecimal.HALF;
-  } else {
-    const angle = BigDecimal.PI.mul(new BigDecimal(tn)).div(new BigDecimal(td));
-    if (needC) c = angle.cos();
-    if (needS) s = angle.sin();
+  // The values are computed with guard digits, then rounded once to the
+  // working precision. Rounded at the working precision at each step, the
+  // quotient `√3/2` of the rounded `√3` was one unit high in its last digit
+  // (`cos(π/6)` at 21 digits ended `…646765`, not `…646764`), and so can be
+  // the cosine of the rounded `t·π`.
+  const precision = BigDecimal.precision;
+  BigDecimal.precision = precision + COS_SIN_GUARD_DIGITS;
+  try {
+    if (tn === 0n) {
+      c = BigDecimal.ONE;
+      s = BigDecimal.ZERO;
+    } else if (at * 4n === td) {
+      c = BigDecimal.TWO.sqrt().div(BigDecimal.TWO).toPrecision(precision);
+      s = tn < 0n ? c.neg() : c;
+    } else if (at * 6n === td) {
+      if (needC)
+        c = new BigDecimal(3).sqrt().div(BigDecimal.TWO).toPrecision(precision);
+      s = tn < 0n ? BigDecimal.HALF.neg() : BigDecimal.HALF;
+    } else {
+      const angle = BigDecimal.PI.mul(new BigDecimal(tn)).div(
+        new BigDecimal(td)
+      );
+      if (needC) c = angle.cos().toPrecision(precision);
+      if (needS) s = angle.sin().toPrecision(precision);
+    }
+  } finally {
+    BigDecimal.precision = precision;
   }
   if (n === 0) return [c, s];
   if (n === 1) return [s.neg(), c];
@@ -2573,6 +2593,97 @@ const HYPERBOLIC_OF_IMAGINARY_NEEDS: Record<string, 'cos' | 'sin' | 'both'> = {
   Sech: 'cos',
   Coth: 'both',
 };
+
+/**
+ * For each hyperbolic function, the circular function of the real angle `y`
+ * (in radians) and the factor that gives the hyperbolic function of `i·y`
+ * from it: `sinh(iy) = i·sin y`, `cosh(iy) = cos y`, `tanh(iy) = i·tan y`,
+ * `csch(iy) = −i·csc y`, `sech(iy) = sec y`, `coth(iy) = −i·cot y`.
+ */
+const CIRCULAR_OF_IMAGINARY: Record<string, [string, '1' | 'i' | '-i']> = {
+  Sinh: ['Sin', 'i'],
+  Cosh: ['Cos', '1'],
+  Tanh: ['Tan', 'i'],
+  Csch: ['Csc', '-i'],
+  Sech: ['Sec', '1'],
+  Coth: ['Cot', '-i'],
+};
+
+/**
+ * The value of a circular function at the real float `y`, in radians,
+ * whatever the angular unit of the engine. The kernels and the rules for a
+ * value that is only rounding are those of `evalTrig`: a value within the
+ * rounding error of `y` of a zero is `0` (`chopBignumDust`), and of a pole
+ * is `~oo` (`poleDust`, `bigPoleDust`).
+ */
+function circularOfRadians(
+  ce: ComputeEngine,
+  name: string,
+  y: Expression
+): Expression | undefined {
+  type BigKernel = (x: BigDecimal) => BigDecimal | Complex | number;
+  type MachineKernel = (x: number) => number | Complex;
+  const kernels: Record<string, [MachineKernel, BigKernel]> = {
+    Sin: [Math.sin, (x) => chopBignumDust(ce, x.sin(), x)],
+    Cos: [Math.cos, (x) => chopBignumDust(ce, x.cos(), x)],
+    Tan: [
+      (x) => poleDust(ce, Math.tan(x), x) as number,
+      (x) => bigZeroAndPoleDust(ce, x.tan(), x) as BigDecimal,
+    ],
+    Cot: [
+      (x) => poleDust(ce, 1 / Math.tan(x), x) as number,
+      (x) =>
+        bigZeroAndPoleDust(ce, BigDecimal.ONE.div(x.tan()), x) as BigDecimal,
+    ],
+    Sec: [
+      (x) => poleDust(ce, 1 / Math.cos(x), x) as number,
+      (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x) as BigDecimal,
+    ],
+    Csc: [
+      (x) => poleDust(ce, 1 / Math.sin(x), x) as number,
+      (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x) as BigDecimal,
+    ],
+  };
+  const [fn, bigFn] = kernels[name];
+  // The kernels can also give an expression (`ce.ComplexInfinity` at a
+  // pole), which `apply` boxes with `ce.number`; its public signature is
+  // narrower, hence the casts above, as in `applyAngle`.
+  return apply(y, fn, bigFn);
+}
+
+/**
+ * The value of a hyperbolic function of a FLOAT operand `i·y` whose real
+ * part is exactly `0`, from the circular function of the real float `y`
+ * (`CIRCULAR_OF_IMAGINARY`). The hyperbolic function of `i·y` is the
+ * circular function of `y`, so the two give the same value at the same
+ * float: `Tanh(iπ·0.5)` is `~oo`, as `Tan(π·0.5)` is, and `Cosh(iπ·0.5)` is
+ * `0`, as `Cos(π·0.5)` is. Before, the complex kernel in doubles gave `NaN`
+ * for `Tanh(iπ·0.5)` and `1.6·10¹⁶` for `Sech(iπ·0.5)`. An EXACT multiple of
+ * `iπ` is reduced before this (`hyperbolicOfImaginaryAngle`). Returns
+ * `undefined` for any other function or operand.
+ */
+function hyperbolicOfImaginaryFloat(
+  name: string,
+  op: Expression
+): Expression | undefined {
+  const entry = CIRCULAR_OF_IMAGINARY[name];
+  if (entry === undefined || !isNumber(op) || op.isExact) return undefined;
+  if (op.re !== 0 || (op.bignumRe !== undefined && !op.bignumRe.isZero()))
+    return undefined;
+  const ce = op.engine;
+  const imBig = op.bignumIm;
+  if (imBig === undefined ? op.im === 0 : imBig.isZero()) return undefined;
+  if (imBig === undefined ? !Number.isFinite(op.im) : !imBig.isFinite())
+    return undefined;
+  const y = ce.number(ce._inexactNumericValue(imBig ?? op.im));
+  const value = circularOfRadians(ce, entry[0], y);
+  if (value === undefined || !isNumber(value)) return value;
+  const factor = entry[1];
+  if (factor === '1' || value.isNaN === true) return value;
+  if (!value.isFinite) return ce.ComplexInfinity;
+  const part = value.bignumRe ?? value.re;
+  return boxParts(ce, 0, factor === 'i' ? part : negPart(part));
+}
 
 /**
  * The numeric value of a hyperbolic function of `i·θ`, with `θ` an EXACT

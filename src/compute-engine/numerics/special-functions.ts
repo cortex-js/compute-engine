@@ -1766,14 +1766,101 @@ function bigGammaQContinuedFractionValue(
   return BigDecimal.NAN;
 }
 
-/** The incomplete gamma kernels in BigDecimal decline (they are NaN, and
- *  the caller uses the machine kernel) for an argument x below 10^(this
- *  value). Their sums then add numbers whose exponents differ by about
- *  −log10 x digits or more, which the exact BigDecimal addition aligns with
- *  a bigint of that many digits: at x = 10⁻¹⁰⁰⁰⁰⁰⁰⁰⁰⁰, `Gamma(5.5, x)` and
+/** The incomplete gamma kernels in BigDecimal do not use their series and
+ *  continued fractions for an argument x below 10^(this value). Their sums
+ *  then add numbers whose exponents differ by about −log10 x digits or
+ *  more, which the exact BigDecimal addition aligns with a bigint of that
+ *  many digits: at x = 10⁻¹⁰⁰⁰⁰⁰⁰⁰⁰⁰, `Gamma(5.5, x)` and
  *  `GammaRegularized(0.5, x)` ran 8 s, then threw "Maximum BigInt size
- *  exceeded". At x = 10⁻¹⁰⁰⁰⁰⁰ they take a few milliseconds. */
+ *  exceeded". At x = 10⁻¹⁰⁰⁰⁰⁰ they take a few milliseconds. Below it, the
+ *  regularized kernels use the leading term of the series
+ *  (`tinyGammaPLeadingTerm`), and the other kernels decline (they are NaN,
+ *  and the caller uses the machine kernel). */
 const INCOMPLETE_GAMMA_MIN_MAGNITUDE = -100_000;
+
+/**
+ * The leading term of the lower regularized gamma P(a, x) = γ(a, x)/Γ(a)
+ * at a tiny x > 0, as `{ log, negative }`: P is about x^a/Γ(a + 1), with
+ * `log` = a·ln x − ln|Γ(a + 1)| and `negative` the sign of Γ(a + 1). Called
+ * inside the guard-digit context, for a real `a` that is not a
+ * non-positive integer. Returns `undefined` when the terms after the
+ * leading one are not below the working precision.
+ *
+ * From the series γ(a, x) = xᵃ e⁻ˣ Σ_{n≥0} xⁿ/(a(a+1)…(a+n)),
+ * P = xᵃ/Γ(a + 1) · e⁻ˣ · (1 + x/(a+1) + x²/((a+1)(a+2)) + …). With d the
+ * smallest |a + k| for k ≥ 1, and x ≤ d/2, the relative difference from the
+ * leading term is at most about x·(1 + 2/d). The leading term is used when
+ * that bound is below 10^−(precision + 1).
+ */
+function tinyGammaPLeadingTerm(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum
+): { log: BigNum; negative: boolean } | undefined {
+  const a1 = a.add(BigDecimal.ONE);
+  // For a > −1 the smallest |a + k| is a + 1. Below, it is the distance of
+  // `a` to the nearest integer, which is then −k for a k ≥ 1.
+  const d = a.gt(BigDecimal.NEGATIVE_ONE)
+    ? a1
+    : a.sub(a.floor()).lt(a.ceil().sub(a))
+      ? a.sub(a.floor())
+      : a.ceil().sub(a);
+  if (d.isZero()) return undefined;
+  const bound = decimalMagnitude(x) + Math.max(0, 1 - decimalMagnitude(d)) + 1;
+  if (bound > -BigDecimal.precision - 1) return undefined;
+  const log = a.mul(x.ln()).sub(gammalnOnePlus(ce, a));
+  // For a + 1 < 1/2, Γ(a + 1) = π/(sin(π(a + 1))·Γ(−a)) with Γ(−a) > 0, so
+  // its sign is the sign of sin(π(a + 1)). Above, Γ(a + 1) is positive.
+  const negative = a1.lt(BigDecimal.HALF) && bigSinPi(a1).isNegative();
+  return { log, negative };
+}
+
+/**
+ * ln Γ(1 + a), with a relative error near the working precision also when
+ * |a| is tiny.
+ *
+ * ln Γ(1 + a) is about −γ·a near a = 0, but `gammalnCore` computes it with
+ * an absolute error near 10^−precision: at a = 10⁻¹⁰⁰ and 45 digits it gave
+ * −1.2·10⁻⁴³ for −5.8·10⁻¹⁰¹. For |a| < 1, the log-gamma is computed with
+ * about −log10|a| more digits (`1 + a` is exact, because the BigDecimal
+ * addition is exact). When that would be more digits than the working
+ * precision (|a| < 10^−precision), the Taylor series
+ * ln Γ(1 + a) = −γ·a + ζ(2)/2·a² − ζ(3)/3·a³ + … is used with its first two
+ * terms: the first term left out is below 10^(−2·precision) relative to the
+ * sum.
+ */
+function gammalnOnePlus(ce: ComputeEngine, a: BigNum): BigNum {
+  if (a.isZero()) return BigDecimal.ZERO;
+  const mag = decimalMagnitude(a);
+  const a1 = a.add(BigDecimal.ONE);
+  if (mag > 0) return gammalnCore(ce, a1);
+  const saved = BigDecimal.precision;
+  if (-mag > saved) {
+    // ζ(2)/2 = π²/12
+    const halfZeta2 = BigDecimal.PI.mul(BigDecimal.PI).div(12);
+    return a.mul(a.mul(halfZeta2).sub(BigDecimal.EULER_GAMMA));
+  }
+  BigDecimal.precision = saved - mag + 2;
+  try {
+    return gammalnCore(ce, a1).toPrecision(saved);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/** The upper regularized gamma Q(a, x) = 1 − P(a, x) from the leading term
+ *  of P at a tiny x (`tinyGammaPLeadingTerm`), or NaN when that term is not
+ *  enough. Q = −expm1(log) when Γ(a + 1) is positive, so that a value of P
+ *  close to 1 (a tiny order) does not lose digits to the subtraction, and
+ *  Q = 1 + exp(log) when it is negative. Called inside the guard-digit
+ *  context. */
+function tinyGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+  const term = tinyGammaPLeadingTerm(ce, a, x);
+  if (term === undefined) return BigDecimal.NAN;
+  return term.negative
+    ? BigDecimal.ONE.add(term.log.exp())
+    : term.log.expm1().neg();
+}
 
 /**
  * Bignum upper regularized incomplete gamma Q(a, x) = Γ(a, x)/Γ(a) for a
@@ -1791,8 +1878,13 @@ export function bigGammaQNegativeOrder(
   if (!a.isNegative() || a.isInteger()) return BigDecimal.NAN;
   if (!x.isPositive()) return BigDecimal.NAN;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => bigGammaQUpperTail(ce, a, x));
+    return withGuardDigits(SPECIAL_FN_GUARD, () => tinyGammaQ(ce, a, x));
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const tail = bigGammaQUpperTail(ce, a, x);
+    // A tiny order at a small x: the upper tail declines, and the leading
+    // term of P gives Q when x is small enough (`bigGammaQ`).
+    return tail.isNaN() ? tinyGammaQ(ce, a, x) : tail;
+  });
 }
 
 /**
@@ -1807,7 +1899,10 @@ export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ZERO;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return BigDecimal.NAN;
+    return withGuardDigits(SPECIAL_FN_GUARD, () => {
+      const term = tinyGammaPLeadingTerm(ce, a, x);
+      return term === undefined ? BigDecimal.NAN : term.log.exp();
+    });
   // Series when x < 2a+2, 1 − Q otherwise (Q is then small, so the
   // subtraction loses nothing; `bigGammaQUpperTail`). The band just above
   // the machine boundary x = a+1 is where the continued fraction converges
@@ -1855,7 +1950,7 @@ export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ONE;
   if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
-    return BigDecimal.NAN;
+    return withGuardDigits(SPECIAL_FN_GUARD, () => tinyGammaQ(ce, a, x));
   return withGuardDigits(SPECIAL_FN_GUARD, () => {
     let q: BigNum | undefined;
     if (x.lt(a.mul(2).add(BigDecimal.TWO))) {
@@ -1863,8 +1958,13 @@ export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
       if (q.gte(BIG_GAMMA_Q_SERIES_MIN)) return q;
     }
     const tail = bigGammaQUpperTail(ce, a, x);
-    if (!tail.isNaN() || q === undefined) return tail;
-    return q.gte(BIG_CANCELLED_MIN) ? q : BigDecimal.NAN;
+    if (!tail.isNaN()) return tail;
+    if (q !== undefined && q.gte(BIG_CANCELLED_MIN)) return q;
+    // A tiny order at a small x (a = 10⁻¹⁰⁰, x = 10⁻¹⁰⁰⁰): Q is about
+    // −a·ln x, the subtraction 1 − P loses every digit, and the upper tail
+    // declines. The leading term of P gives Q without the subtraction when
+    // x is small enough (it is NaN otherwise).
+    return tinyGammaQ(ce, a, x);
   });
 }
 

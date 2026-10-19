@@ -5638,6 +5638,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
+      // See `CompileTarget.inputWrites`.
+      inputWrites: new Set<string>(),
       // Constant folding is UNSOUND on this target, unconditionally: it bakes
       // a subtree's `.N()` value as a zero-width point, discarding the
       // outward-rounded enclosure the structural interval code computes. A
@@ -5933,15 +5935,17 @@ function compileToIntervalTarget(
   const preamble = [target.preamble, declarations, hoisted.definitions]
     .filter((part) => part)
     .join('\n');
-  const fn = new ComputeEngineIntervalFunction(
-    hoistedJs,
-    perCall,
-    declarations
-  );
+  // A body that writes an input first makes the vars object a local copy
+  // (`localVarsObjectStatement`). `run()` gives the body a converted copy of
+  // the caller's object already (`processInput`), but `code` is also run by
+  // hosts that pass their own object.
+  const localVars = BaseCompiler.localVarsObjectStatement(target);
+  const body = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
+  const fn = new ComputeEngineIntervalFunction(body, perCall, declarations);
   return {
     target: 'interval-js',
     success: true,
-    code: hoistedJs,
+    code: body,
     // `code` reads names the preamble binds — a hoisted constant, a
     // user-function definition — so the two halves are reported together
     // (`CompilationResult.preamble`). A reader that only takes `code` sees

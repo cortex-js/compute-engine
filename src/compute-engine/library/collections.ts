@@ -59,7 +59,16 @@ import {
   windowedCollectionOps,
   type WindowedParams,
   isWalkableFiniteCollection,
+  finiteUncountedIsEmpty,
+  innerCollectionCannotBeWalked,
+  listFiniteUncountedCollection,
 } from '../collection-utils.js';
+import {
+  MeasuredWalk,
+  incompleteWalkCount,
+  noteIncompleteWalk,
+  unlessWalkMissedElements,
+} from '../boxed-expression/incomplete-walks.js';
 import {
   isFiniteCount,
   normalizeCount,
@@ -573,10 +582,14 @@ function sequenceSearchOperands(
 ): [subject: Expression[], pattern: Expression[]] | undefined {
   if (!isWalkableFiniteCollection(xs)) return undefined;
   if (!isWalkableFiniteCollection(needle)) return undefined;
-  return [
-    Array.from(xs.each()) as Expression[],
-    Array.from(needle.each()) as Expression[],
-  ];
+  // Both are listed with the bound of an eager operator (`eagerElements()`):
+  // `StartsWith(Permutations(Range(1, 25)), [1])` listed the 25! elements of
+  // the subject, and the process ran out of memory.
+  const subject = eagerElements(xs);
+  if (subject === undefined) return undefined;
+  const pattern = eagerElements(needle);
+  if (pattern === undefined) return undefined;
+  return [subject, pattern];
 }
 
 /**
@@ -1260,6 +1273,14 @@ function unboundedIntegerRangeIndex(
  * by the synthesized `indexWhere` handler (`collectionIndexWhere`,
  * `collection-utils.ts`), and a walk that reaches the cap, or that ends
  * without a match on a source of unknown finiteness, has no answer.
+ *
+ * A search that meets an inner collection that it cannot walk (the `FlatMap`
+ * of a callback that returns `Join([x], v)` for a valueless `v`) has no
+ * answer either: the elements of `v` are not known, so neither the index of
+ * a match after them nor the not-found `0` is known
+ * (`unlessWalkMissedElements()`). This also applies when the predicate
+ * itself meets such a collection, which is a decline that is not necessary
+ * but is safe.
  */
 function searchIndex(
   xs: Expression,
@@ -1267,9 +1288,10 @@ function searchIndex(
 ): number | undefined {
   if (!isEnumerableSource(xs)) return undefined;
   if (xs.isIndexedCollection !== true) return undefined;
-  if (xs.isFiniteCollection === true) return xs.indexWhere(predicate) ?? 0;
+  if (xs.isFiniteCollection === true)
+    return unlessWalkMissedElements(() => xs.indexWhere(predicate) ?? 0);
   try {
-    return xs.indexWhere(predicate);
+    return unlessWalkMissedElements(() => xs.indexWhere(predicate));
   } catch (e) {
     if (
       e instanceof CancellationError &&
@@ -5186,6 +5208,21 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
 }
 
 /**
+ * True when a walk that met an inner collection that it cannot walk was
+ * recorded after `walksBefore`, a value of `incompleteWalkCount()` read
+ * before an `at()` read.
+ *
+ * `at()` then gives `undefined` (see `BoxedFunction.at()`), but this miss is
+ * not a proof that the position is outside the collection: the elements of
+ * `v` are not known in `FlatMap([1, 2], x ↦ Join([x], v))`, so
+ * `isProvablyOutOfRange()` must not be read, and the read stays unevaluated.
+ * `First(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3))` was `NaN`.
+ */
+function missIsNotAProof(walksBefore: number): boolean {
+  return incompleteWalkCount() !== walksBefore;
+}
+
+/**
  * Decide whether a positional read `xs.at(index)` that returned `undefined`
  * missed because the index is OUTSIDE the collection, or because the
  * collection could not produce the element.
@@ -5433,6 +5470,23 @@ function absentOperandMarker(
   return absentScalarMarker(ce, expression);
 }
 
+/**
+ * Whether the `At` index `index` needs the count of the collection: a
+ * negative integer counts from the end, a boolean mask must have the length
+ * of the collection, and a gather (a list of integer indices) with a negative
+ * entry counts that entry from the end.
+ */
+function indexNeedsCount(index: Expression): boolean {
+  if (isNumber(index)) return index.re < 0;
+  if (!index.isCollection || !isWalkableFiniteCollection(index)) return false;
+  for (const m of index.each()) {
+    const name = sym(m);
+    if (name === 'True' || name === 'False') return true;
+    if (isNumber(m) && m.re < 0) return true;
+  }
+  return false;
+}
+
 // Access the element of `xs` at 1-based `position` (`-1` = last), used by the
 // `First`/`Second`/`Third`/`Last` evaluate handlers. A literal indexed
 // collection returns the element (an out-of-range position yields the
@@ -5470,8 +5524,21 @@ function componentAt(
     // would read as "that position is empty".
     if (!xs.isIndexedCollection)
       return refusedOperandError(ce, operator, 1, 'indexed_collection', xs);
+    const walksBefore = incompleteWalkCount();
     const v = xs.at(position);
     if (v !== undefined) return v;
+    // A miss after a walk that met an inner collection that it cannot walk
+    // is not a proof that the position is outside the collection (see
+    // `missIsNotAProof()`).
+    if (missIsNotAProof(walksBefore)) return undefined;
+    // A position from the end needs the count. A finite collection with no
+    // count (`Last(FlatMap([1, 2, 3], x ↦ [x, x]))`) is listed once, and the
+    // list is read.
+    if (position < 0 && xs.count === undefined) {
+      const listed = listFiniteUncountedCollection(xs);
+      if (listed !== undefined)
+        return listed[listed.length + position] ?? absenceMarker(ce, xs);
+    }
     // A miss is the absence marker only when the position is provably
     // outside the collection. When the length is not known (`First(Range(0,
     // n))` with `n` unassigned), the read stays unevaluated.
@@ -6389,7 +6456,11 @@ const reduceEvaluate = <R>(
           let accumulator: number | Expression = NaN;
           let first = true;
           let empty = true;
-          for (const item of collection.each()) {
+          // A walk that met an inner collection that it cannot walk misses
+          // elements (see `MeasuredWalk`), and its fold is not the fold of
+          // the collection: the fold stays unevaluated.
+          const walk = new MeasuredWalk(() => collection.each());
+          for (const item of walk) {
             empty = false;
             if (first && hasInitial) {
               // The seed takes the same reading as an element: an underflowed
@@ -6413,6 +6484,7 @@ const reduceEvaluate = <R>(
             first = false;
             yield;
           }
+          if (walk.missedElements) return undefined;
           if (enumerationDeclinedAfterWalk(collection, empty ? 0 : 1))
             return undefined;
           // An empty fold is its seed; a seedless fold of an empty
@@ -6448,10 +6520,14 @@ const reduceEvaluate = <R>(
     return drive(
       (function* (): Generator<Expression | undefined, Expression | undefined> {
         let acc: Expression | undefined = undefined;
-        for (const x of collection.each()) {
+        // See the compiled fold above: a walk that missed elements does not
+        // give the fold of the collection.
+        const walk = new MeasuredWalk(() => collection.each());
+        for (const x of walk) {
           acc = acc === undefined ? settled(numeric(x)) : step(acc, x);
           yield acc;
         }
+        if (walk.missedElements) return undefined;
         if (enumerationDeclinedAfterWalk(collection, acc === undefined ? 0 : 1))
           return undefined;
         // Nothing to seed from: an empty seedless fold has no value.
@@ -6466,11 +6542,15 @@ const reduceEvaluate = <R>(
     (function* (): Generator<Expression | undefined, Expression | undefined> {
       let acc: Expression | undefined = undefined;
       let walked = 0;
-      for (const x of collection.each()) {
+      // See the compiled fold above: a walk that missed elements does not
+      // give the fold of the collection.
+      const walk = new MeasuredWalk(() => collection.each());
+      for (const x of walk) {
         acc = step(acc ?? seed(), x);
         walked += 1;
         yield acc;
       }
+      if (walk.missedElements) return undefined;
       if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
       return acc ?? seed();
     })()
@@ -6730,7 +6810,19 @@ const JOIN_COLLECTION_HANDLERS: CollectionHandlers = {
 
     // Walk the sources, skipping over each one's elements
     for (const op of expr.ops) {
-      const count = countOf(op);
+      // A count that is a `bigint`, or a `number` that is not a safe integer
+      // (`Range(1, 10^20)`), is larger than every position that `index` can
+      // hold, so the element is in this part. `smallCount()` reads such a
+      // count as not known, and `First(Join(Permutations(Range(1, 25)),
+      // [1]))` was `Missing`.
+      const exact = isAtomicJoinOperand(op) ? 1 : op.count;
+      const count =
+        typeof exact === 'bigint' ||
+        (typeof exact === 'number' &&
+          Number.isFinite(exact) &&
+          !Number.isSafeInteger(exact))
+          ? Infinity
+          : exact;
       if (count === undefined) return undefined;
       if (index <= count) {
         if (isAtomicJoinOperand(op)) return op;
@@ -7244,6 +7336,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (n === Infinity) return engine.PositiveInfinity;
       // A count that is not a safe integer is a `bigint`: an exact integer.
       if (typeof n === 'bigint') return engine.number(n);
+      if (n === undefined) {
+        // A finite collection with no count (`FlatMap([1, 2, 3], x ↦ [x,
+        // x])`) is walked once to count its elements.
+        const listed = listFiniteUncountedCollection(xs);
+        if (listed !== undefined) return engine.number(listed.length);
+      }
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
       return engine.number(n);
@@ -9074,8 +9172,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // over a symbolic domain) stays symbolic.
       if (what === undefined) {
         const n = xs.count;
-        if (n === undefined) return undefined;
-        return engine.number(n);
+        if (n !== undefined) return engine.number(n);
+        // A finite collection with no count (`FlatMap([1, 2, 3], x ↦ [x,
+        // x])`) is walked once to count its elements.
+        const listed = listFiniteUncountedCollection(xs);
+        return listed === undefined ? undefined : engine.number(listed.length);
       }
 
       // 2-arg PREDICATE form: delegate to `Filter` and read its count, so the
@@ -9160,7 +9261,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Three-valued: an indeterminate emptiness (e.g. a bounded Filter walk
       // that hits its iteration limit) stays inert rather than collapsing to
       // False.
-      const empty = xs.isEmptyCollection;
+      // A finite collection whose emptiness the facet does not know
+      // (`Take(FlatMap([1, 2], x ↦ []), 1)`: the callback decides it) is
+      // walked up to its first element.
+      const empty = xs.isEmptyCollection ?? finiteUncountedIsEmpty(xs);
       if (empty === undefined) return undefined;
       return empty ? ce.True : ce.False;
     },
@@ -10383,9 +10487,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        let n = 0;
-        for (const _ of expr.each()) n++;
-        return n;
+        return countByWalk(expr, expr.op1);
       },
       // True if the source is finite (the taken prefix is then finite too);
       // for an infinite/unknown source we cannot know (it MAY be finite).
@@ -10548,9 +10650,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        let n = 0;
-        for (const _ of expr.each()) n++;
-        return n;
+        return countByWalk(expr, expr.op1);
       },
       // Delegates to the source for finite sources; unknown otherwise.
       isFinite: (expr) =>
@@ -10687,8 +10787,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const f = applicable(ops[1]);
       const cap = engine.maxCollectionSize;
       const xs: Expression[] = [];
+      // A walk of the source or of an inner result can itself meet an inner
+      // collection that cannot be walked, although the result reports that
+      // it can be walked: `FlatMap([1], x ↦ FlatMap([x], y ↦ Join([y], v)))`
+      // with a valueless `v` listed `[1]`. Such a walk records an incomplete
+      // walk (`noteIncompleteWalk()`), and the view then stays lazy.
+      const walksBefore = incompleteWalkCount();
       for (const value of ops[0].each()) {
         const mapped = f([value]) ?? absenceMarker(engine, expr);
+        // An inner result that cannot be walked now (`Join([x], v)` with a
+        // valueless `v`, or a symbol of a list type with no value) has
+        // elements that are not known: the view stays lazy. Before, the
+        // splice read it as empty, or kept the symbol as one element, and
+        // the list had the wrong elements.
+        if (innerCollectionCannotBeWalked(mapped)) return undefined;
         if (!mapped.isCollection || isString(mapped)) {
           xs.push(mapped);
         } else {
@@ -10710,6 +10822,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         if (xs.length > cap) return undefined;
       }
+      if (incompleteWalkCount() !== walksBefore) return undefined;
       return engine._fn('List', xs);
     },
     collection: {
@@ -10752,6 +10865,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const inner = callbackResultType(expr.op2);
         if (inner === undefined) return undefined;
         if (provablyDisjoint(inner, 'collection')) return true;
+        // A collection whose element type is `never` (`x ↦ []` returns
+        // `list<never>`) holds no element: each inner result is empty.
+        if (collectionElementType(inner) === 'never') return true;
         const dims = staticCollectionDims(inner);
         return dims !== null && dims.every((d) => d >= 0) ? true : undefined;
       },
@@ -10773,6 +10889,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               const { value, done } = source.next();
               if (done) return { value: undefined, done: true };
               const mapped = f([value]) ?? absenceMarker(expr.engine, expr);
+              // An inner result that cannot be walked now is spliced as
+              // before (it yields nothing, or a symbol is one element), but
+              // the walk is then not a complete listing of the collection.
+              // The iterator cannot tell its consumer, so it records the
+              // event (`noteIncompleteWalk()`): a consumer that lists the
+              // whole collection then stays unevaluated.
+              if (innerCollectionCannotBeWalked(mapped)) noteIncompleteWalk();
               // A STRING result is a single element, not a collection to
               // splice: strings are atomic under every deep-descent walk
               // (`docs/STRING_ROADMAP.md`, design constraint 6), so a
@@ -12072,6 +12195,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           continue;
         }
 
+        // A negative index, a boolean mask and a gather with a negative entry
+        // need the count of the collection. A finite indexed collection with
+        // no count (`At(FlatMap([1, 2, 3], x ↦ [x, x]), -1)`) is listed once,
+        // and the list is read.
+        if (
+          key === undefined &&
+          expr.isIndexedCollection === true &&
+          expr.count === undefined &&
+          indexNeedsCount(opAtIndex)
+        ) {
+          const listed = listFiniteUncountedCollection(expr);
+          if (listed !== undefined) expr = ce._fn('List', listed);
+        }
+
         const def = expr.baseDefinition;
         // A STRING implements element access on the boxed VALUE
         // (`BoxedString.at`) rather than through an operator definition's
@@ -12173,11 +12310,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 continue;
               }
               // Route through the dispatcher so negative indices normalize.
+              const walksBefore = incompleteWalkCount();
               const v = expr.at(k);
               // A miss at a position that is not provably outside the
-              // collection (its length is not known) leaves the whole
+              // collection (its length is not known, or the read met an
+              // inner collection that it cannot walk) leaves the whole
               // gather unevaluated, as a scalar index does below.
-              if (v === undefined && !isProvablyOutOfRange(expr, k))
+              if (
+                v === undefined &&
+                (missIsNotAProof(walksBefore) || !isProvablyOutOfRange(expr, k))
+              )
                 return undefined;
               picked.push(v ?? (marker ??= absenceMarker(ce, expr)));
             }
@@ -12202,12 +12344,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             ? chainAbsorbMarker(ce, expr.type.type, ops, index)
             : absenceMarker(ce, expr);
         }
+        const walksBefore = incompleteWalkCount();
         const v = expr.at(i);
         // A miss is out-of-band only when the index is provably outside the
         // collection. When the length is not known — `At(Range(0, n), 1)`
         // with `n` unassigned — the read is undecided and `At` stays
-        // unevaluated, as it does for a symbolic index.
-        if (v === undefined && !isProvablyOutOfRange(expr, i)) return undefined;
+        // unevaluated, as it does for a symbolic index. The read is undecided
+        // too when it met an inner collection that it cannot walk
+        // (`missIsNotAProof()`).
+        if (
+          v === undefined &&
+          (missIsNotAProof(walksBefore) || !isProvablyOutOfRange(expr, i))
+        )
+          return undefined;
         if (v === undefined)
           return index + 1 < ops.length
             ? chainAbsorbMarker(ce, expr.type.type, ops, index)
@@ -14107,7 +14256,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // grounds for the NOT-FOUND `Nothing` — stay inert (see
       // `isEnumerableSource`).
       if (!isEnumerableSource(xs)) return undefined;
-      for (const item of xs.each()) {
+      // A walk that meets an inner collection that it cannot walk ends early
+      // (see `MeasuredWalk`): a match before that point is the first match,
+      // but the end of the walk is not grounds for `Nothing`.
+      const walk = new MeasuredWalk(() => xs.each());
+      for (const item of walk) {
         const applied = f([item]);
         const pred = selectionVerdict(applied);
         if (pred === 'False') continue;
@@ -14118,6 +14271,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (err) return err;
         throw predicateResultError('Find', fn);
       }
+      if (walk.missedElements) return undefined;
       return ce.Nothing;
     },
   },
@@ -14150,7 +14304,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // loop below would count 0. See `isEnumerableSource`.
       if (!isEnumerableSource(xs)) return undefined;
       let count = 0;
-      for (const item of xs.each()) {
+      // A walk that meets an inner collection that it cannot walk ends early
+      // and misses elements (see `MeasuredWalk`), so its count is not the
+      // count: `CountIf(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3), x ↦ x >
+      // 0)` was `0`.
+      const walk = new MeasuredWalk(() => xs.each());
+      for (const item of walk) {
         const applied = f([item]);
         const pred = selectionVerdict(applied);
         if (pred === 'False') continue;
@@ -14163,6 +14322,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           throw predicateResultError('CountIf', fn);
         }
       }
+      if (walk.missedElements) return undefined;
       return ce.number(count);
     },
   },
@@ -14202,7 +14362,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isEnumerableSource(xs)) return undefined;
       const indices: Expression[] = [];
       let index = 1;
-      for (const item of xs.each()) {
+      // The result can hold an index for each element, so the source is
+      // walked with the bound of an eager operator (`eagerElementWalk()`).
+      const walk = eagerElementWalk(xs);
+      if (walk === undefined) return undefined;
+      for (const item of walk) {
         const applied = f([item]);
         const pred = selectionVerdict(applied);
         if (pred === 'True') indices.push(ce.number(index));
@@ -14215,6 +14379,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         index++;
       }
+      if (!walk.complete) return undefined;
       return ce.function('List', indices);
     },
   },
@@ -14841,7 +15006,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!isWalkableFiniteCollection(ops[0])) return undefined;
-      const [values, counts] = tally(ops[0]!);
+      const tallied = tally(ops[0]!);
+      if (tallied === undefined) return undefined;
+      const [values, counts] = tallied;
       return ce.tuple(ce.function('List', values), ce.function('List', counts));
     },
   },
@@ -14875,7 +15042,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
       if (!isWalkableFiniteCollection(ops[0])) return undefined;
-      const [values, _counts] = tally(ops[0]!);
+      const tallied = tally(ops[0]!);
+      if (tallied === undefined) return undefined;
+      const [values] = tallied;
       // The string arm: `Unique` is eager and has no lazy collection handlers,
       // so the join happens here rather than in
       // `evaluateStringPreservingCollection`. Re-segmentation caveat:
@@ -15197,7 +15366,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const trueGroup: Expression[] = [];
       const falseGroup: Expression[] = [];
-      for (const item of xs.each()) {
+      // The two groups hold every element: the source is walked with the
+      // bound of an eager operator (`eagerElementWalk()`).
+      const walk = eagerElementWalk(xs);
+      if (walk === undefined) return undefined;
+      for (const item of walk) {
         const applied = fn([item]);
         // A `Missing` answer puts the element in the FALSE group: a partition
         // keeps every element, and "not decidedly satisfied" is the group a
@@ -15229,6 +15402,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           throw predicateResultError('Partition', arg);
         }
       }
+      if (!walk.complete) return undefined;
 
       // The two predicate groups are inner runs like any other: for a string
       // source each comes back as a string, so `Partition("a1b2", isDigit)` is
@@ -15337,7 +15511,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // stays symbolic.
       if (k > MAX_CHUNK_COUNT) return undefined;
 
-      const all = Array.from(xs.each()) as Expression[];
+      // The source is listed with the bound of an eager operator
+      // (`eagerElements()`): `Chunk(Permutations(Range(1, 25)), 2)` listed
+      // the 25! elements of the source, and the process ran out of memory.
+      const all = eagerElements(xs);
+      if (all === undefined) return undefined;
       const result: Expression[] = [];
       const chunkSize = Math.ceil(all.length / k);
 
@@ -15408,7 +15586,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const runs: Expression[][] = [];
       let currentKey: Expression | undefined = undefined;
       let current: Expression[] = [];
-      for (const item of xs.each()) {
+      // The runs hold every element: the source is walked with the bound of
+      // an eager operator (`eagerElementWalk()`).
+      const walk = eagerElementWalk(xs);
+      if (walk === undefined) return undefined;
+      for (const item of walk) {
         const key = f([item]) ?? ce.Nothing;
         // Compare run keys with `.isSame()` — exact structural/symbolic
         // equality, the engine's internal-comparison convention. `.isEqual()`
@@ -15426,6 +15608,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           currentKey = key;
         }
       }
+      if (!walk.complete) return undefined;
       if (current.length > 0) runs.push(current);
 
       // Each run is emitted through `innerRun`, which makes it a STRING when
@@ -15460,9 +15643,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        let n = 0;
-        for (const _ of expr.each()) n++;
-        return n;
+        return countByWalk(expr, expr.op1);
       },
       // Finite source ⇒ finite number of runs; otherwise unknown.
       isFinite: (expr) =>
@@ -15488,9 +15669,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         let pending: Expression | undefined = undefined;
         let pendingKey: Expression | undefined = undefined;
         let done = false;
+        // A run is read whole before it is given, so a run of the whole
+        // source (a key that never changes) is a pull that reads every
+        // element: `ChunkBy(Permutations(Range(1, 25)), x ↦ 1)` did not end.
+        // When the count of the source is a `bigint` (more than 2^53
+        // elements), a run longer than `ce.maxCollectionSize` elements ends
+        // the walk, and the walk is recorded as a walk that missed elements
+        // (`noteIncompleteWalk()`): its consumers stay unevaluated. Over any
+        // other source a run of any length is read, as before
+        // (`First(ChunkBy(Range(1, 20000), x ↦ 1))` is the whole range).
+        const runLimit =
+          typeof expr.op1.count === 'bigint' ? ce.maxCollectionSize : Infinity;
+        let tooLong = false;
         return {
           next: () => {
-            if (done && pending === undefined)
+            if (tooLong || (done && pending === undefined))
               return { value: undefined, done: true };
             // Seed the run with the pending element, or read the first one.
             let run: Expression[];
@@ -15518,8 +15711,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 break;
               }
               const k = f([value]) ?? ce.Nothing;
-              if (key.isSame(k)) run.push(value);
-              else {
+              if (key.isSame(k)) {
+                if (run.length >= runLimit) {
+                  tooLong = true;
+                  noteIncompleteWalk();
+                  return { value: undefined, done: true };
+                }
+                run.push(value);
+              } else {
                 pending = value;
                 pendingKey = k;
                 break;
@@ -15576,7 +15775,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       const groups: Record<string, Expression[]> = {};
 
-      for (const item of xs.each()) {
+      // The groups hold every element: the source is walked with the bound
+      // of an eager operator (`eagerElementWalk()`).
+      const walk = eagerElementWalk(xs);
+      if (walk === undefined) return undefined;
+      for (const item of walk) {
         const keyExpr = f([item]) ?? ce.Nothing;
 
         // A key that is an inert application of an operator that was only
@@ -15612,6 +15815,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!(key in groups)) groups[key] = [];
         groups[key].push(item);
       }
+      if (!walk.complete) return undefined;
 
       return ce.function(
         'Dictionary',
@@ -16009,8 +16213,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // than every index this walk can reach, so the walk never wraps
         // around: it reads the source in order.
         const l = typeof count === 'bigint' ? Infinity : count;
-        if (l === undefined || l === 0)
-          return { next: () => ({ value: undefined, done: true }) };
+        if (l === undefined) return cycleWalk(expr.op1);
+        if (l === 0) return { next: () => ({ value: undefined, done: true }) };
         return {
           next: () => {
             const i = l === Infinity ? index : ((index - 1) % l) + 1;
@@ -16032,7 +16236,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (typeof count === 'bigint')
           return Number.isSafeInteger(index) ? expr.op1.at(index) : undefined;
         const l = count;
-        if (l === undefined || l === 0) return undefined;
+        if (l === undefined) return cycleAt(expr.op1, index);
+        if (l === 0) return undefined;
         const i = ((index - 1) % l) + 1; // 1-based index
         return expr.op1.at(i);
       },
@@ -16159,6 +16364,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // hundred thousand elements exceeded the argument limit
           // (`ListFrom(Range(1, 300000))` was an `internal-error`,
           // "Maximum call stack size exceeded").
+          //
+          // A collection whose count is a `bigint` (more than 2^53 elements)
+          // cannot be listed in memory: the walk ran until the process ran
+          // out of memory (`ListFrom(Permutations(Range(1, 25)))`). It stays
+          // unevaluated. A smaller collection is listed whatever its size,
+          // because `ListFrom` is the explicit way to list a collection
+          // (`TupleFrom(Range(1, 300000))` is listed).
+          if (typeof xs.count === 'bigint') return undefined;
           for (const x of xs.each()) elements.push(x);
         }
       }
@@ -16247,7 +16460,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else {
           if (!isWalkableFiniteCollection(xs)) return undefined;
           // One `push` per element, as in `ListFrom`: a spread of the whole
-          // array exceeds the argument limit for a very large collection.
+          // array exceeds the argument limit for a very large collection. A
+          // collection whose count is a `bigint` stays unevaluated, as in
+          // `ListFrom`.
+          if (typeof xs.count === 'bigint') return undefined;
           for (const x of xs.each()) elements.push(x);
         }
       }
@@ -16278,7 +16494,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else {
           if (!isWalkableFiniteCollection(xs)) return undefined;
           // One `push` per element, as in `ListFrom`: a spread of the whole
-          // array exceeds the argument limit for a very large collection.
+          // array exceeds the argument limit for a very large collection. A
+          // collection whose count is a `bigint` stays unevaluated, as in
+          // `ListFrom`.
+          if (typeof xs.count === 'bigint') return undefined;
           for (const x of xs.each()) elements.push(x);
         }
       }
@@ -16603,7 +16822,13 @@ function quantifierWalk(
   let sawUndetermined = false;
   let sawAbsent = false;
   return (function* (): Generator<undefined, Expression | undefined> {
-    for (const item of collection.each()) {
+    // The walk ends early when it meets an inner collection that it cannot
+    // walk (see `MeasuredWalk`). A short-circuit on an element before that
+    // point is correct. The answer at the end of the walk (`False` for
+    // `Any`, `True` for `All`) is not: `All(FlatMap([1, 2], x ↦ Join([x],
+    // v)), x ↦ x < 5)` was `True` for a valueless `v`.
+    const walk = new MeasuredWalk(() => collection.each());
+    for (const item of walk) {
       const result = f ? f([item]) : item.evaluate();
       const s = sym(result);
       if (s === shortSym) return shortValue;
@@ -16619,6 +16844,7 @@ function quantifierWalk(
       }
       yield;
     }
+    if (walk.missedElements) return undefined;
     if (sawUndetermined) return undefined;
     if (sawAbsent) return ce.symbol('Missing');
     return defaultValue;
@@ -17645,9 +17871,58 @@ function setComprehensionContains(
   return undefined;
 }
 
-function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
+/**
+ * A walk of the finite collection `xs` for an eager operator that keeps
+ * every element, or a value for each element, in its result: `Tally`,
+ * `Unique`, `GroupBy`, `ChunkBy`, `Chunk`, `Position`, the predicate form of
+ * `Partition`, and the sequence search (`StartsWith`, `RangeOf`, …).
+ *
+ * A lazy source is walked with a bound: the walk gives at most
+ * `ce.maxCollectionSize` elements (`MeasuredWalk`), and the answer is
+ * `undefined`, with no walk, when the count of `xs` is known to be larger (a
+ * `bigint` count is larger). With no bound,
+ * `Tally(Permutations(Range(1, 25)))` did not end, and `Chunk` of the same
+ * source ran out of memory. A source whose elements are already held (a
+ * `List` literal, a string, a symbol whose value is such a collection) is
+ * walked with no bound: its elements are in memory, and its walk ends
+ * (`Unique` of a list of 10001 integers).
+ *
+ * After the walk, the operator stays unevaluated unless `walk.complete` is
+ * true: the walk can also end at the bound (a source with no count), or
+ * because it met an inner collection that it cannot walk, and it then
+ * misses elements.
+ */
+function eagerElementWalk(
+  xs: Expression
+): MeasuredWalk<Expression> | undefined {
+  const cap = xs.engine.maxCollectionSize;
+  const count = xs.count;
+  if (xs.isLazyCollection !== true && typeof count !== 'bigint')
+    return new MeasuredWalk(() => xs.each());
+  if (typeof count === 'bigint' || (count !== undefined && count > cap))
+    return undefined;
+  return new MeasuredWalk(() => xs.each(), cap);
+}
+
+/** The elements of `xs`, listed by {@link eagerElementWalk}, or `undefined`
+ * when that walk does not give every element. */
+function eagerElements(xs: Expression): Expression[] | undefined {
+  const walk = eagerElementWalk(xs);
+  if (walk === undefined) return undefined;
+  const elements = [...walk];
+  return walk.complete ? elements : undefined;
+}
+
+/** The distinct elements of `collection` and the count of each, or
+ * `undefined` when the walk does not give every element (see
+ * {@link eagerElementWalk}). */
+function tally(
+  collection: Expression
+): [ReadonlyArray<Expression>, number[]] | undefined {
   const values: Expression[] = [];
   const counts: number[] = [];
+  const walk = eagerElementWalk(collection);
+  if (walk === undefined) return undefined;
 
   const indexOf = (expr: Expression) => {
     for (let i = 0; i < values.length; i++)
@@ -17655,7 +17930,7 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
     return -1;
   };
 
-  for (const op of collection.each()) {
+  for (const op of walk) {
     const index = indexOf(op);
     if (index >= 0) counts[index]++;
     else {
@@ -17663,6 +17938,7 @@ function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
       counts.push(1);
     }
   }
+  if (!walk.complete) return undefined;
 
   return [values, counts];
 }
@@ -19579,6 +19855,131 @@ function windowAt(
   return undefined;
 }
 
+/**
+ * The count of the lazy view `expr` over `source`, by a walk of the
+ * elements of `expr`: the count of `TakeWhile`, `DropWhile` and `ChunkBy` is
+ * known only after a walk.
+ *
+ * When the count of `source` is a `bigint` (more than 2^53 elements), a
+ * walk to the end cannot end: `TakeWhile(Permutations(Range(1, 25)), x ↦
+ * True)` read its count and did not end. The walk then stops after
+ * `ce.maxCollectionSize` elements, and the count is not known. A walk that
+ * ends before that gives the count: `TakeWhile(Permutations(Range(1, 25)),
+ * x ↦ False)` has the count 0. Over any other source the walk goes to its
+ * end, as before.
+ *
+ * The count is not known either when the walk misses elements (see
+ * `MeasuredWalk`): the iterator of `ChunkBy` stops at a run that is too long
+ * to list, and a walk can meet an inner collection that it cannot walk.
+ */
+function countByWalk(expr: Expression, source: Expression): number | undefined {
+  const limit =
+    typeof source.count === 'bigint' ? expr.engine.maxCollectionSize : Infinity;
+  const walk = new MeasuredWalk(() => expr.each(), limit);
+  let n = 0;
+  try {
+    for (const _ of walk) n += 1;
+  } catch (e) {
+    // The iterator gave up (a `TakeWhile` over a long run that its guard
+    // stops): the count is not known. Any other cancellation (a deadline)
+    // propagates.
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  return walk.complete ? n : undefined;
+}
+
+/**
+ * The walk of `Cycle(source)` when the count of `source` is not known
+ * (`FlatMap([1, 2, 3], x ↦ [x, x])`, whose count needs the results of its
+ * callback). The walk with a count reads the source at a position taken
+ * modulo the count, so without a count it would yield nothing, while `Cycle`
+ * claims to be enumerable: a consumer then read the empty walk as an empty
+ * collection.
+ *
+ * This walk reads the source in order, and starts a new walk of the source
+ * when it ends. A walk of the source that yields no element ends the walk:
+ * the cycle of an empty collection is empty. The source is not listed, so
+ * the memory does not grow with the source, and a source whose finiteness is
+ * not known can be cycled too (its first walk can be infinite, and the cycle
+ * is then the source). A source with an element memo (`FlatMap`) serves the
+ * later walks from the memo, so its callback is not applied again.
+ */
+function cycleWalk(source: Expression): Iterator<Expression> {
+  let walk: Iterator<Expression> = source.each();
+  let yielded = false;
+  let ended = false;
+  return {
+    next: () => {
+      if (ended) return { value: undefined, done: true };
+      try {
+        let step = walk.next();
+        if (step.done && yielded) {
+          walk = source.each();
+          yielded = false;
+          step = walk.next();
+        }
+        if (step.done) return { value: undefined, done: true };
+        yielded = true;
+        return { value: step.value, done: false };
+      } catch (e) {
+        // The walk of a source whose finiteness is not known can give up
+        // (`Filter(Range(1, ∞), x ↦ x < 3)` stops at its iteration limit
+        // after a long run of rejected elements). The source can still
+        // have elements after that point, so the walk is recorded as a
+        // walk that missed elements (`noteIncompleteWalk()`) and ends: its
+        // consumer stays unevaluated. Any other cancellation (a deadline)
+        // propagates.
+        if (
+          e instanceof CancellationError &&
+          e.cause === 'iteration-limit-exceeded'
+        ) {
+          ended = true;
+          noteIncompleteWalk();
+          return { value: undefined, done: true };
+        }
+        throw e;
+      }
+    },
+  };
+}
+
+/**
+ * The element of `Cycle(source)` at the positive position `index`, when the
+ * count of `source` is not known (see {@link cycleWalk}). The first walk of
+ * the source finds the element when `index` is in the first cycle, and gives
+ * the count of the source otherwise: the element is then read at the
+ * position modulo that count.
+ */
+function cycleAt(source: Expression, index: number): Expression | undefined {
+  let n = 0;
+  try {
+    for (const x of source.each()) {
+      n += 1;
+      if (n === index) return x;
+    }
+  } catch (e) {
+    // The walk gave up (see {@link cycleWalk}): the count of the source is
+    // not known, so the element is not known. The walk is recorded as a
+    // walk that missed elements, so that the miss is not read as a
+    // position outside the collection.
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    ) {
+      noteIncompleteWalk();
+      return undefined;
+    }
+    throw e;
+  }
+  if (n === 0) return undefined;
+  return source.at(((index - 1) % n) + 1);
+}
+
 function takeIterator(expr: Expression): Iterator<Expression> {
   if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
@@ -19597,6 +19998,51 @@ function takeIterator(expr: Expression): Iterator<Expression> {
     );
 
   if (count === 0) return { next: () => ({ value: undefined, done: true }) };
+
+  // A lazy source with no count (`FlatMap(Range(1, 2000), x ↦ [x])`, a
+  // `Filter`) reads an element by position with a walk from its start, so
+  // reading each element with `at()` made the walk quadratic:
+  // `Count(Take(…, 2000))` took 4.9 s. Such a source is walked once, in
+  // order. A source with a count, and an eager source (`Divisors(12)`, whose
+  // `at()` reads one cached evaluation where each walk evaluates it again),
+  // are read by position, as before.
+  if (expr.op1.count === undefined && expr.op1.isLazyCollection === true) {
+    const source = expr.op1.each();
+    let taken = 0;
+    let ended = false;
+    return {
+      next: () => {
+        if (ended) return { value: undefined, done: true };
+        if (taken >= count) {
+          ended = true;
+          source.return?.(undefined);
+          return { value: undefined, done: true };
+        }
+        let step: IteratorResult<Expression>;
+        try {
+          step = source.next();
+        } catch (e) {
+          // The walk of the source gave up (a `Filter` with a long run of
+          // rejected elements): the walk ends, as the read by position
+          // ends when `Filter.at` gives up.
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          ) {
+            ended = true;
+            return { value: undefined, done: true };
+          }
+          throw e;
+        }
+        if (step.done === true) {
+          ended = true;
+          return { value: undefined, done: true };
+        }
+        taken += 1;
+        return { value: step.value, done: false };
+      },
+    };
+  }
 
   let index = 1;
   let n = 0;

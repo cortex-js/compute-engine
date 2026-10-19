@@ -46,6 +46,7 @@ import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import type { Scope } from './types-evaluation.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
+import { incompleteWalkCount } from './boxed-expression/incomplete-walks.js';
 import {
   Expression,
   CollectionHandlers,
@@ -146,6 +147,183 @@ export function isWalkableFiniteCollection(col: Expression): boolean {
   if (col.isFiniteCollection !== true) return false;
   if (col.isEnumerableCollection !== false) return true;
   return col.isEmptyCollection === true;
+}
+
+/**
+ * True when `mapped`, the result of the callback of a `FlatMap` for one
+ * element, is a collection (or a symbol of a collection type) that cannot be
+ * walked now, so that splicing it would miss elements. A string is one
+ * element, and a scalar is one element. A collection that is provably empty
+ * contributes nothing, and that is correct.
+ */
+export function innerCollectionCannotBeWalked(mapped: Expression): boolean {
+  if (isString(mapped)) return false;
+  if (!mapped.isCollection && !mapped.type.matches('collection<any>'))
+    return false;
+  if (mapped.isEnumerableCollection !== false) return false;
+  return mapped.isEmptyCollection !== true;
+}
+
+/**
+ * Whether a walk of `xs` is allowed to answer a read that needs the count of
+ * `xs`: `xs` is known to be finite, and its elements can be enumerated.
+ *
+ * Some finite collections have no `count`. The count of
+ * `FlatMap([1, 2, 3], x ↦ [x, x])` is known only after the callback is
+ * applied to each element, and the `count` and `at` facets do not apply a
+ * callback. A read that needs the count (`Count`, `Length`, `IsEmpty`,
+ * `Last`, a negative index, and the views that read their source from the
+ * end: `Reverse`, `Most`, `RotateLeft`, `RotateRight`) walks such a
+ * collection instead, outside the facets.
+ *
+ * This is done only when the count is unknown because it waits for a
+ * callback (`countWaitsForCallback()`). A finite collection can also have no
+ * count because the count is too large to compute
+ * (`Permutations(Permutations(Range(1, 10000)), 10000)`): such a collection
+ * has many more than `maxCollectionSize` elements, so a walk cannot give an
+ * answer, and only its cost is certain.
+ */
+function walkCanAnswerCount(xs: Expression): boolean {
+  return (
+    xs.isFiniteCollection === true &&
+    xs.isEnumerableCollection === true &&
+    countWaitsForCallback(xs)
+  );
+}
+
+/**
+ * Whether the collection `xs` is, or reads from, a `FlatMap`: the collection
+ * operator whose count is known only after its callback is applied to each
+ * element. A view over it (`Take`, `Map`, `Reverse`, …) has no count for the
+ * same reason. Only the operands that are collections are read.
+ */
+function countWaitsForCallback(xs: Expression): boolean {
+  if (!isFunction(xs)) return false;
+  if (xs.operator === 'FlatMap') return true;
+  return xs.ops.some((op) => op.isCollection && countWaitsForCallback(op));
+}
+
+/**
+ * The elements of the finite collection `xs`, listed by ONE walk, for a read
+ * that needs the count of `xs` when the `count` facet gives no answer (see
+ * `walkCanAnswerCount()`). Each callback of the collection is applied once for
+ * each element of the walk. A read that needs elements from the end of the
+ * collection (`Reverse`) lists it with this function once, and then reads the
+ * list. It does not read one index from the end at a time, because each such
+ * read would walk the collection again.
+ *
+ * The answer is `undefined`, and the read stays unevaluated, when:
+ * - `xs` is not known to be finite, or its elements cannot be enumerated;
+ * - `xs` has more than `engine.maxCollectionSize` elements;
+ * - the walk gives up with `iteration-limit-exceeded` (a `Filter` with a long
+ *   run of rejected elements);
+ * - the walk met an inner collection that it could not walk
+ *   (`incomplete-walks.ts`), so the list would miss elements.
+ *
+ * An empty list is a correct answer: an enumerable collection whose walk is
+ * complete and yields nothing is empty.
+ */
+export function listFiniteUncountedCollection(
+  xs: Expression
+): Expression[] | undefined {
+  if (!walkCanAnswerCount(xs)) return undefined;
+  const cap = xs.engine.maxCollectionSize;
+  const before = incompleteWalkCount();
+  const elements: Expression[] = [];
+  try {
+    for (const x of xs.each()) {
+      if (elements.length >= cap) return undefined;
+      elements.push(x);
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  if (incompleteWalkCount() !== before) return undefined;
+  return elements;
+}
+
+/**
+ * The emptiness of the finite collection `xs`, decided by a walk, for an
+ * `IsEmpty` read when the `isEmpty` facet gives no answer (see
+ * `walkCanAnswerCount()`). The walk stops at the first element: the
+ * collection is then not empty. A walk that ends with no element decides that
+ * the collection is empty, because a collection that claims to be enumerable
+ * yields all its elements, also when the count of its source is not known
+ * (the contract of the views is stated at `walkDecidesEmptiness()`,
+ * `boxed-expression/boxed-function.ts`).
+ *
+ * The answer is `undefined` when the walk met an inner collection that it
+ * could not walk (`incomplete-walks.ts`), also when it found an element: the
+ * iterator of `FlatMap` gives a symbol of a collection type with no value as
+ * one element, and that symbol can hold an empty collection.
+ */
+export function finiteUncountedIsEmpty(xs: Expression): boolean | undefined {
+  if (!walkCanAnswerCount(xs)) return undefined;
+  const before = incompleteWalkCount();
+  let empty = true;
+  try {
+    for (const _ of xs.each()) {
+      empty = false;
+      break;
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+  return incompleteWalkCount() === before ? empty : undefined;
+}
+
+/**
+ * The views that read their source by a position computed from the count of
+ * the source: `Reverse` reads it from the end, `Most` up to its count minus
+ * one, and the rotations from an offset taken modulo the count. Over a finite
+ * source with no count, such a view cannot be enumerated (see
+ * `enumerableFromSmallSource()`, `library/collections.ts`). See
+ * {@link viewOverListedSource}.
+ */
+const VIEWS_THAT_NEED_THE_SOURCE_COUNT = new Set([
+  'Reverse',
+  'Most',
+  'RotateLeft',
+  'RotateRight',
+]);
+
+/**
+ * For the materialization of a view that reads its source by a position
+ * computed from the count of the source (`Reverse`, `Most`, `RotateLeft`,
+ * `RotateRight`), over a finite indexed source with no count: the same view
+ * over the LIST of the elements of the source, listed once by
+ * `listFiniteUncountedCollection()`. So
+ * `Reverse(FlatMap([1, 2, 3], x ↦ [x, x]))` materializes as
+ * `Reverse([1, 1, 2, 2, 3, 3])`, which is `[3, 3, 2, 2, 1, 1]`.
+ *
+ * The answer is `undefined` when `expr` is not such a view, or when its source
+ * has a count (the view then reads its source itself). It is `null` when the
+ * source cannot be listed (see `listFiniteUncountedCollection()`): the view
+ * must then stay in its lazy form.
+ */
+export function viewOverListedSource(
+  expr: Expression
+): Expression | null | undefined {
+  if (!isFunction(expr) || expr.nops === 0) return undefined;
+  if (!VIEWS_THAT_NEED_THE_SOURCE_COUNT.has(expr.operator)) return undefined;
+  const source = expr.op1;
+  if (source.count !== undefined) return undefined;
+  if (!walkCanAnswerCount(source)) return undefined;
+  if (source.isIndexedCollection !== true) return undefined;
+  const listed = listFiniteUncountedCollection(source);
+  if (listed === undefined) return null;
+  const ce = expr.engine;
+  return ce._fn(expr.operator, [ce._fn('List', listed), ...expr.ops.slice(1)]);
 }
 
 /**
@@ -3578,9 +3756,44 @@ export function windowedCollectionOps(
       if (p === undefined) return undefined;
       const { src, size, step, keepPartial } = p;
       const n = smallCount(src);
-      if (n === undefined) return undefined;
       const start = (index - 1) * step + 1;
       const end = start + size - 1;
+      if (n === undefined) {
+        // The count of the source is not known (`FlatMap([1, 2, 3], x ↦
+        // [x, x])`), or it is a `bigint` (`Permutations(Range(1, 25))`).
+        // The view claims to be enumerable, and `Take`, `Drop` and `Rest`
+        // read it by position, so a window at a positive position must be
+        // given also with no count: when this returned `undefined`,
+        // `Take(Partition(FlatMap(…), 2), 1)` was `[]`.
+        //
+        // The source is read with ONE walk: the first `start − 1` elements
+        // are skipped, and the next `size` elements are the window. A read
+        // of each element by position is a walk from the start for such a
+        // source, so `First(Partition(Permutations(Range(1, 25)), 10000))`
+        // took 78 s. A walk that ends before the start means that the
+        // window is past the end.
+        if (!Number.isSafeInteger(end)) return undefined;
+        if (src.isIndexedCollection !== true) return undefined;
+        const iter = src.each();
+        try {
+          for (let j = 1; j < start; j++)
+            if (iter.next().done === true) return undefined;
+          const items: Expression[] = [];
+          for (let j = start; j <= end; j++) {
+            const step = iter.next();
+            if (step.done === true) {
+              // An incomplete window is kept only by the chunk form, as its
+              // trailing partial chunk.
+              if (j === start || !keepPartial) return undefined;
+              break;
+            }
+            items.push(step.value);
+          }
+          return expr.engine.function('List', items);
+        } finally {
+          iter.return?.(undefined);
+        }
+      }
       let last = end;
       if (Number.isFinite(n)) {
         if (keepPartial) {

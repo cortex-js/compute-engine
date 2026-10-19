@@ -18,7 +18,7 @@ import {
 } from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
 import { normalizedUnknownsForSolve, liftIntegrand } from './utils.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { labelFor } from './explain-labels.js';
 
 /**
@@ -614,6 +614,11 @@ function explainIntegrate(
  * state after the step): at `'default'` verbosity, steps whose value is
  * unchanged from the previous state are dropped.
  *
+ * A step that changes only the exactness of a number changes the state
+ * (`sameState()`): for `x^{2.0} + 3x + 2 = 0`, the step to
+ * `x^2 + 3x + 2 = 0` and the step from the exact roots `-1`, `-2` to the
+ * float roots `-1.0`, `-2.0` are kept.
+ *
  * @internal used by the solve and D explanation builders
  */
 export function curateChain(
@@ -626,11 +631,29 @@ export function curateChain(
   const steps: ExplainStep[] = [];
   let prev: Expression = initial;
   for (const s of trace) {
-    if (s.value.isSame(prev)) continue;
+    if (sameState(s.value, prev)) continue;
     steps.push(toExplainStep(s));
     prev = s.value;
   }
   return steps;
+}
+
+/**
+ * Whether `a` and `b` are the same state of a chain of steps: `a.isSame(b)`,
+ * and each number literal of `a` is exact when the number literal at the
+ * same position in `b` is exact. `isSame()` compares number literals by
+ * value, thus `2.0` is the same as `2` for it.
+ */
+function sameState(a: Expression, b: Expression): boolean {
+  return a.isSame(b) && sameExactness(a, b);
+}
+
+/** The exactness test of `sameState()`, for `a` and `b` with `a.isSame(b)`. */
+function sameExactness(a: Expression, b: Expression): boolean {
+  if (isNumber(a) && isNumber(b)) return a.isExact === b.isExact;
+  if (isFunction(a) && isFunction(b))
+    return a.ops.every((op, i) => sameExactness(op, b.ops[i]));
+  return true;
 }
 
 /**

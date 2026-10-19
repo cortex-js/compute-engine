@@ -1568,6 +1568,13 @@ export interface LaurentData {
   coeff: (p: number) => Expression;
 }
 
+/** Whether `e` holds an `Add` or a `Subtract` at any depth. */
+function holdsSum(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'Add' || e.operator === 'Subtract') return true;
+  return e.ops.some(holdsSum);
+}
+
 /**
  * Laurent-expand `f` in `x` about the finite point `x0`. Returns `null` when
  * the kernel declines (branch point, essential singularity, unexpandable
@@ -1583,6 +1590,15 @@ export function laurentData(
   W = 6
 ): LaurentData | null {
   if (x0.isFinite !== true) return null;
+  // The kernel reads a coefficient as zero only when it IS the number 0
+  // (`isSame(0)`), so it needs a point at which `evaluate()` folds each
+  // exact constant coefficient that is 0 to the number 0. At a point that
+  // holds a sum it does not: `evaluate()` does not expand a power of a sum,
+  // so at x0 = 1/2 + (√3/2)i the constant coefficient of x³ + 1,
+  // `1 + (1/2 + (√3/2)i)³`, stays a sum although it is 0, and the pole of
+  // 1/(x³ + 1) there was read as a removable point. Such a point is
+  // declined, and the caller uses its other methods.
+  if (holdsSum(x0)) return null;
   const L = expandLaurent(f, x, x0, ce, Math.min(W, MAX_SERIES_ORDER));
   if (!L) return null;
   const v = trueVal(L);

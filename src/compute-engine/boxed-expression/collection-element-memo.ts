@@ -23,6 +23,7 @@ import {
 import { containsObject } from './object-walk';
 import { subscriptEvaluateReads } from './transitive-purity';
 import { sequenceReadStopCount } from './sequence-read-stops';
+import { incompleteWalkCount } from './incomplete-walks';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -1053,7 +1054,8 @@ function commitRecordedWalk(
   suspendedEpochChange: boolean,
   complete: boolean,
   objectDeps: ObjectDeps | undefined,
-  sequenceStopsBefore: number
+  sequenceStopsBefore: number,
+  incompleteWalksBefore: number
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
@@ -1062,6 +1064,11 @@ function commitRecordedWalk(
   // declined term, and a later read can give it. Such a buffer is not
   // committed (`sequence-read-stops.ts`).
   if (sequenceReadStopCount() !== sequenceStopsBefore) return;
+  // The walk met an inner collection that it could not walk (a `FlatMap`
+  // whose callback returned `Join([x], v)` for a valueless `v`), so the
+  // buffer misses elements. A later walk that read it would not see that
+  // (`incomplete-walks.ts`).
+  if (incompleteWalkCount() !== incompleteWalksBefore) return;
   // An element that IS (or transitively holds) a mutable object is never
   // memoized: the entry would keep it alive for as long as the collection
   // instance lives (ruling B12), and its contents are not part of what the
@@ -1140,6 +1147,7 @@ export function* elementMemoRecordingStream(
   // A stop of a sequence read between here and the commit, also one made
   // by the consumer between two pulls, prevents the commit.
   const sequenceStopsBefore = sequenceReadStopCount();
+  const incompleteWalksBefore = incompleteWalkCount();
   /** The mutable-object field reads made by the walk itself. A collector is
    * opened around each PULL rather than around the whole generator: the
    * generator suspends at every `yield`, and a collector left open across
@@ -1211,7 +1219,8 @@ export function* elementMemoRecordingStream(
       suspendedEpochChange || suspendedScopeChange,
       drained && !overflow,
       objectDeps,
-      sequenceStopsBefore
+      sequenceStopsBefore,
+      incompleteWalksBefore
     );
   }
 }
@@ -1265,6 +1274,7 @@ export function elementMemoFillTo(
   const elements: Expression[] = [];
   let complete = false;
   const sequenceStopsBefore = sequenceReadStopCount();
+  const incompleteWalksBefore = incompleteWalkCount();
   const iter = makeStream();
   // The drain is synchronous and uninterrupted by consumer code, so ONE
   // collector brackets the whole of it: every mutable-object field read below
@@ -1296,10 +1306,13 @@ export function elementMemoFillTo(
   // …and a fill during which a read of a sequence term was stopped is not
   // committed: an element can hold the declined term, which a later read
   // can give (`sequence-read-stops.ts`).
+  // …and a fill that met an inner collection that it could not walk is not
+  // committed: it misses elements (`incomplete-walks.ts`).
   if (
     deps !== undefined &&
     !elements.some(containsObject) &&
     sequenceReadStopCount() === sequenceStopsBefore &&
+    incompleteWalkCount() === incompleteWalksBefore &&
     // Elements computed inside a transient precision window are not stored
     // (see `validElementMemo`).
     !expr.engine._atTransientConfiguration

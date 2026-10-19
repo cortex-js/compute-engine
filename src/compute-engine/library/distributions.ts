@@ -471,6 +471,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // of `complex`, so the policy derived from the signature alone would be
       // `reject`.
       signature: '(complex | infinity, complex | infinity) -> number',
+      broadcastable: true,
       nanBehavior: 'propagate',
       // A finite real ONLY on the proven domain a > 0, z ≥ 0 (there
       // Q(a, z) ∈ [0, 1]); outside it the value can be negative
@@ -611,6 +612,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // subtype of `complex`).
       signature:
         '(complex | infinity, complex | infinity, complex | infinity) -> number',
+      broadcastable: true,
       nanBehavior: 'propagate',
       // A finite real ONLY on the proven domain x ∈ [0, 1], a > 0, b > 0
       // (there I_x(a, b) ∈ [0, 1]); the unconditional `real` this

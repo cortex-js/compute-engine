@@ -2,6 +2,72 @@
 
 ### Behavior Changes
 
+- **Under `.N()`, the direct application of a function literal gives the value
+  of its body with the arguments as written**, as a lazy `Map` does (user
+  decision 2026-10-18). At machine precision `Apply(x ↦ Sin(x), Pi).N()` was
+  `1.2246467991473532e-16` and is now `0`; `f((25! − 1)/24!).N()` with
+  `f := x ↦ Numerator(x)` was `25` and is now the exact numerator. An argument
+  that contains a sum, a product, a loop or a user-function call is still
+  approximated once, so `f(Sum(1/k, k, 1, 10000)).N()` is as fast as before. A
+  broadcast over a lazy `Map` operand reads its elements numerically:
+  `Sin(Map(Sin, [H])).N()` with `H = Sum(1/k, k, 1, 6000)` took 5 s and takes
+  less than 0.1 s.
+
+- **A finite collection whose count is known only after a callback is applied
+  answers `Count`, `Length`, `IsEmpty`, `Last`, a negative index, `Reverse`,
+  `Most`, `RotateLeft` and `RotateRight`** (user decision 2026-10-18):
+  `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` is `3`. Each read walks the collection
+  once; a collection larger than `maxCollectionSize` stays unevaluated.
+  `Take(FlatMap([1, 2], x ↦ []), 1)` is `[]`. A `FlatMap` whose callback returns
+  a collection that cannot be listed yet (`Join([x], v)` with a valueless `v`)
+  stays unevaluated; it was listed without the elements of `v`.
+
+- **`Sum` and `Product` accept the iterator `{i, n}`** (user decision
+  2026-10-18), from 1 to `n`, as `Table` does: `Sum(k^2, {k, 3})` is `14`. The
+  LaTeX specification `(i, 1, 10)` is read as a tuple:
+  `\mathrm{Sum}(i, (i,1,10))` is `55` (it was
+  `Sum(Complex(0,1), Error("missing"))`), and `\mathrm{Integrate}(x, (x,0,1))`
+  is `1/2` (the bounds were dropped). In `\lim_{x\to a+1^+}`, the direction
+  marker applies to the whole point. A limit at a symbolic point is the generic
+  answer (`lim_{x→a} 1/x` is `1/a`), except when that answer has a jump at a
+  value of the parameter (user decision 2026-10-18): `lim_{x→a} |x|/x` was
+  `|a|/a`, which is not the limit at `a = 0`; it stays unevaluated unless the
+  sign of `a` or an assumption `a ≠ 0` is known.
+
+- **Compiled code that assigns an input no longer changes the caller's `vars`
+  object** (user decision 2026-10-18): the JavaScript and interval-js code
+  writes a local copy of that object, also when the object is frozen; the copy
+  does not call a getter of the object, and its cost does not grow with the
+  number of properties of the object. Python `compileFunction()` reads such a
+  name from the module global into a local (it raised `UnboundLocalError`), also
+  when a parameter is named `globals`. `e^{iπx}`, `Exp(iπx)` and `e^{−iπx}` with
+  an undeclared `x` compile with the angle in half-turns: `e^{iπx}` at `x = 1`
+  is exactly `−1`.
+
+- **The integer functions of number theory and combinatorics map over lists**
+  (user decision 2026-10-17). `NthPrime`, `NextPrime`, `Totient`, `MoebiusMu`,
+  `DivisorSigma`, `JacobiSymbol`, `Fibonacci`, `BellNumber`, `Binomial`,
+  `Pochhammer`, `Stirling`, the figurate predicates, `Divides`,
+  `GammaRegularized`, `BetaRegularized`, `Mandelbrot`, `Julia`, `Rationalize`
+  and the other element-wise integer functions are broadcastable:
+  `NthPrime([1, 2, 3])` is `[2, 3, 5]`. `IsSquare`, `IsTriangular`,
+  `IsOctahedral`, `IsCenteredSquare`, `IsHappy` and `IsAbundant` of a symbol now
+  stay unevaluated; they answered `False`.
+
+- **`Solve` gaps.** `√x = i` gives `[-1]`, and `√x = -i` gives `[]`. A float
+  residual is compared with the size of the terms of the equation, so an
+  extraneous root of an equation whose terms are all small is removed.
+  `Solve(x^{2.5} = -4, x, RealNumbers)` gives `[]`. `√x = −1.0·10⁻²⁰·x − 1`
+  gives `[]`: the residual of a square root is compared with the size of the
+  root, not of its argument. `k·xⁿ + c = 0` is solved by a direct formula:
+  `x^{256} = 2` takes 0.4 s, where it took 15 s, and an integer-valued float
+  exponent up to 10000 in a pure power is a degree; with `a := 0`, `x^3 = a`
+  gives `[0]` once. Over a bounded domain, a product of periodic factors gives
+  the roots of each factor: `sin(x)·sin(a·x) = 0` with
+  `a = 2000000001/2000000000` over [0, 10] gives its seven roots. At the default
+  verbosity, `explain('solve')` for `x^{2.0} + 3x + 2 = 0` shows the step to
+  integer exponents and the float roots.
+
 - **`Solve` of a periodic equation returns its families of solutions** (user
   decision 2026-10-17). With no domain, or over the real or the complex numbers,
   a trigonometric equation gives one family `x₀ + T·t` for each class of
@@ -31,12 +97,12 @@
   nested call no longer adds guard digits at each level (`Erf` nested 12 deep
   took 0.4 s and now takes 7 ms).
 
-- **A lazy `Map` under `.N()` gives the same values as the direct call**
-  (user decision 2026-10-18). Each element is passed to the callback as
-  written, and the application is evaluated under the numeric request, so
-  `Map(f, [v]).N()` is `[f(v).N()]`: the element is no longer evaluated exactly
-  first. `At(Map(Sin, [H]), 1).N()` with `H = Sum(1/k, k, 1, 6000)` took 5.6 s and
-  now takes about 60 ms; `Map(Sin, [Pi]).N()` is `[0]`;
+- **A lazy `Map` under `.N()` gives the same values as the direct call** (user
+  decision 2026-10-18). Each element is passed to the callback as written, and
+  the application is evaluated under the numeric request, so `Map(f, [v]).N()`
+  is `[f(v).N()]`: the element is no longer evaluated exactly first.
+  `At(Map(Sin, [H]), 1).N()` with `H = Sum(1/k, k, 1, 6000)` took 5.6 s and now
+  takes about 60 ms; `Map(Sin, [Pi]).N()` is `[0]`;
   `Map(Floor, [(25! − 1)/24!]).N()` is `[24]`. A user function used by name as a
   callback is applied without boxing an application for each element (user
   decision 2026-10-17).
@@ -51,6 +117,32 @@
   (user decision 2026-10-17). `Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` is
   `[1, 1, 2]`, and `Sum(Reverse(FlatMap(…)))` no longer reads a `FlatMap` with
   no count as empty (it gave `0`).
+
+- **A collection read by position, or walked to an answer, no longer gives a
+  wrong value when a count is missing.** A view that is read by position gives
+  its elements when the count of its source is not known or is very large:
+  `Take(Partition(FlatMap([1, 2, 3], x ↦ [x, x]), 2), 1)` is `[[1, 1]]` (it was
+  `[]`, and `IsEmpty` of it was `True`), and `Take(Cycle(FlatMap(…)), 8)` cycles
+  the source. A read of a collection whose walk meets an inner collection that
+  cannot be computed stays unevaluated (user decision 2026-10-18): with a
+  valueless `v`, `At(FlatMap([1, 2], x ↦ Join([x], v)), 2)` was `2`, and
+  `IndexOf`, `Find`, `Any`, `All`, `CountIf`, `Max`, `Reduce`, `Contains` and
+  `Sum` (`Sum(Take(…, 3))` was `0`) no longer answer from the elements before
+  `v`. The operators that keep every element of their source (`Tally`, `Unique`,
+  `GroupBy`, `ChunkBy`, `Chunk`, `Position`, `Partition` with a predicate,
+  `StartsWith`, `EndsWith`, `RangeOf`, `ContainsSequence`) list at most
+  `maxCollectionSize` elements of a lazy source and stay unevaluated for a
+  larger one (a list literal is not bounded); over `Permutations(Range(1, 25))`
+  they did not end or ran out of memory. `ListFrom`, `SetFrom` and `TupleFrom`
+  stay unevaluated for a collection of more than 2^53 elements, and the count of
+  `TakeWhile`, `DropWhile` and `ChunkBy` over such a collection is no longer
+  computed by a walk that cannot end. `Flatten([[1], v, [2]])` with a valueless
+  `v` stays unevaluated (its count was `3`). An element of a view whose source
+  is very large can be read: `First(Join(Permutations(Range(1, 25)), [1]))` is
+  the first permutation (it was `Missing`), and
+  `First(Join(Range(1, 10^20), [1]))` is `1` (it was `NaN`). `Take` of a source
+  whose count is not known walks the source once:
+  `Count(Take(FlatMap(Range(1, 2000), x ↦ [x]), 2000))` takes milliseconds.
 
 - **Compiled code agrees with the interpreter in more cases** (user decisions
   2026-10-17 and 2026-10-18). Python `compile()` refuses a selection that mixes
@@ -594,9 +686,41 @@
 
 ### Issues Resolved
 
+- **Numerics.** `e^{iθ}`, `cos θ` and `sin θ` of an exact multiple of π/12 above
+  machine precision are correctly rounded (`e^{−7iπ/6}.N()` had a real part one
+  unit high in the last digit). A hyperbolic function of a float `i·y` has the
+  value of the circular function of `y`: `Tanh(iπ·0.5).N()` was `NaN` and
+  `Sech(iπ·0.5).N()` was `1.6e16`; both are `~oo`. `isFinite` is `true` for a
+  negation, sum, difference or product of finite numbers (`−π`, `π − 4`).
+  `GammaRegularized(0.5, 1e-1000000000)` was `NaN` and is `1`. A tiny order at a
+  small argument keeps its digits: `GammaRegularized(1e-100, 1e-1000)` was `NaN`
+  and is `2.30200787732914415116e-97`, and the same with the order `-1e-100` was
+  not evaluated. Above the length of the built-in table of π, `BigDecimal.PI`
+  keeps the value with the most digits that it computed, so a change of
+  precision rounds it instead of computing it again. `BigDecimal` `add()` and
+  `sub()` no longer throw "Maximum BigInt size exceeded" when the exponents are
+  very far apart. `Gamma(2, 1e100000).evaluate()` took 0.8 s and takes 17 ms.
+
+- **`D` of a function literal of its own variable is the derivative of the
+  body** (Tycho ledger row 391). `D(x ↦ a+b, x)` canonicalizes to `D(a+b, x)`.
+  The two have the same value, and both are written
+  `\frac{\mathrm{d}(a+b)}{\mathrm{d}x}`, which parsed back as the second, so a
+  LaTeX round trip changed the tree. A body that is a single symbol keeps the
+  function literal, which is the canonical form of `\frac{d}{dx}f`.
+
+- **On `interval-js`, each arm of a `Which` or an `If` is evaluated where it can
+  be selected** (Tycho ledger row 392).
+  `\begin{cases}0 & x\ge1\\ \arccos x & \text{otherwise}\end{cases}` over [0.99,
+  1.01] evaluated `\arccos` over (1, 1.01] too, where its condition is false,
+  and answered `partial` (domain clipped) for a function defined everywhere. An
+  arm that can be undefined is now compiled with each variable clamped to the
+  bounds that the conditions give it (`x ≥ a`, `x < a`, …), which does not
+  change its value where it is selected. Arms defined for every input compile as
+  before.
+
 - **`Gamma(s, z)` with real arguments and `z > 0` is computed at the working
-  precision.** Above machine precision it returned a machine float with about
-  15 correct digits. `GammaRegularized` no longer gives `NaN` (or a 15-digit
+  precision.** Above machine precision it returned a machine float with about 15
+  correct digits. `GammaRegularized` no longer gives `NaN` (or a 15-digit
   machine value) where its continued fraction does not converge, for example
   `GammaRegularized(-1.5, 0.1)` at 50 digits and `GammaRegularized(0.5, 3)` at
   300 digits; and `GammaRegularized` and `BetaRegularized` are much faster at a

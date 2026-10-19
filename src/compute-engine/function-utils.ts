@@ -2016,12 +2016,19 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
  * - an exact number literal is itself;
  * - a symbol is read now, in the caller's frame: the source its own
  *   activation records (a parameter of the caller passed on, `f2 := x ↦
- *   f(x) + 1`), or its exact value when it holds one (a global `y`);
+ *   f(x) + 1`), its exact value when it holds one (a global `y`), the
+ *   expression it holds when that expression has the properties of the
+ *   next rule, or the symbol itself for a constant such as `Pi`;
  * - an expression with no free symbol (`(25! − 1)/24!`, `Sum(1/k, k, 1,
  *   n)` with a literal `n`) is itself when it is transitively pure;
  * - anything else is not recorded: the body then reads the float.
  * Nothing is evaluated here: the cost of an exact evaluation is paid only
  * by a re-read near a jump.
+ *
+ * The application of a function literal with a one-statement body also
+ * reads these sources: when one of them differs from its approximated
+ * argument, it puts the sources in the body in place of the parameters
+ * and approximates the result (`applyWrittenArguments` in `makeLambda`).
  */
 export function exactArgumentSources(
   ce: ComputeEngine,
@@ -2035,13 +2042,59 @@ export function exactArgumentSources(
       const recorded = exactArgumentSourceOf(def.value);
       if (recorded !== undefined) return recorded;
       const value = ce._getSymbolValue(op.symbol);
-      return value !== undefined && isExactRealLiteral(value)
-        ? value
-        : undefined;
+      if (value !== undefined && isExactRealLiteral(value)) return value;
+      // A value that is an expression is recorded as an expression written
+      // in place of the symbol would be (the last rule below).
+      if (
+        value !== undefined &&
+        isFunction(value) &&
+        !containsFreeSymbol(value) &&
+        isTransitivelyPure(value)
+      )
+        return value;
+      // A constant whose value is not an exact literal (`Pi`, whose stored
+      // value is a float held until `.N()`) is its own exact source: it is
+      // pure, and it means the same from inside the function.
+      return def.value.isConstant ? op : undefined;
     }
     if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
     return isTransitivelyPure(op) ? op : undefined;
   });
+}
+
+/**
+ * True when the approximated argument `arg` is the written argument
+ * `source` itself. Two number literals must also be both exact or both
+ * inexact: `isSame()` is true for an exact rational and the float of the
+ * same value.
+ */
+function isSameWritten(source: Expression, arg: Expression): boolean {
+  if (isNumber(source) && isNumber(arg) && source.isExact !== arg.isExact)
+    return false;
+  return source.isSame(arg);
+}
+
+/**
+ * True when a second approximation of the written argument `source` costs
+ * little: `source` is a number or a symbol, or it applies library
+ * operators only, and none of them is a scoped operator (a `Sum`, a
+ * `Product`, a loop). The caller of an application under `.N()` has
+ * approximated the argument already, so an application that puts `source`
+ * in the body (`applyWrittenArguments` in `makeLambda`) approximates it a
+ * second time: with `f := x ↦ Sin(x)`, `f(Sum(1/k, k, 1, 10000)).N()` took
+ * two times as long as `Sin(Sum(1/k, k, 1, 10000)).N()`. An application
+ * with an argument for which this is false takes the ordinary route, which
+ * binds the approximation and re-reads the exact argument only near a jump
+ * (`exact-argument-source.ts`). The same test tells whether the body of a
+ * literal is short enough to evaluate synchronously on the asynchronous
+ * route.
+ */
+function isCheapWrittenArgument(source: Expression): boolean {
+  if (!isFunction(source)) return true;
+  if (source.isScoped) return false;
+  const def = source.operatorDefinition;
+  if (def === undefined || def.isUserFunctionDefinition) return false;
+  return source.ops.every(isCheapWrittenArgument);
 }
 
 /**
@@ -4478,51 +4531,161 @@ function makeLambda(
    * (`markerBody` above): the `.N()` of the marker's operand, with each
    * argument as written in place of its parameter. `undefined` when the
    * application must take the ordinary route, which evaluates the
-   * arguments exactly and binds them in a call frame:
-   * - a parameter that is not a plain symbol (an annotated, destructuring
-   *   or rest parameter), or a count of arguments that is not the count of
-   *   parameters: the ordinary route validates, destructures and collects;
-   * - a body or an argument that is not pure: an argument put in two places
-   *   is evaluated two times, and an effect of the body belongs in a call
-   *   frame;
-   * - an argument that has a symbol of the body: the substitution could put
-   *   it under a binder of the body that has the same name (the index of a
-   *   `Sum`);
-   * - an application with held or awaited arguments, the statements of a
-   *   loop, or an active debugger, which need the call frame.
+   * arguments exactly and binds them in a call frame: an application with
+   * awaited arguments, or a substitution that is not safe
+   * (`substitutedBody`).
    */
   const applyMarkerBody = (
     args: ReadonlyArray<Expression>,
     options: ApplyOptions | undefined,
     iterationStatements: ReadonlyArray<Expression> | undefined
   ): Expression | undefined => {
+    if (markerBody === undefined || options?.awaitStatements) return undefined;
+    const applied = substitutedBody(
+      markerBody,
+      args,
+      options,
+      iterationStatements
+    );
+    // As the evaluate handler of `NumericApproximation` does.
+    return applied === undefined ? undefined : bodyResultValue(applied.N());
+  };
+
+  /**
+   * `e`, an expression of the body, with each of `values` in place of its
+   * parameter, canonical. `undefined` when the substitution is not safe, and
+   * the application must then take the ordinary route, which binds the
+   * arguments in a call frame:
+   * - a parameter that is not a plain symbol (an annotated, destructuring
+   *   or rest parameter), or a count of values that is not the count of
+   *   parameters: the ordinary route validates, destructures and collects;
+   * - a body or a value that is not pure: a value put in two places is
+   *   evaluated two times, and an effect of the body belongs in a call
+   *   frame;
+   * - a value that has a symbol of `e`: the substitution could put it
+   *   under a binder of `e` that has the same name (the index of a `Sum`);
+   * - an application with held arguments, the statements of a loop, or an
+   *   active debugger, which need the call frame.
+   */
+  const substitutedBody = (
+    e: Expression,
+    values: ReadonlyArray<Expression>,
+    options: ApplyOptions | undefined,
+    iterationStatements: ReadonlyArray<Expression> | undefined
+  ): Expression | undefined => {
     if (
-      markerBody === undefined ||
       iterationStatements !== undefined ||
       options?.holdArguments ||
-      options?.awaitStatements ||
       restIndex >= 0 ||
       validateApplication ||
-      args.length !== params.length ||
+      values.length !== params.length ||
       debugStatementHook !== undefined ||
       debugStatementResultHook !== undefined ||
       !isPureComputedEffects(effectsOf(body))
     )
       return undefined;
-    const bodySymbols = new Set(markerBody.symbols);
+    const bodySymbols = new Set(e.symbols);
     const written = new Map<string, Expression>();
     for (let i = 0; i < params.length; i++) {
       const param = params[i];
-      const arg = args[i];
-      if (!isSymbol(param) || !arg.isPure) return undefined;
-      if (arg.symbols.some((s) => bodySymbols.has(s))) return undefined;
-      written.set(param.symbol, arg);
+      const value = values[i];
+      if (!isSymbol(param) || !value.isPure) return undefined;
+      if (value.symbols.some((s) => bodySymbols.has(s))) return undefined;
+      written.set(param.symbol, value);
     }
-    const applied = rewriteWithBinders(markerBody, (sym, shadowed) =>
+    const applied = rewriteWithBinders(e, (sym, shadowed) =>
       shadowed?.has(sym.symbol) ? sym : (written.get(sym.symbol) ?? sym)
     );
-    // As the evaluate handler of `NumericApproximation` does.
-    return bodyResultValue(applied.canonical.N());
+    return applied.canonical;
+  };
+
+  // The one statement of the body, when the body is a single expression
+  // with no return-type ascription and no `Return`.
+  const onlyStatement =
+    bodyFn.ops.length === 1 &&
+    !isFunction(bodyFn.ops[0], 'Typed') &&
+    !isFunction(bodyFn.ops[0], 'Return')
+      ? bodyFn.ops[0]
+      : undefined;
+
+  /**
+   * Under `.N()`, the value of an application whose written arguments
+   * (`ApplyOptions.exactSources`, `exactArgumentSources`) are not all
+   * equal to their approximations: the `.N()` of the body with the written
+   * arguments in place of the parameters (`substitutedBody`). This is what
+   * the element function of a lazy `Map` does (`applyMarkerBody`), so that
+   * `f(v).N()`, `Apply(f, v).N()` and `Map(f, [v]).N()` agree. The caller
+   * has approximated the arguments already, and an approximation loses the
+   * exact structure that the body reads under `.N()`: at machine precision
+   * the float of π gives `Sin(x)` the value `1.2e-16` where `Sin(Pi).N()`
+   * is `0`, and the float of `(25! − 1)/24!` is the integer 25, whose
+   * numerator is 25. `undefined` when the ordinary route applies:
+   * - the request is exact, or no written argument is known;
+   * - each written argument is the same as its approximation (an integer,
+   *   a float): the ordinary route gives the same value, and it keeps the
+   *   application memo;
+   * - a value has a free symbol: the ordinary route does not unroll a
+   *   recursion over it (`SymbolicRecursion`);
+   * - a written argument costs much to approximate a second time
+   *   (`isCheapWrittenArgument`);
+   * - the body has more than one statement, or it applies this literal: a
+   *   recursive body runs exactly in its call frame, and memoizes its exact
+   *   value (`resultStatementRequest`);
+   * - the substitution is not safe (`substitutedBody`);
+   * - with `awaitStatements`, a body that is not short.
+   * With `awaitStatements`, the answer is a `Promise`, as on the ordinary
+   * route.
+   */
+  const applyWrittenArguments = (
+    args: ReadonlyArray<Expression>,
+    options: ApplyOptions | undefined,
+    iterationStatements: ReadonlyArray<Expression> | undefined
+  ): Expression | undefined => {
+    const sources = options?.exactSources;
+    if (
+      options?.numericApproximation !== true ||
+      onlyStatement === undefined ||
+      sources === undefined ||
+      sources.length !== args.length ||
+      !sources.some((s, i) => s !== undefined && !isSameWritten(s, args[i]))
+    )
+      return undefined;
+    const values = args.map((arg, i) => sources[i] ?? arg);
+    if (values.some((v) => containsFreeSymbol(v))) return undefined;
+    if (!sources.every((s) => s === undefined || isCheapWrittenArgument(s)))
+      return undefined;
+    if (appliesLiteral(onlyStatement, fnExpr)) return undefined;
+    // The asynchronous route yields between time slices while the body
+    // runs. The body is evaluated here synchronously, so it must be short:
+    // it applies library operators only, and no scoped operator.
+    if (options.awaitStatements && !isCheapWrittenArgument(onlyStatement))
+      return undefined;
+    // The substituted body is canonicalized and evaluated in a scope whose
+    // parent is the scope where the literal was defined, as a call frame
+    // is: a name of the body that is not a parameter (a local of the
+    // `Block` that made the literal, read after the `Block` returned)
+    // resolves there, not in the scope of the caller.
+    const capturedScope =
+      definingScopeOf(ce, bodyFn.localScope!) ?? ce.context.lexicalScope;
+    ce.pushScope({ parent: capturedScope, bindings: new Map() });
+    let result: Expression | undefined;
+    try {
+      result = substitutedBody(
+        onlyStatement,
+        values,
+        options,
+        iterationStatements
+      )?.N();
+    } finally {
+      ce.popScope();
+    }
+    if (result === undefined) return undefined;
+    result = bodyResultValue(result);
+    // The lambda is typed synchronous: a `Promise` comes back only for the
+    // caller that set `awaitStatements`.
+    if (options.awaitStatements)
+      return Promise.resolve(result) as unknown as Expression;
+    return result;
   };
 
   const invoke = (
@@ -4930,6 +5093,15 @@ function makeLambda(
     // as written in its body (`applyMarkerBody`).
     const markerValue = applyMarkerBody(args, options, iterationStatements);
     if (markerValue !== undefined) return markerValue;
+
+    // Under `.N()`, an application whose written arguments are not their
+    // approximations takes the same route (`applyWrittenArguments`).
+    const writtenValue = applyWrittenArguments(
+      args,
+      options,
+      iterationStatements
+    );
+    if (writtenValue !== undefined) return writtenValue;
 
     //
     // 4/ Evaluate arguments in the calling scope before switching context

@@ -42,7 +42,10 @@ import {
   collectBinderNames,
 } from '../boxed-expression/utils.js';
 import { scaledPNorm } from '../numerics/linear-algebra.js';
-import { flatLimitsSpan } from '../boxed-expression/binding-sites.js';
+import {
+  flatLimitsSpan,
+  parenthesizedTupleOperands,
+} from '../boxed-expression/binding-sites.js';
 import {
   binderBindingOf,
   rewriteWithBinders,
@@ -2793,6 +2796,17 @@ export function canonicalLimitsSequence(
   const result: Expression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
+    // A parenthesized tuple parsed from LaTeX (`\mathrm{Integrate}(x, (x, 0,
+    // 1))`) is still `Delimiter(Sequence(x, 0, 1), "(,)")` in the held
+    // operand. It is read as the `Tuple(x, 0, 1)` it denotes, with the same
+    // arity rule. Before, no branch below matched it, and the operand was
+    // dropped without a diagnostic: the integral became indefinite.
+    const tuple = parenthesizedTupleOperands(op);
+    if (tuple !== undefined) {
+      if (tuple.length >= 1 && tuple.length <= 3)
+        result.push(canonicalLimits(tuple, options) ?? ce.error('missing'));
+      continue;
+    }
     if (op.operator === 'Range') {
       // ["Range", 1, 10]
       const rangeFn = op as Expression &
@@ -3035,6 +3049,15 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   let upper: Expression | null = null;
   let lower: Expression | null = null;
 
+  // A parenthesized tuple parsed from LaTeX (`\mathrm{Sum}(i, (i, 1, 10))`)
+  // is still `Delimiter(Sequence(i, 1, 10), "(,)")` in the held operand. It
+  // is read as the `Tuple(i, 1, 10)` it denotes. The binder hook declares its
+  // index (`indexingSetSite`, `boxed-expression/binding-sites.ts`), so the
+  // index is not the imaginary unit.
+  const tuple = parenthesizedTupleOperands(expr);
+  if (tuple !== undefined)
+    expr = ce._fn('Tuple', [...tuple], { canonical: false });
+
   // Handle Element expressions - preserve them in canonical form
   // e.g., ["Element", "n", ["Set", 1, 2, 3]]
   // or with condition: ["Element", "n", ["Set", 1, 2, 3], ["Greater", "n", 0]]
@@ -3126,16 +3149,17 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     ]);
   }
 
-  // Mathematica-style iterator set: `{i, lo, hi}` or `{i, lo, hi, step}`.
-  // This reinterpretation is POSITIONAL — it only applies here, in a big
-  // operator's iterator slot. The `Set` is held (raw), so its index symbol
-  // has not been canonicalized (e.g. `i` → imaginary unit) and its operands
-  // have not been sorted/de-duplicated. Only a proper iterator triple is
-  // recognized; any other `Set` shape returns `undefined` (today's behavior).
+  // Mathematica-style iterator set: `{i, n}`, `{i, lo, hi}` or
+  // `{i, lo, hi, step}`. `{i, n}` is `{i, 1, n}`, as in Mathematica and in
+  // `Table`. This reinterpretation is POSITIONAL — it only applies here, in a
+  // big operator's iterator slot. The `Set` is held (raw), so its index
+  // symbol has not been canonicalized (e.g. `i` → imaginary unit) and its
+  // operands have not been sorted/de-duplicated. Any other `Set` shape
+  // returns `undefined`.
   if (isFunction(expr, 'Set')) {
     const setOps = expr.ops ?? [];
     const idx = setOps[0];
-    if (!idx || !isSymbol(idx) || setOps.length < 3 || setOps.length > 4)
+    if (!idx || !isSymbol(idx) || setOps.length < 2 || setOps.length > 4)
       return undefined;
     if (
       idx.symbol !== 'Nothing' &&
@@ -3155,6 +3179,12 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     }
     // `{i, lo, hi}` → `Limits(i, lo, hi)` — same result as the `Tuple`/
     // `Element` forms, and (unlike Range) preserves symbolic bounds.
+    if (setOps.length === 2)
+      return ce.function('Limits', [
+        idx.canonical,
+        ce.One,
+        checkBound(setOps[1].canonical) ?? ce.Nothing,
+      ]);
     return ce.function('Limits', [
       idx.canonical,
       checkBound(setOps[1].canonical) ?? ce.Nothing,
@@ -3198,8 +3228,20 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
       ]);
     }
     index = expr.op1;
-    lower = checkBound(expr.ops[1]?.canonical ?? null);
-    upper = checkBound(expr.ops[2]?.canonical ?? null);
+    if (
+      tupleOps.length === 2 &&
+      !isSymbol(tupleOps[0], 'Nothing') &&
+      !isSymbol(tupleOps[1], 'Nothing')
+    ) {
+      // `(i, n)` is the iterator `{i, n}` of the `Set` branch above: `i`
+      // from 1 to `n`. The upper bound alone gives `Limits(i, 1, n)` below.
+      // A `Nothing` (no index, or no bound) keeps the reading of the
+      // operands as they are.
+      upper = checkBound(expr.ops[1].canonical);
+    } else {
+      lower = checkBound(expr.ops[1]?.canonical ?? null);
+      upper = checkBound(expr.ops[2]?.canonical ?? null);
+    }
   } else index = expr;
 
   if (isFunction(index, 'Hold')) index = index.op1;

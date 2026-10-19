@@ -6,7 +6,7 @@ import type {
   Scope,
 } from '../global-types.js';
 
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { isValueDef } from './definition-guards.js';
 import {
   functionLiteralParameterName,
@@ -102,6 +102,46 @@ const INDEXING_SET_OPERATORS = new Set([
 ]);
 
 /**
+ * The operands of the parenthesized tuple `(i, 1, 10)` as the LaTeX parser
+ * gives it in an operand slot that is held (raw): the parser has not
+ * converted it to a `Tuple` yet, and it is still
+ * `Delimiter(Sequence(i, 1, 10), "(,)")` (or `Delimiter(Sequence(…))`, whose
+ * delimiters are the parentheses by default). For any other expression,
+ * the result is `undefined`.
+ *
+ * A big operator reads such an operand as the `Tuple` it denotes: the
+ * binder hook below, `canonicalIndexingSet()` (`Sum`, `Product`) and
+ * `canonicalLimitsSequence()` (`Integrate`), both in `library/utils.ts`.
+ */
+export function parenthesizedTupleOperands(
+  op: Expression | undefined
+): ReadonlyArray<Expression> | undefined {
+  if (!isFunction(op, 'Delimiter') || !isFunction(op.op1, 'Sequence'))
+    return undefined;
+  if (op.nops === 1) return op.op1.ops;
+  if (op.nops === 2 && isString(op.op2) && op.op2.string === '(,)')
+    return op.op1.ops;
+  return undefined;
+}
+
+/**
+ * The index symbol of the indexing-set clause `op`, as the binder hook reads
+ * it: the first operand of a range-shaped clause or of an `Element` clause,
+ * the first element of a parenthesized tuple, or `undefined` for any other
+ * operand.
+ */
+function clauseIndex(op: Expression): Expression | undefined {
+  const tuple = parenthesizedTupleOperands(op);
+  if (tuple !== undefined) return tuple[0];
+  if (
+    isFunction(op) &&
+    (op.operator === 'Element' || INDEXING_SET_OPERATORS.has(op.operator))
+  )
+    return op.ops[0];
+  return undefined;
+}
+
+/**
  * The type of the index of a `Limits` clause whose bounds are integer
  * literals: the ranged type `integer<lo..hi>` (or `integer<lo..>` when the
  * upper bound is `+∞`). A ranged index lets the body type more precisely:
@@ -120,28 +160,54 @@ function rangeIndexType(
   flatIndexes: ReadonlySet<number>
 ): TypeString | undefined {
   if (type !== 'integer' || !isFunction(op)) return type;
-  // The parser spells `\sum_{k=1}^{16}` as `Tuple(k, 1, 16)`, which
-  // `canonicalIndexingSet` reads as `Limits(k, 1, 16)`; `Triple(k, 1, 16)`
-  // and the held iterator set `{k, 1, 16}` are read the same way. With a
-  // fourth operand (a step), the clause is a `Range` and is not typed here.
+  if (op.operator === 'Limits')
+    return rangeIndexTypeOf(
+      op.ops[0],
+      op.ops[1],
+      op.ops[2],
+      type,
+      ops,
+      flatIndexes
+    );
   if (
-    op.operator !== 'Limits' &&
-    !(
-      (op.operator === 'Tuple' ||
-        op.operator === 'Triple' ||
-        op.operator === 'Set') &&
-      op.nops === 3
-    )
+    op.operator === 'Tuple' ||
+    op.operator === 'Triple' ||
+    op.operator === 'Pair' ||
+    op.operator === 'Set'
   )
-    return type;
-  return rangeIndexTypeOf(
-    op.ops[0],
-    op.ops[1],
-    op.ops[2],
-    type,
-    ops,
-    flatIndexes
-  );
+    return iteratorSpecIndexType(op.ops, type, ops, flatIndexes);
+  return type;
+}
+
+/**
+ * The ranged type of the index of the iterator specification `spec`, the
+ * operands of a `Tuple`, `Triple`, `Pair` or `Set` clause, or of a
+ * parenthesized tuple. The parser spells `\sum_{k=1}^{16}` as
+ * `Tuple(k, 1, 16)`, which `canonicalIndexingSet` reads as
+ * `Limits(k, 1, 16)`; `Triple(k, 1, 16)`, the held iterator set
+ * `{k, 1, 16}` and the parenthesized tuple `(k, 1, 16)` are read the same
+ * way. The two-operand specification `{k, 16}` is `k` from 1 to 16, as in
+ * Mathematica. With a fourth operand (a step), the clause is a `Range` and
+ * is not typed here.
+ */
+function iteratorSpecIndexType(
+  spec: ReadonlyArray<Expression>,
+  type: TypeString | undefined,
+  ops: ReadonlyArray<Expression>,
+  flatIndexes: ReadonlySet<number>
+): TypeString | undefined {
+  if (spec.length === 2)
+    return rangeIndexTypeOf(
+      spec[0],
+      spec[0].engine.One,
+      spec[1],
+      type,
+      ops,
+      flatIndexes
+    );
+  if (spec.length === 3)
+    return rangeIndexTypeOf(spec[0], spec[1], spec[2], type, ops, flatIndexes);
+  return type;
 }
 
 /**
@@ -163,15 +229,14 @@ function rangeIndexTypeOf(
   // Two clauses that bind the same name (`Sum(k, Limits(k, 1, 3),
   // Limits(k, 5, 7))`, or the flat `Sum(k, k, 1, 3, k, 5, 7)`) assign the
   // values of both ranges to one symbol, so neither range is its type.
-  const bindsIndex = (x: Expression, i: number): boolean =>
-    isFunction(x, 'Hold') && x.nops === 1
-      ? bindsIndex(x.op1, i)
-      : isFunction(x)
-        ? (x.operator === 'Element' ||
-            INDEXING_SET_OPERATORS.has(x.operator)) &&
-          isSymbol(x.ops[0]) &&
-          x.ops[0].symbol === index.symbol
-        : flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
+  const bindsIndex = (x: Expression, i: number): boolean => {
+    if (isFunction(x, 'Hold') && x.nops === 1) return bindsIndex(x.op1, i);
+    if (isFunction(x)) {
+      const clauseIdx = clauseIndex(x);
+      return isSymbol(clauseIdx) && clauseIdx.symbol === index.symbol;
+    }
+    return flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
+  };
   if (ops.filter(bindsIndex).length > 1) return type;
   // Only number LITERALS: a symbol bound (`Limits(k, 1, n)` with `n := 10`)
   // can be reassigned after this binding, which would leave the index type
@@ -340,6 +405,22 @@ function indexingSetSite(
     );
     return site === undefined ? [] : [{ ...site, clauseLocal: true }];
   }
+  // A parenthesized tuple parsed from LaTeX (`\mathrm{Sum}(i, (i, 1, 10))`)
+  // is still `Delimiter(Sequence(i, 1, 10), "(,)")` in the held operand. Its
+  // index is the first element of the `Sequence`, and it is typed as the
+  // index of the `Tuple` it denotes. Without this site, the `i` of the body
+  // and of the clause was the imaginary unit.
+  const tuple = parenthesizedTupleOperands(op);
+  if (tuple !== undefined) {
+    const site = siteFor(
+      tuple[0],
+      [i, 0, 0],
+      tuple.length === 0
+        ? type
+        : iteratorSpecIndexType(tuple, type, ops, flatIndexes)
+    );
+    return site === undefined ? [] : [{ ...site, clauseLocal: true }];
+  }
   // A bare symbol that is followed by its bounds (`Sum(body, n, 1, 10)`)
   // takes the ranged type its `Limits` spelling would take.
   const flatType =
@@ -455,6 +536,7 @@ export function flatLimitsSpan(
 function isClause(op: Expression): boolean {
   if (isFunction(op, 'Hold') && op.nops === 1)
     return isSymbol(op.op1) || isClause(op.op1);
+  if (parenthesizedTupleOperands(op) !== undefined) return true;
   return (
     isFunction(op) &&
     (INDEXING_SET_OPERATORS.has(op.operator) ||

@@ -4864,6 +4864,13 @@ export class BaseCompiler {
    * none. The targets lower `e^{a + iπu}` as `e^a·(cos πu + i·sin πu)` with
    * the angle in half-turns, so `e^{x + iπ}` is `−e^x` with no imaginary
    * part. Returns `undefined` for any other exponent.
+   *
+   * A term `iπu` is read as the hyperbolic lowerings read it
+   * (`imaginaryPiMultiple`): a factor of `u` with no declared type, such as
+   * an undeclared `x`, is real, because it compiles to a real value. So
+   * `e^{iπx}` and `sinh(iπx)` get the same exact lowering with an undeclared
+   * `x`. The other shapes of `getImaginaryFactor` (`Negate(iπx)`, …) are
+   * read as before, and they require real factors.
    */
   static eulerPiSplit(
     exponent: Expression
@@ -4872,9 +4879,11 @@ export class BaseCompiler {
     let u: Expression | undefined = undefined;
     const real: Expression[] = [];
     for (const term of terms) {
-      const theta = getImaginaryFactor(term);
-      const v =
-        theta !== undefined ? BaseCompiler.piMultiple(theta) : undefined;
+      let v = BaseCompiler.imaginaryPiMultiple(term);
+      if (v === undefined) {
+        const theta = getImaginaryFactor(term);
+        if (theta !== undefined) v = BaseCompiler.piMultiple(theta);
+      }
       if (v !== undefined && u === undefined) u = v;
       else if (BaseCompiler.isComplexValued(term)) return undefined;
       else real.push(term);
@@ -4903,6 +4912,9 @@ export class BaseCompiler {
    */
   static piMultiple(x: Expression): Expression | undefined {
     const ce = x.engine;
+    // `−π·u` is `π·(−u)`. A product with the factor `−1` canonicalizes to a
+    // `Negate`, so `e^{−iπx}` reaches this function as `Negate(π·x)`.
+    if (isFunction(x, 'Negate')) return BaseCompiler.piMultiple(x.op1)?.neg();
     if (isSymbol(x, 'Pi'))
       return BaseCompiler.isLibraryPi(x) ? ce.One : undefined;
     if (!isFunction(x, 'Multiply')) return undefined;
@@ -17340,7 +17352,8 @@ export class BaseCompiler {
    * current evaluation context, such as the global scope after
    * `ce.declare('u', 'real')` or `ce.assign('u', 2)`). The interpreter then
    * changes that binding, and the name is an input of the compiled code.
-   * The JavaScript and Python targets write it as a free name, as before. A
+   * The JavaScript and Python targets write it as a free name, in a local
+   * copy of the input (`CompileTarget.inputWrites`). A
    * shader target cannot write an input (a uniform is read-only, and a
    * shader does not give a value back to the engine), and a local of the same
    * name would give a later read of the name a different value from the
@@ -17564,7 +17577,9 @@ export class BaseCompiler {
             `every read of it bakes into the generated source, so this write ` +
             `would be invisible to them.`
         );
-      return target.mangleId ? target.mangleId(name) : name;
+      const spelled = target.mangleId ? target.mangleId(name) : name;
+      target.inputWrites?.add(spelled);
+      return spelled;
     }
     if (resolved === name) return resolved;
     // A vars-object member access naming this very symbol (`_.s`) is the only
@@ -17574,13 +17589,80 @@ export class BaseCompiler {
     if (
       resolved.endsWith(`.${name}`) &&
       /^[A-Za-z_$][\w$]*$/.test(resolved.slice(0, -(name.length + 1)))
-    )
+    ) {
+      // A write into the vars object of the caller: the target makes that
+      // object a local copy before the body runs (`localVarsObjectStatement`).
+      if (
+        target.varsObjectName !== undefined &&
+        resolved.slice(0, -(name.length + 1)) === target.varsObjectName
+      )
+        target.inputWrites?.add(name);
       return resolved;
+    }
     throw new Error(
       `Could not compile \`Assign\`: target '${target.language ?? 'javascript'}' ` +
         `compiles reads of "${name}" as \`${resolved}\`, which is not an ` +
         `assignable reference (a constant, a folded value, or a baked ` +
         `\`vars\` mapping), so the write would be invisible to every read.`
+    );
+  }
+
+  /**
+   * The statement that makes the vars object of a JavaScript-family target a
+   * local copy, or `undefined` when the body writes no input
+   * (`CompileTarget.inputWrites`).
+   *
+   * An `Assign` whose target is an input that an engine scope binds
+   * (`ce.declare('u', 'real')`, then `u ≔ u + 1`) is written `_.u = …`, the
+   * same spelling as a read. Without a copy, the write changed the object
+   * that the caller gave to `run()`. The interpreter changes the engine's
+   * binding instead, and the caller's object is not an engine binding.
+   *
+   * The copy has the caller's object as its prototype, so a read that comes
+   * before any write gives the caller's value, and an accessor of the
+   * caller's object is still read. The compiled code tests an own property
+   * only for a name of `Object.prototype` (`toString`: it reads
+   * `Object.prototype.hasOwnProperty.call(_, "toString")`), so the own
+   * properties of the caller's object with such a name are also own
+   * properties of the copy, and the test gives the same answer as on the
+   * caller's object. The other own properties are not copied: a copy of
+   * each one made each run take a time that grows with the number of
+   * properties of the caller's object (2,000 runs with 2,001 properties took
+   * 1.1 s). With no vars object (`run()` with no argument), the copy is an
+   * empty object with no prototype, so a body that writes an input before it
+   * reads it gives a value.
+   *
+   * The properties of the copy are DEFINED (the second argument of
+   * `Object.create`), not assigned. An assignment would fail on a property
+   * that the caller's object, now the prototype, makes read-only
+   * (`run(Object.freeze({ u: 5 }))` threw "Cannot assign to read only
+   * property"), and would call a setter that the caller's object inherits.
+   * An own property that is copied keeps its descriptor, so a getter is not
+   * called before the body reads the property, and a data property is made
+   * writable. Each input that the body writes is defined as a writable data
+   * property with the value that a read gives, so that the write in the body
+   * is to an own writable property of the copy, also when the caller's object
+   * only inherits it. A getter of an input that the body does not write is
+   * never called by the copy.
+   *
+   * The statement assigns the parameter `_` of the compiled function. The
+   * definitions of the preamble that the body calls read `_` when they run,
+   * so they read the copy too.
+   */
+  static localVarsObjectStatement(
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const vars = target.varsObjectName;
+    if (vars === undefined || !target.inputWrites?.size) return undefined;
+    const written = JSON.stringify([...target.inputWrites]);
+    return (
+      `${vars} = ((s) => { const d = {}; ` +
+      `if (s != null) for (const k of Object.getOwnPropertyNames(Object.prototype)) { ` +
+      `const p = Object.getOwnPropertyDescriptor(s, k); ` +
+      `if (p) { if ('value' in p) { p.writable = true; p.configurable = true; } d[k] = p; } } ` +
+      `for (const k of ${written}) d[k] = { value: s == null ? undefined : s[k], ` +
+      `writable: true, enumerable: true, configurable: true }; ` +
+      `return Object.create(s || null, d); })(${vars})`
     );
   }
 

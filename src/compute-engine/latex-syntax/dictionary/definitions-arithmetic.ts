@@ -3564,15 +3564,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // the limit-point position those shapes are direction markers, not
       // matrix/sign operations: unwrap them into `Limit`'s direction operand
       // (1 = from above, -1 = from below).
-      let point = operand(base, 2);
-      let direction: 1 | -1 | undefined = undefined;
-      if (operator(point) === 'PseudoInverse' && nops(point) === 1) {
-        direction = 1;
-        point = operand(point, 1);
-      } else if (operator(point) === 'Superminus' && nops(point) === 1) {
-        direction = -1;
-        point = operand(point, 1);
-      }
+      //
+      // The postfix binds tighter than any infix operator, so in
+      // `x \to a + 1^+` it applies to the last term only:
+      // `Add(a, PseudoInverse(1))`. A one-sided limit point has one direction
+      // marker, at its end, and it applies to the whole point:
+      // `x \to a + 1^+` is `x \to (a + 1)^+`. `liftDirectionMarker` moves
+      // the marker of the last term onto the whole point. Only the limit point
+      // is read this way: elsewhere, `1^+` keeps its meaning.
+      const [point, direction] = liftDirectionMarker(operand(base, 2));
       const fn = ['Function', expr, operand(base, 1)] as MathJsonExpression;
       if (direction === undefined)
         return ['Limit', fn, point] as MathJsonExpression;
@@ -4928,4 +4928,48 @@ function negatedNumber(
         : null;
   if (text === null || !text.startsWith('-')) return null;
   return { num: text.slice(1) };
+}
+
+/**
+ * The operators whose LAST operand ends the limit point when it is written
+ * without parentheses: `a + 1^+`, `a - 1^-`, `-1^+`, `2\pi^+`, `2 \cdot
+ * \pi^-` and `a/2^+`.
+ */
+const LIMIT_POINT_TAIL_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'InvisibleOperator',
+  'Divide',
+]);
+
+/**
+ * Split the limit point of `\lim_{x \to …}` into the point and the
+ * direction of a one-sided limit (1 = from above, -1 = from below).
+ *
+ * The generic superscript postfix entries read `0^+` as `PseudoInverse(0)`
+ * and `0^-` as `Superminus(0)`. At the end of a limit point, these shapes are
+ * a direction marker instead. The marker can be on the whole point
+ * (`(a + 1)^+`, `0^+`) or, when the point is written without parentheses, on
+ * its last term (`a + 1^+` is `Add(a, PseudoInverse(1))`): in both cases it
+ * applies to the whole point, and the point is returned without it. A marker
+ * on a term that is not the last one (`a^+ + 1`) is not a direction marker,
+ * and the point is returned unchanged.
+ */
+function liftDirectionMarker(
+  point: MathJsonExpression | null
+): [MathJsonExpression | null, 1 | -1 | undefined] {
+  if (point === null) return [point, undefined];
+  const head = operator(point);
+  if (head === 'PseudoInverse' && nops(point) === 1)
+    return [operand(point, 1), 1];
+  if (head === 'Superminus' && nops(point) === 1)
+    return [operand(point, 1), -1];
+  if (!LIMIT_POINT_TAIL_OPERATORS.has(head)) return [point, undefined];
+  const ops = operands(point);
+  if (ops.length === 0) return [point, undefined];
+  const [last, direction] = liftDirectionMarker(ops[ops.length - 1]);
+  if (direction === undefined || last === null) return [point, undefined];
+  return [[head, ...ops.slice(0, -1), last] as MathJsonExpression, direction];
 }

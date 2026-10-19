@@ -13,9 +13,10 @@
  * position computed from the count (`Reverse`, `Most`, `RotateLeft`), and a
  * negative index needs the count too. Their walks gave nothing, and the
  * consumers read that as an empty collection: `Sum(Reverse(FlatMap(…)))`
- * was `0`, `Last(FlatMap(…))` was `NaN`. These now stay unevaluated
- * (`enumerableFromSmallSource`, `isProvablyOutOfRange`,
- * `library/collections.ts`).
+ * was `0`, `Last(FlatMap(…))` was `NaN`. These views now claim not to be
+ * enumerable (`enumerableFromSmallSource`, `isProvablyOutOfRange`,
+ * `library/collections.ts`). The reads themselves list the source once and
+ * give the value (`finite-uncounted-collection-reads.test.ts`).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';

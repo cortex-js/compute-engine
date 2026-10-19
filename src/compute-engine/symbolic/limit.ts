@@ -132,6 +132,12 @@ export function symbolicLimit(
     const r = limitDispatch(b, x, point, dir ?? 0, ce, 0);
     if (r === undefined) return limitAtSymbolicPoint(b, x, point, dir, ce);
     if (r.isNaN === true) return undefined;
+    // A limit in terms of a parameter is the GENERIC answer: `1/a` for
+    // `lim_{x→a} 1/x`, although the limit does not exist at `a = 0`. The one
+    // exception is an answer with a jump at a value the parameter can take:
+    // `|a|/a` for `lim_{x→a} |x|/x` is `1` or `−1`, and it is not the limit
+    // at `a = 0` from either side.
+    if (limitResultHasJump(r, b)) return undefined;
     return r;
   } catch (e) {
     // A deadline/interrupt must unwind to the public evaluate boundary rather
@@ -481,6 +487,95 @@ function substituteAtFinitePoint(
     current = replaceSubterm(current, jump, value);
   }
   return undefined;
+}
+
+/**
+ * Whether the limit `r` of `body` has a jump at a value that its parameters
+ * can take, so that `r` is not the limit for that value:
+ *
+ * - a `JUMP_FNS` application in `r` that did not evaluate (`Sign(a)`,
+ *   `Floor(a)`): its argument can be on the jump;
+ * - a quotient `|w|/w` or `w/|w|` in `r` (the sign of `w`), when `w` is not
+ *   known to be nonzero from its sign or from an assumption such as `a ≠ 0`.
+ *   `√(w²)` is read as `|w|` for a real `w`.
+ *   `|x|/x` at `a` gives `|a|/a`, which is `1` or `−1` and has a jump at
+ *   `a = 0`. A power of either factor (`|w|³/w³`) is the same quotient.
+ *
+ * A subexpression that is in `body` too, unchanged, is not a result of the
+ * limit: the body `x + |a|/a` has the limit `|a|/a` at 0 for each `a`, and
+ * that limit has no other answer.
+ */
+function limitResultHasJump(r: Expression, body: Expression): boolean {
+  if (!isFunction(r)) return false;
+  const inBody = (e: Expression): boolean =>
+    body.getSubexpressions(e.operator).some((s) => s.isSame(e));
+  for (const head of JUMP_FNS)
+    for (const sub of r.getSubexpressions(head)) if (!inBody(sub)) return true;
+
+  // The factors of a product, with integer powers read as their base.
+  const factors = (e: Expression, into: Expression[]): void => {
+    if (e.operator === 'Multiply') oo(e).forEach((f) => factors(f, into));
+    else if (e.operator === 'Negate') factors(o1(e), into);
+    else if (
+      e.operator === 'Power' &&
+      isNumber(o2(e)) &&
+      o2(e).isInteger === true &&
+      o2(e).isPositive === true
+    )
+      factors(o1(e), into);
+    else into.push(e);
+  };
+  const quotients = [
+    ...r.getSubexpressions('Divide'),
+    ...r.getSubexpressions('Multiply'),
+  ];
+  if (isFunction(r, 'Divide') || isFunction(r, 'Multiply')) quotients.push(r);
+  for (const q of quotients) {
+    const num: Expression[] = [];
+    const den: Expression[] = [];
+    if (q.operator === 'Divide') {
+      factors(o1(q), num);
+      factors(o2(q), den);
+    } else {
+      for (const f of oo(q)) {
+        const k = o2(f);
+        if (f.operator === 'Power' && isNumber(k) && k.isNegative === true) {
+          if (k.isInteger !== true) continue;
+          factors(o1(f), den);
+        } else factors(f, num);
+      }
+    }
+    const isSign = (abs: Expression[], other: Expression[]): boolean =>
+      abs.some((f) => {
+        const w = absoluteValueArgument(f);
+        if (w === undefined || inBody(f)) return false;
+        if (isKnownNonZero(w)) return false;
+        const minusW = w.neg();
+        return other.some((g) => g.isSame(w) || g.isSame(minusW));
+      });
+    if (isSign(num, den) || isSign(den, num)) return true;
+  }
+  return false;
+}
+
+/** The `w` of `|w|`, or of `√(w²)`, which is `|w|` for a real `w`;
+ * `undefined` for any other expression. */
+function absoluteValueArgument(e: Expression): Expression | undefined {
+  if (e.operator === 'Abs') return o1(e);
+  if (e.operator === 'Sqrt' && o1(e).operator === 'Power') {
+    const k = o2(o1(e));
+    if (isNumber(k) && k.is(2) && o1(o1(e)).type.matches('real'))
+      return o1(o1(e));
+  }
+  return undefined;
+}
+
+/** `e` is known not to be 0: by its sign, by its value, or by an assumption
+ * such as `a ≠ 0`. */
+function isKnownNonZero(e: Expression): boolean {
+  return (
+    e.isPositive === true || e.isNegative === true || e.isEqual(0) === false
+  );
 }
 
 /**

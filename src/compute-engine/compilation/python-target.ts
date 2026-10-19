@@ -2635,6 +2635,24 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
 }
 
 /**
+ * Whether the first line of the Python statement list `body` that names
+ * `name` is an assignment of `name` at the top level of the list (not in a
+ * loop or a branch, so it always runs), whose value does not read `name`.
+ * Then no statement reads `name` before it has a value. Any other first
+ * occurrence (a read, a write in an indented block, a mention in a string)
+ * gives `false`.
+ */
+function pythonWrittenFirst(body: string, name: string): boolean {
+  const word = new RegExp(`(?<![\\w.])${name}(?!\\w)`);
+  for (const line of body.split('\n')) {
+    if (!word.test(line)) continue;
+    if (!line.startsWith(`${name} = `)) return false;
+    return !word.test(line.slice(name.length + 3));
+  }
+  return false;
+}
+
+/**
  * Fail closed when `compileFunction()`'s body is STRUCTURALLY a statement.
  *
  * `compileFunction()` is the statement-capable route the rest of this class
@@ -6169,11 +6187,49 @@ export class PythonTarget implements LanguageTarget<Expression> {
       var: this.makeVarResolver(undefined, parameters),
       constantFold: options?.constantFold,
       naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
+      inputWrites: new Set<string>(),
     });
     // CSE is default-enabled; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
-    const body = BaseCompiler.compileCseRoot(expr, target);
+    let body = BaseCompiler.compileCseRoot(expr, target);
     pythonAssertReturnedBlock('compileFunction()', expr, body);
+    // A free symbol that is not a parameter is read as a module global. When
+    // the body also assigns it (an input that an engine scope binds, as in
+    // `u ≔ u + 1`), Python makes the name a local of the whole function, and
+    // a read before the first write raised `UnboundLocalError`. The local
+    // is initialized from the module global instead (`None` when there is
+    // none), so the read gives the value of the global, and the write does
+    // not change the global. The initialization is not necessary when the
+    // first statement that names the symbol is a write that always runs (an
+    // assignment at the top level of the body whose value does not read the
+    // symbol), and it is then not emitted.
+    //
+    // The initialization reads the module globals with the builtin
+    // `globals()` through `__import__("builtins")`, because `globals` is a
+    // valid name for a parameter, a local or a free symbol: a parameter named
+    // `globals` made the bare call `globals()` raise `TypeError`, and a
+    // written input named `globals` raised `UnboundLocalError`. The name
+    // `__import__` itself is refused (fail closed) when the expression or the
+    // parameters use it.
+    const writtenGlobals = [...target.inputWrites!].filter(
+      (name) => !parameters.includes(name) && !pythonWrittenFirst(body, name)
+    );
+    if (writtenGlobals.length > 0) {
+      if (
+        parameters.includes('__import__') ||
+        expr.symbols.includes('__import__')
+      )
+        throw new Error(
+          `"__import__" cannot be used as a symbol or parameter name in a Python function that assigns a module global. Rename it before compiling to Python (fail closed).`
+        );
+      body = [
+        ...writtenGlobals.map(
+          (name) =>
+            `${name} = __import__("builtins").globals().get(${JSON.stringify(name)})`
+        ),
+        /^return\b/.test(body) || body.includes('\n') ? body : `return ${body}`,
+      ].join('\n');
+    }
 
     const params = parameters.join(', ');
     let code = '';

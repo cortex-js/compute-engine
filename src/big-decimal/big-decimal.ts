@@ -97,6 +97,12 @@ export class BigDecimal {
   /** PI rounded to working precision */
   private static _piCache: BigDecimal | null = null;
   private static _piCachePrecision: number = 0;
+  /** The value of π with the most digits that the Chudnovsky computation
+   *  gave (beyond the length of `PI_DIGITS`), not rounded, or `null`, and
+   *  the number of digits that it was computed for. The number is stored:
+   *  the digit count of the value is smaller when its last digits are 0. */
+  private static _piComputed: BigDecimal | null = null;
+  private static _piComputedDigits: number = 0;
 
   /** Euler–Mascheroni constant γ, computed on demand (see EULER_GAMMA). */
   private static _eulerGammaCache: BigDecimal | null = null;
@@ -119,10 +125,24 @@ export class BigDecimal {
         );
       }
       pi = BigDecimal._piFullPrecision.toPrecision(need);
+    } else if (
+      BigDecimal._piComputed !== null &&
+      BigDecimal._piComputedDigits >= need + 4
+    ) {
+      // A value computed earlier with at least as many digits. The cache
+      // above keeps one precision only, and the special-function kernels
+      // read π at the working precision and at the working precision plus
+      // their guard digits by turns: without this value, each change of the
+      // precision computed π again. The value is kept as the computation
+      // gave it, not rounded, so it is rounded only once here.
+      pi = BigDecimal._piComputed.toPrecision(need);
     } else {
       // Beyond the table: compute on demand via Chudnovsky binary splitting.
       const extra = need + 4;
-      pi = fromRaw(piChudnovskyDecimal(extra), -extra).toPrecision(need);
+      const computed = fromRaw(piChudnovskyDecimal(extra), -extra);
+      BigDecimal._piComputed = computed;
+      BigDecimal._piComputedDigits = extra;
+      pi = computed.toPrecision(need);
     }
     BigDecimal._piCache = pi;
     BigDecimal._piCachePrecision = prec;
@@ -396,9 +416,17 @@ export class BigDecimal {
 
   /**
    * Add this value to another.
-   * Aligns exponents, adds significands. The result is exact. For a value
-   * that is an approximation at the working precision, `addBounded()` avoids
-   * building a significand of the size of the exponent gap.
+   * Aligns exponents, adds significands. The result is exact while the
+   * smaller operand is at most `maxAlignedGap()` digits (a million, or more
+   * at a very high working precision) below the last digit of the larger
+   * one. Past that gap the exact sum needs a significand of the size of the
+   * gap, which a bigint cannot hold for `1 + 10^(−10¹⁵)` ("Maximum BigInt
+   * size exceeded"), so the sum is then the bounded sum of `addBounded()`:
+   * it rounds as the exact sum does at every precision up to the limit of
+   * `addBounded()` (at least 10,000 digits and 4 times the working
+   * precision). For a value that is an approximation at the working
+   * precision, `addBounded()` avoids building a significand of the size of
+   * the exponent gap.
    */
   add(other: BigDecimal | number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
@@ -414,7 +442,7 @@ export class BigDecimal {
       if (this.significand === 0n) return other;
       if (thisExp === otherExp)
         return fromRaw(this.significand + other.significand, thisExp);
-      return alignedSum(this, other, Infinity);
+      return alignedSum(this, other, maxAlignedGap(), maxExactGap());
     }
 
     // Slow path: handle NaN, Infinity
@@ -439,7 +467,8 @@ export class BigDecimal {
 
   /**
    * Subtract other from this.
-   * Aligns exponents, subtracts significands. The result is exact.
+   * Aligns exponents, subtracts significands. The result is exact up to the
+   * exponent gap of `add()`, and bounded as in `add()` past it.
    */
   sub(other: BigDecimal | number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
@@ -452,7 +481,7 @@ export class BigDecimal {
       if (this.significand === 0n) return other.neg();
       if (thisExp === otherExp)
         return fromRaw(this.significand - other.significand, thisExp);
-      return alignedSum(this, other.neg(), Infinity);
+      return alignedSum(this, other.neg(), maxAlignedGap(), maxExactGap());
     }
 
     // Slow path: handle NaN, Infinity
@@ -1472,26 +1501,43 @@ function maxExactGap(): number {
 }
 
 /**
+ * The largest number of digits, below the last digit of the larger operand,
+ * at which `add` and `sub` still place the smaller operand exactly: a
+ * million digits (aligning them takes about 30 ms), and never less than the
+ * limit of `addBounded`. A sum with a larger gap is the bounded sum of
+ * `addBounded`, since its exact significand could have more digits than a
+ * bigint can hold.
+ */
+function maxAlignedGap(): number {
+  return Math.max(1_000_000, maxExactGap());
+}
+
+/**
  * The sum of two finite, nonzero values with different exponents.
  *
  * The exact sum aligns the significands: the one with the larger exponent is
  * multiplied by 10^(difference of the exponents). For `10^(10⁹) + 1` that is
  * a significand of a billion digits, which a JavaScript bigint cannot hold.
  *
- * With a finite `limit`, when ALL the digits of the smaller operand are more
- * than `limit` digits below the last digit of the larger one, the smaller
- * operand is replaced by a value of the same sign, `±1` at `limit` digits
- * below that last digit. The exact sum and this sum are both strictly
- * between the larger operand and its neighbour one digit above that
- * position, so they round to the same value at any precision lower than the
- * number of digits of the larger operand plus `limit − 1`. With an infinite
- * `limit` the sum is exact.
+ * When ALL the digits of the smaller operand are more than `limit` digits
+ * below the last digit of the larger one, the smaller operand is replaced by
+ * a value of the same sign, `±1` at `place` digits below that last digit
+ * (`place` is at most `limit`, and is `limit` when not given). The exact sum
+ * and this sum are both strictly between the larger operand and its
+ * neighbour one digit above that position, so they round to the same value
+ * at any precision lower than the number of digits of the larger operand
+ * plus `place − 1`. Otherwise the sum is exact.
  */
-function alignedSum(a: BigDecimal, b: BigDecimal, limit: number): BigDecimal {
+function alignedSum(
+  a: BigDecimal,
+  b: BigDecimal,
+  limit: number,
+  place: number = limit
+): BigDecimal {
   const high = a.exponent > b.exponent ? a : b;
   let low = high === a ? b : a;
   if (high.exponent - (low.exponent + low._digitCount()) > limit)
-    low = fromRaw(low.significand > 0n ? 1n : -1n, high.exponent - limit);
+    low = fromRaw(low.significand > 0n ? 1n : -1n, high.exponent - place);
   return fromRaw(
     high.significand * pow10(high.exponent - low.exponent) + low.significand,
     low.exponent
@@ -1546,7 +1592,6 @@ function roundMagnitudeToward(
  * Strip trailing zeros from the significand and adjust the exponent.
  * Zero always normalizes to { 0n, 0 }.
  */
-const _1e9 = 1000000000n;
 const _1e3 = 1000n;
 
 function normalize(sig: bigint, exp: number): [bigint, number] {
@@ -1560,9 +1605,22 @@ function normalize(sig: bigint, exp: number): [bigint, number] {
   if ((sig & 1n) !== 0n) return [sig, exp];
   if (sig % 10n !== 0n) return [sig, exp];
 
-  while (sig % _1e9 === 0n) {
-    sig /= _1e9;
-    exp += 9;
+  // The zeros are removed in blocks of 9 digits, then of 18, 36, … digits
+  // while the block divides the significand, then of half the size at each
+  // step down to 9. One division per 9 digits took a time quadratic in the
+  // number of zeros: about 0.4 s for the exact integer 10^100000.
+  let k = 9;
+  while (sig % pow10(k) === 0n) {
+    sig /= pow10(k);
+    exp += k;
+    k *= 2;
+  }
+  while (k > 9) {
+    k /= 2;
+    if (sig % pow10(k) === 0n) {
+      sig /= pow10(k);
+      exp += k;
+    }
   }
   while (sig % _1e3 === 0n) {
     sig /= _1e3;

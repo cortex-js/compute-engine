@@ -34,6 +34,7 @@ import {
   broadcastingComponentKind,
   canEnumerateFiniteSource,
   hasAccessibleComponents,
+  innerCollectionCannotBeWalked,
   isFiniteIndexedCollection,
   isNumericTuple,
   isPointListValue,
@@ -7632,6 +7633,13 @@ function flattenToDepth(
     ) {
       // A finite indexed collection that `isFiniteIndexedCollection()`
       // rejects: its elements cannot be computed.
+      return undefined;
+    } else if (depth >= 1 && innerCollectionCannotBeWalked(e)) {
+      // A collection that cannot be walked now, such as a symbol `v` of a
+      // list type with no value: `Flatten([[1], v, [2]])` kept `v` as one
+      // element, so its count was 3 and its sum `v + 3`, which are wrong
+      // when `v` gets a value. `FlatMap` and `Join` stay unevaluated in the
+      // same case.
       return undefined;
     } else result.push(e);
   }

@@ -9804,6 +9804,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       unrollSkipHeads,
       operators: operatorLookup,
       varsObjectRefs,
+      // See `CompileTarget.inputWrites`.
+      inputWrites: new Set<MathJsonSymbol>(),
       // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`, so
       // a lambda parameter spelled `_` must not shadow the vars object.
       varsObjectName: '_',
@@ -10331,20 +10333,28 @@ function compileToTarget(
     ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
     : undefined;
   const reconstructionDigits = realPowerReconstructionDigits();
+  // A body that writes an input first makes the vars object a local copy, so
+  // the object of the caller does not change (`localVarsObjectStatement`).
+  // The copy is the first operand of a comma expression in `code`, which is
+  // an expression, and the first statement of the statement form.
+  const localVars = BaseCompiler.localVarsObjectStatement(target);
+  const statementBody = javascriptStatements(target)?.functionBody(js);
   const fn = new ComputeEngineFunction(
     expr.engine,
-    js,
+    localVars ? `(${localVars}, ${js})` : js,
     perCall,
     entryPlan,
     split.hoisted,
-    javascriptStatements(target)?.functionBody(js),
+    localVars && statementBody
+      ? `${localVars};\n${statementBody}`
+      : statementBody,
     reconstructionDigits
   );
   return {
     target: 'javascript' as const,
     success: true,
     runtimeVersion: RUNTIME_VERSION,
-    code: js,
+    code: localVars ? `(${localVars}, ${js})` : js,
     // The helper preamble plus the emitted definitions (`_fn_*` user
     // functions, `_val_*` bound symbol values), which `code` reads by name.
     ...(preamble ? { preamble } : {}),

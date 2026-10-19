@@ -1601,6 +1601,24 @@ export interface CompileTarget<Expr = unknown> {
   varsObjectRefs?: Set<MathJsonSymbol>;
 
   /**
+   * When provided, the compiler records into this set the spelling of every
+   * free symbol that an `Assign` WRITES: the name of the member of the vars
+   * object (`_.<id> = …` in the JavaScript targets), or the bare identifier
+   * of a target that reads a free symbol by its name (Python). Such a symbol
+   * is an input that an engine scope outside the expression binds
+   * (`ce.declare('u', 'real')`), and the body changes it. The compiled code
+   * must not change a binding of the caller:
+   * - The JavaScript targets make the vars object a local copy before the
+   *   body runs (`BaseCompiler.localVarsObjectStatement`).
+   * - Python `compileFunction()` starts the function with a local of the
+   *   same name, initialized from the module global, for each written name
+   *   that is not a parameter (a parameter is a local already).
+   *
+   * Survives the compiler's `{ ...target }` spreads by reference.
+   */
+  inputWrites?: Set<MathJsonSymbol>;
+
+  /**
    * Mutable per-compile registry for user-defined functions — a symbol whose
    * engine definition is a `Function` literal (`f(x) := …`, `x ↦ …`, or an
    * `ce.assign(name, lambda)`) encountered as an *operator* (`f(2)`). Each such

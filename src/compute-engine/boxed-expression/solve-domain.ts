@@ -1198,7 +1198,17 @@ export function solveOverDomain(
       stats.userRule && roots.length > 0,
       partial
     );
-    const expanded = partial && checked === undefined ? null : checked;
+    // When the families of the whole product cannot be shown to be complete
+    // (`sin(x)·sin(a·x) = 0` with `a = 2000000001/2000000000` has the period
+    // `4000000000π`, and its principal roots give only a part of its roots
+    // in `[0, 10]`), each factor gives its own roots in the domain
+    // (`productRootsByFactor()`).
+    const expanded =
+      checked === null
+        ? productRootsByFactor(ce, predBody, unknown, domain)
+        : partial && checked === undefined
+          ? null
+          : checked;
     let finalRoots = expanded === null ? [] : (expanded ?? roots);
 
     // Over the real or the complex numbers, the principal roots of a
@@ -1270,6 +1280,23 @@ export function solveOverDomain(
         );
         return filterSide([...filterRootsByAssumptions(ce, inDomain, unknown)]);
       }
+    }
+
+    // Over the real or the complex numbers, the solve above is the solve of
+    // an unknown declared with the element type of the domain (`real` for
+    // `RealNumbers`). An empty list from it is then an answer when it is an
+    // answer for such an unknown without a domain (`emptyRootsAnswer()`):
+    // `Solve(x^{2.5} = -4, x, RealNumbers)` gives `[]`, as `x^{2.5} = -4`
+    // does for an unknown declared `real`. The identity case (a fresh
+    // parameter) is not used here: it does not express the domain.
+    if (
+      unbounded &&
+      roots.length === 0 &&
+      isPrincipalValueDomain(domain) &&
+      partialRootListReason(ceq, unknown, roots, stats) === undefined
+    ) {
+      const answer = emptyRootsAnswer(ce, ceq, unknown, stats, true);
+      if (isFunction(answer, 'List') && answer.nops === 0) return [];
     }
   }
 
@@ -2422,6 +2449,124 @@ function withFactorFamilies(
   }
   if (added) out.sort((p, q) => p.N().re - q.N().re);
   return out;
+}
+
+/**
+ * All the roots in the bounded `domain` of the product `predBody` whose
+ * factors that contain `unknown` are each periodic (the unknown is only in
+ * trig functions of a linear argument): the union of the roots of each
+ * factor, sorted by value. A product is zero when one of its factors is
+ * zero, thus the union holds all the roots of the product. A factor `fⁿ`
+ * with a positive constant `n` gives the roots of `f`.
+ *
+ * Each factor gives its roots with `expandPeriodicRoots()`, which shows that
+ * its list holds all the roots of the factor in the domain. Two roots of two
+ * factors are the same root only when their exact difference is `0`: two
+ * roots can be nearer than any tolerance and still be different (`π` and
+ * `π/a` with `a = 2000000001/2000000000` are about `1.6·10^-9` apart). Each
+ * root is then checked in the product: a root of a factor where another
+ * factor has no value (a pole of `cot(x)`) is not a root.
+ *
+ * Returns `null` when `predBody` is not such a product, when the domain is
+ * not bounded, when the list of a factor is not shown to be complete, when
+ * the numeric values cannot show whether two roots are different, or when
+ * the check of a root in the product is not decided.
+ */
+function productRootsByFactor(
+  ce: ComputeEngine,
+  predBody: Expression,
+  unknown: string,
+  domain: Expression
+): Expression[] | null {
+  if (!isFunction(predBody, 'Multiply')) return null;
+  if (domainBoundingRange(domain) === undefined) return null;
+  const factors = predBody.ops.filter((op) => op.has(unknown));
+  if (factors.length < 2) return null;
+
+  const all: Array<{ root: Expression; value: number }> = [];
+  for (const factor of factors) {
+    const base =
+      isFunction(factor, 'Power') &&
+      !factor.op2.has(unknown) &&
+      factor.op2.isPositive === true
+        ? factor.op1
+        : factor;
+    const terms = analyzePeriodic(base, unknown);
+    if (terms === undefined || terms.length === 0) return null;
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const factorRoots = findUnivariateRoots(base, unknown, 0, undefined, stats);
+    if (stats.userRule) return null;
+    const family = expandPeriodicRoots(
+      ce,
+      base,
+      base,
+      unknown,
+      domain,
+      factorRoots,
+      false,
+      stats.partial || stats.undecided
+    );
+    if (!Array.isArray(family)) return null;
+
+    for (const root of family) {
+      const value = root.N().re;
+      if (!Number.isFinite(value)) return null;
+      let duplicate = false;
+      for (const other of all) {
+        const same = sameRootValue(ce, other.root, other.value, root, value);
+        if (same === undefined) return null;
+        if (same) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) all.push({ root, value });
+    }
+  }
+
+  const roots: Expression[] = [];
+  for (const { root } of all.sort((p, q) => p.value - q.value)) {
+    const residual = predBody.subs({ [unknown]: root }).evaluate();
+    if (residual.isNaN === true) continue;
+    const zero = residual.isIdenticallyEqual(0);
+    if (zero === undefined) return null;
+    if (zero) roots.push(root);
+  }
+  return roots;
+}
+
+/**
+ * Whether the roots `a` and `b` (with the numeric values `aNum` and `bNum`)
+ * are the same value. Two exact roots are the same only when their exact
+ * difference is `0`; when the difference is not `0` but its numeric value
+ * is too small to show that, the answer is `undefined`. A float root is the
+ * same as a root whose value is equal within the engine tolerance, relative
+ * to the size of the values.
+ */
+function sameRootValue(
+  ce: ComputeEngine,
+  a: Expression,
+  aNum: number,
+  b: Expression,
+  bNum: number
+): boolean | undefined {
+  if (a.isSame(b)) return true;
+  const scale = Math.max(1, Math.abs(aNum), Math.abs(bNum));
+  const exact = (e: Expression): boolean => !isNumber(e) || e.isExact;
+  if (!exact(a) || !exact(b))
+    return Math.abs(aNum - bNum) <= ce.tolerance * scale;
+  const diff = ce.function('Subtract', [a, b]).evaluate();
+  if (diff.isSame(0)) return true;
+  // The numeric value of the exact difference has an error of a few units
+  // of `|x|·ε`. A value much larger than that is not 0.
+  const d = diff.N().re;
+  if (Number.isFinite(d) && Math.abs(d) > 1e-12 * scale) return false;
+  return undefined;
 }
 
 //

@@ -1178,13 +1178,14 @@ function withoutTemplates(
  * (`withExactIntegerExponents()`): `x^{2.0} + 3x + 2 = 0` is solved as
  * `x^2 + 3x + 2 = 0`, and its roots are changed to floats. Such an exponent
  * can still come from a step of the solver (clearing the denominator of
- * `x^{-0.5}` gives `x^{0.0}`), or be larger than `MAX_FLOAT_DEGREE`. The
+ * `x^{-0.5}` gives `x^{0.0}`), or be larger than `MAX_FLOAT_DEGREE` (or
+ * than `MAX_FLOAT_POWER_DEGREE` in a pure power of the unknown). The
  * pattern matcher compares number literals by value: without this test, the
  * literal `2` of the quadratic templates matches the float `2.0`, and the
  * templates give exact roots for an equation that has a float.
  * The general power template `solve.power` does not read a degree and is
  * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so
- * `x^{100.0} = 2^{100}` has the float root `2.0`. The template `solve.power-negative-root` is kept
+ * `x^{20000.0} = 2^{20000}` has the float root `2.0`. The template `solve.power-negative-root` is kept
  * too: it reads only the parity of `n`, and gives the second root `-2.0`.
  */
 function hasFloatPowerOfUnknown(expr: Expression): boolean {
@@ -1201,12 +1202,21 @@ function hasFloatPowerOfUnknown(expr: Expression): boolean {
 
 /**
  * The largest absolute value of an integer-valued float exponent that
- * `withExactIntegerExponents()` changes to an integer. The time of the
- * polynomial root finder grows fast with the degree: `x^{256} = 2` takes
- * about 15 s. A larger float exponent is left to the float-exponent
- * strategies, which give at most two roots (`x^{100.0} = 2` gives `±2^{0.01}`).
+ * `withExactIntegerExponents()` changes to an integer, by default. The time
+ * of the polynomial root finder grows fast with the degree. A larger float
+ * exponent is left to the float-exponent strategies, which give at most two
+ * roots, or no answer (`x^{100.0} + x = 2`).
  */
 const MAX_FLOAT_DEGREE = 64;
+
+/**
+ * The largest integer-valued float exponent `n` that is read as a degree in
+ * a pure power of the unknown, `k·x^{n.0} + c = 0`. The `n` roots of such an
+ * equation have a direct formula (`rootsOfScaledIntegerPower()`), whose time
+ * grows as `n`: `x^{10000.0} = 2` takes about 5 s. A larger exponent gives
+ * at most two roots, as above.
+ */
+const MAX_FLOAT_POWER_DEGREE = 10000;
 
 /**
  * `expr` with each power whose base contains the unknown `x` and whose
@@ -1219,20 +1229,21 @@ const MAX_FLOAT_DEGREE = 64;
  * steps and the root templates read `2.0` as the degree `2`:
  * `x^{2.0} + 3x + 2 = 0` is the quadratic `x^2 + 3x + 2 = 0`. A float
  * exponent that is not an integer (`x^{2.5}`) is not changed, and an
- * exponent larger than `MAX_FLOAT_DEGREE` is not changed. The exponent
+ * exponent larger than `maxDegree` is not changed. The exponent
  * `0.0` is not changed: `x^0` is `1`, but `0^{0.0}` has no value.
  * @internal exported for the polynomial test of `Solve` over a domain
  * (`solve-domain.ts`).
  */
 export function withExactIntegerExponents(
   expr: Expression,
-  x: string
+  x: string,
+  maxDegree = MAX_FLOAT_DEGREE
 ): Expression | null {
   if (!isFunction(expr) || !expr.has(x)) return null;
   const ce = expr.engine;
   let changed = false;
   const ops = expr.ops.map((op) => {
-    const result = withExactIntegerExponents(op, x);
+    const result = withExactIntegerExponents(op, x, maxDegree);
     if (result === null) return op;
     changed = true;
     return result;
@@ -1245,7 +1256,7 @@ export function withExactIntegerExponents(
       n.im === 0 &&
       Number.isInteger(n.re) &&
       n.re !== 0 &&
-      Math.abs(n.re) <= MAX_FLOAT_DEGREE &&
+      Math.abs(n.re) <= maxDegree &&
       n.isInteger === true
     ) {
       ops[1] = ce.number(n.re);
@@ -1683,6 +1694,21 @@ function sqrtEquationRhsGuard(
 
   // √R = −B/A must be non-negative for a real root.
   const rhs = b.neg().div(a).simplify();
+
+  // For a constant `rhs` that is not real (`√x = i`), `0 ≤ rhs` is not a
+  // comparison of two real numbers, and it is never decided. Decide it from
+  // the range of the principal square root instead: the values with a
+  // positive real part, and the values `i·t` with a real `t ≥ 0`. Thus
+  // `√x = i` has the root `-1` (`√(-1) = i`), and `√x = -i` has no root.
+  if (rhs.isExtendedReal === false && rhs.unknowns.length === 0) {
+    const re = ce.function('Real', [rhs]).evaluate();
+    const im = ce.function('Imaginary', [rhs]).evaluate();
+    const reIsZero = isNumber(re) && re.isSame(0);
+    if (re.isPositive === true || (reIsZero && im.isNonNegative === true))
+      return ce.True;
+    if (re.isNegative === true || (reIsZero && im.isNegative === true))
+      return ce.False;
+  }
   return ce.function('LessEqual', [ce.Zero, rhs]);
 }
 
@@ -4182,8 +4208,25 @@ export function findUnivariateRoots(
   // roots against the equation with the integer exponents, and sets `stats`.
   // The canonical form of the new equation must not have such an exponent
   // again, else the recursive call does not end.
+  // A pure power `k·x^{n.0} + c = 0` has a direct formula for its `n` roots
+  // (`rootsOfScaledIntegerPower()`), thus a larger exponent is a degree
+  // there: `x^{100.0} = 2` has 100 roots.
   {
-    const exact = withExactIntegerExponents(expr, x);
+    const anyDegree = withExactIntegerExponents(
+      expr,
+      x,
+      MAX_FLOAT_POWER_DEGREE
+    );
+    const exact =
+      anyDegree !== null &&
+      scaledIntegerPower(
+        isFunction(anyDegree, 'Equal')
+          ? anyDegree.op1.sub(anyDegree.op2)
+          : anyDegree,
+        x
+      ) !== null
+        ? anyDegree
+        : withExactIntegerExponents(expr, x);
     if (exact !== null && withExactIntegerExponents(exact, x) === null) {
       traceStep(
         trace,
@@ -4192,6 +4235,42 @@ export function findUnivariateRoots(
       );
       return findUnivariateRoots(exact, x, depth, trace, stats).map((root) =>
         floatRoot(root)
+      );
+    }
+  }
+
+  // A pure power of the unknown, `k·x^n + c = 0` with a constant `-c/k`
+  // that is not zero and an integer `n ≥ 3`, has the `n` roots of
+  // `x^n = -c/k` (`nthRoots()`). These roots are correct by their
+  // construction, thus they are not checked against the equation: the check
+  // and the comparison of each pair of roots take a time that grows faster
+  // than `n` (about 15 s for `x^{256} = 2`).
+  {
+    const f = isFunction(expr, 'Equal') ? expr.op1.sub(expr.op2) : expr;
+    const roots = rootsOfScaledIntegerPower(f, x);
+    if (roots !== null) {
+      if (isFunction(expr, 'Equal'))
+        traceStep(trace, 'solve.move-terms', asEquation(f, x));
+      traceStep(
+        trace,
+        'solve.polynomial-roots',
+        rootsAsEquations(ce, x, roots)
+      );
+      if (stats) stats.candidates = true;
+      return filterRootsByType(
+        ce,
+        x,
+        roots.map((root) => {
+          // A cosine or a sine that the evaluation did not change to an
+          // exact value (`cos(π/500)`) has no simpler form: `simplify()`
+          // does not change such a root, and it takes most of the time.
+          const value = root.evaluate();
+          return value.has('Cos') || value.has('Sin')
+            ? value
+            : value.simplify();
+        }),
+        trace,
+        stats
       );
     }
   }
@@ -4812,6 +4891,7 @@ export function findUnivariateRoots(
   const sqrtGuardDecides =
     sqrtGuard === null ||
     !complexUnknown ||
+    isSymbol(sqrtGuard, 'False') ||
     (isFunction(sqrtGuard) && sqrtGuard.op2.isExtendedReal === true);
   const resolved: Expression[] = [];
   for (const r of result) {
@@ -5240,6 +5320,54 @@ function rootsOfPolynomialFactor(
 }
 
 /**
+ * The `n` roots of `expr = 0`, in the order of `sortRoots()`, when exactly
+ * one term of `expr` contains the unknown `x` and that term is `k·xⁿ`, with
+ * an exact integer `n ≥ 3`: `k·xⁿ + c = 0` is `xⁿ = -c/k`, and `nthRoots()`
+ * gives its roots. `-c/k` must be a constant with a finite value that is not
+ * `0`: then the `n` roots are different. For an unknown declared real, a constant `-c/k` that
+ * the solver reads as real gives only the real roots (see `nthRoots()`).
+ * Returns `null` for another form (a degree of 2 or less is left to the
+ * quadratic formula).
+ */
+function rootsOfScaledIntegerPower(
+  expr: Expression,
+  x: string
+): Expression[] | null {
+  const power = scaledIntegerPower(expr, x);
+  if (power === null) return null;
+  const ce = expr.engine;
+  return sortRoots(nthRoots(ce, power.r, power.n, isRealUnknown(ce, x)));
+}
+
+/**
+ * The degree `n` and the constant `r = -c/k` when `expr` is
+ * `k·xⁿ + c` as `rootsOfScaledIntegerPower()` states, else `null`.
+ */
+function scaledIntegerPower(
+  expr: Expression,
+  x: string
+): { n: number; r: Expression } | null {
+  const split = splitScaledTerm(expr, x);
+  if (split === null) return null;
+  const { k, f, c } = split;
+  if (!isFunction(f, 'Power') || !isSymbol(f.op1, x)) return null;
+  const n = asExactSmallInteger(f.op2);
+  if (n === null || n < 3) return null;
+  if (c.isSame(0)) return null;
+  const ce = expr.engine;
+  const r = ce.function('Divide', [ce.function('Negate', [c]), k]);
+  if (r.unknowns.length > 0 || r.has(x) || r.isSame(0)) return null;
+  // The roots are not checked against the equation, so `r` must have a
+  // finite value that is not 0. With no unknowns, `r` can still be a symbol
+  // with an assigned value, such as `a` after `a ≔ 0`: then the `n` roots
+  // were `n` copies of 0. A constant that is 0, NaN or infinite is left to
+  // the usual solution, which checks each root and removes the duplicates.
+  const value = r.N();
+  if (!isNumber(value) || value.isFinite !== true || value.is(0)) return null;
+  return { n, r };
+}
+
+/**
  * The `n` roots of `xⁿ = c` for an integer `n ≥ 1`: `r·(cos θₖ + i·sin θₖ)`
  * with `r` an n-th root of `c` and `θₖ` one of `n` angles one n-th of a turn
  * apart. The angles are written with a half turn in the angular unit of the
@@ -5645,6 +5773,126 @@ function harmonize(expr: Expression): Expression[] {
 }
 
 /**
+ * The size of the quantities that the value of `expr` is computed from, when
+ * the unknown `x` is `root`. `validateRoots()` compares a float residual with
+ * this size: a float residual is zero when it is small relative to it.
+ *
+ * The size of a sum is the largest size of its terms, the size of a product
+ * is the product of the sizes of its factors, and the size of a quotient is
+ * the size of the numerator divided by the absolute value of the
+ * denominator. The size of a power with a positive constant exponent `n` is
+ * the size of the base to the power `n`, and so is the size of a square
+ * root (`n = 1/2`) or of an n-th root (`1/n`). The size of a sum, product or
+ * power is about the rounding error of its value divided by the machine
+ * epsilon.
+ *
+ * For a function `f(u)` of one argument, that error is `|f'(u)|` times the
+ * error of `u`. So the size of `ln(u)` is the size of `u` divided by `|u|`:
+ * for `ln(x - 10^{-30})` at `x = 1`, the value is about `-10^{-30}`, but it
+ * is computed from `x = 1`, whose rounding error is much larger. The size of
+ * `exp(u)` is `|exp(u)|` times the size of `u`. The size of `|u|` is the size
+ * of `u`. For `sin`, `cos`, `arctan` and `tanh`, whose derivative is at most
+ * 1, the size is the largest of the absolute value and the size of `u`. The
+ * size of a number, or of a symbol, is its absolute value.
+ *
+ * Returns `undefined` when a value is not a finite number, and for another
+ * function. The largest of the sizes of the arguments is not a safe size
+ * for a function whose derivative is small: for `√x = -10^{-20}·x - 1`,
+ * squaring gives the candidate `10^{40}`, where `√x` is `10^{20}`; the size
+ * `10^{40}` of the argument accepted the residual `2·10^{20}`, but the
+ * equation has no root. The caller then checks the residual as before.
+ */
+function residualScale(
+  expr: Expression,
+  x: string,
+  root: Expression
+): number | undefined {
+  const size = (node: Expression): number | undefined => {
+    const value = node.has(x)
+      ? node.subs({ [x]: root }).canonical.N()
+      : node.N();
+    if (!isNumber(value)) return undefined;
+    const result = Math.hypot(value.re, value.im);
+    return Number.isFinite(result) ? result : undefined;
+  };
+  const scale = (node: Expression): number | undefined => {
+    if (!isFunction(node) || !node.has(x)) return size(node);
+    const ops: number[] = [];
+    const opScales = (): boolean => {
+      for (const op of node.ops) {
+        const s = scale(op);
+        if (s === undefined) return false;
+        ops.push(s);
+      }
+      return true;
+    };
+    switch (node.operator) {
+      case 'Add':
+        return opScales() ? Math.max(...ops) : undefined;
+      case 'Multiply':
+        return opScales() ? ops.reduce((a, b) => a * b, 1) : undefined;
+      case 'Negate':
+        return scale(node.op1);
+      case 'Divide': {
+        const numerator = scale(node.op1);
+        const denominator = size(node.op2);
+        if (numerator === undefined || denominator === undefined)
+          return undefined;
+        return denominator === 0 ? undefined : numerator / denominator;
+      }
+      case 'Power': {
+        const n = node.op2;
+        if (!n.has(x) && isNumber(n) && n.im === 0 && n.re > 0) {
+          const base = scale(node.op1);
+          return base === undefined ? undefined : base ** n.re;
+        }
+        return size(node);
+      }
+      case 'Sqrt': {
+        const base = scale(node.op1);
+        return base === undefined ? undefined : Math.sqrt(base);
+      }
+      case 'Root': {
+        const n = node.op2;
+        if (n.has(x) || !isNumber(n) || n.im !== 0 || !(n.re > 0))
+          return undefined;
+        const base = scale(node.op1);
+        return base === undefined ? undefined : base ** (1 / n.re);
+      }
+      case 'Ln':
+      case 'Log': {
+        if (node.nops > 1 && node.op2.has(x)) return undefined;
+        const arg = scale(node.op1);
+        const magnitude = size(node.op1);
+        if (arg === undefined || magnitude === undefined || magnitude === 0)
+          return undefined;
+        return arg / magnitude;
+      }
+      case 'Exp': {
+        const value = size(node);
+        const arg = scale(node.op1);
+        if (value === undefined || arg === undefined) return undefined;
+        return value * Math.max(1, arg);
+      }
+      case 'Abs':
+        return scale(node.op1);
+      case 'Sin':
+      case 'Cos':
+      case 'Arctan':
+      case 'Tanh': {
+        const value = size(node);
+        const arg = scale(node.op1);
+        if (value === undefined || arg === undefined) return undefined;
+        return Math.max(value, arg);
+      }
+    }
+    return undefined;
+  };
+  const result = scale(expr);
+  return result !== undefined && Number.isFinite(result) ? result : undefined;
+}
+
+/**
  * The roots that satisfy `expr` (or `expr = 0`), deduplicated. When `stats`
  * is given, `stats.undecided` is set to `true` when a root is dropped without
  * a decided check: its residual still has the unknown, or it has a free
@@ -5657,6 +5905,7 @@ function validateRoots(
   trace?: RuleSteps,
   stats?: { undecided: boolean }
 ): Expression[] {
+  const ce = expr.engine;
   const validRoots = roots.filter((root) => {
     // A validity-guarded root `When(v, guard)` is verified by its *value* `v`
     // (the guard already restricts the domain, decision 8): substituting the
@@ -5675,6 +5924,19 @@ function validateRoots(
     if (value.has(x)) {
       if (stats) stats.undecided = true;
       return false;
+    }
+
+    // A float residual is compared with the size of the quantities of the
+    // equation at the candidate (`residualScale()`), not with an absolute
+    // tolerance. With an absolute tolerance, a residual of `10^{-30}` is zero
+    // whatever the size of the terms: squaring
+    // `1.0·10^{-30}·√x = 1.0·10^{-30}·(x - 2)` gives the candidates `1` and
+    // `4`, and the residual `2·10^{-30}` of the extraneous candidate `1` was
+    // read as zero.
+    if (isNumber(value) && !value.isExact) {
+      const scale = residualScale(expr, x, probe);
+      if (scale !== undefined)
+        return Math.hypot(value.re, value.im) <= ce.tolerance * scale;
     }
 
     // Important: we want the prover tier (`isIdenticallyEqual()`), not

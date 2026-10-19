@@ -1,5 +1,5 @@
 import { BigDecimal } from '../../src/big-decimal';
-import { fromRaw } from '../../src/big-decimal/big-decimal';
+import { fromRaw, PI_DIGITS } from '../../src/big-decimal/big-decimal';
 import { bigintDigits } from '../../src/big-decimal/utils';
 
 // Helper to check internal representation
@@ -1233,7 +1233,7 @@ describe('add() and sub() with a large exponent gap', () => {
     expect(rep(BigDecimal.ZERO.sub(big))).toEqual(rep(big.neg()));
   });
 
-  test('add() and sub() are exact at any gap', () => {
+  test('add() and sub() are exact up to a gap of a million digits', () => {
     const a = new BigDecimal('1e20000');
     expect(a.add(1).sub(a).toString()).toBe('1');
     const x = new BigDecimal('-1' + '0'.repeat(20000) + '.5');
@@ -1260,6 +1260,54 @@ describe('add() and sub() with a large exponent gap', () => {
   test('addBounded() within the gap limit is exact', () => {
     const a = new BigDecimal('1e5000');
     expect(a.addBounded(1).subBounded(a).toString()).toBe('1');
+  });
+
+  test('add() and sub() past a gap of a million digits do not throw', () => {
+    // The exact difference 1 − 10^(−155504635359666) needs a significand of
+    // 1.5·10¹⁴ digits: it threw "Maximum BigInt size exceeded".
+    const one = BigDecimal.ONE;
+    const tiny = new BigDecimal('1e-155504635359666');
+    const d = one.sub(tiny);
+    expect(d.lt(one)).toBe(true);
+    expect(rep(d.toPrecision(50))).toEqual(rep(one));
+    expect(rep(tiny.sub(one).toPrecision(50))).toEqual(rep(one.neg()));
+    expect(one.add(tiny).gt(one)).toBe(true);
+    expect(rep(one.add(tiny).toPrecision(50))).toEqual(rep(one));
+    expect(one.neg().add(tiny).gt(one.neg())).toBe(true);
+    expect(rep(one.neg().sub(tiny).toPrecision(50))).toEqual(rep(one.neg()));
+    // The larger operand can be the second one, and very large.
+    const huge = new BigDecimal('1e155504635359666');
+    expect(rep(one.sub(huge).toPrecision(50))).toEqual(rep(huge.neg()));
+    expect(rep(huge.add(one).toPrecision(50))).toEqual(rep(huge));
+    expect(huge.add(one).gt(huge)).toBe(true);
+    // The bounded sum is short: it does not have the digits of the gap.
+    expect(d.significand.toString().length).toBeLessThan(20_000);
+  });
+
+  test('add() at a gap just above a million digits rounds as the exact sum', () => {
+    const a = new BigDecimal('1e-1000010');
+    const s = BigDecimal.ONE.add(a);
+    expect(s.gt(BigDecimal.ONE)).toBe(true);
+    expect(rep(s.toPrecision(100))).toEqual(rep(BigDecimal.ONE));
+    const t = BigDecimal.ONE.sub(new BigDecimal('3e-1000010'));
+    expect(t.lt(BigDecimal.ONE)).toBe(true);
+    expect(t.toPrecision(30).toString()).toBe('1');
+  });
+});
+
+describe('a significand with many trailing zeros', () => {
+  test('is normalized', () => {
+    for (const zeros of [
+      0, 1, 8, 9, 10, 17, 18, 19, 35, 36, 37, 100, 1000, 12345,
+    ]) {
+      const d = new BigDecimal(37n * 10n ** BigInt(zeros));
+      expect(rep(d)).toEqual({ sig: 37n, exp: zeros });
+    }
+    const big = new BigDecimal(10n ** 100000n);
+    expect(rep(big)).toEqual({ sig: 1n, exp: 100000 });
+    const odd = new BigDecimal((10n ** 3000n + 7n) * 10n ** 4321n);
+    expect(odd.exponent).toBe(4321);
+    expect(odd.significand).toBe(10n ** 3000n + 7n);
   });
 });
 
@@ -2287,6 +2335,25 @@ describe('_digitCount() cache', () => {
       expect(() => c._digitCount()).not.toThrow();
       expect(c._digitCount()).toBe(expected);
       expect(c._digitCount()).toBe(expected); // idempotent
+    }
+  });
+});
+
+describe('PI beyond the digit table', () => {
+  // The value computed at the higher precision is kept, and a lower
+  // precision is a rounding of it, not a new computation.
+  test('a lower precision after a higher one is the rounded value', () => {
+    const saved = BigDecimal.precision;
+    try {
+      BigDecimal.precision = PI_DIGITS.length + 300;
+      const high = BigDecimal.PI;
+      BigDecimal.precision = PI_DIGITS.length + 290;
+      const low = BigDecimal.PI;
+      expect(low.eq(high.toPrecision(PI_DIGITS.length + 294))).toBe(true);
+      BigDecimal.precision = PI_DIGITS.length + 300;
+      expect(BigDecimal.PI.eq(high)).toBe(true);
+    } finally {
+      BigDecimal.precision = saved;
     }
   });
 });

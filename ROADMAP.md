@@ -109,6 +109,18 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Which value-preserving serializer rewrites are allowed at the structural tier (OPEN, decision — Tycho ledger row 390, filed 2026-10-18)
+
+The user allowed two shapes on 2026-08-04 (a product with a fraction factor
+written as one fraction, and the `(a)(b)^{-1}` fallback). Tycho's audit finds 58
+more trees whose round trip keeps the value but not the tree, all from the
+serializer writing a power or a root as one fraction: a power of a quotient
+written out (`Power(Divide(v, 3.6), 2)` → `\frac{v^2}{12.96}`), a negative
+symbolic exponent as a quotient (`Power(n, −k)` → `Divide(1, Power(n, k))`), the
+root of a reciprocal (`\sqrt{\frac{1}{2\pi}}` → `\frac{\sqrt{2}}{2\sqrt{\pi}}`),
+and constant factors folded into the coefficient. Tycho asks for a decision per
+shape: allowed, or a defect. Nothing in Tycho depends on it today.
+
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
 - `cantorEnumerateComplexNumbers()` (`numerics/numeric.ts`, exported from
@@ -137,19 +149,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ### Smaller defects found on 2026-10-18 (batch 5) (OPEN, small)
 
-- The machine kernel of `GammaRegularized(a, z)` (`gammaQ` in
-  `numerics/special-functions.ts`) takes `Q = 1 − P` from the series for
-  `z < a + 1` with no floor, so a small `Q` at a tiny order keeps few digits:
-  `GammaRegularized(1e-10, 1e-10)` at `precision = 'machine'` is `2.244866e-9`
-  against mpmath's `2.2448635240e-9` (relative error `1.1e-6`), and
-  `GammaRegularized(1e-7, 0.05)` has a relative error of `7.6e-9`. The Legendre
-  continued fraction cannot replace the series there (at a small `z` it needs
-  about `(4/z)·(digits)²` terms). The bignum kernel is right (its 24 guard
-  digits absorb the loss; found 2026-10-18 by the review of the
-  `GammaRegularized`/`BetaRegularized` tail fix, issue #450). Two options:
-  decline with `NaN` below a floor, as the machine `BetaRegularized` does below
-  `1e-6`, or add a small-order series for `Q` (DLMF 8.7.3 with `Γ(a + 1) − z^a`
-  summed as one expression in `a`). A decision is needed on which.
 - Adding two temperatures that have an offset is not defined:
   `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the
   result unit is the one with the largest scale, and the offset of each operand
@@ -176,124 +175,151 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   `library/special-functions.ts`, `library/trigonometry.ts`,
   `library/linear-algebra.ts`, `boxed-expression/arithmetic-mul-div.ts` and the
   `LambertW` handler. Remove them.
-- At `ce.precision = 50`, the incomplete gamma function `Gamma(a, z)` gives a
-  machine float (about 15 correct digits). It must give 50 digits.
 - `Power(Quantity(2, m), 1/2)` serializes its unit as `\mathrm{}` (empty), and
   `\mathrm{m^{0.5}}` parses back as `m^0`. The correct unit is `m^{1/2}` (or
   `m^{0.5}`) in both directions.
 - `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the correct
   value is `68`. The cause: the conversion data in `unit-data.ts` are floats.
 
-### Decisions of 2026-10-18 (second set) that wait for implementation (OPEN, decided 2026-10-18)
+### Decisions of 2026-10-18 (third set) that wait for implementation (OPEN, decided 2026-10-18)
 
-- **A finite collection with no count may be walked to answer a read that needs
-  the count.** `FlatMap([1, 2, 3], x ↦ [x, x])` is finite, but it has no `count`
-  facet, because its count is known only after the callback is applied to each
-  element, and a facet must not apply the callback. Today
-  `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` stays unevaluated. Decision: `Count`,
-  `Length`, `IsEmpty`, `Last`, a negative index, `Reverse`, `Most`, `RotateLeft`
-  and `RotateRight` may walk such a collection outside the facets, so
-  `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` gives `3`. Each of these reads walks
-  the whole collection. `Reverse` must list the collection once, and must not
-  read it from the end one index at a time.
-- **The big operators accept the iterator `{i, n}`.** `Table` accepts the
-  Mathematica iterator `{i, n}` (`i` goes from 1 to `n`). `Sum(f, {i, n})`,
-  `Product` and the other big operators must accept it too. Also, the LaTeX
-  parenthesized specification `(i, 1, 10)` must be read as a tuple: today
-  `\mathrm{Sum}(i, (i,1,10))` gives `Sum(Complex(0,1), Error("missing"))`, and
-  the correct result is `55`. The cause: `binding-sites.ts` and
-  `canonicalIndexingSet()` in `library/utils.ts` do not read
-  `Delimiter(Sequence(…), "(,)")`.
-- **Compiled JavaScript copies an input into a local before it writes it.** When
+- **The shader targets copy an input into a local before they write it.** When
   an engine scope binds `u` (for example `ce.declare('u', 'real')`) and the
-  expression assigns `u`, the compiled code writes `_.u = …` into the `vars`
-  object that the caller gives. Decision: the compiled code writes a local copy
-  of `u`, so the object of the caller never changes. The cause is probably
-  `scopeChainBinds` (`compilation/base-compiler.ts`): it sees the outer binding
-  of `u` and does not declare a local.
+  expression assigns `u` (`u ≔ u + 1`), the GLSL and WGSL code today is
+  `u = u + 1.0;`, which is invalid when `u` is a uniform. Decision: the shader
+  code writes a local copy of `u` that starts with the value of the input, as
+  the JavaScript target does since 2026-10-18.
+- **`Boole` maps over a list.** `Boole([True, False])` is refused today.
+  Decision: it gives `[1, 0]`. The test "Boole of a boolean list still rejects"
+  in `test/compute-engine/broadcast-lift.test.ts` changes with it. No other
+  operator starts to convert a boolean to a number.
+- **A typed comparator must accept every element.** Today
+  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` is accepted, because
+  `integer` overlaps `number`, and the order of the result is arbitrary (`1.5`
+  is not an integer). `Sort` refuses only a comparator whose parameter type is
+  disjoint from the element type. Decision: `Sort` and `Ordering` refuse a typed
+  comparator unless the element type is a subtype of its parameter type, so this
+  example gives an error.
+- **A positional operator refused for a set gives the bare `Error`.** With `c` a
+  set, `Reverse(c)`, `Take(c, 1)`, `Drop(c, 1)`, `Rest(c)` and `Most(c)` today
+  give the operator with the error inside (`Reverse(Error(…))`), while `Sort(c)`
+  gives the bare `Error` with its `ErrorTrace` frame. Decision: every positional
+  operator refused for a set gives the bare `Error` with its frame, as `Sort`
+  does.
+- **A `Table` with an empty range gives `[]`.** Today `Table(k², {k, 1, 0})`
+  stays unevaluated (the fast route gives `Tabulate(fn, 0)`), and
+  `Table(k², {k, 2, 0})` counts down and gives `[4, 1, 0]`. Decision: when the
+  upper bound is below the lower bound and the step is positive (the default
+  step is 1), `Table` gives `[]`, as Mathematica gives `{}`. A count-down needs
+  an explicit negative step. The compile route still declines a `Tabulate` with
+  a zero dimension.
 
-### Smaller defects and questions found on 2026-10-18 (batch 6) (OPEN, small)
+### A walk over a collection of more than 2^53 elements does not end (OPEN, decision — found 2026-10-18)
 
-- `BigDecimal.sub` throws "Maximum BigInt size exceeded" when the exponents of
-  the two operands are far apart (for example `1 − 10^-155504635359666`); the
-  special-function kernels avoid it with a local `subBounded` helper
-  (`numerics/special-functions.ts`), but every other caller can still throw.
-  The subtraction should return the larger operand, rounded to the working
-  precision, when the smaller one is below its last digit.
-- `GammaRegularized(0.5, 1e-1000000000)` gives `NaN` (the bignum kernels return
-  `NaN` below `x = 10^-100000` and the machine kernel cannot represent `x`),
-  where the value is close to `1`.
-- `ce.box(['Gamma', 2, {num: '1e100000'}]).evaluate()` takes about 0.8 s before
-  any kernel runs, in the evaluate route.
+`S = Permutations(Range(1, 25))` has 25! elements, a count that is a `bigint`.
+The operators that keep every element of a source stay unevaluated over such a
+source since 2026-10-18 (they list at most `maxCollectionSize` elements). The
+operators that walk the source and keep no element do not end: `Count(S, v)`,
+`CountIf`, `Any`, `All`, `Find`, `IndexOf`, `Contains`, `Reduce`, `Sum`, `Max`,
+`MaxBy`, and `DropWhile(S, x ↦ True)` when it is walked. They run until the host
+stops them, because `ce.timeLimit` is not set by default. `ListFrom`, `SetFrom`
+and `TupleFrom` over a huge source whose count is not known also list it with no
+limit (the test `TupleFrom(Range(1, 300000))` in
+`test/compute-engine/collections.test.ts` requires a list of 300,000 elements,
+more than `maxCollectionSize`).
 
-- The top-level application of a function literal evaluates its argument
-  numerically before it binds it: at machine precision
-  `Apply(x ↦ Sin(x), Pi).N()` is `1.2246467991473532e-16` (correct: `0`), and
-  with `v = (25! − 1)/24!`, `Apply(x ↦ Numerator(x), v).N()` is `25` (correct:
-  the exact numerator). Since 2026-10-18 a lazy `Map` passes the element as
-  written and gives `[0]` and the true numerator; the direct application should
-  do the same (`makeLambda` step 4 in `function-utils.ts`; `applyMarkerBody` is
-  the `Map` route's helper).
-- `Solve(sin x · sin(a·x) = 0, x ∈ [0, 10])` with `a = 2000000001/2000000000`
-  stays unevaluated (since the exact-spacing fix of 2026-10-18; before, it gave
-  the incomplete `[0, π/a, π, 2π, 3π]`). The complete answer has seven roots
-  (`0, π/a, π, 2π/a, 2π, 3π/a, 3π`): a bounded product could list the roots of
-  each factor separately and merge them exactly.
+Options:
+
+- **A.** Before a walk that must reach the end, stay unevaluated when the count
+  of the source is a `bigint`. Such a walk cannot finish. An early answer is
+  lost: today `Any(S, x ↦ True)` gives `True` at once; with option A it stays
+  unevaluated.
+- **B.** No change. A host that needs a limit sets `ce.timeLimit`.
+
+If nothing is decided, option B stays.
+
+### A function local to a `Block` loses its written arguments under `.N()` (OPEN, wrong value — found 2026-10-18)
+
+`Block(hF := x ↦ Floor(x), hF((25! − 1)/24!)).N()` gives `25`; the correct value
+is `24`. `Block(hLoc := x ↦ 2·Numerator(x), hLoc(3/7)).N()` gives `0.857…`; the
+correct value is `6`. Under `.N()`, a function applied to an exact argument must
+read the argument as written, not its rounded value. The cause: in
+`applyFunctionLiteralWith` (`boxed-expression/boxed-function.ts`), the branch
+`if (!value || value.type.isUnknown)` sends the evaluated operands to the
+operator definition. The fix: pass `expr.ops` (the written operands), as the
+`operatorCallee` branch does. A related defect:
+`Block(hLoc2 := x ↦ 2·Numerator(x), Map(hLoc2, [3/7])).N()` gives
+`[hLoc2(3/7)]`, while `evaluate()` gives `[6]`: the name of the callback is read
+outside its `Block`.
+
+### `Residue` and `Limit` at an algebraic pole do not see the pole (OPEN, wrong value — found 2026-10-18)
+
+`Residue(1/(x³+1), x, 1/2+(√3/2)i)` gives `0`; the correct value is
+`−1/6 − (√3/6)i`. `Limit(1/(x³+1), x → 1/2+(√3/2)i)` gives
+`1/(1+(1/2+(√3/2)i)³)`, which is `1/0`; the correct value is `~oo`.
+`Residue(1/(x² − (3+2√2)), x, 1+√2)` gives `0`; the correct value is `(√2−1)/2`.
+The cause: the fallbacks in `residue.ts` and `limit.ts` substitute the point
+into the expression and do not see that the denominator is `0` there
+(`simplify()` and `ExpandAll` of the denominator find the `0`).
+
+### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
+
+- `Sum(Reverse(FlatMap([1, 2], x ↦ [x, x])))` stays unevaluated; the correct
+  value is `6`. The same is true of other consumers of `Reverse`, `Most`,
+  `RotateLeft` and `RotateRight` over a source with no count: the view reports
+  that it cannot be enumerated. A plain `evaluate()` of the view must list its
+  source (in `_computeValue`, `boxed-expression/boxed-function.ts`).
+- `Insert` and two other eager handlers in `library/collections.ts` (the checks
+  `size === undefined`) stay unevaluated over a source with no count, for
+  example `Insert(FlatMap([1, 2], x ↦ [x, x]), 1, 0)`. They must list the source
+  first.
+- `First(Permutations(Range(1, 5000)))` gives
+  `internal-error: Maximum call stack size exceeded`; the correct value is the
+  list `[1, 2, …, 5000]` (with `Range(1, 5)` the result is `[1,2,3,4,5]`). The
+  cause: the `permute` iterator in `library/combinatorics.ts` recurses to a
+  depth of k (the length of the permutation). It must iterate.
+- `Degrees` and `DMS` (`library/trigonometry.ts`) apply element by element, but
+  they do not have the `broadcastable` definition flag, so the result has no
+  broadcast count.
+- The broadcast type lift is wrong when the result for one element is a
+  collection: `ComplexRoots([1, 8], 3)` is typed `vector<2>`, but its value is a
+  2×3 matrix; `NumeratorDenominator((0.5, 0.25))` is typed
+  `tuple<number, number>`, but its value is a tuple of tuples
+  (`broadcast-lift-type.ts`). When this is correct, `FactorInteger`, `Divisors`,
+  `PrimeFactors`, `ExtendedGCD`, `ContinuedFraction`, `IntegerDigits`,
+  `PrimitiveRootList` and `DigitCount` can get the `broadcastable` flag.
+- The Gamma family is typed `real` at a pole: for `x: real`, `Gamma(x)`,
+  `Factorial(k)`, `Digamma(x)`, `GammaLn(x)` and `Factorial2(k)` are typed
+  `real`, but `Gamma(-1)` is `~oo`, which is not real. The cause:
+  `numericTypeHandlerOnTypes` (`library/special-functions.ts`).
+- `Solve(x^{65.0} + x = 2, x)` gives no answer. An integer-valued float exponent
+  is read as a degree only up to 64 (`withExactIntegerExponents`,
+  `boxed-expression/solve.ts`), because the numeric root finder is too slow at a
+  high degree. A pure power (`x^{65.0} = 2`) uses the direct formula since
+  2026-10-18, but a polynomial with other terms does not.
+- An exact pure power has no limit on its degree: `Solve(x^{100000} = 2, x)`
+  takes about one minute. For an unknown declared `real`, `r^{1000} = 2` builds
+  1000 complex roots and then removes all but the real ones (1.1 s). The direct
+  route of `Solve` must generate only the real roots when the domain is real.
+- The Python `compile()` (code with no `def`) of `u ≔ u + 1`, when an engine
+  scope binds `u`, gives the plain text `u = u + 1`. If a host runs this code
+  inside a function with `u` as a global, Python raises `UnboundLocalError`.
+- Under `.N()`, the direct application of a function with its written arguments
+  does not use the application memo. A body with no recursion that is called
+  many times with the same rational argument is evaluated again at each call.
+
+### Smaller defects found on 2026-10-18 (batch 6) (OPEN, small)
 
 - **Over ℂ, a periodic family can miss complex roots.**
   `Solve(e^{sin x} = 1, x ∈ ℂ)` gives `[πt]`. The roots where `sin z = 2πik`
   with an integer `k ≠ 0` are missing. The cause: the ℂ route of `Solve` inverts
   `exp` on the principal branch only (`exp(w) = 1` gives `w = 0`, not
   `w = 2πik`).
-- **Question (OPEN, decision): must `Sort` refuse a comparator whose parameter
-  type only overlaps the element type?** `Sort` refuses at run time a typed
-  comparator whose parameter type is disjoint from the element type. But
-  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` is accepted, because
-  `integer` overlaps `number`, and the order of the result is arbitrary (`1.5`
-  is not an integer). Option A: refuse when the element type is not a subtype of
-  the parameter type; then this example gives an error. Option B: keep today's
-  behavior. If nothing is decided, option B stays in effect.
-- **Question (OPEN, decision): which shape does a positional view of a set
-  give?** With `c` a set, `Reverse(c)`, `Take(c, 1)`, `Drop(c, 1)`, `Rest(c)`
-  and `Most(c)` give the operator with the error inside (`Reverse(Error(…))`),
-  but `Sort(c)` and `TakeWhile(c, p)` give the bare `Error`. Option A: all give
-  the bare `Error`. Option B: keep the two shapes. If nothing is decided, option
-  B stays in effect.
 - **`Element` over a lazy `Filter` with an unknown element throws.** With `z`
   not assigned, `z ∈ Filter([z], y ↦ y > 0)` throws "Filter predicate must
   return True or False". The correct result is an unevaluated `Element` (the
   sign of `z` is not known). The message also has a wrong hint:
   `Unknown symbol "y". Did you mean "x"?`.
-- **`e^{−7iπ/6}.N()` is wrong in the last digit.** At 21 digits, the real part
-  ends `…646765`; the correct value ends `…764`. The cause: `exactEulerN()` and
-  `unitCircleOfHalfTurns()` in `boxed-expression/arithmetic-power.ts` round
-  `√3/2` one unit high.
-- **The interpreter does not reduce a float half-integer in `iπ·u`.**
-  `Tanh(iπ·0.5).N()` gives `NaN` and `Sech(iπ·0.5).N()` gives `1.6e16`, where
-  the exact argument `iπ/2` gives `~oo` for both. The compiled code now gives
-  `~oo`. The interpreter must reduce the float `0.5` as it reduces the exact
-  `1/2`.
-- **`e^{iπx}` with `x` not declared does not get the exact compiled lowering.**
-  `eulerPiSplit` uses `getImaginaryFactor`, which requires `x: real`. The
-  hyperbolic lowering of `iπx` accepts an `x` that is not declared, so the two
-  lowerings disagree.
-- **`Sin(Map(Sin, [H])).N()` still evaluates `H` exactly once.** With
-  `H = Sum(1/k, k, 1, 6000)`, a broadcast over a lazy `Map` operand under `.N()`
-  goes through the exact callback (step 2 of `_computeValue` in
-  `boxed-function.ts`, and the zip in `collection-utils.ts`). The fix: rewrite
-  the source with `lazyMapNumericApproximation`, as `Map(Sin, [H]).N()` does.
-- **Question (OPEN, decision): what does a `Table` with an empty range give?**
-  Today `Table(k², {k, 1, 0})` stays unevaluated (the fast route gives
-  `Tabulate(fn, 0)`, and a compile test treats a zero dimension as invalid),
-  `Table(k², {k, 2, 0})` counts down and gives `[4, 1, 0]`, and
-  `Sum(k, {k, 1, 0})` is `0`. Mathematica gives `{}` for both `Table` forms.
-  Option A: give `[]` for both, as Mathematica does. Option B: keep today's
-  behavior. If nothing is decided, option B stays in effect.
-- **`\lim_{x\to a+1^+}` reads `1^+` as `PseudoInverse(1)`.** The limit parser
-  must apply a direction marker to the whole point, as `(a+1)^+` does today.
-- **`lim_{x→a} |x|/x` with `a: real` gives `|a|/a`.** This is wrong only at
-  `a = 0`, where the limit does not exist. The result must carry the condition
-  `a ≠ 0`, or stay unevaluated.
 - **Limits of the per-run block locals (since 2026-10-18).** An implicit local
   of a block starts fresh at each top-level evaluation and at each function
   call. Two cases remain: (1) a recursive call that runs the same nested block
@@ -531,35 +557,6 @@ for the `Return` shape needs an evaluation option that only `Return` honors,
 carried by `If`, `Which`, `Block` and `Loop` and removed by every inner function
 application, so that values in the middle stay exact.
 
-### Three `Solve` gaps found with the fractional-power fix (OPEN, small — found 2026-10-18)
-
-(1) `\sqrt{x} = i` gives `When(-1, 0 ≤ i)`, a root with a meaningless condition,
-where the answer is `-1`; the guard comes from `sqrtEquationRhsGuard`
-(`boxed-expression/solve.ts`). (2) `validateRoots()` compares the residual of a
-candidate with an ABSOLUTE tolerance, so a residual of `1e-30` counts as zero
-whatever the size of the equation's terms: with `x^{-0.5} = 10^{-30}`, the
-candidate `-10^{60}` would pass. A relative test (against the size of the right
-side or of the terms) changes many `Solve` results, so measure the effect first.
-(3) `Solve(x^{2.5} = -4, x, RealNumbers)` stays unevaluated, while an unknown
-declared `real` gives `[]`: `solve-domain.ts` treats an empty list for an
-equation that is not a polynomial as undecided.
-
-### `Solve` of `x^n = c` with a large `n` is very slow (OPEN, performance — found 2026-10-18 by the float-degree `Solve` work)
-
-`x^{256} = 2` takes about 15 s and `x^{1000} = 2` does not finish in 60 s,
-although the `n` roots of `x^n = c` have a direct formula
-(`c^{1/n}·e^{2πik/n}`). Because of this, an integer-valued float exponent is
-read as a degree only up to 64 (`withExactIntegerExponents`, `solve.ts`), so
-`x^{65.0} = 2` still gives only the real roots.
-
-### `explain('solve')` at the default verbosity shows exact roots for a float-exponent equation (OPEN, small — found 2026-10-18 by the float-degree `Solve` work)
-
-For `x^{2.0} + 3x + 2 = 0` the result holds the floats `−1.0` and `−2.0`, but
-the curated explanation shows `x = −1` from the quadratic formula:
-`isSame(2.0, 2)` is true, so the curation drops the step that changes the
-exponents to integers and the step that changes the roots to floats. With
-`verbosity: 'all'` every step shows.
-
 ### The structural hash of a function expression repeats every 32 or 64 levels of nesting (OPEN, small — found 2026-10-18 by the CSE shared-subtree fix)
 
 `BoxedFunction.hash` combines operands as `((h << 1) ^ op.hash) ^ hashCode(op)`
@@ -592,16 +589,6 @@ s from source (13 s under jest). (4) `.N()` of a product of many factors is
 quadratic (16 000 factors 1.5 s, 200 000 factors 225 s): `BigDecimal.mul` and
 `normalize` keep every digit during the fold instead of rounding to the working
 precision.
-
-### `isFinite` is `undefined` for a sum or negation of finite constants (OPEN, small — found 2026-10-18 by the review of the fractional-power `Solve` fix)
-
-`ce.box(['Negate', 'Pi']).isFinite`, and the same for `Pi - 4`,
-`Multiply(-1, Pi)` and `Sqrt(2) - 3`, is `undefined`, although each is a finite
-real constant. Code that tests `isFinite === true` before it uses a value then
-gives up for every compound constant (the fractional-power `Solve` route reads
-the numeric value instead since 2026-10-18). `Negate`, `Add` and `Multiply` of
-operands that are all finite should report `true` (and `Divide` when the divisor
-is also nonzero).
 
 ### Compiling shared nodes under lazy operands in nested regions is still exponential (OPEN, performance — found 2026-10-18 by the CSE shared-subtree fix)
 
@@ -5714,16 +5701,15 @@ is in git history. The only items deliberately left open:
     pass-throughs that were right by accident (`N`, `Evaluate`, `Identity`,
     `Typed`, `Matrix`, `Transpose`, …). Each is an `elementCount` handler away
     from answering again; adopt on demand, never as a name list in engine code.
-  - `Prime` (and other type-handler-lifting operators) have no `broadcastable`
-    definition flag. Today is consistent (`Prime([1,2,3]).count` and its
-    `evaluate().count` are both `undefined`), so nothing is wrong — but the flag
-    would give such operators the broadcast count AND the
-    `isEnumerableCollection` broadcast tier. **User decision 2026-10-17: add the
-    flag to the element-wise operators of this class** — after a sweep of every
-    flag consumer (canonicalization, compile gates, the facet), for the whole
-    class at once, each element-wise operator such as `Prime` gets the
-    `broadcastable` flag, so `Prime([1,2,3])` gives `[2, 3, 5]` with a count
-    of 3.
+  - Since 2026-10-18, 56 element-wise operators whose type handler lifts over a
+    list have the `broadcastable` definition flag (user decision 2026-10-17), so
+    `NthPrime([1,2,3])` gives `[2, 3, 5]` with a count of 3. (`Prime` is the
+    derivative mark, not the n-th prime.) Two groups do not have the flag yet:
+    `Degrees` and `DMS` (`trigonometry.ts`), and the operators whose result for
+    one element is a collection (`FactorInteger`, `Divisors`, `PrimeFactors`,
+    `ExtendedGCD`, `ContinuedFraction`, `IntegerDigits`, `PrimitiveRootList`,
+    `DigitCount`), which need a correct broadcast type lift first. Both are
+    bullets of "Smaller defects found on 2026-10-18 (batch 7)".
 - **Typed `Declare` does not survive a LaTeX round trip (RULED DEMAND-GATED
   2026-08-12).** A standalone `["Declare","s","'number'"]` round-trips typed
   since 2026-09-29 (`\mathrm{Declare}(s, \text{number})`), but a leading

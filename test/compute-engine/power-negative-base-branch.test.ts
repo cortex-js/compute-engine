@@ -774,22 +774,32 @@ describe('NEGATIVE BASE: exact exponent provenance under .N()', () => {
    * KNOWN RESIDUAL, pinned rather than left unstated. Provenance is read off
    * the node's own `op2`, so it survives exactly one hop: a number literal, or
    * a symbol bound to one. An `op2` whose exact value only exists once
-   * something ELSE has run — a lambda parameter bound at application, a
-   * `When`'s selected arm — reaches the handler as a plain expression, and the
-   * float reconstruction decides. Past its cap (`q = 1000001`) that is the
-   * COMPLEX branch, so these routes still disagree with the literal one.
+   * something ELSE has run — a `When`'s selected arm — reaches the handler as
+   * a plain expression, and the float reconstruction decides. Past its cap
+   * (`q = 1000001`) that is the COMPLEX branch, so this route still disagrees
+   * with the literal one.
    *
-   * Recovering them would mean evaluating an arbitrary `op2` inside the engine's
+   * Recovering it would mean evaluating an arbitrary `op2` inside the engine's
    * hottest operator — a re-entrancy and cost hazard deliberately not taken.
+   *
+   * A lambda parameter is no longer a residual: under `.N()`, a function is
+   * applied to its arguments as written (user decision 2026-10-18), so the
+   * body `(-2)^t` sees the exact rational and gives the real value of the
+   * literal route.
    */
-  it('does NOT recover provenance through a lambda parameter or a When (residual)', () => {
+  it('does NOT recover provenance through a When (residual)', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('t \\mapsto (-2)^t'));
-    const residual = [
-      engine.box(['f', ['Rational', 1000003, 1000001]]),
-      engine.box(['Power', -2, ['When', ['Rational', 1000003, 1000001], true]]),
-    ];
-    for (const e of residual) expect(e.N().im).not.toBe(0);
+    expect(
+      engine
+        .box(['Power', -2, ['When', ['Rational', 1000003, 1000001], true]])
+        .N().im
+    ).not.toBe(0);
+    const applied = engine.box(['f', ['Rational', 1000003, 1000001]]).N();
+    expect(applied.im).toBe(0);
+    expect(applied.re).toBe(
+      engine.box(['Power', -2, ['Rational', 1000003, 1000001]]).N().re
+    );
 
     // The routes where `op2` IS the literal — including one nested in a `Sum`
     // body — do resolve, and are the reference these residuals differ from.

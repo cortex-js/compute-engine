@@ -131,7 +131,13 @@ import {
   addsPointToNumberCollection,
   isAbsentScalarTerm,
   collectionSourceOperands,
+  viewOverListedSource,
 } from '../collection-utils.js';
+import {
+  incompleteWalkCount,
+  takeBackIncompleteWalks,
+  unlessWalkMissedElements,
+} from './incomplete-walks.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -2434,6 +2440,18 @@ export class BoxedFunction
         if (num === true && den === true && isNonZero(this.op2)) return true;
         break;
       }
+      case 'Negate':
+      case 'Add':
+      case 'Subtract':
+      case 'Multiply':
+        // A negation, sum, difference or product of finite numbers is
+        // finite: `−π`, `π − 4` and `√2 − 3` are finite. An operand that
+        // is not a number, or whose finiteness is not known (a NaN or an
+        // infinite operand is not finite), leaves the result undecided
+        // here.
+        if (this.ops.every((x) => x.isNumber === true && x.isFinite === true))
+          return true;
+        break;
     }
 
     // A type-provable non-finite expression (e.g. `Ln(0)`) never reaches here:
@@ -3207,6 +3225,7 @@ export class BoxedFunction
     // (`IComputeEngine._numericRequest`).
     const enclosingNumericRequest = engine._numericRequest;
     engine._numericRequest = options?.numericApproximation === true;
+    const walksBefore = incompleteWalkCount();
     try {
       // A deadline is armed only by an enclosing `withTimeLimit` span; work
       // outside a span runs unbounded. Evaluation checkpoints the ambient
@@ -3218,6 +3237,13 @@ export class BoxedFunction
             this._isMemoizableInertEvaluation(options)
           ? this._memoizedLazyCollectionValue(options)
           : this._computeValue(options)();
+      // An evaluation whose result is a value takes back the incomplete
+      // walks that it recorded: a read in it that met an inner collection
+      // that it cannot walk stayed unevaluated, which is a correct result,
+      // and an enclosing handler must not discard its own result because of
+      // it (see `resultHoldsNoIncompleteWalk()`).
+      if (resultHoldsNoIncompleteWalk(result))
+        takeBackIncompleteWalks(walksBefore);
       return options?.numericApproximation
         ? indeterminateAsNaN(result)
         : result;
@@ -4221,7 +4247,15 @@ export class BoxedFunction
 
   contains(rhs: Expression): boolean | undefined {
     if (this._optedOutOfCollection) return undefined;
-    return this.baseDefinition?.collection?.contains?.(this, rhs);
+    // A handler that walks the collection (the `contains` of `Take` or
+    // `Filter`) can meet an inner collection that it cannot walk: its
+    // `false` misses those elements, and its `true` can come from an element
+    // that is not one (the iterator of `FlatMap` gives a valueless symbol of
+    // a list type as one element). The answer is then not known (see
+    // `unlessWalkMissedElements()`).
+    return unlessWalkMissedElements(() =>
+      this.baseDefinition?.collection?.contains?.(this, rhs)
+    );
   }
 
   /**
@@ -4310,6 +4344,7 @@ export class BoxedFunction
     const cyclesBefore = cycleDetectionCount();
     const provisionalBefore = _lazyValueProvisionalReads;
     const iterationBreachesBefore = iterationLimitCancellationCount();
+    const incompleteWalksBefore = incompleteWalkCount();
     _facetComputeCount += 1;
     // A facet answer is a number or a boolean, so it can never CONTAIN an
     // object; it can perfectly well be DERIVED from one's fields, though
@@ -4323,6 +4358,15 @@ export class BoxedFunction
       value = compute();
     } finally {
       objectDeps = endObjectDeps();
+    }
+    // A computation that walked the collection (the `isEmpty` of `Filter`
+    // reads a first element) and met an inner collection that it cannot
+    // walk has no answer: the walk missed elements, and an element that it
+    // gave can be a valueless symbol of a list type (see
+    // `incomplete-walks.ts`). The answer is not known, and it is not stored.
+    if (incompleteWalkCount() !== incompleteWalksBefore) {
+      if (CACHE_STATS) recordCache('collectionFacet', 'declineCycle');
+      return undefined as T;
     }
     if (
       cycleDetectionCount() !== cyclesBefore ||
@@ -4815,7 +4859,12 @@ export class BoxedFunction
       if (cached !== undefined) return cached;
     }
 
-    return handler(this, idx);
+    // A handler that walks a collection to find the element at `idx` (the
+    // `at` of `FlatMap`, and of a view such as `Filter` that walks its
+    // source) can meet an inner collection that it cannot walk. The element
+    // it finds is then not known to be at `idx`, so the answer is
+    // `undefined` (see `unlessWalkMissedElements()`).
+    return unlessWalkMissedElements(() => handler(this, idx));
   }
 
   /**
@@ -5568,17 +5617,37 @@ export class BoxedFunction
         if (unindexed === 'veto')
           return this.engine._fn(this.operator, bops).evaluate(options);
 
+        // Under `.N()`, a lazy `Map` operand is read through its numeric
+        // callback (`lazyMapNumericApproximation`), as `Map(f, xs).N()`
+        // reads it. The cells are built from the elements of the operand,
+        // and the exact callback computes each element exactly first: with
+        // `H = Sum(1/k, k, 1, 6000)`, `Sin(Map(Sin, [H])).N()` computed the
+        // exact `H`, a rational with thousands of digits, where
+        // `Map(Sin, [H]).N()` reads `H` numerically. A jump operator keeps
+        // the exact elements: its handler reads the exact value of an
+        // exact operand near the jump (`Floor(Map(x ↦ x, [(25! − 1)/24!]))`
+        // is `[24]`, where the float of the element is 25).
+        const cellOps =
+          numericApproximation && !JUMP_BROADCAST_OPERATORS.has(this.operator)
+            ? bops.map(
+                (op) =>
+                  (op.isLazyCollection &&
+                    lazyMapNumericApproximation(this.engine, op)) ||
+                  op
+              )
+            : bops;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          bops,
+          cellOps,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
         const items =
-          unindexed === 'lift' ? zipLiftingUnindexed(bops) : zip(bops);
+          unindexed === 'lift' ? zipLiftingUnindexed(cellOps) : zip(cellOps);
         if (!items) return this.engine._fn('List', []);
 
         const results: Expression[] = [];
@@ -6548,6 +6617,7 @@ export class BoxedFunction
       // An absent value at a declared numeric parameter of a function
       // literal is read as `NaN` (`declaredLambdaOperands`).
       const handlerOperands = declaredLambdaOperands(this.engine, def, tail);
+      const walksBefore = walksMeasuredBy(def, handlerOperands);
       let evalResult: Expression | undefined;
       try {
         evalResult = def.evaluate?.(handlerOperands, {
@@ -6590,6 +6660,7 @@ export class BoxedFunction
       } finally {
         if (isScoped) this.engine._popEvalContext();
       }
+      if (handlerWalkMissedElements(walksBefore)) evalResult = undefined;
 
       // Fallback to a symbolic result if we could not evaluate. For a SCOPED
       // operator with NO evaluate handler (a lazy scoped collection —
@@ -6790,17 +6861,29 @@ export class BoxedFunction
         if (unindexed === 'veto')
           return this.engine._fn(this.operator, bops).evaluateAsync(options);
 
+        // A lazy `Map` operand is read through its numeric callback under
+        // `.N()`, except by a jump operator (mirrors the sync path).
+        const cellOps =
+          numericApproximation && !JUMP_BROADCAST_OPERATORS.has(this.operator)
+            ? bops.map(
+                (op) =>
+                  (op.isLazyCollection &&
+                    lazyMapNumericApproximation(this.engine, op)) ||
+                  op
+              )
+            : bops;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          bops,
+          cellOps,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
         const items =
-          unindexed === 'lift' ? zipLiftingUnindexed(bops) : zip(bops);
+          unindexed === 'lift' ? zipLiftingUnindexed(cellOps) : zip(cellOps);
         if (!items) return this.engine._fn('List', []);
 
         const results: Promise<Expression>[] = [];
@@ -7655,6 +7738,7 @@ export class BoxedFunction
       // 5/ Call the `evaluate` handler
       //
       let value: Expression | undefined;
+      let handlerMissedElements = false;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
@@ -7766,6 +7850,14 @@ export class BoxedFunction
         // evaluation is put in its engine slot for the same part
         // (`IComputeEngine._numericRequest`), and restored before the
         // `await` too: a collection handler reads it there.
+        //
+        // The result of a synchronous handler that read a walk that missed
+        // elements is not used, as on the synchronous route
+        // (`walksMeasuredBy()`). The call is measured inside the synchronous
+        // slice, where no other evaluation can run, so the result does not
+        // depend on a concurrent evaluation. A handler that answers a
+        // promise (`evaluateAsync`, a user function) is not measured here:
+        // its walks measure their own pulls (`MeasuredWalk`).
         value = await runWithEvaluationEffects(
           engine,
           effects,
@@ -7789,9 +7881,14 @@ export class BoxedFunction
                     }
                   | undefined
               )?.applyAwaiting;
-              return applyAwaiting !== undefined
-                ? applyAwaiting(handlerOps, opts)
-                : def.evaluate?.(handlerOps, opts);
+              if (applyAwaiting !== undefined)
+                return applyAwaiting(handlerOps, opts);
+              const walksBefore = walksMeasuredBy(def, handlerOps);
+              try {
+                return def.evaluate?.(handlerOps, opts);
+              } finally {
+                handlerMissedElements = handlerWalkMissedElements(walksBefore);
+              }
             } finally {
               engine._numericRequest = enclosingNumericRequest;
             }
@@ -7799,6 +7896,7 @@ export class BoxedFunction
           contextStack,
           options?._precisionWindow
         );
+        if (handlerMissedElements) value = undefined;
         // A handler that answers `undefined` leaves the operator as it is;
         // over evaluated operands that is the operator over the values, as
         // an inert comparison answers on the synchronous route.
@@ -7806,6 +7904,9 @@ export class BoxedFunction
           value = engine._fn(this._operator, [...handlerOps]);
       } catch (e) {
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
+        // An error that a handler throws after it read a walk that missed
+        // elements is not used either (the synchronous route does the same).
+        if (handlerMissedElements) value = undefined;
       } finally {
         // The frame is on this evaluation's own stack, not on the engine's
         // stack: remove it from there.
@@ -13800,6 +13901,79 @@ async function runMaterializationAsync(
 }
 
 /**
+ * The value of `incompleteWalkCount()` before a call of the `evaluate`
+ * handler of `def`, or `undefined` when the result of the handler is not
+ * measured (see {@link handlerWalkMissedElements}).
+ *
+ * The result of a handler that walked a collection and met an inner
+ * collection that it could not walk (`incomplete-walks.ts`) is not used: the
+ * handler read a walk that missed elements, so its answer can be wrong
+ * (`Sum(Take(FlatMap([1, 2], x ↦ Join([x], v)), 3))` was `0` for a valueless
+ * `v`), and the operator stays unevaluated. This applies to every handler
+ * that walks a collection, so each handler does not have to measure its own
+ * walk.
+ *
+ * Only a handler with a collection operand is measured: a handler with no
+ * collection operand (`Factorial`, `Add` of numbers) walks no collection of
+ * its own, and an incomplete walk in an expression that it evaluates is not
+ * a reason to discard its result.
+ *
+ * Two kinds of handler are not measured, because they evaluate expressions
+ * whose own reads stay unevaluated after an incomplete walk, and the result
+ * that holds such a read is correct:
+ * - the handler of a `lazy` operator evaluates its operands itself (`If`,
+ *   `Block`, `Assign`). To discard its result would also run its side
+ *   effects again at the next evaluation. A lazy operator that walks a
+ *   collection measures its own walk (`Any`, `All`, with `MeasuredWalk`);
+ * - a user function (`isUserFunctionDefinition`) evaluates its body.
+ *
+ * A nested evaluation whose result is a value (a number, `x + Sum(…)`)
+ * takes back the incomplete walks that it recorded (`evaluate()`), so the
+ * callback of a measured handler (`GroupBy([1, 2, 3], x ↦ x + Sum(…))`)
+ * does not make the handler discard its result.
+ */
+function walksMeasuredBy(
+  def: BoxedOperatorDefinition,
+  operands: ReadonlyArray<Expression>
+): number | undefined {
+  if (def.lazy === true || def.isUserFunctionDefinition) return undefined;
+  if (!operands.some(isCollectionOperand)) return undefined;
+  return incompleteWalkCount();
+}
+
+/** True when `op` is a collection, or an expression of a collection type
+ * (a valueless symbol declared `list<integer>`). */
+function isCollectionOperand(op: Expression): boolean {
+  return op.isCollection || op.type.matches('collection<any>');
+}
+
+/**
+ * True when the result of a nested evaluation is a value that its caller
+ * cannot walk again to reach the elements that an incomplete walk missed: a
+ * result that is not a collection (`2 + Sum(Take(…))`, a number), or a `List`
+ * or `Tuple` literal whose elements are values.
+ *
+ * Such an evaluation takes back the incomplete walks that it recorded
+ * (`takeBackIncompleteWalks()`): its result is correct, and an unevaluated
+ * read in it is a correct result too. A result that is another collection
+ * (`Sort(FlatMap(…))` unevaluated, a lazy view) keeps them: a caller that
+ * walks it reads it through an evaluation that can yield nothing
+ * (`BoxedFunction.each()` evaluates an eager source), and the caller must
+ * know that the walk missed elements.
+ */
+function resultHoldsNoIncompleteWalk(result: Expression): boolean {
+  if (result.operator === 'List' || result.operator === 'Tuple')
+    return result.isLazyCollection !== true;
+  return !isCollectionOperand(result);
+}
+
+/** True when an incomplete walk was recorded after `walksBefore`, the value
+ * that {@link walksMeasuredBy} gave before the call of the handler. */
+function handlerWalkMissedElements(walksBefore: number | undefined): boolean {
+  return walksBefore !== undefined && incompleteWalkCount() !== walksBefore;
+}
+
+/**
  * A walk of a collection that can be started again: a new walk gives first
  * the elements that the earlier walks pulled from the iterator, then pulls
  * the next ones from the same iterator. So the callbacks of the collection
@@ -13810,14 +13984,33 @@ async function runMaterializationAsync(
  *
  * Ending a walk before the end (a `break`) closes the iterator, so a walk
  * that is ended this way must be the last one.
+ *
+ * `incomplete` is true when a pull from the iterator met an inner collection
+ * that the iterator could not walk (`incomplete-walks.ts`): the walk then
+ * misses elements, and its elements are not the elements of the collection.
+ * Only the pulls are measured, so an evaluation of an element between two
+ * pulls does not count.
  */
 class RepeatableWalk {
   private readonly pulled: Expression[] = [];
   private ended = false;
   private failed = false;
   private error: unknown;
+  incomplete = false;
 
   constructor(private readonly iter: Iterator<Expression>) {}
+
+  /**
+   * A walk of `expr`. The call of `expr.each()` is measured too, because the
+   * iterator of some views pulls from its source when it is made (the
+   * iterator of `Differences` reads the first element of its source).
+   */
+  static of(expr: Expression): RepeatableWalk {
+    const before = incompleteWalkCount();
+    const walk = new RepeatableWalk(expr.each());
+    if (incompleteWalkCount() !== before) walk.incomplete = true;
+    return walk;
+  }
 
   walk(): IterableIterator<Expression> {
     let i = 0;
@@ -13827,12 +14020,15 @@ class RepeatableWalk {
       if (this.failed) throw this.error;
       if (this.ended) return { done: true, value: undefined };
       let step: IteratorResult<Expression>;
+      const before = incompleteWalkCount();
       try {
         step = this.iter.next();
       } catch (e) {
         this.ended = this.failed = true;
         this.error = e;
         throw e;
+      } finally {
+        if (incompleteWalkCount() !== before) this.incomplete = true;
       }
       if (step.done) {
         this.ended = true;
@@ -13876,19 +14072,41 @@ class RepeatableWalk {
  * the first element.
  *
  * This is done only for a collection that is known to be finite and
- * enumerable, and only a first element decides: the collection is then not
- * empty. An iterator that ends at once does not decide, because some views
- * claim to be enumerable but yield nothing when a count they need is not
- * known. A walk that gives up with `iteration-limit-exceeded` (a `Filter`
- * with a long run of rejected elements) does not decide either. In both
- * cases the lazy form stays, as before.
+ * enumerable. A first element decides that the collection is not empty. An
+ * iterator that ends at once decides that the collection is empty
+ * (`Take(FlatMap([1, 2], x ↦ []), 1)` is `[]`): a collection that claims to
+ * be enumerable yields all its elements. Each view must keep this contract
+ * also over a finite source with no count, or with a `bigint` count:
+ * - a view that reads its source by a position computed from the count of
+ *   the source (`Reverse`, `Most`, `RotateLeft`, `RotateRight`) yields
+ *   nothing then, so it claims not to be enumerable then
+ *   (`enumerableFromSmallSource()`, `library/collections.ts`). `Cycle`
+ *   reads its source in order instead (`cycleWalk()`, same file);
+ * - a view that reads its source at a positive position (`Take`, `Drop`,
+ *   `Rest` read their source with `at()`) needs an `at()` that gives each
+ *   element with no count. The windows of `Partition` and `SlidingWindow`
+ *   (`windowedCollectionOps()`, `collection-utils.ts`) are read from the
+ *   positions of the source for this reason: when they needed the count,
+ *   `Take(Partition(FlatMap([1, 2, 3], x ↦ [x, x]), 2), 1)` was `[]`.
+ *
+ * The walk does not decide, and the lazy form stays, when:
+ * - the walk met an inner collection that it could not walk
+ *   (`RepeatableWalk.incomplete`): the `FlatMap` of a callback that returns
+ *   `Join([x], v)` for a valueless `v`. Its walk misses the elements of `v`,
+ *   so an empty walk is not an empty collection;
+ * - the walk gives up with `iteration-limit-exceeded` (a `Filter` with a long
+ *   run of rejected elements).
  */
 function walkDecidesEmptiness(expr: Expression): RepeatableWalk | undefined {
   if (expr.isFiniteCollection !== true) return undefined;
   if (expr.isEnumerableCollection !== true) return undefined;
-  const walk = new RepeatableWalk(expr.each());
+  const walk = RepeatableWalk.of(expr);
   try {
-    if (walk.walk().next().done === true) return undefined;
+    walk.walk().next();
+    if (walk.incomplete) {
+      walk.close();
+      return undefined;
+    }
     return walk;
   } catch (e) {
     if (
@@ -13907,6 +14125,17 @@ function* materializationSteps(
   options?: Partial<EvaluateOptions>
 ): MaterializationSteps {
   if (!expr.isValid || options?.materialization === false) return expr;
+
+  // A view that reads its source by a position computed from the count of
+  // the source (`Reverse`, `Most`, `RotateLeft`, `RotateRight`) cannot walk a
+  // finite source with no count (`FlatMap([1, 2, 3], x ↦ [x, x])`). The
+  // source is listed ONCE, and the same view over that list is materialized
+  // (`viewOverListedSource()`). Reading the source from the end one index at
+  // a time would walk it again for each element.
+  const listedView = viewOverListedSource(expr);
+  if (listedView === null) return expr;
+  if (listedView instanceof BoxedFunction)
+    return yield* materializationSteps(listedView, def, options);
 
   // Emptiness indeterminate (e.g. Range(1, n) with a symbolic bound): the
   // collection cannot be enumerated, so fabricating a literal would collapse
@@ -13991,7 +14220,7 @@ function* materializationSteps(
   if (full && !expr.isEmptyCollection && expr.count === undefined) {
     const cap = expr.engine.maxCollectionSize;
     let n = 0;
-    walk ??= new RepeatableWalk(expr.each());
+    walk ??= RepeatableWalk.of(expr);
     try {
       for (const _ of walk.walk()) {
         n += 1;
@@ -14004,6 +14233,9 @@ function* materializationSteps(
       )
         throw e;
     }
+    // A walk that missed elements (see `RepeatableWalk.incomplete`) cannot
+    // give the full list.
+    if (walk.incomplete) return expr;
   }
 
   const xs: Expression[] = [];
@@ -14025,7 +14257,10 @@ function* materializationSteps(
         typeof materialization === 'number'
           ? materialization
           : materialization[0];
-      const iter = walk?.walk() ?? expr.each();
+      // The walk is a `RepeatableWalk` also when no walk was started above,
+      // so that a walk that missed elements is detected below.
+      walk ??= RepeatableWalk.of(expr);
+      const iter = walk.walk();
       try {
         for (const x of iter) {
           if (xs.length === last) {
@@ -14077,6 +14312,10 @@ function* materializationSteps(
           );
         xs.push(expr.engine.symbol('ContinuationPlaceholder'));
       }
+      // A walk that missed elements gives the wrong elements: the
+      // `FlatMap` of a callback that returns `Join([x], v)` for a valueless
+      // `v` listed `[1, 2]` for the elements of `v` too. Keep the lazy form.
+      if (walk.incomplete) return expr;
     } else {
       //
       // We are indexed and finite, so we can materialize the head and tail
