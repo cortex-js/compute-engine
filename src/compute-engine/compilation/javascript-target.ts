@@ -89,7 +89,10 @@ import {
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
-import { isTupleShapedType } from '../collection-utils.js';
+import {
+  isTupleOrTupleUnionShapedType,
+  isTupleShapedType,
+} from '../collection-utils.js';
 import type { Type, TupleType } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -1952,7 +1955,7 @@ function admitsRuntimeCheckedArray(e: Expression): boolean {
   if (
     e.type.matches('set<any>') ||
     e.type.matches('dictionary<any>') ||
-    e.type.matches('tuple')
+    isTupleOrTupleUnionShapedType(e.type.type)
   )
     return false;
   return true;

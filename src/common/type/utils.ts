@@ -677,7 +677,77 @@ export function recordUnfoldOnDescent(
   if (count >= ALIAS_UNFOLDS_PER_PATH) return undefined;
   const next = new Map(seen);
   next.set(decl, count + 1);
+  const bare =
+    seen === undefined ? undefined : BARE_SINCE_CONSTRUCTOR.get(seen);
+  BARE_SINCE_CONSTRUCTOR.set(next, new Set(bare).add(decl));
   return next;
+}
+
+/**
+ * For each descent, the declarations it unfolded since the walk last
+ * entered a constructor (a list element, a tuple component, …). A walk
+ * that calls {@link descendIntoConstructor} when it enters a constructor
+ * can then tell the two kinds of cut apart ({@link isBareCutOnDescent}).
+ * Keyed by the descent map, so the type of a descent stays a plain map.
+ */
+const BARE_SINCE_CONSTRUCTOR = new WeakMap<
+  ReadonlyMap<TypeReference, number>,
+  ReadonlySet<TypeReference>
+>();
+
+/**
+ * The descent to hand to a recursive call that enters a constructor: a
+ * list, set or collection element, a tuple component, a record field, a
+ * dictionary value. The unfold counts are kept, and no declaration is bare
+ * any more (see {@link isBareCutOnDescent}).
+ */
+export function descendIntoConstructor(seen: AliasDescent): AliasDescent {
+  if (seen === undefined || !BARE_SINCE_CONSTRUCTOR.has(seen)) return seen;
+  return new Map(seen);
+}
+
+/**
+ * Whether the descent guard cuts `t` on this path: `t` is a transparent
+ * alias that has spent its unfolds (see {@link unfoldAliasOnDescent}).
+ * Allocates nothing, unlike a call of `unfoldAliasOnDescent` used as a
+ * yes/no test.
+ */
+export function isCutOnDescent(t: Readonly<Type>, seen: AliasDescent): boolean {
+  if (
+    seen === undefined ||
+    typeof t !== 'object' ||
+    t.kind !== 'reference' ||
+    t.alias !== true ||
+    t.def === undefined
+  )
+    return false;
+  return (seen.get(declarationOf(t)) ?? 0) >= ALIAS_UNFOLDS_PER_PATH;
+}
+
+/**
+ * Whether the descent guard cuts `t` here (see {@link isCutOnDescent}) AND
+ * the walk entered no constructor since it last unfolded the same alias. The
+ * alias then reaches itself as a bare arm of its own union (the `cyc` arm of
+ * `type alias cyc = cyc | tuple<number, number>`, possibly inside a nested
+ * union): the occurrence adds no value of its own, so a walk may drop it,
+ * or keep it unchanged, and its answer stays exact.
+ *
+ * A cut that is not bare was reached through a constructor (the `a` inside
+ * `type alias a = list<a | integer> | missing`): it stands for values deeper
+ * in the structure, which the walk has not read at that depth. Dropping it
+ * loses those values, and keeping it unchanged under a rewrite that changes
+ * the leaves keeps the old leaves. A walk must answer soundly there: keep
+ * the reference when it rewrites nothing, or widen. This test is reliable
+ * only in a walk that calls {@link descendIntoConstructor} whenever it
+ * enters a constructor.
+ */
+export function isBareCutOnDescent(
+  t: Readonly<Type>,
+  seen: AliasDescent
+): boolean {
+  if (!isCutOnDescent(t, seen)) return false;
+  const bare = BARE_SINCE_CONSTRUCTOR.get(seen!);
+  return bare?.has(declarationOf(t as TypeReference)) === true;
 }
 
 /**
@@ -1291,8 +1361,16 @@ export function stripMissingFromType(
   if (typeof t === 'string') return t;
   const strip = (x: Readonly<Type>) =>
     stripMissingFromType(x, tupleComponents, seen);
+  // The parts of a constructor (list elements, tuple components, …) are
+  // stripped with a descent that records the entry into the constructor, so
+  // that a cut there is not taken for a bare union arm (see the `union`
+  // case).
+  const stripPart = (x: Readonly<Type>) =>
+    stripMissingFromType(x, tupleComponents, descendIntoConstructor(seen));
   switch (t.kind) {
     case 'reference': {
+      // At a cut of the descent guard the reference is kept as it is. That
+      // is sound: it names every value of the alias, its absent ones too.
       const unfolded = unfoldAliasOnDescent(t, seen);
       if (
         unfolded === undefined ||
@@ -1310,7 +1388,19 @@ export function stripMissingFromType(
       return stripped === unfolded.type ? (t as Type) : stripped;
     }
     case 'union': {
-      const arms = t.types.map((x) => strip(x)).filter((x) => x !== 'never');
+      // A union arm that is a self-referential alias reaching itself again
+      // as a bare union arm, with no constructor entered since it was last
+      // unfolded (the `cyc` arm of `type alias cyc = cyc | list<integer> |
+      // missing`), is dropped: its values are those of the other arms. Kept,
+      // it would still carry the `missing` arm of its definition, and each
+      // new strip of the result would unfold it once more, so the type would
+      // grow without end. An alias cut after the walk entered a constructor
+      // (the `a` inside `type alias a = list<a | integer> | missing`) stands
+      // for deeper values, so it is kept: dropping it would lose them.
+      const arms = t.types
+        .filter((x) => !isBareCutOnDescent(x, seen))
+        .map((x) => strip(x))
+        .filter((x) => x !== 'never');
       if (arms.length === 0) return 'never';
       if (arms.length === 1) return arms[0];
       return { kind: 'union', types: arms };
@@ -1324,7 +1414,7 @@ export function stripMissingFromType(
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: strip(t.elements) };
+      return { ...t, elements: stripPart(t.elements) };
     case 'tuple':
       // A `missing` component of a tuple is an absent COORDINATE of a point.
       // `tupleComponents` says what becomes of it:
@@ -1342,7 +1432,7 @@ export function stripMissingFromType(
       return {
         ...t,
         elements: t.elements.map((e) => {
-          const type = strip(e.type);
+          const type = stripPart(e.type);
           return {
             ...e,
             type:
@@ -1355,7 +1445,7 @@ export function stripMissingFromType(
         }),
       };
     case 'dictionary':
-      return { ...t, values: strip(t.values) };
+      return { ...t, values: stripPart(t.values) };
     case 'record':
     case 'object': {
       // `elements` is a prototype-free map from field name to field type, and
@@ -1364,7 +1454,7 @@ export function stripMissingFromType(
       // inherit a bogus type for the second.
       const elements: Record<string, Type> = Object.create(null);
       for (const key of Object.keys(t.elements))
-        elements[key] = strip(t.elements[key]);
+        elements[key] = stripPart(t.elements[key]);
       return { ...t, elements };
     }
     default:
@@ -1472,7 +1562,10 @@ export function numericMissingSlot(t: Readonly<Type>): boolean {
  * block). Callers must apply that second gate — do not use this predicate
  * alone to justify a shape.
  */
-export function isAtomicValueType(t: Readonly<Type>): boolean {
+export function isAtomicValueType(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): boolean {
   // Bare (primitive) string form first — the codebase's `typeof t === 'string'`
   // idiom.
   if (typeof t === 'string')
@@ -1493,7 +1586,7 @@ export function isAtomicValueType(t: Readonly<Type>): boolean {
     case 'intersection':
       // union: the value MIGHT be a collection arm → block unless all atomic.
       // intersection: the value IS every arm → any collection arm makes it one.
-      return t.types.every((arm) => isAtomicValueType(arm));
+      return t.types.every((arm) => isAtomicValueType(arm, seen));
 
     case 'broadcastable':
       return false; // lift marker — may broadcast over a collection
@@ -1501,9 +1594,21 @@ export function isAtomicValueType(t: Readonly<Type>): boolean {
     case 'negation':
       return false; // can't bound the negated set; conservative
 
-    case 'reference':
+    case 'reference': {
       // Recurse on the resolved definition; unresolved → conservative.
-      return t.def !== undefined ? isAtomicValueType(t.def) : false;
+      if (t.def === undefined) return false;
+      // The definition is read under the descent guard
+      // (`recordUnfoldOnDescent`, which counts nominal references too): a
+      // self-referential type (`type alias cyc = cyc | tuple<number,
+      // number>`) stops when it reaches itself again. The walk descends
+      // only through union, intersection and reference arms, so the values
+      // of the repeated occurrence are those of the other arms, and it
+      // answers `true`, the neutral answer for "every arm is atomic".
+      // Without the guard the walk overflows the stack.
+      const next = recordUnfoldOnDescent(declarationOf(t), seen);
+      if (next === undefined) return true;
+      return isAtomicValueType(t.def, next);
+    }
 
     case 'value':
       // A literal value type — recurse on the literal's underlying type.

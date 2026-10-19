@@ -46,6 +46,10 @@ import {
   staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
+  descendIntoConstructor,
+  isBareCutOnDescent,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -749,20 +753,28 @@ export function absorbOperandAbsence(
 /** Whether `t` has a `missing` arm that can stand for a whole value or a
  * whole collection cell. A `missing` arm inside a tuple component is an
  * absent coordinate, not an absent cell, and does not count. */
-function missingOutsideTuples(t: Type): boolean {
-  const r = resolveTypeAlias(t);
+function missingOutsideTuples(t: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again, and that occurrence contributes no
+  // members (`false`, the neutral answer for "some part has a `missing`
+  // arm"). Without the guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  const walk = (x: Type) => missingOutsideTuples(x, unfolded.seen);
   if (r === 'missing') return true;
   if (typeof r === 'string') return false;
   switch (r.kind) {
     case 'union':
     case 'intersection':
-      return r.types.some(missingOutsideTuples);
+      return r.types.some(walk);
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return missingOutsideTuples(r.elements);
+      return walk(r.elements);
     default:
       return false;
   }
@@ -778,12 +790,33 @@ function missingOutsideTuples(t: Type): boolean {
  * that is not in a collection, and a cell with a non-tuple arm are kept as
  * they are.
  */
-function withAbsentPointCells(t: Type, anyCell = false): Type {
-  const r = resolveTypeAlias(t);
+function withAbsentPointCells(
+  t: Type,
+  anyCell = false,
+  seen?: AliasDescent
+): Type {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias stops when it reaches itself again. Without the
+  // guard the walk overflows the stack. What the occurrence gives depends on
+  // how it was reached:
+  // - as a bare arm of its own union, with no constructor entered since the
+  //   alias was last unfolded (`type alias cyc = cyc | tuple<number, number>
+  //   | missing`), it adds no value of its own: it is returned unchanged, and
+  //   the other arms, which are rewritten, hold every value;
+  // - through a constructor (the inner `pts` of `type alias pts =
+  //   list<pts> | list<tuple<number, number>>`), it stands for deeper cells,
+  //   which this walk has not given their `missing` arm. Unchanged, it would
+  //   claim those cells are present, so it gives `any`, which admits an
+  //   absent cell at any depth.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return isBareCutOnDescent(t, seen) ? t : 'any';
+  const r = unfolded.type;
   if (typeof r === 'string') return t;
   switch (r.kind) {
     case 'union': {
-      const arms = r.types.map((x) => withAbsentPointCells(x, anyCell));
+      const arms = r.types.map((x) =>
+        withAbsentPointCells(x, anyCell, unfolded.seen)
+      );
       if (arms.every((x, i) => x === r.types[i])) return t;
       return widen(...arms);
     }
@@ -800,7 +833,11 @@ function withAbsentPointCells(t: Type, anyCell = false): Type {
           e.kind === 'indexed_collection' ||
           e.kind === 'broadcastable')
       ) {
-        const inner = withAbsentPointCells(cell, anyCell);
+        const inner = withAbsentPointCells(
+          cell,
+          anyCell,
+          descendIntoConstructor(unfolded.seen)
+        );
         return inner === cell ? t : { ...r, elements: inner };
       }
       return anyCell || isPointCellType(cell)
@@ -939,13 +976,28 @@ export function tupleBroadcastArityOnViews(
  * leaf (a scalar sibling); `null` when the type is not such a list. */
 function pointLeafArity(
   t: Type,
-  rank: number
+  rank: number,
+  seen?: AliasDescent
 ): { arity: number | undefined; rank: number } | null {
-  t = resolveTypeAlias(t);
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | list<integer>`,
+  // `type alias nest = list<nest>`) stops when it reaches itself again.
+  // Where the walk is cut it answers `null` (not a point list), except for a
+  // union arm that reaches its own alias as a bare arm, with no constructor
+  // entered since the alias was last unfolded: that arm is skipped, since
+  // its values are those of the other arms. A cut reached through a list
+  // element stands for deeper lists, whose rank this walk has not read, so
+  // it keeps the answer `null`. Without the guard the walk overflows the
+  // stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return null;
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (typeof t === 'string') return null;
   if (t.kind === 'union') {
     let result: { arity: number | undefined; rank: number } | null = null;
     for (const arm of t.types) {
+      if (isBareCutOnDescent(arm, seen)) continue;
       // A `missing` arm is an absent cell (a restricted point inside a
       // list, `[P{c}, (2, 3)]`): it has no leaf of its own, and the cell
       // keeps the arity of the present arms. `absorbOperandAbsence` puts the
@@ -957,7 +1009,7 @@ function pointLeafArity(
       const a =
         rank > 0 && typeof r !== 'string' && r.kind === 'tuple'
           ? tupleLeafArity(r, rank)
-          : pointLeafArity(arm, rank);
+          : pointLeafArity(arm, rank, seen);
       if (a === null) return null;
       if (result === null) result = a;
       else if (result.arity !== a.arity || result.rank !== a.rank) return null;
@@ -966,7 +1018,12 @@ function pointLeafArity(
   }
   if (t.kind !== 'list' && t.kind !== 'indexed_collection') return null;
   const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
-  const elt = resolveTypeAlias(t.elements);
+  const element = unfoldAliasOnDescent(
+    t.elements,
+    descendIntoConstructor(seen)
+  );
+  if (element === undefined) return null;
+  const elt = element.type;
   if (typeof elt === 'string') {
     return isSubtype(elt, 'number')
       ? { arity: undefined, rank: rank + dims }
@@ -977,7 +1034,7 @@ function pointLeafArity(
     elt.kind === 'indexed_collection' ||
     elt.kind === 'union'
   )
-    return pointLeafArity(elt, rank + dims);
+    return pointLeafArity(elt, rank + dims, element.seen);
   if (elt.kind === 'tuple') return tupleLeafArity(elt, rank + dims);
   // A numeric leaf that is an object type (a ranged number, `integer<2..3>`)
   // is a scalar sibling, as a primitive numeric leaf is above.
@@ -1041,12 +1098,21 @@ function isPointOrPointListUnion(t: Type): boolean {
   });
 }
 
-function hasTupleBranch(t: Type): boolean {
-  t = resolveTypeAlias(t);
+function hasTupleBranch(t: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again, and that arm contributes no members
+  // (`false`, the neutral answer for "some arm is a tuple"), so the union is
+  // decided by its other arms. Without the guard the walk overflows the
+  // stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
   return (
-    typeof t !== 'string' &&
-    (t.kind === 'tuple' ||
-      (t.kind === 'union' && t.types.some((m) => hasTupleBranch(m))))
+    typeof r !== 'string' &&
+    (r.kind === 'tuple' ||
+      (r.kind === 'union' &&
+        r.types.some((m) => hasTupleBranch(m, unfolded.seen))))
   );
 }
 
@@ -1590,25 +1656,39 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
  * in a component the shaped tuple type does not admit, so the one-cell
  * typing stands for it (as the point-list lift declines it,
  * `pointLeafArity`). */
-function hasTupleArm(t: Type): boolean {
-  const r = resolveTypeAlias(t);
+function hasTupleArm(t: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again, and that arm contributes no members
+  // (`false`, the neutral answer for "some arm is a tuple"). Without the
+  // guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
   if (r === 'tuple') return true;
   if (typeof r === 'string') return false;
   if (r.kind === 'tuple')
     return !r.elements.some((c) => typeCouldBeCollection(c.type));
-  return r.kind === 'union' && r.types.some((m) => hasTupleArm(m));
+  return (
+    r.kind === 'union' && r.types.some((m) => hasTupleArm(m, unfolded.seen))
+  );
 }
 
 /** Whether a trigger of the visible-collection lift has a tuple arm in its
  * CELL: a dimensionless list whose element has one, a union with a tuple
  * arm or with such a list branch, or a tuple itself. */
-function hasTupleCell(t: Type): boolean {
-  const element = dimensionlessIndexedElement(t);
-  if (element !== undefined) return hasTupleArm(element);
-  const r = resolveTypeAlias(t);
+function hasTupleCell(t: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`), as in
+  // `hasTupleArm`: a self-referential alias stops when it reaches itself
+  // again, and that arm answers `false`, the neutral answer for "some arm".
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const element = dimensionlessIndexedElement(unfolded.type);
+  if (element !== undefined) return hasTupleArm(element, unfolded.seen);
+  const r = unfolded.type;
   if (typeof r !== 'string' && r.kind === 'union')
-    return r.types.some((m) => hasTupleCell(m));
-  return hasTupleArm(r);
+    return r.types.some((m) => hasTupleCell(m, unfolded.seen));
+  return hasTupleArm(r, unfolded.seen);
 }
 
 /** The element type of a `broadcastable<E>` type, `undefined` for any other

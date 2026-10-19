@@ -9,13 +9,20 @@ import {
   isPointElementType,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
+  descendIntoConstructor,
+  isBareCutOnDescent,
+  isCutOnDescent,
   type AliasDescent,
 } from '../common/type/utils.js';
 import {
   isInferredTypedParameter,
   markInferredTypeOperand,
 } from './boxed-expression/inferred-annotations.js';
-import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  resolveTypeReference,
+} from '../common/type/subtype.js';
 import { declarationOf } from '../common/type/reference.js';
 import { reduceType } from '../common/type/reduce.js';
 import {
@@ -835,7 +842,9 @@ function isUnresolvedCollectionShape(x: Expression): boolean {
   if (isTuple(x) || isTextAtom(x)) return false;
   const t = x.type.type;
   const resolved = resolveTypeReference(t) ?? t;
-  if (isTupleShapedType(resolved)) return false;
+  // A union whose every arm is a tuple (`tuple<integer> | tuple<integer,
+  // missing>`) holds a tuple, so it is atomic too.
+  if (isTupleOrTupleUnionShapedType(resolved)) return false;
   if (isValuelessCollectionTyped(x)) return true;
   if (x.isCollection) return false;
   return (
@@ -2723,6 +2732,194 @@ export function isTupleShapedType(t: Type): boolean {
 }
 
 /**
+ * Is this type a TUPLE, structurally, or a union whose every arm is one
+ * (`tuple<integer> | tuple<integer, missing>`)? Every value of such a type
+ * is a tuple, whatever its slot types.
+ *
+ * This is the shape twin of `matches('tuple')` for a gate that treats a
+ * tuple as one atomic value (a spread operand, a `Join` operand, a listed
+ * element): `matches('tuple')` admits a union of value-slotted tuples but
+ * rejects an absence-slotted tuple, and {@link isTupleShapedType} admits an
+ * absence-slotted tuple but does not see the arms of a union.
+ */
+export function isTupleOrTupleUnionShapedType(
+  t: Type,
+  seen?: AliasDescent
+): boolean {
+  return everyArmIsShaped(t, isTupleShapedType, seen);
+}
+
+/**
+ * Is this type a RECORD, structurally, or a union whose every arm is one
+ * (`record{a: integer} | record{b: integer}`), possibly through a
+ * transparent alias? Every value of such a type is a record, whatever its
+ * field types. {@link isRecordShapedType} does not see the arms of a union,
+ * and `isSubtype(t, 'record')` rejects a record with an absence-typed
+ * field: a gate that excludes records needs both.
+ */
+export function isRecordOrRecordUnionShapedType(
+  t: Type,
+  seen?: AliasDescent
+): boolean {
+  return everyArmIsShaped(t, isRecordShapedType, seen);
+}
+
+/**
+ * True when `shaped` holds for `t` or, when `t` is a union (directly or
+ * through a transparent alias), for every arm of it. An intersection has the
+ * shape when one of its members that is not a negation has it: every value of
+ * `tuple<integer, integer> & !tuple<0, 0>` is a tuple. A negation member
+ * establishes nothing (`!list<integer>` is not a list).
+ *
+ * The alias unfolds under the descent guard (`unfoldAliasOnDescent`), so a
+ * self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+ * stops when it reaches itself again. An arm cut there contributes no
+ * members of its own: the values of `cyc` are the values of its other arms.
+ * So the cut arm answers `true`, the neutral answer for "every arm", and the
+ * union is decided by its other arms. Without the guard each recursive call
+ * unfolds the alias again and the walk overflows the stack.
+ */
+function everyArmIsShaped(
+  t: Type,
+  shaped: (t: Type) => boolean,
+  seen: AliasDescent
+): boolean {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return true;
+  const r = unfolded.type;
+  if (typeof r === 'object' && r.kind === 'union')
+    return (
+      r.types.length > 0 &&
+      r.types.every((arm) => everyArmIsShaped(arm, shaped, unfolded.seen))
+    );
+  // A cut member of an intersection is skipped: the neutral answer of "some
+  // member" is `false`.
+  if (
+    typeof r === 'object' &&
+    r.kind === 'intersection' &&
+    r.types.some(
+      (member) =>
+        (typeof member !== 'object' || member.kind !== 'negation') &&
+        !isCutOnDescent(member, unfolded.seen) &&
+        everyArmIsShaped(member, shaped, unfolded.seen)
+    )
+  )
+    return true;
+  return shaped(r);
+}
+
+/**
+ * Could a value of type `t` be a TUPLE? True for a tuple type (whatever its
+ * slot types, so `tuple<integer, missing>` too), for a union with an arm
+ * that could be one, and for a type whose values include tuples: a top type
+ * (`unknown`, `any`, `value`, `expression`), the bare or composite
+ * `collection` and `indexed_collection`, and `broadcastable<T>`. A
+ * reference to a type that is not declared yet is opaque, so it could be a
+ * tuple as well. False for a type that excludes every tuple: a scalar,
+ * `missing`, a list, a set, a string, a dictionary, a record, a function, and
+ * a NOMINAL type. A value of a nominal type is tagged with its type name,
+ * even when the declaration is a tuple (`type point = tuple<x: number, y:
+ * number>`), so it is never equal to the structural tuple with the same
+ * components: `point(1, 2) = (1, 2)` is `False` (pinned in
+ * `test/compute-engine/type-constructors.test.ts`).
+ *
+ * `couldMatch(t, 'tuple')` is not this test: the bare `tuple` admits values
+ * only, so it rejects `tuple<integer, missing>`, and it rejects
+ * `indexed_collection<integer>` although a tuple of integers is one.
+ *
+ * The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+ * self-referential alias stops when it reaches itself again, and that arm
+ * contributes no members (`false`), so the union is decided by its other
+ * arms.
+ */
+export function typeCouldBeTuple(t: Type, seen?: AliasDescent): boolean {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (typeof r === 'string') return couldMatch(r, 'tuple');
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((arm) => typeCouldBeTuple(arm, unfolded.seen));
+    case 'intersection':
+      // A value of an intersection is a value of every member that is not a
+      // negation, so each of them must be able to hold a tuple.
+      return r.types.every(
+        (member) =>
+          (typeof member === 'object' && member.kind === 'negation') ||
+          typeCouldBeTuple(member, unfolded.seen)
+      );
+    case 'variable':
+    case 'negation':
+      // A type variable can be bound to a tuple type, and a negation holds
+      // every value outside a type: both could be a tuple.
+      return true;
+    case 'reference':
+      return r.def === undefined;
+    case 'tuple':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return true;
+    default:
+      return couldMatch(r, 'tuple');
+  }
+}
+
+/**
+ * Could a value of type `t` be a LIST, that is an indexed collection that
+ * is not a tuple and not a string? True for a list type (a vector, a matrix,
+ * a `range`), for a union with an arm that could be one, and for a type
+ * whose values include lists: a top type (`unknown`, `any`, `value`,
+ * `expression`), the bare or composite `collection` and
+ * `indexed_collection`, and `broadcastable<T>`. A reference to a type that
+ * is not declared yet is opaque, so it could be a list as well. False for a
+ * type that excludes every list: a scalar, `missing`, a tuple (whatever its
+ * slot types), a set, a string, a dictionary, a record, a function, and a
+ * NOMINAL type, whose values are tagged with the type name (see
+ * {@link typeCouldBeTuple}).
+ *
+ * A string is excluded because a string is never equal to a collection of
+ * another kind (`eq()`, `boxed-expression/compare.ts`).
+ *
+ * The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+ * self-referential alias stops when it reaches itself again, and that arm
+ * contributes no members (`false`), so the union is decided by its other
+ * arms.
+ */
+export function typeCouldBeList(t: Type, seen?: AliasDescent): boolean {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (typeof r === 'string') return couldMatch(r, 'list');
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((arm) => typeCouldBeList(arm, unfolded.seen));
+    case 'intersection':
+      // A value of an intersection is a value of every member that is not a
+      // negation, so each of them must be able to hold a list.
+      return r.types.every(
+        (member) =>
+          (typeof member === 'object' && member.kind === 'negation') ||
+          typeCouldBeList(member, unfolded.seen)
+      );
+    case 'variable':
+    case 'negation':
+      // A type variable can be bound to a list type, and a negation holds
+      // every value outside a type: both could be a list.
+      return true;
+    case 'reference':
+      return r.def === undefined;
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return true;
+    default:
+      return couldMatch(r, 'list');
+  }
+}
+
+/**
  * How a component of type `t` of a point takes part in the norm of the
  * point:
  *
@@ -2782,10 +2979,16 @@ export function isRecordShapedType(t: Type): boolean {
  * `library/control-structures.ts`) and by the JavaScript compilation of a
  * restriction (`base-compiler.ts`), which declines such a union.
  */
-export function hasTupleOrStringArm(t: Type): boolean {
-  const r = resolveTypeAlias(t);
+export function hasTupleOrStringArm(t: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | list<integer>`) stops
+  // when it reaches itself again, and that arm contributes no members
+  // (`false`), so the union is decided by its other arms.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
   if (typeof r !== 'string' && r.kind === 'union')
-    return r.types.some(hasTupleOrStringArm);
+    return r.types.some((arm) => hasTupleOrStringArm(arm, unfolded.seen));
   return isTupleShapedType(r) || (r !== 'never' && isSubtype(r, 'string'));
 }
 
@@ -4935,8 +5138,35 @@ export function isPointArithmeticError(
  * (`list<number | tuple<…>>`), are unknown, or are `never` (an empty list)
  * does not qualify.
  */
-function isNumberCollectionType(type: Type): boolean {
-  const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(type)));
+function isNumberCollectionType(type: Type, seen?: AliasDescent): boolean {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`,
+  // `type alias nest = list<nest>`) stops when it reaches itself again.
+  // Where the walk is cut it answers `false`, except for a union arm that
+  // reaches its alias as a bare arm, with no constructor entered since the
+  // alias was last unfolded: that arm is left out of the union, since its
+  // values are those of the other arms. Without the guard the walk
+  // overflows the stack.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  return isPresentNumberCollectionType(
+    stripMissingFromType(unfolded.type, 'strip', unfolded.seen),
+    unfolded.seen
+  );
+}
+
+/**
+ * {@link isNumberCollectionType} for a type `s` whose `missing` arms are
+ * already removed. The walk below does not strip again: the strip unfolds
+ * an alias with a `missing` arm in place, so a type stripped again at each
+ * step of the walk would unfold a self-referential alias anew at each step,
+ * and the descent guard would never count it. Only an alias reference that
+ * the strip left in place is unfolded (and stripped) again, under the
+ * guard.
+ */
+function isPresentNumberCollectionType(s: Type, seen: AliasDescent): boolean {
+  if (typeof s === 'object' && s.kind === 'reference' && s.alias === true)
+    return isNumberCollectionType(s, seen);
   // A type that is only `missing` leaves `never` once the `missing` arm is
   // removed. `never` is a subtype of every type, `list<number>` included, so
   // it must be excluded here: `Missing - (1, 2)` is an absent operand beside a
@@ -4947,28 +5177,42 @@ function isNumberCollectionType(type: Type): boolean {
   // an error (a point plus a number, or a point plus a collection of
   // numbers), so the union counts. A union with no collection arm is a
   // plain number, which this predicate does not cover.
-  if (typeof s === 'object' && s.kind === 'union')
+  if (typeof s === 'object' && s.kind === 'union') {
+    const arms = s.types.filter((arm) => !isBareCutOnDescent(arm, seen));
     return (
-      s.types.some((arm) => isNumberCollectionType(arm)) &&
-      s.types.every(
+      arms.some((arm) => isPresentNumberCollectionType(arm, seen)) &&
+      arms.every(
         (arm) =>
-          isNumberCollectionType(arm) ||
+          isPresentNumberCollectionType(arm, seen) ||
           (resolveTypeAlias(arm) !== 'never' && isSubtype(arm, 'number'))
       )
     );
+  }
   // A bare spelling that names a list of numbers (`range`, a subtype of
   // `list<integer>`; not the bare `list`, whose elements are unknown).
   if (typeof s === 'string') return isSubtype(s, 'list<number>');
   if (s.kind !== 'list' && s.kind !== 'indexed_collection') return false;
-  const el = resolveTypeAlias(
-    stripMissingFromType(resolveTypeAlias(s.elements))
+  const element = unfoldAliasOnDescent(
+    s.elements,
+    descendIntoConstructor(seen)
   );
+  if (element === undefined) return false;
+  let el = stripMissingFromType(element.type, 'strip', element.seen);
+  let elSeen = element.seen;
+  // The strip keeps an alias with no `missing` arm by its name
+  // (`lst | missing` strips to `lst`): read its definition.
+  if (typeof el === 'object' && el.kind === 'reference' && el.alias === true) {
+    const named = unfoldAliasOnDescent(el, elSeen);
+    if (named === undefined) return false;
+    el = named.type;
+    elSeen = named.seen;
+  }
   if (el === 'never') return false;
   if (
     typeof el !== 'string' &&
     (el.kind === 'list' || el.kind === 'indexed_collection')
   )
-    return isNumberCollectionType(el);
+    return isPresentNumberCollectionType(el, elSeen);
   return isSubtype(el, 'number');
 }
 

@@ -234,8 +234,12 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   stripNumericRanges,
+  descendIntoConstructor,
+  isBareCutOnDescent,
+  unfoldAliasOnDescent,
   widen,
   widenAll,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import {
   couldMatch,
@@ -254,7 +258,6 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import type {
-  AlgebraicType,
   ListType,
   NamedElement,
   TupleType,
@@ -1685,10 +1688,21 @@ function rationalTierOf(
  * type with every collection rank unwrapped, and the join of the components
  * for a tuple. A scalar type is its own cell.
  */
-function numericCellTypeOf(t: Type): Type {
-  const cell = resolveTypeAlias(broadcastCellType(t));
+function numericCellTypeOf(t: Type, seen?: AliasDescent): Type {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias reached again through a tuple component (`type
+  // alias tc = tuple<tc, number> | integer`) stops there and gives
+  // `unknown`, which admits every cell, so no tier is claimed for it.
+  // Without the guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return 'unknown';
+  const cell = resolveTypeAlias(broadcastCellType(unfolded.type));
   if (typeof cell === 'object' && cell.kind === 'tuple')
-    return widenAll(cell.elements.map((e) => numericCellTypeOf(e.type)));
+    return widenAll(
+      cell.elements.map((e) =>
+        numericCellTypeOf(e.type, descendIntoConstructor(unfolded.seen))
+      )
+    );
   return cell;
 }
 
@@ -1924,9 +1938,27 @@ function quotientComponentType(
 function quotientShapeType(
   t: Type,
   den: OperandDescriptor,
-  floatNumerator: boolean
+  floatNumerator: boolean,
+  seen?: AliasDescent
 ): Type {
-  t = resolveTypeAlias(t);
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias stops when it reaches itself again. Without the
+  // guard the walk overflows the stack. What the occurrence gives depends on
+  // how it was reached:
+  // - as a bare arm of its own union, with no constructor entered since the
+  //   alias was last unfolded (`type alias cyc = cyc | tuple<number,
+  //   number>`), it adds no value of its own: it is returned unchanged, and
+  //   the other arms, which are rewritten, hold every quotient;
+  // - through a constructor (the inner `pts` of `type alias pts =
+  //   tuple<integer, integer> | list<pts>`), it stands for deeper values,
+  //   whose quotients this walk has not computed. Unchanged, it would claim
+  //   their old leaves (integers, where `[[(1, 1)]] / 2` has rational
+  //   coordinates), so it gives `unknown`, which admits every quotient.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined)
+    return isBareCutOnDescent(t, seen) ? t : 'unknown';
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (typeof t === 'string') {
     if (
       t === 'tuple' ||
@@ -1940,7 +1972,9 @@ function quotientShapeType(
   if (t.kind === 'union')
     return {
       kind: 'union',
-      types: t.types.map((a) => quotientShapeType(a, den, floatNumerator)),
+      types: t.types.map((a) =>
+        quotientShapeType(a, den, floatNumerator, seen)
+      ),
     };
   if (t.kind === 'tuple')
     return {
@@ -1960,7 +1994,12 @@ function quotientShapeType(
     // the spread.
     return {
       ...t,
-      elements: quotientShapeType(t.elements, den, floatNumerator),
+      elements: quotientShapeType(
+        t.elements,
+        den,
+        floatNumerator,
+        descendIntoConstructor(seen)
+      ),
     };
   return quotientComponentType(t, den, floatNumerator);
 }
@@ -2312,6 +2351,30 @@ function isNonTupleCollectionOperand(x: Expression): boolean {
 }
 
 /**
+ * The arms of the union `t`, read flat: an arm that is a union, or a
+ * transparent alias of one, contributes its own arms, recursively; any other
+ * arm, an alias of a non-union type included, is kept as it is written. An
+ * arm met twice (the same object) is kept once.
+ *
+ * The aliases unfold under the descent guard (`unfoldAliasOnDescent`). The
+ * walk crosses only union arms and alias references, never a constructor, so
+ * an alias it cuts reaches itself as a bare arm of its own union (`type
+ * alias nn = list<integer> | (nn | integer)`): it adds no value of its own,
+ * and it is left out.
+ */
+function flatUnionArms(t: Type, seen?: AliasDescent, out: Type[] = []): Type[] {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return out;
+  const r = unfolded.type;
+  if (typeof r === 'object' && r.kind === 'union') {
+    for (const arm of r.types) flatUnionArms(arm, unfolded.seen, out);
+    return out;
+  }
+  if (!out.includes(t)) out.push(t);
+  return out;
+}
+
+/**
  * The tuple shape a point operand contributes to one CELL of a broadcast:
  * the type itself for a tuple, and for a union the join of every tuple it
  * may hold — its tuple arms, and the tuple shape inside each dimensionless
@@ -2321,18 +2384,28 @@ function isNonTupleCollectionOperand(x: Expression): boolean {
  * left out on purpose: the broadcast re-adds it. The caller has established
  * `typeCouldBeNumericTuple`, so at least one tuple arm exists.
  */
-function numericTupleArms(t0: Type): Type {
-  const t = resolveTypeAlias(t0);
+function numericTupleArms(t0: Type, seen?: AliasDescent): Type {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again. That occurrence gives `never`, the
+  // neutral member of the join below: its tuples are those of the other
+  // arms. Without the guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t0, seen);
+  if (unfolded === undefined) return 'never';
+  const t = unfolded.type;
   if (typeof t === 'string' || t.kind !== 'union') return t as Type;
   const arms: Type[] = [];
   for (const arm of t.types) {
-    if (typeCouldBeNumericTuple(arm)) {
-      arms.push(numericTupleArms(arm));
+    if (typeCouldBeNumericTuple(arm, unfolded.seen)) {
+      arms.push(numericTupleArms(arm, unfolded.seen));
       continue;
     }
     const element = dimensionlessIndexedElementType(arm);
-    if (element !== undefined && typeCouldBeNumericTuple(element))
-      arms.push(numericTupleArms(element));
+    if (
+      element !== undefined &&
+      typeCouldBeNumericTuple(element, unfolded.seen)
+    )
+      arms.push(numericTupleArms(element, unfolded.seen));
   }
   return widen(...arms);
 }
@@ -2348,13 +2421,34 @@ function numericTupleArms(t0: Type): Type {
  */
 function scaleTupleComponents(
   t: Readonly<Type>,
-  scalarTypes: ReadonlyArray<Type>
+  scalarTypes: ReadonlyArray<Type>,
+  seen?: AliasDescent
 ): Type {
   // A transparent alias of a tuple is scaled like the tuple it names, and
   // the result is that tuple, not the alias name: `0.5 · p` for `p: ipt` (an
   // alias of `tuple<integer, integer>`) has real components, which `ipt` no
   // longer describes (the alias policy of the broadcast lift).
-  t = resolveTypeAlias(t);
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias stops when it reaches itself again. Without the
+  // guard the walk overflows the stack. What the occurrence gives depends on
+  // how it was reached:
+  // - as a bare arm of its own union, with no constructor entered since the
+  //   alias was last unfolded (`type alias cyc = cyc | tuple<number,
+  //   number>`), it adds no value of its own: it is returned unchanged, and
+  //   the other arms, which are scaled, hold every scaled value;
+  // - through a constructor (the inner `pts` of `type alias pts =
+  //   tuple<integer, integer> | list<pts>`), it stands for deeper values,
+  //   which this walk has not scaled. Unchanged, it would claim their old
+  //   components, so it gives `unknown`, which admits every scaled value.
+  // With no factor, nothing is scaled, and the occurrence is unchanged in
+  // both cases.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined)
+    return scalarTypes.length === 0 || isBareCutOnDescent(t, seen)
+      ? (t as Type)
+      : 'unknown';
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (scalarTypes.length === 0) return t as Type;
   // A plain numeric arm inside a scaled union (a symbol declared
   // `number | tuple<…>`, or the `number` element of the mixed
@@ -2373,13 +2467,20 @@ function scaleTupleComponents(
   if (t.kind === 'union')
     return {
       kind: 'union',
-      types: t.types.map((arm) => scaleTupleComponents(arm, scalarTypes)),
+      types: t.types.map((arm) => scaleTupleComponents(arm, scalarTypes, seen)),
     };
   // A collection arm scales its element, whatever shape it has: a tuple
   // element as a tuple, a union element (the mixed
   // `indexed_collection<number | tuple<…>>` arm) arm by arm.
   if (t.kind === 'list' || t.kind === 'indexed_collection')
-    return { ...t, elements: scaleTupleComponents(t.elements, scalarTypes) };
+    return {
+      ...t,
+      elements: scaleTupleComponents(
+        t.elements,
+        scalarTypes,
+        descendIntoConstructor(seen)
+      ),
+    };
   if (t.kind !== 'tuple')
     return factsOf(t).belowNumber
       ? (widen(
@@ -2479,18 +2580,27 @@ function isExtendedRealOperand(d: OperandDescriptor): boolean {
  */
 function mapProductCells(
   t0: Type,
-  cellOf: (cell: Type) => Type | undefined
+  cellOf: (cell: Type) => Type | undefined,
+  seen?: AliasDescent
 ): Type | undefined {
-  const t = resolveTypeAlias(t0);
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again, and that occurrence gives
+  // `undefined`, the answer for a cell that is not known to be numeric, so
+  // the caller declines. Without the guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t0, seen);
+  if (unfolded === undefined) return undefined;
+  const t = unfolded.type;
+  seen = unfolded.seen;
   if (isSubtype(t, 'number')) return cellOf(t);
   if (typeof t !== 'object') return undefined;
   if (t.kind === 'list' || t.kind === 'indexed_collection') {
-    const elements = mapProductCells(t.elements, cellOf);
+    const elements = mapProductCells(t.elements, cellOf, seen);
     return elements === undefined ? undefined : { ...t, elements };
   }
   if (t.kind === 'tuple') {
     const elements = t.elements.map((e) => {
-      const type = mapProductCells(e.type, cellOf);
+      const type = mapProductCells(e.type, cellOf, seen);
       return type === undefined ? undefined : { ...e, type };
     });
     return elements.some((e) => e === undefined)
@@ -2498,7 +2608,7 @@ function mapProductCells(
       : { ...t, elements: elements as typeof t.elements };
   }
   if (t.kind === 'union') {
-    const types = t.types.map((x) => mapProductCells(x, cellOf));
+    const types = t.types.map((x) => mapProductCells(x, cellOf, seen));
     return types.some((x) => x === undefined)
       ? undefined
       : reduceType({ kind: 'union', types: types as Type[] });
@@ -3113,11 +3223,20 @@ type PointNest = {
   withCell: (cell: Type) => Type;
 };
 
-function pointNestOf(t0: Type): PointNest | undefined {
-  const t = resolveTypeAlias(t0);
+function pointNestOf(t0: Type, seen?: AliasDescent): PointNest | undefined {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias nest = list<nest> | integer`)
+  // stops when it reaches itself again, and the walk then answers
+  // `undefined` (not a nest of points), so the caller declines. Without the
+  // guard the walk overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t0, seen);
+  if (unfolded === undefined) return undefined;
+  const t = unfolded.type;
   if (typeof t === 'string') return undefined;
   if (t.kind !== 'list' && t.kind !== 'indexed_collection') return undefined;
-  const elt = resolveTypeAlias(t.elements);
+  const element = unfoldAliasOnDescent(t.elements, unfolded.seen);
+  if (element === undefined) return undefined;
+  const elt = element.type;
   const isPoint = (x: Type): boolean =>
     typeof x !== 'string' &&
     (x.kind === 'tuple' ||
@@ -3130,7 +3249,7 @@ function pointNestOf(t0: Type): PointNest | undefined {
   if (isPoint(elt))
     return { cell: elt, rank: dims, withCell: (c) => ({ ...t, elements: c }) };
   if (dims > 1) return undefined;
-  const inner = pointNestOf(elt);
+  const inner = pointNestOf(elt, element.seen);
   if (inner === undefined) return undefined;
   return {
     cell: inner.cell,
@@ -8664,7 +8783,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             );
           });
           if (i >= 0) {
-            const arms = (resolveTypeAlias(ops[i].type) as AlgebraicType).types;
+            // The arms are read flat (`flatUnionArms`): an arm that is a
+            // union, or an alias of one, gives its own arms, and the
+            // product is never derived again for a union. A self-referential
+            // alias that names itself in the union (`type alias nn = nn |
+            // list<integer>`, or `list<integer> | (nn | integer)`) would
+            // otherwise split the same union again, without end.
+            const arms = flatUnionArms(ops[i].type);
             const results: Type[] = [];
             for (const arm of arms) {
               if (

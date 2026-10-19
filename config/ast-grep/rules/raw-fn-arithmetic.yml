@@ -1,0 +1,32 @@
+id: raw-fn-arithmetic
+language: TypeScript
+severity: warning
+message: Arithmetic on a raw (unbound) expression throws `Not canonical`.
+note: |
+  `ce._fn(..., { canonical: false })` and `ce.function(..., { form: 'raw' })`
+  build an expression that is not bound to an operator definition. The
+  arithmetic methods `mul`, `add`, `sub`, `div`, `neg`, `inv`, `sqrt`, `root`,
+  `abs` and `ln` throw `Error('Not canonical')` when their receiver is neither
+  canonical nor structural. (`pow` does not throw: it returns another raw
+  `Power`, which the next arithmetic call then rejects.) Build the expression
+  with `ce.function(op, ops, { form: 'structural' })` instead, which is bound
+  but keeps the operand order and structure.
+
+  This rule sees only a call chained directly on the constructor. A raw
+  expression stored in a variable and used later is not detected.
+rule:
+  any:
+    - pattern: $CE._fn($OP, $OPS, $OPTS).$M($$$REST)
+    - pattern: $CE._fn($OP, $OPS, $OPTS)?.$M($$$REST)
+    - pattern: $CE.function($OP, $OPS, $OPTS).$M($$$REST)
+    - pattern: $CE.function($OP, $OPS, $OPTS)?.$M($$$REST)
+constraints:
+  M:
+    regex: ^(mul|add|sub|div|neg|inv|sqrt|root|abs|ln)$
+  OPTS:
+    kind: object
+    has:
+      kind: pair
+      any:
+        - regex: ^canonical\s*:\s*false$
+        - regex: ^form\s*:\s*['"]raw['"]$

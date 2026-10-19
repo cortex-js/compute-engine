@@ -2,6 +2,30 @@
 
 ### Behavior Changes
 
+- `Or`, `And`, `Nand`, `Nor`, `Implies`, `Any` and `All` do not depend on the
+  order of their operands when an operand fails. A `True` operand of `Or` or
+  `Nor`, a `False` operand of `And` or `Nand`, a `False` antecedent or a `True`
+  consequent of `Implies`, and a deciding element of `Any` or `All` decide the
+  answer wherever they are, also after a failed operand: `Or(1/"a" > 0, True)`
+  is `True`, as `Or(True, 1/"a" > 0)` already was, `And(1, False)` is `False`,
+  and `Any([1, 1/"a", 3], u ↦ u > 2)` is `True` (they were the error). When no
+  operand decides, the answer is the error of the first failed operand.
+  Evaluation still stops at the first deciding operand, but the operands after
+  a failed operand are now evaluated, with their side effects (also Epsil `&&`
+  and `||`). `Xor` and `Equivalent` need every operand and are not changed.
+
+- Two quantities whose units have different physical dimensions are not equal:
+  `6 W = 6 m` and `0 m = 0 s` are `False`, `6 W ≠ 6 m` is `True`, and
+  `isEqual()` and `isIdenticallyEqual()` return `false` (they stayed
+  unevaluated or gave `undefined`). A quantity with a dimension and a number
+  are not equal either: `6 m = 6` is `False`, and a quantity is never equal to
+  a string or a boolean (`6 m = "a"` and `6 percent = True` are `False`). Order
+  has no meaning across
+  dimensions, so `Less`, `isLess()`, `Max`, `Min`, `Sort` and `Clamp` stay
+  unevaluated for such operands. A unit that is not in the unit table, and a
+  dimensionless quantity compared with a number (`6 percent = 0.06`), stay
+  undecided.
+
 - In a block written in LaTeX, `k \coloneq v` still declares a local `k`. A
   new keyword, `let` (`\operatorname{let}`, `\text{let}`), writes a
   declaration with a type, `\operatorname{let} s\colon integer\coloneq 1`,
@@ -101,6 +125,22 @@
 
 ### Bug Fixes
 
+- Angle quantities with exact magnitudes compare exactly. The scale of `deg`,
+  `grad`, `turn`, `arcmin` and `arcsec` is a rational multiple of π, so
+  `180 deg = π rad` is `True` with no rounding, and
+  `1 deg < (π/180 + 10^-30) rad` is `True` (it was `False`, a tie within the
+  tolerance). A quantity in daltons compares exactly with the value stored in
+  the unit table (CODATA 2018). Unit conversion results do not change.
+- In Epsil, a failed cell in the collection of a `for` loop or comprehension
+  header is reported. With `g(x) = 1/x`, `for x in [1, g("a"), 3] { n = n + 1 }`
+  ran 3 turns and reported nothing, because the body does not use `x` and a
+  header is not a statement. The loop still runs 3 turns, and the list gets a
+  `runtime-error` with the same message and code as the statement
+  `let xs = [1, g("a"), 3]`. Each header is reported once, also in a nested
+  loop or in a function that is called more than once. A header that is a
+  variable (`for x in xs`) is not reported again, because the statement that
+  gave `xs` its value is. A comprehension header is reported when the program
+  reads the list.
 - A tuple whose type has an absent slot, such as a symbol declared
   `tuple<integer, missing>`, is treated as a tuple. It was not, because the
   bare type `tuple` admits value slots only. So `[...t, 5]` and `{...t, 5}`
@@ -112,6 +152,27 @@
   tuple joins with a list (`Join([3, 4], s)`), where it was an
   `incompatible-type` error. A compiled `Dot` of a tuple of such tuples is
   declined, as for other tuples of tuples.
+
+- A tuple or list literal compared with a value whose type only may be a
+  tuple or a list stays undecided. `(1, 2) = x` with an undeclared `x` was
+  `False`, and so was the comparison with a symbol declared
+  `tuple<integer, integer> | missing` or `integer | tuple<integer, integer>`.
+  `[1, 2].isEqual(x)` was `false` for an undeclared `x` or for a symbol
+  declared `list<integer> | integer`; it is now `undefined`. A literal is still
+  unequal to a value that cannot have its kind: `[1, 2] = (1, 2)` and
+  `(1, 2) = 5` are `False`, and so is a tuple literal compared with a value of
+  a nominal type.
+
+- A type alias that names itself as an arm of its own union, such as
+  `cyc = cyc | tuple<number, number>`, no longer overflows the stack. Spread,
+  `Join`, arithmetic, comparisons and `At` of a symbol of such a type threw or
+  logged `Maximum call stack size exceeded`. Such an alias is now a subtype of
+  what its other arms are subtypes of (user decision 2026-10-19): with
+  `cyc = cyc | 0`, `Norm(c)` is valid and evaluates to `|c|`, where it was an
+  `incompatible-type` error, and `Join([3, 4], c)` with
+  `cyc = cyc | tuple<number, number>` appends `c` as one element. An alias that
+  names itself inside a constructor, such as `json = list<json> | integer`, is
+  unchanged.
 
 - A complex number whose imaginary coefficient is written as an inline
   fraction keeps its value in a LaTeX round trip. At a deep level, or with an

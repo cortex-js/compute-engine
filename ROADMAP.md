@@ -109,6 +109,19 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The type of a list plus a float keeps the integer list arm of a union cell (OPEN, small — found 2026-10-19 by the review of the self-referential alias guards)
+
+`absorbScalarsIntoCells` (`boxed-expression/arithmetic-add.ts`) folds a
+scalar operand into the cell type of a list. When the cell type is a union
+with a collection arm, the collection arm is kept unchanged, so the result
+type does not hold the result. Measured on 2026-10-19 with
+`L: list<list<integer> | integer>` and `L := [[1, 2], 3]`: `L + 0.5` is typed
+`list<integer | list<integer> | real>`, but its value `[[1.5, 2.5], 3.5]` has
+type `list<real | vector<real^2>>`, which is not a subtype of it. With
+`b = list<b | integer>` (an alias) and `d: list<b | integer>`, `d + 0.5` is
+typed `list<b | integer | real>` for the same reason. The fix is to fold the
+scalar into each collection arm as well, as the element-wise add does.
+
 ### The result type of `Join` and `ListJoin` turns an absent element into `number` (OPEN, small — found 2026-10-19 by the tuple shape-test fix)
 
 The type handler of `Join` receives each operand type with `missing`
@@ -206,29 +219,15 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 12) (OPEN, decision)
+### Questions found on 2026-10-19 (batch 12) (OPEN, decided 2026-10-19)
 
 - **A failed cell in a loop header is not reported.** In Epsil, with
   `g(x) = 1/x`, `for x in [1, g("a"), 3] { n = n + 1 }` runs 3 turns and
   reports nothing, because the body does not use `x` and a loop header is not a
   statement. `let xs = [1, g("a"), 3]` is reported, because it is a statement.
   (A) Report a `runtime-error` at the list literal in the header. (B) Keep it
-  silent. If nothing is decided, it stays silent. Recommendation: (A).
-- **A user function as a callback does not see a failed cell.** A user function
-  applied to an error gives that error without running its body. So with
-  `xs = [1, g("a"), 3]`, `map((u) => isError(u), xs)` is
-  `[False, Error(…), False]`, while `[isError(x) for x in xs]` is
-  `[False, True, False]`. (A) Keep this: the two forms differ. (B) Run the
-  callback body on a failed cell, as a comprehension does. If nothing is
-  decided, (A) stays. Recommendation: (A), because (B) changes the rule for
-  every user function.
-- **Partial cancellation of units.** Quantity arithmetic cancels units only
-  when the result is a pure number: `(2 Hz)·(3 s)` is `6` and `(6 m)/(2 km)` is
-  `0.003`, but `(2 Hz)·(3 J)·(1 s)` stays `6 Hz·J·s` (`UnitSimplify` gives
-  `6 J`). (A) Keep this. (B) Cancel each pair of opposite dimensions in
-  arithmetic, so the result is `6 J`. If nothing is decided, (A) stays.
-  Recommendation: (A), because arithmetic keeps the units it combines and
-  `UnitSimplify` does the rest.
+  silent. If nothing is decided, it stays silent. Recommendation: (A). User
+  decision 2026-10-19: (A).
 - **`Any`, `All`, `Or` and `And` with a failed operand.** Membership does not
   depend on the order of the cells: `3 ∈ [1, 1/"a", 3]` is `True`. `Any` and
   `All` combine the answers in order, as `Or` and `And` do, so
@@ -238,7 +237,7 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   decides, also after a failed operand. If nothing is decided, (A) stays.
   Recommendation: (B), because a definite answer that does not depend on the
   failed value is the rule everywhere else in the error model; it changes `Or`
-  and `And`, so it needs a decision.
+  and `And`, so it needs a decision. User decision 2026-10-19: (B).
 - **An Epsil assignment to a new name in a function body.**
   `function g(k) { t = k + 1; t }` then `[g(1), g(2)]` gives `[g(1),g(2)]` and
   the run-time error "writes outside a function require a declared `scope`
@@ -254,6 +253,7 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   If nothing is decided, the error stays. Recommendation: (A), because it
   makes the static rule match what the run does; printing a view already
   follows that rule (`previewRunsEffect()`, `boxed-expression/boxed-function.ts`).
+  User decision 2026-10-19: (A).
 - **Equality of two quantities of different dimensions.** `6 W = 6 m` and
   `6 W ≠ 6 m` stay unevaluated, and `isEqual()` gives `undefined`, although a
   power is never equal to a length. (A) Keep this. (B) `Equal` gives `False`,
@@ -261,7 +261,18 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   stay unevaluated, because order has no meaning across dimensions. This is
   what the engine does for a string against a number. (C) The comparison gives
   an `incompatible-type` error; this breaks `Filter` over a list of mixed
-  quantities. If nothing is decided, (A) stays. Recommendation: (B).
+  quantities. If nothing is decided, (A) stays. Recommendation: (B). User
+  decision 2026-10-19: (B).
+
+### Questions found on 2026-10-19 (batch 13) (OPEN, decision)
+
+- **A dimensionless quantity compared with a number.** `6 percent = 0.06` and
+  `30 deg = π/6` stay unevaluated, while two quantities of different
+  dimensions, or a quantity with a dimension and a number, are `False`. (A)
+  Keep this. (B) Compare a dimensionless quantity with a number as a value
+  with scale 1: `6 percent = 0.06` and `180 deg = π` are `True`. If nothing is
+  decided, (A) stays. Recommendation: (B), because SI treats angles and ratios
+  as dimensionless values.
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
@@ -272,17 +283,16 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   that the index holds: `[Map(q, [1]) for q in [a ↦ a + 1]]` is `[[q(1)]]`,
   while `[q(1) for q in [a ↦ a + 1]]` is `[2]` and `Map(q, [1])` with
   `q := a ↦ a + 1` in a `Block` is `[2]`.
+- The LaTeX parser makes a `Quantity` only after a number literal:
+  `\pi\,\mathrm{rad}` is `Multiply(Pi, rad)` and `10^{-30}\,\mathrm{rad}` is
+  `Multiply(rad, 10^-30)`, so `\frac{\pi}{180}\cdot 1\,\mathrm{rad} +
+  10^{-30}\,\mathrm{rad}` evaluates to a sum of a quantity and a product, not
+  to one quantity.
 - Printing a view can still call an impure function through a chain of
   symbols: `previewRunsEffect()` (`boxed-expression/boxed-function.ts`) reads
   the function literals held by a symbol of the view, but not those of a symbol
   that this value refers to.
 
-- Two quantities whose unit scale is stored as a float with no exact value
-  (`in`, `ft`, `mi`, `lb`, `eV`, `Da`, `au`, the angle units, and the prefixes
-  Y, R and Q) are compared within the tolerance even when both magnitudes are
-  exact: `1 Ym = (10^24 + 1) m` is `True`. The unit table would need an exact
-  scale for each such unit (for example the prefixes as powers of ten), as
-  `exactUnitConversion()` (`numerics/unit-data.ts`) has for the other units.
 
 ### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
 
@@ -315,181 +325,33 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   by the index of the sum (build it through the binding-site mechanism, not with
   `ce.symbol`).
 
-### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
+### Two trigonometric argument shapes are not reduced on the shader targets (OPEN, small — found 2026-10-18 with Tycho ledger rows 382 and 384)
 
-A shader computes in float32, about 7 significant digits. A periodic function
-turns an absolute error of its argument into a full-scale error of its value.
-The constant term of a trigonometric argument is now reduced by whole periods at
-compile time (`gpuReduceTrigOffset`, `compilation/gpu-target.ts`), so
-`\sin(x+10^6)` compiles to `sin(x + -0.35756418)` (user decision 2026-10-18).
-What remains is an argument that float32 rounds through a large FACTOR or a
-non-constant term: the sine hash `\operatorname{mod}(10^4\sin(10^4x),1)` still
-compiles to `fract(10000.0 * sin(10000.0 * x))`, with `success: true` and no
-diagnostic, and its float32 value has no relation to the `javascript` value.
+A shader computes in float32, and the constant term of a trigonometric argument
+is reduced by whole periods at compile time (`gpuReduceTrigOffset`,
+`compilation/gpu-target.ts`), so `\sin(x+10^6)` compiles to
+`sin(x + -0.35756418)`. Two shapes are not reduced, and their shader value can
+be far from the `javascript` value:
 
-- **Row 382 (the sine hash, a silent wrong value).** Tycho asks for (a) a
-  diagnostic with `kind: "correctness"` when an operand of `fract`/`mod` is a
-  trig call scaled by a constant of magnitude ≥ 1000, or (b) a range-reduced
-  sine for such an argument, so that the shader value follows the `javascript`
-  value. Tycho prefers (b). If CE declines (b), the Tycho owner must be told
-  before CE delivers (a) alone. Until one of them ships, Tycho scans the emitted
-  shader text itself.
-- **Row 384 (a high-precision mode, the Tycho owner's request).** A compile
-  option, for example `precision: "high"`, under which the shader targets emit
-  double-float arithmetic (two float32 words per value) so that the result
-  matches the `javascript` target. User direction 2026-10-18: the compile-time
-  reduction of constant offsets applies in every mode (done); double-float
-  arithmetic is for the high-precision mode only. Later phases: cancelling
-  arithmetic (`(x + 10^6)^2 − 10^12`), `exp` and `pow` of large arguments, and a
-  report of which subexpressions the mode rewrote.
-
-**Measured 2026-10-18 on an Apple M5 Max (WebGL2, ANGLE on Metal):**
-
-- The native `sin` of a float32 argument up to 10^6 is accurate (maximum error
-  1.2·10⁻⁷). A run-time reduction of an argument that is already a float32 value
-  gives no accuracy gain on this GPU. In a loop of dependent `sin` calls it
-  costs about 60% more per call (8.5 ms → 13.8 ms for 4.3·10⁹ calls). In a
-  plot-like shader there was no measurable difference.
-- The shader compiler reorders float arithmetic. A Cody–Waite reduction (2π
-  split into several float32 parts) gave the same error as one float32 2π; a
-  multiplication by a uniform `1.0` between the steps was necessary. The error
-  term of a Dekker product came out as 0 even with these barriers. GLSL ES 3.00
-  has no `fma` and no `precise`, so double-float code on the `glsl` target is
-  not reliable.
-- WGSL under WebGPU (same GPU, Metal 3, measured 2026-10-18): `fma` is exact.
-  `e = fma(K, x, −p)` is the exact error of `p = K·x` at all 4,096 inputs, and
-  `sin(10^4x)` with that product and an `fma` reduction by 2π has a maximum
-  error of 2.2·10⁻⁷ (plain: 3.8·10⁻³). The GPU's own `sin` of the reduced
-  argument (3–4 ulp) still leaves the hash off by more than 10⁻³ at 154 of 4,096
-  inputs. A reduction by π/2 to the quadrant and Taylor polynomials for `sin`
-  and `cos` on [−π/4, π/4], evaluated with `fma`, give 5.9·10⁻⁸ (under 1 ulp),
-  and the hash with an exact outer product (`fma(10^4, s, −p)`) is then within
-  10⁻³ at all 4,096 inputs. Cost per call in a loop of dependent calls, under
-  load: plain 3.4 ms, exact product and 2π reduction 4.3 ms (+26%), the
-  polynomial version 5.5 ms (+62%), for 10⁹ calls. Harness: a Playwright page
-  from a fake `https://` origin (`navigator.gpu` needs a secure context), with
-  `--enable-unsafe-webgpu --ignore-gpu-blocklist --use-angle=metal`; without
-  these flags Chromium falls back to SwiftShader, where `fma` was not fused.
-- For the hash, a correctly rounded float32 sine followed by a float32 product
-  by 10^4 meets Tycho's 10⁻³ target at every input tested; a sine with an error
-  of 1.65·10⁻⁷ misses it at 135 of 4,096 inputs.
-
-Two shapes are not reduced by the compile-time fold:
-
-- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the fold
-  accepts only exact arithmetic over number literals, so that a `Random()` draw
-  or a function mapped by the `functions` option of `compile()` is never
+- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the
+  fold accepts only exact arithmetic over number literals, so that a `Random()`
+  draw or a function mapped by the `functions` option of `compile()` is never
   evaluated at compile time. The compiler's own constant fold then emits the
   large value unreduced.
 - A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real part
   is periodic in the same way, but the constant is one complex literal.
 
-Tycho's answers (2026-10-18): every Tycho GPU lane compiles to `glsl` (WebGL2)
-only, so a `wgsl`-only lowering helps no Tycho lane today. In the stored
-all-corpus codegen audit (4,844 `glsl` rows), Tycho's scan flags 116 rows in 23
-documents: a factor ≥ 1000 inside the trig argument (`fract(K·sin(10^4·x))`, 106
-rows, 19 documents), a factor ≥ 1000 outside the trig only
-(`fract(K·sin(small·x))`, 9 rows, 3 documents), and the dot one-liner (1 row). A
-diagnostic (a) that replaces Tycho's scan must flag a `fract`/`mod` operand that
-contains a trig call and a multiplicative literal ≥ 1000 anywhere in it, inner
-or outer factor. The decisions on a `wgsl` default and on shipping (a) for
-`glsl` are with the Tycho owner.
-
-**Done (2026-10-18, user decisions the same day):** plan (i) is implemented in
-`compilation/gpu-exact-trig.ts` — the exact sine hash on `glsl`, NaN and
-`CompilationResult.float32Bounds` beyond the range. Every other flagged `Mod` or
-`Fract` operand on `glsl`, and every flagged one on `wgsl`, keeps the float32
-code with a `CompilationResult.warnings` entry (`float32-unsafe-argument`, kind
-`correctness`); a decline was implemented first and replaced after Tycho's
-measurement below. `Fract(u)` has the same check as `Mod(u, 1)`. Not covered
-yet, each the float32 code with a warning today: a hash whose operand is a
-parameter of a user function (its value comes from the call; the corpus noise
-kernel `art/hyvhlz4chj` is one — checking the arguments at each call, or
-inlining the function, would cover it), an operand rounded before the product
-(`x + 10^4`, `x·y`), an outer factor above 5·10^4 (the corpus has factors up to
-1.9·10^9, which need a more precise sine), a `wgsl` exact form (`fma`, measured
-above), and a range beyond 2.6·10^7.
-
-**Coverage in the Tycho corpus (Tycho's count, 2026-10-18, from its stored audit
-of 116 flagged `glsl` rows in 23 documents; upper bounds):** an outer factor
-above 5·10^4 in 88 rows (8 documents; up to 1,944,810,000), a hash inside a
-document function (reads a parameter) in 47 rows (15 documents), so at most 14
-rows in 7 documents can take the exact form today. The two trees that started
-row 382 (`neyret/w9f36vvizr`, `nsgmgxnou6`) decline on both counts. Extending
-coverage means: (1) for an outer factor up to 2·10^9, a sine accurate to about
-5·10^-13, so a polynomial evaluated entirely in two-part arithmetic and more
-parts of π/2; (2) for the operands those rows use
-(`10^4·(51.1·floor(t) − 3.9)`), two-part arithmetic for the operand itself,
-which is the general high-precision mode of row 384; (3) for a function
-parameter, a check of the arguments at each call, or inlining.
-
-**Tycho owner's decision (2026-10-18, later the same day), accepted by the CE
-user and implemented:** the three extensions are withdrawn (deferred, no plan to
-resume). Instead, a hash with no exact form should NOT decline: `glsl` (and
-`wgsl`) should emit the plain float32 code with `success: true` and mark the
-result as float32-unsafe, so that Tycho's curve lanes send the row to the CPU
-and its field lanes keep the shader. Tycho measured the decline on 12 corpus
-documents with hash rows on field lanes: one wheel zoom went from about 1 ms to
-2,671 ms of render work (`neyret/62urmx2dcm`), from 28 to 1,016 ms
-(`74cc5c82a3`) and from 1 to 620 ms (`0et6fx01id`), while the float32 picture
-there is a noise texture of a different pattern. The exact form, where it
-applies, stays.
-
-**Tycho owner's decision (2026-10-18):** plan (i). The `glsl` target emits the
-exact form by default (no compile option) for the three hash shapes, in the wide
-version only (exact up to `|K·x| ≈ 2.6·10^7`). Beyond the limit the shader gives
-NaN, and the compile result reports the bound on each variable (for example
-"accurate for `|x| ≤ 2,635`"); a compile-time decision for a variable with a
-declared bounded range is welcome but not required. Other flagged shapes get the
-diagnostic (a), with the inner-or-outer criterion. No `wgsl` work is needed for
-Tycho, and a range beyond 2.6·10^7 is not needed for the first step. Tycho
-removes its text scan at the adoption that ships this.
-
-Next steps, after those decisions: the diagnostic (a) on `glsl` with the
-criterion above; a `wgsl` lowering of `sin`/`cos` of a product with a large
-constant factor (exact product, `fma` reduction, polynomial). An exact product
-on `glsl` through integer arithmetic on the float bits was measured on
-2026-10-18 (see below): it works, so the `glsl` target can also be made
-accurate.
-
-**`glsl` with integer arithmetic (WebGL2, measured 2026-10-18 on ANGLE/Metal,
-Apple M5 Max, and on SwiftShader):** the product `a·b = p + e` is exact when `e`
-is formed from the 48-bit product of the two significands (12-bit pieces in
-`uint`, from `floatBitsToUint`). The rest of the hash also needs exact float
-steps, and the compiler breaks each one unless its operands pass through
-`opaque(v) = uintBitsToFloat(floatBitsToUint(v) ^ ZERO_U)` with a uniform
-`ZERO_U = 0` (a multiplication by a uniform `1.0` was not enough): both operands
-and each intermediate value of the two-sum, the operands and the rounded result
-of the product (otherwise the product is fused into the next subtraction), each
-step of the reduction by π/2, and `fract(p)` before small terms are added to it
-(otherwise `p − floor(p) + e` is reordered into `(p + e) − floor(p)`). With a
-reduction by π/2 that keeps its rounding in a low part, a two-part Taylor
-`sin`/`cos`, an exact outer product, and every double constant carried as two
-float32 parts (`12.9898 = hi + lo`), all three corpus shapes match float64
-within 10⁻³ at 4,096 of 4,096 inputs, on both backends:
-`fract(10^4·sin(10^4·x))`, `fract(43758.5453·sin(12.9898·x))`, and
-`fract(43758.5453·sin(dot(p, (12.9898, 78.233, 45.164))))`. Cost on the GPU
-(268M dependent calls): plain 1.1 ms; the first two shapes 6.0–6.3 ms (about
-5.5×); the `dot` shape 12.3 ms (about 10×). Harness: `glsl-int-bench.mjs` in the
-session scratchpad (not kept).
-
-**Range of the reduction (measured 2026-10-18):** with `k = round(p·2/π)` and
-π/2 split into 8-bit parts, `k·Ci` is exact only for `k < 2^16`, so the value is
-silently wrong for `|K·x|` above about 10^5 (2,872 of 4,096 inputs off for
-`|10^4·x|` up to 10^6). Splitting `k` into two 12-bit halves and π/2 into 12-bit
-parts (from 60 digits of π/2), with a second pass that corrects `k` by ±1, is
-accurate up to `2^24·π/2 ≈ 2.6·10^7` (0 of 4,096 off at 2.5·10^7, on ANGLE/Metal
-and SwiftShader) and costs about 7× plain against 5.5× (6.5 ms against 4.9 ms
-and 0.9 ms plain). Above 2.6·10^7, `k` is no longer an exact float and the value
-is again silently wrong (3,826 of 4,096 off at 10^9). A shader must therefore
-check `|p|` against the limit and give NaN beyond it, and the compile result
-should report the limit (as a bound on each variable when the factor is known),
-since the range of `x` is not known at compile time. A larger range needs `k` as
-two floats or a Payne–Hanek reduction in integer arithmetic (not measured).
-
-Tycho's probes: `scripts/repros/2026-10-17-ce382-glsl-amplified-trig-probe.mts`
-in the Tycho repo; the full text of both rows is in Tycho's
-`docs/COMPUTE_ENGINE.md`.
+Tycho closed rows 382 and 384 on 2026-10-19: the exact sine hash on `glsl` and
+the `float32-unsafe-argument` warnings (`compilation/gpu-exact-trig.ts`) cover
+row 382, and the high-precision mode of row 384 (double-float arithmetic, a
+non-constant offset, cancelling arithmetic, `exp` and `pow` of large arguments)
+is not needed: Tycho's GPU picture promises float32 only, and its curve lanes
+draw in float64 on the CPU. The measurements of 2026-10-18 (native `sin`
+accuracy on an Apple M5 Max, the shader compiler reordering error-free
+arithmetic, an exact `fma` on WebGPU, an exact product on `glsl` through integer
+arithmetic on the float bits) are in the version of this entry in the git
+history of ROADMAP.md before 2026-10-19, under the title "The shader targets
+compute a large trigonometric argument in float32 with no warning".
 
 ### Under `.N()`, a jump function of an expression of a parameter reads the rounded argument (OPEN, design — found 2026-10-17 by the same fix)
 

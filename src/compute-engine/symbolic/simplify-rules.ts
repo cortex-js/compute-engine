@@ -143,9 +143,13 @@ const ODD_SPECIAL_FUNCTIONS = new Set([
  *     relation is a proper sub-expression.
  *   - `simplifySystemOfEquations` (`x.simplify()` per element): each list
  *     element is a proper sub-expression; guarded by an `isSame` re-fire check.
- *   - `simplifySum` / `simplifyProduct` (body / limit `.simplify()`): the
- *     summand/factor body and the numeric limit expressions are proper
- *     sub-expressions of the Sum/Product.
+ *   - `simplifySum` / `simplifyProduct` (`symbolic/simplify-sum.ts`,
+ *     `symbolic/simplify-product.ts`): every call simplifies a value built only
+ *     from the summand/factor body and the limits, never one that contains the
+ *     Sum/Product itself — the body, the body at the lower limit, the term
+ *     count `upper - lower + 1`, `upper + 1`, and the closed-form result of a
+ *     sum of the index (`(b(b+1) - a(a-1)) / 2`). Each has one fewer level of
+ *     Sum/Product than the input, so the recursion terminates.
  *
  * The former `sqrt(-n) -> i·sqrt(n)` site was removed: canonicalization already
  * folds `Sqrt` of the positive numeric operand, so no `.simplify()` was needed.

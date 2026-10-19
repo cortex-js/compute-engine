@@ -122,6 +122,11 @@ import {
   broadcastResultType,
   broadcastShapedResultType,
   nestedBroadcastResultType,
+  descendIntoConstructor,
+  isBareCutOnDescent,
+  isCutOnDescent,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -2903,14 +2908,32 @@ function writeEvidenceType(
  */
 function tuplePatternLeafTypes(
   pattern: Expression,
-  t: Type
+  t: Type,
+  seen?: AliasDescent
 ): Map<string, Type> | undefined {
   if (!isFunction(pattern, 'Tuple')) return undefined;
-  const rt = resolveTypeAlias(t);
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias stops when it reaches itself again, and the
+  // occurrence gives `undefined`. Without the guard the walk overflows the
+  // stack. As an arm of a union, the occurrence is skipped, like an arm of
+  // another shape, when it reaches its alias as a bare union arm, with no
+  // constructor entered since the alias was last unfolded (`type alias cyc
+  // = cyc | tuple<number, number>`): its values are those of the other arms.
+  // Reached through a tuple component, it stands for deeper values whose
+  // leaves this walk has not read, so the whole union gives `undefined`: no
+  // leaf type is recorded, rather than one that leaves those values out.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const rt = unfolded.type;
   if (typeof rt !== 'string' && rt.kind === 'union') {
     const armLeaves: Map<string, Type>[] = [];
     for (const arm of rt.types) {
-      const leaves = tuplePatternLeafTypes(pattern, arm);
+      if (
+        isCutOnDescent(arm, unfolded.seen) &&
+        !isBareCutOnDescent(arm, unfolded.seen)
+      )
+        return undefined;
+      const leaves = tuplePatternLeafTypes(pattern, arm, unfolded.seen);
       if (leaves !== undefined) armLeaves.push(leaves);
     }
     if (armLeaves.length === 0) return undefined;
@@ -2930,7 +2953,11 @@ function tuplePatternLeafTypes(
     const leaf = pattern.ops[i];
     const leafType = rt.elements[i].type;
     if (isFunction(leaf, 'Tuple')) {
-      const nested = tuplePatternLeafTypes(leaf, leafType);
+      const nested = tuplePatternLeafTypes(
+        leaf,
+        leafType,
+        descendIntoConstructor(unfolded.seen)
+      );
       if (nested === undefined) return undefined;
       for (const [name, type] of nested) leaves.set(name, type);
       continue;

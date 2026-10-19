@@ -1,0 +1,25 @@
+# ast-grep project configuration for the Compute Engine API-trap rules.
+#
+# Each rule in `rules/` detects one trap that CLAUDE.md and AGENT.md describe
+# in prose, and its `note` explains the trap. Run from the repository root.
+#
+# The whole engine source:
+#
+#   ast-grep scan -c config/ast-grep/sgconfig.yml src
+#
+# Only the source files changed since the last commit, new files included.
+# The `if` keeps an empty list from scanning the whole current directory:
+#
+#   files=$( { git diff --name-only --diff-filter=d HEAD -- 'src/*.ts'; \
+#              git ls-files --others --exclude-standard -- 'src/*.ts'; } )
+#   if [ -n "$files" ]; then echo "$files" | xargs ast-grep scan -c config/ast-grep/sgconfig.yml; fi
+#
+# A `warning` rule has no hit in the committed `src/`, so a hit there is new
+# and is most likely a bug. A `hint` rule has known hits that were checked and
+# accepted; it is a review aid for the lines a diff adds. Files outside `src/`
+# (tests, benchmarks, examples) are not held to these rules.
+#
+# To keep a deliberate exception, put `// ast-grep-ignore: <rule-id>` on the
+# line before it, followed by a sentence that says why.
+ruleDirs:
+  - rules

@@ -1,0 +1,29 @@
+id: nan-identity-check
+language: TypeScript
+severity: warning
+message: Test `.isNaN`, not identity with `ce.NaN`.
+note: |
+  An exact form with no value (`0/0`, `0·∞`, `∞ − ∞`) evaluates to
+  `Indeterminate`, which is a different object from `ce.NaN`. Both report
+  `isNaN === true`, but `isSame`, `is`, `===` and `Object.is` against `ce.NaN`
+  are all `false` for `Indeterminate`, so such a test misses every
+  indeterminate form. Use `x.isNaN === true`, and `x.isIndeterminate` when
+  the two must be told apart.
+rule:
+  any:
+    - pattern: $X.isSame($CE.NaN)
+    - pattern: $X?.isSame($CE.NaN)
+    - pattern: $CE.NaN.isSame($X)
+    - pattern: $X.is($CE.NaN)
+    - pattern: $X?.is($CE.NaN)
+    - pattern: $CE.NaN.is($X)
+    - pattern: $X === $CE.NaN
+    - pattern: $CE.NaN === $X
+    - pattern: $X !== $CE.NaN
+    - pattern: $CE.NaN !== $X
+    - pattern: $X == $CE.NaN
+    - pattern: $CE.NaN == $X
+    - pattern: $X != $CE.NaN
+    - pattern: $CE.NaN != $X
+    - pattern: Object.is($X, $CE.NaN)
+    - pattern: Object.is($CE.NaN, $X)

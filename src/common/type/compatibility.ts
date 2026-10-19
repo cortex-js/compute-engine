@@ -1,4 +1,8 @@
-import { signatureArms } from './utils.js';
+import {
+  signatureArms,
+  unfoldAliasOnDescent,
+  type AliasDescent,
+} from './utils.js';
 import { freeTypeVariables } from './instantiate.js';
 import { provablyDisjoint } from './subtype.js';
 import type { FunctionSignature, Type } from './types.js';
@@ -101,7 +105,8 @@ export function callbackIncompatibility(
  * judged the union as a whole).
  */
 function collectSignatureArms(
-  t: Type
+  t: Type,
+  seen?: AliasDescent
 ): ReadonlyArray<FunctionSignature> | undefined {
   if (typeof t === 'string')
     return t === 'function' || t === 'unknown' || t === 'any' ? undefined : [];
@@ -118,7 +123,7 @@ function collectSignatureArms(
       // non-callable member proves nothing on its own.
       const arms: FunctionSignature[] = [];
       for (const member of t.types) {
-        const inner = collectSignatureArms(member);
+        const inner = collectSignatureArms(member, seen);
         if (inner === undefined) return undefined;
         arms.push(...inner);
       }
@@ -127,8 +132,17 @@ function collectSignatureArms(
     case 'reference':
       // A transparent alias IS its definition; a nominal reference is opaque
       // to this walk — conservative wildcard, rule 1 already had its say.
-      if (t.alias === true && t.def !== undefined)
-        return collectSignatureArms(t.def);
+      // The alias unfolds under the descent guard (`unfoldAliasOnDescent`):
+      // a self-referential alias (`type alias cyc = cyc | tuple<number,
+      // number>`) stops when it reaches itself again, and that occurrence
+      // contributes no arm (`[]`), the neutral answer of this collection:
+      // its arms are those of the other members. Without the guard the walk
+      // overflows the stack.
+      if (t.alias === true && t.def !== undefined) {
+        const unfolded = unfoldAliasOnDescent(t, seen);
+        if (unfolded === undefined) return [];
+        return collectSignatureArms(unfolded.type, unfolded.seen);
+      }
       return undefined;
     default:
       // Composite kinds (collections, tuples, records, negations, …): a

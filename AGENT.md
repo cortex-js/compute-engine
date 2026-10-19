@@ -25,6 +25,25 @@ Guidance for coding agents working in this repository. Derived from `CLAUDE.md`.
 - `npm run lint` - Run every check of `npm run ci` except the test suite: Oxlint + Prettier with auto-fix (`npm run lint:code`), the type check, and the corpus and artifact freshness checks (`npm run ci:corpus-pipeline`)
 - `npm run lint:code` - Run only Oxlint + Prettier with auto-fix
 - `npm run doc` - Generate documentation
+- `npx tsx scripts/probe.ts '<latex>'` - Show the raw parse, canonical form,
+  type, `evaluate()`, `.N()` and `simplify()` of one expression. With
+  `--check '<expr>'`, compare two expressions at repeatable sample points
+  before you encode an identity or a special value (exit code 1 when a point
+  disagrees). With `--routes`, compare the `ce.parse`, `ce.box` and
+  `ce.function` routes, which a lazy operator needs. The file header lists all
+  the options.
+- `npx tsx scripts/where.ts <Operator>` - Show the operator's signature, flags
+  and handlers, its LaTeX round trip, every source line that names it grouped
+  by part of the engine, its LaTeX commands, and the test files that use it.
+- `ast-grep scan -c config/ast-grep/sgconfig.yml src` - Find the API traps
+  that this file and `CLAUDE.md` describe (identity with `ce.NaN`, a bare
+  collection type in a shape test, arithmetic on a raw expression, a leftover
+  `console.log`; and, as review hints, a direct `ce.Indeterminate` result and
+  `.simplify()` in the simplification rules). Pass the changed `src/` files
+  instead of `src` to scan only those; never pass an empty list. Needs
+  `ast-grep` (`brew install ast-grep`). The rules and their explanations are
+  in `config/ast-grep/rules/`, and `config/ast-grep/sgconfig.yml` says how to
+  read the results.
 
 ### Code Comments
 

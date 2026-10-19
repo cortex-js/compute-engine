@@ -7,6 +7,7 @@ import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   collectionSourceOperands,
   isRecordShapedType,
+  isTupleOrTupleUnionShapedType,
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
@@ -67,7 +68,11 @@ export function hasConstantTimeCount(x: Expression): boolean {
     return (
       x.isIndexedCollection === true &&
       !producesKeyed(x) &&
-      x.ops.every((op) => op.type.matches('tuple') || hasConstantTimeCount(op))
+      x.ops.every(
+        (op) =>
+          isTupleOrTupleUnionShapedType(op.type.type) ||
+          hasConstantTimeCount(op)
+      )
     );
   return false;
 }
@@ -121,7 +126,7 @@ export function listingCountUpperBound(
     // callback-free bound and stayed a view.
     let total = 0;
     for (const op of x.ops) {
-      const bound = op.type.matches('tuple')
+      const bound = isTupleOrTupleUnionShapedType(op.type.type)
         ? 1
         : listingCountUpperBound(op, memo);
       if (bound === undefined) {

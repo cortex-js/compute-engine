@@ -1,0 +1,22 @@
+id: simplify-in-rule-path
+language: TypeScript
+severity: hint
+message: '`.simplify()` in code that simplification rules call can recurse without end.'
+note: |
+  The simplification driver guards against cycles (seen-expression set, step
+  limit) only within one call. A `.simplify()` inside a rule, or inside a
+  helper that a rule calls, starts a new call with new guards, so the same rule
+  can fire again without limit. Return the canonical result instead. A call is
+  acceptable only when it simplifies an expression that cannot contain the
+  expression being simplified (a strict sub-expression, or a value built only
+  from sub-expressions); then add it, with the reason, to the list of
+  permitted calls in the header of `symbolic/simplify-rules.ts`. The current
+  calls are all on that list, so this rule is a review aid for changed files.
+files:
+  - '**/symbolic/simplify-*.ts'
+  - '**/symbolic/fu*.ts'
+  - '**/boxed-expression/polynomials.ts'
+  - '**/boxed-expression/factor.ts'
+  - '**/boxed-expression/expand.ts'
+rule:
+  pattern: $X.simplify($$$)

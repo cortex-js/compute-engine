@@ -26,7 +26,12 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
-import { isRecordShapedType, isTupleShapedType } from '../collection-utils.js';
+import {
+  isRecordOrRecordUnionShapedType,
+  isRecordShapedType,
+  isTupleOrTupleUnionShapedType,
+  isTupleShapedType,
+} from '../collection-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { declaredBinders } from './binding-sites.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -1143,8 +1148,8 @@ function wholeCollectionSlotArm(
     (m) =>
       !isScalarType(m) &&
       !isSubtype(m, 'function') &&
-      !isSubtype(m, 'tuple') &&
-      !isSubtype(m, 'record')
+      !isTupleOrTupleUnionShapedType(m) &&
+      !isRecordOrRecordUnionShapedType(m)
   );
   return collections.length === 0 ? undefined : widenAll(collections);
 }

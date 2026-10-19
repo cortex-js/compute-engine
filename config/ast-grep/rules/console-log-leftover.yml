@@ -1,0 +1,30 @@
+id: console-log-leftover
+language: TypeScript
+severity: warning
+message: '`console.log` outside a debug guard is probably a leftover.'
+note: |
+  The production build strips every `console.*` call, so a leftover
+  `console.log` only shows up in development builds and in tests, where it
+  adds noise. `console.assert`, `console.warn` and `console.error` are not
+  matched. A trace that must stay belongs in the `then` branch of a positive
+  debug test, `if (DEBUG_…)` or `if (obj.DEBUG_…)`. The `else` branch, a
+  negated test (`if (!DEBUG)`) and a test that only mentions the word
+  (`if (x !== 'DEBUG')`) are not guards.
+rule:
+  pattern: console.log($$$)
+  not:
+    inside:
+      stopBy: end
+      kind: if_statement
+      has:
+        field: condition
+        regex: ^\(\s*([\w.]*\.)?DEBUG\w*\s*(\)|&&)
+      # The `then` branch only: the call must not be inside the `else` clause
+      # of that same `if` statement.
+      not:
+        has:
+          field: alternative
+          stopBy: end
+          pattern: console.log($$$)
+ignores:
+  - '**/scripts/**'

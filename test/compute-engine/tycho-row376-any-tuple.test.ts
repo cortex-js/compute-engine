@@ -141,8 +141,12 @@ describe('A STRUCTURAL ALIAS of a tuple of any or of unknown', () => {
 // union arm (`cyc`) or through a constructor (`json`, `nest`). The walk that
 // reads each `any` cell as `unknown` counts the unfolds of each alias on its
 // path, so it stops. Before that count, these operands overflowed the stack
-// at boxing. None of these aliases has a point type, so each call is an
-// `incompatible-type` error.
+// at boxing. None of these aliases has a point type, so `Dot` with each of
+// them is an `incompatible-type` error, and so is `Norm` of `j` and of `n`.
+//
+// `cyc = cyc | 0` names itself only as a bare union arm, so its values are
+// those of `0`, and it is a subtype of what `0` is a subtype of. `Norm`
+// accepts a number, so `Norm(c)` is valid (user decision 2026-10-19).
 describe('A SELF-REFERENTIAL ALIAS at a stripped position', () => {
   function cyclicEngine(): ComputeEngine {
     const ce = new ComputeEngine();
@@ -154,10 +158,12 @@ describe('A SELF-REFERENTIAL ALIAS at a stripped position', () => {
     ce.declare('n', 'nest');
     return ce;
   }
-  const CYCLIC_CALLS = ['c', 'j', 'n'].flatMap((s) => [
-    [`Dot with ${s}`, ['Dot', ['Tuple', 1, 2], s]] as const,
-    [`Norm of ${s}`, ['Norm', s]] as const,
-  ]);
+  const CYCLIC_CALLS = ['c', 'j', 'n']
+    .flatMap((s) => [
+      [`Dot with ${s}`, ['Dot', ['Tuple', 1, 2], s]] as const,
+      [`Norm of ${s}`, ['Norm', s]] as const,
+    ])
+    .filter(([label]) => label !== 'Norm of c');
 
   test.each(CYCLIC_CALLS)('%s', (_, input) => {
     const ce = cyclicEngine();
@@ -167,6 +173,19 @@ describe('A SELF-REFERENTIAL ALIAS at a stripped position', () => {
     }).not.toThrow();
     expect(e!.isValid).toBe(false);
     expect(JSON.stringify(e!.json)).toContain('incompatible-type');
+  });
+
+  test('Norm of c', () => {
+    // `cyc` is a subtype of what `0` is a subtype of, a number, so `Norm(c)`
+    // is valid: it is the absolute value of `c` (user decision 2026-10-19).
+    const ce = cyclicEngine();
+    let e: Expression | undefined;
+    expect(() => {
+      e = ce.box(['Norm', 'c']);
+    }).not.toThrow();
+    expect(e!.isValid).toBe(true);
+    expect(e!.type.toString()).toBe('+oo | nan | real');
+    expect(e!.evaluate().json).toEqual(['Abs', 'c']);
   });
 
   // An alias nested inside a constructor, and an alias of that alias, are

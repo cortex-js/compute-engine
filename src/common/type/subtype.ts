@@ -342,6 +342,39 @@ function endUnfold(ref: TypeReference): void {
 }
 
 /**
+ * The right-hand types each structural alias on the LEFT is being unfolded
+ * against, one entry per live lhs unfold frame (paired with `beginUnfold`).
+ *
+ * A self-referential alias whose definition names itself as a bare union
+ * arm (`type alias cyc = cyc | tuple<number, number>`) has the values of its
+ * other arms only: the arm `cyc` adds no value of its own. So when the
+ * question `cyc <: R` is asked while the same question is being answered
+ * further up the stack, that arm is taken as a subtype of `R` and the union
+ * is decided by its other arms (`isAssumedUnionArm`). Without this, the
+ * re-entry was refused by `beginUnfold`, the arm answered `false`, and
+ * `cyc` was a subtype of nothing, not even `tuple`. The assumption is made
+ * only for the SAME `R` (compared by identity), so an alias reached again
+ * through a constructor, where the question asked is about an element
+ * type, is still refused as before.
+ *
+ * The rule: a self-referential alias that names itself as a bare union arm
+ * is a subtype of what its other arms are subtypes of (user decision
+ * 2026-10-19).
+ */
+let lhsUnfoldTargets: Map<TypeReference, Set<unknown>> | null = null;
+
+/** Whether the union arm `arm` is a structural alias already being unfolded
+ * against `rhs` further up the stack: see `lhsUnfoldTargets`. */
+function isAssumedUnionArm(arm: Type, rhs: unknown): boolean {
+  return (
+    typeof arm === 'object' &&
+    arm.kind === 'reference' &&
+    arm.alias === true &&
+    lhsUnfoldTargets?.get(arm)?.has(rhs) === true
+  );
+}
+
+/**
  * The RHS unfold's cycle guard, keyed on the PAIR — the alias record together
  * with the identity of the left-hand type it is being unfolded against.
  *
@@ -1096,10 +1129,14 @@ export function isSubtype(
     // (through the cycle) is under-reported — but an acyclic alias chain of any
     // length is answered exactly.
     if (!beginUnfold(lhs)) return false;
+    lhsUnfoldTargets ??= new Map();
+    lhsUnfoldTargets.set(lhs, new Set([rhs]));
     try {
       const def = aliasDefinitionAt(lhs);
       return def === undefined ? false : isSubtype(def, rhs);
     } finally {
+      lhsUnfoldTargets.delete(lhs);
+      if (lhsUnfoldTargets.size === 0) lhsUnfoldTargets = null;
       endUnfold(lhs);
     }
   }
@@ -1152,7 +1189,9 @@ export function isSubtype(
     // `list`). The absence PRIMITIVES themselves (`nothing`, `missing`)
     // returned false above, before this rule.
     if (typeof lhs !== 'string' && lhs.kind === 'union')
-      return lhs.types.every((t) => isSubtype(t, 'unknown'));
+      return lhs.types.every(
+        (t) => isAssumedUnionArm(t, 'unknown') || isSubtype(t, 'unknown')
+      );
     return true;
   }
   // 'unknown' is only a subtype of `any` (handled above); gate on a primitive
@@ -1230,7 +1269,10 @@ export function isSubtype(
     }
 
     // A union is a subtype of a type if all of its types is a subtype of the type
-    if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
+    if (lhs.kind === 'union')
+      return lhs.types.every(
+        (t) => isAssumedUnionArm(t, rhs) || isSubtype(t, rhs)
+      );
 
     // An intersection is a subtype of a type if any of its types is a subtype of the type
     if (lhs.kind === 'intersection') {
@@ -1360,6 +1402,7 @@ export function isSubtype(
       // flat `integer | +oo | -oo | nan`); requiring a single covering rhs
       // member wrongly rejected exactly that case.
       return lhs.types.every((lhsType) => {
+        if (isAssumedUnionArm(lhsType, rhs)) return true;
         if (typeof lhsType !== 'string') {
           if (lhsType.kind === 'broadcastable')
             return broadcastableFitsUnion(lhsType);
@@ -1417,7 +1460,9 @@ export function isSubtype(
 
     // A union is broadcastable iff each of its members is.
     if (typeof lhs !== 'string' && lhs.kind === 'union')
-      return lhs.types.every((t) => isSubtype(t, rhs));
+      return lhs.types.every(
+        (t) => isAssumedUnionArm(t, rhs) || isSubtype(t, rhs)
+      );
 
     // Scalar branch: `S <: T ⟹ S <: broadcastable<T>`.
     if (isSubtype(lhs, rhs.elements)) return true;
@@ -1471,10 +1516,24 @@ export function isSubtype(
       // the record: see `beginUnfoldAgainst` for why this side cannot use the
       // record-keyed guard the lhs uses.
       if (!beginUnfoldAgainst(rhs, lhs)) return false;
+      // An assumption `A <: rhs` held for a live lhs unfold
+      // (`lhsUnfoldTargets`) holds for the definition of `rhs` as well, since
+      // the alias IS its definition. It is recorded for the definition while
+      // it is read, so that the arm `cyc` of `type alias cyc = cyc |
+      // tuple<number, number>` is still taken as a subtype of `pt` when `pt`
+      // is an alias of `tuple<number, number>`.
+      const extended: Set<unknown>[] = [];
+      const def = aliasDefinitionAt(rhs);
       try {
-        const def = aliasDefinitionAt(rhs);
-        return def === undefined ? false : isSubtype(lhs, def);
+        if (def === undefined) return false;
+        for (const targets of lhsUnfoldTargets?.values() ?? [])
+          if (targets.has(rhs) && !targets.has(def)) {
+            targets.add(def);
+            extended.push(targets);
+          }
+        return isSubtype(lhs, def);
       } finally {
+        for (const targets of extended) targets.delete(def);
         endUnfoldAgainst(rhs, lhs);
       }
     }
@@ -1559,7 +1618,10 @@ export function isSubtype(
   // the SHAPE of the rhs: `list<tuple<3>> | tuple<3>` matched the composite
   // `tuple<number, number, number>` (any-branch) while `number | list<number>`
   // failed the primitive `number` (all-branch). Tycho item 92.
-  if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
+  if (lhs.kind === 'union')
+    return lhs.types.every(
+      (t) => isAssumedUnionArm(t, rhs) || isSubtype(t, rhs)
+    );
 
   // Handle intersection types with other types
   if (lhs.kind === 'intersection') {

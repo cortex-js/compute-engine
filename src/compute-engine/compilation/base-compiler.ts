@@ -62,6 +62,7 @@ import {
   isPossiblyCollectionTyped,
   isTextAtom,
   isTuple,
+  isTupleOrTupleUnionShapedType,
   isTupleShapedType,
   isTupleWithListCoordinate,
   isPointListArgumentType,
@@ -13278,7 +13279,7 @@ export class BaseCompiler {
     return (
       typeof t !== 'string' &&
       t.kind === 'tuple' &&
-      t.elements.some((e) => isSubtype(e.type, 'tuple'))
+      t.elements.some((e) => isTupleOrTupleUnionShapedType(e.type))
     );
   }
 

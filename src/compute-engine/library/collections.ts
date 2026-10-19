@@ -51,8 +51,11 @@ import {
   isTextAtom,
   isRecordShapedType,
   isTuple,
+  isTupleOrTupleUnionShapedType,
   isTupleShapedType,
   isUnknownLengthBroadcast,
+  typeCouldBeList,
+  typeCouldBeTuple,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
@@ -152,6 +155,9 @@ import {
   widen,
   widenAll,
   widenElementTypes,
+  unfoldAliasOnDescent,
+  isCutOnDescent,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import {
   arityProvablyIncapable,
@@ -3857,7 +3863,7 @@ function isIndexSpanD(ops: ReadonlyArray<OperandDescriptor>): boolean {
 
 /** Descriptor twin of {@link isAtomicJoinOperand}. */
 function isAtomicJoinOperandD(d: OperandDescriptor): boolean {
-  return isSubtype(d.type, 'tuple');
+  return isTupleOrTupleUnionShapedType(d.type);
 }
 
 /**
@@ -4276,14 +4282,26 @@ function isPointOrNumberElementType(element: Type | undefined): boolean {
  * non-tuple arm, or a position past the arity — so the caller declines rather
  * than fabricating a coordinate.
  */
-function tupleComponentType(t: Type, position: number): Type | undefined {
-  const e = resolveTypeAlias(t);
+function tupleComponentType(
+  t: Type,
+  position: number,
+  seen?: AliasDescent
+): Type | undefined {
+  // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+  // stops when it reaches itself again, and that branch is skipped: its
+  // components are those of the other branches. Without the guard the walk
+  // overflows the stack.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const e = unfolded.type;
   if (typeof e === 'string') return undefined;
   if (e.kind === 'tuple') return e.elements[position - 1]?.type;
   if (e.kind === 'union') {
     const comps: Type[] = [];
     for (const branch of e.types) {
-      const c = tupleComponentType(branch, position);
+      if (isCutOnDescent(branch, unfolded.seen)) continue;
+      const c = tupleComponentType(branch, position, unfolded.seen);
       if (c === undefined) return undefined;
       comps.push(c);
     }
@@ -8207,7 +8225,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Tuples do not spread (they are units; a pair is a tuple). A
           // dictionary has no error CELL to freeze into — entries are
           // pairs — so the whole literal collapses to the error.
-          if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
+          if (
+            isFunction(x, 'Tuple') ||
+            isTupleOrTupleUnionShapedType(x.type.type)
+          )
             return ce.error(['spread-tuple'], x.toString());
           flushRun();
           segments.push(ce._fn('ListFrom', [x]));
@@ -12189,7 +12210,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // out-of-band. An in-range literal tuple/record hit is exact (no marker);
       // an out-of-range literal misses to `marker(⊔S)`; a dynamic index gains
       // `T | marker(T)`.
-      const scalarResultType = (t: Type = ops[0].type): Type => {
+      const scalarResultType = (
+        t: Type = ops[0].type,
+        seen?: AliasDescent
+      ): Type => {
         const key = ops[1];
         // A tuple base: a literal in-range index selects that slot's type
         // exactly, an out-of-range literal misses to `marker(⊔S)`, and a
@@ -12224,7 +12248,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is, since the access of an absent operand is absent; the other
         // arms are read together as one type by this same function, and the
         // results are joined.
-        const rt = resolveTypeAlias(t);
+        //
+        // The alias unfolds under the descent guard (`unfoldAliasOnDescent`):
+        // a self-referential alias (`type alias cyc = cyc | tuple<number,
+        // number>`) stops when it reaches itself again, and that arm is
+        // skipped: its values are those of the other arms. An arm that is an
+        // alias of a union is handed to the recursive call unresolved, so that
+        // the call counts its unfold. Without the guard the walk overflows the
+        // stack.
+        const unfolded = unfoldAliasOnDescent(t, seen);
+        const rt = unfolded?.type ?? resolveTypeAlias(t);
         if (
           typeof rt !== 'string' &&
           rt.kind === 'union' &&
@@ -12236,10 +12269,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const results: Type[] = [];
           const others: Type[] = [];
           for (const arm of rt.types) {
+            if (isCutOnDescent(arm, unfolded?.seen)) continue;
             const r = resolveTypeAlias(arm);
             if (r === 'missing' || r === 'nothing') results.push(r);
             else if (typeof r !== 'string' && r.kind === 'tuple')
               results.push(tupleResult(r));
+            else if (typeof r !== 'string' && r.kind === 'union')
+              others.push(arm);
             else others.push(r);
           }
           if (others.length > 0)
@@ -12247,7 +12283,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               scalarResultType(
                 others.length === 1
                   ? others[0]
-                  : (reduceType({ kind: 'union', types: others }) ?? 'any')
+                  : (reduceType({ kind: 'union', types: others }) ?? 'any'),
+                unfolded?.seen
               )
             );
           return reduceType({ kind: 'union', types: results }) ?? 'any';
@@ -18121,7 +18158,10 @@ function canonicalList(
         // Epsil serializer prints as `[...missing, 0]` is `Missing`.
         flushRun();
         segments.push(x);
-      } else if (isFunction(x, 'Tuple') || x.type.matches('tuple')) {
+      } else if (
+        isFunction(x, 'Tuple') ||
+        isTupleOrTupleUnionShapedType(x.type.type)
+      ) {
         // Tuples do not spread. The error is an ELEMENT, so the list
         // freezes with the error cell in place (error-propagation §6a.2).
         run.push(ce.error(['spread-tuple'], x.toString()));
@@ -18220,7 +18260,10 @@ function canonicalSet(
         // was `Set(Missing, 0)`.
         flushRun();
         segments.push(x);
-      } else if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
+      } else if (
+        isFunction(x, 'Tuple') ||
+        isTupleOrTupleUnionShapedType(x.type.type)
+      )
         run.push(engine.error(['spread-tuple'], x.toString()));
       else if (isProvablyScalarJoinOperand(x)) run.push(x);
       else {
@@ -18978,7 +19021,7 @@ export function* reduceCollection<T>(
  * collections and tuples.
  */
 function isAtomicJoinOperand(op: Expression): boolean {
-  return op.type.matches('tuple');
+  return isTupleOrTupleUnionShapedType(op.type.type);
 }
 
 /**
@@ -19083,12 +19126,12 @@ function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
  */
 function isProvablyScalarJoinOperand(op: Expression): boolean {
   if (!op.isValid) return false;
-  if (op.type.matches('tuple')) return false;
+  if (isTupleOrTupleUnionShapedType(op.type.type)) return false;
   const atomic = (t: Type): boolean => {
     if (t === 'unknown' || t === 'any' || t === 'value') return false;
     if (typeof t !== 'string' && t.kind === 'union')
       return t.types.every(atomic);
-    if (isSubtype(t, 'tuple')) return true;
+    if (isTupleShapedType(t)) return true;
     return !typeCouldBeCollection(t);
   };
   return atomic(op.type.type);
@@ -20284,11 +20327,19 @@ function defaultCollectionEq(a: Expression, b: Expression) {
     // collection…): decline so `eq()` in compare.ts can evaluate both sides,
     // re-consult, or fall back to its element-wise collection comparison. A
     // value whose type cannot be this kind is definitively unequal.
+    //
+    // So a literal declines when `b` COULD be of its kind. A tuple literal
+    // declines for an undeclared symbol (`unknown`), a union with a tuple arm
+    // (`integer | tuple<…>`, `tuple<…> | missing`) and an absence-slotted
+    // tuple. A list literal declines for an undeclared symbol, an
+    // application with no declared result, and a union with a list arm
+    // (`list<integer> | integer`); it is definitively unequal to a value
+    // whose every arm is a tuple (`tuple<integer> | tuple<integer,
+    // missing>`), as to a single tuple, a set or a scalar.
     const compatible =
       a.operator === 'Tuple'
-        ? b.type.matches('tuple')
-        : b.type.matches('indexed_collection<any>') &&
-          !isTupleShapedType(b.type.type);
+        ? typeCouldBeTuple(b.type.type)
+        : typeCouldBeList(b.type.type);
     return compatible ? undefined : false;
   }
   if (!isFunction(a) || !isFunction(b)) return false;

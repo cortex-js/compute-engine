@@ -1,0 +1,37 @@
+id: indeterminate-direct-return
+language: TypeScript
+severity: hint
+message: An `Indeterminate` answer must become `NaN` when an operand is a float; prefer `indeterminateFormAnswer(ce, operands)`.
+note: |
+  An exact form with no value is `Indeterminate` only when every operand is
+  exact and present. With a float operand the answer is `NaN`, and with an
+  absent or `NaN` operand it is `NaN` too. `indeterminateFormAnswer(ce,
+  operands)` in `boxed-expression/type-guards.ts` applies these rules. A site
+  that produces `ce.Indeterminate` directly must make the same check itself,
+  or have a caller that makes it.
+
+  This is a `hint` because the 11 current sites were all checked: each one
+  tests for a float first, has a caller that converts the result (the
+  definite-integral and `Max` folds), or is the value of the `Indeterminate`
+  constant itself. Report a hit only in code that a diff adds.
+rule:
+  pattern: $CE.Indeterminate
+  inside:
+    any:
+      - kind: return_statement
+      - kind: ternary_expression
+      - kind: pair
+      - kind: array
+      - kind: arrow_function
+    stopBy:
+      any:
+        - kind: statement_block
+        - kind: call_expression
+        - kind: binary_expression
+  not:
+    inside:
+      kind: function_declaration
+      has:
+        field: name
+        regex: ^indeterminateFormAnswer$
+      stopBy: end

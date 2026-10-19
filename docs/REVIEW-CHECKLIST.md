@@ -9,6 +9,32 @@ repository and hard to see in a diff. The full rules are in `CLAUDE.md`,
 Keep each item short and testable. Add an item when a review misses a mistake
 that a reader of the diff could have seen.
 
+## Automated trap scan
+
+Run this once on the changed files under `src/`. It is a read-only search,
+not a build or a test, so a reviewer may run it. Pass the files of the review
+(for a staged review, `git diff --cached --name-only --diff-filter=d -- 'src/*.ts'`);
+never run it with an empty file list, which scans the whole current directory:
+
+```
+ast-grep scan -c config/ast-grep/sgconfig.yml <changed src/**/*.ts files>
+```
+
+The rules are in `config/ast-grep/rules/`, one trap per file, each with a
+note that explains it. A `warning` has no hit in the committed `src/`, so a
+hit in a changed file is most likely a bug: report it as a finding, unless an
+`// ast-grep-ignore` comment with a reason covers it. A `hint` has known hits
+that were checked and accepted; report one only on a line that the diff adds:
+
+- `simplify-in-rule-path`: a new `.simplify()` in code that the
+  simplification rules call, unless the diff also adds it, with the reason,
+  to the list of permitted calls in the header of `symbolic/simplify-rules.ts`.
+- `indeterminate-direct-return`: a new `ce.Indeterminate` result that is not
+  turned into `NaN` when an operand is a float, absent or `NaN`.
+
+When a review finds a trap that a syntax pattern can detect, add a rule for it
+there.
+
 ## Correctness
 
 - **Exact results stay exact.** An `evaluate` handler returns an exact value or
