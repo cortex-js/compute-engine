@@ -1,0 +1,125 @@
+{
+ "$comment": "Trees from Tycho's round-trip audit of its Desmos corpus that failed the round trip with the engine's default serialization (toLatex({ materialization: false })) on CE 0.157.0. Each entry is the canonical MathJSON tree Tycho boxed (`json`), the LaTeX source it came from (`source`) and the Tycho document (`from`). Read by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip), which boxes `json`, serializes it with the default options, parses the result and checks isSame. Source: ~/dev/tycho/_TASK/ce-round-trip-audit/2026-10-19-ce0.157.0-final/seed.json (Tycho ledger, after rows 387-389).",
+ "date": "2026-10-19",
+ "engineVersion": "0.157.0",
+ "trees": [
+  {
+   "id": "tycho-00001",
+   "from": "art/13obrwvjag",
+   "source": "\\Re(\\sqrt[\\frac{i,1}{\\sqrt{50i}}]{x+yi})\\le0",
+   "json": [
+    "LessEqual",
+    [
+     "Real",
+     [
+      "Root",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        [
+         "Complex",
+         0,
+         1
+        ],
+        "y"
+       ]
+      ],
+      [
+       "Tuple",
+       [
+        "Complex",
+        [
+         "Rational",
+         1,
+         10
+        ],
+        [
+         "Rational",
+         1,
+         10
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Sqrt",
+         [
+          "Complex",
+          0,
+          50
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    0
+   ]
+  },
+  {
+   "id": "tycho-00002",
+   "from": "neyret/cucxkogo6q",
+   "source": "P(x, y)=\\frac{1}{2}(\\sum_{i=1}^4\\frac{1}{2^{i}}p(2^{i}x,2^{i}y))",
+   "json": [
+    "Equal",
+    [
+     "P",
+     "x",
+     "y"
+    ],
+    [
+     "Multiply",
+     [
+      "Rational",
+      1,
+      2
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "p",
+        [
+         "Multiply",
+         "x",
+         [
+          "Power",
+          2,
+          "i"
+         ]
+        ],
+        [
+         "Multiply",
+         "y",
+         [
+          "Power",
+          2,
+          "i"
+         ]
+        ]
+       ],
+       [
+        "Power",
+        2,
+        [
+         "Negate",
+         "i"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "i",
+       1,
+       4
+      ]
+     ]
+    ]
+   ]
+  }
+ ]
+}

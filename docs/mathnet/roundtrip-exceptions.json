@@ -2,7 +2,7 @@
  "$comment": "Known failures of the serialize->parse round-trip property `ce.parse(t.latex).isSame(t)` (structural tier) over docs/mathnet/parser-test-cases.json. Maintained by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip); regenerate with `npm run check:roundtrip -- --update`. `reason` is `bug` (a serializer/round-trip defect to fix) or `documented-lossy` (a form the serializer is contractually allowed to lose). `class` groups identical-cause entries; see `classes` below. CI fails only on failures NOT listed here.",
  "date": "2026-08-04",
  "engineVersion": "0.101.0+unreleased",
- "lastChecked": "2026-10-05",
+ "lastChecked": "2026-10-19",
  "classes": {
   "fraction-fallback-inverse-power": {
    "reason": "documented-lossy",
@@ -31,6 +31,14 @@
    "mismatch": "[\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Multiply\",[\"Rational\",1,2],[\"Divide\",1,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]…  ≠  [\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Divide\",1,[\"Multiply\",2,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]]]",
    "class": "quotient-factor-merged-into-fraction",
    "reason": "documented-lossy"
+  },
+  {
+   "latex": "tycho-seed:tycho-00002",
+   "reserialized": "P(x, y)=\\frac{1}{2}(\\sum_{i=1}^4\\frac{p(x\\times2^{i}, y\\times2^{i})}{2^{i}})",
+   "mismatch": "[\"Equal\",[\"P\",\"x\",\"y\"],[\"Multiply\",[\"Rational\",1,2],[\"Sum\",[\"Multiply\",[\"p\",[\"Multiply\",\"x\",[\"Power\",2,\"i\"]],[\"Multiply\",\"y\",[\"Power\",2,\"i\"]]],[\"Power\",2,[\"Negate\",\"i\"]]],[\"Limits\",\"i\",1,4]]]]  ≠  [\"Equal\",[\"P\",\"x\",\"y\"],[\"Multiply\",[\"Rational\",1,2],[\"Sum\",[\"Divide\",[\"p\",[\"Multiply\",\"x\",[\"Power\",2,\"i\"]],[\"Multiply\",\"y\",[\"Power\",2,\"i\"]]],[\"Power\",2,\"i\"]],[\"Limits\",\"i\",1,4]]]]",
+   "class": "quotient-factor-merged-into-fraction",
+   "reason": "documented-lossy",
+   "note": "Tycho round-trip seed (Desmos neyret/cucxkogo6q). Multiply(p(...), Power(2, -i)) is written \\frac{p(...)}{2^{i}} under the default prettify, a value-preserving rewrite kept by the user decision of 2026-10-18 (prettify: false keeps the tree)."
   }
  ]
 }

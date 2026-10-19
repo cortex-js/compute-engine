@@ -974,49 +974,11 @@ function serializeAdd(
     // `reorderSeriesTerms` above.
     const ops = reorderSeriesTerms(operands(expr));
 
-    // If it is the sum of an integer and a rational, use a special form
-    // (e.g. 1 + 1/2 -> 1 1/2)
-    if (
-      serializer.options.prettify &&
-      ops.length === 2 &&
-      serializer.options.invisiblePlus !== '+'
-    ) {
-      const [op1, op2] = ops;
-
-      let [lhs, rhs] = [op1, op2];
-      let lhsValue = machineValue(lhs);
-      let rhsValue = rationalValue(rhs);
-      if (lhsValue === null || rhsValue === null) {
-        [lhs, rhs] = [op2, op1];
-        lhsValue = machineValue(lhs);
-        rhsValue = rationalValue(rhs);
-      }
-
-      if (lhsValue !== null && rhsValue !== null) {
-        if (
-          isFinite(lhsValue) &&
-          Number.isInteger(lhsValue) &&
-          lhsValue >= 0 &&
-          lhsValue <= 1000 &&
-          isFinite(rhsValue[0]) &&
-          isFinite(rhsValue[1]) &&
-          rhsValue[0] > 0 &&
-          rhsValue[0] <= 100 &&
-          rhsValue[1] <= 100
-        ) {
-          // Don't include the '+' sign, it's a rational, use 'invisible plus'
-
-          // Replace #1 and #2
-          result = latexTemplate(
-            serializer.options.invisiblePlus,
-            serializer.serialize(lhs),
-            serializer.serialize(rhs)
-          );
-
-          serializer.level += 1;
-          return result;
-        }
-      }
+    // A mixed number (`2\frac{1}{2}`): see `mixedNumberLatex()`.
+    const mixed = mixedNumberLatex(serializer, ops);
+    if (mixed !== null) {
+      serializer.level += 1;
+      return mixed;
     }
 
     // If we have (-a)+b, we want to render it as b-a
@@ -2215,6 +2177,20 @@ function isDifferentialName(name: string): boolean {
 }
 
 /**
+ * True if `latex` has a `/` outside of any `{}`, `()` or `[]`: an inline
+ * fraction, whose denominator a factor written after it would join.
+ */
+function hasTopLevelSolidus(latex: string): boolean {
+  let depth = 0;
+  for (const c of latex) {
+    if (c === '{' || c === '(' || c === '[') depth += 1;
+    else if (c === '}' || c === ')' || c === ']') depth -= 1;
+    else if (c === '/' && depth === 0) return true;
+  }
+  return false;
+}
+
+/**
  * True if `latex` has a `\times` or a `\cdot` outside of any group or
  * delimiter: an infix product that an operator binding more tightly, such as
  * `\bmod`, would split.
@@ -2233,6 +2209,101 @@ function hasTopLevelExplicitProduct(latex: string): boolean {
       return true;
   }
   return false;
+}
+
+/**
+ * The LaTeX of the sum `ops` as a mixed number (`2\frac{1}{2}`), or `null`.
+ *
+ * A mixed number has the canonical form `Add(2, 1/2)`: the canonical form of
+ * the juxtaposition keeps the two parts (see `canonicalInvisibleOperator()`),
+ * where `2+\frac{1}{2}` folds to `5/2`. Such a sum is written as a mixed
+ * number exactly when the parser builds the same sum from it: an integer
+ * literal and a `Rational` of the same sign (a positive one after 0), with a
+ * numerator from 1 to 1000 and a denominator from 2 to 1000
+ * (`-2\frac{1}{2}` is `Add(-2, -1/2)`). With `prettify`, a sum of an integer
+ * from 0 to 1000 and a positive fraction with a numerator and a denominator
+ * up to 100 is written this way too, in either order.
+ *
+ * The fraction is always written `\frac{…}{…}`: an inline fraction
+ * (`fractionStyle`, or the inline style of a deep level) would join the
+ * whole part to its numerator (`-21/2`). A template for `invisiblePlus` with
+ * a `+` writes a sum, not a mixed number, so it is not used here.
+ */
+function mixedNumberLatex(
+  serializer: Serializer,
+  ops: ReadonlyArray<MathJsonExpression>
+): string | null {
+  if (ops.length !== 2) return null;
+  const template = serializer.options.invisiblePlus ?? '';
+  if (template.includes('+')) return null;
+
+  const write = (
+    whole: MathJsonExpression,
+    numerator: number,
+    denominator: number
+  ): string =>
+    latexTemplate(
+      template,
+      serializer.serialize(whole),
+      `\\frac{${serializer.serialize(Math.abs(numerator))}}{${serializer.serialize(denominator)}}`
+    );
+
+  // The sum the parser builds.
+  const [whole, fraction] = ops;
+  const w = machineValue(whole);
+  const f = operator(fraction) === 'Rational' ? rationalValue(fraction) : null;
+  if (
+    w !== null &&
+    // The parser reads a whole part past the range of a double as a product.
+    Number.isFinite(w) &&
+    f !== null &&
+    isIntegerLiteralJson(whole) &&
+    Number.isInteger(f[0]) &&
+    Number.isInteger(f[1]) &&
+    f[0] !== 0 &&
+    Math.abs(f[0]) <= 1000 &&
+    f[1] >= 2 &&
+    f[1] <= 1000 &&
+    (w < 0 ? f[0] < 0 : f[0] > 0)
+  )
+    return write(whole, f[0], f[1]);
+
+  if (!serializer.options.prettify) return null;
+  for (const [lhs, rhs] of [
+    [ops[0], ops[1]],
+    [ops[1], ops[0]],
+  ]) {
+    const lhsValue = machineValue(lhs);
+    const rhsValue = rationalValue(rhs);
+    if (
+      lhsValue !== null &&
+      rhsValue !== null &&
+      Number.isInteger(lhsValue) &&
+      lhsValue >= 0 &&
+      lhsValue <= 1000 &&
+      Number.isInteger(rhsValue[0]) &&
+      Number.isInteger(rhsValue[1]) &&
+      rhsValue[0] > 0 &&
+      rhsValue[0] <= 100 &&
+      rhsValue[1] >= 2 &&
+      rhsValue[1] <= 100
+    )
+      return write(lhs, rhsValue[0], rhsValue[1]);
+  }
+  return null;
+}
+
+/** True if `expr` is an integer number literal: a JSON integer, or a
+ * number string of digits only (an integer past 2^53). */
+function isIntegerLiteralJson(expr: MathJsonExpression): boolean {
+  if (typeof expr === 'number') return Number.isInteger(expr);
+  return (
+    typeof expr === 'object' &&
+    expr !== null &&
+    'num' in expr &&
+    typeof expr.num === 'string' &&
+    /^[-+]?[0-9]+$/.test(expr.num)
+  );
 }
 
 /** True if `expr` is a differential `d`, a power of it, or a product whose
@@ -3013,19 +3084,28 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         isFloatSpelling(imOperand)
       );
 
+      // A coefficient written as an inline fraction (`1/10`, the style of a
+      // deep level or of `fractionStyle`) is wrapped: the unit after it
+      // would join the denominator, `1/10\imaginaryI` read as `1/(10i)`.
+      const coefficient = (x: MathJsonExpression): string => {
+        const latex = serializer.serialize(x);
+        return hasTopLevelSolidus(latex)
+          ? serializer.wrapString(latex, 'normal')
+          : latex;
+      };
       const imPart =
         negImMagnitude !== null
           ? joinLatex([
               '-',
               machineValue(negImMagnitude) === 1
                 ? IU
-                : joinLatex([serializer.serialize(negImMagnitude), IU]),
+                : joinLatex([coefficient(negImMagnitude), IU]),
             ])
           : im?.isOne && unitCoefficient
             ? IU
             : im?.isNegativeOne && unitCoefficient
               ? `-${IU}`
-              : joinLatex([serializer.serialize(operand(expr, 2)), IU]);
+              : joinLatex([coefficient(operand(expr, 2)!), IU]);
 
       if (reIsZero) return imPart;
 

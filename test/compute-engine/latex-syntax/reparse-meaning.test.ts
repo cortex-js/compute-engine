@@ -589,3 +589,89 @@ describe('the outer assignment without an engine', () => {
     expect(ls.parse(ls.serialize(block as any))).toEqual(block);
   });
 });
+
+describe('row 390: a mixed number', () => {
+  // `2\frac{1}{2}` has the canonical form `Add(2, 1/2)`; `2+\frac{1}{2}`
+  // folds to `5/2`. The sum is written as a mixed number, so it reads back
+  // as the same tree.
+  test.each([
+    ['2\\frac{1}{2}'],
+    ['y=2\\frac{1}{2}'],
+    ['-2\\frac{1}{2}'],
+    ['2\\frac{3}{2}'],
+    ['500\\frac{999}{1000}'],
+    ['3\\cdot 2\\frac{1}{2}'],
+    ['0\\frac{1}{2}'],
+    ['12345678901234567890\\frac{1}{2}'],
+    // A fraction that is an integer is folded: `2\frac{4}{2}` is 4.
+    ['2\\frac{4}{2}'],
+  ])('%s', (latex) => {
+    const engine = new ComputeEngine();
+    const e = engine.parse(latex);
+    for (const prettify of [false, true]) {
+      const written = e.toLatex({ prettify });
+      expect([prettify, engine.parse(written).json]).toEqual([
+        prettify,
+        e.json,
+      ]);
+    }
+  });
+
+  test('the fraction is always written \\frac, and a + template writes a sum', () => {
+    const engine = new ComputeEngine();
+    const e = engine.parse('-2\\frac{1}{2}');
+    // An inline fraction would join the whole part to the numerator (-21/2).
+    expect(e.toLatex({ fractionStyle: () => 'inline-solidus' })).toBe(
+      '-2\\frac{1}{2}'
+    );
+    expect(e.toLatex({ invisiblePlus: '#1 + #2' })).toBe('-2-\\frac{1}{2}');
+    expect(engine.parse('2\\frac{4}{2}').json).toEqual(4);
+  });
+
+  test('a whole part past the range of a double is written as a sum', () => {
+    // The parser reads such a juxtaposition as a product, not a mixed number.
+    const engine = new ComputeEngine();
+    const e = engine.box(
+      ['Add', { num: '1' + '0'.repeat(310) }, ['Rational', 1, 2]],
+      { form: 'structural' }
+    );
+    expect(e.toLatex({ prettify: false })).toMatch(/\+\\frac\{1\}\{2\}$/);
+  });
+
+  test('a fraction with a denominator of 1 is not written as a mixed number', async () => {
+    const { LatexSyntax } =
+      await import('../../../src/compute-engine/latex-syntax/latex-syntax');
+    const ls = new LatexSyntax({});
+    expect(ls.serialize(['Add', 2, ['Rational', 3, 1]])).toBe('2+\\frac{3}{1}');
+  });
+});
+
+describe('the coefficient of i written as an inline fraction', () => {
+  // At a deep level (or with an inline `fractionStyle`), a fraction is
+  // written `1/10`; the unit after it joined the denominator, so
+  // `1/10\imaginaryI` read back as `1/(10i)`, the opposite imaginary part
+  // (Tycho round-trip seed, Desmos art/13obrwvjag).
+  const deep = (x: unknown) => [
+    'Tuple',
+    ['Tuple', ['Tuple', ['Tuple', x, 1], 1], 1],
+    1,
+  ];
+  test.each([
+    [['Complex', ['Rational', 1, 10], ['Rational', 1, 10]]],
+    [['Complex', 0, ['Rational', 1, 10]]],
+    [['Complex', 0, ['Rational', -1, 10]]],
+    [['Complex', 2, ['Rational', -3, 10]]],
+  ])('%j', (json) => {
+    const engine = new ComputeEngine();
+    for (const tree of [json, deep(json)]) {
+      const e = engine.box(tree as any);
+      expect(engine.parse(e.latex).isSame(e)).toBe(true);
+    }
+    const e = engine.box(json as any);
+    expect(
+      engine
+        .parse(e.toLatex({ fractionStyle: () => 'inline-solidus' }))
+        .isSame(e)
+    ).toBe(true);
+  });
+});

@@ -85,9 +85,10 @@ describe('PARSING OF NUMBER', () => {
     expect(parse('3\\frac14')).toMatchInlineSnapshot(
       `["Add", 3, ["Rational", 1, 4]]`
     );
-    // Negative mixed fraction -> -(3 + 1/4)
+    // Negative mixed fraction -> -(3 + 1/4), kept as a sum so that it is
+    // written back as the mixed number `-3\frac{1}{4}`
     expect(parse('-3\\frac14')).toMatchInlineSnapshot(
-      `["Subtract", ["Rational", -1, 4], 3]`
+      `["Add", -3, ["Rational", -1, 4]]`
     );
     expect(parse('3\\frac14+\\frac12')).toMatchInlineSnapshot(
       `["Rational", 15, 4]`

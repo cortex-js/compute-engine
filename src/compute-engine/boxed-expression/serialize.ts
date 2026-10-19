@@ -87,6 +87,35 @@ function _serializeLatexMetadata(
   return ce.latexSyntax!.serialize(expr, latexSerializeOptions(ce));
 }
 
+/**
+ * True for the sum of a negative integer and a negative fraction, the
+ * canonical form of a negative mixed number (`-2\frac{1}{2}` is
+ * `Add(-2, -1/2)`). It is kept as a sum, which the LaTeX serializer writes
+ * as a mixed number: as a subtraction, `-\frac{1}{2}-2`, it reads back as
+ * `-5/2`.
+ */
+function isNegativeMixedNumber(args: ReadonlyArray<Expression>): boolean {
+  const [whole, fraction] = args;
+  if (!isNumber(whole) || whole.isInteger !== true) return false;
+  if (whole.isNegative !== true) return false;
+  // A literal fraction (canonical form), or a `Rational` function of two
+  // integer literals (structural form).
+  if (isNumber(fraction))
+    return (
+      fraction.isInteger === false &&
+      fraction.isNegative === true &&
+      fraction.type.matches('rational')
+    );
+  return (
+    isFunction(fraction, 'Rational') &&
+    isNumber(fraction.op1) &&
+    isNumber(fraction.op2) &&
+    fraction.op1.isInteger === true &&
+    fraction.op1.isNegative === true &&
+    fraction.op2.isInteger === true
+  );
+}
+
 /** Attempt to transform an expression a+b as a subtraction b-a. Return null
  * if could not.
  *
@@ -247,7 +276,12 @@ function serializePrettyJsonFunction(
   const preserveStructure = _preserveStructure;
   const exclusions = options.exclude;
 
-  if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
+  if (
+    name === 'Add' &&
+    args.length === 2 &&
+    !exclusions.includes('Subtract') &&
+    !isNegativeMixedNumber(args)
+  ) {
     const sub =
       serializeSubtract(ce, args[0], args[1], options, metadata) ??
       serializeSubtract(ce, args[1], args[0], options, metadata);

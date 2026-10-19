@@ -120,6 +120,11 @@ export function canonicalInvisibleOperator(
           let frac = rhs.canonical;
           if (lhsInteger < 0) frac = frac.neg();
 
+          // A fraction that is an integer (`2\frac{4}{2}`) is not a mixed
+          // number: the sum is folded, as `2+\frac{4}{2}` is. Kept as
+          // `Add(2, 2)`, it had no LaTeX spelling that reads back as itself.
+          if (isNumber(frac) && frac.isInteger === true)
+            return ce.function('Add', [lhs.canonical, frac]);
           return ce._fn('Add', [lhs.canonical, frac]);
         }
       }

@@ -28,6 +28,12 @@
  * subexpression) are skipped — this harness measures the serializer, not the
  * parser; check-corpus.ts owns parser coverage.
  *
+ * A second set of inputs are MathJSON trees: ../tycho-roundtrip-seed.json,
+ * the trees of Tycho's Desmos corpus that failed this round trip. For each,
+ * `t = ce.box(json)` (canonical) replaces the first parse, and the same
+ * property is checked. Such an input is named `tycho-seed:<id>` in the
+ * report and in the exception list.
+ *
  * Failures are checked against the versioned exception list
  * ../roundtrip-exceptions.json. Each entry carries the original LaTeX, the
  * reserialized LaTeX, a brief mismatch, a failure `class`, and a `reason`
@@ -48,7 +54,13 @@ const scriptDir = path.dirname(process.argv[1]);
 const corpusPath = path.join(scriptDir, '..', 'parser-test-cases.json');
 const exceptionsPath = path.join(scriptDir, '..', 'roundtrip-exceptions.json');
 
+const seedPath = path.join(scriptDir, '..', 'tycho-roundtrip-seed.json');
+
 const corpus = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
+const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+for (const t of seed.trees)
+  if (typeof t.id !== 'string' || t.json === undefined)
+    throw new Error(`${seedPath}: an entry has no \`id\` or no \`json\``);
 const exceptionsFile = JSON.parse(fs.readFileSync(exceptionsPath, 'utf8'));
 
 const showFailures = process.argv.includes('--failures');
@@ -82,15 +94,31 @@ function brief(s: string, max = 220): string {
  * Run the round-trip property on one input.
  * Returns `null` if the property holds or the input is skipped.
  */
-function roundTrip(input: string): { skipped: boolean; failure: Failure | null } {
+function roundTrip(
+  input: string,
+  tree?: unknown
+): { skipped: boolean; failure: Failure | null } {
   const ce = new ComputeEngine();
   let t: ReturnType<ComputeEngine['parse']>;
+  // A seed tree that does not box cleanly is a failure, not a skip: the
+  // seed is a regression input, and a skip would stop checking it.
+  const notClean = (detail: string) =>
+    tree === undefined
+      ? { skipped: true, failure: null }
+      : {
+          skipped: false,
+          failure: {
+            latex: input,
+            reserialized: '',
+            mismatch: `seed tree did not box cleanly: ${detail}`,
+          },
+        };
   try {
-    t = ce.parse(input);
+    t = tree === undefined ? ce.parse(input) : ce.box(tree as any);
     if (!t.isValid || JSON.stringify(t.json).includes('"Error"'))
-      return { skipped: true, failure: null };
-  } catch {
-    return { skipped: true, failure: null };
+      return notClean(brief(JSON.stringify(t.json)));
+  } catch (e) {
+    return notClean(String(e));
   }
 
   let reserialized: string;
@@ -137,17 +165,18 @@ function roundTrip(input: string): { skipped: boolean; failure: Failure | null }
   return { skipped: false, failure: { latex: input, reserialized, mismatch } };
 }
 
-const inputs: string[] = [
-  ...corpus.fragments.map((c: any) => c.latex),
-  ...corpus.unicodeAnswers.map((c: any) => c.input),
+const inputs: { name: string; tree?: unknown }[] = [
+  ...corpus.fragments.map((c: any) => ({ name: c.latex })),
+  ...corpus.unicodeAnswers.map((c: any) => ({ name: c.input })),
+  ...seed.trees.map((t: any) => ({ name: `tycho-seed:${t.id}`, tree: t.json })),
 ];
 
 const t0 = Date.now();
 let skipped = 0;
 let passed = 0;
 const failures: Failure[] = [];
-for (const input of inputs) {
-  const r = roundTrip(input);
+for (const { name, tree } of inputs) {
+  const r = roundTrip(name, tree);
   if (r.skipped) skipped++;
   else if (r.failure === null) passed++;
   else failures.push(r.failure);
@@ -169,7 +198,8 @@ const drifted = failures.filter((f) => {
 // --- Report ---------------------------------------------------------------
 console.log(`\nRound-trip property: ce.parse(t.latex).isSame(t)  [structural tier]`);
 console.log(`Corpus ${path.basename(corpusPath)} captured ${corpus.date} on v${corpus.engineVersion}`);
-console.log(`${'corpus inputs'.padEnd(28)}${String(inputs.length).padStart(5)}`);
+console.log(`Seed ${path.basename(seedPath)} (${seed.trees.length} trees) captured ${seed.date} on v${seed.engineVersion}`);
+console.log(`${'inputs (corpus + seed)'.padEnd(28)}${String(inputs.length).padStart(5)}`);
 console.log(`${'skipped (parse not clean)'.padEnd(28)}${String(skipped).padStart(5)}`);
 console.log(`${'checked'.padEnd(28)}${String(inputs.length - skipped).padStart(5)}`);
 console.log(`${'round-trips'.padEnd(28)}${String(passed).padStart(5)}`);
