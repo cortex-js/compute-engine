@@ -17,7 +17,7 @@ import { SPECIAL_FUNCTIONS_LIBRARY } from './special-functions.js';
 import { STATISTICS_LIBRARY } from './statistics.js';
 import { DISTRIBUTIONS_LIBRARY } from './distributions.js';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry.js';
-import { UNITS_LIBRARY } from './units.js';
+import { UNITS_LIBRARY, canonicalUnit } from './units.js';
 import { FRACTALS_LIBRARY } from './fractals.js';
 
 import type { LibraryCategory } from '../latex-syntax/types.js';
@@ -34,6 +34,7 @@ import type {
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
   ExpressionInput,
+  Expression,
 } from '../global-types.js';
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition.js';
 
@@ -52,6 +53,19 @@ import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-def
  */
 function unit(ce: ComputeEngine, name: string) {
   return ce.symbol(name, { autoDeclare: false });
+}
+
+/**
+ * The `Quantity` value of a physical constant. The unit takes its canonical
+ * form (see `canonicalUnit()`): `Power(mol, -1)` is `Divide(1, mol)`, the
+ * tree that the parser gives for `\mathrm{1/mol}`. So the value of the
+ * constant and the parse of its LaTeX are the same expression.
+ */
+function constantQuantity(
+  ce: ComputeEngine,
+  [magnitude, unitExpr]: [Expression, Expression]
+): Expression {
+  return ce._fn('Quantity', [magnitude, canonicalUnit(ce, unitExpr)]);
 }
 
 /**
@@ -160,7 +174,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q2111',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(299792458),
             ce._fn('Divide', [unit(ce, 'm'), unit(ce, 's')]),
           ]),
@@ -171,7 +185,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q122894',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(6.62607015e-34),
             ce._fn('Multiply', [unit(ce, 'J'), unit(ce, 's')]),
           ]),
@@ -182,7 +196,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q1515261',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(1.25663706212e-6),
             ce._fn('Divide', [
               unit(ce, 'N'),
@@ -196,7 +210,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q30006',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(9.80665),
             ce._fn('Divide', [
               unit(ce, 'm'),
@@ -210,7 +224,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q2101',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [ce.number(1.602176634e-19), unit(ce, 'C')]),
+          constantQuantity(ce, [ce.number(1.602176634e-19), unit(ce, 'C')]),
       },
       BoltzmannConstant: {
         description: 'Boltzmann constant',
@@ -218,7 +232,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q5962',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(1.380649e-23),
             ce._fn('Divide', [unit(ce, 'J'), unit(ce, 'K')]),
           ]),
@@ -229,7 +243,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q6203',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(6.02214076e23),
             ce._fn('Power', [unit(ce, 'mol'), ce.number(-1)]),
           ]),
@@ -240,7 +254,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q6158',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(8.8541878128e-12),
             ce._fn('Divide', [unit(ce, 'F'), unit(ce, 'm')]),
           ]),
@@ -251,7 +265,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q18373',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(6.6743e-11),
             ce._fn('Divide', [
               ce._fn('Power', [unit(ce, 'm'), ce.number(3)]),
@@ -268,7 +282,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q51374',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(5.670374419e-8),
             ce._fn('Divide', [
               unit(ce, 'W'),
@@ -285,7 +299,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q182333',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [
+          constantQuantity(ce, [
             ce.number(8.314462618),
             ce._fn('Divide', [
               unit(ce, 'J'),

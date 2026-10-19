@@ -147,8 +147,25 @@ function unitToString(
     return isFunction(x, 'Multiply') || isFunction(x, 'Divide') ? `(${s})` : s;
   };
   const op = expr.operator;
-  if (op === 'Divide')
+  if (op === 'Divide') {
+    // The canonical form of a reciprocal unit is `Divide(1, s)`. The unit of
+    // one factor with an integer or float exponent is written with a
+    // negative exponent, `s^-1` and `m^-2`: after a magnitude, `1/3 1/s`
+    // reads as a product of two fractions.
+    if (isNumber(expr.op1) && expr.op1.isSame(1)) {
+      const den = expr.op2;
+      if (isSymbol(den)) return `${den.symbol}^-1`;
+      if (
+        isFunction(den, 'Power') &&
+        isSymbol(den.op1) &&
+        isNumber(den.op2) &&
+        Number.isFinite(den.op2.re) &&
+        (Number.isInteger(den.op2.re) || !den.op2.isExact)
+      )
+        return `${den.op1.symbol}^${-den.op2.re}`;
+    }
     return `${unitToString(expr.op1, serialize)}/${group(expr.op2)}`;
+  }
   if (op === 'Multiply')
     return expr.ops.map((x) => unitToString(x, serialize)).join('\u22C5');
   if (op === 'Power') {

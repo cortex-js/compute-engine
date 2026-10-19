@@ -4577,6 +4577,9 @@ function classifyCellD(op: OperandDescriptor): Type | null {
   if (mayEvaluateToNothingD(op)) return null;
   if (isUndefinedSymbolD(op)) return 'missing';
   const t = op.type;
+  // A failed cell (an `error` component) blocks the shape claim, and the
+  // literal takes the element type of `literalElementType()`.
+  if (t === 'error') return null;
 
   if (t === 'unknown' || t === 'any') {
     // The generic-symbol fold is for a FREE symbol. A block-local binding a
@@ -4684,9 +4687,31 @@ function analyzeLevelD(
  * claimed a `list<integer>` and a compilation shaped its loop variable real
  * while the list handed it a complex value (Tycho item 332). With no unknown
  * component the join is `widenElementTypes` (the extended-real rule).
+ *
+ * An `error` component is a failed cell, which the literal keeps in its
+ * position (`docs/ERROR-MODEL.md` §3). It has no value, so nothing is known
+ * of the type the cell would have had, and it makes the element type
+ * `unknown` too: `[1, Error(…)]` is `list` (`list<unknown>`). A join with
+ * `error` would make the element type, and so the whole literal, `error`
+ * (`reduceListType()`), and the literal would be read as a scalar.
+ *
+ * `unknown` is the top of the VALUE types: it does not admit the absence
+ * marker `missing`. So when another component can be absent (a `Missing`
+ * cell, typed `missing` or `T | missing`), the element type keeps that
+ * arm: `[Error(…), Missing]` is `list<unknown | missing>`, not
+ * `list<unknown>`, which would claim that every cell is a value. A `NaN`
+ * cell is a value (`nan` is a number type), and a `Nothing` cell is erased
+ * when the literal is made canonical, so neither adds an arm.
  */
 function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
-  if (types.some((t) => t === 'unknown')) return 'unknown';
+  if (types.some((t) => t === 'unknown' || t === 'error')) {
+    const absent = types.some(
+      (t) => t !== 'unknown' && t !== 'error' && isSubtype('missing', t)
+    );
+    return absent
+      ? { kind: 'union', types: ['unknown', 'missing'] }
+      : 'unknown';
+  }
   return widenElementTypes(types);
 }
 
@@ -4700,7 +4725,7 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * A shape claim requires: no blocked element (`classifyCellD`); no level
  * mixing cells and nested lists; for rank ≥ 2 every child a literal `List`
  * with identical dimensions (cell types need not match row to row); and a
- * union-free widened cell type.
+ * union-free widened cell type, or a union of tuple types.
  *
  * A literal whose levels are all empty below the first has no cell, and its
  * element type is `never`: `[[], []]` is `list<never^(2x0)>` (the matrix type
@@ -4721,7 +4746,34 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * the unknown and unsoundly claim `list<color>` for `[x, Rgb]`. A NUMERIC
  * union (`real | +oo | -oo`, the carrier a declared-domain operator infers
  * into a fresh symbol) is not heterogeneous, and keeps its shape claim.
+ * Neither is, at rank 2 or more, a union of TUPLE types of one arity (with
+ * `missing`, the type of an absent point, or without it): points
+ * whose components have different types (`(1, 1/2)` and `(1/2, 1)`) are
+ * cells of one kind, and a matrix of them is
+ * `list<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>`. A list
+ * of rank 1 of such points keeps the type `list<tuple<…> | tuple<…>>`, which
+ * the point accessors read as a list of points.
+ *
+ * A heterogeneous literal of rank 2 or more keeps its nesting, without
+ * dimensions: `[[1, "a"], [2, "b"]]` is `list<list<integer | string>>`. A
+ * flat `list<integer | string>` claimed that the elements are the cells,
+ * where they are the rows.
  */
+/** True when every type of `types` is a tuple type, all of the same arity,
+ * or `missing` (an absent point, such as a restricted point whose condition
+ * fails). */
+function isUnionOfTuplesOfOneArity(types: ReadonlyArray<Type>): boolean {
+  let arity: number | undefined;
+  for (const t of types) {
+    if (t === 'missing') continue;
+    const r = resolveTypeAlias(t);
+    if (typeof r !== 'object' || r.kind !== 'tuple') return false;
+    if (arity === undefined) arity = r.elements.length;
+    else if (r.elements.length !== arity) return false;
+  }
+  return arity !== undefined;
+}
+
 function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   const analysis = analyzeLevelD(ops, new Map());
   if (analysis === null) return null;
@@ -4737,9 +4789,14 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   if (
     typeof widened !== 'string' &&
     widened.kind === 'union' &&
-    !isSubtype(widened, 'number')
-  )
-    return internType({ kind: 'list', elements: widened });
+    !isSubtype(widened, 'number') &&
+    !(dims.length > 1 && isUnionOfTuplesOfOneArity(widened.types))
+  ) {
+    let nested: Type = widened;
+    for (let i = 0; i < dims.length; i++)
+      nested = { kind: 'list', elements: nested };
+    return internType(nested);
+  }
 
   return internType({
     kind: 'list',
@@ -7322,10 +7379,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return b.type.matches('set<any>') ? undefined : false;
       if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
-      // The elements are not indexed
-      const has: (x: Expression) => boolean = (x) =>
-        b.ops.some((y) => x.isSame(y));
-      return a.ops.every(has);
+      // The elements are not indexed: each element of `a` must be `isSame`
+      // an element of `b`. Two `isSame` elements always have the same hash,
+      // so an element of `a` is compared only with the elements of `b` that
+      // have its hash. The cost is linear in the number of elements when
+      // their hashes are distinct, where a comparison with every element of
+      // `b` was quadratic (two sets of 20,000 elements took about 1.6 s).
+      const byHash = new Map<number, Expression[]>();
+      for (const y of b.ops) {
+        const bucket = byHash.get(y.hash);
+        if (bucket === undefined) byHash.set(y.hash, [y]);
+        else bucket.push(y);
+      }
+      return a.ops.every(
+        (x) => byHash.get(x.hash)?.some((y) => x.isSame(y)) === true
+      );
     },
     collection: {
       ...SET_BASE_HANDLERS,
@@ -7385,7 +7453,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const comp = parseSetComprehension(expr.ops);
         if (comp !== null) return setComprehensionContains(comp, target);
-        return literalSetContains(expr.ops, target);
+        return indexedLiteralSetContains(expr, target);
       },
       // Derived from the domain's element type, never enumerated: this
       // handler is reached from `describe()` for every `Set` operand a
@@ -18250,6 +18318,101 @@ function enumerateSetComprehension(
     if (!elements.some((y) => y.isSame(x))) elements.push(x);
   }
   return elements;
+}
+
+/**
+ * The elements of a literal set, grouped so that `indexedLiteralSetContains`
+ * does not compare a target with every element.
+ */
+type LiteralSetIndex = {
+  /** The elements, grouped by their hash. */
+  byHash: Map<number, Expression[]>;
+  /** The number literals. */
+  numbers: Expression[];
+  /** The number literals that are not exact (floats, `NaN`). */
+  inexactNumbers: Expression[];
+  /** True when an element is not a number literal. */
+  hasNonNumber: boolean;
+  /** True when an element is not a string. */
+  hasNonString: boolean;
+};
+
+/** The index of each large literal set, built the first time a membership
+ * is asked. An expression does not change, so the index stays valid. */
+const LITERAL_SET_INDEX = new WeakMap<Expression, LiteralSetIndex>();
+
+/** A literal set with fewer elements is searched element by element: an
+ * index costs more than it saves. */
+const LITERAL_SET_INDEX_MIN_SIZE = 32;
+
+/**
+ * The membership of `target` in the literal set `expr`, with the same three
+ * answers as `literalSetContains`, in a time that does not grow with the
+ * size of the set for most targets.
+ *
+ * `literalSetContains` answers `true` when an element is `isSame` the
+ * target, or when the element and the target are number literals that
+ * `isEqual` says are equal. It answers `undefined` when no element matches
+ * and some element is undecided: a pair of numbers for which `isEqual` is
+ * undecided, or a pair that is not two numbers or two strings. It answers
+ * `false` otherwise.
+ *
+ * Here, the `isSame` test reads only the elements that have the hash of the
+ * target: two `isSame` expressions always have the same hash. The `isEqual`
+ * test is not syntactic, so it still reads every number element, except in
+ * one case: for an exact target, it reads only the inexact elements. Two
+ * exact numbers are compared exactly, without a tolerance, so they are
+ * equal only when they are `isSame`, which the hash lookup has already
+ * tested.
+ */
+function indexedLiteralSetContains(
+  expr: Expression,
+  target: Expression
+): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (expr.nops < LITERAL_SET_INDEX_MIN_SIZE)
+    return literalSetContains(expr.ops, target);
+  let index = LITERAL_SET_INDEX.get(expr);
+  if (index === undefined) {
+    index = {
+      byHash: new Map(),
+      numbers: [],
+      inexactNumbers: [],
+      hasNonNumber: false,
+      hasNonString: false,
+    };
+    for (const op of expr.ops) {
+      const bucket = index.byHash.get(op.hash);
+      if (bucket === undefined) index.byHash.set(op.hash, [op]);
+      else bucket.push(op);
+      if (isNumber(op)) {
+        index.numbers.push(op);
+        if (!op.isExact) index.inexactNumbers.push(op);
+      } else index.hasNonNumber = true;
+      if (!isString(op)) index.hasNonString = true;
+    }
+    LITERAL_SET_INDEX.set(expr, index);
+  }
+
+  if (index.byHash.get(target.hash)?.some((op) => target.isSame(op)))
+    return true;
+
+  if (isNumber(target)) {
+    let indeterminate = index.hasNonNumber;
+    const candidates = target.isExact ? index.inexactNumbers : index.numbers;
+    for (const op of candidates) {
+      const eq = target.isEqual(op);
+      if (eq === true) return true;
+      if (eq !== false) indeterminate = true;
+    }
+    return indeterminate ? undefined : false;
+  }
+
+  // A string target is refuted by a string element that is not `isSame`,
+  // and undecided against any other element. Any other target is undecided
+  // against every element that is not `isSame`.
+  if (isString(target)) return index.hasNonString ? undefined : false;
+  return undefined;
 }
 
 /**

@@ -2002,7 +2002,8 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
   // A divisor that can PRESENT a tuple divides point by point, and a point has
   // no reciprocal — the value is a list of `no-division-by-point` errors, so
   // the quotient must not claim the numerator's tuple shape. A matrix divisor
-  // is excluded for a different reason: the value path leaves `p / M` inert.
+  // is excluded for a different reason: the broadcast pairs each point with a
+  // row of the matrix, so the quotient is a list of lists of points.
   test.each([
     'list<tuple<number, number>>',
     'indexed_collection<tuple<number, number>>',
@@ -2036,11 +2037,18 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     ).toBe(true);
   });
 
-  test('a matrix factor is a matrix product, not a per-point scale', () => {
+  test('a matrix factor scales the i-th point by each cell of the i-th row', () => {
+    // The product is a matrix of points, not a list of points: the
+    // broadcast pairs each point with a row of the matrix. It was typed
+    // `list<tuple<number, number>> | matrix<2x2>`.
     const ce = pointListEngine('matrix<2x2>');
-    expect(
-      ce.box(['Multiply', 'p', 'q']).type.matches('list<tuple<number, number>>')
-    ).toBe(false);
+    const e = ce.box(['Multiply', 'p', 'q']);
+    expect(e.type.toString()).toBe('list<tuple<number, number>^(2x2)>');
+    ce.assign('p', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    ce.assign('q', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    const value = e.evaluate();
+    expect(value.toString()).toBe('[[(1, 2),(2, 4)],[(9, 12),(12, 16)]]');
+    expect(value.type.matches(e.type)).toBe(true);
   });
 
   test('scalar factors widen the point COMPONENTS', () => {

@@ -353,6 +353,8 @@ export class Serializer {
     // (`Mod(A,2)^x` → `A\bmod2^x` = `Mod(A, 2^x)`), so it must be wrapped.
     // `Range` has the same hazard on its END operand (parsed at minPrec
     // 270): `Range(1,n)^2` → `1..n^2` re-parses as `Range(1, n²)`.
+    // A `Quantity` is written as a juxtaposition of its magnitude and its
+    // unit: `Quantity(2, m)^n` → `2\,\mathrm{m}^{n}` re-parses as `2·m^n`.
     const isRoundTripHazard =
       h === 'Add' ||
       h === 'Negate' ||
@@ -360,7 +362,8 @@ export class Serializer {
       h === 'Measurement' ||
       h === 'Multiply' ||
       h === 'Mod' ||
-      h === 'Range';
+      h === 'Range' ||
+      h === 'Quantity';
 
     // Anything the dictionary declares as an `expression`, `infix` or
     // `prefix` entry with a precedence looser than `^` reads the same way.

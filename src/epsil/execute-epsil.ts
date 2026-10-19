@@ -447,6 +447,19 @@ function executeEpsilBatch(
             Array.isArray(d.message) &&
             d.message[0] === 'absence-marker-binding' &&
             d.message[1] === markerName
+        )) ||
+      // A `function` statement on a `const` binding: the static check reports
+      // it as a `static-type-error` with the engine code
+      // `invalid-clause-definition` at this statement, so the error value of
+      // the statement is not reported a second time as a `runtime-error`.
+      (markerError !== undefined &&
+        errorCode(markerError.json) === 'invalid-clause-definition' &&
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'static-type-error' &&
+            d.message[3] === 'invalid-clause-definition' &&
+            d.range[0] === statementRange(stmt, source)[0]
         ));
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {

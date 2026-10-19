@@ -1781,6 +1781,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   return ce._fn('Divide', [op1, op2]);
 }
 
+/** True when the factors `xs` hold a point (a tuple) and a tensor of rank 3
+ * or more, which `mulTensors` leaves unevaluated. */
+function isPointTimesHighRankTensor(xs: ReadonlyArray<Expression>): boolean {
+  return (
+    xs.some((x) => isTuple(x)) &&
+    xs.some((x) => isTensorValue(x) && x.shape.length > 2)
+  );
+}
+
 export function div(num: Expression, denom: number | Expression): Expression {
   const ce = num.engine;
 
@@ -1859,13 +1868,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // `[(1, 2), (1/2, 1)]`, the same list of points that the product
     // `(1, 2) · [1, 1/2]` gives (`mulImpl`). The generic broadcast of the
     // `Divide` operator stands aside for a tuple operand, so without this
-    // the quotient stayed an inert `Divide`. A matrix divisor is not
-    // distributed: `p / M` stays inert, which the `Divide` type handler
-    // expects (`divisorKeepsNumeratorShape`, `library/arithmetic.ts`).
-    if (
-      isFiniteBroadcastParticipant(d) &&
-      !(isTensorValue(d) && d.shape.length !== 1)
-    ) {
+    // the quotient stayed an inert `Divide`. A matrix divisor is distributed
+    // the same way, cell by cell: `(1, 2) / [[1, 2], [3, 4]]` is the matrix
+    // of points `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]`, as the
+    // product `(1, 2) · [[1, 2], [3, 4]]` is the matrix of the scaled
+    // points. A division by a matrix is element-wise for a list numerator
+    // too (`[1, 2] / [[1, 2], [3, 4]]`); it is never a product with the
+    // inverse matrix.
+    if (isFiniteBroadcastParticipant(d)) {
       const r = broadcastOverIndexedCollections(ce, 'Divide', [num, d], false);
       if (r !== undefined) return r;
     }
@@ -2685,6 +2695,17 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       false
     );
 
+  // A point times a tensor of rank 3 or more scales the point at every cell
+  // of the tensor, as for a vector or a matrix: each element of the tensor
+  // (a tensor of rank one less) scales the point, down to the rank 2 that
+  // `mulTensors` handles. `mulTensors` leaves a product with a tensor of
+  // rank 3 unevaluated, and `div()` divides a point by such a tensor cell by
+  // cell, so `(1, 2) · T` stayed unevaluated where `(1, 2) / T` did not.
+  if (!unresolvedFactor && isPointTimesHighRankTensor(xs)) {
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false, true);
+    if (r) return r;
+  }
+
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
   if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
@@ -3015,6 +3036,11 @@ export function mulNEvaluated(
       isBroadcastableCollection,
       true
     );
+  // A point times a tensor of rank 3 or more (see `mulImpl`).
+  if (!unresolvedFactor && isPointTimesHighRankTensor(xs)) {
+    const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
+    if (r) return r;
+  }
   if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
     const r = mulTensors(ce, xs, true);
     if (r) return r;

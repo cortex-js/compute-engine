@@ -109,6 +109,30 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Smaller defects found on 2026-10-19 by the review of pull request 445 (OPEN, small)
+
+- With Rubi loaded (`loadIntegrationRules`), a definite integral of a real,
+  positive integrand over a real interval can return a complex value.
+  `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` returns `1005 − 503 ln(−1005) + 503 ln(1005)`,
+  which is `1005 − 1580.2i`; the correct value is `1005`. The Rubi
+  antiderivative is
+  `x/2 + 503 ln(x−1006) − √x·√(2012−x)/2 + 503 artanh(√x·√(2012−x)/1006)`. Both
+  logarithmic terms are singular at `x = 1006`, inside the interval, and the
+  definite route subtracts the endpoint values across that point. Without Rubi,
+  the integral stays unevaluated. A provider result that is not real, for an
+  integrand that is real on a real interval, must be refused, so that the
+  built-in route can try. Pull request 445 adds a reduction that gives `1005`
+  for this integral, but it runs after the provider, so the provider's wrong
+  value is returned first.
+- `simplify()` does not rationalize a denominator of the form `(a + b√c)²`:
+  `−π(12 − 7√3)/(3 − 2√3)²` stays as it is, and its value is `π√3/3`. The
+  definite route returns this form for `∫₀^π 1/(2 + cos x) dx`, and for every
+  integral `∫₀^π 1/(a + b cos x) dx` with `a > |b|`.
+- `simplify()` does not combine a sum of logarithms of positive rationals:
+  `−2 ln 2 − 2 ln(3/2) + 2 ln 3` stays as it is, and its value is `0`. The
+  definite route returns `3/2 − 2 ln(3/2) + 2 ln 3 − ln 2 + ln(1/2)` for
+  `∫_{1/2}^2 (1 + x²)/(x² + x³) dx`, which is `3/2`.
+
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
 - A declaration of `Pi` is refused in the global scope only (since 2026-10-18),
@@ -127,45 +151,73 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   is applied). A decision is needed on what such a sum means (an error, or a
   difference of temperatures).
 
-### Smaller defects found on 2026-10-18 (batch 10) (OPEN, small)
+### Smaller defects found on 2026-10-19 (batch 11) (OPEN, small)
 
-- A unit has more than one tree for the same value:
-  `Power(Quantity(4, m), -1/2).evaluate()` gives the unit
-  `Power(Power(m, 1/2), -1)`, and the parse of its LaTeX gives
-  `Divide(1, Sqrt(m))`. The dimension is the same, but `isSame` is `false`. The
-  evaluated and the parsed unit trees also differ with the magnitude `3`. The
-  unit needs one canonical form.
-- The `eq` handler of `Set` (the `Equal` comparison) and the duplicate removal
-  of `Union` (`library/sets.ts`) compare each element with every element of the
-  other set, so their time grows with the square of the size. Its results are
-  correct. `isSame` of two sets uses hash buckets since 2026-10-18; `Equal` can
-  do the same for elements whose comparison is syntactic.
-- Nested assumptions hide a sign: with `b` declared `integer`, `assume(b ≥ 0)`
-  in one scope and `assume(b > 0)` in a nested scope, `b.isGreater(0)` and
-  `b.isPositive` are both `undefined`; they must be `true`. With `b` declared
-  `integer<0..>` and only the inner assumption, both are `true`.
-- `isGreaterEqual` does not read a type bound: with `p` declared `integer<0..>`,
-  `p.isGreaterEqual(0)` is `undefined`, while `p.isNonNegative` is `true`.
-- An error in an `else if` branch is underlined on the whole statement:
-  `locateError()` (`src/epsil/error-location.ts`) matches the frames
-  (`If argument 2`, `If argument 3`, which are correct) by operator name and
-  gives up when the name occurs twice. It must walk the frames from the
-  outermost one down from the statement node.
-- On the host route a list that holds a failed cell is typed `error`, so
-  `ce.assign('fs', [Error(…)])` makes `fs` a scalar, `ListJoin(fs, [2])` gives
-  `[[Error(…)], 2]`, and a declared `list` refuses the value. The Epsil route is
-  not affected. The rule that an invalid expression has the type `error` must
-  not make a collection with a failed cell a non-collection.
-- A list where every cell failed is slow to grow in a loop: 3200 turns of
-  `fs = [...fs, g("a")]` take 11.5 s, against 0.7 s when only one cell failed,
-  because each turn evaluates every `Error` cell of the list again.
-- With `f := x ↦ AsyncOnly(x)` (an operator with only an `evaluateAsync`
-  handler), `f(1{0<t})` gives `AsyncOnly(1) {0 < t}` on the asynchronous route,
-  while `AsyncOnly(1{0<t})` gives the handler's value under the condition. An
-  application whose argument has a free symbol runs its body synchronously,
-  because its recursion guard is the synchronous one (the `awaiting` test in
-  `function-utils.ts`); the recursion guard of an awaited application must
-  accept such an argument.
+- `isEqual(k)` does not read a symbol's bounds when they pin it to `k`: with
+  `b ≥ 0` and `b ≤ 0`, `b.isEqual(0)` is `undefined` (`eq()` reads no bounds or
+  signs), while `b.isGreaterEqual(0)` and `b.isLessEqual(0)` are `true`.
+- The static type of `ListJoin(fs, [2])` with `fs: list<unknown>` is
+  `list<integer>`, while its value `[Error(…), 2]` is `list<unknown>`:
+  `joinedElementTypeD()` refines an `unknown` element by the other operands. The
+  value type must be a subtype of the static type.
+- In a `match` case, an error is underlined on the whole statement: `Match`
+  records no frame for its cases, so `locateError()` has nothing to narrow to.
+- Other loops compare each element with every element:
+  `enumerateSetComprehension` and its asynchronous twin
+  (`library/collections.ts`), and two loops in `library/sets.ts` (near lines
+  1815 and 2246; they may be capped at 100 elements).
+- With an operator that has only an `evaluateAsync` handler declared, each
+  application on the asynchronous route walks the body
+  (`hasAsyncOnlyApplication`, `function-utils.ts`) with no cache. The cost is
+  not measured.
+- `\qty{3}{m.s^{-1}}` does not parse: the unit parser does not read the siunitx
+  product separator `.`.
+
+- The Epsil parser gives a sum of operands in parentheses a source range that
+  does not include the first `(` and the last `)`: for `(A) + (B)` the range
+  starts after the first `(` and ends before the last `)`, and the statement
+  `let v = (…) + (…)` also ends before its last `)` (`src/epsil/parser.ts`,
+  binary operators).
+- A user function marked `commutative` sorts its operands too, but
+  `locateError()` (`src/epsil/error-location.ts`) has no engine and treats only
+  `Add`, `Multiply`, `Xor` and `Set` as reordered; its callers would need to
+  pass a resolver, as they do for slot names. No probe shows a wrong underline
+  yet.
+
+- `2·T` with `T` a tensor of rank 3 stays unevaluated: `mulTensors` leaves every
+  product with a tensor of rank 3 or more unevaluated (a point times such a
+  tensor evaluates since 2026-10-19).
+- `pointListElementType` (`collection-utils.ts`), which `isPointListCarrier`
+  uses to refuse a division by a list of points, reads a list of rank 1 only, so
+  a matrix of points as a divisor probably does not give `no-division-by-point`
+  (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
+  in `boxed-expression/arithmetic-add.ts` is out of date.
+
+### Questions found on 2026-10-19 (batch 11) (OPEN, decision)
+
+- **Iteration over a list with a failed cell.** `isCollection` is `false` for an
+  invalid tree, so with `xs = [1, g("a"), 3]` (Epsil, `g(x) = 1/x`),
+  `for x in xs { … }` runs no turn (with no diagnostic when the literal is in
+  the loop header), `Map((u) => u + 1, xs)` returns `xs` unchanged, and
+  `[x for x in [1, g("a"), 3]]` stays unevaluated. `docs/ERROR-MODEL.md` §3 says
+  a collection with a failed cell is "preserved and iterable". (A) A loop, a
+  `Map` and a comprehension read every cell and give the failed cell to the body
+  as the value. (B) The operator answers the error. If nothing is decided, the
+  silent loop with no turn stays.
+- **`epsil check` and an assignment to a `const`.** With `const c = 1` then
+  `c = 2`, `epsil check` reports nothing, and the run reports a `runtime-error`
+  whose code is the bare message `Cannot assign a value to the constant "c"`
+  (not a stable code). A `function` statement on a `const` is reported by both.
+  (A) Report the assignment statically, with a new engine code such as
+  `constant-assignment`. (B) Keep it a run-time problem only. If nothing is
+  decided, (B) stays.
+- **A derived unit named from its dimensions.** `(2 m/s)·(3 m/s)` evaluates to
+  `6 Gy`: `findNamedUnit()` names any unit with the dimensions m²/s² as gray,
+  although the sievert has the same dimensions and a squared velocity is not a
+  dose. (A) Keep the naming (today). (B) Name a derived unit only in
+  `UnitSimplify` (then `N·m` stays `N·m` in arithmetic). (C) Keep the naming but
+  leave out a name that shares its dimensions with another (`Gy`, `Sv`). If
+  nothing is decided, (A) stays.
 
 ### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
 
@@ -577,12 +629,6 @@ sampling limit, not a defect: `\ln(-\ln t)/(t(-\ln t)^{1.1})` converges (about
 depth a double reaches; the comment at `SHELL_POWER_DIVERGENT` does not list
 this family.
 
-### A point divided by a matrix stays unevaluated and is typed `number` (OPEN, small — found 2026-10-16 by the `Subtract` type handler)
-
-`(1, 2) / [[1, 2], [3, 4]]` (a point divided by a matrix) stays unevaluated and
-is typed `number`, which does not describe the unevaluated form (checked again
-2026-10-18).
-
 ### Other handler-created errors lack their `ErrorTrace` frame (OPEN, small — found 2026-10-16 by the `ErrorTrace` frame fix of the collection operators)
 
 Since 2026-10-16, `Count`, `Length`, `First`/`Second`/`Third`/`Last`,
@@ -596,19 +642,6 @@ near lines 12879 and 12889) and the many `ce.error('incompatible-type')` returns
 in `library/colors.ts`. Closing it: either each handler goes through
 `withErrorFrames`, or the evaluation adds the frame of the call when a handler
 returns an error whose frames do not start with that call.
-
-### The Epsil static check does not report the refusal of a `function` statement on a `const` binding (OPEN, small — found 2026-10-16 by the static-check reassignment fix)
-
-The static check does not report the refusal of a `function` statement on a
-`const` binding as a diagnostic of its own (`executeEpsil` reports it as
-`runtime-error` / `invalid-clause-definition`; `epsil check` users see nothing).
-
-### The Python `compileFunction()` accepts a binding name that is not an identifier (OPEN, small — found 2026-10-16 by the Python `return s = x` fix)
-
-The Python binding-name checks reject keywords only; a name that is not an
-identifier (`compileFunction(expr, 'a b', ['1x'])`) is still accepted and gives
-code that does not parse, and the fix needs a syntax check that admits the
-Unicode identifiers Python allows.
 
 ### A base case assigned inside a closure can record a pending sequence under a discarded scope (OPEN, small — found 2026-10-16 by the per-binding pending sequences)
 

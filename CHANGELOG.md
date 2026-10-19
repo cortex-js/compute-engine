@@ -31,6 +31,14 @@
 
 ### Bug Fixes
 
+- On `interval-js`, a `Which` or an `If` arm is also narrowed by a decimal
+  bound written in LaTeX (`x \ge 0.5`) and by an exact bound that a double
+  holds (`\frac{1}{2}`) (Tycho ledger row 397). Over [0.49, 0.51],
+  `\begin{cases}0 & x\ge0.5\\ \arccos(2x) & \text{otherwise}\end{cases}` was
+  `partial` (domain clipped) and is an interval. A bound that no double holds
+  (`\frac{1}{3}`) is compiled to an enclosure of its value and still does not
+  narrow.
+
 - **#454** A `Fold` whose step reads its accumulator by index, such as `q(s[1])`
   with `q: (integer) -> list<integer>`, is typed from its seed again. The index
   read had typed the accumulator as a tuple of one integer, and the fold as

@@ -46,9 +46,15 @@ describe('boolean value types — comparison producers', () => {
   ])('%s', (_label, latex, expectedType, _expectedEval) => {
     const e = ce.parse(latex);
     expect(typeOf(e)).toBe(expectedType);
-    // A proof and its evaluation never disagree.
+    // A proof and its evaluation never disagree. A `boolean` type claims
+    // no verdict, so it agrees with any verdict of the evaluation: with
+    // `p: real<3<..>`, `p > 3` evaluates `True` (every value of `p` is
+    // above 3), and its type stays `boolean` for the reason given above.
     const v = e.evaluate();
-    if (v.symbol === 'True' || v.symbol === 'False')
+    if (
+      (v.symbol === 'True' || v.symbol === 'False') &&
+      expectedType !== 'boolean'
+    )
       expect(v.symbol === 'True').toBe(expectedType === 'true');
   });
 

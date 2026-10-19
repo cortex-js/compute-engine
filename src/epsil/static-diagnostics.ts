@@ -828,10 +828,11 @@ function canonicalizationDiagnostics(
   const pinned = new Map<string, PinnedSignature>();
 
   // The names that a top-level `const` declaration of this program binds, in
-  // the order of the walk. The run time refuses a later `function` statement
-  // for such a name, and the binding stays as it is (see
-  // `keepConstantBinding()`).
-  const constants = new Set<string>();
+  // the order of the walk, each with the range of its declaration. The run
+  // time refuses a later `function` statement for such a name, and the
+  // binding stays as it is (see `keepConstantBinding()`); the pass reports
+  // the refusal (see `constantClauseDiagnostic()`).
+  const constants = new Map<string, [number, number]>();
 
   // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
   // where. A pass-local map, deliberately not the runtime batch stamp: the
@@ -887,6 +888,12 @@ function canonicalizationDiagnostics(
     );
     if (variableRedeclaration !== undefined)
       diagnostics.push(variableRedeclaration);
+    const constantClause = constantClauseDiagnostic(
+      statement,
+      source,
+      constants
+    );
+    if (constantClause !== undefined) diagnostics.push(constantClause);
 
     // A rule (`name -> value`) passed where the callee expects a function is
     // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
@@ -1023,7 +1030,8 @@ function canonicalizationDiagnostics(
     // `function` statement for the same name a runtime error.
     if (declMismatch === undefined) {
       const name = constantDeclarationName(boxed);
-      if (name !== undefined) constants.add(name);
+      if (name !== undefined)
+        constants.set(name, statementRange(statement, source));
     }
 
     // The statement's ASSIGNMENT type effect, visible to the LATER statements
@@ -2028,7 +2036,7 @@ function installAssignedLiteralBeforeClause(
   ce: ComputeEngine,
   statement: MathJsonExpression,
   pinned: Map<string, PinnedSignature>,
-  constants: Set<string>
+  constants: Map<string, [number, number]>
 ): (() => void) | undefined {
   if (operator(statement) !== 'DefineFunction') return undefined;
   const name = declarationName(operand(statement, 1));
@@ -2099,6 +2107,59 @@ function keepConstantBinding(
   if (pin === undefined) return undefined;
   return () => {
     ce.box(name)._infer(() => pin.type, 'narrow');
+  };
+}
+
+/**
+ * A top-level `function` statement (or `name(params) = body` definition) for
+ * a name that an earlier `const` declaration of this program bound. At run
+ * time `defineFunctionClause()` (`multi-clause.ts`) refuses to add a clause
+ * to a constant, the statement evaluates to an `invalid-clause-definition`
+ * error, and the binding keeps its value. `constants` maps each such name to
+ * the range of its declaration.
+ *
+ * The pass reports the refusal as the run time describes it, in the form the
+ * pass uses for the other errors that the engine finds before anything runs:
+ * a `static-type-error` that carries the engine's error code. Example:
+ * `const c = 1` then `function c(x) { x }` gives `invalid clause definition —
+ * "c" is a constant; it cannot be redefined` on the `function` statement,
+ * with a note on the `const` declaration.
+ *
+ * A `function` statement inside a block or a function body is not a
+ * redefinition: it declares a local binding that shadows the constant.
+ */
+function constantClauseDiagnostic(
+  statement: MathJsonExpression,
+  source: string,
+  constants: Map<string, [number, number]>
+): ParsingDiagnostic | undefined {
+  if (operator(statement) !== 'DefineFunction') return undefined;
+  const name = declarationName(operand(statement, 1));
+  if (name === undefined) return undefined;
+  const declared = constants.get(name);
+  if (declared === undefined) return undefined;
+  // The same error value as the one that the `DefineFunction` handler
+  // returns at run time (the `ClauseDefinitionError` thrown for a constant
+  // in `defineFunctionClause()`), so both tiers describe it with the same
+  // words.
+  const error: MathJsonExpression = [
+    'Error',
+    { str: 'invalid-clause-definition' },
+    { str: `"${name}" is a constant; it cannot be redefined` },
+  ];
+  const [start, end] = statementRange(statement, source);
+  return {
+    severity: 'error',
+    message: [
+      'static-type-error',
+      describeError(error),
+      epsilSnippet(statement),
+      'invalid-clause-definition',
+    ],
+    range: [start, end, start],
+    notes: [
+      { message: `\`${name}\` is declared constant here`, range: declared },
+    ],
   };
 }
 

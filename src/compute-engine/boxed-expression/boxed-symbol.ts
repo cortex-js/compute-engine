@@ -81,6 +81,7 @@ import {
   nonPositiveSign,
   negativeSign,
   nonNegativeSign,
+  meetSigns,
 } from './sgn.js';
 import { matchesSymbol } from '../../math-json/utils.js';
 import { getSignFromAssumptions } from '../assume.js';
@@ -1274,11 +1275,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       }
     }
 
-    // Otherwise, check if there are assumptions about this symbol's sign
+    // Otherwise, combine the sign that the assumptions about this symbol
+    // give with the sign of its type, below: with `p: integer<1..>` and
+    // `assume(p ≥ 0)`, the assumption gives only `non-negative`, and the
+    // type gives `positive`. Before, an assumption hid the sign of the type.
     const assumed = getSignFromAssumptions(this.engine, this.symbol);
-    if (assumed !== undefined) return assumed;
 
-    // Finally, a RANGED declaration carries a sign: a symbol declared
+    // A RANGED declaration carries a sign: a symbol declared
     // `integer<1..>` is positive, `real<0..>` non-negative, `real<..0>`
     // non-positive, and `real<0..> & !0` (the intersection spelling of
     // "positive") combines the bound with the zero exclusion. Before this
@@ -1288,7 +1291,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // reached the sign channel (measured 2026-08-22; see the ROADMAP entry
     // "Ranged types should carry sign (and a literal's value) through type
     // derivation").
-    return signOfType(this.type.type);
+    return meetSigns(assumed, signOfType(this.type.type));
   }
 
   get isOdd(): boolean | undefined {

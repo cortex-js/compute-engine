@@ -127,3 +127,52 @@ export function nonPositiveSign(s: Sign | undefined): boolean | undefined {
   //'nan', a complex-number sign, or a sign not conveying sufficient info.
   return undefined;
 }
+
+/**
+ * The sign of a value that has both sign `a` and sign `b`: the strongest
+ * sign the two facts entail together. For example, `non-negative` and
+ * `not-zero` give `positive`, and `non-negative` and `non-positive` give
+ * `zero`.
+ *
+ * Only the real signs (`zero`, `positive`, `negative`, `non-negative`,
+ * `non-positive`, `not-zero`) are combined. When one of the two is
+ * `undefined`, the result is the other. When one is another sign
+ * (`unsigned`…), the result is `a`. When the two contradict each other
+ * (`positive` and `negative`), no value has both signs, and the result is
+ * `undefined` rather than one of the two.
+ */
+export function meetSigns(
+  a: Sign | undefined,
+  b: Sign | undefined
+): Sign | undefined {
+  if (a === undefined) return b;
+  if (b === undefined || a === b) return a;
+  const facts = (s: Sign) => {
+    switch (s) {
+      case 'zero':
+        return { ge0: true, le0: true, nz: false };
+      case 'positive':
+        return { ge0: true, le0: false, nz: true };
+      case 'negative':
+        return { ge0: false, le0: true, nz: true };
+      case 'non-negative':
+        return { ge0: true, le0: false, nz: false };
+      case 'non-positive':
+        return { ge0: false, le0: true, nz: false };
+      case 'not-zero':
+        return { ge0: false, le0: false, nz: true };
+      default:
+        return undefined;
+    }
+  };
+  const fa = facts(a);
+  const fb = facts(b);
+  if (fa === undefined || fb === undefined) return a;
+  const ge0 = fa.ge0 || fb.ge0;
+  const le0 = fa.le0 || fb.le0;
+  const nz = fa.nz || fb.nz;
+  if (ge0 && le0) return nz ? undefined : 'zero';
+  if (ge0) return nz ? 'positive' : 'non-negative';
+  if (le0) return nz ? 'negative' : 'non-positive';
+  return 'not-zero';
+}

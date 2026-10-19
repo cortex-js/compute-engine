@@ -58,10 +58,13 @@ describe('CONSTANT — a function literal cannot replace a constant', () => {
     const { value, diagnostics } = run(
       'const k = (n) => n\nk(x) = x * 2\nk(3)'
     );
-    expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
-    expect(String(diagnostics[0].message[1])).toContain(
-      '"k" is a constant; it cannot be redefined'
-    );
+    // The static check reports the refusal before the program runs, and the
+    // run does not report it a second time.
+    expect(diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
+    for (const d of diagnostics)
+      expect(String(d.message[1])).toContain(
+        '"k" is a constant; it cannot be redefined'
+      );
     expect(value.re).toBe(3);
   });
 

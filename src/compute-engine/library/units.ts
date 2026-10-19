@@ -21,9 +21,13 @@ import {
   getExpressionDimension,
   getExpressionScale,
   findNamedUnit,
+  getUnitDimension,
   type UnitExpression,
 } from './unit-data.js';
 import { isMeasurement, measurementAffine } from './measurement-arithmetic.js';
+import { asRational } from '../boxed-expression/numerics.js';
+import { order } from '../boxed-expression/order.js';
+import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
 
 /**
  * Convert a boxed expression representing a unit into a plain
@@ -86,6 +90,328 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   }
 
   return null;
+}
+
+/**
+ * The exponent of a unit factor: an exact fraction `[n, d]` with `d > 0`, or
+ * a machine number for a float exponent (`m^{0.5}`).
+ */
+type UnitExponent = [number, number] | number;
+
+function gcdInt(a: number, b: number): number {
+  a = Math.abs(a);
+  while (b !== 0) [a, b] = [b, a % b];
+  return a === 0 ? 1 : a;
+}
+
+/**
+ * The fraction `n/d` in lowest terms. Returns `null` when `n` or `d` is not
+ * a safe integer: such an exponent (`m^(10^200)`) cannot be exact as a
+ * machine number, and the unit keeps its usual canonical form.
+ */
+function unitFraction(n: number, d: number): UnitExponent | null {
+  if (!Number.isSafeInteger(n) || !Number.isSafeInteger(d) || d === 0)
+    return null;
+  if (d < 0) [n, d] = [-n, -d];
+  const g = gcdInt(n, d);
+  return [n / g, d / g];
+}
+
+function unitExponentValue(e: UnitExponent): number {
+  return typeof e === 'number' ? e : e[0] / e[1];
+}
+
+/** A float exponent, or `null` when it is not finite. */
+function finiteUnitExponent(x: number): UnitExponent | null {
+  return Number.isFinite(x) ? x : null;
+}
+
+function negateUnitExponent(e: UnitExponent): UnitExponent {
+  return typeof e === 'number' ? -e : [-e[0], e[1]];
+}
+
+/**
+ * The fraction `n/d` of two bigints, in lowest terms, as an exponent. Returns
+ * `null` when the reduced `n` or `d` is not a safe integer (see
+ * `unitFraction()`).
+ *
+ * The sum and the product of two exponents are computed with bigints: a
+ * cross-product of two safe integers can be above 2^53, and a machine-number
+ * product rounds it. The rounded cross-products can then give a small
+ * numerator that passes the safe-integer test, but is wrong:
+ * `6004799503160661/2 - 9007199254740991/3` is `1/6`, and machine numbers
+ * give `2/6`.
+ */
+function bigUnitFraction(n: bigint, d: bigint): UnitExponent | null {
+  if (d === 0n) return null;
+  if (d < 0n) [n, d] = [-n, -d];
+  const g = bigGcd(n, d);
+  if (g > 1n) [n, d] = [n / g, d / g];
+  const max = BigInt(Number.MAX_SAFE_INTEGER);
+  if (n > max || -n > max || d > max) return null;
+  return [Number(n), Number(d)];
+}
+
+function addUnitExponents(
+  a: UnitExponent,
+  b: UnitExponent
+): UnitExponent | null {
+  if (typeof a === 'number' || typeof b === 'number')
+    return finiteUnitExponent(unitExponentValue(a) + unitExponentValue(b));
+  return bigUnitFraction(
+    BigInt(a[0]) * BigInt(b[1]) + BigInt(b[0]) * BigInt(a[1]),
+    BigInt(a[1]) * BigInt(b[1])
+  );
+}
+
+function multiplyUnitExponents(
+  a: UnitExponent,
+  b: UnitExponent
+): UnitExponent | null {
+  if (typeof a === 'number' || typeof b === 'number')
+    return finiteUnitExponent(unitExponentValue(a) * unitExponentValue(b));
+  return bigUnitFraction(
+    BigInt(a[0]) * BigInt(b[0]),
+    BigInt(a[1]) * BigInt(b[1])
+  );
+}
+
+/**
+ * The exponent of a `Power` unit: an exact integer or rational literal gives
+ * a fraction, a finite real float gives a float. Any other exponent (a
+ * symbol, a radical) gives `null`. The exponent of a unit that is not
+ * canonical yet (`Rational(1, 2)`, `Negate(2)`) is read from its canonical
+ * form.
+ */
+function readUnitExponent(x: Expression): UnitExponent | null {
+  x = x.canonical;
+  if (!isNumber(x)) return null;
+  const r = asRational(x);
+  if (r !== undefined) return unitFraction(Number(r[0]), Number(r[1]));
+  if (x.isExact || x.im !== 0) return null;
+  return finiteUnitExponent(x.re);
+}
+
+/**
+ * A unit symbol and its total exponent in a unit expression. The symbol is
+ * kept as the canonical boxed symbol of the unit, so that a rebuilt unit has
+ * the same binding as the original one.
+ */
+type UnitFactor = { symbol: Expression; exp: UnitExponent };
+
+/**
+ * The factors of a unit expression: each unit symbol with the sum of its
+ * exponents, in the order of their first occurrence. `kg·m/s^2` gives
+ * `kg^1, m^1, s^-2`, and `m·m` gives `m^2`. A `Sqrt` or `Root` is a power
+ * with a fraction exponent: `Sqrt(m)` is `m^(1/2)`. The `1` of a reciprocal
+ * unit, `Divide(1, s)`, is not a factor.
+ *
+ * The unit can be canonical or not: the parser gives a unit that is not
+ * canonical yet. Only the symbols and the exponents are made canonical, not
+ * the products and quotients. The canonical form of a product checks that
+ * its operands are numbers, and it declares a single-letter unit that is
+ * also an operator (`N`, the newton, and the operator `N`) as a new symbol
+ * of the current scope. Then `N(π)` was not evaluated after the parse of
+ * `\mathrm{N/A^{2}}`.
+ *
+ * Returns `null` when the expression is not a product of powers of symbols
+ * with numeric exponents (for example `m^n`, or `m + s`).
+ */
+function unitFactors(
+  ce: ComputeEngine,
+  unit: Expression
+): Map<string, UnitFactor> | null {
+  const factors = new Map<string, UnitFactor>();
+  const walk = (e: Expression, exp: UnitExponent): boolean => {
+    if (isSymbol(e)) {
+      const prev = factors.get(e.symbol);
+      const total = prev ? addUnitExponents(prev.exp, exp) : exp;
+      if (total === null) return false;
+      factors.set(e.symbol, {
+        symbol: prev?.symbol ?? ce._resolveOnly(() => e.canonical),
+        exp: total,
+      });
+      return true;
+    }
+    if (!isFunction(e)) return false;
+    const op = e.operator;
+    if (op === 'Multiply') return e.ops.every((x) => walk(x, exp));
+    if (op === 'Divide') {
+      if (e.nops !== 2) return false;
+      const minus = negateUnitExponent(exp);
+      if (isNumber(e.op1) && e.op1.isSame(1)) return walk(e.op2, minus);
+      return walk(e.op1, exp) && walk(e.op2, minus);
+    }
+    let inner: UnitExponent | null = null;
+    if (op === 'Power' && e.nops === 2) inner = readUnitExponent(e.op2);
+    else if (op === 'Sqrt' && e.nops === 1) inner = [1, 2];
+    else if (op === 'Root' && e.nops === 2) {
+      const n = readUnitExponent(e.op2);
+      if (n !== null && typeof n !== 'number' && n[1] === 1 && n[0] > 0)
+        inner = [1, n[0]];
+    }
+    if (inner === null) return false;
+    const next = multiplyUnitExponents(exp, inner);
+    return next !== null && walk(e.op1, next);
+  };
+  return walk(unit, [1, 1]) ? factors : null;
+}
+
+/**
+ * The canonical unit expression of a list of unit factors, or `null` when
+ * every exponent is zero (the unit is dimensionless).
+ *
+ * The factors with a positive exponent are the numerator, the factors with a
+ * negative exponent the denominator, and the unit is `Divide(numerator,
+ * denominator)`. With no positive factor, the numerator is `1`: `s^-1` is
+ * `Divide(1, s)`. The factors of a product are sorted in the canonical order
+ * of a product. A fraction exponent has the canonical form of a power:
+ * `m^(1/2)` is `Sqrt(m)`, `m^(1/3)` is `Root(m, 3)`, `m^(2/3)` is
+ * `Power(m, 2/3)`. This is also the canonical tree of `kg\cdot m/s^{2}` and
+ * of `1/m^{1/2}`.
+ *
+ * The tree is built from its parts, with no canonicalization of the products
+ * and quotients, for the reason given in `unitFactors()`.
+ */
+function unitFromFactors(
+  ce: ComputeEngine,
+  factors: Iterable<UnitFactor>
+): Expression | null {
+  const power = (symbol: Expression, e: UnitExponent): Expression => {
+    if (typeof e === 'number') return ce._fn('Power', [symbol, ce.number(e)]);
+    const [n, d] = e;
+    if (d === 1)
+      return n === 1 ? symbol : ce._fn('Power', [symbol, ce.number(n)]);
+    if (n === 1 && d === 2) return ce._fn('Sqrt', [symbol]);
+    if (n === 1) return ce._fn('Root', [symbol, ce.number(d)]);
+    return ce._fn('Power', [symbol, ce.number([n, d])]);
+  };
+  const product = (xs: Expression[]): Expression =>
+    xs.length === 1 ? xs[0] : ce._fn('Multiply', xs.sort(order));
+  const num: Expression[] = [];
+  const den: Expression[] = [];
+  for (const { symbol, exp } of factors) {
+    const v = unitExponentValue(exp);
+    if (v === 0) continue;
+    if (v > 0) num.push(power(symbol, exp));
+    else den.push(power(symbol, negateUnitExponent(exp)));
+  }
+  if (num.length === 0 && den.length === 0) return null;
+  if (den.length === 0) return product(num);
+  return ce._fn('Divide', [
+    num.length === 0 ? ce.One : product(num),
+    product(den),
+  ]);
+}
+
+/**
+ * The canonical form of a unit expression. A unit has many trees with the
+ * same value: `Power(Sqrt(m), -1)`, `Power(m, -1/2)` and `Divide(1, Sqrt(m))`
+ * are the same unit, and so are `Multiply(m, Power(s, -1))` and
+ * `Divide(m, s)`, or `Multiply(m, m)` and `Power(m, 2)`. The canonical form
+ * collects the exponents of each unit symbol, with exact fraction exponents,
+ * and writes the result as in `unitFromFactors()`. The `Quantity` canonical
+ * handler (which the parser output goes through) and the quantity arithmetic
+ * both use this form, so that `isSame()` is `true` for two trees of the same
+ * unit, and the LaTeX of a quantity parses back to the same tree.
+ *
+ * The unit can be canonical or not. A unit that is not a product of powers
+ * of symbols with numeric exponents (`m^n`), and a unit whose exponents all
+ * cancel (`m/m`), are returned in their usual canonical form. A unit name
+ * is not a variable: the unit is boxed resolve-only, so a name with no
+ * definition is not declared in the current scope.
+ */
+export function canonicalUnit(ce: ComputeEngine, unit: Expression): Expression {
+  if (isFunction(unit)) {
+    const factors = unitFactors(ce, unit);
+    const result = factors ? unitFromFactors(ce, factors.values()) : null;
+    if (result) return result;
+  }
+  return ce._resolveOnly(() => unit.canonical);
+}
+
+/**
+ * The canonical unit for the factor map of a unit after a cancellation by
+ * `cancelUnitFactors()`, whose exponents are machine numbers: `m^(2/3)·m^(2/3)`
+ * gives the exponent `1.3333333333333333`. The exact exponents are recovered
+ * from the exponents of `original`, the unit before the cancellation: when
+ * they are all exact, each exponent of the cancellation is a sum of them, so
+ * it is a multiple of `1/L`, with `L` the least common multiple of their
+ * denominators. Then `m^(4/3)` has the exact exponent `4/3`. When an
+ * exponent of `original` is a float, or when `L` is above 10^6 (the rounding
+ * error of `L` times an exponent can then reach one unit), the exponents stay
+ * floats.
+ *
+ * Returns `null` when every exponent is zero, or when a symbol of `factors`
+ * is not a symbol of `original`.
+ */
+/**
+ * Whether the unit factors of `unit` cancel exactly, as the unit
+ * cancellation of `cancelUnitFactors()` found with machine numbers. That
+ * cancellation groups the unit symbols by dimension, and a group cancels when
+ * the sum of its exponents is zero. The sum of two large exponents can round
+ * to zero: `m^(6004799503160661/2) · m^(-9007199254740991/3)` is `m^(1/6)`,
+ * but both exponents round to the machine number `3002399751580330.5`.
+ * This function adds the exact exponents of each group.
+ *
+ * Returns `false` when the exact sum of a group is not zero: then the unit
+ * did not cancel. Returns `true` when every exact sum is zero, and also when
+ * the exact sums cannot be computed (an exponent is not a number, a symbol is
+ * not a known unit, or a sum is too large to be exact): then the result of
+ * the cancellation with machine numbers is kept.
+ */
+export function unitExactlyCancels(
+  ce: ComputeEngine,
+  unit: Expression
+): boolean {
+  const factors = unitFactors(ce, unit);
+  if (factors === null) return true;
+  const sums = new Map<string, UnitExponent>();
+  for (const [name, { exp }] of factors) {
+    const dim = getUnitDimension(name);
+    if (dim === null) return true;
+    const key = dim.join(',');
+    const prev = sums.get(key);
+    const total = prev === undefined ? exp : addUnitExponents(prev, exp);
+    if (total === null) return true;
+    sums.set(key, total);
+  }
+  for (const e of sums.values()) if (unitExponentValue(e) !== 0) return false;
+  return true;
+}
+
+export function canonicalUnitFromFactorMap(
+  ce: ComputeEngine,
+  factors: Map<string, number>,
+  original: Expression
+): Expression | null {
+  const originalFactors = unitFactors(ce, original);
+  if (originalFactors === null) return null;
+  let lcm: number | null = 1;
+  for (const { exp } of originalFactors.values()) {
+    if (typeof exp === 'number') {
+      lcm = null;
+      break;
+    }
+    lcm = (lcm / gcdInt(lcm, exp[1])) * exp[1];
+    if (lcm > 1e6) {
+      lcm = null;
+      break;
+    }
+  }
+  const result: UnitFactor[] = [];
+  for (const [name, e] of factors) {
+    const symbol = originalFactors.get(name)?.symbol;
+    if (symbol === undefined) return null;
+    let exp: UnitExponent = e;
+    if (lcm !== null) {
+      const k = Math.round(e * lcm);
+      if (Math.abs(k / lcm - e) <= 1e-9 * Math.max(1, Math.abs(e)))
+        exp = unitFraction(k, lcm) ?? e;
+    }
+    result.push({ symbol, exp });
+  }
+  return unitFromFactors(ce, result);
 }
 
 /**
@@ -298,18 +624,19 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
             mag,
             ce.error(['unexpected-argument', unitArg.string]),
           ]);
+        // The compound unit is boxed raw: `canonicalUnit()` makes it
+        // canonical.
         const boxed = ce._resolveOnly(() =>
           typeof parsed === 'string'
             ? ce.symbol(parsed)
-            : ce.expr(parsed as any)
+            : ce.box(parsed as any, { form: 'raw' })
         );
-        return ce._fn('Quantity', [mag, boxed]);
+        return ce._fn('Quantity', [mag, canonicalUnit(ce, boxed)]);
       }
 
-      return ce._fn('Quantity', [
-        mag,
-        ce._resolveOnly(() => unitArg.canonical),
-      ]);
+      // The unit takes its canonical form (see `canonicalUnit()`): a unit
+      // has one tree, whatever the tree of the input.
+      return ce._fn('Quantity', [mag, canonicalUnit(ce, unitArg)]);
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
       const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
@@ -366,9 +693,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // Canonicalize the quantity (first arg) but leave the target unit as-is.
       // The target unit is boxed resolve-only, as the unit of a `Quantity`:
       // a unit name is not declared in the current scope.
+      // The target unit takes its canonical form, which is the unit of the
+      // result (see `canonicalUnit()`).
       return ce._fn('UnitConvert', [
         args[0].canonical,
-        ce._resolveOnly(() => args[1].canonical),
+        canonicalUnit(ce, args[1]),
       ]);
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {

@@ -244,8 +244,9 @@ describe('compound unit cancellation', () => {
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(6);
-    // in·ft must NOT collapse — both exponents are positive
-    expect(boxedToUnitExpression(expr.op2)).toEqual(['Multiply', 'in', 'ft']);
+    // in·ft must NOT collapse — both exponents are positive. The factors are
+    // in the canonical order of a product.
+    expect(boxedToUnitExpression(expr.op2)).toEqual(['Multiply', 'ft', 'in']);
   });
 
   test('named derived unit still recognised (N·m → J)', () => {
@@ -967,8 +968,9 @@ describe('FRACTIONAL POWERS ON QUANTITIES', () => {
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(2);
-    // Unit should be Power(m, 0.5)
-    expect(expr.op2.operator).toBe('Power');
+    // The unit is m^(1/2), whose canonical form is Sqrt(m): the tree that
+    // the parser gives for `\mathrm{m^{1/2}}`.
+    expect(expr.op2.operator).toBe('Sqrt');
   });
 
   test('Power(quantity, 2) squares the unit', () => {
@@ -1515,7 +1517,7 @@ describe('QUANTITY TIMES A SYMBOL', () => {
     expect(evalJson(['Divide', 'x', ['Quantity', 3, 'm']])).toEqual([
       'Quantity',
       ['Multiply', ['Rational', 1, 3], 'x'],
-      ['Power', 'm', -1],
+      ['Divide', 1, 'm'],
     ]);
   });
 
@@ -1681,11 +1683,12 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
     ).toEqual(['Quantity', ['Root', 'x', 3], 'm']);
   });
 
-  test('a unit with no repeated factor keeps its spelling', () => {
-    // Nothing cancels or collects, so the unit is kept as written. It is
-    // not rewritten as a quotient of positive powers. A product with a
-    // number keeps the unit directly; a product or quotient of two
-    // quantities goes through the unit cancellation.
+  test('a unit takes its canonical form', () => {
+    // A unit has one tree: the factors with a positive exponent over the
+    // factors with a negative exponent, in the canonical order of a product.
+    // This is the tree that the parser gives for the LaTeX of the unit
+    // (`mol\cdot m^{2}/s^{2}`), so `(m/s)^2` is written `m^2/s^2`, and
+    // `kg·m·s^-2` is written `kg·m/s^2`.
     expect(
       evalJson([
         'Multiply',
@@ -1695,7 +1698,7 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
     ).toEqual([
       'Quantity',
       6,
-      ['Multiply', 'mol', ['Power', ['Divide', 'm', 's'], 2]],
+      ['Divide', ['Multiply', 'mol', ['Power', 'm', 2]], ['Power', 's', 2]],
     ]);
     expect(
       evalJson([
@@ -1706,7 +1709,7 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
     ).toEqual([
       'Quantity',
       6,
-      ['Multiply', 'mol', 'kg', 'm', ['Power', 's', -2]],
+      ['Divide', ['Multiply', 'kg', 'm', 'mol'], ['Power', 's', 2]],
     ]);
     expect(
       evalJson([
@@ -1717,7 +1720,7 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
     ).toEqual([
       'Quantity',
       ['Rational', 3, 2],
-      ['Divide', ['Power', ['Divide', 'm', 's'], 2], 'mol'],
+      ['Divide', ['Power', 'm', 2], ['Multiply', 'mol', ['Power', 's', 2]]],
     ]);
     expect(
       evalJson([
@@ -1725,14 +1728,22 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
         ['Quantity', 3, ['Power', ['Divide', 'm', 's'], 2]],
         2,
       ])
-    ).toEqual(['Quantity', 6, ['Power', ['Divide', 'm', 's'], 2]]);
+    ).toEqual([
+      'Quantity',
+      6,
+      ['Divide', ['Power', 'm', 2], ['Power', 's', 2]],
+    ]);
     expect(
       evalJson([
         'Multiply',
         ['Quantity', 2, ['Multiply', 'kg', 'm', ['Power', 's', -2]]],
         3,
       ])
-    ).toEqual(['Quantity', 6, ['Multiply', 'kg', 'm', ['Power', 's', -2]]]);
+    ).toEqual([
+      'Quantity',
+      6,
+      ['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]],
+    ]);
   });
 
   test('a reciprocal unit cancels and converts', () => {

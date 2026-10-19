@@ -1714,11 +1714,18 @@ function union(
   const totalSize = xs.reduce((acc, op) => acc + (smallCount(op) ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
 
-  // Keep only unique elements
+  // Keep only unique elements. Two `isSame` elements always have the same
+  // hash, so an element is compared only with the elements already kept that
+  // have its hash.
   const elements: Expression[] = [];
+  const kept = new Map<number, Expression[]>();
   for (const op of xs) {
     for (const elem of op.each()) {
-      if (elements.every((e) => !e.isSame(elem))) elements.push(elem);
+      const bucket = kept.get(elem.hash);
+      if (bucket === undefined) kept.set(elem.hash, [elem]);
+      else if (bucket.some((e) => e.isSame(elem))) continue;
+      else bucket.push(elem);
+      elements.push(elem);
     }
   }
 
@@ -2386,8 +2393,11 @@ function* unionIterator(
   if (!isFunction(col)) return;
   const seen: Expression[] = [];
   for (const op of col.ops) {
+    // A list operand can hold an element more than one time: it is yielded
+    // the first time only.
+    const isNew = firstOccurrence(op);
     for (const elem of op.each()) {
-      if (seen.every((e) => !e.contains(elem))) {
+      if (seen.every((e) => !e.contains(elem)) && isNew(elem)) {
         yield elem;
       }
     }
@@ -2866,8 +2876,11 @@ function countMatchingUnion(
   const seen: Expression[] = [];
   let count = 0;
   for (const op of expr.ops) {
+    // A list operand can hold an element more than one time: it is counted
+    // one time only.
+    const isNew = firstOccurrence(op);
     for (const elem of op.each()) {
-      if (isUnique(elem, seen)) count += 1;
+      if (isUnique(elem, seen) && isNew(elem)) count += 1;
     }
     seen.push(op);
   }

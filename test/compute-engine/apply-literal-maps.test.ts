@@ -535,8 +535,11 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
         const sum = ce.box(['Add', call, 1] as never);
         const nested = ce.box(['Add', ['Multiply', 2, call], 1] as never);
         const list = ce.box(['List', call, 1] as never);
-        for (const x of [sum, nested, list])
+        for (const x of [sum, nested])
           expect(x.type.toString()).toBe('error');
+        // A list keeps a failed cell: it is still a collection, and the
+        // failed cell makes its element type `unknown`.
+        expect(list.type.toString()).toBe('list<unknown>');
         expect(sum.evaluate().toString()).toBe(
           'Error(ErrorCode("incompatible-type", "real", "string"), "abc")'
         );

@@ -827,8 +827,10 @@ function snapshotDepsUnderChain(
       const opDef = e.operatorDefinition;
       if (opDef !== undefined) visitLambdaBody(e, e.operator, opDef, true);
       // A store-backed list (`ce.list()`) holds numbers only: no dependency
-      // inside it, and reading its `ops` would box every element.
-      if (e._numericStore !== undefined) return;
+      // inside it, and reading its `ops` would box every element. Other
+      // written-out data (a list of numbers and failed cells,
+      // `_isLiteralData()`) holds no symbol, so no dependency either.
+      if (e._numericStore !== undefined || e._isLiteralData()) return;
       for (const op of e.ops) visit(op, skipNames);
     } finally {
       for (const def of entered) excluded.delete(def);

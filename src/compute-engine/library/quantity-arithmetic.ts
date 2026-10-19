@@ -20,7 +20,10 @@ import { asFloat } from '../boxed-expression/float-result.js';
 import {
   affineMagnitude,
   boxedToUnitExpression,
+  canonicalUnit,
+  canonicalUnitFromFactorMap,
   isExactConversion,
+  unitExactlyCancels,
   isSymbolicValue,
   usesExpressionArithmetic,
 } from './units.js';
@@ -429,7 +432,10 @@ export function quantityDivide(
     const mag = denQ.op1.re;
     if (scalar === undefined || mag === undefined || mag === 0)
       return undefined;
-    const invertedUnit = ce._fn('Power', [denQ.op2, ce.number(-1)]);
+    const invertedUnit = canonicalUnit(
+      ce,
+      ce._fn('Power', [denQ.op2, ce.number(-1)])
+    );
     return ce._fn('Quantity', [asFloat(ce.number(scalar / mag)), invertedUnit]);
   }
 
@@ -487,7 +493,10 @@ function quantityDivideMeasurement(
     // scalar / Quantity => Quantity with inverted unit
     const resultMag = divideMagnitudes(ce, num, denQ.op1);
     if (resultMag === undefined) return undefined;
-    const invertedUnit = ce._fn('Power', [denQ.op2, ce.number(-1)]);
+    const invertedUnit = canonicalUnit(
+      ce,
+      ce._fn('Power', [denQ.op2, ce.number(-1)])
+    );
     return ce._fn('Quantity', [resultMag, invertedUnit]);
   }
 
@@ -537,12 +546,15 @@ function hasRepeatedUnitSymbol(ue: UnitExpression): boolean {
  * always a quotient of positive powers, so `(m/s)^2` or `kg·m·s^-2` would
  * otherwise be rewritten although nothing cancelled or collected.
  *
- * Otherwise returns the magnitude scale to apply and the rebuilt
- * `UnitExpression` (`null` rebuilt = fully cancelled → dimensionless).
+ * Otherwise returns the magnitude scale to apply, the rebuilt
+ * `UnitExpression` (`null` rebuilt = fully cancelled → dimensionless), and
+ * the factor map of the rebuilt unit (unit symbol → exponent).
  */
-function cancelCompoundUnit(
-  ue: UnitExpression
-): { magnitudeScale: number; rebuilt: UnitExpression | null } | null {
+function cancelCompoundUnit(ue: UnitExpression): {
+  magnitudeScale: number;
+  rebuilt: UnitExpression | null;
+  factors: Map<string, number>;
+} | null {
   const flat = flattenUnitFactors(ue);
   if (!flat) return null;
   const cancelled = cancelUnitFactors(flat);
@@ -554,7 +566,11 @@ function cancelCompoundUnit(
     !hasRepeatedUnitSymbol(ue)
   )
     return null;
-  return { magnitudeScale: cancelled.magnitudeScale, rebuilt };
+  return {
+    magnitudeScale: cancelled.magnitudeScale,
+    rebuilt,
+    factors: cancelled.factors,
+  };
 }
 
 /**
@@ -579,13 +595,28 @@ function simplifyQuantityUnit(
   // unit still gets a chance at findNamedUnit below.
   if (ue) {
     const cancelled = cancelCompoundUnit(ue);
+    // The cancellation adds the exponents as machine numbers, and a sum can
+    // round to zero although the exact sum is not zero (see
+    // `unitExactlyCancels()`). Then the unit did not cancel: it is kept, and
+    // the dimension test below, which also uses machine numbers, is skipped.
+    if (
+      cancelled &&
+      cancelled.rebuilt === null &&
+      !unitExactlyCancels(ce, unit)
+    )
+      return ce._fn('Quantity', [float(mag), canonicalUnit(ce, unit)]);
     if (cancelled) {
       mag = mag * cancelled.magnitudeScale;
       if (cancelled.rebuilt === null) return float(mag);
       // A unit name is not a variable: box the rebuilt unit resolve-only, so
       // that a unit name with no definition is not declared in the current
-      // scope. The named unit below is boxed the same way.
-      unit = ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
+      // scope. The named unit below is boxed the same way. The rebuilt unit
+      // has exact exponents when the exponents of `unit` are exact:
+      // `m^(2/3)·m^(2/3)` is `m^(4/3)`, not `m^1.3333333333333333` (see
+      // `canonicalUnitFromFactorMap()`).
+      unit =
+        canonicalUnitFromFactorMap(ce, cancelled.factors, unit) ??
+        ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
       ue = boxedToUnitExpression(unit);
     }
   }
@@ -611,7 +642,7 @@ function simplifyQuantityUnit(
       }
     }
   }
-  return ce._fn('Quantity', [float(mag), unit]);
+  return ce._fn('Quantity', [float(mag), canonicalUnit(ce, unit)]);
 }
 
 /**
@@ -631,12 +662,22 @@ function simplifyQuantityUnitMeasurement(
   // applied with error-propagating multiplication.
   if (ue) {
     const cancelled = cancelCompoundUnit(ue);
+    // A unit whose exponents cancel only as machine numbers is kept (see
+    // `simplifyQuantityUnit`).
+    if (
+      cancelled &&
+      cancelled.rebuilt === null &&
+      !unitExactlyCancels(ce, unit)
+    )
+      return ce._fn('Quantity', [mag, canonicalUnit(ce, unit)]);
     if (cancelled) {
       mag = scaleMagnitude(ce, mag, cancelled.magnitudeScale);
       if (cancelled.rebuilt === null) return mag;
       // Resolve-only, as in `simplifyQuantityUnit`: a unit name is not a
       // variable.
-      unit = ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
+      unit =
+        canonicalUnitFromFactorMap(ce, cancelled.factors, unit) ??
+        ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
       ue = boxedToUnitExpression(unit);
     }
   }
@@ -660,7 +701,7 @@ function simplifyQuantityUnitMeasurement(
       }
     }
   }
-  return ce._fn('Quantity', [mag, unit]);
+  return ce._fn('Quantity', [mag, canonicalUnit(ce, unit)]);
 }
 
 /** Scale a (possibly `Measurement`) magnitude by a plain factor. */
@@ -722,6 +763,9 @@ export function quantityPower(
   } else {
     resultUnit = n === 1 ? unit : ce._fn('Power', [unit, exp]);
   }
+  // The unit takes its canonical form: `(m^(1/2))^-1` is `1/Sqrt(m)`, the
+  // tree that the parser gives for `1/m^{1/2}` (see `canonicalUnit()`).
+  resultUnit = canonicalUnit(ce, resultUnit);
 
   if (magIsMeasurement) {
     const poweredMag = measurementPower(ce, base.op1, exp);

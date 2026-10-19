@@ -1520,8 +1520,10 @@ function getSymbols(
   if (!isFunction(expr) || visited.has(expr)) return;
   visited.add(expr);
   // A store-backed list (`ce.list()`) holds numbers only: no symbol to
-  // collect, and walking it would box every element.
-  if (expr._numericStore !== undefined) return;
+  // collect, and walking it would box every element. Other written-out data
+  // (a list of numbers and failed cells, `_isLiteralData()`) holds no symbol
+  // either.
+  if (expr._numericStore !== undefined || expr._isLiteralData()) return;
   for (const op of expr.ops) getSymbols(op, result, visited);
 }
 
@@ -1645,8 +1647,11 @@ function getReferences(
 ): void {
   if (isFunction(expr)) {
     // A store-backed list (`ce.list()`) holds numbers only: nothing to
-    // reference, and walking it would box every element.
-    if (expr._numericStore !== undefined) return;
+    // reference, and walking it would box every element. Other written-out
+    // data (a list of numbers and failed cells, `_isLiteralData()`) holds no
+    // symbol either. Each `Error` node of a list in which every cell failed
+    // was walked, with two lookups of its operator, at each read.
+    if (expr._numericStore !== undefined || expr._isLiteralData()) return;
     const hit = memo.get(expr);
     if (hit !== undefined) {
       for (const s of hit[0]) freeVars.add(s);

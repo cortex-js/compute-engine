@@ -1551,7 +1551,17 @@ export class BoxedFunction
   _effectsOf(): ComputedEffects {
     // A store-backed list is a container of numbers: evaluating it has no
     // effect, and the projection must not box the operands to find that out.
-    if (this._numericStore !== undefined) return undefined;
+    // A `List` or `Tuple` that is other written-out data (`_isLiteralData()`:
+    // numbers, failed cells and lists of them) evaluates to itself, so it has
+    // no effect either. Its projection visited each `Error` cell, and the
+    // cache below is keyed on the lexical scope, which changes at each turn
+    // of a loop. A single `Error` node is small, and keeps its cached
+    // projection.
+    if (
+      this._numericStore !== undefined ||
+      (this._operator !== 'Error' && this._isLiteralData())
+    )
+      return undefined;
     const callableVersion = this.engine._callableVersion;
     const scope = this.engine.context?.lexicalScope;
     if (
@@ -3196,15 +3206,24 @@ export class BoxedFunction
     return result;
   }
 
-  /** Is this node a `List` whose elements are number or string literals or
-   * literal list trees themselves? Decided once per node — the structure
-   * never changes — and read by `get type` for its constant cache key. A
-   * nested list reads its own memo, so a shared tower is walked once per
-   * node, not once per path. */
+  /** Is this node a `List` whose elements are number or string literals,
+   * failed cells, or literal list trees themselves, or is it a failed cell?
+   * Decided once per node — the structure never changes — and read by
+   * `get type` for its constant cache key. A nested list reads its own
+   * memo, so a shared tower is walked once per node, not once per path.
+   *
+   * A failed cell is an `Error` node with no symbol in it (see
+   * `_isLiteralData()`). Its type is `error` whatever the definitions and
+   * the assumptions, so it does not make its own type, or the type of a list
+   * that holds it, depend on them. Without it, a list that holds failed
+   * cells was typed again at each read in a loop that assigns it (an
+   * assignment advances the generation), three times per turn, and each
+   * typing read the type of each `Error` cell again. */
   private _isLiteralListTree(): boolean {
     if (this._literalListTree !== undefined) return this._literalListTree;
     this._literalListTree =
       this._numericStore !== undefined ||
+      (this._operator === 'Error' && this._isLiteralData()) ||
       (this._operator === 'List' &&
         this._ops.every(
           (op) =>
@@ -3397,7 +3416,19 @@ export class BoxedFunction
   /**
    * Is this node written-out DATA that evaluates to itself under `options`:
    * a canonical `List` or `Tuple` whose every element is a number literal,
-   * or such a `List` or `Tuple` in turn?
+   * a failed cell, or such a `List` or `Tuple` in turn?
+   *
+   * A failed cell is an `Error` node that holds no symbol at any depth (the
+   * error code, its arguments and the `where` operand are strings, numbers
+   * and applications of them). An `Error` node is a final value: it never
+   * evaluates its operands, and it evaluates to itself under every option,
+   * so it is data too, and this method answers `true` for such a node. A
+   * list in which every cell failed was evaluated again at each use, cell by
+   * cell, and every walk of its symbols (the free variables, the dependency
+   * snapshot of a memo, the own-binding walk of a stored value) visited the
+   * operands of each `Error`: a loop that grew such a list by one cell per
+   * turn (`fs = [...fs, g("a")]` in Epsil, where the call `g("a")` fails)
+   * took 11.5 s for 3200 turns, against 0.7 s when only one cell failed.
    *
    * A number literal evaluates to itself, and under a numeric approximation
    * it does when `N()` answers the same object (a machine number, or a
@@ -3420,7 +3451,12 @@ export class BoxedFunction
     // A list that holds its numbers unboxed is data under every option, and
     // the walk below would read its operands, which boxes every number.
     if (this._numericStore !== undefined) return true;
-    if (this._operator !== 'List' && this._operator !== 'Tuple') return false;
+    if (
+      this._operator !== 'List' &&
+      this._operator !== 'Tuple' &&
+      this._operator !== 'Error'
+    )
+      return false;
     let numeric = false;
     if (options !== undefined)
       for (const k in options) {
@@ -3433,6 +3469,11 @@ export class BoxedFunction
       // handler that answers something else, and that handler must run.
       let level: 0 | 1 | 2 =
         this.isCanonical && this._isBoundToLibraryDefinition() ? 2 : 0;
+      if (this._operator === 'Error') {
+        if (level !== 0 && !holdsOnlyData(this)) level = 0;
+        this._literalData = level;
+        return this._literalData >= (numeric ? 2 : 1);
+      }
       for (const op of this._ops) {
         if (level === 0) break;
         if (isNumber(op)) {
@@ -10137,6 +10178,28 @@ function listRank(t: Type): number {
   return (t.dimensions?.length ?? 1) + listRank(t.elements);
 }
 
+/** True when `expr` holds no symbol at any depth: it is a string, a number,
+ * or an application whose operands are such expressions. Used for the
+ * operands of an `Error` node (`BoxedFunction._isLiteralData()`).
+ *
+ * The walk visits each node once, with an explicit stack. A payload can
+ * share a subtree between several operands (`t₀ = 1`, `tₙ₊₁ = F(tₙ, tₙ)`):
+ * a walk of every path visits such a payload of depth 60 2⁶⁰ times, and a
+ * recursive walk of a deep payload can overflow the stack. */
+function holdsOnlyData(expr: Expression): boolean {
+  const visited = new Set<Expression>();
+  const stack: Expression[] = [expr];
+  while (stack.length > 0) {
+    const x = stack.pop()!;
+    if (isString(x) || isNumber(x)) continue;
+    if (!isFunction(x)) return false;
+    if (visited.has(x)) continue;
+    visited.add(x);
+    for (const op of x.ops) stack.push(op);
+  }
+  return true;
+}
+
 /** The definition half (value or operator) of the binding `def`, which a
  * call records to know later whether its callee changed
  * (`BoxedFunction._calleeStamp`). */
@@ -10156,7 +10219,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
   // (`_recheckedTree()`).
   if (!expr.isValid) {
     const rechecked = expr._recheckedTree();
-    return rechecked === expr ? 'error' : rechecked.type;
+    if (rechecked !== expr) return rechecked.type;
+    // A `List` or `Set` literal that holds a failed cell is still a
+    // collection: an error in an element is a failure of that cell, not of
+    // the container, which keeps its length and its other cells
+    // (`docs/ERROR-MODEL.md` §3). So it is not typed `error`: its type is
+    // given by the type handler of the literal, which types a failed cell
+    // as `unknown` (`literalElementType()`, `library/collections.ts`).
+    // Typed `error`, the list was a scalar to the operators that read its
+    // type: `ListJoin(fs, [2])` with `fs := [Error(…)]` wrapped the list as
+    // one element, and a variable declared `list` refused the value. A
+    // literal that is not bound (a raw node) is typed `error` as before.
+    if (
+      (expr.operator !== 'List' && expr.operator !== 'Set') ||
+      expr.operatorDefinition === undefined
+    )
+      return 'error';
   }
   // A call that its callee accepted has the type of the same call boxed
   // against the definition that the name holds now, when that definition
@@ -10333,15 +10411,19 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // A position that does not strip `missing` (`missingStrip`) takes no
     // part in the absorption: the handler answers for an absent operand
     // there (the searched value of `Contains` is not found).
-    const absenceTypes = expr.ops.map((x, i) =>
-      !def.stripsMissingAt(i)
-        ? stripMissingFromType(x.type.type)
-        : absentTerm(x)
-          ? 'missing'
-          : passedThrough[i]
-            ? stripMissingFromType(x.type.type)
-            : x.type.type
-    );
+    // Computed only when an absence is absorbed (`maybeAbsorb`): for a list
+    // literal of thousands of elements, typed at each turn of a loop that
+    // grows it, the eager map was a quarter of the typing.
+    const absenceTypes = (): Type[] =>
+      expr.ops.map((x, i) =>
+        !def.stripsMissingAt(i)
+          ? stripMissingFromType(x.type.type)
+          : absentTerm(x)
+            ? 'missing'
+            : passedThrough[i]
+              ? stripMissingFromType(x.type.type)
+              : x.type.type
+      );
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some(
@@ -10459,7 +10541,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
         absorbMissing
           ? absorbOperandAbsence(
               t,
-              absenceTypes,
+              absenceTypes(),
               ABSENT_CELLS_STAY_MISSING.has(expr.operator),
               def.broadcastable
             )

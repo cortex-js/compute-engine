@@ -2016,15 +2016,22 @@ function collectionElementTypeOf(t: Type): Type | undefined {
  *   (`[(3,4),(6,8)] / [(1,2),(2,2)]` evaluates to a list of
  *   `no-division-by-point` errors).
  *
- * A MATRIX divisor is rejected for a different reason: the value path leaves
- * `p / M` inert (`(3, 4) / [1,2]`) rather than distributing it, so no
- * component-wise claim about the result holds.
+ * A MATRIX divisor is rejected unless `admitMatrix` is true. A matrix
+ * divides a point cell by cell, so the quotient is a matrix of points, not a
+ * point: only `pointOverCollectionQuotientType` gives that type, and the
+ * caller admits a matrix only for a numerator that it can type. A list of
+ * points divided by a matrix pairs each point with a row of the matrix and
+ * gives a matrix of points too, which the shape-preserving claim (a list of
+ * points) does not describe.
  *
  * Admitted: a scalar, and a collection of scalars — dimensionless
  * (`list<number>`) or `vector<n>`, which a literal list such as `[5, 10]`
  * types as — since each divides one point by one scalar.
  */
-function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
+function divisorKeepsNumeratorShape(
+  den: OperandDescriptor,
+  admitMatrix = false
+): boolean {
   const dt = den.type;
   if (typeCouldBeNumericTuple(dt)) return false;
   if (typeCouldBeNumericTupleCollection(dt)) return false;
@@ -2034,7 +2041,7 @@ function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
     typeCouldBeNumericTuple(dt.elements)
   )
     return false;
-  return !factsOf(dt).matrix;
+  return admitMatrix || !factsOf(dt).matrix;
 }
 
 /**
@@ -2045,18 +2052,28 @@ function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
  * typed arm by arm, and the result is the union of the arm results: a point
  * for the number arm, a list of points for the list arm.
  *
- * `num` must be a definite tuple type. A point-or-point-list numerator is
+ * `num` must be a tuple type, of a known or an unknown arity (the bare
+ * `tuple`). A point-or-point-list numerator is
  * left to the broadcast lift, which types the arms of such a union itself
- * (see the `Multiply` type handler for the same rule). A matrix arm keeps
- * the old reading (the value path leaves `p / M` inert), and so does a
- * divisor with no collection arm: the function returns `undefined` for them.
+ * (see the `Multiply` type handler for the same rule). A matrix arm with
+ * known dimensions gives a matrix of points of these dimensions:
+ * `(1, 2) / [[1, 2], [3, 4]]` is
+ * `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]`, one point divided by
+ * each cell, as the product `(1, 2) · [[1, 2], [3, 4]]` is the matrix of the
+ * scaled points. A matrix arm with no known dimensions, and a divisor with no
+ * collection arm, have no such type: the function returns `undefined` for
+ * them.
  */
 function pointOverCollectionQuotientType(
   num: OperandDescriptor,
   den: OperandDescriptor
 ): Type | undefined {
   const point = resolveTypeAlias(num.type);
-  if (typeof point !== 'object' || point.kind !== 'tuple') return undefined;
+  if (
+    point !== 'tuple' &&
+    (typeof point !== 'object' || point.kind !== 'tuple')
+  )
+    return undefined;
   const d = resolveTypeAlias(den.type);
   const arms = typeof d === 'object' && d.kind === 'union' ? d.types : [d];
   const inUnion = arms.length > 1;
@@ -2064,10 +2081,14 @@ function pointOverCollectionQuotientType(
   let sawCollection = false;
   const results: Type[] = [];
   for (const arm of arms) {
-    if (factsOf(arm).matrix) return undefined;
-    const elt =
-      dimensionlessIndexedElementType(arm, undefined, inUnion) ??
-      numericTensorElementType(arm);
+    // A matrix arm is read only through its dimensions: the element type of
+    // a matrix with no dimensions is a row, not a number.
+    const isMatrix = factsOf(arm).matrix;
+    const elt = isMatrix
+      ? numericTensorElementType(arm)
+      : (dimensionlessIndexedElementType(arm, undefined, inUnion) ??
+        numericTensorElementType(arm));
+    if (isMatrix && elt === undefined) return undefined;
     if (elt === undefined) {
       // A scalar arm divides the point component-wise. The arm keeps the
       // structural view of the divisor, as the arms of a `Multiply` factor
@@ -2087,14 +2108,27 @@ function pointOverCollectionQuotientType(
     sawCollection = true;
     // An element type that is not known to be a number (a bare `list`)
     // still divides by SOME number, so it is read as `number`.
-    const cell = quotientShapeType(
+    let cell = quotientShapeType(
       point,
       describeType(factsOf(elt).belowNumber ? elt : 'number'),
       floatNumerator
     );
+    // A cell of the divisor that can be zero gives the quotient of the point
+    // by zero, as the scalar rule does (`pointByZeroCellType`).
+    const zero = divisorCellZero(den, elt, inUnion);
+    if (zero !== 'none')
+      cell = reduceType({
+        kind: 'union',
+        types: [cell, pointByZeroCellType(num, point, zero)],
+      });
     const r = resolveTypeAlias(arm);
-    const dims =
+    let dims =
       typeof r === 'object' && r.kind === 'list' ? r.dimensions : undefined;
+    // A list of rank 1 of points of two tuple types (`(1, 2)` and `(~oo,
+    // ~oo)`) is typed without dimensions, as the literal of its value is
+    // (`shapedListTypeD`, `library/collections.ts`).
+    if (dims?.length === 1 && typeof cell === 'object' && cell.kind === 'union')
+      dims = undefined;
     results.push(
       dims !== undefined
         ? { kind: 'list', elements: cell, dimensions: dims }
@@ -2103,6 +2137,163 @@ function pointOverCollectionQuotientType(
   }
   if (!sawCollection) return undefined;
   return reduceType({ kind: 'union', types: results });
+}
+
+/**
+ * Whether a cell of the collection divisor `den` can be zero. `elt` is the
+ * element type of the collection arm that is divided by, and `inUnion` tells
+ * that this arm is one arm of a union.
+ *
+ * - `'none'`: every cell is provably not zero (`[1, 2]`, `Range(1, 3)`,
+ *   `list<integer<1..>>`).
+ * - `'literal'`: a cell of a literal divisor is the number `0`, and every
+ *   other cell is provably not zero (`[1, 0]`).
+ * - `'maybe'`: a cell may be zero (a cell typed `integer`, a divisor typed
+ *   `list<integer>`).
+ */
+function divisorCellZero(
+  den: OperandDescriptor,
+  elt: Type,
+  inUnion: boolean
+): 'none' | 'literal' | 'maybe' {
+  let structure = inUnion ? undefined : den.structureOf?.();
+  // A `Matrix` wrapper (the parse of `\begin{pmatrix}…\end{pmatrix}`) holds
+  // the literal as its first operand.
+  if (structure?.kind === 'application' && structure.head === 'Matrix')
+    structure = structure.children[0]?.structureOf?.();
+  if (structure?.kind === 'list-literal') {
+    let result: 'none' | 'literal' = 'none';
+    const walk = (cells: ReadonlyArray<OperandDescriptor>): boolean => {
+      for (const c of cells) {
+        const sub = c.structureOf?.();
+        if (sub?.kind === 'list-literal') {
+          if (walk(sub.elements)) return true;
+        } else if (operandLiteralValueOnTypes(c) === 0) result = 'literal';
+        else if (!provablyNonZeroSign(c)) return true;
+      }
+      return false;
+    };
+    return walk(structure.elements) ? 'maybe' : result;
+  }
+  // The elements of `Range(a, b, step)` are between `a` and `b`, so none is
+  // zero when the two bounds have the same sign: `Range(1, 3)` is
+  // `[1, 2, 3]`. `Range(n)` is `[1, …, n]`, whose elements are positive.
+  if (structure?.kind === 'application' && structure.head === 'Range') {
+    const bounds = structure.children.slice(0, 2);
+    if (bounds.length === 1) return 'none';
+    const signs = bounds.map((b) => operandSgnOnTypes(b));
+    if (
+      signs.every((x) => x === 'positive') ||
+      signs.every((x) => x === 'negative')
+    )
+      return 'none';
+    return 'maybe';
+  }
+  const iv = intervalOfType(elt);
+  return iv !== undefined && intervalExcludesZero(iv) ? 'none' : 'maybe';
+}
+
+/**
+ * The type of the point `num` (of type `point`) divided by a cell that is
+ * zero (`zero` is `'literal'`) or may be zero (`'maybe'`), by the rule of a
+ * scalar quotient. A component divided by zero is `~oo` (type `infinity`),
+ * and `0/0` is `Indeterminate` (type `nan`): `(1, 2) / 0` is
+ * `(~oo, ~oo)`, and `(0, 1) / 0` is `(Indeterminate, ~oo)`. A component
+ * divided by a cell that may be zero is a real, `~oo` or `NaN`, as `1 / n`
+ * for `n: integer` is.
+ */
+function pointByZeroCellType(
+  num: OperandDescriptor,
+  point: Type,
+  zero: 'literal' | 'maybe'
+): Type {
+  if (typeof point !== 'object' || point.kind !== 'tuple') return point;
+  const structure = num.structureOf?.();
+  const components =
+    structure?.kind === 'tuple' && structure.arity === point.elements.length
+      ? structure.elements
+      : undefined;
+  return {
+    kind: 'tuple',
+    elements: point.elements.map((e, i) => {
+      if (zero === 'maybe')
+        return {
+          ...e,
+          type: factsOf(e.type).real ? POSSIBLY_ZERO_QUOTIENT_TYPE : 'number',
+        };
+      const c = components?.[i];
+      const nonZero =
+        c !== undefined
+          ? provablyNonZeroSign(c)
+          : (() => {
+              const iv = intervalOfType(e.type);
+              return iv !== undefined && intervalExcludesZero(iv);
+            })();
+      const isZero = c !== undefined && operandLiteralValueOnTypes(c) === 0;
+      return {
+        ...e,
+        type: nonZero
+          ? 'infinity'
+          : isZero
+            ? 'nan'
+            : reduceType({ kind: 'union', types: ['infinity', 'nan'] }),
+      };
+    }),
+  };
+}
+
+/**
+ * The type of a LIST OF POINTS divided by a matrix of numbers with known
+ * dimensions. The broadcast pairs the i-th point with the i-th row of the
+ * matrix and divides the point by each cell of the row, so the quotient is a
+ * matrix of points with the dimensions of the matrix:
+ * `[(1, 2), (3, 4)] / [[1, 2], [3, 4]]` is
+ * `[[(1, 2), (1/2, 1)], [(1, 4/3), (3/4, 1)]]`. The product
+ * `[(1, 2), (3, 4)] · [[1, 2], [3, 4]]` pairs them the same way.
+ *
+ * `undefined` for every other pair of operand types, including a numerator
+ * that may be a list of points or something else (a union).
+ */
+function pointListOverMatrixQuotientType(
+  num: OperandDescriptor,
+  den: OperandDescriptor
+): Type | undefined {
+  const list = resolveTypeAlias(num.type);
+  if (typeof list !== 'object' || list.kind !== 'list') return undefined;
+  const point = resolveTypeAlias(list.elements);
+  if (
+    point !== 'tuple' &&
+    (typeof point !== 'object' || point.kind !== 'tuple')
+  )
+    return undefined;
+  const matrix = resolveTypeAlias(den.type);
+  if (
+    typeof matrix !== 'object' ||
+    matrix.kind !== 'list' ||
+    matrix.dimensions === undefined ||
+    !factsOf(matrix).matrix
+  )
+    return undefined;
+  const cell = numericTensorElementType(matrix);
+  if (cell === undefined) return undefined;
+  let quotient = quotientShapeType(
+    point,
+    describeType(cell),
+    hasInexactRationalComponent(num)
+  );
+  // A cell of the matrix that can be zero gives the quotient of a point by
+  // zero (`pointByZeroCellType`).
+  const zero = divisorCellZero(den, cell, false);
+  if (zero !== 'none')
+    quotient = reduceType({
+      kind: 'union',
+      types: [quotient, pointByZeroCellType(num, point, zero)],
+    });
+  return {
+    kind: 'list',
+    elements: quotient,
+    dimensions: matrix.dimensions,
+  };
 }
 
 /**
@@ -2907,15 +3098,45 @@ function isDeclaredScalarNumberOperand(
   return false;
 }
 
-/** Twin of the private `pointListElementType` of `arithmetic-add.ts`: the
- * tuple ELEMENT type of a type that is statically a rank-1 list of points. */
-function pointListElementTypeOf(t0: Type): Type | undefined {
+/**
+ * A type that is statically a list of points of any rank: a list of points
+ * (`list<tuple<…>>`), a matrix of points (`list<tuple<…>^(2x2)>`), or a list
+ * of such lists (`list<list<tuple<…>>>`). A cell can also be a union of
+ * tuple types (points whose components have different types).
+ *
+ * `cell` is the point type, `rank` the number of list levels, and
+ * `withCell` gives the same shape with another point type.
+ */
+type PointNest = {
+  cell: Type;
+  rank: number;
+  withCell: (cell: Type) => Type;
+};
+
+function pointNestOf(t0: Type): PointNest | undefined {
   const t = resolveTypeAlias(t0);
   if (typeof t === 'string') return undefined;
   if (t.kind !== 'list' && t.kind !== 'indexed_collection') return undefined;
-  if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) return undefined;
-  const elt = t.elements;
-  return typeof elt !== 'string' && elt.kind === 'tuple' ? elt : undefined;
+  const elt = resolveTypeAlias(t.elements);
+  const isPoint = (x: Type): boolean =>
+    typeof x !== 'string' &&
+    (x.kind === 'tuple' ||
+      (x.kind === 'union' &&
+        x.types.every((arm) => {
+          const r = resolveTypeAlias(arm);
+          return typeof r !== 'string' && r.kind === 'tuple';
+        })));
+  const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
+  if (isPoint(elt))
+    return { cell: elt, rank: dims, withCell: (c) => ({ ...t, elements: c }) };
+  if (dims > 1) return undefined;
+  const inner = pointNestOf(elt);
+  if (inner === undefined) return undefined;
+  return {
+    cell: inner.cell,
+    rank: inner.rank + 1,
+    withCell: (c) => ({ ...t, elements: inner.withCell(c) }),
+  };
 }
 
 /**
@@ -3158,20 +3379,36 @@ function addTypeOnTypes(
     )
       return 'error';
     // A point BROADCAST over a list of points: the sum is a list of points,
-    // not the union `list<tuple<…>> | tuple<…>` the widen below reports.
+    // not the union `list<tuple<…>> | tuple<…>` the widen below reports. A
+    // matrix of points (a list of points of rank 2 or more) gives a matrix
+    // of points of the same shape: `[[(1, 2), (3, 4)], [(5, 6), (7, 8)]] +
+    // (1, 1)` is a 2×2 matrix of points.
     const pointLists = args.filter(
       (x) =>
-        !typeCouldBeNumericTuple(x.type) &&
-        pointListElementTypeOf(x.type) !== undefined
+        !typeCouldBeNumericTuple(x.type) && pointNestOf(x.type) !== undefined
     );
     if (
       pointLists.length > 0 &&
       args.every(
         (x) =>
-          typeCouldBeNumericTuple(x.type) ||
-          pointListElementTypeOf(x.type) !== undefined
+          typeCouldBeNumericTuple(x.type) || pointNestOf(x.type) !== undefined
       )
-    )
+    ) {
+      const cell = widenAll(
+        args.map((x) =>
+          stripNumericRanges(
+            typeCouldBeNumericTuple(x.type)
+              ? numericTupleArms(x.type)
+              : pointNestOf(x.type)!.cell
+          )
+        )
+      );
+      // The operand of highest rank gives the shape.
+      const deepest = pointLists
+        .map((x) => pointNestOf(x.type)!)
+        .reduce((a, b) => (b.rank > a.rank ? b : a));
+      if (deepest.rank > 1)
+        return withFloatRationalCellsAsReal(args, deepest.withCell(cell));
       // Only the TUPLE arms of a point operand reach the cell: a
       // point-or-point-list operand (`tuple<…> | list<tuple<…>>`) beside a
       // list of points sums to a list of points whichever arm it holds, and
@@ -3182,20 +3419,8 @@ function addTypeOnTypes(
       // beside a definite collection already has — so only its tuple shape
       // reaches the cell; a number it may hold sums with a point to an
       // error the value path reports per cell, which no static type spells.
-      return withFloatRationalCellsAsReal(
-        args,
-        broadcastResultType(
-          widenAll(
-            args.map((x) =>
-              stripNumericRanges(
-                typeCouldBeNumericTuple(x.type)
-                  ? numericTupleArms(x.type)
-                  : pointListElementTypeOf(x.type)!
-              )
-            )
-          )
-        )
-      );
+      return withFloatRationalCellsAsReal(args, broadcastResultType(cell));
+    }
     // Tuples of the same arity add COMPONENT-WISE, and a component that is a
     // list broadcasts against the other operands' components at that
     // position: `(g_x, g_y) + (L, L₂)` evaluates to the tuple
@@ -5798,11 +6023,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a shape-preserving quotient can divide by at all — see
         // `divisorKeepsNumeratorShape`, which rules out every divisor that can
         // present a TUPLE (`tuple / tuple` has no defined quotient and
-        // `canonicalDivide` rejects it) as well as a matrix, which the value
-        // path leaves inert. The tuple-ness of the numerator is read from its
-        // TYPE alone here (`typeCouldBeNumericTuple`), so a tuple that a
-        // scalar declaration hides behind a symbol's held value is read as a
-        // scalar. The STRUCTURE is preserved but
+        // `canonicalDivide` rejects it). A matrix divisor divides the point
+        // cell by cell and gives a matrix of points, which only
+        // `pointOverCollectionQuotientType` types: the shape-preserving claim
+        // (a point) is not made for it. The tuple-ness of the numerator is
+        // read from its TYPE alone here (`typeCouldBeNumericTuple`), so a
+        // tuple that a scalar declaration hides behind a symbol's held value
+        // is read as a scalar. The STRUCTURE is preserved but
         // the components are NOT echoed: each is widened through
         // `quotientComponentType`, which applies the same tier rules as the
         // scalar branches below — echoing claimed integer components for
@@ -5810,20 +6037,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // rational (`[6,2]/4 = [3/2,1/2]`).
         if (
           typeCouldBeNumericTuple(num.type) &&
-          divisorKeepsNumeratorShape(den)
+          divisorKeepsNumeratorShape(den, true)
         ) {
           // A point divided by a collection of numbers is a list of points,
           // one for each element (`pointOverCollectionQuotientType`).
           const overCollection = pointOverCollectionQuotientType(num, den);
-          return BoxedType.forResult(
-            overCollection ??
-              quotientShapeType(
-                num.type,
-                den,
-                hasInexactRationalComponent(num)
-              ),
-            context.engine._typeResolver
-          );
+          if (overCollection !== undefined || !factsOf(den.type).matrix)
+            return BoxedType.forResult(
+              overCollection ??
+                quotientShapeType(
+                  num.type,
+                  den,
+                  hasInexactRationalComponent(num)
+                ),
+              context.engine._typeResolver
+            );
         }
         // The ELEMENTWISE counterpart of the branch above (Tycho item 209): a
         // COLLECTION whose elements are numeric tuples — a point LIST, e.g.
@@ -5841,6 +6069,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `tuple / tuple` has no defined quotient — while a COLLECTION of
         // scalars is admitted: it divides the point list elementwise, one
         // scalar per point.
+        //
+        // A matrix divisor is not such a collection of scalars: the broadcast
+        // pairs each point of the list with a row of the matrix, and divides
+        // it by each cell of that row, so the quotient is a matrix of points
+        // (`pointListOverMatrixQuotientType`).
+        {
+          const overMatrix = pointListOverMatrixQuotientType(num, den);
+          if (overMatrix !== undefined)
+            return BoxedType.forResult(
+              overMatrix,
+              context.engine._typeResolver
+            );
+        }
         if (
           typeCouldBeNumericTupleCollection(num.type) &&
           divisorKeepsNumeratorShape(den)
@@ -8480,9 +8721,64 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `tuple<integer, integer>` for a value that is a list of points.
         // Only a tensor of NUMBERS qualifies: a list of points is a point
         // list, whose product with a point is the `no-product-between-points`
-        // error the value path answers.
+        // error the value path answers. A factor that is not a literal but
+        // is typed as a tensor of numbers (a symbol declared `vector<2>` or
+        // `matrix<2x2>`, a quotient `1 / M`) takes this arm too: its value
+        // is such a literal, which scales the point at every cell, so
+        // `(1, 2) · n` with `n := [[1, 2], [3, 4]]` is a 2×2 nest of points.
+        // The single-tuple branch below claimed a point for it.
         const isNumericTensorOperand = (x: OperandDescriptor) =>
-          isTensorOperand(x) && numericTensorElementType(x.type) !== undefined;
+          numericTensorElementType(x.type) !== undefined;
+        // A list of points times a matrix of numbers with known dimensions:
+        // the broadcast pairs the i-th point with the i-th row of the matrix
+        // and scales the point by each cell of the row, so the product is a
+        // matrix of points with the dimensions of the matrix:
+        // `[(1, 2), (3, 4)] · [[1, 2], [3, 4]]` is
+        // `[[(1, 2), (2, 4)], [(9, 12), (12, 16)]]`. The tensor branches
+        // below read the list of points as a vector and claimed a vector or
+        // a matrix of numbers.
+        // Scalar factors scale the cells: `2 · [(1, 2), (3, 4)] · M` is the
+        // same matrix of points, scaled. They are merged into the cell type
+        // as in the point branch below: a scalar whose number type is not
+        // declared leaves the point type as written.
+        const scalarFactors = ops.filter((x) => isSubtype(x.type, 'number'));
+        const shapedFactors = ops.filter((x) => !isSubtype(x.type, 'number'));
+        if (shapedFactors.length === 2) {
+          const [a, b] = shapedFactors;
+          const [points, matrix] = factsOf(a.type).matrix ? [b, a] : [a, b];
+          const list = resolveTypeAlias(points.type);
+          const point =
+            typeof list === 'object' && list.kind === 'list'
+              ? resolveTypeAlias(list.elements)
+              : undefined;
+          const m = resolveTypeAlias(matrix.type);
+          const cell = numericTensorElementType(m);
+          if (
+            point !== undefined &&
+            (point === 'tuple' ||
+              (typeof point === 'object' && point.kind === 'tuple')) &&
+            typeof m === 'object' &&
+            m.kind === 'list' &&
+            m.dimensions !== undefined &&
+            factsOf(m).matrix &&
+            cell !== undefined
+          )
+            return BoxedType.forResult(
+              withFloatRationalCellsAsReal(ops, {
+                kind: 'list',
+                elements: scaleTupleComponents(
+                  point,
+                  scalarFactors.every((x) =>
+                    isDeclaredScalarNumberOperand(x, engine)
+                  )
+                    ? [cell, ...scalarFactors.map((x) => x.type)]
+                    : [cell]
+                ),
+                dimensions: m.dimensions,
+              }),
+              engine._typeResolver
+            );
+        }
         const scalesPoint = (x: OperandDescriptor) =>
           isBroadcastCollectionTypeOf(x.type) || isNumericTensorOperand(x);
         // The collection factor and the point factor must be DIFFERENT

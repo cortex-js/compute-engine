@@ -3,6 +3,7 @@ import {
   debugStatementHook,
   debugStatementResultHook,
 } from '../common/debug-hook.js';
+import { isThenable } from '../common/interruptible.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   bindingInContext,
@@ -16,6 +17,7 @@ import {
   shadowedKey,
 } from './boxed-expression/binders.js';
 import { declaredBinders } from './boxed-expression/binding-sites.js';
+import { hasAsyncOnlyApplication } from './boxed-expression/async-only-descendants.js';
 import type {
   BoxedDefinition,
   BoxedOperatorDefinition,
@@ -2207,6 +2209,17 @@ export function apply(
     return fn.engine._fn('Apply', [fn.op1, ...args]);
 
   const result = makeLambda(fn, errorPolicy)?.(args, options);
+  // An application with awaited statements (`awaitStatements`) answers a
+  // `Promise`, which gives `undefined` when the application declines.
+  if (isThenable(result))
+    return (result as unknown as Promise<Expression | undefined>).then(
+      (value) =>
+        value ??
+        declined ??
+        fn.engine.withEvaluationContext(options, () =>
+          fn.engine.function('Apply', [fn, ...args])
+        )
+    ) as unknown as Expression;
   if (result) return result;
   return declined ?? fn.engine.function('Apply', [fn, ...args]);
 }
@@ -3622,6 +3635,38 @@ class SymbolicRecursion {
  */
 const activeApplications = new Map<number, number>();
 
+/**
+ * The call frames of the applications whose statements are awaited
+ * (`ApplyOptions.awaitStatements`) and have not ended, each with the
+ * structural hash of its literal, and the number of such applications for
+ * each hash.
+ *
+ * `activeApplications` counts an awaited application for its synchronous
+ * part only (see `guardSymbolicRecursion`), so it does not see a recursive
+ * application that the body of an awaited application starts in a later
+ * time slice. That application runs on a copy of the context stack of its
+ * caller, which holds the frame of each enclosing application. An
+ * application is thus inside an awaited application of its own literal when
+ * one of the frames of its context stack is in this map with the same hash
+ * (`insideAwaitedApplication()`). A concurrent evaluation has its own
+ * context stack, which does not hold these frames, so it does not see them.
+ * The count only makes the test cheap when no awaited application of the
+ * literal is in flight.
+ */
+const awaitedFrames = new WeakMap<Scope, number>();
+const awaitedApplicationCount = new Map<number, number>();
+
+/** Is one of the frames of `contexts` the call frame of an application of
+ * the literal with the structural hash `literal` whose statements are
+ * awaited (`awaitedFrames`)? */
+function insideAwaitedApplication(
+  literal: number,
+  contexts: ReadonlyArray<{ lexicalScope: Scope }>
+): boolean {
+  if (!awaitedApplicationCount.has(literal)) return false;
+  return contexts.some((c) => awaitedFrames.get(c.lexicalScope) === literal);
+}
+
 /** An application of a literal whose statements are awaited
  * (`ApplyOptions.awaitStatements`): its call frame, and a promise that is
  * settled when the application ends. */
@@ -3765,19 +3810,42 @@ function guardSymbolicRecursion(
   const key = literal.hash;
   return (params, options) => {
     const depth = activeApplications.get(key) ?? 0;
+    // An application inside an awaited application of the same literal
+    // (`awaitedFrames`) is not the outermost one, whatever the count of
+    // `activeApplications` is: the outermost application is the awaited
+    // one, and it declines.
+    const enclosed = insideAwaitedApplication(
+      key,
+      options?._contextStack ?? literal.engine._evalContextStack
+    );
     activeApplications.set(key, depth + 1);
     try {
       // An application that answers a `Promise` (`awaitStatements`) is
-      // counted for its synchronous part only: its arguments are ground, so
-      // it raises no `SymbolicRecursion` of its own, and a count held while
-      // it is suspended would make a concurrent application with a free
-      // symbol in an argument (`f(y)` on this engine, or on another engine
-      // with an identical literal, since the map is keyed by hash) throw
-      // instead of staying inert. The applications its body makes in later
-      // time slices count themselves.
-      return fn(params, options);
+      // counted for its synchronous part only: a count held while it is
+      // suspended would make a concurrent application with a free symbol
+      // in an argument (`f(y)` on this engine, or on another engine with an
+      // identical literal, since the map is keyed by hash) throw instead of
+      // staying inert. The applications its body makes in later time slices
+      // find its frame on their context stack (`insideAwaitedApplication`).
+      // A `SymbolicRecursion` that one of them raises rejects the `Promise`
+      // of this application, and the outermost application declines.
+      const result = fn(params, options);
+      if (!enclosed && isThenable(result))
+        return (result as unknown as Promise<Expression | undefined>).catch(
+          (e: unknown) => {
+            if (e instanceof SymbolicRecursion && e.literal === key)
+              return undefined;
+            throw e;
+          }
+        ) as unknown as Expression;
+      return result;
     } catch (e) {
-      if (e instanceof SymbolicRecursion && e.literal === key && depth === 0)
+      if (
+        e instanceof SymbolicRecursion &&
+        e.literal === key &&
+        depth === 0 &&
+        !enclosed
+      )
         return undefined;
       throw e;
     } finally {
@@ -4696,16 +4764,21 @@ function makeLambda(
    * literal, the application runs the statements of a loop, or the body is
    * not pure. Purity is read per application (see `invoke`). The part
    * says whether the assumptions are hidden right now, and spells `-0`
-   * apart from `0`, which `JSON.stringify` would collapse.
+   * apart from `0`, which `JSON.stringify` would collapse. It also says
+   * whether the statements are awaited and the body applies an operator
+   * that has only an `evaluateAsync` handler (`asyncOnly`): the synchronous
+   * route leaves such an application unevaluated, and its answer must not
+   * be served to the asynchronous route, or the reverse.
    */
   const applicationMemoArgs = (
     args: ReadonlyArray<Expression>,
-    iterationStatements: ReadonlyArray<Expression> | undefined
+    iterationStatements: ReadonlyArray<Expression> | undefined,
+    asyncOnly = false
   ): string | undefined =>
     iterationStatements === undefined &&
     args.every((a) => isNumber(a)) &&
     isPureComputedEffects(effectsOf(body))
-      ? `${ce._factsHidden() ? 'H' : ''}|${args
+      ? `${asyncOnly ? 'A' : ''}${ce._factsHidden() ? 'H' : ''}|${args
           .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
           .join('|')}`
       : undefined;
@@ -4759,8 +4832,14 @@ function makeLambda(
     if (appliesLiteral(onlyStatement, fnExpr)) return undefined;
     // The asynchronous route yields between time slices while the body
     // runs. The body is evaluated here synchronously, so it must be short:
-    // it applies library operators only, and no scoped operator.
-    if (options.awaitStatements && !isCheapWrittenArgument(onlyStatement))
+    // it applies library operators only, and no scoped operator. It must
+    // also apply no operator that has only an `evaluateAsync` handler,
+    // which the synchronous evaluation leaves unevaluated.
+    if (
+      options.awaitStatements &&
+      (!isCheapWrittenArgument(onlyStatement) ||
+        hasAsyncOnlyApplication(onlyStatement, true))
+    )
       return undefined;
     // The application memo, as on the ordinary route (`invoke`): a body
     // with no recursion that is called many times with the same exact
@@ -5315,7 +5394,20 @@ function makeLambda(
     // float (a body `N(Pi)`), and the body of a function that a numeric
     // request applies runs through the exact route first.
     const precisionKey = `${ce.precision}:${ce._requestedPrecision ?? ''}`;
-    const memoArgs = applicationMemoArgs(evaluatedArgs, iterationStatements);
+    // On the asynchronous route, does the body apply an operator that has
+    // only an `evaluateAsync` handler, directly or through a helper
+    // function (`hasAsyncOnlyApplication`)? The synchronous route leaves
+    // such an application unevaluated. The application memo then keeps the
+    // answers of the two routes apart (`applicationMemoArgs`), and the
+    // list-recursion plan below, which runs its steps synchronously, is
+    // not used.
+    const asyncOnly =
+      options?.awaitStatements === true && hasAsyncOnlyApplication(body, true);
+    const memoArgs = applicationMemoArgs(
+      evaluatedArgs,
+      iterationStatements,
+      asyncOnly
+    );
     const numeric = options?.numericApproximation === true;
     const memoKey =
       memoArgs === undefined
@@ -5334,9 +5426,17 @@ function makeLambda(
     // A recursive definition is not unrolled symbolically: a re-entrant
     // application with an argument that contains a free symbol abandons the
     // outermost application of this literal, which stays inert (see
-    // `SymbolicRecursion`). Ground arguments never abandon anything.
+    // `SymbolicRecursion`). Ground arguments never abandon anything. An
+    // application is re-entrant when an application of this literal is
+    // still in its synchronous part (`activeApplications`), or when it is
+    // inside an awaited application of this literal, whose body runs in
+    // later time slices (`insideAwaitedApplication`).
     if (
-      (activeApplications.get(fnExpr.hash) ?? 0) > 1 &&
+      ((activeApplications.get(fnExpr.hash) ?? 0) > 1 ||
+        insideAwaitedApplication(
+          fnExpr.hash,
+          options?._contextStack ?? ce._evalContextStack
+        )) &&
       evaluatedArgs.some((a) => containsFreeSymbol(a))
     )
       throw new SymbolicRecursion(fnExpr.hash);
@@ -5350,6 +5450,7 @@ function makeLambda(
       !options?.holdArguments &&
       evaluatedArgs.length === params.length &&
       evaluatedArgs.every(isNumber) &&
+      !asyncOnly &&
       debugStatementHook === undefined &&
       debugStatementResultHook === undefined
     ) {
@@ -5438,12 +5539,13 @@ function makeLambda(
     // `enterNestedBodyScopes`.
     const nested = enterNestedBodyScopes(bodyFn);
 
-    // Are the statements awaited (`awaitStatements`)? Not when an argument
-    // has a free symbol: the recursion guard of such an application is the
-    // synchronous one above. An application that another suspended
-    // application of this literal blocks waited at the start of `invoke`
-    // (see `asyncInFlight`), so none blocks this one now; the test is
-    // repeated, and a blocked application runs synchronously.
+    // Are the statements awaited (`awaitStatements`)? An argument can have
+    // a free symbol: a recursive application in the body finds the frame of
+    // this application on its context stack (`awaitedFrames`) and abandons
+    // this application, as on the synchronous route. An application that
+    // another suspended application of this literal blocks waited at the
+    // start of `invoke` (see `asyncInFlight`), so none blocks this one now;
+    // the test is repeated, and a blocked application runs synchronously.
     const awaiting =
       options?.awaitStatements === true &&
       options._effects !== undefined &&
@@ -5451,8 +5553,7 @@ function makeLambda(
       blockingAsyncApplication(
         bodyScope,
         options._contextStack ?? ce._evalContextStack
-      ) === undefined &&
-      !evaluatedArgs.some((a) => containsFreeSymbol(a));
+      ) === undefined;
     // An application whose statements are awaited puts its call frame on
     // its own copy of the evaluation-context stack, as the asynchronous
     // route of a named function does (`applyAwaiting`). The caller can start
@@ -5642,6 +5743,12 @@ function makeLambda(
       }
       inFlight.push(application);
       const applications = inFlight;
+      const literal = fnExpr.hash;
+      awaitedFrames.set(freshScope, literal);
+      awaitedApplicationCount.set(
+        literal,
+        (awaitedApplicationCount.get(literal) ?? 0) + 1
+      );
       // Other evaluations run while the statements are awaited. A result
       // computed before one of them wrote a value the body reads must not
       // enter the memo, whose record is stamped at store time: the
@@ -5671,6 +5778,10 @@ function makeLambda(
           const index = applications.lastIndexOf(application);
           if (index >= 0) applications.splice(index, 1);
           if (applications.length === 0) asyncInFlight.delete(bodyScope);
+          awaitedFrames.delete(freshScope);
+          const count = (awaitedApplicationCount.get(literal) ?? 1) - 1;
+          if (count > 0) awaitedApplicationCount.set(literal, count);
+          else awaitedApplicationCount.delete(literal);
           application.finish();
         }
         return inContext(() =>
@@ -5701,7 +5812,10 @@ function makeLambda(
     } finally {
       cleanup();
     }
-    return conclude();
+    // The memo key of an application on the asynchronous route whose body
+    // applies an asynchronous-only operator is the key of that route
+    // (`asyncOnly`). An answer computed synchronously is not stored under it.
+    return conclude(!asyncOnly);
   };
 
   // `invoke` applies `lambda` again when an application waited for another

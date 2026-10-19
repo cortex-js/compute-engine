@@ -1201,7 +1201,9 @@ describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
       [
         'expected `function`, got `list<integer>` at `[1, 2] |> filter(Function(x > 1, x))`',
         'incompatible-type',
-        src,
+        // The piped value of the outer pipe, which is in the callback slot
+        // of `map`.
+        '[1, 2] |> filter(x => x > 1)',
       ],
     ]);
     // The direct call is the same error: the filtered list is in the
@@ -1236,7 +1238,7 @@ describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
       [
         'expected `function`, got `list<integer>` at `[1, 2, 3] |> take(2)`',
         'incompatible-type',
-        src,
+        '[1, 2, 3] |> take(2)',
       ],
     ]);
     expect(report('"abc" |> take(2) |> map(c => c)')).toEqual([]);
@@ -1952,30 +1954,31 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
   test('a `function` statement on a `const` binding leaves the binding', () => {
     // The run time refuses the `function` statement, because the binding is
     // a constant, and the binding keeps its literal. The static tier leaves
-    // the binding as it is too, and does not report the refusal: it is a
-    // runtime error, as for an assignment to a constant.
+    // the binding as it is too, and reports the refusal at the `function`
+    // statement (`static-type-error` with the code
+    // `invalid-clause-definition`); the run does not report it a second time.
     const error = jest.spyOn(console, 'error').mockImplementation(() => {});
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const REFUSED = ['runtime-error', 'invalid-clause-definition'];
+      const STATIC = ['static-type-error', 'invalid-clause-definition'];
       const head = 'const h = (x: integer) => x\nfunction h(u: string) { u }\n';
       const first = run(head + 'h(x: 3)');
-      expect(codes(first)).toEqual([REFUSED]);
+      expect(codes(first)).toEqual([STATIC]);
       expect(first.value.re).toBe(3);
       const second = run(head + 'h(u: "a")');
-      expect(codes(second)).toEqual([...NAME_UNKNOWN, REFUSED]);
+      expect(codes(second)).toEqual([STATIC, ...NAME_UNKNOWN]);
       expect(second.value.errors.length).toBeGreaterThan(0);
 
       // The second `function` statement is refused for the same reason. It
       // is not a redefinition of the first one, which was never installed.
       const twice = run(head + 'function h(u: string) { u }\nh(x: 3)');
-      expect(codes(twice)).toEqual([REFUSED, REFUSED]);
+      expect(codes(twice)).toEqual([STATIC, STATIC]);
       expect(twice.value.re).toBe(3);
 
       // A literal with no annotation pins no signature. The binding stays
       // too, so the positional call is valid.
       const bare = run('const h = (x) => x\nfunction h(u: string) { u }\nh(3)');
-      expect(codes(bare)).toEqual([REFUSED]);
+      expect(codes(bare)).toEqual([STATIC]);
       expect(bare.value.re).toBe(3);
 
       expect(error).not.toHaveBeenCalled();

@@ -5,6 +5,7 @@ import type {
   BoxedBaseDefinition,
   BoxedValueDefinition,
   Expression,
+  IntervalBounds,
 } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import {
@@ -12,8 +13,10 @@ import {
   exactCompareNumbers,
   exactRealValueOf,
   isExactRealLiteral,
+  mergeTightestBounds,
   relationFromChains,
 } from './constraint-subject.js';
+import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import {
   isNumber,
   isFunction,
@@ -818,6 +821,110 @@ function exactValuesDiffer(a: Expression, b: Expression): boolean {
 }
 
 /**
+ * The bounds known for the symbol `x`, from three sources:
+ *
+ * - the inequalities assumed about it (`assume(x > 0)`), from every scope
+ *   in force;
+ * - the range of its type (`integer<1..>` has the lower bound `1`,
+ *   `real<-1..2>` the bounds `-1` and `2`), read by `intervalOfType`;
+ * - its sign (`x.sgn`), which also reads its value, a disequality
+ *   `x ≠ 0`, and a type such as `real<0..> & !0` that a range alone does
+ *   not express (`positive` is the bound `x > 0`).
+ *
+ * The tightest bound of each side wins. These are the facts the sign
+ * getters (`isPositive`, `isNonNegative`…) read, so a comparison with a
+ * number and a sign getter agree: with `p: integer<0..>`, `p ≥ 0` is
+ * `true`, as `p.isNonNegative` is.
+ */
+function symbolBounds(x: Expression & { symbol: string }): IntervalBounds {
+  const ce = x.engine;
+  const bounds = getInequalityBoundsFromAssumptions(ce, x.symbol);
+  const range = intervalOfType(x.type.type);
+  if (range !== undefined) {
+    const fromType: IntervalBounds = {};
+    if (Number.isFinite(range.lo)) {
+      fromType.lower = boundOfType(ce, range.lo);
+      fromType.lowerStrict = range.loOpen === true;
+    }
+    if (Number.isFinite(range.hi)) {
+      fromType.upper = boundOfType(ce, range.hi);
+      fromType.upperStrict = range.hiOpen === true;
+    }
+    mergeTightestBounds(bounds, fromType);
+  }
+  const s = x.sgn;
+  const fromSign: IntervalBounds = {};
+  if (s === 'positive' || s === 'non-negative' || s === 'zero') {
+    fromSign.lower = ce.Zero;
+    fromSign.lowerStrict = s === 'positive';
+  }
+  if (s === 'negative' || s === 'non-positive' || s === 'zero') {
+    fromSign.upper = ce.Zero;
+    fromSign.upperStrict = s === 'negative';
+  }
+  mergeTightestBounds(bounds, fromSign);
+  return bounds;
+}
+
+/**
+ * Whether the bounds contradict each other (`x ≥ 0` and `x < 0`): no value
+ * is within them, so they must not decide a comparison.
+ */
+function admitsNoValue(bounds: IntervalBounds): boolean {
+  if (bounds.lower === undefined || bounds.upper === undefined) return false;
+  const width = exactCompareNumbers(bounds.lower, bounds.upper);
+  return (
+    width === 1 ||
+    (width === 0 &&
+      (bounds.lowerStrict === true || bounds.upperStrict === true))
+  );
+}
+
+/**
+ * A bound of a type range as a number expression. A range holds doubles,
+ * and a type reads a double as the decimal its shortest form spells
+ * (`real<0.1..>` starts at the decimal `0.1`, not at the double nearest to
+ * it). So an integer bound is an exact integer, and any other bound is the
+ * big decimal of that shortest form, which `exactCompareNumbers` orders
+ * exactly against an exact rational such as `1/10`.
+ */
+function boundOfType(ce: Expression['engine'], v: number): Expression {
+  return Number.isInteger(v)
+    ? ce.number(v)
+    : ce.number(new BigDecimal(v.toString()));
+}
+
+/**
+ * The relation of the symbol `x` to the finite real number `k` that the
+ * bounds of `x` (`symbolBounds`) entail, or `undefined`. A bound at `k`
+ * gives a weak relation (`x ≥ k`) unless it is strict; a closed lower and
+ * a closed upper bound both at `k` give `x = k`. Bounds that contradict
+ * each other (`x ≥ 0` from the type and `x < 0` from an assumption) admit
+ * no value, and give no relation rather than an arbitrary one.
+ */
+function relationFromSymbolBounds(
+  x: Expression & { symbol: string },
+  k: Expression | number
+): '<' | '<=' | '=' | '>=' | '>' | undefined {
+  const bounds = symbolBounds(x);
+  if (admitsNoValue(bounds)) return undefined;
+  const lower =
+    bounds.lower === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.lower, k);
+  const upper =
+    bounds.upper === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.upper, k);
+  if (lower === 1 || (lower === 0 && bounds.lowerStrict === true)) return '>';
+  if (upper === -1 || (upper === 0 && bounds.upperStrict === true)) return '<';
+  if (lower === 0 && upper === 0) return '=';
+  if (lower === 0) return '>=';
+  if (upper === 0) return '<=';
+  return undefined;
+}
+
+/**
  * The relation between `a` and `b`, or `undefined` when it is not known.
  *
  * Two values that differ by `tolerance` or less are `'='`. The default is
@@ -963,8 +1070,11 @@ function cmpWithTolerance(
     )
       b = b.numericValue;
     if (typeof b === 'number') {
-      if (b === 0) {
-        // We could be querying the sign of a number
+      // We could be querying the sign of an EXACT number. A float is
+      // compared with the tolerance by the code below instead: a float
+      // within the tolerance of 0 (`1e-12`) is equal to 0 (`isEqual(0)` is
+      // `true`), so it must not be ordered strictly against 0 (CM-P1-4).
+      if (b === 0 && a.isExact) {
         const s = a.sgn;
         if (s === undefined) return undefined;
         if (s === 'zero') return '=';
@@ -1003,56 +1113,52 @@ function cmpWithTolerance(
       if (isSymbol(b)) {
         // A non-real (complex) number cannot be ordered against a real symbol
         if (a.isComplex) return undefined;
-        const bounds = getInequalityBoundsFromAssumptions(a.engine, b.symbol);
         const aNum =
           typeof a.numericValue === 'number'
             ? a.numericValue
             : a.numericValue.re;
 
         if (aNum !== undefined && Number.isFinite(aNum)) {
-          // We're comparing a (number) to b (symbol). The bound is compared
-          // with `a` EXACTLY: read as doubles, a lower bound of `1 − 10⁻³⁰`
-          // equalled `a = 1`, and `1 < b` was ordered from a bound that does
-          // not entail it.
-          // If b has a lower bound > a, then a < b
-          if (bounds.lower !== undefined) {
-            const order = exactCompareNumbers(bounds.lower, a);
-            // b > lowerBound (if strict) or b >= lowerBound (if not strict)
-            // If lowerBound > a, then b > a, so a < b
-            if (order === 1) return '<';
-            // If lowerBound = a and strict (b > a), then a < b
-            if (order === 0 && bounds.lowerStrict) return '<';
-            // If lowerBound = a and not strict (b >= a), then a <= b
-            if (order === 0 && !bounds.lowerStrict) return '<=';
-          }
-
-          // If b has an upper bound < a, then a > b
-          if (bounds.upper !== undefined) {
-            const order = exactCompareNumbers(bounds.upper, a);
-            // b < upperBound (if strict) or b <= upperBound (if not strict)
-            // If upperBound < a, then b < a, so a > b
-            if (order === -1) return '>';
-            // If upperBound = a and strict (b < a), then a > b
-            if (order === 0 && bounds.upperStrict) return '>';
-            // If upperBound = a and not strict (b <= a), then a >= b
-            if (order === 0 && !bounds.upperStrict) return '>=';
-          }
-
-          // Fall back to the symbol's known numeric value.
-          // Only order if the symbol's value is provably real.
+          // We're comparing a (number) to b (symbol).
+          //
+          // A symbol with a known real value (e.g. Pi, or `x := 1e-12`) is
+          // first compared by that value, with the tolerance: a value
+          // within the tolerance of `a` is equal to it (`isEqual` is
+          // `true`), so the bounds must not order it strictly (CM-P1-4).
+          // The sign of `x := 1e-12` gives the bound `x > 0`, and it made
+          // `0 < x` true while `0 = x` was true too.
           const bSymNum = b.re;
-          if (
+          const bHasValue =
             typeof bSymNum === 'number' &&
             Number.isFinite(bSymNum) &&
-            b.im === 0
-          ) {
-            // With no tolerance, the machine value of the symbol is not
-            // enough: `π.re` is the float `3.141592653589793`, which is
-            // not `π`. See `orderByValue`.
-            if (tolerance === 0) return orderByValue(a, b, tolerance);
+            b.im === 0;
+          if (bHasValue && tolerance !== 0) {
             if (Math.abs(aNum - bSymNum) <= tolerance) return '=';
             return aNum < bSymNum ? '<' : '>';
           }
+
+          // Otherwise, the relation of `b` to `a` that the bounds of `b`
+          // entail, reversed. A strict relation or an equality is final. A
+          // weak one (`b ≥ a`) is returned only when the value of `b` does
+          // not give a stricter one below.
+          const fromBounds = relationFromSymbolBounds(b, a);
+          const rel =
+            fromBounds === '>'
+              ? '<'
+              : fromBounds === '<'
+                ? '>'
+                : fromBounds === '>='
+                  ? '<='
+                  : fromBounds === '<='
+                    ? '>='
+                    : fromBounds;
+          if (rel === '<' || rel === '>' || rel === '=') return rel;
+
+          // With no tolerance, the machine value of the symbol is not
+          // enough: `π.re` is the float `3.141592653589793`, which is not
+          // `π`. See `orderByValue`.
+          if (bHasValue) return orderByValue(a, b, tolerance) ?? rel;
+          if (rel !== undefined) return rel;
         }
         // A signed infinity is ordered against a finite value.
         if (aNum !== undefined && isSignedInfinity(aNum))
@@ -1106,44 +1212,34 @@ function cmpWithTolerance(
   if (typeof b === 'number') {
     // Check if a is a symbol with inequality assumptions
     if (isSymbol(a)) {
-      const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
-
-      // We're comparing a (symbol) to b (number). The bound is compared
-      // with `b` exactly, as in the number-to-symbol branch above.
-      // If a has a lower bound >= b, then a > b (or a >= b)
-      if (bounds.lower !== undefined) {
-        const order = exactCompareNumbers(bounds.lower, b);
-        // a > lowerBound (if strict) or a >= lowerBound (if not strict)
-        // If lowerBound > b, then a > b
-        if (order === 1) return '>';
-        // If lowerBound = b and strict (a > b), then a > b
-        if (order === 0 && bounds.lowerStrict) return '>';
-        // If lowerBound = b and not strict (a >= b), then a >= b
-        if (order === 0 && !bounds.lowerStrict) return '>=';
-      }
-
-      // If a has an upper bound <= b, then a < b (or a <= b)
-      if (bounds.upper !== undefined) {
-        const order = exactCompareNumbers(bounds.upper, b);
-        // a < upperBound (if strict) or a <= upperBound (if not strict)
-        // If upperBound < b, then a < b
-        if (order === -1) return '<';
-        // If upperBound = b and strict (a < b), then a < b
-        if (order === 0 && bounds.upperStrict) return '<';
-        // If upperBound = b and not strict (a <= b), then a <= b
-        if (order === 0 && !bounds.upperStrict) return '<=';
-      }
-
-      // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
-      // Only order if the symbol's value is provably real. With no
-      // tolerance, or with a signed infinity, see `orderByValue`.
+      // We're comparing a (symbol) to b (number).
+      //
+      // A symbol with a known real value (e.g. Pi, ExponentialE, or
+      // `x := 1e-12`) is first compared by that value, with the tolerance,
+      // as in the number-to-symbol branch above (CM-P1-4).
       const aNum = a.re;
-      if (!Number.isNaN(aNum) && a.im === 0) {
-        if (tolerance === 0 || !Number.isFinite(aNum) || !Number.isFinite(b))
-          return orderByValue(a, a.engine.number(b), tolerance);
+      const aHasValue = !Number.isNaN(aNum) && a.im === 0;
+      if (
+        aHasValue &&
+        tolerance !== 0 &&
+        Number.isFinite(aNum) &&
+        Number.isFinite(b)
+      ) {
         if (Math.abs(aNum - b) <= tolerance) return '=';
         return aNum < b ? '<' : '>';
       }
+
+      // Otherwise, the relation that the bounds of `a` entail. A strict
+      // relation or an equality is final. A weak one (`a ≥ b`) is returned
+      // only when the value of `a` does not give a stricter one below.
+      const rel = relationFromSymbolBounds(a, b);
+      if (rel === '<' || rel === '>' || rel === '=') return rel;
+
+      // Fall back to the symbol's known numeric value. With no tolerance,
+      // or with a signed infinity, see `orderByValue`.
+      if (aHasValue)
+        return orderByValue(a, a.engine.number(b), tolerance) ?? rel;
+      if (rel !== undefined) return rel;
     }
 
     // Handle function expressions (e.g., Negate(Pi)) compared to a number
@@ -1201,65 +1297,57 @@ function cmpWithTolerance(
     const eqResult = a.valueDefinition?.eq?.(b);
     if (eqResult === true) return '=';
 
-    // Symbol-vs-symbol ordering from assumed interval bounds (SYM P2-8):
-    // e.g. `assume(s > 4); assume(t < 1)` ⇒ `s > t`. Only a bounds separation
-    // decides the relation; overlapping bounds stay `undefined` (fail closed).
+    // Symbol-vs-symbol ordering from the bounds of the two symbols (SYM
+    // P2-8): e.g. `assume(s > 4); assume(t < 1)` ⇒ `s > t`. Only a bounds
+    // separation decides the relation; overlapping bounds stay `undefined`
+    // (fail closed). The bounds of a symbol include its declared range and
+    // its sign (`symbolBounds`), so `p: integer<1..>` is greater than
+    // `q: integer<..0>`.
+    //
+    // Against a number, the relation is the one the bounds of `a` entail.
+    //
+    // When both sides have a known real value, the values are compared
+    // first, with the tolerance: two values within the tolerance are equal
+    // (`isEqual` is `true`), so the bounds must not order them strictly
+    // (CM-P1-4). The sign of `x := 1e-12` gives the bound `x > 0`.
+    //
+    // Otherwise, a strict relation or an equality from the bounds is final.
+    // A weak one (`a ≥ b`) is returned only when the values of the symbols
+    // do not give a stricter one below: with `x := 0` and `y := 0`, the
+    // signs give only `x ≥ y`, and the values give `x = y`.
+    const aNum = a.re;
+    const bx = typeof b === 'number' ? a.engine.number(b) : b;
+    const bNum = bx.re;
+    const haveValues =
+      !Number.isNaN(aNum) && a.im === 0 && !Number.isNaN(bNum) && bx.im === 0;
+    if (
+      haveValues &&
+      tolerance !== 0 &&
+      Number.isFinite(aNum) &&
+      Number.isFinite(bNum)
+    ) {
+      if (Math.abs(aNum - bNum) <= tolerance) return '=';
+      return aNum < bNum ? '<' : '>';
+    }
+
+    let rel: '<' | '<=' | '=' | '>=' | '>' | undefined = undefined;
     if (typeof b !== 'number' && isSymbol(b)) {
-      const rel = compareBounds(
-        getInequalityBoundsFromAssumptions(a.engine, a.symbol),
-        getInequalityBoundsFromAssumptions(a.engine, b.symbol)
-      );
-      if (rel !== undefined) return rel;
+      const ba = symbolBounds(a);
+      const bb = symbolBounds(b);
+      if (!admitsNoValue(ba) && !admitsNoValue(bb)) rel = compareBounds(ba, bb);
+    } else if (isNumber(b) && !b.isComplex) {
+      // Only compare against a provably real number (a complex value is
+      // unordered and its bounds relationship is indeterminate).
+      rel = relationFromSymbolBounds(a, b);
     }
-
-    // Check inequality assumptions for the symbol.
-    // Only compare against a provably real number (a complex value is unordered
-    // and its bounds relationship is indeterminate).
-    if (isNumber(b) && !b.isComplex) {
-      const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
-      // The bound is compared with `b` exactly, as in the number-to-symbol
-      // branch above.
-      // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
-      if (bounds.lower !== undefined) {
-        const order = exactCompareNumbers(bounds.lower, b);
-        // symbol > lowerBound (if strict) or symbol >= lowerBound (if not strict)
-        // If lowerBound > b, then symbol > b
-        if (order === 1) return '>';
-        // If lowerBound = b and strict (symbol > b), then symbol > b
-        if (order === 0 && bounds.lowerStrict) return '>';
-        // If lowerBound = b and not strict (symbol >= b), then symbol >= b
-        if (order === 0 && !bounds.lowerStrict) return '>=';
-      }
-
-      // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
-      if (bounds.upper !== undefined) {
-        const order = exactCompareNumbers(bounds.upper, b);
-        // symbol < upperBound (if strict) or symbol <= upperBound (if not strict)
-        // If upperBound < b, then symbol < b
-        if (order === -1) return '<';
-        // If upperBound = b and strict (symbol < b), then symbol < b
-        if (order === 0 && bounds.upperStrict) return '<';
-        // If upperBound = b and not strict (symbol <= b), then symbol <= b
-        if (order === 0 && !bounds.upperStrict) return '<=';
-      }
-    }
+    if (rel === '<' || rel === '>' || rel === '=') return rel;
 
     // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
     // Only order if both sides are provably real. With no tolerance, or
     // with a signed infinity, see `orderByValue`.
-    const aNum = a.re;
-    if (!Number.isNaN(aNum) && a.im === 0) {
-      const bx = typeof b === 'number' ? a.engine.number(b) : b;
-      const bNum = bx.re;
-      if (!Number.isNaN(bNum) && bx.im === 0) {
-        if (tolerance === 0 || !Number.isFinite(aNum) || !Number.isFinite(bNum))
-          return orderByValue(a, bx, tolerance);
-        if (Math.abs(aNum - bNum) <= tolerance) return '=';
-        return aNum < bNum ? '<' : '>';
-      }
-    }
+    if (haveValues) return orderByValue(a, bx, tolerance) ?? rel;
 
-    return undefined;
+    return rel;
   }
 
   //

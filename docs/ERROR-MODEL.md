@@ -300,9 +300,13 @@ first three in `_invalidValue()`,
   `collection` handler block), not on laziness. To be precise about
   status: the frozen container is *preserved and iterable*, but its tree
   is still **invalid** — `isValid` is `false` for any tree containing an
-  `Error` node, container or not (`error-value.ts`). Giving containers a
-  validity notion distinct from their cells (a valid list with invalid
-  cells, reflected in its type) is a possible future type-system
+  `Error` node, container or not (`error-value.ts`). Its type is still a
+  collection type: a failed cell makes the element type `unknown`, so
+  `[1, err, 3]` is typed `list` (`list<unknown>`), not `error`, and
+  `ListJoin` splices it as it splices any list. A variable declared `list`
+  accepts it; one declared `list<number>` does not, because `error` is not
+  a subtype of `number`. Giving containers a validity notion distinct from
+  their cells (a valid list with invalid cells) is a possible future
   refinement, not current behavior. Absorption looks at operands, not
   arbitrarily deep through collection values: `Sin([err])` stays an inert
   application of `Sin` to a list, while `Sin(err)` bubbles. The operands of
@@ -1881,7 +1885,9 @@ document's history):
   (`list<number | error>`; `Length` answers the length, `Sum` demands
   every cell and answers the error, a plot draws the good cells)? Today
   one error cell makes the whole tree invalid: `[1, Sin("a"), 3]` has
-  `isValid === false` and type `error`, and `Length` of it stays inert,
+  `isValid === false` and `isCollection === false`, and `Length` of it
+  stays inert. Its type is `list<unknown>` (it was `error` until
+  2026-10-19, and `ListJoin` then wrapped such a list as one element),
   while a NaN or `~oo` cell is an ordinary value (`[1, 1/0, 3]` is the
   valid `[1, ~oo, 3]`). Favored eventually by the 2026-08-25 review; it is
   a design touching the type lattice (an `error` cell type) and every

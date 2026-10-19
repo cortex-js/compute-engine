@@ -209,7 +209,14 @@ describe('Point arithmetic — when the points are still built', () => {
       ['Add', ['Tuple', 'a', 'b'], ['Tuple', 1, 2, 3]],
       ...COMPUTED_POINTS.slice(2),
     ];
-    expect(ce.box(['PointX', points] as never).evaluate().operator).toBe('Error');
+    // The list keeps the failed sum as a cell (`docs/ERROR-MODEL.md` §3), so
+    // the projection holds the error and gives no number for it. (Before
+    // 2026-10-19 the list was typed `error`, and the whole projection was the
+    // `Error`; whether a projection over a list with a failed cell maps the
+    // cells or answers the error is an open question in ROADMAP.md.)
+    const projected = ce.box(['PointX', points] as never).evaluate();
+    expect(projected.errors.length).toBeGreaterThan(0);
+    expect(projected.isNumber).not.toBe(true);
     const { run } = compiled(['PointX', points]);
     const got = run(VALUES) as number[];
     expect(got[0]).toBeNaN();

@@ -3494,6 +3494,39 @@ export function lazyBroadcastMapIfNeeded(
  */
 const lazyMapNRewraps = new WeakMap<Expression, Expression>();
 
+/** A literal collection with fewer elements is searched element by element:
+ * an index costs more than it saves. */
+const ELEMENTS_BY_HASH_MIN_SIZE = 32;
+
+/** The index of each large literal collection, built the first time a
+ * membership is asked. An expression does not change, so the index stays
+ * valid. */
+const ELEMENTS_BY_HASH = new WeakMap<Expression, Map<number, Expression[]>>();
+
+/**
+ * The elements of the literal collection `expr`, grouped by their hash. Two
+ * `isSame` elements always have the same hash, so a membership test by
+ * `isSame` reads only the elements that have the hash of the target: its cost
+ * does not grow with the size of the collection, where a comparison with
+ * every element made a walk that asks for the membership of each element of
+ * another collection (the elements of a held `Union`) quadratic.
+ */
+function elementsByHash(
+  expr: Expression & { ops: ReadonlyArray<Expression> }
+): Map<number, Expression[]> {
+  let index = ELEMENTS_BY_HASH.get(expr);
+  if (index === undefined) {
+    index = new Map();
+    for (const op of expr.ops) {
+      const bucket = index.get(op.hash);
+      if (bucket === undefined) index.set(op.hash, [op]);
+      else bucket.push(op);
+    }
+    ELEMENTS_BY_HASH.set(expr, index);
+  }
+  return index;
+}
+
 export function lazyMapNumericApproximation(
   ce: Expression['engine'],
   expr: Expression
@@ -4497,7 +4530,13 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         const x = machineNumberOf(target);
         if (x !== undefined) return storeContains(store, x);
       }
-      return expr.ops.some((x) => x.isSame(target));
+      if (expr.nops < ELEMENTS_BY_HASH_MIN_SIZE)
+        return expr.ops.some((x) => x.isSame(target));
+      return (
+        elementsByHash(expr)
+          .get(target.hash)
+          ?.some((x) => x.isSame(target)) === true
+      );
     },
 
     iterator: (expr) => {

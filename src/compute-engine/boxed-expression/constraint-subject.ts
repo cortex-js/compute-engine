@@ -455,26 +455,41 @@ export function boundsFromNormalizedInequality(
 /**
  * Merge `from` into `into`, keeping the tightest bounds.
  *
- * Semantics match the historical accumulation in
- * `getInequalityBoundsFromAssumptions`: a candidate replaces the current
- * bound only when it is strictly tighter (`isGreater`/`isLess` returning
- * exactly `true`); ties keep the existing strictness.
+ * A candidate replaces the current bound when it is strictly tighter. Two
+ * bounds are ordered exactly (`exactCompareNumbers`) when both are finite
+ * real numbers, else with `isGreater`/`isLess`. When the two bounds have
+ * the same value, a strict bound wins: `x ≥ 0` and `x > 0` together give
+ * `x > 0`, whatever the order of the two facts. Before, the bound seen
+ * first kept its strictness, so `assume(x ≥ 0)` in a scope and
+ * `assume(x > 0)` in a nested scope gave only `x ≥ 0`.
  */
 export function mergeTightestBounds(
   into: IntervalBounds,
   from: IntervalBounds
 ): void {
   if (from.lower !== undefined) {
-    if (into.lower === undefined || from.lower.isGreater(into.lower) === true) {
+    const order =
+      into.lower === undefined
+        ? 1
+        : (exactCompareNumbers(from.lower, into.lower) ??
+          (from.lower.isGreater(into.lower) === true ? 1 : undefined));
+    if (order === 1) {
       into.lower = from.lower;
       into.lowerStrict = from.lowerStrict;
-    }
+    } else if (order === 0 && from.lowerStrict === true)
+      into.lowerStrict = true;
   }
   if (from.upper !== undefined) {
-    if (into.upper === undefined || from.upper.isLess(into.upper) === true) {
+    const order =
+      into.upper === undefined
+        ? -1
+        : (exactCompareNumbers(from.upper, into.upper) ??
+          (from.upper.isLess(into.upper) === true ? -1 : undefined));
+    if (order === -1) {
       into.upper = from.upper;
       into.upperStrict = from.upperStrict;
-    }
+    } else if (order === 0 && from.upperStrict === true)
+      into.upperStrict = true;
   }
 }
 
@@ -1495,15 +1510,23 @@ export function signFromBounds(bounds: IntervalBounds): Sign | undefined {
     bounds.lower === undefined
       ? undefined
       : exactCompareNumbers(bounds.lower, 0);
+  const upper =
+    bounds.upper === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.upper, 0);
+  // `x ≥ 0` and `x ≤ 0` together give `x = 0`.
+  if (
+    lower === 0 &&
+    upper === 0 &&
+    bounds.lowerStrict !== true &&
+    bounds.upperStrict !== true
+  )
+    return 'zero';
   if (lower !== undefined) {
     if (lower > 0 || (lower === 0 && bounds.lowerStrict === true))
       return 'positive';
     if (lower === 0) return 'non-negative';
   }
-  const upper =
-    bounds.upper === undefined
-      ? undefined
-      : exactCompareNumbers(bounds.upper, 0);
   if (upper !== undefined) {
     if (upper < 0 || (upper === 0 && bounds.upperStrict === true))
       return 'negative';

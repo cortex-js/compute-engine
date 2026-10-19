@@ -3161,8 +3161,9 @@ export interface FunctionInterface {
   /**
    * Internal. Is this node written-out DATA: a canonical `List` or `Tuple`
    * bound to the standard library whose every element is a number literal,
-   * or such a `List` or `Tuple` in turn? Such a node holds no symbol and
-   * evaluates to itself. The answer is computed once per node.
+   * a failed cell, or such a `List` or `Tuple` in turn? A failed cell is an
+   * `Error` node with no symbol in it, and is data too. Such a node holds no
+   * symbol and evaluates to itself. The answer is computed once per node.
    */
   _isLiteralData(): boolean;
   readonly op1: Expression;

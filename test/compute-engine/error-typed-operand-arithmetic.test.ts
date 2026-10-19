@@ -81,12 +81,17 @@ describe('An operator with an operand typed error', () => {
     expect(errorCode(e.evaluate())).toBe('incompatible-type');
   });
 
+  // The operand typed `error` is a cell that fails when the list is
+  // evaluated. Nothing is known of the type of such a cell, so the element
+  // type is `unknown`, the same type as the value `[Error(…), 1]` that the
+  // evaluation gives (`literalElementType` in `library/collections.ts`).
+  // It was `list<error | integer>`, which a variable declared `list` refused.
   test('a list that holds an operand typed error is not typed error', () => {
     expect(
       engine()
         .box(['List', E, 1] as any)
         .type.toString()
-    ).toBe('list<error | integer>');
+    ).toBe('list<unknown>');
   });
 
   test('an operand that is not typed error keeps the numeric type', () => {

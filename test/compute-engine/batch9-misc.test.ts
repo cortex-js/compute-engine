@@ -111,8 +111,14 @@ describe('LaTeX of a quantity whose unit has a symbolic exponent', () => {
     expect(
       text(['Quantity', 3, ['Divide', 'm', ['Multiply', 's', 'kg']]])
     ).toBe('3 m/(kg\u22C5s)');
+    // A unit with a numeric exponent takes its canonical form, a quotient of
+    // powers of unit symbols. A unit with a symbolic exponent keeps its
+    // tree.
     expect(text(['Quantity', 3, ['Power', ['Divide', 'mi', 'h'], 2]])).toBe(
-      '3 (mi/h)^2'
+      '3 mi^2/h^2'
+    );
+    expect(text(['Quantity', 3, ['Power', ['Divide', 'mi', 'h'], 'n']])).toBe(
+      '3 (mi/h)^n'
     );
     expect(text(['Quantity', 3, ['Power', 'm', ['Rational', 3, 2]]])).toBe(
       '3 m^(3/2)'
@@ -209,7 +215,7 @@ describe('LaTeX round trip of every unit of the registry', () => {
     expect(ce.parse('3\\,\\mathrm{mph}^2').json).toEqual([
       'Quantity',
       3,
-      ['Power', ['Divide', 'mi', 'h'], 2],
+      ['Divide', ['Power', 'mi', 2], ['Power', 'h', 2]],
     ]);
     expect(parseUnitDSL('(mi/h)^2')).toEqual([
       'Power',

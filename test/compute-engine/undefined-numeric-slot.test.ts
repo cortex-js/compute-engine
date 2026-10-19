@@ -135,7 +135,9 @@ describe('UNDEFINED in a numeric slot', () => {
         ce
           .box(['List', ['List', 1, 'Undefined'], ['List', 1, 2]])
           .type.toString()
-      ).toBe('list<integer | missing>');
+        // A list of rows keeps its level (since 2026-10-19; it was typed as a
+        // flat list, which did not describe the value).
+      ).toBe('list<list<integer | missing>>');
       expect(ce.parse('[1, \\operatorname{Undefined}]').type.toString()).toBe(
         'list<integer | missing>'
       );

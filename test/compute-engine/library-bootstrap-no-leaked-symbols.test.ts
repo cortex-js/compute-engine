@@ -71,7 +71,7 @@ const CONSTANTS: [string, MathJsonExpression, string][] = [
   ],
   [
     'AvogadroConstant',
-    ['Quantity', 6.02214076e23, ['Power', 'mol', -1]],
+    ['Quantity', 6.02214076e23, ['Divide', 1, 'mol']],
     '6.022\\,140\\,76\\cdot10^{23}\\,\\mathrm{1/mol}',
   ],
   [
@@ -93,14 +93,14 @@ const CONSTANTS: [string, MathJsonExpression, string][] = [
     [
       'Quantity',
       5.670374419e-8,
-      ['Divide', 'W', ['Multiply', ['Power', 'm', 2], ['Power', 'K', 4]]],
+      ['Divide', 'W', ['Multiply', ['Power', 'K', 4], ['Power', 'm', 2]]],
     ],
-    '5.670\\,374\\,419\\cdot10^{-8}\\,\\mathrm{W/m^{2}\\cdot K^{4}}',
+    '5.670\\,374\\,419\\cdot10^{-8}\\,\\mathrm{W/K^{4}\\cdot m^{2}}',
   ],
   [
     'GasConstant',
-    ['Quantity', 8.314462618, ['Divide', 'J', ['Multiply', 'mol', 'K']]],
-    '8.314\\,462\\,618\\,\\mathrm{J/mol\\cdot K}',
+    ['Quantity', 8.314462618, ['Divide', 'J', ['Multiply', 'K', 'mol']]],
+    '8.314\\,462\\,618\\,\\mathrm{J/K\\cdot mol}',
   ],
 ];
 

@@ -460,20 +460,14 @@ export function canonicalInvisibleOperator(
         if (isFunction(u, 'Negate') && isNumber(u.op1)) return true;
         return u !== x && (isFunction(u, 'Add') || isFunction(u, 'Subtract'));
       };
-      // The unit is boxed resolve-only: a unit name is not a variable, so a
-      // name with no definition is not declared in the current scope.
-      if (isMagnitude(a) && isFunction(b, '__unit__')) {
-        return ce._fn('Quantity', [
-          unwrap(a).canonical,
-          ce._resolveOnly(() => b.op1.canonical),
-        ]);
-      }
-      if (isMagnitude(b) && isFunction(a, '__unit__')) {
-        return ce._fn('Quantity', [
-          unwrap(b).canonical,
-          ce._resolveOnly(() => a.op1.canonical),
-        ]);
-      }
+      // The canonical handler of `Quantity` boxes the unit resolve-only (a
+      // unit name is not a variable, so a name with no definition is not
+      // declared in the current scope) and gives it its canonical form, the
+      // same tree as the unit of a quantity built by quantity arithmetic.
+      if (isMagnitude(a) && isFunction(b, '__unit__'))
+        return ce.function('Quantity', [unwrap(a), b.op1]);
+      if (isMagnitude(b) && isFunction(a, '__unit__'))
+        return ce.function('Quantity', [unwrap(b), a.op1]);
     }
   }
 
