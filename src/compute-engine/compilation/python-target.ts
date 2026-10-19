@@ -923,11 +923,25 @@ function compilePythonEquality(
  */
 function compilePythonBound(
   expr: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  /** The bound of a `Sum`/`Product`, floored at run time (see below). A
+   * `Loop` over a `Range` reads its bounds as they are: it walks a range
+   * with a fractional start bound in floats. */
+  floor = false
 ): string {
   if (isNumber(expr) && !expr.isComplex && Number.isFinite(expr.re))
     return String(Math.floor(expr.re));
-  return BaseCompiler.compile(expr, target);
+  const code = BaseCompiler.compile(expr, target);
+  if (!floor) return code;
+  // The interpreter walks the integers from the floor of the lower bound to
+  // the floor of the upper bound, and a bound that is not typed `integer`
+  // can hold a float at run time (`x = 0.7`), which `range` refuses with a
+  // `TypeError`. Such a bound is floored with Python's floor division
+  // `// 1`, which needs no import, and converted to an `int`. A bound of
+  // unknown type (an undeclared `n`) is converted too: it can hold a float
+  // at run time as well. Only a bound typed `integer` is kept as written.
+  if (expr.type.matches('integer')) return code;
+  return `int((${code}) // 1)`;
 }
 
 /**
@@ -941,7 +955,7 @@ function compilePythonUpperBound(
 ): string {
   if (isNumber(expr) && !expr.isComplex && Number.isFinite(expr.re))
     return String(Math.floor(expr.re) + 1);
-  return `${BaseCompiler.compile(expr, target)} + 1`;
+  return `${compilePythonBound(expr, target, true)} + 1`;
 }
 
 /**
@@ -959,6 +973,10 @@ function compilePythonUpperBound(
  * nested generator clauses (`… for i in … for j in …`) — the natural, trivial
  * Python idiom — so every indexing set is honored (cf. the JS target, which
  * nests single-index loops; GPU targets fail closed instead).
+ *
+ * A body that is a statement or a block of statements has no generator
+ * form; it takes the loop form (`compilePythonSumProductLoop`) where the
+ * `Sum` is the value of a statement, and declines elsewhere.
  */
 function compilePythonSumProduct(
   kind: 'Sum' | 'Product',
@@ -976,9 +994,56 @@ function compilePythonSumProduct(
   BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
   const body = args[0];
-  const clauses = args.slice(1);
-  const forClauses: string[] = [];
 
+  // The body is the element of a generator expression, which takes an
+  // EXPRESSION. A body that is an assignment or a declaration
+  // (`statementBodyHead`), or a block of several statements (a block with a
+  // local: `Block(t ≔ t + k; t)`), has no form there: it gave
+  // `sum(t = k + t ⏎ return t for k in …)`, a Python syntax error. Such a
+  // body takes the loop form (`compilePythonSumProductLoop`) where the `Sum`
+  // is the value of a statement; elsewhere the compilation fails.
+  const statementError = (): Error =>
+    new Error(
+      `Could not compile \`${kind}\`: the body is a statement or a block of ` +
+        `statements, and the Python lowering of \`${kind}\` is a generator ` +
+        `expression, whose element is an expression. The loop form of ` +
+        `\`${kind}\` is written only where the \`${kind}\` is the value of a ` +
+        `statement (a function body, a statement of a block, or the right ` +
+        `side of an assignment there).`
+    );
+  if (
+    statementBodyHead(body) !== undefined ||
+    (isFunction(body, 'Block') && body.nops > 1)
+  ) {
+    const loop = compilePythonSumProductLoop(kind, args, target);
+    if (loop !== undefined) return loop;
+    throw statementError();
+  }
+
+  const { forClauses, idxTarget } = compilePythonSumProductClauses(
+    kind,
+    args.slice(1),
+    target
+  );
+  const bodyCode = BaseCompiler.compile(body, idxTarget);
+  if (bodyCode.includes('\n')) throw statementError();
+  const gen = `${bodyCode} ${forClauses.join(' ')}`;
+  return kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
+}
+
+/**
+ * The `for` clauses of a Python `Sum`/`Product` (`for k in range(1, 4)`),
+ * one for each `Limits` clause, and the target in which the body resolves
+ * each index to its Python name. `indexName` gives the Python name of an
+ * index; by default it is the name of the index.
+ */
+function compilePythonSumProductClauses(
+  kind: 'Sum' | 'Product',
+  clauses: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  indexName?: (index: string) => string
+): { forClauses: string[]; idxTarget: CompileTarget<Expression> } {
+  const forClauses: string[] = [];
   // `idxTarget` binds every index seen so far, so an inner clause's bounds and
   // the body resolve the outer indices as bare identifiers.
   let idxTarget = target;
@@ -992,7 +1057,8 @@ function compilePythonSumProduct(
     if (!isSymbol(indexExpr))
       throw new Error(`Could not compile \`${kind}\`: index must be a symbol`);
     // The index is emitted as a bare Python identifier.
-    const index = pythonCheckBindingName(indexExpr.symbol);
+    const name = pythonCheckBindingName(indexExpr.symbol);
+    const index = indexName?.(name) ?? name;
 
     const lowerExpr = ops[1];
     const upperExpr = ops[2];
@@ -1009,35 +1075,172 @@ function compilePythonSumProduct(
         `Could not compile \`${kind}\`: an unbounded range is not supported`
       );
 
-    const lowerCode = compilePythonBound(lowerExpr, idxTarget);
+    const lowerCode = compilePythonBound(lowerExpr, idxTarget, true);
     const upperCode = compilePythonUpperBound(upperExpr, idxTarget);
     forClauses.push(`for ${index} in range(${lowerCode}, ${upperCode})`);
 
     const prev = idxTarget;
     idxTarget = {
       ...prev,
-      var: (id) => (id === index ? index : prev.var(id)),
-      boundVars: BaseCompiler.withBoundNames(prev, [index]),
+      var: (id) => (id === name ? index : prev.var(id)),
+      boundVars: BaseCompiler.withBoundNames(prev, [name]),
     };
   }
 
-  // The body is the element of a generator expression, which takes an
-  // EXPRESSION. A body that is an assignment or a declaration
-  // (`statementBodyHead`), or that compiles to several statements (a block
-  // with a local: `Block(t ≔ t + k; t)`), has no form there: it gave
-  // `sum(t = k + t ⏎ return t for k in …)`, a Python syntax error. Python
-  // has no statement position to hoist a loop to, so the compilation fails.
-  const statementError = (): Error =>
-    new Error(
-      `Could not compile \`${kind}\`: the body is a statement or a block of ` +
-        `statements, and the Python lowering of \`${kind}\` is a generator ` +
-        `expression, whose element is an expression.`
-    );
-  if (statementBodyHead(body) !== undefined) throw statementError();
-  const bodyCode = BaseCompiler.compile(body, idxTarget);
-  if (bodyCode.includes('\n')) throw statementError();
-  const gen = `${bodyCode} ${forClauses.join(' ')}`;
-  return kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
+  return { forClauses, idxTarget };
+}
+
+/**
+ * Compile `expr` as the body of a Python function (`compile()`,
+ * `compileFunction()`), with a statement sink (`CompileTarget.hoist`) for the
+ * statements that a lowering writes ahead of the body's value: the loop of a
+ * `Sum` with a statement body (`compilePythonSumProductLoop`). With no such
+ * statement, the code is the code of `compileCseRoot`, a single expression
+ * or a block of statements that ends with a `return`. With such statements,
+ * the code is those statements followed by the value, which gets a `return`
+ * when it is a single expression, and not when it is a root assignment.
+ */
+function compilePythonRoot(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): string {
+  const sink: NonNullable<CompileTarget<Expression>['hoist']> = {
+    stmts: [],
+    boundVars: target.boundVars,
+    unit: expr,
+  };
+  const code = BaseCompiler.compileCseRoot(expr, { ...target, hoist: sink });
+  if (sink.stmts.length === 0) return code;
+  // A root assignment (`s ≔ Sum(…)`) is a statement, as it is with no
+  // hoisted statement: `return s = _tv1` does not parse. The convention of
+  // the `block` hook detects it: no Python expression starts with a token
+  // free of spaces and brackets followed by ` = `.
+  const statement =
+    code.includes('\n') ||
+    /^return\b/.test(code) ||
+    /^[^\s()[\]{}'"=,:]+ = /.test(code);
+  return [...sink.stmts, statement ? code : `return ${code}`].join('\n');
+}
+
+/**
+ * A `Sum`/`Product` whose body is a statement or a block of statements, as a
+ * Python `for` loop with an accumulator. The loop is written ahead of the
+ * statement that holds the `Sum`, in the statement sink of that statement
+ * (`CompileTarget.hoist`), and the `Sum` is then the name of the
+ * accumulator:
+ *
+ *     _tv2 = 0
+ *     for _tv3 in range(1, 4):
+ *         u = u + _tv3
+ *         _tv2 += u
+ *
+ * The body is compiled as the body of a function is, a block with its own
+ * locals. The value of an iteration is the value of the last statement of
+ * the body; when that statement assigns a name, its value is the assigned
+ * name, as for the interpreter. A last statement with no value (a loop), and
+ * a `Return`, or a `Break` or `Continue` outside a loop of the body, have no
+ * loop form.
+ *
+ * The loop is written only where the `Sum` is the value of the statement that
+ * owns the sink: the statement itself, the right side of an `Assign` or of a
+ * `Declare`, or the value of a `Return`. There the value is computed before
+ * anything else of the statement runs, so the loop can run first. In any
+ * other position (an operand, a conditional arm, the body of a lambda or of a
+ * generator), the loop would run before the expression around it, and it
+ * would run even when the expression does not evaluate the `Sum`; the answer
+ * is then `undefined` and the `Sum` declines.
+ *
+ * The indices are fresh names: a Python `for` binds its variable in the
+ * scope of the whole function, so `for k in …` changed a `k` of the enclosing
+ * code, where the generator expression does not. The loop is compiled
+ * without common-subexpression elimination: this target binds a temporary
+ * around an expression (`cseBind`), and the loop is not in that expression.
+ */
+function compilePythonSumProductLoop(
+  kind: 'Sum' | 'Product',
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!BaseCompiler.canHoist(target)) return undefined;
+  const unit = target.hoist!.unit;
+  const isThis = (e: Expression | undefined): boolean =>
+    isFunction(e, kind) &&
+    e.nops === args.length &&
+    e.ops.every((op, i) => op === args[i]);
+  const direct =
+    isThis(unit) ||
+    (isFunction(unit, 'Assign') && isThis(unit.ops[1])) ||
+    (isFunction(unit, 'Declare') &&
+      isThis(BaseCompiler.declareValueOperand(unit.ops))) ||
+    (isFunction(unit, 'Return') && isThis(unit.ops[0]));
+  if (!direct) return undefined;
+
+  const body = args[0];
+  // A `Return` leaves the function, and a `Break` or a `Continue` outside a
+  // loop of the body would act on the loop of the `Sum`: none of them has a
+  // meaning that the interpreter gives a `Sum`, so the loop form declines.
+  const jumps = (e: Expression, inLoop: boolean): boolean => {
+    if (!isFunction(e) || e.operator === 'Function') return false;
+    const h = e.operator;
+    if (h === 'Return') return true;
+    if ((h === 'Break' || h === 'Continue') && !inLoop) return true;
+    return e.ops.some((x) => jumps(x, inLoop || h === 'Loop'));
+  };
+  if (jumps(body, false)) return undefined;
+
+  const acc = BaseCompiler.tempVar(target);
+  const plain: CompileTarget<Expression> = { ...target, cse: undefined };
+  const { forClauses, idxTarget } = compilePythonSumProductClauses(
+    kind,
+    args.slice(1),
+    plain,
+    () => BaseCompiler.tempVar(target)
+  );
+  // The body is compiled as the body of a function would be: a block with its
+  // locals, whose last line returns its value (the `block` hook), or a single
+  // line. The body has a statement sink of its own, so a `Sum` with a
+  // statement body that is the value of a statement of the body writes its
+  // loop inside the loop of this `Sum`, ahead of that statement.
+  const sink: NonNullable<CompileTarget<Expression>['hoist']> = {
+    stmts: [],
+    boundVars: idxTarget.boundVars,
+    unit: body,
+  };
+  // The statements of the body run in the scope of the enclosing function,
+  // where a local `t` of the body would write a parameter or a local `t` of
+  // the enclosing code. Each local of a block of the body is spelled with a
+  // fresh name (`withFreshBlockLocals`), as the indices are.
+  const code = BaseCompiler.withFreshBlockLocals(() =>
+    BaseCompiler.compile(body, { ...idxTarget, hoist: sink })
+  );
+  const lines = [...sink.stmts, ...code.split('\n')];
+  // The value of an iteration: the value the last line returns, or the
+  // name that a last line which is an assignment writes (the convention of
+  // the `block` hook: no Python expression starts with a token free of
+  // spaces and brackets followed by ` = `), or the single line itself.
+  const lastLine = lines.pop()!;
+  const returned = /^return (.+)$/.exec(lastLine);
+  const assigned = /^([^\s()[\]{}'"=,:]+) = /.exec(lastLine);
+  let value: string;
+  // A block that ends with a loop returns `None` (the `block` hook), which
+  // is not a term.
+  if (returned !== null && returned[1] !== 'None') value = returned[1];
+  else if (returned === null && assigned !== null) {
+    lines.push(lastLine);
+    value = assigned[1];
+  } else if (lines.length === 0 && !/^(?:if|for|while)\b/.test(lastLine))
+    value = lastLine;
+  else return undefined;
+  lines.push(`${acc} ${kind === 'Sum' ? '+=' : '*='} ${value}`);
+  let loop = lines.join('\n');
+  for (let i = forClauses.length - 1; i >= 0; i--)
+    loop = `${forClauses[i]}:\n${indentPythonStatements(loop)}`;
+  BaseCompiler.hoistStatement(
+    target,
+    `${acc} = ${kind === 'Sum' ? '0' : '1'}`,
+    loop
+  );
+  return acc;
 }
 
 /**
@@ -5644,7 +5847,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `list(__import__('itertools').accumulate(${coll}, ${fn}))`;
   },
   // Apply the function to 1-based indexes; a statically non-positive
-  // dimension is inert in the interpreter and fails closed.
+  // dimension, which gives the constant `[]` in the interpreter, fails closed
+  // as on the JavaScript target (see the comment of its `Tabulate` handler).
   Tabulate: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Tabulate`: missing argument');
@@ -5656,8 +5860,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
         throw new Error(
-          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) is inert ` +
-            `in the interpreter.`
+          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) gives ` +
+            `a constant empty list.`
         );
     }
     const f = pyFnArg('Tabulate', args[0], compile, ['integer', 'integer']);
@@ -6231,7 +6435,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     for (const name of writtenInputs ?? [])
       inputLocals.set(name, BaseCompiler.tempVar(target));
     pythonAssertReturnableSelection('compile()', expr, true);
-    let body = BaseCompiler.compileCseRoot(expr, target);
+    let body = compilePythonRoot(expr, target);
     // The body assigns an input (`u ≔ u + 1`, when an engine scope binds
     // `u`). The code has no `def`, and a host runs it in a context that this
     // target does not know: at the top level of a module, or in a function
@@ -6393,7 +6597,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     });
     // CSE is default-enabled; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
-    let body = BaseCompiler.compileCseRoot(expr, target);
+    let body = compilePythonRoot(expr, target);
     pythonAssertReturnedBlock('compileFunction()', expr, body);
     // Two different names stay two different Python identifiers
     // (`pythonDistinctIdentifiers`). The function name and the parameters

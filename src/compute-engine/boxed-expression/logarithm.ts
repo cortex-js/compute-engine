@@ -1,35 +1,16 @@
 import type { Expression } from '../global-types.js';
-import type { NumericValue } from '../numeric-value/types.js';
 import { isNumber, isSymbol, indeterminateFormAnswer } from './type-guards.js';
-import { isImaginaryPartFinite } from './imaginary-part.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
-
-/**
- * Whether a number literal's value has an infinite component although it is
- * not one of the three named infinities — an "anonymous" member of the
- * `infinity` type such as `∞ + i` (`isInfinity` and `isFinite` both answer
- * for the named values only). Asked of the NUMERIC VALUE, not the machine
- * projections: a finite bignum beyond the double range (`10^1000`)
- * projects `re` to `Infinity` while its `bignumRe` is finite.
- */
-export function hasInfiniteComponent(nv: NumericValue | number): boolean {
-  if (typeof nv === 'number') return !Number.isFinite(nv);
-  const reFinite =
-    nv.bignumRe !== undefined ? nv.bignumRe.isFinite() : Number.isFinite(nv.re);
-  return !reFinite || !isImaginaryPartFinite(nv);
-}
 
 /**
  * Where a logarithm operand sits among the exceptional points:
  *
  * - `nan`, `zero` (`ln 0 = −∞`), `one` (`ln 1 = 0`), `pos-inf`
  *   (`ln(+∞) = +∞`), `complex-inf` (`ln(~oo) = ~oo`);
- * - `directed-inf`: an infinite value with a direction other than +∞ —
- *   `−∞`, or a number literal with an infinite component that is not
- *   `isInfinity` — whose logarithm is `∞ + iθ` with a finite θ. A value
- *   with an infinite real part and a finite imaginary part is the real
- *   infinity `+∞` (`canonicalNumber()`), so `ln(−∞) = +∞`, as
- *   `ln(+∞)`;
+ * - `directed-inf`: `−∞`, an infinite value with a direction other than
+ *   +∞, whose logarithm is `∞ + iπ`. A value with an infinite real part and
+ *   a finite imaginary part is the real infinity `+∞` or `−∞`
+ *   (`canonicalNumber()`), so `ln(−∞) = +∞`, as `ln(+∞)`;
  * - `finite`: every other finite number literal;
  * - `undefined`: an operand with no known value (a symbol that holds
  *   none), which has no exceptional-point answer.
@@ -61,9 +42,8 @@ function classify(x: Expression): LogPoint | undefined {
     return isNumber(x) ? 'complex-inf' : undefined;
   }
   if (isNumber(x)) {
-    // A literal is boxed as `±∞` or `~oo` when one of its parts is
-    // infinite (`canonicalNumber()`), so this is a defensive test.
-    if (hasInfiniteComponent(x.numericValue)) return 'directed-inf';
+    // A literal with an infinite part is boxed as `±∞` or `~oo`
+    // (`canonicalNumber()`), thus it was classified above.
     if (x.isSame(0)) return 'zero';
     if (x.isSame(1)) return 'one';
     return 'finite';

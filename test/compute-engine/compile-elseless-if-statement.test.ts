@@ -431,11 +431,15 @@ describe('the admission is plain-JavaScript only', () => {
     });
   });
 
-  test('the GPU targets stay fail-closed', () => {
+  test('the GPU targets write an if statement when the branch assigns', () => {
+    // The shader statement form of a selection whose branch assigns
+    // (`compile-statement-forms.test.ts`): an else-less `If` has no ternary
+    // form, and in statement position its value is discarded.
     for (const to of ['glsl', 'wgsl'] as const) {
       const e = new ComputeEngine();
-      const r = compile(elselessBlock(e), { to });
-      expect(r.success).toBe(false);
+      const r = compile(elselessBlock(e), { to, fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.code).toContain('if (0.0 < x) {\n  s = -1.0;\n}');
     }
   });
 });

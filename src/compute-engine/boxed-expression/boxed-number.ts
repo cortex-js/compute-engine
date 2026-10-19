@@ -88,13 +88,9 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from './type-guards.js';
-import { isImaginaryPartFinite } from './imaginary-part.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
-import {
-  hasInfiniteComponent,
-  logarithmAtExceptionalPoint,
-} from './logarithm.js';
+import { logarithmAtExceptionalPoint } from './logarithm.js';
 
 /** Is the exact rational `r` equal to the double `re` under the engine's
  * DECIMAL reading of doubles? A double stands for the decimal number its
@@ -857,17 +853,6 @@ export class BoxedNumber
     if (this.isNaN) return this;
     if (this.isInfinity === true)
       return this.isPositive === true ? this : ce.ComplexInfinity;
-    // An "anonymous" infinity — a complex literal with an infinite
-    // component (`∞ + i`), a member of the `infinity` type whose
-    // `isInfinity` is false: its square root has infinite modulus and half
-    // its direction, so `+∞` when the value points along +∞ (a positive
-    // infinite real part with a finite imaginary part) and the
-    // direction-less `~oo` otherwise. The generic complex kernel below
-    // computes `∞ − ∞` for it and answers NaN.
-    if (hasInfiniteComponent(this._value))
-      return this.re === Infinity && isImaginaryPartFinite(this)
-        ? ce.PositiveInfinity
-        : ce.ComplexInfinity;
     // @fastpath
     if (typeof this._value === 'number') {
       const v = this._value;

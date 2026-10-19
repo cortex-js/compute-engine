@@ -987,7 +987,14 @@ function matchCommutativeWithAnchors(
         result.push([...combo]);
         return;
       }
-      for (let i = start; i < n; i++) {
+      // Stop where too few indices are left to complete the combination.
+      // Without this bound the search visits every subset of fewer than `k`
+      // indices: for `k = n - 1` that is about `2^n` steps for `n`
+      // combinations. Solving `x + x^2 + … + x^{23} + sin(x) = 2`, whose
+      // root templates capture all the other terms of the sum with a
+      // sequence wildcard, took 39 s. The combinations and their order do
+      // not change.
+      for (let i = start; i <= n - (k - combo.length); i++) {
         combo.push(i);
         backtrack(i + 1);
         combo.pop();
@@ -1396,7 +1403,9 @@ function combinations(n: number, k: number): number[][] {
       result.push([...combo]);
       return;
     }
-    for (let i = start; i < n; i++) {
+    // Stop where too few indices are left to complete the combination (see
+    // `getCombinations()`): the combinations and their order do not change.
+    for (let i = start; i <= n - (k - combo.length); i++) {
       combo.push(i);
       backtrack(i + 1);
       combo.pop();

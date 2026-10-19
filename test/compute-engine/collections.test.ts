@@ -394,17 +394,19 @@ describe('COUNT — 2-argument value and predicate forms', () => {
     );
   });
 
-  test('a non-boolean predicate result is a hard error, exactly as in Filter', () => {
+  test('an undecided predicate verdict leaves the count unknown, exactly as in Filter', () => {
     // Delegating to `Filter` means the predicate contract is Filter's by
-    // construction: an inert `x > 1` over a symbolic element throws rather
-    // than being silently counted or skipped.
+    // construction: an inert `x > 1` over a symbolic element is neither
+    // counted nor skipped. The walk records that it missed an element, and
+    // the count is not known, so `Count` stays unevaluated (it threw before
+    // 2026-10-18).
     const pred: Expression = ['Function', ['Greater', '_', 1], '_'];
-    expect(() =>
-      engine.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate()
-    ).toThrow(/must return "True" or "False"/);
     expect(
-      () => engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
-    ).toThrow(/must return "True" or "False"/);
+      engine.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate().operator
+    ).toBe('Count');
+    expect(
+      engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
+    ).toBeUndefined();
   });
 
   test('an indeterminate-count collection stays symbolic, as in the 1-arg form', () => {
@@ -4647,11 +4649,12 @@ describe('Lambda application substitutes the element into an undetermined body',
   test('Filter shares the choke point: predicate sees the element value', () => {
     // The predicate below cannot decide (m is undetermined), so once the
     // element value is substituted the applied predicate is `1 == m`, not the
-    // old, corrupted `k == m`. Filter surfaces the undetermined predicate as
-    // an error rather than silently dropping the element.
+    // old, corrupted `k == m`. Filter does not silently drop the element: its
+    // walk records that it missed an element, and the Filter stays
+    // unevaluated (it threw before 2026-10-18).
     const undeterminedPred: Expression = ['Function', ['Equal', 'k', 'm'], 'k'];
-    expect(() => [...ce.box(['Filter', 'd', undeterminedPred]).each()]).toThrow(
-      /True.+False/
+    expect(ce.box(['Filter', 'd', undeterminedPred]).evaluate().operator).toBe(
+      'Filter'
     );
     // A fully-decidable predicate still filters correctly (regression guard on
     // the value flowing through the choke point).

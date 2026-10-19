@@ -371,8 +371,9 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
   // The Python lowering of `Sum`/`Product` is a generator expression, whose
   // element is an expression. A body with an assignment gave
   // `sum(_tv1 = k + _tv1 ⏎ return _tv1 for k in range(1, 4))`, a syntax
-  // error. The compilation now fails closed, and the fallback runs the
-  // interpreter.
+  // error. Such a body is now a `for` loop with an accumulator, written
+  // ahead of the body's value (`compile-statement-forms.test.ts`); a body
+  // that writes an input writes the local copy of the input.
   const py = new PythonTarget();
   const limits = ['Limits', 'k', 1, 3];
   const PROGRAMS: [string, boolean, any][] = [
@@ -397,14 +398,26 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
     ],
   ];
   for (const [name, declareU, src] of PROGRAMS)
-    test(name, () => {
+    (TEST_PYTHON === undefined ? it.skip : it)(name, () => {
       const ce = new ComputeEngine();
       if (declareU) ce.declare('u', 'real');
-      expect(() => py.compile(ce.box(src))).toThrow(
-        /the Python lowering of `(Sum|Product)` is a generator expression/
+      const code = py.compile(ce.box(src)).code;
+      expect(code).toMatch(/^for _tv\d+ in range\(1, 4\):$/m);
+      // The input `u` is read, never written.
+      expect(code).not.toMatch(/(^|[^\w.])u\s*=[^=]/m);
+      const indent = code
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n');
+      const out = execFileSync(
+        TEST_PYTHON!,
+        [
+          '-c',
+          `import json\nu = 5.0\ndef g():\n${indent}\nprint(json.dumps([g(), u]))`,
+        ],
+        { encoding: 'utf8' }
       );
-      const r = py.compile(ce.box(src), { fallback: true });
-      expect(r.success).toBe(false);
+      expect(JSON.parse(out)).toEqual([interpreted(src), 5]);
     });
 
   (TEST_PYTHON === undefined ? it.skip : it)(

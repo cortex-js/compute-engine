@@ -1451,6 +1451,25 @@ function predicateResultError(operator: string, fn: Expression): Error {
 }
 
 /**
+ * Whether a predicate result that is neither `True`, `False` nor an error
+ * value ({@link predicateErrorValue}) is an UNDECIDED verdict rather than a
+ * malformed predicate: a boolean that is not decided yet, such as `0 < z` for
+ * a `z` with no value. The element is then neither selected nor rejected,
+ * and the consumer of the predicate stays unevaluated (a selecting walk
+ * records that it missed the element, `noteIncompleteWalk()`). A result that
+ * is not a boolean (`x ↦ x + 1`) is a malformed predicate, reported by
+ * {@link predicateResultError}. So is a boolean that has no unknown: no later
+ * value can decide it, as `0 < "a"` for the string element `"a"`.
+ */
+function isUndecidedVerdict(applied: Expression): boolean {
+  return (
+    applied.isValid &&
+    applied.type.matches('boolean') &&
+    applied.unknowns.length > 0
+  );
+}
+
+/**
  * A function operand written in the wrapper-free shorthand form
  * (`["Greater", "_", 5]` instead of `["Function", ["Greater", "_", 5]]`),
  * converted to a canonical function literal — or `undefined` when the operand
@@ -5421,6 +5440,33 @@ function isProvablyOutOfRange(xs: Expression, index: number): boolean {
   return xs.isFiniteCollection === true && xs.isEnumerableCollection === true;
 }
 
+/**
+ * The element of `xs` at the position `index`, an integer number literal that
+ * is not a safe integer (`At(Permutations(Range(1, 25)), 10^20)`), read
+ * exactly by the `atBigint` facet of a collection whose count is a `bigint`.
+ * The `number` that `index.re` gives is not exact for such a position, and
+ * `at()` takes a `number`.
+ *
+ * The answer is `'outside'` when the position is provably outside the
+ * collection, and `undefined` when the facet does not apply (no `atBigint`
+ * facet, a count that is not a `bigint`) or does not answer: the caller then
+ * reads the position as before.
+ */
+function elementAtLargePosition(
+  xs: Expression,
+  index: Expression
+): Expression | 'outside' | undefined {
+  const atBigint = xs.baseDefinition?.collection?.atBigint;
+  if (atBigint === undefined) return undefined;
+  const k = asBigint(index);
+  if (k === null) return undefined;
+  const count = xs.count;
+  if (typeof count !== 'bigint') return undefined;
+  const position = k < 0n ? count + 1n + k : k;
+  if (position < 1n || position > count) return 'outside';
+  return unlessWalkMissedElements(() => atBigint(xs, position));
+}
+
 function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
   if (xs === undefined) return ce.Missing;
 
@@ -9302,6 +9348,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // ...and only an enumerable one: `Take(xs, 2)` over a valueless `xs` is
       // finite yet has nothing to walk (see `isEnumerableSource`).
       if (!isEnumerableSource(xs)) return undefined;
+      // A collection with a `countOf` facet computes the count with no walk:
+      // `Permutations(Range(1, 25))` has 25! elements, which no walk can
+      // visit.
+      const countOf = xs.baseDefinition?.collection?.countOf;
+      if (countOf !== undefined) {
+        const c = unlessWalkMissedElements(() => countOf(xs, what));
+        if (c !== undefined) return engine.number(c);
+      }
       let n = 0;
       for (const x of xs.each()) if (x.isSame(what)) n += 1;
       return engine.number(n);
@@ -10053,7 +10107,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 // An error VALUE takes the element's place, so this pull is
                 // productive too and resets the counter.
                 if (err) return emit(err);
-                throw predicateResultError('Filter', expr.op2);
+                // An undecided verdict (`0 < z` for a `z` with no value, see
+                // `isUndecidedVerdict`) neither selects nor rejects the
+                // element. The walk misses it, and records that it missed an
+                // element (`noteIncompleteWalk()`), so that every reader of
+                // the walk (the evaluation of the `Filter`, its count, its
+                // first element) stays unevaluated. The pull counts toward
+                // the cap, as a rejection does.
+                if (!isUndecidedVerdict(pred))
+                  throw predicateResultError('Filter', expr.op2);
+                noteIncompleteWalk();
               }
               // REJECTED — the only pull that counts toward the cap.
               if (++sinceEmit > limit)
@@ -12425,6 +12488,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             let marker: Expression | undefined;
             for (const m of indices) {
               const k = m.re;
+              // An entry that is not a safe integer is read exactly (see
+              // `elementAtLargePosition()`).
+              if (Number.isInteger(k) && !Number.isSafeInteger(k)) {
+                const large = elementAtLargePosition(expr, m);
+                if (large === 'outside') {
+                  picked.push((marker ??= absenceMarker(ce, expr)));
+                  continue;
+                }
+                if (large !== undefined) {
+                  picked.push(large);
+                  continue;
+                }
+              }
               if (!Number.isInteger(k)) {
                 // An entry that is provably not an integer selects nothing:
                 // the marker, in place, like an out-of-range entry.
@@ -12466,6 +12542,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return index + 1 < ops.length
             ? chainAbsorbMarker(ce, expr.type.type, ops, index)
             : absenceMarker(ce, expr);
+        }
+        // An index that is not a safe integer is read exactly (see
+        // `elementAtLargePosition()`).
+        if (!Number.isSafeInteger(i)) {
+          const large = elementAtLargePosition(expr, opAtIndex);
+          if (large === 'outside')
+            return index + 1 < ops.length
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index)
+              : absenceMarker(ce, expr);
+          if (large !== undefined) {
+            expr = large;
+            index += 1;
+            continue;
+          }
         }
         const walksBefore = incompleteWalkCount();
         const v = expr.at(i);
@@ -14237,6 +14327,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the walk never disagree.
       if (xs.isFiniteCollection === false && xs.contains(value) === false)
         return ce.Zero;
+      // A collection with an `indexOf` facet computes the position with no
+      // walk: `Permutations(Range(1, 25))` has 25! elements, which no walk
+      // can visit.
+      const indexOf = xs.baseDefinition?.collection?.indexOf;
+      if (indexOf !== undefined && value !== undefined) {
+        const position = unlessWalkMissedElements(() => indexOf(xs, value));
+        if (position !== undefined) return ce.number(position);
+      }
       const gridIndex = unboundedIntegerRangeIndex(xs, value);
       if (gridIndex !== undefined) return ce.number(gridIndex);
       const index = searchIndex(xs, (x) => x.isSame(value));
@@ -14446,6 +14544,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // reported as the operator's result. Collected here rather than thrown:
       // stop the walk (by reporting a match) and return the error below.
       const predErrors: Expression[] = [];
+      // An undecided verdict (`isUndecidedVerdict`) leaves the first match
+      // unknown: the walk stops there, and the operator stays unevaluated.
+      let undecided = false;
       // A source that cannot be searched has no first match to index AND no
       // grounds for the NOT-FOUND `0` — stay inert (see `searchIndex`).
       const index = searchIndex(xs, (x) => {
@@ -14458,9 +14559,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           predErrors.push(err);
           return true;
         }
+        if (applied !== undefined && isUndecidedVerdict(applied)) {
+          undecided = true;
+          return true;
+        }
         throw predicateResultError('IndexWhere', fn);
       });
       if (predErrors.length > 0) return predErrors[0];
+      if (undecided) return undefined;
       return index === undefined ? undefined : ce.number(index);
     },
   },
@@ -14522,6 +14628,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // surfaced as the operator's result.
         const err = predicateErrorValue(applied);
         if (err) return err;
+        // An undecided verdict leaves the first match unknown
+        // (`isUndecidedVerdict`).
+        if (applied !== undefined && isUndecidedVerdict(applied))
+          return undefined;
         throw predicateResultError('Find', fn);
       }
       if (walk.missedElements) return undefined;
@@ -14577,6 +14687,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // surfaced as the operator's result.
           const err = predicateErrorValue(applied);
           if (err) return err;
+          // An undecided verdict leaves the count unknown
+          // (`isUndecidedVerdict`).
+          if (applied !== undefined && isUndecidedVerdict(applied))
+            return undefined;
           throw predicateResultError('CountIf', fn);
         }
       }
@@ -14633,6 +14747,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // surfaced as the operator's result.
           const err = predicateErrorValue(applied);
           if (err) return err;
+          // An undecided verdict leaves the positions unknown
+          // (`isUndecidedVerdict`).
+          if (applied !== undefined && isUndecidedVerdict(applied))
+            return undefined;
           throw predicateResultError('Position', fn);
         }
         index++;
@@ -15225,11 +15343,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // literal integer 1, no step). Canonicalize to
       // `Tabulate(Function(expr, v₁, …), n₁, …)`; `Tabulate` applies the
       // function to 1-based indices, matching the iterator semantics.
-      // An upper bound that is a number literal below 1 is an empty range,
-      // and `Tabulate` with a dimension that is not positive stays
-      // unevaluated (its compilation declines it too). Such a spec takes the
-      // general route below, whose `Range` with step 1 is empty:
-      // `Table(k², {k, 1, 0})` is `[]`, as in Mathematica.
+      // An upper bound that is a number literal below 1 is an empty range.
+      // Such a spec takes the general route below, whose `Range` with step 1
+      // is empty: `Table(k², {k, 1, 0})` is `[]`, as in Mathematica. (A
+      // `Tabulate` with a dimension that is not positive is `[]` too, which
+      // is what `Table(k², {k, 1, n})` gives once `n` has such a value, but
+      // its compilation declines it, and a bound that is not an integer,
+      // `Table(k², {k, 1, 0.5})`, is not a dimension.)
       if (
         parsed.every(
           (s) =>
@@ -20446,13 +20566,20 @@ function iteratorSpecOperands(
   return undefined;
 }
 
-/** The integer dimensions of a `Tabulate`, or `null` if any is missing,
- * non-integer, or non-positive. `Tabulate(fn)` (no dimensions) returns `[]`. */
+/** The integer dimensions of a `Tabulate`, or `null` if any is missing or
+ * non-integer. `Tabulate(fn)` (no dimensions) returns `[]`.
+ *
+ * A dimension that is not positive has no index, so the tabulation is empty
+ * along it: it is read as `0`. `Tabulate(f, 0)` and `Tabulate(f, -2)` are
+ * `[]`, and `Tabulate(f, 2, 0)` is `[[], []]`. This is what `Table` gives for
+ * an empty iterator (`Table(k², {k, 1, 0})` and `Table(k², {k, -3})` are
+ * `[]`), and `Table(k², {k, 1, n})` is `Tabulate(k ↦ k², n)` when `n` has no
+ * value yet, so the two agree once `n` has a value that is not positive. */
 function tabulateDims(expr: Expression): number[] | null {
   if (!isFunction(expr)) return null;
   const dims = expr.ops.slice(1).map((op) => toIntegerOperand(op));
-  if (dims.some((d) => d === null || d <= 0)) return null;
-  return dims as number[];
+  if (dims.some((d) => d === null)) return null;
+  return (dims as number[]).map((d) => Math.max(0, d));
 }
 
 /** Element count of a `Tabulate` = its OUTER dimension (no enumeration).

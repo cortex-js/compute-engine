@@ -417,8 +417,13 @@ describe('a block local that is read before it has a value', () => {
     expect(compile(ce.box(json), { to: 'glsl' }).success).toBe(true);
     // WGSL has no expression form for the `If` whose branches assign: it
     // was `select(y = 2.0, y = 1.0, 0.0 < x);`, which no WGSL compiler
-    // accepts, behind `success: true`. It now declines.
-    expect(compile(ce.box(json), { to: 'wgsl' }).success).toBe(false);
+    // accepts, behind `success: true`. In statement position it is an `if`
+    // statement (`compile-statement-forms.test.ts`).
+    const wgsl = compile(ce.box(json), { to: 'wgsl' });
+    expect(wgsl.success).toBe(true);
+    expect(wgsl.code).toContain(
+      'if (0.0 < x) {\n  y = 1.0;\n} else {\n  y = 2.0;\n}'
+    );
   });
 
   test('an outer variable is still the input', () => {

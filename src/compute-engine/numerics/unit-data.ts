@@ -119,6 +119,7 @@ const PREFIXABLE_UNITS: Set<string> = new Set([
   'V',
   'F',
   'ohm',
+  '\u03A9', // Ω
   'S',
   'Wb',
   'T',
@@ -166,6 +167,9 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
   'V': { dimension: [2, 1, -3, -1, 0, 0, 0, 0], scale: 1 },
   'F': { dimension: [-2, -1, 4, 2, 0, 0, 0, 0], scale: 1 },
   'ohm': { dimension: [2, 1, -3, -2, 0, 0, 0, 0], scale: 1 },
+  // The symbol of the ohm, the Greek capital omega (U+03A9). The ohm sign
+  // U+2126 is the same symbol after NFC normalization.
+  '\u03A9': { dimension: [2, 1, -3, -2, 0, 0, 0, 0], scale: 1 }, // Ω
   'S': { dimension: [-2, -1, 3, 2, 0, 0, 0, 0], scale: 1 },
   'Wb': { dimension: [2, 1, -2, -1, 0, 0, 0, 0], scale: 1 },
   'T': { dimension: [0, 1, -2, -1, 0, 0, 0, 0], scale: 1 },
@@ -338,6 +342,18 @@ function resolveUnit(symbol: string): UnitEntry | null {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/**
+ * Every unit symbol of the registry: the units of the table, and each
+ * prefixable unit with each SI prefix (`km`, `µs`, `kΩ`).
+ */
+export function unitRegistrySymbols(): string[] {
+  const units = Object.keys(UNIT_TABLE);
+  const prefixed = Object.keys(SI_PREFIXES).flatMap((p) =>
+    [...PREFIXABLE_UNITS].map((u) => p + u)
+  );
+  return [...units, ...prefixed];
+}
 
 /**
  * Return the dimension vector for `symbol`, or `null` if unknown.
@@ -972,9 +988,28 @@ function parseDSLGroup(s: string): UnitExpression | null {
     return ['Multiply', ...parts];
   }
 
-  // Single token — if it starts with `(` we already tried paren-stripping
-  // at the top and it didn't match, so the parens are unbalanced.
-  if (s[0] === '(') return null;
+  // A group with an exponent: `(mi/h)^2` is `["Power", ["Divide", "mi",
+  // "h"], 2]`. The exponent is read as the exponent of a unit token.
+  if (s[0] === '(') {
+    let close = -1;
+    depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')' && --depth === 0) {
+        close = i;
+        break;
+      }
+    }
+    if (close > 0 && s[close + 1] === '^') {
+      const base = parseDSLGroup(s.slice(1, close));
+      const power = parseUnitToken(`x${s.slice(close + 1)}`);
+      if (base !== null && Array.isArray(power))
+        return ['Power', base, power[2]];
+    }
+    // Otherwise the text is not a unit: the parentheses are unbalanced, two
+    // groups are adjacent (`(m)(s)`), or the exponent is not a number.
+    return null;
+  }
   return parseUnitToken(s);
 }
 

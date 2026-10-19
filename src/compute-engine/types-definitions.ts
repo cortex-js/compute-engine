@@ -1655,6 +1655,25 @@ export interface BaseCollectionHandlers {
   ) => boolean | undefined;
 
   /**
+   * Return the number of elements of the collection that are structurally
+   * the same as `target` (the `isSame()` comparison), without a walk of the
+   * collection. `Count(xs, v)` reads it.
+   *
+   * Give this handler when the collection can have more elements than a
+   * walk can visit (a combinatorial generator such as `Permutations` has
+   * `n!` elements): without it, `Count(xs, v)` walks every element. A count
+   * that is not a safe integer is returned as a `bigint`.
+   *
+   * Return `undefined` when the count cannot be computed without a walk.
+   * The answer must be the one a walk that compares each element with
+   * `isSame()` gives.
+   */
+  countOf?: (
+    collection: Expression,
+    target: Expression
+  ) => number | bigint | undefined;
+
+  /**
    * Return `true` if all the elements of `collection` are in `other` — that
    * is, `collection` ⊆ `other`. The RECEIVER is the candidate subset, matching
    * the public `Expression.subsetOf(other, strict)` method that dispatches
@@ -1718,6 +1737,37 @@ export interface IndexedCollectionHandlers {
     collection: Expression,
     predicate: (element: Expression) => boolean
   ) => number | undefined;
+
+  /**
+   * Return the element at a 1-based position given as a `bigint`.
+   *
+   * The position is positive. A negative position is converted before the
+   * call: it counts from the end, so it is `count + index + 1`.
+   *
+   * `at()` takes a `number`, which cannot hold a position larger than
+   * `Number.MAX_SAFE_INTEGER` exactly. Give this handler when the collection
+   * can have more elements than that (its `count` can be a `bigint`): it is
+   * used for such a position, and for a negative position when the count is
+   * a `bigint`. Without it, these positions have no element.
+   *
+   * If the position is outside the collection, return `undefined`.
+   */
+  atBigint?: (collection: Expression, index: bigint) => undefined | Expression;
+
+  /**
+   * Return the 1-based position of the first element that is structurally
+   * the same as `target` (the `isSame()` comparison), without a walk of the
+   * collection. `IndexOf(xs, v)` reads it.
+   *
+   * Return `0` when no element is the same as `target`, and `undefined` when
+   * the position cannot be computed without a walk. A position that is not a
+   * safe integer is returned as a `bigint`. The answer must be the one a walk
+   * that compares each element with `isSame()` gives.
+   */
+  indexOf?: (
+    collection: Expression,
+    target: Expression
+  ) => number | bigint | undefined;
 }
 
 /**

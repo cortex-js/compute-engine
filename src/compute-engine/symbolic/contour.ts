@@ -19,6 +19,7 @@ import {
   isExactConstantExpression,
   refineExactConstants,
 } from '../boxed-expression/compare.js';
+import { expandAll } from '../boxed-expression/expand.js';
 
 type Point = { x: Expression; y: Expression };
 type Location = ContourPole['location'];
@@ -142,6 +143,114 @@ export function exactlyEqual(
   return x === 0 && y === 0 ? true : undefined;
 }
 
+/**
+ * Whether the constant `c` is exactly 0 although it is not the number
+ * literal 0. `evaluate()` does not expand a power of a sum, so at
+ * x = 1/2 + (√3/2)i the value of x³ + 1 stays the sum
+ * `1 + (1/2 + (√3/2)i)³`, which is 0, and at x = 1 + π the value of
+ * x² − 1 − 2π − π² stays `(1 + π)² − 1 − 2π − π²`, which is 0. The test is
+ * `exactZeroVerdict()`, so it never reads a value that is only near 0 as 0.
+ * It answers `false` when the verdict is not `true`, and for an expression
+ * with an unknown.
+ */
+export function isUnfoldedZero(c: Expression): boolean {
+  if (isNumber(c) || !isFunction(c) || c.unknowns.length > 0) return false;
+  return exactZeroVerdict(c) === true;
+}
+
+/**
+ * Whether the constant `c` (a function expression with no unknowns) is 0:
+ * `true` when it is proved 0, `false` when it is proved not 0, `undefined`
+ * when neither is proved. The tests run in this order, from the fastest:
+ *
+ * 1. `c` is evaluated. A number literal decides it.
+ * 2. An enclosure of the value at the working precision that excludes 0
+ *    proves that it is not 0 (`refineExactConstants()`, for a real
+ *    constant). This test decides most constants that are not 0.
+ * 3. The value is expanded (`expandAll()`) and evaluated again: a
+ *    polynomial identity in constants, such as
+ *    `(1 + ln 2)² − 1 − 2 ln 2 − ln²2`, then folds to the number 0.
+ * 4. The exact real and imaginary parts decide it (`exactlyEqual()`):
+ *    exact arithmetic proves a 0, and an enclosure that excludes 0 proves a
+ *    value that is not 0. An enclosure that still holds 0 at the precision
+ *    limit decides nothing.
+ *
+ * The verdicts are kept in a memo for each engine, keyed by the structure of
+ * the expression (its hash, then `isSame()`): the series and limit code test
+ * the same constant many times, and the value of a constant cannot change.
+ * The value of `Exp` depends on the angular unit and the enclosures depend
+ * on the precision, thus both are part of the key.
+ */
+export function exactZeroVerdict(c: Expression): boolean | undefined {
+  const hit = memoizedZeroVerdict(c);
+  if (hit !== 'none') return hit;
+  const ce = c.engine;
+  const v = c.evaluate();
+  let zero: boolean | undefined;
+  if (isNumber(v)) zero = v.isSame(0);
+  else if (
+    // `decide` gives a result at the first precision, so the precision is
+    // not raised: an enclosure that holds 0 leaves the decision to the
+    // tests below.
+    isExactConstantExpression(v) &&
+    refineExactConstants([v], ([[lo, hi]]) => lo.gt(0) || hi.lt(0)) === true
+  )
+    zero = false;
+  else {
+    const expanded = expandAll(v).evaluate();
+    zero = isNumber(expanded)
+      ? expanded.isSame(0)
+      : exactlyEqual(expanded, ce.Zero);
+  }
+  let memo = zeroMemo.get(ce);
+  if (!memo || memo.size > MAX_MEMO_SIZE) {
+    memo = new Map();
+    zeroMemo.set(ce, memo);
+  }
+  const key = `${ce.angularUnit} ${ce.precision}`;
+  const bucket = memo.get(c.hash);
+  if (bucket) bucket.push({ c, key, zero });
+  else memo.set(c.hash, [{ c, key, zero }]);
+  return zero;
+}
+
+/** The verdict of `exactZeroVerdict()` for `c` when it is in the memo, or
+ * `'none'` when it is not. It computes nothing. */
+export function memoizedZeroVerdict(
+  c: Expression
+): boolean | undefined | 'none' {
+  const ce = c.engine;
+  const key = `${ce.angularUnit} ${ce.precision}`;
+  const hit = zeroMemo
+    .get(ce)
+    ?.get(c.hash)
+    ?.find((entry) => entry.key === key && entry.c.isSame(c));
+  return hit ? hit.zero : 'none';
+}
+
+const zeroMemo = new WeakMap<
+  IComputeEngine,
+  Map<number, { c: Expression; key: string; zero: boolean | undefined }[]>
+>();
+
+/**
+ * Whether `e` contains an algebraic constant that is not rational: an exact
+ * number literal that is not rational (`√2`, an exact complex number), the
+ * imaginary unit, a root, or a power whose exponent is a number literal
+ * that is not an integer (`2^(1/3)`). The test reads the structure only;
+ * it evaluates nothing.
+ */
+export function hasIrrationalAlgebraic(e: Expression): boolean {
+  if (isNumber(e)) return e.isExact && e.isRational !== true;
+  if (isSymbol(e)) return e.symbol === 'ImaginaryUnit';
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'Sqrt' || op === 'Root') return true;
+  if (op === 'Power' && isNumber(e.op2) && e.op2.isInteger !== true)
+    return true;
+  return e.ops.some(hasIrrationalAlgebraic);
+}
+
 const sign = exactSign;
 
 /** The exact real and imaginary parts of a pure constant expression, or
@@ -258,6 +367,48 @@ function computeExactComplexParts(z: Expression): Point | undefined {
         x: mul(modulus, ce.function('Cos', [w.y])),
         y: mul(modulus, ce.function('Sin', [w.y])),
       };
+    }
+  }
+  // The circular and hyperbolic sine and cosine of a + ib, with b ≠ 0:
+  //   sin(a + ib)  = sin a·cosh b + i·cos a·sinh b
+  //   cos(a + ib)  = cos a·cosh b − i·sin a·sinh b
+  //   sinh(a + ib) = sinh a·cos b + i·cosh a·sin b
+  //   cosh(a + ib) = cosh a·cos b + i·sinh a·sin b
+  // Each part is a real constant with an enclosure. As for `Exp` above, this
+  // applies only in radians, and a real argument is handled below.
+  if (
+    ce.angularUnit === 'rad' &&
+    (isFunction(z, 'Sin') ||
+      isFunction(z, 'Cos') ||
+      isFunction(z, 'Sinh') ||
+      isFunction(z, 'Cosh'))
+  ) {
+    const w = exactComplexParts(z.op1);
+    if (!w) return undefined;
+    if (exactSign(w.y) !== 0) {
+      const f = (name: string, t: Expression) => ce.function(name, [t]);
+      switch (z.operator) {
+        case 'Sin':
+          return {
+            x: mul(f('Sin', w.x), f('Cosh', w.y)),
+            y: mul(f('Cos', w.x), f('Sinh', w.y)),
+          };
+        case 'Cos':
+          return {
+            x: mul(f('Cos', w.x), f('Cosh', w.y)),
+            y: mul(f('Sin', w.x), f('Sinh', w.y)).neg(),
+          };
+        case 'Sinh':
+          return {
+            x: mul(f('Sinh', w.x), f('Cos', w.y)),
+            y: mul(f('Cosh', w.x), f('Sin', w.y)),
+          };
+        default:
+          return {
+            x: mul(f('Cosh', w.x), f('Cos', w.y)),
+            y: mul(f('Sinh', w.x), f('Sin', w.y)),
+          };
+      }
     }
   }
   const v = z.evaluate();

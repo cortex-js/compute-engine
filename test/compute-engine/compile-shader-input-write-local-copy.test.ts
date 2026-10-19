@@ -83,6 +83,14 @@ function shaderToJS(code: string): string {
     .replace(/\b(?:float|f32)\(/g, '(');
 }
 
+/** The interpreter's value of `src` with `x` given. */
+function interpretedAt(src: any, x: number): number {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.assign('x', x);
+  return ce.box(src).evaluate().re;
+}
+
 /** Run the body `code` with the input `u` as a `const`. */
 function runShader(code: string, u: number): number {
   // eslint-disable-next-line no-new-func
@@ -338,7 +346,10 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
   // WGSL lowers `If`/`Which` to `select(…)`, a function call, and a WGSL
   // assignment is a statement: `If(x > 0, t ≔ 1, t ≔ 2)` gave
   // `select(t = 2.0, t = 1.0, 0.0 < x);`, which no WGSL compiler accepts.
-  // WGSL now fails closed; GLSL keeps its ternary, which is valid there.
+  // In statement position (a statement of a block, a loop body) the
+  // selection is now an `if` statement on WGSL. In a value position (here,
+  // the whole body) WGSL fails closed. GLSL keeps its ternary, which is valid
+  // there.
   const programs: [string, any][] = [
     [
       'If in a block',
@@ -374,13 +385,28 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
     ],
   ];
   for (const [name, src] of programs) {
-    test(`WGSL fails closed: ${name}`, () => {
-      expect(() => compiled(src, 'wgsl')).toThrow(
-        /a branch assigns a variable, and the WGSL selection/
-      );
-      // The fallback runs the interpreter.
-      expect(compiled(src, 'wgsl', { fallback: true }).success).toBe(false);
-    });
+    if (src[0] === 'Block')
+      test(`WGSL writes an if statement: ${name}`, () => {
+        const c = compiled(src, 'wgsl');
+        expect(c.success).toBe(true);
+        expect(c.code).not.toContain('select(');
+        expect(c.code).toMatch(/^\s*if \(.*\) \{$/m);
+        // The free `x` of the first program is a host input: the JavaScript
+        // translation reads it as a parameter.
+        for (const x of [-1, 1])
+          // eslint-disable-next-line no-new-func
+          expect(new Function('x', shaderToJS(c.code))(x)).toBe(
+            interpretedAt(src, x)
+          );
+      });
+    else
+      test(`WGSL fails closed: ${name}`, () => {
+        expect(() => compiled(src, 'wgsl')).toThrow(
+          /a branch assigns a variable, and the WGSL selection/
+        );
+        // The fallback runs the interpreter.
+        expect(compiled(src, 'wgsl', { fallback: true }).success).toBe(false);
+      });
     test(`GLSL keeps the ternary: ${name}`, () => {
       expect(compiled(src, 'glsl').code).toMatch(/\? \(\w+ = 1\.0\) :/);
     });

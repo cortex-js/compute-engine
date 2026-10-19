@@ -28,7 +28,11 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
-import { exactlyEqual } from './contour.js';
+import {
+  exactlyEqual,
+  hasIrrationalAlgebraic,
+  isUnfoldedZero,
+} from './contour.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions
@@ -501,36 +505,22 @@ function substituteAtFinitePoint(
 }
 
 /**
- * Whether the constant `c` is exactly 0 although it is not the number
- * literal 0. `evaluate()` does not expand a power of a sum, so at
- * x = 1/2 + (√3/2)i the value of x³ + 1 stays the sum
- * `1 + (1/2 + (√3/2)i)³`, which is 0, and at x = 1 + √2 the value of
- * x² − 3 − 2√2 stays `(1 + √2)² − 3 − 2√2`, which is 0. The test computes
- * the exact real and imaginary parts of `c` (`exactlyEqual()`), so it never
- * reads a value that is only near 0 as 0. It answers `false` when the parts
- * cannot be computed exactly, and for an expression with an unknown.
- */
-function isUnfoldedZero(c: Expression): boolean {
-  if (isNumber(c) || !isFunction(c) || c.unknowns.length > 0) return false;
-  return exactlyEqual(c, c.engine.Zero) === true;
-}
-
-/**
  * `e` with each largest subterm that contains `x` and whose value at
  * `x = a` is an exact zero that does not fold to the number literal 0 (see
  * `isUnfoldedZero`) replaced by 0. `e` itself when there is no such
  * subterm.
  *
- * When the point is a rational number literal or a float and `e` has no
- * algebraic constant that is not rational (`hasIrrationalAlgebraic`), `e`
- * is returned at once, without the walk (which evaluates each subterm).
- * There, the value of a polynomial or a rational function folds to a
- * number literal, and an exact zero that does not fold could come only
- * from an identity of transcendental functions (`sin²x + cos²x − 1`),
- * which `exactlyEqual()` cannot prove. With a radical or `i`, the walk is
- * necessary: `(x + 1)² − 3 − 2√2` does not fold at √2, and
- * `(1 + √2 + t)³ − (3 + 2√2)(1 + √2 + t)` does not fold at t = 0 (the
- * limit at a point that is a sum is taken at 0 after a shift).
+ * When the point is a rational number literal or a float and `e` holds no
+ * constant other than rational number literals and no radical
+ * (`hasNonRationalConstant`, `hasIrrationalAlgebraic`),
+ * `e` is returned at once, without the walk (which evaluates each
+ * subterm). There, the value of a polynomial or a rational function folds
+ * to a number literal. With a radical, `i`, a constant symbol such as `π`,
+ * or a function of constants such as `ln 2`, the walk is necessary:
+ * `(x + 1)² − 3 − 2√2` does not fold at √2, and
+ * `(1 + π + t)² − 1 − 2π − π²` does not fold at t = 0 (the limit at a point
+ * that is a sum is taken at 0 after a shift), because `evaluate()` does not
+ * expand a power of a sum.
  */
 function replaceExactZeros(
   e: Expression,
@@ -542,10 +532,26 @@ function replaceExactZeros(
     isNumber(a) &&
     (a.isRational === true || !a.isExact) &&
     !hasIrrationalAlgebraic(a) &&
-    !hasIrrationalAlgebraic(e)
+    !hasIrrationalAlgebraic(e) &&
+    !hasNonRationalConstant(e, x)
   )
     return e;
   return replaceExactZerosWalk(e, x, a, ce);
+}
+
+/**
+ * Whether `e` holds a constant other than a rational number literal: an
+ * exact number literal that is not rational, a constant symbol (`π`, `e`,
+ * `i`), or a function of constants (`√2`, `ln 2`, `sin 1`). A float literal is not such a constant: a float operand makes
+ * the value a float, and a float is not tested for an exact zero. The test
+ * reads the structure only; it evaluates nothing.
+ */
+function hasNonRationalConstant(e: Expression, x: string): boolean {
+  if (isNumber(e)) return e.isExact && e.isRational !== true;
+  if (isSymbol(e)) return e.symbol !== x && e.isConstant === true;
+  if (!isFunction(e)) return false;
+  if (!e.has(x)) return e.unknowns.length === 0;
+  return e.ops.some((op) => hasNonRationalConstant(op, x));
 }
 
 function replaceExactZerosWalk(
@@ -559,24 +565,6 @@ function replaceExactZerosWalk(
   const ops = e.ops.map((op) => replaceExactZerosWalk(op, x, a, ce));
   if (ops.every((op, i) => op === e.ops[i])) return e;
   return ce.function(e.operator, ops);
-}
-
-/**
- * Whether `e` contains an algebraic constant that is not rational: an exact
- * number literal that is not rational (`√2`, an exact complex number), the
- * imaginary unit, a root, or a power whose exponent is a number literal
- * that is not an integer (`2^(1/3)`). The test reads the structure only;
- * it evaluates nothing.
- */
-function hasIrrationalAlgebraic(e: Expression): boolean {
-  if (isNumber(e)) return e.isExact && e.isRational !== true;
-  if (isSymbol(e)) return e.symbol === 'ImaginaryUnit';
-  if (!isFunction(e)) return false;
-  const op = e.operator;
-  if (op === 'Sqrt' || op === 'Root') return true;
-  if (op === 'Power' && isNumber(e.op2) && e.op2.isInteger !== true)
-    return true;
-  return e.ops.some(hasIrrationalAlgebraic);
 }
 
 /**

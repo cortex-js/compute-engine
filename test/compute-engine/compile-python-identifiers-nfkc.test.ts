@@ -72,7 +72,7 @@ describe('PYTHON: IDENTIFIERS WITH THE SAME NFKC FORM', () => {
     const r = py.compile(
       ce.box(['Sum', ['Add', fi, 'fi'], ['Limits', fi, 1, 'n']])
     );
-    expect(r.code).toBe('sum(fi + _uFB01_ for _uFB01_ in range(1, n + 1))');
+    expect(r.code).toBe('sum(fi + _uFB01_ for _uFB01_ in range(1, int((n) // 1) + 1))');
     expect(r.freeSymbols).toEqual(['fi', 'n']);
     // The new name has a suffix when a symbol already has it.
     expect(

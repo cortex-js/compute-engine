@@ -27,6 +27,7 @@ import {
   symbol,
   machineValue,
   rationalValue,
+  matchesSymbol,
 } from '../../../math-json/utils.js';
 import type {
   LatexDictionary,
@@ -283,7 +284,13 @@ const UNIT_ALIASES: Record<string, string> = {
 function normalizeUnitText(text: string): string {
   // Replace each maximal run of letters/period (or a literal `$`) with its
   // alias, leaving DSL operators (`/ * ^`), spaces, and digits untouched.
-  return text.replace(/\$|[A-Za-z.]+/g, (w) => UNIT_ALIASES[w] ?? w);
+  // A compound alias is put in parentheses, so that an exponent applies to
+  // all of it: `mph^2` is `(mi/h)^2`, not `mi/h^2`.
+  return text.replace(/\$|[A-Za-z.]+/g, (w) => {
+    const alias = UNIT_ALIASES[w];
+    if (alias === undefined) return w;
+    return /[A-Za-z]/.test(alias) && /[/*]/.test(alias) ? `(${alias})` : alias;
+  });
 }
 
 /**
@@ -297,7 +304,9 @@ export function resolveUnitText(text: string): MathJsonExpression | null {
 
   // Trim surrounding whitespace so the blocklist and unit lookups see the
   // bare base text (e.g. `\mathrm{ d }` still blocks the differential `d`).
-  const trimmed = text.trim();
+  // The NFC form is the form of a symbol name: the ohm sign U+2126 is the
+  // unit `Ω` (U+03A9), and the angstrom sign U+212B is the unit `Å` (U+00C5).
+  const trimmed = text.trim().normalize('NFC');
   if (trimmed.length === 0) return null;
 
   // Block symbols that have primary mathematical meanings.  Checked on the
@@ -311,7 +320,7 @@ export function resolveUnitText(text: string): MathJsonExpression | null {
   const normalized = normalizeUnitText(trimmed).replace(/\s+/g, '');
 
   // Simple unit check: is the whole string a known unit?
-  if (getUnitDimension(normalized) !== null) return normalized;
+  if (getUnitDimension(normalized) !== null) return unitSymbols(normalized);
 
   // Compound unit check: does the string contain `/`, `*`, or `^`?
   if (/[/*^]/.test(normalized)) {
@@ -319,13 +328,27 @@ export function resolveUnitText(text: string): MathJsonExpression | null {
       const parsed = parseUnitDSL(normalized);
       // Verify the parsed expression represents valid units
       if (parsed !== null && isValidUnitExpression(parsed))
-        return parsed as MathJsonExpression;
+        return unitSymbols(parsed);
     } catch {
       return null;
     }
   }
 
   return null;
+}
+
+/**
+ * The MathJSON of a unit expression of the unit DSL. A unit symbol that is
+ * not an ASCII name (`µm`, `Å`, `Ω`) is written `{ sym: … }`: a bare string
+ * with other characters is a MathJSON string, not a symbol, so
+ * `\mathrm{µm}` gave the string `'µm'` and `\mathrm{µm/s}` a type error.
+ */
+function unitSymbols(expr: UnitExpression): MathJsonExpression {
+  if (typeof expr === 'string')
+    return matchesSymbol(expr) ? expr : { sym: expr };
+  if (!Array.isArray(expr)) return expr as MathJsonExpression;
+  const [op, ...args] = expr;
+  return [op, ...args.map((x) => unitSymbols(x))] as MathJsonExpression;
 }
 
 /**
@@ -459,53 +482,16 @@ const parseUnitExpression: ExpressionParseHandler = (
  * - `['Power', 's', 2]`  →  `'s^{2}'`
  * - `['Divide', 'm', ['Power', 's', 2]]`  →  `'m/s^{2}'`
  * - `['Multiply', 'kg', 'm']`  →  `'kg\\cdot m'`
+ *
+ * Returns `null` when the unit is not a product of powers of unit symbols
+ * with finite numeric exponents, for example `m^{n+1}`. The unit parser
+ * reads only a numeric exponent inside `\mathrm{...}`: the text `m^{n}`
+ * parses as the symbol `m_n`. The caller then writes the quantity as a
+ * function, `\mathrm{Quantity}(1, m^{n+1})`, which parses back to the same
+ * expression. A symbol that is not a known unit also returns `null`.
  */
-function unitToMathrm(expr: MathJsonExpression): string {
-  const factors = unitFactorsToMathrm(expr);
-  if (factors !== null) return factors;
-
-  // Simple symbol
-  const sym = symbol(expr);
-  if (sym !== null) return sym;
-
-  // Number (e.g. the 1 in ['Divide', 1, 's'] from prettified Power(s, -1))
-  if (typeof expr === 'number') return String(expr);
-
-  const op = operator(expr);
-  if (!op) return '';
-
-  if (op === 'Divide') {
-    const num = operand(expr, 1);
-    const den = operand(expr, 2);
-    return `${unitToMathrm(num!)}/${unitToMathrm(den!)}`;
-  }
-
-  if (op === 'Multiply') {
-    // Collect all operands
-    const parts: string[] = [];
-    if (Array.isArray(expr)) {
-      for (let i = 1; i < expr.length; i++) {
-        parts.push(unitToMathrm(expr[i]));
-      }
-    }
-    return parts.join('\\cdot ');
-  }
-
-  if (op === 'Power') {
-    const base = operand(expr, 1);
-    const exp = operand(expr, 2);
-    const expStr =
-      typeof exp === 'number' ? String(exp) : (symbol(exp) ?? String(exp));
-    return `${unitToMathrm(base!)}^{${expStr}}`;
-  }
-
-  // Handle prettified forms: Square(x) → x^{2}
-  if (op === 'Square') {
-    const base = operand(expr, 1);
-    return `${unitToMathrm(base!)}^{2}`;
-  }
-
-  return '';
+function unitToMathrm(expr: MathJsonExpression): string | null {
+  return unitFactorsToMathrm(expr);
 }
 
 /**
@@ -565,6 +551,19 @@ function unitFactorExponentToString(e: UnitFactorExponent): string {
 }
 
 /**
+ * The unit symbols that the parser does not read back as a unit inside
+ * `\mathrm{...}`, and the word that is written in their place. The parser
+ * reads `\mathrm{d}` as the differential `d` (see `UNIT_BLOCKLIST`), so the
+ * unit day is written `\mathrm{day}`: the alias `day` → `d` of
+ * `UNIT_ALIASES` reads it back as the unit `d`, also in a compound unit
+ * (`m/day`, `day^{2}`).
+ */
+const SERIALIZED_UNIT_NAMES: Record<string, string> = {
+  __proto__: null as never,
+  d: 'day',
+};
+
+/**
  * The content of `\mathrm{...}` for a unit expression, written as a product
  * of unit symbols with exponents: the factors with a positive exponent, then
  * `/` and the factors with a negative exponent. With no positive factor the
@@ -576,7 +575,7 @@ function unitFactorExponentToString(e: UnitFactorExponent): string {
  * as a fraction: `Sqrt(m)` is `m^{1/2}`.
  *
  * Returns `null` for a unit expression that is not a product of powers of
- * unit symbols with numeric exponents (for example `m^n`).
+ * known unit symbols with finite numeric exponents (for example `m^n`).
  */
 function unitFactorsToMathrm(expr: MathJsonExpression): string | null {
   const factors: [string, UnitFactorExponent][] = [];
@@ -588,6 +587,9 @@ function unitFactorsToMathrm(expr: MathJsonExpression): string | null {
     if (e === null || exp === null) return false;
     const sym = symbol(e);
     if (sym !== null) {
+      // A symbol that is not a known unit (`Quantity(3, foo)`) would parse
+      // back as a product with a symbol, not as a quantity.
+      if (getUnitDimension(sym) === null) return false;
       factors.push([sym, exp]);
       return true;
     }
@@ -620,7 +622,8 @@ function unitFactorsToMathrm(expr: MathJsonExpression): string | null {
 
   const write = ([sym, e]: [string, UnitFactorExponent]) => {
     const s = unitFactorExponentToString(e);
-    return s === '1' ? sym : `${sym}^{${s}}`;
+    const name = SERIALIZED_UNIT_NAMES[sym] ?? sym;
+    return s === '1' ? name : `${name}^{${s}}`;
   };
   const num = factors.filter(([, e]) => !isNegativeUnitFactorExponent(e));
   const den = factors.filter(([, e]) => isNegativeUnitFactorExponent(e));
@@ -736,6 +739,7 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
           // Fall back to default serialization if we can't get a numeric value
           const magLatex = serializer.serialize(magnitude);
           const unitStr = unitToMathrm(unit);
+          if (unitStr === null) return serializer.serializeFunction(expr);
           return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);
         }
 
@@ -763,6 +767,8 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
       // to the whole measurement: `(5.1 \pm 0.2)\,\mathrm{cm}`.  A sum
       // magnitude is wrapped for the same reason: `(1+\pi)\,\mathrm{m}`,
       // not `1+\pi\,\mathrm{m}`, which parses as `1 + π m`.
+      const unitStr = unitToMathrm(unit);
+      if (unitStr === null) return serializer.serializeFunction(expr);
       let magLatex = serializer.serialize(magnitude);
       const magOperator = operator(magnitude);
       if (
@@ -771,7 +777,6 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
         magOperator === 'Subtract'
       )
         magLatex = `\\left(${magLatex}\\right)`;
-      const unitStr = unitToMathrm(unit);
 
       return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);
     },

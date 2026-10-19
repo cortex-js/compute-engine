@@ -14,6 +14,11 @@ import { bernoulliRational } from '../numerics/bernoulli.js';
 import { differentiate } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
+import {
+  exactComplexParts,
+  exactZeroVerdict,
+  memoizedZeroVerdict,
+} from './contour.js';
 
 //
 // This module implements `Series` — symbolic Taylor expansion at a regular
@@ -101,6 +106,93 @@ function factorialBig(k: number): bigint {
 // ─────────────────────────────────────────────────────────────────────────
 //  Dense coefficient-array arithmetic (all truncated to order W = length − 1)
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the coefficient `c` is 0: `true` when it is proved 0, `false` when
+ * it is proved not 0, `undefined` when neither is proved.
+ *
+ * The coefficients are built without evaluation, and `evaluate()` does not
+ * expand a power of a sum. So at x0 = 1 + √2 the constant coefficient of
+ * x² − 3 − 2√2 is `(1 + √2)² − 3 − 2√2`, at x0 = 1 + π the constant
+ * coefficient of x² − (1 + π)² is `(1 + π)² − 1 − 2π − π²`, and at x0 = π/2
+ * the constant coefficient of x − π/2 is `π/2 − π/2`. Each one is 0, but it
+ * is not the number 0. Read as a value that is not 0, such a coefficient makes
+ * a pole look like a regular point, and a zero of order m look like a zero
+ * of lower order.
+ *
+ * A number literal is decided by its value. A symbol, or a function of an
+ * unknown (a parameter such as `a`), is read as not 0: an expansion in a
+ * parameter is valid for its generic values. A constant is decided by
+ * `exactZeroVerdict()`, which keeps its verdicts in a memo.
+ */
+function zeroVerdict(c: Expression): boolean | undefined {
+  if (isNumber(c)) return c.isSame(0);
+  if (!isFunction(c) || c.unknowns.length > 0) return false;
+  return exactZeroVerdict(c);
+}
+
+/**
+ * Whether `c` is known to be 0 without a new test: the number 0, or a
+ * constant whose verdict is in the memo of `exactZeroVerdict()` and is
+ * `true`. The assembly of a result uses this test to drop terms. A
+ * coefficient that is an unfolded 0 and was not tested gives a larger
+ * result, not a wrong one, and the test of the valuation (`trueVal()`) has
+ * already put the verdict of each coefficient below the valuation in the
+ * memo.
+ */
+function isKnownZero(c: Expression): boolean {
+  if (c.isSame(0)) return true;
+  return isFunction(c) && memoizedZeroVerdict(c) === true;
+}
+
+/** `c`, or the number 0 when `c` is proved 0 (`zeroVerdict()`). The value of
+ * a function at a point is read from the point: `ln(b0)` at an unfolded zero
+ * `b0` evaluates to a finite-looking `Ln(…)`, and `ln(0)` evaluates to `−∞`,
+ * which is read as a singularity. */
+function foldZeroCoeff(ce: ComputeEngine, c: Expression): Expression {
+  return !c.isSame(0) && zeroVerdict(c) === true ? ce.Zero : c;
+}
+
+/** Whether `e` holds an `Add` or a `Subtract` at any depth. */
+function holdsSum(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'Add' || e.operator === 'Subtract') return true;
+  return e.ops.some(holdsSum);
+}
+
+/**
+ * Whether the constant value `val` (the value of a function or of one of its
+ * derivatives at the expansion point) divides by a value that is not proved
+ * to be not 0 (`zeroVerdict()`), or applies a function with a branch point
+ * at 0 (a root, a power with an exponent that is not an integer, a
+ * logarithm) to such a value. `1/(x² − 3 − 2√2)` at x = 1 + √2 evaluates to
+ * `1/((1 + √2)² − 3 − 2√2)`, which reads as finite but is `1/0`. Such a value
+ * is a singularity: the Taylor engines must decline, and the Laurent engine
+ * then expands the function. Only an operand that holds a sum is tested: an
+ * operand without a sum that is 0 folds to the number 0 when `val` is
+ * evaluated, and the value is then infinite or NaN.
+ */
+function hasHiddenSingularity(val: Expression): boolean {
+  const notProvedNonzero = (e: Expression): boolean =>
+    holdsSum(e) && zeroVerdict(e) !== false;
+  const singularAt = (e: Expression): boolean => {
+    if (!isFunction(e)) return false;
+    const op = e.operator;
+    if (op === 'Divide') return notProvedNonzero(e.op2);
+    if (op === 'Power') {
+      const k = asSmallInteger(e.op2);
+      return (k === null || k < 0) && notProvedNonzero(e.op1);
+    }
+    if (op === 'Sqrt' || op === 'Root' || op === 'Ln' || op === 'Log')
+      return notProvedNonzero(e.op1);
+    return false;
+  };
+  if (!holdsSum(val)) return false;
+  if (singularAt(val)) return true;
+  return val
+    .getSubexpressions('')
+    .some((sub) => sub !== val && singularAt(sub));
+}
 
 function zeroCoeffs(ce: ComputeEngine, W: number): Coeffs {
   return Array.from({ length: W + 1 }, () => ce.Zero);
@@ -219,6 +311,7 @@ function unaryTaylor(
   // A plain (non-wildcard) symbol that does not occur in `b0`. A leading
   // underscore would collide with the `_` hole convention in the
   // differentiation machinery, so it must be avoided.
+  b0 = foldZeroCoeff(ce, b0);
   const v = freshSymbol(b0, op);
   const reduceHyp = HYPERBOLIC.has(op);
   let g: Expression = ce.function(op, [ce.symbol(v)]).canonical;
@@ -237,7 +330,8 @@ function unaryTaylor(
     if (
       val.isNaN === true ||
       val.isInfinity === true ||
-      hasIndeterminateZeroPower(val)
+      hasIndeterminateZeroPower(val) ||
+      hasHiddenSingularity(val)
     )
       return null;
     coeffs.push(ce.function('Divide', [val, ce.number(factorialBig(k))]));
@@ -262,7 +356,7 @@ function powerOuter(
   base0: Expression,
   W: number
 ): Coeffs | null {
-  if (base0.isSame(0)) return null; // branch point — Phase 2
+  if (zeroVerdict(base0) !== false) return null; // branch point — Phase 2
   const outer: Coeffs = [];
   for (let k = 0; k <= W; k++) {
     // C(a,k) = ∏_{i=0}^{k-1} (a − i) / k!
@@ -290,7 +384,7 @@ function powerOuter(
 /** Reciprocal `1/b` of a series `b` with nonzero constant term. */
 function reciprocalC(ce: ComputeEngine, b: Coeffs, W: number): Coeffs | null {
   const b0 = b[0];
-  if (b0.isSame(0)) return null; // pole — Phase 2
+  if (zeroVerdict(b0) !== false) return null; // pole — Phase 2
   // Taylor of 1/y around b0: a_k = (−1)^k / b0^{k+1}
   const outer: Coeffs = [];
   for (let k = 0; k <= W; k++) {
@@ -477,7 +571,8 @@ function expandByDerivative(
       !val.isValid ||
       val.isNaN === true ||
       val.isInfinity === true ||
-      hasIndeterminateZeroPower(val)
+      hasIndeterminateZeroPower(val) ||
+      hasHiddenSingularity(val)
     ) {
       val = resolve ? (resolve(g, k) ?? undefined) : undefined;
       if (!val) return null;
@@ -532,7 +627,7 @@ function assemble(
   const terms: Expression[] = [];
   for (let k = 0; k <= n && k < coeffs.length; k++) {
     const c = coeffs[k];
-    if (c.isSame(0)) continue;
+    if (isKnownZero(c)) continue;
     if (k === 0) {
       terms.push(c);
     } else {
@@ -546,7 +641,7 @@ function assemble(
     // within the lookahead window, fall back to the conservative O(t^{n+1}).
     let m = n + 1;
     for (let k = n + 1; k <= W && k < coeffs.length; k++) {
-      if (!coeffs[k].isSame(0)) {
+      if (!isKnownZero(coeffs[k])) {
         m = k;
         break;
       }
@@ -616,9 +711,23 @@ function coeffAt(ce: ComputeEngine, L: Laurent, p: number): Expression {
 }
 
 /** The valuation (lowest power with a nonzero coefficient), or `null` if every
- * stored coefficient is zero. */
+ * stored coefficient is zero, or when the first coefficient that is not
+ * proved 0 is not proved nonzero either (`zeroVerdict()`): the valuation is
+ * then not known, and each caller declines. */
 function trueVal(L: Laurent): number | null {
-  for (let i = 0; i < L.c.length; i++) if (!L.c[i].isSame(0)) return L.v + i;
+  for (let i = 0; i < L.c.length; i++) {
+    const zero = zeroVerdict(L.c[i]);
+    if (zero === true) continue;
+    return zero === false ? L.v + i : null;
+  }
+  return null;
+}
+
+/** The lowest power whose coefficient is not proved 0, or `null` if every
+ * stored coefficient is proved 0. It is a lower bound of the valuation. */
+function lowestPossibleVal(L: Laurent): number | null {
+  for (let i = 0; i < L.c.length; i++)
+    if (zeroVerdict(L.c[i]) !== true) return L.v + i;
   return null;
 }
 
@@ -698,8 +807,9 @@ function mulLaurent(
   );
   // Completeness: power p is complete iff every needed a_i (i ≤ p − val(b)) is
   // known (p ≤ a.hi + val(b)) and every needed b_j is known (p ≤ b.hi + val(a)).
-  const la = trueVal(a);
-  const lb = trueVal(b);
+  // A lower bound of a valuation gives a lower `hi`, which is safe.
+  const la = lowestPossibleVal(a);
+  const lb = lowestPossibleVal(b);
   const hi =
     la === null || lb === null ? Wn : Math.min(a.hi + lb, b.hi + la, Wn);
   return { v, d: D, c, hi };
@@ -1302,7 +1412,7 @@ function powerSeriesLaurent(
     const bs = expandLaurent(base, x, x0, ce, W);
     if (!bs || bs.v < 0 || bs.d !== 1) return null;
     const base0 = coeffAt(ce, bs, 0);
-    if (base0.isSame(0) || base0.has(x)) return null;
+    if (base0.has(x) || zeroVerdict(base0) !== false) return null;
     const outer = powerOuter(ce, expo, base0, W);
     if (!outer) return null;
     return lFromTaylor(
@@ -1423,7 +1533,7 @@ function expandLaurent(
       if (m === null || m < 0 || ops[0].has(x)) return null;
       const inner = expandLaurent(ops[1], x, x0, ce, W);
       if (!inner || inner.d !== 1) return null;
-      const b0 = coeffAt(ce, inner, 0);
+      const b0 = foldZeroCoeff(ce, coeffAt(ce, inner, 0));
       if (b0.has(x)) return null;
       const outer = polygammaLaurent(ce, m, b0, W);
       if (!outer) return null;
@@ -1496,7 +1606,7 @@ function expandLaurent(
       if (ops.length !== 1) return null;
       const inner = expandLaurent(ops[0], x, x0, ce, W);
       if (!inner) return null;
-      const b0 = coeffAt(ce, inner, 0);
+      const b0 = foldZeroCoeff(ce, coeffAt(ce, inner, 0));
 
       // A log-carrying argument (e.g. `sin(ln x)`, `Γ(ln x)`) has no
       // elementary composition — defer.
@@ -1568,13 +1678,6 @@ export interface LaurentData {
   coeff: (p: number) => Expression;
 }
 
-/** Whether `e` holds an `Add` or a `Subtract` at any depth. */
-function holdsSum(e: Expression): boolean {
-  if (!isFunction(e)) return false;
-  if (e.operator === 'Add' || e.operator === 'Subtract') return true;
-  return e.ops.some(holdsSum);
-}
-
 /**
  * Laurent-expand `f` in `x` about the finite point `x0`. Returns `null` when
  * the kernel declines (branch point, essential singularity, unexpandable
@@ -1589,16 +1692,14 @@ export function laurentData(
   ce: ComputeEngine,
   W = 6
 ): LaurentData | null {
-  if (x0.isFinite !== true) return null;
-  // The kernel reads a coefficient as zero only when it IS the number 0
-  // (`isSame(0)`), so it needs a point at which `evaluate()` folds each
-  // exact constant coefficient that is 0 to the number 0. At a point that
-  // holds a sum it does not: `evaluate()` does not expand a power of a sum,
-  // so at x0 = 1/2 + (√3/2)i the constant coefficient of x³ + 1,
-  // `1 + (1/2 + (√3/2)i)³`, stays a sum although it is 0, and the pole of
-  // 1/(x³ + 1) there was read as a removable point. Such a point is
-  // declined, and the caller uses its other methods.
-  if (holdsSum(x0)) return null;
+  // `isFinite` is not known for some finite constants (`1 + ln 2`). A
+  // constant whose exact real and imaginary parts can be computed has a
+  // finite enclosure, so it is finite.
+  if (
+    x0.isFinite !== true &&
+    (x0.unknowns.length > 0 || exactComplexParts(x0) === undefined)
+  )
+    return null;
   const L = expandLaurent(f, x, x0, ce, Math.min(W, MAX_SERIES_ORDER));
   if (!L) return null;
   const v = trueVal(L);
@@ -1614,7 +1715,7 @@ export function laurentData(
   // `limit`/`residue` see exactly what they did before.
   if (L.d > 1) {
     for (let p = v; p <= L.hi; p++)
-      if (!coeffAt(ce, L, p).isSame(0) && p % L.d !== 0) return null;
+      if (p % L.d !== 0 && zeroVerdict(coeffAt(ce, L, p)) !== true) return null;
     return {
       v: v / L.d,
       hi: Math.floor(L.hi / L.d),
@@ -1645,7 +1746,7 @@ function assembleLaurent(
   const terms: Expression[] = [];
   for (let p = L.v; p <= top; p++) {
     const c = coeffAt(ce, L, p);
-    if (c.isSame(0)) continue;
+    if (isKnownZero(c)) continue;
     if (p === 0) {
       terms.push(c);
     } else {
@@ -1664,7 +1765,7 @@ function assembleLaurent(
   if (L.hi >= n * d && terms.length >= 1) {
     let tailZero = true;
     for (let p = top + 1; p <= L.hi; p++)
-      if (!coeffAt(ce, L, p).isSame(0)) {
+      if (!isKnownZero(coeffAt(ce, L, p))) {
         tailZero = false;
         break;
       }
@@ -1692,7 +1793,7 @@ function assembleLaurent(
 
   let m = L.hi + 1;
   for (let p = top + 1; p <= L.hi; p++) {
-    if (!coeffAt(ce, L, p).isSame(0)) {
+    if (!isKnownZero(coeffAt(ce, L, p))) {
       m = p;
       break;
     }
@@ -1840,7 +1941,7 @@ function specialPoleInvolved(
 
 function allZeroBeyond(coeffs: Coeffs, n: number, W: number): boolean {
   for (let k = n + 1; k <= W && k < coeffs.length; k++)
-    if (!coeffs[k].isSame(0)) return false;
+    if (!isKnownZero(coeffs[k])) return false;
   return true;
 }
 

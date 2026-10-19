@@ -4699,9 +4699,7 @@ export function findUnivariateRoots(
     // coefficient with no closed form), the root templates are not matched.
     // They have no template for a degree of 3 or more other than a pure
     // power, which the polynomial route solves, thus they cannot give all
-    // the roots either. And the time of the commutative matcher grows
-    // exponentially with the number of terms: `x^{28} + … + x + 1 = 2`
-    // took 18 s.
+    // the roots either.
     let polynomialDeclined = false;
     if (
       result.length === 0 &&

@@ -132,21 +132,47 @@ function reorderAsciiSeriesTerms(
 }
 
 /** Serialize a unit expression to a human-readable string like "m/s^2". */
-function unitToString(expr: Expression): string {
+function unitToString(
+  expr: Expression,
+  serialize: AsciiMathSerializer
+): string {
   if (isSymbol(expr)) return expr.symbol;
   if (isNumber(expr)) return String(expr.re);
   if (!isFunction(expr)) return '';
+  // A product or a quotient in a denominator or in the base of a power is
+  // put in parentheses: `m/(kg⋅s)` and `(mi/h)^2`, not `m/kg⋅s` and
+  // `mi/h^2`.
+  const group = (x: Expression): string => {
+    const s = unitToString(x, serialize);
+    return isFunction(x, 'Multiply') || isFunction(x, 'Divide') ? `(${s})` : s;
+  };
   const op = expr.operator;
   if (op === 'Divide')
-    return `${unitToString(expr.op1)}/${unitToString(expr.op2)}`;
-  if (op === 'Multiply') return expr.ops.map(unitToString).join('\u22C5');
+    return `${unitToString(expr.op1, serialize)}/${group(expr.op2)}`;
+  if (op === 'Multiply')
+    return expr.ops.map((x) => unitToString(x, serialize)).join('\u22C5');
   if (op === 'Power') {
-    const exp = expr.op2?.re;
-    return exp !== undefined
-      ? `${unitToString(expr.op1)}^${exp}`
-      : unitToString(expr.op1);
+    const base = group(expr.op1);
+    // An integer exponent or a float exponent is written as its value. Any
+    // other exponent (`3/2`, `n + 1`, `oo`) is written with the serializer:
+    // the `.re` of `n + 1` is `NaN`, and `m^NaN` loses the exponent.
+    if (
+      isNumber(expr.op2) &&
+      Number.isFinite(expr.op2.re) &&
+      (Number.isInteger(expr.op2.re) || !expr.op2.isExact)
+    )
+      return `${base}^${expr.op2.re}`;
+    const exp = serialize(expr.op2);
+    return isSymbol(expr.op2) ? `${base}^${exp}` : `${base}^(${exp})`;
   }
-  return '';
+  // A root of a unit is written from its parts, so that the unit symbol is
+  // not quoted as a multi-letter symbol is by the serializer: `sqrt(Hz)`,
+  // not `sqrt("Hz")`.
+  if (op === 'Sqrt') return `sqrt(${unitToString(expr.op1, serialize)})`;
+  if (op === 'Root')
+    return `root(${serialize(expr.op2)})(${unitToString(expr.op1, serialize)})`;
+  // Another unit operator is written with the serializer, not dropped.
+  return serialize(expr);
 }
 
 export type AsciiMathSerializer = (
@@ -529,7 +555,7 @@ const FUNCTIONS: Record<
       isFunction(expr.op1, 'Subtract')
         ? `(${serialize(expr.op1)})`
         : serialize(expr.op1);
-    return `${mag} ${unitToString(expr.op2)}`;
+    return `${mag} ${unitToString(expr.op2, serialize)}`;
   },
 
   GCD: 'gcd',

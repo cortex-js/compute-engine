@@ -42,11 +42,23 @@ const LIST_TYPE = new BoxedType('list');
  * and `isUnknown` all answer `false` for a union with a `missing` member.
  * Only the marker is stripped, so a type that fails the gate on its own
  * merits (`string | number`) still fails it.
+ *
+ * A `nothing` arm of a union is set aside in the same way. `Numerator` and
+ * `Denominator` type `number | nothing` (a call with no operand is
+ * `Nothing`), and a product drops a `Nothing` operand (`2·Nothing` is `2`),
+ * so `2\operatorname{Numerator}(x)` is a product exactly as
+ * `2\operatorname{Abs}(x)` is. Testing the union made it a `Tuple`. Only a
+ * top-level arm is set aside: the type `nothing` alone reads as itself.
  */
 function typeIgnoringAbsence(x: Expression): BoxedType {
   const t = x.type.type;
-  if (!typeContainsMissing(t)) return x.type;
-  const stripped = stripMissingFromType(t);
+  let stripped = typeContainsMissing(t) ? stripMissingFromType(t) : t;
+  if (typeof stripped !== 'string' && stripped.kind === 'union') {
+    const arms = stripped.types.filter((arm) => arm !== 'nothing');
+    if (arms.length !== stripped.types.length)
+      stripped = arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+  }
+  if (stripped === t) return x.type;
   return stripped === 'never' ? x.type : new BoxedType(stripped);
 }
 

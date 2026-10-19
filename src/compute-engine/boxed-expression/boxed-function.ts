@@ -2452,6 +2452,37 @@ export class BoxedFunction
         if (this.ops.every((x) => x.isNumber === true && x.isFinite === true))
           return true;
         break;
+      case 'Sin':
+      case 'Cos':
+      case 'Sinh':
+      case 'Cosh':
+      case 'Exp':
+      case 'Erf':
+      case 'Erfc':
+        // An entire function of a finite number (real or complex) is
+        // finite: `sin(1)` and `cosh(2 + i)` are finite.
+        if (this.op1.isNumber === true && this.op1.isFinite === true)
+          return true;
+        break;
+      case 'Arctan':
+        // arctan has its poles at ±i only, so it is finite at a finite real
+        // number.
+        if (this.op1.isFinite === true && this.op1.isExtendedReal === true)
+          return true;
+        break;
+      case 'Ln':
+      case 'Log':
+        // A logarithm of a finite number that is not 0 is finite: `ln(2)`
+        // and `ln(−3)` (= ln 3 + iπ). A `Log` with a base is not decided
+        // here (a base of 1 has no logarithm).
+        if (
+          this.nops === 1 &&
+          this.op1.isNumber === true &&
+          this.op1.isFinite === true &&
+          isNonZero(this.op1)
+        )
+          return true;
+        break;
     }
 
     // A type-provable non-finite expression (e.g. `Ln(0)`) never reaches here:
@@ -3275,6 +3306,30 @@ export class BoxedFunction
       evaluatesExponentExactly(this, options) &&
       this._isBoundToLibraryDefinition()
     );
+  }
+
+  /**
+   * This application over `ops`, bound to the same definition as this node,
+   * with no lookup of the operator in the current scope. `ops` must be
+   * canonical. When `ops` are the operands of this node, the node itself.
+   *
+   * A rebuild through `ce.function()` looks the operator up in the current
+   * scope, and declares it there when the name has no binding. That is wrong
+   * for an application whose binding is in a scope that is no longer on the
+   * chain: `h(1)` made by a run of a block, read again by the `Sum` that
+   * holds the block, would declare `h` in the scope of the `Sum`, and an
+   * assignment to `h` in the next evaluation of the block would write that
+   * binding and keep the value. @internal
+   */
+  _withSameBinding(ops: ReadonlyArray<Expression>): Expression {
+    if (
+      ops.length === this.ops.length &&
+      ops.every((x, i) => x === this.ops[i])
+    )
+      return this;
+    const result = new BoxedFunction(this.engine, this._operator, ops);
+    result._def = this._def;
+    return result;
   }
 
   private _isBoundToLibraryDefinition(): boolean {
@@ -4841,7 +4896,18 @@ export class BoxedFunction
       // materialization, no hang).
       if (this.isFiniteCollection !== true) return undefined;
       // A count that is not a safe integer (a `bigint`) cannot be used as a
-      // `number` index: `smallCount()` reads it as unknown.
+      // `number` index. The position from the end is then a `bigint` too,
+      // and only an `atBigint` handler can take it (`Last` of
+      // `Permutations(Range(1, 25))`, which has 25! elements).
+      const bigCount = this.count;
+      if (typeof bigCount === 'bigint') {
+        const atBigint = this.operatorDefinition?.collection?.atBigint;
+        if (atBigint === undefined || !Number.isInteger(index))
+          return undefined;
+        const position = bigCount + 1n + BigInt(index);
+        if (position < 1n) return undefined;
+        return unlessWalkMissedElements(() => atBigint(this, position));
+      }
       const count = smallCount(this);
       if (count === undefined || !Number.isFinite(count)) return undefined;
       idx = count + 1 + index;
@@ -6599,55 +6665,9 @@ export class BoxedFunction
       // value of a restricted list whose condition is not decided — is first
       // read back as that restricted list (`regroupRestrictedCells`).
       //
-      if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(this.operator)) {
-        if (tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which'))) {
-          const threaded = threadConditional(
-            this.engine,
-            this.operator,
-            tail,
-            def.lazy === true,
-            options,
-            this,
-            def.resolvedMissingBehavior === 'propagate'
-          );
-          if (threaded) return threaded;
-        }
-      } else if (
-        def.threadsConditionals !== false &&
-        // A cheap test first, so that an application with no conditional
-        // operand (the common case) allocates nothing: only a `When`, a
-        // `Which`, or a `List` (which can hold restricted cells) at a
-        // threaded position can be lifted.
-        tail.some(
-          (x, i) =>
-            def.threadsConditionalsAt(i) &&
-            (isFunction(x, 'When') ||
-              isFunction(x, 'Which') ||
-              isFunction(x, 'List'))
-        )
-      ) {
-        const threadsAt = (i: number) => def.threadsConditionalsAt(i);
-        const regrouped = tail.map((x, i) =>
-          threadsAt(i) ? regroupRestrictedCells(this.engine, x) : x
-        );
-        if (
-          regrouped.some(
-            (x, i) =>
-              threadsAt(i) && (isFunction(x, 'When') || isFunction(x, 'Which'))
-          )
-        ) {
-          const threaded = threadConditional(
-            this.engine,
-            this.operator,
-            regrouped,
-            def.lazy === true,
-            options,
-            this,
-            def.resolvedMissingBehavior === 'propagate',
-            threadsAt
-          );
-          if (threaded) return threaded;
-        }
+      {
+        const threaded = threadConditionalOperands(this, def, tail, options);
+        if (threaded) return threaded;
       }
 
       //
@@ -7783,6 +7803,50 @@ export class BoxedFunction
           options
         );
         if (mapped) return mapped;
+      }
+
+      //
+      // 3b-cond/ Thread over conditional values (`When`/`Which`) — the async
+      // twin of the sync step 4c, with the same rules
+      // (`threadConditionalOperands`): `Sin(When(3, c))` is `When(Sin(3), c)`
+      // on both routes. The lift applies the operator to the values with the
+      // synchronous `evaluate()`, so it does not run for an operator that has
+      // only an `evaluateAsync` handler: that operator keeps the conditional
+      // operand. An operator with a synchronous handler, a function literal,
+      // and a lazy collection operator (no handler: its value is a view that
+      // its collection handlers read) are lifted.
+      // The lift runs after an `await`, so the context of this evaluation
+      // (the scope of an enclosing `Sum` index, for example) is put in place
+      // for it. A lazy operator's held operands are evaluated by the lift
+      // with `evaluate()`, which cannot run an asynchronous-only descendant:
+      // those are awaited first, as for the handler in step 5
+      // (`awaitAsyncOnlyDescendants`).
+      //
+      // A cheap test first, the same one as the lift makes: only a `When`, a
+      // `Which` or a `List` operand can be lifted, so an application with
+      // none of them awaits nothing here.
+      if (
+        (isSyncApplicable ||
+          (def.evaluate === undefined && def.evaluateAsync === undefined)) &&
+        tail.some(
+          (x) =>
+            isFunction(x, 'When') ||
+            isFunction(x, 'Which') ||
+            isFunction(x, 'List')
+        )
+      ) {
+        const threadTail =
+          def.lazy === true &&
+          this.engine._hasAsyncOnlyOperator &&
+          !def.selectsOperands &&
+          !def.scoped &&
+          def.holdClass !== 'quote'
+            ? await awaitAsyncOnlyDescendants(tail, options)
+            : tail;
+        const threaded = this.engine.withEvaluationContext(options, () =>
+          threadConditionalOperands(this, def, threadTail, options)
+        );
+        if (threaded) return threaded;
       }
 
       //
@@ -9244,6 +9308,79 @@ const CONDITIONAL_THREADING_SKIP = new Set([
   'Implies',
   'Equivalent',
 ]);
+
+/**
+ * Step 4c of the evaluation of a function expression, shared by the
+ * synchronous and the asynchronous routes: lift a conditional operand
+ * (`When`/`Which`) of the evaluated operands `tail` out of the application
+ * `expr`, so that the operator applies to the values and the result carries
+ * the condition (`Sin(When(3, c))` is `When(Sin(3), c)`). Returns `undefined`
+ * when there is nothing to lift.
+ *
+ * A broadcastable operator lifts a conditional at any position, except the
+ * logic operators (`CONDITIONAL_THREADING_SKIP`). An operator that is not
+ * broadcastable lifts it at the positions that its `threadsConditionals`
+ * flag selects; at those positions a `List` whose every cell has the same
+ * condition is first read back as that restricted list
+ * (`regroupRestrictedCells`).
+ */
+function threadConditionalOperands(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  tail: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> | undefined
+): Expression | undefined {
+  const ce = expr.engine;
+  if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(expr.operator)) {
+    if (!tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which')))
+      return undefined;
+    return threadConditional(
+      ce,
+      expr.operator,
+      tail,
+      def.lazy === true,
+      options,
+      expr,
+      def.resolvedMissingBehavior === 'propagate'
+    );
+  }
+  if (
+    def.threadsConditionals === false ||
+    // A cheap test first, so that an application with no conditional
+    // operand (the common case) allocates nothing: only a `When`, a
+    // `Which`, or a `List` (which can hold restricted cells) at a
+    // threaded position can be lifted.
+    !tail.some(
+      (x, i) =>
+        def.threadsConditionalsAt(i) &&
+        (isFunction(x, 'When') ||
+          isFunction(x, 'Which') ||
+          isFunction(x, 'List'))
+    )
+  )
+    return undefined;
+  const threadsAt = (i: number) => def.threadsConditionalsAt(i);
+  const regrouped = tail.map((x, i) =>
+    threadsAt(i) ? regroupRestrictedCells(ce, x) : x
+  );
+  if (
+    !regrouped.some(
+      (x, i) =>
+        threadsAt(i) && (isFunction(x, 'When') || isFunction(x, 'Which'))
+    )
+  )
+    return undefined;
+  return threadConditional(
+    ce,
+    expr.operator,
+    regrouped,
+    def.lazy === true,
+    options,
+    expr,
+    def.resolvedMissingBehavior === 'propagate',
+    threadsAt
+  );
+}
 
 /**
  * `x` read back as a restricted list when it is the EVALUATED form of one, or
@@ -11050,6 +11187,14 @@ function applyFunctionLiteralWith(
     }
     const evaluated =
       evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
+    // A name with no binding in the current scope: the application was
+    // bound in a scope that is not on the chain now (the scope of a block
+    // whose run ended, read again by an enclosing `Sum`). A rebuild through
+    // `ce.function()` would declare the name in the current scope, and a
+    // later assignment would write that binding (`_withSameBinding`). The
+    // application keeps the binding it has.
+    if (opDef === undefined && expr._parseScope === undefined)
+      return expr._withSameBinding(evaluated);
     return expr._withParseScope(() =>
       expr.engine.function(expr.operator, evaluated)
     );

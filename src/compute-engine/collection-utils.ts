@@ -4434,7 +4434,13 @@ function collectionIndexWhere(
   return undefined;
 }
 
-function collectionContains(
+/**
+ * The default `contains` facet: whether an element of a finite collection
+ * that can be walked is the same as `target` (`isSame()`), by a walk of the
+ * collection. A collection with its own `contains` facet calls it when the
+ * facet cannot answer without a walk.
+ */
+export function collectionContains(
   expr: Expression,
   target: Expression
 ): boolean | undefined {
@@ -4648,9 +4654,12 @@ export function defaultCollectionHandlers(
   if (def.elementMemo) result.elementMemo = def.elementMemo;
   if (def.eltsgn) result.eltsgn = def.eltsgn;
   if (def.elttype) result.elttype = def.elttype;
+  if (def.countOf) result.countOf = def.countOf;
   if (def.at) {
     result.at = def.at;
     result.indexWhere = def.indexWhere ?? collectionIndexWhere;
+    if (def.atBigint) result.atBigint = def.atBigint;
+    if (def.indexOf) result.indexOf = def.indexOf;
   }
   return result;
 }

@@ -5544,10 +5544,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // dimension must not be re-evaluated per row), and a *dynamic* dimension is
   // normalized at runtime like the interpreter's `toInteger`: rounded to the
   // nearest integer and clamped to ≥ 0 (a NaN dimension yields an empty list).
-  // A *statically* non-positive dimension (a literal ≤ 0) is inert in the
-  // interpreter (it stays symbolic, e.g. `Tabulate(f, 0)`), so it fails closed
-  // (D6) here rather than compiling to `[]` behind `success: true` — mirroring
-  // the `Range`/`Table` step-0 precedent.
+  // A *statically* non-positive dimension (a literal ≤ 0) gives the constant
+  // `[]` in the interpreter (`Tabulate(f, 0)` is `[]`). It fails closed (D6)
+  // here rather than compiling to that constant behind `success: true`: a
+  // compiled function whose value is always the empty list is more likely an
+  // error in the input than an intended result. This decline was first
+  // written when the interpreter left such a `Tabulate` unevaluated, and it
+  // is kept. The constant fold declines such a `Tabulate` too
+  // (`isTabulateWithNonPositiveDimension`, `base-compiler.ts`), so that the
+  // decline here is reached.
   Tabulate: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Tabulate`: missing argument');
@@ -5559,8 +5564,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const dim = tryGetConstant(args[i]!);
       if (dim !== undefined && Math.round(dim) <= 0)
         throw new Error(
-          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) is inert ` +
-            `in the interpreter.`
+          `Could not compile \`Tabulate\`: a statically non-positive dimension (${dim}) gives ` +
+            `a constant empty list.`
         );
     }
     // The emitted lowering passes 1-based integer indexes, so an annotated

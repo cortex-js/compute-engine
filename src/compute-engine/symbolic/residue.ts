@@ -27,7 +27,7 @@ import { isEntireIn, symbolicLimit } from './limit.js';
 import { laurentData, freshSymbol } from './series.js';
 import { differentiate } from './derivative.js';
 import { expandAll } from '../boxed-expression/expand.js';
-import { isNumber, sym } from '../boxed-expression/type-guards.js';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
@@ -121,13 +121,14 @@ export function residue(
   // `x² − 2 = −1` is on the cut of `√`, as an analytic function.
   if (hasBranchPointAt(body, varName, point)) return undefined;
 
-  // At a point with a radical (`√2`), the Laurent kernel reads a
-  // coefficient as 0 only when `evaluate()` folds it to the number 0, and
-  // `(√2 + 1)² − 3 − 2√2` does not fold. It then reads the pole of
-  // 1/((x + 1)² − 3 − 2√2) at √2 as an analytic point. At such a point, the
-  // exact Taylor method for a quotient of entire functions runs first. At a
-  // rational point or a float, the values of a polynomial fold, and the
-  // kernel is used first.
+  // At a point with a radical (`√2`) or a point that is not real, the
+  // coefficients of the Laurent kernel are not expanded: the residue of
+  // 1/((x + 1)² − 3 − 2√2) at √2 holds the factor `(√2 + 1)² − 3 − 2√2`,
+  // which is 0 although it does not fold. At such a point, the exact Taylor
+  // method for a quotient of functions analytic at the point runs first: it
+  // expands each coefficient, so its value is more readable. At a rational
+  // point or a float, the values of a polynomial fold, and the kernel is
+  // used first.
   if (!(isNumber(point) && (point.isRational === true || !point.isExact))) {
     const quotient = quotientPoleResidue(body, varName, point, ce);
     if (quotient !== undefined) return quotient;
@@ -306,12 +307,131 @@ function isNegativeReal(v: Expression): boolean {
 }
 
 /**
+ * Whether the constant `v` is proved to be off the principal branch cut
+ * (−∞, 0] of `ln` and `√`: its imaginary part is proved not 0, or it is
+ * proved real and positive (`exactComplexParts()`, `exactSign()`).
+ */
+function isOffPrincipalCut(v: Expression): boolean {
+  if (v.unknowns.length > 0) return false;
+  const parts = exactComplexParts(v);
+  if (parts === undefined) return false;
+  const y = exactSign(parts.y);
+  if (y === 1 || y === -1) return true;
+  return y === 0 && exactSign(parts.x) === 1;
+}
+
+/**
+ * Whether `e` is proved analytic in `varName` at the exact constant
+ * `point`, so that its Taylor coefficients there are the values of its
+ * derivatives divided by the factorials. An entire function (`isEntireIn`)
+ * is analytic at each point. Otherwise `e` must be built from
+ * - sums, products and powers with an integer exponent of analytic
+ *   functions, where a quotient or a negative power needs a value that is
+ *   proved not 0 at the point (`exactlyEqual()`);
+ * - `ln`, `log` with a constant base, `√`, a root and a power with a
+ *   constant exponent that is not an integer, of an analytic argument whose
+ *   value at the point is proved off the principal branch cut (−∞, 0]
+ *   (`isOffPrincipalCut()`);
+ * - `exp`, `sin`, `cos`, `sinh`, `cosh` of an analytic argument;
+ * - `tan` and `sec` of an analytic argument whose value is not real (the
+ *   zeros of `cos` are the real numbers π/2 + kπ only), or is real with a
+ *   cosine that is proved not 0;
+ * - `arctan` of an analytic argument whose value is off the cuts of
+ *   `arctan`, the half-lines iy with |y| ≥ 1: its real part is proved not 0,
+ *   or its real part is 0 and |y| < 1 is proved.
+ * Any other function is not proved analytic.
+ */
+function isAnalyticAt(
+  e: Expression,
+  varName: string,
+  point: Expression
+): boolean {
+  if (isEntireIn(e, varName)) return true;
+  if (!isFunction(e)) return false;
+  const ce = e.engine;
+  const valueAt = (g: Expression): Expression =>
+    g.subs({ [varName]: point }).evaluate();
+  const analytic = (g: Expression): boolean => isAnalyticAt(g, varName, point);
+  const nonzeroAt = (g: Expression): boolean =>
+    exactlyEqual(valueAt(g), ce.Zero) === false;
+  const offCutAt = (g: Expression): boolean =>
+    analytic(g) && isOffPrincipalCut(valueAt(g));
+  const ops = e.ops;
+  switch (e.operator) {
+    case 'Add':
+    case 'Subtract':
+    case 'Negate':
+    case 'Multiply':
+      return ops.every(analytic);
+    case 'Divide':
+      return analytic(ops[0]) && analytic(ops[1]) && nonzeroAt(ops[1]);
+    case 'Power': {
+      const [base, exponent] = ops;
+      if (exponent.has(varName)) {
+        // b^g = exp(g·ln b): analytic when g is, and b is off the cut of ln.
+        if (sym(base) === 'ExponentialE') return analytic(exponent);
+        return analytic(exponent) && offCutAt(base);
+      }
+      if (isNumber(exponent) && exponent.isInteger === true)
+        return exponent.isNegative === true
+          ? analytic(base) && nonzeroAt(base)
+          : analytic(base);
+      return offCutAt(base);
+    }
+    case 'Sqrt':
+    case 'Root':
+    case 'Ln':
+      return offCutAt(ops[0]);
+    case 'Log':
+      return (ops.length === 1 || !ops[1].has(varName)) && offCutAt(ops[0]);
+    case 'Exp':
+    case 'Sin':
+    case 'Cos':
+    case 'Sinh':
+    case 'Cosh':
+      return analytic(ops[0]);
+    case 'Tan':
+    case 'Sec': {
+      if (!analytic(ops[0])) return false;
+      const v = valueAt(ops[0]);
+      if (v.unknowns.length > 0) return false;
+      const parts = exactComplexParts(v);
+      if (parts === undefined) return false;
+      const y = exactSign(parts.y);
+      if (y === 1 || y === -1) return true;
+      if (y !== 0) return false;
+      const c = exactSign(ce.function('Cos', [parts.x]));
+      return c === 1 || c === -1;
+    }
+    case 'Arctan': {
+      if (!analytic(ops[0])) return false;
+      const v = valueAt(ops[0]);
+      if (v.unknowns.length > 0) return false;
+      const parts = exactComplexParts(v);
+      if (parts === undefined) return false;
+      const x = exactSign(parts.x);
+      if (x === 1 || x === -1) return true;
+      if (x !== 0) return false;
+      // 1 − y² > 0, that is |y| < 1.
+      const gap = ce.function('Subtract', [
+        ce.One,
+        ce.function('Multiply', [parts.y, parts.y]),
+      ]);
+      return exactSign(gap) === 1;
+    }
+  }
+  return false;
+}
+
+/**
  * Residue of `body` at a pole that comes from a zero of its denominator,
- * when its numerator and its denominator are entire functions
- * (`isEntireIn`), from the Taylor coefficients of the numerator and of the
- * denominator at the point. The Laurent kernel declines a point that is a sum (`1 + √2`,
- * `1/2 + (√3/2)i`), and the probing of `lim (x − a)ⁿ·f` there is slow,
- * because each L'Hôpital step differentiates a larger expression.
+ * when its numerator and its denominator are analytic at the point
+ * (`isAnalyticAt()`), from the Taylor coefficients of the numerator and of
+ * the denominator at the point. At a point that is a sum (`1 + √2`,
+ * `1/2 + (√3/2)i`), this method gives a more readable value than the
+ * Laurent kernel, because each coefficient is expanded (`expandAll()`), and
+ * the probing of `lim (x − a)ⁿ·f` there is slow, because each L'Hôpital
+ * step differentiates a larger expression.
  *
  * Write `body` as `N/D` (`numeratorDenominator`), and let `nⱼ = N⁽ʲ⁾(a)/j!`
  * and `dⱼ = D⁽ʲ⁾(a)/j!` be the Taylor coefficients at the point `a`. When
@@ -326,7 +446,7 @@ function isNegativeReal(v: Expression): boolean {
  * residue of the reduced pole, or 0 for a removable point.
  *
  * The point must be a finite exact constant: then each coefficient is
- * finite, because `N` and `D` are entire. Each `dⱼ` must be decided exactly
+ * finite, because `N` and `D` are analytic at the point. Each `dⱼ` must be decided exactly
  * to be 0 or not 0 (`exactlyEqual()`). The coefficients of `N` need no such
  * test, so `sin(a)` is a valid coefficient although `exactComplexParts()`
  * cannot compute its parts at a point that is not real. Returns `undefined`
@@ -339,8 +459,9 @@ function quotientPoleResidue(
   point: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  // The point must be a finite exact constant. A derivative of an entire
-  // function is entire, so its value at such a point is finite.
+  // The point must be a finite exact constant. A derivative of a function
+  // that is analytic at the point is analytic there too, so its value at
+  // the point is finite.
   if (point.unknowns.length > 0 || exactComplexParts(point) === undefined)
     return undefined;
   const [num, den] = body.numeratorDenominator;
@@ -348,7 +469,8 @@ function quotientPoleResidue(
   // Both parts must be analytic at the point, so that their Taylor
   // coefficients are the values of their derivatives there. A numerator
   // with a branch point (`√x` at 0) has no such coefficients.
-  if (!isEntireIn(num, varName) || !isEntireIn(den, varName)) return undefined;
+  if (!isAnalyticAt(num, varName, point) || !isAnalyticAt(den, varName, point))
+    return undefined;
 
   // The Taylor coefficients of `g` at the point, in order. Each call of
   // `next()` returns the next coefficient, or `undefined` when it is not an

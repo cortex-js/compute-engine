@@ -62,10 +62,7 @@ import {
 import { addOrder } from '../boxed-expression/order.js';
 import { surplusOperandError } from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
-import {
-  hasInfiniteComponent,
-  logarithmAtExceptionalPoint,
-} from '../boxed-expression/logarithm.js';
+import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 import {
   apply,
@@ -10626,15 +10623,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             }
           }
 
-          // An infinite radicand — a named infinity, or an "anonymous" one
-          // with an infinite component (`∞ + i`) — has an exact value on the
-          // numeric route too (`BoxedNumber.sqrt()`); the numeric-value
-          // kernel below answers NaN for `~oo` and `∞ − ∞` for `∞ + i`.
-          if (
-            isNumber(x) &&
-            (x.isInfinity === true || hasInfiniteComponent(x.numericValue))
-          )
-            return x.sqrt();
+          // An infinite radicand has an exact value on the numeric route too
+          // (`BoxedNumber.sqrt()`); the numeric-value kernel below answers
+          // NaN for `~oo`.
+          if (isNumber(x) && x.isInfinity === true) return x.sqrt();
 
           const [c, rest] = x.toNumericValue();
           const cSqrt = engine.number(c.sqrt().N());

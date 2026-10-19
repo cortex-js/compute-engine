@@ -100,6 +100,12 @@ interface BaseCollectionHandlers {
     collection: Expression,
     target: Expression
   ) => boolean | undefined;
+  /** The number of elements that are the same as `target`, with no walk.
+   * Mirror of the handler documented in `types-definitions.ts`. */
+  countOf?: (
+    collection: Expression,
+    target: Expression
+  ) => number | bigint | undefined;
   subsetOf?: (
     collection: Expression,
     other: Expression,
@@ -118,6 +124,15 @@ interface IndexedCollectionHandlers {
     collection: Expression,
     predicate: (element: Expression) => boolean
   ) => number | undefined;
+  /** The element at a positive 1-based `bigint` position. Mirror of the
+   * handler documented in `types-definitions.ts`. */
+  atBigint?: (collection: Expression, index: bigint) => undefined | Expression;
+  /** The position of the first element that is the same as `target`, with
+   * no walk. Mirror of the handler documented in `types-definitions.ts`. */
+  indexOf?: (
+    collection: Expression,
+    target: Expression
+  ) => number | bigint | undefined;
 }
 
 type CollectionHandlers = BaseCollectionHandlers &

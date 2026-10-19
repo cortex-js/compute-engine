@@ -221,9 +221,12 @@ describe('LIMIT AT AN ALGEBRAIC POLE', () => {
   });
 
   test('a logarithm of an argument that is 0 at the point is not its value', () => {
-    // The substitution gave `ln((1 + √2)² − 3 − 2√2)`, which is `ln 0`.
+    // The substitution gave `ln((1 + √2)² − 3 − 2√2)`, which is `ln 0`. The
+    // argument is 2(1 + √2)·t + t² with t = x − (1 + √2), so it goes to 0
+    // from above when t → 0⁺, and the limit from the right is −∞.
     const r = limit(['Ln', SQUARE_MINUS_B2], B, 1);
-    expect(r.operator).toBe('Limit');
+    expect(r.operator).not.toBe('Limit');
+    expect(r.toString()).toBe('-oo');
   });
 });
 
@@ -314,14 +317,34 @@ describe('RESIDUE WITH AN ENTIRE NUMERATOR THAT IS NOT A POLYNOMIAL', () => {
     expect(n.im).toBeCloseTo(-0.0802848547634, 10);
   }, 5000);
 
-  test('a time limit stops a slow residue', () => {
-    // arctan is not entire, so the residue comes from the slow search over
-    // the limits of (x − b)ⁿ·f.
-    const f = ['Divide', ['Arctan', 'x'], ['Power', SQUARE_MINUS_B2, 2]];
+  test('a time limit stops the search over the limits', () => {
+    // `Gamma` is not among the numerators that the exact Taylor route
+    // accepts, so the residue comes from the search over the limits of
+    // (x − b)ⁿ·f, which reads the deadline at each order. The search takes
+    // more than 1 ms, so a limit of 1 ms stops it.
+    const f = [
+      'Divide',
+      ['Gamma', ['Add', 'x', 3]],
+      ['Power', SQUARE_MINUS_B2, 2],
+    ];
     const start = Date.now();
     expect(() =>
-      ce.withTimeLimit({ ms: 200, label: 'test:residue' }, () => residue(f, B))
+      ce.withTimeLimit({ ms: 1, label: 'test:residue' }, () => residue(f, B))
     ).toThrow(/Timeout/);
+    expect(Date.now() - start).toBeLessThan(2000);
+  }, 5000);
+
+  test('the arctan residue comes from the exact route at once', () => {
+    // arctan is analytic at 1 + √2 (off its cuts iy, |y| ≥ 1), so the exact
+    // Taylor route accepts it; it took about 5 s by the search.
+    const f = ['Divide', ['Arctan', 'x'], ['Power', SQUARE_MINUS_B2, 2]];
+    const start = Date.now();
+    // d/dx[arctan(x)/(x + b)²] at b = 1/((1 + b²)(2b)²) − 2·arctan(b)/(2b)³
+    const b = 1 + Math.SQRT2;
+    expectValue(
+      residue(f, B),
+      1 / ((1 + b * b) * (2 * b) ** 2) - (2 * Math.atan(b)) / (2 * b) ** 3
+    );
     expect(Date.now() - start).toBeLessThan(2000);
   }, 5000);
 });

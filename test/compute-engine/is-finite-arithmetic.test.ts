@@ -46,3 +46,24 @@ describe('isFinite of Negate, Add, Subtract and Multiply', () => {
     expect(ce.box(['Add', 'Pi', ['List', 1, 2]]).isFinite).toBe(false);
   });
 });
+
+describe('isFinite of a function of a finite constant', () => {
+  // `ln(2)`, `sin(1)` and `1 + ln(2)` reported `undefined`, while `1 + π`
+  // reported `true`, so code that requires `isFinite === true` refused a
+  // point such as `1 + ln 2`.
+  const engine = new ComputeEngine();
+  test.each([
+    [['Ln', 2], true],
+    [['Ln', -3], true],
+    [['Add', 1, ['Ln', 2]], true],
+    [['Sin', 1], true],
+    [['Cosh', ['Complex', 2, 1]], true],
+    [['Arctan', 1], true],
+    [['Ln', 0], false],
+    [['Ln', 'x'], undefined],
+    [['Sin', 'x'], undefined],
+    [['Log', 2, 1], undefined],
+  ])('%j', (json, expected) => {
+    expect(engine.box(json as any).isFinite).toBe(expected);
+  });
+});

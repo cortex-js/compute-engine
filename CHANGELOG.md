@@ -2,6 +2,51 @@
 
 ### Behavior Changes
 
+- **A quantity whose unit LaTeX cannot express round-trips.** The LaTeX of a
+  quantity whose unit has a non-numeric exponent was the text of its MathJSON
+  array: `Quantity(1, Power(m, n + 1))` gave `\mathrm{m^{Add,n,1}}`. Such a
+  quantity, and a quantity whose unit is not a known unit (`Quantity(3, foo)`,
+  which gave `3\,\mathrm{foo}` and parsed as a product), is now written as a
+  function, `\mathrm{Quantity}(1, m^{n+1})`, which parses back to the same
+  expression. The unit day is written `\mathrm{day}`, because `\mathrm{d}`
+  parses as the differential. The text form writes the exponent: `1 m^(n + 1)`,
+  not `1 m^NaN`, a unit root as `sqrt(Hz)`, not `sqrt("Hz")` or `1`, and a
+  compound denominator or base in parentheses: `m/(kg⋅s)`, `(mi/h)^2`. Units
+  with a name that is not ASCII parse as units: `3\,\mathrm{µm}`,
+  `3\,\mathrm{Å}` and `\mathrm{µm/s}` parsed as a string or gave a type error,
+  and every unit of the registry now round-trips through LaTeX. `Ω` (and the ohm
+  sign U+2126) is the ohm, also with a prefix (`kΩ`). An exponent applies to all
+  of the alias `mph`: `\mathrm{mph}^2` is `(mi/h)^2`, not `mi/h^2`. An `If` with
+  no else branch is written `\operatorname{If}(c, x)`; it was an empty string,
+  so `Block(If(k = 2, a ≔ 5); a)` lost the statement in a LaTeX round trip.
+
+- **A `Tabulate` with a dimension that is not positive is empty** (user decision
+  2026-10-18 on empty `Table` ranges): `Tabulate(f, 0)` and `Tabulate(f, -2)`
+  are `[]`, and `Table(k, {k, 1, n})` is `[]` once `n := 0`. The compilation
+  still declines a constant dimension that is not positive.
+
+- **Compiled statement forms.** On WGSL, an `If`, `When` or `Which` whose branch
+  assigns a variable, used as a statement of a block that is not the block's
+  value or as a statement of a loop body, compiles to `if (…) { … } else { … }`;
+  it declined. On GLSL, an else-less `If` whose branch assigns compiles to an
+  `if` statement. A WGSL statement whose value is discarded is written
+  `_ = x + 1.0;` (`x + 1.0;` is not valid WGSL). On Python, a `Sum` or `Product`
+  whose body is an assignment or a block of statements compiles to a loop with
+  an accumulator ahead of the statement, where the `Sum` is the body of
+  `compile()` or `compileFunction()`, a statement of a block, or the right side
+  of an assignment there. An assignment used as an operand (`(t ≔ 1) + 2`)
+  compiled to `t = 1 + 2` on every target, which assigned 3: JavaScript and GLSL
+  write `(t = 1) + 2`, and Python and WGSL decline. In the Python loop form,
+  each local of the body and each index has a fresh name, so the loop does not
+  change a parameter or a variable of the enclosing code with the same name, and
+  a root assignment of such a `Sum` is a statement. A WGSL condition that
+  assigns a variable declines. A Python `Sum` or `Product` bound that is not
+  typed `integer` is floored, as the interpreter does: `Sum(10k, k = 1..x)`
+  compiled to `range(1, x + 1)`, and `x = 0.7` raised `TypeError`; it is now
+  `range(1, int((x) // 1) + 1)`. The compiled type report of an input that is
+  only written (`If(c, flag ≔ …, …)`) gives its declared type; GLSL declared the
+  local copy of a boolean input as a `float`.
+
 - **The GLSL and WGSL code writes a local copy of an input that the body
   assigns** (user decision 2026-10-18). With `ce.declare('u', 'real')`,
   `u ≔ u + 1` compiled to `u = u + 1.0`, which is not valid when `u` is a
@@ -740,6 +785,55 @@
   statement form.
 
 ### Issues Resolved
+
+- **Combinatorial generators answer without a walk.** `Permutations` and
+  `Combinations` compute an element from its position and a position from an
+  element, so `Element`, `At`, `IndexOf`, `First`, `Last` and `Count(S, v)`
+  answer at once over `Permutations(Range(1, 25))`, which has 25! elements;
+  these walked and did not end. `At` reads a position larger than 2^53 exactly.
+  `Count(S, v)` over a `PowerSet` or a `CartesianProduct` no longer walks.
+  Collections get three optional facets for this: `countOf`, `indexOf` and
+  `atBigint`. A predicate whose verdict is not decided (`y > 0` for a `y` with
+  no value) leaves `Filter`, `Count`, `CountIf`, `Find`, `IndexWhere` and
+  `Position` unevaluated; they threw `predicate must return "True" or "False"`.
+
+- **Evaluation.** `evaluateAsync()` moves a condition out of an application, as
+  `evaluate()` does: `sin(3{0<t})` evaluates to `sin(3){0<t}` on both routes,
+  and a collection operator over a restricted list gives the same value on both
+  routes. A `Sum` or `Product` whose block assigns a function used in the term
+  gives the same value on every evaluation:
+  `Sum(Block(If(k = 2, h ≔ (z ↦ 2z)); h(k)), k, 1, 3)` is `10 + h(1)` (the
+  second evaluation gave `12`), and `Table` of such a block no longer declares
+  `h` in the global scope. `2\operatorname{Numerator}(x)`,
+  `2\operatorname{Denominator}(x)` and `x\operatorname{Numerator}(x)` parse as
+  products, not as a `Tuple`.
+
+- **`Series`, `Limit` and `Residue` at a point that is a sum** (`1 + √2`,
+  `1/2 + (√3/2)i`) or at `π/2`. A coefficient that is 0 but does not fold, such
+  as `(1 + √2)² − 3 − 2√2` or `π/2 − π/2`, is recognized as 0.
+  `Series(1/(x² − 3 − 2√2), x, 1 + √2)` gave a wrong regular expansion, and
+  `lim_{x→(1+√2)⁺} ln(x² − 3 − 2√2)` is `−∞` (it stayed unevaluated).
+  `Series(1/(x − π/2), x, π/2)` and `Residue(tan(x)/(x − π/2)², x, π/2) = 1/3`
+  evaluate. `Residue` at a complex algebraic pole accepts a numerator that is
+  analytic at the point but not entire (`ln x`, `√x`, `tan x`, `arctan x`) when
+  its argument is proved off the branch cut; the `arctan` residue at `1 + √2`
+  takes 80 ms instead of 5 s. The subtype test of nested list dimensions removes
+  more than one outer dimension: `matrix<integer^(2x2)>` is a subtype of
+  `list<list>`. At a point that is a sum with a transcendental constant
+  (`1 + π`, `1 + e`, `1 + ln 2`), a coefficient such as `(1 + π)² − 1 − 2π − π²`
+  is also recognized as 0: `Series(1/(x² − (1 + π)²), x, 1 + π)` gives the
+  simple pole (it divided by 0), the two-sided limit stays unevaluated because
+  its sides are `+∞` and `−∞`, and `Residue(Γ(x)/(x² − (1 + π)²), x, 1 + π)` is
+  `Γ(1 + π)/(2(1 + π))`. A coefficient whose zero test cannot decide makes the
+  expansion stay unevaluated; it is no longer read as nonzero. `isFinite` is
+  `true` for a logarithm of a finite nonzero number (`ln 2`, `1 + ln 2`), an
+  entire function (`sin`, `cos`, `sinh`, `cosh`, `exp`, `erf`) of a finite
+  number, and `arctan` of a finite real number; it was `undefined`.
+
+- **Faster matching of a sum with many terms.** The commutative pattern matcher
+  made the combinations for a sequence wildcard with a search whose time grew as
+  `2^n`: solving `x + x^2 + … + x^{23} + sin(x) = 2` took 39 s and now takes
+  less than 0.1 s. The matches do not change.
 
 - **A function local to a `Block` reads an exact argument as written under
   `.N()`**, as a global function does:

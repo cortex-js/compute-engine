@@ -151,82 +151,26 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ### Smaller defects found on 2026-10-18 (batch 8) (OPEN, small)
 
-- `2\operatorname{Numerator}(x)` parses to `Tuple(2, Numerator(x))`, not to a
-  product; the same for `Denominator` and `x\operatorname{Numerator}(x)`
-  (`2\operatorname{Abs}(x)` is a `Multiply`). The cause: `Numerator` is typed
-  `(number) -> number | nothing`, and the product test in
-  `boxed-expression/invisible-operator.ts` ignores a `missing` part of a type
-  (`typeIgnoringAbsence`) but not a `nothing` part.
-- `evaluateAsync()` has no step that threads a condition (step 4c of the
-  synchronous evaluation in `boxed-function.ts`): `sin(3{0<t})` gives
-  `sin(3{0<t})` on the asynchronous route and `sin(3){0<t}` on the synchronous
-  route, and restricted lists under `evaluateAsync()` stay unevaluated or give
-  errors. A fix: an asynchronous step after step 3b that calls
-  `threadConditional` when the operator has a synchronous `evaluate` handler
-  (the `isSyncApplicable` guard of step 3b).
-- `Sum` declares an unknown function name in its own scope when it evaluates a
-  term, so a later assignment in the body writes that binding and the value is
-  kept for the next evaluation:
-  `Sum(Block(If(k = 2, h ≔ (z ↦ 2z)); h(k)), k, 1, 3)` gives `10 + h(1)` on the
-  first evaluation and `12` on the second.
-- `Residue` at a complex algebraic pole of a function whose numerator is
-  analytic at the point but not entire stays unevaluated or is slow:
-  `ln(x)/(x³+1)²`, `tan(x)/(x³+1)` and `√x/(x³+1)³` at `1/2 + (√3/2)i` stay
-  unevaluated (they gave a wrong `0` before 2026-10-18), and
-  `Residue(arctan(x)/(x² − 3 − 2√2)², x, 1 + √2)` is correct but takes about 5
-  s. The exact Taylor route of `residue.ts` (`quotientPoleResidue`) accepts only
-  an entire numerator; it must also accept a numerator proved analytic at the
-  point (for `ln` and `√`, an argument proved off the branch cut).
-- The Laurent kernel (`symbolic/series.ts`, `holdsSum()`) declines every point
-  that is a sum, so `lim_{x→(1+√2)⁺} ln(x² − 3 − 2√2)` stays unevaluated; the
-  correct value is `−∞`. The `isSame(0)` tests of `series.ts` need an exact zero
-  test at such points.
-- Two compiled forms decline where a statement form is needed (they gave invalid
-  code before 2026-10-18; with the fallback the interpreter runs): an `If`,
-  `When` or `Which` whose branch assigns a variable on WGSL needs a statement
-  `if (…) { … } else { … }` (the block statement dispatcher of
-  `base-compiler.ts`), and a Python `Sum` or `Product` whose body is an
-  assignment or a block of statements needs a `for` loop with an accumulator
-  before the expression, as the GLSL and WGSL targets write.
-- The subtype test of nested dimensions (`common/type/subtype.ts`, the list
-  branch) removes only one outer dimension: `matrix<integer^(2x2)>` is not a
-  subtype of `list<list>` or `list<list<unknown>>`, and `list<complex^(1x2x3)>`
-  is not a subtype of `list<list<number>^(1x2)>`, so a correct value can fail a
-  correct type.
-- With `z` not assigned, `Filter([z], y ↦ y > 0).evaluate()` gives the error
-  `Filter predicate must return "True" or "False"`, and `Count` or `CountIf` of
-  it throws. By the decision of 2026-10-18 that every reader of a walk that
-  missed elements stays unevaluated, the walk must record an incomplete walk and
-  the expression stay unevaluated (`Element` does since 2026-10-18).
-- `Table(k, {k, 1, n})` is `Tabulate(f, n)`; with `n := 0` it stays
-  `Tabulate(f, 0)`, where the decision of 2026-10-18 gives `[]`. Making
-  `Tabulate(f, 0)` evaluate to `[]` makes the compile test "Tabulate with a
-  statically non-positive dimension fails closed" fail (the compiler folds the
-  constant `[]` before its decline); the compile route must still decline.
-- The commutative matching of the root templates of `Solve` (`match.ts`) takes a
-  time that grows exponentially with the number of terms of an `Add`:
-  `x^0 + … + x^{24} = 2` took 2 s and `… + x^{28}` 18 s. Since 2026-10-18 it is
-  skipped when the polynomial route declines, but an equation that is not a
-  polynomial and has many terms still takes this time.
 - With `g(t) := 2a(t)` defined before `a(x, y) := x + y`, the definition of `a`
   is now the `incompatible-type` error value, but `g` keeps its earlier
   provisional definition, so `g(1)` gives `2·(y ↦ 1 + y)`. The test "the error
   surfaces and no dependent is dropped" requires that `g` keeps its definition;
   a dependent whose rebuilt body is a type error must not give a value from the
   old body.
-- Unreachable tests of an infinite component remain in `boxed-number.ts` (near
-  line 867), `logarithm.ts` (near line 66, `'directed-inf'`) and the `Sqrt`
-  handler of `library/arithmetic.ts`, since no value is an anonymous infinity.
-  The comment "Installed even when the rebuilt literal is INVALID" in
-  `repairWave` (`function-utils.ts`) is false for an operator definition.
 
-- The fallback of the unit serializer (`unitToMathrm()`,
-  `latex-syntax/dictionary/definitions-units.ts`, used when the unit is not a
-  product of powers with numeric exponents) writes a compound exponent with
-  `String()` of its MathJSON array: `Quantity(1, Power(m, n + 1))` gives
-  `\mathrm{m^{Add,n,1}}`, and an infinite exponent gives
-  `\mathrm{m^{Multiply,1e+200,1e+200}}`. Such a unit must be serialized with the
-  LaTeX of its exponent, or outside `\mathrm{}`.
+- An operator that has only an `evaluateAsync` handler is not threaded on the
+  asynchronous route: for a broadcastable `AsyncOnly` with only an
+  `evaluateAsync` handler, `AsyncOnly(1{0<t})` gives `AsyncOnly(1) {0<t}` with
+  `evaluate()`, but `evaluateAsync()` passes the `When` to the handler, which
+  gives `NaN`. The asynchronous step that threads a condition
+  (`threadConditionalOperands`, `boxed-function.ts`) runs only for an operator
+  with a synchronous handler; an asynchronous copy of `threadConditional` is
+  needed.
+- In the Python loop form of a `Sum` whose body is a statement, an implicit
+  local of the body (`t` in `Block(t ≔ k + 1, t·t)`) is a variable of the whole
+  Python function, as in the Python `Loop` form. The value differs from the
+  interpreter only when code after the `Sum` reads `t` and no enclosing scope
+  declares it.
 
 ### Questions found on 2026-10-18 (batch 8) (OPEN, decision)
 
@@ -236,6 +180,11 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   the magnitude (`invisible-operator.ts`), so an exact quantity does not
   round-trip. Should the serializer put a non-literal magnitude in parentheses,
   and the parser accept it?
+- **Should `isSame` ignore the order of the elements of a `Set`?** Today
+  `Set(2, 1).isSame(Set(1, 2))` is `false`. So
+  `Element(Set(2, 1), PowerSet(Set(1, 2, 3)))` is `True` (set semantics), but
+  `Count(PowerSet(Set(1, 2, 3)), Set(2, 1))` is `0` (`isSame` semantics). If
+  nothing is decided, `isSame` keeps the order.
 - **`Factorial2` at a negative integer** gives `NaN` on the exact route. The
   usual extension gives `(−1)!! = 1` and `(−3)!! = −1`, with poles at the even
   negative integers. If nothing is decided, `NaN` stays (the type of
@@ -246,14 +195,16 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 `S = Permutations(Range(1, 25))` has 25! elements, a count that is a `bigint`.
 The operators that keep every element of a source stay unevaluated over such a
 source since 2026-10-18 (they list at most `maxCollectionSize` elements). The
-operators that walk the source and keep no element do not end: `Count(S, v)`,
-`CountIf`, `Any`, `All`, `Find`, `IndexOf`, `Contains`, `Reduce`, `Sum`, `Max`,
-`MaxBy`, and `DropWhile(S, x ↦ True)` when it is walked. They run until the host
-stops them: no time limit applies unless the host calls `ce.withTimeLimit()`.
-`ListFrom`, `SetFrom` and `TupleFrom` over a huge source whose count is not
-known also list it with no limit (the test `TupleFrom(Range(1, 300000))` in
-`test/compute-engine/collections.test.ts` requires a list of 300,000 elements,
-more than `maxCollectionSize`).
+generators `Permutations` and `Combinations` compute an element from its
+position and a position from an element, so `Element`, `At`, `IndexOf`, `First`,
+`Last` and `Count(S, v)` answer at once. The operators that walk the source with
+an arbitrary predicate and keep no element do not end: `CountIf`, `Any`, `All`,
+`Find`, `Reduce`, `Sum`, `Max`, `MaxBy`, and `DropWhile(S, x ↦ True)` when it is
+walked. They run until the host stops them: no time limit applies unless the
+host calls `ce.withTimeLimit()`. `ListFrom`, `SetFrom` and `TupleFrom` over a
+huge source whose count is not known also list it with no limit (the test
+`TupleFrom(Range(1, 300000))` in `test/compute-engine/collections.test.ts`
+requires a list of 300,000 elements, more than `maxCollectionSize`).
 
 Options:
 

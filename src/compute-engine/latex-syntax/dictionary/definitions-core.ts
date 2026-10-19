@@ -3062,7 +3062,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'If',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
-      if (!args || args.length < 3) return '';
+      if (!args || args.length < 2) return '';
+      // With no else branch, the keyword form `if c then x` does not parse
+      // back (the parser reads an `if … then` only with its `else`), and an
+      // empty string lost the statement: `Block(If(k = 2, a ≔ 5); a)` gave
+      // `\begin{cases}\\a\end{cases}`. The function form
+      // `\operatorname{If}(c, x)` parses back to `If(c, x)`.
+      if (args.length === 2) return serializer.serializeFunction(expr);
       return joinLatex([
         serializeKeyword(serializer, 'if', { trail: true }),
         serializer.serialize(args[0]),

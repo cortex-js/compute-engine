@@ -1490,14 +1490,14 @@ describe('PYTHON TARGET', () => {
     it('symbolic-bound Sum keeps the bound symbolic (b + 1)', () => {
       const expr = ce.parse('\\sum_{i=1}^{n} i^2');
       expect(python.compile(expr).code).toBe(
-        'sum(i ** 2 for i in range(1, n + 1))'
+        'sum(i ** 2 for i in range(1, int((n) // 1) + 1))'
       );
     });
 
     it('Sum nested inside a larger expression', () => {
       const expr = ce.parse('1 + \\sum_{i=1}^{n} i');
       expect(python.compile(expr).code).toBe(
-        'sum(i for i in range(1, n + 1)) + 1'
+        'sum(i for i in range(1, int((n) // 1) + 1)) + 1'
       );
     });
 
@@ -1515,7 +1515,9 @@ describe('PYTHON TARGET', () => {
       const expr = ce.parse('\\prod_{k=1}^{n} k');
       const code = pythonWithImports.compile(expr).code;
       expect(code).toContain('import math');
-      expect(code).toContain('math.prod(k for k in range(1, n + 1))');
+      expect(code).toContain(
+        'math.prod(k for k in range(1, int((n) // 1) + 1))'
+      );
     });
 
     it('empty/reversed range relies on Python range semantics', () => {
@@ -1551,7 +1553,7 @@ describe('PYTHON TARGET', () => {
     it('composes as a lambda body', () => {
       const expr = ce.parse('\\sum_{i=1}^{n} i^2');
       expect(python.compileLambda(expr, ['n'])).toBe(
-        'lambda n: sum(i ** 2 for i in range(1, n + 1))'
+        'lambda n: sum(i ** 2 for i in range(1, int((n) // 1) + 1))'
       );
     });
 

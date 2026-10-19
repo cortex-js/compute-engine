@@ -17,6 +17,8 @@ import type { Type } from '../../common/type/types.js';
 import {
   isFunction,
   isNumber,
+  isString,
+  isSymbol,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -45,6 +47,7 @@ import {
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
 import {
+  collectionContains,
   enumerableFromAllSources,
   enumerableFromSource,
   isWalkableFiniteCollection,
@@ -813,6 +816,23 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           // definite "not a member" no factor had given).
           return kleeneEvery(factors, (factor, i) => factor.contains(xOps[i]));
         },
+        // An element is a `Tuple` with one component per factor, and the
+        // number of elements that are the same as a tuple is the product,
+        // over the factors, of the number of elements of the factor that are
+        // the same as its component. No walk of the product is necessary.
+        countOf: (expr, target) => {
+          if (!isFunction(expr)) return undefined;
+          const factors = expr.ops;
+          if (!isFunction(target, 'Tuple') || target.nops !== factors.length)
+            return 0;
+          let total = 1n;
+          for (let i = 0; i < factors.length; i++) {
+            const c = sameElementCount(factors[i], target.ops[i]);
+            if (c === undefined) return undefined;
+            total *= BigInt(c);
+          }
+          return normalizeCount(total);
+        },
         count: (expr) => {
           if (!isFunction(expr)) return 0;
           const sizes = expr.ops.map((op) => op.count);
@@ -854,6 +874,21 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           // Three-valued: a candidate element the base set cannot judge leaves
           // the subset relation — and so the membership — undecided.
           return kleeneEvery(x.ops, (elem) => base.contains(elem));
+        },
+        // The iterator gives the empty subset as the symbol `EmptySet`, and
+        // every other subset as a `Set` of its elements in the order of the
+        // base. A `Set` is therefore the same as one subset for each way to
+        // find its elements, in the same order, at increasing positions of
+        // the base. No walk of the 2ⁿ subsets is necessary.
+        countOf: (expr, target) => {
+          if (!isFunction(expr)) return undefined;
+          const base = expr.ops[0];
+          if (!isWalkableFiniteCollection(base)) return undefined;
+          if (isSymbol(target, 'EmptySet')) return 1;
+          if (!isFunction(target, 'Set') || target.nops === 0) return 0;
+          return normalizeCount(
+            embeddingCount([...base.each()] as Expression[], target.ops)
+          );
         },
         count: (expr) => {
           if (!isFunction(expr)) return 0;
@@ -934,8 +969,43 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           return f === false ? undefined : f;
         },
         iterator: permutationsIterator,
+        // The facets below compute an element from its position, and a
+        // position from an element, with no walk: `Permutations(Range(1,
+        // 25))` has 25! elements. Each one gives the answer of the walk of
+        // `permutationsIterator`, in the same order. When a facet cannot
+        // answer (a string source, see `arrangementParts`), `contains`
+        // walks, and `IndexOf` and `Count` walk too.
         at: (expr, index) =>
-          nthFromIterator(expr, index, permutationsIterator, permutationsCount),
+          arrangementAt(
+            expr,
+            index,
+            true,
+            unrankPermutation,
+            permutationsCount
+          ),
+        atBigint: (expr, index) =>
+          arrangementAt(
+            expr,
+            index,
+            true,
+            unrankPermutation,
+            permutationsCount
+          ),
+        indexOf: (expr, target) =>
+          arrangementIndexOf(expr, target, true, permutationRank),
+        contains: (expr, target) => {
+          const i = arrangementIndexOf(expr, target, true, permutationRank);
+          if (i === undefined) return collectionContains(expr, target);
+          return i !== 0;
+        },
+        countOf: (expr, target) => {
+          const src = arrangementSource(expr, true);
+          if (src === undefined) return undefined;
+          const parts = arrangementParts(src, target);
+          if (parts === undefined) return undefined;
+          if (parts === null) return 0;
+          return normalizeCount(permutationSameCount(src.all, parts));
+        },
       },
     },
 
@@ -976,8 +1046,41 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           return f === false ? undefined : f;
         },
         iterator: combinationsIterator,
+        // The facets below compute an element from its position, and a
+        // position from an element, with no walk (see `Permutations`). Each
+        // one gives the answer of the walk of `combinationsIterator`, in the
+        // same order.
         at: (expr, index) =>
-          nthFromIterator(expr, index, combinationsIterator, combinationsCount),
+          arrangementAt(
+            expr,
+            index,
+            false,
+            unrankCombination,
+            combinationsCount
+          ),
+        atBigint: (expr, index) =>
+          arrangementAt(
+            expr,
+            index,
+            false,
+            unrankCombination,
+            combinationsCount
+          ),
+        indexOf: (expr, target) =>
+          arrangementIndexOf(expr, target, false, combinationRank),
+        contains: (expr, target) => {
+          const i = arrangementIndexOf(expr, target, false, combinationRank);
+          if (i === undefined) return collectionContains(expr, target);
+          return i !== 0;
+        },
+        countOf: (expr, target) => {
+          const src = arrangementSource(expr, false);
+          if (src === undefined) return undefined;
+          const parts = arrangementParts(src, target);
+          if (parts === undefined) return undefined;
+          if (parts === null) return 0;
+          return normalizeCount(embeddingCount(src.all, parts));
+        },
       },
     },
 
@@ -1404,31 +1507,379 @@ function* combinationsIterator(
 }
 
 /**
- * Return the element at `index` (1-based; negative counts from the end) of a
- * lazy collection defined by a streaming `gen`, walking only as far as needed.
- * A negative index needs the length, taken from `countFn` (closed form here),
- * so it never forces a full materialization for a known count.
+ * The source of a `Permutations` or a `Combinations`, read once by the facets
+ * that compute an element from its position (`at`, `atBigint`) or a position
+ * from an element (`indexOf`, `contains`, `countOf`).
+ *
+ * `xs` is the source, with a text source resolved to its string (see
+ * `resolveTextSource`), `all` holds its elements in the order of its walk, and
+ * `k` is the length of an arrangement.
  */
-function nthFromIterator(
+interface ArrangementSource {
+  ce: Expression['engine'];
+  xs: Expression;
+  all: Expression[];
+  k: number;
+}
+
+/**
+ * Read the source of a `Permutations` (`defaultLength` is `true`: the length
+ * of an arrangement is the length of the source when it is not given) or of a
+ * `Combinations` (the length must be given).
+ *
+ * The rules are those of `permutationsIterator` and `combinationsIterator`, so
+ * that a facet and the walk agree: a length of 0 gives the one empty
+ * arrangement with no read of the source. The answer is `undefined` when the
+ * walk gives no element: the length is not a non-negative integer, it is
+ * larger than the source, or the source cannot be walked.
+ */
+function arrangementSource(
   expr: Expression,
-  index: number | string,
-  gen: (e: Expression) => Generator<Expression, undefined, any>,
+  defaultLength: boolean
+): ArrangementSource | undefined {
+  if (!isFunction(expr)) return undefined;
+  const xs = resolveTextSource(expr.op1);
+  const ce = expr.engine;
+  const kExpr = expr.ops[1];
+  let k: number | null = null;
+  if (kExpr) {
+    k = toIntegerOperand(kExpr);
+    if (k === null || k < 0) return undefined;
+    if (k === 0) return { ce, xs, all: [], k: 0 };
+  } else if (!defaultLength) return undefined;
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  const all = [...xs.each()] as Expression[];
+  k ??= all.length;
+  if (k > all.length) return undefined;
+  return { ce, xs, all, k };
+}
+
+/**
+ * The elements of `target` when it can be the same as an arrangement of
+ * `src`, `null` when it is the same as no arrangement, and `undefined` when
+ * this is not known without a walk.
+ *
+ * Over a source that is not a string, an arrangement is a `List` of `k`
+ * elements of the source (`innerRun`), and two lists are the same when their
+ * elements are the same, one by one. Any other target is the same as no
+ * arrangement.
+ *
+ * Over a string source, an arrangement is the string that joins its
+ * characters. The join runs the segmentation into grapheme clusters again,
+ * and two adjacent characters can then merge into one (when the source holds
+ * a lone combining mark), so the characters of a target string do not tell
+ * which characters of the source make it. The answer is then `undefined`.
+ */
+function arrangementParts(
+  src: ArrangementSource,
+  target: Expression
+): ReadonlyArray<Expression> | null | undefined {
+  if (isString(src.xs)) return undefined;
+  if (!isFunction(target, 'List') || target.nops !== src.k) return null;
+  return target.ops;
+}
+
+/**
+ * The element at the 1-based position `index` (negative counts from the end)
+ * of a `Permutations` or a `Combinations`, computed from the position by
+ * `unrank` (which takes the 0-based position), with no walk. A position that
+ * is not a safe integer comes as a `bigint` (the `atBigint` facet).
+ *
+ * A negative position needs the count, from `countFn`.
+ */
+function arrangementAt(
+  expr: Expression,
+  index: number | string | bigint,
+  defaultLength: boolean,
+  unrank: (src: ArrangementSource, rank: bigint) => Expression | undefined,
   countFn: (e: Expression) => number | bigint | undefined
 ): Expression | undefined {
-  if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
+  if (typeof index === 'string') return undefined;
+  // A `number` that is not a safe integer is not exact: it is not used as a
+  // position.
+  if (typeof index === 'number' && !Number.isSafeInteger(index))
     return undefined;
-  let target = index;
-  if (index < 0) {
-    // A `bigint` count is not a safe integer: no `number` index reaches
-    // back from its end.
+  let position = BigInt(index);
+  if (position === 0n) return undefined;
+  if (position < 0n) {
     const c = countFn(expr);
-    if (typeof c !== 'number' || !Number.isFinite(c)) return undefined;
-    target = c + index + 1;
-    if (target < 1) return undefined;
+    if (c === undefined || !isFiniteCount(c)) return undefined;
+    position = BigInt(c) + position + 1n;
+    if (position < 1n) return undefined;
   }
-  let i = 0;
-  for (const el of gen(expr)) {
-    if (++i === target) return el;
+  const src = arrangementSource(expr, defaultLength);
+  if (src === undefined) return undefined;
+  return unrank(src, position - 1n);
+}
+
+/**
+ * The 1-based position of the first element of a `Permutations` or a
+ * `Combinations` that is the same as `target` (`isSame()`), `0` when no
+ * element is, and `undefined` when this is not known without a walk.
+ * `rankOf` gives the 0-based position, or `null` when no element is the same.
+ */
+function arrangementIndexOf(
+  expr: Expression,
+  target: Expression,
+  defaultLength: boolean,
+  rankOf: (
+    src: ArrangementSource,
+    parts: ReadonlyArray<Expression>
+  ) => bigint | null
+): number | bigint | undefined {
+  const src = arrangementSource(expr, defaultLength);
+  if (src === undefined) return undefined;
+  const parts = arrangementParts(src, target);
+  if (parts === undefined) return undefined;
+  if (parts === null) return 0;
+  const rank = rankOf(src, parts);
+  if (rank === null) return 0;
+  return normalizeCount(rank + 1n);
+}
+
+/**
+ * The arrangement at the 0-based position `rank` of the walk of
+ * `permutationsIterator`, or `undefined` when the position is outside.
+ *
+ * The walk lists the arrangements in the lexicographic order of the indices
+ * of their elements in the source. At position `p` of an arrangement, `n − p`
+ * indices are not used yet, and each choice there is followed by
+ * `(n − p − 1)·(n − p − 2)···(n − k + 1)` arrangements. The position is
+ * therefore a number in a mixed radix: its digit `p`, of radix `n − p`, is the
+ * rank of the chosen index among the indices that are not used yet. The
+ * digits are read from the last one, of radix `n − k + 1`.
+ */
+function unrankPermutation(
+  src: ArrangementSource,
+  rank: bigint
+): Expression | undefined {
+  const { ce, xs, all, k } = src;
+  const n = all.length;
+  if (rank < 0n) return undefined;
+  let r = rank;
+  const digits: number[] = new Array(k);
+  for (let p = k - 1; p >= 0; p--) {
+    const radix = BigInt(n - p);
+    digits[p] = Number(r % radix);
+    r /= radix;
   }
-  return undefined;
+  // A remainder is a position past the last arrangement.
+  if (r !== 0n) return undefined;
+  const unused = Array.from({ length: n }, (_, i) => i);
+  return innerRun(
+    ce,
+    xs,
+    digits.map((d) => all[unused.splice(d, 1)[0]])
+  );
+}
+
+/**
+ * The 0-based position in the walk of `permutationsIterator` of the first
+ * arrangement whose elements are the same as `parts`, one by one, or `null`
+ * when no arrangement is. This is the inverse of `unrankPermutation`.
+ *
+ * Elements of the source that are the same (`Permutations([1, 1, 2])`) give
+ * arrangements that are the same: the first one uses, at each position, the
+ * first index that is not used yet and whose element is the same as the part.
+ */
+function permutationRank(
+  src: ArrangementSource,
+  parts: ReadonlyArray<Expression>
+): bigint | null {
+  const { all, k } = src;
+  const n = all.length;
+  const used: boolean[] = new Array(n).fill(false);
+  let rank = 0n;
+  for (let p = 0; p < k; p++) {
+    // `digit` is the number of unused indices before the chosen one.
+    let digit = 0;
+    let j = 0;
+    for (; j < n; j++) {
+      if (used[j]) continue;
+      if (all[j].isSame(parts[p])) break;
+      digit += 1;
+    }
+    if (j === n) return null;
+    used[j] = true;
+    rank = rank * BigInt(n - p) + BigInt(digit);
+  }
+  return rank;
+}
+
+/**
+ * The number of arrangements of `all` whose elements are the same as `parts`,
+ * one by one. For each group of parts that are the same as each other (`c`
+ * parts), with `m` elements of the source that are the same as them, the
+ * parts can take `m·(m − 1)···(m − c + 1)` choices of indices.
+ */
+function permutationSameCount(
+  all: ReadonlyArray<Expression>,
+  parts: ReadonlyArray<Expression>
+): bigint {
+  const done: boolean[] = new Array(parts.length).fill(false);
+  let total = 1n;
+  for (let p = 0; p < parts.length; p++) {
+    if (done[p]) continue;
+    let c = 0;
+    for (let q = p; q < parts.length; q++) {
+      if (!done[q] && parts[q].isSame(parts[p])) {
+        done[q] = true;
+        c += 1;
+      }
+    }
+    let m = 0;
+    for (const x of all) if (x.isSame(parts[p])) m += 1;
+    if (m < c) return 0n;
+    for (let i = 0; i < c; i++) total *= BigInt(m - i);
+  }
+  return total;
+}
+
+/** The binomial coefficient `C(m, t)`, exact. */
+function smallBinomial(m: number, t: number): bigint {
+  if (t < 0 || t > m) return 0n;
+  const s = Math.min(t, m - t);
+  let c = 1n;
+  for (let i = 0; i < s; i++) c = (c * BigInt(m - i)) / BigInt(i + 1);
+  return c;
+}
+
+/**
+ * The combination at the 0-based position `rank` of the walk of
+ * `combinationsIterator`, or `undefined` when the position is outside.
+ *
+ * The walk lists the combinations in the lexicographic order of the
+ * (increasing) indices of their elements. With `t` positions left after
+ * position `p`, the index `j` at position `p` is followed by `C(n − 1 − j, t)`
+ * combinations. The index at each position is the first one whose block holds
+ * the position, and the position is reduced by the blocks that come before.
+ *
+ * The binomial coefficients are updated from one to the next, not computed
+ * again: `C(m − 1, t) = C(m, t)·(m − t)/m` for the next index at the same
+ * position, and `C(m − 1, t − 1) = C(m, t)·t/m` for the next position. Both
+ * divisions are exact.
+ */
+function unrankCombination(
+  src: ArrangementSource,
+  rank: bigint
+): Expression | undefined {
+  const { ce, xs, all, k } = src;
+  const n = all.length;
+  if (rank < 0n) return undefined;
+  let r = rank;
+  const idx: number[] = [];
+  let j = 0;
+  let m = n - 1;
+  let t = k - 1;
+  let block = smallBinomial(m, t);
+  for (let p = 0; p < k; p++) {
+    // The largest index at position `p`: `k − 1 − p` larger indices follow.
+    const last = n - k + p;
+    while (r >= block) {
+      if (j >= last) return undefined;
+      r -= block;
+      block = (block * BigInt(m - t)) / BigInt(m);
+      m -= 1;
+      j += 1;
+    }
+    idx.push(j);
+    if (p === k - 1) break;
+    block = (block * BigInt(t)) / BigInt(m);
+    m -= 1;
+    t -= 1;
+    j += 1;
+  }
+  // A remainder is a position past the last combination (with `k = 0`, the
+  // one empty combination is at position 0).
+  if (r !== 0n) return undefined;
+  return innerRun(
+    ce,
+    xs,
+    idx.map((i) => all[i])
+  );
+}
+
+/**
+ * The 0-based position in the walk of `combinationsIterator` of the first
+ * combination whose elements are the same as `parts`, one by one, or `null`
+ * when no combination is. This is the inverse of `unrankCombination`.
+ *
+ * The first such combination takes, at each position, the first index after
+ * the previous one whose element is the same as the part.
+ */
+function combinationRank(
+  src: ArrangementSource,
+  parts: ReadonlyArray<Expression>
+): bigint | null {
+  const { all, k } = src;
+  const n = all.length;
+  const idx: number[] = [];
+  let next = 0;
+  for (let p = 0; p < k; p++) {
+    while (next < n && !all[next].isSame(parts[p])) next += 1;
+    if (next === n) return null;
+    idx.push(next);
+    next += 1;
+  }
+  // Add the blocks of the indices before the chosen one at each position
+  // (see `unrankCombination`).
+  let rank = 0n;
+  let j = 0;
+  let m = n - 1;
+  let t = k - 1;
+  let block = smallBinomial(m, t);
+  for (let p = 0; p < k; p++) {
+    while (j < idx[p]) {
+      rank += block;
+      block = (block * BigInt(m - t)) / BigInt(m);
+      m -= 1;
+      j += 1;
+    }
+    if (p === k - 1) break;
+    block = (block * BigInt(t)) / BigInt(m);
+    m -= 1;
+    t -= 1;
+    j += 1;
+  }
+  return rank;
+}
+
+/**
+ * The number of ways to find the elements of `parts`, in the same order, at
+ * increasing positions of `source`: the number of combinations (or of subsets
+ * of a power set) whose elements are the same as `parts`, one by one.
+ * `ways[j]` is the number of ways to find the first `j` parts in the elements
+ * read so far.
+ */
+function embeddingCount(
+  source: ReadonlyArray<Expression>,
+  parts: ReadonlyArray<Expression>
+): bigint {
+  const k = parts.length;
+  const ways: bigint[] = new Array(k + 1).fill(0n);
+  ways[0] = 1n;
+  for (const x of source)
+    for (let j = k; j >= 1; j--)
+      if (ways[j - 1] !== 0n && x.isSame(parts[j - 1])) ways[j] += ways[j - 1];
+  return ways[k];
+}
+
+/**
+ * The number of elements of the collection `xs` that are the same as
+ * `target` (`isSame()`): from its `countOf` facet when it has one, or else
+ * from a walk of a finite collection. `undefined` when neither applies.
+ */
+function sameElementCount(
+  xs: Expression,
+  target: Expression
+): number | bigint | undefined {
+  const countOf = xs.baseDefinition?.collection?.countOf;
+  if (countOf !== undefined) {
+    const c = countOf(xs, target);
+    if (c !== undefined) return c;
+  }
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  let n = 0;
+  for (const x of xs.each()) if (x.isSame(target)) n += 1;
+  return n;
 }

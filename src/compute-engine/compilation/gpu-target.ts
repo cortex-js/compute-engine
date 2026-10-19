@@ -1820,7 +1820,10 @@ function gpuAssertSelectableArms(
  * of that function, not an operand of the selection. Called where the
  * selection is written as `select(…)`: the statement form
  * (`compileGPUStatementSelection`) writes a block arm that assigns its own
- * locals as statements, which is valid.
+ * locals as statements, which is valid. A selection in statement position
+ * (a statement of a block that is not its value, a loop body) does not
+ * reach this function: the block statement dispatcher writes it as an `if`
+ * statement (`BaseCompiler.shaderSelectionStatement`).
  */
 function gpuAssertNoAssignmentOperand(
   head: string,
@@ -1844,7 +1847,9 @@ function gpuAssertNoAssignmentOperand(
     throw new Error(
       `Could not compile \`${head}\`: a branch assigns a variable, and the ` +
         `WGSL selection \`select(…)\` takes expressions, where an assignment ` +
-        `is a statement in WGSL.`
+        `is a statement in WGSL. Such a selection compiles as an \`if\` ` +
+        `statement only where its value is discarded: a statement of a ` +
+        `block that is not the block's value, or a loop body.`
     );
 }
 

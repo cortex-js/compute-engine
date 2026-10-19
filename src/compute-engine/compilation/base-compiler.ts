@@ -2750,6 +2750,8 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
+    if (isFunction(expr, 'Assign') && isSymbol(expr.ops[0]))
+      BaseCompiler.assertAssignmentIsStatement(expr.ops[0].symbol, target);
     const code = BaseCompiler.compile(expr, target, prec);
     if (
       target.bareStatementBlocks &&
@@ -2767,6 +2769,27 @@ export class BaseCompiler {
     }
     BaseCompiler.assertNoStatementOperand(expr, code, target);
     return code;
+  }
+
+  /**
+   * Fail closed on a target where an assignment is a statement and has no
+   * expression form — Python and WGSL — when an assignment to `name` is
+   * compiled as an operand of an expression: an operand of an operator, or
+   * an argument of a function. Python read `np.sin(t = 1)` as a keyword
+   * argument, and WGSL accepts neither `w = sin(t = 1.0)` nor
+   * `_ = t = 1.0 + 2.0`. JavaScript and GLSL have an assignment expression.
+   */
+  static assertAssignmentIsStatement(
+    name: string,
+    target: CompileTarget<Expression>
+  ): void {
+    if (target.language !== 'python' && target.language !== 'wgsl') return;
+    throw new Error(
+      `Could not compile \`Assign\`: the assignment to "${name}" is an ` +
+        `operand of an expression, and an assignment is a statement in ` +
+        `'${target.language}', with no expression form. Assign the value in ` +
+        `a statement of its own first.`
+    );
   }
 
   /**
@@ -6945,6 +6968,27 @@ export class BaseCompiler {
   }
 
   /**
+   * Whether `expr` is a `Tabulate` with a dimension that is a finite real
+   * number literal that rounds to 0 or less (the test of the `Tabulate`
+   * compile handlers of the JavaScript and Python targets, which read the
+   * dimension with `tryGetConstant()`). Its value is the empty list `[]`, and
+   * those handlers decline it, so it must not constant-fold: the fold would
+   * emit the `[]` before the handler can decline.
+   */
+  private static isTabulateWithNonPositiveDimension(expr: Expression): boolean {
+    if (!isFunction(expr, 'Tabulate')) return false;
+    return expr.ops
+      .slice(1)
+      .some(
+        (op) =>
+          isNumber(op) &&
+          !op.isComplex &&
+          Number.isFinite(op.re) &&
+          Math.round(op.re) <= 0
+      );
+  }
+
+  /**
    * Whether the subtree contains a `Sum`/`Product` with a non-finite bound in
    * an INDEXING-SET operand (everything after the body: `Limits`, `Element`,
    * and the raw spellings). Such a node must never constant-fold — see the
@@ -8632,6 +8676,10 @@ export class BaseCompiler {
     // infinite pipeline (`Sum(Take(Map(_ ↦ _^2, 1..∞), 10))`) has its `∞`
     // inside the collection operand, not an indexing set, and still folds.
     if (BaseCompiler.containsUnboundedBigOp(expr)) return undefined;
+    // A `Tabulate` with a dimension that is a constant ≤ 0 is left to its
+    // compile handler, which declines it (see
+    // `isTabulateWithNonPositiveDimension`).
+    if (BaseCompiler.isTabulateWithNonPositiveDimension(expr)) return undefined;
     // A COLOR value has a representation of its own on the JavaScript target —
     // the object `{ space, c0, c1, c2, alpha }` — and the interpreter's value
     // does not carry it: a color evaluates to a typed head, whose literal
@@ -12126,6 +12174,17 @@ export class BaseCompiler {
             `statement instead (\`Block(u ≔ s; t ≔ 2u)\`).`
         );
       const stored = target.assignmentValue?.(args[1], code, target) ?? code;
+      // An assignment that is an operand of an operator (`(t ≔ 1) + 2`, whose
+      // value is the assigned value) was emitted without parentheses:
+      // `t = 1 + 2` assigns 3 to `t`, where the interpreter assigns 1. An
+      // assignment is an expression in JavaScript and in GLSL, so it is
+      // parenthesized there. In Python and in WGSL an assignment is a
+      // statement, and it has no expression form: the compilation declines
+      // (`assertAssignmentIsStatement`).
+      if (prec > 0) {
+        BaseCompiler.assertAssignmentIsStatement(args[0].symbol, target);
+        return `(${name} = ${stored})`;
+      }
       return `${name} = ${stored}`;
     }
     if (h === 'Return') {
@@ -17093,12 +17152,19 @@ export class BaseCompiler {
       (chained.length > 1 ? [...chained] : null);
     // On a shader target the lone statement gets a statement sink of its own
     // (see `compileListStatement`): a loop-form `Sum` on the right of the
-    // assignment has nowhere else to put its loop.
+    // assignment has nowhere else to put its loop. A selection whose branches
+    // assign takes the statement form (`shaderSelectionStatement`), and a
+    // value is written as a WGSL statement (`shaderExpressionStatement`).
     if (stmts === null)
       return target.bareStatementBlocks
         ? BaseCompiler.joinShaderStatements(
             BaseCompiler.compileListStatement(target, expr, (t) => [
-              BaseCompiler.compile(expr, t),
+              BaseCompiler.shaderSelectionStatement(expr, t) ??
+                BaseCompiler.shaderExpressionStatement(
+                  expr,
+                  BaseCompiler.compile(expr, t),
+                  t
+                ),
             ])
           )
         : BaseCompiler.compile(expr, target);
@@ -17114,6 +17180,149 @@ export class BaseCompiler {
     return stmts
       .map((s) => BaseCompiler.compile(s, stmtTarget))
       .join(`;${target.ws('\n')}`);
+  }
+
+  /**
+   * A selection (`If`, `When`, `Which`) in STATEMENT position on a shader
+   * target, written as an `if (…) { … } else { … }` statement, or
+   * `undefined` when the selection keeps its expression form.
+   *
+   * The expression form of a selection is a WGSL `select(…)` call, whose
+   * operands are expressions, and an assignment is a statement in WGSL: a
+   * branch that assigns a variable has no expression form there. GLSL keeps
+   * its ternary, where an assignment is an expression and only the selected
+   * branch runs, except for an else-less `If`, which has no ternary form on
+   * either language. In statement position the value of the selection is
+   * discarded, so the statement form is exact: each branch is compiled as a
+   * statement list (`compileStatementList`) and runs only when its clause is
+   * selected. A condition after the first is compiled inside the `else` of
+   * the clause before it, with a statement sink of its own, so a statement
+   * it hoists runs only when that clause is reached.
+   *
+   * The form is taken only when a branch or a condition assigns a variable
+   * (outside a function literal, whose body is not run here) and no operand
+   * contains a `Return`, `Break` or `Continue`: those keep the gates of the
+   * expression form. A condition must be a scalar boolean, because an `if`
+   * statement takes a `bool`. A condition that is not `true` (a comparison
+   * with a NaN operand gives `false`) runs the next clause, as the
+   * expression form selects its `else` operand.
+   */
+  private static shaderSelectionStatement(
+    stmt: Expression,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if (target.language !== 'wgsl' && target.language !== 'glsl')
+      return undefined;
+    if (!isFunction(stmt)) return undefined;
+    const h = stmt.operator;
+    const ops = stmt.ops;
+    // The clauses as (condition index, branch index) pairs of the operands of
+    // `stmt`; a condition index of `-1` is the default clause.
+    const clauses: Array<[number, number]> = [];
+    if (h === 'If' && (ops.length === 2 || ops.length === 3)) {
+      clauses.push([0, 1]);
+      if (ops.length === 3) clauses.push([-1, 2]);
+    } else if (h === 'When' && ops.length === 2) clauses.push([1, 0]);
+    else if (h === 'Which' && ops.length >= 2 && ops.length % 2 === 0) {
+      for (let i = 0; i < ops.length; i += 2)
+        clauses.push([isSymbol(ops[i], 'True') ? -1 : i, i + 1]);
+    } else return undefined;
+    const elseless = h === 'If' && ops.length === 2;
+    if (target.language !== 'wgsl' && !elseless) return undefined;
+    const contains =
+      (heads: ReadonlyArray<string>) =>
+      (e: Expression): boolean =>
+        isFunction(e) &&
+        e.operator !== 'Function' &&
+        (heads.includes(e.operator) || e.ops.some(contains(heads)));
+    if (!ops.some(contains(['Assign']))) return undefined;
+    if (ops.some(contains(['Return', 'Break', 'Continue']))) return undefined;
+    for (const [c] of clauses) {
+      if (c < 0) continue;
+      BaseCompiler.assertScalarCondition(ops[c]);
+      if (!ops[c].type.matches('boolean')) return undefined;
+    }
+    const indent = (code: string): string[] =>
+      code === '' ? [] : code.split('\n').map((line) => `  ${line}`);
+    const branch = (i: number): string =>
+      BaseCompiler.withCseScope(stmt, i, target, () =>
+        BaseCompiler.compileStatementList(ops[i], target)
+      );
+    const build = (k: number): string[] => {
+      if (k >= clauses.length) return [];
+      const [c, b] = clauses[k];
+      if (c < 0) {
+        const body = branch(b);
+        return body === '' ? [] : [body];
+      }
+      // A condition is a value: an assignment there (`if (flag = c)`) has no
+      // WGSL form, and the compilation declines as for any other operand
+      // (`assertAssignmentIsStatement`). An assignment nested deeper in the
+      // condition reaches the same test through `compileValueOperand`.
+      const condition = ops[c];
+      if (isFunction(condition, 'Assign') && isSymbol(condition.ops[0]))
+        BaseCompiler.assertAssignmentIsStatement(
+          condition.ops[0].symbol,
+          target
+        );
+      // The first condition runs whenever the statement runs: a statement it
+      // hoists goes to the sink of the statement, ahead of the `if`. A later
+      // condition is compiled with a sink of its own, in the `else` branch.
+      const condLines =
+        k === 0
+          ? [BaseCompiler.compileOp(stmt, c, target, 0, ops[c])]
+          : BaseCompiler.compileListStatement(target, ops[c], (t) => [
+              BaseCompiler.compileOp(stmt, c, t, 0, ops[c]),
+            ]);
+      const cond = condLines.pop()!;
+      const rest = build(k + 1).join('\n');
+      return [
+        ...condLines.map((line) => (/[;}]\s*$/.test(line) ? line : `${line};`)),
+        `if (${cond}) {`,
+        ...indent(branch(b)),
+        ...(rest === '' ? ['}'] : ['} else {', ...indent(rest), '}']),
+      ];
+    };
+    return build(0).join('\n');
+  }
+
+  /**
+   * The statement for a value `code` (the compiled `stmt`) whose value is
+   * discarded, on a shader target. WGSL has no expression statement — `x +
+   * 1.0;` is a syntax error there — so the value is written as a phony
+   * assignment, `_ = x + 1.0;`, which evaluates it and discards it. GLSL
+   * accepts an expression statement, and `code` is kept. A statement
+   * (an assignment, a declaration, a loop, a jump, a block, or code that is
+   * already a statement or several lines) is kept as well.
+   */
+  private static shaderExpressionStatement(
+    stmt: Expression,
+    code: string,
+    target: CompileTarget<Expression>
+  ): string {
+    if (target.language !== 'wgsl' || code === '' || code.includes('\n'))
+      return code;
+    if (isSymbol(stmt, 'Nothing')) return code;
+    if (
+      isFunction(stmt) &&
+      [
+        'Assign',
+        'Declare',
+        'Loop',
+        'Return',
+        'Break',
+        'Continue',
+        'Block',
+      ].includes(stmt.operator)
+    )
+      return code;
+    if (
+      /^\s*(?:(?:for|while|loop|if|switch|return|break|continue|var|let|const)\b|_\s*=(?!=)|\{)/.test(
+        code
+      )
+    )
+      return code;
+    return `_ = ${code}`;
   }
 
   /**
@@ -17548,6 +17757,34 @@ export class BaseCompiler {
    * has nowhere to write: fail closed rather than emit a write the reads
    * cannot see.
    */
+  /** The depth of the `withFreshBlockLocals` calls that are running. */
+  private static _freshBlockLocals = 0;
+  /** The fresh names that `compileBlock` gave to block locals while
+   * `withFreshBlockLocals` runs, which `assignLValue` accepts as the
+   * spelling of a write. Cleared when the outermost call ends. */
+  private static _freshLocalNames = new Set<string>();
+
+  /**
+   * Run `fn` with each local of each block that `compileBlock` compiles
+   * spelled with a fresh name (`tempVar`) instead of its own name. A target
+   * whose code puts the statements of a block in the scope of the
+   * enclosing function (the Python loop form of a `Sum` with a statement
+   * body) uses it, so that a local of the block does not write a variable
+   * of the enclosing code with the same name: a parameter `t` of the
+   * function, or a local `t` of an enclosing block, is a different binding
+   * from a local `t` of the body.
+   */
+  static withFreshBlockLocals<T>(fn: () => T): T {
+    BaseCompiler._freshBlockLocals += 1;
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._freshBlockLocals -= 1;
+      if (BaseCompiler._freshBlockLocals === 0)
+        BaseCompiler._freshLocalNames.clear();
+    }
+  }
+
   private static assignLValue(
     engine: ComputeEngine,
     name: string,
@@ -17589,6 +17826,8 @@ export class BaseCompiler {
       return resolved;
     }
     if (resolved === name) return resolved;
+    // A block local spelled with a fresh name (`withFreshBlockLocals`).
+    if (BaseCompiler._freshLocalNames.has(resolved)) return resolved;
     // A vars-object member access naming this very symbol (`_.s`) is the only
     // other assignable form the built-in targets produce. Matched by string
     // surgery, not a regexp built from `name` (a symbol may hold regexp
@@ -18046,10 +18285,20 @@ export class BaseCompiler {
         reboundLocals
       );
 
+      // The spelling of each local: its name, or a fresh name while
+      // `withFreshBlockLocals` runs.
+      const spelled = new Map<string, string>();
+      if (BaseCompiler._freshBlockLocals > 0)
+        for (const local of locals) {
+          const fresh = BaseCompiler.tempVar(target);
+          spelled.set(local, fresh);
+          BaseCompiler._freshLocalNames.add(fresh);
+        }
+      const spellLocal = (name: string): string => spelled.get(name) ?? name;
       const localTarget: CompileTarget<Expression> = {
         ...target,
         var: (id) => {
-          if (locals.includes(id)) return id;
+          if (locals.includes(id)) return spellLocal(id);
           return target.var(id);
         },
         boundVars: BaseCompiler.withBoundNames(target, locals),
@@ -18126,6 +18375,8 @@ export class BaseCompiler {
                 //    else-less `If` inside an interval LOOP body — pre-existing,
                 //    separate, and not to be widened here.)
                 //  - The GPU targets: their own statement model, plus the above.
+                //    An else-less `If` whose branch assigns takes the shader
+                //    statement form below (`shaderSelectionStatement`).
                 //
                 // An `If` with a `Return` in a branch, in statement position,
                 // takes the same statement form on plain JavaScript: the
@@ -18146,6 +18397,16 @@ export class BaseCompiler {
                     target.language === 'javascript')
                 )
                   return [BaseCompiler.compileLoopBody(arg, stmtTarget)];
+                // A selection whose branches assign, in statement position on
+                // a shader target, is an `if` statement
+                // (`shaderSelectionStatement`).
+                if (isStatement) {
+                  const statement = BaseCompiler.shaderSelectionStatement(
+                    arg,
+                    stmtTarget
+                  );
+                  if (statement !== undefined) return [statement];
+                }
                 if (returnsEarly && BaseCompiler.writesBlocksAsIife(target))
                   throw new Error(
                     `Could not compile \`If\`: a branch returns early ` +
@@ -18161,7 +18422,10 @@ export class BaseCompiler {
                   target.declare
                 ) {
                   const name = arg.ops[0].symbol;
-                  const decl = target.declare(name, typeHints[name]);
+                  const decl = target.declare(
+                    spellLocal(name),
+                    typeHints[name]
+                  );
                   // A `Declare` may carry an initial value (`Declare(sym, type, value)`
                   // or a `value` key in a trailing attributes dictionary). Emit it as a
                   // separate assignment statement, mirroring how a hoisted
@@ -18190,7 +18454,7 @@ export class BaseCompiler {
                         valueCode,
                         stmtTarget
                       ) ?? valueCode;
-                    return [decl, `${name} = ${stored}`];
+                    return [decl, `${spellLocal(name)} = ${stored}`];
                   }
                   return [decl];
                 }
@@ -18236,7 +18500,24 @@ export class BaseCompiler {
                         BaseCompiler.compile(value, stmtTarget, 0)
                     ),
                   ];
-                return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, value)];
+                const code = BaseCompiler.compileOp(
+                  arg,
+                  -1,
+                  stmtTarget,
+                  0,
+                  value
+                );
+                // A discarded value is a WGSL phony assignment
+                // (`shaderExpressionStatement`).
+                return [
+                  isStatement && target.bareStatementBlocks
+                    ? BaseCompiler.shaderExpressionStatement(
+                        arg,
+                        code,
+                        stmtTarget
+                      )
+                    : code,
+                ];
               }
             )
           )
@@ -34906,7 +35187,17 @@ export class BaseCompiler {
     const ce = expr.engine;
     const result: Record<string, FreeSymbolType> = {};
     for (const name of names) {
-      const occurrence = occurrences.get(name);
+      // The target of an assignment is not bound to a definition (it has no
+      // `valueDefinition`, and its type is `unknown`). When it is the only
+      // occurrence of an input (`If(c, u ≔ 1, …)` writes `u` and does not
+      // read it), the report reads the definition in scope instead: it was
+      // `unknown`, and a shader declared the local copy of a boolean input
+      // as a `float`.
+      const found = occurrences.get(name);
+      const occurrence =
+        found !== undefined && isSymbol(found) && !found.valueDefinition
+          ? undefined
+          : found;
       const symbol = occurrence ?? ce.symbol(name);
       let valueDef: { inferredType: boolean } | undefined;
       if (occurrence !== undefined && isSymbol(occurrence))

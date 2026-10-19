@@ -1222,10 +1222,13 @@ function repairWave(
         rebuilt = ce._inScope(info.scope, () =>
           canonicalFunctionLiteralArguments(ce, info.ops)
         );
-        // Installed even when the rebuilt literal is INVALID: a fresh parse made
-        // after `name` was defined produces exactly that invalid application, and
-        // fresh-parse parity is the contract. Keeping the stale product instead
-        // would silently answer a different question.
+        // A value definition gets the rebuilt literal even when it is
+        // INVALID: a fresh parse made after `name` was defined produces
+        // exactly that invalid application, and fresh-parse parity is the
+        // contract. Keeping the stale product instead would silently answer
+        // a different question. An operator definition does not: its
+        // `_update()` throws for an invalid body, and the `catch` below keeps
+        // the previous definition, re-registers it and reports the error.
         if (rebuilt !== undefined && rebuilt !== literal) {
           installRebuiltLiteral(ce, def, rebuilt);
           // The rebuilt literal is installed in place, without `updateDef`,
