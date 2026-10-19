@@ -1017,6 +1017,16 @@ const KEYWORDS: KeywordDef[] = [
     },
   },
   {
+    // `let k \coloneq v` declares a local `k` and assigns it, as in Epsil:
+    // `Declare(k)` then `Assign(k, v)`. A bare `k \coloneq v` is only the
+    // assignment, which changes a `k` outside the block when there is one.
+    surface: 'let',
+    kind: 'prefix',
+    precedence: 245,
+    operatorname: true,
+    build: parseLetStatement,
+  },
+  {
     surface: 'break',
     kind: 'prefix',
     precedence: 245,
@@ -1417,6 +1427,60 @@ function isParameterTypeText(text: string): boolean {
 }
 
 /**
+ * Advance the parser over a type annotation and return the index where it
+ * ends: the first token at the annotation's own nesting depth for which
+ * `stops` is true, or -1 when the input ends first. The angle brackets of the
+ * type grammar and the delimiters nest, the `>` of an arrow `->` is not a
+ * closing bracket, and a quoted value type (`"a,b"`) is skipped whole. A
+ * sizing prefix before the closing delimiter (`\left(x\colon real\right)`)
+ * belongs to the delimiter: the annotation ends before it, so the parser
+ * resumes on the prefix and the group closes as usual.
+ */
+function scanTypeAnnotation(
+  parser: Parser,
+  stops: (tok: string) => boolean
+): number {
+  const start = parser.index;
+  let depth = 0;
+  let quoted = false;
+  let lastTok = '';
+  let lastIndex = start;
+  while (!parser.atEnd) {
+    const tok = parser.peek;
+    const isArrowHead = tok === '>' && lastTok === '-';
+    if (tok === '"') quoted = !quoted;
+    else if (!quoted && !isArrowHead) {
+      if (depth === 0 && stops(tok))
+        return CLOSE_DELIMITER_PREFIX.has(lastTok) ? lastIndex : parser.index;
+      if (ANNOTATION_OPENERS.has(tok)) depth += 1;
+      else if (ANNOTATION_CLOSERS.has(tok)) depth -= 1;
+    }
+    lastTok = tok;
+    lastIndex = parser.index;
+    parser.nextToken();
+  }
+  return -1;
+}
+
+/**
+ * The type text between `start` and `end`, or `null` when it is not a type
+ * (see `isParameterTypeText()`). A sizing prefix on a delimiter INSIDE the
+ * type (`\bigl(real\bigr) -> real`) is not part of the type and is dropped,
+ * and a `\mathrm{…}`, `\text{…}` or `\operatorname{…}` wrapper is unwrapped.
+ */
+function typeAnnotationText(
+  parser: Parser,
+  start: number,
+  end: number
+): string | null {
+  let text = parser.latex(start, end).replace(DELIMITER_PREFIX_PATTERN, '');
+  text = text.trim();
+  const wrapped = /^\\(?:mathrm|text|operatorname)\{(.*)\}$/s.exec(text);
+  if (wrapped) text = wrapped[1].trim();
+  return text !== '' && isParameterTypeText(text) ? text : null;
+}
+
+/**
  * Read the type annotation of an anonymous function's parameter — the
  * `x: T` of `(x: T) \mapsto …`, `(x: T, y: U) \mapsto …` or `x: T \mapsto …`
  * — into `["Typed", x, "T"]`, or return `null` when the colon after `lhs` is
@@ -1446,35 +1510,11 @@ function parseParameterTypeAnnotation(
   if (!name) return null;
   const start = parser.index;
 
-  // 1. The end of the annotation text, at the annotation's own depth. A
-  //    sizing prefix before the closing delimiter (`\left(x\colon real\right)`)
-  //    belongs to the delimiter: the annotation ends before it, so the
-  //    parser resumes on the prefix and the group closes as usual.
-  let depth = 0;
-  let quoted = false;
-  let end = -1;
-  let lastTok = '';
-  let lastIndex = start;
-  while (!parser.atEnd) {
-    const tok = parser.peek;
-    // The `>` of the type grammar's arrow `->` is not a closing bracket.
-    const isArrowHead = tok === '>' && lastTok === '-';
-    if (tok === '"') quoted = !quoted;
-    else if (!quoted && !isArrowHead) {
-      if (
-        depth === 0 &&
-        (tok === ',' || tok === '\\mapsto' || ANNOTATION_CLOSERS.has(tok))
-      ) {
-        end = CLOSE_DELIMITER_PREFIX.has(lastTok) ? lastIndex : parser.index;
-        break;
-      }
-      if (ANNOTATION_OPENERS.has(tok)) depth += 1;
-      else if (ANNOTATION_CLOSERS.has(tok)) depth -= 1;
-    }
-    lastTok = tok;
-    lastIndex = parser.index;
-    parser.nextToken();
-  }
+  // 1. The end of the annotation text, at the annotation's own depth.
+  const end = scanTypeAnnotation(
+    parser,
+    (tok) => tok === ',' || tok === '\\mapsto' || ANNOTATION_CLOSERS.has(tok)
+  );
   if (end < 0 || end === start) {
     parser.index = start;
     return null;
@@ -1505,13 +1545,9 @@ function parseParameterTypeAnnotation(
     return null;
   }
 
-  // 3. The type itself. A sizing prefix on a delimiter INSIDE the type
-  //    (`\bigl(real\bigr) -> real`) is not part of the type and is dropped.
-  let text = parser.latex(start, end).replace(DELIMITER_PREFIX_PATTERN, '');
-  text = text.trim();
-  const wrapped = /^\\(?:mathrm|text|operatorname)\{(.*)\}$/s.exec(text);
-  if (wrapped) text = wrapped[1].trim();
-  if (!isParameterTypeText(text)) {
+  // 3. The type itself.
+  const text = typeAnnotationText(parser, start, end);
+  if (text === null) {
     parser.index = start;
     return null;
   }
@@ -1777,17 +1813,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // one statement is written as that statement, which reads back as the
       // same literal. Written as a block, it is fenced (`x\mapsto\left(f;
       // \right)`), as `prettify` already avoided.
-      let body = operand(expr, 1);
-      const statement = operand(body, 1);
-      if (
-        operator(body) === 'Block' &&
-        operands(body).length === 1 &&
-        statement !== null &&
-        operator(statement) !== 'Declare' &&
-        operator(statement) !== 'Assign' &&
-        operator(statement) !== 'Block'
-      )
-        body = statement;
+      const body = functionLiteralBody(operand(expr, 1));
       // A literal with no parameter operand, `["Function", body]`, is
       // written `()\mapsto body`. That is not an empty parameter list: the
       // parser above reads `()` as "the parameters are the wildcards of the
@@ -2068,7 +2094,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       if (operator(operand(expr, 2)) === 'Function') {
         const op_2 = operand(expr, 2);
-        const body = unhold(operand(op_2, 1));
+        const body = functionLiteralBody(unhold(operand(op_2, 1)));
         const args = operands(op_2).slice(1);
 
         return joinLatex([
@@ -2089,6 +2115,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
     parse: parseAssign,
   },
+  // The function spelling `\mathrm{Assign}(k, v)`, which the `Block`
+  // serializer writes for an assignment to a variable outside the block. It
+  // is read without the engine too (a standalone `LatexSyntax`), so that the
+  // `;` list it is in is read as a block.
+  { symbolTrigger: 'Assign', kind: 'function', parse: 'Assign' },
+  // The function spelling of a declaration the `let` form cannot hold (a
+  // symbol type, a type with a character LaTeX gives a meaning to, more
+  // operands), read without the engine too.
+  { symbolTrigger: 'Declare', kind: 'function', parse: 'Declare' },
   {
     latexTrigger: '\\coloneqq',
     kind: 'infix',
@@ -2966,8 +3001,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         trailingMarker = true;
       }
 
-      // If any element is an Assign, produce a Block
-      if (seq.some((e) => operator(e) === 'Assign'))
+      // If any element is an Assign or a `let` statement, produce a Block
+      if (seq.some((e) => operator(e) === 'Assign' || isLetStatement(e)))
         return buildBlockFromSequence(seq);
 
       // A lone statement followed by the trailing-`;` marker is the spelling
@@ -2995,9 +3030,70 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (!args || args.length === 0) return '';
-      // Skip Declare statements (implicit in LaTeX — the := implies declaration)
-      const stmts = args.filter((a) => operator(a) !== 'Declare');
-      const parts = stmts.map((a) => serializer.serialize(a));
+      // A `Declare(k)` and the `Assign(k, v)` after it are written
+      // `k \coloneq v`, which the parser reads back as both (see
+      // `buildBlockFromSequence()`). With a type, they are written
+      // `let k \colon T \coloneq v`, and a `Declare` alone is `let k`. A
+      // bare `Assign`, which changes a `k` outside the block, is written
+      // `\mathrm{Assign}(k, v)`.
+      const parts: string[] = [];
+      // The statements as they are written, a `let` counting as an `Assign`.
+      const stmts: MathJsonExpression[] = [];
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (operator(a) === 'Assign') {
+          parts.push(serializer.serializeFunction(a));
+          stmts.push(a);
+          continue;
+        }
+        if (operator(a) !== 'Declare') {
+          parts.push(serializer.serialize(a));
+          stmts.push(a);
+          continue;
+        }
+        const name = symbol(operand(a, 1));
+        const type = operand(a, 2);
+        // A type is written with `let` only when it is a string that the
+        // `let` parser reads back: a symbol type (`Declare(k, integer)`)
+        // would read back as a string, and a type with a character that
+        // LaTeX gives a meaning to would not read back at all. Those
+        // declarations use the function spelling, which keeps them.
+        const typeText = type === null ? null : stringValue(type);
+        if (
+          name === null ||
+          nops(a) > 2 ||
+          (type !== null &&
+            (typeText === null ||
+              !isParameterTypeText(typeText) ||
+              /[%#$&~\\{}^]/.test(typeText)))
+        ) {
+          parts.push(serializer.serializeFunction(a));
+          stmts.push(a);
+          continue;
+        }
+        const next = args[i + 1];
+        const assigns =
+          next !== undefined &&
+          operator(next) === 'Assign' &&
+          symbol(operand(next, 1)) === name;
+        const keyword = serializeKeyword(serializer, 'let', { trail: true });
+        let latex: string;
+        if (typeText) {
+          latex = joinLatex([
+            keyword,
+            serializer.serialize(name),
+            '\\colon',
+            typeText,
+            ...(assigns
+              ? ['\\coloneq', serializer.serialize(operand(next, 2))]
+              : []),
+          ]);
+        } else if (assigns) latex = serializer.serialize(next);
+        else latex = joinLatex([keyword, serializer.serialize(name)]);
+        if (assigns) i += 1;
+        parts.push(latex);
+        stmts.push(['Assign', name, 'Nothing']);
+      }
       // The `;`-separated spellings below bind more loosely than every
       // operator and than the `,` between arguments, so a block nested in
       // another expression is written in parentheses: `Less(Block(z ≔ Z+1,
@@ -3012,10 +3108,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         serializer.depth > 0
           ? joinLatex(['\\left(', latex, '\\right)'])
           : latex;
-      // A single EMITTED statement (a `Declare` emits nothing, so
-      // `Block(Declare s, Assign s 2)` is one) needs the trailing `;` marker
-      // to survive the round trip: without it, `s≔2` re-parses as a bare
-      // `Assign`, and the block — with its local scope — is gone.
+      // A single EMITTED statement (`Block(Declare s, Assign s 2)` is one,
+      // `let s≔2`) needs the trailing `;` marker to survive the round trip:
+      // without it, `s≔2` re-parses as a bare `Assign`, and the block — with
+      // its local scope — is gone.
       if (parts.length === 1) return fenced(`${parts[0]};`);
       // Several statements, none of them an `Assign`: the `;`-separated list
       // is NOT faithful — the `;` parser builds a `Block` only when one of
@@ -3696,16 +3792,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         // one statement is that statement: written as a block, it is fenced
         // (`\left(f;\right)`) and reads back as a `Block`, not as the
         // function literal that `\frac{\mathrm{d}f}{\mathrm{d}x}` gives.
-        const statement = operand(bodyToSerialize, 1);
-        if (
-          operator(bodyToSerialize) === 'Block' &&
-          operands(bodyToSerialize).length === 1 &&
-          statement !== null &&
-          operator(statement) !== 'Declare' &&
-          operator(statement) !== 'Assign' &&
-          operator(statement) !== 'Block'
-        )
-          bodyToSerialize = statement;
+        bodyToSerialize = functionLiteralBody(bodyToSerialize);
       }
 
       // `wrapShort` delimits the loose-infix heads (`Add`/`Subtract`/
@@ -5748,8 +5835,19 @@ function parseFunctionDefinitionBody(
   args: readonly MathJsonExpression[] | null,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
-  const parseBody = () =>
-    parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+  // A statement block in parentheses (`f(x) \coloneq \left(j \coloneq x;
+  // j\right)`) is the body itself, as for `x \mapsto \left(…\right)`: kept
+  // as a `Delimiter`, it became a block inside the body's block.
+  const parseBody = () => {
+    const body = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+    if (
+      operator(body) === 'Delimiter' &&
+      nops(body) === 1 &&
+      operator(operand(body, 1)) === 'Block'
+    )
+      return operand(body, 1);
+    return body;
+  };
 
   const sig = parser.resolveSymbol(fn)?.type.type;
   const sigArgs =
@@ -5778,7 +5876,26 @@ function parseFunctionDefinitionBody(
   }
 }
 
+/**
+ * The `Assign`s written with `\coloneq` (or `:=`). In a block, such an
+ * assignment also declares its name as a local (see
+ * `buildBlockFromSequence()`). The function spelling, `\mathrm{Assign}(k, v)`
+ * (or `\operatorname{Assign}(k, v)`), is not marked: it is only the
+ * assignment, which changes a `k` outside the block when there is one.
+ */
+const INFIX_ASSIGNS = new WeakSet<object>();
+
 function parseAssign(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  const result = parseAssignStatement(parser, lhs, until);
+  if (result !== null && typeof result === 'object') INFIX_ASSIGNS.add(result);
+  return result;
+}
+
+function parseAssignStatement(
   parser: Parser,
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
@@ -5971,8 +6088,11 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
   // environment with a `&` in any row stays a `Which` — including the mixed
   // pattern where a bare "otherwise" row sits among two-column rows.
   //
+  // The rows are the statements of a block, read as in a `;` list: a
+  // `\coloneq` row declares a local and a `let` row is spliced in (see
+  // `buildBlockFromSequence()`).
   if (rows.length >= 2 && rows.every((row) => row.length === 1))
-    return ['Block', ...rows.map((row) => row[0])];
+    return buildBlockFromSequence(rows.map((row) => row[0]));
 
   //
   // 3/ It's a "Which" expression
@@ -6495,15 +6615,7 @@ function parseWhereExpression(
     if (loop) {
       // Build Block: Declare+Assign for each binding, Loop last as body.
       const block: MathJsonExpression[] = [];
-      for (const b of bindings) {
-        const normalized = normalizeLocalAssign(b);
-        if (operator(normalized) === 'Assign') {
-          block.push(['Declare', operand(normalized, 1)!]);
-          block.push(normalized);
-        } else {
-          block.push(normalized);
-        }
-      }
+      for (const b of bindings) block.push(...bindingStatements(b));
       block.push(loop);
       return ['Block', ...block] as MathJsonExpression;
     }
@@ -6514,33 +6626,226 @@ function parseWhereExpression(
 
   // Build Block: Declare+Assign for each binding, body (lhs) last
   const block: MathJsonExpression[] = [];
-  for (const b of bindings) {
-    const normalized = normalizeLocalAssign(b);
-    if (operator(normalized) === 'Assign') {
-      block.push(['Declare', operand(normalized, 1)!]);
-      block.push(normalized);
-    } else {
-      block.push(normalized);
-    }
-  }
+  for (const b of bindings) block.push(...bindingStatements(b));
   block.push(lhs); // body is last in Block
   return ['Block', ...block] as MathJsonExpression;
 }
 
 /**
- * Convert a sequence of expressions to a Block, inserting Declare
- * before each Assign.
+ * The statements of a `where` binding: an assignment declares its name as a
+ * local (`Declare` then `Assign`), and a `let` statement is its own
+ * statements.
+ */
+function bindingStatements(b: MathJsonExpression): MathJsonExpression[] {
+  if (isLetStatement(b)) return [...operands(undecorated(b))];
+  const normalized = normalizeLocalAssign(b);
+  if (operator(normalized) === 'Assign')
+    return [['Declare', operand(normalized, 1)!], normalized];
+  return [normalized];
+}
+
+/**
+ * Convert a sequence of statements to a Block. An assignment written with
+ * `\coloneq` declares its name as a local: `Declare(k)` then `Assign(k, v)`.
+ * A `let` statement is its `Declare` and its `Assign`. An assignment written
+ * `\mathrm{Assign}(k, v)` is only the `Assign`, so it changes a `k`
+ * outside the block when there is one (the `Block` serializer writes a bare
+ * `Assign` that way).
  */
 function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
   const block: MathJsonExpression[] = [];
+  // The names this block has declared: a later `\coloneq` of one of them
+  // assigns the local (`let s; s \coloneq 2`, `x \coloneq 1; x \coloneq
+  // x+1`), it does not declare it a second time.
+  const declared = new Set<string>();
   for (const s of seq) {
+    if (isLetStatement(s)) {
+      for (const statement of operands(undecorated(s))) {
+        const name =
+          operator(statement) === 'Declare'
+            ? symbol(operand(statement, 1))
+            : null;
+        if (name !== null) declared.add(name);
+        block.push(statement);
+      }
+      continue;
+    }
     const normalized = normalizeLocalAssign(s);
-    if (operator(normalized) === 'Assign') {
-      block.push(['Declare', operand(normalized, 1)!]);
+    const node = undecorated(s);
+    const name =
+      operator(normalized) === 'Assign' ? symbol(operand(normalized, 1)) : null;
+    if (
+      name !== null &&
+      !declared.has(name) &&
+      typeof node === 'object' &&
+      node !== null &&
+      INFIX_ASSIGNS.has(node)
+    ) {
+      block.push(['Declare', name]);
+      declared.add(name);
     }
     block.push(normalized);
   }
   return ['Block', ...block] as MathJsonExpression;
+}
+
+/**
+ * The `Block`s that `parseLetStatement()` returns. In a `;` sequence their
+ * statements are spliced into the enclosing block; alone, a `let` statement
+ * is a block of its own.
+ */
+const LET_STATEMENTS = new WeakSet<object>();
+
+function isLetStatement(expr: MathJsonExpression): boolean {
+  const node = undecorated(expr);
+  return typeof node === 'object' && node !== null && LET_STATEMENTS.has(node);
+}
+
+/**
+ * The expression a `preserveLatex` parse decorated (`{ latex, fn }`), or
+ * `expr` itself. The marks of `INFIX_ASSIGNS` and `LET_STATEMENTS` are on
+ * the undecorated node.
+ */
+function undecorated(expr: MathJsonExpression): MathJsonExpression {
+  if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    'fn' in expr &&
+    Array.isArray(expr.fn)
+  )
+    return expr.fn as MathJsonExpression;
+  return expr;
+}
+
+/**
+ * The body of a function literal as it is written. The canonical body is a
+ * `Block`; a block of one statement is written as that statement, which
+ * reads back as the same literal. Written as a block, it is fenced
+ * (`x\mapsto\left(f;\right)`). A `Declare`, an `Assign` or a nested
+ * `Block` keeps its block.
+ */
+function functionLiteralBody<T extends MathJsonExpression | null>(
+  body: T
+): T | MathJsonExpression {
+  const statement = operand(body, 1);
+  if (
+    operator(body) === 'Block' &&
+    nops(body) === 1 &&
+    statement !== null &&
+    operator(statement) !== 'Declare' &&
+    operator(statement) !== 'Assign' &&
+    operator(statement) !== 'Block'
+  )
+    return statement;
+  return body;
+}
+
+/** The tokens that spell an assignment after the name of a `let`. */
+const LET_ASSIGNMENT_TOKENS: string[][] = [
+  ['\\coloneq'],
+  ['\\coloneqq'],
+  ['\\colonequals'],
+  [':', '='],
+];
+
+/** True if the parser is at one of `LET_ASSIGNMENT_TOKENS`. */
+function startsLetAssignment(parser: Parser): boolean {
+  const start = parser.index;
+  const found = LET_ASSIGNMENT_TOKENS.some((t) => {
+    parser.index = start;
+    return parser.matchAll(t);
+  });
+  parser.index = start;
+  return found;
+}
+
+/**
+ * Parse the statement after `let`: `k`, `k \coloneq v`, `k \colon T` or
+ * `k \colon T \coloneq v`, into `Block(Declare(k[, T])[, Assign(k, v)])`
+ * (see `LET_STATEMENTS`). A function definition, `f(x) \coloneq x^2`, is
+ * read as the assignment of a function literal. The type `T` is read as text,
+ * as a parameter annotation is (see `parseParameterTypeAnnotation()`), up to
+ * the assignment or the end of the statement.
+ */
+function parseLetStatement(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  // The statement ends at `;` (19) and `,` (20), and includes `\coloneq`.
+  const terminator: Terminator = { ...until, minPrec: 20 };
+  parser.skipVisualSpace();
+  const start = parser.index;
+  const name = symbol(parser.parseSymbol(terminator));
+  parser.skipSpace();
+  if (name !== null && (parser.match('\\colon') || parser.match(':'))) {
+    // A typed declaration: the type text runs to an assignment (`\coloneq`,
+    // or `=` as in Epsil) or to the end of the statement (`;`, `,`, the
+    // `\\\\` or `&` of an environment, a closing delimiter or a boundary of
+    // the caller) at its own depth.
+    const typeStart = parser.index;
+    let typeEnd = scanTypeAnnotation(
+      parser,
+      (tok) =>
+        tok === ';' ||
+        tok === ',' ||
+        tok === '\\\\' ||
+        tok === '&' ||
+        tok === '=' ||
+        ANNOTATION_CLOSERS.has(tok) ||
+        startsLetAssignment(parser) ||
+        parser.atTerminator(until)
+    );
+    if (typeEnd < 0) typeEnd = parser.index;
+    parser.index = typeEnd;
+    const text = typeAnnotationText(parser, typeStart, typeEnd);
+    // A type that is not one (`\mathbb{Z}`) is an `invalid-type` error in
+    // the block, which still declares the name: read as an expression, the
+    // statement lost its `let` and became unrelated math.
+    const statements: MathJsonExpression[] =
+      text !== null
+        ? [['Declare', name, { str: text }]]
+        : [
+            ['Declare', name],
+            [
+              'Error',
+              "'invalid-type'",
+              { str: parser.latex(typeStart, typeEnd).trim() },
+            ],
+          ];
+    if (
+      LET_ASSIGNMENT_TOKENS.some((t) => parser.matchAll(t)) ||
+      parser.match('=')
+    ) {
+      const value = parser.parseExpression(terminator) ?? [
+        'Error',
+        "'missing'",
+      ];
+      statements.push(['Assign', name, value]);
+    }
+    const result: MathJsonExpression = ['Block', ...statements];
+    LET_STATEMENTS.add(result as object);
+    return result;
+  }
+  parser.index = start;
+  const statement = parser.parseExpression(terminator);
+  if (statement === null) return null;
+  const normalized = normalizeLocalAssign(statement);
+  let result: MathJsonExpression;
+  if (operator(normalized) === 'Assign')
+    result = ['Block', ['Declare', operand(normalized, 1)!], normalized];
+  else if (operator(normalized) === 'Equal' && symbol(operand(normalized, 1)))
+    // `let k = v`, as in Epsil: after `let`, `=` is the assignment.
+    result = [
+      'Block',
+      ['Declare', operand(normalized, 1)!],
+      ['Assign', operand(normalized, 1)!, operand(normalized, 2)!],
+    ];
+  else if (symbol(normalized) !== null)
+    result = ['Block', ['Declare', normalized]];
+  else return null;
+  LET_STATEMENTS.add(result as object);
+  return result;
 }
 
 function normalizeLocalAssign(expr: MathJsonExpression): MathJsonExpression {

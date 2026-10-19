@@ -320,18 +320,21 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(back.evaluate().json).toEqual(2);
   });
 
-  // A `Declare` emits nothing, so `Block(Assign s 2)` is also a ONE-statement
-  // block. It re-parses with the `Declare` the `;` handler inserts in front of
-  // every block-local `Assign` — the same expression the box route produces.
-  test('a bare Assign block re-parses with its implicit Declare', () => {
+  // A bare `Assign` changes an `s` outside the block: it is written in the
+  // function spelling, which the parser reads back without a `Declare`. A
+  // local (`Declare` then `Assign`) is written `s\\coloneq2`.
+  test('a bare Assign block round trips without a Declare', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Block', ['Assign', 's', 2]] as any);
-    expect(e.latex).toMatchInlineSnapshot(`s\\coloneq2;`);
-    expect(ce.parse(e.latex).json).toEqual([
+    expect(e.latex).toMatchInlineSnapshot(`\\mathrm{Assign}(s, 2);`);
+    expect(ce.parse(e.latex).json).toEqual(['Block', ['Assign', 's', 2]]);
+    const local = ce.box([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 2],
-    ]);
+    ] as any);
+    expect(local.latex).toMatchInlineSnapshot(`s\\coloneq2;`);
+    expect(ce.parse(local.latex).json).toEqual(local.json);
   });
 
   // A single NON-assign statement gets the marker too, and the marker alone

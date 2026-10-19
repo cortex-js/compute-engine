@@ -111,34 +111,32 @@ describe('Block → one-column `cases` (serializer)', () => {
     // A nested `;`-spelled Block fences itself (Tycho ledger row 389); the
     // row separator would have closed it here, so the fence is not needed in
     // this position, but it re-parses to the same block.
+    // The inner `Assign` has no `Declare`: it changes a `t` outside the
+    // block, and is written in the function spelling, which the parser reads
+    // back without a `Declare`.
     expect(r.latex).toBe(
-      '\\begin{cases}\\left(t\\coloneq2; t+1\\right)\\\\u+1\\end{cases}'
+      '\\begin{cases}\\left(\\mathrm{Assign}(t, 2); t+1\\right)\\\\u+1\\end{cases}'
     );
-    // The inner block re-parses with the `Declare` the `Assign` implies —
-    // pre-existing, value-faithful behavior of the `Assign` → `Block` rule.
-    expect(r.after).toBe(
-      JSON.stringify([
-        'Block',
-        ['Block', ['Declare', 't'], ['Assign', 't', 2], ['Add', 't', 1]],
-        ['Add', 'u', 1],
-      ])
-    );
+    expect(r.after).toBe(r.before);
   });
 });
 
 describe('Block spellings left byte-identical', () => {
   test('multi-statement WITH an Assign keeps the `; ` list', () => {
+    // A local (`Declare` then `Assign`) is written `s\\coloneq2`; a bare
+    // `Assign`, which changes an `s` outside the block, is written in the
+    // function spelling. Both read back unchanged.
+    const local = roundtrip([
+      'Block',
+      ['Declare', 's'],
+      ['Assign', 's', 2],
+      ['Add', 's', 1],
+    ]);
+    expect(local.latex).toBe('s\\coloneq2; s+1');
+    expect(local.after).toBe(local.before);
     const r = roundtrip(['Block', ['Assign', 's', 2], ['Add', 's', 1]]);
-    expect(r.latex).toBe('s\\coloneq2; s+1');
-    // Faithful (modulo the implied `Declare`), so the `; ` spelling stays.
-    expect(r.after).toBe(
-      JSON.stringify([
-        'Block',
-        ['Declare', 's'],
-        ['Assign', 's', 2],
-        ['Add', 's', 1],
-      ])
-    );
+    expect(r.latex).toBe('\\mathrm{Assign}(s, 2); s+1');
+    expect(r.after).toBe(r.before);
   });
 
   test('a single emitted statement keeps the trailing `;`', () => {
@@ -148,8 +146,10 @@ describe('Block spellings left byte-identical', () => {
   });
 
   test('`Declare` + `Assign` is ONE emitted statement → trailing `;`', () => {
+    // A typed `Declare` is written with `let`, which keeps the type.
     const r = roundtrip(['Block', ['Declare', 's', "'number'"], ['Assign', 's', 2]]);
-    expect(r.latex).toBe('s\\coloneq2;');
+    expect(r.latex).toBe('\\text{let }s\\colon number\\coloneq2;');
+    expect(r.after).toBe(r.before);
   });
 
   test('`Which` still serializes two columns', () => {
@@ -264,10 +264,11 @@ describe('fence interplay — the cases block in operand/body position', () => {
 
   test('a `;`-list that STARTS and ENDS like a cases environment is still fenced', () => {
     // `Block(Block(a…), Assign(q, Block(c…)))` serializes as
-    // `\begin{cases}…\end{cases}; q\coloneq\begin{cases}…\end{cases}` — a
+    // `\begin{cases}…\end{cases}; \mathrm{Assign}(q, \begin{cases}…\end{cases})` — a
     // prefix/suffix test would call that self-delimiting and skip the fence,
-    // letting the `;` swallow the following operand (`, 3`). The
-    // environment-depth walk in `isSelfDelimitingBlockLatex` catches it.
+    // letting the `;` swallow the following operand (`, 3`). The `Block`
+    // serializer fences a `;` list whenever the block is an operand
+    // (`serializer.depth > 0`), whatever its first and last statements are.
     const r = roundtrip([
       'Repeat',
       [
@@ -312,8 +313,8 @@ describe('fence skip requires the WHOLE string to be the environment', () => {
   //  - `Block(Block(a, b))`: the outer block has ONE emitted statement (the
   //    inner, `cases`-spelled block), so the single-statement rule appends
   //    the trailing `;` marker → `\begin{cases}…\end{cases};`
-  //  - `Block(Block(a, b), q≔2)`: an `Assign` sibling keeps the `; ` list →
-  //    `\begin{cases}…\end{cases}; q≔2`
+  //  - `Block(Block(a, b), Assign(q, 2))`: an `Assign` sibling keeps the
+  //    `; ` list → `\begin{cases}…\end{cases}; \mathrm{Assign}(q, 2)`
   //
   // A `startsWith`-only test skipped the fence for both. The comprehension
   // witness then serialized to
@@ -322,15 +323,6 @@ describe('fence skip requires the WHOLE string to be the environment', () => {
   const inner = ['Block', ['Add', 's', 1], ['Add', 's', 2]] as any;
   const nested = ['Block', inner] as any;
   const mixed = ['Block', inner, ['Assign', 'q', 2]] as any;
-
-  // The `; `-spelled mixed block re-parses with the `Declare` its `Assign`
-  // implies — pre-existing, value-faithful (see the `; ` list tests above).
-  const withDeclare = [
-    'Block',
-    inner,
-    ['Declare', 'q'],
-    ['Assign', 'q', 2],
-  ] as any;
 
   test('nested Block-in-Block at TOP level (no fence needed, no leak)', () => {
     const r = roundtrip(nested);
@@ -381,16 +373,16 @@ describe('fence skip requires the WHOLE string to be the environment', () => {
     // `startsWith` true, `endsWith` false — at top level nothing follows, so
     // the `; ` list is already faithful.
     const r = roundtrip(mixed);
-    expect(r.latex).toBe('\\begin{cases}s+1\\\\s+2\\end{cases}; q\\coloneq2');
-    expect(r.after).toBe(JSON.stringify(ce().box(withDeclare).json));
+    expect(r.latex).toBe('\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)');
+    expect(r.after).toBe(r.before);
   });
 
   test('the mixed sibling in operand and body position IS fenced', () => {
     const r1 = roundtrip(['Repeat', mixed, 3]);
     expect(r1.latex).toBe(
-      '\\mathrm{Repeat}(\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; q\\coloneq2\\right), 3)'
+      '\\mathrm{Repeat}(\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)\\right), 3)'
     );
-    expect(r1.after).toBe(JSON.stringify(ce().box(['Repeat', withDeclare, 3]).json));
+    expect(r1.after).toBe(r1.before);
 
     const r2 = roundtrip([
       'Comprehension',
@@ -398,17 +390,9 @@ describe('fence skip requires the WHOLE string to be the environment', () => {
       ['Element', 'n', ['Range', 1, 3]],
     ]);
     expect(r2.latex).toBe(
-      '\\left[\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; q\\coloneq2\\right) \\operatorname{for} n = 1..3\\right]'
+      '\\left[\\left(\\begin{cases}s+1\\\\s+2\\end{cases}; \\mathrm{Assign}(q, 2)\\right) \\operatorname{for} n = 1..3\\right]'
     );
-    expect(r2.after).toBe(
-      JSON.stringify(
-        ce().box([
-          'Comprehension',
-          withDeclare,
-          ['Element', 'n', ['Range', 1, 3]],
-        ]).json
-      )
-    );
+    expect(r2.after).toBe(r2.before);
   });
 });
 
@@ -455,12 +439,12 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
     expect(ce().parse(r.latex).operator).toBe('Block');
   });
 
-  test('`Declare` statements do not count: Declare + 2 relations diverts', () => {
-    // `Declare` emits nothing, so the EMITTED statements are the two
-    // relations — the same shape the system branch would swallow.
+  test('a `Declare` alone is a `let` statement, which keeps the `; ` list', () => {
+    // A `Declare` with no `Assign` after it is written `let x`; a `let`
+    // statement makes the `;` list a block, as an assignment does.
     const r = roundtrip(['Block', ['Declare', 'x'], ['Equal', 'x', 1], ['Equal', 'y', 2]]);
-    expect(r.latex).toBe('\\operatorname{Block}(x=1, y=2)');
-    expect(ce().parse(r.latex).operator).toBe('Block');
+    expect(r.latex).toBe('\\text{let }x; x=1; y=2');
+    expect(r.after).toBe(r.before);
   });
 
   //
@@ -500,13 +484,8 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
 
   test('CONTROL (with an Assign): relations + an Assign keep the `; ` list', () => {
     const r = roundtrip(['Block', ['Assign', 'q', 2], ['Equal', 'x', 1]]);
-    expect(r.latex).toBe('q\\coloneq2; x=1');
-    expect(r.after).toBe(
-      JSON.stringify(
-        ce().box(['Block', ['Declare', 'q'], ['Assign', 'q', 2], ['Equal', 'x', 1]])
-          .json
-      )
-    );
+    expect(r.latex).toBe('\\mathrm{Assign}(q, 2); x=1');
+    expect(r.after).toBe(r.before);
   });
 
   //
@@ -559,21 +538,14 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
   });
 
   test('the `endsWith(")")` trap: call-spelled Block + an Assign ending in `)`', () => {
-    // `\operatorname{Block}(x=1, y=2); q≔\sin(2)` starts with the prefix AND
+    // `\operatorname{Block}(x=1, y=2); \mathrm{Assign}(q, \sin(2))` starts
+    // with the prefix AND
     // ends with `)`, yet the paren the prefix opened closed long before.
     const mixed = ['Block', B2, ['Assign', 'q', ['Sin', 2]]] as any;
-    const withDeclare = [
-      'Block',
-      B2,
-      ['Declare', 'q'],
-      ['Assign', 'q', ['Sin', 2]],
-    ] as any;
     const r = roundtrip(['Repeat', mixed, 3]);
     expect(r.latex).toBe(
-      '\\mathrm{Repeat}(\\left(\\operatorname{Block}(x=1, y=2); q\\coloneq\\sin(2)\\right), 3)'
+      '\\mathrm{Repeat}(\\left(\\operatorname{Block}(x=1, y=2); \\mathrm{Assign}(q, \\sin(2))\\right), 3)'
     );
-    expect(r.after).toBe(
-      JSON.stringify(ce().box(['Repeat', withDeclare, 3]).json)
-    );
+    expect(r.after).toBe(r.before);
   });
 });

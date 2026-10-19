@@ -372,3 +372,220 @@ describe('row 395: the dividend of Mod written as an explicit product', () => {
     }
   });
 });
+
+describe('local and outer assignments in a block', () => {
+  // In a block, `k \coloneq v` declares a local `k` (`Declare` then
+  // `Assign`). `let k \coloneq v` is the same, and `let` also gives a
+  // declaration its type. A bare `Assign`, which changes a `k` outside the
+  // block, is written `\mathrm{Assign}(k, v)`.
+  test.each([
+    [['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Multiply', 'k', 'x']]],
+    [['Block', ['Assign', 'k', 2], ['Multiply', 'k', 'x']]],
+    [['Block', ['Assign', 'k', 2]]],
+    [
+      [
+        'Block',
+        ['Declare', 's', "'integer'"],
+        ['Assign', 's', 1],
+        ['Add', 's', 1],
+      ],
+    ],
+    [['Block', ['Declare', 's', "'list<integer>'"], 's']],
+    [['Block', ['Declare', 'a'], ['Add', 'a', 1]]],
+    [
+      [
+        'Block',
+        ['Declare', 'a'],
+        ['Declare', 'b'],
+        ['Assign', 'a', 1],
+        ['Assign', 'b', 2],
+        ['Add', 'a', 'b'],
+      ],
+    ],
+    [
+      [
+        'Block',
+        ['Declare', 'f'],
+        ['Assign', 'f', ['Function', ['Power', 'x', 2], 'x']],
+        ['f', 3],
+      ],
+    ],
+    // Types with an arrow or a quoted value; a symbol type.
+    [['Block', ['Declare', 'f', "'(real) -> real'"], 'f']],
+    [['Block', ['Declare', 's', '\'"a,b"\''], 's']],
+    [['Block', ['Declare', 'k', 'integer'], 'k']],
+    // A function whose body is a block of several statements.
+    [
+      [
+        'Block',
+        ['Declare', 'k'],
+        [
+          'Assign',
+          'k',
+          [
+            'Function',
+            ['Block', ['Declare', 'j'], ['Assign', 'j', 'x'], 'j'],
+            'x',
+          ],
+        ],
+        ['k', 2],
+      ],
+    ],
+    [['Assign', 'f', ['Function', ['Block', ['Assign', 'k', 'x']], 'x']]],
+  ])('%j round-trips', (json) => {
+    const engine = new ComputeEngine();
+    const e = engine.box(json as any);
+    for (const prettify of [false, true]) {
+      const latex = e.toLatex({ prettify });
+      expect([prettify, engine.parse(latex).json]).toEqual([prettify, e.json]);
+    }
+  });
+
+  test('let is a local declaration', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\operatorname{let} k\\coloneq 2; kx', { form: 'raw' }).json
+    ).toEqual([
+      'Block',
+      ['Declare', 'k'],
+      ['Assign', 'k', 2],
+      ['InvisibleOperator', 'k', 'x'],
+    ]);
+    expect(
+      engine.parse('\\text{let }s\\colon integer\\coloneq 1; s', {
+        form: 'raw',
+      }).json
+    ).toEqual([
+      'Block',
+      ['Declare', 's', "'integer'"],
+      ['Assign', 's', 1],
+      's',
+    ]);
+  });
+
+  test('a let in a where clause or a cases block is a local of the block', () => {
+    const engine = new ComputeEngine();
+    engine.assign('k', 10);
+    expect(
+      engine
+        .parse('k+1 \\text{ where } \\text{let } k \\coloneq 2')
+        .evaluate()
+        .toString()
+    ).toBe('3');
+    expect(
+      engine.parse(
+        '\\begin{cases}\\text{let }k\\coloneq 2\\\\ k+1\\end{cases}',
+        { form: 'raw' }
+      ).json
+    ).toEqual(['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Add', 'k', 1]]);
+  });
+
+  test('the marks survive preserveLatex', () => {
+    const engine = new ComputeEngine();
+    engine.assign('k', 5);
+    engine.parse('0; k\\coloneq2; k', { preserveLatex: true }).evaluate();
+    expect(engine.box('k').evaluate().toString()).toBe('5');
+  });
+
+  test('a let with no value after the assignment is an error', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\text{let }k\\colon integer\\coloneq', { form: 'raw' })
+        .json
+    ).toEqual([
+      'Block',
+      ['Declare', 'k', "'integer'"],
+      ['Assign', 'k', ['Error', "'missing'"]],
+    ]);
+  });
+
+  test('a let with a type that is not one is an error in the block', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\text{let } s\\colon \\mathbb{Z} \\coloneq 1; s', {
+        form: 'raw',
+      }).json
+    ).toEqual([
+      'Block',
+      ['Declare', 's'],
+      ['Error', "'invalid-type'", "'\\mathbb{Z}'"],
+      ['Assign', 's', 1],
+      's',
+    ]);
+  });
+
+  test('after let, = is the assignment, as in Epsil', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\text{let } s\\colon integer = 1; s', { form: 'raw' }).json
+    ).toEqual([
+      'Block',
+      ['Declare', 's', "'integer'"],
+      ['Assign', 's', 1],
+      's',
+    ]);
+    expect(
+      engine.parse('\\text{let } k = 2; k+1', { form: 'raw' }).json
+    ).toEqual(['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Add', 'k', 1]]);
+  });
+
+  test('a name is declared once per block', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\text{let } s; s\\coloneq 2; s+1').evaluate().toString()
+    ).toBe('3');
+    expect(
+      engine.parse('x\\coloneq 1; x\\coloneq x+1; x').evaluate().toString()
+    ).toBe('2');
+  });
+
+  test('a one-column cases block reads its rows as a ; list does', () => {
+    const engine = new ComputeEngine();
+    engine.assign('k', 10);
+    engine.parse('\\begin{cases}k\\coloneq 2\\\\ k+1\\end{cases}').evaluate();
+    expect(engine.box('k').evaluate().toString()).toBe('10');
+    expect(
+      engine.parse(
+        '\\begin{cases}x+1\\\\ \\text{let }k\\colon integer\\end{cases}',
+        { form: 'raw' }
+      ).json
+    ).toEqual(['Block', ['Add', 'x', 1], ['Declare', 'k', "'integer'"]]);
+  });
+
+  test('a local and an outer assignment', () => {
+    const engine = new ComputeEngine();
+    engine.assign('k', 5);
+    engine.parse('k\\coloneq 2; k').evaluate();
+    expect(engine.box('k').evaluate().toString()).toBe('5');
+    engine.parse('\\mathrm{Assign}(k, 2); k').evaluate();
+    expect(engine.box('k').evaluate().toString()).toBe('2');
+  });
+});
+
+describe('the outer assignment without an engine', () => {
+  test('a standalone LatexSyntax reads the function spelling as a block', async () => {
+    const { LatexSyntax } =
+      await import('../../../src/compute-engine/latex-syntax/latex-syntax');
+    const ls = new LatexSyntax({});
+    const latex = ls.serialize(['Block', ['Assign', 's', 2], ['Add', 's', 1]]);
+    expect(latex).toBe('\\mathrm{Assign}(s, 2); s+1');
+    expect(ls.parse(latex)).toEqual([
+      'Block',
+      ['Assign', 's', 2],
+      ['Add', 's', 1],
+    ]);
+  });
+
+  test('a standalone LatexSyntax reads the function spelling of Declare', async () => {
+    const { LatexSyntax } =
+      await import('../../../src/compute-engine/latex-syntax/latex-syntax');
+    const ls = new LatexSyntax({});
+    const block = [
+      'Block',
+      ['Declare', 's', 'integer'],
+      ['Assign', 's', 1],
+      's',
+    ];
+    expect(ls.parse(ls.serialize(block as any))).toEqual(block);
+  });
+});
