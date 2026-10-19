@@ -1,6 +1,6 @@
 // Entry point for the `@cortex-js/compute-engine/integration-rules` sub-path.
-// An opt-in symbolic-integration rule driver ported from the Rubi corpus
-// (Chapter 1: algebraic functions). Once loaded, the engine's `Integrate`
+// An opt-in symbolic-integration rule driver ported from the bundled Rubi
+// corpus. Once loaded, the engine's `Integrate`
 // evaluator consults the rules before its built-in antiderivative.
 //
 // Usage:
