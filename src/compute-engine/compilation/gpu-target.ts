@@ -4747,10 +4747,7 @@ function gpuPointListAtBase(
   base: Expression,
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>
-):
-  | GPUPointListAtBase
-  | { decline: string }
-  | undefined {
+): GPUPointListAtBase | { decline: string } | undefined {
   const isWGSL = target.language === 'wgsl';
   const vec = (m: number): string => (isWGSL ? `vec${m}f` : `vec${m}`);
   const array = (m: number, n: number, items: string[]): string =>
@@ -4904,7 +4901,10 @@ function compileGPUPointListAt(
   const { m, n } = shape;
   const isWGSL = target.language === 'wgsl';
   const absent = `${isWGSL ? `vec${m}f` : `vec${m}`}(${gpuNaN(target)})`;
-  if (isFunction(index, 'List') || isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE))
+  if (
+    isFunction(index, 'List') ||
+    isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE)
+  )
     decline(
       'the index is a collection, so the result is a list of points, which ' +
         'has no shader value shape here'
@@ -4921,7 +4921,10 @@ function compileGPUPointListAt(
       );
     return absent;
   }
-  if (BaseCompiler.isComplexValued(index) || !couldMatch(gpuType(index), 'number'))
+  if (
+    BaseCompiler.isComplexValued(index) ||
+    !couldMatch(gpuType(index), 'number')
+  )
     decline(
       `the index (type \`${index.type.toString()}\`) is not a real number, ` +
         `so it selects no point`

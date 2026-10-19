@@ -3022,8 +3022,7 @@ export function hurwitzZetaComplexWithError(
   // a time (at a = −1e12 + i, s = 2, one call would add 1e12 of them). An
   // integer order has a route whose cost does not depend on Re(a)
   // (`hurwitzZetaFarLeft`); another order declines.
-  if (-a.re > HURWITZ_MAX_PASSED_TERMS)
-    return hurwitzZetaFarLeft(s, a);
+  if (-a.re > HURWITZ_MAX_PASSED_TERMS) return hurwitzZetaFarLeft(s, a);
   const emTerms = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const em = () =>
     tallied((tally) => hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1), tally));

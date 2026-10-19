@@ -54,8 +54,8 @@ Past that gap, the sum is the bounded sum of `addBounded`: it rounds as the
 exact sum does at every precision up to at least 10,000 digits and 4 times the
 working precision, but its digits below that are not the exact digits. So
 `(1 + 10^(−1000002)) − 1` at 50 digits is `1e-10000`, not `1e-1000002`. The
-engine computes such a sum with exact rationals, not with `add`, so its value
-is correct.
+engine computes such a sum with exact rationals, not with `add`, so its value is
+correct.
 
 Transcendental functions internally add 10-20 guard digits to the working
 precision and round the final result to the target precision.

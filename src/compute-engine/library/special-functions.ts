@@ -1137,8 +1137,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           (z, tau) =>
             jacobiTheta(
               j as 1 | 2 | 3 | 4,
-              ops[1].engine.complex(z, 0),
-              ops[1].engine.complex(tau, 0)
+              engine.complex(z, 0),
+              engine.complex(tau, 0)
             ),
           undefined,
           (z, tau) => jacobiTheta(j as 1 | 2 | 3 | 4, z, tau)

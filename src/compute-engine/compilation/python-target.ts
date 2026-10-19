@@ -3925,10 +3925,7 @@ function pythonArmResultKinds(
     pythonArmResultKinds(arm.ops[2], kinds);
     return kinds;
   }
-  if (
-    isFunction(arm) &&
-    ['Break', 'Continue', 'Loop'].includes(arm.operator)
-  )
+  if (isFunction(arm) && ['Break', 'Continue', 'Loop'].includes(arm.operator))
     kinds.add('control');
   else kinds.add('value');
   return kinds;

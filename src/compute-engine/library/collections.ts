@@ -10041,10 +10041,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // The source the iterator walks (`walkedSource`), read by element
         // VALUE as the iterator emits them, so that a query and a walk of the
         // same `Filter` read the same elements.
-        const inSource = selectedSourceContains(
-          walkedSource(expr.op1),
-          target
-        );
+        const inSource = selectedSourceContains(walkedSource(expr.op1), target);
         if (inSource !== true) return inSource === false ? false : undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);

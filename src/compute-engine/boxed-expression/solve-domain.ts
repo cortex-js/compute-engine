@@ -2876,7 +2876,8 @@ function reduceRootFamilies(
     return { ...f, root, value: f.value + k * f.spacingValue };
   });
 
-  const key = (f: RootFamily) => (Number.isFinite(f.value) ? f.value : Infinity);
+  const key = (f: RootFamily) =>
+    Number.isFinite(f.value) ? f.value : Infinity;
   return out.sort((p, q) => key(p) - key(q));
 }
 
@@ -3079,8 +3080,7 @@ function rootFamilies(
           return undefined;
         // A factor with no root: the empty list must be a decision.
         if (factorRoots.length === 0) {
-          if (stats.candidates && !stats.undecided && !stats.userRule)
-            continue;
+          if (stats.candidates && !stats.undecided && !stats.userRule) continue;
           return undefined;
         }
       }
