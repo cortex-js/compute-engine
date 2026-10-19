@@ -155,4 +155,46 @@ describe('narrowing keeps the meaning of the expression', () => {
       100
     );
   });
+
+  // A decimal bound (`0.5`) is parsed at high precision, but this target
+  // compiles it to a point at its double, as it does a machine float, so it
+  // narrows too (Tycho ledger row 397). So does an exact bound that a double
+  // holds (`1/2`).
+  test.each([
+    [
+      '\\begin{cases}0 & x\\ge0.5\\\\ \\arccos(2x) & \\text{otherwise}\\end{cases}',
+    ],
+    [
+      '\\begin{cases}0 & x\\ge0.5\\\\ \\sqrt{1-2x} & \\text{otherwise}\\end{cases}',
+    ],
+    [
+      '\\begin{cases}0 & x\\ge\\frac12\\\\ \\arccos(2x) & \\text{otherwise}\\end{cases}',
+    ],
+  ])('a bound that compiles to a point narrows: %s', (latex) => {
+    const r: any = compile(ce.parse(latex), { to: 'interval-js' });
+    expect(r.success).toBe(true);
+    const result = r.run({ x: { lo: 0.49, hi: 0.51 } });
+    expect(result.kind).toBe('interval');
+    // The hull of the arm at the boundary (0) and at x = 0.49.
+    expect(result.value.lo).toBe(0);
+    expect(result.value.hi).toBeGreaterThanOrEqual(
+      Math.min(Math.acos(0.98), Math.sqrt(0.02))
+    );
+  });
+
+  test('a decimal bound that a double rounds narrows at that double', () => {
+    // The double of 0.30000000000000000001 is 0.3: the condition and the
+    // clamp both use it, so the arm `\sqrt{0.3 - x}` is defined over the
+    // clamped part and its value at the boundary is 0.
+    const r: any = compile(
+      ce.parse(
+        '\\begin{cases}0 & x\\ge0.30000000000000000001\\\\ \\sqrt{0.3-x} & \\text{otherwise}\\end{cases}'
+      ),
+      { to: 'interval-js' }
+    );
+    const result = r.run({ x: { lo: 0.29, hi: 0.31 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBe(0);
+    expect(result.value.hi).toBeGreaterThanOrEqual(Math.sqrt(0.01) - 1e-15);
+  });
 });

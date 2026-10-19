@@ -852,7 +852,7 @@ export function compilationType(expr: Expression): Type {
  * Read by the number-literal lowering to decide between `target.number` and
  * `target.inexactNumber`.
  */
-function literalHasNoDoubleValue(expr: Expression): boolean {
+export function literalHasNoDoubleValue(expr: Expression): boolean {
   if (!isNumber(expr)) return false;
   const nv = expr.numericValue;
   // A machine float carries no exact value beyond the double it already is.

@@ -61,6 +61,7 @@ import {
   isProvablyNumericListOperand,
   isProvablyStringOperand,
   explicitBroadcastPointNorm,
+  literalHasNoDoubleValue,
   pointHasBroadcastComponent,
 } from './base-compiler.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
@@ -2195,10 +2196,14 @@ type IntervalArmBounds = ReadonlyMap<
  * `a`: the symbol with `lo: a` or `hi: a`. A strict comparison gives the same
  * closed bound, since an interval end is a closed bound.
  *
- * The constant must be exactly the double the comparison uses: a machine
- * number, or an exact integer a double holds. An exact `1/3` is not: its
- * double is below it, and a bound there would cut off part of the arm.
- * `undefined` for any other condition.
+ * The constant must be exactly the double the comparison uses: a literal
+ * that this target compiles to a point at its `re` (`literalHasNoDoubleValue`
+ * is false), that is a machine float, a decimal literal (`0.5`, which the
+ * parser holds at high precision) or an exact number that a double holds
+ * (`1/2`). An exact `1/3` is not: it is compiled to an enclosure of its
+ * value, and neither end of the enclosure is a bound that keeps every input
+ * where the arm is selected and keeps the arm defined. `undefined` for any
+ * other condition.
  */
 function intervalConditionRegion(
   cond: Expression
@@ -2208,12 +2213,12 @@ function intervalConditionRegion(
   const below = op === 'Less' || op === 'LessEqual';
   if (!below && op !== 'Greater' && op !== 'GreaterEqual') return undefined;
   const [a, b] = cond.ops;
+  // The compiled condition compares with the same double as the clamp (see
+  // the comment above), so the clamp loses no input where the arm is
+  // selected.
   const constant = (e: Expression): number | undefined => {
     if (!isNumber(e) || e.isComplex || !Number.isFinite(e.re)) return undefined;
-    if (typeof e.numericValue === 'number') return e.re;
-    return e.isInteger === true && Number.isSafeInteger(e.re)
-      ? e.re
-      : undefined;
+    return literalHasNoDoubleValue(e) ? undefined : e.re;
   };
   // `x < a`: x has the upper bound a; `a < x`: x has the lower bound a.
   if (isSymbol(a) && constant(b) !== undefined)
