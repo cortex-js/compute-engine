@@ -89,10 +89,13 @@ import {
   polygammaDomainKnown,
 } from '../symbolic/special-integrate.js';
 import {
+  continuousRange,
+  finiteConstant,
   integrateBetaMoment,
   integrateDefiniteElementary,
   integrateTrigPolynomial,
 } from '../symbolic/definite-integrate.js';
+import { exactSign } from '../symbolic/contour.js';
 import { integrateDiscreteMoments } from '../symbolic/definite-discrete.js';
 import {
   hasHighDegreeReciprocalDenominator,
@@ -896,6 +899,45 @@ function powerRuleParameterGuard(
     }
   }
   return ce.function('NotEqual', [exponent, ce.number(-1)]);
+}
+
+/**
+ * Whether the numeric value of `e` has an imaginary part that is not a
+ * rounding error: larger than 10⁻⁹ times the magnitude of the real part, or
+ * than 10⁻⁹ when the real part is smaller than 1. An expression with no
+ * numeric value gives `false`.
+ */
+function hasImaginaryPart(e: Expression): boolean {
+  const n = isNumber(e) ? e : e.N();
+  if (!isNumber(n)) return false;
+  const { re, im } = n;
+  return (
+    Number.isFinite(im) &&
+    Math.abs(im) > 1e-9 * Math.max(1, Number.isFinite(re) ? Math.abs(re) : 1)
+  );
+}
+
+/**
+ * Whether `integrand` is proven real on the closed interval between the exact
+ * bounds `lower` and `upper`. `continuousRange` encloses its values with exact
+ * interval arithmetic, and declines each operation that could leave the
+ * reals: `√u` or `ln u` where `u` can be negative, a denominator that can be
+ * 0. Without a proof (float or infinite bounds, an operator that
+ * `continuousRange` does not know), the answer is `false`. A sampling of the
+ * integrand is not a proof: `√x` is real at three sample points of `[−1, 3]`,
+ * and `∫₋₁³ √x dx = 2√3 + (2/3)i` is a correct complex value.
+ */
+function provenRealOnInterval(
+  integrand: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression
+): boolean {
+  if (!finiteConstant(lower) || !finiteConstant(upper)) return false;
+  const order = exactSign(integrand.engine.function('Subtract', [upper, lower]));
+  if (order === undefined) return false;
+  const [lo, hi] = order < 0 ? [upper, lower] : [lower, upper];
+  return continuousRange(integrand, variable, lo, hi) !== undefined;
 }
 
 /**
@@ -5059,7 +5101,22 @@ volumes
             const definiteFallback = (): Expression | undefined => {
               if (isElementaryIntegrationFunction(integrand, variable, false))
                 return undefined;
+              // The symmetry reductions of `integrateDefiniteElementary` come
+              // first: they are cheap and give the simplest form. The
+              // composition search after them evaluates a nested integral,
+              // which a registered provider (Rubi) can answer in a form with
+              // complex terms that cancel: with Rubi loaded,
+              // `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` was
+              // `1005 − 1006 artanh(√2011/2011) − 503 ln 1005 +
+              // 503 ln(−1005) + 1006 artanh(√2011)`, where the reflection
+              // identity gives `1005`.
               const candidate =
+                integrateDefiniteElementary(
+                  integrand,
+                  variable,
+                  lower,
+                  upper
+                ) ??
                 logarithmicParameterDifference(
                   integrand,
                   variable,
@@ -5093,12 +5150,6 @@ volumes
                   telescopingProduct,
                   infiniteTelescopingProduct,
                 ])?.value ??
-                integrateDefiniteElementary(
-                  integrand,
-                  variable,
-                  lower,
-                  upper
-                ) ??
                 integrateBetaMoment(integrand, variable, lower, upper) ??
                 integrateTrigPolynomial(integrand, variable, lower, upper) ??
                 integrateRationalTrig(integrand, variable, lower, upper)
@@ -5237,13 +5288,26 @@ volumes
                 exactExpression(lower) &&
                 exactExpression(upper) &&
                 !exactExpression(candidate);
+              // A provider endpoint difference with an imaginary part, for an
+              // integrand proven real on the interval, is not the value (see
+              // the refusal after the endpoint evaluation below): try the
+              // built-in primitive first, which may give the real value.
+              const nonReal = () =>
+                hasImaginaryPart(candidate) &&
+                provenRealOnInterval(
+                  withAssignedValues(ce, integrand, [variable]),
+                  variable,
+                  lower,
+                  upper
+                );
               if (
                 lostExactness ||
                 hasVariableSign(antideriv, variable) ||
                 !candidate.isValid ||
                 candidate.isNaN === true ||
                 candidate.isInfinity === true ||
-                candidate.has(['EvaluateAt', 'Limit', 'Integrate'])
+                candidate.has(['EvaluateAt', 'Limit', 'Integrate']) ||
+                nonReal()
               ) {
                 const alternative = antiderivative(integrand, variable);
                 if (
@@ -5456,6 +5520,31 @@ volumes
                 )
                   raw = ce.NaN;
               }
+              // The integral of an integrand that is real on a real interval
+              // is real. An antiderivative that is singular, or crosses a
+              // branch cut, inside the interval can give a difference of
+              // endpoint values with an imaginary part. With Rubi loaded,
+              // `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` gave
+              // `1005 − 503 ln(−1005) + 503 ln(1005)`, which is
+              // `1005 − 1580.2i`: the primitive's `ln(x − 1006)` and `artanh`
+              // terms are singular at `x = 1006`. Such a value is refused, as
+              // `NaN`: a bounded definite reduction (`definiteFallback`) can
+              // still give the value, and otherwise the integral stays
+              // unevaluated. A value is refused only when the integrand is
+              // proven real on the interval (`provenRealOnInterval`), so a
+              // correct complex value (`∫₋₁³ √x dx`) is kept.
+              if (
+                noValue === undefined &&
+                raw.isNaN !== true &&
+                hasImaginaryPart(raw) &&
+                provenRealOnInterval(
+                  withAssignedValues(ce, integrand, [variable]),
+                  variable,
+                  lower,
+                  upper
+                )
+              )
+                raw = ce.NaN;
               // A NaN result is an unresolved indeterminate, not a leak-free
               // value — fail closed (inert) rather than leak the NaN.
               const resolved =

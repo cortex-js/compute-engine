@@ -111,19 +111,19 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ### Smaller defects found on 2026-10-19 by the review of pull request 445 (OPEN, small)
 
-- With Rubi loaded (`loadIntegrationRules`), a definite integral of a real,
-  positive integrand over a real interval can return a complex value.
-  `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` returns `1005 − 503 ln(−1005) + 503 ln(1005)`,
-  which is `1005 − 1580.2i`; the correct value is `1005`. The Rubi
-  antiderivative is
-  `x/2 + 503 ln(x−1006) − √x·√(2012−x)/2 + 503 artanh(√x·√(2012−x)/1006)`. Both
-  logarithmic terms are singular at `x = 1006`, inside the interval, and the
-  definite route subtracts the endpoint values across that point. Without Rubi,
-  the integral stays unevaluated. A provider result that is not real, for an
-  integrand that is real on a real interval, must be refused, so that the
-  built-in route can try. Pull request 445 adds a reduction that gives `1005`
-  for this integral, but it runs after the provider, so the provider's wrong
-  value is returned first.
+`npx tsx benchmarks/audit/integration-families.ts` lists every definite
+integral of its case tables that gives a right exact value which `simplify()`
+cannot reduce to the reference (48 runs on 2026-10-19). Most come from the two
+gaps below.
+
+- On an infinite or half-infinite interval, a definite integral of a real
+  integrand can still give a complex value when the antiderivative is singular,
+  or crosses a branch cut, inside the interval. On a finite interval such a
+  value is refused (`hasImaginaryPart` and `provenRealOnInterval` in
+  `library/calculus.ts`), but the proof that the integrand is real
+  (`continuousRange` in `symbolic/definite-integrate.ts`) needs finite bounds.
+  A proof on `[a, ∞)` could split the interval at a finite point and enclose
+  the integrand on the tail with a change of variable such as `x = a + t/(1−t)`.
 - `simplify()` does not rationalize a denominator of the form `(a + b√c)²`:
   `−π(12 − 7√3)/(3 − 2√3)²` stays as it is, and its value is `π√3/3`. The
   definite route returns this form for `∫₀^π 1/(2 + cos x) dx`, and for every
@@ -193,31 +193,29 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 11) (OPEN, decision)
+### Questions found on 2026-10-19 (batch 12) (OPEN, decision)
 
-- **Iteration over a list with a failed cell.** `isCollection` is `false` for an
-  invalid tree, so with `xs = [1, g("a"), 3]` (Epsil, `g(x) = 1/x`),
-  `for x in xs { … }` runs no turn (with no diagnostic when the literal is in
-  the loop header), `Map((u) => u + 1, xs)` returns `xs` unchanged, and
-  `[x for x in [1, g("a"), 3]]` stays unevaluated. `docs/ERROR-MODEL.md` §3 says
-  a collection with a failed cell is "preserved and iterable". (A) A loop, a
-  `Map` and a comprehension read every cell and give the failed cell to the body
-  as the value. (B) The operator answers the error. User decision 2026-10-19:
-  (A).
-- **`epsil check` and an assignment to a `const`.** With `const c = 1` then
-  `c = 2`, `epsil check` reports nothing, and the run reports a `runtime-error`
-  whose code is the bare message `Cannot assign a value to the constant "c"`
-  (not a stable code). A `function` statement on a `const` is reported by both.
-  (A) Report the assignment statically, with a new engine code such as
-  `constant-assignment`. (B) Keep it a run-time problem only. User decision
-  2026-10-19: (A).
-- **A derived unit named from its dimensions.** `(2 m/s)·(3 m/s)` evaluates to
-  `6 Gy`: `findNamedUnit()` names any unit with the dimensions m²/s² as gray,
-  although the sievert has the same dimensions and a squared velocity is not a
-  dose. (A) Keep the naming (today). (B) Name a derived unit only in
-  `UnitSimplify` (then `N·m` stays `N·m` in arithmetic). (C) Keep the naming but
-  leave out a name that shares its dimensions with another (`Gy`, `Sv`). If
-  nothing is decided, (A) stays.
+- **A failed cell in a loop header is not reported.** In Epsil, with
+  `g(x) = 1/x`, `for x in [1, g("a"), 3] { n = n + 1 }` runs 3 turns and
+  reports nothing, because the body does not use `x` and a loop header is not a
+  statement. `let xs = [1, g("a"), 3]` is reported, because it is a statement.
+  (A) Report a `runtime-error` at the list literal in the header. (B) Keep it
+  silent. If nothing is decided, it stays silent. Recommendation: (A).
+- **A user function as a callback does not see a failed cell.** A user function
+  applied to an error gives that error without running its body. So with
+  `xs = [1, g("a"), 3]`, `map((u) => isError(u), xs)` is
+  `[False, Error(…), False]`, while `[isError(x) for x in xs]` is
+  `[False, True, False]`. (A) Keep this: the two forms differ. (B) Run the
+  callback body on a failed cell, as a comprehension does. If nothing is
+  decided, (A) stays. Recommendation: (A), because (B) changes the rule for
+  every user function.
+- **Partial cancellation of units.** Quantity arithmetic cancels units only
+  when the result is a pure number: `(2 Hz)·(3 s)` is `6` and `(6 m)/(2 km)` is
+  `0.003`, but `(2 Hz)·(3 J)·(1 s)` stays `6 Hz·J·s` (`UnitSimplify` gives
+  `6 J`). (A) Keep this. (B) Cancel each pair of opposite dimensions in
+  arithmetic, so the result is `6 J`. If nothing is decided, (A) stays.
+  Recommendation: (A), because arithmetic keeps the units it combines and
+  `UnitSimplify` does the rest.
 
 ### An assignment to an outer variable in a `Block` changes meaning in a LaTeX round trip (OPEN, decision — found 2026-10-18 with Tycho ledger row 391)
 

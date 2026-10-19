@@ -105,8 +105,11 @@ the interval excludes poles in the reciprocal sum. Other products decline.
 
 ## Verification and profiling
 
-`test/compute-engine/integrate-competition-exact.test.ts` exercises exact
-answers and reversed bounds both with and without Rubi. It also tests unsafe
+`benchmarks/audit/integration-families.ts` checks the exact answers of the
+shared fixture, with reversed bounds, both with and without Rubi. It is not
+part of the test suite, because the sweep takes minutes on the
+continuous-integration runners.
+`test/compute-engine/integrate-competition-exact.test.ts` tests unsafe
 domains, divergent Bose moments, degree mode, user-defined functions,
 assigned variables and indices, and coefficients beyond the machine integer
 range. The existing provider, piecewise, cancellation, contour, residue, limit,

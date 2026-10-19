@@ -22,6 +22,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Solving** | `audit/solve.ts` | CE · CE+Fungrim · SymPy · **Mathematica** | `audit/REPORT-solve.md` |
 | **ODE solving** | `audit/dsolve.ts` | CE · SymPy | `audit/REPORT-dsolve.md` |
 | **Bondarenko ∫** | `audit/bondarenko.ts` | CE · CE+R/F · SymPy · Mathematica | `audit/REPORT-bondarenko.md` |
+| **Definite ∫ families** | `audit/integration-families.ts` | CE · CE+Rubi | `audit/REPORT-integration-families.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Engine configuration** | `effects-registration.ts` | CE (self, before/after) | stdout |
 | **Overload resolution** | `overload-resolution.ts` | CE (self, before/after) | stdout |
@@ -269,6 +270,7 @@ feed it, each writing its own report:
 | `audit/dsolve.ts` | The **ODE-solving** benchmark: runs CE `DSolve` from source and grades it by a **substitute-back residual oracle** (explicit `y=f(x)`; implicit `F(x,y)=C` via the first-integral identity `y′=−F_x/F_y`; initial/boundary conditions) → **`audit/REPORT-dsolve.md`**. CE’s inert-rather-than-wrong contract is scored honestly: `unsupported` (expected inert) is separated from `gap` (should have solved). SymPy is the comparator (graded by the mirror oracle in `gen_dsolve.py`); Mathematica is not yet wired in. |
 | `audit/bondarenko.ts` | The **Bondarenko** integration set: loads the 35 vendored problems (`benchmarks/bondarenko/`) via `scripts/rubi/load-tests.ts` and runs each indefinite integral on **base CE / CE+Rubi+Fungrim / SymPy / Mathematica**, graded by the invariant `d/dx(F) ≈ f` → **`audit/REPORT-bondarenko.md`**. Uses the same SymPy (`run_sympy_wester.py`) and Wolfram (`run_wolfram_batch.mjs`) batch runners as the Wester harness. |
 | `benchmarks/bondarenko/` | The vendored data: Vladimir Bondarenko's 35 integration problems (`bondarenko-problems.m`), an independent test set from the Rubi MathematicaSyntaxTestSuite (**MIT**). |
+| `audit/integration-families.ts` | The **exact definite-integration families**: runs the case tables of `test/compute-engine/fixtures/` (`competition-exact.ts`, `integration-families.ts`, `integration-composed.ts`) on **base CE / CE+Rubi**, in both orientations of the bounds where the case table asks for it, graded against each case's exact reference to 40 digits → **`audit/REPORT-integration-families.md`**. Runs from source; about 20 s. |
 
 The Mathematica side of all three is driven through the shared
 [`runners/run_wolfram_batch.mjs`](./runners/run_wolfram_batch.mjs) (one kernel
@@ -284,6 +286,7 @@ npx tsx benchmarks/audit/wester.ts                                     # Wester 
 ./venv/bin/python3 benchmarks/audit/gen_solve.py && npx tsx benchmarks/audit/solve.ts  # univariate solving
 ./venv/bin/python3 benchmarks/audit/gen_dsolve.py && npx tsx benchmarks/audit/dsolve.ts  # ODE solving
 npx tsx benchmarks/audit/bondarenko.ts                                 # Bondarenko integration set
+npx tsx benchmarks/audit/integration-families.ts                       # exact definite-integration families
 ```
 
 **Grading** is by operation invariant, so no reference answers are needed:
@@ -322,6 +325,15 @@ verbatim copy of the Wolfram-Language source (parseable by `load-tests.ts`).
 Unlike the release-baseline harnesses, `bondarenko.ts` is an **on-demand
 integration-depth probe** (like `dsolve.ts`) — run it when investigating the
 indefinite-∫ gap, not on every release.
+
+`integration-families.ts` holds the sweeps over the case tables of the guarded
+definite-integration families. They were part of the test suite, but took
+minutes on the continuous-integration runners, so the test suite keeps only the
+guard tests of these families (decline conditions, routing order, the Rubi
+helpers) and this harness runs the sweeps. Run it before a release and after any
+change to the integration code. It exits with code 1 when a result disagrees
+with its reference. It also lists the exact results that `simplify()` cannot
+reduce to the reference: those are simplification gaps, not integration errors.
 
 ---
 

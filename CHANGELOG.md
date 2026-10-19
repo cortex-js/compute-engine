@@ -2,6 +2,21 @@
 
 ### Behavior Changes
 
+- Assigning a value to a constant has a stable error code, and `epsil check`
+  reports it. `ce.assign()` and the `Assign` operator still throw
+  `Cannot assign a value to the constant "c"`, and the error now has
+  `code: 'constant-assignment'` and `constantName`. In Epsil, `const c = 1` then
+  `c = 2` is reported before the program runs, as a static error with the code
+  `constant-assignment` and a note on the `const`; before, `epsil check`
+  reported nothing and the run reported a `runtime-error` whose code was the
+  message text. The check covers a `const` of the program at any depth and each
+  name of a destructuring `const`, wherever the assignment is; a `let`, a
+  parameter or a loop variable that shadows the constant is not reported, and
+  the run does not report the problem a second time. A constant the check cannot
+  see (a library constant such as `Pi`, or one from an earlier program) is
+  reported by the run with the code `constant-assignment`. The error value is
+  `["Error", ["ErrorCode", "constant-assignment", "c"]]`.
+
 - A unit has one canonical form: its unit symbols with exact exponents, those
   with a positive exponent over those with a negative exponent, in the canonical
   order. Quantity arithmetic, `Quantity`, `UnitConvert` and the LaTeX parser
@@ -11,12 +26,31 @@
   `m^(4/3)` (it was `m^1.3333333333333333`). The unit of `AvogadroConstant` is
   `Divide(1, mol)`, and the text form writes a reciprocal unit with a negative
   exponent (`3 m^-1`).
+- Quantity arithmetic keeps the units it combines and no longer replaces them
+  with a named derived unit: `(2 V)·(3 A)` is `6 A·V` (it was `6 W`),
+  `(2 N)·(3 m)` is `6 N·m` (it was `6 J`), and `(1 J)/(1 kg)` stays `J/kg`.
+  `UnitSimplify` still gives the named unit (`UnitSimplify(6 A·V)` is `6 W`),
+  and equality is not changed: `6 A·V` equals `6 W`.
 - A `List` or `Set` literal that keeps a failed cell (`[1, Error(…), 3]`) is
   typed `list<unknown>` (it was `error`, so a variable that held it was a
   scalar): with `fs := [Error(…)]`, `ListJoin(fs, [2])` is `[Error(…), 2]` (it
   was `[[Error(…)], 2]`), and a variable declared `list` accepts the value. An
   absent cell keeps its arm: `[Error(…), Missing]` is typed
   `list<unknown | missing>`.
+- A `List` or `Set` that holds a failed cell can be iterated. In Epsil, with
+  `g(x) = 1/x` and `xs = [1, g("a"), 3]`, a `for` loop runs one turn for each
+  cell, and `Map`, `Filter`, a comprehension and an arithmetic broadcast give
+  the failed cell to the body as the value of that element:
+  `map((u) => u + 1, xs)` is `[2, Error(…), 4]`. Before, the loop ran no turn,
+  `Map` returned the list unchanged, and the comprehension stayed unevaluated.
+  `Length` and `Count` give the number of cells (`3`), and `First`, `At`,
+  `Reverse` and `Take` keep the failed cell in its position. An operator that
+  needs the value of every cell gives the error of the failed cell: `Sum`,
+  `Product`, `Max`, `Min`, `Mean` and the other statistics, `Sort`, `ArgMax`
+  and `MaxBy`. A comprehension guard that fails on an element keeps the error
+  in that position, as `Filter` does; before, the element was removed. The list
+  still carries its error (`isValid` is `false`), and it still does not
+  compile. A `Tuple` or `Dictionary` with a failed cell is not changed.
 - A point divided by a matrix is the matrix of the point divided by each cell,
   as a point times a matrix is: `(1, 2) / [[1, 2], [3, 4]]` is
   `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]` (it stayed unevaluated and
@@ -31,9 +65,12 @@
 
 ### Bug Fixes
 
-- On `interval-js`, a `Which` or an `If` arm is also narrowed by a decimal
-  bound written in LaTeX (`x \ge 0.5`) and by an exact bound that a double
-  holds (`\frac{1}{2}`) (Tycho ledger row 397). Over [0.49, 0.51],
+- `Count(xs, p)` gives the error when the predicate fails on an element, as
+  `CountIf` does. Before, it counted that element as selected: with
+  `h(2)` failing, `Count([1, 2, 3], (u) => h(u) > 0)` was `3`.
+- On `interval-js`, a `Which` or an `If` arm is also narrowed by a decimal bound
+  written in LaTeX (`x \ge 0.5`) and by an exact bound that a double holds
+  (`\frac{1}{2}`) (Tycho ledger row 397). Over [0.49, 0.51],
   `\begin{cases}0 & x\ge0.5\\ \arccos(2x) & \text{otherwise}\end{cases}` was
   `partial` (domain clipped) and is an interval. A bound that no double holds
   (`\frac{1}{3}`) is compiled to an enclosure of its value and still does not
@@ -89,6 +126,16 @@
   the code `invalid-clause-definition`, and the run does not report it a second
   time.
 
+- With the Rubi rules loaded (`loadIntegrationRules`), a definite integral of
+  an integrand that is real on the interval no longer gives a complex value:
+  `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` is `1005` (it was
+  `1005 − 503 ln(−1005) + 503 ln(1005)`, which is `1005 − 1580.2i`). When the
+  integrand is proven real on a finite interval and the difference of the
+  values of the antiderivative at the bounds has an imaginary part, that value
+  is refused: the built-in antiderivative or an exact reduction gives the
+  value, and otherwise the integral stays unevaluated. A correct complex value
+  is kept: `∫₋₁³ √x dx` is `2√3 + (2/3)i`.
+
 ### Performance
 
 - A type string that names a type declared with `ce.declareType`, such as the
@@ -104,6 +151,26 @@
 - A list in which every cell failed is data: it evaluates to itself and is not
   walked again at each use. In Epsil, 3200 turns of `fs = [...fs, g("a")]` with
   a failing `g("a")` take about 3 s (they took about 20 s).
+
+### New Features
+
+- `Integrate` gives exact values for more families of definite integrals:
+  substitutions that it composes with the existing solver, Beta and Beta-prime
+  forms with logarithmic moments, rational functions of trigonometric and
+  hyperbolic functions, products of `Floor`, `Ceil` and `FractionalPart` with
+  polynomials, polynomially weighted series and telescoping products, and
+  reciprocal pairs of high-degree rational functions. For example,
+  `∫₀¹ x(1−x)^99 dx` is `1/10100`, `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` is `1005`, and
+  `∫_{1/5}^{5} (1+x²)/(x²+x⁹) dx` is `24/5`. Most of these reductions run only
+  when the existing routes give no exact value; the splitting at
+  discontinuities, the high-degree reciprocal pairs and the Beta forms with a
+  large power run first, because the existing routes would expand them. Each
+  reduction proves its domain and convergence conditions before it returns a
+  value. The Rubi rules also gain
+  three substitution utilities (`SubstForFractionalPowerOfLinear`,
+  `InverseFunctionOfLinear`, `SubstForInverseFunction`)
+  ([#445](https://github.com/cortex-js/compute-engine/pull/445), contributed by
+  [KingArth0r](https://github.com/KingArth0r)).
 
 ## 0.157.0 _2026-10-19_
 

@@ -34,36 +34,11 @@ function exactLeaves(e: Expression): void {
   if (isFunction(e)) e.ops.forEach(exactLeaves);
 }
 
-describe.each([false, true])(
-  'EXACT COMPETITION REDUCTIONS (Rubi=%s)',
-  (rubi) => {
-    let ce: ComputeEngine;
-    beforeAll(() => {
-      ce = new ComputeEngine();
-      if (rubi)
-        loadIntegrationRules(ce, { timeLimitMs: 4000, stepBudget: 300000 });
-    });
-    test.each(cases)('%s', (name, body, a, b, expected) => {
-      for (const reversed of [false, true]) {
-        const value = ce
-          .box([
-            'Integrate',
-            body,
-            ['Limits', 'x', reversed ? b : a, reversed ? a : b],
-          ])
-          .evaluate();
-        expect(value.has(['Integrate', 'Sum', 'Product'])).toBe(false);
-        exactLeaves(value);
-        const reference = ce
-          .box(reversed ? ['Negate', expected] : expected)
-          .evaluate();
-        expect(
-          ce.function('Subtract', [value, reference]).simplify().isSame(0)
-        ).toBe(true);
-      }
-    });
-  }
-);
+// The sweep over every case of `fixtures/competition-exact.ts`, with and
+// without Rubi and in both orientations of the bounds, is not part of the
+// test suite: it takes minutes on the continuous-integration runners. It runs
+// in `benchmarks/audit/integration-families.ts`, which grades each value
+// against its reference to 40 digits and exits with code 1 on a wrong value.
 
 describe('DEFINITE REDUCTION CERTIFICATES', () => {
   let ce: ComputeEngine;

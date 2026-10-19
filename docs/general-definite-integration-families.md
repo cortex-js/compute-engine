@@ -157,9 +157,13 @@ not assert divergence.
 ## Verification
 
 `fixtures/integration-families.ts` contains generated parameter grids and
-mathematical regression examples. The suite runs every fixture in both
-orientations, with and without Rubi, checks exact symbolic agreement, and
-rejects inexact number leaves. Separate tests reject invalid convergence and
+mathematical regression examples. The harness
+`benchmarks/audit/integration-families.ts` runs every fixture in both
+orientations, with and without Rubi. It grades each value against its
+reference to 40 digits, rejects inexact number leaves, and exits with code 1
+on a wrong value. It is not part of the test suite, because the sweep takes
+minutes on the continuous-integration runners. The test suite keeps the
+polynomial fixtures and the separate tests that reject invalid convergence and
 branch conditions, hidden zeros in products, shadowed library functions,
 non-radian trig substitutions, and bound-variable leakage.
 

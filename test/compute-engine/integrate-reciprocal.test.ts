@@ -1,11 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { loadIntegrationRules } from '../../src/integration-rules';
 import { integrateReciprocalRational } from '../../src/compute-engine/symbolic/definite-reciprocal';
-import {
-  exactExpression,
-  integrateBySubstitution,
-} from '../../src/compute-engine/symbolic/definite-transform';
-import { reciprocalCases } from './fixtures/integration-families';
+import { integrateBySubstitution } from '../../src/compute-engine/symbolic/definite-transform';
 
 test.each([65, 128, 2022, 8192])(
   'high-degree rational substitution search declines before expansion %s',
@@ -22,33 +17,11 @@ test.each([65, 128, 2022, 8192])(
   }
 );
 
-describe.each([false, true])(
-  'reciprocal rational integration Rubi=%s',
-  (rubi) => {
-    const ce = new ComputeEngine();
-    if (rubi)
-      loadIntegrationRules(ce, { timeLimitMs: 4000, stepBudget: 300000 });
-    test.each(reciprocalCases)('%s', (_name, body, lo, hi, expected) => {
-      for (const reverse of [false, true]) {
-        const result = ce
-          .box([
-            'Integrate',
-            body,
-            ['Limits', 'x', reverse ? hi : lo, reverse ? lo : hi],
-          ])
-          .evaluate();
-        const reference = ce
-          .box(reverse ? ['Negate', expected] : expected)
-          .evaluate();
-        expect(result.has('Integrate')).toBe(false);
-        expect(exactExpression(result)).toBe(true);
-        expect(
-          ce.function('Subtract', [result, reference]).simplify().isSame(0)
-        ).toBe(true);
-      }
-    });
-  }
-);
+// The sweep over every case of `reciprocalCases` in
+// `fixtures/integration-families.ts`, with and without Rubi and in both
+// orientations of the bounds, is not part of the test suite. It runs in
+// `benchmarks/audit/integration-families.ts`, which grades each value against
+// its reference to 40 digits and exits with code 1 on a wrong value.
 
 test.each([
   ['Divide', 1, ['Subtract', 'x', 1]],

@@ -126,3 +126,66 @@ test('finite exponential-trig recurrence accepts symbolic polynomial coefficient
     )
   ).toBeNull();
 });
+
+test('a provider primitive that gives a non-real value for a real integrand is refused', () => {
+  // The primitive that Rubi returns for √x/(√(2012−x)+√x). Its ln(x − 1006)
+  // and artanh terms are singular at x = 1006, inside [1, 2011], so the
+  // difference of its endpoint values is 1005 − 1580.2i. The integral of a
+  // real integrand over a real interval is real: the value must be refused,
+  // and the built-in reflection reduction then gives 1005.
+  const ce = new ComputeEngine();
+  const integrand = ce.box([
+    'Divide',
+    ['Sqrt', 'x'],
+    ['Add', ['Sqrt', ['Subtract', 2012, 'x']], ['Sqrt', 'x']],
+  ]);
+  const primitive = ce.box([
+    'Add',
+    ['Divide', 'x', 2],
+    ['Multiply', 503, ['Ln', ['Subtract', 'x', 1006]]],
+    [
+      'Negate',
+      [
+        'Divide',
+        ['Multiply', ['Sqrt', 'x'], ['Sqrt', ['Subtract', 2012, 'x']]],
+        2,
+      ],
+    ],
+    [
+      'Multiply',
+      503,
+      [
+        'Artanh',
+        [
+          'Divide',
+          ['Multiply', ['Sqrt', 'x'], ['Sqrt', ['Subtract', 2012, 'x']]],
+          1006,
+        ],
+      ],
+    ],
+  ]);
+  // The provider receives the integrand bound in the scope of the integral,
+  // where `x` is another symbol than the `x` of `integrand`: compare the
+  // MathJSON, not the boxed expressions.
+  const key = JSON.stringify(integrand.json);
+  ce._integrationProvider = (f) =>
+    JSON.stringify(f.json) === key ? primitive : null;
+  const value = ce
+    .box(['Integrate', integrand, ['Limits', 'x', 1, 2011]])
+    .evaluate();
+  expect(value.N().im).toBe(0);
+  expect(value.isSame(1005)).toBe(true);
+});
+
+test('a correct complex value is kept when the integrand is not proven real', () => {
+  // √x is complex on [−1, 0) and real at sample points such as 0, 1 and 2, so
+  // a sampling of the integrand cannot prove that it is real on [−1, 3]. The
+  // value 2√3 + (2/3)i is correct and must not be refused.
+  const ce = new ComputeEngine();
+  const value = ce
+    .box(['Integrate', ['Sqrt', 'x'], ['Limits', 'x', -1, 3]])
+    .evaluate();
+  expect(value.has('Integrate')).toBe(false);
+  expect(value.N().re).toBeCloseTo(2 * Math.sqrt(3), 12);
+  expect(value.N().im).toBeCloseTo(2 / 3, 12);
+});

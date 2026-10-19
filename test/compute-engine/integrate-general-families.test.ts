@@ -19,7 +19,7 @@ import { integrateRationalTrig } from '../../src/compute-engine/symbolic/definit
 import { integrateWeightedDiscrete } from '../../src/compute-engine/symbolic/definite-periodic';
 import { integratePiecewise } from '../../src/compute-engine/symbolic/piecewise-integrate';
 
-import { cases, polynomialCases } from './fixtures/integration-families';
+import { polynomialCases } from './fixtures/integration-families';
 
 const terminals = [
   generalizedBeta,
@@ -328,29 +328,11 @@ describe('weighted moments agree with independent finite partitioning', () => {
             ).toBe(true);
         });
 });
-describe.each([false, true])('GENERAL DEFINITE FAMILIES Rubi=%s', (rubi) => {
-  const ce = new ComputeEngine();
-  if (rubi) loadIntegrationRules(ce, { timeLimitMs: 4000, stepBudget: 300000 });
-  test.each(cases)('%s', (_name, f, lo, hi, expected) => {
-    for (const reverse of [false, true]) {
-      const result = ce
-        .box([
-          'Integrate',
-          f,
-          ['Limits', 'x', reverse ? hi : lo, reverse ? lo : hi],
-        ])
-        .evaluate();
-      expect(result.has(['Integrate', 'Sum', 'Product', 'Limit'])).toBe(false);
-      expect(exactExpression(result)).toBe(true);
-      const reference = ce
-        .box(reverse ? ['Negate', expected] : expected)
-        .evaluate();
-      expect(
-        ce.function('Subtract', [result, reference]).simplify().isSame(0)
-      ).toBe(true);
-    }
-  });
-});
+// The sweep over every case of `cases` in `fixtures/integration-families.ts`,
+// with and without Rubi and in both orientations of the bounds, is not part of
+// the test suite: it takes minutes on the continuous-integration runners. It
+// runs in `benchmarks/audit/integration-families.ts`, which grades each value
+// against its reference to 40 digits and exits with code 1 on a wrong value.
 
 test('substitution exposes justified intermediate steps', () => {
   const ce = new ComputeEngine();
