@@ -1404,20 +1404,17 @@ describe('Chapter-5 inverse-trig utilities', () => {
     expect(build(['Discriminant', 'quadNeg', 'x'], ctx).evaluate().isSame(-3)).toBe(true);
   });
 
-  test('Head returns the CE operator name as a symbol', () => {
-    expect(build(['Head', ['Arctan', 'x']], ctx).symbol).toBe('Arctan');
-    expect(build(['Head', ['Multiply', 'a', 'x']], ctx).symbol).toBe('Multiply');
+  test('Head preserves the corpus inverse-function symbol spelling', () => {
+    expect(build(['Head', ['Arctan', 'x']], ctx).symbol).toBe('ArcTan');
+    expect(build(['Head', ['Multiply', 'a', 'x']], ctx).symbol).toBe(
+      'Multiply'
+    );
   });
 
   test('fail-open / fail-closed guards return the False sentinel', () => {
-    // These four are stubs (see rubi-utils.ts): each returns Rubi False, so the
-    // FalseQ-guarded #71–#74 by-parts rules fire and #27/#28 decline cleanly.
-    for (const head of [
-      'FunctionOfLinear',
-      'PowerVariableExpn',
-      'InverseFunctionOfLinear',
-      'SubstForInverseFunction',
-    ]) {
+    // These guards retain the by-parts route until its alternative consumers
+    // are bundled; a recognizer alone would disable otherwise usable rules.
+    for (const head of ['FunctionOfLinear', 'PowerVariableExpn']) {
       expect(build([head, 'quadNeg', 'x'], ctx).symbol).toBe('False');
       expect(cond(['FalseQ', [head, 'quadNeg', 'x']])).toBe(true);
     }

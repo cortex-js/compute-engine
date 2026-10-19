@@ -76,6 +76,10 @@ import {
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { simplifyTrig } from '../symbolic/simplify-trig.js';
 import { toTimesPower, recanonicalize } from './normal-form.js';
+import {
+  logarithmicSubstitution,
+  polynomialExponentialTrig,
+} from './substitution-integrals.js';
 
 const MAX_DEPTH = 40;
 
@@ -1144,6 +1148,28 @@ export class RubiDriver {
           return r;
         }
       }
+    }
+
+    const exponentialTrig = polynomialExponentialTrig(integrand, variable);
+    if (exponentialTrig !== null) {
+      this.record(
+        entryNode,
+        () => exponentialTrig,
+        'integrate.exponential-trig'
+      );
+      return exponentialTrig;
+    }
+    const logSubstitution = logarithmicSubstitution(integrand, variable);
+    if (logSubstitution !== null) {
+      const mark = this.mark();
+      const F = recurse(logSubstitution.integrand);
+      if (F !== null && !F.has('Integrate')) {
+        const result = F.subs({ [variable]: logSubstitution.back });
+        this.truncate(mark);
+        this.record(entryNode, () => result, 'integrate.log-substitution');
+        return result;
+      }
+      this.truncate(mark);
     }
 
     // ---- hyperbolic → exponential fallback (self-contained) ------------
