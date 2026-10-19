@@ -1773,6 +1773,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return type === null ? name : joinLatex([name, '\\colon', type]);
       };
       if (args.length < 1) return '()\\mapsto()';
+      // The canonical body of a function literal is a `Block`. A block of
+      // one statement is written as that statement, which reads back as the
+      // same literal. Written as a block, it is fenced (`x\mapsto\left(f;
+      // \right)`), as `prettify` already avoided.
+      let body = operand(expr, 1);
+      const statement = operand(body, 1);
+      if (
+        operator(body) === 'Block' &&
+        operands(body).length === 1 &&
+        statement !== null &&
+        operator(statement) !== 'Declare' &&
+        operator(statement) !== 'Assign' &&
+        operator(statement) !== 'Block'
+      )
+        body = statement;
       // A literal with no parameter operand, `["Function", body]`, is
       // written `()\mapsto body`. That is not an empty parameter list: the
       // parser above reads `()` as "the parameters are the wildcards of the
@@ -1783,17 +1798,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // LaTeX round-trips. A body with no wildcard, `()\mapsto 2`, is a
       // function of no argument.
       if (args.length === 1)
-        return joinLatex([
-          '()',
-          '\\mapsto',
-          serializer.serialize(operand(expr, 1)),
-        ]);
+        return joinLatex(['()', '\\mapsto', serializer.serialize(body)]);
 
       if (args.length === 2 && !isTyped(operand(expr, 2)!)) {
         return joinLatex([
           serializer.serialize(operand(expr, 2)!),
           '\\mapsto',
-          serializer.serialize(operand(expr, 1)),
+          serializer.serialize(body),
         ]);
       }
 
@@ -1803,7 +1814,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           'normal'
         ),
         '\\mapsto',
-        serializer.serialize(operand(expr, 1)),
+        serializer.serialize(body),
       ]);
     },
   },
@@ -2817,30 +2828,50 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           serializer.wrap(operand(expr, 2), 800)
         );
       // 1..3..7
+      // The notation `a..b..c` gives the second element `b`, not the step:
+      // the parser reads the step back as `b − a`. So the second element
+      // is written only when that difference gives the step again.
       if (args.length === 3) {
-        // Are step and start numeric values?
-        const step = machineValue(operand(expr, 3));
-        const start = machineValue(operand(expr, 1));
-        if (step !== null && start !== null) {
+        const start = operand(expr, 1)!;
+        const step = operand(expr, 3)!;
+        // Two decimal literals: the second element is their EXACT decimal
+        // sum, and the parser subtracts exactly, so the step is the same
+        // literal. A sum in machine floats is rounded: with a start of 0.6
+        // and a step of 0.20000000000000007 it is 0.8, which reads back as a
+        // step of 0.2.
+        const second = exactDecimalSum(start, step);
+        if (second !== null) {
           return (
-            serializer.wrap(operand(expr, 1), 800) +
+            serializer.wrap(start, 800) +
             '..' +
-            serializer.wrap(start + step, 800) +
+            serializer.wrap({ num: second }, 800) +
             '..' +
             serializer.wrap(operand(expr, 2), 800)
           );
         }
 
-        // We have arbitrary expressions for start (a) or step (b)...
-        // i.e. a..(a+b)..c
+        // An integer start and any other step: `a..(a+s)..c`. The
+        // difference `(a + s) − a` cancels exactly, because integers are
+        // folded when the step is read back.
+        if (isIntegerLiteral(start)) {
+          return (
+            serializer.wrap(start, 800) +
+            '..(' +
+            (serializer.wrap(start, ADDITION_PRECEDENCE) +
+              '+' +
+              serializer.wrap(step, ADDITION_PRECEDENCE)) +
+            ')..' +
+            serializer.wrap(operand(expr, 2), 800)
+          );
+        }
+
+        // Any other start: `(a + s) − a` is not folded back to `s` (the
+        // terms of `a` stay in the sum, and a float is not folded), so the
+        // range is written as a function call, which keeps each operand.
         return (
-          serializer.wrap(operand(expr, 1), 800) +
-          '..(' +
-          (serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE) +
-            '+' +
-            serializer.wrap(operand(expr, 3), ADDITION_PRECEDENCE)) +
-          ')..' +
-          serializer.wrap(operand(expr, 2), 800)
+          '\\operatorname{Range}(' +
+          args.map((x) => serializer.serialize(x)).join(', ') +
+          ')'
         );
       }
       return '';
@@ -3655,6 +3686,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       let bodyToSerialize = innerFn;
       if (operator(innerFn) === 'Function') {
         bodyToSerialize = operand(innerFn, 1) ?? innerFn;
+        // The canonical body of a function literal is a `Block`. A block of
+        // one statement is that statement: written as a block, it is fenced
+        // (`\left(f;\right)`) and reads back as a `Block`, not as the
+        // function literal that `\frac{\mathrm{d}f}{\mathrm{d}x}` gives.
+        const statement = operand(bodyToSerialize, 1);
+        if (
+          operator(bodyToSerialize) === 'Block' &&
+          operands(bodyToSerialize).length === 1 &&
+          statement !== null &&
+          operator(statement) !== 'Declare' &&
+          operator(statement) !== 'Assign' &&
+          operator(statement) !== 'Block'
+        )
+          bodyToSerialize = statement;
       }
 
       // `wrapShort` delimits the loose-infix heads (`Add`/`Subtract`/
@@ -5409,6 +5454,118 @@ function serializeList(
     '\\bigr\\rbrack',
   ]);
 }
+/**
+ * The decimal digits of a number literal, as `[digits, exponent]`, with
+ * value `digits × 10^exponent`; `null` if `expr` is not a finite decimal
+ * literal. A machine number gives the digits of its shortest decimal
+ * spelling, which reads back as the same machine number.
+ */
+function decimalLiteralDigits(
+  expr: MathJsonExpression
+): [bigint, number] | null {
+  let text: string;
+  if (typeof expr === 'number') {
+    if (!Number.isFinite(expr)) return null;
+    text = String(expr);
+  } else if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    'num' in expr &&
+    typeof expr.num === 'string'
+  ) {
+    text = expr.num;
+  } else return null;
+  const m = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text.trim());
+  if (!m || (m[2] === '' && (m[3] ?? '') === '')) return null;
+  const fraction = m[3] ?? '';
+  const exponent = Number(m[4] ?? 0) - fraction.length;
+  // The callers write out every digit of a sum, so a literal far from 1 is
+  // not handled here: another spelling is used.
+  if (Math.abs(exponent) > MAX_EXPANDED_EXPONENT) return null;
+  const digits = BigInt((m[1] === '-' ? '-' : '') + (m[2] + fraction || '0'));
+  return [digits, exponent];
+}
+
+/** The largest power of ten that `decimalLiteralDigits()` accepts. */
+const MAX_EXPANDED_EXPONENT = 60;
+
+/**
+ * The exact sum of two decimal literals, as a decimal string, or `null` if
+ * either one is not a decimal literal (see `decimalLiteralDigits()`).
+ */
+function exactDecimalSum(
+  a: MathJsonExpression,
+  b: MathJsonExpression
+): string | null {
+  // A machine number above 2^53 is not an exact integer: the parser reads
+  // it as a float, and a step read back as a float difference does not
+  // cancel. A machine sum above 2^53 is not exact either.
+  const machine = typeof a === 'number' || typeof b === 'number';
+  if (
+    machine &&
+    ((typeof a === 'number' && Math.abs(a) > Number.MAX_SAFE_INTEGER) ||
+      (typeof b === 'number' && Math.abs(b) > Number.MAX_SAFE_INTEGER))
+  )
+    return null;
+  const x = decimalLiteralDigits(a);
+  const y = decimalLiteralDigits(b);
+  if (x === null || y === null) return null;
+  // The step is read back as `b − a`, which is a float when `b` or `a` is.
+  // A float start with an exact step would give a float step: use another
+  // spelling. Otherwise `b` is a float exactly when the step is.
+  const floatStart = isFloatLiteral(a);
+  const floatStep = isFloatLiteral(b);
+  if (floatStart && !floatStep) return null;
+  const exponent = Math.min(x[1], y[1]);
+  // A sum of two numbers of very different sizes has as many digits as
+  // their ratio: use another spelling instead.
+  if (Math.max(x[1], y[1]) - exponent > 40) return null;
+  const sum =
+    x[0] * 10n ** BigInt(x[1] - exponent) +
+    y[0] * 10n ** BigInt(y[1] - exponent);
+  const negative = sum < 0n;
+  let digits = (negative ? -sum : sum).toString();
+  let result: string;
+  if (exponent >= 0) result = digits + '0'.repeat(exponent);
+  else {
+    digits = digits.padStart(1 - exponent, '0');
+    const point = digits.length + exponent;
+    result = (digits.slice(0, point) + '.' + digits.slice(point)).replace(
+      /\.?0+$/,
+      ''
+    );
+  }
+  if (machine && Math.abs(Number(result)) > Number.MAX_SAFE_INTEGER)
+    return null;
+  // A float keeps a fraction part, or it would be read back as an integer.
+  if (floatStep && !result.includes('.')) result += '.0';
+  return (negative ? '-' : '') + result;
+}
+
+/**
+ * True if `expr` is a float literal, by the rule `serializeNumber()` writes
+ * and the parser reads: a machine number that is not a safe integer, or a
+ * number string with a fraction part or a negative exponent.
+ */
+function isFloatLiteral(expr: MathJsonExpression): boolean {
+  if (typeof expr === 'number') return !Number.isSafeInteger(expr);
+  if (
+    typeof expr === 'object' &&
+    expr !== null &&
+    'num' in expr &&
+    typeof expr.num === 'string'
+  )
+    return /\.|e-/i.test(expr.num);
+  return false;
+}
+
+/** True if `expr` is an exact integer number literal (not a float with an
+ * integer value: a float is not folded exactly when the step is read back,
+ * see `exactDecimalSum()`). */
+function isIntegerLiteral(expr: MathJsonExpression): boolean {
+  return !isFloatLiteral(expr) && decimalLiteralDigits(expr) !== null;
+}
+
 /**
  * A range is a sequence of numbers, e.g. `1..10`.
  * Optionally, they may include a step, e.g. `1..3..10`.

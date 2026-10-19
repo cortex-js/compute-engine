@@ -11,6 +11,19 @@
  *   ends a `cases` row, so the `Which` lost every clause.
  * - 389: a nested `Block` was written as a bare `;` list, and the comparison
  *   after it moved inside the block.
+ *
+ * Rows 390, 393, 394 and 395 (filed 2026-10-18): trees that kept their value
+ * but not their shape with `prettify: false`.
+ *
+ * - 390: a `Range` with a float or symbolic step (`a..b..c` gives the second
+ *   element, and the step is read back as `b − a`), and a quotient of
+ *   products of a variable named `d`, which read back as a derivative.
+ * - 393: a negative machine number with an exponent in its shortest
+ *   spelling had its sign written among its digits.
+ * - 394: a function literal whose body is one statement was written as a
+ *   block.
+ * - 395: the operand of `Mod` written as a product with `\times` lost all but
+ *   its last factor.
  */
 import { ComputeEngine } from '../../../src/compute-engine';
 
@@ -245,5 +258,117 @@ describe('row 391: the derivative of a function literal', () => {
       ['Block', ['Function', ['Block', ['Multiply', 't', 'x']], 't']],
       'x',
     ]);
+  });
+});
+
+describe('rows 390, 393 and 394: trees that keep the value but not the tree', () => {
+  // Tycho serializes with `prettify: false` and compares the parsed tree
+  // with the original. These shapes changed the tree; each one is checked
+  // with and without `prettify`.
+  const shapes: [string, unknown][] = [
+    // `a..b..c` gives the second element; the step is read back as `b − a`.
+    [
+      'a float step that the machine sum rounds',
+      ['Range', 0.6, 5, 0.20000000000000007],
+    ],
+    ['a decimal step', ['Range', 0.1, 1, 0.2]],
+    ['an exact step', ['Range', 1, 2, ['Rational', 1, 3]]],
+    ['a symbolic step', ['Range', 1, 5, 'h']],
+    [
+      'a symbolic start and step',
+      ['Range', ['Add', ['Divide', 4, 'q'], 1], 5, ['Divide', 8, 'q']],
+    ],
+    ['a float start and a symbolic step', ['Range', 0.5, 3, 'h']],
+    // A quotient of products of a variable named `d` is not a derivative.
+    [
+      'a product of d over a product of d',
+      [
+        'Divide',
+        [
+          'Multiply',
+          'd_upright',
+          ['Power', ['Add', ['Power', 'x', 2], -1], 'l'],
+        ],
+        ['Multiply', 'd_upright', 'x'],
+      ],
+    ],
+    ['dy over dx', ['Divide', ['Multiply', 'd', 'y'], ['Multiply', 'd', 'x']]],
+    ['d over dx', ['Divide', 'd_upright', ['Multiply', 'd_upright', 'x']]],
+    [
+      'd² over dx²',
+      ['Divide', ['Power', 'd', 2], ['Multiply', 'd', ['Power', 'x', 2]]],
+    ],
+    ['d over a symbol named dx', ['Divide', ['Multiply', 'd', 'y'], 'dx']],
+    ['d over delta', ['Divide', ['Multiply', 'd', 'y'], 'delta']],
+    ['dy over d', ['Divide', ['Multiply', 'd', 'y'], 'd_upright']],
+    // A machine number above 2^53 is read back as a float.
+    ['a start above 2^53', ['Range', 1e21, 2e21, 1]],
+    ['an integer start above 2^53', ['Range', 1e17, 2e17, 'h']],
+    ['a very small decimal', ['Range', { num: '1e-1000000000' }, 1, 'h']],
+    // Row 393: a negative machine number whose shortest spelling has an
+    // exponent kept its sign among the digits (`0.000\,00-15`).
+    ['a small negative number', -1.5e-7],
+    ['a small negative term', ['Add', 'u', 1, -9.5367431640625e-7]],
+    // Row 394: a function literal whose body is one statement.
+    ['a function literal of a symbol', ['Function', ['Block', 'f'], 'x']],
+    [
+      'the derivative of a function literal of a symbol',
+      ['D', ['Function', ['Block', 'f'], 'x'], 'x'],
+    ],
+    // A start and a step that are not both exact or both floats.
+    ['a float start and an exact step', ['Range', 0.5, 3, 1]],
+    ['an exact start and a float step', ['Range', 1, 5, { num: '1.0' }]],
+    ['a float start with an integer value', ['Range', { num: '2.0' }, 5, 'h']],
+    // A nested block keeps its outer block.
+    [
+      'the derivative of a function literal of a nested block',
+      ['D', ['Function', ['Block', ['Block', 1, 'x']], 'x'], 'x'],
+    ],
+    // The derivatives themselves still round-trip.
+    ['the derivative of an application', ['D', ['D', ['g', 'x'], 'x'], 'x']],
+    ['the derivative of a function symbol', ['D', 'g', 'x']],
+  ];
+  test.each(shapes)('%s', (_, json) => {
+    const engine = new ComputeEngine();
+    const e = engine.box(json as any);
+    for (const prettify of [false, true]) {
+      const latex = e.toLatex({ prettify });
+      expect([prettify, engine.parse(latex).json]).toEqual([prettify, e.json]);
+    }
+  });
+
+  test('an explicit product with d is not a differential', () => {
+    expect(ce.parse('\\frac{\\mathrm{d}\\cdot y}{\\mathrm{d}x}').operator).toBe(
+      'Divide'
+    );
+    expect(ce.parse('\\frac{\\mathrm{d}y}{\\mathrm{d}\\cdot x}').operator).toBe(
+      'Divide'
+    );
+    expect(ce.parse('\\frac{\\mathrm{d}y}{\\mathrm{d}x}').operator).toBe('D');
+    // Only `d` and one letter is a differential name: `\\delta` is not `d`
+    // followed by `elta`.
+    expect(ce.parse('\\frac{dy}{\\delta}').operator).toBe('Divide');
+    expect(ce.parse('\\frac{dy}{\\mathrm{dx}}').operator).toBe('D');
+  });
+});
+
+describe('row 395: the dividend of Mod written as an explicit product', () => {
+  // A structural product with a number after its first factor is written
+  // with `\\times`, which binds more loosely than `\\bmod`.
+  test.each([
+    [['Mod', ['Multiply', 'a', 2], 1]],
+    [['Mod', ['Multiply', ['Sin', 'q'], 43758.5453], 1]],
+    [['Mod', 'a', ['Multiply', 'b', 2]]],
+  ])('%j', (json) => {
+    const engine = new ComputeEngine();
+    const structural = engine.box(json as any, { form: 'structural' });
+    const canonical = engine.box(json as any);
+    for (const prettify of [false, true]) {
+      const latex = structural.toLatex({ prettify });
+      expect([prettify, engine.parse(latex).json]).toEqual([
+        prettify,
+        canonical.json,
+      ]);
+    }
   });
 });

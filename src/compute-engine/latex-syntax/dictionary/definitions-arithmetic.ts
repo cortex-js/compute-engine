@@ -1730,9 +1730,15 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
 
   // Extract the differential degree from the numerator, and — for the
   // single-fraction form — the function folded into it. The numerator is one
-  // of: `d` (degree 1), `d^n` (degree n), or a product `d^n · f` / `d · f`.
-  // The degree `n` can be a symbol (`d^n`), but not a number that is 0 or
-  // less.
+  // of: `d` (degree 1), `d^n` (degree n), or a juxtaposition `d^n f` /
+  // `d f`. The degree `n` can be a symbol (`d^n`), but not a number that is
+  // 0 or less.
+  //
+  // A differential is juxtaposed with what follows it. An explicit product
+  // (`\mathrm{d}\cdot f`, `\mathrm{d}\times f`, parsed as `Multiply`) is a
+  // product of a variable named `d`, and the fraction is a division: this is
+  // how the serializer writes a quotient of products of such a variable,
+  // which would otherwise read back as a derivative.
   let isDerivative = false;
   // The degree when it is not 1
   let numerOrder: MathJsonExpression | null = null;
@@ -1740,11 +1746,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
   {
     const numerHead = operator(numer);
     const factors =
-      numerHead === 'Multiply' ||
-      numerHead === 'InvisibleOperator' ||
-      numerHead === 'Sequence'
+      numerHead === 'InvisibleOperator' || numerHead === 'Sequence'
         ? [...operands(numer!)]
-        : [numer!];
+        : numerHead === 'Multiply'
+          ? []
+          : [numer!];
     const head = factors[0];
     if (isDiffSym(symbol(head))) {
       isDerivative = true;
@@ -1759,20 +1765,25 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         if (deg !== 1) numerOrder = order;
       }
     }
+    // The factors after the differential are still a juxtaposition: `f(x)`
+    // in `\mathrm{d}^2f(x)` is the application of `f`, which the
+    // canonical form of an `InvisibleOperator` recognizes. As a `Multiply`
+    // it was the product of `f` and `x`.
     if (isDerivative && factors.length > 1) {
       const rest = factors.slice(1);
       numerFn =
         rest.length === 1
           ? rest[0]
-          : (['Multiply', ...rest] as MathJsonExpression);
+          : (['InvisibleOperator', ...rest] as MathJsonExpression);
     }
   }
 
   if (isDerivative) {
     // Extract variable(s) from the denominator. Typical forms:
     // - 'dx' (single symbol)
-    // - ['Sequence', 'd', 'x'] / ['Multiply', 'd', 'x']
-    // - ['Multiply', 'd', ['Power', 'x', n]]  (n-th order denominator `dx^n`)
+    // - ['Sequence', 'd', 'x'] / ['InvisibleOperator', 'd', 'x']
+    // - ['InvisibleOperator', 'd', ['Power', 'x', n]]  (n-th order
+    //   denominator `dx^n`)
     const vars: MathJsonExpression[] = [];
     let sawDiff = false;
 
@@ -1788,9 +1799,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         vars.push(expr);
         return;
       }
-      // If it's a sequence/multiply/invisible operator, inspect operands
+      // If it's a sequence or a juxtaposition, inspect the operands. An
+      // explicit product (`\mathrm{d}\cdot x`, `Multiply`) is not a
+      // differential (see the numerator above).
       const h = operator(expr);
-      if (h === 'Sequence' || h === 'Multiply' || h === 'InvisibleOperator') {
+      if (h === 'Sequence' || h === 'InvisibleOperator') {
         for (const op of operands(expr)) collectVars(op);
       } else if (h === 'Power') {
         // `dx^n`: the differentiation variable is the base of the power; the
@@ -1807,12 +1820,15 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // numerator is an ordinary variable: `\frac{d}{L}` is a division.
     if (!sawDiff) vars.length = 0;
 
-    // If no vars found, try parsing denom as 'dx' -> 'x'
+    // If no vars found, try parsing denom as 'dx' -> 'x' (a symbol written
+    // `\mathrm{dx}`). Only `d` followed by one letter is split (see
+    // `isDifferentialName()`): `\frac{dy}{\delta}` is a division, not a
+    // derivative with respect to `elta`, and `\frac{dy}{\mathrm{d}}` is a
+    // division too.
     if (vars.length === 0) {
       const denomSym = symbol(denom);
-      if (denomSym && denomSym.length > 1 && denomSym[0] === 'd') {
+      if (denomSym && isDifferentialName(denomSym))
         vars.push(denomSym.slice(1));
-      }
     }
 
     // A single variable with an integer numerator degree from 2 to
@@ -2146,8 +2162,89 @@ function serializeFraction(
   else if (style === 'inline-quotient') cmd = '\\tfrac';
 
   const numerLatex = serializer.serialize(numer);
-  const denomLatex = serializer.serialize(denom);
+  // A quotient whose numerator starts with a variable named `d` and whose
+  // denominator is a product with such a variable (`(d·y)/(d·x)`) would be
+  // written `\frac{\mathrm{d}y}{\mathrm{d}x}`, which reads back as a
+  // derivative. The denominator is then written as an explicit product
+  // (`\mathrm{d}\cdot x`), which `parseFraction` reads as a division.
+  //
+  // A denominator symbol that `parseFraction` splits into a differential
+  // (`dx`, see `isDifferentialName()`) is written in parentheses.
+  let denomLatex: string;
+  const denomSymbol = symbol(denom);
+  if (
+    startsWithDifferential(numer) &&
+    operator(denom) === 'Multiply' &&
+    operands(denom).some((x) => isDifferentialSymbol(x))
+  ) {
+    const factors = operands(denom);
+    denomLatex = factors
+      .map((x, i) =>
+        // A big operator before another factor would read that factor
+        // into its body: it is fenced, as in a product.
+        i < factors.length - 1 &&
+        BODY_ABSORBING_OPERATORS.has(operator(x) ?? '')
+          ? serializer.wrapString(
+              serializer.serialize(x),
+              serializer.options.applyFunctionStyle(denom, serializer.level)
+            )
+          : // A nested product that canonicalization keeps (an ellipsis
+            // pattern) keeps its parentheses, as in a product.
+            isFoldBarrierFactor(x)
+            ? serializer.wrap(x, MULTIPLICATION_PRECEDENCE + 1)
+            : serializer.wrap(x, MULTIPLICATION_PRECEDENCE)
+      )
+      .join('\\cdot ');
+  } else if (
+    startsWithDifferential(numer) &&
+    denomSymbol !== null &&
+    isDifferentialName(denomSymbol)
+  )
+    denomLatex = `\\left(${serializer.serialize(denom)}\\right)`;
+  else denomLatex = serializer.serialize(denom);
   return `${sign}${cmd}{${numerLatex}}{${denomLatex}}`;
+}
+
+/**
+ * True if `name` is a symbol name that `parseFraction` reads as a
+ * differential followed by its variable, when it is the denominator of a
+ * Leibniz derivative: `d` and one letter (`dx`, from `\mathrm{dx}`).
+ */
+function isDifferentialName(name: string): boolean {
+  return /^d[a-zA-Z]$/.test(name);
+}
+
+/**
+ * True if `latex` has a `\times` or a `\cdot` outside of any group or
+ * delimiter: an infix product that an operator binding more tightly, such as
+ * `\bmod`, would split.
+ */
+function hasTopLevelExplicitProduct(latex: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < latex.length; i++) {
+    const c = latex[i];
+    if (c === '{' || c === '(' || c === '[') depth += 1;
+    else if (c === '}' || c === ')' || c === ']') depth -= 1;
+    else if (
+      c === '\\' &&
+      depth === 0 &&
+      /^\\(times|cdot)(?![a-zA-Z])/.test(latex.slice(i))
+    )
+      return true;
+  }
+  return false;
+}
+
+/** True if `expr` is a differential `d`, a power of it, or a product whose
+ * first factor is one of these: the numerator of a Leibniz derivative. */
+function startsWithDifferential(expr: MathJsonExpression | null): boolean {
+  if (expr === null) return false;
+  if (operator(expr) === 'Multiply')
+    return startsWithDifferential(operand(expr, 1));
+  // `Square` is the prettified spelling of `Power(_, 2)`.
+  if (operator(expr) === 'Power' || operator(expr) === 'Square')
+    return isDifferentialSymbol(operand(expr, 1));
+  return isDifferentialSymbol(expr);
 }
 
 /** Parse `\binom{n}{k}` (and the `\dbinom`/`\tbinom` display/text variants)
@@ -3800,9 +3897,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // `\times`): a product then serializes with that infix operator, which
       // re-parses at MULTIPLICATION_PRECEDENCE — *looser* than `\bmod` — so a
       // `Multiply` operand must be parenthesized too.
+      // The same holds when the product itself is written with an explicit
+      // `\times` or `\cdot` between two factors: a structural product with
+      // a number after its first factor is written `a\times2`, and
+      // `a\times2\bmod1` parses as `a·(2 mod 1)`.
       const explicitMultiply = !!serializer.options.invisibleMultiply;
       const wrapOperand = (op: MathJsonExpression | null) => {
-        if (explicitMultiply && operator(op) === 'Multiply') {
+        if (operator(op) !== 'Multiply')
+          return serializer.wrap(op, MULTIPLICATION_PRECEDENCE);
+        // A product is serialized once: a nested `Mod` in it would otherwise
+        // be serialized again at each level.
+        const latex = serializer.serialize(op);
+        const fenced = () =>
+          serializer.wrapString(
+            latex,
+            serializer.options.applyFunctionStyle(op!, serializer.level)
+          );
+        if (hasTopLevelExplicitProduct(latex)) return fenced();
+        if (explicitMultiply) {
           // ...but a product with a denominator serializes as a `\frac`,
           // which is a tight unit either way.
           const [, denom] = numeratorDenominator(op!);
@@ -3810,10 +3922,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
             serializer.options.prettify === true &&
             denom.length > 0 &&
             !(denom.length === 1 && denom[0] === 1);
-          if (!isFraction)
-            return serializer.wrap(op, MULTIPLICATION_PRECEDENCE + 1);
+          if (!isFraction) return fenced();
         }
-        return serializer.wrap(op, MULTIPLICATION_PRECEDENCE);
+        // A juxtaposed product binds more tightly than `\bmod`.
+        return latex;
       };
 
       const op1 = operand(expr, 1);

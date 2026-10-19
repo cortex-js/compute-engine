@@ -173,9 +173,16 @@ export function serializeNumber(
         isFloat
       );
     }
-    return (
-      result ?? serializeAutoNotationNumber(num.toString(), options, isFloat)
-    );
+    if (result !== undefined) return result;
+    // The sign is written in front of the digits of the magnitude.
+    // `serializeAutoNotationNumber` moves the decimal point of a spelling
+    // with an exponent, and a sign in that spelling ended up among the
+    // digits: `-1.5e-7` was written `0.000\,00-15`.
+    if (num < 0)
+      return (
+        '-' + serializeAutoNotationNumber((-num).toString(), options, isFloat)
+      );
+    return serializeAutoNotationNumber(num.toString(), options, isFloat);
   }
 
   num = num.toLowerCase().replace(/[\u0009-\u000d\u0020\u00a0]/g, '');
