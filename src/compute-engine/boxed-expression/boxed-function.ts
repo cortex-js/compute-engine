@@ -243,6 +243,7 @@ import {
   emptyRootsAnswer,
   filterRootsByAssumptions,
   partialRootListReason,
+  withoutPeriodicDuplicates,
 } from './solve-domain.js';
 import { solveSystem, solveOr } from './solve-system.js';
 import { solveCongruence } from './solve-congruence.js';
@@ -4328,7 +4329,10 @@ export class BoxedFunction
     // recursive `findUnivariateRoots`, which re-enters with substituted
     // variables) so both `expr.solve('n')` and the `Solve` operator benefit.
     const kept = filterRootsByAssumptions(this.engine, roots, varNames[0]);
-    if (kept.length > 0) return kept;
+    // One root of each family of a periodic equation: `sin(x) = -1` gives
+    // `-π/2` and not also `3π/2` (`withoutPeriodicDuplicates()`).
+    if (kept.length > 0)
+      return withoutPeriodicDuplicates(this.engine, this, varNames[0], kept);
     // An empty list states that there is no root. It is the answer only when
     // the `Solve` operator gives it too (`emptyRootsAnswer()`): `e^x = x + 2`
     // has roots that the root finder cannot find, and the answer is `null`.

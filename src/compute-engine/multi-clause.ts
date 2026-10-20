@@ -73,6 +73,7 @@ import {
   assignFn,
   assignValueAsOperatorDef,
   reconcileFunctionLiteralReturn,
+  validationSignatureOf,
 } from './engine-declarations.js';
 import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
@@ -1368,6 +1369,36 @@ function installClauseList(
   const flags = Object.fromEntries(
     ALGEBRAIC_FLAGS.filter((f) => attrs[f] === true).map((f) => [f, true])
   );
+  // A single clause is in clause storage only because of its algebraic
+  // flags (`function op(a, b) commutative { … }`). Its calls must accept the
+  // same arguments as the calls of the same function without the flags. That
+  // function validates a bare parameter as `any`
+  // (`validationSignatureOf`, engine-declarations.ts), but the clause
+  // signature types it `unknown`, which refuses an error value: with
+  // `w = Ln("a")`, `op(z, w)` gave a new `incompatible-type` error ("expected
+  // `unknown`, got `error`") in place of the error of `Ln`. Validate the
+  // calls against the clause signature with each bare slot typed `any`, the
+  // variadic slot of an associative function included.
+  let validationSignature: Type | undefined;
+  if (
+    declared === undefined &&
+    !hold &&
+    clauses.length === 1 &&
+    Object.keys(flags).length > 0
+  ) {
+    validationSignature = validationSignatureOf(clauses[0].literal, arms[0]);
+    if (
+      validationSignature !== undefined &&
+      typeof validationSignature === 'object' &&
+      validationSignature.kind === 'signature' &&
+      validationSignature.variadicArg !== undefined &&
+      functionLiteralParameters(clauses[0].literal)[1]?.type === undefined
+    )
+      validationSignature = {
+        ...validationSignature,
+        variadicArg: { type: 'any' },
+      };
+  }
   // The description is the MOST RECENT documented clause's — a doc comment on
   // a later overload updates it — independently of the flags, which are the
   // first clause's (uniform across the set).
@@ -1393,6 +1424,9 @@ function installClauseList(
       : {}),
     ...flags,
     signature,
+    ...(validationSignature !== undefined
+      ? { _validationSignature: validationSignature }
+      : {}),
     // A collection argument at a SCALAR parameter maps the function over the
     // collection (`5..10 |> fib`, with `fib(n: integer) = …`): the evaluate
     // route broadcasts element-wise (`boxed-function.ts`, steps 2b and 4b).

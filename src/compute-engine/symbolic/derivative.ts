@@ -1488,6 +1488,11 @@ function differentiateNode(
     return ce.function(expr.operator, ops);
   }
 
+  // Big operators: a `Sum` is differentiated term by term, a `Product` with a
+  // small finite range is expanded first. See `differentiateBigOp()`.
+  if (expr.operator === 'Sum' || expr.operator === 'Product')
+    return differentiateBigOp(expr, v, depth, trace);
+
   // D - evaluate the derivative first, then differentiate the result
   if (expr.operator === 'D') {
     const evaluated = expr.evaluate();
@@ -2155,6 +2160,171 @@ function differentiateNode(
 }
 
 /**
+ * The largest number of factors a `Product` is expanded to before it is
+ * differentiated (see `differentiateBigOp()`). The product rule writes one
+ * term per factor, and each term repeats the other factors, so the size of
+ * the derivative grows with the square of this number.
+ */
+const MAX_EXPANDED_PRODUCT_FACTORS = 24;
+
+/**
+ * The derivative of a `Sum` or a `Product` with respect to `v`.
+ *
+ * The derivative is computed only when every indexing set is a `Limits`
+ * clause (or, for a `Sum`, an `Element` clause) whose bounds, collection and
+ * condition do not mention `v`. A bound that depends on `v` changes the set
+ * of terms with `v`, and a bound that is `Nothing` (absent) gives no definite
+ * set of terms: the derivative then stays unevaluated (`undefined`).
+ *
+ * When `v` is the index of one of the indexing sets, every `v` in the body is
+ * that index, not the variable of differentiation. The operator is then a
+ * constant in `v`, and its derivative is 0. The same is true when the body
+ * does not mention `v`.
+ *
+ * `Sum`: the sum rule applied term by term,
+ *
+ *     d/dv Σ_k f(k, v) = Σ_k d/dv f(k, v)
+ *
+ * with the same indexing sets. For a finite range this is the sum rule. For
+ * an infinite range it is the formal term-by-term derivative, which is the
+ * value of the derivative where the series of derivatives converges
+ * uniformly (a power series inside its radius of convergence, for example).
+ * The new sum is built with `ce.function('Sum', …)` on the scope of the
+ * original sum, where the index in the new body is already bound. The index
+ * symbol is never made with `ce.symbol()`.
+ *
+ * `Product`: the product is expanded into its factors, and the product rule
+ * is applied to them. This is done only when every bound is an integer
+ * literal no larger in magnitude than 2^53 − 1 (a safe integer) and the
+ * total number of factors is at most
+ * `MAX_EXPANDED_PRODUCT_FACTORS`. Other products stay unevaluated. Two other
+ * forms were not used:
+ * - The logarithmic derivative, (∏f)·Σ(f′/f), divides by each factor, so it
+ *   is not defined when a factor is 0 at the point.
+ * - The form Σ_j f′_j·∏_{k<j} f_k·∏_{k>j} f_k is correct for a symbolic
+ *   range, but it needs a new index for the outer sum and bounds that depend
+ *   on it, and for an infinite range it has convergence conditions that the
+ *   engine cannot check.
+ * The expansion substitutes each index value into the body by name. When a
+ * binder inside the body binds a name of an index (or a name that a bound
+ * mentions), that substitution could capture it, so the derivative stays
+ * unevaluated.
+ */
+function differentiateBigOp(
+  expr: Expression & FunctionInterface,
+  v: string,
+  depth: number,
+  trace: DerivativeTrace | undefined
+): Expression | undefined {
+  const ce = expr.engine;
+  const isSum = expr.operator === 'Sum';
+  const [body, ...sets] = expr.ops;
+  // A big operator without an indexing set is the reduction of a collection
+  // (`Sum([1, 2, 3])`): it is not a function of a term, so decline.
+  if (body === undefined || sets.length === 0) return undefined;
+
+  const indexes: string[] = [];
+  for (const set of sets) {
+    let index: Expression | undefined;
+    let others: ReadonlyArray<Expression>;
+    if (isFunction(set, 'Limits') && set.nops === 3) {
+      index = set.op1;
+      others = [set.op2, set.op3];
+    } else if (isSum && isFunction(set, 'Element') && set.nops >= 2) {
+      index = set.op1;
+      others = set.ops.slice(1);
+    } else return undefined;
+    if (!isSymbol(index) || index.symbol === 'Nothing') return undefined;
+    // A bound that is `Nothing` is absent (`\sum_k x^k` has no bounds). The
+    // sum or product then has no definite set of terms, so its derivative
+    // stays unevaluated.
+    if (others.some((x) => isSymbol(x, 'Nothing') || x.has(v)))
+      return undefined;
+    indexes.push(index.symbol);
+  }
+
+  if (indexes.includes(v) || !body.has(v)) {
+    recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
+    return ce.Zero;
+  }
+
+  if (isSum) {
+    // The template keeps the scope of the original sum, so the index in
+    // `D(body, v)` is the same binding as in `body`: `explainD()` finds the
+    // later steps' nodes in it with `isSame()`, which compares bindings.
+    recordD(trace, expr, v, 'derivative.term-by-term', () =>
+      ce._fn('Sum', [dPlaceholder(body, v), ...sets], {
+        scope: expr.localScope,
+      })
+    );
+    const dBody = differentiate(body, v, depth + 1, trace);
+    if (dBody === undefined || !dBody.isValid) return undefined;
+    // The index in `dBody` and in `sets` is bound in the scope of the
+    // original sum, so the new sum is built on that scope. A new scope would
+    // have a different parent, and an index named like a library constant
+    // (`i`, `e`) could then resolve to the constant (docs/SCOPING-MODEL.md,
+    // "Rebuilding a scoped node").
+    return ce.function('Sum', [dBody, ...sets], { scope: expr.localScope });
+  }
+
+  // Product: expand a small finite range into its factors.
+  const ranges: [string, number, number][] = [];
+  let count = 1;
+  for (const [i, set] of sets.entries()) {
+    // Every set is a `Limits` clause here: `Element` is accepted only for a
+    // `Sum`.
+    if (!isFunction(set)) return undefined;
+    const [lower, upper] = [set.op2, set.op3];
+    if (
+      !isNumber(lower) ||
+      !isNumber(upper) ||
+      lower.isInteger !== true ||
+      upper.isInteger !== true
+    )
+      return undefined;
+    const lo = lower.re;
+    const hi = upper.re;
+    // Above 2^53 a machine number cannot hold every integer: `n++` would not
+    // change `n`, and the loop below would never end.
+    if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi))
+      return undefined;
+    count *= Math.max(0, hi - lo + 1);
+    if (count > MAX_EXPANDED_PRODUCT_FACTORS) return undefined;
+    ranges.push([indexes[i], lo, hi]);
+  }
+  const binders = collectBinderNames(body);
+  if (indexes.some((index) => binders.has(index))) return undefined;
+
+  // Every combination of index values, the first indexing set varying
+  // slowest. The maps have no prototype: `subs()` reads `map[name]`, and with
+  // a plain object a symbol named `constructor` or `toString` in the body
+  // would read an inherited property.
+  let substitutions: Record<string, Expression>[] = [Object.create(null)];
+  for (const [index, lo, hi] of ranges) {
+    const next: Record<string, Expression>[] = [];
+    for (const s of substitutions)
+      for (let n = lo; n <= hi; n++) {
+        const m: Record<string, Expression> = Object.assign(
+          Object.create(null),
+          s
+        );
+        m[index] = ce.number(n);
+        next.push(m);
+      }
+    substitutions = next;
+  }
+  const factors = substitutions.map((s) => body.subs(s));
+  // An empty range: the product is 1.
+  if (factors.length === 0) return ce.Zero;
+  const expanded =
+    factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
+  recordD(trace, expr, v, 'derivative.rewrite', () =>
+    dPlaceholder(expanded, v)
+  );
+  return differentiate(expanded, v, depth + 1, trace);
+}
+
+/**
  * The derivative of an application of an operator with no entry in the
  * derivative table: an operator the user defined, or an unknown function.
  *
@@ -2200,7 +2370,7 @@ function differentiateUnknownApplication(
     }
   }
 
-  // A LAZY operator (`Which`, `Sum`, `Integrate`, `Loop`, …) holds its
+  // A LAZY operator (`Integrate`, `Loop`, …) holds its
   // operands unevaluated: its slots are binders, conditions or statements,
   // not scalar function arguments, so the slot-wise chain rule below is
   // meaningless for it (it would differentiate with respect to a boolean

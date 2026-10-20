@@ -57,7 +57,7 @@ import { containsResidueClass, residueArithmetic } from './residue-class.js';
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
  * but an expression with no value has no shape to rewrite for. */
-function isMatrixTyped(x: Expression): boolean {
+export function isMatrixTyped(x: Expression): boolean {
   return x.type.type !== 'never' && x.type.matches(new BoxedType('matrix'));
 }
 
@@ -395,6 +395,16 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     if (n === 1) return a;
     // Preserve the existing canonical form for the inverse.
     if (n === -1) return ce.function('Inverse', [a]);
+    // `(A^m)^n` with positive integers `m` and `n` is the product of `m·n`
+    // factors `A`, so it is `A^{m·n}`: `(A^2)^3` is `MatrixPower(A, 6)`.
+    // A zero or negative exponent is left as it is.
+    if (
+      n > 1 &&
+      isFunction(a, 'MatrixPower') &&
+      isExactInteger(a.op2) &&
+      a.op2.re > 0
+    )
+      return ce.function('MatrixPower', [a.op1, a.op2.mul(b)]);
     return ce.function('MatrixPower', [a, b]);
   }
 

@@ -883,7 +883,7 @@ describe('SUBTRACTION serialization', () => {
       '\\frac{1}{y}(-x-1)'
     );
     expect(expr.toLatex({ fractionStyle: 'reciprocal' })).toBe(
-      '(-x-1)(y)^{-1}'
+      '(-x-1)y^{-1}'
     );
   });
 });

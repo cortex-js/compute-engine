@@ -710,7 +710,7 @@ describe('STYLE - RECIPROCAL FRACTION STYLE ROUND TRIP', () => {
     ['decimal number', 1.5, D, '1.5\\times(y^2+z^2)^{-1}'],
     ['library constant', 'Pi', D, '\\pi(y^2+z^2)^{-1}'],
     ['function', ['Sin', 'x'], D, '\\sin(x)\\times(y^2+z^2)^{-1}'],
-    ['symbol over symbol', 'x', 'y', 'x\\times(y)^{-1}'],
+    ['symbol over symbol', 'x', 'y', 'x\\times y^{-1}'],
     [
       'symbol over absolute value',
       'x',
@@ -742,30 +742,32 @@ describe('STYLE - RECIPROCAL FRACTION STYLE ROUND TRIP', () => {
 });
 
 describe('STYLE - FACTOR FRACTION STYLE ROUND TRIP', () => {
-  // The `factor` style writes `a/b` as `\\frac{1}{b}` followed by `a` in
-  // parentheses. A parenthesized group after a `\\frac` is a factor, not the
-  // argument of a call, so every numerator parses back to the same value.
+  // The `factor` style writes `a/b` as `\\frac{1}{b}` followed by `a`. The
+  // numerator gets parentheses only when a factor of a product would get them
+  // (a sum, a negative value). A numerator that starts with a digit gets an
+  // explicit multiplication sign, as a number after another factor does in a
+  // product. Every numerator parses back to the same value.
   // As for the `reciprocal` style, the output parses to
   // `Multiply(a, Divide(1, b))`, not to `Divide(a, b)`.
   const D = ['Add', ['Power', 'y', 2], ['Power', 'z', 2]];
   const cases: [string, any, any, string][] = [
-    ['symbol', 'x', D, '\\frac{1}{y^2+z^2}(x)'],
-    ['uppercase symbol', 'K', D, '\\frac{1}{y^2+z^2}(K)'],
+    ['symbol', 'x', D, '\\frac{1}{y^2+z^2}x'],
+    ['uppercase symbol', 'K', D, '\\frac{1}{y^2+z^2}K'],
     ['negation', ['Negate', 'y'], D, '\\frac{1}{y^2+z^2}(-y)'],
     ['sum', ['Add', 'x', 1], D, '\\frac{1}{y^2+z^2}(x+1)'],
-    ['product', ['Multiply', 2, 'x'], D, '\\frac{1}{y^2+z^2}(2x)'],
-    ['integer', 2, D, '\\frac{1}{y^2+z^2}(2)'],
+    ['product', ['Multiply', 2, 'x'], D, '\\frac{1}{y^2+z^2}\\times2x'],
+    ['integer', 2, D, '\\frac{1}{y^2+z^2}\\times2'],
     ['negative integer', -2, D, '\\frac{1}{y^2+z^2}(-2)'],
-    ['decimal number', 1.5, D, '\\frac{1}{y^2+z^2}(1.5)'],
-    ['decimal over an integer', 1.5, 2, '\\frac{1}{2}(1.5)'],
-    ['library constant', 'Pi', D, '\\frac{1}{y^2+z^2}(\\pi)'],
-    ['function', ['Sin', 'x'], D, '\\frac{1}{y^2+z^2}(\\sin(x))'],
-    ['symbol over symbol', 'x', 'y', '\\frac{1}{y}(x)'],
+    ['decimal number', 1.5, D, '\\frac{1}{y^2+z^2}\\times1.5'],
+    ['decimal over an integer', 1.5, 2, '\\frac{1}{2}\\times1.5'],
+    ['library constant', 'Pi', D, '\\frac{1}{y^2+z^2}\\pi'],
+    ['function', ['Sin', 'x'], D, '\\frac{1}{y^2+z^2}\\sin(x)'],
+    ['symbol over symbol', 'x', 'y', '\\frac{1}{y}x'],
     [
       'symbol over absolute value',
       'x',
       ['Abs', 'y'],
-      '\\frac{1}{\\vert y\\vert}(x)',
+      '\\frac{1}{\\vert y\\vert}x',
     ],
   ];
 

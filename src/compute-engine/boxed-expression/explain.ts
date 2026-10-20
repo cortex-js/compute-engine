@@ -15,6 +15,7 @@ import {
   emptyRootsAnswer,
   filterRootsByAssumptions,
   partialRootListReason,
+  withoutPeriodicDuplicates,
 } from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
 import { normalizedUnknownsForSolve, liftIntegrand } from './utils.js';
@@ -182,6 +183,19 @@ function explainSolveUnivariate(
         verbosity
       );
     filtered = isFunction(answer) ? [...answer.ops] : [];
+  } else {
+    // The same list as `solve()`: one root of each family of a periodic
+    // equation (`withoutPeriodicDuplicates()`). A step names the roots that
+    // are removed.
+    const unique = withoutPeriodicDuplicates(ce, canonical, x, filtered);
+    if (unique.length < filtered.length) {
+      const dropped = filtered.filter((r) => !unique.some((u) => u.isSame(r)));
+      trace.push({
+        value: rootsAsEquations(ce, x, dropped),
+        because: 'solve.periodic-duplicate',
+      });
+    }
+    filtered = [...unique];
   }
 
   if (filtered.length > 0)

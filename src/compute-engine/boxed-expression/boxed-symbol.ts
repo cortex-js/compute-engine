@@ -2044,7 +2044,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     options?: { canonical?: CanonicalOptions }
   ): Expression {
     const canonical = options?.canonical ?? this.isCanonical;
-    if (sub[this._id] === undefined) return canonical ? this.canonical : this;
+    // `Object.hasOwn`, not a bare index: a symbol name is arbitrary user text,
+    // so a symbol named `constructor` or `toString` would otherwise read the
+    // inherited property of a plain object and be replaced by a function.
+    if (!Object.hasOwn(sub, this._id) || sub[this._id] === undefined)
+      return canonical ? this.canonical : this;
 
     const form =
       canonical === true

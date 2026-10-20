@@ -112,24 +112,28 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
 The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
-and 26 other collection operators found these related defects. Each was
-measured on 2026-10-19:
+and 26 other collection operators found these related defects. Each was measured
+on 2026-10-19:
 
-- `Map` with a user function that has no declared result claims a wrong
-  element type: with `atbashChar` returning strings,
+- `Map` with a user function that has no declared result claims a wrong element
+  type: with `atbashChar` returning strings,
   `map(atbashChar, characters("abc"))` is typed `list<character^3>`, but its
   elements are strings. A precise `Chunk` signature exposed it in the Epsil
   corpus program `test/epsil/corpus/exercism/atbash-cipher.epsil`.
 - `Iterate(f, Missing)` is typed `list<unknown>`. The bare `unknown` excludes
   absence markers, so the type does not hold the value.
-- An operand typed with `any` elements (`set<any>`, `list<any>`) is not
-  covered: `typeContainsMissing('any')` is false, so `Union(A, {2})` with
-  `A: set<any>`, `Join(A, {2})` and `Flatten(B)` with `B: list<any>` answer the
-  bare result types, which exclude `Missing`.
+- An operand typed with `any` elements (`set<any>`, `list<any>`) is not covered:
+  `typeContainsMissing('any')` is false, so `Union(A, {2})` with `A: set<any>`,
+  `Join(A, {2})` and `Flatten(B)` with `B: list<any>` answer the bare result
+  types, which exclude `Missing`.
 - `Zip(L, L).toString()` prints `Missing` for the pair of two absent cells,
   while `.at(2)` and `.each()` give `(Missing, Missing)`.
 - `First([])` of an empty list literal is typed `unknown`, but it evaluates to
   `Missing`, and the bare `unknown` excludes `missing`.
+- `Map` with a declared scalar callback over a source typed `any` assumes a
+  scalar per element: `Map(Sqrt, U)` with `U: any` holding `[[1, 2], [3]]` is
+  typed `list<number>` (at HEAD `list<complex | infinity>`), but `Sqrt` maps
+  over each inner list, so the value is a list of lists.
 - QUESTION: `TupleFrom(L)` and `Join` of records answer the bare `tuple` and
   `record`, but the value can be `tuple<integer, missing, integer>` or
   `record{a: missing}`. No type means "a tuple (or record) of any length whose
@@ -235,19 +239,54 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   application on the asynchronous route walks the body
   (`hasAsyncOnlyApplication`, `function-utils.ts`) with no cache. The cost is
   not measured.
-- `\qty{3}{m.s^{-1}}` does not parse: the unit parser does not read the siunitx
-  product separator `.`.
 
-- The Epsil parser gives a sum of operands in parentheses a source range that
-  does not include the first `(` and the last `)`: for `(A) + (B)` the range
-  starts after the first `(` and ends before the last `)`, and the statement
-  `let v = (…) + (…)` also ends before its last `)` (`src/epsil/parser.ts`,
-  binary operators).
-- A user function marked `commutative` sorts its operands too, but
-  `locateError()` (`src/epsil/error-location.ts`) has no engine and treats only
-  `Add`, `Multiply`, `Xor` and `Set` as reordered; its callers would need to
-  pass a resolver, as they do for slot names. No probe shows a wrong underline
-  yet.
+- The frame of an error that the evaluation of an operand of `Add` or `Multiply`
+  makes counts the operands of the RESULT of the handler, not of the canonical
+  call. With `let s: any = "a"`, `Sin(s) * Cos(x)` (canonical order
+  `Sin(s)·Cos(x)`) gives the frames `Multiply argument 2, Divide argument 1`.
+  These two operators are lazy: their handler evaluates the operands, and
+  `_computeValue()` (`boxed-expression/boxed-function.ts`) reads the error out
+  of the result tree with `errorValue(result)`. The Epsil error location
+  therefore does not trust such an index: it underlines the one written operand
+  that can make an error (`Ln(w) * 2` underlines `Ln(w)`), or else the whole
+  call (`Sin(u) * Ln(w)`, `a - Sin(w) + 3`), which is correct but wide. A frame
+  that names the canonical operand (found with `errorEvaluatedFrom`, as
+  `_deferredErrorFrame()` does) would let the location underline the operand.
+- In Epsil, `let v = Ln("a") + Ln(2)` underlines the whole call for the runtime
+  error, and its `static-type-error` underlines the whole statement. The `Ln`
+  frame matches two written calls, so `locateError()`
+  (`src/epsil/error-location.ts`) treats it as ambiguous. The error carries the
+  offending value `"a"`, and `cannotBeValue()` already tells that `Ln(2)` cannot
+  have made it: use it to drop the call whose argument differs before the match
+  is called ambiguous. Also, the frames of `3 - Ln(w)` (with `let w: any = "s"`)
+  are `Negate argument 1, Add argument 1`, with no `Ln` frame, while `Ln(w) * 2`
+  has one: find why the `Ln` call adds no frame there.
+- A lazy collection operator whose callback is a symbol holding an error reports
+  the wrong error. With `w` holding the error of `Ln("a")`, `Any([1, 2], w)`,
+  `Filter([1, 2], w)` and `Reduce([1, 2], w)` give "expected `function`, got
+  `error`" (`canonicalCallbackOperand()`, `library/collections.ts`), while the
+  eager `Sort([2, 1], w)` gives the error of `Ln`. Letting the symbol through
+  the canonical check is not enough: these operators hold their operands, so `w`
+  is never evaluated, and the call stays unevaluated (`Reduce` gives `w(1, 2)`).
+  Two places can fix it: the lazy evaluation in
+  `boxed-expression/boxed-function.ts` (a held operand at a function-typed slot
+  whose value is an error gives that error, with the frame of the call), or each
+  lazy callback `evaluate` handler in `library/collections.ts` (about 20
+  operators). The first is one change; `boxed-function.ts` was staged with other
+  work on 2026-10-19, so this waits for that commit.
+- A lazy call whose operand is a raw `["Function"]` with no body throws when its
+  `.type` is read or when it is evaluated, from `functionLiteralSignatureType()`
+  (`boxed-expression/function-literal.ts`), reached through `boxed-function.ts`
+  and `isAbsentableCollectionOperand()`. The input is malformed, but it must
+  give an error value, not throw.
+- An error from a call of a function name declared first
+  (`ce.declare('g', 'function')`, or
+  `ce.declare('g', {type: '(number) -> unknown', value: …})`) has no frame for
+  the call: with `w` holding the error of `Ln("a")`, `g(w)` evaluates to that
+  error with no `{g, 1}` frame. Without the declaration
+  (`ce.assign('g', (a: number) ↦ a)`), and on the Epsil route, the frame is
+  there. This is in how the error frames are built when the call is evaluated
+  (`boxed-expression/boxed-function.ts`), for every parameter type.
 
 - `2·T` with `T` a tensor of rank 3 stays unevaluated: `mulTensors` leaves every
   product with a tensor of rank 3 or more unevaluated (a point times such a
@@ -258,7 +297,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 13) (OPEN, decision)
+### Questions found on 2026-10-19 (batch 13) (OPEN, decided 2026-10-19)
 
 - **A dimensionless quantity compared with a number.** `6 percent = 0.06` and
   `30 deg = π/6` stay unevaluated, while two quantities of different dimensions,
@@ -266,7 +305,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   Compare a dimensionless quantity with a number as a value with scale 1:
   `6 percent = 0.06` and `180 deg = π` are `True`. If nothing is decided, (A)
   stays. Recommendation: (B), because SI treats angles and ratios as
-  dimensionless values.
+  dimensionless values. User decision 2026-10-19: (B).
 
 - **A read of a function-body local before its first assignment.** In Epsil,
   `function g(k) { u = t; t = k; u }` reads the local `t` before it is assigned;
@@ -274,7 +313,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   its declaration is the `read-before-declaration` error. (A) Keep the bare
   symbol. (B) Report the same error as for `let`. If nothing is decided, (A)
   stays. Recommendation: (B), because a bare symbol here is almost always a typo
-  or an ordering mistake, and JavaScript and Python report it.
+  or an ordering mistake, and JavaScript and Python report it. User decision
+  2026-10-19: (B).
 
 - **A top-level `let` written after a function, in a compiled Epsil program.**
   `function g(k) { t = k + 1; t }` then `let t = 0` then `[g(1), g(2), t]`:
@@ -289,7 +329,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   gives `[2,3,3]` (or the `scope` error). If nothing is decided, the routes keep
   giving different answers for this shape. Recommendation: (A), because the
   documentation says that a declaration made later does not change what a
-  function writes.
+  function writes. User decision 2026-10-19: (A).
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
@@ -321,19 +361,79 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   compare different (`sameBinding`, `boxed-expression/compare.ts`). Found
   2026-10-18 with Tycho ledger row 394. Find which binding the box route gives
   `x` and `f` inside the literal, and make the two routes agree.
-- The `nice-solidus` fraction style (`fractionStyle`, a public `FractionStyle`
-  value in `latex-syntax/types.ts`) writes `{}^{a}\!\!/\!{}_{b}`, which the
-  parser does not read: `x/10` reads back as `Superscript(Error('missing'))`.
-  Either the parser accepts that form, or the documentation says the style is
-  for display only and does not round-trip (found 2026-10-19 by the review of
-  the complex-coefficient fix).
-- `D` of a `Sum` or a `Product` stays unevaluated:
-  `D(Sum(k·x^k, Limits(k, 1, 3)), x)` is not computed; the correct value is
-  `1 + 4x + 9x²`. `differentiateNode` (`symbolic/derivative.ts`) has no branch
-  for a big operator. The derivative of a sum whose bounds do not depend on the
-  variable is the sum of the derivatives of its body; the new body must be bound
-  by the index of the sum (build it through the binding-site mechanism, not with
-  `ce.symbol`).
+
+### Smaller defects found on 2026-10-19 by the derivative, LaTeX and matrix-power fixes (OPEN, small)
+
+- A sum or a product with no bounds reads its index as a one-point range.
+  `\sum_k x^k` is `Sum(x^k, Limits(k, Nothing, Nothing))`.
+  `Sum(x^(k-1), Limits(k, Nothing, Nothing))` evaluates to `1/x` and
+  `Sum(x^k, Limits(k, Nothing, Nothing))` to `Error("missing")`; `\prod_k x^k`
+  is also `Error("missing")`, and `\sum_k y` and `\prod_k y` canonicalize to
+  `y`. Expected: all of them stay unevaluated, as
+  `Sum(k, Limits(k, Nothing, Nothing))` does (a clause with no bounds runs over
+  the default domain: `\sum_k \frac{1}{k^2}` `.N()` is `1.6449…`). Cause:
+  `isDegenerateBounds()` (`library/utils.ts`) is true because
+  `lower.isSame(upper)` is true for two `Nothing` symbols; then
+  `degenerateBigOpTerm()` substitutes `k := Nothing` into the body, and on the
+  canonical route `isVacuousIndexingSet()` drops the indexing set. Fix:
+  `isDegenerateBounds()` is false when a bound is `Nothing`; also check the
+  telescoping step of `symbolicSumClosedForm()` and
+  `symbolicProductClosedForm()`, which substitutes the bounds without that
+  check. `\sum_k y` changes its canonical form, so count the changed snapshots.
+  (`library/utils.ts` was staged with other work on 2026-10-19, so this waits
+  for that commit.)
+- In a product that has a matrix, a nested product with no matrix loses the
+  order of its factors: `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]`
+  (with `A` a matrix and `g`, `k` undeclared functions) boxes to
+  `A·k(x)·g(x)·g(x)`, because the inner product is sorted when it is made
+  canonical, before the outer product sees the matrix. The flat product
+  `A·g(x)·k(x)·g(x)` keeps its order. A fix would keep a product with no matrix
+  unsorted until its context is known, which changes the order of scalar
+  products such as `g(x)·k(x)` (today always `k(x)·g(x)`). A decision is
+  necessary. (`test.todo` in
+  `test/compute-engine/matrix-unknown-factor-order.test.ts`.)
+- `g(x)^{-1}` has two readings. `Power(g(x), -1)` is made canonical as
+  `Divide(1, g(x))`, which is element-wise when `g(x)` is a matrix, while
+  `Power(M, -1)` for a symbol `M` declared as a matrix becomes `Inverse(M)`. So
+  the value of `g(x)^{-1}` depends on whether `g` is known to be a matrix when
+  the expression is boxed. A decision is necessary: either a negative power of
+  an operand that can be a matrix stays a `Power` (the matrix inverse once the
+  value is known), or it stays element-wise. The code is in `canonicalPower`
+  (`boxed-expression/arithmetic-power.ts`).
+- A symbol declared `error` with no value (`ce.declare('e', 'error')`) is
+  checked by two different rules. On a ground signature it is admitted:
+  `g1: (number) -> number` with `g1(e)` is valid and evaluates to itself, and so
+  are `(string) -> string` and `(unknown) -> unknown`, because
+  `overlapAdmission()` accepts it (`typesOverlap('error', T)` is true for every
+  `T`); `Sqrt(e)` is valid because `checkNumericArgs()`
+  (`boxed-expression/validate.ts`) passes every valid operand of type `error`.
+  On a generic signature it is refused: `(T) -> T where T: number` gives
+  "expected `number`, got `error`" (the `unheldErrorIdx` block of
+  `validateArguments()`). A decision is necessary: (A) refuse such an operand on
+  the ground route too, at a parameter that does not accept `error`, or (B)
+  admit it on the generic route too. If nothing is decided, the two routes keep
+  giving different answers.
+- The parse route does not infer the type of a symbol in a juxtaposed product.
+  `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
+  `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
+  type narrowing of `Multiply`. A product with a matrix treats an undeclared
+  symbol as a scalar on both routes (see `mayBeTensorProductOperand()` in
+  `boxed-expression/order.ts`), so the difference does not change a product's
+  order today.
+- A symbol with two subscripts does not round-trip through LaTeX. The canonical
+  form of `Subscript(Subscript(x, 1), 2)` is the symbol `x_1_2` (also the parse
+  of `x_1_2`, `x_{1}_{2}` and `{x_1}_2`). The symbol serializer
+  (`serializeSymbol` in `latex-syntax/serializer.ts`) joins the subscripts with
+  a comma, `x_{1,2}`, which reads back as `Subscript(x, Sequence(1, 2))` (or
+  `At(M, 1, 2)` for a matrix `M`). A decision is necessary: write such a symbol
+  in a form that reads back (for example `{x_{1}}_{2}`), or keep the comma
+  spelling and say that it is for display.
+- The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
+  and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
+  `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A
+  quotient has two canonical forms" below. The same item makes every fraction
+  style write `c\frac{a}{b}` (canonical `Multiply(c, Divide(a, b))`) as one
+  fraction, `\frac{ac}{b}`, which reads back as `Divide(Multiply(a, c), b)`.
 
 ### Two trigonometric argument shapes are not reduced on the shader targets (OPEN, small — found 2026-10-18 with Tycho ledger rows 382 and 384)
 
@@ -1021,15 +1121,14 @@ and a divergence test for the family `1/(n (\ln n)^p)`, `p ≤ 1` (the Cauchy
 condensation test `Σ 2^k f(2^k)` reduces it to `Σ 1/k^p`), so that this family
 returns `+∞` instead of declining.
 
-### `Limit` at infinity of a difference of radicals stays unevaluated (OPEN, small — found 2026-10-14 by the fix of the exponential growth ranking)
+### `Limit` of `ln(3x)/ln(x^π)` at infinity stays unevaluated (OPEN, small — found 2026-10-19 by the fix of the limit of a difference of radicals)
 
-`\lim_{t\to\infty} \sqrt{t+1} - \sqrt{t}` stays unevaluated; the limit is `0`.
-No wrong value is given. The leading-order rewrite of the limit at infinity
-(`symbolic/limit.ts`) ranks the two radicals at the same growth level and has no
-rule that cancels them; the usual route multiplies by the conjugate
-(`(\sqrt{t+1} - \sqrt{t}) = 1/(\sqrt{t+1} + \sqrt{t})`) and then reads the
-quotient. A fix adds that rewrite for a difference of two radicals with the same
-growth level.
+`\lim_{x\to\infty} \frac{\ln(3x)}{\ln(x^{\pi})}` stays unevaluated; the limit is
+`1/π`. Its `.N()` is `NaN`, so the numeric limit does not find it either. No
+wrong value is given. For `x > 0`, `ln(x^π) = π·ln x`, and the quotient is
+`(ln 3 + ln x)/(π·ln x)`. The leading-order rewrite (`symbolic/limit.ts`) does
+not rewrite the logarithm of a power, and the series with `x = 1/u` at `u = 0`
+(`constantTermAtInfinity()`) has a logarithm of `u`, so it declines.
 
 ### A complex-valued function whose parts cannot be separated has no symbolic limit (OPEN, small — found 2026-10-04, issue #396)
 
@@ -1128,15 +1227,16 @@ window for a multiple root, so `Solve(sin(x)^10 = 0, x ∈ [3, 4])` still gives
 missed; giving no answer in that case would remove correct answers to common
 equations.
 
-### `sin(sin(x)) = 0` has no answer (OPEN, small — found 2026-10-04)
+### `sin(x) + sin(2x) = 0` has no answer (OPEN, small — found 2026-10-19)
 
-Since 2026-10-04, a trig function whose argument is not linear in the unknown
-gives no answer (`hasNonInvertibleHead()` in
-`boxed-expression/solve-domain.ts`), because the equation is not periodic in the
-unknown. `sin(sin(x)) = 0` is periodic (its argument is periodic), and its roots
-are `0` and `π` plus multiples of `2π`: it was `[0, π]`. A test for an argument
-that is itself a periodic function of a linear argument would give this answer
-again.
+`Solve(sin(x) + sin(2x) = 0, x)` stays unevaluated, `expr.solve()` returns
+`null`, and `Solve` over `[-7, 7]` stays unevaluated too. The equation is
+`sin(x)·(1 + 2·cos(x)) = 0`, so its roots are `x = kπ` and `x = ±2π/3 + 2kπ` for
+each integer `k`. The root finder finds no single generator for `sin(x)` and
+`sin(2x)` (`solveByGeneratorSubstitution()` in `boxed-expression/solve.ts`), and
+`solveLinearTrigArgument()` needs one common argument. A fix: write a trig
+function of `n·x` (a small integer `n`) as a polynomial in `sin(x)` and `cos(x)`
+(`sin(2x) = 2·sin(x)·cos(x)`) before the search for a generator, then factor.
 
 ### interval-js declines an index into the tuple that a block-local function returns (OPEN, small — found 2026-10-04 by the collection-valued function bodies)
 
@@ -1172,18 +1272,6 @@ on `|z| = 2` gives `2iπ(¼ sin(−i) + ¼ sin(i) − ¼i cos(i) + ¼i cos(−i)
 is 0: `sin(−i) + sin(i)` is not combined, because the odd-function rule does not
 read the complex literal `−i` as a negation. `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx`
 over `(−∞, ∞)` gives `π/(2(2 − √2)) − π/(2(2 + √2))` instead of `π/√2`.
-
-### Whole-number powers of one matrix do not combine (OPEN, small — found 2026-10-05 by the matrix fix for issue #415)
-
-`A^2 · A^3` stays a product for a symbol `A` declared `matrix<2x2>`, and
-`A · A^2` too. The value `A^5` (or `A^3`) is correct, because a positive
-whole-number power of a matrix is the matrix power and the powers of one matrix
-commute. The products stay because canonicalization writes these powers as
-`MatrixPower(…)`, and no rule merges two `MatrixPower` factors with the same
-base. The same-base rules in `simplify-power.ts` (`canCombineSameBase()`) refuse
-every other combination of matrix factors on purpose (the product of matrices is
-the matrix product, while `Exp` and a non-integer `Power` of a matrix are
-element-wise).
 
 ### Indexing and slicing a collection whose count is a `bigint` (OPEN, decided 2026-10-06 — issue #416)
 
@@ -1225,6 +1313,17 @@ odd and even functions of a negated argument was added to that list on
 `2Si(1)`. The same holds for trigonometric terms. A fix simplifies the numerator
 and the denominator of a `Divide` like the operands of a sum, with the same
 guards against runaway rewriting.
+
+Another example (found 2026-10-19): like terms in the numerator are not
+collected when the denominator is a sum.
+`ce.function('Divide', [t − t + 1, y + z]).simplify()` stays
+`(t − t + 1)/(y + z)`, while `evaluate()` gives `1/(y + z)`, which costs less.
+The numerator is collected when the denominator is a symbol or a root:
+`(t − t + 1)/y` simplifies to `1/y`, and `(t − t + 1)/√t` to `1/√t`. Canonical
+forms do not collect like terms, so such a numerator comes from code that builds
+a difference with `ce.function('Subtract', …)`. The limit code at infinity
+(`combineCancellingPairs()`, `symbolic/limit.ts`) expands its numerator itself,
+so it does not depend on this.
 
 ### A quotient has two canonical forms: `x·(1/y)` and `x/y` (OPEN, medium — measured 2026-10-03; user decision: not now)
 

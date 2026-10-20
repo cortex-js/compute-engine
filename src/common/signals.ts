@@ -124,6 +124,10 @@ export type WarningSignalHandler = (warnings: WarningSignal[]) => void;
  *
  * * `base-out-of-range`:  The base is expected to be between 2 and 36.
  *
+ * * `unknown-unit`: the unit argument of a siunitx command (`\qty`, `\SI`,
+ * `\unit`, `\si`) is not a known unit, for example `\qty{3}{foo}`. The error
+ * holds the text of the argument.
+ *
  * @category Error Handling
  *
  */
@@ -139,6 +143,7 @@ export type ErrorCode =
   | 'unknown-function'
   | 'unknown-command'
   | 'unexpected-command'
+  | 'unknown-unit'
   | 'unbalanced-symbols'
   | 'unexpected-superscript'
   | 'unexpected-subscript'

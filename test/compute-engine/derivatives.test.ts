@@ -1598,11 +1598,16 @@ describe('D over lazy operators stays symbolic (Tycho item 115)', () => {
     );
   });
 
-  it('D over an explicit Sum stays inert (no bound-variable leak)', () => {
+  // `Sum` and `Product` are also exceptions: a `Sum` is differentiated term
+  // by term, and a small finite `Product` is expanded first (see
+  // `derivative-big-operator.test.ts`). The point kept here is that the bound
+  // index does not leak into the result as a free variable.
+  it('D over an explicit Sum does not leak its bound variable', () => {
     const result = engine
       .expr(['D', ['Sum', ['Power', 'x', 'm'], ['Triple', 'm', 0, 4]], 'x'])
       .evaluate();
-    expect(result.operator).toEqual('D');
+    expect(result.toString()).toEqual('4x^3 + 3x^2 + 2x + 1');
+    expect([...result.unknowns]).toEqual(['x']);
   });
 
   it('a user function whose body is a piecewise stays inert by reference', () => {

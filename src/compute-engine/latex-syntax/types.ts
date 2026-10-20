@@ -1337,6 +1337,15 @@ export interface Parser {
    */
   _visualSpaceStops: ReadonlySet<number> | null;
 
+  /**
+   * @internal
+   * True if the token at `index` is a `<space>` token that is a `~` in the
+   * input. The tokenizer gives the same token for `~` and for a space; the
+   * unit argument of a siunitx command (`\qty{3}{m~s^{-1}}`) reads `~` as a
+   * product of two units, and a space as nothing.
+   */
+  _isTilde(index: number): boolean;
+
   /** If the next token matches the target advance and return true. Otherwise
    * return false
    */

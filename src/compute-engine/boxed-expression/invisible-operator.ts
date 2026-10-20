@@ -102,11 +102,18 @@ export function canonicalInvisibleOperator(
     // Note: the numerators and denominators are limited to 999
     //
     const lhsInteger = asInteger(lhs);
-    if (!Number.isNaN(lhsInteger)) {
+    // A mixed number is written with EXACT integer literals only. A float
+    // anywhere (`2.0\frac{1}{3}`, `2\frac{1.0}{3}`) makes the juxtaposition a
+    // product, as `2\frac{1+1}{3}` is the product `2·(2/3)`, not `2 + 2/3`.
+    const isExactLiteral = (x: Expression | null): boolean =>
+      x !== null && isNumber(x) && x.isExact;
+    if (!Number.isNaN(lhsInteger) && isExactLiteral(coefficientLiteral(lhs))) {
       const rhs = ops[1];
       if (
         (rhs.operator === 'Divide' || rhs.operator === 'Rational') &&
-        isFunction(rhs)
+        isFunction(rhs) &&
+        isExactLiteral(rhs.op1) &&
+        isExactLiteral(rhs.op2)
       ) {
         const [n, d] = [rhs.op1.canonical.re, rhs.op2.canonical.re];
         if (

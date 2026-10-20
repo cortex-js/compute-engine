@@ -81,8 +81,12 @@ import {
 } from '../numerics/numeric.js';
 import { bigint } from '../numerics/bigint.js';
 
-import { sortProductOperands } from './order.js';
-import { asRadical } from './arithmetic-power.js';
+import {
+  hasCollectionShape,
+  mayBeTensorProductOperand,
+  sortProductOperands,
+} from './order.js';
+import { asRadical, isMatrixTyped } from './arithmetic-power.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
@@ -234,6 +238,22 @@ export class Product {
   // inexact (`0·∞`), and `NaN` otherwise (`0.0·∞`).
   private _indeterminateForm = false;
 
+  // The operands given to the constructor. `hasMatrixFactor()` reads them to
+  // know if a matrix comes later in the product than the term being tallied.
+  private readonly _operands: ReadonlyArray<Expression> | undefined;
+
+  // `true` when this product is a part of a larger product that has a
+  // matrix (the option `matrixContext`). A factor that can be a matrix
+  // (`g(x)`) then keeps its order, although no factor of this part is a
+  // matrix: see `expandProducts()`.
+  private readonly _matrixContext: boolean;
+
+  // The answer of `hasMatrixFactor()`, or `undefined` before it is first
+  // computed. Terms are only added to a product, so the answer can change
+  // only from `false` to `true`: `mul()` sets it to `true` when it receives a
+  // matrix after the answer was computed.
+  private _hasMatrix: boolean | undefined = undefined;
+
   static from(expr: Expression): Product {
     return new Product(expr.engine, [expr]);
   }
@@ -241,16 +261,51 @@ export class Product {
   constructor(
     ce: ComputeEngine,
     xs?: ReadonlyArray<Expression>,
-    readonly options?: { canonical?: boolean }
+    readonly options?: { canonical?: boolean; matrixContext?: boolean }
   ) {
     options = options ? { ...options } : {};
     if (!('canonical' in options)) options.canonical = true;
     this._isCanonical = options.canonical!;
+    this._matrixContext = options.matrixContext === true;
 
     this.engine = ce;
     this.coefficient = ce._numericValue(1);
+    this._operands = xs;
 
     if (xs) for (const x of xs) this.mul(x);
+  }
+
+  /**
+   * Is a factor of this product a matrix (or another collection)? The terms
+   * tallied so far are read, and the operands given to the constructor
+   * (with the operands of a `Multiply` operand), since a matrix can come
+   * after the term being tallied. It is also `true` when this product is a
+   * part of a larger product that has a matrix (`_matrixContext`). The
+   * answer is computed once, and kept in `_hasMatrix`.
+   */
+  private hasMatrixFactor(): boolean {
+    this._hasMatrix ??=
+      this._matrixContext ||
+      this.terms.some((t) => hasCollectionShape(t.term)) ||
+      (this._operands ?? []).some(
+        (x) =>
+          hasCollectionShape(x) ||
+          (isFunction(x, 'Multiply') && x.ops.some(hasCollectionShape))
+      );
+    return this._hasMatrix;
+  }
+
+  /**
+   * Can the term `x` be a matrix that does not commute with another factor
+   * of this product? This is `true` for a matrix (or another collection),
+   * and, in a product that has a matrix, for a term whose type does not
+   * exclude a matrix (`g(x)` with `g` a function that was not declared, see
+   * `mayBeTensorProductOperand()`). In a product with no matrix, such a term
+   * is a scalar, as before.
+   */
+  private isNoncommutingTerm(x: Expression): boolean {
+    if (hasCollectionShape(x)) return true;
+    return mayBeTensorProductOperand(x) && this.hasMatrixFactor();
   }
 
   /**
@@ -261,6 +316,8 @@ export class Product {
    */
   mul(term: Expression, exp?: Rational) {
     console.assert(term.isCanonical || term.isStructural);
+    if (this._hasMatrix === false && hasCollectionShape(term))
+      this._hasMatrix = true;
     if (isInexactOperand(term) || isAbsentSymbol(term)) this._sawInexact = true;
     // Only a NUMBER LITERAL whose value is `NaN` makes the coefficient `NaN`.
     // `isNaN` of a symbol reads its current value, and a product built from
@@ -582,6 +639,43 @@ export class Product {
         term.operator === 'Root') &&
       isCollectionShaped(term);
 
+    // `MatrixPower(A, n)` with a positive integer `n` is the matrix product
+    // `A·A·…·A` of `n` factors. It is read as the base `A` with the exponent
+    // `n`, so that it merges with a factor of the same base: `A^2·A^3` is
+    // `A^5` and `A·A^2` is `A^3`. The powers of one matrix commute with each
+    // other, but not with another matrix: the tally below does not merge two
+    // factors when a different matrix is between them (`A^2·B·A^3` stays as
+    // it is). Only a positive `n` in a product with a positive integer
+    // exponent is read. `MatrixPower(A, 0)` is the identity matrix, not the
+    // number `1`, and the merge of a positive and a negative power
+    // (`A^2·A^{-1} = A`) is correct only when `A` is invertible.
+    //
+    // The base is tallied as one factor: it is not given to `mul()` again,
+    // because `mul()` splits a product into its factors and gives the
+    // exponent to each one. `(A·B)^2` is `A·B·A·B`, not `A^2·B^2`. For the
+    // same reason, a `MatrixPower` whose base is a product is not read: it
+    // stays one factor with the exponent `1`.
+    if (
+      isFunction(term, 'MatrixPower') &&
+      isMatrixTyped(term.op1) &&
+      !isFunction(term.op1, 'Multiply')
+    ) {
+      const n = exactRationalExponent(term.op2);
+      const outer = reducedRational(exponent);
+      if (
+        n !== undefined &&
+        isIntegerRational(reducedRational(n)) &&
+        !isNeg(n) &&
+        !isZero(n) &&
+        isIntegerRational(outer) &&
+        !isNeg(outer) &&
+        !isZero(outer)
+      ) {
+        this.tallyInOrder(term.op1, rationalMul(outer, n));
+        return;
+      }
+    }
+
     // If this is a power expression, extract the exponent
     if (isFunction(term, 'Power')) {
       // Term is `Power(op1, op2)`. The exponent is read as a rational only
@@ -608,12 +702,19 @@ export class Product {
           (expIsInteger && numeratorIsOdd) ||
           term.op1.isNonNegative === true;
 
+        // A negative power of a base that can be a matrix (`g(x)^{-2}` in
+        // `A·g(x)^{-2}·A`) is kept as one term, which keeps its position. A
+        // term with a negative exponent goes to the denominator of the
+        // quotient that `asNumeratorDenominator()` makes, and
+        // `(A·A)/g(x)^2` is a different value.
+        const product = rationalMul(exponent, r);
         if (
           foldIsSound &&
           (!baseIsNumeric || expIsInteger) &&
-          (!collectionShaped || expIsInteger)
+          (!collectionShaped || expIsInteger) &&
+          !(isNeg(product) && this.isNoncommutingTerm(term.op1))
         ) {
-          this.mul(term.op1, rationalMul(exponent, r));
+          this.mul(term.op1, product);
           return;
         }
         // Otherwise, keep the Power expression as a single term
@@ -657,8 +758,17 @@ export class Product {
       // For a FRACTIONAL exponent the split (u/v)^r → u^r·v^(−r) flips
       // the principal branch when v < 0 ((u/v)^(1/4) vs u^(1/4)·v^(−1/4)
       // differ by a phase) — only split when sound.
+      //
+      // A denominator that can be a matrix (see `isNoncommutingTerm()`) is
+      // not split either. The quotient of two matrices is element-wise, and
+      // so is `1/M`: it is not the inverse of `M`. So `A/M` is not `A·M^{-1}`,
+      // and `(A/g(x))·A` is not `(A·A)/g(x)`. The quotient is tallied as one
+      // term, which keeps its position in the product.
       const e = reducedRational(exponent);
-      if (isIntegerRational(e) || term.op2.isNonNegative === true) {
+      if (
+        (isIntegerRational(e) || term.op2.isNonNegative === true) &&
+        !this.isNoncommutingTerm(term.op2)
+      ) {
         this.mul(term.op1, exponent);
         this.mul(term.op2, neg(exponent));
         return;
@@ -679,28 +789,58 @@ export class Product {
       tallyExp = rationalMul(exponent, norm.exp);
     }
 
-    // Look for the base, and add the exponent if already in the list of terms.
-    // The matrix product is not commutative, so a matrix (or another
-    // collection) is not merged with an earlier term of the same base when a
-    // different collection-shaped term is between them: `A·B·A` is not
-    // `A^2·B`, and `√A·B·√A` is not `(√A)^2·B`. Scalar terms commute with all
-    // terms, so they do not prevent the merge.
-    const tallyShaped = isCollectionShaped(tallyTerm);
+    this.tallyInOrder(tallyTerm, tallyExp);
+  }
+
+  /**
+   * Look for the base `tallyTerm`, and add `tallyExp` to its exponent if it
+   * is already in the list of terms. Otherwise, add it as a new term.
+   *
+   * The matrix product is not commutative, so a matrix (or another
+   * collection) is not merged with an earlier term of the same base when a
+   * different collection-shaped term is between them: `A·B·A` is not
+   * `A^2·B`, and `√A·B·√A` is not `(√A)^2·B`. Scalar terms commute with all
+   * terms, so they do not prevent the merge.
+   *
+   * Two terms of the same collection-shaped base are also not merged when
+   * one exponent is positive and the other is negative: `A^2·A^{-1}` is `A`
+   * only when `A` is invertible. A term with the exponent `0` would be
+   * dropped as if it were the number `1`, but `A^0` is the identity matrix.
+   *
+   * In a product that has a matrix, a term whose type does not exclude a
+   * matrix (`g(x)` with `g` a function that was not declared) is also not
+   * moved past a matrix or past another such term: `A·g(x)·A` is not
+   * `A^2·g(x)`, and `g(x)·A·g(x)` is not `g(x)^2·A`. Two such terms with
+   * the same base and exponents of opposite signs are not merged either:
+   * `A·g(x)^{-1}·g(x)·A` is not `A^2`.
+   */
+  private tallyInOrder(tallyTerm: Expression, tallyExp: Rational): void {
+    const tallyShaped = hasCollectionShape(tallyTerm);
+    const noncommuting = tallyShaped || this.isNoncommutingTerm(tallyTerm);
     let found = false;
     for (const [i, x] of this.terms.entries()) {
-      if (
-        tallyShaped &&
-        x.term.isSame(tallyTerm) &&
-        this.terms
-          .slice(i + 1)
-          .some((y) => !y.term.isSame(tallyTerm) && isCollectionShaped(y.term))
-      )
-        continue;
-      if (x.term.isSame(tallyTerm)) {
-        x.exponent = rationalAdd(x.exponent, tallyExp);
-        found = true;
-        break;
+      if (!x.term.isSame(tallyTerm)) continue;
+      if (noncommuting) {
+        // A different term between the two that does not commute with them
+        if (
+          this.terms.some(
+            (y, j) =>
+              j > i &&
+              !y.term.isSame(tallyTerm) &&
+              (tallyShaped
+                ? hasCollectionShape(y.term) ||
+                  mayBeTensorProductOperand(y.term)
+                : this.isNoncommutingTerm(y.term))
+          )
+        )
+          continue;
+        // One exponent is positive and the other is negative: when the term
+        // is a matrix, the two powers do not cancel in general
+        if (isNeg(x.exponent) !== isNeg(tallyExp)) continue;
       }
+      x.exponent = rationalAdd(x.exponent, tallyExp);
+      found = true;
+      break;
     }
     if (!found) this.terms.push({ term: tallyTerm, exponent: tallyExp });
   }
@@ -896,8 +1036,18 @@ export class Product {
       // fractional r that merge is only sound when the term is known
       // non-negative: (−u)^(1/4)·v^(1/4) ≠ (−u·v)^(1/4) in general (the
       // principal-branch phases differ).
+      //
+      // A matrix (or another collection) is never grouped with another term:
+      // the matrix product is not commutative, so `A^2·B^2` is not
+      // `(A·B)^2`, and `A^2·B·A^2` is not `(A·A)^2·B`. Each such term is a
+      // group of its own, and the groups keep the order of the terms. In a
+      // product that has a matrix, a term whose type does not exclude a
+      // matrix (`g(x)`) is also a group of its own: `g(x)·A·h(x)` is not
+      // `g(x)·h(x)·A`.
+      const shaped = this.isNoncommutingTerm(t.term);
       const mergeable =
-        isIntegerRational(exponent) || t.term.isNonNegative === true;
+        !shaped &&
+        (isIntegerRational(exponent) || t.term.isNonNegative === true);
       let found = false;
       if (mergeable) {
         for (let i = 0; i < xs.length; i++) {
@@ -970,7 +1120,7 @@ export class Product {
       });
       this.coefficient = coef;
       if (grouped === null) return ce.NaN;
-      const rest = termsAsExpression(ce, grouped);
+      const rest = termsAsExpression(ce, this._matrixContext, grouped);
       if (isLiteral(rest, 0)) return this._formAnswer(rest);
       if (rest.isPositive === true) return infinity;
       if (rest.isNegative === true)
@@ -992,12 +1142,16 @@ export class Product {
 
     // If the coef is -1, negate the expression and reset the coef
     if (isNegativeOne) {
-      const result = termsAsExpression(ce, groupedTerms).neg();
+      const result = termsAsExpression(
+        ce,
+        this._matrixContext,
+        groupedTerms
+      ).neg();
       this.coefficient = ce._numericValue(-1);
       return result;
     }
 
-    return termsAsExpression(ce, groupedTerms);
+    return termsAsExpression(ce, this._matrixContext, groupedTerms);
   }
 
   /** The answer of a product whose coefficient is `NaN`: see
@@ -1043,7 +1197,7 @@ export class Product {
       const grouped = this.groupedByDegrees({ mode: 'expression' });
       this.coefficient = coef;
       if (grouped === null) return [ce.NaN, ce.NaN];
-      const rest = termsAsExpression(ce, grouped);
+      const rest = termsAsExpression(ce, this._matrixContext, grouped);
       if (isLiteral(rest, 0)) {
         const answer = this._formAnswer(rest);
         return [answer, answer];
@@ -1076,11 +1230,11 @@ export class Product {
         terms: x.terms,
       }));
 
-    const num = termsAsExpression(ce, xsNumerator);
+    const num = termsAsExpression(ce, this._matrixContext, xsNumerator);
 
     return [
       isNegativeOne ? num.neg() : num,
-      termsAsExpression(ce, xsDenominator),
+      termsAsExpression(ce, this._matrixContext, xsDenominator),
     ];
   }
 
@@ -1154,12 +1308,15 @@ function numericRadicalBaseExp(
 
 function termsAsExpression(
   ce: ComputeEngine,
+  matrixContext: boolean,
   terms: { exponent: Rational; terms: ReadonlyArray<Expression> }[]
 ): Expression {
   let result = terms.map(({ terms, exponent }) => {
     const t = flatten(terms, 'Multiply');
     const base =
-      t.length <= 1 ? t[0] : ce._fn('Multiply', sortProductOperands(t));
+      t.length <= 1
+        ? t[0]
+        : ce._fn('Multiply', sortProductOperands(t, matrixContext));
     if (isOne(exponent)) return base;
     // Numeric rational powers may expose an exact coefficient plus a proper
     // radical (`2^(5/3) -> 2*2^(2/3)`). Route them through evaluation so
@@ -1174,7 +1331,7 @@ function termsAsExpression(
   if (result.length === 0) return ce.One;
   if (result.length === 1) return result[0];
 
-  return ce._fn('Multiply', sortProductOperands(result));
+  return ce._fn('Multiply', sortProductOperands(result, matrixContext));
 }
 
 /**
@@ -2506,40 +2663,149 @@ function unnegate(op: Expression): [Expression, sign: number] {
  */
 function expandProduct(
   lhs: Readonly<Expression>,
-  rhs: Readonly<Expression>
+  rhs: Readonly<Expression>,
+  matrixContext = false
 ): Expression {
   if (isFunction(lhs, 'Negate') && isFunction(rhs) && rhs.operator === 'Negate')
-    return expandProduct(lhs.op1, rhs.op1);
+    return expandProduct(lhs.op1, rhs.op1, matrixContext);
 
   const ce = lhs.engine;
 
-  if (isFunction(lhs, 'Negate')) return expandProduct(lhs.op1, rhs).neg();
-  if (isFunction(rhs, 'Negate')) return expandProduct(lhs, rhs.op1).neg();
+  if (isFunction(lhs, 'Negate'))
+    return expandProduct(lhs.op1, rhs, matrixContext).neg();
+  if (isFunction(rhs, 'Negate'))
+    return expandProduct(lhs, rhs.op1, matrixContext).neg();
 
-  if (
-    isFunction(lhs, 'Divide') &&
-    isFunction(rhs) &&
-    rhs.operator === 'Divide'
-  ) {
+  // In a product with a matrix, a quotient whose denominator can be a matrix
+  // is kept as one factor: the quotient is element-wise, so `(A/g(x))·A` is
+  // not `(A·A)/g(x)`.
+  const lhsDivide =
+    isFunction(lhs, 'Divide') && (!matrixContext || isScalarFactor(lhs.op2));
+  const rhsDivide =
+    isFunction(rhs, 'Divide') && (!matrixContext || isScalarFactor(rhs.op2));
+
+  if (lhsDivide && rhsDivide) {
     const denom = lhs.op2.mul(rhs.op2);
-    return expandProduct(lhs.op1, rhs.op1).div(denom);
+    return expandProduct(lhs.op1, rhs.op1, matrixContext).div(denom);
   }
 
-  if (isFunction(lhs, 'Divide'))
-    return expandProduct(lhs.op1, rhs).div(lhs.op2);
-  if (isFunction(rhs, 'Divide'))
-    return expandProduct(lhs, rhs.op1).div(rhs.op2);
+  if (lhsDivide) return expandProduct(lhs.op1, rhs, matrixContext).div(lhs.op2);
+  if (rhsDivide) return expandProduct(lhs, rhs.op1, matrixContext).div(rhs.op2);
 
   if (isFunction(lhs, 'Add')) {
-    const terms: Expression[] = lhs.ops.map((x) => expandProduct(x, rhs));
+    const terms: Expression[] = lhs.ops.map((x) =>
+      expandProduct(x, rhs, matrixContext)
+    );
     return addArray(terms);
   }
   if (isFunction(rhs, 'Add')) {
-    const terms: Expression[] = rhs.ops.map((x) => expandProduct(lhs, x));
+    const terms: Expression[] = rhs.ops.map((x) =>
+      expandProduct(lhs, x, matrixContext)
+    );
     return addArray(terms);
   }
 
-  return new Product(ce, [lhs, rhs]).asExpression();
+  return new Product(ce, [lhs, rhs], { matrixContext }).asExpression();
+}
+
+/**
+ * Is the factor `x` a matrix (or another collection), or does it have one as
+ * a term or a factor? A `Negate` and the numerator of a `Divide` are read, as
+ * `hasDistributableSum()` reads them.
+ */
+function hasMatrixPart(x: Expression): boolean {
+  if (isFunction(x, 'Negate')) return hasMatrixPart(x.op1);
+  if (isFunction(x, 'Divide')) return hasMatrixPart(x.op1);
+  if (hasCollectionShape(x)) return true;
+  return (
+    (isFunction(x, 'Add') || isFunction(x, 'Multiply')) &&
+    x.ops.some(hasCollectionShape)
+  );
+}
+
+/**
+ * Is the factor `x` a scalar: is its type known to exclude a matrix? A
+ * scalar commutes with every factor of a product, and its product with a sum
+ * of matrices is distributed: `r·(B + C)` is `r·B + r·C`.
+ */
+function isScalarFactor(x: Expression): boolean {
+  return !hasCollectionShape(x) && !mayBeTensorProductOperand(x);
+}
+
+/**
+ * If the factor `x` is a sum of matrices that a product with matrices can be
+ * distributed over, the terms of the sum. A `Negate`, and a `Divide` by a
+ * scalar, are distributed with the sum: `-(B + C)` gives `-B` and `-C`.
+ *
+ * Each term of the sum must be a matrix (or another collection). The sum of a
+ * matrix and a scalar adds the scalar to each element of the matrix, so the
+ * product of a matrix and such a sum is not distributed: `A·(B + r)` is not
+ * `A·B + r·A`. A term that can be a matrix (`g(x)`) can also be a scalar, so
+ * a sum with such a term is not distributed either.
+ */
+function matrixSumTerms(x: Expression): Expression[] | undefined {
+  if (isFunction(x, 'Negate'))
+    return matrixSumTerms(x.op1)?.map((t) => t.neg());
+  if (isFunction(x, 'Divide')) {
+    if (!isScalarFactor(x.op2)) return undefined;
+    const den = x.op2;
+    return matrixSumTerms(x.op1)?.map((t) => t.div(den));
+  }
+  if (isFunction(x, 'Add') && x.ops.every(hasCollectionShape))
+    return [...x.ops];
+  return undefined;
+}
+
+/**
+ * Expand the product of the factors `ops`, where a factor is or has a matrix
+ * and a factor has a sum to distribute.
+ *
+ * The scalar factors (see `isScalarFactor()`) commute with the other
+ * factors, so their product is expanded first, as for a product with no
+ * matrix. The other factors keep their order. They are multiplied from left
+ * to right, and each sum of matrices (see `matrixSumTerms()`) is distributed
+ * in turn. The like terms are combined after each sum, so the number of terms
+ * does not grow more than necessary. A sum with a term that is not a matrix
+ * is kept as a factor. Last, the product of the scalar factors is distributed
+ * over the result.
+ *
+ * Each product is made with the option `matrixContext`, so that a factor that
+ * can be a matrix (`g(x)`) keeps its position. A sum makes its terms
+ * canonical again, without that option. This is correct because each term
+ * of a sum made here has a matrix, which a sum of matrices gives to each of
+ * its terms, and the canonical form of a term with a matrix keeps the order
+ * of its factors again.
+ */
+function expandMatrixProduct(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const scalars = ops.filter(isScalarFactor);
+  let terms: Expression[] | undefined;
+  for (const op of ops) {
+    if (isScalarFactor(op)) continue;
+    const choices = matrixSumTerms(op) ?? [op];
+    if (terms === undefined) {
+      terms = choices;
+      continue;
+    }
+    const products = terms.flatMap((p) =>
+      choices.map((t) =>
+        new Product(ce, [p, t], { matrixContext: true }).asExpression()
+      )
+    );
+    if (choices.length === 1) terms = products;
+    else {
+      const sum = addArray(products);
+      terms = isFunction(sum, 'Add') ? [...sum.ops] : [sum];
+    }
+  }
+  const scalar =
+    scalars.length <= 1 ? scalars[0] : expandProducts(ce, scalars)!;
+  if (terms === undefined) return scalar ?? ce.One;
+  const rest = terms.length === 1 ? terms[0] : addArray(terms);
+  if (scalar === undefined) return rest;
+  return expandProduct(scalar, rest, true);
 }
 
 /**
@@ -2568,8 +2834,27 @@ export function expandProducts(
   // in a loop: a recursion on `ops.slice(1)` used one stack frame and one
   // copy of the remaining operands per factor, so a product of about 8 000
   // factors threw `RangeError: Maximum call stack size exceeded`.
-  let rhs = expandProduct(ops[ops.length - 2], ops[ops.length - 1]);
-  for (let i = ops.length - 3; i >= 0; i--) rhs = expandProduct(ops[i], rhs);
+  //
+  // A part of the fold, such as the product of the last two factors, does
+  // not see a matrix in an earlier factor. When the product has a matrix, a
+  // factor that can be a matrix (`g(x)` with `g` a function that was not
+  // declared) must keep its order in each part too, or `A·g(x)·k(x)·g(x)`
+  // becomes `A·k(x)·g(x)^2`. Each part is told so with `matrixContext`.
+  //
+  // A product with a matrix and a sum to distribute is expanded by
+  // `expandMatrixProduct()`: the matrix product is not commutative, and the
+  // sum of a matrix and a scalar is element-wise, so not every sum can be
+  // distributed.
+  const matrixContext = ops.some(hasMatrixPart);
+  if (matrixContext && ops.some(hasDistributableSum))
+    return expandMatrixProduct(ce, ops);
+  let rhs = expandProduct(
+    ops[ops.length - 2],
+    ops[ops.length - 1],
+    matrixContext
+  );
+  for (let i = ops.length - 3; i >= 0; i--)
+    rhs = expandProduct(ops[i], rhs, matrixContext);
   return rhs;
 }
 

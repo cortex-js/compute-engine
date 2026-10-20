@@ -14,6 +14,8 @@ import {
 } from '../boxed-expression/utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { laurentData } from './series.js';
+import { expand } from '../boxed-expression/expand.js';
+import { asExactSmallInteger } from '../boxed-expression/numerics.js';
 import {
   limit as numericLimit,
   LIMIT_PROBE_ITERATION_BUDGET,
@@ -269,7 +271,13 @@ function limitDispatch(
     // `simplify` is otherwise helpful at infinity (the leading-order rewrite
     // handles sums); at a finite point it can distribute a quotient into a sum
     // and defeat L'Hôpital, so the finite path keeps the structure instead.
-    return limitAtPosInf(g.simplify(), x, ce, depth);
+    const r = limitAtPosInf(g.simplify(), x, ce, depth);
+    if (r !== undefined) return r;
+    // The strategies at infinity read the growth of the terms, and they do
+    // not see a product such as `x·(e^{1/x} − 1)`, whose factors go to `+∞`
+    // and to 0. The series of the function with `x = 1/u` at `u = 0` gives
+    // its exact limit (1) when that series has no negative power.
+    return constantTermAtInfinity(g, x, ce);
   }
 
   return limitAtFinite(e, x, point, dir, ce, depth);
@@ -1148,7 +1156,11 @@ function limitAtPosInf(
   checkDeadline(ce._deadlineFrame);
   // Rewrite to leading asymptotic order (drop negligible additive terms), which
   // often collapses the expression to something a structural pass can finish.
-  const e = leadingOrder(e0, x, ce, depth).simplify();
+  const e = forPositiveVariable(
+    leadingOrder(e0, x, ce, depth).simplify(),
+    x,
+    ce
+  );
   if (!e.has(x)) return e.evaluate();
 
   // Polynomial in x → signed infinity by leading coefficient.
@@ -1175,10 +1187,27 @@ function limitAtPosInf(
     return undefined;
   }
 
+  // `|u|` is continuous, and it goes to `+∞` when `u` goes to `+∞` or to
+  // `−∞`. This rule is necessary for a radical: the leading order of
+  // `√(x² + 1)` is `√(x²)`, which simplifies to `|x|`.
+  if (op === 'Abs') {
+    const l = limitAtPosInf(o1(e), x, ce, depth + 1);
+    if (!l) return undefined;
+    if (l.isInfinity === true)
+      return l.isPositive === true || l.isNegative === true
+        ? ce.PositiveInfinity
+        : undefined;
+    if (isDefiniteValue(l)) return ce.function('Abs', [l]).evaluate();
+    return undefined;
+  }
+
   if (op === 'Add') {
     // After the leading-order rewrite the surviving terms are co-dominant
     // (e.g. 1/x + 1/x², both → 0); sum their individual limits.
-    let acc: Expression = ce.Zero;
+    // The finite limits are added with an `Add` expression, not with the
+    // `.add()` method: `.add()` changes a sum of exact numbers such as
+    // `√3 + √5` to a float.
+    const finite: Expression[] = [];
     let posInf = 0;
     let negInf = 0;
     for (const t of oo(e)) {
@@ -1187,13 +1216,14 @@ function limitAtPosInf(
       if (l.isInfinity === true) {
         if (l.isNegative === true) negInf++;
         else posInf++;
-      } else if (isDefiniteValue(l)) acc = acc.add(l);
+      } else if (isDefiniteValue(l)) finite.push(l);
       else return undefined;
     }
     if (posInf > 0 && negInf > 0) return undefined; // ∞ − ∞ (needs cancellation)
     if (posInf > 0) return ce.PositiveInfinity;
     if (negInf > 0) return ce.NegativeInfinity;
-    return acc.evaluate();
+    if (finite.length === 0) return ce.Zero;
+    return ce.function('Add', finite).evaluate();
   }
 
   if (op === 'Divide') return limitRatioAtPosInf(o1(e), o2(e), x, ce, depth);
@@ -1310,8 +1340,16 @@ function limitRatioAtPosInf(
   if (hasCancellation(num, x, ce) || hasCancellation(den, x, ce))
     return undefined;
 
-  const n = leadingOrder(num, x, ce, depth).simplify();
-  const d = leadingOrder(den, x, ce, depth).simplify();
+  const n = forPositiveVariable(
+    leadingOrder(num, x, ce, depth).simplify(),
+    x,
+    ce
+  );
+  const d = forPositiveVariable(
+    leadingOrder(den, x, ce, depth).simplify(),
+    x,
+    ce
+  );
 
   // Compare growth *first*. (Simplifying the quotient first can re-expand it
   // back into the original product and loop — e.g. x/(1/ln(1+a/x)).)
@@ -1334,6 +1372,29 @@ function limitRatioAtPosInf(
     // Same growth order → ratio of leading coefficients.
     const r = n.div(d).simplify();
     if (!r.has(x)) return r.evaluate();
+    // The numeric growth comparison does not see a very small power:
+    // `x^(1 + 10^-30)` and `x` have almost the same value at each probe
+    // point, so they were taken to grow at the same rate, and the numeric
+    // ratio gave 1. When the exact quotient is `k·x^c` with constants `k`
+    // and `c`, the signs of `k` and `c` give the limit.
+    const [k, p] =
+      r.operator === 'Multiply' && oo(r).length === 2 && !o1(r).has(x)
+        ? [o1(r), o2(r)]
+        : [ce.One, r];
+    const base = o1(p);
+    if (
+      p.operator === 'Power' &&
+      isSymbol(base) &&
+      base.symbol === x &&
+      !o2(p).has(x)
+    ) {
+      const c = o2(p);
+      if (c.isNegative === true) return ce.Zero;
+      if (c.isPositive === true) {
+        if (k.isPositive === true) return ce.PositiveInfinity;
+        if (k.isNegative === true) return ce.NegativeInfinity;
+      }
+    }
     return leadingCoefficientRatio(n, d, x, ce);
   }
 
@@ -1371,7 +1432,14 @@ function limitPowerAtPosInf(
       // A base that goes to `−∞`: an integer exponent gives a signed
       // infinity by its parity. Any other exponent gives a complex value
       // (`(−x)^{3/2} = −i·x^{3/2}`), which has no signed limit.
-      if (b.isNegative === true && isNumber(expo) && expo.im === 0) {
+      // `isInteger` is read first: the exact `2 + 10^-30` has the double
+      // value 2, but it is not an integer.
+      if (
+        b.isNegative === true &&
+        isNumber(expo) &&
+        expo.im === 0 &&
+        expo.isInteger === true
+      ) {
         const n = expo.re;
         if (Number.isSafeInteger(n))
           return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
@@ -1798,7 +1866,8 @@ function growthLevel(
   if (deg > 0) return 2;
   if (deg === 0) return 0;
 
-  if (op === 'Negate') return growthLevel(o1(e), x, ce, depth + 1);
+  if (op === 'Negate' || op === 'Abs')
+    return growthLevel(o1(e), x, ce, depth + 1);
 
   // A root keeps the growth class of its radicand: `√x` is polynomial,
   // `√(eˣ) = e^{x/2}` is exponential, `√(ln x)` is logarithmic. Without this
@@ -2259,10 +2328,18 @@ function leadingCoefficientRatio(
   ce: ComputeEngine
 ): Expression | undefined {
   // Same growth order ⟹ the limit is a finite constant (the ratio of leading
-  // coefficients). Recover it with Richardson extrapolation — which converges
-  // even for slow approaches such as x·ln(1+1/x) → 1 that a single large probe
-  // would under-shoot — then recognize a simple rational.
+  // coefficients). First try the exact value from a series: with `x = 1/u`,
+  // the limit as `x → +∞` is the constant term of the series of the ratio
+  // at `u = 0` (`x·ln(1 + π/x)` is `ln(1 + π·u)/u = π − π²·u/2 + …`).
   const ratio = n.div(d);
+  const exact = constantTermAtInfinity(ratio, x, ce);
+  if (exact !== undefined) return exact;
+  // Else recover it with Richardson extrapolation — which converges even for
+  // slow approaches such as x·ln(1+1/x) → 1 that a single large probe would
+  // under-shoot — then recognize an integer or a simple fraction. Any other
+  // value is not known exactly, and a float is not a result of `evaluate()`
+  // (the exactness contract): return `undefined`, so that `evaluate()` keeps
+  // the limit unevaluated and `.N()` uses the numeric limit.
   // Shift the probe ladder a little past x = 1: forms like x·ln(1−1/x) are
   // singular there (ln 0), which would poison the extrapolation. The shift
   // leaves the x → ∞ limit unchanged.
@@ -2279,7 +2356,82 @@ function leadingCoefficientRatio(
     const p = Math.round(v * q);
     if (Math.abs(v - p / q) < 1e-9) return ce.number(p).div(ce.number(q));
   }
-  return ce.number(v);
+  return undefined;
+}
+
+/**
+ * The limit of `e` as `x → +∞` from the series of `e` with `x = 1/u` at
+ * `u = 0`: the constant term when the series starts at the power 0, and 0
+ * when it starts at a positive power. `undefined` when there is no such
+ * series (a branch point, an essential singularity, a power of `u` with a
+ * negative exponent) or when the value still contains `u`.
+ *
+ * The fresh variable `u` is declared `real` in a temporary scope, so it has
+ * no binding outside this function.
+ */
+function constantTermAtInfinity(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): Expression | undefined {
+  const u = ['u', 'w', 's', 't', 'q', 'tau', 'xi', 'eta'].find(
+    (name) => name !== x && !e.has(name)
+  );
+  if (u === undefined) return undefined;
+  ce.pushScope();
+  try {
+    ce.declare(u, 'real');
+    const f = e.subs({ [x]: ce.function('Divide', [ce.One, ce.symbol(u)]) });
+    const L = laurentData(f, u, ce.Zero, ce, 3);
+    if (!L || L.v < 0) return undefined;
+    if (L.v > 0) return ce.Zero;
+    const c = L.coeff(0).evaluate();
+    if (!c.isValid || c.isNaN === true || c.has(u) || c.has(x))
+      return undefined;
+    return c;
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * `e` with each `|x|` replaced by `x`, and each `√(x^m)` and `ⁿ√(x^m)`
+ * (a real constant `m`, an exact integer degree `n ≥ 2`) replaced by
+ * `x^(m/n)`. As `x → +∞`, `x` is positive for large values, so these forms
+ * are equal there. The leading-order rewrite gives such terms: the leading order of
+ * `√(2x² + 1)/x` is `√2·√(x²)/x`. Without this step, the ratio still
+ * contains `x`, and `leadingCoefficientRatio()` reads its value from
+ * numeric probes: the result was the float `1.414…`, not `√2`.
+ */
+function forPositiveVariable(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): Expression {
+  if (!isFunction(e) || !e.has(x)) return e;
+  const isX = (u: Expression): boolean => isSymbol(u) && u.symbol === x;
+  if (e.operator === 'Abs' && isX(e.op1)) return e.op1;
+  if (
+    (e.operator === 'Sqrt' || e.operator === 'Root') &&
+    e.op1.operator === 'Power' &&
+    isX(o1(e.op1))
+  ) {
+    // The exponent `m` is kept as an expression, and the new exponent is the
+    // `Divide` expression `m/n`. The double value of `m` is not read: the
+    // exact `2 + 10^-30` has the double value `2`, but `√(x^(2 + 10^-30))`
+    // is not `x`. A float exponent stays a float. The degree must be an
+    // exact integer, for the same reason.
+    const m = o2(e.op1);
+    const n = e.operator === 'Sqrt' ? 2 : asExactSmallInteger(e.op2);
+    if (n !== null && n >= 2 && !m.has(x) && m.type.matches('finite_real'))
+      return ce.function('Power', [
+        o1(e.op1),
+        ce.function('Divide', [m, ce.number(n)]),
+      ]);
+  }
+  const ops = e.ops.map((op) => forPositiveVariable(op, x, ce));
+  if (ops.every((op, k) => op === e.ops[k])) return e;
+  return ce.function(e.operator, ops);
 }
 
 function baseEventuallyPositive(
@@ -2294,17 +2446,36 @@ function baseEventuallyPositive(
  * Combine cancellation-prone pairs inside sums, recursively over the whole
  * expression:
  *
- *   ln u − ln v  →  ln(u/v)                (u, v eventually positive)
- *   √u − √v      →  (u − v)/(√u + √v)      (u, v eventually positive)
+ *   ln u − ln v   →  ln(u/v)              (u, v eventually positive)
+ *   √u − √v       →  (u − v)/(√u + √v)    (u, v eventually positive)
+ *   √u − q        →  (u − q²)/(√u + q)    (u, q eventually positive, and √u
+ *                                          and q grow at the same rate)
  *
  * Differences of co-dominant terms like these lose their magnitude to
  * cancellation, so neither the leading-order rewrite nor the growth
  * comparison can rank them (they see the individual terms, not the ~1/x
  * difference). The combined forms are mathematically identical on the
  * eventually-positive domain and are handled exactly by the existing
- * strategies. Only unit-coefficient pairs are combined; anything else is
- * left untouched (and remains protected by the fail-closed instability
- * guards).
+ * strategies.
+ *
+ * The radical rules also apply to a root of an integer degree `n` from 2 to
+ * `MAX_CONJUGATE_DEGREE` (`Root(u, n)`), with the identity
+ * `a − b = (aⁿ − bⁿ)/(aⁿ⁻¹ + aⁿ⁻²·b + … + bⁿ⁻¹)`. The identity is true when
+ * the denominator is not zero, and the denominator is positive when `a` and
+ * `b` are positive. The numerator `aⁿ − bⁿ` is expanded, so that its leading
+ * terms cancel: `√(x² + x) − x` gives `(x² + x − x²)/(√(x² + x) + x)`, which
+ * is `x/(√(x² + x) + x)`. Without the expansion the numerator stays
+ * `x² + x − x²` (canonical forms do not collect like terms), and the
+ * leading-order rewrite reads it as `x² − x²`. The radicands `u`, `v` and
+ * the term `q` must be polynomials in `x`: the expansion cancels the leading
+ * terms of polynomials only.
+ *
+ * A radical term can have a number coefficient: `2√u − 2√v` is
+ * `2·(√u − √v)` and `2√u − x` is `2·(√u − x/2)`. A logarithm pair must have
+ * unit coefficients. The rule `√u − q` applies only when `√u` and `q` grow
+ * at the same rate (their difference then cancels at leading order); any
+ * other sum is left untouched (and remains protected by the fail-closed
+ * instability guards).
  */
 function combineCancellingPairs(
   e: Expression,
@@ -2324,56 +2495,177 @@ function combineCancellingPairs(
     return ce.function(e.operator, ops);
   }
 
-  // Decompose each term into (sign, core), pairing `Ln`/`Sqrt` terms of
-  // opposite sign.
+  // Decompose each term into (sign, core), pairing `Ln` terms of opposite
+  // sign.
   const sign = (t: Expression): 1 | -1 => (t.operator === 'Negate' ? -1 : 1);
   const core = (t: Expression): Expression =>
     t.operator === 'Negate' ? o1(t) : t;
 
+  // `k·ⁿ√u` → `{ k, root: ⁿ√u, u, n }`, where `k` is a non-zero real number
+  // literal (1 when the term has no coefficient). `undefined` when the term
+  // is not a radical of an integer degree from 2 to `MAX_CONJUGATE_DEGREE`.
+  const radicalTerm = (
+    t: Expression
+  ):
+    | { k: Expression; root: Expression; u: Expression; n: number }
+    | undefined => {
+    let k: Expression = ce.One;
+    let r = t;
+    if (r.operator === 'Negate') {
+      k = ce.NegativeOne;
+      r = o1(r);
+    }
+    if (r.operator === 'Multiply' && oo(r).length === 2) {
+      const c = o1(r);
+      if (
+        !isNumber(c) ||
+        c.im !== 0 ||
+        (c.isPositive !== true && c.isNegative !== true)
+      )
+        return undefined;
+      k = k.mul(c);
+      r = o2(r);
+    }
+    if (r.operator === 'Sqrt') return { k, root: r, u: o1(r), n: 2 };
+    if (r.operator === 'Root') {
+      // An exact integer degree only: the exact `3 + 10^-30` projects to the
+      // double `3`, but `Root(u, 3 + 10^-30)` is not a cube root.
+      const d = asExactSmallInteger(o2(r));
+      if (d === null || d < 2 || d > MAX_CONJUGATE_DEGREE) return undefined;
+      return { k, root: r, u: o1(r), n: d };
+    }
+    return undefined;
+  };
+
+  // `k·(a − b)` written as `k·(aⁿ − bⁿ)/(aⁿ⁻¹ + aⁿ⁻²·b + … + bⁿ⁻¹)`.
+  const rootDifference = (
+    k: Expression,
+    a: Expression,
+    aN: Expression,
+    b: Expression,
+    bN: Expression,
+    n: number
+  ): Expression => {
+    const pow = (base: Expression, m: number): Expression =>
+      m === 0
+        ? ce.One
+        : m === 1
+          ? base
+          : ce.function('Power', [base, ce.number(m)]);
+    const terms: Expression[] = [];
+    for (let m = 0; m < n; m++)
+      terms.push(ce.function('Multiply', [pow(a, n - 1 - m), pow(b, m)]));
+    const q = ce.function('Divide', [
+      expand(ce.function('Subtract', [aN, bN])),
+      ce.function('Add', terms),
+    ]);
+    return k.isSame(1) ? q : ce.function('Multiply', [k, q]);
+  };
+
+  // The rewrite `a − b → (aⁿ − bⁿ)/(…)` is used only when `aⁿ` and `bⁿ` are
+  // polynomials in `x`. Then `expand()` cancels their leading terms. With
+  // another function, such as `x²·cos²(1/x)`, the expanded numerator keeps
+  // terms that cancel only at leading order (`x² − x²·cos²(1/x)`), and the
+  // leading-order rewrite drops the smaller terms that give the limit:
+  // `√(x² + x) − x·cos(1/x)` gave 0, but its limit is 1/2.
+  const isPolynomial = (p: Expression): boolean => polynomialDegree(p, x) >= 0;
+
   const used = ops.map(() => false);
-  const out: Expression[] = [];
+  // The combined form of a pair, at the index of one of its two terms (the
+  // first term of a pair of the same kind, the radical of a pair of a
+  // radical and another term). The terms of a sum can be in any order.
+  const combinedAt: (Expression | undefined)[] = ops.map(() => undefined);
+
+  // Pairs of logarithms, and pairs of radicals of the same degree.
   for (let i = 0; i < ops.length; i++) {
     if (used[i]) continue;
-    let combined: Expression | undefined = undefined;
     const si = sign(ops[i]);
     const ci = core(ops[i]);
-    if (ci.operator === 'Ln' || ci.operator === 'Sqrt') {
-      for (let j = i + 1; j < ops.length; j++) {
-        if (used[j]) continue;
+    const ri = radicalTerm(ops[i]);
+    if (ci.operator !== 'Ln' && ri === undefined) continue;
+    for (let j = i + 1; j < ops.length; j++) {
+      if (used[j]) continue;
+      let combined: Expression | undefined = undefined;
+      if (ci.operator === 'Ln') {
         const sj = sign(ops[j]);
         const cj = core(ops[j]);
-        if (si === sj || cj.operator !== ci.operator) continue;
-        // (u, v) so that the pair is `f(u) − f(v)`.
+        if (si === sj || cj.operator !== 'Ln') continue;
+        // (u, v) so that the pair is `ln(u) − ln(v)`.
         const [u, v] = si === 1 ? [o1(ci), o1(cj)] : [o1(cj), o1(ci)];
         if (
           !baseEventuallyPositive(u, x, ce) ||
           !baseEventuallyPositive(v, x, ce)
         )
           continue;
-        if (ci.operator === 'Ln') {
-          combined = ce.function('Ln', [ce.function('Divide', [u, v])]);
-        } else {
-          combined = ce.function('Divide', [
-            ce.function('Subtract', [u, v]),
-            ce.function('Add', [
-              ce.function('Sqrt', [u]),
-              ce.function('Sqrt', [v]),
-            ]),
-          ]);
-        }
-        used[i] = used[j] = true;
-        changed = true;
-        break;
+        combined = ce.function('Ln', [ce.function('Divide', [u, v])]);
+      } else if (ri !== undefined) {
+        const rj = radicalTerm(ops[j]);
+        if (rj === undefined || rj.n !== ri.n || !rj.k.isSame(ri.k.neg()))
+          continue;
+        // A pair of constants, such as `√3 − √2`, does not need a rewrite.
+        if (!ri.root.has(x) && !rj.root.has(x)) continue;
+        if (!isPolynomial(ri.u) || !isPolynomial(rj.u)) continue;
+        // (a, b) so that the pair is `k·(a − b)` with `k > 0`.
+        const [a, b] = ri.k.isPositive === true ? [ri, rj] : [rj, ri];
+        if (
+          !baseEventuallyPositive(a.u, x, ce) ||
+          !baseEventuallyPositive(b.u, x, ce)
+        )
+          continue;
+        combined = rootDifference(a.k, a.root, a.u, b.root, b.u, ri.n);
       }
+      if (combined === undefined) continue;
+      combinedAt[i] = combined;
+      used[i] = used[j] = true;
+      changed = true;
+      break;
     }
-    if (combined !== undefined) out.push(combined);
-    else if (!used[i]) out.push(ops[i]);
+  }
+
+  // A radical and another term that grows at the same rate, as in
+  // `√(x² + x) − x`: `k·ⁿ√u + t` is `k·(ⁿ√u − q)` with `q = −t/k`.
+  for (let i = 0; i < ops.length; i++) {
+    if (used[i]) continue;
+    const ri = radicalTerm(ops[i]);
+    if (ri === undefined || !ri.root.has(x) || !isPolynomial(ri.u)) continue;
+    if (!baseEventuallyPositive(ri.u, x, ce)) continue;
+    for (let j = 0; j < ops.length; j++) {
+      if (j === i || used[j]) continue;
+      const t = ops[j];
+      const q = ri.k.isSame(1)
+        ? t.neg()
+        : ce.function('Divide', [t.neg(), ri.k]);
+      if (!isPolynomial(q)) continue;
+      if (stableSignAtInf(q, x, ce) !== 1) continue;
+      if (compareGrowth(ri.root, q, x, ce) !== 0) continue;
+      combinedAt[i] = rootDifference(
+        ri.k,
+        ri.root,
+        ri.u,
+        q,
+        ce.function('Power', [q, ce.number(ri.n)]),
+        ri.n
+      );
+      used[i] = used[j] = true;
+      changed = true;
+      break;
+    }
   }
 
   if (!changed) return e;
+  const out: Expression[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const c = combinedAt[i];
+    if (c !== undefined) out.push(c);
+    else if (!used[i]) out.push(ops[i]);
+  }
   if (out.length === 1) return out[0];
   return ce.function('Add', out);
 }
+
+/** The largest root degree that `combineCancellingPairs` rewrites: the
+ * rewrite of `ⁿ√u − ⁿ√v` has a denominator of `n` terms. */
+const MAX_CONJUGATE_DEGREE = 6;
 
 /**
  * Does the sum `e` lose most of its magnitude to cancellation (or overflow) at

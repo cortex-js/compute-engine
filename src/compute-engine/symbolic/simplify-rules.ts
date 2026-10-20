@@ -52,6 +52,10 @@ import {
   simplifyFactorialAdd,
 } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import {
+  hasCollectionShape,
+  mayBeTensorProductOperand,
+} from '../boxed-expression/order.js';
 
 // Odd special functions of one argument: f(-x) = -f(x)
 const ODD_SPECIAL_FUNCTIONS = new Set([
@@ -1013,6 +1017,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     const nonScalarTerms: Group[] = [];
     let run: { key: string; group: Group } | undefined;
 
+    // In a product that has a matrix (or another collection), a term whose
+    // type does not exclude a matrix (`g(x)` with `g` a function that was not
+    // declared, see `mayBeTensorProductOperand()`) is also a non-scalar term:
+    // `A·g(x)·A` is not `A^2·g(x)`. In a product with no matrix, such a term
+    // is a scalar, as before.
+    const hasMatrix = x.ops.some(hasCollectionShape);
+    const mayBeMatrix = (t: Expression) =>
+      hasMatrix && !hasCollectionShape(t) && mayBeTensorProductOperand(t);
+
     for (const term of x.ops) {
       let base: Expression;
       let exp: Expression;
@@ -1020,8 +1033,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (isFunction(term, 'Power')) {
         base = term.op1;
         exp = term.op2;
-      } else if (isSymbol(term)) {
-        // Bare symbol treated as base^1
+      } else if (isSymbol(term) || mayBeMatrix(term)) {
+        // Bare symbol treated as base^1. A term that can be a matrix
+        // (`g(x)`) is read as `g(x)^1` too, so that a run of adjacent equal
+        // terms is combined below as for a matrix: `A·g(x)·g(x)·A` is
+        // `A·g(x)^2·A`.
         base = term;
         exp = ce.One;
       } else {
@@ -1032,6 +1048,29 @@ export const SIMPLIFY_RULES: Rule[] = [
           nonScalarTerms.push({ base: term, terms: [{ term, exp: ce.One }] });
           run = undefined;
         } else otherTerms.push(term);
+        continue;
+      }
+
+      // A power of a term that can be a matrix is kept as it is, and keeps
+      // its position, unless the exponent is an exact positive integer
+      // literal, as for a matrix: a non-integer or float power of a matrix
+      // (`h(x)^{2.0}`) is element-wise.
+      if (mayBeMatrix(term) || mayBeMatrix(base)) {
+        const positiveInteger =
+          isNumber(exp) &&
+          exp.isExact &&
+          exp.isInteger === true &&
+          exp.isPositive === true;
+        const baseKey = JSON.stringify(base.json);
+        if (positiveInteger && run?.key === baseKey)
+          run.group.terms.push({ term, exp });
+        else if (positiveInteger) {
+          run = { key: baseKey, group: { base, terms: [{ term, exp }] } };
+          nonScalarTerms.push(run.group);
+        } else {
+          nonScalarTerms.push({ base, terms: [{ term, exp }] });
+          run = undefined;
+        }
         continue;
       }
 

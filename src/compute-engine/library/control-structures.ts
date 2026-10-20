@@ -77,6 +77,7 @@ import {
   errorValue,
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
+import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
 import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
@@ -1758,6 +1759,11 @@ function evaluateConnective(
 function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
   const t = cond.type;
   if (!cond.isValid || t.isUnknown) return cond;
+  // A condition that holds an error value (`w` after `w := Ln("a")`) is
+  // kept: its evaluation gives that error, as an argument of an eager
+  // operator does (`isErrorTypedOperand()`). The type `error` is disjoint
+  // from `boolean`, so the refusals below would replace it with a new error.
+  if (isErrorTypedOperand(cond)) return cond;
   const type = t.type;
   const refuse = () => ce.typeError('boolean', t, cond);
   if (isSubtype(type, 'string') || isTupleShapedType(type)) return refuse();

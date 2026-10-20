@@ -579,7 +579,7 @@ describe('Series — Laurent expansions at poles (§6)', () => {
     // Before, the expansion stopped at the constant term with `O(x−1)` at
     // every order.
     expect(series('\\zeta(x)', '1', 3).latex).toBe(
-      '\\frac{1}{x-1}+\\operatorname{EulerGamma}-(x-1)\\mathrm{StieltjesGamma}(1)+\\frac{1}{2}(\\mathrm{StieltjesGamma}(2)(x-1)^2)-\\frac{1}{6}(\\mathrm{StieltjesGamma}(3)(x-1)^3)+O\\left((x-1)^4\\right)'
+      '\\frac{1}{x-1}+\\operatorname{EulerGamma}-(x-1)\\mathrm{StieltjesGamma}(1)+\\frac{1}{2}\\mathrm{StieltjesGamma}(2)(x-1)^2-\\frac{1}{6}\\mathrm{StieltjesGamma}(3)(x-1)^3+O\\left((x-1)^4\\right)'
     );
     expect(seriesResidue('\\zeta(x)', '1').isSame(1)).toBe(true);
 

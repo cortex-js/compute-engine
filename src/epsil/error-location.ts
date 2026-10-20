@@ -21,6 +21,48 @@ import {
 export type ErrorFrameRef = { name: string; index: number };
 
 /**
+ * What the caller knows about the canonical form of the statement, for a call
+ * whose canonical form does not keep the written order of its operands.
+ *
+ * Canonicalization sorts the operands of a commutative operator and flattens
+ * the nested calls of an associative one. With `op` a user function marked
+ * `commutative`, `op(z, w)` is `op(w, z)`, so its frame `op argument 1` names
+ * `w`, the SECOND written operand. A canonical operand keeps the source range
+ * of the written operand it was made from, and the caller that boxed the
+ * statement can read it. This maps a frame's argument index back to the
+ * written operand.
+ */
+export type CanonicalOrder = {
+  /** Whether canonicalization sorts or flattens the operands of a call of
+   * `operatorName`: a library operator such as `Xor`, or a user function
+   * marked `commutative` or `associative`. */
+  reorders(operatorName: string): boolean;
+  /** The source range of operand `index` (1-based) of the canonical call of
+   * `operatorName` whose source range is `callRange`. `undefined` when there
+   * is no such canonical call, when its operand has no source range (a
+   * number made by folding `2 * x * 3`), or when the index does not count
+   * the operands of the canonical call (an error that the evaluation of an
+   * operand of `Add` or `Multiply` made, whose frame counts the operands of
+   * the result of the evaluation). */
+  argumentOffsets(
+    operatorName: string,
+    callRange: [number, number],
+    index: number
+  ): [number, number] | undefined;
+};
+
+/**
+ * The frames that {@link locateError} skipped because they did not make the
+ * error in the statement (their selected argument is a literal that is not
+ * the value the error names), by index in the frame list, and the written
+ * calls those frames selected.
+ */
+type Rejected = {
+  frames: Set<number>;
+  calls: Set<MathJsonExpression>;
+};
+
+/**
  * The frames of an error's `ErrorTrace` breadcrumb (engine design §2a),
  * innermost first: `["ErrorTrace", ["ErrorFrame", "'Ln'", 1], ["ErrorFrame",
  * "'Add'", 2]]`. The breadcrumb is the LAST operand of the `["Error", …]`
@@ -43,6 +85,19 @@ export function traceFrames(error: MathJsonExpression): ErrorFrameRef[] {
     frames.push({ name, index });
   }
   return frames;
+}
+
+/**
+ * The value that an error names as its cause: the operand that follows the
+ * error code (`["Error", code, where, trace]`), such as `'a'` for the error
+ * of `Ln("a")`. `undefined` when the error has no such operand.
+ */
+export function offendingValue(
+  error: MathJsonExpression
+): MathJsonExpression | undefined {
+  const where = operand(error, 2);
+  if (where === null || operator(where) === 'ErrorTrace') return undefined;
+  return where;
 }
 
 /**
@@ -122,12 +177,22 @@ export function locateError(
    * normalization FAILURES (`errorIndexCountsWrittenArguments`,
    * boxed-expression/named-arguments.ts): the call was never permuted, so
    * the index already counts written positions and is used directly. */
-  frameIndexOrder: 'declaration' | 'written' = 'declaration'
+  frameIndexOrder: 'declaration' | 'written' = 'declaration',
+  /** Maps the argument index of a frame of a reordered call back to the
+   * written operand (see {@link CanonicalOrder}). Without it, the index of a
+   * frame of `Add`, `Multiply`, `Xor` or `Set` is used as a written position
+   * when no inner frame names an operator of the statement, which is wrong
+   * when canonicalization moved the operand. */
+  canonicalOrder?: CanonicalOrder,
+  /** The value that the error names as the cause (see
+   * {@link offendingValue}), such as `"a"` for the error of `Ln("a")`. */
+  offending?: MathJsonExpression
 ): { range: [number, number]; call?: MathJsonExpression } {
+  const rejected: Rejected = { frames: new Set(), calls: new Set() };
   for (let k = 0; k < frames.length; k++) {
     const { name, index } = frames[k];
     const matches: MathJsonExpression[] = [];
-    findByOperator(stmt, name, matches);
+    findWrittenCalls(stmt, name, matches);
     let found: { call: MathJsonExpression; arg: MathJsonExpression | null };
     if (matches.length === 1) {
       // When the argument is not sure, the whole call is the range: it
@@ -139,7 +204,9 @@ export function locateError(
         stmt,
         stmt,
         frameIndexOrder,
-        slotNamesFor
+        slotNamesFor,
+        canonicalOrder,
+        rejected
       ) ?? {
         call: clusterTop(stmt, matches[0], name),
         arg: null,
@@ -150,11 +217,29 @@ export function locateError(
         k,
         stmt,
         frameIndexOrder,
-        slotNamesFor
+        slotNamesFor,
+        canonicalOrder,
+        rejected
       );
       if (walked === undefined) continue;
       found = walked;
     } else continue;
+
+    // The frame can come from a call in an EARLIER statement: with
+    // `let x = Ln("a")`, the error of `let v = x + Ln(2)` has the frames
+    // `Ln argument 1, Add argument 1`, and the `Ln` frame selects the `2` of
+    // `Ln(2)`. A literal argument that is not the value the error names did
+    // not make the error. The frame is then skipped, and the outer frames
+    // treat its call as a call that did not make the error.
+    if (
+      offending !== undefined &&
+      found.arg !== null &&
+      cannotBeValue(found.arg, offending)
+    ) {
+      rejected.frames.add(k);
+      rejected.calls.add(found.call);
+      continue;
+    }
 
     const range = nodeOffsets(found.arg) ?? nodeOffsets(found.call);
     // The matched CALL travels with the range: a caller quoting the error's
@@ -209,7 +294,9 @@ function walkToFrame(
   frameIndexOrder: 'declaration' | 'written',
   slotNamesFor?: (
     operatorName: string
-  ) => readonly (string | undefined)[] | undefined
+  ) => readonly (string | undefined)[] | undefined,
+  canonicalOrder?: CanonicalOrder,
+  rejected?: Rejected
 ): { call: MathJsonExpression; arg: MathJsonExpression | null } | undefined {
   let scope = stmt;
   // Whether an outer frame selected a call (and its argument is `scope`).
@@ -218,12 +305,18 @@ function walkToFrame(
     const { name } = frames[j];
     if (j > k) {
       const inStatement: MathJsonExpression[] = [];
-      findByOperator(stmt, name, inStatement);
+      findWrittenCalls(stmt, name, inStatement);
       if (inStatement.length === 0) continue;
     }
 
     const shallowest: MathJsonExpression[] = [];
     findShallowestByOperator(scope, name, shallowest);
+    // A written subtraction is the call of an `Add` frame when the scope has
+    // no written `Add` (see `clusterOperators`).
+    for (const other of clusterOperators(name)) {
+      if (shallowest.length > 0) break;
+      if (other !== name) findShallowestByOperator(scope, other, shallowest);
+    }
     if (shallowest.length !== 1) return undefined;
     const selected = frameArgument(
       frames,
@@ -232,7 +325,9 @@ function walkToFrame(
       scope,
       stmt,
       frameIndexOrder,
-      slotNamesFor
+      slotNamesFor,
+      canonicalOrder,
+      rejected
     );
     if (selected === undefined) return undefined;
     const { call, arg } = selected;
@@ -284,8 +379,9 @@ function clusterOperators(name: string): readonly string[] {
  * when the argument is not sure.
  *
  * For most operators the frame's argument index selects the argument. For
- * an operator in {@link REORDERED_OPERATORS}, the index counts the operands
- * of the canonical call. When an inner frame names an operator of the
+ * an operator in {@link REORDERED_OPERATORS}, or one that `canonicalOrder`
+ * says is reordered, the index counts the operands of the canonical call.
+ * When an inner frame names an operator of the
  * statement, the error went through a call of that operator, so the
  * argument is the one written operand of the call that holds such a call.
  * The written operands are read through the nested calls that
@@ -295,8 +391,11 @@ function clusterOperators(name: string): readonly string[] {
  * frame `Add argument 2` can name the first written operand, and when both
  * operands hold an `if` the argument is not sure. When no inner frame names
  * an operator of the statement, the call made the error for its own operand:
- * `"a" + 1` gives `Add argument 1`. Such an operand keeps its written
- * position, and the index is used.
+ * `"a" + 1` gives `Add argument 1`. With `canonicalOrder`, the written
+ * operand is the one whose source range the canonical operand has
+ * ({@link writtenOperandAt}): in `Ln(w) * 2`, whose canonical form is
+ * `2·Ln(w)`, the frame `Multiply argument 2` gives `Ln(w)`. Without it, the
+ * index is used as a written position.
  *
  * When frame `j` is not the innermost frame, the error came from a call
  * inside the argument. An argument that cannot fail when it is evaluated
@@ -312,18 +411,39 @@ function frameArgument(
   frameIndexOrder: 'declaration' | 'written',
   slotNamesFor?: (
     operatorName: string
-  ) => readonly (string | undefined)[] | undefined
+  ) => readonly (string | undefined)[] | undefined,
+  canonicalOrder?: CanonicalOrder,
+  rejected?: Rejected
 ): { call: MathJsonExpression; arg: MathJsonExpression | null } | undefined {
   const { name, index } = frames[j];
   let inner: string | undefined;
   for (let i = j - 1; i >= 0 && inner === undefined; i--) {
+    // A rejected frame did not make the error in this statement.
+    if (rejected?.frames.has(i)) continue;
     const found: MathJsonExpression[] = [];
-    findByOperator(stmt, frames[i].name, found);
+    findWrittenCalls(stmt, frames[i].name, found);
     if (found.length > 0) inner = frames[i].name;
   }
 
+  const reordered =
+    REORDERED_OPERATORS.has(name) || canonicalOrder?.reorders(name) === true;
   let result: { call: MathJsonExpression; arg: MathJsonExpression | null };
-  if (REORDERED_OPERATORS.has(name) && inner !== undefined) {
+  if (
+    reordered &&
+    inner === undefined &&
+    canonicalOrder !== undefined &&
+    frameIndexOrder === 'declaration' &&
+    !operands(call).some((op) => operator(op) === 'NamedArgument')
+  ) {
+    // The call made the error for one of its own operands, and the index
+    // counts the operands of the canonical call. The canonical operand keeps
+    // the source range of the written operand it was made from.
+    const top = clusterTop(scope, call, name);
+    result = {
+      call: top,
+      arg: writtenOperandAt(top, name, index, canonicalOrder, rejected),
+    };
+  } else if (reordered && inner !== undefined) {
     const top = clusterTop(scope, call, name);
     const holders = clusterLeaves(top, name).filter((leaf) => {
       const found: MathJsonExpression[] = [];
@@ -383,6 +503,46 @@ function clusterLeaves(
   return leaves;
 }
 
+/**
+ * The written operand of the reordered call `top` that operand `index`
+ * (1-based) of its canonical call was made from, found by source range (see
+ * {@link CanonicalOrder}). The candidates are the operands of `top` and the
+ * operands read through the nested calls that canonicalization merges with it
+ * ({@link clusterLeaves}).
+ *
+ * When the operand is not known (`argumentOffsets` gives `undefined`), the
+ * written operand is the one operand that can make an error when it is
+ * evaluated ({@link mayFail}): in `Ln(w) * 2`, `2` cannot. A call of a
+ * rejected frame (see {@link Rejected}) did not make the error either: in
+ * `x + Ln(2)`, with `x` an error from an earlier statement, the operand is
+ * `x`. `null` when no written operand, or more than one, is found
+ * (`Ln(w) + Ln(w)`): the caller then uses the whole call, which contains the
+ * error.
+ */
+function writtenOperandAt(
+  top: MathJsonExpression,
+  name: string,
+  index: number,
+  canonicalOrder: CanonicalOrder,
+  rejected?: Rejected
+): MathJsonExpression | null {
+  const callRange = nodeOffsets(top);
+  if (callRange === undefined) return null;
+  const range = canonicalOrder.argumentOffsets(name, callRange, index);
+  if (range === undefined) {
+    const failing = clusterLeaves(top, name).filter(
+      (leaf) => mayFail(leaf) && !rejected?.calls.has(leaf)
+    );
+    return failing.length === 1 ? failing[0] : null;
+  }
+  const candidates = new Set([...operands(top), ...clusterLeaves(top, name)]);
+  const found = [...candidates].filter((node) => {
+    const o = nodeOffsets(node);
+    return o !== undefined && o[0] === range[0] && o[1] === range[1];
+  });
+  return found.length === 1 ? found[0] : null;
+}
+
 /** Fill `path` with the nodes from `root` down to `node` (found by
  * identity). `false` when `node` is not in `root`. */
 function pathTo(
@@ -406,6 +566,29 @@ function mayFail(node: MathJsonExpression): boolean {
   if (['Block', 'List', 'Tuple'].includes(head))
     return operands(node).some(mayFail);
   return true;
+}
+
+/**
+ * Whether the written argument `arg` surely is not the value `value` that an
+ * error names as its cause (see {@link offendingValue}). This is true only
+ * when `arg` is a number or string literal and `value` is a different number
+ * or string. Any other argument, such as a symbol or a call, can evaluate to
+ * the value, and the answer is then `false`.
+ */
+function cannotBeValue(
+  arg: MathJsonExpression,
+  value: MathJsonExpression
+): boolean {
+  if (mayFail(arg)) return false;
+  const valueString = stringValue(value);
+  const valueNumber = machineValue(value);
+  if (valueString === null && valueNumber === null) return false;
+  const argString = stringValue(arg);
+  if (argString !== null) return argString !== valueString;
+  const argNumber = machineValue(arg);
+  if (argNumber !== null)
+    return valueNumber === null || !Object.is(argNumber, valueNumber);
+  return false;
 }
 
 /** Collect the nodes of `expr` whose operator is `name` and that are not
@@ -483,10 +666,19 @@ export function narrowToFrames(
   slotNamesFor?: (
     operatorName: string
   ) => readonly (string | undefined)[] | undefined,
-  frameIndexOrder: 'declaration' | 'written' = 'declaration'
+  frameIndexOrder: 'declaration' | 'written' = 'declaration',
+  canonicalOrder?: CanonicalOrder,
+  offending?: MathJsonExpression
 ): [number, number] {
-  return locateError(frames, stmt, fallback, slotNamesFor, frameIndexOrder)
-    .range;
+  return locateError(
+    frames,
+    stmt,
+    fallback,
+    slotNamesFor,
+    frameIndexOrder,
+    canonicalOrder,
+    offending
+  ).range;
 }
 
 /** Collect every node of `expr` whose operator is `name` (early-exits once
@@ -500,6 +692,26 @@ function findByOperator(
   if (operator(expr) === '') return;
   if (operator(expr) === name) matches.push(expr);
   for (const op of operands(expr)) findByOperator(op, name, matches);
+}
+
+/**
+ * Collect the written calls of `expr` that a frame of the operator `name`
+ * can name (early-exits once there are two). These are the calls of `name`
+ * itself. When there is none, they are the calls of the other written
+ * operators that canonicalization merges into a call of `name` (see
+ * {@link clusterOperators}): `3 - Ln(w)` has no written `Add`, and its
+ * `Subtract` is the call of an `Add` frame.
+ */
+function findWrittenCalls(
+  expr: MathJsonExpression | null,
+  name: string,
+  matches: MathJsonExpression[]
+): void {
+  findByOperator(expr, name, matches);
+  for (const other of clusterOperators(name)) {
+    if (matches.length > 0) return;
+    if (other !== name) findByOperator(expr, other, matches);
+  }
 }
 
 /** The `sourceOffsets` of a raw AST node, when it carries them. */

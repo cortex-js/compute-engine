@@ -35,17 +35,78 @@ export function isTensorProductOperand(x: Expression): boolean {
 }
 
 /**
+ * Can this operand be a matrix, although its type does not say so? This is
+ * `true` when the type of the operand is not known to exclude a collection:
+ * the type is `unknown` or `any` (the call `g(x)` of a function that was not
+ * declared), a union such as `number | matrix`, or a collection that is not
+ * known to be a matrix or a vector (`g(A)` with `A` a matrix has the type
+ * `list<unknown^(2x2)>`). A tuple is not a matrix. An operand of a scalar
+ * type (`number`, `real`, `integer`) is `false`.
+ *
+ * A symbol of type `unknown` (a symbol with no declaration and no value) is
+ * `false`: a symbol used in a product is a number. `ce.box(['Multiply', 'A',
+ * 'x'])` infers the type `number` for `x`, but `ce.parse('A x')` leaves it
+ * `unknown`, and the two must give the same product. A symbol declared with
+ * the type `any` is not inferred to be a number, so it is `true`.
+ *
+ * In a product with a matrix, such an operand must not move past a matrix
+ * or past another operand of this kind: if it is a matrix, the two factors
+ * do not commute.
+ *
+ * Limit: a product with no matrix is sorted when it is made canonical, so a
+ * product nested in a product with a matrix can lose the order of its
+ * factors before the outer product sees the matrix.
+ * `['Multiply', 'A', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']]]`
+ * becomes `A·k(x)·g(x)·g(x)`, because the inner product has no matrix and
+ * is sorted first. To keep that order, a product with no matrix must not be
+ * sorted, and this changes the order of a scalar product such as
+ * `g(x)·k(x)`.
+ */
+export function mayBeTensorProductOperand(x: Expression): boolean {
+  const facts = x.type.facts;
+  if (facts.collection === false || facts.tupleShaped) return false;
+  return !(isSymbol(x) && x.type.type === 'unknown');
+}
+
+/**
+ * Is the type of this operand a collection (a list, a matrix, a set) that
+ * is not a tuple? This gives the same answer as `isCollectionShaped()` in
+ * `collection-utils.ts`, but it reads the facts that the type keeps in a
+ * cache, and does not match the type again at each call.
+ */
+export function hasCollectionShape(x: Expression): boolean {
+  const facts = x.type.facts;
+  return facts.collection === true && !facts.tupleShaped;
+}
+
+/**
  * Sort the operands of a product: with two or more matrix/vector operands,
  * keep the tensors in their written order and sort only the (commutative)
  * scalar factors, placed before them. With 0 or 1 tensor the product is
  * order-independent and the normal canonical sort applies.
+ *
+ * An operand that can be a matrix (see `mayBeTensorProductOperand()`) is
+ * kept in its written order with the tensors when the product has at least
+ * one tensor: with `A` a matrix and `g` a function that was not declared,
+ * `A·g(A)·A` stays as it is, because `g(A)` can be a matrix that does not
+ * commute with `A`. A product with no tensor is sorted as before, so `x·g(x)`
+ * is still sorted.
+ *
+ * When `matrixContext` is `true`, `xs` are a part of a larger product that
+ * has a tensor, and the operands that can be a matrix keep their order even
+ * if no operand of `xs` is a tensor.
  */
 export function sortProductOperands(
-  xs: ReadonlyArray<Expression>
+  xs: ReadonlyArray<Expression>,
+  matrixContext = false
 ): Expression[] {
   // The tensor predicate does type-matching work: evaluate it once per
   // operand, not once per filter pass.
   const isTensor = xs.map(isTensorProductOperand);
+  if (matrixContext || isTensor.some(Boolean)) {
+    for (let i = 0; i < xs.length; i++)
+      if (!isTensor[i]) isTensor[i] = mayBeTensorProductOperand(xs[i]);
+  }
   if (isTensor.filter(Boolean).length >= 2) {
     const scalars = xs.filter((_, i) => !isTensor[i]).sort(order);
     const tensors = xs.filter((_, i) => isTensor[i]);

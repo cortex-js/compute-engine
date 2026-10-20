@@ -397,6 +397,78 @@ function startsWithPrimeMark(
   return isPrimeCommand(tokens[k]);
 }
 
+/**
+ * Whether a fraction written in the `nice-solidus` style starts at token
+ * `k`: `{}^{a}\!\!/\!{}_{b}`. The shape must be exact: an empty group, a `^`
+ * and a braced numerator, any number of negative thin spaces (`\!`), a `/`,
+ * any number of `\!`, an empty group, a `_` and a braced denominator. White
+ * space is allowed between the tokens.
+ *
+ * Out of this shape, an empty group is white space (see `skipSpace()`) and
+ * `{}^{a}` or `{}_{b}` keep their usual reading.
+ *
+ * Return the token positions of the numerator group and of the denominator
+ * group, or `null` if the tokens do not have this shape. Each group starts at
+ * its `{` and ends at the token after its closing `}`.
+ */
+function isNiceSolidusAt(
+  tokens: readonly LatexToken[],
+  k: number
+): {
+  numerStart: number;
+  numerEnd: number;
+  denomStart: number;
+  denomEnd: number;
+} | null {
+  const skipSpace = () => {
+    while (tokens[k] === '<space>') k++;
+  };
+  // Match the empty group `{}` followed by the script token `script`
+  const matchEmptyGroupAndScript = (script: LatexToken): boolean => {
+    skipSpace();
+    if (tokens[k] !== '<{>') return false;
+    k++;
+    skipSpace();
+    if (tokens[k] !== '<}>') return false;
+    k++;
+    skipSpace();
+    if (tokens[k] !== script) return false;
+    k++;
+    skipSpace();
+    return true;
+  };
+  // Match a braced group, with balanced braces inside
+  const matchGroup = (): boolean => {
+    if (tokens[k] !== '<{>') return false;
+    let level = 0;
+    while (k < tokens.length) {
+      const t = tokens[k++];
+      if (t === '<{>') level += 1;
+      else if (t === '<}>') {
+        level -= 1;
+        if (level === 0) return true;
+      }
+    }
+    return false;
+  };
+  const skipNegativeThinSpace = () => {
+    while (tokens[k] === '\\!' || tokens[k] === '<space>') k++;
+  };
+
+  if (!matchEmptyGroupAndScript('^')) return null;
+  const numerStart = k;
+  if (!matchGroup()) return null;
+  const numerEnd = k;
+  skipNegativeThinSpace();
+  if (tokens[k] !== '/') return null;
+  k++;
+  skipNegativeThinSpace();
+  if (!matchEmptyGroupAndScript('_')) return null;
+  const denomStart = k;
+  if (!matchGroup()) return null;
+  return { numerStart, numerEnd, denomStart, denomEnd: k };
+}
+
 /** Map of common bare function names (e.g. `sin(x)` without a backslash,
  * accepted in non-strict mode) to their MathJSON operator.
  * See `tryParseBareFunction()`. */
@@ -868,6 +940,9 @@ export class _Parser implements Parser {
   // for the others (see `tokenize()`). `sourceOffsets()` measures these
   // tokens with this text, so the spans after them match the input.
   private readonly _inputText: ReadonlyMap<number, string> | undefined;
+  // The indices of the `<space>` tokens that are a `~` in the input (see
+  // `tokenize()` and `_isTilde()`).
+  private readonly _tildes: ReadonlySet<number> | undefined;
   // The text that the offsets of `sourceOffsets()` index into: the
   // normalized LaTeX, with the text in `_inputText` for the tokens that it
   // holds. Built with `_tokenPrefixOffsets`.
@@ -1352,10 +1427,12 @@ export class _Parser implements Parser {
     tokens: LatexToken[],
     dictionary: IndexedLatexDictionary,
     options: Readonly<ParseLatexOptions>,
-    inputText?: ReadonlyMap<number, string>
+    inputText?: ReadonlyMap<number, string>,
+    tildes?: ReadonlySet<number>
   ) {
     this._tokens = tokens;
     this._inputText = inputText;
+    this._tildes = tildes;
     this.options = options;
     this._dictionary = dictionary;
     // `onAmbiguity: 'error'` needs the `ambiguous-*` diagnostics of the
@@ -1864,7 +1941,13 @@ export class _Parser implements Parser {
     // Check if there is a `{}` token sequence.
     // Those are used in LaTeX to force an invisible separation between commands
     // and are considered skipable space.
-    if (!this.atEnd && this.peek === '<{>') {
+    // The `{}` that starts a `nice-solidus` fraction, `{}^{a}\!\!/\!{}_{b}`,
+    // is not skipped: `parsePrimary()` reads the fraction.
+    if (
+      !this.atEnd &&
+      this.peek === '<{>' &&
+      !isNiceSolidusAt(this._tokens, this.index)
+    ) {
       const index = this.index;
       this.nextToken();
       while (this.match('<space>')) {}
@@ -1900,6 +1983,10 @@ export class _Parser implements Parser {
   }
 
   _visualSpaceStops: ReadonlySet<number> | null = null;
+
+  _isTilde(index: number): boolean {
+    return this._tildes?.has(index) ?? false;
+  }
 
   skipVisualSpace(): void {
     if (!this.options.skipSpace) return;
@@ -2268,6 +2355,34 @@ export class _Parser implements Parser {
       }
     }
 
+    this.index = start;
+    return null;
+  }
+
+  /**
+   * Read a fraction written in the `nice-solidus` style,
+   * `{}^{a}\!\!/\!{}_{b}`, as `Divide(a, b)`. The serializer writes this
+   * form when the `fractionStyle` option is `'nice-solidus'`. Return `null`,
+   * and do not move the index, if the tokens do not have exactly this shape
+   * (see `isNiceSolidusAt()`).
+   *
+   * The parse of a group can stop before the closing `}` that the shape
+   * found, for example on a `&` or a `)`. The parse then recovers at the
+   * first `}`, which can be the `}` of a nested group. In this case, also
+   * return `null` and do not move the index.
+   */
+  private parseNiceSolidus(): MathJsonExpression | null {
+    const start = this.index;
+    const shape = isNiceSolidusAt(this._tokens, start);
+    if (shape === null) return null;
+    this.index = shape.numerStart;
+    const numer = this.parseGroup();
+    if (this.index === shape.numerEnd) {
+      this.index = shape.denomStart;
+      const denom = this.parseGroup();
+      if (this.index === shape.denomEnd)
+        return ['Divide', missingIfEmpty(numer), missingIfEmpty(denom)];
+    }
     this.index = start;
     return null;
   }
@@ -5767,6 +5882,9 @@ export class _Parser implements Parser {
     if (this.match('<}>'))
       return this.error('unexpected-closing-delimiter', start);
 
+    // A fraction in the `nice-solidus` style, `{}^{a}\!\!/\!{}_{b}`
+    result ??= this.parseNiceSolidus();
+
     result ??= this.parseGroup();
 
     //
@@ -6847,11 +6965,13 @@ function parseCore(
   comments?: DiscardedComment[]
 ): { expr: MathJsonExpression | null; parser: _Parser } {
   const inputText = new Map<number, string>();
+  const tildes = new Set<number>();
   const parser = new _Parser(
-    tokenize(latex, [], comments, inputText),
+    tokenize(latex, [], comments, inputText, tildes),
     dictionary,
     options,
-    inputText
+    inputText,
+    tildes
   );
 
   let expr = parser.parseExpression();

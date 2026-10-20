@@ -53,6 +53,10 @@ import {
   type ArmTrialFn,
   type OverloadResolution,
 } from './overload.js';
+import {
+  isErrorTypedOperand,
+  isErrorTypedWithoutErrorValue,
+} from './error-typed-operand.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
@@ -3136,7 +3140,16 @@ export function validateArguments(
   // statically STRICTER than its ground counterpart on unknown/`any` operands,
   // breaking the §4.5 parity requirement. Deferred like the other provisional
   // admissions, so the final inference pass does not narrow on a guess.
+  //
+  // The solver also absorbs a top-level operand of type `error` at a call,
+  // because a symbol that holds an error value gives its own error at every
+  // parameter (`isErrorTypedOperand()`). The solver sees only the type, so
+  // it absorbs other operands of type `error` too: a symbol declared `error`
+  // that has NO value, or an application whose declared result type is
+  // `error`. Neither evaluates to an error. Their positions are recorded in
+  // `unheldErrorIdx` and checked after the per-position checks (see below).
   const provisionalIdx = new Set<number>();
+  const unheldErrorIdx = new Set<number>();
   if (solved && solved.absorbed.size > 0 && polyArm) {
     const patterns = parameterPositions(polyArm, ops.length);
     patterns.forEach((p, k) => {
@@ -3144,6 +3157,9 @@ export function validateArguments(
       for (const v of freeTypeVariables(p))
         if (solved.absorbed.has(v)) {
           provisionalIdx.add(k);
+          const op = ops[k];
+          if (op !== undefined && isErrorTypedWithoutErrorValue(op))
+            unheldErrorIdx.add(k);
           return;
         }
     });
@@ -3248,6 +3264,22 @@ export function validateArguments(
     if (!op.isValid) {
       result.push(op);
       isValid = false;
+      continue;
+    }
+    // A valid operand whose type is `error` (a symbol that holds an error
+    // value, such as `w` after `w := Ln("a")`) always evaluates to its own
+    // error. It passes through at every parameter type, and the evaluation
+    // of the call then gives that error, with the frame of the call. The
+    // type `error` is a member of no value type, not even `unknown`, so the
+    // checks below refused it at some parameters (`unknown`, a collection,
+    // `function`) with a new `incompatible-type` error ("expected
+    // `unknown`, got `error`") that hid the real error. `checkNumericArgs`
+    // passes such an operand through for the same reason. The position is
+    // deferred, so the final inference pass does not narrow the symbol to
+    // the parameter type.
+    if (isErrorTypedOperand(op)) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
       continue;
     }
     if (op.type.isUnknown || op.type.type === 'any') {
@@ -3589,6 +3621,14 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // An operand typed `error` passes through — see the required
+    // parameters above.
+    if (isErrorTypedOperand(op)) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
+      i += 1;
+      continue;
+    }
     if (op.type.isUnknown || op.type.type === 'any') {
       // An expression with an unknown or any type is assumed to be valid,
       // we'll infer the type later
@@ -3853,6 +3893,13 @@ export function validateArguments(
         isValid = false;
         continue;
       }
+      // An operand typed `error` passes through — see the required
+      // parameters above.
+      if (isErrorTypedOperand(op)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       if (op.type.isUnknown || op.type.type === 'any') {
         // An expression with an unknown or any type is assumed to be valid,
         // we'll infer the type later
@@ -4059,6 +4106,42 @@ export function validateArguments(
   if (i < ops.length) {
     for (const op of ops.slice(i)) {
       result.push(ce.error('unexpected-argument', op.toString()));
+      isValid = false;
+    }
+  }
+
+  // An operand of type `error` that does not hold an error value, at a
+  // position whose type variable the solver absorbed (see `unheldErrorIdx`
+  // above). The operand is checked against the parameter with each absorbed
+  // variable read at its declared bound, or at `any` when the variable has
+  // no bound. A parameter that accepts the type `error` (`any`, or `error`
+  // itself) admits the operand. Any other parameter refuses it: `(T) -> T
+  // where T: number` applied to `e` (declared `error`, with no value)
+  // reports "expected `number`, got `error`".
+  //
+  // This refusal is stricter than the ground route. The per-position checks
+  // above admit the same `e` at a ground scalar parameter such as `number`
+  // or `string`, because `typesOverlap()` reports that `error` overlaps
+  // every type (`overlapAdmission()`). `checkNumericArgs()` also passes
+  // every valid operand of type `error` to a library numeric operator. So
+  // `(number) -> number` applied to `e` and `Sqrt(e)` are valid and
+  // evaluate to themselves. A ground collection parameter such as `list`
+  // refuses `e`.
+  if (unheldErrorIdx.size > 0 && solved && polyArm) {
+    const patterns = parameterPositions(polyArm, ops.length);
+    const atBounds: Record<string, Type> = { ...solved.bindings };
+    for (const tp of polyArm.typeParams ?? [])
+      if (solved.absorbed.has(tp.name)) atBounds[tp.name] = tp.bound ?? 'any';
+    for (const idx of unheldErrorIdx) {
+      if (idx >= result.length || !result[idx].isValid) continue;
+      const pattern = patterns[idx];
+      // A parameter that stays open admits everything, as in `groundParam()`.
+      const expected =
+        (pattern !== undefined
+          ? instantiatedParam(pattern, atBounds)
+          : undefined) ?? 'any';
+      if (isSubtype('error', expected)) continue;
+      result[idx] = ce.typeError(expected, ops[idx]?.type, ops[idx]);
       isValid = false;
     }
   }

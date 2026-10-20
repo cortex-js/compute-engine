@@ -3784,6 +3784,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           zeroShape[0] !== zeroShape[1]
         )
           return ce.error('expected-square-matrix', A.toString());
+        // `MatrixPower(MatrixPower(B, m), n)` with positive integers `m` and
+        // `n` is the product of `m·n` factors `B`, so it is
+        // `MatrixPower(B, m·n)`. This applies when `B` has no value, so that
+        // the inner power stays symbolic. A zero or negative exponent is
+        // left as it is.
+        if (
+          isFunction(A, 'MatrixPower') &&
+          isNumber(A.op2) &&
+          A.op2.isExact &&
+          A.op2.isInteger === true &&
+          A.op2.re > 0 &&
+          isNumber(exponent) &&
+          exponent.isExact &&
+          exponent.isInteger === true &&
+          exponent.re > 0
+        )
+          return ce.function('MatrixPower', [A.op1, A.op2.mul(exponent)]);
         if (!isTensorValue(A)) return undefined;
         const aTensor = packTensor(ce, A, { numeric: numericApproximation });
         if (!aTensor) return undefined;

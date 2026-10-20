@@ -62,9 +62,13 @@ import { normalizeAngle, formatDMS } from '../serialize-dms.js';
  * Use `\mathrm{m^{2}\cdot s}` (with explicit `\cdot`) for multi-unit
  * expressions that include braced exponents.
  *
+ * When `siunitx` is true (the unit argument of a siunitx command), a `~`
+ * is emitted as `.`: in siunitx, both are a product of two units. Elsewhere
+ * a `~` is a space, as in LaTeX.
+ *
  * Returns `null` if no opening brace is found.
  */
-function readBracedText(parser: Parser): string | null {
+function readBracedText(parser: Parser, siunitx = false): string | null {
   // Skip spaces between the trigger and the opening brace, e.g. the space
   // in `\text { gallons/ft}`.
   while (parser.peek === '<space>') parser.nextToken();
@@ -102,7 +106,8 @@ function readBracedText(parser: Parser): string | null {
     // boundaries surviving to the alias pass; `resolveUnitText` trims and
     // strips the spaces before the unit lookup.
     if (token === '<space>') {
-      if (text.length > 0 && !text.endsWith(' ')) text += ' ';
+      if (siunitx && parser._isTilde(parser.index)) text += '.';
+      else if (text.length > 0 && !text.endsWith(' ')) text += ' ';
       parser.nextToken();
       continue;
     }
@@ -748,22 +753,54 @@ function parseSiunitxUnit(parser: Parser): MathJsonExpression | null {
 }
 
 /**
- * Read a braced group as raw text, resolve it as a unit, and restore the
- * parser on failure.  Shared by siunitx handlers.
+ * Replace the siunitx product separator `.` with the `*` of the unit DSL:
+ * `m.s^-1` is `m*s^-1`, and `kg.m^2.s^-2` is `kg*m^2*s^-2`.
+ *
+ * In the unit argument of a siunitx command, a `.` between two units is a
+ * product of the units. A `.` is a separator only when a unit or an
+ * exponent comes before it and a unit comes after it. So the decimal point
+ * of an exponent (`m^1.5`) stays, and so does a `.` at the end of the text,
+ * as in the abbreviation `in.` of the alias table `UNIT_ALIASES`.
+ *
+ * The other siunitx product separator, `~`, is already a `.` in the text
+ * (see `readBracedText()`). A space is not a separator: `m s` is `ms`, the
+ * millisecond, as LaTeX prints it.
+ */
+function siunitxProductsToDsl(text: string): string {
+  return text.replace(/(?<=[^\s./*^(])\s*\.\s*(?=[^\s\d./*^)+-])/g, '*');
+}
+
+/**
+ * Read a braced group as raw text and resolve it as a unit.  Shared by
+ * siunitx handlers. In the text, the siunitx product separators `.` and `~`
+ * are a product (`m.s^{-1}` and `m~s^{-1}` are `m·s⁻¹`).
+ *
+ * When there is no braced group, or it is not closed, restore the parser
+ * and return `null`. When the text of the group is not a unit, return an
+ * `unknown-unit` error with the text of the group:
+ * `["Error", "'unknown-unit'", ["LatexString", "'foo'"]]` for `{foo}`.
+ * Without it, the parser reported an `unexpected-command` error on the
+ * siunitx command, which does not say that the unit is the problem.
  */
 function readBracedUnit(parser: Parser): MathJsonExpression | null {
   const saved = parser.index;
-  const unitText = readBracedText(parser);
+  while (parser.peek === '<space>') parser.nextToken();
+  // The index of the first token after the `{`
+  const start = parser.index + 1;
+  const unitText = readBracedText(parser, true);
   if (unitText === null) {
     parser.index = saved;
     return null;
   }
-  const unit = resolveUnitText(unitText);
-  if (unit === null) {
-    parser.index = saved;
-    return null;
-  }
-  return unit;
+  const unit = resolveUnitText(siunitxProductsToDsl(unitText));
+  if (unit !== null) return unit;
+  // The error spans the text of the group, without the braces: move back
+  // before the `}`, make the error, then move after the `}` again.
+  const end = parser.index;
+  parser.index = end - 1;
+  const error = parser.error('unknown-unit', start);
+  parser.index = end;
+  return error;
 }
 
 // ---------------------------------------------------------------------------

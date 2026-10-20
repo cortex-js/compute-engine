@@ -605,6 +605,20 @@ export class Parser {
    */
   private readonly redundantlyParenthesized = new WeakSet<object>();
 
+  /**
+   * For each node that came out of a parenthesized group holding exactly one
+   * value (`(expr)` in an expression, `(p)` in a pattern), the local
+   * `[start, end]` of the group, parentheses included.
+   *
+   * The node keeps its own span, which excludes the parentheses: checks that
+   * read the authored text of a node (`(x) = 5` assigns, `(x) -> x^2` is a
+   * lambda with the wrong arrow) depend on it. A node that CONTAINS the group
+   * must cover the parentheses, or `(a) + (b)` spans `a) + (b`. The
+   * {@link outerStart} and {@link outerEnd} helpers read this map for that.
+   * With nested groups, `((a))`, the outer group is recorded last and wins.
+   */
+  private readonly parenthesizedSpans = new WeakMap<object, [number, number]>();
+
   /** Set by {@link recoverAtStatementBoundary}: the statement that just
    * returned `null` has ALREADY emitted its diagnostic and resynchronized to
    * the next statement boundary. The statement loops (`parseProgram`,
@@ -1271,7 +1285,7 @@ export class Parser {
         );
       } else {
         valueNode = init;
-        end = this.localEnd(init) ?? this.previousEnd();
+        end = this.outerEnd(init) ?? this.previousEnd();
       }
     }
     if (options?.requireValue && valueNode === undefined) {
@@ -3142,7 +3156,7 @@ export class Parser {
       return null;
     }
     this.checkRangePatterns(pattern);
-    const patternEnd = this.localEnd(pattern) ?? this.previousEnd();
+    const patternEnd = this.outerEnd(pattern) ?? this.previousEnd();
 
     const eq = this.current;
     if (eq.type !== 'OPERATOR' || eq.text !== '=') {
@@ -3450,7 +3464,7 @@ export class Parser {
     const elementNode = this.wrap(
       ['Element', varNode, coll] as MathJsonExpression[],
       varStart,
-      this.localEnd(coll) ?? this.previousEnd()
+      this.outerEnd(coll) ?? this.previousEnd()
     );
     return this.wrap(
       ['Loop', body, elementNode] as MathJsonExpression[],
@@ -3550,7 +3564,7 @@ export class Parser {
         );
         return null;
       }
-      let end = this.localEnd(coll) ?? this.previousEnd();
+      let end = this.outerEnd(coll) ?? this.previousEnd();
       const clause: MathJsonExpression[] = ['Element', binding.node, coll];
       if (this.check('SYMBOL') && this.current.text === 'if') {
         this.advance(); // 'if'
@@ -3565,14 +3579,14 @@ export class Parser {
         }
         this.checkConditionAssign(guard);
         clause.push(guard);
-        end = this.localEnd(guard) ?? this.previousEnd();
+        end = this.outerEnd(guard) ?? this.previousEnd();
       }
       clauses.push(this.wrap(clause, binding.start, end));
       if (!this.match('COMMA')) break;
     }
     return this.wrap(
       ['Comprehension', body, ...clauses] as MathJsonExpression[],
-      this.localStart(body) ?? forTok.start,
+      this.outerStart(body) ?? forTok.start,
       this.previousEnd()
     );
   }
@@ -3756,7 +3770,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
-    const end = this.localEnd(body) ?? this.previousEnd();
+    const end = this.outerEnd(body) ?? this.previousEnd();
 
     // Conjoin the implicit type guards with the explicit guard (implicit
     // first), building a single guard operand.
@@ -3924,8 +3938,8 @@ export class Parser {
       }
     }
 
-    const start = this.localStart(first) ?? this.current.start;
-    const end = this.localEnd(alts[alts.length - 1]) ?? this.previousEnd();
+    const start = this.outerStart(first) ?? this.current.start;
+    const end = this.outerEnd(alts[alts.length - 1]) ?? this.previousEnd();
     return this.wrap(
       ['Alternatives', ...alts] as MathJsonExpression[],
       start,
@@ -4050,7 +4064,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
-    const end = this.localEnd(operand) ?? this.previousEnd();
+    const end = this.outerEnd(operand) ?? this.previousEnd();
     // A literal pin matches structurally; drop the `Pin` head.
     if (isLiteralNode(operand)) return operand;
     return this.wrap(
@@ -4069,7 +4083,7 @@ export class Parser {
     for (;;) {
       const post = this.peekPostfix();
       if (post !== null && post.precedence >= minPrecedence) {
-        const start = this.localStart(left) ?? this.current.start;
+        const start = this.outerStart(left) ?? this.current.start;
         const opTok = this.advance();
         left = this.wrap(
           [post.name, left] as MathJsonExpression[],
@@ -4124,7 +4138,7 @@ export class Parser {
         this.error(['expression-expected'], signTok.start, signTok.end);
         return null;
       }
-      const end = this.localEnd(operand) ?? this.previousEnd();
+      const end = this.outerEnd(operand) ?? this.previousEnd();
       return rootDegree === 2
         ? this.wrap(['Sqrt', operand], signTok.start, end)
         : this.wrap(['Root', operand, rootDegree], signTok.start, end);
@@ -4300,7 +4314,10 @@ export class Parser {
       this.error(['expression-expected'], open.start, end);
       return null;
     }
-    if (values.length === 1) return values[0];
+    if (values.length === 1) {
+      this.markParenthesized(values[0], open.start, end);
+      return values[0];
+    }
     return this.wrap(
       ['Tuple', ...values] as MathJsonExpression[],
       open.start,
@@ -5529,13 +5546,13 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
-    const end = this.localEnd(rhs) ?? this.previousEnd();
+    const end = this.outerEnd(rhs) ?? this.previousEnd();
 
     const ascribedBody =
       ascription !== null
         ? this.wrap(
             ['Typed', rhs, ascription] as MathJsonExpression[],
-            this.localStart(rhs) ?? nameTok.start,
+            this.outerStart(rhs) ?? nameTok.start,
             end
           )
         : rhs;
@@ -6426,7 +6443,7 @@ export class Parser {
       // so they are consumed before `peekInfix`. `x!` → `["Factorial", x]`.
       const post = this.peekPostfix();
       if (post !== null && post.precedence >= minPrecedence) {
-        const start = this.localStart(left) ?? this.current.start;
+        const start = this.outerStart(left) ?? this.current.start;
         const opTok = this.advance(); // the postfix operator token
         left = this.wrap(
           [post.name, left] as MathJsonExpression[],
@@ -6452,7 +6469,7 @@ export class Parser {
         const scriptTok = this.advance();
         const script = this.parseScript(scriptTok);
         if (script === null) break;
-        const start = this.localStart(left) ?? scriptTok.start;
+        const start = this.outerStart(left) ?? scriptTok.start;
         const base = left;
         left = this.wrap(
           [
@@ -6558,8 +6575,8 @@ export class Parser {
           // No operator has that precedence, so it binds the same operators.
           const right = this.parseExpression(MULTIPLY_PRECEDENCE + 2);
           if (right === null) break;
-          const start = this.localStart(left) ?? 0;
-          const end = this.localEnd(right) ?? this.previousEnd();
+          const start = this.outerStart(left) ?? 0;
+          const end = this.outerEnd(right) ?? this.previousEnd();
           left = this.wrap(
             ['Multiply', left, right] as MathJsonExpression[],
             start,
@@ -6714,8 +6731,8 @@ export class Parser {
 
     return this.wrap(
       ['If', cond, consequent, alternative] as MathJsonExpression[],
-      this.localStart(consequent) ?? kw.start,
-      this.localEnd(alternative) ?? this.previousEnd()
+      this.outerStart(consequent) ?? kw.start,
+      this.outerEnd(alternative) ?? this.previousEnd()
     );
   }
 
@@ -6744,7 +6761,7 @@ export class Parser {
     subject: MathJsonExpression
   ): MathJsonExpression | null {
     const kw = this.advance(); // 'is'
-    const start = this.localStart(subject) ?? kw.start;
+    const start = this.outerStart(subject) ?? kw.start;
     const tok = this.current;
 
     // The type must be on the SAME LINE as `is`, for the same reason `is`
@@ -6975,7 +6992,7 @@ export class Parser {
       this.error(['expression-expected'], signTok.start, signTok.end);
       return null;
     }
-    const end = this.localEnd(operand) ?? this.previousEnd();
+    const end = this.outerEnd(operand) ?? this.previousEnd();
     const node =
       degree === 2
         ? this.wrap(['Sqrt', operand], signTok.start, end)
@@ -7012,7 +7029,7 @@ export class Parser {
     operand: MathJsonExpression,
     start: number
   ): MathJsonExpression {
-    const end = this.localEnd(operand) ?? this.previousEnd();
+    const end = this.outerEnd(operand) ?? this.previousEnd();
     // A signed glyph coefficient is still a coefficient: `-√2x` and `-2²x`
     // multiply as `-2x` does. Membership is copied onto every wrapper the
     // loop below builds around a member.
@@ -7292,8 +7309,8 @@ export class Parser {
     if (typeof op !== 'string' || op === '') return operand;
     if (operatorDefByName(op) === undefined) return operand;
     if (!mentionsWildcard(operand)) return operand;
-    const start = this.localStart(operand) ?? 0;
-    const end = this.localEnd(operand) ?? this.previousEnd();
+    const start = this.outerStart(operand) ?? 0;
+    const end = this.outerEnd(operand) ?? this.previousEnd();
     return this.wrap(['Function', operand] as MathJsonExpression[], start, end);
   }
 
@@ -7302,8 +7319,8 @@ export class Parser {
     left: MathJsonExpression,
     right: MathJsonExpression
   ): MathJsonExpression {
-    const start = this.localStart(left) ?? 0;
-    const end = this.localEnd(right) ?? this.previousEnd();
+    const start = this.outerStart(left) ?? 0;
+    const end = this.outerEnd(right) ?? this.previousEnd();
 
     // The mapsto arrow `params => body`: `left` is a parameter list (a bare
     // symbol, or a parenthesized/tuple list of symbols), `right` is the body.
@@ -7415,13 +7432,27 @@ export class Parser {
    * That is the intended reading — redundant parentheses around a name do not
    * change what it is. (The case the design note names, `Solve((x = 4), x)`,
    * is already handled: the inner `=` is in expression position and compares.)
+   *
+   * The same holds for parentheses around the receiver of a property or an
+   * index: `(p).x = 1` and `(xs)[1] = 1` assign. The span of the `Field` or
+   * `At` node covers those parentheses (see {@link outerStart}), so the
+   * opening parentheses at its start are skipped. The token after them must
+   * be the root symbol of the target (see {@link bindingTargetRoot}): in
+   * `(+p).x = 1` it is the `+`, and the statement compares.
    */
   private startsWithSymbolToken(target: MathJsonExpression): boolean {
     const start = this.localStart(target);
     if (start === undefined || start === null) return false;
-    const tok = this.firstTokenAtOrAfter(start);
+    const first = this.firstTokenIndexAtOrAfter(start);
+    let i = first;
+    while (i < this.tokens.length && this.tokens[i].type === 'OPEN_PAREN') i++;
+    const tok = this.tokens[i];
     if (tok === undefined) return false;
-    return tok.type === 'SYMBOL' || tok.type === 'VERBATIM_SYMBOL';
+    if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') return false;
+    if (i === first) return true;
+    // Parentheses were skipped: the symbol must be where the root starts.
+    const root = bindingTargetRoot(target);
+    return root !== null && this.localStart(root) === tok.start;
   }
 
   /**
@@ -7436,6 +7467,12 @@ export class Parser {
    * 69% of parse time on a 16 000-statement program).
    */
   private firstTokenAtOrAfter(offset: number): Token | undefined {
+    return this.tokens[this.firstTokenIndexAtOrAfter(offset)];
+  }
+
+  /** The index in `this.tokens` of {@link firstTokenAtOrAfter}, or the length
+   * of `this.tokens` when every token begins before `offset`. */
+  private firstTokenIndexAtOrAfter(offset: number): number {
     const tokens = this.tokens;
     let lo = 0;
     let hi = tokens.length;
@@ -7444,7 +7481,7 @@ export class Parser {
       if (tokens[mid].start < offset) lo = mid + 1;
       else hi = mid;
     }
-    return tokens[lo];
+    return lo;
   }
 
   /**
@@ -7816,8 +7853,8 @@ export class Parser {
       }
     }
     const fallback: [number, number] = [
-      this.localStart(left) ?? 0,
-      this.localEnd(right) ?? this.previousEnd(),
+      this.outerStart(left) ?? 0,
+      this.outerEnd(right) ?? this.previousEnd(),
     ];
     const diagnostic: ParsingDiagnostic = {
       severity: 'error',
@@ -7850,6 +7887,39 @@ export class Parser {
   private localEnd(expr: MathJsonExpression): number | undefined {
     const o = nodeOffsets(expr);
     return o ? o[1] - this.baseOffset : undefined;
+  }
+
+  /** Record that `expr` is the content of a parenthesized group whose local
+   * span (parentheses included) is `[start, end]`. */
+  private markParenthesized(
+    expr: MathJsonExpression,
+    start: number,
+    end: number
+  ): void {
+    if (typeof expr === 'object' && expr !== null)
+      this.parenthesizedSpans.set(expr, [start, end]);
+  }
+
+  /** Local start offset of a node, including the parentheses of a group that
+   * wraps it (see {@link parenthesizedSpans}). Use it, not
+   * {@link localStart}, for the start of a node that contains `expr`. */
+  private outerStart(expr: MathJsonExpression): number | undefined {
+    if (typeof expr === 'object' && expr !== null) {
+      const span = this.parenthesizedSpans.get(expr);
+      if (span !== undefined) return span[0];
+    }
+    return this.localStart(expr);
+  }
+
+  /** Local end offset of a node, including the parentheses of a group that
+   * wraps it (see {@link parenthesizedSpans}). Use it, not {@link localEnd},
+   * for the end of a node or statement that contains `expr`. */
+  private outerEnd(expr: MathJsonExpression): number | undefined {
+    if (typeof expr === 'object' && expr !== null) {
+      const span = this.parenthesizedSpans.get(expr);
+      if (span !== undefined) return span[1];
+    }
+    return this.localEnd(expr);
   }
 
   //
@@ -7906,7 +7976,7 @@ export class Parser {
    * the operator head (`f(x)` → `["f", x]`); any other callee is wrapped in
    * `Apply` (`(g)(x)` → `["Apply", g, x]`). */
   private parseCall(callee: MathJsonExpression): MathJsonExpression {
-    const start = this.localStart(callee) ?? this.current.start;
+    const start = this.outerStart(callee) ?? this.current.start;
     // The explicit `Function(body, …params)` literal is a function boundary
     // for `break`/`continue`, exactly as `=>` is. Without this, a call
     // argument is parsed in the ENCLOSING loop context, so
@@ -7945,7 +8015,7 @@ export class Parser {
    * makes to D16 of the nominal-types design (ruling P6): exactly
    * SYMBOL `.` SYMBOL inside the parentheses, nothing else. */
   private parseField(base: MathJsonExpression): MathJsonExpression {
-    const start = this.localStart(base) ?? this.current.start;
+    const start = this.outerStart(base) ?? this.current.start;
     this.advance(); // '.'
     if (this.current.type === 'OPEN_PAREN')
       return this.parseQualifiedField(base, start);
@@ -7981,7 +8051,7 @@ export class Parser {
    *
    * Spread and named arguments are admitted, as in any call argument list. */
   private parseMemberCall(field: MathJsonExpression): MathJsonExpression {
-    const start = this.localStart(field) ?? this.current.start;
+    const start = this.outerStart(field) ?? this.current.start;
     const { values, end } = this.parseBracketedList(
       'CLOSE_PAREN',
       ')',
@@ -8063,7 +8133,7 @@ export class Parser {
 
   /** An index clause `[ i ]` applied to `base` → `["At", base, i]` (1-based). */
   private parseIndex(base: MathJsonExpression): MathJsonExpression {
-    const start = this.localStart(base) ?? this.current.start;
+    const start = this.outerStart(base) ?? this.current.start;
     const { values, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
     // A literal index 0 is the zero-based-indexing reflex; `At` is 1-based
     // and `xs[0]` evaluates to NaN. Advisory only — the parse is unchanged.
@@ -8493,6 +8563,7 @@ export class Parser {
       // it cannot be held weakly — and it can never be a parameter list.
       if (typeof values[0] === 'object' && values[0] !== null)
         this.redundantlyParenthesized.add(values[0]);
+      this.markParenthesized(values[0], open.start, end);
       return values[0];
     }
     return this.wrap(
@@ -8802,7 +8873,7 @@ export class Parser {
             this.wrap(
               ['Spread', arg] as MathJsonExpression[],
               dots.start,
-              this.localEnd(arg) ?? this.previousEnd()
+              this.outerEnd(arg) ?? this.previousEnd()
             )
           );
           if (!this.match('COMMA')) break;
@@ -8846,7 +8917,7 @@ export class Parser {
                 value,
               ] as MathJsonExpression[],
               nameTok.start,
-              this.localEnd(value) ?? this.previousEnd()
+              this.outerEnd(value) ?? this.previousEnd()
             )
           );
           if (!this.match('COMMA')) break;
@@ -8901,7 +8972,7 @@ export class Parser {
           this.check('OPERATOR') &&
           this.current.text === ':'
         ) {
-          const start = this.localStart(expr) ?? this.current.start;
+          const start = this.outerStart(expr) ?? this.current.start;
           const annotation = this.parseTypeAnnotation();
           if (annotation !== null) {
             element = this.wrap(

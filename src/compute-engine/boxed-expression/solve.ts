@@ -2654,6 +2654,141 @@ function collectGenerators(expr: Expression, x: string): Expression[] {
 }
 
 /**
+ * Return `true` when the generator `g` takes only values in `[-1, 1]` for a
+ * real unknown `x`: `g` is `sin(f(x))` or `cos(f(x))`, and `f(x)` is real
+ * for each real `x` (`isRealForRealUnknown()`). For an unknown that can
+ * take a value that is not real, `sin(x)` is not bounded.
+ */
+function isBoundedGenerator(g: Expression, x: string): boolean {
+  if (!isFunction(g, 'Sin') && !isFunction(g, 'Cos')) return false;
+  if (g.nops !== 1) return false;
+  return isRealForRealUnknown(g.op1, x);
+}
+
+/**
+ * The maximum number of roots that `rootsInUnitRange()` adds, for all the
+ * roots of the list together. Above it, the list is not changed.
+ */
+const MAX_UNIT_RANGE_SHIFTS = 16;
+
+/**
+ * The roots of `exprU = 0` in `u` (the name `uName`) that can be the value of
+ * a generator in `[-1, 1]` (`isBoundedGenerator()`), from the roots `uRoots`
+ * of the root finder.
+ *
+ * The root finder solves a trig function of a linear argument `a·u + b` for
+ * one turn of that argument only (`solveLinearTrigArgument()`): for
+ * `sin(4u) = 0` it gives `u = 0` and `u = π/4`. But a root of the
+ * generator equation `g(x) = u` exists for each `u` in `[-1, 1]`, and the
+ * roots `u = -π/4` (and `u = ±π/2`, which are outside `[-1, 1]`) are lost:
+ * `sin(4·sin(x)) = 0` has the roots of `sin(x) = -π/4`.
+ *
+ * When each occurrence of `u` in `exprU` is in a trig function of the same
+ * linear argument `a·u + b`, the equation repeats with the period
+ * `P = (one turn)/|a|` in `u` (one half turn when each trig function is
+ * `tan` or `cot`). Each root `r` of the list then gives the roots
+ * `r + k·P` for each integer `k` such that `r + k·P` is in `[-1, 1]` (with a
+ * small margin: the caller checks each root against the equation). The
+ * roots of the list are kept as they are. A root `When(r, guard)` gives
+ * `When(r + k·P, guard)`.
+ *
+ * Returns `uRoots` when `exprU` does not have this form, or when it would add
+ * more than `MAX_UNIT_RANGE_SHIFTS` roots.
+ */
+function rootsInUnitRange(
+  exprU: Expression,
+  uName: string,
+  uRoots: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (uRoots.length === 0) return uRoots;
+  const ce = exprU.engine;
+  // The common linear coefficient `a` of the trig functions of `u`, or
+  // `null` when `u` is also outside such a function, or when two
+  // coefficients are not the same.
+  let a: Expression | undefined;
+  // `true` while each trig function of `u` found is `tan` or `cot`.
+  let onlyTanCot = true;
+  const scan = (node: Expression): boolean => {
+    if (!node.has(uName)) return true;
+    if (!isFunction(node)) return false; // `u` itself, outside a trig function
+    if (LINEAR_TRIG_OPERATORS.has(node.operator)) {
+      if (node.nops !== 1) return false;
+      const coeffs = getPolynomialCoefficients(node.op1, uName);
+      if (coeffs === null || coeffs.length !== 2) return false;
+      if (node.operator !== 'Tan' && node.operator !== 'Cot')
+        onlyTanCot = false;
+      if (a === undefined) a = coeffs[1];
+      return coeffs[1].isSame(a);
+    }
+    return node.ops.every(scan);
+  };
+  if (!scan(exprU) || a === undefined) return uRoots;
+  const aNum = a.N().re;
+  // A coefficient with a free parameter has no numeric value: keep the list.
+  if (!Number.isFinite(aNum) || aNum === 0 || a.unknowns.length > 0)
+    return uRoots;
+  // The root finder solves `tan` and `cot` for one half turn of their
+  // argument, and the other trig functions for one full turn. When the
+  // equation also has a trig function with a period of one full turn, the
+  // period of the equation is one full turn.
+  const turn = onlyTanCot
+    ? halfTurnAngle(ce)
+    : ce.function('Multiply', [ce.number(2), halfTurnAngle(ce)]);
+  const period = ce
+    .function('Divide', [turn, ce.function('Abs', [a])])
+    .evaluate();
+  const periodNum = period.N().re;
+  if (!Number.isFinite(periodNum) || periodNum <= 0) return uRoots;
+
+  // The range of the shift index `k` for each root of the list.
+  const margin = 1e-9;
+  const ranges: Array<{ root: Expression; kmin: number; kmax: number }> = [];
+  let count = 0;
+  for (const root of uRoots) {
+    const value = isFunction(root, 'When') ? root.op1 : root;
+    const v = value.N();
+    if (!Number.isFinite(v.re) || v.im !== 0) continue;
+    const kmin = Math.ceil((-1 - margin - v.re) / periodNum);
+    const kmax = Math.floor((1 + margin - v.re) / periodNum);
+    // Above 2^53, `k + 1` is not always a different float: the loop below
+    // would not end (`sin(sin(x) + 10^18) = 0`). Keep the list as it is (the
+    // callers then find it incomplete).
+    if (!Number.isSafeInteger(kmin) || !Number.isSafeInteger(kmax))
+      return uRoots;
+    if (kmax < kmin) continue;
+    ranges.push({ root, kmin, kmax });
+    count += kmax - kmin + 1 - (kmin <= 0 && kmax >= 0 ? 1 : 0);
+  }
+  // Each new root of `u` costs one inversion `g(x) = u` and the checks of its
+  // roots: about 50 ms for each new root, and about 100 ms for `Solve` over
+  // a bounded domain (measured on `sin(27·sin(x)) = 1/3` and
+  // `x·sin(26·sin(x)) = 0`, which add 15 roots and take up to 2 s). With a
+  // period much smaller than the range there are many new roots: keep the
+  // list as it is (the callers then find it incomplete, as for
+  // `sin(200·sin(x)) = 1/3`, which would add about 125 roots).
+  if (count > MAX_UNIT_RANGE_SHIFTS) return uRoots;
+
+  const out: Expression[] = [...uRoots];
+  for (const { root, kmin, kmax } of ranges) {
+    const value = isFunction(root, 'When') ? root.op1 : root;
+    for (let k = kmin; k <= kmax; k++) {
+      if (k === 0) continue;
+      const shifted = ce
+        .function('Add', [
+          value,
+          ce.function('Multiply', [ce.number(k), period]),
+        ])
+        .evaluate();
+      const member = isFunction(root, 'When')
+        ? ce.function('When', [shifted, root.op2])
+        : shifted;
+      if (!out.some((r) => r.isSame(member))) out.push(member);
+    }
+  }
+  return out;
+}
+
+/**
  * Solve an equation that is a polynomial in a single nonlinear *generator*
  * `g(x)` — a logarithm, exponential, trig function, radical, or a nested
  * combination — by the substitution `u = g(x)`. After normalizing (so
@@ -2722,6 +2857,8 @@ function solveByGeneratorSubstitution(
       const child = childStats();
       uRoots = findUnivariateRoots(exprU, uName, depth + 1, undefined, child);
       adoptChildStats(combined, child);
+      if (isBoundedGenerator(g, x))
+        uRoots = rootsInUnitRange(exprU, uName, uRoots);
     } finally {
       ce.popScope();
     }
@@ -3200,7 +3337,76 @@ function isRealRoot(root: Expression): boolean | undefined {
   const v = root.N();
   if (!Number.isFinite(v.re) || !Number.isFinite(v.im)) return undefined;
   if (Math.abs(v.im) > 1e-9 * Math.max(1, Math.abs(v.re))) return false;
+  // The type of `arcsin(arccos(9/10))` is `complex`, because the type of an
+  // inverse trig function does not use the value of its argument. Its
+  // structure can show that it is real (`isRealConstant()`).
+  if (isRealConstant(root)) return true;
   return undefined;
+}
+
+/**
+ * Return `true` when `expr`, an expression with no free symbol, is a real
+ * number by its structure: a real literal or constant, or a sum, product,
+ * quotient or real function of such expressions. An `arcsin` or `arccos` is
+ * real when its argument is real and in `[-1, 1]`, a square root or a
+ * logarithm when its argument is real and positive, and a power when its
+ * base is real and its exponent an integer, or its base positive and its
+ * exponent real. The tests of a sign or of `[-1, 1]` use the numeric value
+ * of the argument, with a margin much larger than its rounding error: a
+ * value near a bound (`arcsin(1 - 10^-15)`) is not decided, and the result
+ * is then `false`.
+ *
+ * The caller also checks that the numeric value is finite: a quotient by 0
+ * is not a real number.
+ */
+function isRealConstant(expr: Expression): boolean {
+  if (expr.unknowns.length > 0) return false;
+  if (expr.isExtendedReal === true) return true;
+  if (!isFunction(expr)) return false;
+  // The numeric value of `x` when `x` is real, or `NaN`.
+  const value = (x: Expression): number => {
+    if (!isRealConstant(x)) return NaN;
+    const v = x.N().re;
+    return Number.isFinite(v) ? v : NaN;
+  };
+  const margin = (v: number): number => 1e-9 * Math.max(1, Math.abs(v));
+  const ops = expr.ops;
+  switch (expr.operator) {
+    case 'Add':
+    case 'Subtract':
+    case 'Negate':
+    case 'Multiply':
+    case 'Divide':
+    case 'Square':
+    case 'Sin':
+    case 'Cos':
+    case 'Arctan':
+    case 'Exp':
+    case 'Sinh':
+    case 'Cosh':
+    case 'Tanh':
+    case 'Arsinh':
+      return ops.every((op) => isRealConstant(op));
+    case 'Arcsin':
+    case 'Arccos': {
+      if (ops.length !== 1) return false;
+      const v = value(ops[0]);
+      return Math.abs(v) <= 1 - margin(1);
+    }
+    case 'Sqrt':
+    case 'Ln': {
+      if (ops.length !== 1) return false;
+      const v = value(ops[0]);
+      return v > margin(v);
+    }
+    case 'Power': {
+      if (ops.length !== 2 || !isRealConstant(ops[1])) return false;
+      if (ops[1].isInteger === true) return isRealConstant(ops[0]);
+      const base = value(ops[0]);
+      return base > margin(base);
+    }
+  }
+  return false;
 }
 
 /**

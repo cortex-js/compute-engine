@@ -407,6 +407,16 @@ export function emptyRootsAnswer(
   // no root: the template can be wrong.
   if (stats.candidates && !stats.undecided && !stats.userRule)
     return ce.function('List', []);
+  // A trig function of a periodic argument (`cos(sin(x)) = 0`): the equation
+  // is periodic, and a scan of one period with an interval proof can show
+  // that it has no real root (`periodicRootsComplete()`). Here `|sin(x)| ≤ 1`,
+  // and `cos(u) = 0` needs `|u| ≥ π/2`.
+  if (
+    equationHasNestedPeriodicHead(equation, x) &&
+    !equationHasNonInvertibleHead(equation, x) &&
+    periodicRootsComplete(ce, equation, x, [])
+  )
+    return ce.function('List', []);
   return undefined;
 }
 
@@ -1627,6 +1637,15 @@ const INVERTIBLE_HEADS = new Set([
  * the equation is not periodic in the unknown, its roots do not form a
  * finite number of families, and the root finder gives only some of them
  * (`sin(x^2) = 0` has the roots `±√(kπ)` for each integer `k ≥ 0`).
+ *
+ * A trig function whose argument is itself a periodic function of the
+ * unknown (the unknown is only in trig functions of a linear argument in
+ * it, as in `sin(sin(x))` or `cos(2·cos(x) + 1)`) is not such a function:
+ * the equation is periodic, with the period of the inner trig functions.
+ * Its operands are examined as the operands of any other head. The root
+ * finder can give only a part of the roots of such an equation, thus the
+ * callers check its list with a numeric scan and an interval proof
+ * (`hasNestedPeriodicHead()`, `periodicRootsComplete()`).
  */
 function hasNonInvertibleHead(node: Expression, unknown: string): boolean {
   if (!isFunction(node) || !node.has(unknown)) return false;
@@ -1636,7 +1655,10 @@ function hasNonInvertibleHead(node: Expression, unknown: string): boolean {
   if (
     (TRIG_2PI.has(op) || TRIG_PI.has(op)) &&
     node.ops.some(
-      (arg) => arg.has(unknown) && polynomialDegree(arg, unknown) !== 1
+      (arg) =>
+        arg.has(unknown) &&
+        polynomialDegree(arg, unknown) !== 1 &&
+        analyzePeriodic(arg, unknown) === undefined
     )
   )
     return true;
@@ -1662,6 +1684,189 @@ function equationHasNonInvertibleHead(
 }
 
 /**
+ * Return `true` when `node` has a trig function (a head of `TRIG_2PI` or
+ * `TRIG_PI`) whose argument holds `unknown` and is not linear in it, such
+ * as `sin(sin(x))`. When `hasNonInvertibleHead()` is `false`, such an
+ * argument is a periodic function of the unknown, and the equation is
+ * periodic.
+ *
+ * The argument can take values in more than one period of the outer
+ * function: `sin(4·sin(x)) = 0` holds when `4·sin(x)` is `0`, `π` or `-π`.
+ * The root finder solves the outer function for one period of its argument,
+ * then adds the roots of the other periods that the inner `sin` or `cos`
+ * can reach (`rootsInUnitRange()` in `solve.ts`). It does not do this in
+ * every case: for `sin(1000·sin(x)) = 0` there are too many periods, and
+ * the list holds only a part of the roots. Thus its list must be checked
+ * (`periodicRootsComplete()`).
+ */
+function hasNestedPeriodicHead(node: Expression, unknown: string): boolean {
+  if (!isFunction(node) || !node.has(unknown)) return false;
+  const op = node.operator;
+  if (
+    (TRIG_2PI.has(op) || TRIG_PI.has(op)) &&
+    node.ops.some(
+      (arg) => arg.has(unknown) && polynomialDegree(arg, unknown) !== 1
+    )
+  )
+    return true;
+  return node.ops.some((child) => hasNestedPeriodicHead(child, unknown));
+}
+
+/**
+ * `hasNestedPeriodicHead()` for an equation `lhs = rhs` (each side is
+ * examined), or for an expression that is read as `expr = 0`.
+ */
+function equationHasNestedPeriodicHead(
+  eq: Expression,
+  unknown: string
+): boolean {
+  if (isFunction(eq, 'Equal'))
+    return eq.ops.some((side) => hasNestedPeriodicHead(side, unknown));
+  return hasNestedPeriodicHead(eq, unknown);
+}
+
+/**
+ * Return `true` when `roots` hold one root of each family of real roots of
+ * the periodic equation `equation` in `unknown` (an `Equal` with two sides,
+ * or an expression that is read as `= 0`): each real root of the equation
+ * is a value of `roots` plus a multiple of the period `T` of the equation.
+ * An empty `roots` is accepted when the equation has no real root.
+ *
+ * The roots are expanded into all the roots in a window of length `T`, and
+ * a numeric scan with an interval proof shows that the window has no other
+ * root (`expandPeriodicRoots()`). Each root of the window must then be in
+ * the family `r + T·k` of a value `r` of `roots` (`sameRootFamily()`).
+ *
+ * The result is `false` when this cannot be shown: the equation has a free
+ * parameter, a root is not a real number, the unknown is declared complex
+ * (the scan finds only the real roots), a user binding shadows `Pi` (the
+ * period would hold the library π), or the equation is not periodic.
+ */
+function periodicRootsComplete(
+  ce: ComputeEngine,
+  equation: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>
+): boolean {
+  const type = ce.symbol(unknown).type;
+  if (type.matches('complex') && !type.matches('real')) return false;
+  if (isFunction(equation, 'Equal') && equation.nops !== 2) return false;
+  const { predBody, isEquation } = classifyPredicate(equation);
+  if (!isEquation) return false;
+  if (!predBody.unknowns.every((u) => u === unknown)) return false;
+  const terms = analyzePeriodic(predBody, unknown);
+  if (terms === undefined || terms.length === 0) return false;
+  if (halfTurnAngle(ce).has('Pi') && shadowsLibraryName(ce, 'Pi')) return false;
+  const period = combinedPeriod(ce, terms);
+  if (
+    period === undefined ||
+    !Number.isFinite(period.value) ||
+    period.value <= 0
+  )
+    return false;
+  const values = roots.map((r) => {
+    const v = r.N();
+    return v.im === 0 ? v.re : NaN;
+  });
+  if (values.some((v) => !Number.isFinite(v))) return false;
+  // The same window as `periodicEquationFamilies()`: it starts at an
+  // irrational fraction of the period, so that a root is not likely to be at
+  // an end of the window.
+  const lo = -0.4142 * period.value;
+  const window = ce.function('Interval', [
+    ce.number(lo),
+    ce.number(lo + period.value),
+  ]);
+  const members = expandPeriodicRoots(
+    ce,
+    equation,
+    predBody,
+    unknown,
+    window,
+    roots
+  );
+  if (!Array.isArray(members)) return false;
+  return members.every((member) => {
+    const value = member.N().re;
+    return roots.some(
+      (root, i) =>
+        sameRootFamily(
+          ce,
+          root,
+          values[i],
+          member,
+          value,
+          period.expr,
+          period.value
+        ) === true
+    );
+  });
+}
+
+/**
+ * The roots `roots` of the equation `equation` in `unknown` (an `Equal`
+ * with two sides, or an expression that is read as `= 0`), without a root
+ * that is an earlier root of the list plus a multiple of the period `T` of
+ * the equation. `expr.solve()` gives one root of each family of roots in one
+ * period, but the root finder can give one root twice: for `sin(x) = -1`,
+ * the two roots `arcsin(-1)` and `π - arcsin(-1)` of the root template are
+ * `-π/2` and `3π/2`, which differ by `2π`. The first root of each family is
+ * kept, in the order of the list.
+ *
+ * Two roots are in one family only when their difference minus a multiple of
+ * `T` evaluates exactly to 0 (`sameRootFamily()`). The list is returned as
+ * it is when the equation is not periodic (the unknown is not only in trig
+ * functions: `x·sin(x)`), when `T` is not known exactly, or when a user
+ * binding shadows `Pi` (the period would hold the library π). A root that is
+ * not a real number (it has a free parameter, an imaginary part, or a
+ * guard `When(r, c)`) is kept.
+ */
+export function withoutPeriodicDuplicates(
+  ce: ComputeEngine,
+  equation: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (roots.length < 2) return roots;
+  if (isFunction(equation, 'Equal') && equation.nops !== 2) return roots;
+  const { predBody, isEquation } = classifyPredicate(equation);
+  if (!isEquation) return roots;
+  const terms = analyzePeriodic(predBody, unknown);
+  if (terms === undefined || terms.length === 0) return roots;
+  if (halfTurnAngle(ce).has('Pi') && shadowsLibraryName(ce, 'Pi')) return roots;
+  const period = combinedPeriod(ce, terms);
+  if (
+    period === undefined ||
+    !Number.isFinite(period.value) ||
+    period.value <= 0
+  )
+    return roots;
+  const kept: Array<{ root: Expression; value: number }> = [];
+  for (const root of roots) {
+    const value = isFunction(root, 'When') ? NaN : realRootValue(root);
+    if (
+      Number.isFinite(value) &&
+      kept.some(
+        (k) =>
+          Number.isFinite(k.value) &&
+          sameRootFamily(
+            ce,
+            k.root,
+            k.value,
+            root,
+            value,
+            period.expr,
+            period.value
+          ) === true
+      )
+    )
+      continue;
+    kept.push({ root, value });
+  }
+  return kept.length === roots.length ? roots : kept.map((k) => k.root);
+}
+
+/**
  * Why the roots that `findUnivariateRoots()` gave for the equation `eq` (an
  * `Equal`, or an expression read as `= 0`), with its `stats`, are only a part
  * of the roots, or `undefined` when they are not known to be:
@@ -1669,7 +1874,11 @@ function equationHasNonInvertibleHead(
  *   have none (`(x - 2)(x + e^x) = 0` gives only `2`);
  * - `'non-invertible'`: the unknown is in a function that the root finder
  *   cannot invert and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`
- *   gives only `1`). A root template that the host added to
+ *   gives only `1`). Also when the unknown is in a trig function of a
+ *   periodic argument and `roots` do not hold one root of each family of
+ *   roots (`periodicRootsComplete()`): for `sin(1000·sin(x)) = 0` the root
+ *   finder gives only the roots of `1000·sin(x) = 0` and
+ *   `1000·sin(x) = π`. A root template that the host added to
  *   `ce.solveRules` is the host's claim of a solution: when one matched
  *   (`stats.userRule`) and `roots` (the result of the root finder) is not
  *   empty, the roots are accepted. A candidate of such a template that the
@@ -1700,9 +1909,35 @@ export function partialRootListReason(
   if (stats.undecided && roots.length > 0) return 'undecided';
   if (stats.userRule && roots.length > 0) return undefined;
   if (!isFunction(eq, 'Equal') && !eq.type.matches('number')) return undefined;
-  return equationHasNonInvertibleHead(eq, unknown)
-    ? 'non-invertible'
-    : undefined;
+  if (equationHasNonInvertibleHead(eq, unknown)) return 'non-invertible';
+  // A trig function of a periodic argument (`sin(sin(x))`): the root finder
+  // can give only a part of the roots (`hasNestedPeriodicHead()`). The list
+  // is accepted when a scan of one period shows that it holds one root of
+  // each family. In a product (`x·sin(sin(x))`), each factor with such a
+  // function is checked: the roots of the product are the roots of its
+  // factors.
+  if (equationHasNestedPeriodicHead(eq, unknown)) {
+    if (isFunction(eq, 'Equal') && eq.nops !== 2) return 'non-invertible';
+    const { predBody } = classifyPredicate(eq);
+    if (!isFunction(predBody, 'Multiply'))
+      return periodicRootsComplete(eq.engine, eq, unknown, roots)
+        ? undefined
+        : 'non-invertible';
+    for (const factor of predBody.ops) {
+      if (!hasNestedPeriodicHead(factor, unknown)) continue;
+      // `fⁿ` has the roots of `f` when `n` is a positive integer.
+      const base =
+        isFunction(factor, 'Power') &&
+        !factor.op2.has(unknown) &&
+        factor.op2.isInteger === true &&
+        factor.op2.isPositive === true
+          ? factor.op1
+          : factor;
+      if (!periodicRootsComplete(eq.engine, base, unknown, roots))
+        return 'non-invertible';
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1803,10 +2038,13 @@ function lcmInt(a: number, b: number): number {
  * Returns:
  * - `[]` when `node` is free of the unknown (contributes no period);
  * - a list of `TrigTerm`s when every occurrence of the unknown sits inside a
- *   trig function of a *linear* argument;
+ *   trig function of a *linear* argument. That trig function can be inside
+ *   the argument of another trig function (`sin(sin(x))` gives the term of
+ *   `sin(x)`): a function of a periodic function is periodic;
  * - `undefined` when the unknown appears outside such a trig function (a bare
- *   `x`, a polynomial term, or a trig function of a non-linear argument) — the
- *   equation is then NOT a candidate for periodic expansion.
+ *   `x`, a polynomial term, or a trig function of an argument that is not
+ *   linear and not periodic, such as `sin(x^2)`) — the equation is then NOT
+ *   a candidate for periodic expansion.
  */
 function analyzePeriodic(
   node: Expression,
@@ -1819,9 +2057,15 @@ function analyzePeriodic(
     const baseMult = TRIG_2PI.has(op) ? 2 : TRIG_PI.has(op) ? 1 : 0;
     if (baseMult !== 0 && node.nops === 1) {
       const arg = node.op1;
-      // The argument must be linear in the unknown: `a·x + b`, degree exactly 1.
+      // The argument is linear in the unknown: `a·x + b`, degree exactly 1.
+      // Or it is itself a periodic function of the unknown (`sin(sin(x))`):
+      // then any function of it is periodic too, and its terms are the
+      // terms of the argument.
       const coeffs = getPolynomialCoefficients(arg, unknown);
-      if (!coeffs || coeffs.length !== 2) return undefined;
+      if (!coeffs || coeffs.length !== 2) {
+        const inner = analyzePeriodic(arg, unknown);
+        return inner !== undefined && inner.length > 0 ? inner : undefined;
+      }
       const aExpr = coeffs[1];
       const aNum = aExpr.N().re;
       if (!Number.isFinite(aNum) || Math.abs(aNum) < 1e-12) return undefined;
@@ -2298,19 +2542,58 @@ function sameRootFamily(
   const k = Math.round(q);
   // The rounding error of `q` is much smaller than this limit.
   if (Math.abs(q - k) > 1e-6) return false;
-  const diff = ce
-    .function('Subtract', [
-      b,
-      ce.function('Add', [a, ce.function('Multiply', [ce.number(k), spacing])]),
-    ])
-    .evaluate();
+  const difference = (p: Expression, r: Expression): Expression =>
+    ce
+      .function('Subtract', [
+        r,
+        ce.function('Add', [
+          p,
+          ce.function('Multiply', [ce.number(k), spacing]),
+        ]),
+      ])
+      .evaluate();
+  const diff = difference(a, b);
   if (diff.isSame(0)) return true;
   // The numeric value of the exact difference has an error of a few units
   // of `|x|·ε`. A value much larger than that is not 0.
   const d = diff.N().re;
   const scale = Math.max(1, Math.abs(aNum), Math.abs(bNum));
   if (Number.isFinite(d) && Math.abs(d) > 1e-12 * scale) return false;
+  // `evaluate()` does not write `arccos(-c)` as `π - arccos(c)`: the roots
+  // `-arccos(-1/3)` and `arccos(1/3) - π` of `cos(x)^2 = 1/9` have a
+  // difference that does not evaluate to 0. Compare them again with each
+  // `arccos` of a negative constant rewritten (`arccosOfNonNegative()`).
+  const a2 = arccosOfNonNegative(ce, a);
+  const b2 = arccosOfNonNegative(ce, b);
+  if ((a2 !== a || b2 !== b) && difference(a2, b2).isSame(0)) return true;
   return undefined;
+}
+
+/**
+ * `expr` with each `arccos(c)` whose argument `c` is a negative constant
+ * written as `H - arccos(-c)`, where `H` is a half turn in the angular unit
+ * of the engine (`halfTurnAngle()`: π in radians). The identity
+ * `arccos(-z) = π - arccos(z)` holds for each complex `z` with the principal
+ * branch, because `arccos(z) = π/2 - arcsin(z)` and `arcsin` is odd. Thus
+ * the sign test only chooses which `arccos` to rewrite, and its numeric
+ * fallback (the sign of `-arccos(9/10)` is not known from its type) cannot
+ * make the result wrong. Returns `expr` itself when nothing is rewritten.
+ */
+function arccosOfNonNegative(ce: ComputeEngine, expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  const ops = expr.ops.map((op) => arccosOfNonNegative(ce, op));
+  if (
+    expr.operator === 'Arccos' &&
+    ops.length === 1 &&
+    ops[0].unknowns.length === 0 &&
+    (ops[0].isNegative === true || ops[0].N().re < 0)
+  )
+    return ce.function('Subtract', [
+      halfTurnAngle(ce),
+      ce.function('Arccos', [ce.function('Negate', [ops[0]])]),
+    ]);
+  if (ops.every((op, i) => op === expr.ops[i])) return expr;
+  return ce.function(expr.operator, ops);
 }
 
 /**
@@ -2893,7 +3176,8 @@ function reduceRootFamilies(
  * π), and the root `π` is in no family `0 + 2πt`. Thus the roots in one
  * period are found and checked first:
  *
- * - When the unknown is in one trig function only, and `body` is an entire
+ * - When the unknown is in one trig function only, that function has a
+ *   linear argument, and `body` is an entire
  *   function of that trig function (`isEntireIn()`), such as
  *   `sin(x) - a` or `cos(2x)^2 - 1/4`, the root finder inverts the trig
  *   function for a full period, and no root is rejected: the principal
@@ -2928,8 +3212,16 @@ function periodicEquationFamilies(
     spacingValue: period.value,
   });
 
+  // The root finder inverts the trig function for a full period only when
+  // its argument is linear. For a periodic argument (`sin(sin(x))`), the
+  // argument can take values in more than one period of the trig function
+  // (`hasNestedPeriodicHead()`), and the roots are checked in a window below.
   const trig = singleTrigNode(body, unknown);
-  if (trig !== undefined && isEntireIn(body, unknown, trig))
+  if (
+    trig !== undefined &&
+    !hasNestedPeriodicHead(trig, unknown) &&
+    isEntireIn(body, unknown, trig)
+  )
     return roots.map((r) => family(r));
 
   if (!body.unknowns.every((u) => u === unknown)) return undefined;
@@ -3884,7 +4176,11 @@ function rootSetDivisor(
  * the scan for such an equation: `expandPeriodicRoots()` returns no answer
  * when the unknown is in a function that the root finder cannot invert
  * (`hasNonInvertibleHead()`), and `checkNonPeriodicRoots()` when a trig
- * function has an argument that is not linear. Also, the scan cannot tell
+ * function has an argument that is not linear and not periodic. A trig
+ * function of a periodic argument (`sin(10·sin(x))`) can oscillate faster
+ * than the inner trig function too. The scan can then miss a root, but the
+ * interval proof below does not accept a list that misses one: the
+ * enclosure of `f` over a cell that holds a root holds 0. Also, the scan cannot tell
  * apart two roots that are in one interval where `|f|` is close to zero, or
  * that are in one cell of the scan with no sign change of `f` at the
  * samples: it finds only one of them. This occurs near a double root (a

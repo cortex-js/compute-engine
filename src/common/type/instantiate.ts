@@ -1195,7 +1195,9 @@ export interface InferenceOptions {
    * defers the same operand (`overlapsForDeferredValidation`), so the two
    * readings stay in parity (user decision 2026-09-30). Signature
    * subtyping (`Poly <: Ground`) has no runtime re-check and leaves it
-   * unset: there a nested `unknown` still refutes. */
+   * unset: there a nested `unknown` still refutes. When it is set, a
+   * top-level `error` operand contributes no bound either (see
+   * `joinBounds`). */
   waiveNestedUnknown?: boolean;
 }
 
@@ -1871,6 +1873,28 @@ function joinBounds(
   // it to match (the block below). A nested `any` is never waived: it admits
   // the absence markers, which a value slot does not.
   if (waiveNestedUnknown) {
+    // At a call, an operand whose own type is `error` (a symbol that holds
+    // an error value) evaluates to that error whatever the variable is, and
+    // argument validation passes it through at every ground parameter
+    // (`isErrorTypedOperand()` in `validateArguments()`). The solver sees
+    // only types, so it drops the bound of every operand of type `error`;
+    // `validateArguments()` checks the other operands of type `error` (a
+    // symbol with no value, an application) on its own. Such a bound
+    // therefore contributes nothing: the variable is solved from the other
+    // bounds, and when there is no other bound it is absorbed like a
+    // top-level `unknown`, so its declared bound is not checked against
+    // `error`. Only a top-level `error` is dropped: an `error` nested under
+    // a constructor is still a bound. A `never` bound (the element of an
+    // empty list) is dropped too: alone it would solve the variable to
+    // `never`, so `(T, list<T>) -> list<T>` applied to such an operand and
+    // `[]` would be typed `list<never>`, and with `where T: number` the
+    // result `T` would be typed `never`.
+    const isTopError = (b: Bound) => b.top === true && b.type === 'error';
+    if (bounds.some(isTopError)) {
+      const rest = bounds.filter((b) => !isTopError(b) && b.type !== 'never');
+      if (rest.length === 0) return { type: 'unknown', absorbed: true };
+      return joinBounds(rest, true);
+    }
     // A nested `unknown` contributes nothing when another bound says
     // something: `(tuple<T>, tuple<T>) -> T where T: number` applied to a
     // `tuple<unknown>` and a `tuple<string>` must still refuse the string,

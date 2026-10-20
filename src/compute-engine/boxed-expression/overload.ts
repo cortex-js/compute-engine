@@ -38,6 +38,7 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
+import { isErrorTypedOperand } from './error-typed-operand.js';
 import { indexReadTupleExtension } from './index-read-tuple.js';
 import {
   admissionOf,
@@ -434,6 +435,14 @@ function prefilterAdmits(
   // meaningful — `validateArguments` pushes them through untouched.
   if (policies?.lazy) return true;
 
+  // A valid operand typed `error` (a symbol that holds an error value) does
+  // not get a vote either: it evaluates to its own error whatever arm is
+  // selected, and argument validation passes it through at every parameter
+  // (`isErrorTypedOperand()`, `error-typed-operand.ts`). This test comes
+  // after the lazy test, because the type of an unbound operand cannot
+  // always be read.
+  if (isErrorTypedOperand(op)) return true;
+
   // An unknown/`any` operand never refutes an arm. This is why ambiguity is
   // always "eliminated nothing", never "picked wrong" (§4.1).
   if (op.type.isUnknown || op.type.type === 'any') return true;
@@ -733,7 +742,9 @@ function instantiateArm(
  * lower bound, so the solver reads the variable at its bound).
  *
  * Only a variable that occurs as the WHOLE parameter at a position whose
- * operand is `unknown` or `any` is read at its bound. A variable absorbed
+ * operand is `unknown`, `any` or `error` is read at its bound. (An operand
+ * typed `error` holds an error value: the solver absorbs it the same way,
+ * because the call evaluates to that error.) A variable absorbed
  * from a nested `unknown` (`list<unknown>` at `list<T>`), and a variable
  * with no declared bound, keep the solved binding. The instance itself is
  * not changed, so admission, ranking and operand inference (which reads the
@@ -755,7 +766,12 @@ function undecidedResultOf(
     if (!solution.absorbed.has(tp.name)) continue;
     const fromUndecidedOperand = armOps.some((op, i) => {
       if (!op?.isValid) return false;
-      if (!op.type.isUnknown && op.type.type !== 'any') return false;
+      if (
+        !op.type.isUnknown &&
+        op.type.type !== 'any' &&
+        !isErrorTypedOperand(op)
+      )
+        return false;
       const param = paramAt(declared, i);
       return (
         typeof param === 'object' &&
@@ -1135,7 +1151,12 @@ function undecidedJoin(
         (!lifted &&
           (arm.ops ?? ops).every((op, i) => {
             if (!op.isValid) return false;
-            if (op.type.isUnknown || op.type.type === 'any') return true;
+            if (
+              op.type.isUnknown ||
+              op.type.type === 'any' ||
+              isErrorTypedOperand(op)
+            )
+              return true;
             const param = paramAt(arm.instance, i);
             return param !== undefined && canTakeAtRunTime(op, param);
           })))
@@ -1216,7 +1237,12 @@ function takesByOverlap(
   policies?: AdmissionPolicies
 ): boolean {
   return ops.some((op, i) => {
-    if (!op.isValid || op.type.isUnknown || op.type.type === 'any')
+    if (
+      !op.isValid ||
+      op.type.isUnknown ||
+      op.type.type === 'any' ||
+      isErrorTypedOperand(op)
+    )
       return false;
     const param = paramAt(arm, i);
     if (param === undefined || hasValueComponent(param) || isArrowParam(param))
@@ -1307,10 +1333,11 @@ function boundReading(solution: Type | undefined, bound: Type): Type {
 }
 
 /**
- * True when a valid operand is typed `unknown` or `any` — the operand
- * `prefilterAdmits` lets through at every arm — and the operator is not lazy
- * (a lazy operator's operands arrive unbound, so their types say nothing).
- * See {@link OverloadResolution.undecidedResults}.
+ * True when a valid operand is typed `unknown`, `any` or `error` — the
+ * operands `prefilterAdmits` lets through at every arm — and the operator is
+ * not lazy (a lazy operator's operands arrive unbound, so their types say
+ * nothing). An operand typed `error` selects no arm: the call evaluates to
+ * its error. See {@link OverloadResolution.undecidedResults}.
  */
 function hasUndecidedOperand(
   ops: ReadonlyArray<Expression>,
@@ -1318,7 +1345,11 @@ function hasUndecidedOperand(
 ): boolean {
   if (policies?.lazy) return false;
   return ops.some(
-    (op) => op.isValid && (op.type.isUnknown || op.type.type === 'any')
+    (op) =>
+      op.isValid &&
+      (op.type.isUnknown ||
+        op.type.type === 'any' ||
+        isErrorTypedOperand(op))
   );
 }
 

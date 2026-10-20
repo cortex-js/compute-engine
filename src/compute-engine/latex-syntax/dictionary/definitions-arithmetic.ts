@@ -2022,13 +2022,17 @@ function stripGroupingParentheses(
 
 /**
  * Write the numerator of a fraction in the `reciprocal` style, followed by
- * `reciprocal`, the inverse power of the denominator (`(y^2+z^2)^{-1}`).
+ * `reciprocal`, the inverse power of the denominator (`(y^2+z^2)^{-1}`,
+ * `b^{-1}`).
  *
  * The numerator gets parentheses only when it needs them: a sum and a
  * negative value (`(x+1)(y^2+z^2)^{-1}`, `(-y)(y^2+z^2)^{-1}`). An integer, a
  * library constant or a numerator in parentheses is juxtaposed with the
- * inverse power (`2(y^2+z^2)^{-1}`, `\pi(y^2+z^2)^{-1}`). Any other
- * numerator gets an explicit multiplication sign (`x\times(y^2+z^2)^{-1}`):
+ * inverse power (`2(y^2+z^2)^{-1}`, `\pi(y^2+z^2)^{-1}`, `2b^{-1}`), unless
+ * the inverse power starts with a digit (`2\times3^{-1}`). Any other
+ * numerator gets an explicit multiplication sign (`x\times(y^2+z^2)^{-1}`,
+ * `x\times b^{-1}`). Before an inverse power that starts with a parenthesis,
+ * the sign is necessary:
  *  - a symbol before a parenthesized group parses back as a function call:
  *    `x(y^2+z^2)^{-1}` reads as the inverse of `x` applied to `y^2+z^2`;
  *  - a decimal number before a parenthesized group parses back as a
@@ -2042,9 +2046,19 @@ function serializeReciprocalProduct(
   const value = machineValue(numer);
   const isNegative =
     operator(numer) === 'Negate' || (value !== null && value < 0);
-  const numerLatex = isNegative
-    ? serializer.wrap(numer)
-    : serializer.wrap(numer, MULTIPLICATION_PRECEDENCE);
+  // A big operator (`\sum`, `\prod`, `\lim`) always gets parentheses: its
+  // body runs to the right, so the body would take the inverse power.
+  // `\prod_{i=1}^{n}i\times b^{-1}` reads back as the product of `i/b`. The
+  // parentheses are forced, as in `serializeMultiply()`: the `\lim` entry
+  // has no precedence, so a precedence test would never fence a `Limit`.
+  const numerLatex = BODY_ABSORBING_OPERATORS.has(operator(numer) ?? '')
+    ? serializer.wrapString(
+        serializer.serialize(numer),
+        serializer.options.applyFunctionStyle(numer, serializer.level)
+      )
+    : isNegative
+      ? serializer.wrap(numer)
+      : serializer.wrap(numer, MULTIPLICATION_PRECEDENCE);
   const name = symbol(numer);
   const juxtapose =
     !/^\d/.test(reciprocal) &&
@@ -2055,6 +2069,39 @@ function serializeReciprocalProduct(
       (name !== null && ALWAYS_DECLARED_CONSTANTS.has(name)));
   if (juxtapose) return joinLatex([numerLatex, reciprocal]);
   return latexTemplate(serializer.options.multiply, numerLatex, reciprocal);
+}
+
+/**
+ * Write the numerator of a fraction in the `factor` style, after `factor`,
+ * the fraction with numerator 1 (`\frac{1}{b}`).
+ *
+ * The numerator gets parentheses where a factor of a product gets them (see
+ * `serializeMultiply()`): around a sum, a negative value, an open infix
+ * `Mod` and a product that holds an ellipsis (`\frac{1}{b}(a+c)`,
+ * `\frac{1}{b}(-a)`). A symbol, a function, a power or a product is
+ * juxtaposed (`\frac{1}{b}a`, `\frac{1}{b}xy`); the parser reads the
+ * juxtaposition as a product. A numerator that starts with a digit gets an
+ * explicit multiplication sign, as a number after another factor does in a
+ * product: `\frac{1}{3}\times2`, not `\frac{1}{3}2`.
+ */
+function serializeFactorProduct(
+  serializer: Serializer,
+  numer: MathJsonExpression,
+  factor: string
+): string {
+  let numerLatex =
+    operator(numer) === 'Mod' && nops(numer) === 2
+      ? serializer.wrap(numer, DIVISION_PRECEDENCE + 1)
+      : isFoldBarrierFactor(numer)
+        ? serializer.wrap(numer, MULTIPLICATION_PRECEDENCE + 1)
+        : serializer.wrap(numer, MULTIPLICATION_PRECEDENCE);
+  // A numerator that is not wrapped can start with a sign (a product with a
+  // negative coefficient, `-2x`). After the fraction, the sign would read as
+  // a subtraction: `\frac{1}{b}-2x`.
+  if (numerLatex.startsWith('-')) numerLatex = serializer.wrap(numer);
+  if (/^\d/.test(numerLatex))
+    return latexTemplate(serializer.options.multiply, factor, numerLatex);
+  return joinLatex([factor, numerLatex]);
 }
 
 function serializeFraction(
@@ -2101,21 +2148,32 @@ function serializeFraction(
     if (style === 'inline-solidus') return `${sign}${numerStr}/${denomStr}`;
     return `${sign}{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
-    const reciprocal = serializer.wrap(denom) + '^{-1}';
-    if (machineValue(numer) === 1) return sign + reciprocal;
+    // The denominator is the base of a power: it gets parentheses where the
+    // `Power` serializer puts them around a base (a sum, a product, a
+    // negative value, a power), and not around a symbol, a number or a
+    // function (`b^{-1}`, `(2b)^{-1}`, `\sin(b)^{-1}`).
+    // A big operator (`\sum`, `\prod`, `\lim`) always gets parentheses: its
+    // body runs to the right, so the body would take the `^{-1}`.
+    // `\lim_{x\to1}2x^{-1}` reads back as the limit of `2/x`.
+    const reciprocal = supsub(
+      '^',
+      BODY_ABSORBING_OPERATORS.has(operator(denom) ?? '')
+        ? serializer.wrapString(
+            serializer.serialize(denom),
+            serializer.options.applyFunctionStyle(denom, serializer.level)
+          )
+        : serializer.wrapPowerBase(denom),
+      '-1'
+    );
+    // Only an exact numerator 1 is left out. A float `1.0` stays, so that
+    // the value read back is a float too.
+    if (isExactOne(numer)) return sign + reciprocal;
     return sign + serializeReciprocalProduct(serializer, numer, reciprocal);
   } else if (style === 'factor') {
-    if (machineValue(denom) === 1) return sign + serializer.wrap(numer);
-    return (
-      sign +
-      '\\frac{1}{' +
-      serializer.serialize(denom) +
-      '}' +
-      serializer.wrapString(
-        serializer.serialize(numer),
-        serializer.groupStyle(expr, 1)
-      )
-    );
+    if (isExactOne(denom)) return sign + serializer.wrap(numer);
+    const factor = '\\frac{1}{' + serializer.serialize(denom) + '}';
+    if (isExactOne(numer)) return sign + factor;
+    return sign + serializeFactorProduct(serializer, numer, factor);
   }
 
   // Quotient (default)
@@ -2295,6 +2353,15 @@ function mixedNumberLatex(
 
 /** True if `expr` is an integer number literal: a JSON integer, or a
  * number string of digits only (an integer past 2^53). */
+/**
+ * True if `expr` is the exact integer 1: the number `1` or the digit string
+ * `{num: "1"}`. A float spelling (`{num: "1.0"}`) and a decimal that rounds
+ * to 1 as a double (`{num: "1.0000000000000001"}`) are not.
+ */
+function isExactOne(expr: MathJsonExpression): boolean {
+  return isIntegerLiteralJson(expr) && machineValue(expr) === 1;
+}
+
 function isIntegerLiteralJson(expr: MathJsonExpression): boolean {
   if (typeof expr === 'number') return Number.isInteger(expr);
   return (

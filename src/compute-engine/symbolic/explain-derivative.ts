@@ -177,6 +177,12 @@ function replaceFirst(
     const r = replaceFirst(ops[i], needle, replacement);
     if (r !== null) {
       ops[i] = r;
+      // A node with a scope of its own (a `Sum` or a `Product` template) is
+      // rebuilt with the same scope. `ce.function()` would make a new scope
+      // and bind the index to it, and the nodes of the later steps, which
+      // hold the index of the original scope, would then not be found.
+      const scope = e.localScope;
+      if (scope !== undefined) return e.engine._fn(e.operator, ops, { scope });
       return e.engine.function(e.operator, ops);
     }
   }

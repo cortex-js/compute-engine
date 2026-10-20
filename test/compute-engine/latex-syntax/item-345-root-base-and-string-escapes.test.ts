@@ -32,7 +32,7 @@ describe('ISSUE 345: A ROOT BASE DEEP INSIDE AN EXPRESSION', () => {
     const latex = raw(nested).latex;
     expect(latex).not.toMatch(/\^\{[^{}]*\}\^/);
     expect(latex).toBe(
-      '\\bigl\\lbrack\\bigl\\lbrack\\frac{1}{2}(2^{(1+x)/2})\\bigr\\rbrack\\bigr\\rbrack'
+      '\\bigl\\lbrack\\bigl\\lbrack\\frac{1}{2}\\times2^{(1+x)/2}\\bigr\\rbrack\\bigr\\rbrack'
     );
   });
 

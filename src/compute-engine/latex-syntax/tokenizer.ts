@@ -201,6 +201,11 @@ class Tokenizer {
     return this.offsets![Math.min(this.pos, this.s.length)];
   }
 
+  /** The characters of `joined` from the offset `from` to the offset `to` */
+  source(from: number, to: number): string {
+    return this.joined.slice(from, to);
+  }
+
   /**
    * The text in the input of the characters from the offset `from` to the
    * offset `to` (see `offset`), when some of them were written by the
@@ -483,12 +488,17 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
  * (`x²` is `x^{2}`). The text of the `^` or `_`, `{` and `}` tokens is
  * empty, and the text of the other tokens is the Unicode character they
  * replace (`²` for the token `2`).
+ * @param tildes - If given, receives the index of each `<space>` token that
+ * is a `~` in `s`. The token is the same as for a space, so this is the only
+ * way to tell the two apart. The unit argument of a siunitx command needs
+ * it: there, `~` is a product of two units and a space is not.
  */
 export function tokenize(
   s: string,
   args: string[] = [],
   comments?: DiscardedComment[],
-  inputText?: Map<number, string>
+  inputText?: Map<number, string>,
+  tildes?: Set<number>
 ): Token[] {
   // Merge multiple lines into one, and remove comments.
   // Split keeping the line separators (capture group) so the exact separator
@@ -539,6 +549,13 @@ export function tokenize(
       const text = tokenizer.inputText(from, tokenizer.offset);
       if (text !== undefined) inputText.set(result.length, text);
     }
+    if (
+      tildes !== undefined &&
+      tokens.length === 1 &&
+      tokens[0] === '<space>' &&
+      tokenizer.source(from, tokenizer.offset) === '~'
+    )
+      tildes.add(result.length);
     result.push(...tokens);
   } while (!tokenizer.end());
 

@@ -854,6 +854,48 @@ function serializeInvisibleOperator(
   if (xs.length === 0) return '';
   if (xs.length === 1) return serializer.serialize(xs[0]);
 
+  // The value of `x` if it is an EXACT integer literal, `null` otherwise. A
+  // float literal such as `{num: "1.0"}` has an integer value, but it is not
+  // exact. The value is a machine number, so it is only used to recognize a
+  // shape, never to write the literal.
+  const exactInteger = (x: MathJsonExpression | null): number | null => {
+    if (x === null || !isNumberExpression(x)) return null;
+    const v = machineValue(x);
+    if (v === null || !Number.isInteger(v)) return null;
+    if (typeof x === 'number') return v;
+    const s = typeof x === 'string' ? x : x.num;
+    return /^[+-]?\d+n?$/.test(String(s)) ? v : null;
+  };
+
+  // True if `x` is an exact integer literal, or the negation of one.
+  const isInteger = (x: MathJsonExpression): boolean => {
+    if (operator(x) === 'Negate' && nops(x) === 1)
+      return isInteger(operand(x, 1)!);
+    return exactInteger(x) !== null;
+  };
+
+  // The parser reads an integer followed by a fraction as a mixed number:
+  // `2\frac{1}{3}` is `2 + 1/3`, and `-2\frac{1}{3}` is `-2 - 1/3`. It does
+  // this when the integer, the numerator and the denominator are exact
+  // integer literals, the numerator is from 1 to 1000 and the denominator is
+  // from 2 to 1000 (see `canonicalInvisibleOperator()`). For this shape, the
+  // fraction is always written `\frac{n}{d}`. The other fraction styles do
+  // not read back as a mixed number: `2\times3^{-1}` and `2\times1/3` are
+  // `2/3`, not `7/3`.
+  const isFractionPart = (x: MathJsonExpression): boolean => {
+    const h = operator(x);
+    if ((h !== 'Divide' && h !== 'Rational') || nops(x) !== 2) return false;
+    const nv = exactInteger(operand(x, 1));
+    const dv = exactInteger(operand(x, 2));
+    if (nv === null || dv === null) return false;
+    return nv >= 1 && nv <= 1000 && dv >= 2 && dv <= 1000;
+  };
+  if (xs.length === 2 && isInteger(xs[0]) && isFractionPart(xs[1]))
+    return joinLatex([
+      serializer.serialize(xs[0]),
+      `\\frac{${serializer.serialize(operand(xs[1], 1))}}{${serializer.serialize(operand(xs[1], 2))}}`,
+    ]);
+
   const parts = xs.map((op, i) => {
     const h = operator(op);
     let s: string;
@@ -865,7 +907,13 @@ function serializeInvisibleOperator(
       s = i === 0 ? serializer.serialize(op) : serializer.wrap(op);
     else if (i === 0 && isNumberExpression(op)) s = serializer.serialize(op);
     else s = serializer.wrap(op, MULTIPLICATION_PRECEDENCE);
-    if (i < xs.length - 1 && rendersAsSolidus(serializer, op))
+    if (
+      (i < xs.length - 1 && rendersAsSolidus(serializer, op)) ||
+      // A part after the first that starts with a minus sign re-parses as a
+      // subtraction: `InvisibleOperator(2, Divide(-3, 4))` written
+      // `2-\frac{3}{4}` reads back as `5/4`, not `-3/2`.
+      (i > 0 && s.startsWith('-'))
+    )
       return serializer.wrapString(
         s,
         serializer.groupStyle(expr, serializer.level + 1)
@@ -883,7 +931,15 @@ function serializeInvisibleOperator(
         (/^[A-Z]$/.test(prevSym) ||
           (operator(xs[i]) !== 'Delimiter' &&
             !ALWAYS_DECLARED_CONSTANTS.has(prevSym)))) ||
-      (/\d$/.test(result) && /^\d/.test(parts[i]))
+      (/\d$/.test(result) && /^\d/.test(parts[i])) ||
+      // A digit followed by a fraction of two integers reads back as a
+      // mixed number. The test is on the text, not on the operands: the
+      // `factor` style writes `1.5/3` as `\frac{1}{3}\times1.5`, so after `2`
+      // it reads back as `(2 + 1/3)·1.5`, and it writes `3/x` as
+      // `\frac{1}{x}\times3`, so before `\frac{1}{2}` it reads back as
+      // `\frac{1}{x}·(3 + 1/2)`.
+      (/\d$/.test(result) &&
+        /^\\[dt]?frac\{\d[\d\\,]*\}\{\d[\d\\,]*\}/.test(parts[i]))
     )
       result = latexTemplate(serializer.options.multiply, result, parts[i]);
     else result = joinLatex([result, parts[i]]);
@@ -3440,7 +3496,50 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         const braced =
           operator(base) === 'Conjugate' &&
           isNumberExpression(operand(base, 1));
-        const lhs = serializer.serialize(base);
+        // A compound base is fenced as the base of a power is: the subscript
+        // binds to the last token before it, so `Subscript(x+1, 2)` written
+        // `x+1_{2}` reads back as `x + BaseForm(1, 2)`, and
+        // `Subscript(x^2, 1)` written `x^2_{1}` reads back as `Power(x_1, 2)`.
+        // `(x+1)_{2}` and `(x^2)_{1}` read back as written. A negative number
+        // is fenced too: `-2_{k}` reads back as `Negate(BaseForm(2, k))`.
+        let lhs = braced
+          ? serializer.serialize(base)
+          : serializer.wrapPowerBase(base);
+        // Two more bases are fenced here, but not as the base of a power:
+        //  - A base that ends with a superscript (`\exponentialE^{x}` for
+        //    `Exp(x)`): `\exponentialE^{x}_{1}` reads back as
+        //    `Power(Subscript(e, 1), x)`.
+        //  - A function application written as a name followed by a
+        //    parenthesized argument list, when the parser reads the name as a
+        //    symbol and not as a function: `g(x+1)_{k}`, `\Gamma(x)_{1}` and
+        //    `\mathrm{Overline}(x)_{1}` read back as the product of the name
+        //    and `Subscript((x+1), k)`. The name of such a function has no
+        //    dictionary entry, or has an entry of kind `symbol`. A function
+        //    whose entry parses its own arguments (`\sin(x)_{1}`,
+        //    `\max(x, y)_{1}`) reads back as written and is not fenced.
+        const h = operator(base);
+        const kind = h
+          ? (serializer.dictionary.ids.get(h) as { kind?: string } | undefined)
+              ?.kind
+          : undefined;
+        if (
+          base !== null &&
+          !braced &&
+          (endsWithSuperscript(lhs) ||
+            (h !== '' &&
+              h !== 'Delimiter' &&
+              (kind === undefined || kind === 'symbol') &&
+              /(\)|\\right\))$/.test(lhs)))
+        )
+          lhs = serializer.wrapString(
+            lhs,
+            serializer.options.groupStyle(base, serializer.level + 1)
+          );
+        if (base !== null && !braced && lhs.startsWith('-'))
+          lhs = serializer.wrapString(
+            lhs,
+            serializer.options.groupStyle(base, serializer.level + 1)
+          );
         return (
           (braced ? `{${lhs}}` : lhs) +
           '_{' +

@@ -27,6 +27,7 @@ import {
   ParsingDiagnostic,
 } from './diagnostics.js';
 import {
+  isDictionary,
   isFunction,
   isString,
   isSymbol,
@@ -35,7 +36,12 @@ import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';
 import { definitionSites } from './definition-sites.js';
-import { narrowToFrames, traceFrames } from './error-location.js';
+import {
+  narrowToFrames,
+  offendingValue,
+  traceFrames,
+  type CanonicalOrder,
+} from './error-location.js';
 import { signatureNotes } from './signature-notes.js';
 import {
   calleeSlotNamesResolver,
@@ -341,6 +347,9 @@ function executeEpsilBatch(
     // The name a top-level `let` of this statement re-declares, if any (see
     // `declaredAtTopLevel`).
     let redeclared: string | undefined;
+    // The canonical form of the statement, which maps an error's frame back
+    // to the written operand of a reordered call (`canonicalOrderOf`).
+    let boxedStmt: BoxedExpression | undefined;
 
     // Run BEFORE the statement is boxed: this scan reads the RAW ast and needs
     // no value, and boxing an application INFERS a function signature for an
@@ -385,16 +394,22 @@ function executeEpsilBatch(
       // between statements bounds the overrun to one statement.
       checkDeadline(ce._deadlineFrame);
       redeclared = topLevelRedeclaration(stmt, declaredAtTopLevel);
-      value =
-        redeclared === undefined
-          ? ce.box(stmt).evaluate()
-          : ce.error(['variable-redeclaration', redeclared]);
+      if (redeclared === undefined) {
+        boxedStmt = ce.box(stmt);
+        value = boxedStmt.evaluate();
+      } else value = ce.error(['variable-redeclaration', redeclared]);
       // An error value narrows the anchor to its breadcrumb's innermost
       // source-mapped frame, so a host that reports the error points at the
       // offending subexpression, not the whole statement.
       const errors = value.errors;
       if (errors.length > 0)
-        valueRange = narrowErrorRange(ce, errors[0].json, stmt, valueRange);
+        valueRange = narrowErrorRange(
+          ce,
+          errors[0].json,
+          stmt,
+          valueRange,
+          boxedStmt
+        );
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       cancellation = cancellationCause(e);
@@ -517,7 +532,8 @@ function executeEpsilBatch(
               stmt,
               statementRange(stmt, source),
               defSites,
-              cancellation
+              cancellation,
+              boxedStmt
             )
           );
       });
@@ -767,7 +783,8 @@ function narrowErrorRange(
   ce: ComputeEngine,
   error: MathJsonExpression,
   stmt: MathJsonExpression,
-  fallback: [number, number]
+  fallback: [number, number],
+  boxedStmt?: BoxedExpression
 ): [number, number] {
   // The engine resolves the callee's declared parameter names so a NAMED
   // call's frame index (which counts declaration slots after the seam's
@@ -779,8 +796,82 @@ function narrowErrorRange(
     stmt,
     fallback,
     calleeSlotNamesResolver(ce),
-    frameOrderOf(errorCode(error))
+    frameOrderOf(errorCode(error)),
+    canonicalOrderOf(ce, boxedStmt),
+    offendingValue(error)
   );
+}
+
+/**
+ * The canonical form `boxedStmt` of a statement as a `CanonicalOrder`
+ * (error-location.ts), or `undefined` when it is not known.
+ *
+ * Canonicalization sorts the operands of a commutative call and flattens the
+ * nested calls of an associative one, so the argument index of an error's
+ * frame counts the operands of the CANONICAL call: in `Ln(w) * 2`, whose
+ * canonical form is `2·Ln(w)`, the frame `Multiply argument 2` names
+ * `Ln(w)`. Each canonical operand keeps the source range of the written
+ * operand it was made from, which is how the frame is mapped back to the
+ * source. The canonical call is found by its source range, which is the
+ * range of the written call.
+ */
+function canonicalOrderOf(
+  ce: ComputeEngine,
+  boxedStmt: BoxedExpression | undefined
+): CanonicalOrder | undefined {
+  if (boxedStmt === undefined) return undefined;
+  return {
+    reorders: (operatorName) => {
+      const def = ce.lookupDefinition(operatorName);
+      if (def === undefined || !('operator' in def)) return false;
+      return def.operator.commutative || def.operator.associative;
+    },
+    argumentOffsets: (operatorName, callRange, index) => {
+      const pending: BoxedExpression[] = [boxedStmt];
+      while (pending.length > 0) {
+        const node = pending.pop()!;
+        // The value of a `let` is in the `Dictionary` of its `Declare`.
+        if (isDictionary(node)) pending.push(...node.values);
+        if (!isFunction(node)) continue;
+        const o = node.sourceOffsets;
+        if (
+          node.operator === operatorName &&
+          o !== undefined &&
+          o[0] === callRange[0] &&
+          o[1] === callRange[1]
+        ) {
+          const op: BoxedExpression | undefined = node.ops[index - 1];
+          if (op === undefined) return undefined;
+          // A lazy operator such as `Add` or `Multiply` evaluates its
+          // operands in its own handler. An error that the evaluation of an
+          // operand makes reaches the frame through the RESULT of the
+          // handler, whose operands can be in another order: the error of
+          // `Sin(s)` in `Sin(s) * Cos(x)` has the frame `Multiply argument 2`.
+          // Only an operand that is already an error in the canonical form
+          // (`1 + "a"`) is then known.
+          const def = ce.lookupDefinition(operatorName);
+          if (
+            def !== undefined &&
+            'operator' in def &&
+            def.operator.lazy &&
+            op.isValid
+          )
+            return undefined;
+          if (op.sourceOffsets !== undefined) return op.sourceOffsets;
+          // A subtracted term `a - t` is `Negate(t)` in the canonical sum,
+          // and an operand refused at canonicalization (`1 + "a"`) is
+          // `Error(code, "a")`. Only `t` and `"a"` have a source range.
+          if (op.operator === 'Negate' && isFunction(op))
+            return op.op1.sourceOffsets;
+          if (op.operator === 'Error' && isFunction(op))
+            return op.ops[1]?.sourceOffsets;
+          return undefined;
+        }
+        pending.push(...node.ops);
+      }
+      return undefined;
+    },
+  };
 }
 
 /**
@@ -799,7 +890,10 @@ function errorValueDiagnostic(
   stmt: MathJsonExpression,
   fallback: [number, number],
   defSites: ReturnType<typeof definitionSites>,
-  cancellation?: CancellationCause
+  cancellation?: CancellationCause,
+  /** The canonical form of `stmt`, when it is known (see
+   * {@link canonicalOrderOf}). */
+  boxedStmt?: BoxedExpression
 ): ParsingDiagnostic {
   // An error that BUBBLED out of a subexpression carries a breadcrumb
   // of `(operator, operand index)` frames (engine design §2a). Rendered
@@ -807,7 +901,7 @@ function errorValueDiagnostic(
   // statement range below supplies the source anchoring.
   const frames = errorFrameChain(error.json);
   const description = describeError(error.json);
-  const range = narrowErrorRange(ce, error.json, stmt, fallback);
+  const range = narrowErrorRange(ce, error.json, stmt, fallback, boxedStmt);
   const diagnostic = makeDiagnostic(
     cancellation !== undefined
       ? ['evaluation-canceled', cancellation, error.toString()]
@@ -1103,8 +1197,12 @@ function nestedStatementReporter(
 ): (statement: BoxedExpression, result: BoxedExpression) => void {
   const sites = nestedStatementSites(statements);
   const reported = new Set<string>();
-  // The site where a value passed up from an inner block was made.
-  const madeAt = new WeakMap<BoxedExpression, NestedStatementSite>();
+  // The site where a value passed up from an inner block was made, with the
+  // canonical form of its statement.
+  const madeAt = new WeakMap<
+    BoxedExpression,
+    { site: NestedStatementSite; statement: BoxedExpression }
+  >();
   const hook = (statement: BoxedExpression, result: BoxedExpression): void => {
     // `isValid` is false exactly when the value holds an `Error`, and it is
     // memoized on each node, so this test does not walk a list again on
@@ -1130,10 +1228,11 @@ function nestedStatementReporter(
     if (site.role === 'returned') return;
     if (site.role === 'passed') {
       // The innermost statement that made the value is recorded first.
-      if (!madeAt.has(result)) madeAt.set(result, site);
+      if (!madeAt.has(result)) madeAt.set(result, { site, statement });
       return;
     }
-    const origin = madeAt.get(result) ?? site;
+    const made = madeAt.get(result);
+    const origin = made?.site ?? site;
     const originKey = `${origin.range[0]}:${origin.range[1]}`;
     if (reported.has(originKey)) return;
     const lazyError = lazyView ? lazyViewCellError(ce, result) : undefined;
@@ -1158,7 +1257,9 @@ function nestedStatementReporter(
             errors[0],
             origin.stmt,
             origin.range,
-            defSites
+            defSites,
+            undefined,
+            made?.statement ?? statement
           )
         );
       }

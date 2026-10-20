@@ -697,9 +697,9 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   test('should solve 3cos(x) + 3 = 0', () => {
     const e = expr('3\\cos(x) + 3 = 0');
     const result = e.solve('x')?.map((x) => x.N().json);
-    // cos(x) = -1, solution: π ≈ 3.1416 and -π
-    expect(result?.length).toBe(2);
-    // Check one is π and one is -π
+    // cos(x) = -1: the roots are π + 2πk, one family. The roots π and -π of
+    // the root template differ by the period 2π, so only π is kept.
+    expect(result?.length).toBe(1);
     const values = result?.map((r) => parseFloat((r as { num: string }).num));
     expect(values?.some((v) => Math.abs(v - Math.PI) < 0.001)).toBe(true);
   });

@@ -264,6 +264,8 @@ registerStepLabels({
   'solve.validate-roots':
     'Check each candidate in the original equation; reject the extraneous ones',
   'solve.filter-domain': 'Discard solutions outside the domain of the variable',
+  'solve.periodic-duplicate':
+    'Discard solutions that differ from another solution by a period',
   'solve.roots': 'The solutions',
   'solve.incomplete-factor':
     'No complete answer: a factor gave no solution, and it is not shown to have none',
@@ -401,6 +403,8 @@ registerStepLabels({
 //
 registerStepLabels({
   'derivative.sum-rule': 'Apply the sum rule: (u + v)′ = u′ + v′',
+  'derivative.term-by-term':
+    'Differentiate the sum term by term: (Σₖ uₖ)′ = Σₖ uₖ′',
   'derivative.product-rule': 'Apply the product rule: (u·v)′ = u′·v + u·v′',
   'derivative.quotient-rule':
     'Apply the quotient rule: (u⁄v)′ = (u′·v − u·v′)⁄v²',
