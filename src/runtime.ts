@@ -19,3 +19,10 @@ export type {
 } from './compute-engine/compilation/javascript-runtime.js';
 
 export type { RandomSeedFrame } from './compute-engine/numerics/random.js';
+
+// The batch forms (`runtime.loadBroadcast()`, `runtime.loadBroadcastSlice()`).
+export type {
+  BroadcastInputs,
+  BroadcastOptions,
+} from './compute-engine/compilation/types.js';
+export type { BroadcastSlice } from './compute-engine/compilation/broadcast.js';

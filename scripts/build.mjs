@@ -210,6 +210,11 @@ const ENTRIES = [
     globalName: 'Epsil',
     esmViaSplit: true,
   },
+  // The script of a kernel worker thread (`src/kernel-worker.ts`): one
+  // self-contained ESM file that a host copies next to its own files and
+  // starts with `new Worker(url, { type: 'module' })`. A worker script has
+  // no use for a UMD wrapper, so `esmOnly` skips those builds.
+  { name: 'kernel-worker', esmOnly: true },
 ];
 
 // The published layout puts the variant marker in the DIRECTORY, not the
@@ -274,6 +279,7 @@ for (const e of ENTRIES) {
 
 // Self-contained UMD (IIFE) builds for every entry, minified and not.
 for (const e of ENTRIES) {
+  if (e.esmOnly) continue;
   builds.push(
     esbuild.build({
       ...BUILD_OPTIONS,

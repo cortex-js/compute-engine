@@ -176,6 +176,12 @@ import {
 } from '../../common/interruptible.js';
 import { CapabilityDeniedError } from '../effects-registry.js';
 import { JET_HELPERS } from './jet-helpers.js';
+import {
+  broadcastNumbers,
+  broadcastNumbersSlice,
+  type BroadcastSlice,
+} from './broadcast.js';
+import type { BroadcastInputs, BroadcastOptions } from './types.js';
 import type {
   CompiledColor,
   CompiledColorSpace,
@@ -6298,6 +6304,25 @@ export interface JavaScriptRuntime {
    * per-call value are evaluated once, here, as `run()` does. The inputs are
    * checked and converted by `entryPlan`, as `run()` does. */
   load(stored: StoredJavaScript): (...args: unknown[]) => unknown;
+  /** The stored code as a batch evaluator: the `broadcast()` of the
+   * compilation result (`compilation/broadcast.ts`), with the same inputs,
+   * layouts and output. Code compiled from an expression only; a lambda
+   * (`calling: 'lambda'`) throws. */
+  loadBroadcast(
+    stored: StoredJavaScript
+  ): (inputs: BroadcastInputs, options?: BroadcastOptions) => Float64Array;
+  /** The slice form of `loadBroadcast`: evaluate the cells of `slice` and
+   * write them at the start of `out`, returning the count written
+   * (`broadcastNumbersSlice` in `compilation/broadcast.ts`). The loop a
+   * kernel worker runs for one task. */
+  loadBroadcastSlice(
+    stored: StoredJavaScript
+  ): (
+    inputs: BroadcastInputs,
+    options: BroadcastOptions | undefined,
+    out: Float64Array,
+    slice: BroadcastSlice
+  ) => number;
 }
 
 /** A runtime together with its helper table, for the engine's own tests. */
@@ -6453,8 +6478,104 @@ export function createSysRuntime(
         };
       },
     },
+    loadBroadcast: {
+      value: (
+        stored: StoredJavaScript
+      ): ((
+        inputs: BroadcastInputs,
+        options?: BroadcastOptions
+      ) => Float64Array) => {
+        const { fn, plan, digits } = storedExpressionRunner(sys, stored);
+        return (inputs, options) => {
+          const previous = setReconstructionDigits(digits);
+          try {
+            return broadcastNumbers((vars) => fn(vars), plan, inputs, options);
+          } finally {
+            setReconstructionDigits(previous);
+          }
+        };
+      },
+    },
+    loadBroadcastSlice: {
+      value: (
+        stored: StoredJavaScript
+      ): ((
+        inputs: BroadcastInputs,
+        options: BroadcastOptions | undefined,
+        out: Float64Array,
+        slice: BroadcastSlice
+      ) => number) => {
+        const { fn, plan, digits } = storedExpressionRunner(sys, stored);
+        return (inputs, options, out, slice) => {
+          const previous = setReconstructionDigits(digits);
+          try {
+            return broadcastNumbersSlice(
+              (vars) => fn(vars),
+              plan,
+              inputs,
+              options,
+              out,
+              slice
+            );
+          } finally {
+            setReconstructionDigits(previous);
+          }
+        };
+      },
+    },
   });
   return sys;
+}
+
+/**
+ * The raw function of stored code compiled from an expression, for the batch
+ * loaders: the same construction as `load()` (the once-only definitions
+ * evaluated here, the per-call ones on every call, the exponent digits fixed
+ * to the stored count), without the per-call entry check and result
+ * normalization that `broadcastNumbers` applies itself. A lambda (positional
+ * arguments) has no batch form.
+ */
+function storedExpressionRunner(
+  sys: SysHelpers,
+  stored: StoredJavaScript
+): {
+  fn: (...args: unknown[]) => unknown;
+  plan: EntryPlan | undefined;
+  digits: number;
+} {
+  if (stored.calling === 'lambda')
+    throw new Error(
+      'The stored code is a lambda (positional arguments): it has no broadcast'
+    );
+  if (stored.runtimeVersion === undefined)
+    throw new Error(
+      'The stored code has no runtimeVersion: it cannot be matched to this runtime'
+    );
+  if (stored.runtimeVersion !== RUNTIME_VERSION)
+    throw new Error(
+      `The code was compiled for runtime ${stored.runtimeVersion}, this is runtime ${RUNTIME_VERSION}`
+    );
+  const plan = stored.entryPlan && restoreEntryPlan(stored.entryPlan);
+  const storedDigits = stored.reconstructionDigits;
+  const digits =
+    typeof storedDigits === 'number' && Number.isFinite(storedDigits)
+      ? Math.max(15, Math.min(17, Math.trunc(storedDigits)))
+      : 17;
+  const split =
+    stored.preambleOnce !== undefined || stored.preamblePerCall !== undefined;
+  const perCall = split ? stored.preamblePerCall : stored.preamble;
+  const previous = setReconstructionDigits(digits);
+  try {
+    const fn = twoStageRunner(
+      sys,
+      stored.preambleOnce ?? '',
+      ['_'],
+      `${perCall ?? ''}\nreturn ${stored.code};`
+    );
+    return { fn, plan: plan || undefined, digits };
+  } finally {
+    setReconstructionDigits(previous);
+  }
 }
 
 /**

@@ -508,6 +508,13 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import {
+  broadcastNumbers,
+  broadcastNumbersSlice,
+  type BroadcastInputs,
+  type BroadcastOptions,
+} from './broadcast.js';
+import { makeBroadcastAsync, isShippableCode } from '../kernel-pool.js';
 import { literalParamsMap } from '../library/core.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import type {
@@ -9356,6 +9363,13 @@ function engineRuntimeSource(ce: ComputeEngine): RuntimeSource {
  */
 export class ComputeEngineFunction extends Function {
   SYS: SysHelpers;
+  /**
+   * The compiled body applied to a vars object with none of the per-call
+   * work of a call through the function itself: no entry check, no
+   * reconstruction-digit frame, no result normalization. `broadcast()` runs
+   * it once per cell inside one frame of its own (`compilation/broadcast.ts`).
+   */
+  rawCall!: (vars: unknown) => unknown;
 
   constructor(
     ce: ComputeEngine,
@@ -9384,6 +9398,12 @@ export class ComputeEngineFunction extends Function {
         setReconstructionDigits(previous);
       }
     }
+    // `this` is the function itself here, not the proxy returned below, so
+    // the call does not go through the `apply` trap.
+    this.rawCall = (vars: unknown): unknown =>
+      inner !== undefined
+        ? inner(vars)
+        : Function.prototype.call.call(this, undefined, this.SYS, vars);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
         const previous = setReconstructionDigits(reconstructionDigits);
@@ -9947,6 +9967,22 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // never against whichever nested target requested the emission (see
     // `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
+    // Whether the emitted code names identifiers that exist only here (see
+    // `CompileTarget.hostNames`): a function given by name, a `vars` mapping
+    // to anything but a read of the vars object, a caller preamble. A
+    // function given as a function object is copied into the preamble as
+    // source, so it travels with the code.
+    target.hostNames =
+      preamble !== undefined ||
+      (functions !== undefined &&
+        Object.values(functions).some(
+          (entry) => typeof entrySource(entry) === 'string'
+        )) ||
+      (vars !== undefined &&
+        Object.values(vars).some(
+          (v) =>
+            typeof v !== 'string' || !/^_(\.[A-Za-z_$][\w$]*|\[.*\])$/.test(v)
+        ));
 
     // Common-subexpression elimination (design §4.2). Harvest the SAME tree
     // the emitters walk (post `rewriteAngularUnit`). The G1b provenance
@@ -10406,7 +10442,7 @@ function compileToTarget(
       : statementBody,
     reconstructionDigits
   );
-  return {
+  const result: CompilationResult<'javascript'> = {
     target: 'javascript' as const,
     success: true,
     runtimeVersion: RUNTIME_VERSION,
@@ -10422,7 +10458,48 @@ function compileToTarget(
     reconstructionDigits,
     ...(entryPlan ? { entryPlan: storeEntryPlan(entryPlan) } : {}),
     run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
+    // The whole batch runs inside one reconstruction-digit frame, as each
+    // `run()` call does (see the constructor of `ComputeEngineFunction`).
+    broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
+      const previous = setReconstructionDigits(reconstructionDigits);
+      try {
+        return broadcastNumbers(fn.rawCall, entryPlan, inputs, options);
+      } finally {
+        setReconstructionDigits(previous);
+      }
+    },
   };
+  // `broadcastAsync` ships the result itself (its `code`, preambles, entry
+  // plan and version) to the engine's worker pool, and runs slices here when
+  // there is none (`kernel-pool.ts`).
+  const engine = expr.engine;
+  result.broadcastAsync = makeBroadcastAsync({
+    kind: 'javascript',
+    stored: result,
+    // A worker has no engine: code that names a host identifier or draws
+    // from the engine's random stream stays on this thread.
+    shippable:
+      target.hostNames !== true &&
+      isShippableCode(`${split.hoisted}\n${perCall ?? ''}\n${result.code}`),
+    iterationLimit: () => engine.iterationLimit,
+    slice: (inputs, options, out, slice) => {
+      const previous = setReconstructionDigits(reconstructionDigits);
+      try {
+        return broadcastNumbersSlice(
+          fn.rawCall,
+          entryPlan,
+          inputs,
+          options,
+          out,
+          slice
+        );
+      } finally {
+        setReconstructionDigits(previous);
+      }
+    },
+    workers: () => engine.workers,
+  });
+  return result;
 }
 
 /**

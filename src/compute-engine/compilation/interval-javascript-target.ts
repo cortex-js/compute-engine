@@ -103,8 +103,25 @@ import type {
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
-import { IntervalArithmetic } from '../interval/index.js';
+import {
+  IntervalArithmetic,
+  INTERVAL_RUNTIME_VERSION,
+} from '../interval/index.js';
 import type { Interval } from '../interval/types.js';
+import {
+  isPlainInterval,
+  freshIntervalValue,
+  isRecord,
+  hasIntervalBounds,
+  processInput,
+} from '../interval/run-support.js';
+import {
+  broadcastIntervals,
+  broadcastIntervalsSlice,
+  type BroadcastInputs,
+  type BroadcastOptions,
+} from './broadcast.js';
+import { makeBroadcastAsync, isShippableCode } from '../kernel-pool.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { interval } from '../numerics/interval.js';
@@ -5110,72 +5127,6 @@ function hoistIntervalConstants(
   };
 }
 
-/** A bare `{ lo, hi }` with numeric endpoints and nothing else. */
-function isPlainInterval(value: unknown): value is Interval {
-  return (
-    isRecord(value) &&
-    Object.keys(value).length === 2 &&
-    typeof value.lo === 'number' &&
-    typeof value.hi === 'number'
-  );
-}
-
-/**
- * A copy of a run result that shares no object with the constant table.
- *
- * The constant declarations are evaluated ONCE per artifact, so a constant
- * interval is the SAME object on every call, and several routines hand an
- * operand back rather than building a new answer — `piecewise` returns the
- * arm it selected, `restrict` returns its value. A caller who writes to the
- * `lo` of a returned interval would therefore change what every later call
- * answers. Copying the result on the way out keeps the returned value the
- * caller's own, at the cost of one small object per call.
- *
- * The copy is one level deep for a kinded result (the wrapper and the
- * enclosure it carries), and elementwise for an array — the value a
- * collection-valued root answers, whether it is the result itself or the
- * value a kinded wrapper carries. A number, a string and a nested plain value
- * copy through as they are.
- *
- * The copy also gives every scalar of the result the one shape of the `run`
- * contract, at every depth of an array: a kinded `IntervalResult`, never a
- * bare `{ lo, hi }`, and `{ kind: 'empty' }` for an absent value.
- */
-function freshIntervalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(freshIntervalValue);
-  if (!isRecord(value)) return value;
-  // A bare enclosure `{ lo, hi }` — what the compiled code gives for a
-  // constant, a bare variable or a block that returns a local — is wrapped
-  // as the `{ kind: 'interval', value }` result that a computed value has. A
-  // bare enclosure whose lower bound is NaN is this target's absent marker
-  // (see `isAbsent` in `interval/comparison.ts`) and becomes
-  // `{ kind: 'empty' }`, the value the compiled code and the interpreter
-  // fallback give where there is no value.
-  if (
-    !('kind' in value) &&
-    typeof value.lo === 'number' &&
-    typeof value.hi === 'number'
-  ) {
-    if (Number.isNaN(value.lo)) return { kind: 'empty' };
-    return { kind: 'interval', value: { lo: value.lo, hi: value.hi } };
-  }
-  // The absent marker can also arrive inside a kinded wrapper — an operation
-  // over an absent operand answers `{ kind: 'interval', value }` whose
-  // enclosure is NaN, a restriction of it a `partial` one. `isAbsent` reads
-  // both as absent, and the runner gives them as `empty` too.
-  if (
-    (value.kind === 'interval' || value.kind === 'partial') &&
-    isPlainInterval(value.value) &&
-    Number.isNaN(value.value.lo)
-  )
-    return { kind: 'empty' };
-  const copy: Record<string, unknown> = { ...value };
-  if (isPlainInterval(copy.value)) copy.value = { ...copy.value };
-  else if (Array.isArray(copy.value))
-    copy.value = copy.value.map(freshIntervalValue);
-  return copy;
-}
-
 /**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
@@ -5194,6 +5145,14 @@ function freshIntervalValue(value: unknown): unknown {
  */
 export class ComputeEngineIntervalFunction extends Function {
   IA = IntervalArithmetic;
+  /**
+   * The compiled body applied to a vars object of `{ lo, hi }` enclosures,
+   * with none of the per-call work of a call through the function itself: no
+   * input conversion, no result copy, no error-to-`entire` net. `broadcast()`
+   * runs it once per cell and encodes each answer itself
+   * (`compilation/broadcast.ts`).
+   */
+  rawCall!: (vars: unknown) => unknown;
 
   constructor(body: string, preamble = '', constants = '') {
     const perCallCode = preamble
@@ -5209,6 +5168,12 @@ export class ComputeEngineIntervalFunction extends Function {
               `${constants}\nreturn function (_) { ${perCallCode} };`
             ) as (ia: typeof IntervalArithmetic) => (v?: unknown) => unknown
           )(this.IA);
+    // `this` is the function itself here, not the proxy returned below, so
+    // the call does not go through the `apply` trap.
+    this.rawCall = (vars: unknown): unknown =>
+      inner !== undefined
+        ? inner(vars)
+        : Function.prototype.call.call(this, undefined, this.IA, vars);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
         try {
@@ -5235,24 +5200,6 @@ export class ComputeEngineIntervalFunction extends Function {
       },
     });
   }
-}
-
-/**
- * Process an input value to interval format.
- *
- * Accepts:
- * - { lo: number, hi: number } - Direct interval
- * - { x: {...}, y: {...} } - Object with interval-valued properties
- * - number - Convert to point interval
- */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
-
-function hasIntervalBounds(
-  value: unknown
-): value is { lo: unknown; hi: unknown } {
-  return isRecord(value) && 'lo' in value && 'hi' in value;
 }
 
 /**
@@ -5308,43 +5255,6 @@ function collapseIntervalInput(value: unknown): unknown {
     return out;
   }
   return value;
-}
-
-function processInput(input: unknown): unknown {
-  if (input === null || input === undefined) {
-    return input;
-  }
-
-  // Already an interval
-  if (hasIntervalBounds(input)) {
-    return input;
-  }
-
-  // A COLLECTION input stays an array: the accessors (`_IA.at`, `_IA.length`,
-  // `_IA.component`) dispatch on `Array.isArray` and read `.length`. The
-  // generic record branch below would copy it into a null-prototype object
-  // keyed "0", "1", … — silently losing both the length and the positional
-  // access, so every collection access would answer absence.
-  if (Array.isArray(input)) return input.map(processInput);
-
-  // Object with properties - process recursively
-  if (isRecord(input)) {
-    // Prototype-free — see `collapseIntervalInput`: an ordinary object cannot
-    // carry an own `__proto__` key, so the caller's value for a variable of
-    // that name would be silently lost in this copy.
-    const result: Record<string, unknown> = Object.create(null);
-    for (const [key, value] of Object.entries(input)) {
-      result[key] = processInput(value);
-    }
-    return result;
-  }
-
-  // Number - convert to point interval
-  if (typeof input === 'number') {
-    return { lo: input, hi: input };
-  }
-
-  return input;
 }
 
 /**
@@ -5995,16 +5905,42 @@ function compileToIntervalTarget(
   const localVars = BaseCompiler.localVarsObjectStatement(target);
   const body = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
   const fn = new ComputeEngineIntervalFunction(body, perCall, declarations);
-  return {
+  const result: CompilationResult<'interval-js', IntervalValue> = {
     target: 'interval-js',
     success: true,
+    runtimeVersion: INTERVAL_RUNTIME_VERSION,
     code: body,
     // `code` reads names the preamble binds — a hoisted constant, a
     // user-function definition — so the two halves are reported together
     // (`CompilationResult.preamble`). A reader that only takes `code` sees
     // undefined identifiers.
     ...(preamble ? { preamble } : {}),
+    // The same preamble split as `run()` evaluates it: the declarations once,
+    // when the function is built, the definitions on every call. A runtime
+    // that rebuilds the function from the stored result
+    // (`createIntervalRuntime`) does the same split.
+    ...(declarations ? { preambleOnce: declarations } : {}),
+    ...(declarations && perCall ? { preamblePerCall: perCall } : {}),
     calling: 'expression',
     run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
+    broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) =>
+      broadcastIntervals(fn.rawCall, inputs, options),
   };
+  // `broadcastAsync` ships the result itself (its `code`, preambles and
+  // version) to the engine's worker pool, and runs slices here when there is
+  // none (`kernel-pool.ts`).
+  const engine = expr.engine;
+  result.broadcastAsync = makeBroadcastAsync({
+    kind: 'interval-js',
+    stored: result,
+    // A worker has no engine: code that names a host identifier or draws
+    // from the engine's random stream stays on this thread.
+    shippable:
+      target.hostNames !== true && isShippableCode(`${preamble}\n${body}`),
+    iterationLimit: () => engine.iterationLimit,
+    slice: (inputs, options, out, slice) =>
+      broadcastIntervalsSlice(fn.rawCall, inputs, options, out, slice),
+    workers: () => engine.workers,
+  });
+  return result;
 }

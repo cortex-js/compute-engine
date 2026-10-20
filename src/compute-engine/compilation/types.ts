@@ -1639,6 +1639,15 @@ export interface CompileTarget<Expr = unknown> {
   inputLocals?: ReadonlyMap<MathJsonSymbol, string>;
 
   /**
+   * The emitted code names identifiers that exist only where the compilation
+   * ran: a caller function given by name (`functions: { f: 'hostFn' }`), a
+   * `vars` mapping to anything but a read of the vars object, or a caller
+   * `preamble`. Such a result runs only on the compiling thread; the worker
+   * pool of `broadcastAsync()` leaves it inline (`kernel-pool.ts`).
+   */
+  hostNames?: boolean;
+
+  /**
    * Mutable per-compile registry for user-defined functions — a symbol whose
    * engine definition is a `Function` literal (`f(x) := …`, `x ↦ …`, or an
    * `ce.assign(name, lambda)`) encountered as an *operator* (`f(2)`). Each such
@@ -2610,6 +2619,57 @@ export type StoredEntryPlan = {
 };
 
 /**
+ * The inputs of `CompilationResult.broadcast()`: one `Float64Array` per free
+ * variable (one value per cell; a `lo, hi` pair per cell for `interval-js`),
+ * or one number, the same value for every cell. See
+ * `compilation/broadcast.ts` for the layouts and the output encoding.
+ */
+export type BroadcastInputs = Record<string, Float64Array | number>;
+
+export interface BroadcastOptions {
+  /**
+   * `'cells'` (default): every array holds one entry per cell and all have
+   * the same cell count. `'grid'`: the arrays are the axes of a regular grid,
+   * in key order of `inputs`, the first varying fastest; the cell count is
+   * the product of their lengths.
+   */
+  layout?: 'cells' | 'grid';
+  /**
+   * A caller-owned output array, filled and returned instead of a new one. It
+   * must hold at least one value per cell (`javascript`) or three
+   * (`interval-js`); a longer array is filled from the start.
+   */
+  out?: Float64Array;
+}
+
+export interface BroadcastAsyncOptions extends BroadcastOptions {
+  /** Stops the batch: the cells done so far are returned. */
+  signal?: AbortSignal;
+  /**
+   * Wall-clock budget for the whole batch, in milliseconds from the call.
+   * When it passes, the loops stop and the result reports the cells done.
+   */
+  deadline?: number;
+  /**
+   * Cells per task on a worker pool, or per slice between two yields to the
+   * event loop inline. Default: the cell count divided by the pool size (at
+   * least 1024), or 16 384 inline.
+   */
+  chunk?: number;
+}
+
+export interface BroadcastAsyncResult {
+  /** The output array (`options.out` when given). */
+  out: Float64Array;
+  /**
+   * The number of leading cells that are valid: every cell, or fewer when
+   * `deadline` or `signal` stopped the batch; the cells after `done` are
+   * untouched.
+   */
+  done: number;
+}
+
+/**
  * Result of compiling an expression.
  *
  * Three type parameters control the shape:
@@ -2675,7 +2735,9 @@ export type CompilationResult<
    * stored code with `createJavaScriptRuntime()` from
    * `@cortex-js/compute-engine/runtime`, and compare this with the runtime's
    * `runtimeVersion`: a mismatch means the code was compiled by another
-   * release. Set by the JavaScript target only.
+   * release. An `interval-js` result carries the version of the interval
+   * library its `code` calls as `_IA`, for the same comparison. Set by the
+   * JavaScript and interval-js targets only.
    */
   runtimeVersion?: string;
 
@@ -2924,6 +2986,34 @@ export type CompilationResult<
 
   /** Executable function (present for JS-executable targets only). */
   run?: CompiledRunner<R, V>;
+
+  /**
+   * Evaluate the compiled function at many points in one call. Present on a
+   * `javascript` result called with a vars object (`calling: 'expression'`)
+   * and on an `interval-js` result. `inputs` maps each free variable to a
+   * `Float64Array` (one value per cell; a `lo, hi` pair per cell for
+   * `interval-js`) or to one number for every cell. The result is a
+   * `Float64Array`: one value per cell, or a `lo, hi, kind` triple per cell
+   * with the `INTERVAL_KIND` codes. Cell for cell, the value is the one
+   * `run()` gives. The input layout, the output encoding and the error rules
+   * are in `compilation/broadcast.ts`.
+   */
+  broadcast?: (
+    inputs: BroadcastInputs,
+    options?: BroadcastOptions
+  ) => Float64Array;
+
+  /**
+   * `broadcast` through the engine's worker pool (`ce.workers`), or inline in
+   * slices between yields to the event loop when there is no pool or the
+   * batch is small. Takes the same inputs, plus a `signal`, a `deadline` and
+   * a `chunk` size, and resolves to the output and the count of leading cells
+   * that are valid. Present where `broadcast` is. See `kernel-pool.ts`.
+   */
+  broadcastAsync?: (
+    inputs: BroadcastInputs,
+    options?: BroadcastAsyncOptions
+  ) => Promise<BroadcastAsyncResult>;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

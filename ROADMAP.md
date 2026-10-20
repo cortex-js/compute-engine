@@ -127,7 +127,7 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20 uncommitted; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
@@ -146,7 +146,7 @@ evaluation on compiled results, the executor with a serial default, the
 `kernel-worker` bundle and interval runtime, `broadcastAsync` on a pool); step 5
 (the pooled `FindFit`) and the Epsil asynchronous route wait for Tycho's
 integration feedback (Tycho caps fits at 10 000 rows and samples 500 for the
-global search). Steps 1 to 4 landed 2026-10-20 (uncommitted, dual-reviewed):
+global search). Steps 1 to 4 landed 2026-10-20 (dual-reviewed):
 `broadcast`/`broadcastAsync` on compiled results, `INTERVAL_KIND`,
 `createIntervalRuntime`, `createKernelPool`, `ce.workers`, the
 `kernel-worker` entry; step 2 (the fit plan and `fit-executor.ts`, no

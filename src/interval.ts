@@ -126,5 +126,31 @@ export {
   clamp,
 } from './compute-engine/interval/comparison.js';
 
-// Runtime library object for compiled interval arithmetic functions
-export { IntervalArithmetic } from './compute-engine/interval/index.js';
+// Runtime library object for compiled interval arithmetic functions, and the
+// version an `interval-js` compilation result carries as `runtimeVersion`.
+export {
+  IntervalArithmetic,
+  INTERVAL_RUNTIME_VERSION,
+} from './compute-engine/interval/index.js';
+
+// Batch evaluation: the `kind` codes of a `broadcast()` result, the encoder of
+// one `IntervalResult` into the `lo, hi, kind` triple, and the loop that
+// evaluates a rebuilt interval function over a batch (what a worker runs).
+export {
+  INTERVAL_KIND,
+  encodeIntervalResult,
+  broadcastIntervals,
+  type IntervalKindCode,
+} from './compute-engine/compilation/broadcast.js';
+export type {
+  BroadcastInputs,
+  BroadcastOptions,
+} from './compute-engine/compilation/types.js';
+
+// The standalone runtime: rebuild the function of a stored `interval-js`
+// compilation result with no engine behind it (a page, a worker, a server).
+export {
+  createIntervalRuntime,
+  type IntervalRuntime,
+  type StoredIntervalJavaScript,
+} from './compute-engine/compilation/interval-runtime.js';

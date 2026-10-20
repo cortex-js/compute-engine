@@ -337,7 +337,9 @@ describe('the entry point has no engine in it', () => {
       /^src\/compute-engine\/effects-registry\.ts$/,
       /^src\/compute-engine\/numerics\/[\w-]+\.ts$/,
       /^src\/big-decimal\/[\w-]+\.ts$/,
-      /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers)\.ts$/,
+      // `broadcast.ts` is the batch loop of `loadBroadcast()`: it imports
+      // types only.
+      /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers|broadcast)\.ts$/,
       /node_modules\/(complex\.js|@arnog\/colors)\//,
     ];
     const inputs = Object.keys(metafile.inputs);

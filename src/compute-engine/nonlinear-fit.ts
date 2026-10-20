@@ -35,6 +35,15 @@ import {
   solveWithInflation,
   type LMResult,
 } from './numerics/levenberg-marquardt.js';
+import {
+  InlineFitExecutor,
+  runFitPlanSync,
+  type FitBatchResult,
+  type FitKernel,
+  type FitTask,
+  type LinearScanSolution,
+  type StartTask,
+} from './fit-executor.js';
 
 type NumFn = (vars: Record<string, number>) => number;
 
@@ -738,6 +747,152 @@ function gridLocalMinima(rss: number[], dims: number, n: number): number[] {
   return minima;
 }
 
+/** What the global search found, for `solveGlobal` to turn into a record. */
+interface GlobalSearchOutcome {
+  /** The lowest-residual finished solver run, if any. */
+  best: LMResult | undefined;
+  /** Best point seen before any LM run finished (the fallback of a timeout
+   * during the scan): the vector and its sum of squared residuals. */
+  bestScanned: [number[], number] | undefined;
+  /** Total over every solver run. */
+  iterations: number;
+  timedOut: boolean;
+}
+
+/**
+ * The plan of the global search (see `solveGlobal` for the two strategies):
+ * yields each batch of tasks and receives the batch's results, and returns
+ * the outcome, or `'no-finite-value'` when no grid point had a finite
+ * residual. The plan reads results by task index, so the order they arrive
+ * in does not matter, and it ignores every point at or after the first
+ * nonlinear one, so which of those ran does not matter either. Under a
+ * deadline it uses every result that came back: an executor that ran a
+ * different set of tasks before the deadline (a pool) can then report a
+ * different best point, which the design accepts
+ * (`docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.5).
+ */
+function* globalSearchPlan(
+  separable: boolean,
+  scans: GlobalScan[],
+  thetaAt: (point: number[]) => number[]
+): Generator<
+  FitTask[],
+  GlobalSearchOutcome | 'no-finite-value',
+  FitBatchResult
+> {
+  let iterations = 0;
+  let timedOut = false;
+  let best: LMResult | undefined;
+  let bestScanned: [number[], number] | undefined;
+  const outcome = (): GlobalSearchOutcome => ({
+    best,
+    bestScanned,
+    iterations,
+    timedOut,
+  });
+
+  const consider = (r: LMResult): void => {
+    iterations += r.iterations;
+    if (r.timedOut) timedOut = true;
+    if (
+      Number.isFinite(r.residualNorm) &&
+      (best === undefined || r.residualNorm < best.residualNorm)
+    )
+      best = r;
+  };
+  const considerScanned = (theta: number[], rss: number): void => {
+    if (bestScanned === undefined || rss < bestScanned[1])
+      bestScanned = [theta, rss];
+  };
+
+  /** Record the results of a batch of start tasks in task order: the finite
+   * start points as scanned points, the solver runs as candidates. Ties on
+   * the residual go to the lowest index, as the serial loop's first-seen
+   * rule did. */
+  const takeStarts = (tasks: StartTask[], batch: FitBatchResult): void => {
+    const byIndex = [...batch.results].sort((a, b) => a.index - b.index);
+    for (const r of byIndex) {
+      if (r.kind !== 'start') continue;
+      const task = tasks[r.index];
+      if (task.checkStart && Number.isFinite(r.startRss))
+        considerScanned(task.theta0, r.startRss);
+      if (r.lm) consider(r.lm);
+    }
+    if (batch.timedOut) timedOut = true;
+  };
+
+  const dims = scans.length;
+  if (separable) {
+    const n = SEPARABLE_GRID[dims - 1];
+    const grid = scanGrid(scans, n);
+    const tasks: FitTask[] = grid.map((point, index) => ({
+      kind: 'linear',
+      index,
+      point,
+    }));
+    const batch = yield tasks;
+    // A point that turned out nonlinear means the structural test was wrong
+    // about this model: the multi-start below takes over. The points before
+    // it are genuine evaluated points, so `bestScanned` keeps the best of
+    // them; the points after it are not read, which is what the serial loop
+    // gave when it stopped there.
+    let firstNonlinear = Infinity;
+    for (const r of batch.results)
+      if (r.kind === 'linear' && r.solved === 'nonlinear')
+        firstNonlinear = Math.min(firstNonlinear, r.index);
+    const solved: LinearScanSolution[] = new Array(grid.length).fill(null);
+    // In task order, so that a tie on the residual goes to the lowest index
+    // whatever order the results arrived in.
+    const byIndex = [...batch.results].sort((a, b) => a.index - b.index);
+    for (const r of byIndex) {
+      if (r.kind !== 'linear' || r.index >= firstNonlinear) continue;
+      solved[r.index] = r.solved;
+      if (r.solved !== null && r.solved !== 'nonlinear')
+        considerScanned(r.solved[0], r.solved[1]);
+    }
+    if (batch.timedOut) {
+      // A deadline expiring inside the scan: whatever was found so far is
+      // reported, with no refinement. This comes before the nonlinear check
+      // on purpose: once the deadline has passed, a multi-start would time
+      // out in its first start, so the scanned points are the answer.
+      timedOut = true;
+      return outcome();
+    }
+    if (firstNonlinear !== Infinity) separable = false;
+    else {
+      if (bestScanned === undefined) return 'no-finite-value';
+      const rss = solved.map((s) =>
+        s !== null && s !== 'nonlinear' ? s[1] : Infinity
+      );
+      const candidates = gridLocalMinima(rss, dims, n)
+        .sort((i, k) => rss[i] - rss[k])
+        .slice(0, SEPARABLE_REFINEMENTS);
+      const refinements: StartTask[] = candidates.map((i, index) => ({
+        kind: 'start',
+        index,
+        theta0: (solved[i] as [number[], number])[0],
+        checkStart: false,
+      }));
+      takeStarts(refinements, yield refinements);
+      return outcome();
+    }
+  }
+  const n = MULTISTART_GRID[dims - 1];
+  const starts: StartTask[] = scanGrid(scans, n).map((point, index) => ({
+    kind: 'start',
+    index,
+    theta0: thetaAt(point),
+    checkStart: true,
+  }));
+  const batch = yield starts;
+  takeStarts(starts, batch);
+  // No start had a finite residual, and the deadline did not cut the batch
+  // short (a cut batch is reported with what it has, as the serial loop did
+  // when the deadline expired inside a start's evaluation).
+  if (bestScanned === undefined && !batch.timedOut) return 'no-finite-value';
+  return outcome();
+}
+
 /**
  * `FindFit` with the `global` option: the lowest sum of squared residuals over
  * a closed range of one or two parameters, not the local minimum nearest the
@@ -906,96 +1061,31 @@ function solveGlobal(
     return [theta, rss];
   };
 
-  let iterations = 0;
-  let timedOut = false;
-  let best: LMResult | undefined;
-  /** Best point seen before any LM run finished (the fallback of a timeout
-   * during the scan): the vector and its sum of squared residuals. */
-  let bestScanned: [number[], number] | undefined;
-
-  const consider = (r: LMResult): void => {
-    iterations += r.iterations;
-    if (r.timedOut) timedOut = true;
-    if (
-      Number.isFinite(r.residualNorm) &&
-      (best === undefined || r.residualNorm < best.residualNorm)
-    )
-      best = r;
+  // The pure-number operations of a task (`fit-executor.ts`): the plan below
+  // decides which tasks to run, the executor runs them. Today the executor
+  // runs them here, in order; the plan is written so that a worker pool can
+  // run the same tasks (design: `docs/plans/2026-10-20-worker-kernel-pool.md`,
+  // section 5.5).
+  const kernel: FitKernel = {
+    linearSolveAt,
+    startRss: (theta0) => sumOfSquares(cb.residual(theta0)),
+    lm: (theta0) =>
+      levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+        lo,
+        hi,
+        onIteration: () => checkDeadline(ce._deadlineFrame),
+      }),
   };
-
-  /** One bounded LM run from `theta0`; `false` when the deadline expired
-   * before the solver produced anything (then nothing more should run). */
-  const refine = (theta0: number[]): boolean => {
-    try {
-      consider(
-        levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
-          lo,
-          hi,
-          onIteration: () => checkDeadline(ce._deadlineFrame),
-        })
-      );
-    } catch (e) {
-      if (!isTimeoutCancellation(e)) throw e;
-      timedOut = true;
-    }
-    return !timedOut;
-  };
-
-  const dims = scans.length;
-  try {
-    if (separable) {
-      const n = SEPARABLE_GRID[dims - 1];
-      const grid = scanGrid(scans, n);
-      const solved: ([number[], number] | null)[] = [];
-      for (const point of grid) {
-        const s = linearSolveAt(point);
-        if (s === 'nonlinear') {
-          // The structural test was wrong about this model: the multi-start
-          // below takes over. The points solved so far are genuine evaluated
-          // points, so `bestScanned` keeps the best of them.
-          separable = false;
-          break;
-        }
-        // Narrowed: `s` is a solved point or `null` from here on.
-        solved.push(s as [number[], number] | null);
-        if (s && (bestScanned === undefined || s[1] < bestScanned[1]))
-          bestScanned = s;
-      }
-      if (separable) {
-        if (bestScanned === undefined)
-          return ce.error(
-            'unexpected-argument',
-            'FindFit: the model has no finite value in the global range'
-          );
-        const rss = solved.map((s) => (s ? s[1] : Infinity));
-        const candidates = gridLocalMinima(rss, dims, n)
-          .sort((i, k) => rss[i] - rss[k])
-          .slice(0, SEPARABLE_REFINEMENTS);
-        for (const i of candidates) if (!refine(solved[i]![0])) break;
-      }
-    }
-    if (!separable) {
-      const n = MULTISTART_GRID[dims - 1];
-      for (const point of scanGrid(scans, n)) {
-        const theta0 = thetaAt(point);
-        const rss = sumOfSquares(cb.residual(theta0));
-        if (!Number.isFinite(rss)) continue;
-        if (bestScanned === undefined || rss < bestScanned[1])
-          bestScanned = [theta0, rss];
-        if (!refine(theta0)) break;
-      }
-      if (bestScanned === undefined)
-        return ce.error(
-          'unexpected-argument',
-          'FindFit: the model has no finite value in the global range'
-        );
-    }
-  } catch (e) {
-    // A deadline expiring inside the scan itself (the residual callbacks
-    // check it per row). Whatever was found so far is reported below.
-    if (!isTimeoutCancellation(e)) throw e;
-    timedOut = true;
-  }
+  const outcome = runFitPlanSync(
+    globalSearchPlan(separable, scans, thetaAt),
+    new InlineFitExecutor(kernel)
+  );
+  if (outcome === 'no-finite-value')
+    return ce.error(
+      'unexpected-argument',
+      'FindFit: the model has no finite value in the global range'
+    );
+  const { best, bestScanned, iterations, timedOut } = outcome;
 
   // The best evaluated grid point can beat every finished solver run: in the
   // multi-start a later start is recorded in `bestScanned` before its run,

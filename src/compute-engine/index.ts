@@ -16,6 +16,7 @@ import type { DeadlineFrame } from '../common/interruptible.js';
 import { hidePrivateProperties } from '../common/utils.js';
 
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
+import type { KernelPool } from './kernel-pool-types.js';
 
 import type {
   MathJsonExpression,
@@ -1573,6 +1574,15 @@ export class ComputeEngine implements IComputeEngine {
   private _jit: 'auto' | 'off' = 'auto';
 
   /**
+   * The worker pool that `broadcastAsync()` of a compiled result uses
+   * (`createKernelPool`, `kernel-pool.ts`). The engine creates no worker on
+   * its own: with no pool every batch runs on the calling thread. One pool
+   * can serve several engines; the pool is read at each call, so it can be
+   * given or replaced at any time.
+   */
+  workers: KernelPool | undefined = undefined;
+
+  /**
    * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *
@@ -1617,12 +1627,16 @@ export class ComputeEngine implements IComputeEngine {
     tolerance?: number | 'auto';
     latexSyntax?: ILatexSyntax;
     latexOptions?: Partial<ParseLatexOptions & SerializeLatexOptions>;
+    /** The worker pool for `broadcastAsync()` (`createKernelPool`); the
+     * same as setting `ce.workers` after construction. */
+    workers?: KernelPool;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
 
     this.strict = true;
     this.jit = 'auto';
+    this.workers = options?.workers;
 
     this._numericConfiguration = new EngineNumericConfiguration({
       precision: options?.precision,

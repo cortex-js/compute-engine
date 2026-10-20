@@ -1,6 +1,7 @@
 import type { BigDecimal } from '../big-decimal/index.js';
 import type { Complex } from 'complex.js';
 import type { OneOf } from '../common/one-of.js';
+import type { KernelPool } from './kernel-pool-types.js';
 import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
 import type {
   DeclarationOrigin,
@@ -1704,6 +1705,14 @@ export interface IComputeEngine {
    * `EvalError`; `'off'` never attempts it. Explicit `compile()` is exempt.
    */
   jit: 'auto' | 'off';
+
+  /**
+   * The worker pool that `broadcastAsync()` of a compiled result uses, built
+   * by the host with `createKernelPool()`. The engine creates no worker on
+   * its own: with no pool every batch runs on the calling thread. One pool
+   * can serve several engines, and it is read at each call.
+   */
+  workers: KernelPool | undefined;
 
   expr(
     expr: NumericValue | ExpressionInput,

@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json epsil compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile runtime identities integration-rules epsil compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile runtime kernel-worker identities integration-rules epsil compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -127,6 +127,10 @@ fi
 if [[ "$TARGETS" == *runtime* ]]; then
   "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/runtime.ts
+fi
+if [[ "$TARGETS" == *kernel-worker* ]]; then
+  "$TS7" $DTS_FLAGS \
+    --emitDeclarationOnly --outDir ./dist/types ./src/kernel-worker.ts
 fi
 if [[ "$TARGETS" == *identities* ]]; then
   # --resolveJsonModule/--esModuleInterop: the identities entry imports the

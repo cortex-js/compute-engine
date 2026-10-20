@@ -112,6 +112,27 @@ export type {
   BoolInterval,
 } from './compute-engine/interval/types.js';
 
+// ── Batch evaluation of compiled functions (`result.broadcast()`) ───
+export {
+  INTERVAL_KIND,
+  type IntervalKindCode,
+} from './compute-engine/compilation/broadcast.js';
+export type {
+  BroadcastInputs,
+  BroadcastOptions,
+  BroadcastAsyncOptions,
+  BroadcastAsyncResult,
+} from './compute-engine/compilation/types.js';
+
+// ── Worker pool for `result.broadcastAsync()` (`ce.workers`) ────────
+export {
+  createKernelPool,
+  defaultPoolSize,
+  type KernelPool,
+  type KernelPoolOptions,
+  type WorkerLike,
+} from './compute-engine/kernel-pool.js';
+
 // ── Free functions (accept string | MathJSON | BoxedExpression) ─────
 // `compile` is also imported as a value so it can be placed on the global
 // registration slot below — bundle-external consumers (which may only

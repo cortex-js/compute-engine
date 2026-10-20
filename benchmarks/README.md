@@ -29,6 +29,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Type derivation / P1** | `type-derivation.mjs` | CE baseline · CE current | stdout |
 | **Scalar block accumulation** | `scalar-accumulator.ts [baseline-entry.ts]` | CE baseline · CE current | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
+| **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
 worth adopting but not yet wired in (WolframMark, SageMath's tour of

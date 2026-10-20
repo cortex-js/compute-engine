@@ -111,6 +111,11 @@
       "require": "./dist/umd-min/runtime.cjs",
       "default": "./dist/esm-min/runtime.js"
     },
+    "./kernel-worker": {
+      "types": "./dist/types/kernel-worker.d.ts",
+      "import": "./dist/esm-min/kernel-worker.js",
+      "default": "./dist/esm-min/kernel-worker.js"
+    },
     "./identities": {
       "types": "./dist/types/identities.d.ts",
       "import": "./dist/esm-min/identities.js",
