@@ -2,6 +2,100 @@
 
 ### Behavior Changes
 
+- An overloaded function now accepts a symbol declared `error` that has no
+  value, as a function with one signature does. With `ce.declare('e',
+  'error')` and `ov` declared `((number) -> number) & ((string) -> string)`,
+  `ov(e)` is valid, typed `number | string`, and evaluates to `ov(e)`. Before,
+  it was the error "expected `number | string`, got `error`", while `g(e)` with
+  `g` declared `(number) -> number` was valid. The same applies to a call
+  typed `error` only by its declared result type (`h(2)` with `h` declared
+  `(number) -> error`), and to an overload with a generic arm
+  (`((string) -> string) & ((T) -> T where T: number)`, also typed
+  `number | string`). An arm whose parameter is a collection (`list`,
+  `tuple<…>`) or a function still refuses such an argument. A function with
+  several clauses selects no clause for it: with `f(a: number) = a + 1` and
+  `f(a: string) = "s"`, `f(e)` stays `f(e)`; it was the `no-matching-clause`
+  error. A clause whose parameter is typed `error` or `any` is still selected
+  for it. The library operators that have a string form as well as a
+  collection form (`Reverse`, `Sort`, `Take`, `Drop`, `Slice`, `Unique`,
+  `Most`, `Rest`, `RotateLeft`, `RotateRight`, `Permutations`,
+  `Combinations`, `SlidingWindow`, `RandomSample`, `RandomShuffle`,
+  `DeleteAt`, `StringSplit`, `Chunk`) now accept such an argument through
+  their string form: `Reverse(e)` is valid, typed `string`, and evaluates to
+  `Reverse(e)`; it was refused. A parameter typed `unknown` now
+  accepts such an argument on every route: a library operator with the
+  signature `(unknown) -> unknown` and a function literal `(a: unknown) ↦ a`
+  refused it.
+- A valid call of an overloaded function where no arm is selected is typed by
+  the arms that the call can take at run time. With `r` declared `real` and
+  `G` declared `((T) -> T where T: integer) & ((string) -> string)`, `G(r)` is
+  typed `integer`, as with the ground form `((integer) -> integer) &
+  ((string) -> string)`. It was typed `string`.
+
+- A sum or a product written with no bounds (`\sum_k f`, `\prod_k f`) runs over
+  `k = 1, 2, 3, …` with every method: `evaluate()`, `N()`, `simplify()` and the
+  derivative give the same result as for `\sum_{k=1}^{\infty} f`. Only `N()` did
+  this before; `evaluate()` and `simplify()` kept the sum as it was. Now
+  `\sum_k \frac{1}{k^2}` evaluates to `\frac{\pi^2}{6}`, `\sum_k x^k` to
+  `\frac{x}{1-x}` when `|x| < 1`, `\sum_k \frac{x^k}{k!}` to `e^x - 1`,
+  `\sum_k k` to `\infty` and `\prod_k (1 + \frac{1}{k^2})` to
+  `\frac{\sinh(\pi)}{\pi}`. `\sum_k y` stays as it is under `evaluate()` and
+  `simplify()`, as `\sum_{k=1}^{\infty} y` does: its value depends on the sign
+  of `y`. The derivative of `\sum_k x^k` is `\frac{1}{(1-x)^2}` when `|x| < 1`.
+  The expression keeps its form with no bounds (`\sum_{k}y` is still written
+  `\sum_{k}y`). A sum or a product with one bound only (`\sum_{k=1} f`) still
+  stays unevaluated with every method.
+- A symbol whose name has a superscript part (`__`) is written in
+  `\operatorname{}`, and reads back as the same symbol. Before, `x__a` was
+  written `x^{a}`, which reads back as the power `Power(x, a)`, and
+  `aleph__plus` was written `\aleph^{+}`, which reads back as
+  `PseudoInverse(aleph)`. Now `x__a` is `\operatorname{x^{a}}` and
+  `aleph__plus` is `\operatorname{\aleph^{+}}`. The superscripts and the
+  subscripts are written in the order of the name, with a brace group where
+  the order or valid LaTeX needs one: `x__a_1` is `\operatorname{x^{a}_1}`,
+  `x_1__a` is `\operatorname{{x_1}^{a}}` (it was `x^{a}_1`, the same as
+  `x__a_1`), and two superscripts are nested, `R_doublestruck__0__plus` is
+  `\operatorname{{\mathbb{R}^0}^{+}}` (it was `\mathbb{R^{0,+}}`, which does
+  not parse). A style on the base stays on the base: `x_bold__a` is
+  `\operatorname{\mathbf{x}^{a}}` (it was `\mathbf{x^{a}}`, which reads back
+  as `x__a_bold`). A name with a base of more than one letter is written in
+  `\operatorname{}` too: `mass__earth` is `\operatorname{mass^{earth}}` (it
+  was `\mathrm{mass^{earth}}`, which also read back).
+- A wildcard name with a style or an accent reads back as the same name: the
+  `\_` is inside the style. `_x_bold` is `\operatorname{\mathbf{\_x}}` and
+  `_x_hat` is `\operatorname{\hat{\_x}}` (they were
+  `\operatorname{\_\mathbf{x}}` and `\operatorname{\_\hat{x}}`, which do not
+  parse), and `_x_1_bold` is `\operatorname{\mathbf{\_x_1}}` (it was
+  `\operatorname{\_x_{\mathbf{1}}}`, which reads back as `_x_one_bold`).
+- A name with a style on its base and a style after a subscript of digits
+  reads back: `x_bold_1_bold` is `\mathbf{\mathbf{x}_1}` (it was
+  `\mathbf{x}_{\mathbf{1}}`, which reads back as `x_bold_one_bold`). A name
+  with two such subscripts is written in `\operatorname{}`: `x_1_bold_1_bold`
+  is `\operatorname{\mathbf{\mathbf{x_1}_1}}`.
+- A symbol whose name has a subscript part that is a symbol (`plus`, `minus`,
+  `star`, `dag`, `circle`, …) is written in `\operatorname{}`, and reads back
+  as the same symbol. Before, `x_plus` was written `x_{+}`, which reads back as
+  `Subplus(x)`; `x_1_plus` was `{x_1}_{+}` (`Subplus(x_1)`), and `x_a_dag`
+  was `{x_{a}}_{\dag}`, which is a parse error. Now they are
+  `\operatorname{x_{+}}`, `\operatorname{{x_1}_{+}}` and
+  `\operatorname{{x_{a}}_{\dag}}`. `x_star` is `\operatorname{x_{\star}}` (it
+  was `x_{\star}`, which also read back). The operators do not change:
+  `Subplus(x)` is still `x_+`. The parser reads `\circ` in a name as `circle`,
+  so `x_{\circ}` is the symbol `x_circle` (it was a parse error).
+- A unicode escape in a symbol name stays in the part where it is:
+  `x_a____002012` (the parse of `x_{a\unicode{"2012}}`) is written
+  `x_{a\unicode{"2012}}`. It was `\operatorname{x\unicode{"2012}_{a}}`, which
+  reads back as `x____002012_a`. A subscript that starts with an escape,
+  `x_____002012`, is written `x_{\unicode{"2012}}` (it was `x^{,}_{002012}`,
+  which does not parse).
+- A name with the `deg` accent reads back: the parser reads `\degree` in the
+  body of `\mathrm{}` or `\operatorname{}` as the accent, so
+  `\mathrm{x\degree}` is the symbol `x_deg` (it was a parse error). Outside of
+  a name, `x\degree` is still `Degrees(x)`.
+- A subscript of digits with only the `upright` style is written without the
+  style: `x_1_upright` is written `x_1` (it was `x_{\mathrm{1}}`, which reads
+  back as `x_one`). No spelling reads back as `x_1_upright`, and `x_1` is the
+  nearest name.
 - The term of `Table` is a function body: a name that a branch of the term
   assigns is `read-before-declaration` in a cell where the branch did not run
   (`Table(Block(If(k = 2, h ≔ (z ↦ 2z)), h(k)), (k, 1, 3))` is
@@ -388,13 +482,61 @@
   a brace group that has its own subscripts: `\mathbf{{x_1}_2}` is the symbol
   `x_1_2_bold`.
 - A sum or a product written with no bounds (`\sum_k x^k`, which is
-  `Sum(x^k, Limits(k, Nothing, Nothing))`) runs over the default domain. It was
-  read as a sum over the single point `k = Nothing`: `\sum_k x^{k-1}` evaluated
-  to `\frac{1}{x}`, `\sum_k x^k` and `\prod_k x^k` to an error, and `\sum_k y`
-  and `\prod_k y` became `y`. Now these stay unevaluated, as `\sum_k k` did, and
-  `\sum_k \frac{1}{k^2}` `.N()` is still `1.6449…`. `simplify()` also keeps a
-  sum or a product with no bounds, or with one bound only, as it is: `\sum_k k`
-  gave `1` and `\sum_{k=1} k` gave `\frac{1}{2}`.
+  `Sum(x^k, Limits(k, Nothing, Nothing))`) is no longer read as a sum over the
+  single point `k = Nothing`: `\sum_k x^{k-1}` evaluated to `\frac{1}{x}`,
+  `\sum_k x^k` and `\prod_k x^k` to an error, and `\sum_k y` and `\prod_k y`
+  became `y`. It runs over `k = 1, 2, 3, …`; see the entry about sums with no
+  bounds under "Behavior Changes". `simplify()` keeps a sum or a product with
+  one bound only as it is: `\sum_{k=1} k` gave `\frac{1}{2}`.
+- `\sum_{k=1}^{\infty} \frac{x^k}{k!}` evaluates to `e^x - 1`. It was
+  `e^x - x^0`, which has no value at `x = 0`, where the sum is 0. The same
+  applies to the sum from any lower bound above 0.
+- `simplify()` of a geometric series with an infinite upper bound and a free
+  ratio keeps the sum as it is: `\sum_{k=1}^{\infty} x^k` simplified to
+  `\frac{x - x^{\infty}}{1 - x}`, and `x^{\infty}` is not a value. `evaluate()`
+  still gives `\frac{x}{1-x}` when `|x| < 1`. With a number ratio the closed
+  form still applies: `\sum_{k=0}^{\infty} (\frac{1}{2})^k` simplifies to `2`.
+- `simplify()` of a sum or a product over an infinite range
+  (`\sum_{k=1}^{\infty} f`, or `\sum_k f` with no bounds) no longer puts the
+  infinite bound into a closed form when the result depends on a symbol of
+  unknown sign or has no value:
+  - `\sum_k 0` simplified to `Indeterminate`; it is `0`, also under
+    `evaluate()`.
+  - `\sum_k y` simplified to `\infty \cdot y`, which is wrong for `y = 0`; it
+    stays as it is. A body of known sign gives `\infty` or `-\infty` (`\sum_k 3`
+    is `\infty`).
+  - `\prod_k 1` simplified to `Indeterminate`; it is `1`. A product of a
+    constant `c` is the limit of `c^n`: `0` for `|c| < 1`, `\infty` for `c > 1`.
+    `evaluate()` and `N()` now give the same values (`\prod_k \frac{1}{2}` is
+    `0`; it stayed unevaluated). For `c ≤ -1`, and for a free body (`\prod_k y`
+    simplified to `y^{\infty}`), the product stays as it is. The comparison
+    with 1 uses no tolerance: an exact number is compared exactly, and a float
+    within the engine tolerance of 1 (`1.000000000001`) keeps the product as
+    it is, since the float does not tell on which side of 1 the value is. A
+    body that is not pure (`\mathrm{Random}()`) is not compared, and an empty
+    range (`k` from `\infty` to 5) is not read as an infinite one.
+  - `\sum_k (1 + xk)` simplified to `\infty`, which is wrong for `x < 0`, and
+    `\sum_k kx` to `\infty \cdot x`; both stay as they are. With no free symbol
+    the closed form still applies: `\sum_k (1 + 2k)` is `\infty`.
+  - `\sum_{k=0}^{\infty} (-1)^k` simplified to `Indeterminate`; it stays as it
+    is, as under `evaluate()`.
+- `simplify()` of a geometric series with an exact ratio keeps it exact:
+  `\sum_{k=1}^{\infty} (\frac{1}{\sqrt{2}})^k` simplified to the float `2.414…`;
+  it is now `1 + \sqrt{2}`, as under `evaluate()`. The finite form
+  `\sum_{k=0}^{n} (\frac{1}{\sqrt{2}})^k` keeps the exact ratio too.
+- The derivative of a sum over an infinite range is no longer the series of the
+  derivatives when that series has no closed form: the derivative of
+  `\sum_{k=1}^{\infty} \frac{\sin(kx)}{k}` was `\sum_{k=1}^{\infty} \cos(kx)`,
+  which diverges, while the derivative is `-\frac{1}{2}` on `(0, 2\pi)`. It now
+  stays unevaluated. A sum with a closed form is differentiated through it: the
+  derivative of `\sum_{k=1}^{\infty} \frac{x^k}{k!}` is `e^x`, and the
+  derivative of `\sum_{k=1}^{\infty} x^{k-1}` is `\frac{1}{(1-x)^2}` when
+  `|x| < 1`. `explain('D')` shows the rewrite of the sum to its closed form as
+  a step before the steps of its derivative. A finite range is still
+  differentiated term by term.
+- `compile()` of a sum or a product with no bounds reports the infinite upper
+  bound, as for `\sum_{k=1}^{\infty} f`. It reported that the `Nothing` marker
+  cannot be read as a variable. Both fall back to the interpreter.
 - `simplify()` of a sum or a product with more than one indexing clause no
   longer reads the second index as a free symbol and drops its clause:
   `Sum(i·j, Limits(i, 1, 3), Limits(j, 1, 2))` gave `6j`. It now stays as it is

@@ -147,17 +147,22 @@ describe('STYLED SYMBOL WITH A SUBSCRIPT', () => {
     expect(ce.parse('\\mathrm{x_{12}}').json).toEqual('x_12');
   });
 
-  test('a digit subscript with the upright style keeps its older spelling', () => {
-    // `\mathrm{x_1}` would read back as `x_1`: the parser drops the upright
-    // style of a name of more than one character. No spelling reads back as
-    // `x_1_upright` today.
-    expect(latexOf('x_1_upright')).toBe('x_{\\mathrm{1}}');
+  test('a digit subscript with only the upright style is written without it', () => {
+    // No spelling reads back as `x_1_upright`: the parser drops the upright
+    // style of a name of more than one character (`\mathrm{x_1}` is `x_1`),
+    // and it spells out a styled digit (`x_{\mathrm{1}}` is `x_one`). The
+    // nearest spelling is `x_1`.
+    expect(latexOf('x_1_upright')).toBe('x_1');
+    expect(roundTrip('x_1_upright')).toEqual('x_1');
+    expect(roundTrip('x__a_1_upright')).toEqual('x__a_1');
   });
 
-  test('a wildcard name with a digit subscript and a style keeps its older spelling', () => {
-    // `\operatorname{\_\mathbf{x_1}}` does not parse. The older spelling does
-    // not read back as the same name either (it gives `_x_one_bold`).
-    expect(latexOf('_x_1_bold')).toBe('\\operatorname{\\_x_{\\mathbf{1}}}');
+  test('a wildcard name with a digit subscript and a style reads back', () => {
+    // The `\_` of the wildcard name is inside the style:
+    // `\operatorname{\_\mathbf{x_1}}` does not parse, and the older spelling,
+    // `\operatorname{\_x_{\mathbf{1}}}`, read back as `_x_one_bold`.
+    expect(latexOf('_x_1_bold')).toBe('\\operatorname{\\mathbf{\\_x_1}}');
+    expect(roundTrip('_x_1_bold')).toEqual('_x_1_bold');
   });
 });
 

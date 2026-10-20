@@ -121,7 +121,10 @@ import {
   isInequalityOperator,
   isRelationalOperator,
 } from '../latex-syntax/utils.js';
-import { normalizeIndexingSet } from '../library/utils.js';
+import {
+  normalizeIndexingSet,
+  withDefaultBigOpBounds,
+} from '../library/utils.js';
 import { machineRangeCountDiffers } from '../library/range-closed-form.js';
 import {
   isSymbol,
@@ -10522,22 +10525,29 @@ export class BaseCompiler {
     }
 
     if (h === 'Sum' || h === 'Product') {
+      // A clause with no bounds (`\sum_k f`) runs over 1..+∞, as in the
+      // interpreter, so the targets read the bounds 1 and +∞ (and decline the
+      // infinite bound by name) instead of the `Nothing` marker.
+      const bigOpArgs =
+        args.length > 1
+          ? [args[0], ...withDefaultBigOpBounds(engine, args.slice(1))]
+          : args;
       // Delegate to target-specific function handler if available,
       // otherwise fall back to the generic loop compilation.
       const sumProdFn = target.functions?.(h);
       if (typeof sumProdFn === 'function') {
         return sumProdFn(
-          args,
+          bigOpArgs,
           (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
       }
       if (typeof sumProdFn === 'string') {
-        return `${sumProdFn}(${args
+        return `${sumProdFn}(${bigOpArgs
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      return BaseCompiler.compileLoop(h, args, target, node);
+      return BaseCompiler.compileLoop(h, bigOpArgs, target, node);
     }
 
     // A user operator definition may supply its own target-aware compile

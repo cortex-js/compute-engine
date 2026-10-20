@@ -38,7 +38,10 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
-import { isErrorTypedOperand } from './error-typed-operand.js';
+import {
+  isErrorTypedOperand,
+  isErrorTypedWithoutErrorValue,
+} from './error-typed-operand.js';
 import { indexReadTupleExtension } from './index-read-tuple.js';
 import {
   admissionOf,
@@ -129,6 +132,12 @@ export interface OverloadResolution {
    * resolution attached to a call keeps the arms the operand was undecided
    * between. */
   undecidedResults?: ReadonlyArray<Type>;
+  /** Set only when no arm is selected: a ground arm the call can take at run
+   * time, with the join of the results of every such arm as its result (see
+   * {@link unresolvedArm}). Result typing reads it for a call that is valid
+   * although no arm was selected, in place of the result of the whole
+   * intersection. */
+  unresolved?: FunctionSignature;
   /** `selected`'s ground instantiation at this call (§6). `undefined` exactly
    * when `selected` is; for a ground arm it IS `selected`.
    *
@@ -442,6 +451,21 @@ function prefilterAdmits(
   // after the lazy test, because the type of an unbound operand cannot
   // always be read.
   if (isErrorTypedOperand(op)) return true;
+
+  // A valid operand typed `error` that does not hold an error value (a
+  // symbol declared `error` with no value, or an application such as `g(2)`
+  // whose declared result type is `error`) does not get a vote either. The
+  // type `error` is disjoint from `number` by the test below, but argument
+  // validation admits such an operand at a scalar parameter, because
+  // `typesOverlap()` reports that `error` overlaps every type, and it
+  // refuses it at a collection parameter (`overlapAdmission()` in
+  // `validate.ts`). The trial of each arm is that validation, so it decides
+  // the arm as a single signature would: `((number) -> number) & ((string)
+  // -> string)` admits the operand, as `(number) -> number` does (user
+  // decision 2026-10-20). Without a trial (result typing of a call that was
+  // never validated), every arm is a candidate, and the result types of the
+  // candidates are joined, which is sound.
+  if (isErrorTypedWithoutErrorValue(op)) return true;
 
   // An unknown/`any` operand never refutes an arm. This is why ambiguity is
   // always "eliminated nothing", never "picked wrong" (§4.1).
@@ -769,7 +793,8 @@ function undecidedResultOf(
       if (
         !op.type.isUnknown &&
         op.type.type !== 'any' &&
-        !isErrorTypedOperand(op)
+        !isErrorTypedOperand(op) &&
+        !isErrorTypedWithoutErrorValue(op)
       )
         return false;
       const param = paramAt(declared, i);
@@ -982,6 +1007,15 @@ export function resolveOverload(
         selectedInstance: undefined,
         selectedSolution: undefined,
         viable,
+        unresolved: unresolvedArm(
+          ops,
+          arms.map((arm) =>
+            arityAdmits(arm, arity)
+              ? { instance: arm, viable: false, result: arm.result }
+              : undefined
+          ),
+          policies
+        ),
       };
     let selected = viable[0];
     for (let i = 1; i < viable.length; i++)
@@ -1071,6 +1105,7 @@ export function resolveOverload(
       selectedInstance: undefined,
       selectedSolution: undefined,
       viable: [],
+      unresolved: unresolvedArm(ops, joinArms, policies),
     };
 
   // Rank: the first arm not beaten by any other wins. Scanning in declaration
@@ -1136,6 +1171,56 @@ function undecidedJoin(
   policies?: AdmissionPolicies
 ): ReadonlyArray<Type> | undefined {
   if (policies?.lazy) return undefined;
+  const takeable = takeableArms(ops, arms, policies);
+  const undecided =
+    hasUndecidedOperand(ops, policies) ||
+    takeable.some((arm) =>
+      takesByOverlap(arm.instance, arm.ops ?? ops, policies)
+    );
+  return undecided ? takeable.map((arm) => arm.result) : undefined;
+}
+
+/**
+ * For a call where no arm was selected: the ground instance of the first arm
+ * the call can take at run time ({@link takeableArms}), with the join of the
+ * results of all those arms as its result (`unknown` when one of them is
+ * `unknown`, because `widen` would drop it). `undefined` when no arm can
+ * take the call, or when the operator is lazy.
+ *
+ * A call with no selected arm can still be valid: on the route of a function
+ * held by a symbol, an operand whose type overlaps a parameter is kept
+ * (`keepProvisionalOperands()` in `box.ts`). Example: with `r: real` and
+ * `G: ((T) -> T where T: integer) & ((string) -> string)`, `G(r)` is valid.
+ * The bound `integer` refuses `real`, so no arm is selected, but `r` can be
+ * an integer at run time. The result type is then the result of that arm,
+ * read at the bound (`integer`), not the result of the intersection as a
+ * whole (which gave `string`).
+ */
+function unresolvedArm(
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<JoinArm | undefined>,
+  policies?: AdmissionPolicies
+): FunctionSignature | undefined {
+  if (policies?.lazy) return undefined;
+  const takeable = takeableArms(ops, arms, policies);
+  if (takeable.length === 0) return undefined;
+  const results = takeable.map((arm) => arm.result);
+  return {
+    ...takeable[0].instance,
+    result: results.some((r) => r === 'unknown') ? 'unknown' : widen(...results),
+  };
+}
+
+/**
+ * The arms of `arms` the call can take at run time: the viable arms, and
+ * the arms where every operand is `unknown`/`any`, holds an error value, or
+ * {@link canTakeAtRunTime} at its parameter. See {@link undecidedJoin}.
+ */
+function takeableArms(
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<JoinArm | undefined>,
+  policies?: AdmissionPolicies
+): JoinArm[] {
   // A collection operand lifted at a threadable scalar position: the call
   // broadcasts, and its result type is built elsewhere. The arms the strict
   // reading refused are then not added.
@@ -1144,7 +1229,7 @@ function undecidedJoin(
       isThreadableAt(policies?.threadable, i) &&
       policies?.couldBeUnkeyedCollection?.(op) === true
   );
-  const takeable = arms.filter(
+  return arms.filter(
     (arm): arm is JoinArm =>
       arm !== undefined &&
       (arm.viable ||
@@ -1157,16 +1242,20 @@ function undecidedJoin(
               isErrorTypedOperand(op)
             )
               return true;
+            // An operand typed `error` with no error value: only the arms
+            // the trials admitted take it (they are `viable`). At run time
+            // an arm that admits it on the strict reading (a parameter
+            // typed `error` or `any`) is selected, and the other arms are
+            // read only when none does (`triStateSelect()`), which is what
+            // the two passes of the trials do too. A generic arm whose
+            // instance reads the absorbed variable as `unknown` would
+            // otherwise take it here even when its bound refuses it
+            // (`(T) -> T where T: list`).
+            if (isErrorTypedWithoutErrorValue(op)) return false;
             const param = paramAt(arm.instance, i);
             return param !== undefined && canTakeAtRunTime(op, param);
           })))
   );
-  const undecided =
-    hasUndecidedOperand(ops, policies) ||
-    takeable.some((arm) =>
-      takesByOverlap(arm.instance, arm.ops ?? ops, policies)
-    );
-  return undecided ? takeable.map((arm) => arm.result) : undefined;
 }
 
 /**
@@ -1333,11 +1422,19 @@ function boundReading(solution: Type | undefined, bound: Type): Type {
 }
 
 /**
- * True when a valid operand is typed `unknown`, `any` or `error` — the
- * operands `prefilterAdmits` lets through at every arm — and the operator is
- * not lazy (a lazy operator's operands arrive unbound, so their types say
- * nothing). An operand typed `error` selects no arm: the call evaluates to
- * its error. See {@link OverloadResolution.undecidedResults}.
+ * True when a valid operand is typed `unknown` or `any`, or is a symbol
+ * that holds an error value, and the operator is not lazy (a lazy
+ * operator's operands arrive unbound, so their types say nothing). Such an
+ * operand refutes no arm in `prefilterAdmits`, and the operand types then
+ * do not decide the arm. An operand that holds an error value selects no
+ * arm: the call evaluates to its error. See
+ * {@link OverloadResolution.undecidedResults}.
+ *
+ * `prefilterAdmits` also lets through, at every arm, an operand typed
+ * `error` that does not hold an error value (a symbol declared `error` with
+ * no value). That operand is not counted here: the trials decide which
+ * arms admit it, and the arms that admit it only by overlap make the join
+ * through {@link takesByOverlap}.
  */
 function hasUndecidedOperand(
   ops: ReadonlyArray<Expression>,
@@ -1354,22 +1451,67 @@ function hasUndecidedOperand(
 }
 
 /**
+ * True when argument validation admits, at the parameter `param`, a valid
+ * operand typed `error` that does not hold an error value (see
+ * `isErrorTypedWithoutErrorValue()`). The type `error` overlaps every type,
+ * so a parameter admits such an operand when one of its union arms is
+ * `unknown`, `any` or `error`, or is a type that is not a function type
+ * and not a collection type (`number`, `string`, `boolean`, a value type
+ * such as `0`). A parameter whose arms are all function types or
+ * collection types (`list`, `tuple<number, number>`) refuses it, as
+ * `overlapAdmission()` in `validate.ts` does.
+ */
+function admitsUnheldError(param: Type): boolean {
+  const r = resolveTypeAlias(param);
+  const arms =
+    typeof r !== 'string' && r.kind === 'union'
+      ? r.types.map((t) => resolveTypeAlias(t))
+      : [r];
+  return arms.some(
+    (a) =>
+      a === 'unknown' ||
+      a === 'any' ||
+      a === 'error' ||
+      (!isArrowParam(a) && !isCollectionKind(a))
+  );
+}
+
+/**
  * Tri-state admission of a whole arm for a call
  * (function-polymorphism design §4.4): refuted on arity, else the fold of
  * per-position `admissionOf`. ONE implementation shared by static result
  * typing (`resolvedArm`'s value-arm JOIN) and the runtime clause selector
  * (`multi-clause.ts`), so the two cannot diverge. Write-free.
+ *
+ * With `relaxUnheldError`, an operand typed `error` that does not hold an
+ * error value (a symbol declared `error` with no value, see
+ * `isErrorTypedWithoutErrorValue()`) is not refuted at a parameter that
+ * argument validation admits it at ({@link admitsUnheldError}): nothing is
+ * known about its value, so the arm is undecidable. This is the reading of
+ * the second pass of overload resolution (`overlapTrial` in
+ * `validate.ts`), and a caller uses it only when every arm refutes the call
+ * on the strict reading (see {@link triStateSelect}). An arm that admits
+ * the operand on the strict reading (a parameter typed `error` or `any`)
+ * is then still selected.
  */
 export function armAdmission(
   ops: ReadonlyArray<Expression>,
-  arm: FunctionSignature
+  arm: FunctionSignature,
+  relaxUnheldError = false
 ): Admission {
   if (!arityAdmits(arm, ops.length)) return 'refute';
   let undecidable = false;
   for (let i = 0; i < ops.length; i++) {
     const param = paramAt(arm, i);
     if (param === undefined) return 'refute';
-    const a = admissionOf(ops[i], param);
+    let a = admissionOf(ops[i], param);
+    if (
+      relaxUnheldError &&
+      a === 'refute' &&
+      isErrorTypedWithoutErrorValue(ops[i]) &&
+      admitsUnheldError(param)
+    )
+      a = 'undecidable';
     if (a === 'refute') return 'refute';
     if (a === 'undecidable') undecidable = true;
   }
@@ -1419,14 +1561,31 @@ export function triStateSelect(
   | { kind: 'selected'; index: number }
   | { kind: 'blocked'; nonRefuted: number[] }
   | { kind: 'none' } {
-  const admissions = arms.map((a, k): Admission => {
-    const permutation = named?.[k];
-    if (named !== undefined && permutation === undefined) return 'refute';
-    return armAdmission(
-      permutation === undefined ? ops : permuteOps(ops, permutation),
-      a
-    );
-  });
+  const admissionsOf = (relaxUnheldError: boolean): Admission[] =>
+    arms.map((a, k): Admission => {
+      const permutation = named?.[k];
+      if (named !== undefined && permutation === undefined) return 'refute';
+      return armAdmission(
+        permutation === undefined ? ops : permuteOps(ops, permutation),
+        a,
+        relaxUnheldError
+      );
+    });
+  let admissions = admissionsOf(false);
+  // When every arm refutes the call on the strict reading, and an operand is
+  // typed `error` without holding an error value (a symbol declared `error`
+  // with no value), read the arms again with that operand undecidable at
+  // each parameter that argument validation admits it at, as the second
+  // pass of overload resolution does. Every such arm is then undecidable,
+  // so no arm is selected and the call stays unevaluated: with `f(a:
+  // number) = a + 1` and `f(a: string) = "s"`, `f(e)` is `f(e)`, not the
+  // `no-matching-clause` error. An arm that admits the operand on the strict
+  // reading (`f(a: error) = …`, `f(a: any) = …`) is selected as before.
+  if (
+    admissions.every((a) => a === 'refute') &&
+    ops.some((op) => isErrorTypedWithoutErrorValue(op))
+  )
+    admissions = admissionsOf(true);
 
   let best = -1;
   for (let i = 0; i < arms.length; i++) {

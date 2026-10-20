@@ -1,11 +1,85 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import { infiniteRange, keepInfiniteRangeStep } from './simplify-sum.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+
+/**
+ * The value of `Product(c, …)` over a range with infinitely many terms, for
+ * a body `c` that does not depend on the index: the limit of `cⁿ`. It is 1
+ * for `c = 1`, 0 for `|c| < 1` and +∞ for `c > 1`. Otherwise undefined: for
+ * `c ≤ −1` the partial products do not converge, and for a body whose value
+ * is not known (`Π_{k≥1} y`) the limit depends on that value, so the product
+ * stays as it is. `y^(+∞)` is not a value. Does not call `simplify()`: it
+ * runs inside a simplification rule, and `Product.evaluate()` also uses it.
+ *
+ * The comparisons with ±1 use no tolerance, since the limit jumps there:
+ * `1.000000000001ⁿ` grows to +∞, and `0.999999999999ⁿ` goes to 0. An exact
+ * number is compared exactly. A float, or a closed expression that is not
+ * a number literal (`e^(10^(−20))`), is compared through its numeric value,
+ * and a value within the engine tolerance of ±1 is declined: the float does
+ * not tell on which side of ±1 the exact value is. A body with free symbols
+ * is decided only by what is known about them (`p > 2` gives +∞).
+ *
+ * An impure body (a random draw, a call with effects) is declined before
+ * any comparison: it is not the same value in each factor, and a comparison
+ * could evaluate it and run its effects.
+ */
+export function constantProductOverInfiniteRange(
+  body: Expression
+): Expression | undefined {
+  const ce = body.engine;
+  if (!isTransitivelyPure(body)) return undefined;
+  if (body.isSame(1)) return ce.One;
+  if (isNumber(body) && body.isExact) {
+    if (body.isGreater(1) === true) return ce.PositiveInfinity;
+    if (body.isLess(1) === true && body.isGreater(-1) === true) return ce.Zero;
+    return undefined;
+  }
+  if (body.unknowns.length > 0) {
+    if (body.isGreater(1) === true) return ce.PositiveInfinity;
+    if (body.isLess(1) === true && body.isGreater(-1) === true) return ce.Zero;
+    return undefined;
+  }
+  const value = body.N();
+  if (!isNumber(value) || value.im !== 0) return undefined;
+  const c = value.re;
+  if (!Number.isFinite(c)) return undefined;
+  const tolerance = ce.tolerance;
+  if (Math.abs(c - 1) <= tolerance || Math.abs(c + 1) <= tolerance)
+    return undefined;
+  if (c > 1) return ce.PositiveInfinity;
+  if (c > -1 && c < 1) return ce.Zero;
+  return undefined;
+}
+
+/**
+ * Simplify a `Product`. A range with infinitely many terms is read through
+ * `infiniteRange()`: a body that does not depend on the index is handled by
+ * `constantProductOverInfiniteRange()`, and the steps of the other rules are
+ * checked by `keepInfiniteRangeStep()`.
+ */
+export function simplifyProduct(x: Expression): RuleStep | undefined {
+  if (!isFunction(x, 'Product')) return undefined;
+  const range = infiniteRange(x);
+  if (range && !range.body.symbols.includes(range.index)) {
+    const value = constantProductOverInfiniteRange(range.body);
+    if (value === undefined) return undefined;
+    return {
+      value,
+      because: 'infinite product of a constant',
+      purpose: 'transform',
+    };
+  }
+  const step = simplifyProductRules(x);
+  if (step === undefined || range === undefined) return step;
+  return keepInfiniteRangeStep(range, step) ? step : undefined;
+}
 
 /**
  * Product simplification rules extracted from simplify-rules.ts.
  * Handles 13 patterns for simplifying Product expressions.
  */
-export function simplifyProduct(x: Expression): RuleStep | undefined {
+function simplifyProductRules(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Product')) return undefined;
   // The rules below read only the first indexing clause, and the products
   // they build keep only that clause. With more than one clause
@@ -19,8 +93,8 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   if (!body || !isFunction(limits, 'Limits')) return undefined;
 
   const index = sym(limits.op1);
-  const lower = limits.op2;
-  const upper = limits.op3;
+  let lower = limits.op2;
+  let upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
 
   const ce = x.engine;
@@ -35,11 +109,21 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // A `Nothing` bound is an absent bound, not a value. With no bounds
-  // (`\prod_k f`, `Limits(k, Nothing, Nothing)`) the product runs over the
-  // default domain; with one bound only (`\prod_{k=1} f`) it has no value.
-  // The rules below substitute the bounds into a closed form, so the product
-  // stays as it is, as it does under `evaluate()` and `N()`.
-  if (sym(lower) === 'Nothing' || sym(upper) === 'Nothing') return undefined;
+  // (`\prod_k f`, `Limits(k, Nothing, Nothing)`) the product runs over
+  // `k = 1..+∞`, so the rules below read the bounds 1 and +∞, as
+  // `evaluate()` and `N()` do (`withDefaultBigOpBounds()` in
+  // `library/utils.ts`). A product the rules rebuild keeps the clause with
+  // no bounds. With one bound only (`\prod_{k=1} f`) the product has no
+  // value, so it stays as it is.
+  const noLower = sym(lower) === 'Nothing';
+  const noUpper = sym(upper) === 'Nothing';
+  if (noLower !== noUpper) return undefined;
+  if (noLower && noUpper) {
+    // A clause with no index and no bounds has no index to run over.
+    if (index === 'Nothing') return undefined;
+    lower = ce.One;
+    upper = ce.PositiveInfinity;
+  }
 
   // Handle numeric bounds edge cases
   if (isNumber(lower) && isNumber(upper)) {

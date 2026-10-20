@@ -556,9 +556,11 @@ describe('SYMBOLS', () => {
       expect(latex('`speed_light_max`')).toEqual(
         `{\\mathrm{speed_{light}}}_{max}`
       );
-      expect(latex('`mass__earth`')).toEqual(`\\mathrm{mass^{earth}}`);
+      // A name with a superscript part is written in `\operatorname{}`, so
+      // that it reads back as the same symbol, not as a power.
+      expect(latex('`mass__earth`')).toEqual(`\\operatorname{mass^{earth}}`);
       expect(latex('`radius__moon_min`')).toEqual(
-        `\\mathrm{radius^{moon}_{min}}`
+        `\\operatorname{radius^{moon}_{min}}`
       );
     });
 
@@ -581,7 +583,9 @@ describe('SYMBOLS', () => {
       expect(latex('deltagamma')).toMatchInlineSnapshot(`\\mathrm{deltagamma}`);
       expect(latex('Alpha')).toEqual(`\\Alpha`);
       expect(latex('aleph')).toEqual(`\\aleph`);
-      expect(latex('`aleph__plus`')).toMatchInlineSnapshot(`\\aleph^{+}`);
+      expect(latex('`aleph__plus`')).toMatchInlineSnapshot(
+        `\\operatorname{\\aleph^{+}}`
+      );
       expect(latex('`x_alpha`')).toEqual(`x_{\\alpha}`);
       expect(latex('`alpha_gamma`')).toEqual(`\\alpha_{\\gamma}`);
       expect(latex('`alpha_gamma_delta`')).toEqual(
@@ -591,8 +595,13 @@ describe('SYMBOLS', () => {
       expect(latex('`beta_calligraphic`')).toMatchInlineSnapshot(
         `\\mathcal{\\beta}`
       );
-      expect(latex('`x_plus`')).toEqual(`x_{+}`);
-      expect(latex('`R_blackboard__0__plus`')).toEqual(`\\mathbb{R^{0,+}}`);
+      // A subscript part that is a symbol is written in `\operatorname{}`:
+      // `x_{+}` reads back as `Subplus(x)`.
+      expect(latex('`x_plus`')).toEqual(`\\operatorname{x_{+}}`);
+      // Two superscripts are nested: `\mathbb{R^{0,+}}` did not parse.
+      expect(latex('`R_blackboard__0__plus`')).toEqual(
+        `\\operatorname{{\\mathbb{R}^0}^{+}}`
+      );
     });
   });
 

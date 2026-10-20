@@ -213,7 +213,9 @@ describe('THE OTHER FORMS ARE UNCHANGED', () => {
       'k',
       ['Limits', 'k', 'Nothing', 'Nothing'],
     ]);
-    expect(sum.evaluate().json).toEqual(sum.json);
+    // A clause with no bounds runs over 1..+∞ (user decision 2026-10-20),
+    // as `\sum_{k=1}^{\infty} k` does.
+    expect(sum.evaluate().json).toEqual('PositiveInfinity');
     expect(
       ce
         .box(['Sum', ['Power', 'k', -2], ['Limits', 'k', 'Nothing', 'Nothing']])

@@ -2168,13 +2168,38 @@ function differentiateNode(
 const MAX_EXPANDED_PRODUCT_FACTORS = 24;
 
 /**
+ * Whether an indexing set of a `Sum` has infinitely many values: a `Limits`
+ * clause with an infinite bound or with no bounds (`\sum_k f` runs over
+ * `1..+∞`), or an `Element` clause whose collection is not known to be
+ * finite (`k ∈ ℕ`).
+ */
+function isInfiniteIndexingSet(set: Expression): boolean {
+  if (isFunction(set, 'Limits')) {
+    if (isSymbol(set.op2, 'Nothing') && isSymbol(set.op3, 'Nothing'))
+      return true;
+    return set.op2.isInfinity === true || set.op3.isInfinity === true;
+  }
+  if (isFunction(set, 'Element'))
+    return set.op2 === undefined || set.op2.isFiniteCollection !== true;
+  return false;
+}
+
+/** Whether `expr` has a subexpression with the operator `op`. */
+function containsOperator(expr: Expression, op: string): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.operator === op || expr.ops.some((x) => containsOperator(x, op));
+}
+
+/**
  * The derivative of a `Sum` or a `Product` with respect to `v`.
  *
  * The derivative is computed only when every indexing set is a `Limits`
  * clause (or, for a `Sum`, an `Element` clause) whose bounds, collection and
  * condition do not mention `v`. A bound that depends on `v` changes the set
- * of terms with `v`, and a bound that is `Nothing` (absent) gives no definite
- * set of terms: the derivative then stays unevaluated (`undefined`).
+ * of terms with `v`, and a clause with one `Nothing` (absent) bound gives no
+ * definite set of terms: the derivative then stays unevaluated
+ * (`undefined`). A `Limits` clause with no bounds at all runs over
+ * `1..+∞`, as an explicit infinite range does.
  *
  * When `v` is the index of one of the indexing sets, every `v` in the body is
  * that index, not the variable of differentiation. The operator is then a
@@ -2235,10 +2260,16 @@ function differentiateBigOp(
       others = set.ops.slice(1);
     } else return undefined;
     if (!isSymbol(index) || index.symbol === 'Nothing') return undefined;
-    // A bound that is `Nothing` is absent (`\sum_k x^k` has no bounds). The
-    // sum or product then has no definite set of terms, so its derivative
-    // stays unevaluated.
-    if (others.some((x) => isSymbol(x, 'Nothing') || x.has(v)))
+    // A `Limits` clause with no bounds (`\sum_k x^k`) runs over `k = 1..+∞`
+    // (`withDefaultBigOpBounds()` in `library/utils.ts`), so it is
+    // differentiated as `\sum_{k=1}^{\infty} x^k` is. A clause with one
+    // bound only is absent on one side: the sum or product then has no
+    // definite set of terms, so its derivative stays unevaluated.
+    const noBounds =
+      isFunction(set, 'Limits') &&
+      isSymbol(set.op2, 'Nothing') &&
+      isSymbol(set.op3, 'Nothing');
+    if (!noBounds && others.some((x) => isSymbol(x, 'Nothing') || x.has(v)))
       return undefined;
     indexes.push(index.symbol);
   }
@@ -2249,6 +2280,37 @@ function differentiateBigOp(
   }
 
   if (isSum) {
+    const infinite = sets.some(isInfiniteIndexingSet);
+    // Over an infinite range, a sum with a closed form is differentiated
+    // through it: `Σ_{k≥1} x^k/k!` is `e^x − 1`, whose derivative is `e^x`.
+    // The closed form holds on an open set (`|x| < 1` for `Σ_{k≥1} x^k`,
+    // kept as the condition of a `When`), so its derivative is the
+    // derivative of the sum there.
+    // The rewrite of the sum to its closed form is recorded as a step, so
+    // `explain('D')` shows it before the steps of its derivative. If the
+    // closed form cannot be differentiated, the steps recorded for it are
+    // removed and the term-by-term derivative is tried.
+    if (infinite) {
+      const closed = expr.evaluate();
+      if (!containsOperator(closed, 'Sum')) {
+        const mark = trace?.length ?? 0;
+        if (isFunction(closed, 'When') && closed.nops === 2) {
+          recordD(trace, expr, v, 'derivative.rewrite', () =>
+            ce._fn('When', [dPlaceholder(closed.op1, v), closed.op2])
+          );
+          const d = differentiate(closed.op1, v, depth + 1, trace);
+          if (d !== undefined && d.isValid)
+            return ce.function('When', [d, closed.op2]);
+        } else {
+          recordD(trace, expr, v, 'derivative.rewrite', () =>
+            dPlaceholder(closed, v)
+          );
+          const d = differentiate(closed, v, depth + 1, trace);
+          if (d !== undefined && d.isValid) return d;
+        }
+        if (trace) trace.length = mark;
+      }
+    }
     // The template keeps the scope of the original sum, so the index in
     // `D(body, v)` is the same binding as in `body`: `explainD()` finds the
     // later steps' nodes in it with `isSame()`, which compares bindings.
@@ -2264,7 +2326,22 @@ function differentiateBigOp(
     // have a different parent, and an index named like a library constant
     // (`i`, `e`) could then resolve to the constant (docs/SCOPING-MODEL.md,
     // "Rebuilding a scoped node").
-    return ce.function('Sum', [dBody, ...sets], { scope: expr.localScope });
+    const dSum = ce.function('Sum', [dBody, ...sets], {
+      scope: expr.localScope,
+    });
+    // Over an infinite range, the series of derivatives can diverge where
+    // the series converges: `Σ_{k≥1} sin(kx)/k` converges, but
+    // `Σ_{k≥1} cos(kx)` does not, and the derivative is −1/2 on (0, 2π).
+    // The engine cannot check uniform convergence, so the term-by-term
+    // derivative is kept only when the series of derivatives evaluates to
+    // a closed form (`Σ_{k≥1} k·x^(k−1)` is `1/(1 − x)²` for |x| < 1).
+    // Otherwise the derivative stays unevaluated.
+    if (infinite) {
+      const value = dSum.evaluate();
+      if (containsOperator(value, 'Sum')) return undefined;
+      return value;
+    }
+    return dSum;
   }
 
   // Product: expand a small finite range into its factors.

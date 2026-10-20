@@ -223,13 +223,18 @@ describe('the derivative of a Sum', () => {
     expect(result.op1.localScope?.parent).toBe(result.localScope);
   });
 
-  test('a sum with no bounds: the derivative has no finite value', () => {
+  test('a sum with no bounds: the derivative is that of the sum over 1..+∞', () => {
     const ce = new ComputeEngine();
-    // `\sum_k x^k` is `Sum(x^k, Limits(k, Nothing, Nothing))`: it has no
-    // definite set of terms, so its derivative is not `1/x`.
+    // `\sum_k x^k` is `Sum(x^k, Limits(k, Nothing, Nothing))`, which runs
+    // over k = 1, 2, 3, … (user decision 2026-10-20). Its derivative is the
+    // derivative of `x/(1 − x)` for |x| < 1, which is `1/(1 − x)²`. It used
+    // to be `1/x`, when the two `Nothing` bounds were read as one point.
     const result = ce.parse('\\frac{d}{dx}\\sum_k x^k').evaluate();
-    expect(result.operator).toBe('D');
-    expect(result.isFinite).not.toBe(true);
+    const explicit = ce
+      .parse('\\frac{d}{dx}\\sum_{k=1}^{\\infty} x^k')
+      .evaluate();
+    expect(result.json).toEqual(explicit.json);
+    expect(result.subs({ x: 0.5 }).N().re).toBeCloseTo(4, 12);
   });
 
   test('explain: the steps inside the sum are shown', () => {
@@ -256,6 +261,35 @@ describe('the derivative of a Sum', () => {
       ['Multiply', ['Power', 'k', 2], ['Power', 'x', ['Add', 'k', -1]]],
       ['Limits', 'k', 1, 'n'],
     ]);
+  });
+});
+
+describe('explain: the derivative of an infinite sum through its closed form', () => {
+  test('the rewrite to the closed form is a step', () => {
+    const ce = new ComputeEngine();
+    // `Σ_{k≥1} x^k/k!` is `e^x − 1`. The rewrite to it was not recorded, so
+    // the explanation had no differentiation steps.
+    const explanation = ce
+      .box(['D', ce.parse('\\sum_k \\frac{x^k}{k!}').json, 'x'])
+      .explain('D');
+    expect(explanation.steps.map((s) => [s.id, s.value.toString()])).toEqual([
+      ['derivative.rewrite', 'D(e^x - 1, x)'],
+      ['derivative.sum-rule', 'D(e^x, x)'],
+      ['derivative.exponential-rule', 'e^x'],
+    ]);
+    expect(explanation.result.toString()).toBe('e^x');
+  });
+
+  test('the condition of the closed form is kept in the steps', () => {
+    const ce = new ComputeEngine();
+    const explanation = ce
+      .box(['D', ce.parse('\\sum_k x^k').json, 'x'])
+      .explain('D');
+    expect(explanation.steps[0].id).toBe('derivative.rewrite');
+    expect(explanation.steps[0].value.toString()).toBe(
+      'D(x / (1 - x), x) {|x| < 1}'
+    );
+    expect(explanation.result.toString()).toBe('(1 - x)^(-2) {|x| < 1}');
   });
 });
 

@@ -365,10 +365,18 @@ describe('A square of a base that ends with a superscript', () => {
     );
   });
 
-  test('a superscript followed by a subscript is braced too', () => {
-    // The symbol `x__2_1` serializes as `x^2_1`: both scripts attach to `x`,
-    // so a second superscript after the subscript is still a double one.
-    expect(ce.box(['Power', 'x__2_1', 2]).latex).toBe('{x^2_1}^2');
+  test('a symbol with a superscript part needs no brace', () => {
+    // The symbol `x__2_1` is written `\operatorname{x^2_1}`. The
+    // `\operatorname{}` is one group, so its square is not a double
+    // superscript.
+    expect(ce.box(['Power', 'x__2_1', 2]).latex).toBe(
+      '\\operatorname{x^2_1}^2'
+    );
+    expect(ce.parse('\\operatorname{x^2_1}^2').json).toEqual([
+      'Power',
+      'x__2_1',
+      2,
+    ]);
   });
 
   test('a superscript inside a delimiter or a group adds no brace', () => {

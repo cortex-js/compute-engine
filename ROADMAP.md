@@ -125,12 +125,18 @@ on 2026-10-19:
   `isEmpty` must skip it, `at` becomes O(i), the count is no longer known in
   O(1), and the type stops claiming the source length), or is the printed value
   the one that is wrong?
+- LaTeX cannot write a `Nothing` argument:
+  `\mathrm{If}(x > 1, \mathrm{Nothing}, x)` loses the `Nothing` argument at
+  parse time.
 - `Map(PointX, ["a", "b"])` is typed `list<string^2>` (it copies the source
   type), but its value is `list<character^2>`.
 - `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
   call with two arguments, gets no answer, and falls back to `list<any>`: sound
   but imprecise.
-- QUESTION: `TupleFrom(L)` and `Join` of records answer the bare `tuple` and
+- IN DESIGN (user decision 2026-10-20: write a design note for making bare
+  `tuple` and `record` accept any tuple or record, absent slots included;
+  `missing` stays opt-in everywhere else): `TupleFrom(L)` and `Join` of
+  records answer the bare `tuple` and
   `record`, but the value can be `tuple<integer, missing, integer>` or
   `record{a: missing}`. No type means "a tuple (or record) of any length whose
   slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a

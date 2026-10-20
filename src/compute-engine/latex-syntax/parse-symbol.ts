@@ -104,6 +104,9 @@ function parseSymbolToken(
       '\\top': 'top',
       '\\bullet': 'bullet',
       '\\cir': 'circle',
+      // `\circ` is the spelling the serializer writes for `circle`
+      // (`x_circle` is `\operatorname{x_{\circ}}`).
+      '\\circ': 'circle',
       '\\diamond': 'diamond',
       '\\times': 'times',
       '\\square': 'square',
@@ -192,6 +195,9 @@ function parseSymbolBody(parser: Parser, allowGroup = false): string | null {
     while (!parser.atEnd) {
       const token = parser.peek;
       if (token === '<}>' || token === '_' || token === '^') break;
+      // In the body of a prefix, `\degree` is the `deg` modifier read below:
+      // `\mathrm{x\degree}` is `x_deg`. In a subscript it is not changed.
+      if (allowGroup && token === '\\degree') break;
       if (token === '<space>') {
         parser.nextToken();
         continue;

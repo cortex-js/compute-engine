@@ -148,6 +148,53 @@ describe('Exponential series Σ rᵏ/k!', () => {
       ce.parse('\\sum_{k=0}^\\infty \\frac{x^k}{k!}').evaluate().json
     ).toEqual(['Power', 'ExponentialE', 'x']);
   });
+
+  test('symbolic ratio from k = 1: Σ xᵏ/k! = eˣ − 1, not eˣ − x⁰', () => {
+    // The subtracted k = 0 term is 1, as in the power series. Written `x^0`,
+    // it stayed `x^0` (the engine keeps `x^0` because `0^0` has no value),
+    // and at x = 0 the closed form had no value while the sum is 0.
+    const e = ce.parse('\\sum_{k=1}^\\infty \\frac{x^k}{k!}').evaluate();
+    expect(e.toString()).toBe('e^x - 1');
+    expect(e.subs({ x: 0 }).evaluate().isSame(0)).toBe(true);
+    expect(e.subs({ x: 0.7 }).N().re).toBeCloseTo(Math.exp(0.7) - 1, 12);
+    const tail = ce.parse('\\sum_{k=3}^\\infty \\frac{x^k}{k!}').evaluate();
+    expect(tail.subs({ x: -2 }).N().re).toBeCloseTo(
+      Math.exp(-2) - 1 + 2 - 2,
+      12
+    );
+  });
+});
+
+describe('simplify() of a geometric series with an infinite upper bound', () => {
+  test('a free ratio: the sum stays as it is, with no x^(+∞) term', () => {
+    // The finite closed form `(x − x^(b+1))/(1 − x)` with b = +∞ gave
+    // `(x − x^(+∞))/(1 − x)`. `x^(+∞)` is a limit, not a value: 0 for
+    // |x| < 1 and no value otherwise. `evaluate()` gives the closed form
+    // with its condition.
+    const sum = ce.parse('\\sum_{k=1}^{\\infty} x^k');
+    expect(sum.simplify().json).toEqual(sum.json);
+    const sum0 = ce.parse('\\sum_{k=0}^{\\infty} x^k');
+    expect(sum0.simplify().json).toEqual(sum0.json);
+    expect(sum.evaluate().toString()).toBe('x / (1 - x) {|x| < 1}');
+  });
+
+  test('a number ratio: the closed form applies', () => {
+    expect(
+      ce.parse('\\sum_{k=0}^{\\infty} (\\frac{1}{2})^k').simplify().json
+    ).toEqual(2);
+    expect(
+      ce.parse('\\sum_{k=1}^{\\infty} (-\\frac{1}{2})^k').simplify().json
+    ).toEqual(['Rational', -1, 3]);
+    expect(ce.parse('\\sum_{k=1}^{\\infty} 2^k').simplify().json).toEqual(
+      'PositiveInfinity'
+    );
+  });
+
+  test('a symbolic upper bound: the finite closed form applies', () => {
+    expect(ce.parse('\\sum_{k=0}^{n} x^k').simplify().toString()).toBe(
+      '(1 - x^(n + 1)) / (1 - x)'
+    );
+  });
 });
 
 describe('First-moment geometric Σ k·rᵏ = r/(1−r)²', () => {

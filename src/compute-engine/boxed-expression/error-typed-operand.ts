@@ -41,12 +41,12 @@ export function isErrorTypedOperand(op: Expression): boolean {
  * (`ce.declare('e', 'error')`), or an application whose declared result
  * type is `error`. The type checks treat it as an ordinary operand of type
  * `error`. The type `error` overlaps every type, so a scalar parameter
- * (`number`, `boolean`, `T` with `T: number`) and the condition of `If`
- * admit it, and the call evaluates to itself. A collection parameter
- * (`list`, `T` with `T: list`) refuses it, and so does a parameter typed
- * `unknown` of a library operator or of a function literal (the declared
- * signature `(unknown) -> unknown` of a function name admits it). See
- * {@link isErrorTypedOperand}.
+ * (`number`, `boolean`, `T` with `T: number`), a parameter typed `unknown`
+ * and the condition of `If` admit it, and the call evaluates to itself. An
+ * overloaded function admits it at each arm whose parameter admits it,
+ * selects no arm, and the call evaluates to itself (user decision
+ * 2026-10-20). A collection parameter (`list`, `T` with `T: list`) and a
+ * function parameter refuse it. See {@link isErrorTypedOperand}.
  */
 export function isErrorTypedWithoutErrorValue(op: Expression): boolean {
   return op.isValid && op.type.type === 'error' && !isErrorTypedOperand(op);

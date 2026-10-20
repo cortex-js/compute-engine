@@ -5,12 +5,131 @@ import {
   matchesRationalPattern,
 } from '../boxed-expression/rational-body.js';
 import { asFloat } from '../boxed-expression/float-result.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+
+/**
+ * The body and index of a `Sum` or `Product` whose single range has
+ * infinitely many terms: an upper bound of +∞, a lower bound of −∞, or no
+ * bounds at all (`\sum_k f`, which runs over `k = 1..+∞`). Returns undefined
+ * for a finite range, an empty range (`Σ_{k=+∞}^{5}`), a range with one
+ * bound only, or more than one indexing clause.
+ */
+export function infiniteRange(
+  x: Expression
+): { body: Expression; index: string } | undefined {
+  if (!isFunction(x) || x.nops !== 2) return undefined;
+  const body = x.op1;
+  const limits = x.op2;
+  if (!isFunction(limits, 'Limits')) return undefined;
+  const index = sym(limits.op1);
+  if (!index || index === 'Nothing') return undefined;
+  return limitsHaveInfinitelyManyTerms(limits) ? { body, index } : undefined;
+}
+
+/**
+ * Whether a `Limits` clause has infinitely many terms: no bounds at all
+ * (`1..+∞`), an upper bound of +∞ with a lower bound that is not +∞, or a
+ * lower bound of −∞ with an upper bound that is not −∞. `Limits(k, +∞, 5)`
+ * is an empty range, and a clause with one bound only has no value.
+ */
+export function limitsHaveInfinitelyManyTerms(limits: Expression): boolean {
+  if (!isFunction(limits, 'Limits')) return false;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  const noLower = sym(lower) === 'Nothing';
+  const noUpper = sym(upper) === 'Nothing';
+  if (noLower && noUpper) return true;
+  if (noLower || noUpper) return false;
+  const upperIsPosInf = upper.isInfinity === true && upper.isPositive === true;
+  const lowerIsNegInf = lower.isInfinity === true && lower.isNegative === true;
+  const lowerIsPosInf = lower.isInfinity === true && lower.isPositive === true;
+  const upperIsNegInf = upper.isInfinity === true && upper.isNegative === true;
+  return (
+    (upperIsPosInf && !lowerIsPosInf) || (lowerIsNegInf && !upperIsNegInf)
+  );
+}
+
+/** Whether `e` is ±∞ or ~∞, or has such an operand at any depth. */
+function hasInfinity(e: Expression): boolean {
+  if (e.isInfinity === true) return true;
+  return isFunction(e) && e.ops.some(hasInfinity);
+}
+
+/**
+ * Whether a step of the `Sum`/`Product` rules can be kept for a range with
+ * infinitely many terms (see `infiniteRange()`).
+ *
+ * The rules are closed forms for a finite range `a..b`. With `b = +∞` they
+ * put the infinite bound into the closed form, and the result is the limit
+ * only when the arithmetic with ∞ can decide it. When the body has a free
+ * symbol, that limit depends on the sign or the size of the symbol:
+ * `Σ_{k≥1} (1 + x·k)` is +∞ for `x > 0` and −∞ for `x < 0`, but the closed
+ * form folded to `+∞`; `Σ_{k≥1} k·x` gave `+∞·x`, which is wrong at `x = 0`.
+ * So a step whose value has an infinity is kept only when the body has no
+ * free symbol other than the index. A step with no value (`NaN`, or
+ * `Indeterminate` from `∞ − ∞` or `0·∞`) is never kept: `evaluate()` keeps
+ * such a sum as it is.
+ */
+export function keepInfiniteRangeStep(
+  range: { body: Expression; index: string },
+  step: RuleStep
+): boolean {
+  if (step.value.isNaN === true) return false;
+  if (!hasInfinity(step.value)) return true;
+  return range.body.unknowns.every((s) => s === range.index);
+}
+
+/**
+ * `Sum(c, …)` over a range with infinitely many terms, for a body `c` that
+ * does not depend on the index: 0 for the body 0, and ±∞ when the sign of
+ * the body is known. Otherwise undefined: `Σ_{k≥1} y` is +∞ for `y > 0`,
+ * −∞ for `y < 0` and 0 for `y = 0`, so the sum stays as it is (as it does
+ * under `evaluate()`). Does not call `simplify()`: it runs inside a
+ * simplification rule.
+ */
+function constantSumOverInfiniteRange(body: Expression): RuleStep | undefined {
+  const ce = body.engine;
+  // An impure body (a random draw, a call with effects) is not the same value
+  // in each term, and reading its sign could evaluate it and run its effects.
+  if (!isTransitivelyPure(body)) return undefined;
+  if (body.isSame(0))
+    return { value: ce.Zero, because: 'sum of zero', purpose: 'transform' };
+  if (body.isPositive === true)
+    return {
+      value: ce.PositiveInfinity,
+      because: 'divergent sum of a positive constant',
+      purpose: 'transform',
+    };
+  if (body.isNegative === true)
+    return {
+      value: ce.NegativeInfinity,
+      because: 'divergent sum of a negative constant',
+      purpose: 'transform',
+    };
+  return undefined;
+}
+
+/**
+ * Simplify a `Sum`. A range with infinitely many terms is read through
+ * `infiniteRange()`: a body that does not depend on the index is handled by
+ * `constantSumOverInfiniteRange()`, and the steps of the other rules are
+ * checked by `keepInfiniteRangeStep()`.
+ */
+export function simplifySum(x: Expression): RuleStep | undefined {
+  if (!isFunction(x, 'Sum')) return undefined;
+  const range = infiniteRange(x);
+  if (range && !range.body.symbols.includes(range.index))
+    return constantSumOverInfiniteRange(range.body);
+  const step = simplifySumRules(x);
+  if (step === undefined || range === undefined) return step;
+  return keepInfiniteRangeStep(range, step) ? step : undefined;
+}
 
 /**
  * Sum simplification rules extracted from simplify-rules.ts.
  * Handles 16 patterns for simplifying Sum expressions.
  */
-export function simplifySum(x: Expression): RuleStep | undefined {
+function simplifySumRules(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Sum')) return undefined;
   // The rules below read only the first indexing clause, and the sums they
   // build keep only that clause. With more than one clause
@@ -24,8 +143,8 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   if (!body || !isFunction(limits, 'Limits')) return undefined;
 
   const index = sym(limits.op1);
-  const lower = limits.op2;
-  const upper = limits.op3;
+  let lower = limits.op2;
+  let upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
 
   const ce = x.engine;
@@ -48,11 +167,21 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // A `Nothing` bound is an absent bound, not a value. With no bounds
-  // (`\sum_k f`, `Limits(k, Nothing, Nothing)`) the sum runs over the default
-  // domain; with one bound only (`\sum_{k=1} f`) it has no value. The rules
-  // below substitute the bounds into a closed form, so the sum stays as it
-  // is, as it does under `evaluate()` and `N()`.
-  if (sym(lower) === 'Nothing' || sym(upper) === 'Nothing') return undefined;
+  // (`\sum_k f`, `Limits(k, Nothing, Nothing)`) the sum runs over
+  // `k = 1..+∞`, so the rules below read the bounds 1 and +∞, as
+  // `evaluate()` and `N()` do (`withDefaultBigOpBounds()` in
+  // `library/utils.ts`). A sum the rules rebuild keeps the clause with no
+  // bounds. With one bound only (`\sum_{k=1} f`) the sum has no value, so it
+  // stays as it is.
+  const noLower = sym(lower) === 'Nothing';
+  const noUpper = sym(upper) === 'Nothing';
+  if (noLower !== noUpper) return undefined;
+  if (noLower && noUpper) {
+    // A clause with no index and no bounds has no index to run over.
+    if (index === 'Nothing') return undefined;
+    lower = ce.One;
+    upper = ce.PositiveInfinity;
+  }
 
   // Handle numeric bounds edge cases
   if (isNumber(lower) && isNumber(upper)) {
@@ -264,33 +393,51 @@ export function simplifySum(x: Expression): RuleStep | undefined {
 
   // Geometric series: Sum(r^n, [n, 0, b]) → (1 - r^(b+1)) / (1 - r)
   // Also handles: Sum(r^n, [n, 1, b]) → r * (1 - r^b) / (1 - r)
+  // With an infinite upper bound, the term `r^(b+1)` of the closed forms is
+  // the limit of `r^n`. For a free ratio (`x`) it stays `x^(+∞)`, which is
+  // not a value, so the rule does not apply and the sum stays as it is.
+  // `evaluate()` gives the closed form with its condition
+  // (`x/(1 − x)` when `|x| < 1`). For a number ratio the limit has a value
+  // (`(1/2)^(+∞)` is 0), and the rule applies.
+  //
+  // The closed forms are built with `ce.function()`, not with the `.sub()`,
+  // `.pow()` and `.div()` methods: the methods fold exact numbers to floats,
+  // so the ratio `1/√2` gave `2.414…` instead of `1 + √2`.
+  // With `b = +∞` the exponent is written +∞, not `+∞ + 1`, which the
+  // canonical form does not fold, so that `r^(+∞)` gets its limit (0 for
+  // `r = 1/√2`).
+  const geometricTail = (r: Expression): Expression =>
+    ce.function('Power', [
+      r,
+      upper.isInfinity === true && upper.isPositive === true
+        ? ce.PositiveInfinity
+        : ce.function('Add', [upper, ce.One]),
+    ]);
+  const tailIsALimit = (r: Expression): boolean => {
+    if (upper.isInfinity !== true) return false;
+    const tail = geometricTail(r);
+    return isFunction(tail, 'Power') && tail.op2.isInfinity === true;
+  };
   if (
     isFunction(body, 'Power') &&
     sym(body.op2) === index &&
-    !dependsOnIndex(body.op1)
+    !dependsOnIndex(body.op1) &&
+    !tailIsALimit(body.op1)
   ) {
     const r = body.op1;
-    const b = upper;
 
     // Both closed forms below are cost-gate exempt (`purpose: 'transform'`):
     // resolving a Sum into a closed form is preferred whatever the two sides
     // score, and the closed form is routinely the larger of the two.
-    if (lower.isSame(0)) {
+    if (lower.isSame(0) || lower.isSame(1)) {
       // Sum from n=0 to b of r^n = (1 - r^(b+1)) / (1 - r)
-      const numerator = ce.One.sub(r.pow(b.add(ce.One)));
-      const denominator = ce.One.sub(r);
-      return {
-        value: numerator.div(denominator),
-        because: 'geometric series',
-        purpose: 'transform',
-      };
-    } else if (lower.isSame(1)) {
       // Sum from n=1 to b of r^n = (r - r^(b+1)) / (1 - r)
-      // Note: This form is more compact than r*(1-r^b)/(1-r)
-      const numerator = r.sub(r.pow(b.add(ce.One)));
-      const denominator = ce.One.sub(r);
+      // Note: The second form is more compact than r*(1-r^b)/(1-r)
+      const first = lower.isSame(0) ? ce.One : r;
+      const numerator = ce.function('Subtract', [first, geometricTail(r)]);
+      const denominator = ce.function('Subtract', [ce.One, r]);
       return {
-        value: numerator.div(denominator),
+        value: ce.function('Divide', [numerator, denominator]),
         because: 'geometric series',
         purpose: 'transform',
       };
@@ -590,6 +737,17 @@ export function simplifySum(x: Expression): RuleStep | undefined {
         constantFactors.length === 1
           ? constantFactors[0]
           : ce.function('Multiply', constantFactors);
+      // Over an infinite range the remaining sum can be ±∞, and `c·∞` is ±∞
+      // only for a constant `c` of known sign: `Σ_{k≥1} k·x` became `x·∞`,
+      // which is wrong at `x = 0`. So a constant of unknown sign is not
+      // factored out of such a sum.
+      const infinite = upper.isInfinity === true || lower.isInfinity === true;
+      if (
+        infinite &&
+        constant.isPositive !== true &&
+        constant.isNegative !== true
+      )
+        return undefined;
       const indexPart =
         indexFactors.length === 1
           ? indexFactors[0]

@@ -50,7 +50,11 @@ describe('issue #420: prime on a compound operand', () => {
     expect(latex(['Prime', 'PositiveIntegers'])).toBe(
       '(\\mathbb{N}^*)^{\\prime}'
     );
-    expect(latex(['Prime', 'x__2'])).toBe('(x^2)^{\\prime}');
+  });
+
+  test('a symbol with a superscript part stays bare', () => {
+    // The symbol `x__2` is written `\operatorname{x^2}`, which is one group.
+    expect(latex(['Prime', 'x__2'])).toBe('\\operatorname{x^2}^{\\prime}');
   });
 
   test('a single-group base stays bare', () => {

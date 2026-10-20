@@ -1695,7 +1695,15 @@ function selectClause(
     // symbolic argument is not unrolled — `SymbolicRecursion`,
     // `function-utils.ts`) keeps its name over its operands, held ones as
     // written, rather than becoming an `Apply` of the clause's literal.
-    if (armAdmission(ops, clauses[0].signature) !== 'refute')
+    // The lone clause is applied to an operand typed `error` that holds no
+    // error value (a symbol declared `error` with no value) when its
+    // parameter admits that operand on the reading of argument validation,
+    // as a plain function literal is: with `f(a: number) = a + 1`, `f(e)`
+    // is `e + 1`.
+    if (
+      armAdmission(ops, clauses[0].signature, /* relaxUnheldError */ true) !==
+      'refute'
+    )
       return {
         kind: 'apply',
         literal: clauses[0].literal,

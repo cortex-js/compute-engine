@@ -12030,8 +12030,14 @@ function applyFunctionLiteralWith(
  * `expr.ops`. `undefined` for a plain signature, for a non-overload type, and
  * when no arm fits. In that last case the caller falls back to
  * `functionResult` of the whole intersection, which is the §5.1 join over
- * every arm's result — NOT `unknown`; the operands have already been marked
+ * every arm's result — NOT `unknown`; the operands have usually been marked
  * invalid by `validateArguments`, so the imprecision is not load-bearing.
+ * The exception is a valid call with no selected arm: on the route of a
+ * function held by a symbol, an operand whose type only overlaps a
+ * parameter is kept (`keepProvisionalOperands()` in `box.ts`). Then the arm
+ * the resolution records in `unresolved` is returned: with `r: real` and
+ * `G: ((T) -> T where T: integer) & ((string) -> string)`, `G(r)` is typed
+ * `integer` (the result of the first arm read at its bound), not `string`.
  *
  * Two cases return the selected arm with a JOINED result instead: when the
  * arms dispatch on values and the operands leave the dispatch open (the
@@ -12069,10 +12075,11 @@ function resolvedArm(
     threadable: def?.broadcastable,
     couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
   };
-  const { selected, selectedInstance, undecidedResults } =
+  const { selected, selectedInstance, undecidedResults, unresolved } =
     expr._resolvedOverload ??
     resolveOverload(expr.engine, expr.ops, arms, policies);
-  if (selected === undefined) return undefined;
+  if (selected === undefined)
+    return expr.ops.every((x) => x.isValid) ? unresolved : undefined;
 
   // Value-arm JOIN (function-polymorphism design §4.4): when an arm
   // dispatches on VALUES, the boolean filter drops arms a symbolic operand
@@ -12123,6 +12130,21 @@ function resolvedArm(
   // such arm has the same result, the selected arm is kept unchanged. A
   // lazy operator never joins: its operands are unbound, and
   // `undecidedResults` is never set for it.
+  // One arm only: its result can be more precise than the result of its
+  // instance. A type variable that the solver absorbed from an operand
+  // typed `error` with no error value (a symbol declared `error` with no
+  // value) reads `unknown` in the instance, and `undecidedResults` reads it
+  // at its declared bound (`undecidedResultOf()` in `overload.ts`): with
+  // `Reverse: ((T) -> T where T: string) & …`, `Reverse(e)` is typed
+  // `string`, not `unknown`.
+  if (
+    !def?.lazy &&
+    undecidedResults?.length === 1 &&
+    selectedInstance !== undefined &&
+    selectedInstance.result === 'unknown' &&
+    undecidedResults[0] !== 'unknown'
+  )
+    return { ...selectedInstance, result: undecidedResults[0] };
   if (!def?.lazy && undecidedResults && undecidedResults.length > 1) {
     const first = undecidedResults[0];
     const allSame = undecidedResults.every(

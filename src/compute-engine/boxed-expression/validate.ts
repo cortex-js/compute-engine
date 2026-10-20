@@ -1847,6 +1847,21 @@ function overlapAdmission(op: Expression, param: Type): boolean {
   // that could be callable does not reach this admission: `arrowSlotAdmission`
   // runs first at such a parameter and returns its own verdict — `admit` or a
   // minted error — for every operand it cannot prove non-callable.
+  //
+  // A parameter with an `unknown` arm is exempt from the classifier only
+  // because it admits every value. An operand typed `error` that does not
+  // hold an error value (a symbol declared `error` with no value, see
+  // `isErrorTypedWithoutErrorValue()`) is not a subtype of `unknown`, but
+  // its type overlaps every type, so such a parameter admits it, as a
+  // `number` parameter does. Before, a library operator `(unknown) ->
+  // unknown` and a function-literal parameter `a: unknown` refused it, while
+  // a function name declared `(unknown) -> unknown` and a parameter `T`
+  // with `T: unknown` admitted it.
+  if (
+    isErrorTypedWithoutErrorValue(op) &&
+    paramArms(param).some((a) => a === 'unknown')
+  )
+    return true;
   if (runtimeCheckExemptParam(param) && !unionOfCallableAndNumericArms(param))
     return false;
   if (concreteValueOf(op) !== undefined)
@@ -4130,17 +4145,14 @@ export function validateArguments(
       const op = ops[idx];
       if (isSubtype('error', expected)) continue;
       // The admission on overlap, deferred as in the per-position checks.
-      // Never in an overload trial, the second pass (`overlapTrial`)
-      // included: there the overload prefilter (`prefilterAdmits()`,
-      // `overload.ts`) refuses the operand at a ground arm such as
-      // `(number) -> number`, because `error` is disjoint from `number`, but
-      // it admits it at a generic arm, whose absorbed variable reads
-      // `unknown`. Admitting it here would make `((string) -> string) &
-      // ((T) -> T where T: number)` accept `e` while `((string) -> string) &
-      // ((number) -> number)` refuses it.
+      // As there, it is not active in the first, strict pass of overload
+      // resolution, and it is active in the second pass (`overlapTrial`).
+      // So `((string) -> string) & ((T) -> T where T: number)` admits `e`,
+      // as `((string) -> string) & ((number) -> number)` does (user
+      // decision 2026-10-20).
       if (
         op !== undefined &&
-        !internals?.trial &&
+        (!internals?.trial || internals?.overlapTrial) &&
         overlapAdmission(op, expected)
       ) {
         deferredIdx.add(idx);

@@ -1172,13 +1172,14 @@ describe('SUM', () => {
     // limit (Richardson-accelerated): Σ 1/x² = π²/6.
     const conv = ce.expr(['Sum', ['Divide', 1, ['Square', 'x']], 'x']).N();
     expect(conv.re).toBeCloseTo(1.6449340668482264);
-    // A DIVERGENT series stays unevaluated (ruled 2026-08-14): the harmonic
-    // Σ 1/x has no finite value, and the previous behavior — answering
-    // 9.7876…, the iteration-limit-truncated partial sum — was a silently
-    // wrong number.
+    // A DIVERGENT series never answers a truncated partial sum (ruled
+    // 2026-08-14: the old answer 9.7876… was a silently wrong number). A sum
+    // with no bounds runs over `x = 1..∞` on every route (user decision
+    // 2026-10-20), so the harmonic Σ 1/x gives `+∞`, as
+    // `Sum(1/x, Limits(x, 1, +∞))` does.
     const div = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
-    expect(div.operator).toBe('Sum');
-    expect(Number.isNaN(div.re)).toBe(true);
+    expect(div.isInfinity).toBe(true);
+    expect(div.isPositive).toBe(true);
   }, 30_000);
 
   it('should compute the sum of a collection', () =>

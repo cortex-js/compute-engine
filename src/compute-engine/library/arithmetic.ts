@@ -206,6 +206,8 @@ import {
   bigOpBoundsError,
   classifyBigopDomain,
   hasOneSidedLimits,
+  withDefaultBigOpBounds,
+  constantBigOpOverInfiniteDomain,
   DEGENERATE_CAPTURE_UNSAFE,
   degenerateBigOpTerm,
   symbolicSumClosedForm,
@@ -12403,11 +12405,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // infinite domain stays symbolic under exact evaluate (`.N()` owns
         // the truncated numeric path); free bounds/body are never enumerable.
         const numeric = options.numericApproximation;
-        const bounds = ops.slice(1);
+        // A clause with no bounds runs over 1..+∞: see
+        // `withDefaultBigOpBounds`.
+        const bounds = withDefaultBigOpBounds(ce, ops.slice(1));
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(bounds)) return undefined;
         const mode = classifyBigopDomain(ops[0], bounds, ce);
         if (mode === 'absent') return ce.NaN;
+        if (mode === 'numeric') {
+          // A body that does not depend on the index: the limit of cⁿ.
+          const c = constantBigOpOverInfiniteDomain('Product', ops[0], bounds);
+          if (c !== undefined) return numeric ? c.N() : c;
+        }
         if (mode === 'symbolic') {
           if (bounds.length === 1) {
             // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
@@ -12517,7 +12526,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ops = resolved;
         }
         const numeric = options.numericApproximation;
-        const bounds = ops.slice(1);
+        // A clause with no bounds runs over 1..+∞, as in the synchronous
+        // handler.
+        const bounds = withDefaultBigOpBounds(ce, ops.slice(1));
         // A body holding an asynchronous-only application is evaluated per
         // term with `evaluateBigOpTermAsync`, whose promise the fold yields
         // to `runAsync`; the synchronous term evaluation cannot run such a
@@ -12531,6 +12542,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
           if (mode === 'absent') return ce.NaN;
+          if (mode === 'numeric') {
+            // As in the synchronous handler.
+            const c = constantBigOpOverInfiniteDomain(
+              'Product',
+              ops[0],
+              bounds
+            );
+            if (c !== undefined) return numeric ? c.N() : c;
+          }
           if (mode === 'symbolic') {
             if (bounds.length === 1) {
               // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
@@ -12789,10 +12809,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // or a body with free variables beyond the index are never
         // enumerable, under either mode.
         const numeric = numericApproximation;
+        // A clause with no bounds runs over 1..+∞: see
+        // `withDefaultBigOpBounds`.
+        rest = withDefaultBigOpBounds(engine, rest);
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(rest)) return undefined;
         const mode = classifyBigopDomain(first, rest, engine);
         if (mode === 'absent') return engine.NaN;
+        if (mode === 'numeric') {
+          // A sum of 0 over an infinite domain is 0.
+          const c = constantBigOpOverInfiniteDomain('Sum', first, rest);
+          if (c !== undefined) return numeric ? c.N() : c;
+        }
         if (mode === 'symbolic') {
           if (rest.length === 1) {
             // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.
@@ -12990,11 +13018,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Per-term asynchronous evaluation for a body holding an
         // asynchronous-only application — see the `Product` handler.
         const asyncTerms = hasAsyncOnlyApplication(first);
+        // A clause with no bounds runs over 1..+∞, as in the synchronous
+        // handler.
+        rest = withDefaultBigOpBounds(engine, rest);
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(rest)) return undefined;
         {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'absent') return engine.NaN;
+          if (mode === 'numeric') {
+            // As in the synchronous handler.
+            const c = constantBigOpOverInfiniteDomain('Sum', first, rest);
+            if (c !== undefined) return numeric ? c.N() : c;
+          }
           if (mode === 'symbolic') {
             if (rest.length === 1) {
               // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.

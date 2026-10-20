@@ -783,6 +783,15 @@ const EXTRA_SYMBOLS = new Map<string, string>([
   ['star', '\\star'],
 ]);
 
+/**
+ * A subscript part of a symbol name that is one of the symbols above
+ * (`_plus`, `_dag`), followed by the end of the name or by another part.
+ * Tested on a name whose unicode escapes are replaced by a letter.
+ */
+const SYMBOL_SUBSCRIPT = new RegExp(
+  `_(${[...EXTRA_SYMBOLS.keys()].join('|')})(?![a-zA-Z0-9])`
+);
+
 /** If the string is a special name, extract it. A special name is considered
  * until we run into a '_' or a digit.
  * So, for example `Number` is not `\Nu mber`, but `Number`.
@@ -863,14 +872,27 @@ function parseModifiers(
  * `result`: they are returned in `outerSubs`, and the caller applies them with
  * `withOuterSubscripts()` after it has wrapped `result` (for example in
  * `\operatorname{}`). See the comment where the subscripts are applied.
+ *
+ * A top-level name with a superscript part is the exception: all its
+ * subscripts are in `result`, and `outerSubs` is empty. See
+ * `scriptsInNameOrder()`.
+ *
+ * `prefix` is LaTeX written in front of the base of the name (the `\_` of a
+ * wildcard name). It is part of `result`.
  */
 function parseSymbolBody(
   s: string,
   topLevel = true,
-  style: 'operator' | 'italic' | 'upright' | 'auto' | 'none' = 'auto'
+  style: 'operator' | 'italic' | 'upright' | 'auto' | 'none' = 'auto',
+  prefix = ''
 ): [result: string, rest: string, outerSubs: string[]] {
   // eslint-disable-next-line prefer-const
   let [body, accents, styles, rest] = parseModifiers(s);
+
+  // The prefix is inside the accents and the styles of the base:
+  // `_x_hat` is `\operatorname{\hat{\_x}}`, because
+  // `\operatorname{\_\hat{x}}` does not parse.
+  body = prefix + body;
 
   // Apply accents
   for (const accent of accents) {
@@ -900,6 +922,25 @@ function parseSymbolBody(
     // number of subscripts that the style encloses.
     let subStyles: string[] = [];
     let styledSubCount = 0;
+    // The superscripts and subscripts in the order of the name. They are
+    // used only for a name written in order (`ordered` below).
+    const parts: NamePart[] = [];
+    // The rest of the name, with each unicode escape (`____002012`) replaced
+    // by one letter, so that its `____` is not read as separators.
+    const plainRest = rest.replace(/____[0-9A-Fa-f]{6}/g, 'U');
+    // Whether the name has a superscript part (`__`).
+    const hasSupPart = /__/.test(plainRest);
+    // A name with a superscript part, or with a subscript part that is a
+    // symbol (`x_plus`, `x_1_dag`), is written in `\operatorname{}`, with its
+    // parts in the order of the name. Without the wrapper, `x_{+}` reads back
+    // as `Subplus(x)`, and a second subscript `{x_1}_{\dag}` is not read as a
+    // part of the name. A name with two subscripts of digits with a style
+    // (`x_1_bold_1_bold`) is written in order too:
+    // `\operatorname{\mathbf{\mathbf{x_1}_1}}`.
+    const ordered =
+      hasSupPart ||
+      SYMBOL_SUBSCRIPT.test(plainRest) ||
+      (plainRest.match(STYLED_DIGIT_PART) ?? []).length > 1;
 
     // Check if we have a string of digits at the end of the body.
     //
@@ -915,13 +956,25 @@ function parseSymbolBody(
     // subscripts, `{x_1}_2`, which read back as the different symbol `x_1_2`.
     // Nor does a name with a style (`x1_bold`): it is written `\mathbf{x1}`,
     // because `\mathbf{x}_1` reads back as the different symbol `x_bold_1`.
+    // Nor does a name with a superscript part (`x2__a`): it is written
+    // `\operatorname{x2^{a}}`, because `\operatorname{{x_2}^{a}}` reads back
+    // as the different symbol `x_2__a`. Nor does a name with a unicode escape
+    // after the digits (`x1____002012`).
+    //
+    // The prefix of a wildcard name is not part of this test: `_1_2` keeps
+    // `1` in its base.
+    const bare = body.startsWith(prefix) ? body.slice(prefix.length) : body;
     const m =
-      s.includes('_') && styles.length === 0 && !/^_(?!_)/.test(rest)
-        ? body.match(/^([^\d].*?)(\d+)$/)
+      s.includes('_') &&
+      styles.length === 0 &&
+      !ordered &&
+      !UNICODE_ESCAPE_START.test(rest) &&
+      !/^_(?!_)/.test(rest)
+        ? bare.match(/^([^\d].*?)(\d+)$/)
         : null;
     if (m) {
       subs.push(m[2]);
-      body = m[1];
+      body = body.slice(0, body.length - bare.length) + m[1];
     }
 
     while (rest.length > 0) {
@@ -930,17 +983,57 @@ function parseSymbolBody(
       const ucMatch = rest.match(/^____([0-9A-Fa-f]{6})(.*)/s);
       if (ucMatch) {
         const ucHex = ucMatch[1].replace(/^0+/, '') || '0';
-        body += `\\unicode{"${ucHex.padStart(4, '0')}}`;
+        let segment = `\\unicode{"${ucHex.padStart(4, '0')}}`;
         rest = ucMatch[2];
         // Consume any following text segment up to the next _ separator
         if (rest.length > 0 && !rest.startsWith('_')) {
           const [nextSegment, nextRest] = specialName(rest);
-          body += nextSegment;
+          segment += nextSegment;
           rest = nextRest;
         }
-      } else if (rest.startsWith('__')) {
+        // The escape continues the part before it, as the parser reads it:
+        // `x_a____002012` is `x_{a\unicode{"2012}}` and `x__a____002012` is
+        // `\operatorname{x^{a\unicode{"2012}}}`. A styled part is never
+        // followed by an escape (see `styledDigitSubscript()`).
+        const lastPart = parts[parts.length - 1];
+        if (lastPart === undefined || lastPart.kind === 'styled')
+          body += segment;
+        else {
+          lastPart.body += segment;
+          if (lastPart.kind === '_') subs[subs.length - 1] += segment;
+          else sups[sups.length - 1] += segment;
+        }
+      } else if (
+        rest.startsWith('__') &&
+        !UNICODE_ESCAPE_START.test(rest.substring(1))
+      ) {
+        // (A subscript that starts with a unicode escape, `_` followed by
+        // `____002012`, is handled with the subscripts below.)
+        //
+        // A superscript of digits followed by a style (`x__10_bold`) is the
+        // parse of a style written around the base and the superscript,
+        // `\mathbf{x^{10}}`, for the same reason as a subscript (see below).
+        const styled = styledDigitSubscript(rest.substring(1));
+        if (styled && styled.styles.length === 0) {
+          sups.push(styled.digits);
+          parts.push({ kind: '^', body: styled.digits });
+          rest = styled.rest;
+          continue;
+        }
+        if (styled) {
+          sups.push(styled.digits);
+          parts.push({
+            kind: 'styled',
+            c: '^',
+            digits: styled.digits,
+            styles: styled.styles,
+          });
+          rest = styled.rest;
+          continue;
+        }
         const [sup, rest2] = parseSymbolBody(rest.substring(2), false, 'none');
         sups.push(sup);
+        parts.push({ kind: '^', body: sup });
         rest = rest2;
       } else if (rest.startsWith('_')) {
         // A subscript of digits followed by a style (`x_1_bold`) is the parse
@@ -948,28 +1041,40 @@ function parseSymbolBody(
         // `\mathbf{x_1}`. It cannot be written as a styled subscript,
         // `x_{\mathbf{1}}`, because the parser spells out a styled digit:
         // `\mathbf{1}` is `one_bold`. The style is applied below, around the
-        // base and the subscripts up to this one.
+        // base and the subscripts up to this one. The prefix of a wildcard
+        // name is inside the style: `_x_1_bold` is
+        // `\operatorname{\mathbf{\_x_1}}`.
         //
-        // This is not done for a wildcard name, the only top-level name
-        // spelled with the `'none'` style: it is wrapped in
-        // `\operatorname{}`, and `\operatorname{\_\mathbf{x_1}}` does not
-        // parse.
+        // A name written in order (`ordered`) has none of the limits below: its
+        // parts are written in order (`scriptsInNameOrder()`), so the style
+        // can come after a superscript or after a style of the base:
+        // `x__a_1_bold` is `\operatorname{\mathbf{x^{a}_1}}`.
         const styled =
-          style !== 'none' &&
-          styles.length === 0 &&
-          sups.length === 0 &&
-          subStyles.length === 0
+          ordered || (sups.length === 0 && subStyles.length === 0)
             ? styledDigitSubscript(rest)
             : null;
+        if (styled && styled.styles.length === 0) {
+          subs.push(styled.digits);
+          parts.push({ kind: '_', body: styled.digits });
+          rest = styled.rest;
+          continue;
+        }
         if (styled) {
           subs.push(styled.digits);
           subStyles = styled.styles;
           styledSubCount = subs.length;
+          parts.push({
+            kind: 'styled',
+            c: '_',
+            digits: styled.digits,
+            styles: styled.styles,
+          });
           rest = styled.rest;
           continue;
         }
         const [sub, rest2] = parseSymbolBody(rest.substring(1), false, 'none');
         subs.push(sub);
+        parts.push({ kind: '_', body: sub });
         rest = rest2;
       } else {
         break;
@@ -983,6 +1088,19 @@ function parseSymbolBody(
     // the wrapper keeps enclosing the whole symbol so descriptive subscripts
     // such as `speed_max` stay upright: `\mathrm{speed_{max}}`.)
     baseBody = body;
+
+    // A name with a superscript part or a symbol subscript is written in
+    // `\operatorname{}`, with its superscripts and subscripts in the order of
+    // the name. See `scriptsInNameOrder()`. A wildcard name (the `'none'`
+    // style) is wrapped in `\operatorname{}` by the caller.
+    if (ordered) {
+      for (const style of styles) {
+        if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
+      }
+      body = scriptsInNameOrder(body, parts);
+      if (style !== 'none') body = `\\operatorname{${body}}`;
+      return [body, rest, []];
+    }
 
     // Apply the superscripts and the first subscript.
     //
@@ -1009,8 +1127,13 @@ function parseSymbolBody(
     // LaTeX).
     if (sups.length > 0) body = supsub('^', body, sups.join(','));
     if (styledSubCount > 0) {
+      // A style of the base is inside the style of the subscript:
+      // `x_bold_1_bold` is `\mathbf{\mathbf{x}_1}`.
+      for (const style of styles) {
+        if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
+      }
       for (const sub of subs.slice(0, styledSubCount))
-        body = supsub('_', body, sub);
+        body = nameSubscript(body, sub);
       for (const subStyle of subStyles) body = STYLE_MODIFIERS[subStyle](body);
       outerSubs = subs.slice(styledSubCount);
       explicitStyle = true;
@@ -1019,7 +1142,7 @@ function parseSymbolBody(
         if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
       }
       explicitStyle = styles.length > 0;
-      if (subs.length > 0) body = supsub('_', body, subs[0]);
+      if (subs.length > 0) body = nameSubscript(body, subs[0]);
       outerSubs = subs.slice(1);
     }
   } else {
@@ -1053,10 +1176,69 @@ function parseSymbolBody(
   return [body, rest, outerSubs];
 }
 
+/** A superscript or a subscript of a symbol name. See `parseSymbolBody()`. */
+type NamePart =
+  | { kind: '^' | '_'; body: string }
+  // A superscript (`c` is `^`) or a subscript (`c` is `_`) of digits
+  // followed by styles (`__10_bold`, `_1_bold`). The styles enclose the base
+  // and all the parts up to this one.
+  | { kind: 'styled'; c: '^' | '_'; digits: string; styles: string[] };
+
+/**
+ * Write the superscripts and subscripts of a symbol name in the order of the
+ * name, after `base` (the base of the name, with its prefix, accents and
+ * styles).
+ *
+ * Inside `\operatorname{}`, the parser reads one superscript and one
+ * subscript after a base, and makes the name `base__sup_sub` whatever their
+ * order in the LaTeX. A brace group is a base of its own: `{x_1}^{a}` is
+ * `x_1__a`. So a part is written after a new group when the part before it
+ * would come after it in the name, or when it would make a double script,
+ * which is not valid LaTeX:
+ * - `x__a` is `x^{a}`, `x__a_1` is `x^{a}_1`;
+ * - `x_1__a` is `{x_1}^{a}` (`x^{a}_1` is `x__a_1`);
+ * - `x__0__plus` is `{x^0}^{+}`, `x_1_2__a` is `{{x_1}_2}^{a}`.
+ *
+ * A part of digits with styles puts what comes before it and the part in
+ * the styles: `x__a_1_bold` is `\mathbf{x^{a}_1}`.
+ */
+function scriptsInNameOrder(base: string, parts: NamePart[]): string {
+  // Whether the current group has a superscript or a subscript. An accent
+  // can write a superscript after the base (`x_prime` is `x^{\prime}`).
+  let hasSup = base.includes('^');
+  let hasSub = false;
+  let result = base;
+  for (const part of parts) {
+    const c = part.kind === 'styled' ? part.c : part.kind;
+    const text = part.kind === 'styled' ? part.digits : part.body;
+    if (hasSub || (c === '^' && hasSup)) {
+      result = `{${result}}`;
+      hasSup = false;
+      hasSub = false;
+    }
+    result += /^[0-9]$/.test(text) ? `${c}${text}` : `${c}{${text}}`;
+    if (c === '^') hasSup = true;
+    else hasSub = true;
+    if (part.kind === 'styled') {
+      for (const style of part.styles) result = STYLE_MODIFIERS[style](result);
+      hasSup = false;
+      hasSub = false;
+    }
+  }
+  return result;
+}
+
 /**
  * If `rest` starts with a subscript of digits followed by one or more styles
  * (`_1_bold`, `_12_bold_italic`), return the digits, the styles and what
  * follows them. Otherwise return `null`.
+ *
+ * When the only style is `upright` (`_1_upright`), the styles are empty: the
+ * caller writes the digits with no style. The parser drops the upright style
+ * from a name of more than one character, so `\mathrm{x_1}` reads back as
+ * `x_1`, and the parser spells out a styled digit, so `x_{\mathrm{1}}` reads
+ * back as `x_one`. No spelling reads back as `x_1_upright`; `x_1` is the
+ * nearest one.
  */
 function styledDigitSubscript(
   rest: string
@@ -1066,19 +1248,43 @@ function styledDigitSubscript(
   const names = m[2].split('_').slice(1);
   let count = 0;
   while (count < names.length && STYLE_MODIFIERS[names[count]]) count += 1;
-  // The `upright` style is excluded: the parser drops it from a name of more
-  // than one character, so `\mathrm{x_1}` reads back as `x_1`, not as
-  // `x_1_upright`.
-  if (count === 0 || names.slice(0, count).includes('upright')) return null;
-  return {
-    digits: m[1],
-    styles: names.slice(0, count),
-    rest:
-      names
-        .slice(count)
-        .map((name) => `_${name}`)
-        .join('') + m[3],
-  };
+  if (count === 0) return null;
+  let styles = names.slice(0, count);
+  if (styles.length === 1 && styles[0] === 'upright') styles = [];
+  else if (styles.includes('upright')) return null;
+  const after =
+    names
+      .slice(count)
+      .map((name) => `_${name}`)
+      .join('') + m[3];
+  // A unicode escape right after the styles (`_1_bold____002012`) cannot be
+  // written: the parser reads no text after a style command in a name.
+  if (styles.length > 0 && UNICODE_ESCAPE_START.test(after)) return null;
+  return { digits: m[1], styles, rest: after };
+}
+
+/**
+ * A subscript of digits followed by one or more styles other than `upright`
+ * (`_1_bold`). See `styledDigitSubscript()`.
+ */
+const STYLED_DIGIT_PART = new RegExp(
+  `_\\d+(?:_(?:${Object.keys(STYLE_MODIFIERS)
+    .filter((style) => style !== 'upright')
+    .join('|')}))+(?![a-zA-Z0-9])`,
+  'g'
+);
+
+/** A unicode escape at the start of a string of a symbol name: `____002012`. */
+const UNICODE_ESCAPE_START = /^____[0-9A-Fa-f]{6}/;
+
+/**
+ * Add the subscript `sub` to the spelled-out body of a symbol name. Like
+ * `supsub()`, but the `\_` of a wildcard name is not a subscript: `_x_1` is
+ * `\_x_1`, not `{\_x}_1`.
+ */
+function nameSubscript(body: string, sub: string): string {
+  if (body.replace(/\\_/g, '').includes('_')) return supsub('_', body, sub);
+  return /^[0-9]$/.test(sub) ? `${body}_${sub}` : `${body}_{${sub}}`;
 }
 
 /**
@@ -1131,13 +1337,20 @@ function serializeSymbol(
   // But ____XXXXXX (4 underscores + 6 hex digits) is a unicode escape, not a wildcard.
   const m = s.match(/^(_+)(.*)/);
   if (m && !s.match(/^____[0-9A-Fa-f]{6}/)) {
-    const [body, rest, outerSubs] = parseSymbolBody(m[2], true, 'none');
-    const prefix = '\\_'.repeat(m[1].length);
+    // The prefix is part of the body: in a name with a superscript part, it
+    // is inside the innermost brace group, `_x_1__a` is
+    // `\operatorname{{\_x_1}^{a}}`.
+    const [body, rest, outerSubs] = parseSymbolBody(
+      m[2],
+      true,
+      'none',
+      '\\_'.repeat(m[1].length)
+    );
     // A text that could not be spelled out (`rest`) comes after the
     // subscripts in the name, so the subscripts stay in front of it.
     if (rest.length > 0)
-      return `\\operatorname{${prefix + withOuterSubscripts(body, outerSubs) + rest}}`;
-    return withOuterSubscripts(`\\operatorname{${prefix + body}}`, outerSubs);
+      return `\\operatorname{${withOuterSubscripts(body, outerSubs) + rest}}`;
+    return withOuterSubscripts(`\\operatorname{${body}}`, outerSubs);
   }
 
   const [body, rest, outerSubs] = parseSymbolBody(s, true, style);

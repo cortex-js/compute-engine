@@ -256,7 +256,9 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE', () => {
   // overlaps every type (`overlapAdmission()`,
   // `src/compute-engine/boxed-expression/validate.ts`), so a scalar
   // parameter admits it on the ground and on the generic route alike (user
-  // decision 2026-10-19), and a collection parameter refuses it.
+  // decision 2026-10-19), and a collection parameter refuses it. A parameter
+  // typed `unknown` and an overloaded function admit it too (user decision
+  // 2026-10-20).
   beforeEach(() => ce.declare('e', 'error'));
 
   test('at a parameter typed `list`: refused', () => {
@@ -266,11 +268,26 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE', () => {
     expect(errorCode(call.ops![0])).toBe('incompatible-type list error');
   });
 
-  test('at a function-literal parameter typed `unknown`: refused', () => {
+  test('at a function-literal parameter typed `unknown`: admitted, the call evaluates to the body', () => {
     defineIdentity('op', 'unknown');
     const call = ce.box(['op', 'e']);
-    expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type unknown error');
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('e');
+  });
+
+  test('at a parameter typed `unknown`: every route admits it', () => {
+    // A library operator.
+    ce.declare('lib', {
+      signature: '(unknown) -> unknown',
+      evaluate: (ops) => ops[0],
+    });
+    expect(ce.box(['lib', 'e']).isValid).toBe(true);
+    // A function name declared `(unknown) -> unknown`.
+    ce.declare('fu', '(unknown) -> unknown');
+    expect(ce.box(['fu', 'e']).isValid).toBe(true);
+    // A type variable bounded by `unknown`.
+    ce.declare('fgu', { type: '(T) -> T where T: unknown' });
+    expect(ce.box(['fgu', 'e']).isValid).toBe(true);
   });
 
   test('at a ground parameter typed `number`: admitted, the call evaluates to itself', () => {
@@ -307,12 +324,94 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE', () => {
     );
   });
 
-  test('at an overloaded function: refused', () => {
+  test('at an overloaded function: admitted, typed by the join of the results, the call evaluates to itself', () => {
     ce.declare('ov', { type: '((number) -> number) & ((string) -> string)' });
     const call = ce.box(['ov', 'e']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('number | string');
+    expect(call.evaluate().toString()).toBe('ov(e)');
+  });
+
+  test('at an overloaded function, an arm with a collection parameter refuses it, as `list` does', () => {
+    ce.declare('ov', { type: '((list) -> number) & ((string) -> string)' });
+    const call = ce.box(['ov', 'e']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('string');
+  });
+
+  test('at an overloaded function with only collection parameters: refused', () => {
+    ce.declare('ov', { type: '((list) -> number) & ((set) -> string)' });
+    const call = ce.box(['ov', 'e']);
+    expect(call.isValid).toBe(false);
+  });
+
+  test('at a function with two clauses: no clause is selected, the call evaluates to itself', () => {
+    ce.box([
+      'DefineFunction',
+      'mc',
+      ['Function', ['Add', 'a', 1], ['Typed', 'a', "'number'"]],
+    ]).evaluate();
+    ce.box([
+      'DefineFunction',
+      'mc',
+      ['Function', "'s'", ['Typed', 'a', "'string'"]],
+    ]).evaluate();
+    // The clauses still apply to a number and to a string.
+    expect(ce.box(['mc', 2]).evaluate().toString()).toBe('3');
+    expect(ce.box(['mc', "'x'"]).evaluate().toString()).toBe('"s"');
+    const call = ce.box(['mc', 'e']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('number | string');
+    // Before, every clause refused `e` and the call evaluated to the
+    // `no-matching-clause` error.
+    expect(call.evaluate().toString()).toBe('mc(e)');
+  });
+
+  test('a clause whose parameter admits the type `error` is selected', () => {
+    // The clauses are read first with the strict reading, where only a
+    // parameter typed `error` or `any` admits `e`. The other clauses are
+    // read with `e` undecidable only when every clause refuses it
+    // (`triStateSelect()`, `overload.ts`).
+    const defineClause = (name: string, body: unknown, type: string) =>
+      ce
+        .box([
+          'DefineFunction',
+          name,
+          ['Function', body, ['Typed', 'a', `'${type}'`]],
+        ] as MathJsonExpression)
+        .evaluate();
+    defineClause('m6', "'s'", 'string');
+    defineClause('m6', "'err'", 'error');
+    defineClause('m1', ['Add', 'a', 1], 'number');
+    defineClause('m1', "'other'", 'any');
+    ce.declare('g', '(number) -> error');
+    for (const arg of ['e', ['g', 2]] as MathJsonExpression[]) {
+      const c6 = ce.box(['m6', arg]);
+      expect(c6.isValid).toBe(true);
+      expect(c6.type.toString()).toBe('string');
+      expect(c6.evaluate().toString()).toBe('"err"');
+      const c1 = ce.box(['m1', arg]);
+      expect(c1.isValid).toBe(true);
+      // The static type is the result of the clause that is selected.
+      expect(c1.type.toString()).toBe('string');
+      expect(c1.evaluate().toString()).toBe('"other"');
+    }
+    expect(ce.box(['m1', 2]).evaluate().toString()).toBe('3');
+  });
+
+  test('a library operator with a string form: `Reverse(e)` is valid, typed `string`, and evaluates to itself', () => {
+    const call = ce.box(['Reverse', 'e']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('string');
+    expect(call.evaluate().toString()).toBe('Reverse(e)');
+  });
+
+  test('at an overloaded function, an argument of the wrong type is still refused', () => {
+    ce.declare('ov', { type: '((number) -> number) & ((boolean) -> boolean)' });
+    const call = ce.box(['ov', "'x'"]);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.ops![0])).toBe(
-      'incompatible-type number | string error'
+      'incompatible-type boolean | number string'
     );
   });
 
@@ -390,6 +489,14 @@ describe('AN APPLICATION TYPED `error` BY ITS DECLARED RESULT TYPE IS NOT AN ERR
     const call = ce.box(['op', ['g', 2]]);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.ops![0])).toBe('incompatible-type list error');
+  });
+
+  test('at an overloaded function: admitted, the call evaluates to itself', () => {
+    ce.declare('ov', { type: '((number) -> number) & ((string) -> string)' });
+    const call = ce.box(['ov', ['g', 2]]);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('number | string');
+    expect(call.evaluate().toString()).toBe('ov(g(2))');
   });
 
   test('a symbol declared `error` that holds `g(2)` is admitted as a condition', () => {
@@ -584,7 +691,20 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE AT AN OVERLOADED FUNCTION WITH
     ce.declare('e', 'error');
     ce.declare('ovg', { type: '((string) -> string) & ((T) -> T where T: number)' });
     ce.declare('ov', { type: '((string) -> string) & ((number) -> number)' });
-    expect(ce.box(['ov', 'e']).isValid).toBe(false);
+    expect(ce.box(['ov', 'e']).isValid).toBe(true);
+    const call = ce.box(['ovg', 'e']);
+    expect(call.isValid).toBe(true);
+    // The result of the generic arm is read at the bound of its variable,
+    // as for a symbol that holds an error value.
+    expect(call.type.toString()).toBe('number | string');
+    expect(call.evaluate().toString()).toBe('ovg(e)');
+  });
+
+  test('a generic arm bounded by a collection still refuses it', () => {
+    ce.declare('e', 'error');
+    ce.declare('ovg', {
+      type: '((T) -> T where T: list) & ((T) -> T where T: set)',
+    });
     expect(ce.box(['ovg', 'e']).isValid).toBe(false);
   });
 });
@@ -643,5 +763,26 @@ describe('THE OTHER ARGUMENT CHECKS ARE UNCHANGED', () => {
     const call = ce.box(['op']);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.evaluate())).toBe('missing');
+  });
+});
+
+describe('A VALID CALL OF AN OVERLOADED FUNCTION WITH NO SELECTED ARM', () => {
+  // On the route of a function held by a symbol, an operand whose type only
+  // overlaps a parameter is kept (`keepProvisionalOperands()`,
+  // `src/compute-engine/boxed-expression/box.ts`), so the call is valid
+  // although no arm is selected. Its type is the result of the arms it can
+  // take at run time (`unresolvedArm()`, `overload.ts`). Before, it was the
+  // result of the whole intersection, `string`.
+  test('`G(r)` with `r: real` and `((T) -> T where T: integer) & ((string) -> string)` is typed `integer`', () => {
+    ce.declare('r', 'real');
+    ce.declare('G1', {
+      type: '((T) -> T where T: integer) & ((string) -> string)',
+    });
+    ce.declare('G0', { type: '((integer) -> integer) & ((string) -> string)' });
+    const call = ce.box(['G1', 'r']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('integer');
+    // The same as the ground form.
+    expect(ce.box(['G0', 'r']).type.toString()).toBe('integer');
   });
 });

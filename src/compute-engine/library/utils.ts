@@ -36,6 +36,8 @@ import {
 } from '../boxed-expression/rational-body.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { symbolicLimit } from '../symbolic/limit.js';
+import { constantProductOverInfiniteRange } from '../symbolic/simplify-product.js';
+import { limitsHaveInfinitelyManyTerms } from '../symbolic/simplify-sum.js';
 import { implicitCompileNumeric } from '../implicit-compile.js';
 import {
   bignumPreferred,
@@ -306,6 +308,68 @@ export function hasOneSidedLimits(indexes: ReadonlyArray<Expression>): boolean {
       isFunction(idx, 'Limits') &&
       isSymbol(idx.op2, 'Nothing') !== isSymbol(idx.op3, 'Nothing')
   );
+}
+
+/**
+ * The indexing sets of a `Sum` or `Product`, with the default bounds put in
+ * place of a clause that has no bounds. A sum or product written with no
+ * bounds (`\sum_k f`, `Limits(k, Nothing, Nothing)`) runs over
+ * `k = 1, 2, 3, …`, so the clause is read as `Limits(k, 1, +∞)`, and the
+ * operator gives the same result as `\sum_{k=1}^{\infty} f` under
+ * `evaluate()`, `N()` and `simplify()` (user decision 2026-10-20). The
+ * numeric iteration in `normalizeIndexingSet()` already used these defaults.
+ *
+ * The canonical form keeps the clause with no bounds: the defaults apply only
+ * when the operator is evaluated or simplified. The index symbol of the
+ * clause is kept as it is, so it keeps its binding in the scope of the
+ * operator. A clause with one bound only (see `hasOneSidedLimits()`), a
+ * clause with no index (`Limits(Nothing, Nothing, Nothing)`) and an
+ * `Element` clause are returned unchanged.
+ */
+export function withDefaultBigOpBounds(
+  ce: ComputeEngine,
+  indexes: ReadonlyArray<Expression>
+): Expression[] {
+  return indexes.map((idx) =>
+    isFunction(idx, 'Limits') &&
+    isSymbol(idx.op1) &&
+    idx.op1.symbol !== 'Nothing' &&
+    isSymbol(idx.op2, 'Nothing') &&
+    isSymbol(idx.op3, 'Nothing')
+      ? ce._fn('Limits', [idx.op1, ce.One, ce.PositiveInfinity])
+      : idx
+  );
+}
+
+/**
+ * The value of a `Sum` or `Product` with one indexing set over an infinite
+ * domain, when its body does not depend on the index. A sum of 0 is 0, and
+ * a product of a constant `c` is the limit of `cⁿ`: 1 for `c = 1`, 0 for
+ * `|c| < 1` and +∞ for `c > 1` (`constantProductOverInfiniteRange()`).
+ * Otherwise undefined, and the caller carries on: a sum of a nonzero
+ * constant is ±∞ by `divergentInfiniteSum()`, and a product of `c ≤ −1`
+ * has no limit. `simplify()` gives the same values.
+ */
+export function constantBigOpOverInfiniteDomain(
+  kind: 'Sum' | 'Product',
+  body: Expression | undefined,
+  indexes: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!body || indexes.length !== 1) return undefined;
+  const idx = indexes[0];
+  if (!isFunction(idx) || !isSymbol(idx.op1)) return undefined;
+  if (body.symbols.includes(idx.op1.symbol)) return undefined;
+  // The range must have infinitely many terms. An empty range
+  // (`Limits(k, +∞, 5)`) gives the identity, 0 or 1, through the usual
+  // evaluation, not the limit of a constant. An `Element` clause reaches
+  // here only over ℕ or ℤ⁺ (`classifyBigopDomain()`).
+  if (isFunction(idx, 'Limits') && !limitsHaveInfinitelyManyTerms(idx))
+    return undefined;
+  // An impure body (a random draw, a call with effects) is not the same
+  // value in each term: it is not compared, so it is not evaluated here.
+  if (!isTransitivelyPure(body)) return undefined;
+  if (kind === 'Sum') return body.isSame(0) ? body.engine.Zero : undefined;
+  return constantProductOverInfiniteRange(body);
 }
 
 /**
@@ -661,10 +725,12 @@ export function symbolicSumClosedForm(
   const lower = limits.op2;
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
-  // A clause with no bounds (`Limits(k, Nothing, Nothing)`, from `\sum_k f`)
-  // runs over the default domain. The closed forms below substitute the
-  // bounds into the body, and a `Nothing` bound is not a value, so the sum
-  // stays symbolic.
+  // A `Nothing` bound is not a value, and the closed forms below substitute
+  // the bounds into the body, so such a sum stays symbolic. The `Sum`
+  // handlers put the default bounds 1 and +∞ in place of a clause with no
+  // bounds before they call this (`withDefaultBigOpBounds()`), and they keep
+  // a clause with one bound unevaluated, so this test only guards other
+  // callers.
   if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
     return undefined;
 
@@ -770,10 +836,12 @@ export function symbolicProductClosedForm(
   const lower = limits.op2;
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
-  // A clause with no bounds (`Limits(k, Nothing, Nothing)`, from `\prod_k f`)
-  // runs over the default domain. The closed forms below substitute the
-  // bounds into the body, and a `Nothing` bound is not a value, so the
-  // product stays symbolic.
+  // A `Nothing` bound is not a value, and the closed forms below substitute
+  // the bounds into the body, so such a product stays symbolic. The
+  // `Product` handlers put the default bounds 1 and +∞ in place of a clause
+  // with no bounds before they call this (`withDefaultBigOpBounds()`), and
+  // they keep a clause with one bound unevaluated, so this test only guards
+  // other callers.
   if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
     return undefined;
 
@@ -1271,11 +1339,15 @@ function namedSeriesClosedForm(
     let value: Expression = ce.function('Exp', [r]);
     if (a > 0) {
       const terms: Expression[] = [value];
+      // The term for j = 0 is 1, as in the power series of `e^r`. Written
+      // `r^0`, it would stay `r^0` for a free `r` (the engine keeps `x^0`
+      // because `0^0` has no value), and `Σ_{k=1}^∞ x^k/k!` gave
+      // `e^x − x^0` instead of `e^x − 1`.
       for (let j = 0, fact = 1; j < a; fact *= ++j)
         terms.push(
           ce
             .function('Divide', [
-              ce.function('Power', [r, ce.number(j)]),
+              j === 0 ? ce.One : ce.function('Power', [r, ce.number(j)]),
               ce.number(fact),
             ])
             .evaluate()
