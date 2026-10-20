@@ -10364,31 +10364,26 @@ export class BaseCompiler {
     }
   }
 
-  /**
-   * Compile a function expression
-   */
-  static compileExpr(
-    engine: ComputeEngine,
+  /** Reject omission-sensitive collections until targets can preserve Nothing. */
+  static assertCollectionOmissionSupported(
     h: string,
     args: ReadonlyArray<Expression>,
-    prec: number,
-    target: CompileTarget<Expression>,
-    /** The node being lowered, when the caller has it: the CSE region
-     * inventory is keyed by the `(node, operandIndex)` edge (§5.1). Omitting
-     * it costs only the optimization — no region is pushed. */
     node?: Expression
-  ): TargetSource {
-    if (h === 'Error') throw new Error('Error');
-
+  ): void {
     // Current targets cannot distinguish an omitted element from a missing
     // datum. Do not invoke callbacks or compact paired columns independently.
+    const selects =
+      h === 'Filter' ||
+      (h === 'Count' && args.length === 2 && args[1].isFunction === true);
     if (
       h === 'Map' ||
+      selects ||
       h === 'Covariance' ||
       h === 'PopulationCovariance' ||
       h === 'Correlation'
     ) {
-      const sources = h === 'Map' ? args.slice(1) : args;
+      const sources =
+        h === 'Map' ? args.slice(1) : selects ? args.slice(0, 1) : args;
       const pairMayOmit = (
         type: Type,
         seen: ReadonlySet<Type> = new Set()
@@ -10405,24 +10400,58 @@ export class BaseCompiler {
         }
         return false;
       };
-      const hasOmission = sources.some((source) => {
-        const element = collectionElementType(compilationType(source));
-        if (element === undefined) return false;
-        if (isSubtype('nothing', element)) return true;
-        return h !== 'Map' && args.length === 1 && pairMayOmit(element);
-      });
-      const resultElement =
-        h === 'Map' && node !== undefined
-          ? collectionElementType(compilationType(node))
-          : undefined;
+      const collectionMayOmit = (
+        type: Type,
+        paired: boolean,
+        seen: ReadonlySet<Type> = new Set()
+      ): boolean => {
+        const t = resolveTypeForCompilation(type);
+        if (seen.has(t)) return false;
+        if (typeof t === 'object' && t.kind === 'union') {
+          const next = new Set(seen).add(t);
+          return t.types.some((arm) => collectionMayOmit(arm, paired, next));
+        }
+        const element = collectionElementType(t);
+        return (
+          element !== undefined &&
+          (isSubtype('nothing', element) || (paired && pairMayOmit(element)))
+        );
+      };
+      const hasOmission = sources.some((source) =>
+        collectionMayOmit(
+          compilationType(source),
+          h !== 'Map' && !selects && args.length === 1
+        )
+      );
       if (
         hasOmission ||
-        (resultElement !== undefined && isSubtype('nothing', resultElement))
+        (h === 'Map' &&
+          node !== undefined &&
+          collectionMayOmit(compilationType(node), false))
       )
         throw new Error(
           `Could not compile \`${h}\`: possible 'Nothing' elements require a distinct omission representation.`
         );
     }
+  }
+
+  /**
+   * Compile a function expression
+   */
+  static compileExpr(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    /** The node being lowered, when the caller has it: the CSE region
+     * inventory is keyed by the `(node, operandIndex)` edge (§5.1). Omitting
+     * it costs only the optimization — no region is pushed. */
+    node?: Expression
+  ): TargetSource {
+    if (h === 'Error') throw new Error('Error');
+
+    BaseCompiler.assertCollectionOmissionSupported(h, args, node);
 
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a

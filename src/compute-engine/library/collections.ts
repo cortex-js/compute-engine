@@ -1864,7 +1864,10 @@ function callbackCompatibilityError(
       fnDef.operator.resolvedMissingBehavior === 'handle');
   const elementOf = (src: Expression): Type => {
     const t = collectionElementType(src.type.type) ?? ('any' as Type);
-    const supplied = arity.operator === 'Map' ? withoutNothing(t) : t;
+    const supplied =
+      arity.operator === 'Map' || arity.operator === 'Filter'
+        ? withoutNothing(t)
+        : t;
     return fnTakesAbsence ? stripMissingFromType(supplied) : supplied;
   };
   let supplyArrow: FunctionSignature;
@@ -10308,13 +10311,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const wrongKind = nonCollectionSizeOperandError(engine, xs, 'Count');
       if (wrongKind !== undefined) return wrongKind;
 
-      if (xs.isEmptyCollection) return engine.Zero;
+      // A lazy emptiness query can run the predicate. Read structural
+      // emptiness here and let the counting walk determine the other cases.
+      if (literalCollectionEmptiness(xs) === true) return engine.Zero;
 
       // 1-arg cardinality form. An indeterminate count (e.g. a set-builder
       // over a symbolic domain) stays symbolic.
       if (what === undefined) {
         const n = xs.count;
         if (n !== undefined) return engine.number(n);
+        if (xs.isEmptyCollection) return engine.Zero;
         // A finite collection with no count (`FlatMap([1, 2, 3], x ↦ [x,
         // x])`) is walked once to count its elements.
         const listed = listFiniteUncountedCollection(xs);
@@ -10353,7 +10359,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // `Filter`, only an unbroken run of rejections is limited.
             let sinceSelected = 0;
             for (const x of walkedSource(filtered.op1).each()) {
-              const applied = f([selectedElementValue(x)]);
+              const value = selectedElementValue(x);
+              if (isSymbol(value, 'Nothing')) {
+                if (++sinceSelected > limit) return undefined;
+                continue;
+              }
+              const applied = f([value]);
               if (applied === undefined)
                 throw invalidPredicateError(filtered.op2);
               const verdict = selectionVerdict(applied);
@@ -10389,6 +10400,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // number leaves compare by exact value, so `0.5` counts as `1/2`).
       // Only a finite collection has a knowable count; anything else stays
       // symbolic, mirroring the 1-arg form.
+      if (xs.isEmptyCollection) return engine.Zero;
       if (searchedValueStatus(what) === 'undecided') return undefined;
       if (xs.isFiniteCollection !== true) return undefined;
       // ...and only an enumerable one: `Take(xs, 2)` over a valueless `xs` is
@@ -10950,6 +10962,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return the elements of the collection for which the predicate function returns True.',
       'Equivalent to `[x for x in xs if p(x)]`.',
+      'Immediate `Nothing` inputs are dropped without calling the predicate.',
+      '`Missing` and markers nested inside a datum still reach the predicate.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
@@ -11001,12 +11015,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
       return BoxedType.forResult(
-        filterResultType(ops[0].type),
+        mapImmediateElements(filterResultType(ops[0].type), withoutNothing),
         context.engine._typeResolver
       );
     },
     canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
+      const source = ops[0]?.canonical;
+      // A source is also acceptable when its only non-value elements are
+      // omissions: these are dropped before the predicate receives anything.
+      const collection =
+        source !== undefined &&
+        isSubtype(mapImmediateElements(source.type.type, withoutNothing), {
+          kind: 'collection',
+          elements: 'unknown',
+        })
+          ? source
+          : checkCollectionOperand(engine, source);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Filter',
         supply: PER_ELEMENT_SUPPLY,
@@ -11108,6 +11132,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // True for that target. Note: query the source (`op1`), not `expr` —
         // `expr.contains()` would dispatch back into this handler.
         if (!isFunction(expr)) return false;
+        if (isSymbol(target, 'Nothing')) return false;
         // An UNDECIDED source membership must propagate as `undefined`: `??
         // false` here asserted a definite "not a member" about a source that
         // could not answer at all. A definite `false` still refutes.
@@ -11165,6 +11190,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           sinceEmit = 0;
           return { value, done: false };
         };
+        const reject = () => {
+          if (++sinceEmit > limit)
+            throw new CancellationError({
+              cause: 'iteration-limit-exceeded',
+              message: `Iteration limit of ${limit} exceeded while evaluating Filter()`,
+            });
+        };
         return {
           next: () => {
             while (true) {
@@ -11172,6 +11204,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (next.done) return { value: undefined, done: true };
               // The value the predicate judges is the value emitted.
               const value = selectedElementValue(next.value);
+              // Omitted inputs consume source work but never run the predicate.
+              if (isSymbol(value, 'Nothing')) {
+                reject();
+                continue;
+              }
               const pred = f([value]);
               if (!pred) {
                 throw invalidPredicateError(expr.op2);
@@ -11200,11 +11237,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 noteIncompleteWalk();
               }
               // REJECTED — the only pull that counts toward the cap.
-              if (++sinceEmit > limit)
-                throw new CancellationError({
-                  cause: 'iteration-limit-exceeded',
-                  message: `Iteration limit of ${limit} exceeded while evaluating Filter()`,
-                });
+              reject();
             }
           },
         };

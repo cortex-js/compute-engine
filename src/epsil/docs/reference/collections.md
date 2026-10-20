@@ -718,6 +718,10 @@ Return the elements of the collection for which the predicate function returns T
 
 Equivalent to `[x for x in xs if p(x)]`.
 
+Immediate `Nothing` inputs are dropped without calling the predicate.
+
+`Missing` and markers nested inside a datum still reach the predicate.
+
 ```epsil
 filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 // ➔ [2,4,6]

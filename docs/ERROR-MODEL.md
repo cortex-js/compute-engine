@@ -249,13 +249,15 @@ are 1. The mean counts participating results; an all-omitted input uses the
 ordinary empty-input rule. This does not make `Missing` skippable.
 
 `Map` now bypasses its callback for immediate `Nothing` inputs and preserves
-that raw position. With multiple sources, any omitted coordinate bypasses the
-whole callback. `Missing` and markers nested inside a datum still reach the
+that raw position. `Filter` drops immediate `Nothing` inputs without calling
+its predicate; its filtered positions and count exclude those inputs. With
+multiple map sources, any omitted coordinate bypasses the whole callback. `Missing` and markers nested inside a datum still reach the
 callback. `Covariance`, `PopulationCovariance`, and `Correlation` skip whole
 observations with an omitted coordinate (or an omitted pair row), after checking
-raw source lengths. Every term uses the same retained observations. Maps and
-these paired statistics refuse compilation when their types admit omission
-until the target can preserve that distinction.
+raw source lengths. Every term uses the same retained observations. Maps,
+filters, predicate counts, and these paired statistics refuse compilation when source element
+types admit omission until the target can preserve that distinction. Maps also
+check whether their callback results may be omitted.
 
 Storing, passing, or nesting a view does not implicitly compact it.
 Data tuples retain `Nothing` in its slot, and ordinary arguments do not

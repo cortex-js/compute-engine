@@ -2,6 +2,14 @@
 
 ### Behavior Changes
 
+- `Filter` drops immediate `Nothing` inputs without calling its predicate.
+  Filtering a raw view yielding `1, Nothing, 3` with an always-true predicate
+  now yields `1, 3`, rather than an incompatible-type error cell or a retained
+  omission. `Count(source, predicate)` follows the same selection rule.
+  `Missing` and nested markers still reach the predicate. Result
+  types exclude immediate `nothing`; compilation refuses sources that might
+  contain it until targets can distinguish omission from missing data.
+
 - `Map` bypasses its callback for immediate `Nothing` inputs and preserves their
   positions. A strict numeric callback over a view yielding `1, Nothing, 3` now
   yields its two results and `Nothing`, rather than an incompatible-type error

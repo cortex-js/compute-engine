@@ -623,11 +623,21 @@ This ordinary-parameter recommendation remains open; callback bypass does
 not make a direct call such as `f(Nothing, 8)` omit an argument or bypass
 the function.
 
-For `Filter`, bypassing the predicate is selected, but whether that source
-`Nothing` is retained or rejected remains to be specified. A filter already
-changes cardinality; copying `Map`'s position rule is insufficient.
-Structural `Take` and `Zip` preserve positions and alignment without invoking
-a user callback, so their behavior does not settle this question.
+**Decided: `Filter` drops immediate `Nothing` inputs without calling the
+predicate.** Filtering the raw view `1, Nothing, 3` with `x ↦ True` produces
+`1, 3`; the predicate runs twice during one uncached traversal. Its result
+element type excludes immediate `nothing`, while retaining any nested marker.
+`Missing` still reaches the predicate and follows its ordinary contract.
+`Count(source, predicate)` uses the same selection rule as counting the
+corresponding filtered view.
+
+In plain language: **`Map` skips the callback and keeps the position;
+`Filter` skips the predicate and drops the element.** A filter already changes
+cardinality, so it does not promise source alignment. Counting or indexing it
+may scan the source. Omitted inputs count toward the existing bound on an
+unbroken run of rejected inputs, so an infinite omitted source cannot hang a
+consumer. Structural `Take` and `Zip` preserve positions and alignment without
+invoking a user callback; they keep their separate rules.
 
 #### Paired reductions (Q10)
 
@@ -817,7 +827,7 @@ fusion at an explicit omission boundary; otherwise reject compilation.
 | Q6. What do unspecified record fields promise? | Decided: retain current open records and width subtyping | Make enumeration and dictionary relationships respect unconstrained extra fields; no closed-record syntax required for this work |
 | Q7. How should unbound generic variables behave? | Keep the current fallback initially; bind from actual arguments normally | Test local explicit `where T: any` bounds and overload inference before considering a global fallback change |
 | Q8. How should the agreed inference-marker role of `unknown` be implemented? | The role is decided: it is a placeholder, not a concrete content type | Decide unresolved-type representation, subtype API behavior, bounds, and migration from the current lattice; inventory library signatures and classify inference requests versus explicit content contracts or named generics; coordinate with Q7 |
-| Q9. How do strict parameters and chained callbacks handle `Nothing`? | Decided: bypass callbacks for `Nothing`; `Map` preserves the raw position | `Map` bypass and immediate omission typing implemented; `Filter` retention versus rejection remains open; ordinary strict parameter contracts remain separate |
+| Q9. How do strict parameters and chained callbacks handle `Nothing`? | Decided: bypass callbacks for `Nothing`; `Map` preserves the raw position | `Map` preserves omitted positions; `Filter` drops them; callback bypass and immediate omission typing implemented for both; ordinary strict parameter contracts remain separate |
 | Q10. How do paired reductions handle an omitted coordinate? | Decided: skip the whole observation for paired statistics; preserve alignment and use one shared set of observations | Paired statistics implemented; decide `Dot` and custom `Fold`/`Reduce` separately |
 | Q11. What do repeated view reads observe? | UNDECIDED recommendation after probes: preserve existing effect/cache rules; retain input bindings without eager enumeration on language assignment | Confirm binding capture versus live reassignment; define capture scope for mutable objects and effectful callbacks; do not promise exactly-once evaluation or impose new purity restrictions incidentally |
 
@@ -1143,7 +1153,9 @@ Concrete checks for the design and its implementation:
   their positions. Verify bypass even when the callback accepts `nothing`,
   no callback effects at those positions, and acceptance of a callback
   whose strict input type excludes `nothing`. Retain possible `nothing`
-  in the result type. Cover ordinary calls and `Filter` selection separately.
+  in the result type. `Filter` bypasses its predicate and drops immediate
+  omissions; cover iteration, count, indexing, membership, empty results, and
+  bounded rejected-input scans. Cover ordinary calls separately.
 - For Q10, use differently located `Nothing` results in aligned inputs.
   Verify that no independent compaction shifts pairs, that every term of
   the paired statistic uses the same retained observations, and that an

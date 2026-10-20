@@ -119,8 +119,8 @@ missing would violate the selected rule that `Nothing` passes through.
 Constant expressions may fold before this check; a final fallback is returned
 without an absence test.
 
-`Map`, `Covariance`, `PopulationCovariance`, and `Correlation` also refuse
-compilation when source element types admit `Nothing`; single-source paired
+`Map`, `Filter`, predicate-form `Count`, `Covariance`, `PopulationCovariance`,
+and `Correlation` also refuse compilation when source element types admit `Nothing`; single-source paired
 statistics inspect tuple coordinates, and maps also check their result type.
 An unconstrained `collection<any>` therefore needs an annotation that excludes
 `Nothing` (for example, `list<real>`) to compile. This preserves callback bypass and aligned-observation semantics.
@@ -166,8 +166,10 @@ compilability and size, as it does for compilation (design section 5.7).
 ### Remaining raw-view omission and typing policies (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
 
 `Map` now preserves immediate omission in its result type and bypasses callbacks
-for omitted inputs. Paired statistics now skip whole aligned observations.
-The examples below record the original findings; other producers, `Filter`,
+for omitted inputs. `Filter` drops immediate omissions without invoking its
+predicate and removes them from its element type. Paired statistics now skip
+whole aligned observations.
+The examples below record the original findings; other producers,
 tuple preservation, and the remaining consumers still need their own policies.
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,

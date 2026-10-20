@@ -10939,6 +10939,8 @@ function emitLazyStream(
       'Could not compile the collection: it is not lazily compilable'
     );
   const op = expr.operator;
+  // Stream stages bypass compileExpr, so enforce the same omission contract here.
+  BaseCompiler.assertCollectionOmissionSupported(op, expr.ops, expr);
   if (op === 'Range') {
     const step = infiniteRangeStep(expr);
     if (step === undefined)

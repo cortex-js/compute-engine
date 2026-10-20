@@ -3059,7 +3059,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`.",
+      "description": "Return the elements of the collection for which the predicate function returns True.\n\nEquivalent to `[x for x in xs if p(x)]`.\n\nImmediate `Nothing` inputs are dropped without calling the predicate.\n\n`Missing` and markers nested inside a datum still reach the predicate.",
       "examples": [
         "Filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)"
       ]
