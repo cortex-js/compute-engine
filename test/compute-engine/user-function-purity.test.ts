@@ -524,6 +524,9 @@ describe('The inference stamps an effect set on the signature', () => {
 
   it('f() := Assign(a, 1) gets `scope`, and owes the stream nothing', () => {
     const ce = new ComputeEngine();
+    // `a9x` is declared outside the literal: an assignment to a name that no
+    // outer scope declares would make a local of the body instead.
+    ce.declare('a9x', 'integer');
     // The literal's own arrow is inference-stamped with `scope`; INSTALLING
     // it requires stating the contract (the default-`!scope` ceiling).
     expect(
@@ -958,8 +961,9 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
 
   it('a CONDITIONAL Declare does not dominate → `scope`', () => {
     // h() := Block(If(flag, Declare(n, 0)), Assign(n, 5), n)
-    // On the flag-false path the Assign writes through.
+    // On the flag-false path the Assign writes through to the outer `n`.
     const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
     const literal = ce.box([
       'Function',
       ['Block', ['If', 'flag9x', ['Declare', 'n', 0]], ['Assign', 'n', 5], 'n'],
@@ -969,6 +973,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
 
   it('a Declare in a NESTED Block does not dominate the outer Assign', () => {
     const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
     const literal = ce.box([
       'Function',
       ['Block', ['Block', ['Declare', 'n', 0]], ['Assign', 'n', 5]],
@@ -1016,7 +1021,9 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       ],
     ]);
     expect(specifier(literal)).toBe('scope');
-    // …and the writing closure carries `scope` on its own arrow.
+    // …and the writing closure carries `scope` on its own arrow. Boxed alone,
+    // it writes an `n` declared outside it, as the `n` of the body above.
+    ce.declare('n', 'integer');
     expect(
       specifier(ce.box(['Function', ['Assign', 'n', ['Add', 'n', 1]]]))
     ).toBe('scope');

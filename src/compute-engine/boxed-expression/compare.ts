@@ -58,6 +58,17 @@ export function _setQuantityOrder(fn: QuantityOrderFn) {
   _quantityOrder = fn;
 }
 
+// Lazy reference, for the same reason as `_quantityOrder`: the function is
+// `quantityDimensionsDiffer()` of `library/quantity-compare.ts`. It is true
+// when two values are different because their physical dimensions differ
+// (`6 W` and `6 m`, `6 m` and `6`, `6 m` and `"a"`).
+type QuantityDimensionsDifferFn = (a: Expression, b: Expression) => boolean;
+let _quantityDimensionsDiffer: QuantityDimensionsDifferFn | undefined;
+/** @internal */
+export function _setQuantityDimensionsDiffer(fn: QuantityDimensionsDifferFn) {
+  _quantityDimensionsDiffer = fn;
+}
+
 /**
  * The order of two `Quantity` expressions by their physical value (`1000 m`
  * and `1 km` are equal), or `undefined` when `a` or `b` is not a quantity,
@@ -637,11 +648,16 @@ function eqImpl(
   // Two quantities with units of the same dimension compare by their
   // physical value: `1000 m` is equal to `1 km`, and `6 A·V` to `6 W`. Two
   // exact magnitudes are compared exactly, as two exact numbers are. The
-  // unit symbols are unknowns, so the steps below cannot decide this. Two
-  // quantities with different dimensions (`6 W` and `6 m`) are not decided
-  // here.
+  // unit symbols are unknowns, so the steps below cannot decide this.
   const quantity = quantityOrder(aExact, bExact, a.engine.tolerance, true);
   if (quantity !== undefined) return quantity === 0;
+  // Two values with different physical dimensions are not equal, whatever
+  // their magnitudes: `6 W` and `6 m`, `0 m` and `0 s`, `6 m` and the
+  // number `6`, `6 m` and the string `"a"`. The values after `.N()` are tested, so that an operand that
+  // evaluates to a number (`2 + 3`, a symbol whose value is `5`) is a
+  // number. A unit whose dimension is not known, and a dimensionless
+  // quantity compared with a number, are not decided here.
+  if (_quantityDimensionsDiffer?.(a, b) === true) return false;
 
   // Two exact values, one of them an exact constant expression that is not
   // a number, are compared by enclosures at a raised precision, not by the

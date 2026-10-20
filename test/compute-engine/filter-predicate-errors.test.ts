@@ -164,15 +164,34 @@ describe('Any/All with an Error-valued predicate result', () => {
       expect(result.toString()).not.toContain('must return');
     });
 
-    test(`${op} surfaces an error met BEFORE any decision`, () => {
+    test(`${op} decides on a decision met AFTER the error`, () => {
       // `n > 0`: the float element fails its annotation at index 1, and the
-      // element that would short-circuit (`7` → True for `Any`; `-1` → False
-      // for `All`) sits AFTER it. The error wins.
+      // element that decides (`7` → True for `Any`; `-1` → False for `All`)
+      // sits AFTER it. The answer does not depend on the order of the
+      // elements (three-valued logic, `docs/ERROR-MODEL.md` §3), so the
+      // decision wins.
+      const ce = new ComputeEngine();
+      expect(
+        ce
+          .box([
+            op,
+            ['List', 1.5, op === 'Any' ? 7 : -1],
+            annotatedPredicate('n', 'integer'),
+          ])
+          .evaluate()
+          .toString()
+      ).toBe(op === 'Any' ? '"True"' : '"False"');
+    });
+
+    test(`${op} answers the error when no element decides`, () => {
+      // `1.5` fails its annotation, and the element after it does not
+      // decide: `-3 > 0` is False for `Any`, `3 > 0` is True for `All`. The
+      // answer is the error of the failed element.
       const ce = new ComputeEngine();
       const result = ce
         .box([
           op,
-          ['List', 1.5, op === 'Any' ? 7 : -1],
+          ['List', 1.5, op === 'Any' ? -3 : 3],
           annotatedPredicate('n', 'integer'),
         ])
         .evaluate();

@@ -3,7 +3,13 @@ import {
   exactCompareNumbers,
   isExactRealLiteral,
 } from '../boxed-expression/constraint-subject.js';
-import { isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isAbsentSymbol,
+  isCharacter,
+  isNumber,
+  isString,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import {
   exactConstantOrder,
   isExactConstantExpression,
@@ -12,10 +18,12 @@ import { isMeasurement, measurementNominal } from './measurement-arithmetic.js';
 import { isQuantity } from './quantity-arithmetic.js';
 import { boxedToUnitExpression } from './units.js';
 import {
+  type DimensionVector,
   type UnitExpression,
   convertCompoundUnit,
   decimalFraction,
   dimensionsEqual,
+  isDimensionless,
   exactUnitConversion,
   getExpressionDimension,
   getExpressionScale,
@@ -43,7 +51,8 @@ export type QuantityCompareOptions = {
  * `-1` when `a < b`, `0` when they are equal, `1` when `a > b`.
  *
  * Returns `undefined` when `a` or `b` is not a `Quantity`, when the two
- * units have different dimensions (`6 W` and `6 m`), when a unit is not
+ * units have different dimensions (`6 W` and `6 m`: they are not equal, see
+ * `quantityDimensionsDiffer()`, but they have no order), when a unit is not
  * known, when a magnitude has no real value (a symbol with no value, a
  * complex number, also `1 + 10⁻⁸⁰⁰i`), or when the order cannot be decided.
  *
@@ -179,6 +188,71 @@ export function compareQuantities(
   return d < 0 ? -1 : 1;
 }
 
+/**
+ * True when `a` and `b` are two different values because they have
+ * different physical dimensions:
+ * - two quantities whose units have known dimensions that are not the same:
+ *   `6 W` and `6 m`, also `0 m` and `0 s` and `x m` and `6 s`. The dimension
+ *   is part of the value, so the magnitudes do not change the answer;
+ * - a quantity whose unit has a known dimension that is not
+ *   dimensionless, and a number (a number literal, or an exact constant
+ *   expression such as `π`): `6 m` and `6`. A number is dimensionless;
+ * - a quantity whose unit has a known dimension, also dimensionless, and
+ *   a string, a character or a boolean: `6 m` and `"a"`, `6 percent` and
+ *   `True`. Two values of different kinds are different, as a number and a
+ *   string are, and a number and a boolean are.
+ *
+ * So `Equal` is `False` and `NotEqual` is `True` for such a pair. Their
+ * order has no meaning, and `compareQuantities()` gives `undefined` for it.
+ *
+ * False when the dimension of a unit is not known (a symbol that is not in
+ * the unit table), when a dimensionless quantity is compared with a number
+ * (`6 percent` and `0.06`, `30 deg` and `1`: such a quantity can be equal to
+ * a number), and when the magnitude is an
+ * absent value, `Missing` or `Undefined` (an absent value is not known to be
+ * different).
+ */
+export function quantityDimensionsDiffer(
+  a: Expression,
+  b: Expression
+): boolean {
+  const aQuantity = isQuantity(a);
+  const bQuantity = isQuantity(b);
+  if (!aQuantity && !bQuantity) return false;
+  const aDim = aQuantity ? quantityDimension(a) : undefined;
+  const bDim = bQuantity ? quantityDimension(b) : undefined;
+  if (aDim === null || bDim === null) return false;
+  if (aDim !== undefined && bDim !== undefined)
+    return !dimensionsEqual(aDim, bDim);
+  // One quantity and one other value
+  const [dim, other] = aDim !== undefined ? [aDim, b] : [bDim!, a];
+  // A string, a character or a boolean is never equal to a quantity,
+  // whatever its dimension. A boolean is tested by name.
+  if (
+    isString(other) ||
+    isCharacter(other) ||
+    isSymbol(other, 'True') ||
+    isSymbol(other, 'False')
+  )
+    return true;
+  if (isDimensionless(dim)) return false;
+  // `isExactConstantExpression()` also accepts a constant symbol that is not
+  // a number (`True`), so its type is tested too.
+  return (
+    isNumber(other) ||
+    (isExactConstantExpression(other) && other.type.matches('number'))
+  );
+}
+
+/** The dimension of the unit of the quantity `q`, or `null` when it is not
+ * known or when the magnitude of `q` is absent (`Missing` or `Undefined`,
+ * `isAbsentSymbol()`). */
+function quantityDimension(q: Expression): DimensionVector | null {
+  if (!isQuantity(q) || isAbsentSymbol(q.op1)) return null;
+  const unit = boxedToUnitExpression(q.op2);
+  return unit ? getExpressionDimension(unit) : null;
+}
+
 /** True when `x` is an exact number literal or an exact constant
  * expression (`π`, `√2 + 1`): a value with no rounding. */
 function isExactMagnitude(x: Expression): boolean {
@@ -239,12 +313,27 @@ function orderByConversion(
   if (map === null) return undefined;
   const ce = aMag.engine;
   let converted = from;
-  if (map.factor[0] !== map.factor[1] || map.offset[0] !== 0n) {
+  if (
+    map.factor[0] !== map.factor[1] ||
+    map.piPower !== 0 ||
+    map.offset[0] !== 0n
+  ) {
     // The canonical forms of `Multiply` and `Add` fold exact number
     // literals, and keep an exact constant expression exact. A float is not
-    // folded at canonicalization: the evaluation computes it.
+    // folded at canonicalization: the evaluation computes it. The factor of
+    // a conversion between two angle units can have a power of π (`rad` to
+    // `deg` is `180·π⁻¹`): the converted value of an exact magnitude is
+    // then an exact constant expression (`180·π⁻¹·π` is `180`), which
+    // `orderWithin()` compares with enclosures at a raised precision.
+    const factor =
+      map.piPower === 0
+        ? [ce.number(map.factor)]
+        : [
+            ce.number(map.factor),
+            ce.function('Power', [ce.Pi, ce.number(map.piPower)]),
+          ];
     converted = ce.function('Add', [
-      ce.function('Multiply', [ce.number(map.factor), from]),
+      ce.function('Multiply', [...factor, from]),
       ce.number(map.offset),
     ]);
     if (!isExactMagnitude(converted)) converted = converted.evaluate();

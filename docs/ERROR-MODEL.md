@@ -314,8 +314,10 @@ first three in `_invalidValue()`,
   `isCollection` is `true`, its count is the number of its cells, and a walk
   of its elements (`each()`, `at()`) gives the failed cell as the value of
   that element. A collection operator whose only errors sit in the cells of
-  such literals (`Map(f, [1, err])`, `Reverse([1, err])`) is a collection
-  too, typed by its own type handler. An operator that reads the cells gives
+  such literals (`Map(f, [1, err])`, `Reverse([1, err])`), or under a
+  selecting operator such as an `If` in its callback
+  (`Map(u ↦ If(u = 2, 1/"a", u), Range(1, 5))`, whose second element is the
+  error), is a collection too, typed by its own type handler. An operator that reads the cells gives
   the failed cell to its body or callback, and the ordinary rules apply to
   what the body computes with it:
 
@@ -377,10 +379,31 @@ first three in `_invalidValue()`,
     `list<number>` with no value) keeps the comparison inert before any
     failed cell is read. Two sets are compared by value, so a failed cell
     makes their equality the error. `isSame()` and `isEqual()` do not change: they
-    compare the trees. A quantifier combines the answers in order, as `Or`
-    and `And` do (`Or(err > 0, True)` is the error), so `Any([1, err], x ↦ x
-    > 0)` is `True` and `All([1, err], x ↦ x > 5)` is `False` (decided by
-    the first cell), while `Any([1, err, 3], x ↦ x > 2)` is the error.
+    compare the trees. A quantifier combines the answers by three-valued
+    (Kleene) logic, as `Or` and `And` do (see "The connectives with a failed
+    operand" below), so the order of the cells does not change the answer:
+    an element that decides wins wherever it is. `Any([1, err, 3], x ↦ x >
+    2)` is `True`, `All([1, err, -3], x ↦ x > 0)` is `False`, and
+    `Any([1, err], x ↦ x > 2)` and `All([1, err, 3], x ↦ x > 0)` are the
+    error. When no element decides, the answer is the error of the first
+    failed element, also beside an element whose answer is undetermined or
+    `Missing`. The walk still stops at the first element that decides. After
+    a failed element it goes on to look for one. A source that is known to
+    be finite is read to its end, however large. Any other source
+    (`Range(1, +oo)`, `Repeat(5)`, a `Filter` over an unbounded range) is
+    read for at most `iterationLimit` elements, the cap of the index
+    searches over such a source, with or without a failed element: when no
+    element decides before the cap, the quantifier stays unevaluated, since
+    an element that decides can come later. `Any(Range(1, +oo), u ↦ u < 0)`
+    stays unevaluated (it walked forever before), and
+    `Any(Range(1, +oo), u ↦ u > 500)` is `True`. `ForAll` and `Exists` over
+    a finite domain (`x ∈ [1, 2, 3]`, `x ∈ Range(1, 5)`) follow the same
+    rule, and so does `ExistsUnique`, where a second witness decides
+    `False`: `Exists(x ∈ [1, 2], (x = 2 ? err : x) > 5)` is the error (it
+    was `False`), and an answer with a free symbol (`Exists(x ∈ [1, 2], x >
+    n)`) keeps the quantifier unevaluated (it was `False`). Their domain is
+    never walked past 1000 elements: a larger or infinite domain keeps them
+    unevaluated.
     `Dedup` compares each element with the element before it, so a failed
     cell next to an element that is not the same expression gives the
     error: `Dedup([1, err, 1])` is the error (it is `[1]` if the cell is
@@ -482,6 +505,35 @@ first three in `_invalidValue()`,
   (`If(x == 4, 5, err)` with a free `x`, `Coalesce(x, err)`) stays inert
   with its diagnostic in place: it has neither demanded nor rejected the
   failing arm.
+
+  **The connectives with a failed operand** (decided 2026-10-19). `Or`,
+  `And`, `Nand`, `Nor` and `Implies` use three-valued (Kleene) logic for an
+  operand that evaluates to an error, so the answer does not depend on the
+  order of the operands. An operand that decides the answer decides it
+  wherever it is, also after a failed operand: a `True` operand of `Or` or
+  `Nor`, a `False` operand of `And` or `Nand`, and for `Implies(p, q)` a
+  `False` antecedent or a `True` consequent. So `Or(err, True)` and
+  `Or(True, err)` are `True`, `And(err, False)` is `False`,
+  `Nand(err, False)` is `True`, `Nor(err, True)` is `False` and
+  `Implies(err, True)` is `True`. When no operand decides, the answer is the
+  error of the first failed operand, in the written order, also beside an
+  unknown or an absent operand: `Or(err, False)`, `Or(err, A)`, `Or(A, err)`,
+  `Or(err, Missing)` and `Implies(True, err)` are the error. An operand that
+  is not a boolean is such a failed operand, since canonicalization replaces
+  it with an `incompatible-type` error: `And(1, False)` and `And(False, 1)`
+  are `False`, and `And(1, True)` is the error. Evaluation still goes left
+  to right and stops at the first operand that decides, so the operands
+  after it do not run; a failed operand does not stop it, so the operands
+  after a failed one run, with their side effects. Symbolic operands keep
+  their rules (`Or(A, True)` is `True`, `Or(A, False)` is `A`). `Xor` and
+  `Equivalent` have no operand that decides the answer, so an error operand
+  stays the answer. `Any` and `All` follow the same rule over the cells of a
+  collection (see "Membership and equality" above). Compiled code does not
+  change: a tree that holds an error does not compile, and the fallback
+  evaluates it by these rules. The handlers are `evaluateShortCircuit` and
+  its async twin (`src/compute-engine/library/logic.ts`),
+  `quantifierWalk` (`src/compute-engine/library/collections.ts`) and
+  `foldQuantifierAnswers` (`src/compute-engine/library/logic-analysis.ts`).
 
 **Why collapse at evaluation rather than stay inert.** Expressions are
 immutable, so evaluating does not destroy the in-place, multi-error

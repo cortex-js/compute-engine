@@ -179,10 +179,15 @@ function canonicalShortCircuit(
  *
  * SCALAR application (no operand is collection-shaped, see
  * `isElementwiseOperand`): evaluate the operands left to right and stop at
- * the first `decider` (`False` for `And`, `True` for `Or`) — or at the first
- * operand that evaluates to an error, which is returned as-is: an error is
- * as final as a decider, and evaluating past it would run operands the failed
- * one was guarding. The survivors are then handed to the order-independent
+ * the first `decider` (`False` for `And`, `True` for `Or`). An operand that
+ * evaluates to an error does NOT stop the walk: the result does not depend on
+ * the order of the operands (three-valued, Kleene logic), so a decider after
+ * the failed operand still decides (`Or(err, True)` is `True`, as
+ * `Or(True, err)` is). When no operand decides, the result is the error of
+ * the first failed operand, also beside an unknown or absent operand
+ * (`Or(err, A)` and `Or(A, err)` are `err`). The consequence is that the
+ * operands after a failed one are evaluated, with their side effects.
+ * Otherwise the survivors are handed to the order-independent
  * symbolic reducer (`reduce`: `evaluateAnd`/`evaluateOr`), which folds
  * `True`/`False`, duplicates, contradictions and absorptions, and keeps the
  * rest symbolic.
@@ -215,15 +220,20 @@ function evaluateShortCircuit(
     const evalOptions = evaluateOptionsOf(options);
     const elementwise = ops.some(isCollectionShaped);
     const values: Expression[] = [];
+    let failed: Expression | undefined = undefined;
     for (let i = 0; i < ops.length; i++) {
       const v = ops[i].evaluate(evalOptions);
       if (!elementwise) {
-        if (!v.isValid) return v;
         const decided = decide(ce, v, i);
         if (decided) return decided;
+        if (!v.isValid) {
+          failed ??= v;
+          continue;
+        }
       }
       values.push(v);
     }
+    if (failed) return failed;
     return finishShortCircuit(
       ce,
       name,
@@ -250,15 +260,20 @@ function evaluateShortCircuitAsync(
     const evalOptions = evaluateOptionsOf(options);
     const elementwise = ops.some(isCollectionShaped);
     const values: Expression[] = [];
+    let failed: Expression | undefined = undefined;
     for (let i = 0; i < ops.length; i++) {
       const v = await ops[i].evaluateAsync(evalOptions);
       if (!elementwise) {
-        if (!v.isValid) return v;
         const decided = decide(ce, v, i);
         if (decided) return decided;
+        if (!v.isValid) {
+          failed ??= v;
+          continue;
+        }
       }
       values.push(v);
     }
+    if (failed) return failed;
     return finishShortCircuit(
       ce,
       name,
@@ -299,10 +314,13 @@ const decideNand: Decider = (ce, v) =>
 const decideNor: Decider = (ce, v) =>
   sym(v) === 'True' ? ce.False : undefined;
 /** `Implies(p, q)`: a `False` antecedent decides (`True`) without evaluating
- * the consequent — `False ⇒ q` is `True` for every `q`. The consequent (the
- * last operand) never decides early. */
+ * the consequent — `False ⇒ q` is `True` for every `q`. A `True` consequent
+ * decides too (`p ⇒ True` is `True` for every `p`), so a failed antecedent
+ * does not make `Implies(err, True)` an error. */
 const decideImplies: Decider = (ce, v, i) =>
-  i === 0 && sym(v) === 'False' ? ce.True : undefined;
+  (i === 0 && sym(v) === 'False') || (i === 1 && sym(v) === 'True')
+    ? ce.True
+    : undefined;
 
 /** The `EvaluateOptions` to hand to an operand: everything the caller passed
  * (`numericApproximation`, `materialization`, the cancellation `signal`, and
@@ -331,8 +349,9 @@ function evaluateOptionsOf(
 
 /**
  * Shared tail of the sync/async short-circuit handlers, once every surviving
- * operand has been evaluated into `values` (a decider or an error has already
- * returned early on the scalar path). A collection produced by evaluation is
+ * operand has been evaluated into `values` (on the scalar path, a decider has
+ * already returned early, and a failed operand has already been returned when
+ * no operand decided). A collection produced by evaluation is
  * handed back to the driver's broadcast by rebuilding the call over the
  * values (see the element-wise paragraph of `evaluateShortCircuit`); anything
  * else goes to the symbolic reducer.
@@ -595,19 +614,17 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // permutation and nesting via the `eq` handler. `isSame` stays strictly
     // syntactic and evaluation still short-circuits left to right.
     //
-    // The commutativity this restores is a claim about VALUES, and it does not
-    // extend to error propagation, which is demand-ordered: `And(False, 1)`
-    // answers `False` while `And(1, False)` answers the `incompatible-type`
-    // error on the `1`. Canonicalization mints that diagnostic in both trees —
-    // `1` is not a boolean — but evaluation demands operands left to right and
-    // stops at the first decisive one, so the error is dead code in the first
-    // tree and demanded in the second (the demanded-operands rule,
-    // `docs/ERROR-MODEL.md` §3; `selectsOperands` below is what implements
-    // it). Both trees stay INVALID and keep the diagnostic in place for static
-    // analysis; only the evaluated answers differ. This exception is
-    // deliberate: making it symmetric would mean either failing `And(False, 1)`
-    // — reporting an arm the program never reaches — or swallowing a genuine
-    // fault in `And(1, False)`.
+    // The commutativity this restores is a claim about VALUES, and it extends
+    // to a failed operand (three-valued, Kleene logic): a `False` operand
+    // decides wherever it is, so `And(False, 1)` and `And(1, False)` both
+    // answer `False`, although canonicalization mints an `incompatible-type`
+    // diagnostic on the `1` in both trees. When no operand decides, the answer
+    // is the error of the first failed operand (`And(1, True)` is the error).
+    // Both trees stay INVALID and keep the diagnostic in place for static
+    // analysis (the demanded-operands rule, `docs/ERROR-MODEL.md` §3;
+    // `selectsOperands` below is what implements it). Evaluation still stops
+    // at the first decisive operand, so the operands after it are not
+    // evaluated; a failed operand does not stop it.
     commutativeMatch: true,
     eq: (a, b, prover) => acEquivalentBoolean('And', a, b, prover),
     // Selects among its operands, so an error in an operand it does not
@@ -831,6 +848,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       const result = evaluateExists(args, options);
       if (sym(result) === 'True') return options.engine.False;
       if (sym(result) === 'False') return options.engine.True;
+      // A failed answer is the answer of the negation too.
+      if (result !== undefined && !result.isValid) return result;
       return undefined;
     },
   },
@@ -863,6 +882,8 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       const result = evaluateForAll(args, options);
       if (sym(result) === 'True') return options.engine.False;
       if (sym(result) === 'False') return options.engine.True;
+      // A failed answer is the answer of the negation too.
+      if (result !== undefined && !result.isValid) return result;
       return undefined;
     },
   },
@@ -1028,22 +1049,16 @@ function evaluateForAll(
       );
     }
 
-    // Single quantifier - evaluate body for each value in the domain
-    for (const value of domainResult.values) {
-      const substituted = body.subs({
-        [domainResult.variable]: value,
-      }).canonical;
-      const result = substituted.evaluate(evalOptions);
-
-      if (sym(result) === 'False') {
-        return ce.False; // Found a counterexample
-      }
-      if (sym(result) !== 'True') {
-        // Can't determine truth value, return undefined
-        return undefined;
-      }
-    }
-    return ce.True; // All values satisfied the predicate
+    // Single quantifier: a domain of one dimension. A counterexample decides
+    // wherever it is; otherwise a failed answer is the result; otherwise an
+    // undetermined answer keeps the quantifier unevaluated
+    // (`foldQuantifierAnswers`).
+    return evaluateForAllCartesian(
+      [{ variable: domainResult.variable, values: domainResult.values }],
+      body,
+      ce,
+      evalOptions
+    );
   }
 
   // No finite domain - try evaluating the body
@@ -1111,18 +1126,17 @@ function evaluateExists(
       );
     }
 
-    // Single quantifier - evaluate body for each value in the domain
-    for (const value of domainResult.values) {
-      const substituted = body.subs({
-        [domainResult.variable]: value,
-      }).canonical;
-      const result = substituted.evaluate(evalOptions);
-
-      if (sym(result) === 'True') {
-        return ce.True; // Found a witness
-      }
-    }
-    return ce.False; // No value satisfied the predicate
+    // Single quantifier: a domain of one dimension. A witness decides
+    // wherever it is; otherwise a failed answer is the result; otherwise an
+    // undetermined answer (a body with a free symbol, `x > n`) keeps the
+    // quantifier unevaluated (`foldQuantifierAnswers`). Before, every answer
+    // that was not `True` counted as `False`.
+    return evaluateExistsCartesian(
+      [{ variable: domainResult.variable, values: domainResult.values }],
+      body,
+      ce,
+      evalOptions
+    );
   }
 
   // No finite domain - try evaluating the body
@@ -1155,6 +1169,8 @@ function evaluateExistsUnique(
 
   if (domainResult.status === 'success') {
     let count = 0;
+    let failed: Expression | undefined = undefined;
+    let undetermined = false;
     // Evaluate body for each value in the domain using substitution
     for (const value of domainResult.values) {
       // Substitute the variable with the value, canonicalize, then evaluate
@@ -1169,10 +1185,17 @@ function evaluateExistsUnique(
         count++;
         if (count > 1) return ce.False; // More than one witness
       } else if (sym(result) !== 'False') {
-        // Can't determine truth value
-        return undefined;
+        // A second witness after this answer still decides (`False`), so
+        // the walk goes on. Otherwise the first failed answer is the result,
+        // and an undetermined answer keeps the quantifier unevaluated, as
+        // for `Exists` (`foldQuantifierAnswers`).
+        if (!result.isValid)
+          failed ??= result.operator === 'Error' ? result : result.errors[0];
+        else undetermined = true;
       }
     }
+    if (failed !== undefined) return failed;
+    if (undetermined) return undefined;
     return count === 1 ? ce.True : ce.False;
   }
 

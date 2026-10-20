@@ -311,15 +311,21 @@ function executeEpsilBatch(
   // such statement. Installed for the evaluation loop only: the static pass
   // above evaluates no statement.
   const enclosingStatementHook = ce._epsilStatementResultHook;
+  // The failures (`failureKey()`) that the hook reported during the
+  // evaluation of the current top-level statement. The value of the
+  // statement can hold the same failure, which is then not reported again.
+  const nestedFailures = new Set<object>();
   ce._epsilStatementResultHook = nestedStatementReporter(
     ce,
     statements,
     defSites,
-    diagnostics
+    diagnostics,
+    nestedFailures
   );
 
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
+    nestedFailures.clear();
     // "Errors are values": a runtime problem becomes an `["Error", …]` value.
     // Most engine problems already flow back as `["Error", …]` boxed values;
     // the try/catch is the backstop for the few paths that throw (e.g.
@@ -498,12 +504,16 @@ function executeEpsilBatch(
         ));
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
-        const errors = value.errors;
-        if (errors.length > 0)
+        // A `Map` or `Filter` view that holds no error can still give one
+        // when it is read (`lazyViewCellError`).
+        const error = value.errors[0] ?? lazyViewCellError(ce, value);
+        // A failure that a nested statement of this statement reported is
+        // not reported again.
+        if (error !== undefined && !nestedFailures.has(failureKey(error)))
           diagnostics.push(
             errorValueDiagnostic(
               ce,
-              errors[0],
+              error,
               stmt,
               statementRange(stmt, source),
               defSites,
@@ -821,6 +831,30 @@ function errorValueDiagnostic(
 }
 
 /**
+ * The object that identifies the failure of the error value `error`, so
+ * that the same failure is reported once.
+ *
+ * When an error goes up through an operator or a call, it gets one more
+ * frame in its breadcrumb, which makes a new `Error` node
+ * (`withErrorFrames()`, `boxed-expression/error-value.ts`). The other
+ * operands of the new node are the operands of the first one, the same
+ * objects. So the first operand (the code or the message) identifies the
+ * failure. For example, in `for x in [1, g("a"), 3] { s = s + x }`, the
+ * failed cell is reported at the loop header (`nestedStatementReporter()`),
+ * and the `Error` that the body then makes ends the loop and is the value of
+ * the top-level statement. The two errors have different breadcrumbs, and
+ * can point at different places, but have the same first operand.
+ *
+ * A first operand that is a symbol can be shared by different errors, so
+ * the error itself is the key then.
+ */
+function failureKey(error: BoxedExpression): object {
+  if (!isFunction(error) || error.nops === 0) return error;
+  const first = error.op1;
+  return isFunction(first) || isString(first) ? first : error;
+}
+
+/**
  * What happens to the value of a NESTED statement: a statement of a
  * `Block` (a function body, a loop body, an `if` branch, a `do` block)
  * that is written in the source.
@@ -829,7 +863,9 @@ function errorValueDiagnostic(
  *   the last one of its block (the block continues with the next
  *   statement), or the last statement of a loop body (a loop runs for
  *   effect, and starts the next iteration). The body of a `while let` loop
- *   is a loop body too.
+ *   is a loop body too. The collection of a loop or comprehension header
+ *   (`[1, g("a"), 3]` in `for x in [1, g("a"), 3] { … }`) is `discarded`
+ *   too: the loop reads its cells, but no statement holds the value.
  * - `returned`: the last statement of a function body. The value is the
  *   value of the call, and the expression that made the call reads it.
  * - `passed`: the last statement of any other block, for example an `if`
@@ -869,6 +905,27 @@ function nestedStatementSites(
   ): void => {
     const ops = operands(node);
     const head = operator(node);
+    // The collection of a loop or comprehension header,
+    // `Loop(body, Element(x, coll))` or `Comprehension(body, Element(x,
+    // coll))`. No statement holds its value, so a failed cell in it is
+    // reported here, also when the body does not use the index. A header
+    // that is a variable (`for x in xs`) is not a site: the value of the
+    // variable was made by an earlier statement, which reports it.
+    if (
+      head === 'Element' &&
+      (parent === 'Loop' || parent === 'Comprehension') &&
+      index > 0
+    ) {
+      const coll = ops[1];
+      const range = coll === undefined ? undefined : sourceOffsetsOf(coll);
+      if (coll !== undefined && range !== undefined && symbol(coll) === null) {
+        const key = `${range[0]}:${range[1]}`;
+        sites.set(
+          key,
+          sites.has(key) ? null : { stmt: coll, range, role: 'discarded' }
+        );
+      }
+    }
     if (head === 'Block') {
       ops.forEach((stmt, j) => {
         const range = sourceOffsetsOf(stmt);
@@ -907,6 +964,70 @@ function nestedStatementSites(
   };
   for (const stmt of statements) visit(stmt, '', 0, false);
   return sites;
+}
+
+/**
+ * The error that a `Map` or `Filter` view `value` gives when it is read,
+ * because a cell of its source literal fails, or `undefined`.
+ *
+ * Such a view is lazy: it keeps its source unevaluated, and a cell of the
+ * source is evaluated only when the view is read. So the value of
+ * `let ys = map((u) => u, [1, g("a"), 3])` holds no error (`isValid` is
+ * `true`), although each read of `ys` gives the error at the second element.
+ * A callback applied to a failed cell gives that error, and a `Filter` keeps
+ * the error of its predicate in place, so a failed cell of the source is a
+ * failed element of the view, whatever the callback is.
+ *
+ * Bounded, and without effects: only the unary `Map` and `Filter`, only a
+ * source that is a `List` or `Set` literal, and only a cell that is a pure
+ * call is evaluated. The callback is not applied. A cell that evaluates to a
+ * collection holding a failed cell (`[1, g("a")]`) is not a failed element:
+ * the callback receives that inner list as a value. The hook of the nested
+ * statements is removed during the evaluation, so that nothing it evaluates
+ * is reported as a statement of the program. An exception is ignored, as
+ * the check is advisory, except a cancellation that ends the program (see
+ * the `catch` clause).
+ *
+ * The result is not cached. A loop makes a new view at each turn, and a
+ * cell can read a variable that the loop changes (`g(m)`, or a function
+ * that reads `m`), so a check that found nothing at one turn does not tell
+ * about the next turn.
+ */
+function lazyViewCellError(
+  ce: ComputeEngine,
+  value: BoxedExpression
+): BoxedExpression | undefined {
+  const source = isFunction(value, 'Map')
+    ? value.nops === 2
+      ? value.op2
+      : undefined
+    : isFunction(value, 'Filter')
+      ? value.op1
+      : undefined;
+  if (!isFunction(source, 'List') && !isFunction(source, 'Set'))
+    return undefined;
+  const hook = ce._epsilStatementResultHook;
+  ce._epsilStatementResultHook = undefined;
+  try {
+    for (const cell of source.ops) {
+      if (!isFunction(cell) || !cell.isPure) continue;
+      const cellValue = cell.evaluate();
+      if (!cellValue.isValid && !cellValue.isCollection)
+        return cellValue.errors[0];
+    }
+  } catch (e) {
+    // The time budget and the step budget belong to the whole program: when
+    // the check spends them, the program must stop, as it does when a
+    // statement spends them. A limit of one construct (the iteration or the
+    // recursion limit) is a failure of the cell, which the program gets
+    // only if it reads the view, so the check ignores it.
+    const cause = cancellationCause(e);
+    if (cause === 'timeout' || cause === 'step-budget') throw e;
+    return undefined;
+  } finally {
+    ce._epsilStatementResultHook = hook;
+  }
+  return undefined;
 }
 
 /**
@@ -967,13 +1088,18 @@ function isSameStatement(
  *
  * How often: once per source range. A loop body or a function body runs
  * its statements many times, and a problem in one of them is one problem.
- * The first report of a range is kept.
+ * The first report of a range is kept. Also once per failure
+ * (`failureKey()`): a failed cell of a loop header is reported at the
+ * header, and not again at a statement of the body that holds it. The
+ * failures reported are added to `failures`, which the caller clears at
+ * each top-level statement.
  */
 function nestedStatementReporter(
   ce: ComputeEngine,
   statements: ReadonlyArray<MathJsonExpression>,
   defSites: ReturnType<typeof definitionSites>,
-  diagnostics: ParsingDiagnostic[]
+  diagnostics: ParsingDiagnostic[],
+  failures: Set<object>
 ): (statement: BoxedExpression, result: BoxedExpression) => void {
   const sites = nestedStatementSites(statements);
   const reported = new Set<string>();
@@ -982,9 +1108,12 @@ function nestedStatementReporter(
   const hook = (statement: BoxedExpression, result: BoxedExpression): void => {
     // `isValid` is false exactly when the value holds an `Error`, and it is
     // memoized on each node, so this test does not walk a list again on
-    // each iteration of the loop that grows it.
-    if (result.isValid) return;
+    // each iteration of the loop that grows it. A valid `Map` or `Filter`
+    // view can still give an error when it is read, because a cell of its
+    // source fails (`lazyViewCellError`), so it is examined too.
     const head = result.operator;
+    const lazyView = result.isValid && (head === 'Map' || head === 'Filter');
+    if (result.isValid && !lazyView) return;
     if (
       head === 'Error' ||
       head === 'Return' ||
@@ -1007,6 +1136,8 @@ function nestedStatementReporter(
     const origin = madeAt.get(result) ?? site;
     const originKey = `${origin.range[0]}:${origin.range[1]}`;
     if (reported.has(originKey)) return;
+    const lazyError = lazyView ? lazyViewCellError(ce, result) : undefined;
+    if (lazyView && lazyError === undefined) return;
     reported.add(originKey);
     // Building the diagnostic reads definitions and serializes the error;
     // the hook is removed while it runs, so that nothing it evaluates is
@@ -1018,8 +1149,9 @@ function nestedStatementReporter(
       // stays one flat list, also with a failed cell: `canonicalJoin()`
       // splices a `ListJoin` operand. A value nested in other ways still can
       // be deep.)
-      const errors = result.errors;
-      if (errors.length > 0)
+      const errors = lazyError !== undefined ? [lazyError] : result.errors;
+      if (errors.length > 0 && !failures.has(failureKey(errors[0]))) {
+        failures.add(failureKey(errors[0]));
         diagnostics.push(
           errorValueDiagnostic(
             ce,
@@ -1029,6 +1161,7 @@ function nestedStatementReporter(
             defSites
           )
         );
+      }
     } catch (e) {
       // A report is advisory: a failure while it is built must not become
       // the value of the statement, which is what an exception thrown into

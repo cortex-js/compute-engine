@@ -883,6 +883,22 @@ export class BoxedFunction
       memo.version === half._writeVersion
     )
       return memo.call;
+    // The name must resolve to the binding of this call in the current
+    // scope before the call is boxed again: boxing an application whose name
+    // has no definition declares that name in the current scope. The type of
+    // a call to the index of a binder (`k(1)` in `[k(1) for k in [a ↦ 0]]`)
+    // is read after the binder has left its scope, and the index value
+    // changed during the walk, so boxing it there declared `k` in the global
+    // scope. A name with another binding gives a call that is not used (see
+    // the test of `_def` below), so nothing is lost.
+    if (
+      lookupApplicable(
+        this._operator,
+        this.engine.context.lexicalScope,
+        this.engine
+      ) !== this._def
+    )
+      return undefined;
     const fresh = this.engine.function(
       this._operator,
       this._writtenOperands(stamp.ops ?? this._ops)
@@ -2269,7 +2285,12 @@ export class BoxedFunction
           ? 'raw'
           : options.canonical;
 
-    if (!ops.every((x) => x.isValid))
+    // An operand whose only errors are failed cells of a `List` or `Set`
+    // literal (`isInvalidNonCollection()` is `false` for it) is a collection
+    // value that canonicalization accepts, so it does not force a raw
+    // rebuild: `Map(f, z)` with `z` replaced by `[1, err, 3]` stays a bound
+    // `Map` that can be iterated, as `Map(f, [1, err, 3])` is.
+    if (!ops.every((x) => x.isValid || !isInvalidNonCollection(x)))
       return this.engine.function(this._operator, ops, { form: 'raw' });
 
     // Nothing in this subtree matched the substitution (every operand came
@@ -14038,7 +14059,8 @@ function previewRunsEffect(expr: BoxedFunction): boolean {
   const verdicts = indexCallVerdicts(expr);
   for (const [index, pure] of verdicts)
     if (!pure && callsIndex(expr, index)) return true;
-  if (heldFunctionLiterals(expr).some((f) => !isPreviewPureLiteral(f)))
+  const held = heldFunctionLiterals(expr);
+  if (held === undefined || held.some((f) => !isPreviewPureLiteral(f)))
     return true;
   if (expr.isPure) return false;
   // The function literals of the view are proven pure above. The runtime
@@ -14063,13 +14085,16 @@ function previewRunsEffect(expr: BoxedFunction): boolean {
  * Whether the inferred effects of the function literal `f` are pure, when
  * the block locals of `f` are not counted (`blockLocalParameters`).
  *
- * The inference counts a write as confined only after a `Declare` of the
- * name. An assignment in a `Block` to a name that no outer scope declares
- * makes a LOCAL of the block, with a new binding at each run of the block
- * (`createBlockLocals`, `function-utils.ts`). So in
- * `k ↦ Block(If(k = 2, h := (z ↦ 2z)), h(k))` the write to `h` and the call
- * of `h` have no effect outside the call, but the inference reports a write
- * to an outer `h` and a call of an unknown function.
+ * The inference counts a write as confined after a `Declare` of the name,
+ * or when the name is a local that the canonicalization of a `Block` made
+ * for an assignment statement of the block (`withBlockLocals()`,
+ * `effects-inference.ts`). An assignment in a `Block` to a name that no
+ * outer scope declares makes a LOCAL of the block, also when the assignment
+ * is not a statement of the block, but then the binding has no mark that
+ * the inference reads, and the inference does not resolve a call of a
+ * local. So in `k ↦ Block(If(k = 2, h := (z ↦ 2z)), h(k))` the write to `h`
+ * and the call of `h` have no effect outside the call, but the inference
+ * reports a write to an outer `h` and a call of an unknown function.
  */
 function isPreviewPureLiteral(f: Expression): boolean {
   const ce = f.engine;
@@ -14126,6 +14151,32 @@ function blockLocalParameters(
   );
 }
 
+/**
+ * Whether `f`, an element of the source of a comprehension index, is a
+ * function whose application is proven pure:
+ * - a `Function` literal whose inferred effects are pure;
+ * - the symbol of an operator definition that is pure: a library function
+ *   (`Sin`), a function declared `pure: true`, or a user function whose
+ *   inferred effects are pure;
+ * - a symbol whose value is such a `Function` literal.
+ *
+ * So `[f(0) for f in [Sin, Cos]]` prints `[0, 1]`, while with `H` declared
+ * `pure: false`, `[f(0) for f in [H]]` prints as written. Anything else (a
+ * symbol with no definition, a call that returns a function) is not proven.
+ */
+function isPreviewPureFunction(ce: ComputeEngine, f: Expression): boolean {
+  const pureLiteral = (x: Expression | undefined): boolean =>
+    x !== undefined &&
+    isFunction(x, 'Function') &&
+    isPureEffectSet(inferFunctionLiteralEffects(ce, x).effects);
+  if (pureLiteral(f)) return true;
+  if (!isSymbol(f)) return false;
+  const def = ce.lookupDefinition(f.symbol);
+  if (def === undefined) return false;
+  if (isOperatorDef(def)) return def.operator.pure;
+  return isValueDef(def) && pureLiteral(def.value.value);
+}
+
 /** `expr`, with the body of each `Function` literal replaced by `Nothing`.
  * The parameters are kept. */
 function withoutLiteralBodies(expr: Expression): Expression {
@@ -14141,10 +14192,10 @@ function withoutLiteralBodies(expr: Expression): Expression {
 /**
  * For each index of the `Element` clauses of `expr`, whether a call of the
  * index is proven pure: the index is one symbol, and its source is a `List`
- * or `Set` literal of `Function` literals whose inferred effects are pure.
- * With `H` declared `pure: false`, a call of the index of
- * `[q(1) for q in [a ↦ H(a)]]` is not pure, and neither is a call of an
- * index whose source is a symbol, a view or any other expression: the
+ * or `Set` literal of functions that are proven pure
+ * (`isPreviewPureFunction`). With `H` declared `pure: false`, a call of the
+ * index of `[q(1) for q in [a ↦ H(a)]]` is not pure, and neither is a call
+ * of an index whose source is a symbol, a view or any other expression: the
  * functions such a source supplies are not known before the evaluation. A
  * call of an index of two clauses is pure only when both clauses qualify.
  */
@@ -14157,11 +14208,7 @@ function indexCallVerdicts(expr: BoxedFunction): Map<string, boolean> {
     const pure =
       isSymbol(clause.op1) &&
       (isFunction(source, 'List') || isFunction(source, 'Set')) &&
-      source.ops.every(
-        (f) =>
-          isFunction(f, 'Function') &&
-          isPureEffectSet(inferFunctionLiteralEffects(ce, f).effects)
-      );
+      source.ops.every((f) => isPreviewPureFunction(ce, f));
     for (const s of clause.op1.symbols)
       verdicts.set(s, pure && (verdicts.get(s) ?? true));
   }
@@ -14169,20 +14216,43 @@ function indexCallVerdicts(expr: BoxedFunction): Map<string, boolean> {
 }
 
 /**
+ * The most symbols that `heldFunctionLiterals()` follows from a symbol of
+ * the view to the symbol whose value it reads.
+ */
+const HELD_VALUE_CHAIN_LIMIT = 16;
+
+/**
  * The `Function` literals of `expr`, and those of the values of the symbols
  * of `expr`: with `fs := [a ↦ H(a)]`, the preview of `Map(w ↦ w(1), fs)`
- * calls the literal of `fs`. Reading the value of a symbol does not
- * evaluate anything. The values of the symbols in a value are not read.
+ * calls the literal of `fs`. The values of the symbols in a value are read
+ * too, at any depth: with `fs := gs` and `gs := [a ↦ H(a)]`, the preview
+ * calls the literal of `gs`. Reading the value of a symbol does not
+ * evaluate anything. Each symbol is read once, so a cycle (`p := q`,
+ * `q := p`) ends.
+ *
+ * `undefined` when a chain of more than `HELD_VALUE_CHAIN_LIMIT` symbols
+ * has a value at its end: the literals are then not known, and the caller
+ * counts the view as not pure.
  */
-function heldFunctionLiterals(expr: Expression): Expression[] {
+function heldFunctionLiterals(expr: Expression): Expression[] | undefined {
   const ce = expr.engine;
   const literals = [...expr.getSubexpressions('Function')];
-  for (const name of expr.symbols) {
+  const visited = new Set<string>();
+  // Each entry is a symbol and the number of symbols on the chain from a
+  // symbol of `expr` to it. The entries are read in order (breadth first),
+  // so a symbol is read with its shortest chain.
+  const pending: [string, number][] = expr.symbols.map((name) => [name, 1]);
+  for (let i = 0; i < pending.length; i++) {
+    const [name, depth] = pending[i];
+    if (visited.has(name)) continue;
+    visited.add(name);
     const def = ce.lookupDefinition(name);
     if (!isValueDef(def)) continue;
     const value = def.value.value;
-    if (value !== undefined && value !== null)
-      literals.push(...value.getSubexpressions('Function'));
+    if (value === undefined || value === null) continue;
+    if (depth > HELD_VALUE_CHAIN_LIMIT) return undefined;
+    literals.push(...value.getSubexpressions('Function'));
+    for (const next of value.symbols) pending.push([next, depth + 1]);
   }
   return literals;
 }

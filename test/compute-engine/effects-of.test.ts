@@ -155,6 +155,11 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
 
       it('a scope-writing body on a BARE declaration is refused (the ceiling)', () => {
         const ce = new ComputeEngine();
+        // `tally` is declared outside the literal, so the write is not to a
+        // local of the body. The declared result type of `bump2` moves onto
+        // the `Assign` statement as a `Typed` wrapper, which does not change
+        // that rule.
+        ce.declare('tally', 'number');
         ce.declare('bump2', declaration);
         expect(() =>
           ce.assign(
@@ -595,6 +600,8 @@ describe('Selecting and storing heads drop the LATENT half', () => {
 
     // CONTROL: the frame discharges `random` only — a scope write survives it,
     // on the inference channel exactly as the runtime channel already pinned.
+    // `x` is declared outside the literal, so the write is not to a local.
+    ce.declare('x', 'integer');
     expect(
       ce.box([
         'Function',

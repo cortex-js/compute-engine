@@ -442,23 +442,20 @@ const RUN = (source: string, ce = new ComputeEngine()) => {
 };
 
 describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
-  test('a function defined before the `const` writes it', () => {
+  test('a function defined before a top-level `const` does not write it', () => {
+    // The assignment `c = 2` makes a local of the body of `f`: no enclosing
+    // scope declared `c` when `f` was defined. The constant keeps its value.
     const source =
-      'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nf()\n4';
-    const expected = [['static-type-error', 'constant-assignment', 1, 'c = 2']];
-    expect(CHECK(source)).toEqual(expected);
-    expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
+      'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nf()\nc';
+    expect(CHECK(source)).toEqual([]);
+    expect(RUN(source)).toEqual({ value: '1', diagnostics: [] });
   });
 
-  test('two assignments to the same constant', () => {
-    // The static report of `c = 3` does not hide the failure of `f()`: each
-    // assignment has its own report.
+  test('two assignments to the same name', () => {
+    // Only the top-level assignment writes the constant.
     const source =
       'function f() scope -> integer { c = 2; 0 }\nconst c = 1\nc = 3\nf()\n4';
-    const expected = [
-      ['static-type-error', 'constant-assignment', 1, 'c = 2'],
-      ['static-type-error', 'constant-assignment', 3, 'c = 3'],
-    ];
+    const expected = [['static-type-error', 'constant-assignment', 3, 'c = 3']];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
   });
@@ -468,10 +465,7 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
       'function g() { const c = 5; c = 6 }\n' +
       'function f() scope -> integer { c = 2; 0 }\n' +
       'const c = 1\nf()\n4';
-    const expected = [
-      ['static-type-error', 'constant-assignment', 1, 'c = 6'],
-      ['static-type-error', 'constant-assignment', 2, 'c = 2'],
-    ];
+    const expected = [['static-type-error', 'constant-assignment', 1, 'c = 6']];
     expect(CHECK(source)).toEqual(expected);
     expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
   });
@@ -517,33 +511,23 @@ describe('ONE REPORT FOR EACH ASSIGNMENT', () => {
 });
 
 describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
-  test('each assignment of the body, in a block too', () => {
-    const source =
-      'function f() scope -> integer { if true { c = 2 }; c = 3; 0 }\n' +
-      'const c = 1\nf()\n4';
-    const expected = [
-      ['static-type-error', 'constant-assignment', 1, 'c = 2'],
-      ['static-type-error', 'constant-assignment', 1, 'c = 3'],
-    ];
-    expect(CHECK(source)).toEqual(expected);
-    expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
-  });
-
-  test('a function literal', () => {
-    const source = 'let g = () => do { c = 2 }\nconst c = 1\ng()\n4';
-    const expected = [['static-type-error', 'constant-assignment', 1, 'c = 2']];
-    expect(CHECK(source)).toEqual(expected);
-    expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
-  });
-
-  test('a function called only before the `const` is reported too', () => {
-    // The assignment targets the constant when the function is called after
-    // the `const`; the report does not depend on the calls.
-    const source =
-      'function f() scope -> integer { c = 2; 0 }\nf()\nconst c = 1\n4';
-    const expected = [['static-type-error', 'constant-assignment', 1, 'c = 2']];
-    expect(CHECK(source)).toEqual(expected);
-    expect(RUN(source)).toEqual({ value: '4', diagnostics: expected });
+  // A top-level `const` is not declared when an earlier statement defines a
+  // function, so an assignment to the name in the body makes a local of the
+  // body, with a new binding at each call: the constant is not written, and
+  // nothing is reported. A `const` of a block is declared before the
+  // functions of the block are defined, so a function defined before it in
+  // the block writes it (the next test).
+  test.each([
+    // Each assignment of the body, in a block too.
+    'function f() scope -> integer { if true { c = 2 }; c = 3; 0 }\n' +
+      'const c = 1\nf()\nc',
+    // A function literal.
+    'let g = () => do { c = 2 }\nconst c = 1\ng()\nc',
+    // A function called only before the `const`.
+    'function f() scope -> integer { c = 2; 0 }\nf()\nconst c = 1\nc',
+  ])('no report for a top-level const: %j', (source) => {
+    expect(CHECK(source)).toEqual([]);
+    expect(RUN(source)).toEqual({ value: '1', diagnostics: [] });
   });
 
   test('a local const of a function, written by a function defined before it', () => {

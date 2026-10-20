@@ -76,18 +76,27 @@ export function isInvalidNonCollection(expr: Expression): boolean {
  * operator can read such an operand as a collection value: `Length([1, err,
  * 3])` counts it, `Map(f, [1, err, 3])` applies `f` to each cell.
  *
- * Read only when the error walks have found no error that bubbles (no error
- * outside a collection literal, none under a selecting head): the errors
- * that remain are inside collection literals. When one of them is inside a
- * `Tuple`, a `Dictionary` or a `KeyValuePair` literal instead, the answer is
- * `false`, and the node keeps the failed value frozen in place.
+ * An error under a SELECTING operator (`If`, `Which`, `And`, …:
+ * `defersErrorAbsorption()`) counts the same way: it is the value of an
+ * element only when the selection demands it. So the view
+ * `Map(u ↦ If(u = 2, 1/"a", u), Range(1, 5))` is a collection whose second
+ * element is the error, as it is when the callback calls a function that
+ * fails at run time. Before, such a view was neither a collection nor an
+ * error: `Sum` over it answered the view itself, and `Length` stayed
+ * unevaluated.
+ *
+ * Read only when the error walks have found no error that bubbles: the
+ * errors that remain are inside collection literals or under a selecting
+ * operator. When one of them is inside a `Tuple`, a `Dictionary` or a
+ * `KeyValuePair` literal instead, the answer is `false`, and the node keeps
+ * the failed value frozen in place.
  */
 export function failedCellsAreIterable(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   let found = false;
   for (const op of expr.ops) {
     if (op.isValid) continue;
-    if (isIterableWithFailedCells(op)) {
+    if (isIterableWithFailedCells(op) || defersErrorAbsorption(op)) {
       found = true;
       continue;
     }

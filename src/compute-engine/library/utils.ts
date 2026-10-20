@@ -52,6 +52,7 @@ import {
   sameBindingDef,
 } from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
+import { isValueDef } from '../boxed-expression/definition-guards.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -3448,7 +3449,23 @@ export function assignLoopIndex(
 ): void {
   ce._ephemeralWriteDepth += 1;
   try {
-    ce.assign(index, value);
+    // A function literal (an element of `[a ↦ a + 1]`) is stored as the
+    // VALUE of the index binding. `ce.assign()` would convert the value
+    // definition of the index into an operator definition in place. The
+    // binder then loses track of the index: a `Comprehension` reads the
+    // values of its indexes from their value definitions to substitute them
+    // into each element (`ComprehensionIndexFrame`), so an element such as
+    // `Map(q, [1])` kept the name `q`, which has no value outside the
+    // comprehension, and its cells were `q(1)`. A value definition that
+    // holds a function literal is callable, so `q(1)` in the body still
+    // applies it.
+    const def =
+      typeof value !== 'number' && isFunction(value, 'Function')
+        ? ce.lookupDefinition(index)
+        : undefined;
+    if (def !== undefined && isValueDef(def) && !def.value.isConstant)
+      ce._setSymbolValue(index, value);
+    else ce.assign(index, value);
   } finally {
     ce._ephemeralWriteDepth -= 1;
   }
@@ -3721,16 +3738,49 @@ export function substituteBinderValues(
       binderBindingOf(ce, name, scopeOf?.(name) ?? ce.context.lexicalScope)
     );
 
-  return rewriteWithBinders(expr, (sym, shadowed) => {
-    const name = sym.symbol;
-    if (shadowed?.has(name)) return sym;
-    const value = subs[name];
-    if (value === undefined) return sym;
-    const own = sym.valueDefinition;
-    if (own === undefined) return value;
-    const binding = bindings.get(name);
-    return binding !== undefined && sameBindingDef(binding, own) ? value : sym;
-  });
+  return rewriteWithBinders(
+    expr,
+    (sym, shadowed) => {
+      const name = sym.symbol;
+      if (shadowed?.has(name)) return sym;
+      const value = subs[name];
+      if (value === undefined) return sym;
+      const own = sym.valueDefinition;
+      if (own === undefined) return value;
+      const binding = bindings.get(name);
+      return binding !== undefined && sameBindingDef(binding, own)
+        ? value
+        : sym;
+    },
+    undefined,
+    false,
+    undefined,
+    // A call of the variable, when the variable holds a function, is an
+    // occurrence too: `f(x)` becomes `Apply(value, x)`. Without it, in
+    // `[[f(x) for x in [1, 2]] for f in [a ↦ a + 1]]` the inner
+    // comprehension, which is lazy, kept the call `f(x)` and read `f` when
+    // its cells were read, after the outer comprehension had left its scope:
+    // the cells were `f(1)` and `f(2)`. A call bound to an operator
+    // definition is a call of another function of the same name, and is
+    // kept.
+    (app, ops, shadowed) => {
+      const name = app.operator;
+      if (shadowed?.has(name)) return undefined;
+      const value = subs[name];
+      if (value === undefined || !value.type.matches('function'))
+        return undefined;
+      if (app.operatorDefinition !== undefined) return undefined;
+      const own = app.valueDefinition;
+      if (own !== undefined) {
+        const binding = bindings.get(name);
+        if (binding === undefined || !sameBindingDef(binding, own))
+          return undefined;
+      }
+      return ce.function('Apply', [value, ...ops], {
+        form: app.isCanonical ? 'canonical' : 'raw',
+      });
+    }
+  );
 }
 
 /**

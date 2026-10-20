@@ -2127,8 +2127,15 @@ function undecidedCollectionComparison(
   // `isUnresolvedCollectionOperand` sees an operand with no value that is
   // typed as a collection, and one whose type only admits a collection
   // (`P: number | collection<number>`): `P = [1, 2]` may still be `True`.
+  // A `Quantity` compared with a string is not an operand whose collection
+  // is not known yet, although its type `value` admits a collection:
+  // `6 m = "a"` is decided by the dimensions (`quantityDimensionsDiffer()`),
+  // not kept inert because the string is a collection of characters. A
+  // `Quantity` compared with a list is still kept inert here.
+  const textOnly = ops.every((op) => !op.isCollection || isTextAtom(op));
   const unresolved = (op: Expression): boolean =>
-    isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op);
+    !(textOnly && isFunction(op, 'Quantity')) &&
+    (isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op));
   return ops.some(unresolved) && ops.some((op) => op.isCollection);
 }
 

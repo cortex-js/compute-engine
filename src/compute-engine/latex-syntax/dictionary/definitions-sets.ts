@@ -96,9 +96,16 @@ function parsedIntervalOperand(
 ): MathJsonExpression | null {
   if (expr === null) return null;
 
-  // `[a, b]` — a bracket pair, parsed as a 2-element List
-  if (operator(expr) === 'List' && nops(expr) === 2)
-    return ['Interval', operand(expr, 1)!, operand(expr, 2)!];
+  // `[a, b]` — a bracket pair, parsed as a 2-element List. A function
+  // literal is never the bound of an interval, so a pair with one stays a
+  // list: `\prod_{q\in [a\mapsto a+1, a\mapsto 2a]}q(3)` iterates over the
+  // two functions.
+  if (operator(expr) === 'List' && nops(expr) === 2) {
+    const [lower, upper] = [operand(expr, 1)!, operand(expr, 2)!];
+    if (operator(lower) === 'Function' || operator(upper) === 'Function')
+      return expr;
+    return ['Interval', lower, upper];
+  }
 
   // `(a, b)` — a parenthesized pair, parsed as a Delimiter sequence
   if (operator(expr) === 'Delimiter') {

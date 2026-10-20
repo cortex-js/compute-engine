@@ -153,7 +153,19 @@ let c2 = counter()
 `bump` itself. Writing to a binding outside the function is the `scope`
 effect, and it must be declared — without the specifier the definition is
 rejected and `counter()` never produces a callable. See
-[Effect specifiers](/epsil/control-flow#effect-specifiers).
+[Effect specifiers](/epsil/control-flow#effect-specifiers). An assignment to
+a name that no enclosing scope declares when the function is defined makes a
+local of the function body instead: each call gets its own binding, a later
+declaration of the same name is not written, and it is not the `scope`
+effect (see
+[Reassignment vs. declaration](/epsil/declarations/#reassignment-vs-declaration)):
+
+```epsil
+function step(k) { s = k * 2; s + 1 }
+s = 10
+(step(1), step(2), s)
+// ➔ (3, 5, 10)
+```
 
 Reach for `const` when a name should not move at all. Constness is a property
 of the *binding*, not of the value it holds — every value is immutable
@@ -286,6 +298,18 @@ a `runtime-error` diagnostic — for example an indexed assignment
 reassigning a library constant such as `Pi`. A problem that the static check
 already reported before the program ran, such as reassigning a `const` of the
 same program, is not reported a second time.
+
+The same applies inside a block: a statement of a loop body, a function body
+or an `if` branch whose value is discarded and holds an error is reported, once
+for each place in the source. So is the list of a `for` loop or comprehension
+header, which no statement holds: in `for x in [1, 1 / "a", 3] { n = n + 1 }`
+the loop runs three turns, and the list `[1, 1 / "a", 3]` is reported, also
+when the body does not use `x`. A header that is a variable (`for x in xs`) is
+not reported again: the statement that gave `xs` its value is. A comprehension
+is evaluated when its elements are read, so its header is reported only when
+the program reads the list. A `map` or `filter` also reads its list later, but
+a statement such as `let ys = map((u) => u, [1, 1 / "a", 3])` is reported at
+once, because each read of `ys` gives the error.
 
 A program constructs an error value of its own with `RuntimeError`:
 

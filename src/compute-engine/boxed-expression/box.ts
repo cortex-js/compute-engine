@@ -2564,8 +2564,28 @@ function makeCanonicalFunctionCore(
     // operator, per the structural symbol contract. Note this gates only
     // the AUTO-declare of an undeclared head — binding-site declarations
     // (a Sum index into its local scope) are deliberate and unaffected.
-    if (ce._resolveOnlyDepth === 0)
-      ce.declare(name, { type: 'function', inferred: true });
+    //
+    // The name is declared where an undeclared SYMBOL of the same name would
+    // be (`createSymbolExpression`, `engine-expression-entrypoints.ts`): in
+    // the first scope that is not marked `noAutoDeclare`. A binder (`Sum`,
+    // `Comprehension`) marks its own scope so, and a call in its body
+    // declared the name in that scope: `Σ_{k=1}^{3} h(k)` then kept calling
+    // that local `h` after `h := k ↦ k²` was assigned, and gave
+    // `h(1) + h(2) + h(3)`. When the name is a parameter of a function
+    // literal whose body is being canonicalized, the binding is also the one
+    // the later references of the parameter use, and the one the literal
+    // adopts as its parameter (`_setShadowedParameterDef`). Without it,
+    // `(g) ↦ Σ_{x ∈ [1, 2]} g(x)` called a binding of the `Sum` scope, not
+    // the parameter, and applied to `a ↦ a + 1` gave `g(1) + g(2)`.
+    if (ce._resolveOnlyDepth === 0) {
+      let autoScope = ce.context.lexicalScope;
+      while (autoScope.noAutoDeclare && autoScope.parent)
+        autoScope = autoScope.parent;
+      ce.declare(name, { type: 'function', inferred: true }, autoScope);
+      const declared = autoScope.bindings.get(name);
+      if (declared !== undefined && ce._isShadowedParameter(name))
+        ce._setShadowedParameterDef(name, declared);
+    }
     const boxedOps = flatten(semiCanonical(ce, ops));
     // Definition order must not change semantics. `name` has no definition
     // yet, so the collection evidence its parameters would have narrowed onto

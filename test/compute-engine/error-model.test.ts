@@ -2973,18 +2973,17 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     }
   });
 
-  test('And/Or error propagation is demand-ordered, so it is NOT commutative', () => {
+  test('And/Or with a failed operand do not depend on the operand order', () => {
     // `And`/`Or` declare `commutativeMatch` — the VALUE is commutative even
-    // though the tree stays ordered. That claim does not extend to error
-    // propagation. Canonicalization mints the same `incompatible-type`
-    // diagnostic in both trees below (`1` is not a boolean) and both stay
-    // invalid, but evaluation demands operands left to right and stops at the
-    // first decisive one, so the error is dead code in one and demanded in the
-    // other. Making it symmetric would mean either reporting an arm the
-    // program never reaches or swallowing a genuine fault.
+    // though the tree stays ordered — and the claim extends to a failed
+    // operand (three-valued logic). Canonicalization mints the same
+    // `incompatible-type` diagnostic in both trees below (`1` is not a
+    // boolean) and both stay invalid, but a `False` operand decides wherever
+    // it is. With no operand that decides, the error is the answer.
     const ce2 = new ComputeEngine();
     expect(symbolName(ce2.box(['And', 'False', 1]).evaluate())).toBe('False');
-    expect(errorCode(ce2.box(['And', 1, 'False']).evaluate())).toBe(
+    expect(symbolName(ce2.box(['And', 1, 'False']).evaluate())).toBe('False');
+    expect(errorCode(ce2.box(['And', 1, 'True']).evaluate())).toBe(
       'incompatible-type'
     );
     expect(ce2.box(['And', 'False', 1]).isValid).toBe(false);

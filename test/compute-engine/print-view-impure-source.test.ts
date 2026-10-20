@@ -302,6 +302,44 @@ describe('A CALL OF THE INDEX OF A COMPREHENSION', () => {
     }
     expect(calls()).toBe(0);
   });
+
+  test('a list of library functions is previewed', () => {
+    const { ce } = engine();
+    const view = ce
+      .box([
+        'Comprehension',
+        ['f', 0],
+        ['Element', 'f', ['List', 'Sin', 'Cos']],
+      ])
+      .evaluate();
+    expect(view.toString()).toBe('[0,1]');
+  });
+
+  test('a list of user functions with pure effects is previewed', () => {
+    const { ce, calls } = engine();
+    ce.assign('u', ce.box(['Function', ['Multiply', 2, 'a'], 'a']));
+    const view = ce
+      .box(['Comprehension', ['f', 1], ['Element', 'f', ['List', 'u', 'P']]])
+      .evaluate();
+    expect(view.toString()).toBe('[2,1]');
+    expect(calls()).toBeGreaterThan(0);
+  });
+
+  test.each([
+    ['a function declared impure', ['List', 'H']],
+    ['a library function and an impure one', ['List', 'Sin', 'H']],
+    ['a user function that calls an impure one', ['List', 'w']],
+    ['a symbol with no definition', ['List', 'zz']],
+  ])('a list of symbols is not previewed: %s', (_name, source) => {
+    const { ce, calls } = engine();
+    ce.assign('w', ce.box(['Function', ['H', 'a'], 'a']));
+    const view = ce
+      .box(['Comprehension', ['f', 1], ['Element', 'f', source]])
+      .evaluate();
+    const before = calls();
+    expect(view.toString()).toMatch(/^Comprehension\(/);
+    expect(calls()).toBe(before);
+  });
 });
 
 describe('A CALLBACK THAT CALLS ITS PARAMETER', () => {
@@ -333,6 +371,92 @@ describe('A CALLBACK THAT CALLS ITS PARAMETER', () => {
       ['List', ['Function', 0, 'a'], ['Function', ['Add', 'a', 5], 'a']],
     ]);
     expect(view.toString()).toBe('[0,6]');
+  });
+});
+
+describe('A CALLBACK OVER A CHAIN OF SYMBOLS', () => {
+  // `fs` holds the symbol `gs`, and `gs` holds the impure lambdas. The
+  // preview reads the value of `gs` through `fs`, so it would call `H`. The
+  // literals held at the end of the chain are read too
+  // (`heldFunctionLiterals()`, `boxed-function.ts`).
+  const IMPURE_LIST = ['List', ['Function', ['H', 'a'], 'a']];
+  const PURE_LIST = [
+    'List',
+    ['Function', 0, 'a'],
+    ['Function', ['Add', 'a', 5], 'a'],
+  ];
+  const CALL_W = ['Function', ['w', 1], 'w'];
+
+  /** Assign each symbol of `names` the next one, and the last one `value`,
+   * with `ce.assign()`. */
+  function chain(ce: ComputeEngine, names: string[], value: unknown): void {
+    for (const name of names) ce.declare(name, 'unknown');
+    names.forEach((name, i) =>
+      ce.assign(
+        name,
+        i + 1 < names.length ? ce.box(names[i + 1]) : ce.box(value as never)
+      )
+    );
+  }
+
+  test('a chain of two symbols, with `ce.assign()`', () => {
+    const { ce, calls } = engine();
+    chain(ce, ['fs', 'gs'], IMPURE_LIST);
+    const view = ce.box(['Map', CALL_W, 'fs']);
+    expect(view.toString()).toMatch(/^Map\(/);
+    void view.latex;
+    view.toLatex();
+    expect(calls()).toBe(0);
+    // The evaluation calls `H`.
+    view.evaluate({ materialization: true });
+    expect(calls()).toBe(1);
+  });
+
+  test('a chain of two symbols, with `Assign`', () => {
+    // `fs := gs` while `gs` has no value keeps the symbol `gs` as the value
+    // of `fs`.
+    const { ce, calls } = engine();
+    ce.box(['Assign', 'fs', 'gs']).evaluate();
+    ce.box(['Assign', 'gs', IMPURE_LIST]).evaluate();
+    const view = ce.box(['Map', CALL_W, 'fs']);
+    expect(view.toString()).toMatch(/^Map\(/);
+    void view.latex;
+    expect(calls()).toBe(0);
+  });
+
+  test('a chain of four symbols', () => {
+    const { ce, calls } = engine();
+    chain(ce, ['a1', 'a2', 'a3', 'a4'], IMPURE_LIST);
+    const view = ce.box(['Map', CALL_W, 'a1']);
+    expect(view.toString()).toMatch(/^Map\(/);
+    expect(calls()).toBe(0);
+  });
+
+  test('a chain to pure lambdas is previewed', () => {
+    const { ce } = engine();
+    chain(ce, ['fs', 'gs'], PURE_LIST);
+    expect(ce.box(['Map', CALL_W, 'fs']).toString()).toBe('[0,6]');
+  });
+
+  test('a cycle of symbols prints as written', () => {
+    const { ce, calls } = engine();
+    ce.declare('p', 'unknown');
+    ce.declare('q', 'unknown');
+    ce.assign('p', ce.box('q'));
+    ce.assign('q', ce.box('p'));
+    expect(ce.box(['Map', CALL_W, 'p']).toString()).toMatch(/^Map\(/);
+    expect(calls()).toBe(0);
+  });
+
+  test('a chain too long to follow prints as written', () => {
+    // The lambdas at the end of the chain are pure, but they are not read:
+    // the view is not proven pure, so it prints as written.
+    const { ce } = engine();
+    const names = Array.from({ length: 20 }, (_, i) => `c${i + 1}`);
+    chain(ce, names, PURE_LIST);
+    expect(ce.box(['Map', CALL_W, 'c1']).toString()).toMatch(/^Map\(/);
+    // A shorter chain to the same lambdas is previewed.
+    expect(ce.box(['Map', CALL_W, 'c10']).toString()).toBe('[0,6]');
   });
 });
 

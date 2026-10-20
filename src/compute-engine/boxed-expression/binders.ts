@@ -12,6 +12,7 @@ import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import { declaredBinders, type DeclaredBinders } from './binding-sites.js';
+import { isInvalidNonCollection } from './error-value.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -468,7 +469,19 @@ export function rewriteWithBinders(
   // distinct nodes rather than exponential in the nesting depth. The root is
   // never memoized under `skipRootBinds`: its entry is keyed like any other
   // node's, and the two treatments differ.
-  memo: Map<Expression, Map<string, Expression>> = new Map()
+  memo: Map<Expression, Map<string, Expression>> = new Map(),
+  // Called for every application, with its operands already rewritten and
+  // the names shadowed at the application (the names that the application
+  // binds itself do not shadow its own operator name). It returns the
+  // replacement of the whole application, or `undefined` to keep the
+  // application with the rewritten operands. A caller that replaces a name
+  // by a function value uses it for the occurrences of the name as an
+  // operator: `f(x)` → `Apply(value, x)`.
+  visitApplication?: (
+    app: Expression,
+    ops: ReadonlyArray<Expression>,
+    shadowed: ReadonlySet<string> | undefined
+  ) => Expression | undefined
 ): Expression {
   if (isSymbol(expr)) return visit(expr, shadowed);
 
@@ -491,7 +504,14 @@ export function rewriteWithBinders(
     let changed = false;
     const entries = expr.keys.map((key) => {
       const value = expr.get(key)!;
-      const next = rewriteWithBinders(value, visit, shadowed, false, memo);
+      const next = rewriteWithBinders(
+        value,
+        visit,
+        shadowed,
+        false,
+        memo,
+        visitApplication
+      );
       if (next !== value) changed = true;
       return ce.function('KeyValuePair', [ce.string(key), next]);
     });
@@ -522,12 +542,28 @@ export function rewriteWithBinders(
 
     const ops = expr.ops;
     const next = ops.map((op, i) =>
-      rewriteWithBinders(op, visit, shadowedIn(i), false, memo)
+      rewriteWithBinders(
+        op,
+        visit,
+        shadowedIn(i),
+        false,
+        memo,
+        visitApplication
+      )
     );
-    if (next.every((op, i) => op === ops[i])) result = expr;
+    const replaced = visitApplication?.(expr, next, shadowed);
+    if (replaced !== undefined) result = replaced;
+    else if (next.every((op, i) => op === ops[i])) result = expr;
     else {
       const ce = expr.engine;
-      if (!next.every((x) => x.isValid)) {
+      // An operand whose only errors are failed cells of a `List` or `Set`
+      // literal (`isInvalidNonCollection()` is `false` for it) is a
+      // collection value, and canonicalization accepts it: `Map(f, [1, err,
+      // 3])` is a `Map` view, as on the direct route. Such an operand does
+      // not prevent the rebuild in the node's own form below. A raw rebuild
+      // would leave the node unbound, so `[1, err, 3] |> Map(f, _)` stayed an
+      // inert `Map` that a loop could not iterate.
+      if (!next.every((x) => x.isValid || !isInvalidNonCollection(x))) {
         // An operand that holds an `Error` node must not be canonicalized
         // again (canonicalization short-circuits on an invalid expression),
         // so the node is rebuilt without canonical transforms. A node that

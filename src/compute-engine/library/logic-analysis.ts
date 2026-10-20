@@ -374,8 +374,84 @@ export function getInnermostBody(body: Expression): Expression {
 }
 
 /**
+ * Combine the answers of a finite quantifier (`ForAll`, `Exists`) over its
+ * domain, by three-valued (Kleene) logic, as `All` and `Any` do over a
+ * collection (`quantifierWalk`, `library/collections.ts`):
+ *
+ * - an answer that decides (`False` for `ForAll`, `True` for `Exists`) is the
+ *   result wherever it is, and the walk stops there;
+ * - otherwise, the error of the FIRST answer that failed is the result;
+ * - otherwise, when an answer is neither `True` nor `False` (a body with a
+ *   free symbol, `x > n`, or an absent value), the result is `undefined` and
+ *   the quantifier stays unevaluated, since a value of the free symbol could
+ *   still decide it;
+ * - otherwise the result is the answer of a walk that met no decision (`True`
+ *   for `ForAll`, `False` for `Exists`).
+ *
+ * `answers` is read lazily, so the bodies after a decision are not evaluated.
+ */
+export function foldQuantifierAnswers(
+  kind: 'ForAll' | 'Exists',
+  answers: Iterable<Expression>,
+  ce: ComputeEngine
+): Expression | undefined {
+  const decisive = kind === 'ForAll' ? 'False' : 'True';
+  const definite = kind === 'ForAll' ? 'True' : 'False';
+  let failed: Expression | undefined = undefined;
+  let undetermined = false;
+  for (const result of answers) {
+    const s = sym(result);
+    if (s === decisive) return kind === 'ForAll' ? ce.False : ce.True;
+    if (s === definite) continue;
+    if (!result.isValid)
+      failed ??= result.operator === 'Error' ? result : result.errors[0];
+    else undetermined = true;
+  }
+  if (failed !== undefined) return failed;
+  if (undetermined) return undefined;
+  return kind === 'ForAll' ? ce.True : ce.False;
+}
+
+/**
+ * The answers of `body` for each combination of values of `domains` (their
+ * Cartesian product), computed one at a time when the iterator is read. An
+ * empty domain gives no answer.
+ */
+export function* cartesianAnswers(
+  domains: { variable: string; values: Expression[] }[],
+  body: Expression,
+  evalOptions?: { numericApproximation: true }
+): Generator<Expression> {
+  const indices = domains.map(() => 0);
+  const lengths = domains.map((d) => d.values.length);
+  if (lengths.some((l) => l === 0)) return;
+
+  while (true) {
+    // Build substitution map for current combination
+    const subs: Record<string, Expression> = {};
+    for (let i = 0; i < domains.length; i++) {
+      subs[domains[i].variable] = domains[i].values[indices[i]];
+    }
+
+    // Evaluate body with this combination
+    yield body.subs(subs).canonical.evaluate(evalOptions);
+
+    // Move to next combination
+    let dim = domains.length - 1;
+    while (dim >= 0) {
+      indices[dim]++;
+      if (indices[dim] < lengths[dim]) break;
+      indices[dim] = 0;
+      dim--;
+    }
+    if (dim < 0) return; // Exhausted all combinations
+  }
+}
+
+/**
  * Evaluate ForAll over a Cartesian product of domains.
- * Returns True if the predicate holds for all combinations. `evalOptions`
+ * Returns True if the predicate holds for all combinations, by the rule of
+ * `foldQuantifierAnswers`. `evalOptions`
  * is the numeric request of the quantifier, forwarded to each evaluation of
  * the body (see `evaluateForAll`, `logic.ts`).
  */
@@ -385,48 +461,17 @@ export function evaluateForAllCartesian(
   ce: ComputeEngine,
   evalOptions?: { numericApproximation: true }
 ): Expression | undefined {
-  // Generate Cartesian product indices
-  const indices = domains.map(() => 0);
-  const lengths = domains.map((d) => d.values.length);
-
-  // Check for empty domains
-  if (lengths.some((l) => l === 0)) return ce.True;
-
-  while (true) {
-    // Build substitution map for current combination
-    const subs: Record<string, Expression> = {};
-    for (let i = 0; i < domains.length; i++) {
-      subs[domains[i].variable] = domains[i].values[indices[i]];
-    }
-
-    // Evaluate body with this combination
-    const substituted = body.subs(subs).canonical;
-    const result = substituted.evaluate(evalOptions);
-
-    if (sym(result) === 'False') {
-      return ce.False; // Found a counterexample
-    }
-    if (sym(result) !== 'True') {
-      return undefined; // Can't determine
-    }
-
-    // Move to next combination
-    let dim = domains.length - 1;
-    while (dim >= 0) {
-      indices[dim]++;
-      if (indices[dim] < lengths[dim]) break;
-      indices[dim] = 0;
-      dim--;
-    }
-    if (dim < 0) break; // Exhausted all combinations
-  }
-
-  return ce.True;
+  return foldQuantifierAnswers(
+    'ForAll',
+    cartesianAnswers(domains, body, evalOptions),
+    ce
+  );
 }
 
 /**
  * Evaluate Exists over a Cartesian product of domains.
- * Returns True if the predicate holds for at least one combination.
+ * Returns True if the predicate holds for at least one combination, by the
+ * rule of `foldQuantifierAnswers`.
  * `evalOptions` is the numeric request of the quantifier, forwarded to each
  * evaluation of the body (see `evaluateForAll`, `logic.ts`).
  */
@@ -436,40 +481,11 @@ export function evaluateExistsCartesian(
   ce: ComputeEngine,
   evalOptions?: { numericApproximation: true }
 ): Expression | undefined {
-  // Generate Cartesian product indices
-  const indices = domains.map(() => 0);
-  const lengths = domains.map((d) => d.values.length);
-
-  // Check for empty domains
-  if (lengths.some((l) => l === 0)) return ce.False;
-
-  while (true) {
-    // Build substitution map for current combination
-    const subs: Record<string, Expression> = {};
-    for (let i = 0; i < domains.length; i++) {
-      subs[domains[i].variable] = domains[i].values[indices[i]];
-    }
-
-    // Evaluate body with this combination
-    const substituted = body.subs(subs).canonical;
-    const result = substituted.evaluate(evalOptions);
-
-    if (sym(result) === 'True') {
-      return ce.True; // Found a witness
-    }
-
-    // Move to next combination
-    let dim = domains.length - 1;
-    while (dim >= 0) {
-      indices[dim]++;
-      if (indices[dim] < lengths[dim]) break;
-      indices[dim] = 0;
-      dim--;
-    }
-    if (dim < 0) break; // Exhausted all combinations
-  }
-
-  return ce.False;
+  return foldQuantifierAnswers(
+    'Exists',
+    cartesianAnswers(domains, body, evalOptions),
+    ce
+  );
 }
 
 /**

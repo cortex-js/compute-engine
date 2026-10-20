@@ -17540,11 +17540,12 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * convention `CountIf`/`Find`/`IndexWhere` follow. Absorbing it into
  * `sawUndetermined` discarded the error entirely and left the quantifier inert.
  *
- * The interaction with short-circuiting is decided by ENUMERATION ORDER, which
- * is the family's laziness: the loop answers with whatever it meets FIRST. A
- * definite short-circuit (True for `Any`, False for `All`) at an element BEFORE
- * the failing one still wins — the quantifier never looked at the rest — while
- * an error met before any decision surfaces instead of being skipped past.
+ * The answer does not depend on the order of the elements (three-valued,
+ * Kleene logic, as for `Or` and `And`): a decisive element (True for `Any`,
+ * False for `All`) wins wherever it is, before or after a failed element, and
+ * the walk still stops at the first decisive element. When no element
+ * decides, the answer is the error of the FIRST failed element, also when
+ * another element is undetermined or absent.
  *
  * The walk is driven with `runWalk` (`run(…, ce._timeRemaining)`) so that an
  * infinite or lazy collection with no short-circuit aborts on the deadline
@@ -17572,7 +17573,21 @@ function quantifierWalk(
 
   let sawUndetermined = false;
   let sawAbsent = false;
+  // The error of the first element whose answer failed.
+  let failed: Expression | undefined = undefined;
+  // A source that is known to be finite is read to its end, however large.
+  // Any other source (`Range(1, +oo)`, `Repeat(5)`, a `Filter` over an
+  // unbounded range) is read for at most `ce.iterationLimit` elements, the
+  // cap of the index searches over such a source (`collectionIndexWhere`,
+  // `collection-utils.ts`). When the walk reaches the cap with no decision,
+  // the quantifier stays unevaluated, since a decisive element can come
+  // later: `Any(Range(1, +oo), u ↦ u < 0)` walked forever, and so did the
+  // same walk after a failed element.
+  const limit =
+    collection.isFiniteCollection === true ? Infinity : ce.iterationLimit;
+  let read = 0;
   return (function* (): Generator<undefined, Expression | undefined> {
+    if (limit <= 0) return undefined;
     // The walk ends early when it meets an inner collection that it cannot
     // walk (see `MeasuredWalk`). A short-circuit on an element before that
     // point is correct. The answer at the end of the walk (`False` for
@@ -17580,22 +17595,33 @@ function quantifierWalk(
     // v)), x ↦ x < 5)` was `True` for a valueless `v`.
     const walk = new MeasuredWalk(() => collection.each());
     for (const item of walk) {
+      read += 1;
       const result = f ? f([item]) : item.evaluate();
       const s = sym(result);
       if (s === shortSym) return shortValue;
       if (s !== definiteSym) {
         // See `predicateErrorValue`: an element-valued predicate failure is
-        // surfaced as the operator's result, not absorbed as "undetermined".
-        const err = predicateErrorValue(result);
-        if (err) return err;
+        // the operator's answer, not absorbed as "undetermined", unless an
+        // element after it decides (`Any([1, err, 3], x ↦ x > 2)` is `True`).
         // An absent answer is Kleene's third value; anything else is
         // evidence that has not arrived yet.
-        if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
-        else sawUndetermined = true;
+        const err = predicateErrorValue(result);
+        if (err === undefined) {
+          if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
+          else sawUndetermined = true;
+        } else failed ??= err;
       }
+      // To make an element of a lazy source runs code, which can have an
+      // effect (`Map(H, Repeat(1))` calls `H`). So the walk checks the cap
+      // before it asks for another element, and makes at most `limit`
+      // elements.
+      if (read >= limit) return undefined;
       yield;
     }
     if (walk.missedElements) return undefined;
+    // A failed element outranks an undetermined or an absent answer, as a
+    // failed operand of `Or` outranks an unknown one (`Or(err, A)` is `err`).
+    if (failed !== undefined) return failed;
     if (sawUndetermined) return undefined;
     if (sawAbsent) return ce.symbol('Missing');
     return defaultValue;

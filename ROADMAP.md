@@ -109,12 +109,52 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
+
+The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
+and 26 other collection operators found these related defects. Each was
+measured on 2026-10-19:
+
+- `Map` with a user function that has no declared result claims a wrong
+  element type: with `atbashChar` returning strings,
+  `map(atbashChar, characters("abc"))` is typed `list<character^3>`, but its
+  elements are strings. A precise `Chunk` signature exposed it in the Epsil
+  corpus program `test/epsil/corpus/exercism/atbash-cipher.epsil`.
+- `Iterate(f, Missing)` is typed `list<unknown>`. The bare `unknown` excludes
+  absence markers, so the type does not hold the value.
+- An operand typed with `any` elements (`set<any>`, `list<any>`) is not
+  covered: `typeContainsMissing('any')` is false, so `Union(A, {2})` with
+  `A: set<any>`, `Join(A, {2})` and `Flatten(B)` with `B: list<any>` answer the
+  bare result types, which exclude `Missing`.
+- `Zip(L, L).toString()` prints `Missing` for the pair of two absent cells,
+  while `.at(2)` and `.each()` give `(Missing, Missing)`.
+- `First([])` of an empty list literal is typed `unknown`, but it evaluates to
+  `Missing`, and the bare `unknown` excludes `missing`.
+- QUESTION: `TupleFrom(L)` and `Join` of records answer the bare `tuple` and
+  `record`, but the value can be `tuple<integer, missing, integer>` or
+  `record{a: missing}`. No type means "a tuple (or record) of any length whose
+  slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
+  new spelling for that type or a wider answer (`indexed_collection<any>`,
+  `any`), which loses the information that the value is a tuple.
+
+### Arithmetic on a list whose cells are a list or absent forgets the absent cell (OPEN, small — found 2026-10-19 by the `absorbScalarsIntoCells` fix)
+
+With `L: list<list<integer> | missing>` and `L := [[1, 2], Missing]`, `L + 0.5`
+and `L + 1` are typed `list<list<number>>`, but the value is `[[1.5, 2.5], NaN]`
+(type `list<nan | vector<real^2>>`): the absent cell becomes the number `NaN`,
+and the static type has no scalar arm for it. For `list<integer | missing>` the
+static type `list<number>` does hold `NaN`, so only a cell type that has a
+collection arm and a `missing` arm is affected. HEAD has the same result, so the
+cause is the handling of `missing` before the type handler runs
+(`derive-application-type.ts` replaces `missing` with `nan`, then the broadcast
+lift), not `absorbScalarsIntoCells`.
+
 ### The type of a list plus a float keeps the integer list arm of a union cell (OPEN, small — found 2026-10-19 by the review of the self-referential alias guards)
 
-`absorbScalarsIntoCells` (`boxed-expression/arithmetic-add.ts`) folds a
-scalar operand into the cell type of a list. When the cell type is a union
-with a collection arm, the collection arm is kept unchanged, so the result
-type does not hold the result. Measured on 2026-10-19 with
+`absorbScalarsIntoCells` (`boxed-expression/arithmetic-add.ts`) folds a scalar
+operand into the cell type of a list. When the cell type is a union with a
+collection arm, the collection arm is kept unchanged, so the result type does
+not hold the result. Measured on 2026-10-19 with
 `L: list<list<integer> | integer>` and `L := [[1, 2], 3]`: `L + 0.5` is typed
 `list<integer | list<integer> | real>`, but its value `[[1.5, 2.5], 3.5]` has
 type `list<real | vector<real^2>>`, which is not a subtype of it. With
@@ -124,39 +164,38 @@ scalar into each collection arm as well, as the element-wise add does.
 
 ### The result type of `Join` and `ListJoin` turns an absent element into `number` (OPEN, small — found 2026-10-19 by the tuple shape-test fix)
 
-The type handler of `Join` receives each operand type with `missing`
-replaced by `nan`. `derive-application-type.ts` (about line 536) does this
-for every operator that is not in `ABSENT_CELLS_STAY_MISSING` or
+The type handler of `Join` receives each operand type with `missing` replaced by
+`nan`. `derive-application-type.ts` (about line 536) does this for every
+operator that is not in `ABSENT_CELLS_STAY_MISSING` or
 `ABSENT_CELLS_PASS_THROUGH` (`boxed-expression/broadcast-lift-type.ts`).
 `Append` is in the pass-through set; `Join` and `ListJoin` are not. So the
-static type says that the result holds no absent element, while its value
-can hold one. Measured on 2026-10-19:
+static type says that the result holds no absent element, while its value can
+hold one. Measured on 2026-10-19:
 
-- `L: list<integer | missing>`: `Join(L, [2])` and `ListJoin(L, [2])` are
-  typed `list<number>`, while `Append(L, 2)` is typed
-  `list<integer | missing>`.
+- `L: list<integer | missing>`: `Join(L, [2])` and `ListJoin(L, [2])` are typed
+  `list<number>`, while `Append(L, 2)` is typed `list<integer | missing>`.
 - `t := (1, Missing)` declared `tuple<integer, missing>`: `Join(t, [3, 4])` is
   typed `list<number | tuple<number, number>>`.
 
-The likely fix is to add `Join` and `ListJoin` to the pass-through set.
-Measure the snapshot count of the full suite before landing it, because it
-can change the result type of many expressions.
+The likely fix is to add `Join` and `ListJoin` to the pass-through set. Measure
+the snapshot count of the full suite before landing it, because it can change
+the result type of many expressions.
 
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
-The report of `npx tsx benchmarks/audit/integration-families.ts` lists the
-exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
+The report of `npx tsx benchmarks/audit/integration-families.ts` lists the exact
+values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 2026-10-19). All 8 come from Rubi results:
 
 - `simplify()` applies the rules to some operands of a sum only
-  (`simplifyOperands` in `boxed-expression/simplify.ts`); a call with a
-  positive constant argument keeps its form. So
+  (`simplifyOperands` in `boxed-expression/simplify.ts`); a call with a positive
+  constant argument keeps its form. So
   `−(√2/2)·arctan(−1/(3+2√2)) + (√2/2)·arctan(1/(3+2√2))` becomes
   `(√2/2)·arctan(3−2√2) + (√2/2)·arctan(1/(3+2√2))`: the sign moves out of the
   first argument, which is then rationalized, but the second argument is not,
   and the two equal terms do not combine.
-- Rubi's value of `∫ (1+x²)/(x²+x⁹) dx` on `[1/b, b]` holds
-  `Hypergeometric2F1` terms that cancel. `simplify()` has no rule that relates
+- Rubi's value of `∫ (1+x²)/(x²+x⁹) dx` on `[1/b, b]` holds `Hypergeometric2F1`
+  terms that cancel. `simplify()` has no rule that relates
   `₂F₁(1, 1/7; 8/7; −z)` to `₂F₁(1, 1/7; 8/7; −1/z)`.
 
 ### Smaller defects found on 2026-10-18 (OPEN, small)
@@ -219,80 +258,51 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 12) (OPEN, decided 2026-10-19)
-
-- **A failed cell in a loop header is not reported.** In Epsil, with
-  `g(x) = 1/x`, `for x in [1, g("a"), 3] { n = n + 1 }` runs 3 turns and
-  reports nothing, because the body does not use `x` and a loop header is not a
-  statement. `let xs = [1, g("a"), 3]` is reported, because it is a statement.
-  (A) Report a `runtime-error` at the list literal in the header. (B) Keep it
-  silent. If nothing is decided, it stays silent. Recommendation: (A). User
-  decision 2026-10-19: (A).
-- **`Any`, `All`, `Or` and `And` with a failed operand.** Membership does not
-  depend on the order of the cells: `3 ∈ [1, 1/"a", 3]` is `True`. `Any` and
-  `All` combine the answers in order, as `Or` and `And` do, so
-  `Any([1, 1/"a", 3], u ↦ u > 2)` is the error, because `Or(Error, True)` is
-  the error (while `Or(True, Error)` is `True`). (A) Keep this. (B) Make the four operators independent of order
-  (three-valued logic): a `True` operand of `Or` (a `False` operand of `And`)
-  decides, also after a failed operand. If nothing is decided, (A) stays.
-  Recommendation: (B), because a definite answer that does not depend on the
-  failed value is the rule everywhere else in the error model; it changes `Or`
-  and `And`, so it needs a decision. User decision 2026-10-19: (B).
-- **An Epsil assignment to a new name in a function body.**
-  `function g(k) { t = k + 1; t }` then `[g(1), g(2)]` gives `[g(1),g(2)]` and
-  the run-time error "writes outside a function require a declared `scope`
-  effect"; with `let t = k + 1` it gives `[2,3]`. At run time (since commit
-  `43f0073274628385c99877fbd93f3cbaa9018f9f`), an assignment in a `Block` to a
-  name that no outer scope declares makes a local of that block, so the write
-  does not leave the function; the effect inference (`sequence()`,
-  `effects-inference.ts`) still treats it as a write to an outer scope. (A)
-  Change the inference so that the names a `Block` binds count as declared:
-  the function above gives `[2,3]`. (B) Keep the error as an Epsil rule (a new
-  name in a function needs `let`), and change the message, which now says
-  "writes outside a function" for a write that does not leave the function.
-  If nothing is decided, the error stays. Recommendation: (A), because it
-  makes the static rule match what the run does; printing a view already
-  follows that rule (`previewRunsEffect()`, `boxed-expression/boxed-function.ts`).
-  User decision 2026-10-19: (A).
-- **Equality of two quantities of different dimensions.** `6 W = 6 m` and
-  `6 W ≠ 6 m` stay unevaluated, and `isEqual()` gives `undefined`, although a
-  power is never equal to a length. (A) Keep this. (B) `Equal` gives `False`,
-  `NotEqual` gives `True` and `isEqual()` gives `false`; `Less` and `LessEqual`
-  stay unevaluated, because order has no meaning across dimensions. This is
-  what the engine does for a string against a number. (C) The comparison gives
-  an `incompatible-type` error; this breaks `Filter` over a list of mixed
-  quantities. If nothing is decided, (A) stays. Recommendation: (B). User
-  decision 2026-10-19: (B).
-
 ### Questions found on 2026-10-19 (batch 13) (OPEN, decision)
 
 - **A dimensionless quantity compared with a number.** `6 percent = 0.06` and
-  `30 deg = π/6` stay unevaluated, while two quantities of different
-  dimensions, or a quantity with a dimension and a number, are `False`. (A)
-  Keep this. (B) Compare a dimensionless quantity with a number as a value
-  with scale 1: `6 percent = 0.06` and `180 deg = π` are `True`. If nothing is
-  decided, (A) stays. Recommendation: (B), because SI treats angles and ratios
-  as dimensionless values.
+  `30 deg = π/6` stay unevaluated, while two quantities of different dimensions,
+  or a quantity with a dimension and a number, are `False`. (A) Keep this. (B)
+  Compare a dimensionless quantity with a number as a value with scale 1:
+  `6 percent = 0.06` and `180 deg = π` are `True`. If nothing is decided, (A)
+  stays. Recommendation: (B), because SI treats angles and ratios as
+  dimensionless values.
+
+- **A read of a function-body local before its first assignment.** In Epsil,
+  `function g(k) { u = t; t = k; u }` reads the local `t` before it is assigned;
+  the read gives the bare symbol `t`, so `g(1)` is `t`. A `let` name read before
+  its declaration is the `read-before-declaration` error. (A) Keep the bare
+  symbol. (B) Report the same error as for `let`. If nothing is decided, (A)
+  stays. Recommendation: (B), because a bare symbol here is almost always a typo
+  or an ordering mistake, and JavaScript and Python report it.
+
+- **A top-level `let` written after a function, in a compiled Epsil program.**
+  `function g(k) { t = k + 1; t }` then `let t = 0` then `[g(1), g(2), t]`:
+  `executeEpsil` gives `[2,3,0]`, because it canonicalizes one top-level
+  statement at a time and `t` is a local of `g`. The compiled program gives
+  `[2,3,3]`: it is one `Block`, which declares all its top-level names before it
+  canonicalizes its statements, so `g` writes the later `t` (and the same
+  program evaluated as one block is refused with the `scope` error). (A) A later
+  top-level `let` does not count: the compile route stops declaring top-level
+  names before it canonicalizes, and every route gives `[2,3,0]`. (B) It counts:
+  `executeEpsil` declares the program's top-level names first, and every route
+  gives `[2,3,3]` (or the `scope` error). If nothing is decided, the routes keep
+  giving different answers for this shape. Recommendation: (A), because the
+  documentation says that a declaration made later does not change what a
+  function writes.
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
-- Evaluating a `Comprehension` whose index is called like a function, such as
-  `[k2(1) for k2 in [a ↦ 0, a ↦ 1]]`, declares `k2` in the global scope. A
-  plain index, and the same shape in `Sum`, do not.
-- `Map` with a comprehension index as its callback does not apply the function
-  that the index holds: `[Map(q, [1]) for q in [a ↦ a + 1]]` is `[[q(1)]]`,
-  while `[q(1) for q in [a ↦ a + 1]]` is `[2]` and `Map(q, [1])` with
-  `q := a ↦ a + 1` in a `Block` is `[2]`.
+- Compiled code does not check the `scope` effect contract: an Epsil function
+  whose body writes a name declared before it, with no `scope` specifier, is
+  refused by the run, but the compiled program writes the outer binding (with
+  `let t = 0` before `function g(k) { t = k + 1; t }`, the compiled program
+  gives `[2,2]` for `[g(1), t]`).
 - The LaTeX parser makes a `Quantity` only after a number literal:
   `\pi\,\mathrm{rad}` is `Multiply(Pi, rad)` and `10^{-30}\,\mathrm{rad}` is
-  `Multiply(rad, 10^-30)`, so `\frac{\pi}{180}\cdot 1\,\mathrm{rad} +
-  10^{-30}\,\mathrm{rad}` evaluates to a sum of a quantity and a product, not
-  to one quantity.
-- Printing a view can still call an impure function through a chain of
-  symbols: `previewRunsEffect()` (`boxed-expression/boxed-function.ts`) reads
-  the function literals held by a symbol of the view, but not those of a symbol
-  that this value refers to.
-
+  `Multiply(rad, 10^-30)`, so
+  `\frac{\pi}{180}\cdot 1\,\mathrm{rad} + 10^{-30}\,\mathrm{rad}` evaluates to a
+  sum of a quantity and a product, not to one quantity.
 
 ### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
 
@@ -311,12 +321,12 @@ exact values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   compare different (`sameBinding`, `boxed-expression/compare.ts`). Found
   2026-10-18 with Tycho ledger row 394. Find which binding the box route gives
   `x` and `f` inside the literal, and make the two routes agree.
-- The `nice-solidus` fraction style (`fractionStyle`, a public
-  `FractionStyle` value in `latex-syntax/types.ts`) writes
-  `{}^{a}\!\!/\!{}_{b}`, which the parser does not read: `x/10` reads back
-  as `Superscript(Error('missing'))`. Either the parser accepts that form, or
-  the documentation says the style is for display only and does not round-trip
-  (found 2026-10-19 by the review of the complex-coefficient fix).
+- The `nice-solidus` fraction style (`fractionStyle`, a public `FractionStyle`
+  value in `latex-syntax/types.ts`) writes `{}^{a}\!\!/\!{}_{b}`, which the
+  parser does not read: `x/10` reads back as `Superscript(Error('missing'))`.
+  Either the parser accepts that form, or the documentation says the style is
+  for display only and does not round-trip (found 2026-10-19 by the review of
+  the complex-coefficient fix).
 - `D` of a `Sum` or a `Product` stays unevaluated:
   `D(Sum(k·x^k, Limits(k, 1, 3)), x)` is not computed; the correct value is
   `1 + 4x + 9x²`. `differentiateNode` (`symbolic/derivative.ts`) has no branch
@@ -333,9 +343,9 @@ is reduced by whole periods at compile time (`gpuReduceTrigOffset`,
 `sin(x + -0.35756418)`. Two shapes are not reduced, and their shader value can
 be far from the `javascript` value:
 
-- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the
-  fold accepts only exact arithmetic over number literals, so that a `Random()`
-  draw or a function mapped by the `functions` option of `compile()` is never
+- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the fold
+  accepts only exact arithmetic over number literals, so that a `Random()` draw
+  or a function mapped by the `functions` option of `compile()` is never
   evaluated at compile time. The compiler's own constant fold then emits the
   large value unreduced.
 - A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real part

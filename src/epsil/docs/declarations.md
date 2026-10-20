@@ -181,6 +181,35 @@ x = 5
 Assigning to a name that was never declared does establish it, but `let` is
 the explicit and idiomatic way to introduce a mutable binding.
 
+In a block — a function body, a `do` block, the body of an `if` or of a loop
+— an assignment to a name that no enclosing scope declares makes a local of
+that block, as a `let` does. Which scope a name belongs to is decided where
+the function is **defined**, not where it is called: each call of the
+function gets its own local, and a declaration of the same name made later
+does not change what the function writes. Such an assignment does not write
+a variable outside the function, so it is not the `scope` effect, and the
+function needs no effect specifier:
+
+```epsil
+function g(k) { t = k + 1; t }
+let t = 0
+[g(1), g(2), t]
+// ➔ [2, 3, 0]
+```
+
+An assignment to a name that an enclosing scope declares when the function
+is defined — a top-level `let` or assignment written before the function, a
+parameter or a local of an enclosing function — writes that binding. In a
+function body, this is the `scope` effect, which must be declared (see
+[Effect specifiers](/epsil/control-flow#effect-specifiers)):
+
+```epsil
+let n = 0
+function bump() scope { n = n + 1; n }
+[bump(), bump(), n]
+// ➔ [1, 2, 2]
+```
+
 Reassigning a symbol that was declared `const` produces an
 [error value](/epsil/evaluation/#errors-are-values), not a parse error or a
 thrown exception:
@@ -195,10 +224,12 @@ evaluation time, and its result is an error value. Because the `const` is in the
 same program, `epsil check` also reports the assignment before anything runs
 (`constant-assignment`), wherever it is: at the top level, in a block, a loop
 body or a function body. This holds for a `const` at any depth, and for each
-name of a destructuring `const`. A function defined before the `const` is
-included: its body finds the name when the function is called, so an
-assignment in it writes the constant when the call comes after the `const`.
-An assignment to a `let` or a parameter that shadows
+name of a destructuring `const`. A function defined before a `const` of the
+same block is included, because the `const` of a block is declared when the
+block starts: an assignment in the function writes the constant when the
+call comes after the `const`. A function defined before a top-level `const`
+does not write it: the assignment makes a local of the function body (see
+above). An assignment to a `let` or a parameter that shadows
 the constant is not reported.
 
 A declaration with no initializer declares the name without giving it a value:

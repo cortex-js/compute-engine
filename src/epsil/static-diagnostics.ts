@@ -1081,9 +1081,12 @@ function canonicalizationDiagnostics(
         const range = statementRange(statement, source);
         constantWrites ??= constantWritesOf(ce, ast, source, statements);
         // The assignments to the constant in the statements before it and in
-        // this statement (each is in a function body, see
-        // `writesFromFunctionBodies()`) are reported now. The assignments in
-        // the later statements are reported when the walk reaches them.
+        // this statement are reported now. The assignments in the later
+        // statements are reported when the walk reaches them. A function
+        // defined before a top-level `const` does not write it: an
+        // assignment to the name in the body of that function makes a local
+        // of the function (`registerConstant()` does not read
+        // `writesFromFunctionBodies()` for a top-level `const`).
         for (const group of declaredGroups(constantWrites.byName, statement))
           diagnostics.push(
             ...registerConstant(constantWrites, group, range, statementIndex)
@@ -2321,9 +2324,12 @@ function statementHolding(
  *
  * An assignment in a function body that comes before the `const` is not a
  * `write` of the group: the walk makes it a declaration of a new binding.
- * But the function body finds the name when it runs, so the assignment
- * writes the constant when the function is called after the `const`. Such
- * assignments are reported too (`writesFromFunctionBodies()`).
+ * For a top-level `const`, that is what the run does too: the assignment
+ * makes a local of the function body, with a new binding at each call, and
+ * the constant is not written. For a `const` in a block, the run binds the
+ * name in the block before the function is canonicalized, so the
+ * assignment writes the constant when the function is called after the
+ * `const`. Such assignments are reported too (`writesFromFunctionBodies()`).
  *
  * Each diagnostic is a `static-type-error` that carries the engine code
  * `constant-assignment`, at the assignment, with a note on the `const`
@@ -2359,7 +2365,12 @@ function registerConstant(
     );
     return !shadowed;
   });
-  occurrences.push(...writesFromFunctionBodies(writes, group, named));
+  // A local `const` (`current` is `-1`) is hoisted in its block before the
+  // functions of the block are canonicalized, so a function defined before
+  // it in the block writes it. A top-level `const` is not: see
+  // `writesFromFunctionBodies()`.
+  if (current < 0)
+    occurrences.push(...writesFromFunctionBodies(writes, group, named));
   occurrences.sort((a, b) => a.start - b.start);
 
   const now: ParsingDiagnostic[] = [];
@@ -2401,24 +2412,32 @@ function registerConstant(
  * that the scope-aware walk does not record as a `write` of `group`: the
  * assignments in a function body (a `function` statement or a function
  * literal) that comes before the `const` in the scope of the constant.
- * `named` holds the binding groups with the name of the constant.
+ * `named` holds the binding groups with the name of the constant. Only for
+ * a `const` in a block (a function body, a `do` block, a branch, a loop
+ * body).
  *
  * Where the `const` is not yet visible, the walk makes such an assignment
  * the declaration of a new binding (a bare `c = 2` declares), in the
- * innermost block. At run time a function body finds the name when the
- * function is called. So when the call is after the `const`, the assignment
- * writes the constant, and the engine refuses it:
+ * innermost block. The run binds each `const` of a block in the block
+ * before it canonicalizes the statements of the block
+ * (`canonicalBlock()`, `library/control-structures.ts`), so the function
+ * body finds the constant, and the assignment writes it when the function
+ * is called after the `const`. The engine refuses it:
  *
  * ```
- * function f() scope -> integer { c = 2; 0 }
- * const c = 1
- * f()          // the assignment `c = 2` writes the constant
+ * function o() scope -> integer {
+ *   let g = () => do { c = 2 }
+ *   const c = 1
+ *   g()        // the assignment `c = 2` writes the constant
+ * }
  * ```
  *
  * The report does not depend on the calls: the assignment is reported also
- * when the function is not called, or is called only before the `const`
- * (then the assignment makes a local binding). The rule is that the
- * assignment targets the constant of the program.
+ * when the function is not called.
+ *
+ * A top-level `const` is not bound before the earlier statements are
+ * canonicalized, so for it the assignment makes a local of the function
+ * body, as the walk says, and nothing is reported.
  *
  * Such a binding is reported when:
  * - it has the name of the constant, and its scope is in the scope of the

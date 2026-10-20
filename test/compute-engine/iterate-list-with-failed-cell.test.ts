@@ -811,3 +811,35 @@ describe('THE FINAL REVIEW OF THE FAILED-CELL RULES', () => {
     ).toBe('Element');
   });
 });
+
+describe('A SUBSTITUTION OF A LIST WITH A FAILED CELL KEEPS THE NODE BOUND', () => {
+  // A list whose only errors are failed cells is a collection value, which
+  // canonicalization accepts. Before, a substitution of such a list rebuilt
+  // the node that receives it raw (unbound), so a `Map` stayed unevaluated
+  // and was not a collection.
+
+  test('subs() of the source of a Map', () => {
+    const result = box(['Map', INC, 'z']).subs({ z: box(BOXED_FAILURE) });
+    expect(result.isCanonical).toBe(true);
+    expect(result.isCollection).toBe(true);
+    expect(result.evaluate().toString()).toBe(`[2,${TYPE_ERROR},4]`);
+  });
+
+  test('a function literal applied to the list, and a pipe', () => {
+    const direct = evaluate(['Map', INC, BOXED_FAILURE]);
+    expect(direct).toBe(`[2,${TYPE_ERROR},4]`);
+    expect(
+      evaluate(['Apply', ['Function', ['Map', INC, 'z'], 'z'], BOXED_FAILURE])
+    ).toBe(direct);
+    expect(evaluate(['Pipe', BOXED_FAILURE, ['Map', INC, '_']])).toBe(direct);
+    // A valid list: unchanged.
+    expect(evaluate(['Pipe', ['List', 1, 2], ['Map', INC, '_']])).toBe('[2,3]');
+  });
+
+  test('an operand that is not a collection value still rebuilds raw', () => {
+    // A failed coordinate keeps a `Tuple` frozen.
+    const tuple = ['Tuple', 1, ['Divide', 1, { str: 'a' }]];
+    const result = box(['Map', INC, 'z']).subs({ z: box(tuple) });
+    expect(result.isCanonical).toBe(false);
+  });
+});

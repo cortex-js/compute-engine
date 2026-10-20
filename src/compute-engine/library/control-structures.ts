@@ -1,11 +1,13 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  declareAssignmentLocals,
   enterNestedBodyScopes,
   evaluateStatements,
   evaluateStatementsAsync,
   exitNestedBodyScopes,
   resolveEscapingLambda,
 } from '../function-utils.js';
+import { recordAssignmentLocals } from '../assignment-locals.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -2799,6 +2801,20 @@ function endAsyncRun(run: AsyncRun | undefined): void {
   entry.byKey.set(run.key, locals);
 }
 
+/**
+ * Give each assignment local of the block whose scope is the current
+ * lexical scope a binding with no value in that scope, when the scope does
+ * not bind the name yet (`declareAssignmentLocals`, `function-utils.ts`).
+ * The sweep removed the binding that the canonicalization made, and without
+ * this one an assignment to the local wrote a binding of the same name made
+ * after the block was canonicalized. On the asynchronous route the current
+ * scope is an activation of the block scope, which holds the record.
+ */
+function declareRunAssignmentLocals(ce: ComputeEngine): void {
+  const scope = ce.context.lexicalScope;
+  declareAssignmentLocals(ce, scopeActivationTemplate(scope) ?? scope, scope);
+}
+
 /** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
@@ -2833,6 +2849,7 @@ function evaluateBlock(
   // the marker and are still kept — replaced when the statements start
   // (`createBlockLocals`, called by `evaluateStatements`).
   sweepCanonicalizationBindings(ce);
+  declareRunAssignmentLocals(ce);
 
   // If the block's final value is a bare symbol bound to a user-defined
   // function literal (`helper(x) = …` → a block-local operator definition),
@@ -2876,6 +2893,7 @@ async function evaluateBlockAsync(
   // Before the first `await`, while the activation of this run is still the
   // current lexical scope.
   const run = beginAsyncRun(ce);
+  declareRunAssignmentLocals(ce);
   let result: Expression;
   try {
     result = await evaluateStatementsAsync(
@@ -2978,7 +2996,8 @@ function canonicalBlock(
   // The names in `declaredTypes` whose type is DECLARED, not read from a
   // literal initial value (see `markDeclaredLocal`).
   const explicitlyDeclared = new Set<string>();
-  for (const op of ops) {
+  for (const statement of ops) {
+    const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
       const nameExpr = op.ops[0];
       // A destructuring `Declare((a, b), …)` (`let (a, b) = v`) introduces
@@ -3105,7 +3124,8 @@ function canonicalBlock(
         scope !== undefined &&
         ce._shadowedParameterBoundary(name) === scope.parent) ||
       parentBinderNames?.has(name) === true;
-    for (const op of ops) {
+    for (const statement of ops) {
+      const op = typedStatement(statement);
       if (!isFunction(op, 'Declare')) continue;
       const target = op.ops[0];
       const names = (
@@ -3117,7 +3137,7 @@ function canonicalBlock(
       ).filter((name) => name !== 'Nothing');
       const collision = names.find(redeclares);
       if (collision !== undefined)
-        refused.set(op, ce.error(['variable-redeclaration', collision]));
+        refused.set(statement, ce.error(['variable-redeclaration', collision]));
       else for (const name of names) accepted.add(name);
     }
   }
@@ -3162,7 +3182,13 @@ function canonicalBlock(
         }
       }
     }
-    for (const op of ops) {
+    // The names that the `Assign` statements below make locals of the
+    // block. Each run of the block gives each of them a new binding, so an
+    // assignment to it never writes a binding of the same name made later
+    // (`declareAssignmentLocals`, `function-utils.ts`).
+    const assignmentLocals: string[] = [];
+    for (const statement of ops) {
+      const op = typedStatement(statement);
       if (!isFunction(op, 'Assign')) continue;
       const target = op.ops[0];
       // A destructuring assignment `(x, y) := v` binds one local per pattern
@@ -3178,6 +3204,12 @@ function canonicalBlock(
       for (const name of names) {
         if (!name || name === 'Nothing') continue;
         if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
+        // A parameter of an enclosing function literal is declared after
+        // the body of that literal is canonicalized, so `lookupDefinition`
+        // does not find it yet; the shadowed-parameter stack holds its name.
+        // An assignment to it writes the parameter, and is not a local.
+        if (ce._isShadowedParameter(name)) continue;
+        assignmentLocals.push(name);
         const hoisted = ce._declareSymbolValue(
           name,
           { type: 'unknown', inferred: true },
@@ -3187,6 +3219,7 @@ function canonicalBlock(
         if (isValueDef(hoisted)) hoisted.value._blockLocal = true;
       }
     }
+    recordAssignmentLocals(scope, assignmentLocals);
     // A one-step function definition written inside a block —
     // `DefineFunction(name, Function(…))`, the surface form `name(x) = …` —
     // is BLOCK-LOCAL, on the same rule as `Declare`: it binds in the block it
@@ -3212,7 +3245,8 @@ function canonicalBlock(
     // it later in the block resolves to this binding as an applicable
     // operator instead of deferring past it to the outer definition
     // (`lookupApplicable`, boxed-expression/lookup.ts).
-    for (const op of ops) {
+    for (const statement of ops) {
+      const op = typedStatement(statement);
       if (!isFunction(op, 'DefineFunction')) continue;
       const name = sym(op.ops[0]);
       if (!name || name === 'Nothing') continue;
@@ -3241,6 +3275,20 @@ function canonicalBlock(
   }
 
   return ce._fn('Block', statements, { scope });
+}
+
+/**
+ * The statement that the block operand `op` holds. A return-type annotation
+ * of a function literal moves onto the last statement of its body, so that
+ * statement is `Typed(statement, type)`
+ * (`canonicalFunctionLiteralArguments()`, `function-utils.ts`). The type does
+ * not change which names the statement declares or assigns, so the loops of
+ * `canonicalBlock()` that find the block locals read through the wrapper.
+ * Without this, `function f() -> integer { x = 2 }` did not make `x` a local
+ * of the body, and its write was a `scope` write.
+ */
+function typedStatement(op: Expression): Expression {
+  return isFunction(op, 'Typed') ? op.op1 : op;
 }
 
 /**
@@ -4651,6 +4699,16 @@ function* runNested(
   // Re-evaluate the collection on each entry so that dependent bindings
   // (e.g. `Element(y, Range(1, x))`) see the current value of `x`.
   const collection = collExpr.evaluate();
+  // The Epsil interpreter's hook (see `evaluateStatements`,
+  // `function-utils.ts`) also receives the value of a loop or comprehension
+  // header written in the source. No statement holds that value, so a failed
+  // cell in it (`for x in [1, g("a"), 3]`) would otherwise not be reported
+  // when the body does not use the index.
+  if (
+    ce._epsilStatementResultHook !== undefined &&
+    collExpr.sourceOffsets !== undefined
+  )
+    ce._epsilStatementResultHook(collExpr, collection);
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.
     return;

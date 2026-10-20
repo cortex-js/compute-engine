@@ -55,6 +55,16 @@ interface UnitEntry {
    * only at the end: `20 degC` is `68 degF`, not `67.99999999999994 degF`.
    */
   exact?: { scale: [number, number]; offset: [number, number] };
+  /**
+   * For a unit whose scale is a rational multiple of an integer power of π
+   * (the angle units): the fraction `[numerator, denominator]` and the
+   * power of π, so that the exact scale is `(numerator/denominator)·π^power`.
+   * `deg` is `{ factor: [1, 180], power: 1 }`. `scale` is the machine number
+   * of this value. Only the exact comparison of two quantities reads this
+   * field (`exactUnitConversion()`): the conversion of a value
+   * (`convertUnit()`) uses `scale`.
+   */
+  piMultiple?: { factor: [number, number]; power: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,16 +215,40 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
   'L': { dimension: [3, 0, 0, 0, 0, 0, 0, 0], scale: 1e-3 },
   't': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1e3 },
   'eV': { dimension: [2, 1, -2, 0, 0, 0, 0, 0], scale: 1.602176634e-19 },
+  // The dalton is a measured value (CODATA 2018). The decimal number
+  // written here is its definition in this table: the exact comparison of
+  // two quantities reads it as the exact fraction `16605390666/10³⁷`
+  // (`decimalFraction()`), so `1 Da` and `1.6605390666e-27 kg` are equal.
   'Da': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1.6605390666e-27 },
   'au': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1.495978707e11 },
 
   // Angle units (dimensionless)
-  'deg': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 180 },
+  'deg': {
+    dimension: [0, 0, 0, 0, 0, 0, 0, 0],
+    scale: Math.PI / 180,
+    piMultiple: { factor: [1, 180], power: 1 },
+  },
   'rad': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
-  'grad': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 200 },
-  'turn': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 2 * Math.PI },
-  'arcmin': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 10800 },
-  'arcsec': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: Math.PI / 648000 },
+  'grad': {
+    dimension: [0, 0, 0, 0, 0, 0, 0, 0],
+    scale: Math.PI / 200,
+    piMultiple: { factor: [1, 200], power: 1 },
+  },
+  'turn': {
+    dimension: [0, 0, 0, 0, 0, 0, 0, 0],
+    scale: 2 * Math.PI,
+    piMultiple: { factor: [2, 1], power: 1 },
+  },
+  'arcmin': {
+    dimension: [0, 0, 0, 0, 0, 0, 0, 0],
+    scale: Math.PI / 10800,
+    piMultiple: { factor: [1, 10800], power: 1 },
+  },
+  'arcsec': {
+    dimension: [0, 0, 0, 0, 0, 0, 0, 0],
+    scale: Math.PI / 648000,
+    piMultiple: { factor: [1, 648000], power: 1 },
+  },
 
   // Dimensionless ratios
   'percent': { dimension: [0, 0, 0, 0, 0, 0, 0, 0], scale: 0.01 },
@@ -506,19 +540,19 @@ export function unitConversionCoefficients(
 
 /**
  * The units of the table whose scale is NOT an exact decimal number, so
- * that the decimal of its machine number is not its value:
- * - the angle units, whose scale is computed from `Math.PI` (`deg` is
- *   `π/180`);
- * - `Da`, whose scale is a measured value (CODATA), not a value fixed by a
- *   definition.
+ * that the decimal of its machine number is not its value: the angle
+ * units, whose scale is computed from `Math.PI` (`deg` is `π/180`). Their
+ * exact scale is a rational multiple of π, given by their `piMultiple`
+ * field, which only `exactUnitConversion()` reads.
  *
  * Every other scale of the table is written as an exact decimal number that
- * defines the unit (`in` is `0.0254 m`, `eV` is `1.602176634e-19 J`), or is
- * given by an `exact` field (`degF`). A unit added to the table with a scale
- * that is computed or measured must be added here.
+ * defines the unit (`in` is `0.0254 m`, `eV` is `1.602176634e-19 J`, and
+ * `Da`, a measured value whose decimal number is its definition here), or
+ * is given by an `exact` field (`degF`). A unit added to the table with a
+ * scale that is computed must be added here.
  */
 const INEXACT_SCALE_UNITS: ReadonlySet<UnitEntry> = new Set(
-  ['deg', 'grad', 'turn', 'arcmin', 'arcsec', 'Da'].map((u) => UNIT_TABLE[u])
+  ['deg', 'grad', 'turn', 'arcmin', 'arcsec'].map((u) => UNIT_TABLE[u])
 );
 
 /**
@@ -725,8 +759,36 @@ export function getExpressionScale(expr: UnitExpression): number | null {
 type BigFraction = [bigint, bigint];
 
 /**
+ * An exact positive scale `(n/d)·π^piPower`: a fraction of two integers
+ * and an integer power of π. The power is `0` for every unit of the table
+ * except the angle units (`deg` is `(1/180)·π`).
+ */
+type ExactScale = { scale: BigFraction; piPower: number };
+
+/**
+ * The exact scale and offset of the table entry `entry`, or `null` when
+ * they are not known exactly. An angle unit gives the rational multiple of
+ * π of its `piMultiple` field. Another unit gives its data as
+ * `exactScaleAndOffset()` reads them, with a power of π of `0`.
+ */
+function exactEntryData(
+  entry: UnitEntry
+): (ExactScale & { offset: BigFraction }) | null {
+  if (entry.piMultiple) {
+    const { factor, power } = entry.piMultiple;
+    return {
+      scale: [BigInt(factor[0]), BigInt(factor[1])],
+      piPower: power,
+      offset: [0n, 1n],
+    };
+  }
+  const data = exactScaleAndOffset(entry);
+  return data ? { ...data, piPower: 0 } : null;
+}
+
+/**
  * The exact scale and offset of the unit `symbol`, or `null` when they are
- * not known exactly (see `exactScaleAndOffset()`).
+ * not known exactly (see `exactEntryData()`).
  *
  * A prefixed unit (`km`, `Ym`, `keV`) is the product of the exact value of
  * its prefix (a power of ten) and the exact scale of its unit. The machine
@@ -735,29 +797,33 @@ type BigFraction = [bigint, bigint];
  */
 function exactUnitData(
   symbol: string
-): { scale: BigFraction; offset: BigFraction } | null {
+): (ExactScale & { offset: BigFraction }) | null {
   const direct = UNIT_TABLE[symbol];
-  if (direct) return exactScaleAndOffset(direct);
+  if (direct) return exactEntryData(direct);
   const prefixed = parsePrefixedUnit(symbol);
   if (!prefixed) return null;
-  const base = exactScaleAndOffset(prefixed.baseEntry);
+  const base = exactEntryData(prefixed.baseEntry);
   const prefix = decimalFraction(prefixed.prefixScale);
   if (!base || !prefix || base.offset[0] !== 0n) return null;
   return {
     scale: [prefix[0] * base.scale[0], prefix[1] * base.scale[1]],
+    piPower: base.piPower,
     offset: [0n, 1n],
   };
 }
 
 /**
  * The exact scale of the unit expression `expr` relative to coherent SI, as
- * a fraction of two integers with a positive denominator, or `null` when the
- * scale of a unit is not known exactly (`in`, `eV`, `deg`) or an exponent is
- * not an integer. This is `getExpressionScale()` with exact arithmetic: the
- * offset of a temperature unit is ignored, as it is there.
+ * a fraction of two integers with a positive denominator times an integer
+ * power of π, or `null` when the scale of a unit is not known exactly or an
+ * exponent is not an integer. This is `getExpressionScale()` with exact
+ * arithmetic: the offset of a temperature unit is ignored, as it is there.
  */
-function exactExpressionScale(expr: UnitExpression): BigFraction | null {
-  if (typeof expr === 'string') return exactUnitData(expr)?.scale ?? null;
+function exactExpressionScale(expr: UnitExpression): ExactScale | null {
+  if (typeof expr === 'string') {
+    const data = exactUnitData(expr);
+    return data ? { scale: data.scale, piPower: data.piPower } : null;
+  }
 
   if (!Array.isArray(expr) || expr.length < 2) return null;
 
@@ -766,23 +832,28 @@ function exactExpressionScale(expr: UnitExpression): BigFraction | null {
   if (op === 'Multiply') {
     let n = 1n;
     let d = 1n;
+    let piPower = 0;
     for (let i = 1; i < expr.length; i++) {
       const s = exactExpressionScale(expr[i]);
       if (s === null) return null;
-      n *= s[0];
-      d *= s[1];
+      n *= s.scale[0];
+      d *= s.scale[1];
+      piPower += s.piPower;
     }
-    return [n, d];
+    return { scale: [n, d], piPower };
   }
 
   if (op === 'Divide') {
     if (expr.length !== 3) return null;
     const sa = exactExpressionScale(expr[1]);
     const sb = exactExpressionScale(expr[2]);
-    if (sa === null || sb === null || sb[0] === 0n) return null;
-    const n = sa[0] * sb[1];
-    const d = sa[1] * sb[0];
-    return d < 0n ? [-n, -d] : [n, d];
+    if (sa === null || sb === null || sb.scale[0] === 0n) return null;
+    const n = sa.scale[0] * sb.scale[1];
+    const d = sa.scale[1] * sb.scale[0];
+    return {
+      scale: d < 0n ? [-n, -d] : [n, d],
+      piPower: sa.piPower - sb.piPower,
+    };
   }
 
   if (op === 'Power') {
@@ -790,22 +861,30 @@ function exactExpressionScale(expr: UnitExpression): BigFraction | null {
     const s = exactExpressionScale(expr[1]);
     const exp = unitExponentValue(expr[2]);
     if (s === null || exp === null || !Number.isInteger(exp)) return null;
-    if (exp >= 0) return [s[0] ** BigInt(exp), s[1] ** BigInt(exp)];
-    if (s[0] === 0n) return null;
-    const n = s[1] ** BigInt(-exp);
-    const d = s[0] ** BigInt(-exp);
-    return d < 0n ? [-n, -d] : [n, d];
+    const piPower = s.piPower * exp;
+    if (exp >= 0)
+      return {
+        scale: [s.scale[0] ** BigInt(exp), s.scale[1] ** BigInt(exp)],
+        piPower,
+      };
+    if (s.scale[0] === 0n) return null;
+    const n = s.scale[1] ** BigInt(-exp);
+    const d = s.scale[0] ** BigInt(-exp);
+    return { scale: d < 0n ? [-n, -d] : [n, d], piPower };
   }
 
   return null;
 }
 
 /**
- * The exact affine map `v → factor·v + offset` that converts a value from
- * the unit expression `fromUnit` to the unit expression `toUnit`, with the
- * two coefficients as fractions of integers. Returns `null` when the units
- * are unknown or have different dimensions, or when the data of a unit are
- * not exact (see `exactExpressionScale()`).
+ * The exact affine map `v → factor·π^piPower·v + offset` that converts a
+ * value from the unit expression `fromUnit` to the unit expression
+ * `toUnit`, with `factor` and `offset` as fractions of integers and
+ * `piPower` an integer. The power of π is not `0` only for a conversion
+ * between angle units whose scales have different powers of π: `rad` to
+ * `deg` is `v → 180·π⁻¹·v`, and `deg` to `turn` is `v → (1/360)·v`. Returns
+ * `null` when the units are unknown or have different dimensions, or when
+ * the data of a unit are not exact (see `exactExpressionScale()`).
  *
  * The offsets of the temperature units apply only between two unit symbols,
  * as in `convertCompoundUnit()`: in a compound unit, a temperature unit is a
@@ -818,7 +897,7 @@ function exactExpressionScale(expr: UnitExpression): BigFraction | null {
 export function exactUnitConversion(
   fromUnit: UnitExpression,
   toUnit: UnitExpression
-): { factor: BigFraction; offset: BigFraction } | null {
+): { factor: BigFraction; piPower: number; offset: BigFraction } | null {
   const fromDim = getExpressionDimension(fromUnit);
   const toDim = getExpressionDimension(toUnit);
   if (!fromDim || !toDim || !dimensionsEqual(fromDim, toDim)) return null;
@@ -827,22 +906,28 @@ export function exactUnitConversion(
   // of the unit (`in` to `in`, `Da` to `Da`, `m^(1/2)` to `m^(1/2)`). The
   // dimension of the unit is known, so the unit is valid.
   if (JSON.stringify(fromUnit) === JSON.stringify(toUnit))
-    return { factor: [1n, 1n], offset: [0n, 1n] };
+    return { factor: [1n, 1n], piPower: 0, offset: [0n, 1n] };
 
-  let s1: BigFraction | null;
-  let s2: BigFraction | null;
+  let e1: ExactScale | null;
+  let e2: ExactScale | null;
   let o1: BigFraction = [0n, 1n];
   let o2: BigFraction = [0n, 1n];
   if (typeof fromUnit === 'string' && typeof toUnit === 'string') {
     const f = exactUnitData(fromUnit);
     const t = exactUnitData(toUnit);
     if (!f || !t) return null;
-    [s1, s2, o1, o2] = [f.scale, t.scale, f.offset, t.offset];
+    [e1, e2, o1, o2] = [f, t, f.offset, t.offset];
   } else {
-    s1 = exactExpressionScale(fromUnit);
-    s2 = exactExpressionScale(toUnit);
+    e1 = exactExpressionScale(fromUnit);
+    e2 = exactExpressionScale(toUnit);
   }
-  if (s1 === null || s2 === null || s1[0] <= 0n || s2[0] <= 0n) return null;
+  if (e1 === null || e2 === null) return null;
+  const [s1, s2] = [e1.scale, e2.scale];
+  if (s1[0] <= 0n || s2[0] <= 0n) return null;
+  const piPower = e1.piPower - e2.piPower;
+  // An offset (a temperature unit) with a power of π is not a unit of the
+  // table: the offset below would not be a fraction.
+  if (piPower !== 0 && (o1[0] !== 0n || o2[0] !== 0n)) return null;
 
   const reduce = ([n, d]: BigFraction): BigFraction => {
     const g = gcd(n < 0n ? -n : n, d);
@@ -855,7 +940,7 @@ export function exactUnitConversion(
     o1[0] * k[0] * o2[1] - o2[0] * o1[1] * k[1],
     o1[1] * k[1] * o2[1],
   ]);
-  return { factor: k, offset };
+  return { factor: k, piPower, offset };
 }
 
 // ---------------------------------------------------------------------------

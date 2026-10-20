@@ -130,6 +130,7 @@ import {
   journalDefinitionRecord,
 } from './boxed-expression/boxed-value-definition.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
+import { assignmentLocalsOf } from './assignment-locals.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -2392,6 +2393,47 @@ function createBlockLocals(
 }
 
 /**
+ * When a run of a block starts, give each assignment local of the block
+ * (`recordAssignmentLocals()`, `assignment-locals.ts`) a binding with no value in `run`, the scope
+ * where the statements of this run write: the call frame of a function body,
+ * or the scope of a nested block. A name that `run` already binds (a
+ * parameter, a local that an earlier run of the block made in the same
+ * evaluation) is left as it is.
+ *
+ * Whether such a name is a local is decided when the block is
+ * canonicalized, and never changes after. The run removes the bindings that
+ * the canonicalization made (`hideBodyScopeParams`, and
+ * `sweepCanonicalizationBindings` in `library/control-structures.ts`), so
+ * without this binding the assignment wrote the binding that the name had in
+ * the scopes of the run: a `let t` or `t = …` written after the function
+ * definition, or entered later in the same engine, was written by
+ * `function g(k) { t = k + 1; t }`. With it, each call of `g` has its own
+ * `t`, and a later declaration of `t` is not changed by a call.
+ */
+export function declareAssignmentLocals(
+  ce: ComputeEngine,
+  block: Scope,
+  run: Scope
+): void {
+  const names = assignmentLocalsOf(block);
+  if (names === undefined) return;
+  for (const name of names) {
+    if (run.bindings.has(name)) continue;
+    // Installed by direct map surgery, journaled for `checkpoint()` and
+    // counted as a declaration of the scope, as in `createBlockLocals`.
+    journalCheckpointMapEntry(ce, run.bindings, name, name, 'declare');
+    const half = new _BoxedValueDefinition(ce, name, {
+      type: 'unknown',
+      inferred: true,
+    });
+    half._blockLocal = true;
+    ce._checkpointWindow?.noteCreated(half);
+    run.bindings.set(name, { value: half });
+    noteScopeDeclaration(run);
+  }
+}
+
+/**
  * The asynchronous twin of `evaluateStatements`: each statement is awaited
  * with `evaluateAsync`, so a statement holding an asynchronous-only
  * application (an operator with only an `evaluateAsync` handler) is
@@ -2784,6 +2826,26 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
     }
   };
 
+  // The function that the call `app` applies, when its name resolves now to
+  // a local of the current scope that holds a function, or `undefined`.
+  const localFunction = (app: Expression): Expression | undefined => {
+    const name = app.operator;
+    const binding = scope.bindings.get(name);
+    if (binding === undefined || !names.includes(name)) return undefined;
+    const own = app.valueDefinition ?? app.operatorDefinition;
+    if (bindingInContext(ce, name, own) !== binding) return undefined;
+    if ('operator' in binding) {
+      const literal = (binding.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal === undefined) return undefined;
+      return captureNestedLocals(ce, literal) ?? literal;
+    }
+    const value = binding.value.value;
+    if (value === undefined || !value.type.matches('function'))
+      return undefined;
+    return captureNestedLocals(ce, value) ?? value;
+  };
+
   const walk = (e: Expression, inLazy: boolean): Expression => {
     if (isSymbol(e)) return inLazy ? (localValue(e) ?? e) : e;
     if (!isFunction(e) && !isDictionary(e)) return e;
@@ -2807,20 +2869,51 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
     // A store-backed list holds numbers only, and reading its `ops` would
     // box every element.
     if (e._numericStore !== undefined) return e;
-    if (boundVariableNames(e).length > 0) return e;
+    // An operator that binds names (a comprehension, a `Sum`) reads the
+    // symbols of its operands through its own scope, whose parent chain
+    // includes the current scope, so they are not replaced. A CALL of a local
+    // in its operands is replaced, where the operator does not bind the
+    // name: a call reads the binding it was bound to when it was
+    // canonicalized, and a `Declare` makes a new binding at each run of the
+    // block. So in `do { let f = (a) ↦ a + 1; [f(x) for x in [1, 2]] }` the
+    // call `f(x)` read a binding that has no value, and the cells were
+    // `f(1)` and `f(2)`. `f(x)` becomes `Apply(a ↦ a + 1, x)`.
+    if (boundVariableNames(e).length > 0) {
+      const result = rewriteWithBinders(
+        e,
+        (s) => s,
+        undefined,
+        false,
+        undefined,
+        (app, ops, shadowed) => {
+          if (shadowed?.has(app.operator) === true) return undefined;
+          const fn = localFunction(app);
+          return fn === undefined
+            ? undefined
+            : applyFunctionValue(fn, app, ops);
+        }
+      );
+      cache.set(e, result);
+      return result;
+    }
     const lazy = inLazy || e.isLazyCollection;
     const ops = e.ops;
     const next = ops.map((op) => walk(op, lazy));
-    const result = next.every((op, i) => op === ops[i])
-      ? e
-      : ce.function(e.operator, next, {
-          form: e.isCanonical
-            ? 'canonical'
-            : e.isStructural
-              ? 'structural'
-              : 'raw',
-          scope: e.localScope,
-        });
+    // A call of a local inside a lazy collection is replaced like a symbol.
+    const fn = inLazy ? localFunction(e) : undefined;
+    const result =
+      fn !== undefined
+        ? applyFunctionValue(fn, e, next)
+        : next.every((op, i) => op === ops[i])
+          ? e
+          : ce.function(e.operator, next, {
+              form: e.isCanonical
+                ? 'canonical'
+                : e.isStructural
+                  ? 'structural'
+                  : 'raw',
+              scope: e.localScope,
+            });
     cache.set(e, result);
     return result;
   };
@@ -2968,6 +3061,55 @@ function bindLazyArgumentLocals(
     }
   };
 
+  // The function that the call `app` applies when its name is a binding of
+  // the caller that the callee would not find (the same test as
+  // `callerValue`), or `undefined`.
+  const callerFunction = (app: Expression): Expression | undefined => {
+    const name = app.operator;
+    const own = app.valueDefinition ?? app.operatorDefinition;
+    const live = bindingInContext(ce, name, own);
+    if (live === undefined) return undefined;
+    if (
+      !calleeNames().has(name) &&
+      bindingInContext(ce, name, own, calleeScope) === live
+    )
+      return undefined;
+    if ('operator' in live) {
+      const literal = (live.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal === undefined) return undefined;
+      return captureNestedLocals(ce, literal) ?? literal;
+    }
+    if (!('value' in live)) return undefined;
+    const value = live.value.value;
+    if (value === undefined || !value.type.matches('function'))
+      return undefined;
+    return value;
+  };
+
+  // A call of such a binding, `f(x)`, becomes `Apply(value, x)`, where no
+  // operator of `e` binds the name. A call reads its function by name when
+  // it is applied, and an operator that applies its callback to an element
+  // (`Map`) boxes the call again in the callee: with `h(f, c) = c[2]`, the
+  // call `h(a ↦ 100a, Map(x ↦ f(x), [1, 2]))` in the body of `g(f)` applied
+  // the `f` of `h`, and `g(a ↦ a + 1)` gave `200`, not `3`.
+  const replaceCallerCalls = (
+    e: Expression,
+    shadowed: ReadonlySet<string> | undefined
+  ): Expression =>
+    rewriteWithBinders(
+      e,
+      (s) => s,
+      shadowed,
+      false,
+      undefined,
+      (app, ops, shadowed) => {
+        if (shadowed?.has(app.operator) === true) return undefined;
+        const fn = callerFunction(app);
+        return fn === undefined ? undefined : applyFunctionValue(fn, app, ops);
+      }
+    );
+
   const walk = (
     e: Expression,
     inLazy: boolean,
@@ -2988,6 +3130,7 @@ function bindLazyArgumentLocals(
         ce,
         inLazy ? (captureNestedLocals(ce, e) ?? e) : e
       );
+      if (inLazy) result = replaceCallerCalls(result, shadowed);
     } else if (isDictionary(e)) {
       let changed = false;
       const entries = e.keys.map((key) => {
@@ -3555,34 +3698,78 @@ function bindingKeyedSubs(
   expr: Expression,
   subs: ReadonlyArray<ParameterSub>
 ): Expression {
-  return rewriteWithBinders(expr, (sym, shadowed) => {
-    const def = (sym as { valueDefinition?: BoxedValueDefinition })
-      .valueDefinition;
-    for (const [binding, name, value, ambiguous] of subs) {
-      // Bound: it denotes this parameter — either the literal's own binding or
-      // this frame's activation of it.
-      if (
-        def !== undefined &&
-        binding !== undefined &&
-        sameBindingDef(def, binding) &&
-        (!ambiguous || def === binding) &&
-        shadowed?.has(name) !== true
-      )
-        return value;
-      // Raw: a lazy operator holds its operands unevaluated, so the body
-      // source reaches here un-canonicalized and its parameter references
-      // carry no binding at all (`Map`'s held body, a pipe's `_1` topic). An
-      // unbound occurrence has nothing else it could denote inside this
-      // frame, so the name is the whole answer — the same rule the equality
-      // contract uses for a raw operand.
-      if (
-        def === undefined &&
-        sym.symbol === name &&
-        shadowed?.has(name) !== true
-      )
-        return value;
+  return rewriteWithBinders(
+    expr,
+    (sym, shadowed) => {
+      const def = (sym as { valueDefinition?: BoxedValueDefinition })
+        .valueDefinition;
+      for (const [binding, name, value, ambiguous] of subs) {
+        // Bound: it denotes this parameter — either the literal's own binding
+        // or this frame's activation of it.
+        if (
+          def !== undefined &&
+          binding !== undefined &&
+          sameBindingDef(def, binding) &&
+          (!ambiguous || def === binding) &&
+          shadowed?.has(name) !== true
+        )
+          return value;
+        // Raw: a lazy operator holds its operands unevaluated, so the body
+        // source reaches here un-canonicalized and its parameter references
+        // carry no binding at all (`Map`'s held body, a pipe's `_1` topic). An
+        // unbound occurrence has nothing else it could denote inside this
+        // frame, so the name is the whole answer — the same rule the equality
+        // contract uses for a raw operand.
+        if (
+          def === undefined &&
+          sym.symbol === name &&
+          shadowed?.has(name) !== true
+        )
+          return value;
+      }
+      return sym;
+    },
+    undefined,
+    false,
+    undefined,
+    // A call of a parameter that holds a function is an occurrence of the
+    // parameter too, with the same two halves as a symbol: `f(x)` becomes
+    // `Apply(value, x)`. Without it, `function g(f) { [f(x) for x in [1, 2]]
+    // }` applied to `a ↦ a + 1` returned the lazy comprehension with the call
+    // `f(x)`, which read `f` after the call frame was popped: its cells were
+    // `f(1)` and `f(2)`.
+    (app, ops, shadowed) => {
+      const name = app.operator;
+      if (shadowed?.has(name) === true) return undefined;
+      const def = app.valueDefinition;
+      for (const [binding, param, value, ambiguous] of subs) {
+        if (param !== name) continue;
+        if (!value.type.matches('function')) return undefined;
+        const bound =
+          def !== undefined &&
+          binding !== undefined &&
+          sameBindingDef(def, binding) &&
+          (!ambiguous || def === binding);
+        const raw = def === undefined && app.operatorDefinition === undefined;
+        return bound || raw ? applyFunctionValue(value, app, ops) : undefined;
+      }
+      return undefined;
     }
-    return sym;
+  );
+}
+
+/**
+ * The call `app` of a name that holds the function `fn`, with the name
+ * replaced by the function: `Apply(fn, ...ops)`, where `ops` are the
+ * operands of `app` after a rewrite. It is canonical when `app` is.
+ */
+function applyFunctionValue(
+  fn: Expression,
+  app: Expression,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  return fn.engine.function('Apply', [fn, ...ops], {
+    form: app.isCanonical ? 'canonical' : 'raw',
   });
 }
 
@@ -4432,6 +4619,8 @@ function makeLambda(
       // condition then reads the valueless binding forever and never
       // terminates.
       const hiddenBindings = hideBodyScopeParams(bodyScope, []);
+      // Each assignment local of the body is a new binding of this call.
+      declareAssignmentLocals(ce, bodyScope, freshScope);
       // The scopes nested in the body (loops, big-ops, inner blocks) are
       // private to this application: see `enterNestedBodyScopes`.
       const nested = enterNestedBodyScopes(nullaryBody);
@@ -5283,6 +5472,8 @@ function makeLambda(
       enterAppliedBodyScope(bodyScope, savedParent);
       const curryParamNames = boundPrefix.leaves.map((l) => l.name);
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
+      // Each assignment local of the body is a new binding of this call.
+      declareAssignmentLocals(ce, bodyScope, freshScope);
       // The scopes nested in the body (loops, big-ops, inner blocks) are
       // private to this application: see `enterNestedBodyScopes`.
       const nested = enterNestedBodyScopes(bodyFn);
@@ -5544,6 +5735,8 @@ function makeLambda(
     bodyScope.parent = freshScope;
     enterAppliedBodyScope(bodyScope, savedParent);
     const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
+    // Each assignment local of the body is a new binding of this call.
+    declareAssignmentLocals(ce, bodyScope, freshScope);
     // The scopes nested in the body (loops, big-ops, inner blocks) are
     // private to this application: a recursive call restores the caller's
     // loop variables and inner-block locals when it returns. See
@@ -6292,9 +6485,19 @@ export function lookupApplicable(
   // where no outer `g` exists.
   let boundary: Scope | undefined;
   if (engine?._isShadowedParameter(id)) {
+    boundary = engine._shadowedParameterBoundary(id);
+    // A binder inside the construct that binds the same name (a
+    // comprehension index named like the parameter) shadows the parameter
+    // in its own scope. In `(f) ↦ [[f(x) for x in xs] for f in fs]` the call
+    // `f(x)` is a call of the index, not of the parameter. The binder
+    // records the names it binds on its scope (`binderNames`) before its
+    // operands are canonicalized.
+    for (let s: Scope | null = scope; s && s !== boundary; s = s.parent) {
+      const def = s.binderNames?.has(id) ? s.bindings.get(id) : undefined;
+      if (def !== undefined) return def;
+    }
     const shadowed = engine._shadowedParameterDef(id);
     if (shadowed !== undefined) return shadowed;
-    boundary = engine._shadowedParameterBoundary(id);
   }
 
   let innermost: BoxedDefinition | undefined;

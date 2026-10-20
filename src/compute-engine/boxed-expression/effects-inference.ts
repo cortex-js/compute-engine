@@ -65,6 +65,7 @@ import {
   protocolAccessorEffects,
 } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
+import { assignmentLocalsOf } from '../assignment-locals.js';
 import {
   declaredTypeError,
   genericOverloadLiteralError,
@@ -1708,6 +1709,34 @@ interface WalkContext {
 }
 
 /**
+ * The context `ctx` with the assignment locals of the canonical `Block`
+ * `block` added to its confinement frontier.
+ *
+ * An assignment statement of a block to a name that no enclosing scope
+ * declares when the block is canonicalized makes a local of the block
+ * (`canonicalBlock()`, `library/control-structures.ts`, which records the
+ * names: `assignmentLocalsOf()`, `assignment-locals.ts`). Each run of the
+ * block gives the local a new binding (`declareAssignmentLocals()`,
+ * `function-utils.ts`), so a write to it does not leave the run, also when
+ * a binding of the same name is made later. So
+ * `function g(k) { t = k + 1; t }` writes no outer variable, as with
+ * `let t = k + 1`. A name that an enclosing scope declares (a top-level
+ * `let t` written before the function, a parameter or a local of an
+ * enclosing function, a global) is not an assignment local, and a write to
+ * it stays a `scope` write.
+ *
+ * A raw block has no scope, and adds nothing.
+ */
+function withBlockLocals(block: Expression, ctx: WalkContext): WalkContext {
+  const scope = block.localScope;
+  if (scope === undefined) return ctx;
+  const names = assignmentLocalsOf(scope);
+  if (names === undefined || names.every((name) => ctx.declared.has(name)))
+    return ctx;
+  return { declared: new Set([...ctx.declared, ...names]) };
+}
+
+/**
  * Infer the effect set of a `Function` literal from its body.
  *
  * The normative rules (`docs/EFFECTS-MODEL.md`, "Inference" and "Scope writes"):
@@ -2247,7 +2276,7 @@ class Walker {
     // A sequence: `Block` is the only straight-line construct the confinement
     // analysis reasons about.
     if (head === 'Block') {
-      this.sequence(expr.ops, ctx);
+      this.sequence(expr.ops, withBlockLocals(expr, ctx));
       return;
     }
 

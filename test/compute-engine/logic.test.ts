@@ -892,12 +892,18 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     expect(sc.expr(['Or', 'True', 'False']).isValid).toBe(true);
   });
 
-  it('an operand that evaluates to an error stops the walk, like a decider', () => {
-    // `Error` is as final as `False`: evaluating past it would run the
-    // operands the failed one was guarding.
+  it('an operand that evaluates to an error does not stop the walk', () => {
+    // The answer does not depend on the order of the operands (three-valued
+    // logic, `docs/ERROR-MODEL.md` §3): the walk goes on past a failed
+    // operand to look for a decider. With none, the error is the answer.
     const r = run(['And', 'True', ['Error', "'x'"], ['scT']]);
     expect(r[0]).toBe('Error');
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(['T']);
+    // A decider after the failed operand decides, and the walk stops there.
+    expect(run(['And', ['Error', "'x'"], ['scF'], ['scT']])).toBe('False');
+    expect(calls).toEqual(['F']);
+    expect(run(['Or', ['Error', "'x'"], ['scT'], ['scF']])).toBe('True');
+    expect(calls).toEqual(['T']);
   });
 
   it('the async route awaits async-only operands and short-circuits too', async () => {

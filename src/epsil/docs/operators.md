@@ -734,7 +734,12 @@ evaluated when `a < b` is false.
   evaluation stops at the first operand that decides the result — the first
   `false` for `&&`, the first `true` for `||`. The remaining operands do not
   run, so `k <= n && xs[k] > 0` never reads `xs[k]` when `k` is out of range,
-  and `false && f()` never calls `f()`. Because the written order is
+  and `false && f()` never calls `f()`. An operand that fails (its value is
+  an error) does not stop the evaluation, and an operand after it can still
+  decide: with `function g(x) { 1/x }`, `g("a") > 0 || true` is `true`, as
+  `true || g("a") > 0` is, and `g("a") > 0 && false` is `false`. When no
+  operand decides, the result is the error of the first operand that
+  failed. Because the written order is
   meaningful, `&&`/`||` operands are never reordered by canonicalization. The
   exception is an element-wise application — an operand that is a list of
   booleans (`[true, false] && xs`) makes the result a list, cell by cell, and

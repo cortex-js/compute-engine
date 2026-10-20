@@ -158,8 +158,14 @@ import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
-import { _setQuantityOrder } from './boxed-expression/compare.js';
-import { compareQuantities } from './library/quantity-compare.js';
+import {
+  _setQuantityDimensionsDiffer,
+  _setQuantityOrder,
+} from './boxed-expression/compare.js';
+import {
+  compareQuantities,
+  quantityDimensionsDiffer,
+} from './library/quantity-compare.js';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
 import {
   HARMONIZATION_RULES,
@@ -4741,4 +4747,7 @@ _setDefaultEngineFactory(() => new ComputeEngine());
 // `exactOrder()` (`Max`, `Min`, `Sort`) compare two `Quantity` values by
 // their physical value with it (`1000 m` is `1 km`). Every engine is an
 // instance of the class of this file, so this runs before any engine exists.
+// `isEqual()` also reads `quantityDimensionsDiffer()`: two values with
+// different physical dimensions (`6 W` and `6 m`) are not equal.
 _setQuantityOrder(compareQuantities);
+_setQuantityDimensionsDiffer(quantityDimensionsDiffer);

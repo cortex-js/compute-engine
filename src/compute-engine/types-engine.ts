@@ -1016,6 +1016,11 @@ export interface IComputeEngine {
    * and `evaluateStatementsAsync` (`function-utils.ts`), at the same place
    * as the debugger's statement-result hook.
    *
+   * Also called with the collection of each `Element` clause of a `Loop` or
+   * a `Comprehension` that carries `sourceOffsets` (a loop or comprehension
+   * header written in Epsil source) and its value, each time the clause
+   * evaluates it (`runNested`, `library/control-structures.ts`).
+   *
    * Set by `executeEpsil` for the duration of its evaluation loop, so that
    * a nested statement whose value is discarded and holds an error (an
    * `Error` cell in a list built in a loop) is reported as a diagnostic, as

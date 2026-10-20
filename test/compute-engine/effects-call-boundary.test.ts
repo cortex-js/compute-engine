@@ -92,7 +92,7 @@ describe('a positive bound tolerates what it lists, and only that', () => {
 
   it('admits a `scope` callback', () => {
     const ce = engine(SCOPE_BOUND);
-    ce.box(['Declare', 'ctr', 0]).evaluate();
+    ce.declare('ctr', 'integer');
     const writer = ['Function', ['Block', ['Assign', 'ctr', 1], 2], 'x'];
     expect(ce.box(writer).type.toString()).toContain('scope');
     expect(ce.box(['integ', writer, 0, 1]).isValid).toBe(true);

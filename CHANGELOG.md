@@ -2,6 +2,20 @@
 
 ### Behavior Changes
 
+- In Epsil, an assignment in a function body to a name that no enclosing scope
+  declares when the function is defined makes a local of the function, with a
+  new binding at each call. `function g(k) { t = k + 1; t }` then `[g(1), g(2)]`
+  gives `[2, 3]`; the definition was refused with "writes outside a function
+  require a declared `scope` effect". A declaration of the same name made later
+  is not written: with `let t = 0` after the function, `[g(1), t]` is `[2, 0]`,
+  also when `t` is declared by a later program on the same engine or with
+  `ce.assign()`. An assignment to a name declared before the function (a
+  top-level `let` or assignment, a parameter or a local of an enclosing
+  function) still writes that binding and is the `scope` effect. A function
+  defined before a top-level `const` does not write the constant, and
+  `epsil check` does not report it; a function defined before a `const` of the
+  same block is still reported.
+
 - `Or`, `And`, `Nand`, `Nor`, `Implies`, `Any` and `All` do not depend on the
   order of their operands when an operand fails. A `True` operand of `Or` or
   `Nor`, a `False` operand of `And` or `Nand`, a `False` antecedent or a `True`
@@ -10,41 +24,51 @@
   is `True`, as `Or(True, 1/"a" > 0)` already was, `And(1, False)` is `False`,
   and `Any([1, 1/"a", 3], u ↦ u > 2)` is `True` (they were the error). When no
   operand decides, the answer is the error of the first failed operand.
-  Evaluation still stops at the first deciding operand, but the operands after
-  a failed operand are now evaluated, with their side effects (also Epsil `&&`
-  and `||`). `Xor` and `Equivalent` need every operand and are not changed.
+  Evaluation still stops at the first deciding operand, but the operands after a
+  failed operand are now evaluated, with their side effects (also Epsil `&&` and
+  `||`). `Xor` and `Equivalent` need every operand and are not changed.
+  `ForAll`, `Exists` and `ExistsUnique` over a finite domain follow the same
+  rule: `Exists(x ∈ [1, 2], …)` whose body fails at `x = 2` and is `False` at
+  `x = 1` gives the error (it was `False`), `Exists(x ∈ [1, 2], x > n)` stays
+  unevaluated (it was `False`), and `ForAll` over `{1, 2, 3}` and over
+  `[3, 2, 1]` give the same answer.
+- `Any` and `All` over a source that is not known to be finite (`Range(1, +oo)`,
+  `Repeat(5)`) read at most `iterationLimit` elements (1024 by default) and then
+  stay unevaluated, as `IndexOf` does. Before, a walk with no decision did not
+  end; a decision after the limit, such as `Any(Range(1, +oo), u ↦ u > 5000)`,
+  was found after a long walk and now needs a larger `ce.iterationLimit`. A
+  source known to be finite is still read to its end.
 
 - Two quantities whose units have different physical dimensions are not equal:
   `6 W = 6 m` and `0 m = 0 s` are `False`, `6 W ≠ 6 m` is `True`, and
-  `isEqual()` and `isIdenticallyEqual()` return `false` (they stayed
-  unevaluated or gave `undefined`). A quantity with a dimension and a number
-  are not equal either: `6 m = 6` is `False`, and a quantity is never equal to
-  a string or a boolean (`6 m = "a"` and `6 percent = True` are `False`). Order
-  has no meaning across
-  dimensions, so `Less`, `isLess()`, `Max`, `Min`, `Sort` and `Clamp` stay
-  unevaluated for such operands. A unit that is not in the unit table, and a
-  dimensionless quantity compared with a number (`6 percent = 0.06`), stay
+  `isEqual()` and `isIdenticallyEqual()` return `false` (they stayed unevaluated
+  or gave `undefined`). A quantity with a dimension and a number are not equal
+  either: `6 m = 6` is `False`, and a quantity is never equal to a string or a
+  boolean (`6 m = "a"` and `6 percent = True` are `False`). Order has no meaning
+  across dimensions, so `Less`, `isLess()`, `Max`, `Min`, `Sort` and `Clamp`
+  stay unevaluated for such operands. A unit that is not in the unit table, and
+  a dimensionless quantity compared with a number (`6 percent = 0.06`), stay
   undecided.
 
-- In a block written in LaTeX, `k \coloneq v` still declares a local `k`. A
-  new keyword, `let` (`\operatorname{let}`, `\text{let}`), writes a
-  declaration with a type, `\operatorname{let} s\colon integer\coloneq 1`,
-  and a declaration with no value, `\operatorname{let} s`. A bare `Assign` in
-  a block, which changes a `k` outside the block, is written
-  `\mathrm{Assign}(k, v)` and reads back without a `Declare`: it was written
-  `k\coloneq v`, which read back as a local, so a LaTeX round trip left the
-  outer `k` unchanged. A typed `Declare` in a block was dropped and is written
-  with `let` (user decision 2026-10-19). `let` also works in a `where` clause
-  and in a row of a one-column `cases` block. A function defined as
-  `f(x)\coloneq\left(j\coloneq x; j\right)` has the block as its body; the
-  body was a block inside a block. `\mathrm{let}` is now a keyword, so a symbol
-  named `let` is read as one, as `if` and `where` already are. After `let`,
-  `=` is also the assignment, as in Epsil (`\operatorname{let} k = 2`), and a
-  type that is not one (`\operatorname{let} s\colon\mathbb{Z}`) is an
-  `invalid-type` error. A name is declared once per block:
-  `x\coloneq 1; x\coloneq x+1; x` is `2` (it was a `variable-redeclaration`
-  error). The rows of a one-column `cases` block are read as a `;` list is, so
-  a `k\coloneq v` row declares a local `k` (it changed the `k` outside).
+- In a block written in LaTeX, `k \coloneq v` still declares a local `k`. A new
+  keyword, `let` (`\operatorname{let}`, `\text{let}`), writes a declaration with
+  a type, `\operatorname{let} s\colon integer\coloneq 1`, and a declaration with
+  no value, `\operatorname{let} s`. A bare `Assign` in a block, which changes a
+  `k` outside the block, is written `\mathrm{Assign}(k, v)` and reads back
+  without a `Declare`: it was written `k\coloneq v`, which read back as a local,
+  so a LaTeX round trip left the outer `k` unchanged. A typed `Declare` in a
+  block was dropped and is written with `let` (user decision 2026-10-19). `let`
+  also works in a `where` clause and in a row of a one-column `cases` block. A
+  function defined as `f(x)\coloneq\left(j\coloneq x; j\right)` has the block as
+  its body; the body was a block inside a block. `\mathrm{let}` is now a
+  keyword, so a symbol named `let` is read as one, as `if` and `where` already
+  are. After `let`, `=` is also the assignment, as in Epsil
+  (`\operatorname{let} k = 2`), and a type that is not one
+  (`\operatorname{let} s\colon\mathbb{Z}`) is an `invalid-type` error. A name is
+  declared once per block: `x\coloneq 1; x\coloneq x+1; x` is `2` (it was a
+  `variable-redeclaration` error). The rows of a one-column `cases` block are
+  read as a `;` list is, so a `k\coloneq v` row declares a local `k` (it changed
+  the `k` outside).
 
 - Assigning a value to a constant has a stable error code, and `epsil check`
   reports it. `ce.assign()` and the `Assign` operator still throw
@@ -57,11 +81,10 @@
   name of a destructuring `const`, wherever the assignment is, also in the body
   of a function defined before the `const`. A `let`, a parameter or a loop
   variable that shadows the constant is not reported. The run reports each
-  assignment once: it does not repeat an assignment that the check reported,
-  and it reports an assignment that the check could not see, such as an
-  assignment to a library constant (`Pi`) or to a constant of an earlier
-  program. The error value is
-  `["Error", ["ErrorCode", "constant-assignment", "c"]]`.
+  assignment once: it does not repeat an assignment that the check reported, and
+  it reports an assignment that the check could not see, such as an assignment
+  to a library constant (`Pi`) or to a constant of an earlier program. The error
+  value is `["Error", ["ErrorCode", "constant-assignment", "c"]]`.
 
 - A unit has one canonical form: its unit symbols with exact exponents, those
   with a positive exponent over those with a negative exponent, in the canonical
@@ -92,25 +115,25 @@
   `Length` and `Count` give the number of cells (`3`), and `First`, `At`,
   `Reverse` and `Take` keep the failed cell in its position. An operator that
   needs the value of every cell gives the error of the failed cell: `Sum`,
-  `Product`, `Max`, `Min`, `Mean` and the other statistics, `Sort`, `ArgMax`
-  and `MaxBy`. A comprehension guard that fails on an element keeps the error
-  in that position, as `Filter` does; before, the element was removed. The same
+  `Product`, `Max`, `Min`, `Mean` and the other statistics, `Sort`, `ArgMax` and
+  `MaxBy`. A comprehension guard that fails on an element keeps the error in
+  that position, as `Filter` does; before, the element was removed. The same
   rules apply when the failed cell is a list that holds the error:
   `Mean([[1, 1/"a"], 2])` is the error, and `Map(u ↦ 1, [[1, 1/"a"], [3]])` is
   `[1, 1]`. Membership and equality give the error when the answer depends on a
   failed cell: `2 ∈ [1, 1/"a"]` and `[1, 1/"a"] = [1, 1/"a"]` are the error,
-  while `1 ∈ [1, 1/"a"]` is `True` and `[1, 1/"a"] = [2, 1/"a"]` is `False`.
-  The equality of two collections first checks the facts that decide the
-  equality of valid collections (a set and a list, different counts, a finite
-  and an infinite collection), then reads the cells only as far as needed, so
-  `[1, 1/"a"] = Range(1, 10^12)` is `False`.
-  `IndexOf`, `Count` with a value, `Union`, `Intersection`, `SetMinus` and
-  `SymmetricDifference` follow the same rule. `Unique`, `Tally` and `Dedup`
-  follow it when there is another element to compare: `Dedup([1, 1/"a", 1])`
-  is the error, because whether a neighbor is a duplicate depends on the value
-  of the failed cell, while `Unique([1/"a"])` is `[1/"a"]`. The list still
-  carries its error (`isValid` is `false`), and it still does not compile. A
-  `Tuple` or `Dictionary` with a failed cell is not changed.
+  while `1 ∈ [1, 1/"a"]` is `True` and `[1, 1/"a"] = [2, 1/"a"]` is `False`. The
+  equality of two collections first checks the facts that decide the equality of
+  valid collections (a set and a list, different counts, a finite and an
+  infinite collection), then reads the cells only as far as needed, so
+  `[1, 1/"a"] = Range(1, 10^12)` is `False`. `IndexOf`, `Count` with a value,
+  `Union`, `Intersection`, `SetMinus` and `SymmetricDifference` follow the same
+  rule. `Unique`, `Tally` and `Dedup` follow it when there is another element to
+  compare: `Dedup([1, 1/"a", 1])` is the error, because whether a neighbor is a
+  duplicate depends on the value of the failed cell, while `Unique([1/"a"])` is
+  `[1/"a"]`. The list still carries its error (`isValid` is `false`), and it
+  still does not compile. A `Tuple` or `Dictionary` with a failed cell is not
+  changed.
 - A point divided by a matrix is the matrix of the point divided by each cell,
   as a point times a matrix is: `(1, 2) / [[1, 2], [3, 4]]` is
   `[[(1, 2), (1/2, 1)], [(1/3, 2/3), (1/4, 1/2)]]` (it stayed unevaluated and
@@ -125,6 +148,46 @@
 
 ### Bug Fixes
 
+- A comprehension or a lazy collection that calls a parameter or a local
+  function applies that function after it leaves the function or block that made
+  it: `function g(f) { [f(x) for x in [1, 2]] }` applied to `(a) => a + 1` gives
+  `[2, 3]`, and so does `do { let f = (a) => a + 1; [f(x) for x in [1, 2]] }`;
+  both stayed unevaluated. A `map` or `filter` callback that calls a parameter
+  works the same way, also when the collection is passed to a function that has
+  a parameter with the same name (it used that other function). A call of a
+  function parameter inside a `Sum`, a `Product` or a comprehension in a
+  function body calls the parameter: `(g) ↦ Σ_{k=1}^{3} g(k)` applied to
+  `a ↦ a + 1` is `9` (it was `g(1) + g(2) + g(3)`), and `Σ_{k=1}^{3} h(k)` uses
+  a function `h` assigned after the sum was written.
+- A comprehension over library functions or pure user functions prints its
+  elements: `[f(0) for f in [Sin, Cos]]` prints `[0, 1]`.
+- In LaTeX, a bracket pair of two function literals after `\in` is a list, not
+  an interval: `\prod_{q\in [a\mapsto a+1, a\mapsto 2a]} q(3)` is `24`.
+- In a function body, an assignment in an `if` branch to a local that a later
+  statement of the body assigns writes that local: with
+  `function g(k) { if k > 1 { t = 5 }; t = t + 1; t }`, `g(2)` is `6` (it was
+  `t + 1`).
+- A function held by the index of a comprehension is applied where the index is
+  the callback of a lazy collection operator:
+  `[Map(q, [1]) for q in [a ↦ a + 1]]` is `[[2]]` (it was `[[q(1)]]`), and
+  `Filter([1, 2], q)` with the same kind of index no longer throws. A call of
+  such an index in an inner comprehension uses the function of its own element,
+  also when the elements are read in another order. Evaluating a comprehension
+  whose index is called like a function, such as
+  `[k(1) for k in [a ↦ 0, a ↦ 1]]`, no longer declares `k` in the global scope.
+- A view whose callback holds an error under a selection, such as
+  `Map(u ↦ If(u = 2, 1/"a", u), Range(1, 5))`, is a collection whose second
+  element is the error: `Sum` and `Mean` over it give the error, `Length` gives
+  `5` and `First` gives `1`. Before, `Sum` gave back the view itself and
+  `Length` stayed unevaluated.
+- A pipe into `Map` over a list with a failed cell gives the same value as the
+  direct call: `[1, 1/"a", 3] |> Map(f, _)` and
+  `Apply(z ↦ Map(f, z), [1, 1/"a", 3])` stayed an unevaluated `Map`, and a loop
+  over that value ran no turn. Substituting such a list with `subs()` also keeps
+  the expression bound. In Epsil, a statement whose value is a `map` or `filter`
+  over a list literal with a failed cell, such as
+  `let ys = map((u) => u, [1, g("a"), 3])`, is reported as a `runtime-error`; a
+  cell with an effect is not evaluated for this check.
 - Angle quantities with exact magnitudes compare exactly. The scale of `deg`,
   `grad`, `turn`, `arcmin` and `arcsec` is a rational multiple of π, so
   `180 deg = π rad` is `True` with no rounding, and
@@ -136,15 +199,15 @@
   ran 3 turns and reported nothing, because the body does not use `x` and a
   header is not a statement. The loop still runs 3 turns, and the list gets a
   `runtime-error` with the same message and code as the statement
-  `let xs = [1, g("a"), 3]`. Each header is reported once, also in a nested
-  loop or in a function that is called more than once. A header that is a
-  variable (`for x in xs`) is not reported again, because the statement that
-  gave `xs` its value is. A comprehension header is reported when the program
-  reads the list.
+  `let xs = [1, g("a"), 3]`. Each header is reported once, also in a nested loop
+  or in a function that is called more than once. A header that is a variable
+  (`for x in xs`) is not reported again, because the statement that gave `xs`
+  its value is. A comprehension header is reported when the program reads the
+  list.
 - A tuple whose type has an absent slot, such as a symbol declared
-  `tuple<integer, missing>`, is treated as a tuple. It was not, because the
-  bare type `tuple` admits value slots only. So `[...t, 5]` and `{...t, 5}`
-  spread it (they are now the `spread-tuple` error, as for any tuple), and
+  `tuple<integer, missing>`, is treated as a tuple. It was not, because the bare
+  type `tuple` admits value slots only. So `[...t, 5]` and `{...t, 5}` spread it
+  (they are now the `spread-tuple` error, as for any tuple), and
   `Join(t, [3, 4])` with `t := (1, Missing)` had 4 elements (it now has 3, the
   first of which is the tuple). `(1, 2) = p`, with `p` declared
   `tuple<integer, integer | missing>` and no value, was `False`; it now stays
@@ -153,15 +216,14 @@
   `incompatible-type` error. A compiled `Dot` of a tuple of such tuples is
   declined, as for other tuples of tuples.
 
-- A tuple or list literal compared with a value whose type only may be a
-  tuple or a list stays undecided. `(1, 2) = x` with an undeclared `x` was
-  `False`, and so was the comparison with a symbol declared
+- A tuple or list literal compared with a value whose type only may be a tuple
+  or a list stays undecided. `(1, 2) = x` with an undeclared `x` was `False`,
+  and so was the comparison with a symbol declared
   `tuple<integer, integer> | missing` or `integer | tuple<integer, integer>`.
-  `[1, 2].isEqual(x)` was `false` for an undeclared `x` or for a symbol
-  declared `list<integer> | integer`; it is now `undefined`. A literal is still
-  unequal to a value that cannot have its kind: `[1, 2] = (1, 2)` and
-  `(1, 2) = 5` are `False`, and so is a tuple literal compared with a value of
-  a nominal type.
+  `[1, 2].isEqual(x)` was `false` for an undeclared `x` or for a symbol declared
+  `list<integer> | integer`; it is now `undefined`. A literal is still unequal
+  to a value that cannot have its kind: `[1, 2] = (1, 2)` and `(1, 2) = 5` are
+  `False`, and so is a tuple literal compared with a value of a nominal type.
 
 - A type alias that names itself as an arm of its own union, such as
   `cyc = cyc | tuple<number, number>`, no longer overflows the stack. Spread,
@@ -174,47 +236,71 @@
   names itself inside a constructor, such as `json = list<json> | integer`, is
   unchanged.
 
-- A complex number whose imaginary coefficient is written as an inline
-  fraction keeps its value in a LaTeX round trip. At a deep level, or with an
-  inline `fractionStyle`, `Complex(1/10, 1/10)` was written
-  `1/10+1/10\imaginaryI`, which reads back as `1/10 + 1/(10i)`, the opposite
-  imaginary part. It is written `1/10+(1/10)\imaginaryI` (found by Tycho's
-  round-trip audit of its Desmos corpus, whose failing trees are now part of
-  `npm run check:roundtrip`).
+- The static type of a list plus or times a number contains the result when an
+  element of the list is itself a collection. `[[1, 2], 3] + 0.5` was typed
+  `list<integer | list<integer> | real>`, which does not hold its value
+  `[[1.5, 2.5], 3.5]`; it is now typed `list<list<real> | real>`. The same holds
+  for an element whose type is an alias of a list (`list<myints> + 0.5` is
+  `list<list<real>>`), for a list of ranges (`[1..3, 5] · 0.5`), and for a list
+  of tuples with an imaginary component times `i`. A sum or product that stays
+  an integer keeps its type: `[[1, 2], 3] + 1` is still
+  `list<integer | list<integer>>`.
+
+- The static type of a collection operator keeps the `missing` element of an
+  operand whose cells can be absent. With `L: list<integer | missing>`,
+  `Join(L, [2])` and `ListJoin(L, [2])` were typed `list<number>`, which
+  excludes the `Missing` cell of the value; they are now typed
+  `list<integer | missing>`, as `Append(L, 2)` already was. The same holds for
+  `DeleteAt`, `Partition`, `Chunk`, `ChunkBy`, `GroupBy`, `Zip`, `TakeWhile`,
+  `DropWhile`, `RandomShuffle`, `Dedup`, `Cycle`, `ListFrom`, `SetFrom`,
+  `DictionaryFrom`, `Values`, `Map` with a function literal, `Find`, `MaxBy`,
+  `MinBy`, and the set operations (`Union(S, {2})` with
+  `S: set<integer | missing>` is `set<integer | missing>`, where it was the
+  bare `set`). A position or a count over such a list is an integer:
+  `IndexWhere`, `ArgMax`, `ArgMin` and `CountIf` were typed `number`, and
+  `Position` `list<number>`. `Flatten` of such a list is `list<any>`, where it
+  was the bare `list`.
+
+- A complex number whose imaginary coefficient is written as an inline fraction
+  keeps its value in a LaTeX round trip. At a deep level, or with an inline
+  `fractionStyle`, `Complex(1/10, 1/10)` was written `1/10+1/10\imaginaryI`,
+  which reads back as `1/10 + 1/(10i)`, the opposite imaginary part. It is
+  written `1/10+(1/10)\imaginaryI` (found by Tycho's round-trip audit of its
+  Desmos corpus, whose failing trees are now part of `npm run check:roundtrip`).
 
 - A mixed number keeps its tree in a LaTeX round trip (Tycho ledger row 390).
   `2\frac{1}{2}` is the sum `Add(2, 1/2)`, which was written `2+\frac{1}{2}`
   with `prettify: false` and read back as `5/2`. It is written as the mixed
   number whenever the parser rebuilds the same sum from it, with or without
   `prettify`: `-2\frac{1}{2}` was written `-\frac{1}{2}-2`, and
-  `500\frac{999}{1000}` was written `500+\frac{999}{1000}`. The pretty
-  MathJSON of `-3\frac{1}{4}` is `["Add", -3, ["Rational", -1, 4]]` (it was
+  `500\frac{999}{1000}` was written `500+\frac{999}{1000}`. The pretty MathJSON
+  of `-3\frac{1}{4}` is `["Add", -3, ["Rational", -1, 4]]` (it was
   `["Subtract", ["Rational", -1, 4], 3]`). The fraction of a mixed number is
-  always written `\frac{…}{…}`: with an inline fraction style,
-  `-2\frac{1}{2}` was written `-21/2`. A fraction that is an integer is not a
-  mixed number: `2\frac{4}{2}` is `4` (it was the sum `Add(2, 2)`), and
-  `Add(2, Rational(3, 1))` is no longer written `2\frac{3}{1}`, which read
-  back as 6.
+  always written `\frac{…}{…}`: with an inline fraction style, `-2\frac{1}{2}`
+  was written `-21/2`. A fraction that is an integer is not a mixed number:
+  `2\frac{4}{2}` is `4` (it was the sum `Add(2, 2)`), and
+  `Add(2, Rational(3, 1))` is no longer written `2\frac{3}{1}`, which read back
+  as 6.
 
 - Printing an unevaluated lazy view does not run a side effect. `toString()`,
   the `latex` getter and `toLatex()` evaluated the cells of a view over a list
   literal to show a preview: printing `Dedup([1, H(1), 2])`, with `H` declared
   `pure: false`, called `H` twice, a view over `Random()` printed a different
-  list each time, and a comprehension whose body assigns an outside variable
-  did the assignment. Such a view now prints as written
-  (`Reverse([1, H(1), 2])`), and its value comes from `.evaluate()`. A view
-  over pure functions, or one that writes only to its own local variables,
-  still shows its preview. The same holds when the view calls a comprehension
-  index or a callback parameter whose functions can be impure:
-  `[q(1) for q in [a ↦ H(a)]]` and `Map(w ↦ w(1), fs)`, with `fs` holding such
-  functions, print as written.
+  list each time, and a comprehension whose body assigns an outside variable did
+  the assignment. Such a view now prints as written (`Reverse([1, H(1), 2])`),
+  and its value comes from `.evaluate()`. A view over pure functions, or one
+  that writes only to its own local variables, still shows its preview. The same
+  holds when the view calls a comprehension index or a callback parameter whose
+  functions can be impure: `[q(1) for q in [a ↦ H(a)]]` and `Map(w ↦ w(1), fs)`,
+  with `fs` holding such functions, print as written.
 - In Epsil, a `function` statement in a function body works when its name is
-  also the name of a library constant. `function o() { function i() { 2 }; i() }`
-  then `o()` gave `Error(ErrorCode("constant-assignment", "i"))` instead of
-  `2`; the same happened for `e`, `Pi` and the other library constants. The
-  definition was written to the library constant instead of making a binding
-  local to the call. It is now local to each call of the outer function, as at
-  the top level, and the library constant outside the body does not change.
+  also the name of a library constant.
+  `function o() { function i() { 2 }; i() }` then `o()` gave
+  `Error(ErrorCode("constant-assignment", "i"))` instead of `2`; the same
+  happened for `e`, `Pi` and the other library constants. The definition was
+  written to the library constant instead of making a binding local to the call.
+  It is now local to each call of the outer function, as at the top level, and
+  the library constant outside the body does not change.
 - Two quantities whose units have the same dimension compare by their physical
   value on every route. `isEqual()`, `isIdenticallyEqual()`, `is()`, `isLess()`,
   `isLessEqual()`, `isGreater()` and `isGreaterEqual()` gave `undefined` or
@@ -226,28 +312,28 @@
   unevaluated). The comparison converts both quantities to the finer of the two
   units, so `1 eV = 2 eV` is `False` (it was `True`, because the difference in
   joules was smaller than the tolerance). It applies temperature offsets:
-  `0 °C = 273.15 K` is `True` and `0 °C < 1 K` is `False` (they were `False`
-  and `True`). Two exact magnitudes are compared with exact arithmetic, also
-  when they are too large for a double (`10^400 m < 10^401 m`) or when their
-  double cancels: `1 m = (1 + 10^-16) m` is `False`. Under `.N()`, the exact
-  magnitude of a quantity decides, as it does for a number:
-  `1 m < (1 + 10^-30) m` is `True`. The conversion is exact between two
-  identical units and for every unit defined by an exact decimal number (`in`,
-  `ft`, `mi`, `lb`, `eV` and all SI prefixes); the angle units and `Da` are
-  compared within the tolerance. A magnitude with no numeric value or a complex
-  value, even with a very small imaginary part, leaves the comparison
-  unevaluated: `x m = y m` was `True` and `x m < y m` was `False`. Quantities of different dimensions,
-  and a quantity and a plain number, stay unevaluated.
+  `0 °C = 273.15 K` is `True` and `0 °C < 1 K` is `False` (they were `False` and
+  `True`). Two exact magnitudes are compared with exact arithmetic, also when
+  they are too large for a double (`10^400 m < 10^401 m`) or when their double
+  cancels: `1 m = (1 + 10^-16) m` is `False`. Under `.N()`, the exact magnitude
+  of a quantity decides, as it does for a number: `1 m < (1 + 10^-30) m` is
+  `True`. The conversion is exact between two identical units and for every unit
+  defined by an exact decimal number (`in`, `ft`, `mi`, `lb`, `eV` and all SI
+  prefixes); the angle units and `Da` are compared within the tolerance. A
+  magnitude with no numeric value or a complex value, even with a very small
+  imaginary part, leaves the comparison unevaluated: `x m = y m` was `True` and
+  `x m < y m` was `False`. Quantities of different dimensions, and a quantity
+  and a plain number, stay unevaluated.
 - `Sort` and `Ordering` of a lazy source give the error of an element that
   fails: with `h(2)` an error, `Sort(Map(h, [2]))` was `[Error(…)]` and
   `Sort(Map(h, [3, 2, 1]))` stayed unevaluated. Each element of the source is
-  read once. A membership test (`Element`, `NotElement`, `Contains`) over a
-  lazy source that computes a failed element gives that element's error when
-  it finds no match: `5 ∈ Map(h, [1, 2])` was `False`. A `Range` or an
-  `Interval` keeps its arithmetic test, and an infinite source is not walked.
+  read once. A membership test (`Element`, `NotElement`, `Contains`) over a lazy
+  source that computes a failed element gives that element's error when it finds
+  no match: `5 ∈ Map(h, [1, 2])` was `False`. A `Range` or an `Interval` keeps
+  its arithmetic test, and an infinite source is not walked.
 - `Count(xs, p)` gives the error when the predicate fails on an element, as
-  `CountIf` does. Before, it counted that element as selected: with
-  `h(2)` failing, `Count([1, 2, 3], (u) => h(u) > 0)` was `3`.
+  `CountIf` does. Before, it counted that element as selected: with `h(2)`
+  failing, `Count([1, 2, 3], (u) => h(u) > 0)` was `3`.
 - On `interval-js`, a `Which` or an `If` arm is also narrowed by a decimal bound
   written in LaTeX (`x \ge 0.5`) and by an exact bound that a double holds
   (`\frac{1}{2}`) (Tycho ledger row 397). Over [0.49, 0.51],
@@ -306,31 +392,29 @@
   the code `invalid-clause-definition`, and the run does not report it a second
   time.
 
-- With the Rubi rules loaded (`loadIntegrationRules`), a definite integral of
-  an integrand that is real on the interval no longer gives a complex value:
+- With the Rubi rules loaded (`loadIntegrationRules`), a definite integral of an
+  integrand that is real on the interval no longer gives a complex value:
   `∫₁²⁰¹¹ √x/(√(2012−x)+√x) dx` is `1005` (it was
   `1005 − 503 ln(−1005) + 503 ln(1005)`, which is `1005 − 1580.2i`). When the
-  integrand is proven real on a finite interval and the difference of the
-  values of the antiderivative at the bounds has an imaginary part, that value
-  is refused: the built-in antiderivative or an exact reduction gives the
-  value, and otherwise the integral stays unevaluated. A correct complex value
-  is kept: `∫₋₁³ √x dx` is `2√3 + (2/3)i`.
+  integrand is proven real on a finite interval and the difference of the values
+  of the antiderivative at the bounds has an imaginary part, that value is
+  refused: the built-in antiderivative or an exact reduction gives the value,
+  and otherwise the integral stays unevaluated. A correct complex value is kept:
+  `∫₋₁³ √x dx` is `2√3 + (2/3)i`.
 
 - `simplify()` reduces more exact constants:
   - A sum of logarithms of positive rationals or surds with rational
-    coefficients: `−2 ln 2 − 2 ln(3/2) + 2 ln 3` is `0` (it stayed as it
-    was), and `ln 2 + (1/2) ln 3` is `(1/2) ln 12`.
+    coefficients: `−2 ln 2 − 2 ln(3/2) + 2 ln 3` is `0` (it stayed as it was),
+    and `ln 2 + (1/2) ln 3` is `(1/2) ln 12`.
   - A quotient whose denominator is a power or a product of `a + b√c`:
     `(12 − 7√3)/(3 − 2√3)²` is `−√3/3`, and `−π(12 − 7√3)/(3 − 2√3)²` is
-    `(√3/3)·π`. So the value of `∫₀^π 1/(2 + cos x) dx` simplifies to
-    `π√3/3`.
+    `(√3/3)·π`. So the value of `∫₀^π 1/(2 + cos x) dx` simplifies to `π√3/3`.
   - An odd or even function of a negative constant that is not one number:
     `arctan(−3 + 2√2)` is `−arctan(3 − 2√2)`, so
     `arctan(−3 + 2√2) + arctan(3 − 2√2)` is `0`.
 - With the Rubi rules loaded, a definite integral whose Rubi value is real but
   written with terms that are not real gets the form of the built-in
-  antiderivative: `∫₂^∞ 1/(x² − 1) dx` is `ln(3)/2` (it was
-  `iπ/2 + artanh(2)`).
+  antiderivative: `∫₂^∞ 1/(x² − 1) dx` is `ln(3)/2` (it was `iπ/2 + artanh(2)`).
 
 ### Performance
 
@@ -362,9 +446,9 @@
   discontinuities, the high-degree reciprocal pairs and the Beta forms with a
   large power run first, because the existing routes would expand them. Each
   reduction proves its domain and convergence conditions before it returns a
-  value. The Rubi rules also gain
-  three substitution utilities (`SubstForFractionalPowerOfLinear`,
-  `InverseFunctionOfLinear`, `SubstForInverseFunction`)
+  value. The Rubi rules also gain three substitution utilities
+  (`SubstForFractionalPowerOfLinear`, `InverseFunctionOfLinear`,
+  `SubstForInverseFunction`)
   ([#445](https://github.com/cortex-js/compute-engine/pull/445), contributed by
   [KingArth0r](https://github.com/KingArth0r)).
 
