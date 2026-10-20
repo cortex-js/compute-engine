@@ -119,6 +119,12 @@ missing would violate the selected rule that `Nothing` passes through.
 Constant expressions may fold before this check; a final fallback is returned
 without an absence test.
 
+`Map`, `Covariance`, `PopulationCovariance`, and `Correlation` also refuse
+compilation when source element types admit `Nothing`; single-source paired
+statistics inspect tuple coordinates, and maps also check their result type.
+An unconstrained `collection<any>` therefore needs an annotation that excludes
+`Nothing` (for example, `list<real>`) to compile. This preserves callback bypass and aligned-observation semantics.
+
 Before lifting the refusal, a target must represent `Nothing` separately from
 `Missing`/`Undefined`/numeric absence, preserve it across inputs, intermediate
 values and results, and implement checks/fallbacks that leave it untouched.
@@ -157,7 +163,12 @@ worker protocol for now. Open: the name of the array-evaluation pair
 keyword for parallel execution in Epsil: the engine decides from purity,
 compilability and size, as it does for compilation (design section 5.7).
 
-### The type of a lazy view does not include the `Nothing` it yields (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
+### Remaining raw-view omission and typing policies (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
+
+`Map` now preserves immediate omission in its result type and bypasses callbacks
+for omitted inputs. Paired statistics now skip whole aligned observations.
+The examples below record the original findings; other producers, `Filter`,
+tuple preservation, and the remaining consumers still need their own policies.
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,
 `Iterate`) keeps a `Nothing` result in its own display, count, `.at()` and

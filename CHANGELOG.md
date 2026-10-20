@@ -1,14 +1,29 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- `Map` bypasses its callback for immediate `Nothing` inputs and preserves their
+  positions. A strict numeric callback over a view yielding `1, Nothing, 3` now
+  yields its two results and `Nothing`, rather than an incompatible-type error
+  cell. Multi-source maps bypass the whole row if any input is `Nothing`.
+  `Missing` and markers nested inside a datum still reach the callback.
+- `Covariance`, `PopulationCovariance`, and `Correlation` skip whole aligned
+  observations containing `Nothing`, instead of rejecting them. Raw source
+  lengths must still match; all terms use the same retained observations.
+  Compilation refuses these statistics and maps whose inputs or map results may
+  contain `Nothing` until targets can preserve its distinct representation.
+
 ## 0.159.0 _2026-10-20_
 
 ### Behavior Changes
 
-- Absence checks treat both numeric markers alike: `IsMissing(Indeterminate)`
-  is now `True`, and `Indeterminate ?? 5` returns `5`, as for `NaN`.
-  Exact arithmetic and reducers still produce `Indeterminate` where they did
-  before. `Nothing` passes through fallbacks and is not missing data.
+- Absence checks treat both numeric markers alike: `IsMissing(Indeterminate)` is
+  now `True`, and `Indeterminate ?? 5` returns `5`, as for `NaN`. Exact
+  arithmetic and reducers still produce `Indeterminate` where they did before.
+  `Nothing` passes through fallbacks and is not missing data.
 - `Coalesce(x, RuntimeError("absent"))` retains the successful type of `x`
-  instead of becoming `never`. Coalescing removes only whole-value absence:
-  a list's missing cells and a possible `Nothing` result remain in its type.
+  instead of becoming `never`. Coalescing removes only whole-value absence: a
+  list's missing cells and a possible `Nothing` result remain in its type.
   Compilation refuses absence tests that might confuse `Nothing` with missing
   data until the target can represent that distinction.
 
@@ -19,9 +34,9 @@
   `If(Error(incompatible-type), x)` and is now `If(x > 1, Nothing, x)`, as on
   the `ce.box` route. `f(a, \mathrm{Nothing}, b)` gives the same arguments as
   `f(a,,b)`.
-- LaTeX: a style switch (`\displaystyle`, `\large`, …), `\color{…}`, a strut
-  or an invisible box (`\phantom{…}`, `\vphantom{…}`, `\hphantom{…}`) between
-  an operand and an infix operator no longer changes the expression:
+- LaTeX: a style switch (`\displaystyle`, `\large`, …), `\color{…}`, a strut or
+  an invisible box (`\phantom{…}`, `\vphantom{…}`, `\hphantom{…}`) between an
+  operand and an infix operator no longer changes the expression:
   `x \displaystyle + 1` was the product `x·1` and is now `x + 1`;
   `x\vphantom{y} + 1` was `x·1` and is now `x + 1`;
   `a \cdot b \displaystyle + c` is `ab + c`. The style of such a switch is not
@@ -29,69 +44,67 @@
   `x \displaystyle y + 1` was `x·(y + 1)` and is now `x·y + 1`, and
   `2 \displaystyle \frac{1}{2} + 1` was `3` and is now `2`. A switch at the
   start of a group still applies to the whole group (`{\displaystyle x+y}`).
-- LaTeX: `\smash{x}` gives `x`; before, its content was discarded
-  (`\smash{x}+1` was `1`). The option of `\smash[b]{…}` and of
-  `\placeholder[…]{…}` is read as text, not as math.
+- LaTeX: `\smash{x}` gives `x`; before, its content was discarded (`\smash{x}+1`
+  was `1`). The option of `\smash[b]{…}` and of `\placeholder[…]{…}` is read as
+  text, not as math.
 - LaTeX: an element of a comma list or a matrix cell that holds only a
   presentational command (`f(a, \phantom{x}, b)`,
   `\begin{pmatrix} a & \phantom{0} \\ c & d\end{pmatrix}`) is an empty element.
   Before, the list ended there (`f((a,), b)`), and the matrix lost its row
   break. `\phantom{y} x`, with a space, was an `unexpected-token` error and is
   now `x`.
-- LaTeX: a keyword that does not apply is text, as a word that is not a
-  keyword is. `x \text{where}` (no binding after `where`), `x \text{for} y`
-  (no comprehension or condition after `for`) and `x \text{if}` (no `then`)
-  were a `Sequence` of `x` and an `unexpected-operator` error; they are now
-  `x` followed by the text, as `x \text{hello}` is. `\operatorname{where}`
-  and `\mathrm{for}` that do not apply are symbols, as `\operatorname{foo}`
-  is. Such a keyword in a group no longer breaks the group: `\{x
-  \text{where}\}` is a set and `\frac{x \text{ where }}{2}` a fraction. A
-  statement keyword that applies after an operand starts another expression
-  for the `\text` spelling too: `x \text{return} y` was an error and is now
-  `x` followed by `Return(y)`, as `x \operatorname{return} y` already was.
-  The input after such a statement is read too: `a \text{return} b
-  \text{return} c` was `a` followed by `Return(b)`, without `c`, and
-  `x \operatorname{break} y` lost `y`. The same applies after a prefix
-  operator that ends an operand: `x \neg y \neg z` lost `Not(z)`, and
+- LaTeX: a keyword that does not apply is text, as a word that is not a keyword
+  is. `x \text{where}` (no binding after `where`), `x \text{for} y` (no
+  comprehension or condition after `for`) and `x \text{if}` (no `then`) were a
+  `Sequence` of `x` and an `unexpected-operator` error; they are now `x`
+  followed by the text, as `x \text{hello}` is. `\operatorname{where}` and
+  `\mathrm{for}` that do not apply are symbols, as `\operatorname{foo}` is. Such
+  a keyword in a group no longer breaks the group: `\{x \text{where}\}` is a set
+  and `\frac{x \text{ where }}{2}` a fraction. A statement keyword that applies
+  after an operand starts another expression for the `\text` spelling too:
+  `x \text{return} y` was an error and is now `x` followed by `Return(y)`, as
+  `x \operatorname{return} y` already was. The input after such a statement is
+  read too: `a \text{return} b \text{return} c` was `a` followed by `Return(b)`,
+  without `c`, and `x \operatorname{break} y` lost `y`. The same applies after a
+  prefix operator that ends an operand: `x \neg y \neg z` lost `Not(z)`, and
   `x \lnot y )` dropped the `)` with no error; it now reports an
   `unexpected-delimiter` error, so that input is no longer valid.
-- LaTeX: a keyword operator with nothing after it has a `missing` right
-  operand, as the symbol operators have: `x \text{and}` is
-  `And(x, Error("missing"))`, as `x \land` is. The right operand was
-  `Nothing`, so `x \text{and}` became `And(x)` and the error was lost. The
-  same applies to `or`, `iff`, `if and only if` and `such that`.
+- LaTeX: a keyword operator with nothing after it has a `missing` right operand,
+  as the symbol operators have: `x \text{and}` is `And(x, Error("missing"))`, as
+  `x \land` is. The right operand was `Nothing`, so `x \text{and}` became
+  `And(x)` and the error was lost. The same applies to `or`, `iff`,
+  `if and only if` and `such that`.
 
 ### Bug Fixes
 
-- **Compiled `GammaRegularized(a, z)` is correct for a non-positive order
-  `a`**, as `.N()` is
-  ([#457](https://github.com/cortex-js/compute-engine/issues/457), contributed
-  by [enumeratio](https://github.com/enumeratio)). With `a` and `z` declared
-  real, `compile(GammaRegularized(a, z)).run({a: -1.5, z: 0.001})` was `NaN`
-  and is now `8894.8453395772…`. At a non-positive integer `a` the compiled
-  value is `0` for `z > 0` and `NaN` at `z = 0`, as the interpreter answers; at
-  `z = 0` and a negative non-integer `a` it is `±Infinity` by the sign of
-  `Γ(a)`. The kernel works in logarithms at a large negative order, so
-  `GammaRegularized(-150.5, 120)` is `-7.65e-105`, not `0`. A value outside
-  the double range is `±Infinity`, or a signed `0`, as the IEEE rules give
-  it. The machine kernels were also made more accurate in related places,
-  each checked against mpmath:
-  - The Python target gives the same values. `GammaRegularized(a, z)` lowered
-    to `scipy.special.gammaincc`, which is `nan` for every `a < 0`, and the
+- **Compiled `GammaRegularized(a, z)` is correct for a non-positive order `a`**,
+  as `.N()` is ([#457](https://github.com/cortex-js/compute-engine/issues/457),
+  contributed by [enumeratio](https://github.com/enumeratio)). With `a` and `z`
+  declared real, `compile(GammaRegularized(a, z)).run({a: -1.5, z: 0.001})` was
+  `NaN` and is now `8894.8453395772…`. At a non-positive integer `a` the
+  compiled value is `0` for `z > 0` and `NaN` at `z = 0`, as the interpreter
+  answers; at `z = 0` and a negative non-integer `a` it is `±Infinity` by the
+  sign of `Γ(a)`. The kernel works in logarithms at a large negative order, so
+  `GammaRegularized(-150.5, 120)` is `-7.65e-105`, not `0`. A value outside the
+  double range is `±Infinity`, or a signed `0`, as the IEEE rules give it. The
+  machine kernels were also made more accurate in related places, each checked
+  against mpmath:
+  - The Python target gives the same values. `GammaRegularized(a, z)` lowered to
+    `scipy.special.gammaincc`, which is `nan` for every `a < 0`, and the
     two-operand `Gamma(s, z)` refused to compile for a constant `s ≤ 0`. Both
     now use a helper that keeps SciPy for a positive order and computes a
-    non-positive order itself; the helper also fixes `Gamma(200, 1000)`,
-    which overflowed to `inf` (its value is `6.3e162`). `compileLambda()`
-    cannot hold the helper, as for `Power`. A lambda keeps the inline
-    lowering only where it is correct: `GammaRegularized` with a constant
-    order of at least `1e-20`, and `Gamma(s, z)` with a constant order from
-    `2.5e-4` to `7.5`. Any other order fails with "use compileFunction";
-    before, such a lambda gave `nan` or a wrong value.
+    non-positive order itself; the helper also fixes `Gamma(200, 1000)`, which
+    overflowed to `inf` (its value is `6.3e162`). `compileLambda()` cannot hold
+    the helper, as for `Power`. A lambda keeps the inline lowering only where it
+    is correct: `GammaRegularized` with a constant order of at least `1e-20`,
+    and `Gamma(s, z)` with a constant order from `2.5e-4` to `7.5`. Any other
+    order fails with "use compileFunction"; before, such a lambda gave `nan` or
+    a wrong value.
   - `Gamma`, `Digamma`, `Trigamma` and `ln|Γ|` near a negative integer: the
     reflection formula now takes the sine of the exact remainder, so
     `Gamma(-10.000000001)` has at least 12 correct digits instead of 7. The
-    interval enclosure of `Gamma(-1.000001)` is under `1e-12` wide
-    (relative), not `3.5e-9`.
+    interval enclosure of `Gamma(-1.000001)` is under `1e-12` wide (relative),
+    not `3.5e-9`.
   - `GammaRegularized(a, z)` for `|a| ≤ 1/2` and `Gamma(s, z)` for
     `-1 < s < 1/2` and a small `z`: `GammaRegularized(1e-9, 0.99)` had five
     correct digits, and `Gamma(-0.9999, 0.001)` was `NaN`.
@@ -103,32 +116,31 @@
 
 - **`Log(1, base)` threads over a list of bases** instead of folding to the
   scalar `0`: `Log(1, [-10, e, 27])` was `0` and is now `[0, 0, 0]`, as
-  `Log(8, [2, 4])` is `[3, 3/2]`. The `Log(1, b) = 0` fold now applies only to
-  a base that cannot be a collection, so a symbol declared
-  `real | list<real>` is not folded either. A tuple base threads, as it
-  already did for `Log(8, (2, 3))`: `Log(1, (2, 3))` is `(0, 0)`. A set base
-  is an `incompatible-type` error, as it already was for `Log(8, Set(2, 3))`,
-  where it was the scalar `0` before
+  `Log(8, [2, 4])` is `[3, 3/2]`. The `Log(1, b) = 0` fold now applies only to a
+  base that cannot be a collection, so a symbol declared `real | list<real>` is
+  not folded either. A tuple base threads, as it already did for
+  `Log(8, (2, 3))`: `Log(1, (2, 3))` is `(0, 0)`. A set base is an
+  `incompatible-type` error, as it already was for `Log(8, Set(2, 3))`, where it
+  was the scalar `0` before
   ([#455](https://github.com/cortex-js/compute-engine/issues/455), contributed
   by [enumeratio](https://github.com/enumeratio)).
 
 - LaTeX: a chain of `\text` keyword operators such as
   `a \cdot b \text{and} a \cdot b \text{and} …` took time that grows
-  exponentially with the number of keywords (14 keywords: about 0.2 s; each
-  two more: about 3.4 times longer). The parser now compares the braced text
-  with the keywords instead of parsing the right operand to find out whether
-  the keyword matches.
-- LaTeX: a chain of `\text{ for }` or `\text{ where }` clauses that do not
-  apply (`x_0 \text{ for } y_0 \; x_1 \text{ for } y_1 …`) took time that
-  doubles with each clause (12 clauses: about 0.3 s). Two dictionary entries
-  read `\text{for}`, and each one parsed the rest of the input. The parser
-  now calls the handler of a keyword once at each position, and keeps the
-  result when it declines; 64 clauses take about 0.5 s. A chain of `\text{for}`
-  clauses with `\text{from} … \text{to} … \text{do} …` at its end took about
-  3.7 s for 16 clauses (each four more: about 15 times longer); it takes about
-  0.06 s for 16 clauses and 0.5 s for 32. A chain of
-  `\text{for all}` clauses is faster too (10 clauses: 1.7 s, was 21 s), but
-  still grows exponentially.
+  exponentially with the number of keywords (14 keywords: about 0.2 s; each two
+  more: about 3.4 times longer). The parser now compares the braced text with
+  the keywords instead of parsing the right operand to find out whether the
+  keyword matches.
+- LaTeX: a chain of `\text{ for }` or `\text{ where }` clauses that do not apply
+  (`x_0 \text{ for } y_0 \; x_1 \text{ for } y_1 …`) took time that doubles with
+  each clause (12 clauses: about 0.3 s). Two dictionary entries read
+  `\text{for}`, and each one parsed the rest of the input. The parser now calls
+  the handler of a keyword once at each position, and keeps the result when it
+  declines; 64 clauses take about 0.5 s. A chain of `\text{for}` clauses with
+  `\text{from} … \text{to} … \text{do} …` at its end took about 3.7 s for 16
+  clauses (each four more: about 15 times longer); it takes about 0.06 s for 16
+  clauses and 0.5 s for 32. A chain of `\text{for all}` clauses is faster too
+  (10 clauses: 1.7 s, was 21 s), but still grows exponentially.
 
 - The derivative of a `Sum` follows a call in a term or a bound into the body of
   the called function (Tycho ledger row 405). With `g := a ↦ a·x`,
@@ -205,16 +217,16 @@
 ### New Features
 
 - **Batch evaluation of compiled functions.** A `javascript` or `interval-js`
-  compilation result has `broadcast(inputs, options)`: the inputs of every
-  cell at once, one `Float64Array` per free variable (a `lo, hi` pair per cell
-  for `interval-js`) or one number for every cell, and one `Float64Array` of
+  compilation result has `broadcast(inputs, options)`: the inputs of every cell
+  at once, one `Float64Array` per free variable (a `lo, hi` pair per cell for
+  `interval-js`) or one number for every cell, and one `Float64Array` of
   results: one value per cell, or a `lo, hi, kind` triple per cell with the
   `INTERVAL_KIND` codes (`interval`, `empty`, `entire`, `singularPole`,
   `singularJump`, `partial`, `boolTrue`, `boolFalse`, `boolMaybe`, `error`). A
   `grid` layout takes the arrays as the axes of a regular grid, and `out` is a
   caller-owned output array. Cell for cell, the value is the one `run()` gives;
-  the conversions run once per batch instead of once per cell, which measured
-  20 % faster than `run()` per cell on the main thread.
+  the conversions run once per batch instead of once per cell, which measured 20
+  % faster than `run()` per cell on the main thread.
 
 - **Worker threads.** `broadcastAsync(inputs, options)` runs a batch on a pool
   of worker threads when the host gives the engine one
@@ -223,12 +235,12 @@
   small to pay for the transfer. It takes a `signal`, a `deadline` in
   milliseconds and a `chunk` size, and resolves to `{ out, done }`, the output
   and the number of leading cells that are valid. The worker is the new entry
-  `@cortex-js/compute-engine/kernel-worker`, one self-contained file that
-  holds the compiled-code runtime and the interval runtime and no engine; it
-  rebuilds each compiled function from its text and runs the same loop as the
-  main thread. Measured on an 18-core machine: an implicit plot of 512×512
-  interval cells takes 175 ms inline and 34 ms on 8 workers. The engine
-  creates no worker on its own. Design and measurements:
+  `@cortex-js/compute-engine/kernel-worker`, one self-contained file that holds
+  the compiled-code runtime and the interval runtime and no engine; it rebuilds
+  each compiled function from its text and runs the same loop as the main
+  thread. Measured on an 18-core machine: an implicit plot of 512×512 interval
+  cells takes 175 ms inline and 34 ms on 8 workers. The engine creates no worker
+  on its own. Design and measurements:
   `docs/plans/2026-10-20-worker-kernel-pool.md`.
 
 - **The interval runtime.** `createIntervalRuntime()` from

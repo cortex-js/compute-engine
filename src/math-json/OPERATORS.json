@@ -1679,7 +1679,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs."
+      "description": "Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
     },
     {
       "name": "Cos",
@@ -1814,7 +1814,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
+      "description": "Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
     },
     {
       "name": "Cross",
@@ -4980,7 +4980,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument.",
+      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the FIRST argument.\n\nAn immediate `Nothing` input bypasses the callback and remains `Nothing`\n\nat that position. With multiple sources, any `Nothing` coordinate bypasses\n\nthe whole callback. Nested `Nothing` and `Missing` are passed to the callback.\n\nThe view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.",
       "examples": [
         "Map(x => x^2, [1, 2, 3])"
       ]
@@ -6433,7 +6433,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
+      "description": "Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations."
     },
     {
       "name": "PopulationStandardDeviation",

@@ -9,6 +9,7 @@ import type { Type } from '../../common/type/types.js';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { withoutNothing } from '../../common/type/omission.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
@@ -164,7 +165,7 @@ function sourceElementType(source: Expression | undefined): Type | undefined {
   const src = source.isCanonical ? source : source.canonical;
   const elt = collectionElementType(resolveTypeForCompilation(src.type.type));
   if (elt === undefined || elt === 'unknown' || elt === 'any') return undefined;
-  return elt;
+  return withoutNothing(elt);
 }
 
 /**

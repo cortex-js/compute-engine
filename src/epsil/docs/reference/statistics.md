@@ -54,13 +54,13 @@ Cumulative distribution function P(X ≤ x) of a distribution.
 
 MathJSON `Correlation` · `(collection<any>, collection<any>?) -> nan | real<-1..1>`
 
-Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs.
+Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
 ### covariance
 
 MathJSON `Covariance` · `(collection<any>, collection<any>?) -> nan | real`
 
-Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs.
+Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
 ### erf
 
@@ -189,7 +189,7 @@ Least-squares polynomial fit of the given degree. Returns the ascending coeffici
 
 MathJSON `PopulationCovariance` · `(collection<any>, collection<any>?) -> nan | real`
 
-Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs.
+Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
 ### populationStandardDeviation
 

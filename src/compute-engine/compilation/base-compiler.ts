@@ -10380,6 +10380,50 @@ export class BaseCompiler {
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
+    // Current targets cannot distinguish an omitted element from a missing
+    // datum. Do not invoke callbacks or compact paired columns independently.
+    if (
+      h === 'Map' ||
+      h === 'Covariance' ||
+      h === 'PopulationCovariance' ||
+      h === 'Correlation'
+    ) {
+      const sources = h === 'Map' ? args.slice(1) : args;
+      const pairMayOmit = (
+        type: Type,
+        seen: ReadonlySet<Type> = new Set()
+      ): boolean => {
+        const t = resolveTypeForCompilation(type);
+        if (seen.has(t)) return false;
+        if (isSubtype('nothing', t)) return true;
+        if (typeof t !== 'object') return false;
+        if (t.kind === 'tuple')
+          return t.elements.some((e) => isSubtype('nothing', e.type));
+        if (t.kind === 'union') {
+          const next = new Set(seen).add(t);
+          return t.types.some((arm) => pairMayOmit(arm, next));
+        }
+        return false;
+      };
+      const hasOmission = sources.some((source) => {
+        const element = collectionElementType(compilationType(source));
+        if (element === undefined) return false;
+        if (isSubtype('nothing', element)) return true;
+        return h !== 'Map' && args.length === 1 && pairMayOmit(element);
+      });
+      const resultElement =
+        h === 'Map' && node !== undefined
+          ? collectionElementType(compilationType(node))
+          : undefined;
+      if (
+        hasOmission ||
+        (resultElement !== undefined && isSubtype('nothing', resultElement))
+      )
+        throw new Error(
+          `Could not compile \`${h}\`: possible 'Nothing' elements require a distinct omission representation.`
+        );
+    }
+
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
     // connective of such, a literal predicate — lowers to the target's own

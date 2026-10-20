@@ -1,5 +1,10 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  mapImmediateElements,
+  withoutNothing,
+  withNothing,
+} from '../../common/type/omission.js';
+import {
   isThenable,
   CancellationError,
   checkDeadline,
@@ -203,6 +208,7 @@ import type {
   PureEngineView,
   SymbolDefinitions,
   TypeHandlerContext,
+  OperatorTypeHandlerOnTypes,
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types.js';
@@ -1858,7 +1864,8 @@ function callbackCompatibilityError(
       fnDef.operator.resolvedMissingBehavior === 'handle');
   const elementOf = (src: Expression): Type => {
     const t = collectionElementType(src.type.type) ?? ('any' as Type);
-    return fnTakesAbsence ? stripMissingFromType(t) : t;
+    const supplied = arity.operator === 'Map' ? withoutNothing(t) : t;
+    return fnTakesAbsence ? stripMissingFromType(supplied) : supplied;
   };
   let supplyArrow: FunctionSignature;
   // Which supply positions carry a SOURCE ELEMENT, as opposed to a parameter
@@ -3074,6 +3081,112 @@ function mappingSourceElementTypeD(x: OperandDescriptor): Type | undefined {
   if (t === undefined || t === 'unknown' || t === 'any' || t === 'never')
     return undefined;
   return t;
+}
+
+/** Omission can be a returned branch even when an evidence join erased its type. */
+function mappingReturnsNothing(
+  fn: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  const seen = new Set<string>();
+  const namedBody = (name: string): OperandStructure | undefined => {
+    if (seen.has(name)) return undefined;
+    seen.add(name);
+    const def = engine.lookupDefinition(name);
+    const literal =
+      def?.operator !== undefined
+        ? (def.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
+        : def?.value?.value;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    const shape = describeOperand(literal).structureOf?.();
+    return shape?.kind === 'function-literal' ? shape.body : undefined;
+  };
+  const result = (s: OperandStructure | undefined): boolean => {
+    if (s?.kind === 'symbol') return s.name === 'Nothing' && s.system === true;
+    if (s?.kind !== 'application') return false;
+    const returned = (d: OperandDescriptor) =>
+      isSubtype('nothing', d.type) || result(d.structureOf?.());
+    if (s.head === 'If') return s.children.slice(1).some(returned);
+    if (s.head === 'Which')
+      return s.children.some((d, i) => i % 2 === 1 && returned(d));
+    if (s.head === 'Block')
+      return (
+        s.children.length > 0 &&
+        (returned(s.children[s.children.length - 1]) ||
+          s.children.some((d) => omittedReturn(d.structureOf?.())))
+      );
+    // Return's unit result may already have canonicalized away its operand.
+    if (s.head === 'Return' && s.children.length === 0) return true;
+    if (
+      s.head === 'Return' ||
+      s.head === 'N' ||
+      s.head === 'NumericApproximation' ||
+      s.head === 'When'
+    )
+      return s.children[0] !== undefined && returned(s.children[0]);
+    return result(namedBody(s.head));
+  };
+  // Early returns inside control flow also determine the callback result.
+  // Do not inspect nested function values or data held by other operators.
+  const omittedReturn = (s: OperandStructure | undefined): boolean => {
+    if (s?.kind !== 'application') return false;
+    if (s.head === 'Return') return result(s);
+    if (!['Block', 'If', 'Which', 'While', 'Loop', 'For'].includes(s.head))
+      return false;
+    return s.children.some((d) => omittedReturn(d.structureOf?.()));
+  };
+  const shape = fn.structureOf?.();
+  return (
+    isSubtype('nothing', callbackResultTypeD(fn, engine) ?? 'unknown') ||
+    result(
+      shape?.kind === 'function-literal'
+        ? shape.body
+        : shape?.kind === 'symbol'
+          ? namedBody(shape.name)
+          : undefined
+    )
+  );
+}
+
+function withMapOmission(
+  handler: OperatorTypeHandlerOnTypes
+): OperatorTypeHandlerOnTypes {
+  return (ops, context) => {
+    const bypass = ops.slice(1).some((d) => {
+      const t = d.facts.elementType ?? collectionElementType(d.type);
+      return t !== undefined && isSubtype('nothing', t);
+    });
+    const supplied = bypass
+      ? ops.map((d, i) =>
+          i === 0
+            ? d
+            : {
+                ...d,
+                type: mapImmediateElements(d.type, withoutNothing),
+                facts: {
+                  ...d.facts,
+                  elementType:
+                    d.facts.elementType === undefined
+                      ? undefined
+                      : withoutNothing(d.facts.elementType),
+                },
+              }
+        )
+      : ops;
+    const answer = handler(supplied, context);
+    if (
+      answer === undefined ||
+      (!bypass &&
+        (ops[0] === undefined ||
+          !mappingReturnsNothing(ops[0], context.engine)))
+    )
+      return answer;
+    return BoxedType.forResult(
+      mapImmediateElements(answer.type, withNothing),
+      context.engine._typeResolver
+    );
+  };
 }
 
 /** The head and operand descriptors of a structure that describes an
@@ -4574,7 +4687,7 @@ function withDeclaredCallbackAbsence(
   ops: ReadonlyArray<OperandDescriptor>,
   context: TypeHandlerContext
 ) => BoxedType | undefined {
-  return (ops, context) => {
+  return withMapOmission((ops, context) => {
     const { engine } = context;
     const sources = ops.slice(1);
     const fn = ops[0]?.structureOf?.();
@@ -4627,7 +4740,7 @@ function withDeclaredCallbackAbsence(
         : absorbed,
       engine._typeResolver
     );
-  };
+  });
 }
 
 /**
@@ -10460,6 +10573,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'multiple collections, combines them element-wise (like `zipWith`): ',
       '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
       'shortest input. The mapping function is always the FIRST argument.',
+      'An immediate `Nothing` input bypasses the callback and remains `Nothing`',
+      'at that position. With multiple sources, any `Nothing` coordinate bypasses',
+      'the whole callback. Nested `Nothing` and `Missing` are passed to the callback.',
+      'The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held `When` over the list and
@@ -20666,6 +20783,7 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     if (index < 1) return undefined;
     const items = collections.map((c) => mapSource(c).at(index));
     if (items.some((x) => x === undefined)) return undefined;
+    if (items.some((x) => isSymbol(x, 'Nothing'))) return expr.engine.Nothing;
     // Each at() access is its own micro-drain (resets the
     // once-per-drain attempt bound, so a cleared `{symbol}` mark can
     // re-attempt on an at()-only access pattern).
@@ -20692,6 +20810,7 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
   if (!Number.isFinite(index) || index === 0) return undefined;
   const item = source.at(index);
   if (!item) return undefined;
+  if (isSymbol(item, 'Nothing')) return expr.engine.Nothing;
   // Each at() access is its own micro-drain (see the zip form above).
   const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([item]);
   if (compiled !== undefined) return compiled;
@@ -20880,6 +20999,8 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
             return { value: undefined, done: true };
           items.push(value);
         }
+        if (items.some((v) => isSymbol(v, 'Nothing')))
+          return { value: expr.engine.Nothing, done: false };
         const compiled = auto?.(items);
         if (compiled !== undefined) return { value: compiled, done: false };
         // A mapping function that produced no value is a COMPUTATION
@@ -20905,6 +21026,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
       while (true) {
         const { value, done } = source.next();
         if (done) return { value: undefined, done: true };
+        if (isSymbol(value, 'Nothing')) return { value, done: false };
         const compiled = auto?.([value]);
         if (compiled !== undefined) return { value: compiled, done: false };
         // See above: a failed mapping is the marker, not an erasure.

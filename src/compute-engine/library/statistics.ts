@@ -1670,7 +1670,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Covariance: {
       description:
         'Sample covariance (n − 1 denominator) of paired data, given as two ' +
-        'equal-length collections or one collection of (x, y) pairs.',
+        'equal-length collections or one collection of (x, y) pairs. ' +
+        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
+        'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> real | nan',
@@ -1702,7 +1704,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     PopulationCovariance: {
       description:
         'Population covariance (n denominator) of paired data, given as two ' +
-        'equal-length collections or one collection of (x, y) pairs.',
+        'equal-length collections or one collection of (x, y) pairs. ' +
+        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
+        'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> real | nan',
@@ -1734,7 +1738,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Correlation: {
       description:
         "Pearson's correlation coefficient of paired data, given as two " +
-        'equal-length collections or one collection of (x, y) pairs.',
+        'equal-length collections or one collection of (x, y) pairs. ' +
+        'An observation is skipped if either coordinate (or the whole row) is Nothing. ' +
+        'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> real<-1..1> | nan',
@@ -2695,27 +2701,44 @@ function hasUnwalkableDataCollection(ops: ReadonlyArray<Expression>): boolean {
  * `incompatible-dimensions` error, not `NaN`). The least-squares fits do NOT
  * pass it: a fit has no absent-datum convention, and mis-shaped data is what
  * its `Error` reports.
+ *
+ * `skipNothing` omits whole paired observations, never individual coordinates.
+ * Two sources must have equal raw lengths before omission. The retained rows
+ * supply every term of the paired statistic. Fits leave this option disabled.
  */
 function extractPairs(
   ops: ReadonlyArray<Expression>,
   walked?: Expression[],
-  admitAbsent = false
+  admitAbsent = false,
+  skipNothing = false
 ): { xs: Expression[]; ys: Expression[] } | null {
   const isDatum = (v: Expression): boolean =>
-    isNumber(v) || (admitAbsent && isAbsentValue(v));
+    isNumber(v) ||
+    (admitAbsent && isAbsentValue(v)) ||
+    (skipNothing && isSymbol(v, 'Nothing'));
   if (ops.length === 1) {
     const arg = ops[0];
     if (!isWalkableFiniteCollection(arg)) return null;
     const xs: Expression[] = [];
     const ys: Expression[] = [];
     for (const el of arg.each()) {
+      if (skipNothing && isSymbol(el, 'Nothing')) continue;
       if (!isWalkableFiniteCollection(el)) {
         walked?.push(el);
         return null;
       }
-      const pair = [...el.each()];
+      // A pair's coordinates are fixed slots. Walking a Tuple through its
+      // materializing iterator can erase a computed Nothing and shift them.
+      const pair =
+        skipNothing && isFunction(el, 'Tuple')
+          ? el.ops.map((coordinate) => coordinate.evaluate())
+          : [...el.each()];
+      if (pair.length !== 2) {
+        walked?.push(...pair);
+        return null;
+      }
+      if (skipNothing && pair.some((v) => isSymbol(v, 'Nothing'))) continue;
       walked?.push(...pair);
-      if (pair.length !== 2) return null;
       if (!isDatum(pair[0]) || !isDatum(pair[1])) return null;
       xs.push(pair[0]);
       ys.push(pair[1]);
@@ -2726,8 +2749,30 @@ function extractPairs(
     const [a, b] = ops;
     if (!isWalkableFiniteCollection(a) || !isWalkableFiniteCollection(b))
       return null;
-    const xs = [...a.each()];
-    const ys = [...b.each()];
+    let xs = [...a.each()];
+    let ys = [...b.each()];
+    if (
+      skipNothing &&
+      xs.length !== ys.length &&
+      (xs.some((v) => isSymbol(v, 'Nothing')) ||
+        ys.some((v) => isSymbol(v, 'Nothing')))
+    ) {
+      walked?.push(...xs, ...ys);
+      return { xs, ys };
+    }
+    // Keep mismatched raw lengths for the caller's dimension diagnostic.
+    // Only aligned rows may be omitted; independent compaction shifts pairs.
+    if (skipNothing && xs.length === ys.length) {
+      const keptX: Expression[] = [];
+      const keptY: Expression[] = [];
+      for (let i = 0; i < xs.length; i++) {
+        if (isSymbol(xs[i], 'Nothing') || isSymbol(ys[i], 'Nothing')) continue;
+        keptX.push(xs[i]);
+        keptY.push(ys[i]);
+      }
+      xs = keptX;
+      ys = keptY;
+    }
     walked?.push(...xs, ...ys);
     if (!xs.every(isDatum) || !ys.every(isDatum)) return null;
     return { xs, ys };
@@ -2905,7 +2950,7 @@ function evaluateCovariance(
   const walked: Expression[] = [];
   // `true`: an absent (`Missing`) datum is admitted as data so the §3.C
   // verdict below is reached, AFTER the shape checks — see `extractPairs`.
-  const pairs = extractPairs(ops, walked, true);
+  const pairs = extractPairs(ops, walked, true, true);
   if (!pairs) return shapeError(ce, name, ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`):
@@ -2961,7 +3006,7 @@ function evaluateCorrelation(
   const walked: Expression[] = [];
   // `true`: as in `evaluateCovariance` — an absent datum is data here, and
   // §3.C makes it the answer's `NaN`.
-  const pairs = extractPairs(ops, walked, true);
+  const pairs = extractPairs(ops, walked, true, true);
   if (!pairs) return shapeError(ce, 'Correlation', ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`).

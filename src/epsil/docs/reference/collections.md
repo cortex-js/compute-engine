@@ -1020,6 +1020,14 @@ multiple collections, combines them element-wise (like `zipWith`):
 
 shortest input. The mapping function is always the FIRST argument.
 
+An immediate `Nothing` input bypasses the callback and remains `Nothing`
+
+at that position. With multiple sources, any `Nothing` coordinate bypasses
+
+the whole callback. Nested `Nothing` and `Missing` are passed to the callback.
+
+The view keeps its raw length; `ListFrom` materializes it and omits `Nothing`.
+
 ```epsil
 map(x => x^2, [1, 2, 3])
 // ➔ [1,4,9]

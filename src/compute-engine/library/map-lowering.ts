@@ -11,7 +11,7 @@ import {
 } from './map-broadcast-shape.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { errorValue } from '../boxed-expression/error-value.js';
-import { isNumber } from '../boxed-expression/type-guards.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import { liveScopeOf } from '../boxed-expression/ambient-chain.js';
 
 // The broadcast-shape walk moved to `map-broadcast-shape.js` (a leaf shared
@@ -252,6 +252,8 @@ export function makeSpineRunner(
     let rowEvaluated = false;
     for (let i = 0; i < levels.length; i++) {
       const level = levels[i];
+      // Omission bypasses every remaining callback, including compiled levels.
+      if (row.some((e) => isSymbol(e, 'Nothing'))) return ce.Nothing;
       // `invoke` step 2 (rung 2 of the error-propagation design): an argument
       // that IS — or embeds — an `Error` makes the application evaluate to
       // that error value, and the body never runs. The lowered path must
@@ -276,6 +278,7 @@ export function makeSpineRunner(
           // would otherwise pass through raw. `.evaluate()` is cheap on an
           // already-evaluated value.
           row = row.map((e) => e.evaluate());
+          if (row.some((e) => isSymbol(e, 'Nothing'))) return ce.Nothing;
           rowEvaluated = true;
           // `invoke` step 4: an argument that only became an error when
           // EVALUATED bubbles like a literal one.

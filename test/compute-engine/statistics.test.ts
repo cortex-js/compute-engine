@@ -607,6 +607,9 @@ describe('compilation', () => {
   });
 
   test('Python codegen for cov/corr', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'list<real>');
+    ce.declare('b', 'list<real>');
     const py = new PythonTarget();
     expect(
       py.compile(ce.box(['Covariance', ce.symbol('a'), ce.symbol('b')])).code
