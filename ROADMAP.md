@@ -149,6 +149,24 @@ operator with such a parameter (`Filter`, `Any`, `All`, `Scan`, `Reduce`,
 `ArgMax`, `Partition`, `GroupBy`, …). Fix: bind `T` to the widening of the
 slot types. The bare-`tuple` proposal needs this fix first.
 
+### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
+
+`x: list` (values only) assigned `[1, Missing]` is accepted, and `x` is then
+typed `list<integer | missing>`, which is not a subtype of the declared
+`list`; `t: tuple := TupleFrom(L)` with an absent slot is accepted the same
+way. The assignment check does not apply the subtype test that the
+declaration states. Either the check must refuse such a value, or the
+declaration must be read as admitting it (see
+`docs/plans/2026-10-20-bare-tuple-record-any.md`).
+
+### Two more subtype-relation gaps (OPEN, small — found 2026-10-20 by the bare-type prototypes)
+
+- `any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`
+  (`broadcastable<any>` is a mutual subtype of both `any` and `unknown`).
+- `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`,
+  but `tuple<integer>` is not `<: broadcastable<integer>`; the same for
+  `matrix<integer>`.
+
 ### Two subtype-relation gaps found by the transitivity check (OPEN, small — found 2026-10-20 by the same prototype)
 
 - Five transitivity violations through a record with an extra field of type
@@ -173,7 +191,8 @@ on 2026-10-19:
 - `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
   call with two arguments, gets no answer, and falls back to `list<any>`: sound
   but imprecise.
-- IN DESIGN (user decision 2026-10-20: write a design note for making bare
+- TABLED 2026-10-20 (design note `docs/plans/2026-10-20-bare-tuple-record-any.md`,
+  options A and B measured; the user is thinking it over; earlier: a design note for making bare
   `tuple` and `record` accept any tuple or record, absent slots included;
   `missing` stays opt-in everywhere else): `TupleFrom(L)` and `Join` of
   records answer the bare `tuple` and

@@ -1,7 +1,8 @@
 # Bare `tuple` and `record` accept any tuple and any record
 
-Status: PROPOSAL, waiting for the user's decision (requested 2026-10-20). A
-measurement prototype exists; nothing has landed.
+Status: TABLED by the user on 2026-10-20 ("I'm going to give it some
+thoughts"). Two measurement prototypes were run; nothing has landed. Item 1
+(the tuple-argument binding) is a defect at HEAD and is fixed on its own.
 
 ## The problem
 
@@ -182,12 +183,105 @@ absent element is admitted. A tuple argument does not bind `T` from its slots;
 - The 15 `couldMatch` misses on tuples with an `any` slot
   (`indexed_collection` vs `tuple<any>`).
 
+## Alternative B: every bare collection name is its `<any>` top
+
+The user asked (2026-10-20) whether reading EVERY bare collection name as its
+absence-admitting top — `list` ≡ `list<any>`, `set` ≡ `set<any>`,
+`dictionary` ≡ `dictionary<any>`, `collection` ≡ `collection<any>`,
+`indexed_collection` ≡ `indexed_collection<any>`, and `tuple`/`record` as
+above — with `X<unknown>` kept as an explicit values-only spelling, would be
+more consistent. This is close to the reading before the 2026-08-17 decision
+(bare forms admitted absence then), but on the repaired lattice
+(`any <: unknown` is false today). A second prototype measured it in two
+variants that differ only in how `X<any>` is stored: F reduces `X<any>` to
+the bare name; N keeps `X<any>` as a composite and makes the two mutual
+subtypes.
+
+**Lattice** (79 types; the larger type set of this measurement):
+
+| Check | HEAD | Alternative B |
+| --- | --- | --- |
+| Transitivity violations | 23 (8 through a bare name) | 15 (0 through a bare name) |
+| `couldMatch` false although a common subtype exists | 68 (31 through a bare name) | 45 (8, all `list<list>` vs `matrix<integer>`) |
+| Disjointness violations, `couldMatch` asymmetries | 0 | 0 |
+
+So B removes every bare-name defect of the relation; the others move to the
+explicit `<unknown>` spellings, where they also exist today.
+
+**Full suite** (HEAD: these 43–50 suites all pass):
+
+| | F | N |
+| --- | --- | --- |
+| Failing tests | 267 | 237 |
+| Failing inline snapshots | 18 | 18 |
+| (a) intended: a printed type changes from `X<any>` to `X`, tests that pin the lattice or the stored form, the element type of a bare name is `any` | 166 | 184 |
+| (b) acceptable: the wording of an expected type in a diagnostic; some result types become wider | 53 | 51 |
+| (c) real regressions | 48 | 2 |
+
+The two regressions that remain in N are the Epsil corpus programs `horner`
+and Euler 36. Their cause: `Reverse` (and `RotateLeft`/`RotateRight`) is
+declared with the bound `T: list`, and an unbound type variable is filled in
+as `unknown`, so `indexed_collection<unknown>` is now strictly below bare
+`list`, the union of the overload parameters no longer reduces, and the
+inference of a parameter used in `reverse(ds)` gives up. Removing them needs
+a further decision: whether an unbound type variable for collection elements
+is filled in as `any` (which would also remove most of the (b) diagnostic
+wording changes). The F-only regressions come from code that matches the
+composite `X<any>` form (`parameterIndexReadType`) and from the placeholder
+rule (`isConstructorPlaceholderType`), which would treat an explicit
+`list<any>` declaration as refinable; N keeps them, at the cost of
+`x: list` being a refinable placeholder while `x: list<any>` is a fixed
+contract although the two types are equal.
+
+**What users would see** (measured, HEAD vs B):
+
+- `x: list` assigned `[1, Missing]` is ACCEPTED in both. At HEAD the value
+  type `list<integer | missing>` is not a subtype of the declared `list`,
+  but the assignment check does not apply that subtype test (a HEAD
+  inconsistency, recorded in ROADMAP.md); with B it is a subtype.
+- `x + 1`, `At(x, 1)`, `Map(f, x)`, Epsil `let xs: list = [1, 2]; xs[1] + 1`
+  and compiled `Sum(xs)` give the same results. No route warns about a
+  possible absent element in either design, and compiled code adds no
+  absence check.
+- `list<unknown>` would print as written (today it prints as `list`), and a
+  declaration `x: list<unknown>` becomes a fixed contract (today it is the
+  same as bare `list`, a refinable placeholder).
+- Printed types change wherever `X<any>` was printed: about 145–163 test
+  expectations.
+
+**What B needs beyond A:** changes in `primitive.ts`, `subtype.ts`,
+`reduce.ts`, the type builder, the parser defaults, the serializer and the
+element-type helpers (8 files in the prototype); the decision on unbound
+type variables above; updating about 240 test expectations; rewriting the
+types guide (`doc/08-guide-types.md` lines ~486-497, ~2241-2246, ~2305,
+~2344-2417, including "Which spelling, when" and "Why absence is not part
+of `unknown`"), CLAUDE.md "Common API Traps", `docs/ERROR-MODEL.md`
+(~827-829, ~2184); the `ast-grep` rule `bare-collection-shape-gate` becomes
+obsolete, and nothing would then flag a values-only test spelled with a bare
+name. About 59 parameter positions (`collection<any>` and the like) become
+equal to the bare name; about 68 operators with a bare result type would
+claim that absent elements are possible.
+
+## Comparison
+
+| | A: `tuple`/`record` only | B: every bare collection name |
+| --- | --- | --- |
+| Consistency | bare `tuple`/`record` = any tuple/record; bare `list`, `set`, … stay values-only (they have the `<any>` spelling for the top) | one rule for every collection: the bare name is the top, `<unknown>` is values-only |
+| Lattice (bare-name defects) | removes the bare `tuple`/`record` ones | removes all of them |
+| Tests that change | 3 (one is a regression that item 1 removes) | 237–267, mostly printed types; 2 real regressions that need a further decision |
+| Documentation | a few paragraphs | the "bare type" sections of the guide, CLAUDE.md, ERROR-MODEL.md |
+| User-visible checking | `p: tuple` accepts absent slots | `x: list` etc. accept absent elements (already accepted at assignment today) |
+| Fit with "`missing` stays opt-in" (2026-10-20) | yes, apart from the bare tuple/record top | weaker: writing a bare collection name opts in |
+
 ## Decision needed
 
-- **Yes**: implement items 1-6 in a worktree, item 1 first; measure the full
-  suite again; dual review; land as one change.
-- **No**: bare `tuple` / `record` stay values-only; `TupleFrom` over absent
-  cells and record joins keep a type that excludes their value; item 1 (the
-  tuple-argument binding) is still a defect at HEAD and is fixed on its own.
+- **A**: implement items 1-6 above in a worktree, item 1 first; measure the
+  full suite again; dual review; land as one change.
+- **B**: decide first how an unbound type variable for collection elements
+  is filled in, then implement B (variant N) with the test updates and the
+  documentation rewrite, as its own initiative.
+- **Neither**: bare names stay values-only; `TupleFrom` over absent cells and
+  record joins keep a type that excludes their value.
 
-Either way, item 1 and the two HEAD defects above are recorded in ROADMAP.md.
+In every case, item 1 (the tuple-argument binding, in progress since
+2026-10-20) and the HEAD defects above are fixed or recorded on their own.
