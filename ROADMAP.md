@@ -292,18 +292,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 15) (OPEN, decision)
-
-- **A `real` parameter and an infinite argument on the GLSL, WGSL, Python and
-  interval targets.** The interpreter refuses `±∞` at a parameter declared
-  `real`: with `g: (real) -> real` and the input `x = Infinity`, the run gives
-  an error. Compiled JavaScript tests this (`Number.isFinite`), but GLSL, WGSL,
-  Python and interval-js give `g(∞)`. (A) Keep this, as part of the existing
-  rule that a float target writes `~oo` as `Infinity`. (B) Refuse a `real` call
-  on those targets when the argument's type is not declared; this refuses many
-  shader programs that compile today. If nothing is decided, (A) stays.
-  Recommendation: (A).
-
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
 - `Range(1, t)` with `t` a function-body local that has no value drops the
@@ -367,29 +355,34 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (`boxed-expression/boxed-function.ts`) does not check it, and each element is
   the error that `applicable()` (`function-utils.ts`) gives. Typing the
   parameter `(integer) -> any` would give one error, as for `Map`.
-- A symbol declared `error` with no value (`e`) is still checked by different
-  rules on three routes. An overloaded function refuses it
-  (`((number) -> number) & ((string) -> string)` applied to `e` gives "expected
-  `number | string`, got `error`"), because the overload prefilter
-  (`prefilterAdmits()`, `boxed-expression/overload.ts`) finds `error` disjoint
-  from each arm, while a single signature `(number) -> number` admits it. A
-  parameter typed `unknown` refuses it on a library operator and a function
-  literal, and admits it on a function name declared `(unknown) -> unknown`.
+- With a symbol declared `error` with no value (`ce.declare('e', 'error')`),
   `Length(e)` is valid at boxing and evaluates to "expected `collection`, got
-  `error`". A decision is necessary for the overload: admit `e` as the single
-  signature does, or keep the refusal. User decision 2026-10-20: the overload
-  admits `e`, as the single signature does.
-- A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix).
-  `.N()` runs `\sum_k f(k)` over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is
-  `1.6449…`), but `evaluate()` tries no closed form and leaves it unevaluated,
-  while `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `π²/6`. A decision is
-  necessary: (A) a sum with no bounds means `k = 1..∞` on every route, so
-  `evaluate()` gives `π²/6`; (B) it is an indefinite sum (Mathematica reads
-  `Sum[f, k]` as an antidifference), and `.N()` should not give a number either;
-  (C) keep today's split. Also, `\sum x^k` with no subscript is `Sum(x^k)` with
-  no indexing clause and evaluates to `x^k`; check whether that is intended.
-  User decision 2026-10-20: (A), a sum with no bounds means `k = 1..∞` on every
-  route.
+  `error`". A function with a single signature and a `list` parameter refuses
+  `e` at boxing. `Length` is declared `(any) -> infinity | integer`, so boxing
+  admits `e`, and its evaluate handler refuses it. One of the two routes should
+  change.
+- Infinite sums and products found 2026-10-20 by the no-bounds work (each one
+  also holds for the explicit `\sum_{k=1}^{\infty}` form; none gives a wrong
+  value):
+  - `\sum_{k=1}^\infty ((x+k+1)^2-(x+k)^2)` evaluates to
+    `(x + 1 + oo)^2 - (x + 1)^2` and the product version to
+    `(x + 1 + oo)/(x + 1)`: `symbolicSumClosedForm()` (`library/utils.ts`) puts
+    `+∞` in place of the index, and `symbolicLimit()` cannot take a limit with a
+    free parameter. `simplify()` gives `+oo`.
+  - `\prod_{k=1}^\infty k` stays unevaluated under `evaluate()` and `.N()`,
+    while `simplify()` gives `+oo`.
+  - `\sum_{k=0}^\infty (-2)^k` simplifies to `~oo` (complex infinity), while
+    `evaluate()` leaves it unevaluated; the partial sums are real and oscillate,
+    so `~oo` is not the right description.
+  - `\sum 1/(k+x) - 1/(k+x+1)` does not telescope: `telescopingParts()` needs a
+    `Negate` term.
+  - A sum with one bound (`\sum_{k=1} k`) fails to compile with the message
+    "`Nothing` … cannot be read as a variable" on JavaScript and GLSL (it falls
+    back to the interpreter).
+- `\sum x^k`, with no subscript, is `Sum(x^k)` with no indexing clause, and it
+  evaluates to `x^k` (the one-operand form reads a non-collection operand as
+  itself). Check whether that is intended: `\sum_k x^k` (with an index and no
+  bounds) runs over `k = 1..∞`.
 - The parse route does not infer the type of a symbol in a juxtaposed product.
   `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
   `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
@@ -406,31 +399,16 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (`absorbSubscripts()` in `latex-syntax/parse-symbol.ts`), and a single
   subscript has the same problem (`A_1`). The current output is pinned in
   `test/compute-engine/latex-syntax/double-subscript-symbol.test.ts`.
-- A wildcard name with a style does not round-trip through LaTeX. The name is
-  written in `\operatorname{}` with the style inside it, and the parser does not
-  accept a style command there: `_a_bold` is written
-  `\operatorname{\_\mathbf{a}}`, `_a_bold_1` is `\operatorname{\_\mathbf{a}_1}`
-  and `_x_bold_1` is `\operatorname{\_\mathbf{x}_1}`, and each one is a parse
-  error. `_x_1_bold` is written `\operatorname{\_x_{\mathbf{1}}}`, which reads
-  back as `_x_one_bold`.
 - A name with the upright style after its first part does not round-trip when
   the parser drops that style. The parser keeps `\mathrm{}` only around a
-  one-character body, so no spelling reads back as `x_1_upright` (it is written
-  `x_{\mathrm{1}}`, which reads back as `x_one`) or as `speed_upright_1` (it is
-  written `\mathrm{speed}_1`, which reads back as `speed_1`). The parser never
-  produces these names; they come from MathJSON.
-- A symbol whose name has a superscript part does not round-trip through LaTeX
-  when its base is one letter: `x__a` is written `x^{a}`, which reads back as
-  `Power(x, a)`, and `aleph__plus` is written `\aleph^{+}`, which reads back as
-  `PseudoInverse(aleph)`. A name with two superscript parts joins them with a
-  comma, `R_blackboard__0__plus` → `\mathbb{R^{0,+}}`, which does not parse. A
-  multi-letter base reads back (`mass__earth` → `\mathrm{mass^{earth}}`). A name
-  with a style and a superscript does not read back either: `x_bold__a` is
-  written `\mathbf{x^{a}}`, which reads back as `x__a_bold`. A decision is
-  necessary: choose a spelling that reads back as the symbol (for example
-  `\operatorname{x^{a}}`), or say that these names are for display only. User
-  decision 2026-10-20: write such a name in `\operatorname{}` (for example
-  `\operatorname{x^{a}}`).
+  one-character body, and it spells out a styled digit (`x_{\mathrm{1}}` is
+  `x_one`), so no spelling reads back as `x_1_upright` or `x__a_1_upright` (they
+  are written `x_1` and `\operatorname{x^{a}_1}`, the nearest names) or as
+  `speed_upright_1` (it is written `\mathrm{speed}_1`, which reads back as
+  `speed_1`). Also, no spelling reads back as a name with a unicode escape right
+  after a styled digit part, such as `x_1_bold____002012`: the parser reads no
+  text after a style command in a name. The parser never produces these names;
+  they come from MathJSON.
 - The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
   and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
   `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A

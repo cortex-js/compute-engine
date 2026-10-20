@@ -28449,7 +28449,11 @@ export class BaseCompiler {
    *   static type of the argument proves it
    *   (`argumentProvesParameterType`); or the target does not test it, as
    *   before: a type that admits every real number (`real`, a union with a
-   *   non-numeric member) on a target other than JavaScript.
+   *   non-numeric member) on a target other than JavaScript. So on GLSL,
+   *   WGSL, Python and interval-js, an infinite argument at a `real`
+   *   parameter gives a value, where the interpreter refuses `±∞`. This is
+   *   intended: it is part of the rule that a float target writes `~oo` as
+   *   `Infinity`, and a test would refuse many shader programs.
    * - `'guard'`: the call tests the argument at run time. On JavaScript, a
    *   type with a test (`jsClauseParamGuard`). On the interval target, an
    *   integer type or a real type with bounds (`intervalParameterDomain`).
