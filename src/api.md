@@ -2974,8 +2974,9 @@ _isLiteralData(): boolean
 
 Internal. Is this node written-out DATA: a canonical `List` or `Tuple`
 bound to the standard library whose every element is a number literal,
-or such a `List` or `Tuple` in turn? Such a node holds no symbol and
-evaluates to itself. The answer is computed once per node.
+a failed cell, or such a `List` or `Tuple` in turn? A failed cell is an
+`Error` node with no symbol in it, and is data too. Such a node holds no
+symbol and evaluates to itself. The answer is computed once per node.
 
 </MemberCard>
 
@@ -8434,9 +8435,11 @@ type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions,
   | "numericSetStyle"
   | "indexStyle"
   | "readsAsPointList"
-  | "readsAsCardinality"> & {
+  | "readsAsCardinality"
+  | "readsAsMatrixPowerBase"> & {
   readsAsPointList: ((operands) => boolean | undefined) | undefined;
   readsAsCardinality: ((operand) => boolean | undefined) | undefined;
+  readsAsMatrixPowerBase: ((base) => boolean | undefined) | undefined;
   applyFunctionStyle: (expr, level) => DelimiterScale;
   groupStyle: (expr, level) => DelimiterScale;
   rootStyle: (expr, level) => RootStyle;

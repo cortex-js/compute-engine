@@ -135,19 +135,38 @@ Question: does the element type of a view include `nothing` when its callback
 can return `Nothing`, and how does each reducer treat a `Nothing` element
 (skip it, as a list literal does, or treat it as an error)?
 
-### A tuple argument does not bind the element variable of a collection parameter (OPEN, small — found 2026-10-20 by the bare-`tuple` prototype, `docs/plans/2026-10-20-bare-tuple-record-any.md`)
+### A tuple with an absent slot is refused as the source of a lazy collection operator (OPEN, fix in progress — found 2026-10-20 by the bare-`tuple` prototype, `docs/plans/2026-10-20-bare-tuple-record-any.md`)
 
 `Map(x ↦ x + 10, t)` with `t: tuple<integer, missing>` is an
 `incompatible-type` error, while `l: list<integer | missing>` gives
 `list<number>` and `t: tuple<integer, integer>` gives `list<integer>`
-(measured 2026-10-20). A list argument binds `T` of a `collection<T>` /
-`indexed_collection<T>` parameter to its element type; a tuple argument does
-not bind `T` from its slots, so `T` is read as its bound (`unknown` for an
-unbound variable) and an absent slot is refused. The same applies to every
-operator with such a parameter (`Filter`, `Any`, `All`, `Scan`, `Reduce`,
-`Fold`, `TakeWhile`, `FlatMap`, `Find`, `CountIf`, `Position`, `MaxBy`,
-`ArgMax`, `Partition`, `GroupBy`, …). Fix: bind `T` to the widening of the
-slot types. The bare-`tuple` proposal needs this fix first.
+(measured 2026-10-20). The type-variable solver is not the cause: the eager
+operators (`CountIf`, `Find`, `Sort`, `Partition`, …) accept such a tuple. The
+LAZY operators (`Map`, `Filter`, `Reduce`, `Fold`, `Scan`, `TakeWhile`,
+`DropWhile`, `FlatMap`, `Any`, `All`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`,
+`Dedup`, `Differences`) do not run the solver; their source goes through
+`checkCollectionOperand` → `checkType(x, 'collection')` (`validate.ts`),
+where a list with an absent element defers but a tuple never does.
+`Dedup` also copied its source type, which is wrong when that type states a
+length (`Dedup((1, 1))` typed `tuple<integer, integer>`, value `[1]`).
+
+Related defects found by the same fix (each also on the list route):
+
+- `Any`/`All` are typed `boolean`, but `Any([1, Missing], x ↦ x > 2)` is
+  `Missing` (Kleene logic, locked in `collections-absent.test.ts`); typing
+  the result `boolean | missing` touches Epsil conditions and the compile
+  targets.
+- `FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>` is typed
+  `list<number>`, but its value is `[1, 1, Missing, Missing]`.
+- `Map(F, c)` and `Filter(c, …)` with `c: missing | list<integer>` print as
+  `Set(11, 12)`, although typed `list<integer> | missing` and evaluating to
+  `[11, 12]`.
+- At a lazy source, `list<missing>` is accepted (`Map` gives `[NaN]`) but
+  `tuple<missing, missing>` is refused.
+- `collectionElementType(tuple<unknown, missing>)` widens to `missing`, so
+  that tuple is still refused.
+- `Insert`, `ReplaceAt`, `RangeOf`, `ContainsSequence`, `StartsWith` and
+  `EndsWith` are invalid with a bare `tuple` source (`Insert(tb, 1, 5)`).
 
 ### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 

@@ -2,7 +2,8 @@ import type { Expression } from '../global-types.js';
 import { isFunction, isNumber } from './type-guards.js';
 
 /**
- * If `arg` is the negation of a value `a`, return `a`, else `undefined`.
+ * If `arg` is the negation of a value `a`, return `{ inner: a, literal }`,
+ * else `undefined`.
  * The odd and even function rules use it to move the sign out of the
  * argument: f(-a) = -f(a) or f(-a) = f(a).
  *
