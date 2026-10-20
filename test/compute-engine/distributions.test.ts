@@ -80,7 +80,9 @@ describe('regularized incomplete gamma/beta kernels', () => {
       expect(gammaP(0, 1)).toBeNaN();
       expect(gammaP(-1, 1)).toBeNaN();
       expect(gammaP(3, -1)).toBeNaN();
-      expect(gammaQ(0, 1)).toBeNaN();
+      // a pole of Γ: 1/Γ(a) = 0, as the GammaRegularized head answers
+      expect(gammaQ(0, 1)).toBe(0);
+      expect(gammaQ(0, 0)).toBeNaN();
       expect(gammaP(NaN, 1)).toBeNaN();
       expect(gammaP(3, NaN)).toBeNaN();
     });

@@ -698,14 +698,28 @@ export function gammaP(a: number, x: number): number {
 }
 
 /**
- * Upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x), for
- * real a > 0 and x ≥ 0. Returns NaN outside that domain. The continued
- * fraction is used directly for x ≥ a+1 so the tail keeps full relative
- * precision instead of coming from 1 − P.
+ * Upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a), for real x ≥ 0.
+ * Returns NaN for x < 0, where Q is complex.
+ *
+ * For a > 0 it is 1 − P(a,x), with the continued fraction used directly for
+ * x ≥ a+1 so the tail keeps full relative precision.
+ *
+ * For a ≤ 0 Γ(a) is a pole or negative, so the quotient is taken from
+ * `incompleteGammaUpper`: Q(a,x) = 0 at a non-positive integer (1/Γ(a) = 0)
+ * for x > 0, and NaN at x = 0 (∞/∞). At a negative non-integer a and x = 0 it
+ * is sign(Γ(a))·∞, since Γ(a,x) diverges like x^a (Q(−1.5, 10⁻³) = 8894.8…).
+ * A quotient outside the double range (Γ(a) underflowing past a ≈ −171) is NaN.
  */
 export function gammaQ(a: number, x: number): number {
   if (Number.isNaN(a) || Number.isNaN(x)) return NaN;
-  if (a <= 0 || x < 0) return NaN;
+  if (x < 0) return NaN;
+  if (a <= 0) {
+    if (!Number.isFinite(a)) return NaN;
+    if (Number.isInteger(a)) return x === 0 ? NaN : 0;
+    if (x === 0) return Math.floor(-a) % 2 === 1 ? Infinity : -Infinity;
+    const q = incompleteGammaUpper(a, x) / gamma(a);
+    return Number.isFinite(q) ? q : NaN;
+  }
   if (x === 0) return 1;
   if (x < a + 1) return 1 - gammaPSeries(a, x);
   return gammaQContinuedFraction(a, x);

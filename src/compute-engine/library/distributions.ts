@@ -3,10 +3,8 @@ import {
   bigBetaRegularized,
   bigGammaQ,
   bigGammaQNegativeOrder,
-  gamma,
   betaRegularized,
   gammaQ,
-  incompleteGammaUpper,
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
@@ -572,7 +570,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           const q = apply2(
             a,
             z,
-            (a, z) => incompleteGammaUpper(a, z) / gamma(a),
+            (a, z) => gammaQ(a, z),
             (a, z) => bigGammaQNegativeOrder(ce, a, z)
           );
           if (

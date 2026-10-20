@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **Compiled `GammaRegularized(a, z)` is correct for a non-positive order `a`,**
+  as `.N()` is (#457, contributed by [enumeratio](https://github.com/enumeratio)).
+  With `a` and `z` declared real, `compile(GammaRegularized(a, z)).run({a: -1.5,
+  z: 0.001})` was `NaN`; it is now `8894.8453395772…`, as
+  `GammaRegularized(-1.5, 0.001).N()` is. The same holds for `a = -0.5`
+  (`-16.859…` at `z = 0.001`) and `a = -2.5` (`-13358661.78…`). At a
+  non-positive integer `a` the compiled value is `0` for `z > 0` and `NaN` at
+  `z = 0`, as the interpreter answers, and at `z = 0` and a negative
+  non-integer `a` it is `±Infinity` by the sign of `Γ(a)`. The interpreter and
+  the compiled lane now share one kernel, `gammaQ`.
+
 ## 0.158.0 _2026-10-20_
 
 ### Behavior Changes
