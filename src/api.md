@@ -486,6 +486,21 @@ compilation and latches to `'off'` engine-wide on the first CSP
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~workers~~ {#workers-1}
+
+```ts
+workers: KernelPool | undefined;
+```
+
+The worker pool that `broadcastAsync()` of a compiled result uses, built
+by the host with `createKernelPool()`. The engine creates no worker on
+its own: with no pool every batch runs on the calling thread. One pool
+can serve several engines, and it is read at each call.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~trace~~ {#trace-1}
 
 ```ts
@@ -11657,6 +11672,21 @@ a performance optimization (auto-compiled `Map` drains, compiled numeric
 quadrature/limit kernels). `'auto'` (default) attempts implicit
 compilation and latches to `'off'` engine-wide on the first CSP
 `EvalError`; `'off'` never attempts it. Explicit `compile()` is exempt.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.workers {#workers}
+
+```ts
+workers: KernelPool | undefined;
+```
+
+The worker pool that `broadcastAsync()` of a compiled result uses, built
+by the host with `createKernelPool()`. The engine creates no worker on
+its own: with no pool every batch runs on the calling thread. One pool
+can serve several engines, and it is read at each call.
 
 </MemberCard>
 
