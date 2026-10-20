@@ -109,31 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The derivative of a user-function call: an assigned value of the variable is substituted, and a function passed as an argument is not followed (OPEN, small — found 2026-10-20 by the fix of Tycho ledger rows 405 and 406)
-
-The derivative of a call of a user function finds the body of the function by
-applying it to wildcards and evaluating the call (`userFunctionBody()` in
-`symbolic/derivative.ts`). Two consequences, both measured on 2026-10-20:
-
-- **An assigned value of the variable is substituted.** With `h := a ↦ a·x` and
-  `x := 5`, `D(h(k), x)` is `0`: the evaluation of `h(_)` gives `5·_`. The
-  derivative of a sum written out keeps `x` (`D(Sum(k·x^k, Limits(k, 1, 3)), x)`
-  with `x := 5` is `9x^2 + 4x + 1`, a test of `derivative-big-operator.test.ts`
-  pins it), so the two routes disagree. The result `0` is wrong.
-- **A function passed as an argument is not followed.** With
-  `G := (f, a) ↦ f(a)` and `h` as above, `G(h, k)` evaluates to `k·x`, but
-  `D(G(h, k), x)` stays unevaluated: `G(_1, _2)` is an `Error` (the wildcard
-  `_1` is not a function), so no body is found. For the same reason, the
-  dependency test of a `Sum` term or bound (`dependsOnVariable()`) treats a call
-  of `G` as "may depend on the variable", so
-  `D(Sum(k·x, Limits(k, 1, G(h, 3))), x)` stays unevaluated although the bound
-  is the constant 6.
-
-A substitution of the actual arguments into the function literal would fix both,
-but `subs()` does not replace a parameter used as a function name (`f(a)` with
-`f → h` stays `f(k)`), so it needs an operator-aware substitution first.
-`partialFromFunctionLiteral()`, used for a lazy operator, has the same limit.
-
 ### The type of a lazy view does not include the `Nothing` it yields (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,

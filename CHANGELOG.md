@@ -16,6 +16,38 @@
   known that way is taken to depend on the variable: a bound with such a call
   keeps the derivative unevaluated.
 
+- The derivative of a call of a user function no longer reads an assigned value
+  of its variable. With `h := a ↦ a·x²` and `x := 5`, `D(h(k), x)` was `0`: the
+  body of `h` was found by evaluating `h`, which gave `25k`. The body is now
+  taken from the function literal, with the arguments in place of the
+  parameters, and is not evaluated, so `D(h(k), x)` is `2kx` with and without a
+  value of `x`. The derivative follows the name of its variable into the body of
+  a called function in both cases (user decision 2026-10-20); `Integrate`,
+  `Limit`, `Solve` and `Sum` keep the rule of 2026-09-21, under which their
+  variable does not reach into a called function. A free symbol of the body that
+  is not the variable still reads its value: the derivative of `q` in its
+  parameter, with `q(a) := a x²` and `x := 5`, is `25`.
+
+- A parameter used as the name of a called function now takes a function
+  argument in a derivative. With `G := (f, a) ↦ f(a)`, `D(G(h, k), x)` stayed
+  unevaluated, because the body of `G` applied to wildcards was an `Error`; it
+  is now the derivative of `h(k)`. `D(G(Sin, x), x)` is `cos(x)`, and a function
+  literal argument is applied: `D(G(t ↦ t·x, k), x)` is `k`. The derivative of
+  `Apply(t ↦ t·x, k)` is `k`; it was
+  `t * Apply(Derivative("Apply", 1, 0), (t) => t * x, k)`, with the parameter
+  `t` free in it. A recursive function (`f(x) := x·f(x−1)`, or two functions
+  that call each other) is not expanded: its derivative stays
+  `Apply(Derivative(f, 1), x)`, as before. A function composed with itself is
+  expanded: with `h := a ↦ a·x²`, `D(h(h(x)), x)` is `5x⁴`. A call in an
+  argument is never taken for the parameter (`G(h, f(x))` is `h(f(x))`), and a
+  function with no body passed as an argument keeps its own name
+  (`D(G(u, x), x)` is `u′(x)`).
+
+- The derivative of a power, an exponential and the other operators sees a
+  variable that a call reads in the body of the called function. With
+  `g := t ↦ t·x`, `D(g(k)², x)` and `D(e^{g(k)}, x)` were `0`: the rules tested
+  only the names written in the operand. They are now `2k²x` and `k·e^{kx}`.
+
 - On the `interval-js` target, a negative base under a float exponent that the
   interpreter reads as a rational with an odd denominator, but that is not the
   double nearest to that rational, has its real root (Tycho ledger row 406).

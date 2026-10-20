@@ -169,7 +169,7 @@ export type DerivativeTrace = DerivativeTraceStep[];
 function dPlaceholder(child: Expression, v: string): Expression {
   const ce = child.engine;
   if (isSymbol(child) && child.symbol === v) return ce.One;
-  if (!child.has(v)) return ce.Zero;
+  if (!dependsOnVariable(child, v)) return ce.Zero;
   return ce._fn('D', [child, ce.symbol(v)]);
 }
 
@@ -184,7 +184,7 @@ function recordD(
   id: string,
   template: () => Expression
 ): void {
-  if (!trace || !node.has(v)) return;
+  if (!trace || !dependsOnVariable(node, v)) return;
   trace.push({ node, id, template: template() });
 }
 
@@ -452,35 +452,94 @@ function isUserFunction(sym: Expression): boolean {
 }
 
 /**
+ * The function literal that defines the user function `fn`, or `undefined`
+ * when it has none. A symbol declared with a function type and then assigned
+ * a `Function` literal holds the literal as its value; a definition
+ * `f(x) := …` keeps it on its operator definition (`_lambdaLiteral`).
+ */
+function userFunctionLiteral(fn: Expression): Expression | undefined {
+  const value = fn.valueDefinition?.value;
+  if (value !== undefined && isFunction(value, 'Function')) return value;
+  return fn.operatorDefinition?._lambdaLiteral;
+}
+
+/**
  * The body of the user function `fn` (a symbol for which
- * {@link isUserFunction} is true) applied to `wildcards`, or `undefined`
- * when no body is known.
+ * {@link isUserFunction} is true) with `args` in place of its parameters, or
+ * `undefined` when no body is known.
+ *
+ * When the function has a literal ({@link userFunctionLiteral}), the
+ * arguments replace the parameters in the body of the literal, and the body
+ * is not evaluated. An evaluation would read the assigned value of a symbol
+ * of the body: with `h := a ↦ a·x` and `x := 5`, the evaluated body of
+ * `h(k)` is `5k`, and its derivative in `x` was 0. The derivative follows
+ * the name `x` into the body of a called function whether or not `x` has a
+ * value (user decision 2026-10-20), so `D(h(k), x)` is `k` in both cases.
+ * The literal also lets a parameter used as a function name take a function
+ * argument (`(f, a) ↦ f(a)` applied to `h` and `k` is `h(k)`; see
+ * {@link partialFromFunctionLiteral}).
  *
  * A LAZY operator holds its operands: they are statements, conditions or
  * binders, not values. Its `evaluate` handler can run statements, throw on an
  * operand of an unexpected form, or loop until the deadline, so it is never
- * run on wildcards. When the handler is a function literal, the wildcards
- * replace the parameters in the body of the literal, and the body is not
- * evaluated. A lazy operator with a handler of any other kind has no known
- * body.
+ * run. A lazy operator with no literal has no known body.
  *
- * Any other operator is applied to the wildcards and the call is evaluated.
- * The result is the body, unless it is the same call again.
+ * Any other operator with no literal, or with a literal whose body cannot be
+ * reduced to one expression (a block with control flow), is applied to
+ * wildcards and the call is evaluated; the result is the body, unless it is
+ * the same call again, and the arguments then replace the wildcards.
  */
 function userFunctionBody(
   fn: Expression,
-  wildcards: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>
 ): Expression | undefined {
   const ce = fn.engine;
   const name = sym(fn)!;
-  const opDef = fn.operatorDefinition;
-  if (opDef?.lazy) {
-    const literal = opDef._lambdaLiteral;
-    if (literal === undefined) return undefined;
-    return partialFromFunctionLiteral(ce, literal, wildcards);
+  const literal = userFunctionLiteral(fn);
+  if (literal !== undefined) {
+    const body = partialFromFunctionLiteral(ce, literal, args);
+    if (body !== undefined) return body;
   }
+  if (fn.operatorDefinition?.lazy) return undefined;
+  const wildcards =
+    args.length === 1
+      ? [ce.symbol('_')]
+      : args.map((_, i) => ce.symbol(`_${i + 1}`));
   const body = ce.function(name, wildcards).evaluate();
-  return body.operator === name ? undefined : body;
+  if (body.operator === name) return undefined;
+  const map: Record<string, Expression> = {};
+  wildcards.forEach((w, i) => {
+    map[sym(w)!] = args[i];
+  });
+  return body.subs(map);
+}
+
+/**
+ * Whether the definition of the user function `fn` calls `fn` again: the
+ * body of its literal reaches the function (`reachesUserFunction()`), as in
+ * `f(x) := x·f(x − 1)`, two functions that call each other, or
+ * `F(x) := G(F, x)`. Such a function is not expanded in a derivative: its
+ * derivative would hold `f(x − 1)` too, and the final evaluation of the
+ * derivative at a symbolic `x` would never end (it stops at the recursion
+ * limit with an error). The call keeps the chain rule, `f′(x)`, as it did
+ * when the body was found by an evaluation, which gave the same call back.
+ *
+ * The test reads the definition, not the call: `h(h(x))` is not recursive,
+ * and both calls are expanded. A function with no literal is not tested
+ * here; its body is found by an evaluation (`userFunctionBody()`).
+ */
+function isRecursiveUserFunction(fn: Expression): boolean {
+  const name = sym(fn);
+  const literal = userFunctionLiteral(fn);
+  if (name === undefined || literal === undefined || !isFunction(literal))
+    return false;
+  return reachesUserFunction(literal.op1, name);
+}
+
+/** Whether `expr` has a subexpression that is the same as `node`. */
+function containsSame(expr: Expression, node: Expression): boolean {
+  if (expr.isSame(node)) return true;
+  return isFunction(expr) && expr.ops.some((x) => containsSame(x, node));
 }
 
 /**
@@ -1174,7 +1233,7 @@ function differentiateApplied(
     recordD(trace, node, v, 'derivative.chain-rule', () => {
       const templateTerms: Expression[] = [];
       for (let i = 0; i < args.length; i++) {
-        if (!args[i].has(v)) continue;
+        if (!dependsOnVariable(args[i], v)) continue;
         const nextOrders = orders.slice();
         nextOrders[i] = (nextOrders[i] ?? 0) + 1;
         const nextDeriv = ce._fn('Derivative', [
@@ -1331,12 +1390,11 @@ function differentiateNode(
     if (expr.symbol === v) return expr.engine.One;
 
     // Resolve user-defined functions: e.g. f where f(x) := 2x
-    if (isUserFunction(expr)) {
+    if (isUserFunction(expr) && !isRecursiveUserFunction(expr)) {
       const ce = expr.engine;
-      const body = userFunctionBody(expr, [ce.symbol('_')]);
+      const bodyWithV = userFunctionBody(expr, [ce.symbol(v)]);
       // If the body resolved (is not just the same function call), differentiate it
-      if (body !== undefined) {
-        const bodyWithV = body.subs({ _: ce.symbol(v) });
+      if (bodyWithV !== undefined) {
         // The node (a bare function symbol) does not contain `v`, so record
         // this bridging step directly rather than through `recordD`.
         trace?.push({
@@ -1524,6 +1582,22 @@ function differentiateNode(
     return differentiateApplied(fn, orders, args, v, depth, trace, expr);
   }
 
+  // The application of a function literal, `Apply(t ↦ t·x, k)`, is the body
+  // of the literal with the arguments in place of its parameters, `k·x`.
+  // Without this rule, the chain rule below took `Apply` for an unknown
+  // function of the literal and of the arguments, and gave a result with the
+  // parameter `t` free in it.
+  if (expr.operator === 'Apply' && isFunction(expr.op1, 'Function')) {
+    const body = partialFromFunctionLiteral(ce, expr.op1, expr.ops.slice(1));
+    // A literal applied to itself (`Apply(L, L, x)` with
+    // `L := (p, a) ↦ p(p, a)`) gives the same application back.
+    if (body === undefined || containsSame(body, expr)) return undefined;
+    recordD(trace, expr, v, 'derivative.expand-definition', () =>
+      dPlaceholder(body, v)
+    );
+    return differentiate(body, v, depth + 1, trace);
+  }
+
   // Sum rule
   if (expr.operator === 'Add') {
     recordD(trace, expr, v, 'derivative.sum-rule', () =>
@@ -1535,7 +1609,7 @@ function differentiateNode(
     const terms = expr.ops.map((op) => {
       const term = differentiate(op, v, depth + 1, trace);
       if (term) return term;
-      if (!op.has(v)) return ce.Zero;
+      if (!dependsOnVariable(op, v)) return ce.Zero;
       return ce._fn('D', [op, ce.symbol(v)]);
     });
     if (terms.some((term) => !term.isValid)) return undefined;
@@ -1581,7 +1655,7 @@ function differentiateNode(
     // lose the (1 - ln x) factor, and Root(2, x) = 2^(1/x) would wrongly be
     // 0). Differentiate the equivalent Power(base, 1/n) instead, whose rule
     // handles dependence in both the base and the exponent.
-    if (n.has(v)) {
+    if (dependsOnVariable(n, v)) {
       const power = ce.function('Power', [base, ce.One.div(n)], {
         form: 'structural',
       });
@@ -1591,7 +1665,7 @@ function differentiateNode(
       return differentiate(power, v, depth + 1, trace);
     }
 
-    if (!base.has(v)) return ce.Zero;
+    if (!dependsOnVariable(base, v)) return ce.Zero;
 
     // Constant degree: d/dx base^(1/n) = (1/n) * base^((1/n) - 1) * base'
     const exponent = ce.One.div(n); // 1/n
@@ -1615,8 +1689,8 @@ function differentiateNode(
   // Power rule
   if (expr.operator === 'Power') {
     const [base, exponent] = expr.ops;
-    const baseHasV = base.has(v);
-    const expHasV = exponent.has(v);
+    const baseHasV = dependsOnVariable(base, v);
+    const expHasV = dependsOnVariable(exponent, v);
 
     if (!baseHasV && !expHasV) {
       // Neither depends on v - derivative is 0
@@ -1723,8 +1797,8 @@ function differentiateNode(
   // If both x and base depend on v, use quotient rule on ln(x)/ln(base)
   if (expr.operator === 'Log' && expr.nops === 2) {
     const [x, base] = expr.ops;
-    const xHasV = x.has(v);
-    const baseHasV = base.has(v);
+    const xHasV = dependsOnVariable(x, v);
+    const baseHasV = dependsOnVariable(base, v);
 
     if (!xHasV && !baseHasV) {
       // Neither depends on v - derivative is 0
@@ -1772,8 +1846,8 @@ function differentiateNode(
   // −floor(u/c)·c′ when u does not depend on v.
   if (expr.operator === 'Mod' && expr.nops === 2) {
     const [u, c] = expr.ops;
-    const uHasV = u.has(v);
-    const cHasV = c.has(v);
+    const uHasV = dependsOnVariable(u, v);
+    const cHasV = dependsOnVariable(c, v);
     if (!uHasV && !cHasV) return ce.Zero;
     const floorQ = ce.function('Floor', [ce.function('Divide', [u, c])]);
     recordD(trace, expr, v, 'derivative.known-derivative', () => {
@@ -1822,8 +1896,9 @@ function differentiateNode(
     expr.nops === 2
   ) {
     const [u, n] = expr.ops;
-    if (n.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
-    if (u.has(v)) recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
+    if (dependsOnVariable(n, v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (dependsOnVariable(u, v))
+      recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
   }
 
@@ -1833,8 +1908,8 @@ function differentiateNode(
   // keep it symbolic as Apply(Derivative(Gamma, 1, 0), s, z), times s′.
   if (expr.operator === 'Gamma' && expr.nops === 2) {
     const [s, z] = expr.ops;
-    const sHasV = s.has(v);
-    const zHasV = z.has(v);
+    const sHasV = dependsOnVariable(s, v);
+    const zHasV = dependsOnVariable(z, v);
     if (!sHasV && !zHasV) return ce.Zero;
     const dz = ce
       .function('Multiply', [
@@ -1877,8 +1952,8 @@ function differentiateNode(
   // Apply(Derivative(PolyLog, 1, 0), s, z), times s′.
   if (expr.operator === 'PolyLog' && expr.nops === 2) {
     const [s, z] = expr.ops;
-    const sHasV = s.has(v);
-    const zHasV = z.has(v);
+    const sHasV = dependsOnVariable(s, v);
+    const zHasV = dependsOnVariable(z, v);
     if (!sHasV && !zHasV) return ce.Zero;
     const dz = ce.function('Divide', [
       ce.function('PolyLog', [ce.function('Subtract', [s, ce.One]), z]),
@@ -1915,8 +1990,8 @@ function differentiateNode(
   // closed form — stay symbolic (inert rather than wrong).
   if (expr.operator === 'PolyGamma' && expr.nops === 2) {
     const [m, u] = expr.ops;
-    if (m.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
-    if (!u.has(v)) return ce.Zero;
+    if (dependsOnVariable(m, v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (!dependsOnVariable(u, v)) return ce.Zero;
     const next = ce._fn('PolyGamma', [ce.function('Add', [m, ce.One]), u]);
     recordD(trace, expr, v, 'derivative.known-derivative', () =>
       ce.function('Multiply', [next, dPlaceholder(u, v)])
@@ -1934,8 +2009,8 @@ function differentiateNode(
   // symbolic (inert rather than wrong).
   if (expr.operator === 'LambertW' && expr.nops === 2) {
     const [z, k] = expr.ops;
-    if (k.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
-    if (!z.has(v)) return ce.Zero;
+    if (dependsOnVariable(k, v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (!dependsOnVariable(z, v)) return ce.Zero;
     const w = expr; // W(z, k), branch preserved
     recordD(trace, expr, v, 'derivative.known-derivative', () =>
       ce.function('Multiply', [
@@ -1962,8 +2037,8 @@ function differentiateNode(
     expr.nops === 2
   ) {
     const [order, x] = expr.ops;
-    const xHasV = x.has(v);
-    const orderHasV = order.has(v);
+    const xHasV = dependsOnVariable(x, v);
+    const orderHasV = dependsOnVariable(order, v);
 
     if (!xHasV && !orderHasV) {
       // Neither depends on v - derivative is 0
@@ -2063,7 +2138,7 @@ function differentiateNode(
     // BEFORE this branch existed: the scalar rule composed with `D(V, v) = 0`
     // gave `Sign(V)·0 = 0`, so declining instead would REGRESS
     // `D(|V|, t)` for a `V: list<number>` from `0` to inert.
-    if (!expr.has(v)) return ce.Zero;
+    if (!dependsOnVariable(expr, v)) return ce.Zero;
 
     const vec = expr.op1;
     const comps = isFunction(vec, 'Tuple') ? vec.ops : null;
@@ -2191,6 +2266,40 @@ function containsOperator(expr: Expression, op: string): boolean {
 }
 
 /**
+ * Whether `expr` can call the user function `name`: it names `name`, as the
+ * operator of a call or as a symbol (a function passed as an argument,
+ * `G(f, x)`), or it names a user function whose literal can call `name`, at
+ * any depth (`f` calls `g`, which calls `f`). Each function literal is
+ * walked once.
+ */
+function reachesUserFunction(expr: Expression, name: string): boolean {
+  const ce = expr.engine;
+  const followed = new Set<string>();
+  const visited = new Set<Expression>();
+  const pending: Expression[] = [expr];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (visited.has(e)) continue;
+    visited.add(e);
+    let callee: Expression | undefined;
+    if (isSymbol(e)) callee = e;
+    else if (isFunction(e)) {
+      if (e.operator === name) return true;
+      if (e._numericStore === undefined) pending.push(...e.ops);
+      if (!followed.has(e.operator)) callee = ce.symbol(e.operator);
+    }
+    if (callee === undefined || !isSymbol(callee)) continue;
+    if (callee.symbol === name) return true;
+    if (followed.has(callee.symbol)) continue;
+    followed.add(callee.symbol);
+    if (!isUserFunction(callee)) continue;
+    const literal = userFunctionLiteral(callee);
+    if (literal !== undefined && isFunction(literal)) pending.push(literal.op1);
+  }
+  return false;
+}
+
+/**
  * Whether `expr` can depend on the variable `v`.
  *
  * `expr.has(v)` sees only the names written in `expr`. A call of a user
@@ -2199,7 +2308,13 @@ function containsOperator(expr: Expression, op: string): boolean {
  * which expands the body (`differentiateUnknownApplication()`), is `k`. So a
  * call is followed into the body of its function, and into the calls that
  * this body makes. A function with no known body depends on `v` only through
- * its arguments, as the chain rule reads it. A function that is being
+ * its arguments, as the chain rule reads it.
+ *
+ * Every rule of `differentiateNode()` that answers 0 for an operand that
+ * does not depend on `v` uses this test, not `has(v)`: the body of a user
+ * function is differentiated as it is written (`userFunctionBody()`), so it
+ * can hold a call such as `g(k)` in `g(k)²`, with `g := t ↦ t·x`, whose
+ * derivative is not 0. A function that is being
  * followed already (a recursive definition) adds nothing new when it is met
  * again, so it is not followed a second time.
  *
@@ -2207,12 +2322,13 @@ function containsOperator(expr: Expression, op: string): boolean {
  * passed to `G` as an argument) is followed too, as `differentiate()` expands
  * it: its body is the function applied to the wildcard `_`.
  *
- * The body of a function is found by evaluating the function applied to
- * wildcards (`userFunctionBody()`). A function that is not pure (its body
- * draws a random number, or writes a variable) is not evaluated: the
- * evaluation would run these effects. Such a function may depend on `v`, so
- * the answer is then `true`, and a bound that calls it keeps the derivative
- * unevaluated.
+ * The body of a function is found with wildcards in place of its parameters
+ * (`userFunctionBody()`): from its literal when it has one, otherwise by
+ * evaluating the function applied to the wildcards. A function that is not
+ * pure (its body draws a random number, or writes a variable) is not
+ * followed: the evaluation would run these effects. Such a function may
+ * depend on `v`, so the answer is then `true`, and a bound that calls it
+ * keeps the derivative unevaluated.
  *
  * The expression is walked once: each node is visited once, also when it is
  * shared, and the body of each function (its name and its number of
@@ -2240,13 +2356,29 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
       nargs === 1
         ? [ce.symbol('_')]
         : Array.from({ length: nargs }, (_, i) => ce.symbol(`_${i + 1}`));
-    // A function with effects is not evaluated to find its body: it may
-    // depend on `v`. A body that is not valid is not known either: with
-    // `G := (f, a) ↦ f(a)·x`, the wildcard `_1` is not a function, so
-    // `G(_1, _2)` evaluates to an `Error` that no longer holds the `x`.
+    // A function with effects is not followed to find its body: it may
+    // depend on `v`. The body of a literal is walked as it is written, with
+    // its parameter names: the arguments of each call are walked at the
+    // call. A function with no literal is applied to wildcards and
+    // evaluated (`userFunctionBody()`). A body that is not valid is not
+    // known: the evaluation can give an `Error` (a wildcard is not a
+    // function), which no longer holds the names of the body.
     let result = true;
     if (ce.function(name, wildcards).isPure) {
-      const body = userFunctionBody(fn, wildcards);
+      const literal = userFunctionLiteral(fn);
+      let body: Expression | undefined;
+      if (literal !== undefined && isFunction(literal, 'Function')) {
+        body = literal.op1;
+        if (isFunction(body, 'Block')) body = blockValue(ce, body);
+        // A parameter with the name of the variable (`q(x) := x²`) is not
+        // the variable: it is replaced by a wildcard before the walk.
+        const params = literal.ops
+          .slice(1)
+          .map((p) => functionLiteralParameterName(p));
+        if (body !== undefined && params.includes(v))
+          body = body.subs({ [v]: ce.symbol('_') });
+      }
+      body ??= userFunctionBody(fn, wildcards);
       result = body !== undefined && (!body.isValid || walk(body));
     }
     followed.set(key, result);
@@ -2523,21 +2655,17 @@ function differentiateUnknownApplication(
   if (keyed !== undefined) return keyed;
 
   // Try resolving user-defined function calls before falling back to
-  // symbolic chain rule. Apply the function to wildcards, evaluate to
-  // get the body, substitute actual arguments, and differentiate.
-  if (isUserFunction(opSym)) {
-    const args = expr.ops;
-    const wildcards =
-      args.length === 1
-        ? [ce.symbol('_')]
-        : args.map((_, i) => ce.symbol(`_${i + 1}`));
-    const body = userFunctionBody(opSym, wildcards);
-    if (body !== undefined) {
-      const subsMap: Record<string, Expression> = {};
-      wildcards.forEach((w, i) => {
-        subsMap[sym(w)!] = args[i];
-      });
-      const bodyWithArgs = body.subs(subsMap);
+  // symbolic chain rule: the body of the function with the arguments in
+  // place of its parameters (`userFunctionBody()`) is differentiated.
+  if (isUserFunction(opSym) && !isRecursiveUserFunction(opSym)) {
+    const bodyWithArgs = userFunctionBody(opSym, expr.ops);
+    // A body that holds the call itself (`G(G, x)` with
+    // `G := (p, a) ↦ p(p, a)`) would be expanded again without end, and the
+    // chain rule below has no meaning for a function given itself as an
+    // argument: the derivative stays unevaluated.
+    if (bodyWithArgs !== undefined && containsSame(bodyWithArgs, expr))
+      return undefined;
+    if (bodyWithArgs !== undefined) {
       recordD(trace, expr, v, 'derivative.expand-definition', () =>
         dPlaceholder(bodyWithArgs, v)
       );
@@ -2624,7 +2752,7 @@ function differentiateWithDerivativeKey(
   };
 
   const partials: (Expression | undefined)[] = args.map((arg, i) =>
-    arg.has(v) ? partial(i) : undefined
+    dependsOnVariable(arg, v) ? partial(i) : undefined
   );
 
   recordD(trace, expr, v, 'derivative.chain-rule', () => {
@@ -2656,10 +2784,18 @@ function differentiateWithDerivativeKey(
 }
 
 /**
- * The value at `args` of a partial derivative given as a function literal
- * in the array form of the `derivative` key: each parameter of the literal
- * is replaced by the matching argument in its body. The body is not
- * evaluated, so an exact form such as `ln(10)` stays exact.
+ * The body of the function literal `entry` with each parameter replaced by
+ * the matching argument of `args`: the value at `args` of a partial
+ * derivative given in the array form of the `derivative` key, or the body of
+ * a user function at a call (`userFunctionBody()`). The body is not
+ * evaluated, so an exact form such as `ln(10)` stays exact, and the assigned
+ * value of a symbol of the body is not read.
+ *
+ * A parameter can also be the name of a function in the body: in
+ * `(f, a) ↦ f(a)`, `f(a)` is a call whose operator is the parameter `f`.
+ * `subs()` replaces symbols only, never the operator of a call, so such a
+ * body is substituted by `substituteParameters()`: with the arguments `h`
+ * and `k`, the body is `h(k)`.
  *
  * Returns `undefined` when `entry` is not a function literal with one named
  * parameter for each argument, or when its body is a block that
@@ -2674,6 +2810,9 @@ function partialFromFunctionLiteral(
   if (!isFunction(literal, 'Function')) return undefined;
   const params = literal.ops.slice(1);
   if (params.length !== args.length) return undefined;
+  // A rest parameter (`Spread(rest)`) binds a tuple of the remaining
+  // arguments, not one argument: such a literal is not expanded here.
+  if (params.some((p) => isFunction(p, 'Spread'))) return undefined;
   const names = params.map((p) =>
     isDestructuringParameter(p) ? '' : functionLiteralParameterName(p)
   );
@@ -2688,16 +2827,66 @@ function partialFromFunctionLiteral(
     if (value === undefined) return undefined;
     body = value;
   }
+  // A declared result type wraps the value in `Typed(value, type)`, which
+  // has no derivative rule: the value is used.
+  if (isFunction(body, 'Typed')) body = body.op1;
   // `subs()` is not capture-avoiding: an argument with a free symbol that
   // has the name of a variable bound inside the body (the index `k` of a
   // `Sum` in the body, with the argument `2k`) would be captured by that
   // binder. Rename each such bound variable to a fresh name first.
   body = renameCapturingBinders(ce, body, args);
-  const map: Record<string, Expression> = {};
+  const map: Record<string, Expression> = Object.create(null);
   names.forEach((n, i) => {
     map[n] = args[i];
   });
-  return body.subs(map);
+  return substituteParameters(ce, body, map);
+}
+
+/**
+ * `body` with each parameter named in `map` replaced by its argument.
+ *
+ * When no call in `body` has a parameter as its operator, this is
+ * `body.subs(map)`. Otherwise, the body is walked once:
+ * - a parameter symbol is replaced by its argument, and the argument is not
+ *   walked: a call in an argument whose operator has the name of a
+ *   parameter (`f(x)` in `G(h, f(x))`, with `G := (f, a) ↦ f(a)`) is not
+ *   the parameter;
+ * - a call whose operator is a parameter is rebuilt from its replaced
+ *   operands: `f(a)` with the argument `h` for `f` is `h(k)`, and with a
+ *   function literal or any other expression `ℓ` for `f` it is
+ *   `Apply(ℓ, k)`. The call never keeps the name of the parameter, which
+ *   could name an unrelated function outside the literal.
+ * - any other node is rebuilt with its replaced operands and its own scope,
+ *   as `subs()` does, so that an index of a `Sum` in the body stays bound
+ *   to it. A node that is not canonical (a held operand, such as the index
+ *   of `Limits`) is substituted by `subs()`.
+ */
+function substituteParameters(
+  ce: Expression['engine'],
+  body: Expression,
+  map: Record<string, Expression>
+): Expression {
+  const isParameter = (name: string) => Object.hasOwn(map, name);
+  const hasParameterCall = (e: Expression): boolean =>
+    isFunction(e) &&
+    (isParameter(e.operator) || e.ops.some((x) => hasParameterCall(x)));
+  if (!hasParameterCall(body)) return body.subs(map);
+
+  const walk = (e: Expression): Expression => {
+    if (isSymbol(e)) return isParameter(e.symbol) ? map[e.symbol] : e;
+    if (!isFunction(e)) return e;
+    if (!e.isCanonical) return e.subs(map, { canonical: false });
+    const ops = e.ops.map(walk);
+    if (isParameter(e.operator)) {
+      const fn = map[e.operator];
+      return isSymbol(fn)
+        ? ce.function(fn.symbol, ops)
+        : ce.function('Apply', [fn, ...ops]);
+    }
+    if (ops.every((x, i) => x === e.ops[i])) return e;
+    return ce.function(e.operator, ops, { scope: e.localScope });
+  };
+  return walk(body);
 }
 
 /** The statements that make a block more than a sequence of local
