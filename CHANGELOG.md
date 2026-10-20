@@ -1,6 +1,42 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- LaTeX: an authored `\mathrm{Nothing}` (or `\operatorname{Nothing}`, also in
+  braces or in `\smash{…}`) is an operand. Before, the parser skipped it, as it
+  skips a presentational command, which lost the argument and broke the comma
+  list around it: `\mathrm{If}(x > 1, \mathrm{Nothing}, x)` was
+  `If(Error(incompatible-type), x)` and is now `If(x > 1, Nothing, x)`, as on
+  the `ce.box` route. `f(a, \mathrm{Nothing}, b)` gives the same arguments as
+  `f(a,,b)`.
+- LaTeX: a style switch (`\displaystyle`, `\large`, …), `\color{…}`, a strut
+  or an invisible box (`\phantom{…}`, `\vphantom{…}`, `\hphantom{…}`) between
+  an operand and an infix operator no longer changes the expression:
+  `x \displaystyle + 1` was the product `x·1` and is now `x + 1`;
+  `x\vphantom{y} + 1` was `x·1` and is now `x + 1`;
+  `a \cdot b \displaystyle + c` is `ab + c`. The style of such a switch is not
+  kept. The body of a switch now ends where the expression that holds it ends:
+  `x \displaystyle y + 1` was `x·(y + 1)` and is now `x·y + 1`, and
+  `2 \displaystyle \frac{1}{2} + 1` was `3` and is now `2`. A switch at the
+  start of a group still applies to the whole group (`{\displaystyle x+y}`).
+- LaTeX: `\smash{x}` gives `x`; before, its content was discarded
+  (`\smash{x}+1` was `1`). The option of `\smash[b]{…}` and of
+  `\placeholder[…]{…}` is read as text, not as math.
+- LaTeX: an element of a comma list or a matrix cell that holds only a
+  presentational command (`f(a, \phantom{x}, b)`,
+  `\begin{pmatrix} a & \phantom{0} \\ c & d\end{pmatrix}`) is an empty element.
+  Before, the list ended there (`f((a,), b)`), and the matrix lost its row
+  break. `\phantom{y} x`, with a space, was an `unexpected-token` error and is
+  now `x`.
+
 ### Bug Fixes
+
+- LaTeX: a chain of `\text` keyword operators such as
+  `a \cdot b \text{and} a \cdot b \text{and} …` took time that grows
+  exponentially with the number of keywords (14 keywords: about 0.2 s; each
+  two more: about 3.4 times longer). The parser now compares the braced text
+  with the keywords instead of parsing the right operand to find out whether
+  the keyword matches.
 
 - The derivative of a `Sum` follows a call in a term or a bound into the body of
   the called function (Tycho ledger row 405). With `g := a ↦ a·x`,

@@ -21,6 +21,7 @@ import {
   MathJsonSymbol,
 } from '../../../math-json/types.js';
 import { joinLatex } from '../tokenizer.js';
+import { contentCommand, decoration } from '../decoration-handlers.js';
 import { parseDerivativeOperand } from './definitions-arithmetic.js';
 import {
   PIPE_TOPIC_MARKER,
@@ -185,9 +186,11 @@ function serializeGeometryAccent(
  *  following it in the current group (e.g. `{\displaystyle x+y}`). */
 function parseMathStyleSwitch(
   mathStyle: string
-): (parser: Parser) => MathJsonExpression {
-  return (parser) => {
-    const body = parser.parseExpression();
+): (parser: Parser, until?: Readonly<Terminator>) => MathJsonExpression {
+  return (parser, until) => {
+    // The body ends where the expression that holds the switch ends: in
+    // `x \displaystyle y + 1` it is `y`, not `y + 1`.
+    const body = parser.parseExpression(until);
     if (body !== null && !isEmptySequence(body))
       return ['Annotated', body, { dict: { mathStyle } }];
     return 'Nothing';
@@ -196,9 +199,13 @@ function parseMathStyleSwitch(
 
 /** Parse a LaTeX "switch" command that sets a font size for everything
  *  following it in the current group (e.g. `{\large x+y}`). */
-function parseSizeSwitch(size: number): (parser: Parser) => MathJsonExpression {
-  return (parser) => {
-    const body = parser.parseExpression();
+function parseSizeSwitch(
+  size: number
+): (parser: Parser, until?: Readonly<Terminator>) => MathJsonExpression {
+  return (parser, until) => {
+    // The body ends where the expression that holds the switch ends, as for
+    // a math style switch.
+    const body = parser.parseExpression(until);
     if (body !== null && !isEmptySequence(body))
       return ['Annotated', body, { dict: { size } }];
     return 'Nothing';
@@ -538,72 +545,76 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\displaystyle'],
-    parse: parseMathStyleSwitch('normal'),
+    parse: decoration(contentCommand(parseMathStyleSwitch('normal'))),
   },
   {
     latexTrigger: ['\\textstyle'],
-    parse: parseMathStyleSwitch('compact'),
+    parse: decoration(contentCommand(parseMathStyleSwitch('compact'))),
   },
   {
     latexTrigger: ['\\scriptstyle'],
-    parse: parseMathStyleSwitch('script'),
+    parse: decoration(contentCommand(parseMathStyleSwitch('script'))),
   },
   {
     latexTrigger: ['\\scriptscriptstyle'],
-    parse: parseMathStyleSwitch('scriptscript'),
+    parse: decoration(contentCommand(parseMathStyleSwitch('scriptscript'))),
   },
   {
     latexTrigger: ['\\color'],
-    parse: (parser: Parser): MathJsonExpression => {
-      const color = parser.parseStringGroup();
-      if (color !== null) {
-        const body = parser.parseExpression();
-        if (body !== null && !isEmptySequence(body))
-          return ['Annotated', body, { dict: { color } }];
-      }
-      return 'Nothing';
-    },
+    parse: decoration(
+      contentCommand(
+        (parser: Parser, until?: Readonly<Terminator>): MathJsonExpression => {
+          const color = parser.parseStringGroup();
+          if (color !== null) {
+            const body = parser.parseExpression(until);
+            if (body !== null && !isEmptySequence(body))
+              return ['Annotated', body, { dict: { color } }];
+          }
+          return 'Nothing';
+        }
+      )
+    ),
   },
 
   {
     latexTrigger: ['\\tiny'],
-    parse: parseSizeSwitch(1),
+    parse: decoration(contentCommand(parseSizeSwitch(1))),
   },
   {
     latexTrigger: ['\\scriptsize'],
-    parse: parseSizeSwitch(2),
+    parse: decoration(contentCommand(parseSizeSwitch(2))),
   },
   {
     latexTrigger: ['\\footnotesize'],
-    parse: parseSizeSwitch(3),
+    parse: decoration(contentCommand(parseSizeSwitch(3))),
   },
   {
     latexTrigger: ['\\small'],
-    parse: parseSizeSwitch(4),
+    parse: decoration(contentCommand(parseSizeSwitch(4))),
   },
   {
     latexTrigger: ['\\normalsize'],
-    parse: parseSizeSwitch(5),
+    parse: decoration(contentCommand(parseSizeSwitch(5))),
   },
   {
     latexTrigger: ['\\large'],
-    parse: parseSizeSwitch(6),
+    parse: decoration(contentCommand(parseSizeSwitch(6))),
   },
   {
     latexTrigger: ['\\Large'],
-    parse: parseSizeSwitch(7),
+    parse: decoration(contentCommand(parseSizeSwitch(7))),
   },
   {
     latexTrigger: ['\\LARGE'],
-    parse: parseSizeSwitch(8),
+    parse: decoration(contentCommand(parseSizeSwitch(8))),
   },
   {
     latexTrigger: ['\\huge'],
-    parse: parseSizeSwitch(9),
+    parse: decoration(contentCommand(parseSizeSwitch(9))),
   },
   {
     latexTrigger: ['\\Huge'],
-    parse: parseSizeSwitch(10),
+    parse: decoration(contentCommand(parseSizeSwitch(10))),
   },
 
   {
@@ -783,46 +794,52 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\phantom'],
-    parse: (parser: Parser) => {
+    parse: decoration((parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
-    },
+    }),
   },
   {
     latexTrigger: ['\\vphantom'],
-    parse: (parser: Parser) => {
+    parse: decoration((parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
-    },
+    }),
   },
   {
     latexTrigger: ['\\hphantom'],
-    parse: (parser: Parser) => {
+    parse: decoration((parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
-    },
+    }),
   },
   {
     latexTrigger: ['\\placeholder'],
-    parse: (parser: Parser) => {
-      parser.parseOptionalGroup();
+    parse: contentCommand((parser: Parser) => {
+      // The option (`[b]`, `[t]`, an identifier) is text, not math: reading
+      // it as math reported an undeclared symbol `b`.
+      parser.parseStringGroup(true);
       return parser.parseGroup() ?? 'Nothing';
-    },
+    }),
   },
   {
+    // `\smash{x}` shows `x` with a height and a depth of zero: the content is
+    // part of the math, unlike the content of `\phantom`.
     latexTrigger: ['\\smash'],
-    parse: (parser: Parser) => {
-      parser.parseGroup();
-      return 'Nothing';
-    },
+    parse: contentCommand((parser: Parser) => {
+      // The option (`[b]`, `[t]`, an identifier) is text, not math: reading
+      // it as math reported an undeclared symbol `b`.
+      parser.parseStringGroup(true);
+      return parser.parseGroup() ?? 'Nothing';
+    }),
   },
   {
     latexTrigger: ['\\strut'],
-    parse: (_parser: Parser) => 'Nothing',
+    parse: decoration((_parser: Parser) => 'Nothing'),
   },
   {
     latexTrigger: ['\\mathstrut'],
-    parse: (_parser: Parser) => 'Nothing',
+    parse: decoration((_parser: Parser) => 'Nothing'),
   },
   {
     name: 'HorizontalSpacing',

@@ -25,6 +25,7 @@ import {
   DIVISION_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
+  InfixParseHandler,
   LatexDictionary,
   LatexDictionaryEntry,
   Parser,
@@ -736,10 +737,15 @@ function parseSequence(
         result.push(bareOp);
         done = false;
       } else {
+        const elementStart = parser.index;
         const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
         if (rhs !== null) push(rhs);
         else result.push('Nothing');
-        done = rhs === null;
+        // An element that is only a presentational command (`\phantom{x}`,
+        // `\displaystyle`) reads tokens and gives no expression. It is an
+        // empty element, as in `a,,b`, and the sequence goes on: before,
+        // `f(a, \phantom{x}, b)` ended the sequence after `a`.
+        done = rhs === null && parser.index === elementStart;
       }
     }
     if (!done) {
@@ -1026,6 +1032,9 @@ type KeywordDef =
       precedence: number;
       associativity?: 'right' | 'none';
       operatorname?: boolean;
+      /** True when `build` can return null for some right operands, so the
+       * keyword text alone does not tell that the entry matches. */
+      mayDecline?: boolean;
       build: KeywordInfixBuild;
     };
 
@@ -1050,6 +1059,7 @@ const KEYWORDS: KeywordDef[] = [
     kind: 'infix',
     precedence: 19, // Just below comma (20), so the body is captured whole
     associativity: 'none',
+    mayDecline: true,
     operatorname: true,
     build: (parser, lhs, until) => {
       // First try to parse the clause as a comprehension binding list
@@ -1124,6 +1134,7 @@ const KEYWORDS: KeywordDef[] = [
     kind: 'infix',
     precedence: 19, // Same as the infix `for` fallback
     associativity: 'none',
+    mayDecline: true,
     build: (parser, lhs, until) => {
       const start = parser.index;
       const condition = parseTrailingCondition(parser, until);
@@ -1151,6 +1162,7 @@ const KEYWORDS: KeywordDef[] = [
     kind: 'infix',
     precedence: 21, // Above ; (19) and , (20), very low binding
     associativity: 'none',
+    mayDecline: true,
     operatorname: true,
     build: (parser, lhs, until) => parseWhereExpression(parser, lhs, until),
   },
@@ -1244,6 +1256,24 @@ export function isKeywordText(text: string): boolean {
 }
 
 /**
+ * The parse handlers of the `\text{…}` and `\keyword{…}` infix entries made
+ * from `KEYWORDS`, each with the keyword it matches. A handler not marked
+ * `mayDecline` matches exactly when the braced content is its keyword, so
+ * the parser can compare the
+ * content with the keywords of the active entries instead of calling the
+ * handlers, which parse the right operand.
+ */
+export const KEYWORD_INFIX_PARSE_HANDLERS = new Map<
+  unknown,
+  { surface: string; mayDecline: boolean }
+>();
+
+/** Runs of white space count as one space, as in `matchBracedKeyword()`. */
+export function normalizeKeywordText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+/**
  * Generate the LaTeX dictionary entries for every keyword in `KEYWORDS`.
  *
  * For each keyword we emit a `\text{…}`- and a `\keyword{…}`-triggered entry of
@@ -1280,19 +1310,24 @@ function keywordEntries(): LatexDictionary {
         });
       } else {
         const build = kw.build;
+        const parse: InfixParseHandler = (parser, lhs, until) => {
+          const start = parser.index;
+          if (!matchBracedKeyword(parser, surface)) {
+            parser.index = start;
+            return null;
+          }
+          return build(parser, lhs, until);
+        };
+        KEYWORD_INFIX_PARSE_HANDLERS.set(parse, {
+          surface,
+          mayDecline: kw.mayDecline === true,
+        });
         entries.push({
           latexTrigger: [trigger],
           kind: 'infix',
           associativity: kw.associativity ?? 'right',
           precedence: kw.precedence,
-          parse: (parser, lhs, until) => {
-            const start = parser.index;
-            if (!matchBracedKeyword(parser, surface)) {
-              parser.index = start;
-              return null;
-            }
-            return build(parser, lhs, until);
-          },
+          parse,
         });
       }
     }

@@ -69,8 +69,14 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import {
   isNumberLiteralFactor,
+  KEYWORD_INFIX_PARSE_HANDLERS,
+  normalizeKeywordText,
   normalizeContinuationRanges,
 } from './dictionary/definitions-core.js';
+import {
+  CONTENT_PARSE_HANDLERS,
+  DECORATION_PARSE_HANDLERS,
+} from './decoration-handlers.js';
 import { ApplicationPolicy } from './application-policy.js';
 import { continuationRanges } from './range-provenance.js';
 import {
@@ -284,6 +290,38 @@ const PARSE_TOKEN_EXCLUDED = new Set<string>([
   '\\left',
   '\\bigl',
   '\\mleft',
+]);
+
+/** The spellings of the symbol `Nothing` in LaTeX source. */
+const AUTHORED_NOTHING =
+  /^(?:Nothing|\\(?:mathrm|operatorname|mathit)\{Nothing\})$/;
+
+/** Commands that show nothing that is part of the math: a `{…}` argument, if
+ * any, is invisible space. See `skipDecorationBeforeInfix()`. */
+const INVISIBLE_BOX_COMMANDS = new Set<string>([
+  '\\phantom',
+  '\\vphantom',
+  '\\hphantom',
+]);
+const STRUT_COMMANDS = new Set<string>(['\\strut', '\\mathstrut']);
+
+/** Commands that change the math style or the font size of everything after
+ * them in the current group. See `skipDecorationBeforeInfix()`. */
+const STYLE_SWITCH_COMMANDS = new Set<string>([
+  '\\displaystyle',
+  '\\textstyle',
+  '\\scriptstyle',
+  '\\scriptscriptstyle',
+  '\\tiny',
+  '\\scriptsize',
+  '\\footnotesize',
+  '\\small',
+  '\\normalsize',
+  '\\large',
+  '\\Large',
+  '\\LARGE',
+  '\\huge',
+  '\\Huge',
 ]);
 
 /** Commands that produce visual space, skipped by `skipVisualSpace()` */
@@ -808,6 +846,16 @@ export class _Parser implements Parser {
   // per-letter path, so that `parsePrimary()` can report it as a
   // `ambiguous-letter-run` diagnostic. Only set when diagnostics are enabled.
   private _splitLetterRun: { name: string; start: number } | null = null;
+
+  /** The index after the last authored `\mathrm{Nothing}` that a primary
+   * kept, or -1. A group that ends after this index and gives `Nothing`
+   * holds the authored symbol (`{\mathrm{Nothing}}`), so it is kept too.
+   * See `parsePrimary()`. */
+  private _authoredNothingEnd = -1;
+
+  /** For each `<{>` token, the index of the `<}>` token that closes it.
+   * See `matchingCloseBrace()`. */
+  private _closeBraceOf: Map<number, number> | undefined = undefined;
 
   // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
   // When true, single uppercase letters followed by () are parsed as predicates
@@ -1988,6 +2036,128 @@ export class _Parser implements Parser {
     return this._tildes?.has(index) ?? false;
   }
 
+  /**
+   * Skip a decoration that comes after an operand and before an infix
+   * operator, as in `x \displaystyle + 1` or `x \vphantom{y} + 1`. The
+   * decorations are a style switch (`\displaystyle`, `\large`, …), an
+   * invisible box (`\phantom{…}` and its variants) and a strut.
+   *
+   * A decoration is parsed as a primary. After an operand, the primary
+   * parser reads what follows it as a new operand, so `x \displaystyle + 1`
+   * read `+1` as a factor and gave the product `x·1`. A decoration changes
+   * only the appearance, so the operator is read as an infix operator of the
+   * operand, and the style is not kept.
+   * Several decorations in a row, and visual space between them
+   * (`x \displaystyle \, + 1`), are skipped together.
+   * A decoration that is not followed by an infix operator (`x \large y`) is
+   * left for the primary parser, which keeps a style as an annotation. A
+   * `\text{…}` after the decorations counts as an infix operator only when
+   * it spells an infix keyword such as "and": `x \large \text{ cm}` keeps the
+   * style.
+   *
+   * The decorations stay skipped when the infix operator binds less tightly
+   * than the current context: in `a \cdot b \displaystyle + c` the `+` ends
+   * the right operand of `\cdot`, and the outer level reads it.
+   */
+  skipDecorationBeforeInfix(): void {
+    const start = this.index;
+    let skipped = false;
+    while (true) {
+      const before = this.index;
+      const command = this.peek;
+      if (!this.atDecorationCommand()) break;
+      if (STYLE_SWITCH_COMMANDS.has(command) || STRUT_COMMANDS.has(command)) {
+        this.nextToken();
+      } else if (INVISIBLE_BOX_COMMANDS.has(command)) {
+        this.nextToken();
+        // The group is scanned as tokens, not parsed: this is a look-ahead,
+        // and the primary parser parses the group again when no infix
+        // operator follows. Parsing it here would double the work at each
+        // level of nested phantoms, and would overwrite the left-operand
+        // context (`_operandStartIndex`) that the infix parser reads.
+        if (!this.skipBalancedGroup()) {
+          this.index = before;
+          break;
+        }
+      } else if (command === '\\color') {
+        this.nextToken();
+        if (this.parseStringGroup() === null) {
+          this.index = before;
+          break;
+        }
+      } else break;
+      skipped = true;
+      this.skipVisualSpace();
+    }
+    if (!skipped) return;
+    const infixDefs = this.peekDefinitions('infix');
+    const onlyTextEntries = infixDefs.every(
+      ([def]) =>
+        def.latexTrigger === '\\text' || def.latexTrigger === '\\keyword'
+    );
+    if (
+      infixDefs.length === 0 ||
+      (onlyTextEntries && !this.textInfixAhead(infixDefs))
+    )
+      this.index = start;
+  }
+
+  /** True when every active dictionary entry for the command at the index
+   * is a default decoration handler. A custom dictionary that gives the
+   * command another meaning (`\strut` as a symbol, or as an operator) makes
+   * this false. */
+  private atDecorationCommand(): boolean {
+    if (this.peekDefinitions('operator').length > 0) return false;
+    const defs = this.peekDefinitions('expression');
+    return (
+      defs.length > 0 &&
+      defs.every(([def]) => DECORATION_PARSE_HANDLERS.has(def.parse))
+    );
+  }
+
+  /** True when every active dictionary entry for the command at the index
+   * is a default handler that returns its argument (`\smash`). */
+  private atContentCommand(): boolean {
+    const defs = this.peekDefinitions('expression');
+    return (
+      defs.length > 0 &&
+      defs.every(([def]) => CONTENT_PARSE_HANDLERS.has(def.parse))
+    );
+  }
+
+  /** Skip a `{…}` group, with the groups nested in it, without parsing it.
+   * Return false, and leave the index unchanged, when there is no complete
+   * group at the index. */
+  private skipBalancedGroup(): boolean {
+    const start = this.index;
+    while (this.match('<space>')) {}
+    const end =
+      this.peek === '<{>' ? this.matchingCloseBrace(this.index) : undefined;
+    if (end === undefined) {
+      this.index = start;
+      return false;
+    }
+    this.index = end + 1;
+    return true;
+  }
+
+  /** The index of the `<}>` token that closes the `<{>` token at `open`, or
+   * undefined if it is not closed. The pairs are found in one pass over the
+   * tokens, the first time they are needed, so skipping nested groups again
+   * and again costs no new scan. */
+  private matchingCloseBrace(open: number): number | undefined {
+    if (this._closeBraceOf === undefined) {
+      this._closeBraceOf = new Map();
+      const stack: number[] = [];
+      this._tokens.forEach((token, i) => {
+        if (token === '<{>') stack.push(i);
+        else if (token === '<}>' && stack.length > 0)
+          this._closeBraceOf!.set(stack.pop()!, i);
+      });
+    }
+    return this._closeBraceOf.get(open);
+  }
+
   skipVisualSpace(): void {
     if (!this.options.skipSpace) return;
 
@@ -2509,6 +2679,7 @@ export class _Parser implements Parser {
           peek !== '\\cr' &&
           !this.atBoundary
         ) {
+          const exprStart = this.index;
           expr = this.parseExpression({
             minPrec: 0,
             condition: (p) => {
@@ -2517,7 +2688,12 @@ export class _Parser implements Parser {
             },
           });
           if (expr !== null) cell.push(expr);
-          else {
+          else if (this.index > exprStart) {
+            // The tokens were only a presentational command
+            // (`\phantom{0}`, `\strut`), often used to align columns: the
+            // cell is empty. Reading the next token here would consume the
+            // `\\` that ends the row.
+          } else {
             cell.push([
               'Error',
               "'unexpected-token'",
@@ -2799,6 +2975,61 @@ export class _Parser implements Parser {
 
     this.index = start;
     return null;
+  }
+
+  /**
+   * True when an infix entry at the index binds tightly enough for
+   * `minPrec`, so that `parseInfixOperator()` called its handler. A built-in
+   * keyword entry counts only when the braced text is its keyword: in
+   * `A \text{and} B \large \text{or} C`, the `and` entry ahead of `or` is
+   * not tried.
+   */
+  private infixTriedAt(minPrec: number): boolean {
+    const keyword = this.bracedKeywordText();
+    return this.peekDefinitions('infix').some(([def]) => {
+      if (def.precedence < minPrec) return false;
+      const info = KEYWORD_INFIX_PARSE_HANDLERS.get(def.parse);
+      return info === undefined || info.surface === keyword;
+    });
+  }
+
+  /** The normalized braced text of a `\text{…}` or `\keyword{…}` at the
+   * index, or null. The index does not change. */
+  private bracedKeywordText(): string | null {
+    const start = this.index;
+    let text: string | null = null;
+    if (this.match('\\text') || this.match('\\keyword'))
+      text = this.parseStringGroup();
+    this.index = start;
+    return text === null ? null : normalizeKeywordText(text);
+  }
+
+  /**
+   * True when a `\text` or `\keyword` infix entry in `opDefs` matches the
+   * tokens at the index. The braced content is read once and compared with
+   * the keyword of each built-in entry, and a handler runs only when it
+   * must: for a custom entry, or for a built-in entry whose handler can
+   * decline (`for`) when the content is its keyword. A handler parses its
+   * right operand, so calling every handler in a chain such as
+   * `a \cdot b \text{and} a \cdot b \text{and} …` parsed each suffix again
+   * at each level, in exponential time.
+   */
+  private textInfixAhead(
+    opDefs: [
+      IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry,
+      number,
+    ][]
+  ): boolean {
+    const keyword = this.bracedKeywordText();
+    for (const entry of opDefs) {
+      const [def] = entry;
+      if (def.kind !== 'infix') continue;
+      const info = KEYWORD_INFIX_PARSE_HANDLERS.get(def.parse);
+      if (info !== undefined && info.surface !== keyword) continue;
+      if (info !== undefined && !info.mayDecline) return true;
+      if (this.wouldMatchTextInfix([entry])) return true;
+    }
+    return false;
   }
 
   /**
@@ -5947,11 +6178,41 @@ export class _Parser implements Parser {
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined
     // with a 'symbol' kind
-    result ??=
-      this.parseGenericExpression(until) ??
-      this.parseFunction(until) ??
-      this.parseSymbol(until) ??
-      parseInvalidSymbol(this);
+    // `fromSymbolParse` records that the result is a symbol or a function
+    // call that the source spells, not the result of a dictionary entry.
+    let fromSymbolParse = false;
+    if (result === null) {
+      const authoredNothingEnd = this._authoredNothingEnd;
+      const contentCommand = this.atContentCommand();
+      result = this.parseGenericExpression(until);
+      // A dictionary entry can read an authored `Nothing` in an argument that
+      // it discards (`\phantom{\mathrm{Nothing}}`, or a custom
+      // presentational command): that one does not count, and the mark of an
+      // earlier authored `Nothing` is kept (`{\mathrm{Nothing}\strut}`).
+      // Only an entry known to return its argument
+      // (`\smash{\mathrm{Nothing}}`) keeps the mark of that argument.
+      if (result !== null && !contentCommand)
+        this._authoredNothingEnd = authoredNothingEnd;
+      else if (result === null) {
+        result =
+          this.parseFunction(until) ??
+          this.parseSymbol(until) ??
+          parseInvalidSymbol(this);
+        // A symbol entry of the dictionary can also return `Nothing` (the
+        // `\placeholder{}` entry of the core dictionary does), so the source
+        // must spell the symbol.
+        fromSymbolParse =
+          result === 'Nothing' &&
+          AUTHORED_NOTHING.test(
+            this.latex(start, this.index).replace(/\s+/g, '')
+          );
+        // A symbol or function entry that returns `Nothing` without the
+        // source spelling it (a custom `\myphantom{\mathrm{Nothing}}`)
+        // discards its argument, as a generic entry does.
+        if (result === 'Nothing' && !fromSymbolParse)
+          this._authoredNothingEnd = authoredNothingEnd;
+      }
+    }
 
     // A run of letters that is not a known word (`eps`, `sinx`) is read one
     // letter at a time: report it, unless a dictionary entry with a
@@ -5974,10 +6235,27 @@ export class _Parser implements Parser {
 
     // If we got an empty sequence, ignore it.
     // This is returned by some purely presentational commands,
-    // for example `\displaystyle`
+    // for example `\displaystyle` or `\phantom{…}`. Those commands are
+    // dictionary entries and return the symbol `Nothing`, which is also the
+    // value of an authored `\mathrm{Nothing}`. The authored symbol is an
+    // operand, not decoration: skipping it lost the argument of
+    // `\mathrm{If}(x > 1, \mathrm{Nothing}, x)` and broke the comma list
+    // around it. So a `Nothing` read by the symbol parser is kept.
 
-    if (result !== null && isEmptySequence(result))
+    // The white space after the skipped command separates it from the next
+    // primary: `\phantom{y} x` is `x`, as `\phantom{y}x` is.
+    // A group gives the `Nothing` it holds, so `{\mathrm{Nothing}}` is kept
+    // when an authored `Nothing` was kept inside it.
+    const authoredNothing =
+      result === 'Nothing' &&
+      (fromSymbolParse ||
+        (this._authoredNothingEnd > start &&
+          this._authoredNothingEnd <= this.index));
+    if (authoredNothing) this._authoredNothingEnd = this.index;
+    if (result !== null && isEmptySequence(result) && !authoredNothing) {
+      this.skipSpace();
       return this.parsePrimary(until);
+    }
 
     //
     // 6. Are there postfix operators ?
@@ -6379,8 +6657,26 @@ export class _Parser implements Parser {
             continue;
           }
         }
+        const decorationStart = this.index;
+        this.skipDecorationBeforeInfix();
+        // A skipped decoration can end at a terminator of this expression,
+        // as in `\forall x, P(x)\phantom{y}\land Q(x)`, where the `\land`
+        // must stay outside the body of the quantifier.
+        if (this.atTerminator(until)) break;
         const infixStart = this.index;
         let result = this.parseInfixOperator(lhs, until);
+        // The decorations were skipped for an infix operator whose handler
+        // then declined (`x \large \operatorname{where}`, with no binding
+        // after `where`): put them back, so that the primary parser reads
+        // them as before. An operator that binds too loosely for this
+        // context (the `+` of `a \cdot b \displaystyle + c`) is read by an
+        // outer level, so the decorations stay skipped.
+        if (
+          result === null &&
+          infixStart !== decorationStart &&
+          this.infixTriedAt(until.minPrec ?? 0)
+        )
+          this.index = decorationStart;
         // A library constant alone on the left of `=` (`e = 1.6e-19`,
         // `pi = 3.14`) is read as the constant, and a person usually means a
         // variable with that name. `f(pi) = 3` is not reported.
@@ -6440,7 +6736,7 @@ export class _Parser implements Parser {
             // precedence — do NOT enter InvisibleOperator.
             if (
               opDefs.length > 0 &&
-              this.wouldMatchTextInfix(opDefs as [IndexedInfixEntry, number][])
+              this.textInfixAhead(opDefs as [IndexedInfixEntry, number][])
             ) {
               // A \text infix keyword is ahead but has lower precedence
               // than our current minPrec — stop and let the caller handle it.

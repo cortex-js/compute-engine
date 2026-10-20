@@ -109,6 +109,30 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Worker threads for parallel numeric kernels (IN PROGRESS — decided 2026-10-20, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+
+A compiled function evaluated over an array of inputs, and the starts of a
+`FindFit` global search, are pure-number work that worker threads can run in
+parallel. Measured 2026-10-20 (`benchmarks/workers/*.mts`): an implicit plot
+of 512×512 interval cells takes 152 ms serially and 27 ms on 8 workers; a
+1000-row global fit takes 200 to 500 ms; a 5-point fit or a 2000-column plot
+takes under 10 ms and cannot gain. The design is an executor with a serial
+default, a `kernel-worker` bundle holding the compiled-code runtime, an
+interval runtime and the Levenberg-Marquardt core, a `runBatch` entry on the
+compilation result, and an `evaluateAsync` handler for `FindFit`. The public
+`interval` entry already exports the whole `IntervalArithmetic` namespace,
+so a worker can rebuild interval code from its text; the missing piece is a
+loader with a `runtimeVersion` check.
+User decision 2026-10-20: steps 1 to 5 of the design go ahead (array
+evaluation on compiled results, the executor with a serial default, the
+`kernel-worker` bundle and interval runtime, the pooled `FindFit`), plus an
+asynchronous statement route for Epsil with a `--workers` option; the
+default pool size is `hardwareConcurrency - 1` capped at 8; no whole-engine
+worker protocol for now. Open: the name of the array-evaluation pair
+(working name `broadcast`/`broadcastAsync`, alternative `runMany`). No
+keyword for parallel execution in Epsil: the engine decides from purity,
+compilability and size, as it does for compilation (design section 5.7).
+
 ### The type of a lazy view does not include the `Nothing` it yields (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,
@@ -219,9 +243,6 @@ The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
 and 26 other collection operators found these related defects. Each was measured
 on 2026-10-19:
 
-- LaTeX cannot write a `Nothing` argument:
-  `\mathrm{If}(x > 1, \mathrm{Nothing}, x)` loses the `Nothing` argument at
-  parse time.
 - `Map(PointX, ["a", "b"])` is typed `list<string^2>` (it copies the source
   type), but its value is `list<character^2>`.
 - `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
@@ -309,6 +330,17 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 - Rubi's value of `∫ (1+x²)/(x²+x⁹) dx` on `[1/b, b]` holds `Hypergeometric2F1`
   terms that cancel. `simplify()` has no rule that relates
   `₂F₁(1, 1/7; 8/7; −z)` to `₂F₁(1, 1/7; 8/7; −1/z)`.
+
+### A `\text` keyword with nothing after it is a syntax error (OPEN, small — found 2026-10-20 by the review of the LaTeX `Nothing` and decoration fix)
+
+`x \text{where}` (no binding after `where`) and `x \text{for} y` (no
+comprehension or condition after `for`) parse as
+`Sequence(x, Error("unexpected-operator", "\text"))`. The handlers of `where`,
+`for` and `for all` return null in these cases, but the fallback of the infix
+loop in `parseExpression()` still treats the keyword as an operator ahead and
+stops, so the text is not read as a text run. With a style switch before the
+keyword, `x \large \text{where}` gives `x·Annotated("where", size 6)`.
+Expected: the text run `x·"where"`, as for a word that is not a keyword.
 
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
