@@ -70,6 +70,7 @@ import { TypeString } from '../types.js';
 import {
   isNumberLiteralFactor,
   KEYWORD_INFIX_PARSE_HANDLERS,
+  KEYWORD_PARSE_HANDLERS,
   normalizeKeywordText,
   normalizeContinuationRanges,
 } from './dictionary/definitions-core.js';
@@ -291,6 +292,28 @@ const PARSE_TOKEN_EXCLUDED = new Set<string>([
   '\\bigl',
   '\\mleft',
 ]);
+
+/**
+ * True when the dictionary entry reads a keyword: a `\text{…}` or
+ * `\keyword{…}` entry, or an entry made from the keyword table of the core
+ * dictionary, which can also be found by the symbol name ahead
+ * (`\operatorname{where}`, and also `\text{where}`). Such an entry is an
+ * operator only when its keyword matches the tokens ahead.
+ */
+function isKeywordEntry(def: { latexTrigger?: unknown; parse?: unknown }) {
+  return (
+    def.latexTrigger === '\\text' ||
+    def.latexTrigger === '\\keyword' ||
+    KEYWORD_PARSE_HANDLERS.has(def.parse)
+  );
+}
+
+/** The number of keyword handler results that a parser keeps before it
+ * clears them. See `recordKeywordResult()`. */
+const MAX_KEYWORD_RESULTS = 100_000;
+
+/** The terminator of the look-ahead calls of `wouldMatchTextInfix()`. */
+const LOOK_AHEAD_TERMINATOR: Readonly<Terminator> = { minPrec: 0 };
 
 /** The spellings of the symbol `Nothing` in LaTeX source. */
 const AUTHORED_NOTHING =
@@ -856,6 +879,20 @@ export class _Parser implements Parser {
   /** For each `<{>` token, the index of the `<}>` token that closes it.
    * See `matchingCloseBrace()`. */
   private _closeBraceOf: Map<number, number> | undefined = undefined;
+
+  /** For each token index, the keys (`keywordCallKey()`) of the keyword
+   * handler calls made there, each with true when the call gave an
+   * expression and false when it declined. Cleared when the symbol table
+   * changes (`_keywordResultsGen` is not `_symbolTableGen`), because a
+   * declaration can change how the tokens parse, and when it holds more
+   * than `MAX_KEYWORD_RESULTS` results (`_keywordResultCount`). See
+   * `keywordResult()`. */
+  private _keywordResults = new Map<number, Map<string, boolean>>();
+  private _keywordResultsGen = -1;
+  private _keywordResultCount = 0;
+  /** A number for each object in a key of `_keywordResults`. */
+  private _objectIds = new WeakMap<object, number>();
+  private _nextObjectId = 1;
 
   // Track whether we're inside a quantifier body (ForAll, Exists, etc.)
   // When true, single uppercase letters followed by () are parsed as predicates
@@ -2091,10 +2128,7 @@ export class _Parser implements Parser {
     }
     if (!skipped) return;
     const infixDefs = this.peekDefinitions('infix');
-    const onlyTextEntries = infixDefs.every(
-      ([def]) =>
-        def.latexTrigger === '\\text' || def.latexTrigger === '\\keyword'
-    );
+    const onlyTextEntries = infixDefs.every(([def]) => isKeywordEntry(def));
     if (
       infixDefs.length === 0 ||
       (onlyTextEntries && !this.textInfixAhead(infixDefs))
@@ -2879,13 +2913,166 @@ export class _Parser implements Parser {
     if (!until.minPrec) until = { ...until, minPrec: 0 };
 
     const start = this.index;
+    // A keyword `build` is called once, and a decline is kept, as in
+    // `parseInfixOperator()`. A `\text` or `\keyword` entry of another
+    // keyword (the `let` entry at `\text{if}`) is skipped first: each
+    // `\text{…}` starts one such entry for each prefix keyword.
+    let triedBuilds: Set<unknown> | undefined;
+    let keyword: string | null | undefined;
     for (const [def, n] of this.peekDefinitions('prefix')) {
+      const info = KEYWORD_PARSE_HANDLERS.get(def.parse);
+      const rhsUntil = { ...until, minPrec: def.precedence + 1 };
+      let declineKey: string | undefined;
+      if (info !== undefined) {
+        if (info.braced) {
+          if (keyword === undefined) {
+            // A handler that declined can have moved the index.
+            this.index = start;
+            keyword = this.bracedKeywordText();
+          }
+          if (info.surface !== keyword) continue;
+        }
+        const build = info.build;
+        if (triedBuilds?.has(build)) continue;
+        (triedBuilds ??= new Set()).add(build);
+        declineKey = this.keywordCallKey(build, rhsUntil);
+        if (this.keywordResult(start, declineKey) === false) continue;
+      }
       this.index = start + n;
-      const rhs = def.parse(this, { ...until, minPrec: def.precedence + 1 });
+      const rhs = def.parse(this, rhsUntil);
       if (rhs !== null) return rhs;
+      if (declineKey !== undefined)
+        this.recordKeywordResult(start, declineKey, false);
     }
     this.index = start;
     return null;
+  }
+
+  /** A number that stands for `obj` in a key, or 0 for no object. */
+  private objectId(obj: object | null | undefined): number {
+    if (!obj) return 0;
+    let id = this._objectIds.get(obj);
+    if (id === undefined) {
+      id = this._nextObjectId++;
+      this._objectIds.set(obj, id);
+    }
+    return id;
+  }
+
+  /**
+   * A key for a call of the keyword `build` at the index with the terminator
+   * `until`. Whether the call declines depends on the tokens ahead and on the
+   * parser state that the key holds: the terminator, the open boundaries and
+   * their barrier, the depth counters, the visual space stops, and the end of
+   * the last authored `Nothing`. It does not depend on the left operand: a
+   * keyword handler that can decline (`for`, `where`) decides from its right
+   * operand only.
+   */
+  private keywordCallKey(build: unknown, until: Readonly<Terminator>): string {
+    const boundaries = this._boundaries
+      .map((b) => `${b.index},${b.minIndex ?? ''},${b.tokens.join(' ')}`)
+      .join(';');
+    return [
+      this.objectId(build as object),
+      until.minPrec,
+      this.objectId(until.condition),
+      this._boundaryBarrier,
+      this._reversedIntervalDepth,
+      this._quantifierScopeDepth,
+      this._authoredNothingEnd,
+      this.objectId(this._visualSpaceStops),
+      boundaries,
+    ].join('|');
+  }
+
+  /**
+   * The recorded result of a call with this key (`keywordCallKey()`) at the
+   * index `start`: true when it gave an expression, false when it declined,
+   * undefined when it was not recorded.
+   *
+   * A keyword handler such as the one of `for` parses the rest of the input,
+   * then declines when it does not find the clause it needs. The parser then
+   * tries other readings, which reach the same keyword handler at the same
+   * index with the same terminator. In a chain such as `x_0 \text{for} x_1
+   * \text{for} x_2 …`, each level repeated the work of the next one, in
+   * exponential time.
+   */
+  private keywordResult(start: number, key: string): boolean | undefined {
+    if (this._keywordResultsGen !== this._symbolTableGen) {
+      this._keywordResults.clear();
+      this._keywordResultCount = 0;
+      this._keywordResultsGen = this._symbolTableGen;
+    }
+    return this._keywordResults.get(start)?.get(key);
+  }
+
+  /** Record the result of a call with this key at the index `start`. A
+   * handler that makes a new terminator at each call (the quantifiers) gives
+   * keys that do not occur again, so the results are cleared when there are
+   * too many of them, and the memory stays bounded. */
+  private recordKeywordResult(
+    start: number,
+    key: string,
+    applied: boolean
+  ): void {
+    if (this._keywordResultCount >= MAX_KEYWORD_RESULTS) {
+      this._keywordResults.clear();
+      this._keywordResultCount = 0;
+    }
+    this._keywordResultCount += 1;
+    let results = this._keywordResults.get(start);
+    if (results === undefined) {
+      results = new Map();
+      this._keywordResults.set(start, results);
+    }
+    results.set(key, applied);
+  }
+
+  /**
+   * True when a prefix keyword entry of the core dictionary in `opDefs` that
+   * is found by the symbol name ahead (`\operatorname{return}`, and also
+   * `\text{return}`) gives an expression at the index, as it would for the
+   * right operand of an implicit product. Such an entry is an operator, so
+   * `x \operatorname{return} y` is `x` followed by `Return(y)`, not a
+   * product with `x`. When the keyword does not apply, as `if` with no
+   * `then` after it, the entry is not an operator and the keyword is text.
+   *
+   * The `\text{…}` and `\keyword{…}` entries are not tested: they never
+   * stopped an implicit product (`x \keyword{return} y` is `x·Return(y)`).
+   * The index does not change.
+   */
+  private prefixKeywordApplies(
+    opDefs: [
+      IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry,
+      number,
+    ][],
+    until: Readonly<Terminator>
+  ): boolean {
+    const start = this.index;
+    const tried = new Set<unknown>();
+    let applies = false;
+    for (const [def, n] of opDefs) {
+      if (def.kind !== 'prefix' || !def.symbolTrigger) continue;
+      const build = KEYWORD_PARSE_HANDLERS.get(def.parse)?.build;
+      if (build === undefined || tried.has(build)) continue;
+      tried.add(build);
+      // The terminator that `parsePrefixOperator()` gives the handler.
+      const rhsUntil = { ...until, minPrec: def.precedence + 1 };
+      const key = this.keywordCallKey(build, rhsUntil);
+      let result = this.keywordResult(start, key);
+      if (result === undefined) {
+        this.index = start + n;
+        result = def.parse(this, rhsUntil) !== null;
+        this.index = start;
+        this.recordKeywordResult(start, key, result);
+      }
+      if (result) {
+        applies = true;
+        break;
+      }
+    }
+    this.index = start;
+    return applies;
   }
 
   private parseInfixOperator(
@@ -2905,12 +3092,42 @@ export class _Parser implements Parser {
     // as `Less` (precedence 245 is higher than 241 for `<=`) and leave `=`
     // behind.
     let blockedLength = 0;
+    // The keyword `build` functions already called here: `\text{for}` is
+    // read by the `\text` entry and by the `\operatorname{for}` entry, which
+    // call the same `build` with the same operands. Calling it twice parsed
+    // the rest of the input twice at each `for`, in exponential time.
+    let triedBuilds: Set<unknown> | undefined;
+    let keyword: string | null | undefined;
     for (const [def, n] of this.peekDefinitions('infix')) {
       if (n > 0 && n < blockedLength) continue;
       if (def.precedence >= until.minPrec) {
+        const info = KEYWORD_PARSE_HANDLERS.get(def.parse);
+        let declineKey: string | undefined;
+        if (info !== undefined) {
+          // A `\text` or `\keyword` entry of another keyword declines.
+          if (info.braced) {
+            if (keyword === undefined) {
+              // A handler that declined can have moved the index.
+              this.index = start;
+              keyword = this.bracedKeywordText();
+            }
+            if (info.surface !== keyword) continue;
+          }
+          const build = info.build;
+          if (triedBuilds?.has(build)) continue;
+          (triedBuilds ??= new Set()).add(build);
+          // Only a handler that can decline after its keyword matched
+          // parses its right operand before it declines.
+          if (KEYWORD_INFIX_PARSE_HANDLERS.get(def.parse)?.mayDecline) {
+            declineKey = this.keywordCallKey(build, until);
+            if (this.keywordResult(start, declineKey) === false) continue;
+          }
+        }
         this.index = start + n;
         const rhs = def.parse(this, lhs, until);
         if (rhs !== null) return rhs;
+        if (declineKey !== undefined)
+          this.recordKeywordResult(start, declineKey, false);
       } else if (n > blockedLength) blockedLength = n;
     }
     this.index = start;
@@ -2989,7 +3206,7 @@ export class _Parser implements Parser {
     return this.peekDefinitions('infix').some(([def]) => {
       if (def.precedence < minPrec) return false;
       const info = KEYWORD_INFIX_PARSE_HANDLERS.get(def.parse);
-      return info === undefined || info.surface === keyword;
+      return info === undefined || !info.braced || info.surface === keyword;
     });
   }
 
@@ -3005,14 +3222,15 @@ export class _Parser implements Parser {
   }
 
   /**
-   * True when a `\text` or `\keyword` infix entry in `opDefs` matches the
-   * tokens at the index. The braced content is read once and compared with
-   * the keyword of each built-in entry, and a handler runs only when it
-   * must: for a custom entry, or for a built-in entry whose handler can
+   * True when a keyword infix entry in `opDefs` matches the tokens at the
+   * index. The braced content is read once and compared with the keyword of
+   * each built-in `\text` or `\keyword` entry, and a handler runs only when
+   * it must: for a custom entry, or for a built-in entry whose handler can
    * decline (`for`) when the content is its keyword. A handler parses its
    * right operand, so calling every handler in a chain such as
    * `a \cdot b \text{and} a \cdot b \text{and} …` parsed each suffix again
-   * at each level, in exponential time.
+   * at each level, in exponential time. For the same reason,
+   * `wouldMatchTextInfix()` keeps the result of each handler at each index.
    */
   private textInfixAhead(
     opDefs: [
@@ -3025,7 +3243,8 @@ export class _Parser implements Parser {
       const [def] = entry;
       if (def.kind !== 'infix') continue;
       const info = KEYWORD_INFIX_PARSE_HANDLERS.get(def.parse);
-      if (info !== undefined && info.surface !== keyword) continue;
+      if (info !== undefined && info.braced && info.surface !== keyword)
+        continue;
       if (info !== undefined && !info.mayDecline) return true;
       if (this.wouldMatchTextInfix([entry])) return true;
     }
@@ -3040,6 +3259,14 @@ export class _Parser implements Parser {
    *
    * Returns true if any entry's parse function would succeed (non-null result).
    * The parser index is always restored to its original position.
+   *
+   * The left operand and the terminator are the same at each call, so the
+   * result depends on the index, on the handler and on the parser state that
+   * `keywordCallKey()` holds: it is kept with `recordKeywordResult()`. A
+   * keyword entry is keyed by the `build` function of its keyword, which
+   * `\text{for}` and `\operatorname{for}` share. The `for` handler parses the
+   * rest of the input, which can hold more `for` clauses, so without the
+   * kept results a chain of n clauses took time exponential in n.
    */
   private wouldMatchTextInfix(
     opDefs: [
@@ -3050,10 +3277,22 @@ export class _Parser implements Parser {
     const start = this.index;
     for (const [def, n] of opDefs) {
       if (def.kind !== 'infix') continue;
-      this.index = start + n;
-      // Use a dummy lhs — we only care if the parse succeeds (matches keyword)
-      const result = def.parse(this, 'Nothing', { minPrec: 0 });
-      if (result !== null) {
+      // The `match|` prefix keeps these results apart from the calls of
+      // `parseInfixOperator()`, which pass the real left operand.
+      const key =
+        'match|' +
+        this.keywordCallKey(
+          KEYWORD_PARSE_HANDLERS.get(def.parse)?.build ?? def.parse,
+          LOOK_AHEAD_TERMINATOR
+        );
+      let matched = this.keywordResult(start, key);
+      if (matched === undefined) {
+        this.index = start + n;
+        // Use a dummy lhs — we only care if the parse succeeds (matches keyword)
+        matched = def.parse(this, 'Nothing', LOOK_AHEAD_TERMINATOR) !== null;
+        this.recordKeywordResult(start, key, matched);
+      }
+      if (matched) {
         this.index = start;
         return true;
       }
@@ -5969,18 +6208,37 @@ export class _Parser implements Parser {
       // Check prefix before infix, to catch `-` as a single missing operand
       opDefs = this.peekDefinitions('prefix');
       if (opDefs.length > 0) {
-        const [def, n] = opDefs[0] as [IndexedPrefixEntry, number];
-        this.index += n;
-        if (typeof def.parse === 'function') {
-          const result = def.parse(this, { minPrec: 0 });
-          if (result !== null) return result;
+        // The token can start several prefix entries: `\text` starts one
+        // for each keyword (`\text{and}`, `\text{let}`, …), and only the
+        // entry of the braced keyword matches. So after the first entry,
+        // the keyword entries are tried too, each `build` once. An entry
+        // with no handler or a named entry ends the search, as the first
+        // entry did. The error ends where the handler of the first entry
+        // stopped.
+        let errorEnd = -1;
+        const triedBuilds = new Set<unknown>();
+        for (const [def, n] of opDefs as [IndexedPrefixEntry, number][]) {
+          if (errorEnd >= 0 && !isKeywordEntry(def)) break;
+          const build = KEYWORD_PARSE_HANDLERS.get(def.parse)?.build;
+          if (build !== undefined) {
+            if (triedBuilds.has(build)) continue;
+            triedBuilds.add(build);
+          }
+          this.index = start + n;
+          if (typeof def.parse === 'function') {
+            const result = def.parse(this, { minPrec: 0 });
+            if (result !== null) return result;
+          }
+          if (errorEnd < 0) errorEnd = this.index;
+          if (def.name)
+            return [
+              def.name,
+              // @todo: pass a precedence?
+              this.parseExpression() ?? this.error('missing', start),
+            ];
+          if (typeof def.parse !== 'function') break;
         }
-        if (def.name)
-          return [
-            def.name,
-            // @todo: pass a precedence?
-            this.parseExpression() ?? this.error('missing', start),
-          ];
+        this.index = errorEnd;
         return this.error('unexpected-operator', start);
       }
 
@@ -6724,22 +6982,26 @@ export class _Parser implements Parser {
           const opDefs = this.peekDefinitions('operator');
           if (
             opDefs.length === 0 ||
-            opDefs.every(
-              ([def]) =>
-                def.latexTrigger === '\\text' ||
-                def.latexTrigger === '\\keyword'
-            )
+            opDefs.every(([def]) => isKeywordEntry(def))
           ) {
-            // All operator defs ahead are \text / \keyword entries. Check if
+            // All operator defs ahead are keyword entries. Check if
             // any would match an infix keyword (e.g. "and", "or", "where").
             // If so, this is a real operator that was skipped due to
-            // precedence — do NOT enter InvisibleOperator.
+            // precedence — do NOT enter InvisibleOperator. An
+            // `\operatorname` prefix keyword that applies (`return y`)
+            // starts another expression, so do not enter InvisibleOperator
+            // either.
             if (
               opDefs.length > 0 &&
-              this.textInfixAhead(opDefs as [IndexedInfixEntry, number][])
+              (this.textInfixAhead(opDefs as [IndexedInfixEntry, number][]) ||
+                this.prefixKeywordApplies(opDefs, {
+                  ...until,
+                  minPrec: 0,
+                }))
             ) {
               // A \text infix keyword is ahead but has lower precedence
-              // than our current minPrec — stop and let the caller handle it.
+              // than our current minPrec, or an \operatorname prefix
+              // keyword is ahead — stop and let the caller handle it.
             } else {
               // No infix operator, join the expressions with a Sequence.
               // Capture the token position where the right operand begins (the
@@ -7274,10 +7536,24 @@ function parseCore(
 
   // If we didn't reach the end of the input, there was an error
   if (!parser.atEnd) {
-    const error = parser.parseSyntaxError();
-    // Note: there may still be tokens left in the input, but we will
-    // ignore them
-    expr = expr !== null ? ['Sequence', expr, error] : error;
+    const items: MathJsonExpression[] = expr !== null ? [expr] : [];
+    // `parseSyntaxError()` also reads a prefix operator that ends the
+    // expression before it: a statement keyword (`x \text{return} y`,
+    // `x \operatorname{break}`) or a symbol operator (`x \neg y`). Such an
+    // item holds no error, so the input after it is read too, as more items:
+    // `a \text{return} b \text{return} c` keeps `c`, `x \neg y \neg z` keeps
+    // `Not(z)`, and `x \lnot y )` reports the `)`. After an
+    // item that holds an error (`-(` gives `Negate(Error("missing"))`),
+    // there may still be tokens left in the input, but we will ignore them.
+    while (!parser.atEnd) {
+      const itemStart = parser.index;
+      const item = parser.parseSyntaxError();
+      items.push(item);
+      if (containsError(item) || parser.index === itemStart) break;
+      const next = parser.parseExpression();
+      if (next !== null) items.push(next);
+    }
+    expr = items.length === 1 ? items[0] : ['Sequence', ...items];
   }
 
   return { expr, parser };

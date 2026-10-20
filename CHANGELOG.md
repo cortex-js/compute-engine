@@ -38,6 +38,28 @@
   Before, the list ended there (`f((a,), b)`), and the matrix lost its row
   break. `\phantom{y} x`, with a space, was an `unexpected-token` error and is
   now `x`.
+- LaTeX: a keyword that does not apply is text, as a word that is not a
+  keyword is. `x \text{where}` (no binding after `where`), `x \text{for} y`
+  (no comprehension or condition after `for`) and `x \text{if}` (no `then`)
+  were a `Sequence` of `x` and an `unexpected-operator` error; they are now
+  `x` followed by the text, as `x \text{hello}` is. `\operatorname{where}`
+  and `\mathrm{for}` that do not apply are symbols, as `\operatorname{foo}`
+  is. Such a keyword in a group no longer breaks the group: `\{x
+  \text{where}\}` is a set and `\frac{x \text{ where }}{2}` a fraction. A
+  statement keyword that applies after an operand starts another expression
+  for the `\text` spelling too: `x \text{return} y` was an error and is now
+  `x` followed by `Return(y)`, as `x \operatorname{return} y` already was.
+  The input after such a statement is read too: `a \text{return} b
+  \text{return} c` was `a` followed by `Return(b)`, without `c`, and
+  `x \operatorname{break} y` lost `y`. The same applies after a prefix
+  operator that ends an operand: `x \neg y \neg z` lost `Not(z)`, and
+  `x \lnot y )` dropped the `)` with no error; it now reports an
+  `unexpected-delimiter` error, so that input is no longer valid.
+- LaTeX: a keyword operator with nothing after it has a `missing` right
+  operand, as the symbol operators have: `x \text{and}` is
+  `And(x, Error("missing"))`, as `x \land` is. The right operand was
+  `Nothing`, so `x \text{and}` became `And(x)` and the error was lost. The
+  same applies to `or`, `iff`, `if and only if` and `such that`.
 
 ### Bug Fixes
 
@@ -96,6 +118,17 @@
   two more: about 3.4 times longer). The parser now compares the braced text
   with the keywords instead of parsing the right operand to find out whether
   the keyword matches.
+- LaTeX: a chain of `\text{ for }` or `\text{ where }` clauses that do not
+  apply (`x_0 \text{ for } y_0 \; x_1 \text{ for } y_1 …`) took time that
+  doubles with each clause (12 clauses: about 0.3 s). Two dictionary entries
+  read `\text{for}`, and each one parsed the rest of the input. The parser
+  now calls the handler of a keyword once at each position, and keeps the
+  result when it declines; 64 clauses take about 0.5 s. A chain of `\text{for}`
+  clauses with `\text{from} … \text{to} … \text{do} …` at its end took about
+  3.7 s for 16 clauses (each four more: about 15 times longer); it takes about
+  0.06 s for 16 clauses and 0.5 s for 32. A chain of
+  `\text{for all}` clauses is faster too (10 clauses: 1.7 s, was 21 s), but
+  still grows exponentially.
 
 - The derivative of a `Sum` follows a call in a term or a bound into the body of
   the called function (Tycho ledger row 405). With `g := a ↦ a·x`,
@@ -168,6 +201,41 @@
   `MaxBy(w, …)` is `missing | number`. `Dedup` over a tuple or a list with a
   stated length is typed `list<…>`: `Dedup([1, 1, 2])` was typed
   `vector<integer^3>`, which does not hold its value `[1, 2]`.
+
+### New Features
+
+- **Batch evaluation of compiled functions.** A `javascript` or `interval-js`
+  compilation result has `broadcast(inputs, options)`: the inputs of every
+  cell at once, one `Float64Array` per free variable (a `lo, hi` pair per cell
+  for `interval-js`) or one number for every cell, and one `Float64Array` of
+  results: one value per cell, or a `lo, hi, kind` triple per cell with the
+  `INTERVAL_KIND` codes (`interval`, `empty`, `entire`, `singularPole`,
+  `singularJump`, `partial`, `boolTrue`, `boolFalse`, `boolMaybe`, `error`). A
+  `grid` layout takes the arrays as the axes of a regular grid, and `out` is a
+  caller-owned output array. Cell for cell, the value is the one `run()` gives;
+  the conversions run once per batch instead of once per cell, which measured
+  20 % faster than `run()` per cell on the main thread.
+
+- **Worker threads.** `broadcastAsync(inputs, options)` runs a batch on a pool
+  of worker threads when the host gives the engine one
+  (`ce.workers = createKernelPool({ create, size, prewarm })`), and inline in
+  slices between yields to the event loop otherwise or when the batch is too
+  small to pay for the transfer. It takes a `signal`, a `deadline` in
+  milliseconds and a `chunk` size, and resolves to `{ out, done }`, the output
+  and the number of leading cells that are valid. The worker is the new entry
+  `@cortex-js/compute-engine/kernel-worker`, one self-contained file that
+  holds the compiled-code runtime and the interval runtime and no engine; it
+  rebuilds each compiled function from its text and runs the same loop as the
+  main thread. Measured on an 18-core machine: an implicit plot of 512×512
+  interval cells takes 175 ms inline and 34 ms on 8 workers. The engine
+  creates no worker on its own. Design and measurements:
+  `docs/plans/2026-10-20-worker-kernel-pool.md`.
+
+- **The interval runtime.** `createIntervalRuntime()` from
+  `@cortex-js/compute-engine/interval` rebuilds a stored `interval-js`
+  compilation result with no engine behind it, as `createJavaScriptRuntime()`
+  does for `javascript` code; the result now carries `runtimeVersion`,
+  `preambleOnce` and `preamblePerCall`. Both runtimes gain `loadBroadcast()`.
 
 ## 0.158.0 _2026-10-20_
 

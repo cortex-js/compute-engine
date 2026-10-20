@@ -127,7 +127,7 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### Worker threads for parallel numeric kernels (IN PROGRESS — decided 2026-10-20, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20 uncommitted; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
@@ -141,10 +141,16 @@ compilation result, and an `evaluateAsync` handler for `FindFit`. The public
 `interval` entry already exports the whole `IntervalArithmetic` namespace,
 so a worker can rebuild interval code from its text; the missing piece is a
 loader with a `runtimeVersion` check.
-User decision 2026-10-20: steps 1 to 5 of the design go ahead (array
+User decision 2026-10-20: steps 1 to 4 of the design go ahead (array
 evaluation on compiled results, the executor with a serial default, the
-`kernel-worker` bundle and interval runtime, the pooled `FindFit`), plus an
-asynchronous statement route for Epsil with a `--workers` option; the
+`kernel-worker` bundle and interval runtime, `broadcastAsync` on a pool); step 5
+(the pooled `FindFit`) and the Epsil asynchronous route wait for Tycho's
+integration feedback (Tycho caps fits at 10 000 rows and samples 500 for the
+global search). Steps 1 to 4 landed 2026-10-20 (uncommitted, dual-reviewed):
+`broadcast`/`broadcastAsync` on compiled results, `INTERVAL_KIND`,
+`createIntervalRuntime`, `createKernelPool`, `ce.workers`, the
+`kernel-worker` entry; step 2 (the fit plan and `fit-executor.ts`, no
+behavior change) landed the same day; the
 default pool size is `hardwareConcurrency - 1` capped at 8; no whole-engine
 worker protocol for now. Open: the name of the array-evaluation pair
 (working name `broadcast`/`broadcastAsync`, alternative `runMany`). No
@@ -349,16 +355,24 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   terms that cancel. `simplify()` has no rule that relates
   `₂F₁(1, 1/7; 8/7; −z)` to `₂F₁(1, 1/7; 8/7; −1/z)`.
 
-### A `\text` keyword with nothing after it is a syntax error (OPEN, small — found 2026-10-20 by the review of the LaTeX `Nothing` and decoration fix)
+### A chain of `for all` or `there exists` clauses parses in exponential time (OPEN, small — found 2026-10-20 by the fix of the `\text` keyword that does not apply)
 
-`x \text{where}` (no binding after `where`) and `x \text{for} y` (no
-comprehension or condition after `for`) parse as
-`Sequence(x, Error("unexpected-operator", "\text"))`. The handlers of `where`,
-`for` and `for all` return null in these cases, but the fallback of the infix
-loop in `parseExpression()` still treats the keyword as an operator ahead and
-stops, so the text is not read as a text run. With a style switch before the
-keyword, `x \large \text{where}` gives `x·Annotated("where", size 6)`.
-Expected: the text run `x·"where"`, as for a word that is not a keyword.
+`x_0 \text{ for all } y_0 \; x_1 \text{ for all } y_1 …` (no condition after
+`for all`) takes time that grows about 3 to 10 times with each two clauses:
+8 clauses take about 0.2 s, 10 clauses 1.7 s and 12 clauses 23 s. Before that
+fix it was slower (8 clauses: 1.1 s; 10 clauses: 21 s). A chain of
+`\text{ there exists } y_i` clauses grows about 3 times with each clause,
+before and after that fix (10 clauses: about 1 s). The kept results are
+bounded (`MAX_KEYWORD_RESULTS`), so such a parse is slow but its memory does
+not grow without limit. When the trailing condition of `for all` does not
+apply, the parser reads the clause as the prefix quantifier (`there exists`
+has only the prefix form), and
+`parseQuantifier()` (`dictionary/definitions-logic.ts`) parses the rest of the
+input once for each split point that it tries, each time with a new
+terminator. So the results of the keyword handlers that the parser keeps
+(`keywordResult()` in `parse.ts`, keyed by the terminator) do not apply. A
+fix must make the quantifier parse the rest of the input a bounded number of
+times, or key the kept results so that these terminators match.
 
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 

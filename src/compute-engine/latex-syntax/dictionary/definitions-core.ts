@@ -26,6 +26,7 @@ import {
   MULTIPLICATION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
   InfixParseHandler,
+  PrefixParseHandler,
   LatexDictionary,
   LatexDictionaryEntry,
   Parser,
@@ -1175,7 +1176,8 @@ const KEYWORDS: KeywordDef[] = [
       [
         'Colon',
         lhs,
-        parser.parseExpression({ ...until, minPrec: 21 }) ?? 'Nothing',
+        parser.parseExpression({ ...until, minPrec: 21 }) ??
+          parser.error('missing', parser.index),
       ] as MathJsonExpression,
   },
 
@@ -1199,11 +1201,14 @@ const KEYWORDS: KeywordDef[] = [
     kind: 'infix',
     precedence: 235, // Same as \land
     associativity: 'right',
+    // With no right operand (`x \text{and}`), the operand is a `missing`
+    // error, as for `x \land`.
     build: (parser, lhs, until) =>
       [
         'And',
         lhs,
-        parser.parseExpression({ ...until, minPrec: 235 }) ?? 'Nothing',
+        parser.parseExpression({ ...until, minPrec: 235 }) ??
+          parser.error('missing', parser.index),
       ] as MathJsonExpression,
   },
   {
@@ -1215,7 +1220,8 @@ const KEYWORDS: KeywordDef[] = [
       [
         'Or',
         lhs,
-        parser.parseExpression({ ...until, minPrec: 230 }) ?? 'Nothing',
+        parser.parseExpression({ ...until, minPrec: 230 }) ??
+          parser.error('missing', parser.index),
       ] as MathJsonExpression,
   },
   {
@@ -1227,7 +1233,8 @@ const KEYWORDS: KeywordDef[] = [
       [
         'Equivalent',
         lhs,
-        parser.parseExpression({ ...until, minPrec: 219 }) ?? 'Nothing',
+        parser.parseExpression({ ...until, minPrec: 219 }) ??
+          parser.error('missing', parser.index),
       ] as MathJsonExpression,
   },
   {
@@ -1239,7 +1246,8 @@ const KEYWORDS: KeywordDef[] = [
       [
         'Equivalent',
         lhs,
-        parser.parseExpression({ ...until, minPrec: 219 }) ?? 'Nothing',
+        parser.parseExpression({ ...until, minPrec: 219 }) ??
+          parser.error('missing', parser.index),
       ] as MathJsonExpression,
   },
 ];
@@ -1256,16 +1264,39 @@ export function isKeywordText(text: string): boolean {
 }
 
 /**
- * The parse handlers of the `\text{…}` and `\keyword{…}` infix entries made
- * from `KEYWORDS`, each with the keyword it matches. A handler not marked
- * `mayDecline` matches exactly when the braced content is its keyword, so
- * the parser can compare the
- * content with the keywords of the active entries instead of calling the
- * handlers, which parse the right operand.
+ * The parse handlers of the infix entries made from `KEYWORDS`, each with the
+ * keyword it matches.
+ *
+ * `braced` is true for the `\text{…}` and `\keyword{…}` entries. Such a
+ * handler, when not marked `mayDecline`, matches exactly when the braced
+ * content is its keyword, so the parser can compare the content with the
+ * keywords of the active entries instead of calling the handlers, which
+ * parse the right operand.
+ *
+ * `braced` is false for the `\operatorname{…}` entries, which are found by
+ * the symbol name ahead (also `\text{where}`), so the keyword always matches.
  */
 export const KEYWORD_INFIX_PARSE_HANDLERS = new Map<
   unknown,
-  { surface: string; mayDecline: boolean }
+  { surface: string; mayDecline: boolean; braced: boolean }
+>();
+
+/**
+ * The parse handlers of every entry made from `KEYWORDS` (prefix and infix,
+ * with any trigger), each with the `build` function of its keyword, the
+ * keyword, and `braced`, true for a `\text{…}` or `\keyword{…}` entry.
+ *
+ * When all the operator entries for the tokens ahead are such entries and
+ * none of them matches, the tokens are not an operator: the parser reads
+ * `x \text{where}` as `x` followed by the text "where".
+ *
+ * `\text{for}` is read by two entries, the `\text` entry and the
+ * `\operatorname{for}` entry (found by the symbol name ahead). Both end at
+ * the same token and call the same `build`, so the parser calls it once.
+ */
+export const KEYWORD_PARSE_HANDLERS = new Map<
+  unknown,
+  { build: unknown; surface: string; braced: boolean }
 >();
 
 /** Runs of white space count as one space, as in `matchBracedKeyword()`. */
@@ -1295,18 +1326,20 @@ function keywordEntries(): LatexDictionary {
     for (const trigger of ['\\text', '\\keyword'] as const) {
       if (kw.kind === 'prefix') {
         const build = kw.build;
+        const parse: PrefixParseHandler = (parser, until) => {
+          const start = parser.index;
+          if (!matchBracedKeyword(parser, surface)) {
+            parser.index = start;
+            return null;
+          }
+          return build(parser, until);
+        };
+        KEYWORD_PARSE_HANDLERS.set(parse, { build, surface, braced: true });
         entries.push({
           latexTrigger: [trigger],
           kind: 'prefix',
           precedence: kw.precedence,
-          parse: (parser, until) => {
-            const start = parser.index;
-            if (!matchBracedKeyword(parser, surface)) {
-              parser.index = start;
-              return null;
-            }
-            return build(parser, until);
-          },
+          parse,
         });
       } else {
         const build = kw.build;
@@ -1321,7 +1354,9 @@ function keywordEntries(): LatexDictionary {
         KEYWORD_INFIX_PARSE_HANDLERS.set(parse, {
           surface,
           mayDecline: kw.mayDecline === true,
+          braced: true,
         });
+        KEYWORD_PARSE_HANDLERS.set(parse, { build, surface, braced: true });
         entries.push({
           latexTrigger: [trigger],
           kind: 'infix',
@@ -1336,20 +1371,31 @@ function keywordEntries(): LatexDictionary {
     if (kw.operatorname) {
       if (kw.kind === 'prefix') {
         const build = kw.build;
+        const parse: PrefixParseHandler = (parser, until) =>
+          build(parser, until);
+        KEYWORD_PARSE_HANDLERS.set(parse, { build, surface, braced: false });
         entries.push({
           symbolTrigger: surface,
           kind: 'prefix',
           precedence: kw.precedence,
-          parse: (parser, until) => build(parser, until),
+          parse,
         });
       } else {
         const build = kw.build;
+        const parse: InfixParseHandler = (parser, lhs, until) =>
+          build(parser, lhs, until);
+        KEYWORD_INFIX_PARSE_HANDLERS.set(parse, {
+          surface,
+          mayDecline: kw.mayDecline === true,
+          braced: false,
+        });
+        KEYWORD_PARSE_HANDLERS.set(parse, { build, surface, braced: false });
         entries.push({
           symbolTrigger: surface,
           kind: 'infix',
           associativity: kw.associativity ?? 'right',
           precedence: kw.precedence,
-          parse: (parser, lhs, until) => build(parser, lhs, until),
+          parse,
         });
       }
     }
@@ -6477,6 +6523,47 @@ function peekKeyword(parser: Parser, keyword: string): boolean {
 }
 
 /**
+ * True when the keyword is at the index or at a later token, in a spelling
+ * that `matchKeyword()` reads. The index does not change.
+ *
+ * A handler that needs an inner keyword (`then` after `if`) calls it before
+ * it parses the operand that ends at that keyword. Without the keyword, that
+ * parse reads all the rest of the input and the handler then declines. In a
+ * chain such as `x \text{if} y \text{if} z …`, where `if` is text, each level
+ * parsed the rest of the input again, in exponential time.
+ */
+function keywordAhead(parser: Parser, keyword: string): boolean {
+  const start = parser.index;
+  let found = false;
+  while (!parser.atEnd) {
+    // Each token is tried: `matchKeyword()` accepts each spelling that
+    // `parser.parseSymbol()` reads as the keyword, so the first token of a
+    // spelling is not known in advance.
+    if (peekKeyword(parser, keyword)) {
+      found = true;
+      break;
+    }
+    parser.nextToken();
+  }
+  parser.index = start;
+  return found;
+}
+
+/**
+ * The conditions that end an operand of `if … then … else` and of
+ * `for … from … to … do` at the next keyword. Each one is the same function
+ * at each call, so that the parser can recognize a call of a keyword
+ * handler that it made before with the same terminator, and keep its
+ * result (`keywordCallKey()` in `parse.ts` holds the identity of the
+ * condition).
+ */
+const STOP_AT_THEN = (p: Parser) => peekKeyword(p, 'then');
+const STOP_AT_ELSE = (p: Parser) => peekKeyword(p, 'else');
+const STOP_AT_FROM = (p: Parser) => peekKeyword(p, 'from');
+const STOP_AT_TO = (p: Parser) => peekKeyword(p, 'to');
+const STOP_AT_DO = (p: Parser) => peekKeyword(p, 'do');
+
+/**
  * Parse the body of an if expression after the "if" keyword has been consumed.
  * Parses: condition \text{then} trueBranch \text{else} falseBranch
  */
@@ -6487,10 +6574,12 @@ function parseIfExpression(
   // Ignore visual spacing between if/then/else keywords and branch expressions.
   parser.skipVisualSpace();
 
+  if (!keywordAhead(parser, 'then')) return null;
+
   // Parse condition — stop at "then" keyword
   const condition = parser.parseExpression({
     minPrec: 0,
-    condition: (p) => peekKeyword(p, 'then'),
+    condition: STOP_AT_THEN,
   });
   if (condition === null) return null;
 
@@ -6502,7 +6591,7 @@ function parseIfExpression(
   // Parse true branch — stop at "else" keyword
   const trueBranch = parser.parseExpression({
     minPrec: 0,
-    condition: (p) => peekKeyword(p, 'else'),
+    condition: STOP_AT_ELSE,
   });
   if (trueBranch === null) return null;
 
@@ -6526,10 +6615,12 @@ function parseForExpression(
   parser: Parser,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
+  if (!keywordAhead(parser, 'from')) return null;
+
   // Parse index variable — stop at "from" keyword
   const indexExpr = parser.parseExpression({
     minPrec: 0,
-    condition: (p) => peekKeyword(p, 'from'),
+    condition: STOP_AT_FROM,
   });
   const index = indexExpr ? symbol(indexExpr) : null;
   if (!index) return null;
@@ -6540,7 +6631,7 @@ function parseForExpression(
   // Parse lower bound — stop at "to" keyword
   const lower = parser.parseExpression({
     minPrec: 0,
-    condition: (p) => peekKeyword(p, 'to'),
+    condition: STOP_AT_TO,
   });
   if (lower === null) return null;
 
@@ -6550,7 +6641,7 @@ function parseForExpression(
   // Parse upper bound — stop at "do" keyword
   const upper = parser.parseExpression({
     minPrec: 0,
-    condition: (p) => peekKeyword(p, 'do'),
+    condition: STOP_AT_DO,
   });
   if (upper === null) return null;
 
