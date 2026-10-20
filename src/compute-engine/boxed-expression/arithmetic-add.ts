@@ -8,14 +8,21 @@ import { flatten } from './flatten.js';
 import { isInvalidNonCollection } from './error-value.js';
 import { order, sortAddTerms } from './order.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
-import { Type } from '../../common/type/types.js';
+import { Type, type TypeReference } from '../../common/type/types.js';
 import {
+  type AliasDescent,
   collectionElementType,
+  descendIntoConstructor,
+  isBareCutOnDescent,
   resolveTypeAlias,
   stripNumericRanges,
+  unfoldAliasOnDescent,
   widen,
+  widenAll,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { closeImaginaryUnderArithmetic } from '../../common/type/reduce.js';
+import { declarationOf } from '../../common/type/reference.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type {
   Expression,
@@ -415,15 +422,31 @@ export function canonicalAdd(
  * type no evaluated value ever has, and union matching is all-members, so it
  * also makes `type.matches('collection')` answer a confident `false`.
  *
+ * A cell that is a UNION with collection arms (`list<list<integer> |
+ * integer>`) absorbs the scalars arm by arm, as the element-wise sum does
+ * with each value: `[[1, 2], 3] + 0.5` is `[[1.5, 2.5], 3.5]`, so the
+ * collection arm becomes `list<real>`, not `list<integer>`. A transparent
+ * alias in the cells is unfolded and absorbs the scalars like the type it
+ * names (see `absorbScalarsIntoCell`).
+ *
+ * With `options.combinesCells`, `collectionType` is the join of the types
+ * of two or more sibling collections that the operation combines cell by
+ * cell (`[i] + [-i]`, `L · M`). The cells are then walked even when there is
+ * no scalar, because combining two cells is not closed either: a sum or a
+ * product of two imaginary cells can be real (`i + (-i) = 0`, `i · i = -1`),
+ * so an imaginary cell is `complex`, and a sum of two `range` cells is a
+ * list of integers, not a range.
+ *
  * Returns `collectionType` unchanged when there is nothing to sharpen: no
- * scalars, an element type that already covers them, a type whose element
- * type is unknown (`any`, or a non-collection), or a collection cell this
- * function cannot rebuild (`tuple`, `record`, `dictionary`, or a reference to
- * a type alias).
+ * scalars (and no combined cells), an element type that already covers
+ * them, a type whose element type is unknown (`any`, or a non-collection),
+ * or a collection cell this function cannot rebuild (`record`,
+ * `dictionary`, or a reference to a nominal type).
  */
 export function absorbScalarsIntoCells(
   collectionType: Readonly<Type>,
-  scalarTypes: ReadonlyArray<Type>
+  scalarTypes: ReadonlyArray<Type>,
+  options?: { combinesCells?: boolean }
 ): Type {
   // A transparent alias of a collection is unfolded FIRST, so the scalars
   // fold into the cells it names and the result is the structure, never the
@@ -431,11 +454,13 @@ export function absorbScalarsIntoCells(
   // `list<real>`, which the name `myints` no longer describes. This holds
   // with no scalars too (`L + L` is `list<integer>`): the alias policy of
   // the broadcast lift types every cell-wise result by what it builds.
-  // Only the operand itself is unfolded; an alias in the CELLS is left to
-  // the `reference` exclusion below, which is what keeps this recursion
-  // terminating.
+  // Here only the operand itself is unfolded. An alias in the CELLS is
+  // unfolded by `absorbScalarsIntoCell`, under the descent guard
+  // (`unfoldAliasOnDescent`): the guard stops a self-referential alias when
+  // it reaches itself again, which is what makes that walk terminate.
   collectionType = resolveTypeAlias(collectionType);
-  if (scalarTypes.length === 0) return collectionType as Type;
+  if (scalarTypes.length === 0 && options?.combinesCells !== true)
+    return collectionType as Type;
   // A `broadcastable<S>` co-operand is either a scalar `S` or an indexed
   // collection of `S` that zips with these cells (a length mismatch is an
   // `incompatible-dimensions` error, not a wider result), so its per-CELL
@@ -460,61 +485,40 @@ export function absorbScalarsIntoCells(
       ? collectionType.elements
       : collectionElementType(collectionType);
   if (elt === undefined || elt === 'any') return collectionType as Type;
-  // `elements` is the LEAF only when it is a scalar. A DIMENSIONLESS nested
-  // collection (`list<list<number>>`, the type of `List(L, L)` for
-  // `L: list<number>`) carries its inner shape in `elements` instead, so the
-  // scalar folds into the INNER cells: recurse. Widening a scalar against a
-  // collection cell would produce `list<integer | list<number>>` — a
-  // union of a scalar and a collection, which is never inhabited by the
-  // evaluated value (every element stays a list) and makes
-  // `type.matches('collection')` answer a confident `false`.
-  let cell: Type;
-  if (isSubtype(elt, COLLECTION_SHAPE_TYPE)) {
-    // A TUPLE cell is a point/vector, and a scalar scales each of its
-    // COMPONENTS: `[(3,4)] · 0.5` is `[(1.5, 2)]`, so a
-    // `list<tuple<integer, integer>>` scaled by a real has REAL components and
-    // echoing the integer ones would claim a type the value contradicts.
-    // Rebuild the tuple with each component widened, one arity-preserving
-    // level — unlike the kinds excluded below, whose parts are not uniformly
-    // scaled.
-    if (typeof elt !== 'string' && elt.kind === 'tuple')
-      return {
-        ...(collectionType as Extract<Type, { kind: string }>),
-        elements: {
-          kind: 'tuple',
-          elements: elt.elements.map((e) => ({
-            ...e,
-            type: widen(stripNumericRanges(e.type), ...scalars),
-          })),
-        },
-      } as Type;
-    // Only the kinds whose `elements` is a single rebuildable cell type can be
-    // recursed into. A `record`/`dictionary` cell, or a `reference` to a
-    // (possibly recursive) alias, keeps the collection type unchanged: sound
-    // but imprecise, and never a scalar-plus-collection union. Not following
-    // `reference.def` here is also what keeps this recursion terminating — a
-    // type cycle can only close through that edge.
-    if (
-      typeof elt === 'string' ||
-      (elt.kind !== 'list' &&
-        elt.kind !== 'collection' &&
-        elt.kind !== 'indexed_collection' &&
-        elt.kind !== 'set')
-    )
-      return collectionType as Type;
-    cell = absorbScalarsIntoCells(elt, scalars);
-  } else {
-    cell = widen(stripNumericRanges(elt), ...scalars);
-    // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
-    // `i · i = -1` are both real. `complex` covers the closure — the
-    // same repair the scalar tail of `addType` applies to its final widen.
-    if (cell === 'imaginary') cell = 'complex';
-  }
+  // The first walk answers a self-referential alias, where it reaches
+  // itself through a constructor, with the alias unchanged. That answer is
+  // exact when the scalars widen no leaf of that alias: the alias then
+  // describes every deeper value too. When some unfold of the alias changed
+  // (a leaf widened), the deeper values the alias stands for widen as well,
+  // so the walk runs again and answers `unknown` at the cuts of THAT alias,
+  // which admits them. The cuts of an alias whose unfolds did not change
+  // keep the alias (`b` in `list<b | integer> + 0.5` for `type alias b =
+  // list<b | real>`). A walk that answers `unknown` at a cut can change
+  // another alias that contains the cut, so the walk is repeated until no
+  // kept cut belongs to a changed alias. Each repeat adds at least one alias
+  // to the set that is widened, so the loop ends (see
+  // `absorbScalarsIntoCell`).
+  let walk: AbsorbWalk = {
+    widenAt: new Set(),
+    cuts: new Set(),
+    changed: new Set(),
+  };
+  let cell = absorbScalarsIntoCell(elt, scalars, undefined, walk);
   // Nothing was sharpened (the new cell type is equivalent to the element
   // type, either because the widen added nothing or because the nested recursion
   // came back unchanged): hand back the original spelling so `2·(1..4)` still
   // types as it did.
   if (isSubtype(cell, elt)) return collectionType as Type;
+  while (
+    [...walk.cuts].some((d) => walk.changed.has(d) && !walk.widenAt.has(d))
+  ) {
+    walk = {
+      widenAt: new Set([...walk.widenAt, ...walk.changed]),
+      cuts: new Set(),
+      changed: new Set(),
+    };
+    cell = absorbScalarsIntoCell(elt, scalars, undefined, walk);
+  }
   // Rebuild in place only for the kinds whose `elements` IS a single cell
   // type. A `tuple` keeps an ARRAY there, a `record` a field map and a
   // `dictionary` none at all, so writing a cell type into those would produce
@@ -537,6 +541,193 @@ export function absorbScalarsIntoCells(
   if (collectionType === 'collection')
     return { kind: 'collection', elements: cell };
   return { kind: 'indexed_collection', elements: cell };
+}
+
+/**
+ * The type of one CELL of a collection after the scalars (already stripped
+ * of their range decorations) are folded into it, for
+ * `absorbScalarsIntoCells`. A cell whose type does not change comes back
+ * with its original spelling.
+ *
+ * - A scalar cell is joined with the scalars.
+ * - A `tuple` cell (a point) has the scalars folded into each of its
+ *   components, as into a cell: `[(3,4)] · 0.5` is `[(1.5, 2)]`.
+ * - A `range` cell becomes a `list` of the absorbed integer cells.
+ * - A `list`, `collection`, `indexed_collection` or `set` cell absorbs the
+ *   scalars into its own cells, recursively: the scalar joins the innermost
+ *   cells, never the collection cell itself. A union of a scalar and a
+ *   collection would be a type no evaluated value has, and union matching is
+ *   all-members, so it also makes `type.matches('collection')` answer a
+ *   confident `false`.
+ * - A union cell (`list<integer> | integer`) absorbs the scalars arm by arm,
+ *   as the element-wise operation does with each value. Its scalar arms are
+ *   joined with the scalars together, as one scalar cell.
+ * - A transparent alias is unfolded and absorbs the scalars like the type
+ *   it names. An alias of a scalar is joined as a whole, as a scalar cell.
+ * - Any other collection cell (`record`, `dictionary`, a nominal reference,
+ *   a bare kind name such as `list`) is returned unchanged. Its parts are
+ *   not uniformly scaled, or are unknown.
+ *
+ * The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
+ * self-referential alias stops when it reaches itself again, and without
+ * the guard the walk overflows the stack. What the occurrence gives depends
+ * on how it was reached:
+ * - as a bare arm of its own union, with no constructor entered since the
+ *   alias was last unfolded (`type alias cyc = cyc | list<integer>`), it adds
+ *   no value of its own: it is returned unchanged, and the other arms, which
+ *   absorb the scalars, hold every value;
+ * - through a constructor (the inner `b` of `type alias b = list<b |
+ *   integer>`), it stands for deeper values. When the alias is not in
+ *   `walk.widenAt`, it is returned unchanged and recorded in `walk.cuts`;
+ *   when it is, it gives `unknown`, which admits every deeper value. Each
+ *   alias whose unfold gave a type other than the alias is recorded in
+ *   `walk.changed`: its deeper values then hold widened leaves, which the
+ *   alias no longer describes, and the caller runs the walk again with that
+ *   alias in `walk.widenAt`.
+ */
+function absorbScalarsIntoCell(
+  t: Readonly<Type>,
+  scalars: ReadonlyArray<Type>,
+  seen: AliasDescent,
+  walk: AbsorbWalk
+): Type {
+  const r = absorbScalarsIntoCellBody(t, scalars, seen, walk);
+  // An alias that was unfolded and gave another type changed. A cut gives
+  // the alias itself, or `unknown` for an alias that is already in
+  // `walk.widenAt`, so recording it there too adds nothing new.
+  if (r !== t && typeof t === 'object' && t.kind === 'reference' && t.alias)
+    walk.changed.add(declarationOf(t));
+  return r;
+}
+
+/**
+ * The state of one walk of `absorbScalarsIntoCell` over the cells of a
+ * collection, for the self-referential aliases the walk cuts where they
+ * reach themselves through a constructor. Each alias is identified by its
+ * declaration (`declarationOf`).
+ */
+type AbsorbWalk = {
+  /** The aliases whose cuts give `unknown` in this walk. */
+  readonly widenAt: ReadonlySet<TypeReference>;
+  /** The aliases this walk cut and returned unchanged. */
+  readonly cuts: Set<TypeReference>;
+  /** The aliases of which an unfold, in this walk, gave a type other than
+   * the alias. */
+  readonly changed: Set<TypeReference>;
+};
+
+/** The body of `absorbScalarsIntoCell`, without the record of the aliases
+ * that changed. */
+function absorbScalarsIntoCellBody(
+  t: Readonly<Type>,
+  scalars: ReadonlyArray<Type>,
+  seen: AliasDescent,
+  walk: AbsorbWalk
+): Type {
+  const scalarCell = (c: Readonly<Type>): Type => {
+    // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
+    // `i · i = -1` are both real. Each imaginary member of the join
+    // (`imaginary`, or the `imaginary` arm of `imaginary | integer`) is
+    // `complex`, which covers the closure — the same repair the scalar tail
+    // of `addType` applies to its final widen.
+    const r = closeImaginaryUnderArithmetic(
+      widen(stripNumericRanges(c as Type), ...scalars) as Type
+    );
+    return isSubtype(r, c) ? (c as Type) : r;
+  };
+  const isAlias =
+    typeof t === 'object' && t.kind === 'reference' && t.alias === true;
+  if (
+    !isAlias &&
+    (typeof t !== 'object' || t.kind !== 'union') &&
+    !isSubtype(t, COLLECTION_SHAPE_TYPE)
+  )
+    return scalarCell(t);
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) {
+    if (isBareCutOnDescent(t, seen)) return t as Type;
+    const decl = declarationOf(t as TypeReference);
+    if (walk.widenAt.has(decl)) return 'unknown';
+    walk.cuts.add(decl);
+    return t as Type;
+  }
+  const u = unfolded.type;
+  seen = unfolded.seen;
+  // `range` is the one collection name that carries its element type,
+  // `integer`, in the name. A range cell with a scalar folded in is a list
+  // of the absorbed integer cells, never a range: `[1..3, 5] · 2` is
+  // `[[2, 4, 6], 10]`, and `[2, 4, 6]` is a list, not an index span, even
+  // when its elements stay integers. The other collection names (`list`,
+  // `set`, `tuple`, `record`, …) have no element type in the name, so they
+  // admit every cell value and are returned unchanged. A `string` cell is
+  // returned unchanged too: a number and a string do not combine, and that
+  // per-cell error is not spelled by a static type.
+  if (u === 'range') return { kind: 'list', elements: scalarCell('integer') };
+  if (typeof u === 'string')
+    return isSubtype(u, COLLECTION_SHAPE_TYPE) ? (t as Type) : scalarCell(t);
+  if (u.kind === 'union') {
+    const scalarArms: Type[] = [];
+    const shapedArms: Type[] = [];
+    for (const a of u.types) {
+      if (
+        (typeof a === 'object' &&
+          (a.kind === 'reference' || a.kind === 'union')) ||
+        isSubtype(a, COLLECTION_SHAPE_TYPE)
+      )
+        shapedArms.push(a);
+      else scalarArms.push(a);
+    }
+    // A union of scalars only is a scalar cell.
+    if (shapedArms.length === 0) return scalarCell(t);
+    const parts: Type[] = shapedArms.map((a) =>
+      absorbScalarsIntoCell(a, scalars, seen, walk)
+    );
+    // `widen` drops an `unknown` member in favour of the other members, so
+    // an arm that gave `unknown` (a cut alias) makes the whole cell
+    // `unknown`, which admits every value of every arm.
+    if (parts.includes('unknown')) return 'unknown';
+    if (scalarArms.length > 0)
+      parts.push(
+        scalarCell(
+          scalarArms.length === 1
+            ? scalarArms[0]
+            : { kind: 'union', types: scalarArms }
+        )
+      );
+    const r = widenAll(parts) as Type;
+    return isSubtype(r, t) ? (t as Type) : r;
+  }
+  if (u.kind === 'tuple') {
+    // Each component is a cell of its own: a scalar component is joined
+    // with the scalars (with the `imaginary` repair: `(i, 1) · i` is
+    // `(-1, i)`), and a collection or alias component absorbs them into
+    // its own cells.
+    const componentSeen = descendIntoConstructor(seen);
+    const r: Type = {
+      kind: 'tuple',
+      elements: u.elements.map((e) => ({
+        ...e,
+        type: absorbScalarsIntoCell(e.type, scalars, componentSeen, walk),
+      })),
+    };
+    return isSubtype(r, t) ? (t as Type) : r;
+  }
+  if (
+    u.kind === 'list' ||
+    u.kind === 'collection' ||
+    u.kind === 'indexed_collection' ||
+    u.kind === 'set'
+  ) {
+    const inner = absorbScalarsIntoCell(
+      u.elements,
+      scalars,
+      descendIntoConstructor(seen),
+      walk
+    );
+    if (isSubtype(inner, u.elements)) return t as Type;
+    return { ...u, elements: inner };
+  }
+  return isSubtype(u, COLLECTION_SHAPE_TYPE) ? (t as Type) : scalarCell(t);
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {

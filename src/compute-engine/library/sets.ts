@@ -5,10 +5,11 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
-import { isEmptyType } from '../../common/type/subtype.js';
+import { isEmptyType, widenAll } from '../../common/type/subtype.js';
 import {
   collectionElementType,
   isBooleanOrBroadcastableBooleanType,
+  typeCouldHoldMissing,
 } from '../../common/type/utils.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -413,6 +414,51 @@ function cannotBeResidueClass(x: Expression): boolean {
       (x.isConstant && x.type.matches('number'))
     );
   return x.isCollection === true;
+}
+
+/**
+ * The result type of a set operation (`Union`, `Intersection`, `SetMinus`,
+ * `Complement`, `SymmetricDifference`) when an element of the result can be
+ * absent, or `undefined` when none can: the declared result, the bare
+ * `set`, applies then.
+ *
+ * The bare `set` admits values only. A set operation does not compute from
+ * an element: it keeps each element as it is, absent ones included
+ * (`Union({1, Missing}, {2})` is `{1, 2, Missing}`). So when the elements
+ * of an operand can be absent (a `missing` arm, or `any`, which admits the
+ * absence markers: `typeCouldHoldMissing`), the result type must admit the
+ * absent element too.
+ * `sources` names the operands whose elements can be in the result: every
+ * operand (`Union`, `SymmetricDifference`), or only the first one (the
+ * result of `Intersection`, `SetMinus` and `Complement` is a part of the
+ * first operand). The result is the set of the element types of these
+ * operands, or `set<any>` when the type of one of them does not say what
+ * its elements are (a label operand, an operand typed `unknown`).
+ *
+ * The operands come with the `missing` arm of their elements: these
+ * operators are in `ABSENT_CELLS_PASS_THROUGH` (`broadcast-lift-type.ts`).
+ */
+function absentElementSetType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  sources: 'all' | 'first',
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  const from = sources === 'first' ? ops.slice(0, 1) : ops;
+  if (!from.some((op) => typeCouldHoldMissing(op.type))) return undefined;
+  const elements: Type[] = [];
+  for (const op of from) {
+    const elt = collectionElementType(op.type);
+    if (elt === undefined || elt === 'unknown')
+      return BoxedType.forResult('set<any>', context.engine._typeResolver);
+    elements.push(elt);
+  }
+  // `widenAll` keeps the arms of a union apart: `integer | missing` widened
+  // with `real` is `integer | missing | real`. `reduceType` merges the
+  // numeric arms, `missing | real`.
+  return BoxedType.forResult(
+    { kind: 'set', elements: reduceType(widenAll(elements)) },
+    context.engine._typeResolver
+  );
 }
 
 export const SETS_LIBRARY: SymbolDefinitions = {
@@ -1398,6 +1444,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // the subsequent sets
     wikidata: 'Q242767',
     signature: '(set<any>+) -> set',
+    type: (ops, context) => absentElementSetType(ops, 'first', context),
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
@@ -1444,6 +1491,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     threadsConditionals: true,
     signature: '(any+) -> set',
+    type: (ops, context) => absentElementSetType(ops, 'first', context),
     description: 'Return the intersection of one or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
@@ -1496,6 +1544,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     threadsConditionals: true,
     signature: '(any+) -> set',
+    type: (ops, context) => absentElementSetType(ops, 'all', context),
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
@@ -1563,6 +1612,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     threadsConditionals: [0],
     signature: '(set<any>, value*) -> set',
+    type: (ops, context) => absentElementSetType(ops, 'first', context),
     description:
       'Return the set difference between the first set and subsequent values.',
     canonical: (args, { engine: ce }) => {
@@ -1619,6 +1669,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     /* Corresponds to XOR in boolean logic */
     wikidata: 'Q1147242',
     signature: '(set<any>, set<any>) -> set',
+    type: (ops, context) => absentElementSetType(ops, 'all', context),
     description:
       'Return the symmetric difference of two sets (elements in either set but not both).',
     evaluate: symmetricDifference,

@@ -2,19 +2,56 @@
 
 ### Behavior Changes
 
-- The `reciprocal` and `factor` fraction styles no longer put a symbol, a
-  number or a function in parentheses. `a/b` was `a\times(b)^{-1}` and
+- An Epsil program that is compiled, or evaluated as one `Block`, follows the
+  order of its top-level statements for the names a function body owns: in
+  `function g(k) { t = k + 1; t }`, then `let t = 0`, then `[g(1), g(2), t]`,
+  every route gives `[2, 3, 0]`. The compiled program gave `[2, 3, 3]`, and the
+  block evaluation gave the `scope` effect error. A read of a later name, and
+  the order of declarations inside a nested block, do not change.
+
+- In a function body, a read of a name before the first assignment that makes it
+  a local of the body is the `read-before-declaration` error, as for a `let`
+  local read before its `let`: `function g(k) { t = t + 1; t }` gave `t + 1` for
+  `g(1)`. Each call starts with no value for such a local, a loop body keeps the
+  local from one turn to the next within a call, and a closure reads the local
+  when it is called. `epsil check` reports the read before the program runs when
+  the order is certain from the source. A block outside every function (a host
+  `Block`, or a top-level `do` block or loop body) is not changed:
+  `Block(x ≔ x + 1; 2x)` is still `2(x + 1)`. A call of a local that has no
+  value yet is the same error: `function g() { u = h(1); h = (x) => x; u }` gave
+  `1`. A `for` loop whose collection evaluates to an error stops, and the error
+  is its value (the loop ran no turn and the error was lost). `epsil check` also
+  reports a `let` local used before its `let` when the order is certain from the
+  source, and the run does not report the same use a second time.
+
+- A quantity with a dimensionless unit (`percent`, `ppm`, `rad`, `deg`, `grad`,
+  `turn`, `arcmin`, `arcsec`) compares with a number as a value:
+  `6 percent = 0.06`, `180 deg = π` and `30 deg = π/6` are `True`, and
+  `6 percent < 0.07` is `True` (they stayed unevaluated). Two exact values are
+  compared exactly, and a float within the tolerance. `isEqual()`, `is()`,
+  `isIdenticallyEqual()`, the order methods, `Equal`, `NotEqual`, `Less` and the
+  other relations, `Max`, `Min`, `Sort` and `Clamp` agree
+  (`Max(6 percent, 0.05)` is `6 percent`). A quantity with a logarithmic unit
+  (`dB`, `Np`) is not compared with a number.
+- In LaTeX, a numeric constant expression written before a unit is a quantity:
+  `\pi\,\mathrm{rad}` is `Quantity(Pi, rad)` (it was a product), and so are
+  `10^{-30}\,\mathrm{rad}`, `\frac{1}{2}\,\mathrm{m}`, `\sqrt{2}\,\mathrm{m}`
+  and `2\pi\,\mathrm{rad}`. A magnitude with a variable (`x\,\mathrm{m}`) is
+  still a product.
+
+- The `reciprocal` and `factor` fraction styles no longer put a symbol, a number
+  or a function in parentheses. `a/b` was `a\times(b)^{-1}` and
   `\frac{1}{b}(a)`; it is now `a\times b^{-1}` and `\frac{1}{b}a`. In the
-  `reciprocal` style the denominator gets parentheses where the base of a
-  power does (a sum, a product, a power: `a\times(2b)^{-1}`). In the `factor`
-  style the numerator gets parentheses where a factor of a product does (a
-  sum, a negative value: `\frac{1}{b}(a+c)`, `\frac{1}{b}(-a)`), and a
-  numerator that starts with a digit gets an explicit `\times`
-  (`\frac{1}{3}\times2`). A numerator 1 is no longer written in the `factor`
-  style (`\frac{1}{b}`, not `\frac{1}{b}(1)`). The default style uses the
-  `factor` style for a long numerator over a short denominator, so the default
-  output changes too: `\frac{1}{2}\mathrm{StieltjesGamma}(2)(x-1)^2`. Every
-  output parses back to the same value.
+  `reciprocal` style the denominator gets parentheses where the base of a power
+  does (a sum, a product, a power: `a\times(2b)^{-1}`). In the `factor` style
+  the numerator gets parentheses where a factor of a product does (a sum, a
+  negative value: `\frac{1}{b}(a+c)`, `\frac{1}{b}(-a)`), and a numerator that
+  starts with a digit gets an explicit `\times` (`\frac{1}{3}\times2`). A
+  numerator 1 is no longer written in the `factor` style (`\frac{1}{b}`, not
+  `\frac{1}{b}(1)`). The default style uses the `factor` style for a long
+  numerator over a short denominator, so the default output changes too:
+  `\frac{1}{2}\mathrm{StieltjesGamma}(2)(x-1)^2`. Every output parses back to
+  the same value.
 
 - In Epsil, an assignment in a function body to a name that no enclosing scope
   declares when the function is defined makes a local of the function, with a
@@ -162,32 +199,59 @@
 
 ### Bug Fixes
 
+- An Epsil function declared with a type and then defined
+  (`let g: (integer) -> integer`, then `function g(k) { k + 1 }`) compiles on
+  JavaScript and interval-js and gives the interpreter's value; the compilation
+  failed with `Unknown operator \`g\``.
+- Compiled code refuses a named function definition that the interpreter refuses
+  because of its effects: a body that writes a variable declared before the
+  function without the `scope` effect, or a body whose effects are not in the
+  stated effects (`pure`). With `let t = 0` before
+  `function g(k) { t = k + 1; t }`, the compiled program gave `[2, 2]` for
+  `[g(1), t]`; it now fails with the interpreter's message, on every target.
+- A quantity whose compound unit cancels is the plain number of its magnitude:
+  `["Quantity", 2, ["Divide", "m", "m"]]` and `2\,\mathrm{m/m}` are `2` (they
+  were `Quantity(2, 1)`, written `\mathrm{Quantity}(2, 1)`). A named unit
+  (`percent`, `rad`) and a compound unit that does not cancel (`in/ft`) stay
+  units.
+- A number raised to a negative integer is written as a power in LaTeX:
+  `10^{-30}` and `2^{-3}` (they were `\frac{1}{1\cdot10^{30}}` and
+  `\frac{1}{8}`), and the LaTeX parses back as the same expression.
+- `isEqual()`, `is()`, `isIdenticallyEqual()` and the order methods compare a
+  quantity whose magnitude is an expression with no unknowns by its value, as
+  `Equal` does: `Quantity(2, m).isEqual(Quantity(1.5 + 0.5, m))` is `true` (it
+  was `undefined`).
+- Quantity arithmetic and unit conversion of float magnitudes use the working
+  precision: `(π·(1 rad)).N()` is `3.14159265358979323846 rad` (it was
+  `3.141592653589793 rad`), and `1.1 m + 1.3 cm` is `1.113 m`. At
+  `precision = 'machine'`, machine numbers are used as before.
+- Two quantities with different logarithmic units are not equal: `1 dB = 1 Np`
+  was `True`, because both units have a nominal scale of 1.
 - A mixed number such as `2\frac{1}{3}` is read only when the integer, the
   numerator and the denominator are exact integers: `2\frac{1.0}{3}` and
-  `2.0\frac{1}{3}` are the inexact product 2/3, and a float numerator keeps
-  all its digits when it is serialized.
+  `2.0\frac{1}{3}` are the inexact product 2/3, and a float numerator keeps all
+  its digits when it is serialized.
 - Serializing a juxtaposition no longer changes its value when a factor-style
   fraction that ends in a digit comes before a fraction
   (`\frac{1}{x}\times3\times\frac{1}{2}`), or when a negative fraction follows
-  another factor (`2(-\frac{3}{4})`; it was `2-\frac{3}{4}`, which reads back
-  as `5/4`).
+  another factor (`2(-\frac{3}{4})`; it was `2-\frac{3}{4}`, which reads back as
+  `5/4`).
 - The subscript of a function application written as a name with parentheses
   (`(g(x+1))_{k}`, `(\Gamma(x))_{1}`), or of a base that ends in a superscript
-  (`(\exponentialE^{x})_{1}`, `(f^{\prime})_{1}`), is written in parentheses,
-  so it reads back as written. `g(x+1)_{k}` read back as `g·(x+1)_k`.
-- An argument whose value is an error gives that error at every parameter
-  type. With `let w = Ln("a")`, `function op(a: unknown) { a }` and `op(w)`
-  gave a new error, "expected `unknown`, got `error` at `w`". So did a
-  parameter typed as a collection (`list`, `tuple<…>`) or as `function`, a
-  parameter typed by a type variable with a bound (`Conjugate(w)`,
-  `Remainder(w, 2)`, a function declared `(T) -> T where T: number`), and the
-  condition of `if` and `Which`. A function with several clauses
-  (`op(a: number)`, `op(a: string)`) gave "expected `number | string`, got
-  `error`". The call now evaluates to the error of `Ln`, with the frame of the
-  call, as it already did for a parameter typed `number` or with no type. An
-  argument of the wrong type is still refused, and so are a symbol declared
-  `error` that has no value and a call typed `error` only by its declared
-  result type, at a parameter that does not accept `error`.
+  (`(\exponentialE^{x})_{1}`, `(f^{\prime})_{1}`), is written in parentheses, so
+  it reads back as written. `g(x+1)_{k}` read back as `g·(x+1)_k`.
+- An argument whose value is an error gives that error at every parameter type.
+  With `let w = Ln("a")`, `function op(a: unknown) { a }` and `op(w)` gave a new
+  error, "expected `unknown`, got `error` at `w`". So did a parameter typed as a
+  collection (`list`, `tuple<…>`) or as `function`, a parameter typed by a type
+  variable with a bound (`Conjugate(w)`, `Remainder(w, 2)`, a function declared
+  `(T) -> T where T: number`), and the condition of `if` and `Which`. A function
+  with several clauses (`op(a: number)`, `op(a: string)`) gave "expected
+  `number | string`, got `error`". The call now evaluates to the error of `Ln`,
+  with the frame of the call, as it already did for a parameter typed `number`
+  or with no type. An argument of the wrong type is still refused, and so are a
+  symbol declared `error` that has no value and a call typed `error` only by its
+  declared result type, at a parameter that does not accept `error`.
 - An integer followed by a fraction is read as a mixed number only when the
   numerator and the denominator of the fraction are number literals.
   `2\frac{1+1}{3}` was read as `2 + 2/3`; it is now the product `4/3`, as
@@ -200,58 +264,57 @@
   `g(x)`), a symbol declared `any`, and a value of a type such as
   `number | matrix`. Before, such a factor was sorted in front of the matrices,
   and the powers of a matrix on each side of it were merged: with `A` a 2×2
-  matrix, `A·g(A)·A` evaluated to `A^2·g(A)`, and `A^2·g(A)·A^3` to
-  `A^5·g(A)`. Both are wrong when `g` returns a matrix that does not commute
-  with `A`. `evaluate()`, `simplify()` and `Expand` now keep `A·g(A)·A`. A
-  quotient whose denominator can be a matrix also keeps its position, because
-  the quotient is element-wise: `(A/g(x))·A` evaluated to `A^2/g(x)`,
-  `A·(1/g(x))·g(x)·A` to `A^2`, and, with `B` a matrix, `(A/B)·A` to `A^2/B`.
-  Factors of a scalar type (`real`, `integer`, an undeclared symbol) still move
-  to the front, and a product with no matrix is unchanged.
+  matrix, `A·g(A)·A` evaluated to `A^2·g(A)`, and `A^2·g(A)·A^3` to `A^5·g(A)`.
+  Both are wrong when `g` returns a matrix that does not commute with `A`.
+  `evaluate()`, `simplify()` and `Expand` now keep `A·g(A)·A`. A quotient whose
+  denominator can be a matrix also keeps its position, because the quotient is
+  element-wise: `(A/g(x))·A` evaluated to `A^2/g(x)`, `A·(1/g(x))·g(x)·A` to
+  `A^2`, and, with `B` a matrix, `(A/B)·A` to `A^2/B`. Factors of a scalar type
+  (`real`, `integer`, an undeclared symbol) still move to the front, and a
+  product with no matrix is unchanged.
 - `Expand` does not distribute a product with a matrix over a sum that has a
-  scalar term. The sum of a matrix and a scalar adds the scalar to each
-  element, so `A·(B + r)` is not `A·B + r·A`: `Expand(A·(B + r))` gave
-  `A·B + A·r`, and now stays `A·(B + r)`. A sum of matrices is still
-  distributed, and each term keeps the order of its factors:
-  `Expand(A·(B + C)·g(x))` is `A·B·g(x) + A·C·g(x)`.
+  scalar term. The sum of a matrix and a scalar adds the scalar to each element,
+  so `A·(B + r)` is not `A·B + r·A`: `Expand(A·(B + r))` gave `A·B + A·r`, and
+  now stays `A·(B + r)`. A sum of matrices is still distributed, and each term
+  keeps the order of its factors: `Expand(A·(B + C)·g(x))` is
+  `A·B·g(x) + A·C·g(x)`.
 - In Epsil, the source range of an expression includes the parentheses of its
   operands. The range of `(a) + (b)` was `a) + (b`, and the range of the
   statement `let v = (1) + (2)` ended before the last `)`, so an error reported
   on that statement did not underline the last `)`. This applies to every
   operator, call, member access, index, `if … else`, `is`, loop collection,
-  comprehension and pattern with a parenthesized operand. A single
-  parenthesized expression `(a)` keeps the range of `a`.
+  comprehension and pattern with a parenthesized operand. A single parenthesized
+  expression `(a)` keeps the range of `a`.
 - In Epsil, an error in an operand of a call that canonicalization reorders is
   underlined on the right operand. With `let w: any = "s"`, the statement
   `let v = Ln(w) * 2` underlined `2`, because `Ln(w) * 2` is `2·Ln(w)` in
   canonical form; it now underlines `Ln(w)`. This also applies to a library
   operator such as `Xor` and to a user function marked `commutative` or
-  `associative`: with `w = Ln("a")` and `op` commutative, `op(z, w)`
-  underlined `z`. When the operand is not sure, as in `Ln(w) + Ln(w)`, the
-  whole call is underlined.
+  `associative`: with `w = Ln("a")` and `op` commutative, `op(z, w)` underlined
+  `z`. When the operand is not sure, as in `Ln(w) + Ln(w)`, the whole call is
+  underlined.
 - A function marked `commutative` or `associative` passes an error value
-  through, as the same function without the word does. With
-  `w = Ln("a")` and `function op(a, b) commutative { [a, b] }`, `op(z, w)`
-  gave a new error, "expected `unknown`, got `error`", in place of the error of
-  `Ln`. A parameter without a type is now checked as `any` at the call, as it
-  is without the word.
-- In the unit argument of the siunitx commands `\qty`, `\SI`, `\unit` and
-  `\si`, a `.` or a `~` between two units is a product of the units, as in
-  siunitx. `\qty{3}{m.s^{-1}}` and `\qty{3}{m~s^{-1}}` are the quantity
-  3 m/s, the same as `\qty{3}{m\cdot s^{-1}}`, and `\qty{3}{kg.m^2.s^{-2}}`
-  is 3 kg·m²/s². The `.` form gave parse errors, and the `~` form gave
-  3 per millisecond. A decimal point in an exponent (`\qty{2}{m^{1.5}}`) is
-  not a separator, and a space is still not a product: `\qty{3}{m s^{-1}}`
-  is 3 per millisecond, as LaTeX prints it.
-- A siunitx unit argument that is not a unit gives an `unknown-unit` error
-  with the text of the argument: `\qty{3}{foo}` is
-  `["Quantity", 3, ["Error", "'unknown-unit'", ["LatexString", "'foo'"]]]`.
-  It was an `unexpected-command` error on `\qty`, and the arguments were
-  parsed as a list.
+  through, as the same function without the word does. With `w = Ln("a")` and
+  `function op(a, b) commutative { [a, b] }`, `op(z, w)` gave a new error,
+  "expected `unknown`, got `error`", in place of the error of `Ln`. A parameter
+  without a type is now checked as `any` at the call, as it is without the word.
+- In the unit argument of the siunitx commands `\qty`, `\SI`, `\unit` and `\si`,
+  a `.` or a `~` between two units is a product of the units, as in siunitx.
+  `\qty{3}{m.s^{-1}}` and `\qty{3}{m~s^{-1}}` are the quantity 3 m/s, the same
+  as `\qty{3}{m\cdot s^{-1}}`, and `\qty{3}{kg.m^2.s^{-2}}` is 3 kg·m²/s². The
+  `.` form gave parse errors, and the `~` form gave 3 per millisecond. A decimal
+  point in an exponent (`\qty{2}{m^{1.5}}`) is not a separator, and a space is
+  still not a product: `\qty{3}{m s^{-1}}` is 3 per millisecond, as LaTeX prints
+  it.
+- A siunitx unit argument that is not a unit gives an `unknown-unit` error with
+  the text of the argument: `\qty{3}{foo}` is
+  `["Quantity", 3, ["Error", "'unknown-unit'", ["LatexString", "'foo'"]]]`. It
+  was an `unexpected-command` error on `\qty`, and the arguments were parsed as
+  a list.
 - The derivative of a sum or a product is computed. It stayed unevaluated:
   `\frac{d}{dx}\sum_{k=1}^{3} k x^k` gave the same expression back, and now
-  gives `9x^2 + 4x + 1`. A sum is differentiated term by term when its bounds
-  do not depend on the variable, also with a symbolic or infinite bound:
+  gives `9x^2 + 4x + 1`. A sum is differentiated term by term when its bounds do
+  not depend on the variable, also with a symbolic or infinite bound:
   `\frac{d}{dx}\sum_{k=0}^{n} x^k` is `\sum_{k=0}^{n} k x^{k-1}`. A product with
   integer bounds and at most 24 factors is expanded, then differentiated:
   `\frac{d}{dx}\prod_{k=1}^{2} (x+k)` is `2x + 3`. A product with a symbolic
@@ -259,14 +322,15 @@
   is the variable (`\frac{d}{dx}\sum_{x=1}^{3} x`), the derivative is `0`. When
   a bound depends on the variable, the derivative stays unevaluated.
 - A fraction written with the `nice-solidus` fraction style reads back as the
-  same division. `ce.parse('x/10').toLatex({ fractionStyle: () => 'nice-solidus' })`
-  gives `{}^{x}\!\!/\!{}_{10}`, and parsing this LaTeX gave
+  same division.
+  `ce.parse('x/10').toLatex({ fractionStyle: () => 'nice-solidus' })` gives
+  `{}^{x}\!\!/\!{}_{10}`, and parsing this LaTeX gave
   `Superscript(Error('missing'), x)`; it now gives `Divide(x, 10)`. The parser
-  reads only this exact shape as a division: `{}^{a}`, any number of `\!`,
-  `/`, any number of `\!`, `{}_{b}`. A `{}^{a}` or a `{}_{b}` alone keeps its
+  reads only this exact shape as a division: `{}^{a}`, any number of `\!`, `/`,
+  any number of `\!`, `{}_{b}`. A `{}^{a}` or a `{}_{b}` alone keeps its
   reading.
-- The base of a subscript is written in parentheses when it is compound, as
-  the base of a power is, so the LaTeX reads back as the same expression.
+- The base of a subscript is written in parentheses when it is compound, as the
+  base of a power is, so the LaTeX reads back as the same expression.
   `Subscript(x+1, 2)` was written `x+1_{2}`, which reads back as
   `x + BaseForm(1, 2)`; it is now written `(x+1)_{2}`. A product, a negation, a
   negative number, a power, a fraction and a factorial are also fenced:
@@ -275,73 +339,72 @@
   rate has a value: `\lim_{t\to\infty} (\sqrt{t+1} - \sqrt{t})` is `0`, and
   `\sqrt{t^2+3t} - \sqrt{t^2+t}` gives `1` (they stayed unevaluated). The same
   is true for a radical minus a term that grows at the same rate:
-  `\sqrt{t^2+t} - t` gives `1/2` at `+\infty`, `\sqrt{t^2+t} + t` gives
-  `-1/2` at `-\infty`, and `\sqrt[3]{t^3+t^2} - t` gives `1/3`. The limit code
+  `\sqrt{t^2+t} - t` gives `1/2` at `+\infty`, `\sqrt{t^2+t} + t` gives `-1/2`
+  at `-\infty`, and `\sqrt[3]{t^3+t^2} - t` gives `1/3`. The limit code
   multiplies the difference by its conjugate,
-  `\sqrt{u} - \sqrt{v} = (u - v)/(\sqrt{u} + \sqrt{v})`. A difference that
-  grows without bound, such as `\sqrt{2t} - \sqrt{t}`, still gives `+\infty`.
-  The limit of an absolute value at infinity also has a value: `\sqrt{t^2+1}`
-  is `+\infty` (it stayed unevaluated) and `|(1 - 2t)/(t + 3)|` is `2`. A
-  limit at infinity whose value is a ratio of radicals is exact:
+  `\sqrt{u} - \sqrt{v} = (u - v)/(\sqrt{u} + \sqrt{v})`. A difference that grows
+  without bound, such as `\sqrt{2t} - \sqrt{t}`, still gives `+\infty`. The
+  limit of an absolute value at infinity also has a value: `\sqrt{t^2+1}` is
+  `+\infty` (it stayed unevaluated) and `|(1 - 2t)/(t + 3)|` is `2`. A limit at
+  infinity whose value is a ratio of radicals is exact:
   `\lim_{t\to\infty} \frac{\sqrt{2t^2+1}}{t}` is `\sqrt{2}` and
-  `\lim_{t\to-\infty} \frac{\sqrt{3t^2+1}}{t+1}` is `-\sqrt{3}` (they were
-  the floats `1.414…` and `-1.732…`).
+  `\lim_{t\to-\infty} \frac{\sqrt{3t^2+1}}{t+1}` is `-\sqrt{3}` (they were the
+  floats `1.414…` and `-1.732…`).
 - A limit at infinity of the form `x·f(c/x)` is exact:
   `\lim_{x\to\infty} x\ln(1+\frac{\pi}{x})` is `π` (it was the float
   `3.14159265356268`, with wrong last digits), `x\sin(\frac{\sqrt{2}}{x})` is
   `\sqrt{2}`, `x^2(1-\cos(\frac{\sqrt{3}}{x}))` is `3/2` (it was
-  `1.4999999839369884`), and `x(e^{1/x}-1)` is `1` (it stayed unevaluated).
-  The limit code reads the value from the series of the function with
-  `x = 1/u` at `u = 0`. `evaluate()` no longer returns a float for a limit
-  whose value it cannot find exactly: the limit stays unevaluated, and `.N()`
-  gives the float.
+  `1.4999999839369884`), and `x(e^{1/x}-1)` is `1` (it stayed unevaluated). The
+  limit code reads the value from the series of the function with `x = 1/u` at
+  `u = 0`. `evaluate()` no longer returns a float for a limit whose value it
+  cannot find exactly: the limit stays unevaluated, and `.N()` gives the float.
 - Whole-number powers of one matrix combine. With `A` declared `matrix<2x2>`,
   `A^2 A^3` evaluates and simplifies to `MatrixPower(A, 5)`, and `A A^2` to
   `MatrixPower(A, 3)` (they stayed products, such as
-  `MatrixPower(A, 2) * MatrixPower(A, 3)`). `A^2 A^2` is `MatrixPower(A, 4)`
-  (it was `MatrixPower(MatrixPower(A, 2), 2)`), and `(A^2)^3` is
+  `MatrixPower(A, 2) * MatrixPower(A, 3)`). `A^2 A^2` is `MatrixPower(A, 4)` (it
+  was `MatrixPower(MatrixPower(A, 2), 2)`), and `(A^2)^3` is
   `MatrixPower(A, 6)`. Only positive whole-number exponents combine, and only
-  for powers that no other matrix separates, because the product of matrices
-  is not commutative: `A^2 B A^3` stays as it is. `A^2 A^{-1}` stays as it is
-  too, because `A^2 A^{-1} = A` is true only when `A` is invertible.
+  for powers that no other matrix separates, because the product of matrices is
+  not commutative: `A^2 B A^3` stays as it is. `A^2 A^{-1}` stays as it is too,
+  because `A^2 A^{-1} = A` is true only when `A` is invertible.
 - `Solve` answers an equation with a trig function of a periodic argument, such
   as `sin(sin(x)) = 0`. Such an equation is periodic, with the period of the
   inner trig function. `Solve(sin(sin(x)) = 0, x)` is `[πt]`,
   `ce.parse('\sin(\sin(x))=0').solve('x')` is `[0, π]`, and over `[-7, 7]` the
-  roots are `-2π, -π, 0, π, 2π` (there was no answer since 0.148.0). An
-  equation with no real root gives the empty list: `cos(sin(x)) = 0` is `[]`,
-  because `|sin(x)| ≤ 1 < π/2`. The solver uses each period of the outer
-  function that the inner `sin` or `cos` reaches: `sin(4·sin(x)) = 0` holds
-  for `4·sin(x) = 0`, `π` and `-π`, and the roots of `sin(x) = -π/4` are now
-  in the answer. A scan of one period with an interval proof checks each
-  list. `tan(4·sin(x)) = 1` and `cot(4·sin(x)) = 1` are answered the same
-  way, with the half-turn period of `tan` and `cot`. When the inner function
-  reaches so many periods of the outer one that more than 16 roots would be
-  added, there is no answer, and it comes quickly (`sin(200·sin(x)) = 1/3`,
-  `sin(1000·sin(x)) = 0`). A trig function of an argument that is not
-  periodic (`sin(x²) = 0`, `sin(eˣ) = 0`) still gives no answer.
+  roots are `-2π, -π, 0, π, 2π` (there was no answer since 0.148.0). An equation
+  with no real root gives the empty list: `cos(sin(x)) = 0` is `[]`, because
+  `|sin(x)| ≤ 1 < π/2`. The solver uses each period of the outer function that
+  the inner `sin` or `cos` reaches: `sin(4·sin(x)) = 0` holds for
+  `4·sin(x) = 0`, `π` and `-π`, and the roots of `sin(x) = -π/4` are now in the
+  answer. A scan of one period with an interval proof checks each list.
+  `tan(4·sin(x)) = 1` and `cot(4·sin(x)) = 1` are answered the same way, with
+  the half-turn period of `tan` and `cot`. When the inner function reaches so
+  many periods of the outer one that more than 16 roots would be added, there is
+  no answer, and it comes quickly (`sin(200·sin(x)) = 1/3`,
+  `sin(1000·sin(x)) = 0`). A trig function of an argument that is not periodic
+  (`sin(x²) = 0`, `sin(eˣ) = 0`) still gives no answer.
 - For an unknown declared `real`, a root written with `arcsin` or `arccos` of a
   constant in `[-1, 1]` is kept. With `x` declared `real`,
-  `sin(x) = arccos(9/10)` gives `[arcsin(arccos(9/10)), π − arcsin(arccos(9/10))]`,
-  and `cos(sin(x)) = 9/10` gives its four roots; both gave no answer, because
-  the type of `arcsin(c)` is `complex` when it does not use the value of `c`.
-  `sin(x) = 2` still gives `[]`.
+  `sin(x) = arccos(9/10)` gives
+  `[arcsin(arccos(9/10)), π − arcsin(arccos(9/10))]`, and `cos(sin(x)) = 9/10`
+  gives its four roots; both gave no answer, because the type of `arcsin(c)` is
+  `complex` when it does not use the value of `c`. `sin(x) = 2` still gives
+  `[]`.
 - `Solve(cos(x)^2 = 1/9, x)` is `[πt − arccos(1/3), πt + arccos(1/3)]` (it
   stayed unevaluated). The roots `-arccos(-1/3)` and `arccos(1/3) − π` are in
   the same family, but their difference did not evaluate to 0: the solver now
   uses `arccos(-c) = π − arccos(c)` to compare them.
 - `expr.solve()` no longer lists one root twice for a periodic equation. It
   gives one root of each family in one period, but `sin(x) = -1` gave
-  `[-π/2, 3π/2]` and `3cos(x) + 3 = 0` gave `[π, -π]`, two roots that differ
-  by the period `2π`. They now give `[-π/2]` and `[π]`: of two roots that
-  differ by a multiple of the period, the first one is kept.
-  `expr.explain('solve')` gives the same list, with a step that names each
-  root it removes.
+  `[-π/2, 3π/2]` and `3cos(x) + 3 = 0` gave `[π, -π]`, two roots that differ by
+  the period `2π`. They now give `[-π/2]` and `[π]`: of two roots that differ by
+  a multiple of the period, the first one is kept. `expr.explain('solve')` gives
+  the same list, with a step that names each root it removes.
 - `subs()` reads only the own properties of the substitution object. A symbol
   named like a property of a JavaScript object, such as `constructor` or
   `toString`, was replaced by that inherited property:
-  `ce.box(["Add", "x", "constructor"]).subs({ x: 1 })` gave
-  `"Undefined" + 1`. It now gives `constructor + 1`.
+  `ce.box(["Add", "x", "constructor"]).subs({ x: 1 })` gave `"Undefined" + 1`.
+  It now gives `constructor + 1`.
 - A comprehension or a lazy collection that calls a parameter or a local
   function applies that function after it leaves the function or block that made
   it: `function g(f) { [f(x) for x in [1, 2]] }` applied to `(a) => a + 1` gives
@@ -449,25 +512,25 @@
   `DropWhile`, `RandomShuffle`, `Dedup`, `Cycle`, `ListFrom`, `SetFrom`,
   `DictionaryFrom`, `Values`, `Map` with a function literal, `Find`, `MaxBy`,
   `MinBy`, and the set operations (`Union(S, {2})` with
-  `S: set<integer | missing>` is `set<integer | missing>`, where it was the
-  bare `set`). A position or a count over such a list is an integer:
-  `IndexWhere`, `ArgMax`, `ArgMin` and `CountIf` were typed `number`, and
-  `Position` `list<number>`. `Flatten` of such a list is `list<any>`, where it
-  was the bare `list`. An operand typed with `any` elements is treated the same
-  way, because `any` admits an absent value: `Flatten(M)` with
-  `M: list<list<any>>` and `Union(A, {2})` with `A: set<any>` are `list<any>`
-  and `set<any>`, where they were the bare `list` and `set`.
+  `S: set<integer | missing>` is `set<integer | missing>`, where it was the bare
+  `set`). A position or a count over such a list is an integer: `IndexWhere`,
+  `ArgMax`, `ArgMin` and `CountIf` were typed `number`, and `Position`
+  `list<number>`. `Flatten` of such a list is `list<any>`, where it was the bare
+  `list`. An operand typed with `any` elements is treated the same way, because
+  `any` admits an absent value: `Flatten(M)` with `M: list<list<any>>` and
+  `Union(A, {2})` with `A: set<any>` are `list<any>` and `set<any>`, where they
+  were the bare `list` and `set`.
 
 - A sum or product whose operand type has an imaginary member is typed
   `complex`, because neither is closed over the imaginary numbers
   (`i + (-i) = 0`, `i · i = -1`). With `r: imaginary | integer`, `r + 1` was
   typed `imaginary | integer`, which excludes its value `1 + i`; it is now
   `complex`. The same holds for an alias of such a union, for list and tuple
-  cells (`[i] + [-i]` is `vector<complex^1>`, where it was
-  `vector<imaginary^1>` with the value `[0]`), for a list of points plus a
-  point, and for `imaginary | nan`, which becomes `complex | nan`. A sum of two
-  lists of ranges, `[1..3] + [1..3]`, is typed `list<list<integer>^1>`, where
-  it was `list<range^1>`.
+  cells (`[i] + [-i]` is `vector<complex^1>`, where it was `vector<imaginary^1>`
+  with the value `[0]`), for a list of points plus a point, and for
+  `imaginary | nan`, which becomes `complex | nan`. A sum of two lists of
+  ranges, `[1..3] + [1..3]`, is typed `list<list<integer>^1>`, where it was
+  `list<range^1>`.
 
 - A complex number whose imaginary coefficient is written as an inline fraction
   keeps its value in a LaTeX round trip. At a deep level, or with an inline

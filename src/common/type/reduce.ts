@@ -28,6 +28,7 @@ import type {
 } from './types.js';
 import { isValidPrimitiveType } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
+import { unfoldAliasOnDescent, type AliasDescent } from './utils.js';
 
 /**
  * Reduce the input type
@@ -118,6 +119,68 @@ export function reduceType(type: Type): Type {
     default:
       throw new Error(`Unknown type kind: ${type}`);
   }
+}
+
+/**
+ * The type of a sum or a product, given the join `t` of its operands' types.
+ *
+ * Neither a sum nor a product is closed over `imaginary`: `i + (−i) = 0` and
+ * `i · i = −1` are real, and `1 + i` (an integer plus an imaginary number) is
+ * neither real nor imaginary. A join of the operand types that holds an
+ * imaginary type therefore does not hold every result. This function replaces
+ * each imaginary member of `t` with `complex`, which holds all of them:
+ *
+ * - `imaginary`, and any other type that is a subtype of `imaginary` (a
+ *   literal imaginary value), becomes `complex`;
+ * - in a union, each member that is a subtype of `imaginary` becomes
+ *   `complex`, and the union is then reduced, so that a member which is now a
+ *   subtype of `complex` is absorbed: `imaginary | integer` is `complex`,
+ *   `imaginary | nan` is `complex | nan`, `imaginary | infinity` is
+ *   `complex | infinity`;
+ * - a transparent alias is replaced by its closed definition when the
+ *   definition has an imaginary member: for `type alias imu = imaginary |
+ *   integer`, `imu` becomes `complex`. The alias name is not kept, because
+ *   it no longer describes the result.
+ *
+ * A union is reduced, not widened: `widen` would join `complex` and `nan` to
+ * `number`, which also admits `±∞` and `~oo`.
+ *
+ * A type with no imaginary member is returned unchanged, as the same object.
+ * The function does not descend into a collection, a tuple or a
+ * `broadcastable<…>` type: the caller applies it to the scalar join of each
+ * cell or component.
+ *
+ * An alias is unfolded under the descent guard (`unfoldAliasOnDescent`), so
+ * that a self-referential alias (`type alias cyc = cyc | imaginary`) stops
+ * when it reaches itself again. Such an occurrence is a bare arm of the
+ * alias's own union, because the function does not enter a constructor, and
+ * it adds no value of its own: it is kept unchanged. The other arms are
+ * closed, so the result still holds every sum and every product.
+ */
+export function closeImaginaryUnderArithmetic(
+  t: Type,
+  seen: AliasDescent = undefined
+): Type {
+  if (typeof t === 'string') return t === 'imaginary' ? 'complex' : t;
+  if (t.kind === 'union') {
+    let changed = false;
+    const members = t.types.map((m) => {
+      const r = closeImaginaryUnderArithmetic(m, seen);
+      if (r !== m) changed = true;
+      return r;
+    });
+    return changed ? reduceType({ kind: 'union', types: members }) : t;
+  }
+  if (t.kind === 'reference' && t.alias === true && t.def !== undefined) {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return t;
+    const closed = closeImaginaryUnderArithmetic(unfolded.type, unfolded.seen);
+    return closed === unfolded.type ? t : closed;
+  }
+  // An open type variable stands for an unknown type, and `isSubtype` must
+  // not see one: it is returned unchanged.
+  if (t.kind === 'variable') return t;
+  return isSubtype(t, 'imaginary') ? 'complex' : t;
 }
 
 /** The shape of a list as a comparison key: its lengths, with a dimension

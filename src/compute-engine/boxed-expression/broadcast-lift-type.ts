@@ -471,12 +471,24 @@ export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The collection operators that never compute a value from a cell: they
- * reorder, select or index the cells of their collection operand (`Sort`,
+ * The collection operators that do not compute a value from a cell
+ * themselves: they reorder, select or index the cells of their collection operand (`Sort`,
  * `Reverse`, `Take`, `Filter`, …), put a new cell in among them (`Insert`,
- * `ReplaceAt`, `Append`), answer positions (`Ordering`, `IndexOf`), count
- * cells (`Tally`, `Count`), or test that a cell is there (`Contains`). An
- * absent cell does not make their answer absent: `IndexOf([1, Missing], 2)`
+ * `ReplaceAt`, `Append`), join or regroup the cells of their operands
+ * (`Join`, `ListJoin`, `Partition`, `Zip`, `Union`, …), convert the kind of
+ * the collection (`ListFrom`, `SetFrom`), answer one of the cells (`Find`,
+ * `MaxBy`), answer positions (`Ordering`, `IndexOf`, `IndexWhere`,
+ * `Position`, `ArgMax`), count cells (`Tally`, `Count`, `CountIf`), or test
+ * that a cell is there (`Contains`). `Map` is here too, although it calls a
+ * function on each cell: it gives the cell as it is to the function, and
+ * what the function answers for that cell decides the result cell
+ * (`Map(x ↦ x, L)` keeps an absent cell, `Map(x ↦ x + 1, L)` answers `NaN`
+ * for it). An operator in this set that calls a function on a cell gets no
+ * numeric absorption from the framework, so its `type` handler must widen
+ * a result that it reads from a declared function type, which says nothing
+ * about an absent cell (`withDeclaredCallbackAbsence`,
+ * `library/collections.ts`: `Map(Sqrt, L)` is `list<number>`). An absent cell
+ * does not make their answer absent: `IndexOf([1, Missing], 2)`
  * is `0`, typed `integer`, not `number`. An absent cell of
  * the operand (`[3, Missing, 1]`, typed `list<integer | missing>`) is then
  * an ordinary cell: it goes into the result as it is, or it only takes a
@@ -489,7 +501,10 @@ export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
  * `absorbOperandAbsence` is not applied, so `Ordering` of that list stays
  * `list<integer>`. Before, the operand gave no binding and the numeric
  * absorption applied: `Sort` was typed `list<unknown>`, `Reverse` `list` and
- * `Ordering` `list<number>`.
+ * `Ordering` `list<number>`. A `type` handler gets the operand with the
+ * `missing` arm too: before, `Join` and `ListJoin` got `list<integer | nan>`
+ * for that list, and `Join(L, [2])` was typed `list<number>` although its
+ * value holds the absent cell.
  *
  * An operand that can be absent AS A WHOLE (`Sort(Missing)`, a restricted
  * list) is not changed: the absence gate answers `Missing` for it.
@@ -503,17 +518,48 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
   'Rest',
   'Most',
   'Unique',
+  'Dedup',
+  'RandomShuffle',
   'RotateLeft',
   'RotateRight',
+  'Cycle',
   'Filter',
+  'TakeWhile',
+  'DropWhile',
   'Slice',
   'Tally',
   'Insert',
   'ReplaceAt',
+  'DeleteAt',
   'Append',
+  'Join',
+  'ListJoin',
+  'Partition',
+  'Chunk',
+  'ChunkBy',
+  'GroupBy',
+  'Zip',
+  'ListFrom',
+  'SetFrom',
+  'DictionaryFrom',
+  'Values',
+  'Union',
+  'Intersection',
+  'SetMinus',
+  'Complement',
+  'SymmetricDifference',
+  'Map',
+  'Find',
+  'MaxBy',
+  'MinBy',
   'Contains',
   'IndexOf',
+  'IndexWhere',
+  'Position',
+  'ArgMax',
+  'ArgMin',
   'Count',
+  'CountIf',
 ]);
 
 /**

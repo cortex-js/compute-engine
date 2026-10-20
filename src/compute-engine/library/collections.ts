@@ -80,6 +80,7 @@ import {
   smallCount,
 } from '../boxed-expression/collection-count.js';
 import {
+  absorbOperandAbsence,
   broadcastableOf,
   isAbstractCollectionTypeOf,
   isKindOpenOperandType,
@@ -152,6 +153,7 @@ import {
   staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
+  typeCouldHoldMissing,
   widen,
   widenAll,
   widenElementTypes,
@@ -3894,7 +3896,45 @@ function joinedElementTypeD(
     else return undefined;
   }
   if (eltTypes.length === 0) return undefined;
-  return widenAll(eltTypes);
+  // `widenAll` keeps the arms of a union apart: `integer | missing` widened
+  // with `real` is `integer | missing | real`. `reduceType` merges the
+  // numeric arms, `missing | real`.
+  return reduceType(widenAll(eltTypes));
+}
+
+/**
+ * The result type of an operator whose declared result is a collection type
+ * that admits values only (`list`, `list<list>`, `dictionary<list>`), when
+ * the cells of its collection operand `xs` can be absent (a `missing` arm,
+ * or `any`, which admits the absence markers: `typeCouldHoldMissing`);
+ * `undefined`
+ * otherwise, and the declared result applies.
+ *
+ * The operator keeps each cell of `xs` as it is, absent ones included
+ * (`Cycle`, `Chunk`, `GroupBy`), so the result type must keep the `missing`
+ * arm of the cells. `wrap` builds the result type from the element type of
+ * `xs`, which is `any` when the type of `xs` does not say what its elements
+ * are. The operand comes with the `missing` arm of its cells: these
+ * operators are in `ABSENT_CELLS_PASS_THROUGH` (`broadcast-lift-type.ts`).
+ *
+ * The result is computed only in that case. A precise element type in
+ * every case was tried and broke a program: in `Chunk(Map(f, cs), 5)`,
+ * with `cs` a list of characters and `f` a function with no declared
+ * result that returns strings, `Map` is typed `list<character>`, so each
+ * group was typed `list<character>`, and a function applied to the groups
+ * refused them (`test/epsil/corpus/exercism/atbash-cipher.epsil`).
+ */
+function absentCellsResultType(
+  xs: OperandDescriptor | undefined,
+  context: TypeHandlerContext,
+  wrap: (elements: Type) => Type
+): BoxedType | undefined {
+  if (xs === undefined || !typeCouldHoldMissing(xs.type)) return undefined;
+  const elements = collectionElementType(xs.type);
+  return BoxedType.forResult(
+    wrap(elements === undefined || elements === 'unknown' ? 'any' : elements),
+    context.engine._typeResolver
+  );
 }
 
 /**
@@ -3920,7 +3960,26 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.some((op) => isRecordShapedType(op.type))) return 'record';
   if (ops.some((op) => isSubtype(op.type, DICTIONARY_SHAPE_TYPE)))
     return 'dictionary';
-  if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) return 'set';
+  if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) {
+    // The bare `set` admits values only. That is correct when no operand
+    // can hold an absent element (a `missing` arm, or `any`, which admits
+    // the absence markers: `typeCouldHoldMissing`). When one can, the
+    // joined set holds it as it is (`Join({1, Missing}, {2})` is
+    // `{1, 2, Missing}`), so the type admits it: the set of the joined
+    // element types, or
+    // `set<any>` when an operand does not say what its elements are. An
+    // operand typed `unknown` (a call `q(1)` of a function declared
+    // `-> unknown`) contributes the placeholder `unknown`, which the widening
+    // drops, so such an operand gives `set<any>` too.
+    if (!ops.some((op) => typeCouldHoldMissing(op.type))) return 'set';
+    const unstated = ops.some(
+      (op) =>
+        !isAtomicJoinOperandD(op) &&
+        (collectionElementType(op.type) ?? 'unknown') === 'unknown'
+    );
+    const elements = unstated ? undefined : joinedElementTypeD(ops);
+    return { kind: 'set', elements: elements ?? 'any' };
+  }
 
   const kind = ops.some(
     (op) => !isAtomicJoinOperandD(op) && isKindOpenOperandType(op.type)
@@ -4011,6 +4070,85 @@ function callbackResultTypeD(
       ? def.operator.signature.type
       : def.value?.type?.type;
   return declared === undefined ? undefined : functionResult(declared);
+}
+
+/**
+ * The `type` handler of `Map`, `handler`, with the absent cells of its
+ * sources absorbed when the result of the callback is read from a
+ * declaration.
+ *
+ * `Map` is in `ABSENT_CELLS_PASS_THROUGH` (`broadcast-lift-type.ts`): its
+ * sources come with the `missing` arm of their cells, and the framework does
+ * not absorb that arm. That is correct when the callback is a function
+ * literal: its type is derived from its body with the parameter typed by
+ * the cells, `missing` arm included, so `Map(x ↦ x, L)` keeps an absent
+ * cell, and `Map(x ↦ x + 1, L)` gives `NaN` for it. A DECLARED result (a
+ * library operator, `Sqrt`, or a function symbol declared
+ * `(integer) -> integer`) says nothing about the absent cell, where the
+ * call answers the absence marker of its result (`NaN` for a number,
+ * `Missing` for a point). For such a callback, the handler is called with
+ * the `missing` arm of the cells replaced by `nan`, as the framework does
+ * for an operator that is not in the set, and the result takes the same
+ * absorption (`absorbOperandAbsence`): `Map(Sqrt, L)` is `list<number>`,
+ * not `list<complex | infinity>`, and `Map(Negate, P)` over a list of
+ * points with an absent cell keeps a `missing` arm for that cell.
+ *
+ * A declared result that has a `missing` arm itself
+ * (`(integer | missing) -> integer | missing`) says what the callback
+ * answers for the absent cell, and is used as it is.
+ */
+function withDeclaredCallbackAbsence(
+  handler: (
+    ops: ReadonlyArray<OperandDescriptor>,
+    context: TypeHandlerContext
+  ) => BoxedType | undefined
+): (
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+) => BoxedType | undefined {
+  return (ops, context) => {
+    const { engine } = context;
+    const sources = ops.slice(1);
+    const fn = ops[0]?.structureOf?.();
+    if (
+      ops[0] === undefined ||
+      !sources.some((d) => typeCouldHoldMissing(d.type)) ||
+      fn?.kind === 'function-literal'
+    )
+      return handler(ops, context);
+    const declared = callbackResultTypeD(ops[0], engine);
+    if (declared !== undefined && typeCouldHoldMissing(declared))
+      return handler(ops, context);
+    const present = ops.map((d, i) =>
+      i === 0 || !typeContainsMissing(d.type)
+        ? d
+        : {
+            type: stripMissingFromType(d.type, 'nan'),
+            facts: d.facts,
+            structureOf: d.structureOf,
+          }
+    );
+    const t = handler(present, context);
+    if (t === undefined) return undefined;
+    return BoxedType.forResult(
+      // `Map` reads no point coordinate (`absentCellsStayMissing` is false)
+      // and is not `broadcastable`, as its definition says.
+      // A source that can hold an absent cell only through `any`
+      // (`list<any>`) has no `missing` arm for the absorption to read, so it
+      // is given as `list<missing>`, a list with an absent cell.
+      absorbOperandAbsence(
+        t.type,
+        ops.map((d) =>
+          typeCouldHoldMissing(d.type) && !typeContainsMissing(d.type)
+            ? { kind: 'list', elements: 'missing' }
+            : d.type
+        ),
+        false,
+        false
+      ),
+      engine._typeResolver
+    );
+  };
 }
 
 /** Descriptor twin of {@link foldResultType}. */
@@ -9787,7 +9925,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // For the multi-collection (zipWith) form the result is a list of the
     // lambda's result type when every source is indexed, and an indexed
     // collection of it otherwise (`zipMapResultType`).
-    type: (ops, { engine, derive }) => {
+    type: withDeclaredCallbackAbsence((ops, { engine, derive }) => {
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
       // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
@@ -9890,7 +10028,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ),
         engine._typeResolver
       );
-    },
+    }),
     canonical: (ops, { engine }) => {
       // The mapping function is the first argument; every following argument
       // is a source collection. It is applied to one element from each source
@@ -16201,6 +16339,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // set held by a symbol of a wider declared type by `evaluate`.
     signature:
       '((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)',
+    // The declared result, `list<list>`, admits values only. A group keeps
+    // the cells of the source as they are, absent ones included
+    // (`Chunk([1, Missing, 3], 2)` is `[[1, Missing], [3]]`), so when the
+    // cells of the source can be absent, the groups are typed with them
+    // (`absentCellsResultType`).
+    type: ([xs], context) =>
+      absentCellsResultType(xs, context, (elements) => ({
+        kind: 'list',
+        elements: { kind: 'list', elements },
+      })),
     // Provable declines only (a finite, walkable source and a positive
     // integer `k` are required); success is not cheaply decidable, so never
     // `true` — see `canEnumerateFiniteSource`.
@@ -16498,6 +16646,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
+    // The declared result, `dictionary<list>`, admits values only. A group
+    // keeps the elements of the source as they are, absent ones included,
+    // so when the elements of the source can be absent, the groups are
+    // typed with them (`absentCellsResultType`).
+    type: ([xs], context) =>
+      absentCellsResultType(xs, context, (elements) => ({
+        kind: 'dictionary',
+        values: { kind: 'list', elements },
+      })),
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1, PER_ELEMENT_SUPPLY),
     // Provable declines only (finite, walkable source required); success also
@@ -16600,13 +16757,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const elements = ops.map(
         (x) => x.facts.elementType ?? collectionElementType(x.type) ?? 'unknown'
       );
+      const tuple: Type = {
+        kind: 'tuple',
+        elements: elements.map((t) => ({ type: t })),
+      };
+      // A tuple whose every coordinate is absent is the absent value (see
+      // the `Tuple` type handler): when the cell of every source may be
+      // absent, the pair of two absent cells is `Missing`, and the element
+      // type keeps a `missing` arm. The sources come with the `missing` arm
+      // of their cells (`ABSENT_CELLS_PASS_THROUGH`,
+      // `broadcast-lift-type.ts`).
       return BoxedType.forResult(
         {
           kind: 'list',
-          elements: {
-            kind: 'tuple',
-            elements: elements.map((t) => ({ type: t })),
-          },
+          elements: elements.every((t) => typeCouldHoldMissing(t))
+            ? { kind: 'union', types: ['missing', tuple] }
+            : tuple,
         },
         context.engine._typeResolver
       );
@@ -16914,6 +17080,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(list<any>) -> list',
+    // The declared result, the bare `list`, admits values only. The cycle
+    // repeats the cells of the source as they are, absent ones included,
+    // so when the cells of the source can be absent, the result is typed
+    // with them (`absentCellsResultType`).
+    type: ([xs], context) =>
+      absentCellsResultType(xs, context, (elements) => ({
+        kind: 'list',
+        elements,
+      })),
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -17269,6 +17444,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> dictionary',
+    // The declared result, the bare `dictionary`, admits values only. An
+    // absent value of a pair is a value of the result as it is
+    // (`DictionaryFrom([("a", Missing)])` is `{"a" -> Missing}`), so when
+    // the source can hold an absent value (a `missing` arm, or `any`:
+    // `typeCouldHoldMissing`), the result is `dictionary<any>`, which admits
+    // the absent value. The source comes
+    // with its `missing` arm (`ABSENT_CELLS_PASS_THROUGH`,
+    // `broadcast-lift-type.ts`).
+    type: ([xs], context) =>
+      xs !== undefined && typeCouldHoldMissing(xs.type)
+        ? BoxedType.forResult('dictionary<any>', context.engine._typeResolver)
+        : undefined,
     // Provable declines only (the source must be a finite, walkable
     // collection); success also depends on every element being a
     // string-keyed pair, so never `true` — see `canEnumerateFiniteSource`.

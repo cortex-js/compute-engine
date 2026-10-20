@@ -5,6 +5,7 @@ import {
 } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { closeImaginaryUnderArithmetic } from '../../common/type/reduce.js';
 import {
   broadcastCellType,
   collectionElementType,
@@ -14,6 +15,7 @@ import {
   resolveTypeForCompilation as resolveType,
   staticCollectionDims,
   stripMissingFromType,
+  typeCouldHoldMissing,
   widen,
 } from '../../common/type/utils.js';
 import { ListType, Type } from '../../common/type/types.js';
@@ -1877,7 +1879,8 @@ function hasRestrictedCell(ops: ReadonlyArray<Expression>): boolean {
  *   ±∞ (`∞·3 + 2·4`), while two of them can cancel to NaN and a non-real
  *   companion can produce `~oo`, both of which only the top type admits;
  * - `imaginary` is not closed under addition — the imaginary parts can cancel
- *   to 0, which is real — so a purely imaginary join reports `complex`.
+ *   to 0, which is real — so each imaginary member of the join reports
+ *   `complex` (`imaginary | nan` is `complex | nan`).
  *
  * A one-term sum is the term itself, as in `addType`'s single-argument
  * shortcut: there is nothing to cancel, so an `imaginary` product stays
@@ -1902,8 +1905,7 @@ function innerProductSumType(types: ReadonlyArray<Type>): Type {
       return SIGNED_INFINITY_TYPE;
     return 'number';
   }
-  const t = widen(...types);
-  return t === 'imaginary' ? 'complex' : t;
+  return closeImaginaryUnderArithmetic(widen(...types) as Type);
 }
 
 /**
@@ -2197,6 +2199,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value, integer?) -> list',
+      // The declared result, the bare `list`, admits values only. Flatten
+      // does not compute from an element: an absent element of the operand,
+      // at any depth, is an element of the result (`Flatten([[1, Missing],
+      // [2]])` is `[1, Missing, 2]`). So when the operand can hold an absent
+      // element (a `missing` arm, or `any`, which admits the absence
+      // markers: `typeCouldHoldMissing`), the result is `list<any>`, which
+      // admits the absent element. The element type is not computed: the depth operand and
+      // the tensor and string rules of the evaluate handler decide which
+      // elements are leaves.
+      type: ([xs], context) =>
+        xs !== undefined && typeCouldHoldMissing(xs.type)
+          ? BoxedType.forResult('list<any>', context.engine._typeResolver)
+          : undefined,
       // Provable declines only. The evaluate handler succeeds on three shapes:
       // a scalar (wrapped in a one-element list), a tensor value, and a finite
       // indexed collection — the last two imply a walkable operand, so an

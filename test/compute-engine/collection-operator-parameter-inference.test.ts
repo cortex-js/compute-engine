@@ -172,7 +172,10 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Zip',
     'zip(xs, xs)',
-    '(indexed_collection<any>) -> list<tuple<any, any>>',
+    // The parameter is inferred as `indexed_collection<any>`, and `any`
+    // admits an absent element, so a pair can be absent: `h([1, Missing, 3])`
+    // is `[(1, 1), Missing, (3, 3)]` (user decision 2026-10-19).
+    '(indexed_collection<any>) -> list<missing | tuple<any, any>>',
     [LIST],
   ],
   [

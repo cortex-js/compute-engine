@@ -1029,9 +1029,39 @@ export function typeContainsMissing(
   t: Readonly<Type>,
   seen?: AliasDescent
 ): boolean {
-  if (t === 'missing') return true;
-  if (typeof t === 'string') return false;
-  const contains = (x: Readonly<Type>) => typeContainsMissing(x, seen);
+  return containsPrimitive(t, (p) => p === 'missing', seen);
+}
+
+/**
+ * True if a value of type `t` can hold the absence marker `Missing` at some
+ * nesting level: `t` has a `missing` arm ({@link typeContainsMissing}), or
+ * `any` at some position, because `any` admits the absence markers. A value
+ * typed `any` or `list<any>` can be `Missing` or hold a `Missing` cell. The
+ * bare collection names and `unknown` do not admit absence (`list` is
+ * `list<unknown>`, values only), and neither does `value`: `missing` is a
+ * subtype of only `any` and `missing` among the primitive types.
+ *
+ * Use it where a result type is built from what an operand can hold, so
+ * that the result admits an absent element whenever the operand can carry
+ * one. Use {@link typeContainsMissing} to decide whether to STRIP a
+ * `missing` arm: there is nothing to strip from `any`.
+ */
+export function typeCouldHoldMissing(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): boolean {
+  return containsPrimitive(t, (p) => p === 'missing' || p === 'any', seen);
+}
+
+/** Whether `t` has, at some nesting level, a primitive type that `leaf`
+ * accepts. The walk is the one of {@link typeContainsMissing}. */
+function containsPrimitive(
+  t: Readonly<Type>,
+  leaf: (p: string) => boolean,
+  seen?: AliasDescent
+): boolean {
+  if (typeof t === 'string') return leaf(t);
+  const contains = (x: Readonly<Type>) => containsPrimitive(x, leaf, seen);
   switch (t.kind) {
     case 'union':
     case 'intersection':
@@ -1052,7 +1082,7 @@ export function typeContainsMissing(
     case 'reference': {
       const unfolded = unfoldAliasOnDescent(t, seen);
       if (unfolded === undefined || unfolded.type === t) return false;
-      return typeContainsMissing(unfolded.type, unfolded.seen);
+      return containsPrimitive(unfolded.type, leaf, unfolded.seen);
     }
     default:
       return false;

@@ -3,7 +3,10 @@ import type { BigNum } from '../numerics/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
-import { reduceType } from '../../common/type/reduce.js';
+import {
+  closeImaginaryUnderArithmetic,
+  reduceType,
+} from '../../common/type/reduce.js';
 import {
   describeType,
   typeFact,
@@ -2455,10 +2458,13 @@ function scaleTupleComponents(
   // `indexed_collection<number | tuple<…>>` arm) is a number the factors
   // multiply, so it widens like a tuple component does; anything else that
   // is not a tuple, a union or a collection (`unknown`, a string, the bare
-  // `tuple`) is left as written.
+  // `tuple`) is left as written. A product is not closed over `imaginary`
+  // (`i · i = -1`), so each imaginary member of a join is `complex`.
   if (typeof t === 'string')
     return factsOf(t).belowNumber
-      ? (widen(t, ...scalarTypes.map((x) => stripNumericRanges(x))) as Type)
+      ? closeImaginaryUnderArithmetic(
+          widen(t, ...scalarTypes.map((x) => stripNumericRanges(x))) as Type
+        )
       : (t as Type);
   // A point-or-point-list union (`tuple<…> | list<tuple<…>>`) scales arm by
   // arm: the tuple arm as a tuple, a list or indexed-collection arm of
@@ -2481,22 +2487,33 @@ function scaleTupleComponents(
         descendIntoConstructor(seen)
       ),
     };
+  // A numeric arm that is not a primitive name (a ranged number) widens
+  // like a component, and a product is not closed over `imaginary`.
   if (t.kind !== 'tuple')
     return factsOf(t).belowNumber
-      ? (widen(
-          stripNumericRanges(t),
-          ...scalarTypes.map((x) => stripNumericRanges(x))
-        ) as Type)
+      ? closeImaginaryUnderArithmetic(
+          widen(
+            stripNumericRanges(t),
+            ...scalarTypes.map((x) => stripNumericRanges(x))
+          ) as Type
+        )
       : (t as Type);
   // Range decorations are stripped on BOTH sides of the join: a scaled
   // component does not lie in the union of the component's and the
-  // factors' ranges (see `stripNumericRanges`).
+  // factors' ranges (see `stripNumericRanges`). A product is not closed over
+  // `imaginary` (`i · i = -1`), so each imaginary member of the join of a
+  // component is `complex`.
   const factors = scalarTypes.map((x) => stripNumericRanges(x));
   return {
     kind: 'tuple',
     elements: t.elements.map((e) =>
       factsOf(e.type).belowNumber
-        ? { ...e, type: widen(stripNumericRanges(e.type), ...factors) as Type }
+        ? {
+            ...e,
+            type: closeImaginaryUnderArithmetic(
+              widen(stripNumericRanges(e.type), ...factors) as Type
+            ),
+          }
         : e
     ),
   };
@@ -3159,8 +3176,11 @@ function broadcastableResultTypeOfOperands(
     if (t === 'any' || t === 'value') return t;
     return broadcastElementType(t);
   });
-  let element = widenAll(contributions.map((t) => stripNumericRanges(t)));
-  if (element === 'imaginary') element = 'complex';
+  // Neither a sum nor a product is closed over `imaginary` (`i · i = −1`):
+  // each imaginary member of the join is `complex`.
+  const element = closeImaginaryUnderArithmetic(
+    widenAll(contributions.map((t) => stripNumericRanges(t))) as Type
+  );
   // `broadcastable<any>` is `any` (see `broadcastableOf`).
   if (element === 'any' || element === 'value') return element;
   return { kind: 'broadcastable', elements: element };
@@ -3321,16 +3341,24 @@ function tupleComponentwiseAddType(
         elements.push({ type: 'unknown' });
         continue;
       }
-      // A sum is not closed over `imaginary` (`i + (−i) = 0` is real):
-      // `complex` covers the closure — the same repair the scalar tail of
+      // A sum is not closed over `imaginary` (`i + (−i) = 0` is real, and
+      // `1 + i` is neither real nor imaginary): each imaginary member of the
+      // join is `complex` — the same repair the scalar tail of
       // `addTypeOnTypes` applies, and `absorbScalarsIntoCells` applies to a
       // cell.
-      const scalar = widen(...components);
-      elements.push({ type: scalar === 'imaginary' ? 'complex' : scalar });
+      elements.push({
+        type: closeImaginaryUnderArithmetic(widen(...components) as Type),
+      });
       continue;
     }
     const scalars = components.filter((c) => !isListShaped(c));
-    elements.push({ type: absorbScalarsIntoCells(widen(...lists), scalars) });
+    // Two or more list components at this position are added cell by cell,
+    // and that combination of cells is not closed over `imaginary` either.
+    elements.push({
+      type: absorbScalarsIntoCells(widen(...lists), scalars, {
+        combinesCells: lists.length > 1,
+      }),
+    });
   }
   return { kind: 'tuple', elements };
 }
@@ -3513,14 +3541,19 @@ function addTypeOnTypes(
           typeCouldBeNumericTuple(x.type) || pointNestOf(x.type) !== undefined
       )
     ) {
-      const cell = widenAll(
-        args.map((x) =>
-          stripNumericRanges(
-            typeCouldBeNumericTuple(x.type)
-              ? numericTupleArms(x.type)
-              : pointNestOf(x.type)!.cell
+      // The points are added component by component, which is not closed
+      // over `imaginary` (`(i, i) + (-i, -i)` is `(0, 0)`), so each component
+      // of the joined point type is closed (`closeImaginaryPointComponents`).
+      const cell = closeImaginaryPointComponents(
+        widenAll(
+          args.map((x) =>
+            stripNumericRanges(
+              typeCouldBeNumericTuple(x.type)
+                ? numericTupleArms(x.type)
+                : pointNestOf(x.type)!.cell
+            )
           )
-        )
+        ) as Type
       );
       // The operand of highest rank gives the shape.
       const deepest = pointLists
@@ -3593,11 +3626,14 @@ function addTypeOnTypes(
         shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
       );
       const scalars = args.filter((x) => !isBroadcastShaped(x));
+      // Two or more collections are added cell by cell (`[i] + [-i]` is
+      // `[0]`), so their joined cells are closed like a cell and a scalar.
       return withFloatRationalCellsAsReal(
         args,
         absorbScalarsIntoCells(
           collected,
-          scalars.map((x) => x.type)
+          scalars.map((x) => x.type),
+          { combinesCells: shaped.length > 1 }
         )
       );
     }
@@ -3641,15 +3677,44 @@ function addTypeOnTypes(
   const widened = widenAll(present.map((p) => stripNumericRanges(p)));
   const t = widened === 'rational' ? rationalTierOf(args) : widened;
   // `imaginary + imaginary` is not closed under addition: the imaginary
-  // parts can cancel to 0, which is real. `complex` covers both.
-  if (t === 'imaginary')
+  // parts can cancel to 0, which is real, and `1 + i` (an `imaginary |
+  // integer` term plus an imaginary one) is neither real nor imaginary. Each
+  // imaginary member of the join is `complex`, which covers every sum.
+  const closed = closeImaginaryUnderArithmetic(t as Type);
+  if (closed !== t)
     return hasNaN
-      ? reduceType({ kind: 'union', types: ['complex', 'nan'] })
-      : 'complex';
+      ? reduceType({ kind: 'union', types: [closed, 'nan'] })
+      : closed;
   const ranged = attachInterval(t, foldIntervalsOfTypes(present, addIntervals));
   return hasNaN
     ? reduceType({ kind: 'union', types: [ranged, 'nan'] })
     : ranged;
+}
+
+/**
+ * The point type `t` (a `tuple`, or a union of tuples) with each imaginary
+ * member of each component type replaced by `complex`
+ * (`closeImaginaryUnderArithmetic`): the type of a component-wise sum of
+ * points, which is not closed over `imaginary`. A union of points is closed
+ * arm by arm. Any other type is returned unchanged, and so is a point whose
+ * components have no imaginary member (the same object).
+ */
+function closeImaginaryPointComponents(t: Type): Type {
+  if (typeof t === 'string') return t;
+  if (t.kind === 'union') {
+    const arms = t.types.map((a) => closeImaginaryPointComponents(a));
+    return arms.every((a, i) => a === t.types[i])
+      ? t
+      : reduceType({ kind: 'union', types: arms });
+  }
+  if (t.kind !== 'tuple') return t;
+  const elements = t.elements.map((e) => {
+    const type = closeImaginaryUnderArithmetic(e.type);
+    return type === e.type ? e : { ...e, type };
+  });
+  return elements.every((e, i) => e === t.elements[i])
+    ? t
+    : { ...t, elements };
 }
 
 /** The type handler of `Add`, also used by `Subtract`
@@ -9185,7 +9250,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             );
           // Strip range decorations before the join: a product of two
           // `list<real<-1..>>` operands does not stay above −1
-          // (see `stripNumericRanges`).
+          // (see `stripNumericRanges`). The collections are multiplied cell
+          // by cell, which is not closed over `imaginary` (`[i] · [i]` is
+          // `[-1]`), so the joined cells are walked even with no scalar
+          // factor.
           return BoxedType.forResult(
             withFloatRationalCellsAsReal(
               ops,
@@ -9195,7 +9263,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                     stripNumericRanges(broadcastSiblingType(x.type))
                   )
                 ),
-                scalarTypes
+                scalarTypes,
+                { combinesCells: true }
               )
             ),
             engine._typeResolver

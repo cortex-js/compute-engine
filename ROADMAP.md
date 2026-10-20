@@ -218,7 +218,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the
   result unit is the one with the largest scale, and the offset of each operand
   is applied). A decision is needed on what such a sum means (an error, or a
-  difference of temperatures).
+  difference of temperatures). User decision 2026-10-19: convert each
+  temperature to kelvin and add the values in kelvin.
 
 ### Smaller defects found on 2026-10-19 (batch 11) (OPEN, small)
 
@@ -297,52 +298,47 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 13) (OPEN, decided 2026-10-19)
+### Questions found on 2026-10-19 (batch 14) (OPEN, decision)
 
-- **A dimensionless quantity compared with a number.** `6 percent = 0.06` and
-  `30 deg = π/6` stay unevaluated, while two quantities of different dimensions,
-  or a quantity with a dimension and a number, are `False`. (A) Keep this. (B)
-  Compare a dimensionless quantity with a number as a value with scale 1:
-  `6 percent = 0.06` and `180 deg = π` are `True`. If nothing is decided, (A)
-  stays. Recommendation: (B), because SI treats angles and ratios as
-  dimensionless values. User decision 2026-10-19: (B).
+- **A name assigned in only one branch of an `if` in a function body.** In
+  `function g(c) { if c { t = 1 }; t }`, the `if` branch owns `t` (it is a local
+  of the branch block), so the `t` after the `if` is a free symbol: `g(true)`
+  and `g(false)` both give the symbol `t`. (A) Keep this. (B) The function body
+  owns every name that any of its branches assigns, as in Python: `g(true)`
+  gives `1`, and `g(false)` gives the `read-before-declaration` error. If
+  nothing is decided, (A) stays. Recommendation: (B), because the result of (A)
+  is almost always unexpected; it changes the scoping rule, so it needs a
+  decision.
 
-- **A read of a function-body local before its first assignment.** In Epsil,
-  `function g(k) { u = t; t = k; u }` reads the local `t` before it is assigned;
-  the read gives the bare symbol `t`, so `g(1)` is `t`. A `let` name read before
-  its declaration is the `read-before-declaration` error. (A) Keep the bare
-  symbol. (B) Report the same error as for `let`. If nothing is decided, (A)
-  stays. Recommendation: (B), because a bare symbol here is almost always a typo
-  or an ordering mistake, and JavaScript and Python report it. User decision
-  2026-10-19: (B).
+- **A read of a constant name (`i`, `e`, `Pi`) that a later top-level `let`
+  declares.** In `function g() { i + 1 }`, then `let i = 2`, then `g()`, the run
+  gives `1 + i` (the imaginary unit), while the compiled program and the program
+  evaluated as one `Block` give `3`, because the block declares `i` before it
+  canonicalizes `g`. Since the batch-14 change, an assignment in a function body
+  follows the order of the top-level statements; reads of these names do not.
+  (A) Keep the difference. (B) Make the shadowing of a library constant name by
+  a top-level declaration follow statement order in the program block too, so
+  every route gives `1 + i`. If nothing is decided, the routes keep giving
+  different values for this shape. Recommendation: (B), because it completes the
+  same rule for reads; it changes name resolution, so it needs a decision.
 
-- **A top-level `let` written after a function, in a compiled Epsil program.**
-  `function g(k) { t = k + 1; t }` then `let t = 0` then `[g(1), g(2), t]`:
-  `executeEpsil` gives `[2,3,0]`, because it canonicalizes one top-level
-  statement at a time and `t` is a local of `g`. The compiled program gives
-  `[2,3,3]`: it is one `Block`, which declares all its top-level names before it
-  canonicalizes its statements, so `g` writes the later `t` (and the same
-  program evaluated as one block is refused with the `scope` error). (A) A later
-  top-level `let` does not count: the compile route stops declaring top-level
-  names before it canonicalizes, and every route gives `[2,3,0]`. (B) It counts:
-  `executeEpsil` declares the program's top-level names first, and every route
-  gives `[2,3,3]` (or the `scope` error). If nothing is decided, the routes keep
-  giving different answers for this shape. Recommendation: (A), because the
-  documentation says that a declaration made later does not change what a
-  function writes. User decision 2026-10-19: (A).
+- **Compiled code and a declared function type.** With
+  `let g: (integer) -> integer`, then `function g(k) { k + 1 }` (or
+  `g = (k) => k + 1`), then `g(1.5)`, the run gives an `incompatible-type` error
+  and the compiled code gives `2.5`: the compiler does not check a declared
+  function type at a call. (A) The compiler refuses a call whose argument or
+  result can break a declared type that it cannot check, as it already does for
+  a declared result type that the body clearly breaks. (B) Accept the difference
+  and document that compiled code does not check declared function types. If
+  nothing is decided, the compiled code keeps answering where the run gives a
+  type error. Recommendation: (A).
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
-- Compiled code does not check the `scope` effect contract: an Epsil function
-  whose body writes a name declared before it, with no `scope` specifier, is
-  refused by the run, but the compiled program writes the outer binding (with
-  `let t = 0` before `function g(k) { t = k + 1; t }`, the compiled program
-  gives `[2,2]` for `[g(1), t]`).
-- The LaTeX parser makes a `Quantity` only after a number literal:
-  `\pi\,\mathrm{rad}` is `Multiply(Pi, rad)` and `10^{-30}\,\mathrm{rad}` is
-  `Multiply(rad, 10^-30)`, so
-  `\frac{\pi}{180}\cdot 1\,\mathrm{rad} + 10^{-30}\,\mathrm{rad}` evaluates to a
-  sum of a quantity and a product, not to one quantity.
+- `3·10^-30` (`Multiply(3, Power(10, -30))`) is written `\frac{3}{10^{30}}`,
+  which parses back as `Rational(3, 10^30)`: the same exact value, but not the
+  same expression. The canonical form keeps the product while it folds a
+  `Divide` of exact numbers into a rational.
 
 ### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
 
@@ -391,7 +387,9 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   unsorted until its context is known, which changes the order of scalar
   products such as `g(x)·k(x)` (today always `k(x)·g(x)`). A decision is
   necessary. (`test.todo` in
-  `test/compute-engine/matrix-unknown-factor-order.test.ts`.)
+  `test/compute-engine/matrix-unknown-factor-order.test.ts`.) User decision
+  2026-10-19: flatten the operands of a product first (a nested `Multiply` is
+  spliced into the outer one), then order them, so the written order is kept.
 - `g(x)^{-1}` has two readings. `Power(g(x), -1)` is made canonical as
   `Divide(1, g(x))`, which is element-wise when `g(x)` is a matrix, while
   `Power(M, -1)` for a symbol `M` declared as a matrix becomes `Inverse(M)`. So
@@ -399,7 +397,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   the expression is boxed. A decision is necessary: either a negative power of
   an operand that can be a matrix stays a `Power` (the matrix inverse once the
   value is known), or it stays element-wise. The code is in `canonicalPower`
-  (`boxed-expression/arithmetic-power.ts`).
+  (`boxed-expression/arithmetic-power.ts`). User decision 2026-10-19: a
+  negative power of an operand that can be a matrix stays a `Power`.
 - A symbol declared `error` with no value (`ce.declare('e', 'error')`) is
   checked by two different rules. On a ground signature it is admitted:
   `g1: (number) -> number` with `g1(e)` is valid and evaluates to itself, and so
@@ -412,7 +411,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   `validateArguments()`). A decision is necessary: (A) refuse such an operand on
   the ground route too, at a parameter that does not accept `error`, or (B)
   admit it on the generic route too. If nothing is decided, the two routes keep
-  giving different answers.
+  giving different answers. User decision 2026-10-19: (B).
 - The parse route does not infer the type of a symbol in a juxtaposed product.
   `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
   `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
@@ -427,7 +426,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   a comma, `x_{1,2}`, which reads back as `Subscript(x, Sequence(1, 2))` (or
   `At(M, 1, 2)` for a matrix `M`). A decision is necessary: write such a symbol
   in a form that reads back (for example `{x_{1}}_{2}`), or keep the comma
-  spelling and say that it is for display.
+  spelling and say that it is for display. User decision 2026-10-19: write
+  `{x_{1}}_{2}`.
 - The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
   and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
   `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A
