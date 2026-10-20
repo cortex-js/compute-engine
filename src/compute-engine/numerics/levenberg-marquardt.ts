@@ -103,8 +103,12 @@ function choleskySolve(M: number[][], b: number[]): number[] | null {
  * Solve `M·x = b` for a symmetric (approximately SPD) `M`, retrying with an
  * inflated diagonal if the plain Cholesky hits a non-positive pivot. Returns
  * `null` only if even a heavily-inflated system fails.
+ *
+ * Exported for the separable scan of `FindFit`'s `global` option
+ * (`nonlinear-fit.ts`), which solves the normal equations of a linear
+ * least-squares problem at each grid point with it.
  */
-function solveWithInflation(M: number[][], b: number[]): number[] | null {
+export function solveWithInflation(M: number[][], b: number[]): number[] | null {
   const direct = choleskySolve(M, b);
   if (direct) return direct;
 

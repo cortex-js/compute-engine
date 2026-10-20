@@ -869,3 +869,276 @@ describe('FindFit / FindRoot input validation', () => {
     expect(rec.isValid).toBe(false);
   });
 });
+
+// --- The `global` option (Tycho row 404) -----------------------------------
+
+describe('FindFit global option (Tycho row 404)', () => {
+  // `FindFit` runs Levenberg–Marquardt from one start and returns the local
+  // minimum of that start. For a periodic model on a few points the sum of
+  // squared residuals has many local minima. The optional fifth argument,
+  // `{global: {b: [lo, hi]}}`, searches the named parameter over the range for
+  // the lowest residual: a separable scan when the model is linear in the
+  // other parameters, a multi-start otherwise. The reference values below are
+  // the ones Tycho measured for its repro
+  // (`scripts/repros/2026-10-20-ce404-findfit-global-minimum-repro.mts`): the
+  // five points of the Desmos graph `neyret/5hn1azxfc8` and the model
+  // `a cos(bx + c) + dx + e`, where `e` is Euler's number.
+
+  const X = [1, 3.22, 5.27, 10.49, 7.12];
+  const Y_SAVED = [4.3, 1.18, 0.01, 1.48, 3.44];
+  const Y_MOVED = [4.3, 1.18, 2.0, 1.48, 3.44];
+  const MODEL = [
+    'Add',
+    ['Multiply', 'a', ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']]],
+    ['Multiply', 'd', 'x'],
+    'ExponentialE',
+  ];
+  const PARAMS = ['List', 'a', 'b', 'c', 'd'];
+  const GLOBAL_B = { dict: { global: { dict: { b: [0.1, 6] } } } };
+
+  /** Sum of squared residuals of the fitted record on the points (X, ys). */
+  const rss = (rec: BoxedExpression, ys: number[]): number => {
+    const a = param(rec, 'a');
+    const b = param(rec, 'b');
+    const c = param(rec, 'c');
+    const d = param(rec, 'd');
+    return X.reduce(
+      (s, x, i) =>
+        s + (ys[i] - (a * Math.cos(b * x + c) + d * x + Math.E)) ** 2,
+      0
+    );
+  };
+
+  /** `FindFit` over the Tycho points through the box route (the route the
+   * repro takes), with an optional fifth argument. */
+  const fitTycho = (ys: number[], params: any, options?: any) =>
+    ce
+      .box([
+        'FindFit',
+        ['List', ...X.map((x, i) => ['Tuple', x, ys[i]])],
+        MODEL,
+        params,
+        ['List', 'x'],
+        ...(options === undefined ? [] : [options]),
+      ] as any)
+      .evaluate();
+
+  test('the saved data with b searched over (0.1, 6) reach the period-2.9 fit', () => {
+    // The model is not linear in `c`, so this is the multi-start strategy.
+    const rec = fitTycho(Y_SAVED, PARAMS, GLOBAL_B);
+    expect(rec.operator).toBe('Dictionary');
+    expect(converged(rec)).toBe(true);
+    expect(rss(rec, Y_SAVED)).toBeLessThanOrEqual(0.006);
+    expect(param(rec, 'b')).toBeGreaterThanOrEqual(0.1);
+    expect(param(rec, 'b')).toBeLessThanOrEqual(6);
+    expect((2 * Math.PI) / Math.abs(param(rec, 'b'))).toBeCloseTo(2.898, 2);
+  });
+
+  test('the moved data (y3 = 2.0) reach the period-1.06 fit near the top of the range', () => {
+    const rec = fitTycho(Y_MOVED, PARAMS, GLOBAL_B);
+    expect(rss(rec, Y_MOVED)).toBeLessThanOrEqual(1e-4);
+    expect((2 * Math.PI) / Math.abs(param(rec, 'b'))).toBeCloseTo(1.061, 2);
+  });
+
+  test('without the option the default start still gives the period-8 local fit', () => {
+    const rec = fitTycho(Y_SAVED, PARAMS);
+    const r = rss(rec, Y_SAVED);
+    expect(r).toBeGreaterThanOrEqual(0.357);
+    expect(r).toBeLessThanOrEqual(0.359);
+  });
+
+  test('without the option a start at the saved fit stays there', () => {
+    const rec = fitTycho(Y_SAVED, [
+      'List',
+      ['Tuple', 'a', -2.141845586319585],
+      ['Tuple', 'b', -2.1683006936000204],
+      ['Tuple', 'c', 5.8549276567493695],
+      ['Tuple', 'd', -0.19700948169491872],
+    ]);
+    expect(rss(rec, Y_SAVED)).toBeLessThanOrEqual(0.006);
+  });
+
+  test('an empty global dictionary is the plain local fit', () => {
+    const rec = fitTycho(Y_SAVED, PARAMS, { dict: { global: { dict: {} } } });
+    const r = rss(rec, Y_SAVED);
+    expect(r).toBeGreaterThanOrEqual(0.357);
+    expect(r).toBeLessThanOrEqual(0.359);
+  });
+
+  test('two searched parameters (b and c) make the model separable and reach the same fit', () => {
+    // With `b` and `c` fixed at a grid point the model is linear in `a` and
+    // `d`, so each grid point is one linear least-squares solve.
+    const rec = fitTycho(Y_SAVED, PARAMS, {
+      dict: { global: { dict: { b: [0.1, 6], c: [0, 6.3] } } },
+    });
+    expect(converged(rec)).toBe(true);
+    expect(rss(rec, Y_SAVED)).toBeLessThanOrEqual(0.006);
+    expect(param(rec, 'c')).toBeGreaterThanOrEqual(0);
+    expect(param(rec, 'c')).toBeLessThanOrEqual(6.3);
+  });
+
+  test('the range is intersected with the parameter box constraint', () => {
+    // `b` is bounded to [2, 3] by its spec, so the search range (0.1, 6)
+    // shrinks to [2, 3]; the answer lies there.
+    const rec = fitTycho(
+      Y_SAVED,
+      ['List', 'a', ['Tuple', 'b', 1, 2, 3], 'c', 'd'],
+      GLOBAL_B
+    );
+    expect(param(rec, 'b')).toBeGreaterThanOrEqual(2);
+    expect(param(rec, 'b')).toBeLessThanOrEqual(3);
+    expect(rss(rec, Y_SAVED)).toBeLessThanOrEqual(0.006);
+  });
+
+  test('separable scan: a cos(bx) is recovered where the local fit from the default start fails', () => {
+    const xs = Array.from({ length: 31 }, (_, i) => i * 0.2);
+    const data = dataset(xs.map((x) => [x, 2 * Math.cos(5 * x)]));
+    const model = ['Multiply', 'a', ['Cos', ['Multiply', 'b', 'x']]];
+    const local = findFit(data, model, ['List', 'a', 'b'], 'x');
+    expect(residualNorm(local)).toBeGreaterThan(1);
+    const rec = ce
+      .function('FindFit', [
+        data,
+        ce.box(model),
+        ce.box(['List', 'a', 'b']),
+        ce.symbol('x'),
+        ce.box({ dict: { global: { dict: { b: [0.5, 8] } } } } as any),
+      ])
+      .evaluate();
+    expect(converged(rec)).toBe(true);
+    expect(param(rec, 'a')).toBeCloseTo(2, 6);
+    expect(param(rec, 'b')).toBeCloseTo(5, 6);
+    expect(residualNorm(rec)).toBeLessThan(1e-6);
+  });
+
+  test('a step function of a parameter is not treated as linear in it', () => {
+    // The derivative of `Floor(a)` is zero, so a derivative test alone would
+    // call the model linear in `a` and solve `a = 0`. The multi-start keeps
+    // the start `a = 2.1` and reaches the exact fit `b = 0`.
+    const rec = ce
+      .box([
+        'FindFit',
+        ['List', ['Tuple', 1, 2]],
+        ['Add', ['Floor', 'a'], 'b'],
+        ['List', ['Tuple', 'a', 2.1], 'b'],
+        ['List', 'x'],
+        { dict: { global: { dict: { b: [0, 0.1] } } } },
+      ] as any)
+      .evaluate();
+    expect(residualNorm(rec)).toBeLessThan(1e-9);
+    expect(param(rec, 'a')).toBeCloseTo(2.1, 9);
+    expect(param(rec, 'b')).toBeCloseTo(0, 9);
+  });
+
+  test('a bounded linear parameter is solved with its bound active at each grid point', () => {
+    // Joint fit of three models sharing `a >= 0`, `b` (searched) and `c`.
+    // Clamping an unconstrained least-squares solution ranks the grid wrongly
+    // here and keeps `b = -0.9` (sum of squares 0.585); the constrained
+    // solution finds `b = 0.9` (0.5525).
+    const rec = ce
+      .box([
+        'FindFit',
+        [
+          'List',
+          ['List', ['Tuple', 1, -1]],
+          ['List', ['Tuple', 1, 0]],
+          ['List', ['Tuple', 1, 0]],
+        ],
+        [
+          'List',
+          ['Add', 'a', ['Multiply', 'b', 'c']],
+          ['Add', 'a', 'c'],
+          ['Multiply', 0.1, ['Subtract', 'b', 0.9]],
+        ],
+        ['List', ['Tuple', 'a', 1, 0, 'PositiveInfinity'], 'b', 'c'],
+        ['List', 'x'],
+        { dict: { global: { dict: { b: [-0.9, 0.9] } } } },
+      ] as any)
+      .evaluate();
+    expect(param(rec, 'a')).toBeGreaterThanOrEqual(0);
+    expect(param(rec, 'b')).toBeCloseTo(0.9, 6);
+    expect(residualNorm(rec) ** 2).toBeLessThan(0.553);
+  });
+
+  test('a global fit record has the usual keys and iterations is the total over the runs', () => {
+    const rec = fitTycho(Y_SAVED, PARAMS, GLOBAL_B);
+    expect(rec.keys.sort()).toEqual(
+      ['converged', 'iterations', 'parameters', 'residualNorm'].sort()
+    );
+    // A multi-start over 24 starts spends more iterations than one run.
+    expect(iterations(rec)).toBeGreaterThan(50);
+    expect(rec.get('timedOut')).toBeUndefined();
+  });
+
+  describe('malformed options are errors, never a silent local fit', () => {
+    const cases: [string, any][] = [
+      ['options that are not a dictionary', 3],
+      ['an unknown option key', { dict: { glob: { dict: { b: [0.1, 6] } } } }],
+      [
+        'a name that is not a parameter',
+        { dict: { global: { dict: { z: [0.1, 6] } } } },
+      ],
+      ['a range with lo >= hi', { dict: { global: { dict: { b: [6, 0.1] } } } }],
+      [
+        'a range that is not a pair',
+        { dict: { global: { dict: { b: [0.1, 3, 6] } } } },
+      ],
+      [
+        'a range outside the parameter bounds',
+        { dict: { global: { dict: { b: [10, 20] } } } },
+      ],
+      [
+        'three searched parameters',
+        { dict: { global: { dict: { a: [0, 1], b: [0, 1], c: [0, 1] } } } },
+      ],
+      ['a global value that is not a dictionary', { dict: { global: 5 } }],
+    ];
+    for (const [label, options] of cases)
+      test(label, () => {
+        const rec = fitTycho(
+          Y_SAVED,
+          ['List', 'a', ['Tuple', 'b', 1, 2, 3], 'c', 'd'],
+          options
+        );
+        expect(rec.operator).toBe('Error');
+        expect(rec.op1.string ?? rec.op1.symbol).toBe('unexpected-argument');
+      });
+  });
+
+  test('a deadline during the search returns the best point so far with timedOut: True', () => {
+    // The interpreted per-row path makes each residual pass slow enough that a
+    // short budget expires during the scan or a refinement. The record keeps
+    // the usual shape with `timedOut: True` and finite parameter values.
+    (ce as any).jit = 'off';
+    const xs = Array.from({ length: 300 }, (_, i) => i * 0.02);
+    const data = dataset(xs.map((x) => [x, 2 * Math.cos(5 * x) + 0.1 * x]));
+    const model = ce.box([
+      'Add',
+      ['Multiply', 'a', ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']]],
+      ['Multiply', 'd', 'x'],
+    ]);
+    const params = ce.box(['List', 'a', 'b', 'c', 'd']);
+    const options = ce.box({
+      dict: { global: { dict: { b: [0.5, 8] } } },
+    } as any);
+    const fit = (ms: number) =>
+      ce.withTimeLimit({ ms, label: 'test:global-fit-budget' }, () =>
+        ce
+          .function('FindFit', [data, model, params, ce.symbol('x'), options])
+          .evaluate()
+      );
+    // As in the solve-phase deadline test: raise the budget until setup fits
+    // in it; the first such budget is still far too short for 24 LM runs.
+    let r = fit(100);
+    for (const ms of [400, 1600]) {
+      if (r.get('phase')?.string !== 'setup') break;
+      r = fit(ms);
+    }
+    expect(r.operator).toBe('Dictionary');
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('phase')?.string).toBe('solve');
+    expect(converged(r)).toBe(false);
+    for (const name of ['a', 'b', 'c', 'd'])
+      expect(Number.isFinite(param(r, name))).toBe(true);
+  });
+});

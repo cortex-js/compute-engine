@@ -1822,14 +1822,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'plain list of y values. Each parameter spec is a bare symbol, ' +
         '(a, a0), or (a, a0, lo, hi) with box constraints. Returns a record ' +
         '{parameters, converged, residualNorm, iterations}. The joint form ' +
-        'takes a list of models and matching datasets sharing parameters.',
+        'takes a list of models and matching datasets sharing parameters. ' +
+        'An optional fifth argument is a dictionary of options: ' +
+        '`{global: {b: [lo, hi]}}` searches the named parameters (at most ' +
+        'two) over the given range for the lowest sum of squared residuals ' +
+        'instead of returning the local minimum nearest the start; ' +
+        '`iterations` is then the total over every solver run.',
       complexity: 1200,
       broadcastable: false,
       // Hold the arguments: a parameter symbol may carry a seeded document
       // value that must NOT be substituted before the fit (model/params/vars
       // stay held; the data operand is evaluated inside the handler).
       lazy: true,
-      signature: '(any, any, any, any) -> dictionary',
+      signature: '(any, any, any, any, dictionary?) -> dictionary',
       evaluate: (ops, { engine: ce }) => findFit(ce, ops),
     },
   },

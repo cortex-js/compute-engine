@@ -22,12 +22,17 @@ import {
 } from '../common/interruptible.js';
 
 import type { Expression, IComputeEngine } from './global-types.js';
-import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isSymbol,
+} from './boxed-expression/type-guards.js';
 import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
 import { implicitCompileNumeric } from './implicit-compile.js';
 import {
   levenbergMarquardt,
+  solveWithInflation,
   type LMResult,
 } from './numerics/levenberg-marquardt.js';
 
@@ -36,6 +41,18 @@ type NumFn = (vars: Record<string, number>) => number;
 interface ParamSpec {
   name: string;
   start: number;
+  lo: number;
+  hi: number;
+}
+
+/**
+ * A parameter that the `global` option of `FindFit` searches over a closed
+ * range instead of from a single start (Tycho row 404). `lo`/`hi` are the
+ * range already intersected with the parameter's own box constraint.
+ */
+interface GlobalScan {
+  /** Index of the parameter in the spec list. */
+  index: number;
   lo: number;
   hi: number;
 }
@@ -51,6 +68,23 @@ interface FitUnit {
   fn: NumFn;
   /** Analytic derivative per parameter, or `null` to use finite differences. */
   deriv: (NumFn | null)[];
+  /**
+   * The free symbols (fresh names) of each analytic derivative, or `null`
+   * when the column uses finite differences. The global fit reads them to
+   * decide whether the model is linear in a parameter: it is when the
+   * derivative with respect to that parameter mentions none of the parameters
+   * that must be solved linearly.
+   */
+  derivUnknowns: (ReadonlySet<string> | null)[];
+  /**
+   * Per parameter: the model mentions the parameter but its analytic
+   * derivative is the literal zero. That is the signature of a step function
+   * of the parameter (`Floor(a)`, `Sign(a)`, a parameter that appears only in
+   * the condition of a piecewise): the derivative test alone would call the
+   * model linear in it. The global fit never treats such a parameter as
+   * linear.
+   */
+  stepLike: boolean[];
   rows: DataRow[];
   varFresh: string[];
 }
@@ -156,6 +190,77 @@ function parseVars(varsExpr: Expression): string[] | null {
     return names.length > 0 ? names : null;
   }
   return null;
+}
+
+/** The limit on the number of globally searched parameters: a grid over three
+ * or more dimensions is too costly for the scan this file runs. */
+const MAX_GLOBAL_SCANS = 2;
+
+/**
+ * Parse the optional fifth `FindFit` argument, a dictionary of options.
+ *
+ * The only option today is `global`: a dictionary that maps a parameter name
+ * to a closed range `(lo, hi)`. Each named parameter is searched over that
+ * range for the lowest sum of squared residuals, instead of from its single
+ * start (see `solveGlobal`). At most two parameters can be named. The range is
+ * intersected with the parameter's own box constraint when the spec has one.
+ *
+ * Returns the scans (an empty list when nothing is searched globally), or an
+ * `unexpected-argument` error for a malformed option. The options argument is
+ * strict: an unknown key or a name that is not a parameter is an error, not
+ * silently ignored, so that a typo cannot turn a global fit into a local one.
+ */
+function parseFitOptions(
+  ce: IComputeEngine,
+  optionsExpr: Expression | undefined,
+  specs: ParamSpec[]
+): GlobalScan[] | Expression {
+  if (optionsExpr === undefined) return [];
+  const fail = (msg: string) =>
+    ce.error('unexpected-argument', `FindFit: ${msg}`);
+
+  const options = optionsExpr.canonical;
+  if (!isDictionary(options))
+    return fail('the options argument must be a dictionary');
+
+  const scans: GlobalScan[] = [];
+  for (const [key, value] of options.entries) {
+    if (key !== 'global') return fail(`unknown option "${key}"`);
+    if (!isDictionary(value))
+      return fail('the "global" option must map parameter names to ranges');
+    for (const [name, rangeExpr] of value.entries) {
+      const index = specs.findIndex((s) => s.name === name);
+      if (index < 0)
+        return fail(`"${name}" in the "global" option is not a parameter`);
+      if (scans.some((s) => s.index === index))
+        return fail(`"${name}" is named twice in the "global" option`);
+      // In the MathJSON `dict` spelling a value is JSON data, so the range is
+      // written as a two-element array, `b: [0.1, 6]`, which boxes to a
+      // `List`; a `Tuple`/`Pair` built with `ce.tuple()` is accepted too.
+      const parts = specParts(rangeExpr.canonical);
+      if (!parts || parts.length !== 2)
+        return fail(`the global range of "${name}" must be a pair [lo, hi]`);
+      const lo = realValue(parts[0]);
+      const hi = realValue(parts[1]);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(lo < hi))
+        return fail(
+          `the global range of "${name}" must be two finite numbers with lo < hi`
+        );
+      const spec = specs[index];
+      const scanLo = Math.max(lo, spec.lo);
+      const scanHi = Math.min(hi, spec.hi);
+      if (!(scanLo < scanHi))
+        return fail(
+          `the global range of "${name}" does not overlap its bounds`
+        );
+      scans.push({ index, lo: scanLo, hi: scanHi });
+    }
+  }
+  if (scans.length > MAX_GLOBAL_SCANS)
+    return fail(
+      `at most ${MAX_GLOBAL_SCANS} parameters can be searched globally`
+    );
+  return scans;
 }
 
 //
@@ -296,16 +401,26 @@ function prepareUnit(
   const freeNames = [...varFresh, ...paramFresh];
   const fn = makeNumericFn(ce, renamed, freeNames);
 
-  const deriv: (NumFn | null)[] = paramFresh.map((pf) => {
+  const deriv: (NumFn | null)[] = [];
+  const derivUnknowns: (ReadonlySet<string> | null)[] = [];
+  const stepLike: boolean[] = [];
+  for (const pf of paramFresh) {
     const d = differentiate(renamed, pf);
     // Fall back to finite differences when the column cannot be differentiated
     // symbolically, or when the derivative is left as an un-evaluable
     // `Derivative(…)` placeholder (e.g. `∂Zeta(b·x)/∂b`).
-    if (d === undefined || d.has('Derivative')) return null;
-    return makeNumericFn(ce, d, freeNames);
-  });
+    if (d === undefined || d.has('Derivative')) {
+      deriv.push(null);
+      derivUnknowns.push(null);
+      stepLike.push(false);
+    } else {
+      deriv.push(makeNumericFn(ce, d, freeNames));
+      derivUnknowns.push(new Set(d.unknowns));
+      stepLike.push(d.isSame(0) && renamed.has(pf));
+    }
+  }
 
-  return { fn, deriv, rows, varFresh };
+  return { fn, deriv, derivUnknowns, stepLike, rows, varFresh };
 }
 
 //
@@ -399,19 +514,37 @@ function timeoutRecord(ce: IComputeEngine, ctx: SetupContext): Expression {
   );
 }
 
-/** Assemble the global residual/Jacobian callbacks over all units and run LM. */
-function solve(
+/**
+ * The numeric callbacks over all units that both solvers (`solve` and
+ * `solveGlobal`) share: the residual vector and the Jacobian as the
+ * Levenberg–Marquardt core wants them, and the row walk they are built on.
+ */
+interface FitCallbacks {
+  /** Fresh parameter names, shared across all units by construction. */
+  pFresh: string[];
+  /** Lower/upper box constraint per parameter, from the specs. */
+  lo: number[];
+  hi: number[];
+  /**
+   * Walk every data row of every unit with the parameter values `theta` and
+   * the row's variable values written into the shared symbol-value record,
+   * checking the evaluation deadline once per row, and call `visit` on each.
+   */
+  eachRow: (
+    theta: number[],
+    visit: (unit: FitUnit, row: DataRow, record: Record<string, number>) => void
+  ) => void;
+  residual: (theta: number[]) => number[];
+  jacobian: (theta: number[]) => number[][];
+}
+
+/** Assemble the residual/Jacobian callbacks over all units. */
+function makeCallbacks(
   ce: IComputeEngine,
   units: FitUnit[],
   specs: ParamSpec[]
-): Expression | undefined {
-  // Defensive: an empty model/equation list yields zero units; `units[0]`
-  // below would otherwise throw (see the guards in `findFit`/`findRoot`).
-  if (units.length === 0)
-    return ce.error('unexpected-argument', 'no residual units');
-
+): FitCallbacks {
   const p = specs.length;
-  const theta0 = specs.map((s) => s.start);
   const lo = specs.map((s) => s.lo);
   const hi = specs.map((s) => s.hi);
 
@@ -429,62 +562,78 @@ function solve(
   // is a Date.now() compare — noise next to any real model call. The
   // resulting timeout throw is caught by `levenbergMarquardt`, which returns
   // best-so-far (`converged: false`, `timedOut: true`).
-  const residual = (theta: number[]): number[] => {
+  const eachRow: FitCallbacks['eachRow'] = (theta, visit) => {
     for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
-    const out: number[] = [];
     for (const unit of units) {
       for (const row of unit.rows) {
         checkDeadline(ce._deadlineFrame);
         for (let k = 0; k < unit.varFresh.length; k++)
           record[unit.varFresh[k]] = row.x[k];
-        out.push(unit.fn(record) - row.y);
+        visit(unit, row, record);
       }
     }
+  };
+
+  const residual = (theta: number[]): number[] => {
+    const out: number[] = [];
+    eachRow(theta, (unit, row, rec) => out.push(unit.fn(rec) - row.y));
     return out;
   };
 
   const jacobian = (theta: number[]): number[][] => {
-    for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
     const rowsJ: number[][] = [];
-    for (const unit of units) {
-      for (const row of unit.rows) {
-        checkDeadline(ce._deadlineFrame);
-        for (let k = 0; k < unit.varFresh.length; k++)
-          record[unit.varFresh[k]] = row.x[k];
-        const base = unit.fn(record);
-        const jr = new Array(p).fill(0);
-        for (let j = 0; j < p; j++) {
-          const d = unit.deriv[j];
-          if (d) {
-            jr[j] = d(record);
-          } else {
-            // Finite difference for this column only. The step is scaled to
-            // the parameter magnitude (no underflow near θⱼ = 0), and the
-            // probe stays inside `[lo, hi]`: forward unless that overshoots
-            // `hi[j]`, and if the first probe is non-finite (a box-guarded
-            // model can NaN at an infeasible point) retry the other direction.
-            const t = theta[j];
-            const h = Math.sqrt(Number.EPSILON) * Math.max(1, Math.abs(t));
-            let step = t + h <= hi[j] ? h : -h;
-            record[pFresh[j]] = t + step;
-            let probe = unit.fn(record);
-            if (!Number.isFinite(probe)) {
-              const alt = -step;
-              if (t + alt <= hi[j] && t + alt >= lo[j]) {
-                step = alt;
-                record[pFresh[j]] = t + step;
-                probe = unit.fn(record);
-              }
+    eachRow(theta, (unit, _row, rec) => {
+      const base = unit.fn(rec);
+      const jr = new Array(p).fill(0);
+      for (let j = 0; j < p; j++) {
+        const d = unit.deriv[j];
+        if (d) {
+          jr[j] = d(rec);
+        } else {
+          // Finite difference for this column only. The step is scaled to
+          // the parameter magnitude (no underflow near θⱼ = 0), and the
+          // probe stays inside `[lo, hi]`: forward unless that overshoots
+          // `hi[j]`, and if the first probe is non-finite (a box-guarded
+          // model can NaN at an infeasible point) retry the other direction.
+          const t = theta[j];
+          const h = Math.sqrt(Number.EPSILON) * Math.max(1, Math.abs(t));
+          let step = t + h <= hi[j] ? h : -h;
+          rec[pFresh[j]] = t + step;
+          let probe = unit.fn(rec);
+          if (!Number.isFinite(probe)) {
+            const alt = -step;
+            if (t + alt <= hi[j] && t + alt >= lo[j]) {
+              step = alt;
+              rec[pFresh[j]] = t + step;
+              probe = unit.fn(rec);
             }
-            record[pFresh[j]] = t;
-            jr[j] = (probe - base) / step;
           }
+          rec[pFresh[j]] = t;
+          jr[j] = (probe - base) / step;
         }
-        rowsJ.push(jr);
       }
-    }
+      rowsJ.push(jr);
+    });
     return rowsJ;
   };
+
+  return { pFresh, lo, hi, eachRow, residual, jacobian };
+}
+
+/** Run LM from the single start of the specs and report the record. */
+function solve(
+  ce: IComputeEngine,
+  units: FitUnit[],
+  specs: ParamSpec[]
+): Expression | undefined {
+  // Defensive: an empty model/equation list yields zero units; `units[0]`
+  // in `makeCallbacks` would otherwise throw (see the guards in
+  // `findFit`/`findRoot`).
+  if (units.length === 0)
+    return ce.error('unexpected-argument', 'no residual units');
+
+  const theta0 = specs.map((s) => s.start);
+  const { lo, hi, residual, jacobian } = makeCallbacks(ce, units, specs);
 
   // A deadline expiring during the starting-point evaluation or the solver's
   // own initial residual/Jacobian — before any iteration completed — still
@@ -520,6 +669,370 @@ function solve(
     specs.map((s) => s.name),
     result
   );
+}
+
+//
+// Global fit (the `global` option, Tycho row 404)
+//
+
+/** Grid resolution per scanned parameter. The separable scan is cheap (one
+ * linear solve per grid point), so it can afford a fine grid; a multi-start
+ * runs a full LM solve per grid point, so its grid is coarse. */
+const SEPARABLE_GRID = [400, 40];
+const MULTISTART_GRID = [24, 6];
+/** How many grid-point local minima the separable scan refines by LM. */
+const SEPARABLE_REFINEMENTS = 6;
+
+/** Sum of squares of a residual vector, or `Infinity` for a non-finite one. */
+function sumOfSquares(r: number[]): number {
+  let s = 0;
+  for (const v of r) s += v * v;
+  return Number.isFinite(s) ? s : Infinity;
+}
+
+/**
+ * The grid of scanned-parameter values: `n` points per scanned parameter,
+ * endpoints included (a minimizer pressed against a bound of the range is a
+ * legitimate answer), as the Cartesian product over one or two parameters.
+ * Each point is the list of values in the order of `scans`.
+ */
+function scanGrid(scans: GlobalScan[], n: number): number[][] {
+  const axis = (s: GlobalScan): number[] =>
+    Array.from({ length: n }, (_, i) => s.lo + ((s.hi - s.lo) * i) / (n - 1));
+  if (scans.length === 1) return axis(scans[0]).map((v) => [v]);
+  const grid: number[][] = [];
+  for (const u of axis(scans[0])) for (const v of axis(scans[1])) grid.push([u, v]);
+  return grid;
+}
+
+/**
+ * Indices of the grid points that are local minima of `rss` over the grid: no
+ * finite neighbour is lower (one dimension: the two neighbours; two: the eight
+ * surrounding cells of the `n × n` grid laid out row-major by `scanGrid`).
+ * Non-finite points are never minima.
+ */
+function gridLocalMinima(rss: number[], dims: number, n: number): number[] {
+  const minima: number[] = [];
+  const lowerNeighbour = (i: number, offsets: number[]): boolean =>
+    offsets.some((o) => rss[o] < rss[i]);
+  for (let i = 0; i < rss.length; i++) {
+    if (!Number.isFinite(rss[i])) continue;
+    const neighbours: number[] = [];
+    if (dims === 1) {
+      if (i > 0) neighbours.push(i - 1);
+      if (i < n - 1) neighbours.push(i + 1);
+    } else {
+      const row = Math.floor(i / n);
+      const col = i % n;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const r = row + dr;
+          const c = col + dc;
+          if (r >= 0 && r < n && c >= 0 && c < n) neighbours.push(r * n + c);
+        }
+    }
+    if (!lowerNeighbour(i, neighbours)) minima.push(i);
+  }
+  return minima;
+}
+
+/**
+ * `FindFit` with the `global` option: the lowest sum of squared residuals over
+ * a closed range of one or two parameters, not the local minimum nearest the
+ * start. For a periodic model on a few points the residual has many local
+ * minima and a single Levenberg–Marquardt run returns whichever one its start
+ * falls into (Tycho row 404).
+ *
+ * Two strategies, chosen by the shape of the model:
+ *
+ * 1. **Separable scan** (variable projection), when the model is linear in
+ *    every parameter that is NOT scanned: each such parameter has an analytic
+ *    derivative that mentions none of those parameters. The scanned parameters
+ *    are sampled on a grid over their range; at each grid point the linear
+ *    parameters are solved exactly by linear least squares (the normal
+ *    equations of the derivative columns), which gives the residual of the
+ *    best fit at that grid point. The grid points that are local minima of
+ *    that residual are then refined by the bounded LM solver over ALL
+ *    parameters, and the lowest residual wins. `a·cos(b·x + c) + d·x` with
+ *    `b` scanned is this case: `a` and `d` are linear, `c` is not, so it must
+ *    be scanned too or the fit falls to the multi-start.
+ *
+ * 2. **Multi-start**, otherwise: the scanned parameters are sampled on a
+ *    coarser grid, the other parameters take their starts, LM runs from every
+ *    grid point, and the lowest residual wins.
+ *
+ * In both, a scanned parameter is bounded to its range during the LM
+ * refinement, so the answer lies inside the range. The record is the usual
+ * one; its `iterations` is the total over every LM run. A deadline that
+ * expires during the scan or a refinement returns the best point found so far
+ * with `timedOut: True`.
+ */
+function solveGlobal(
+  ce: IComputeEngine,
+  units: FitUnit[],
+  specs: ParamSpec[],
+  scans: GlobalScan[]
+): Expression | undefined {
+  if (units.length === 0)
+    return ce.error('unexpected-argument', 'no residual units');
+
+  const p = specs.length;
+  const cb = makeCallbacks(ce, units, specs);
+  const lo = cb.lo.slice();
+  const hi = cb.hi.slice();
+  for (const s of scans) {
+    lo[s.index] = s.lo;
+    hi[s.index] = s.hi;
+  }
+  const names = specs.map((s) => s.name);
+
+  // The parameters that are not scanned, and whether the model is linear in
+  // all of them (jointly: no derivative mentions any of them, itself included,
+  // and none is a step function of its parameter, whose derivative is zero
+  // without the model being constant in it). The scan below also checks each
+  // grid point numerically and abandons this strategy on a disagreement.
+  const scanned = new Set(scans.map((s) => s.index));
+  const linearIdx: number[] = [];
+  for (let j = 0; j < p; j++) if (!scanned.has(j)) linearIdx.push(j);
+  const linearFresh = new Set(linearIdx.map((j) => cb.pFresh[j]));
+  let separable = linearIdx.every((j) =>
+    units.every((u) => {
+      const unknowns = u.derivUnknowns[j];
+      if (unknowns === null || u.stepLike[j]) return false;
+      for (const name of unknowns) if (linearFresh.has(name)) return false;
+      return true;
+    })
+  );
+
+  /** The full parameter vector at a grid point: scanned values set, the
+   * others at their (clamped) starts. */
+  const thetaAt = (point: number[]): number[] => {
+    const theta = specs.map((s, j) => clamp(s.start, lo[j], hi[j]));
+    scans.forEach((s, k) => (theta[s.index] = point[k]));
+    return theta;
+  };
+
+  /** Separable step: with the scanned parameters fixed at `point`, solve the
+   * linear parameters by least squares. The model is linear in them, so with
+   * them at zero `unit.fn` is the offset and each analytic derivative is the
+   * basis column of its parameter. A linear parameter with a box constraint
+   * is solved by an active-set loop: a value outside its bounds is fixed at
+   * the bound it crossed, its column moves to the offset, and the free
+   * parameters are solved again, until every free value is inside its bounds.
+   * The sum of squared residuals the linear system predicts is then compared
+   * with the model's actual residual at the solved point: a disagreement means
+   * the model is not linear in those parameters after all (a step function the
+   * structural test did not see), and the answer is `'nonlinear'` so the
+   * caller falls back to the multi-start. Returns the full vector and its sum
+   * of squared residuals, or `null` when the normal equations cannot be solved
+   * or the point is not finite. */
+  const linearSolveAt = (
+    point: number[]
+  ): [number[], number] | null | 'nonlinear' => {
+    const theta = thetaAt(point);
+    for (const j of linearIdx) theta[j] = 0;
+    const nl = linearIdx.length;
+    // Per data row: the offset (the model with the linear parameters at zero)
+    // and the basis column values, kept for the active-set loop and the check.
+    const offsets: number[] = [];
+    const targets: number[] = [];
+    const columns: number[][] = [];
+    let finite = true;
+    cb.eachRow(theta, (unit, row, rec) => {
+      const offset = unit.fn(rec);
+      const phi = linearIdx.map((j) => unit.deriv[j]!(rec));
+      if (!Number.isFinite(offset) || phi.some((v) => !Number.isFinite(v))) {
+        finite = false;
+        return;
+      }
+      offsets.push(offset);
+      targets.push(row.y);
+      columns.push(phi);
+    });
+    if (!finite) return null;
+
+    // Active-set loop over the linear parameters: `fixed[a]` holds the bound a
+    // parameter is pinned at, or NaN while it is free.
+    const fixed: number[] = new Array(nl).fill(NaN);
+    for (let pass = 0; pass <= nl; pass++) {
+      const free: number[] = [];
+      for (let a = 0; a < nl; a++) if (Number.isNaN(fixed[a])) free.push(a);
+      const nf = free.length;
+      const A: number[][] = Array.from({ length: nf }, () =>
+        new Array(nf).fill(0)
+      );
+      const b: number[] = new Array(nf).fill(0);
+      for (let r = 0; r < columns.length; r++) {
+        const phi = columns[r];
+        let target = targets[r] - offsets[r];
+        for (let a = 0; a < nl; a++)
+          if (!Number.isNaN(fixed[a])) target -= phi[a] * fixed[a];
+        for (let u = 0; u < nf; u++) {
+          b[u] += phi[free[u]] * target;
+          for (let v = 0; v < nf; v++) A[u][v] += phi[free[u]] * phi[free[v]];
+        }
+      }
+      const sol = nf > 0 ? solveWithInflation(A, b) : [];
+      if (!sol) return null;
+      let crossed = false;
+      free.forEach((a, u) => {
+        const j = linearIdx[a];
+        if (sol[u] < lo[j]) {
+          fixed[a] = lo[j];
+          crossed = true;
+        } else if (sol[u] > hi[j]) {
+          fixed[a] = hi[j];
+          crossed = true;
+        } else theta[j] = sol[u];
+      });
+      if (!crossed) break;
+    }
+    for (let a = 0; a < nl; a++)
+      if (!Number.isNaN(fixed[a])) theta[linearIdx[a]] = fixed[a];
+
+    // The linear prediction against the model itself at the solved point.
+    let predicted = 0;
+    for (let r = 0; r < columns.length; r++) {
+      let value = offsets[r];
+      for (let a = 0; a < nl; a++) value += columns[r][a] * theta[linearIdx[a]];
+      predicted += (value - targets[r]) ** 2;
+    }
+    const rss = sumOfSquares(cb.residual(theta));
+    if (!Number.isFinite(rss)) return null;
+    if (Math.abs(rss - predicted) > 1e-8 * (1 + rss + predicted))
+      return 'nonlinear';
+    return [theta, rss];
+  };
+
+  let iterations = 0;
+  let timedOut = false;
+  let best: LMResult | undefined;
+  /** Best point seen before any LM run finished (the fallback of a timeout
+   * during the scan): the vector and its sum of squared residuals. */
+  let bestScanned: [number[], number] | undefined;
+
+  const consider = (r: LMResult): void => {
+    iterations += r.iterations;
+    if (r.timedOut) timedOut = true;
+    if (
+      Number.isFinite(r.residualNorm) &&
+      (best === undefined || r.residualNorm < best.residualNorm)
+    )
+      best = r;
+  };
+
+  /** One bounded LM run from `theta0`; `false` when the deadline expired
+   * before the solver produced anything (then nothing more should run). */
+  const refine = (theta0: number[]): boolean => {
+    try {
+      consider(
+        levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+          lo,
+          hi,
+          onIteration: () => checkDeadline(ce._deadlineFrame),
+        })
+      );
+    } catch (e) {
+      if (!isTimeoutCancellation(e)) throw e;
+      timedOut = true;
+    }
+    return !timedOut;
+  };
+
+  const dims = scans.length;
+  try {
+    if (separable) {
+      const n = SEPARABLE_GRID[dims - 1];
+      const grid = scanGrid(scans, n);
+      const solved: ([number[], number] | null)[] = [];
+      for (const point of grid) {
+        const s = linearSolveAt(point);
+        if (s === 'nonlinear') {
+          // The structural test was wrong about this model: the multi-start
+          // below takes over. The points solved so far are genuine evaluated
+          // points, so `bestScanned` keeps the best of them.
+          separable = false;
+          break;
+        }
+        // Narrowed: `s` is a solved point or `null` from here on.
+        solved.push(s as [number[], number] | null);
+        if (s && (bestScanned === undefined || s[1] < bestScanned[1]))
+          bestScanned = s;
+      }
+      if (separable) {
+        if (bestScanned === undefined)
+          return ce.error(
+            'unexpected-argument',
+            'FindFit: the model has no finite value in the global range'
+          );
+        const rss = solved.map((s) => (s ? s[1] : Infinity));
+        const candidates = gridLocalMinima(rss, dims, n)
+          .sort((i, k) => rss[i] - rss[k])
+          .slice(0, SEPARABLE_REFINEMENTS);
+        for (const i of candidates) if (!refine(solved[i]![0])) break;
+      }
+    }
+    if (!separable) {
+      const n = MULTISTART_GRID[dims - 1];
+      for (const point of scanGrid(scans, n)) {
+        const theta0 = thetaAt(point);
+        const rss = sumOfSquares(cb.residual(theta0));
+        if (!Number.isFinite(rss)) continue;
+        if (bestScanned === undefined || rss < bestScanned[1])
+          bestScanned = [theta0, rss];
+        if (!refine(theta0)) break;
+      }
+      if (bestScanned === undefined)
+        return ce.error(
+          'unexpected-argument',
+          'FindFit: the model has no finite value in the global range'
+        );
+    }
+  } catch (e) {
+    // A deadline expiring inside the scan itself (the residual callbacks
+    // check it per row). Whatever was found so far is reported below.
+    if (!isTimeoutCancellation(e)) throw e;
+    timedOut = true;
+  }
+
+  // The best evaluated grid point can beat every finished solver run: in the
+  // multi-start a later start is recorded in `bestScanned` before its run,
+  // and the deadline can expire in that run's first residual evaluation,
+  // which leaves no solver result for it. When the budget expired before any
+  // run finished, it is the only answer there is.
+  if (
+    bestScanned !== undefined &&
+    (best === undefined || Math.sqrt(bestScanned[1]) < best.residualNorm)
+  ) {
+    const [theta, rss] = bestScanned;
+    return buildRecord(ce, names, {
+      theta,
+      converged: false,
+      residualNorm: Math.sqrt(rss),
+      iterations,
+      ...(timedOut ? { timedOut: true } : {}),
+    });
+  }
+  if (best === undefined) {
+    // Nothing was evaluated before the budget expired: the lower corner of
+    // the range, with no residual.
+    return buildRecord(ce, names, {
+      theta: thetaAt(scans.map((s) => s.lo)),
+      converged: false,
+      residualNorm: NaN,
+      iterations,
+      ...(timedOut ? { timedOut: true } : {}),
+    });
+  }
+  // A search cut short by the deadline did not examine every candidate, so
+  // it never reports convergence, even when the winning run converged.
+  return buildRecord(ce, names, {
+    ...best,
+    converged: best.converged && !timedOut,
+    iterations,
+    ...(timedOut ? { timedOut: true } : {}),
+  });
 }
 
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -590,6 +1103,10 @@ function findFitCore(
   if (!specs) return undefined;
   ctx.specs = specs;
 
+  // The optional fifth argument: the options dictionary (`global`).
+  const scans = parseFitOptions(ce, ops[4], specs);
+  if (!Array.isArray(scans)) return scans;
+
   const varNames = parseVars(varsOp);
   if (!varNames) return undefined;
   const nvars = varNames.length;
@@ -645,7 +1162,9 @@ function findFitCore(
   // without a walk.
   checkDeadline(ce._deadlineFrame);
   ctx.phase = 'solve';
-  return solve(ce, units, specs);
+  return scans.length > 0
+    ? solveGlobal(ce, units, specs, scans)
+    : solve(ce, units, specs);
 }
 
 /** `FindRoot(equations, params)`. */

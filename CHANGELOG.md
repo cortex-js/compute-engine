@@ -1115,6 +1115,26 @@
 
 ### New Features
 
+- `FindFit` takes an optional fifth argument, a dictionary of options. The
+  `global` option, `FindFit(data, model, params, vars, {global: {b: [0.1, 6]}})`,
+  searches the named parameters (at most two) over the given range for the
+  lowest sum of squared residuals, instead of returning the local minimum
+  nearest the start. In the MathJSON `dict` spelling the range is a two-element
+  array. When the model is linear in every other parameter, the range is
+  scanned on a grid, the other parameters are solved by linear least squares at
+  each grid point, and the lowest grid minima are refined by the bounded
+  Levenberg–Marquardt solver; otherwise the solver runs from each point of a
+  coarser grid and the lowest residual wins. The searched parameter stays
+  inside the range; a range is intersected with the parameter's own
+  `(a, a0, lo, hi)` bounds. The result record is unchanged; its `iterations` is
+  the total over every solver run, and a deadline that expires during the
+  search returns the best point found with `timedOut: True`. An unknown option
+  key, a name that is not a parameter, or a range that is not two finite
+  numbers with `lo < hi` is an `unexpected-argument` error. Example: on the five
+  points `(1, 4.3), (3.22, 1.18), (5.27, 0.01), (10.49, 1.48), (7.12, 3.44)`
+  with the model `a\cos(bx+c)+dx+e`, the fit from the default start has period
+  8.0 and a sum of squared residuals of 0.36; with `b` searched over `(0.1, 6)`
+  it has period 2.9 and 0.0057.
 - `Integrate` gives exact values for more families of definite integrals:
   substitutions that it composes with the existing solver, Beta and Beta-prime
   forms with logarithmic moments, rational functions of trigonometric and
