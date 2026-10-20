@@ -77,8 +77,11 @@ import {
 } from './derive-application-type.js';
 import {
   ABSENT_CELLS_STAY_MISSING,
+  absentCellsPresentType,
   absorbOperandAbsence,
+  movesAbsentCells,
   passesAbsentCellsThrough,
+  withPresentCellAbsence,
   threadedPresentType,
   withThreadedAbsence,
   abstractCollectionCell,
@@ -183,8 +186,11 @@ import {
 } from './overload.js';
 import { candidateShape } from './tensor-view.js';
 import {
+  actualOfOperand,
   instantiatedResultType,
+  instantiatedResultTypeOverActuals,
   substituteDeclaredBounds,
+  type ArmInferenceContext,
 } from './generic-instantiation.js';
 import type {
   EffectLabel,
@@ -10560,9 +10566,30 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // substitute; an unsolvable residue falls back to `unknown`, never to a
     // variable. The solve mirrors `validateArguments`' — same gates, same
     // bindings — for the same reason `resolvedArm` recomputes its policies.
+    // An operand that can be absent as a whole, at an operator that moves
+    // cells without computing from them, is typed from its present type,
+    // absent cells kept (`absentCellsPresentType`): it binds the
+    // type variables and is given to the type handler with that type, and
+    // its whole absence goes to the absorption below.
+    // Only a position that strips `missing` (`missingStrip`) of an operator
+    // that propagates absence is read this way: at another position (the
+    // inserted value of `Insert`) the operand goes into the result whole,
+    // its `missing` arm included, and the absorption that adds the whole
+    // absence back runs for a `propagate` operator only.
+    const cellsPresent =
+      def.resolvedMissingBehavior === 'propagate' &&
+      movesAbsentCells(expr.operator)
+        ? expr.ops.map((x, i) =>
+            def.stripsMissingAt(i) && x.type.facts.containsMissing
+              ? absentCellsPresentType(expr.operator, x.type.type)
+              : undefined
+          )
+        : undefined;
+    const hasCellsPresent = cellsPresent?.some((t) => t !== undefined) === true;
+
     const declaredResultType = (): Type => {
       const resolved = resolvedOf();
-      const instantiated = instantiatedResultType(resolved, expr.ops, {
+      const ctx: ArmInferenceContext = {
         // The SAME gate `box.ts` hands `validateArguments` (§4.5: validation
         // and result typing solve one constraint problem) — per position when
         // the signature declares `broadcastable<T>` slots.
@@ -10572,12 +10599,35 @@ function type(expr: BoxedFunction): Type | BoxedType {
             : (i: number) => declaredSlots.at(i).mappable,
         // An operand absent only in its cells, at an operator that moves
         // cells without computing from them, binds the type variables with
-        // its `missing` arm (`passesAbsentCellsThrough`).
+        // its `missing` arm (`passesAbsentCellsThrough`). So does the present
+        // type of an operand that can also be absent as a whole
+        // (`cellsPresent`).
         stripMissing: (i) =>
           def.stripsMissingAt(i) &&
+          cellsPresent?.[i] === undefined &&
           !passesAbsentCellsThrough(expr.operator, expr.ops[i].type.type),
         lazy: def.lazy,
-      });
+      };
+      const instantiated = hasCellsPresent
+        ? instantiatedResultTypeOverActuals(
+            resolved,
+            expr.ops.map((x, i) => {
+              const actual = actualOfOperand(x);
+              const present = cellsPresent?.[i];
+              if (present === undefined) return actual;
+              return {
+                type: present,
+                literal: actual.literal,
+                valid: actual.valid,
+                inferable: actual.inferable,
+                get liftable(): boolean {
+                  return actual.liftable;
+                },
+              };
+            }),
+            ctx
+          )
+        : instantiatedResultType(resolved, expr.ops, ctx);
       return instantiated ?? functionResult(resolved) ?? 'unknown';
     };
 
@@ -10617,16 +10667,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // Computed only when an absence is absorbed (`maybeAbsorb`): for a list
     // literal of thousands of elements, typed at each turn of a loop that
     // grows it, the eager map was a quarter of the typing.
+    // An operand typed from its present type (`cellsPresent`) takes part
+    // with its whole absence only: its cells move into the result as they
+    // are, so they do not make the result cells `NaN`.
     const absenceTypes = (): Type[] =>
-      expr.ops.map((x, i) =>
-        !def.stripsMissingAt(i)
-          ? stripMissingFromType(x.type.type)
-          : absentTerm(x)
-            ? 'missing'
-            : passedThrough[i]
-              ? stripMissingFromType(x.type.type)
-              : x.type.type
-      );
+      expr.ops.map((x, i) => {
+        if (!def.stripsMissingAt(i)) return stripMissingFromType(x.type.type);
+        if (absentTerm(x)) return 'missing';
+        if (passedThrough[i]) return stripMissingFromType(x.type.type);
+        const present = cellsPresent?.[i];
+        if (present !== undefined)
+          return {
+            kind: 'union',
+            types: ['missing', stripMissingFromType(present)],
+          };
+        return x.type.type;
+      });
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some(
@@ -10740,14 +10796,20 @@ function type(expr: BoxedFunction): Type | BoxedType {
       return widenNumericCellsWithNan(t);
     };
     const maybeAbsorb = (t: Type): Type | BoxedType => {
+      const absorbed = (): Type => {
+        const r = absorbOperandAbsence(
+          t,
+          absenceTypes(),
+          ABSENT_CELLS_STAY_MISSING.has(expr.operator),
+          def.broadcastable
+        );
+        // An absent cell answered as it is keeps its `missing` arm
+        // (`withPresentCellAbsence`).
+        return hasCellsPresent ? withPresentCellAbsence(t, r) : r;
+      };
       const result = applyContractB(
         absorbMissing
-          ? absorbOperandAbsence(
-              t,
-              absenceTypes(),
-              ABSENT_CELLS_STAY_MISSING.has(expr.operator),
-              def.broadcastable
-            )
+          ? absorbed()
           : threadedAbsence
             ? withThreadedAbsence(t)
             : t
@@ -10788,12 +10850,15 @@ function type(expr: BoxedFunction): Type | BoxedType {
       const tupleComponents = ABSENT_CELLS_STAY_MISSING.has(expr.operator)
         ? 'keep'
         : 'nan';
+      // An operand typed from its present type (`cellsPresent`) is given to
+      // the handler with that type, its absent cells kept.
       const operandTypes = stripsAny
         ? expr.ops.map((x, i) =>
             def.stripsMissingAt(i) &&
             x.type.facts.containsMissing &&
             !passedThrough[i]
-              ? stripMissingFromType(x.type.type, tupleComponents)
+              ? (cellsPresent?.[i] ??
+                stripMissingFromType(x.type.type, tupleComponents))
               : undefined
           )
         : undefined;

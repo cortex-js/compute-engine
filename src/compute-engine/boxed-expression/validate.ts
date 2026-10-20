@@ -36,6 +36,7 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   stripMissingFromElements,
+  typeContainsMissing,
   unfoldAliasOnDescent,
   type AliasDescent,
   signatureSlotType,
@@ -487,7 +488,113 @@ export function checkCollectionOperand(
   // as the refusal of the boxing does (`refusedCollectionSourceOperands`).
   if (isSymbol(x) && x.valueDefinition?.inferredType) return x;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
+  if (absentTupleSlotsMatchSource(x, type)) return x;
+  // A structural alias, at the top or as an arm of a union, is read as its
+  // definition, so that `a: L`, with `L` an alias of
+  // `list<integer | missing>`, is admitted as `list<integer | missing>` is.
+  // The overlap deferral in `checkType` (`overlapsForDeferredValidation`)
+  // reads a reference node as no collection at all, so before, `Dedup(a)`,
+  // `ArgMax(a)` and `Map(x ↦ x + 1, a)` were `incompatible-type` errors, and
+  // so were they for `b: missing | L`.
+  const unfolded = aliasArmsUnfolded(t);
+  if (unfolded !== t && overlapsForDeferredValidation(unfolded, type)) return x;
   return checkType(engine, x, type);
+}
+
+/**
+ * `t` with a structural alias replaced by its definition, at the top and in
+ * each arm of a union; `t` itself when there is none. One level only, with
+ * no further descent, so a self-referential alias cannot make it loop
+ * (`resolveTypeAlias` guards one chain of references).
+ */
+function aliasArmsUnfolded(t: Type): Type {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return r;
+  const arms = r.types.map((a) => resolveTypeAlias(a));
+  return arms.every((a, i) => a === r.types[i])
+    ? r
+    : { kind: 'union', types: arms };
+}
+
+/**
+ * True when `op` is a tuple with a slot that may be absent, or may itself be
+ * absent, and the same tuple without its absent cases fits the source slot
+ * `type` of a lazy collection operator.
+ *
+ * A lazy collection operator (`Map`, `Filter`, `Any`, `Reduce`, `ArgMax`, …)
+ * reads the slots of a tuple source as its elements, as it reads the elements
+ * of a list, and an absent element is an ordinary element for it:
+ * `list<integer | missing>` is admitted at the `collection` source slot.
+ * Without this function, `checkType` read the tuple slot by slot and refused
+ * it, because a `missing` slot is not a value: `Map(x ↦ x + 10, t)` with
+ * `t: tuple<integer, missing>` was an `incompatible-type` error, while the
+ * same call with `l: list<integer | missing>` was typed `list<number>`. The
+ * eager operators with the same parameter (`CountIf`, `Find`, `Sort`) already
+ * admitted the tuple, because their signature solve binds the element type
+ * variable to the widening of the slot types.
+ *
+ * The test is the one the same tuple with no absent case gets: a slot that
+ * holds nothing but `missing` is removed, the `missing` arms of the other
+ * slots are removed (`stripMissingFromElements`), and the result is admitted
+ * only when it is a SUBTYPE of `type`. So `tuple<integer, missing>` is
+ * admitted because `tuple<integer>` is, and `tuple<integer, nothing, missing>`
+ * is refused because `tuple<integer, nothing>` is. The overlap deferral
+ * (`overlapsForDeferredValidation`) is not applied: it never admits a tuple
+ * at a collection parameter (it pairs a tuple only with a tuple), so applying
+ * it here would admit, only because a slot can be absent, a type that the
+ * same tuple without that slot is refused (`tuple<integer, missing> |
+ * boolean` while `tuple<integer, integer> | boolean` is refused).
+ *
+ * A `missing` arm of the operand itself (`missing | tuple<integer, integer>`)
+ * is set aside: every collection operator answers `Missing` for an absent
+ * source, and `missing | list<integer>` is admitted at the same slot. The
+ * other arms of a union are tested as they are.
+ *
+ * A tuple whose slots can hold nothing but absent values
+ * (`tuple<missing, missing>`) is refused: no slot is left once its absent
+ * slots are removed. A `list<missing>` IS admitted at this source today, by
+ * the overlap deferral in `checkType`, so `Map(x ↦ x + 10, m)` with
+ * `m: list<missing>` is typed `list<number>`. The difference is recorded in
+ * ROADMAP.md ("A tuple with an absent slot is refused as the source of a
+ * lazy collection operator").
+ */
+function absentTupleSlotsMatchSource(op: Expression, type: Type): boolean {
+  if (!op.type.facts.containsMissing) return false;
+  const t = resolveTypeAlias(op.type.type);
+  const arms =
+    typeof t !== 'string' && t.kind === 'union'
+      ? t.types.map((a) => resolveTypeAlias(a))
+      : [t];
+  const present = arms.filter((a) => a !== 'missing');
+  if (!present.some((a) => typeof a !== 'string' && a.kind === 'tuple'))
+    return false;
+  const read: Type[] = [];
+  for (const a of present) {
+    if (typeof a === 'string' || a.kind !== 'tuple') {
+      read.push(a);
+      continue;
+    }
+    // A slot that can hold `any` is not read here. Whether a tuple with an
+    // `any` slot is admitted at a collection parameter is an open user
+    // decision (`docs/plans/2026-10-20-bare-tuple-record-any.md`); this
+    // function does not change it, so `tuple<any, integer>` stays refused
+    // at this slot, and `tuple<any, missing>` is refused with it. The test
+    // is `isSubtype`, not equality with `any`, so that a union slot with an
+    // `any` arm (`tuple<integer, any | missing>`) is refused too.
+    if (a.elements.some((e) => isSubtype('any', e.type))) return false;
+    const elements = a.elements.filter(
+      (e) => resolveTypeAlias(e.type) !== 'missing'
+    );
+    if (elements.length === 0) return false;
+    read.push({ ...a, elements });
+  }
+  const view: Type =
+    read.length === 1 ? read[0] : { kind: 'union', types: read };
+  const stripped = typeContainsMissing(view)
+    ? stripMissingFromElements(view)
+    : view;
+  if (stripped === undefined) return false;
+  return isSubtype(stripped, type);
 }
 
 /**

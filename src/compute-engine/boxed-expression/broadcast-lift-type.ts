@@ -599,6 +599,74 @@ export function passesAbsentCellsThrough(operator: string, t: Type): boolean {
 }
 
 /**
+ * The present type of an operand of type `t` that can be absent as a whole,
+ * at an operator of `ABSENT_CELLS_PASS_THROUGH` or
+ * `ABSENT_CELLS_READ_BY_HANDLER`; `undefined` for any other operand or
+ * operator. The caller asks only at a position that strips `missing` of an
+ * operator that propagates absence.
+ *
+ * The present type is `t` without its top-level `missing` arm, with any
+ * absent cells kept: `missing | list<integer | missing>` gives
+ * `list<integer | missing>`, `missing | tuple<integer, missing>` gives
+ * `tuple<integer, missing>`, and `missing | list<integer>` (or a restricted
+ * list, `missing | vector<integer^2>`) gives the list. When the operand is
+ * present, such an operator moves its cells into the result as they are,
+ * exactly as for an operand that is absent only in its cells
+ * (`passesAbsentCellsThrough`). So the type variables are bound from the
+ * present type and the `type` handler is given the present type. The whole
+ * absence is then added by the absorption of `absorbOperandAbsence`, as for
+ * any operand that can be absent as a whole. Without this, the absent cells
+ * were read as `NaN` and the operand bound no type variable: `Dedup(v)` with
+ * `v: missing | list<integer | missing>` holding `[1, Missing]` was typed
+ * `list<number> | missing`, and `Sort(v)` was typed `list<unknown> |
+ * missing`, a type that does not hold the value.
+ */
+export function absentCellsPresentType(
+  operator: string,
+  t: Type
+): Type | undefined {
+  if (!movesAbsentCells(operator)) return undefined;
+  if (!hasTopLevelMissing(t)) return undefined;
+  const present = stripTopMissing(t);
+  if (present === 'never') return undefined;
+  // A structural alias is replaced by its definition (`missing | P`, with
+  // `P` an alias of `tuple<integer, missing>`, gives the tuple), so that the
+  // present type binds the type variables as its definition does.
+  return resolveTypeAlias(present);
+}
+
+/**
+ * True when `operator` is one of the operators of `ABSENT_CELLS_PASS_THROUGH`
+ * or `ABSENT_CELLS_READ_BY_HANDLER`: the operators that move the cells of a
+ * collection operand into their result without computing from them. A cheap
+ * test, to ask before any walk of an operand type.
+ */
+export function movesAbsentCells(operator: string): boolean {
+  return (
+    ABSENT_CELLS_PASS_THROUGH.has(operator) ||
+    ABSENT_CELLS_READ_BY_HANDLER.has(operator)
+  );
+}
+
+/**
+ * `absorbed`, the result type `result` after `absorbOperandAbsence`, with
+ * the `missing` arm of `result` put back when the absorption removed it.
+ *
+ * For an application with an operand typed from its present type
+ * (`absentCellsPresentType`), a `missing` arm of the result comes from an
+ * absent cell that the operator answers as it is: `MaxBy` over
+ * `[1, Missing]` can answer `Missing`. The absorption reads a numeric result
+ * as `NaN` for the whole absence of the operand (`MaxBy(Missing, f)` is
+ * `NaN`), and in doing so drops that arm: the result was typed `number`.
+ * Both answers are possible, so the type is `number | missing`.
+ */
+export function withPresentCellAbsence(result: Type, absorbed: Type): Type {
+  if (!isSubtype('missing', result) || isSubtype('missing', absorbed))
+    return absorbed;
+  return widen('missing', absorbed);
+}
+
+/**
  * The type of a THREADED operand without its top-level `missing` arm, or
  * `undefined` when it has none (or has nothing else).
  *

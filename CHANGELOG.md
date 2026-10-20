@@ -386,6 +386,21 @@
 
 ### Bug Fixes
 
+- A tuple with an absent slot is accepted as the source of `Map`, `Filter`,
+  `Reduce`, `Fold`, `Scan`, `TakeWhile`, `DropWhile`, `FlatMap`, `Any`, `All`,
+  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Dedup` and `Differences`, as a list
+  with an absent element already was. `Map(x ↦ x + 10, t)` with
+  `t: tuple<integer, missing>` was an `incompatible-type` error; it is now
+  typed `list<number>`. An alias of `list<integer | missing>` is accepted
+  there too. The result of these operators and of `Take`, `Reverse`, `Sort`
+  and `Unique` over a source that can be absent as a whole keeps its absent
+  elements in its type: with `w: missing | list<integer | missing>`,
+  `Dedup(w)` was typed `list<number> | missing` and is now
+  `list<integer | missing> | missing`, and `MaxBy(w, …)` is
+  `missing | number`. `Dedup` over a tuple or a list with a stated length is
+  typed `list<…>`: `Dedup([1, 1, 2])` was typed `vector<integer^3>`, which
+  does not hold its value `[1, 2]`.
+
 - A `Table` whose term assigns a variable gives its list in a function body too:
   `Apply(Function(Block(Table(Block(Assign(a, k), a), (k, 1, 3)))))` gave an
   unevaluated `Tabulate(…)`, and gives `[1, 2, 3]`, as at the top level.

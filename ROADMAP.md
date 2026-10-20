@@ -135,22 +135,9 @@ Question: does the element type of a view include `nothing` when its callback
 can return `Nothing`, and how does each reducer treat a `Nothing` element
 (skip it, as a list literal does, or treat it as an error)?
 
-### A tuple with an absent slot is refused as the source of a lazy collection operator (OPEN, fix in progress — found 2026-10-20 by the bare-`tuple` prototype, `docs/plans/2026-10-20-bare-tuple-record-any.md`)
+### Defects found by the tuple-source fix (OPEN, small — found 2026-10-20; the tuple-source fix itself landed the same day)
 
-`Map(x ↦ x + 10, t)` with `t: tuple<integer, missing>` is an
-`incompatible-type` error, while `l: list<integer | missing>` gives
-`list<number>` and `t: tuple<integer, integer>` gives `list<integer>`
-(measured 2026-10-20). The type-variable solver is not the cause: the eager
-operators (`CountIf`, `Find`, `Sort`, `Partition`, …) accept such a tuple. The
-LAZY operators (`Map`, `Filter`, `Reduce`, `Fold`, `Scan`, `TakeWhile`,
-`DropWhile`, `FlatMap`, `Any`, `All`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`,
-`Dedup`, `Differences`) do not run the solver; their source goes through
-`checkCollectionOperand` → `checkType(x, 'collection')` (`validate.ts`),
-where a list with an absent element defers but a tuple never does.
-`Dedup` also copied its source type, which is wrong when that type states a
-length (`Dedup((1, 1))` typed `tuple<integer, integer>`, value `[1]`).
-
-Related defects found by the same fix (each also on the list route):
+Each also occurs on the list route:
 
 - `Any`/`All` are typed `boolean`, but `Any([1, Missing], x ↦ x > 2)` is
   `Missing` (Kleene logic, locked in `collections-absent.test.ts`); typing
@@ -167,6 +154,21 @@ Related defects found by the same fix (each also on the list route):
   that tuple is still refused.
 - `Insert`, `ReplaceAt`, `RangeOf`, `ContainsSequence`, `StartsWith` and
   `EndsWith` are invalid with a bare `tuple` source (`Insert(tb, 1, 5)`).
+- The kind of result of `Dedup`/`Filter` over a source declared
+  `… | string` depends on how the symbol holds its string: a string literal
+  gives a list of characters, an application that evaluates to a string
+  gives a string. The type covers both (`list<character> | string`), but the
+  result kind should not depend on how the value is held.
+- A source typed `missing | string` is an `incompatible-type` error at
+  `Dedup`, `Filter` and `Map`, on the box and Epsil routes, while
+  `missing | list<…>` is admitted.
+- `Map(x ↦ x + 10, q)` with `q: P` (an alias of `tuple<integer, missing>`) is
+  typed `collection<number>`, where the written-out tuple gives
+  `list<number>`: `Map`'s tuple check does not resolve the alias.
+- `Filter` and `Dedup` over a dictionary (alone or as a union arm) are typed
+  `dictionary<integer>`, but the value is a view that prints as
+  `Set(("a", 1))` and lists as `list<tuple<string, integer>>`, which the
+  dictionary type does not hold.
 
 ### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
@@ -185,6 +187,23 @@ declaration must be read as admitting it (see
 - `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`,
   but `tuple<integer>` is not `<: broadcastable<integer>`; the same for
   `matrix<integer>`.
+
+### The type-variable solver binds nothing for an operand typed with an alias (OPEN, small — found 2026-10-20 by the review of the tuple-source fix)
+
+With `ce.declareType('L', 'list<integer | missing>', { alias: true })` and
+`a: L := [3, Missing]`, `Sort(a)` is typed `list<unknown>`; the value
+`[3, Missing]` is `list<integer | missing>`, which that type excludes. Also
+with no absent element: `Q = list<integer>` (alias), `b: Q`, `Sort(b)` is
+`list<unknown>` (sound, but the element type is lost). The written-out type
+gives `list<integer | missing>`. An alias operand should be unfolded before
+the polytype solve.
+
+### `Total` builds an unreduced `any | unknown` element type (OPEN, small — found 2026-10-20 by the same review)
+
+`Total(b)` with `b: list<missing | unknown>` (and `Total(Map(x ↦ x, t))` with
+`t: tuple<integer, missing>`) is typed `list<any | unknown>`: a union that is
+not reduced to `any`. The union is built in the `Total` handler or in the
+absorption, not by the element type itself.
 
 ### Two subtype-relation gaps found by the transitivity check (OPEN, small — found 2026-10-20 by the same prototype)
 

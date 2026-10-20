@@ -54,11 +54,14 @@ import {
 import { arityBounds, isMoreSpecific, overloadArms } from './overload.js';
 import {
   ABSENT_CELLS_STAY_MISSING,
+  absentCellsPresentType,
   absorbOperandAbsence,
   broadcastLiftType,
+  movesAbsentCells,
   passesAbsentCellsThrough,
   threadedPresentType,
   viewOfDescriptor,
+  withPresentCellAbsence,
   withThreadedAbsence,
 } from './broadcast-lift-type.js';
 
@@ -469,6 +472,20 @@ export function deriveApplicationType(
   const passedThrough = operands.map((d) =>
     passesAbsentCellsThrough(operator, d.type)
   );
+  // An operand that can be absent as a whole, at such an operator, is typed
+  // from its present type, absent cells kept, as at the call site
+  // (`absentCellsPresentType`).
+  // Only at a position that strips `missing` of an operator that propagates
+  // absence, as at the call site.
+  const cellsPresent =
+    propagate && movesAbsentCells(operator)
+      ? operands.map((d, i) =>
+          def.stripsMissingAt(i) && typeContainsMissing(d.type)
+            ? absentCellsPresentType(operator, d.type)
+            : undefined
+        )
+      : undefined;
+  const hasCellsPresent = cellsPresent?.some((t) => t !== undefined) === true;
   const absorbMissing =
     propagate &&
     operands.some(
@@ -496,23 +513,30 @@ export function deriveApplicationType(
     threadedPresent?.some((t) => t !== undefined) === true;
   const threadedAbsence =
     threadedPresence && def.resolvedMissingBehavior === 'handle';
+  const absorbed = (t: Type): Type => {
+    const r = absorbOperandAbsence(
+      t,
+      // A position that does not strip `missing` (`missingStrip`) takes no
+      // part in the absorption, and an operand typed from its present type
+      // takes part with its whole absence only, as at the call site.
+      operands.map((d, i): Type => {
+        if (passedThrough[i] || !def.stripsMissingAt(i))
+          return stripMissingFromType(d.type);
+        const present = cellsPresent?.[i];
+        if (present !== undefined)
+          return {
+            kind: 'union',
+            types: ['missing', stripMissingFromType(present)],
+          };
+        return d.type;
+      }),
+      ABSENT_CELLS_STAY_MISSING.has(operator),
+      def.broadcastable
+    );
+    return hasCellsPresent ? withPresentCellAbsence(t, r) : r;
+  };
   const absorb = (t: Type): Type =>
-    absorbMissing
-      ? absorbOperandAbsence(
-          t,
-          // A position that does not strip `missing` (`missingStrip`) takes
-          // no part in the absorption, as at the call site.
-          operands.map((d, i) =>
-            passedThrough[i] || !def.stripsMissingAt(i)
-              ? stripMissingFromType(d.type)
-              : d.type
-          ),
-          ABSENT_CELLS_STAY_MISSING.has(operator),
-          def.broadcastable
-        )
-      : threadedAbsence
-        ? withThreadedAbsence(t)
-        : t;
+    absorbMissing ? absorbed(t) : threadedAbsence ? withThreadedAbsence(t) : t;
 
   // The operands as the type handler sees them. Set by the main handler call
   // below, and read again by the per-cell calls of the broadcast lift
@@ -528,6 +552,15 @@ export function deriveApplicationType(
             passedThrough[i]
           )
             return d;
+          // An operand typed from its present type is given to the handler
+          // with that type, as at the call site.
+          const present = cellsPresent?.[i];
+          if (present !== undefined)
+            return {
+              type: present,
+              facts: d.facts,
+              structureOf: d.structureOf,
+            };
           // An absent coordinate of a point (a `missing` tuple component) is
           // kept for an operator that reads coordinates, and is `nan` for one
           // that computes with them, as at the call site.
@@ -598,18 +631,33 @@ export function deriveApplicationType(
     )
   )
     return 'any';
-  const actuals: SolveActual[] = operands.map(actualOfDescriptor);
+  // An operand typed from its present type binds the type variables, and
+  // takes part in the choice of an overload arm, with that type, as at the
+  // call site.
+  const solvedOperands = hasCellsPresent
+    ? operands.map((d, i) => {
+        const present = cellsPresent?.[i];
+        return present === undefined
+          ? d
+          : { type: present, facts: d.facts, structureOf: d.structureOf };
+      })
+    : operands;
+  const actuals: SolveActual[] = solvedOperands.map(actualOfDescriptor);
+  const stripsAt = (i: number): boolean =>
+    def.stripsMissingAt(i) &&
+    !passedThrough[i] &&
+    cellsPresent?.[i] === undefined;
   return absorb(
     lift(
       instantiatedResultTypeOverActuals(sig, actuals, {
         threadable: def.broadcastable,
-        stripMissing: (i) => def.stripsMissingAt(i) && !passedThrough[i],
+        stripMissing: stripsAt,
         lazy: def.lazy,
         resolver: engine._typeResolver,
       }) ??
-        overloadResultType(engine, sig, operands, actuals, {
+        overloadResultType(engine, sig, solvedOperands, actuals, {
           threadable: def.broadcastable,
-          stripMissing: (i) => def.stripsMissingAt(i) && !passedThrough[i],
+          stripMissing: stripsAt,
           lazy: def.lazy,
         }) ??
         functionResult(sig) ??

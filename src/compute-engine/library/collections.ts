@@ -1204,6 +1204,138 @@ function orderedRunResultType(source: Type): Type {
 }
 
 /**
+ * `source` with `rule` applied to each arm, when `source` is a union, or to
+ * `source` itself otherwise. A structural alias, at the top or as an arm, is
+ * replaced by its definition first. An arm that `rule` leaves unchanged is
+ * kept as it is written, and the arms are joined again with `widen`.
+ *
+ * The walk reads union arms only and never enters a constructor, so an
+ * alias that reaches itself here reaches itself as a bare arm of its own
+ * union (`type alias cyc = cyc | list<integer>`): that arm adds no value of
+ * its own and is kept unchanged (`unfoldAliasOnDescent`). Without the
+ * descent guard, such an alias unfolded forever.
+ */
+function resultTypeByArm(
+  source: Type,
+  rule: (arm: Type) => Type,
+  seen?: AliasDescent
+): Type {
+  const unfolded = unfoldAliasOnDescent(source, seen);
+  if (unfolded === undefined) return source;
+  const t = unfolded.type;
+  if (typeof t !== 'string' && t.kind === 'union') {
+    const arms = t.types.map((a) => resultTypeByArm(a, rule, unfolded.seen));
+    return arms.every((a, i) => a === t.types[i]) ? source : widen(...arms);
+  }
+  const r = rule(t);
+  return r === t ? source : r;
+}
+
+/**
+ * The result type of `Dedup` over a source of type `source`.
+ *
+ * `Dedup` keeps the kind of its source (a set source gives a set view, a
+ * string source a string), so the source type is kept, with two exceptions
+ * where the source type states a number of elements that the result does not
+ * have, because `Dedup` can remove elements:
+ * - a tuple source gives a list of the widening of its slot types:
+ *   `Dedup((1, 1))` is `[1]`, not a 2-tuple, and `Dedup((1, Missing))` is
+ *   `[1, Missing]`, typed `list<integer | missing>`;
+ * - a list source with stated dimensions gives a list of its element type
+ *   with no dimensions: `Dedup([1, 1, 2])` is `[1, 2]`, not a 3-vector.
+ *
+ * A union source is read arm by arm, since the value is in one of its arms
+ * (`resultTypeByArm`): `tuple<integer, integer> | set<integer>` gives
+ * `list<integer> | set<integer>`. A `string` arm of a union gives
+ * `list<character> | string` (`STRING_ARM_IN_UNION`).
+ */
+function dedupResultType(source: Type): Type {
+  if (isSubtype(source, 'string')) return source;
+  return resultTypeByArm(source, (t) => {
+    if (typeof t === 'string') return t === 'string' ? STRING_ARM_IN_UNION : t;
+    if (
+      t.kind === 'tuple' ||
+      (t.kind === 'list' && t.dimensions !== undefined)
+    ) {
+      const elements = collectionElementType(t);
+      if (elements !== undefined) return { kind: 'list', elements };
+    }
+    return t;
+  });
+}
+
+/**
+ * The result type of `Filter` over a source of type `source`.
+ *
+ * A string source keeps its type: filtering the characters of a string gives
+ * a string. Another indexed source gives a list of its element type, with no
+ * shape (filtering changes the length). A source without positions (a set)
+ * keeps its type. A union source is read arm by arm, since the value is in
+ * one of its arms (`resultTypeByArm`): `tuple<integer, missing> |
+ * dictionary<integer>` gives `dictionary<integer> | list<integer | missing>`.
+ * Before, such a union was not an indexed collection as a whole, so it was
+ * kept, and the type claimed a tuple for a value that is a list. A `string`
+ * arm of a union gives `list<character> | string` (`STRING_ARM_IN_UNION`).
+ */
+function filterResultType(source: Type): Type {
+  if (isSubtype(source, 'string')) return source;
+  return resultTypeByArm(source, (t) => {
+    if (t === 'string') return STRING_ARM_IN_UNION;
+    return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+      ? { kind: 'list', elements: collectionElementType(t) ?? 'any' }
+      : t;
+  });
+}
+
+/**
+ * The result type of `Dedup` and `Filter` for a `string` arm of a union
+ * source: `list<character> | string`, because both values occur for a
+ * symbol of the same declared type. With `c: list<integer> | string`:
+ * - when `c` holds a string LITERAL (`"aab"`), the handler keeps the symbol
+ *   as the source of the result, and the result is the view typed from the
+ *   declared union, which is not `string`: the string is not rejoined
+ *   (`evaluateStringPreservingCollection`, `boxed-function.ts`, reads the
+ *   declared result type), and `Dedup(c)` is the list `["a", "b"]`;
+ * - when `c` holds an application that evaluates to a string
+ *   (`StringJoin(["a", "ab"])`), the handler evaluates the source and builds
+ *   the operator again over the string literal, whose result type is
+ *   `string`, and `Dedup(c)` is the string `"ab"`.
+ * A source typed `string` alone keeps `string`: there the result is always
+ * a string.
+ */
+const STRING_ARM_IN_UNION: Type = {
+  kind: 'union',
+  types: [{ kind: 'list', elements: 'character' }, 'string'],
+};
+
+/**
+ * The result type of `Map` over a source arm `t` when the element type of
+ * the result is not known: `t` itself, which the caller echoes, except for
+ * the arms whose type would make a promise the value does not keep.
+ * - An index span, an indexed collection and a string give a bare `list`.
+ * - A tuple gives a bare `list`, or `list<unknown | missing>` when a slot
+ *   of the tuple can be absent: the callback can answer the absent slot as
+ *   it is (`Map(x ↦ x, t)` with `t := (1, Missing)` is `[1, Missing]`), and
+ *   the bare `list` holds values only. Only the slots themselves are read:
+ *   `tuple<tuple<integer, missing>, integer>` has no absent element.
+ */
+function unknownElementMapArm(t: Type): Type {
+  if (t === 'range' || t === 'string' || t === 'indexed_collection')
+    return 'list';
+  if (t === 'tuple') return 'list';
+  if (typeof t === 'string') return t;
+  if (t.kind === 'indexed_collection') return 'list';
+  if (t.kind === 'tuple')
+    return t.elements.some((e) => isSubtype('missing', e.type))
+      ? {
+          kind: 'list',
+          elements: { kind: 'union', types: ['unknown', 'missing'] },
+        }
+      : 'list';
+  return t;
+}
+
+/**
  * The result type of `Scan` over a source of type `source`, whose elements
  * are of type `elements` (the type of the fold), or of the source's own
  * element type when `elements` is `undefined`. It is the type `Map` gives
@@ -10432,8 +10564,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // this branch handles, so the result is a bare `list`. The bare
           // `tuple` spelling (a `PrimitiveType` string) reaches here as `s ===
           // 'tuple'` and must be demoted too, not echoed verbatim.
+          // A tuple with a slot that can be absent gives a list whose
+          // elements can be absent too (`unknownElementMapArm`).
           if (s === 'tuple' || (typeof s !== 'string' && s.kind === 'tuple'))
-            return BoxedType.forResult('list', engine._typeResolver);
+            return BoxedType.forResult(
+              unknownElementMapArm(s),
+              engine._typeResolver
+            );
           // The source type is echoed even when it is not a collection type
           // at all. That is deliberate, and it is what the expressions shape
           // did: wrapping a non-collection source in `collection<unknown>`
@@ -10458,7 +10595,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               mapOperatorResultType(s, 'unknown'),
               engine._typeResolver
             );
-          return BoxedType.forResult(ops[1].type, engine._typeResolver);
+          // A union source is echoed arm by arm, with the same exceptions
+          // as above for each arm (`unknownElementMapArm`): the value is in
+          // one of the arms. Echoed whole, `tuple<integer, missing> |
+          // dictionary<integer>` claimed a tuple for a value that is a list.
+          return BoxedType.forResult(
+            resultTypeByArm(ops[1].type, unknownElementMapArm),
+            engine._typeResolver
+          );
         }
         return BoxedType.forResult(
           mapOperatorResultType(sourceType(0), resultType),
@@ -10726,8 +10870,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // characters than the predicate accepted — filtering away a base character
     // leaves its combining mark to attach to whatever now precedes it.
     type: (ops, context) => {
-      const t = ops[0].type;
-      // Tested with `matches` (a SUBTYPE test) rather than by comparing the
+      // `filterResultType` tests a string source with `isSubtype`, a SUBTYPE
+      // test, rather than by comparing the
       // type constructor, so that a transparent alias or reference whose
       // resolved type is `string` also gets the string-preserving result — an
       // identity test on the constructor let such a source fall through to
@@ -10739,15 +10883,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // reaches `string` through one arm — for those the runtime may well
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
-      if (isSubtype(t, 'string'))
-        return BoxedType.forResult(t, context.engine._typeResolver);
-      if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
-        return BoxedType.forResult(t, context.engine._typeResolver);
       return BoxedType.forResult(
-        {
-          kind: 'list',
-          elements: collectionElementType(t) ?? 'any',
-        },
+        filterResultType(ops[0].type),
         context.engine._typeResolver
       );
     },
@@ -16422,9 +16559,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> collection',
-    // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
+    // Preserve the source's element type / indexed-ness (mirrors TakeWhile),
+    // but not a length the source type states (`dedupResultType`).
     type: (ops, context) =>
-      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
+      BoxedType.forResult(
+        dedupResultType(ops[0].type),
+        context.engine._typeResolver
+      ),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
