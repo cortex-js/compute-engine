@@ -155,7 +155,9 @@ effect, and it must be declared — without the specifier the definition is
 rejected and `counter()` never produces a callable. See
 [Effect specifiers](/epsil/control-flow#effect-specifiers). An assignment to
 a name that no enclosing scope declares when the function is defined makes a
-local of the function body instead: each call gets its own binding, a later
+local of the function body instead, also when the assignment is in a branch
+of an `if`, a loop body or a `do` block of the body: each call gets its own
+binding, a later
 declaration of the same name is not written, and it is not the `scope`
 effect (see
 [Reassignment vs. declaration](/epsil/declarations/#reassignment-vs-declaration)):
@@ -168,7 +170,8 @@ s = 10
 ```
 
 Each call starts with no value for such a local: a read of it before its
-first assignment in the call (`function step(k) { r = s; s = k; r }`) is the
+first assignment in the call (`function step(k) { r = s; s = k; r }`, or
+`function g(c) { if c { t = 1 }; t }` called with `c` false) is the
 `read-before-declaration` error, not the bare symbol, as for a `let` local.
 
 Reach for `const` when a name should not move at all. Constness is a property

@@ -35,7 +35,8 @@ import {
  *   value identity (`0.0` boxes to the exact integer `0`; `3.5 ≡ 7/2`).
  *   `NaN` is a member of exactly the `NaN` value type (amended 2026-08-02;
  *   see `acceptsValueLiteral`) and of no other value type or range. Range
- *   endpoints are inclusive. The same "match only themselves" rule covers the
+ *   endpoints are inclusive, except an endpoint the type excludes
+ *   (`real<0<..>`). The same "match only themselves" rule covers the
  *   unsigned complex infinity `~oo`, whose value type carries a tagged
  *   sentinel instead of a JavaScript number (see `acceptsValueLiteral`).
  * - **Primitives that no value synthesizes**: membership in a primitive name
@@ -304,18 +305,24 @@ function accepts(
       // The base kind is judged on the synthesized type (an integer literal
       // inhabits `integer<…>`; a non-integer float does not).
       if (!isSubtype(v.type.type, t.type)) return false;
-      // Inclusive bounds (spec §4.1), compared through the boxed
-      // exactness-aware comparators — `.re` would project an exact bignum
-      // or rational onto a double and could round it onto an endpoint
-      // (e.g. 2^53 + 1 admitted by an upper bound of 2^53).
+      // The bounds are inclusive unless the type EXCLUDES them (`real<0<..>`
+      // is x > 0, `lowerOpen`/`upperOpen`). They are compared through the
+      // boxed exactness-aware comparators — `.re` would project an exact
+      // bignum or rational onto a double and could round it onto an
+      // endpoint (e.g. 2^53 + 1 admitted by an upper bound of 2^53).
       const ce = v.engine;
-      if (
-        t.lower !== undefined &&
-        v.isGreaterEqual(ce.number(t.lower)) !== true
-      )
-        return false;
-      if (t.upper !== undefined && v.isLessEqual(ce.number(t.upper)) !== true)
-        return false;
+      if (t.lower !== undefined) {
+        const lower = ce.number(t.lower);
+        const above =
+          t.lowerOpen === true ? v.isGreater(lower) : v.isGreaterEqual(lower);
+        if (above !== true) return false;
+      }
+      if (t.upper !== undefined) {
+        const upper = ce.number(t.upper);
+        const below =
+          t.upperOpen === true ? v.isLess(upper) : v.isLessEqual(upper);
+        if (below !== true) return false;
+      }
       return true;
     }
 

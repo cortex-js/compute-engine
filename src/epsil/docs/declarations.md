@@ -181,9 +181,17 @@ x = 5
 Assigning to a name that was never declared does establish it, but `let` is
 the explicit and idiomatic way to introduce a mutable binding.
 
-In a block — a function body, a `do` block, the body of an `if` or of a loop
-— an assignment to a name that no enclosing scope declares makes a local of
-that block, as a `let` does. Which scope a name belongs to is decided where
+In a function body, an assignment to a name that no enclosing scope
+declares makes a local of the function body, as a `let` does. This is also
+true when the assignment is in a nested block of the body — a branch of an
+`if`, the body of a loop, a `do` block —, as in Python. A function literal
+written in the body owns the names that its own body assigns, and a `let` in
+a nested block declares a local of that block only. The rule is the same
+for every function body that the engine makes from an expression: the term
+of a `Table` is applied as a function at each index, so it owns the names
+that its branches assign, while the term of a `Sum` or a `Product` is
+evaluated again at each index, as a loop body is. Which scope a name
+belongs to is decided where
 the function is **defined**, not where it is called: each call of the
 function gets its own local, and a declaration of the same name made later
 does not change what the function writes. Such an assignment does not write
@@ -209,9 +217,17 @@ g(1)
 ```
 
 The same holds for a read in the value of the first assignment
-(`t = t + 1` as the first statement), and for a read in a branch that runs
-when no assignment ran before it (`if c { t = 1 }; t = t + 1` with `c`
-false). A call of the function that the local holds (`h(1)` before
+(`t = t + 1` as the first statement), and for a read that runs when no
+assignment ran before it, such as a read after an `if` that assigns the
+local in one branch only:
+
+```epsil
+function g(c) { if c { t = 1 }; t }
+[g(true), g(false)]
+// ➔ [1, Error(ErrorCode("read-before-declaration", "t", "assignment"))]
+```
+
+The same holds for `if c { t = 1 }; t = t + 1` with `c` false. A call of the function that the local holds (`h(1)` before
 `h = (x) => x`) and the collection of a `for` loop (`for i in t { … }`
 before `t = [1, 2]`) use the local too, and give the same error; the loop
 then runs no iteration, and the error is its value. A closure that reads
@@ -222,16 +238,20 @@ the value that the first one assigned.
 
 `epsil check` reports the read before the program runs when the order is
 certain from the source: the read is in a statement before every statement
-that assigns the local, or in the value of the first assignment. It reports
+that assigns the local, or it runs before the first assignment in the
+statement that holds it (in the value of the assignment, in the condition
+of an `if` or in a branch before the assignment of that branch, in the body
+of a loop before the assignment of the first iteration). It reports
 a read of a `let` local before its `let` in the same way. The run then does
 not report the same read a second time. A read that
 comes before the first assignment only on some paths (after an `if` that
 assigns the local in one branch) is reported when it happens, by the run.
 
 A block outside every function — a `do` block, an `if` or a loop body at the
-top level of a program — owns the names it assigns too, but there a read
-before the first assignment stays the bare symbol, as a read of an
-undeclared name at the top level does.
+top level of a program — owns the names that its own statements assign, but
+not the names that its nested blocks assign: each nested block owns its
+own. There, a read before the first assignment stays the bare symbol, as a
+read of an undeclared name at the top level does.
 
 An assignment to a name that an enclosing scope declares when the function
 is defined — a top-level `let` or assignment written before the function, a

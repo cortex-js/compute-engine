@@ -244,14 +244,22 @@ function serializeNormOrder(
  * If expression is a product, collect all the terms with a
  * negative exponents in the denominator, and all the terms
  * with a positive exponent (or no exponent) in the numerator.
+ *
+ * A number to a negative integer power other than -1 (`10^{-30}`) goes in
+ * neither: it is returned in the third list, and is written as a factor
+ * after the fraction. In a `\frac`, the parser computes it with the other
+ * exact numbers: `\frac{3}{10^{30}}` and `\frac{3\times10^{-30}}{7}` parse
+ * back as rationals, not as products with the power `10^{-30}`. A power
+ * alone is written as a power for the same reason (`serializePower()`).
  */
 function numeratorDenominator(
   expr: MathJsonExpression,
   serializer?: Serializer
-): [MathJsonExpression[], MathJsonExpression[]] {
-  if (operator(expr) !== 'Multiply') return [[], []];
+): [MathJsonExpression[], MathJsonExpression[], MathJsonExpression[]] {
+  if (operator(expr) !== 'Multiply') return [[], [], []];
   const numerator: MathJsonExpression[] = [];
   const denominator: MathJsonExpression[] = [];
+  const powers: MathJsonExpression[] = [];
   for (const arg of operands(expr)) {
     // A negative integer power of a base that can be a matrix stays a
     // factor of the numerator (see `keepsMatrixPower()`)
@@ -269,6 +277,12 @@ function numeratorDenominator(
         const exponentVal = machineValue(op2) ?? NaN;
         if (exponentVal === -1) {
           if (op1) denominator.push(op1);
+        } else if (
+          exponentVal < 0 &&
+          Number.isInteger(exponentVal) &&
+          isNumberExpression(op1)
+        ) {
+          powers.push(arg);
         } else if (exponentVal < 0) {
           if (op1) denominator.push(['Power', op1, -exponentVal]);
         } else {
@@ -291,7 +305,7 @@ function numeratorDenominator(
       } else numerator.push(arg);
     }
   }
-  return [numerator, denominator];
+  return [numerator, denominator, powers];
 }
 
 /**
@@ -1182,6 +1196,33 @@ function foldMultiplyChain(
  */
 const BODY_ABSORBING_OPERATORS = new Set(['Sum', 'Product', 'Limit']);
 
+/**
+ * Serialize `power`, a number raised to a power, as a factor of a product
+ * after the text `before`.
+ *
+ * After a text that ends with a digit, a power of ten with a negative
+ * exponent is written in parentheses: `3\times10^{-30}` is read as the
+ * decimal number `3e-30` (scientific notation), which is not exact, while
+ * `3\times(10^{-30})` is the product of `3` and the power `10^{-30}`.
+ */
+function serializeNumberPowerFactor(
+  serializer: Serializer,
+  before: string,
+  power: MathJsonExpression
+): string {
+  const term = serializer.serialize(power);
+  if (
+    /\d$/.test(before) &&
+    /^(10|\{10\})\^/.test(term) &&
+    (machineValue(operand(power, 2)) ?? 0) < 0
+  )
+    return serializer.wrapString(
+      term,
+      serializer.options.groupStyle(power, serializer.level + 1)
+    );
+  return term;
+}
+
 function serializeMultiply(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -1215,7 +1256,8 @@ function serializeMultiply(
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
   if (serializer.options.prettify === true && !isContinuationProduct) {
-    const [numer, denom] = numeratorDenominator(expr, serializer);
+    const [numer, denom, powers] = numeratorDenominator(expr, serializer);
+    if (denom.length === 1 && denom[0] === 1) numer.push(...powers);
     if (denom.length > 0) {
       if (denom.length === 1 && denom[0] === 1) {
         if (numer.length === 0) result = '1';
@@ -1233,6 +1275,14 @@ function serializeMultiply(
               : ['Multiply', ...numer],
           denom.length === 1 ? denom[0] : ['Multiply', ...denom],
         ]);
+        // The powers of numbers are factors after the fraction
+        // (`\frac{3}{7}\times10^{-30}`), not in it
+        for (const power of powers)
+          result = latexTemplate(
+            serializer.options.multiply,
+            result,
+            serializeNumberPowerFactor(serializer, result, power)
+          );
       }
     }
   }
@@ -1315,7 +1365,7 @@ function serializeMultiply(
     ) {
       // It's a power and the base is a number...
       // add a multiply...
-      term = serializer.serialize(arg);
+      term = serializeNumberPowerFactor(serializer, result, arg);
       if (!result) result = term;
       else result = latexTemplate(serializer.options.multiply, result, term);
 

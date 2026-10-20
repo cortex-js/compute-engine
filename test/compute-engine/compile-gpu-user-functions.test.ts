@@ -160,6 +160,10 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
     const ce = new ComputeEngine();
     ce.declare('n', '(integer) -> integer');
     ce.assign('n', ce.parse('m \\mapsto m + 1'));
+    // `u` is declared an integer: a shader has no run-time test of the
+    // declared parameter type, so a call whose argument may not be an
+    // integer fails closed.
+    ce.declare('u', 'integer');
     const r = glsl.compile(ce.expr(['n', 'u']));
     expect(r.preamble).toContain('float _fn_n(float m)');
     expect(r.preamble).not.toContain('int ');
@@ -433,6 +437,9 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
         "'(n: integer) -> number'",
       ])
     );
+    // An argument declared an integer, so that the call is not refused for
+    // its declared parameter type first.
+    ce.declare('u', 'integer');
     for (const target of [glsl, wgsl]) {
       expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
         /^Could not compile `R`: a recursive \(or mutually recursive\) user-defined function/

@@ -2191,11 +2191,16 @@ export interface IComputeEngine {
    * parameters (a fold's accumulator): the auto-declaration binds such a
    * parameter with that type as an inferred type, which a use may widen and
    * which is not enforced at apply time.
+   * Optional `boundary` is the scope that encloses the construct that
+   * declares the names (`_shadowedParameterBoundary`). By default it is the
+   * current lexical scope, which is correct when the frame is pushed before
+   * the construct's own scope is entered.
    * @internal */
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
     types?: ReadonlyMap<string, Type>,
-    inferredTypes?: ReadonlyMap<string, Type>
+    inferredTypes?: ReadonlyMap<string, Type>,
+    boundary?: Scope
   ): void;
   /** The inferred type a caller supplied for an active bare shadowed
    * parameter, if any. @internal */

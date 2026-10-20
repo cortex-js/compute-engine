@@ -47,3 +47,49 @@ describe('A PROGRAM READ AS ONE BLOCK: NAMES DECLARED LATER', () => {
     expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
   });
 });
+
+//
+// A `let` of a library constant name (`i`, `e`, `Pi`, …) that a later
+// statement of the top-level block declares is not hoisted: the block
+// declares the name, and makes it shadow the constant, when it reaches that
+// statement. A function defined before it reads the constant, as on the
+// `executeEpsil()` route. The `let` of another name is hoisted as before.
+//
+
+describe('A PROGRAM READ AS ONE BLOCK: A LIBRARY CONSTANT DECLARED LATER', () => {
+  test('a function defined before the `let` reads the constant', () => {
+    const source = 'function g() { i^2 }\nlet i = 2\n[g(), i^2]';
+    const value = ['List', -1, 4];
+    expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
+  });
+
+  test('a function defined after the `let` reads the local', () => {
+    const source = 'let i = 2\nfunction g() { i^2 }\n[g(), i^2]';
+    const value = ['List', 4, 4];
+    expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
+  });
+
+  test('a statement before the `let` reads the constant', () => {
+    const source = 'let a = i^2\nlet i = 2\n[a, i^2]';
+    const value = ['List', -1, 4];
+    expect(bothRoutes(source)).toEqual({ block: value, epsil: value });
+  });
+
+  test('a name that is not a constant is read from the later `let`', () => {
+    const source = 'function g() { t + 1 }\nlet t = 5\ng()';
+    expect(bothRoutes(source)).toEqual({ block: 6, epsil: 6 });
+  });
+
+  test('a host block of MathJSON', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box([
+        'Block',
+        ['Assign', 'h', ['Function', ['Power', 'i', 2]]],
+        ['Declare', 'i', 'integer', 2],
+        ['List', ['h'], ['Power', 'i', 2]],
+      ] as never)
+      .evaluate().json;
+    expect(value).toEqual(['List', -1, 4]);
+  });
+});

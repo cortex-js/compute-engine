@@ -115,9 +115,9 @@ The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
 and 26 other collection operators found these related defects. Each was measured
 on 2026-10-19:
 
-- DECIDED 2026-10-20 (implementation in progress): the printed value of a
-  lazy `Map` keeps a `Nothing` result, `[1, Nothing]`, so that every view
-  agrees. The case: a lazy `Map` whose callback returns `Nothing`.
+- DECIDED 2026-10-20 (implementation in progress): the printed value of a lazy
+  `Map` keeps a `Nothing` result, `[1, Nothing]`, so that every view agrees. The
+  case: a lazy `Map` whose callback returns `Nothing`.
   `Map(x ↦ If(x > 1, Nothing, x), [1, 2])` is typed `vector<integer^2>` and
   prints `[1]`, but its count is `2`, `.at(2)` is `Nothing`, `.each()` yields
   `[1, Nothing]` and `Length(…)` is `2`. Making the views agree first needs a
@@ -136,22 +136,21 @@ on 2026-10-19:
   slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
   new spelling for that type or a wider answer (`indexed_collection<any>`,
   `any`), which loses the information that the value is a tuple.
-- DECIDED 2026-10-20 (option A, implementation in progress): the access
-  marker of a declared numeric list that holds no element comes from the
-  declared type, so `First(E)` below evaluates to `NaN`.
-  With `E: list<integer> := []`, `First(E)` is typed `integer | nan` but
-  evaluates to `Missing`. Rule 5 of `docs/ERROR-MODEL.md` computes the marker
-  "from the element type of the access": the declared element type is `integer`
-  (marker `NaN`), the held value `[]` has element type `never` (marker
-  `Missing`), and `componentAt` reads the held value. Option A: take the marker
-  from the declared type, so `First(E)` evaluates to `NaN`. Option B: add
-  `missing` to the static type of every `First(xs)` over a numeric list
-  (`integer | nan | missing`).
-- DESIGN (user decision 2026-10-20: a design item, not a small fix): a
-  `missing` arm for an access over `any` or `unknown` elements.
-  `First(W)` with `W: list<any> := []` is typed `unknown`, but evaluates to
-  `Missing`. Making `withMarker` answer `any` for `any` and `missing | unknown`
-  for `unknown` broke 44 tests in 14 suites: two assert `unknown` directly
+- DECIDED 2026-10-20 (option A, implementation in progress): the access marker
+  of a declared numeric list that holds no element comes from the declared type,
+  so `First(E)` below evaluates to `NaN`. With `E: list<integer> := []`,
+  `First(E)` is typed `integer | nan` but evaluates to `Missing`. Rule 5 of
+  `docs/ERROR-MODEL.md` computes the marker "from the element type of the
+  access": the declared element type is `integer` (marker `NaN`), the held value
+  `[]` has element type `never` (marker `Missing`), and `componentAt` reads the
+  held value. Option A: take the marker from the declared type, so `First(E)`
+  evaluates to `NaN`. Option B: add `missing` to the static type of every
+  `First(xs)` over a numeric list (`integer | nan | missing`).
+- DESIGN (user decision 2026-10-20: a design item, not a small fix): a `missing`
+  arm for an access over `any` or `unknown` elements. `First(W)` with
+  `W: list<any> := []` is typed `unknown`, but evaluates to `Missing`. Making
+  `withMarker` answer `any` for `any` and `missing | unknown` for `unknown`
+  broke 44 tests in 14 suites: two assert `unknown` directly
   (`types.test.ts:2683` `At(anIndexed, 1)`, `missing-value.test.ts:195`
   `At(Missing, 1)`), and the `missing` arm then flows into use-driven inference,
   so Epsil reports `sol[1][1]` as a static error (`programs.test.ts`). The
@@ -293,42 +292,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 14) (OPEN, decided 2026-10-19)
-
-- **A name assigned in only one branch of an `if` in a function body.** In
-  `function g(c) { if c { t = 1 }; t }`, the `if` branch owns `t` (it is a local
-  of the branch block), so the `t` after the `if` is a free symbol: `g(true)`
-  and `g(false)` both give the symbol `t`. (A) Keep this. (B) The function body
-  owns every name that any of its branches assigns, as in Python: `g(true)`
-  gives `1`, and `g(false)` gives the `read-before-declaration` error. If
-  nothing is decided, (A) stays. Recommendation: (B), because the result of (A)
-  is almost always unexpected; it changes the scoping rule, so it needs a
-  decision. User decision 2026-10-19: (B).
-
-- **A read of a constant name (`i`, `e`, `Pi`) that a later top-level `let`
-  declares.** In `function g() { i + 1 }`, then `let i = 2`, then `g()`, the run
-  gives `1 + i` (the imaginary unit), while the compiled program and the program
-  evaluated as one `Block` give `3`, because the block declares `i` before it
-  canonicalizes `g`. Since the batch-14 change, an assignment in a function body
-  follows the order of the top-level statements; reads of these names do not.
-  (A) Keep the difference. (B) Make the shadowing of a library constant name by
-  a top-level declaration follow statement order in the program block too, so
-  every route gives `1 + i`. If nothing is decided, the routes keep giving
-  different values for this shape. Recommendation: (B), because it completes the
-  same rule for reads; it changes name resolution, so it needs a decision. User
-  decision 2026-10-19: (B).
-
-- **Compiled code and a declared function type.** With
-  `let g: (integer) -> integer`, then `function g(k) { k + 1 }` (or
-  `g = (k) => k + 1`), then `g(1.5)`, the run gives an `incompatible-type` error
-  and the compiled code gives `2.5`: the compiler does not check a declared
-  function type at a call. (A) The compiler refuses a call whose argument or
-  result can break a declared type that it cannot check, as it already does for
-  a declared result type that the body clearly breaks. (B) Accept the difference
-  and document that compiled code does not check declared function types. If
-  nothing is decided, the compiled code keeps answering where the run gives a
-  type error. Recommendation: (A). User decision 2026-10-19: (A).
-
 ### Questions found on 2026-10-19 (batch 15) (OPEN, decision)
 
 - **A `real` parameter and an infinite argument on the GLSL, WGSL, Python and
@@ -343,6 +306,19 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
+- `Range(1, t)` with `t` a function-body local that has no value drops the
+  `read-before-declaration` error: `function g() { for k in 1..t { t = 2 }; 0 }`
+  gives `0` in the interpreter, while compiled code throws
+  `read-before-declaration`.
+- A `map` or `filter` stage of a pipe whose lambda assigns a name is refused:
+  `function g() { (1..3) |> map((k) => do { t = k * 2; t }) }` fails with
+  "expected non-scope effects, got scope effects", because `Pipe` keeps its
+  stage raw and the lambda body has no record of its locals. The same program
+  with `let t`, or with the lambda stored in a local first, works.
+- A list of comprehensions that escaped their function displays as unevaluated
+  `Comprehension(…)` elements:
+  `function g() { let xs = [do { t = k * 2; t } for k in 1..3]; xs }` then
+  `[g(), g()]`.
 - A function value returned from a branch does not compile: `let a = mk(2)` then
   `a(1)` fails with "Unknown operator `a`".
 - An assignment to the index of a comprehension (not a `for` statement) is not
@@ -401,7 +377,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   literal, and admits it on a function name declared `(unknown) -> unknown`.
   `Length(e)` is valid at boxing and evaluates to "expected `collection`, got
   `error`". A decision is necessary for the overload: admit `e` as the single
-  signature does, or keep the refusal. User decision 2026-10-20: the overload admits `e`, as the single signature does.
+  signature does, or keep the refusal. User decision 2026-10-20: the overload
+  admits `e`, as the single signature does.
 - A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix).
   `.N()` runs `\sum_k f(k)` over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is
   `1.6449…`), but `evaluate()` tries no closed form and leaves it unevaluated,
@@ -410,7 +387,9 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   `evaluate()` gives `π²/6`; (B) it is an indefinite sum (Mathematica reads
   `Sum[f, k]` as an antidifference), and `.N()` should not give a number either;
   (C) keep today's split. Also, `\sum x^k` with no subscript is `Sum(x^k)` with
-  no indexing clause and evaluates to `x^k`; check whether that is intended. User decision 2026-10-20: (A), a sum with no bounds means `k = 1..∞` on every route.
+  no indexing clause and evaluates to `x^k`; check whether that is intended.
+  User decision 2026-10-20: (A), a sum with no bounds means `k = 1..∞` on every
+  route.
 - The parse route does not infer the type of a symbol in a juxtaposed product.
   `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
   `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
@@ -449,7 +428,9 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   with a style and a superscript does not read back either: `x_bold__a` is
   written `\mathbf{x^{a}}`, which reads back as `x__a_bold`. A decision is
   necessary: choose a spelling that reads back as the symbol (for example
-  `\operatorname{x^{a}}`), or say that these names are for display only. User decision 2026-10-20: write such a name in `\operatorname{}` (for example `\operatorname{x^{a}}`).
+  `\operatorname{x^{a}}`), or say that these names are for display only. User
+  decision 2026-10-20: write such a name in `\operatorname{}` (for example
+  `\operatorname{x^{a}}`).
 - The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
   and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
   `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A

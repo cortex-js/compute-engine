@@ -132,6 +132,16 @@ The constants `e` and `i` are not in this group. The engine never writes
 them by name in a result (it writes `ExponentialE` and a complex number), so
 `let e = 3` and `let i = 1` are correct at the top level.
 
+A top-level `let` of a constant name shadows the constant only from its
+statement on. A function defined before the `let` reads the constant:
+
+```epsil
+function g() { i^2 }
+let i = 2
+[g(), i^2]
+// ➔ [-1, 4]
+```
+
 Shadowing a name that an operator builds changes the operator too: `+` is
 `Add`, so a user `Add` is what `+` calls in its scope, and a definition such
 as `function Add(x, y) { x + y }` calls itself without end. Compiled code

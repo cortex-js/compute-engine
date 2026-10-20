@@ -463,16 +463,21 @@ describe('A CALLBACK OVER A CHAIN OF SYMBOLS', () => {
 describe('A CALLBACK THAT WRITES A LOCAL OF ITS BLOCK', () => {
   // An assignment in a `Block` to a name that no outer scope declares makes a
   // local of the block, with a new binding at each call of the body, so the
-  // write and the call of `h` have no effect outside the call. The same
-  // shape as `batch9-evaluation.test.ts`, "a Table of a block".
+  // write and the call of `h` have no effect outside the call. The block is
+  // the body of the function that `Table` applies, so it owns the `h` that
+  // its branch assigns: a cell where the branch did not run reads `h` before
+  // its first assignment, which is the `read-before-declaration` error. The
+  // same shape as `batch9-evaluation.test.ts`, "a Table of a block".
   const H = ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']];
   const BODY = ['Block', ['If', ['Equal', 'k', 2], H], ['h', 'k']];
 
   test('a local of the block is previewed', () => {
     const ce = new ComputeEngine();
     const value = ce.box(['Table', BODY, ['Tuple', 'k', 1, 3]]).evaluate();
-    expect(value.toString()).toBe('[h(1),4,h(3)]');
-    expect(value.toString()).toBe('[h(1),4,h(3)]');
+    const expected =
+      '[Error(ErrorCode("read-before-declaration", "h", "assignment")),4,Error(ErrorCode("read-before-declaration", "h", "assignment"))]';
+    expect(value.toString()).toBe(expected);
+    expect(value.toString()).toBe(expected);
     expect(ce.lookupDefinition('h')).toBeUndefined();
   });
 

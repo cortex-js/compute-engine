@@ -169,6 +169,25 @@ function serializeSubtract(
 }
 
 /**
+ * Is `x` a number literal raised to an exact negative integer other than -1
+ * (`10^{-30}`, `2^{-3}`)?
+ *
+ * In a product, such a factor is not moved to the denominator of a
+ * fraction: a denominator of exact numbers is computed when the LaTeX is
+ * parsed, so `3·10^{-30}` written `\frac{3}{10^{30}}` reads back as the
+ * rational `3/10^30`, not as the product of `3` and the power. This is the
+ * rule that keeps a lone `Power(10, -30)` written `10^{-30}` (the `Power`
+ * branch of `serializePrettyJsonFunction()`), applied to each factor.
+ */
+function isNumberToNegativePower(x: Expression): boolean {
+  if (!isFunction(x, 'Power') || x.nops !== 2 || !isNumber(x.op1)) return false;
+  const exp = x.op2;
+  if (!isNumber(exp) || !exp.isExact) return false;
+  const n = asSmallInteger(exp);
+  return n !== null && n < -1;
+}
+
+/**
  * Split the factors of a `Multiply` into a numerator and a denominator,
  * preserving the original operand order and any explicit `Delimiter` wrapper.
  *
@@ -182,6 +201,12 @@ function structuralNumeratorDenominator(
   ce: ComputeEngine,
   args: ReadonlyArray<Expression>
 ): [Expression, Expression] | null {
+  // A number literal to a negative integer power is not moved to a
+  // denominator (see `isNumberToNegativePower()`). Here it cannot be moved
+  // after the fraction either, since that would change the order of the
+  // factors: the product is not rewritten.
+  if (args.some(isNumberToNegativePower)) return null;
+
   const numerator: Expression[] = [];
   const denominator: Expression[] = [];
 
@@ -357,9 +382,18 @@ function serializePrettyJsonFunction(
       const nd = structuralNumeratorDenominator(ce, args);
       if (nd) return serializeJsonFunction(ce, 'Divide', nd, options, metadata);
     } else {
-      const result = new _Product(ce, args, {
-        canonical: false,
-      }).asRationalExpression();
+      // A number literal to a negative integer power is a factor after the
+      // fraction (see `isNumberToNegativePower()`): `3·10^{-30}` is not
+      // written `\frac{3}{10^{30}}`, and `(3/7)·10^{-30}` is
+      // `\frac{3}{7}\times10^{-30}`.
+      const kept = args.filter(isNumberToNegativePower);
+      const result = new _Product(
+        ce,
+        kept.length === 0
+          ? args
+          : args.filter((x) => !isNumberToNegativePower(x)),
+        { canonical: false }
+      ).asRationalExpression();
       // `canonicalDivide` strips a denominator of `1`, so a `Divide` here has
       // a real denominator — except when a guard in `canonicalDivide` left the
       // node inert (an invalid operand, for one). A `Divide(Multiply, 1)`
@@ -371,6 +405,14 @@ function serializePrettyJsonFunction(
           ? (result as Expression & FunctionInterface).ops
           : null;
       if (ops && !(isNumber(ops[1]) && ops[1].isSame(1))) {
+        if (kept.length > 0)
+          return serializeJsonFunction(
+            ce,
+            'Multiply',
+            [ce._fn('Divide', ops, { canonical: false }), ...kept],
+            options,
+            metadata
+          );
         return serializeJsonFunction(
           ce,
           result.operator,

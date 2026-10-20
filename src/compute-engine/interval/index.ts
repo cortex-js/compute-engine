@@ -27,6 +27,7 @@ import {
   getValue as _getValue,
   unwrap as _unwrap,
   unwrapOrPropagate as _unwrapOrPropagate,
+  checkedCall as _checkedCall,
 } from './util.js';
 import {
   integrate as _integrate,
@@ -163,6 +164,7 @@ export {
   getValue,
   unwrap,
   unwrapOrPropagate,
+  checkedCall,
 } from './util.js';
 
 // Arithmetic operations
@@ -318,6 +320,9 @@ export const IntervalArithmetic = {
   getValue: _getValue,
   unwrap: _unwrap,
   unwrapOrPropagate: _unwrapOrPropagate,
+  // The call of a user function whose declared parameter types are tested
+  // at run time (`checkedCall`, `util.ts`).
+  checkedCall: _checkedCall,
 
   // Arithmetic
   add: _add,

@@ -939,6 +939,13 @@ is `while true` with a `let` in the body, and it is reported as a
 for x in xs { x }
 ```
 
+The loop variable is a binding of the loop. An assignment to it in the body
+changes it for the rest of that iteration only: the next iteration binds it
+to the next element. Such an assignment does not write a variable outside
+the loop, so in a function body it is not the `scope` effect, and the name
+after the loop is not the loop variable. Compiled code does not compile such
+a loop; the interpreter runs it.
+
 The loop variable may be a **tuple pattern**, using the same grammar as
 [`let (a, b) = v`](/epsil/declarations/#destructuring-declarations) — bare
 names, `_` to skip a position, nested `(…)` patterns:

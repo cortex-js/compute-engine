@@ -466,3 +466,137 @@ export function liftJump<F extends (...args: never[]) => unknown>(fn: F): F {
   };
   return lifted as unknown as F;
 }
+
+/**
+ * The set of values that a declared parameter type admits, as the compiled
+ * call of a user function tests it (`checkedCall`): the integers when
+ * `integer` is true, between the bounds `lower` and `upper` when they are
+ * given. A bound is inclusive, unless `lowerOpen` or `upperOpen` excludes
+ * it (`real<0<..>` is `{ lower: 0, lowerOpen: true }`). Every such set holds
+ * finite values only.
+ */
+export type ParameterDomain = {
+  integer?: boolean;
+  lower?: number;
+  upper?: number;
+  lowerOpen?: boolean;
+  upperOpen?: boolean;
+};
+
+/**
+ * The argument `x` restricted to the values of `domain`, or `undefined`
+ * when `x` has none of them.
+ *
+ * A point interval is the value it holds: it is kept when the value is in
+ * the domain. A wider interval is clipped to the part the domain admits
+ * (`[0.5, 3.5]` at an integer parameter is `[1, 3]`), so the function is
+ * evaluated only where the interpreter gives a value (at an excluded bound,
+ * the clipped interval keeps the bound itself, as a closed interval must). An argument with no
+ * enclosure (`empty`, `entire`, a pole), an argument with a `NaN` bound, and
+ * a value that is not an interval are passed through unchanged: the
+ * interpreter admits a `NaN` at every numeric parameter.
+ *
+ * `partly` is true when the domain does not hold every value of `x`: the
+ * interval was clipped, or it is wider than a point at an integer
+ * parameter, which has no value between two integers.
+ */
+function parameterDomainValue(
+  x: unknown,
+  domain: ParameterDomain
+): { value: unknown; partly: boolean } | undefined {
+  let v: Interval | undefined;
+  if (typeof x === 'number') v = point(x);
+  else if (typeof x === 'object' && x !== null && !Array.isArray(x)) {
+    v =
+      'kind' in x
+        ? getValue(x as IntervalResult)
+        : typeof (x as Interval).lo === 'number' &&
+            typeof (x as Interval).hi === 'number'
+          ? (x as Interval)
+          : undefined;
+  }
+  if (v === undefined || Number.isNaN(v.lo) || Number.isNaN(v.hi))
+    return { value: x, partly: false };
+  // A point at an infinity is not a finite value. An infinite bound of a
+  // wider interval only says that the interval is unbounded.
+  if (v.lo === v.hi && !Number.isFinite(v.lo)) return undefined;
+  let lo = v.lo;
+  let hi = v.hi;
+  if (domain.lower !== undefined) lo = Math.max(lo, domain.lower);
+  if (domain.upper !== undefined) hi = Math.min(hi, domain.upper);
+  if (domain.integer === true) {
+    lo = Math.ceil(lo);
+    hi = Math.floor(hi);
+  }
+  if (!(lo <= hi)) return undefined;
+  // An excluded bound: an interval that reaches past it only AT the bound
+  // holds no admitted value. Otherwise the clipped interval keeps the bound
+  // as its endpoint, which still encloses every admitted value.
+  if (domain.lowerOpen === true && hi <= domain.lower!) return undefined;
+  if (domain.upperOpen === true && lo >= domain.upper!) return undefined;
+  const partly = domain.integer === true && lo < hi;
+  if (lo === v.lo && hi === v.hi) return { value: x, partly };
+  return { value: { lo, hi }, partly: true };
+}
+
+/**
+ * The result `r` of a call whose arguments the domains of the parameters
+ * did not hold whole (`checkedCall`): the function has a value on a part
+ * of the input box only, which a `partial` result says. An `interval`
+ * result, or a bare `{ lo, hi }` (the collection accessors answer one),
+ * becomes `partial`, and the clip side of a `partial` result becomes
+ * `'both'`: which end of the result the edge of the domain maps to is not
+ * known (see `propagatePartial`). A list result is changed element by
+ * element. Any other result (`empty`, `entire`, `singular`, a boolean
+ * answer, an absent element with `NaN` bounds) is returned as it is.
+ */
+function partialResult(r: unknown): unknown {
+  if (Array.isArray(r)) return r.map(partialResult);
+  if (typeof r !== 'object' || r === null) return r;
+  const x = r as Partial<Interval> & { kind?: string; value?: Interval };
+  const bound: Interval | undefined =
+    x.kind === undefined
+      ? typeof x.lo === 'number' && typeof x.hi === 'number'
+        ? (x as Interval)
+        : undefined
+      : x.kind === 'interval' || x.kind === 'partial'
+        ? x.value
+        : undefined;
+  if (bound === undefined) return r;
+  if (Number.isNaN(bound.lo) || Number.isNaN(bound.hi)) return r;
+  return { kind: 'partial', value: bound, domainClipped: 'both' };
+}
+
+/**
+ * The call `f(...args)` of a compiled user function whose parameters have
+ * declared types that the static types of the arguments do not prove.
+ *
+ * `domains[i]` lists the domains (`ParameterDomain`) of the declared types
+ * of parameter `i`, or is `null` when the parameter is not tested. Each
+ * tested argument is restricted to its domains before the call. When an
+ * argument has no value in a domain, the interpreter gives an
+ * `incompatible-type` error for the call, and the call is `empty`: the
+ * function has no value there. When a domain holds a part of an argument
+ * only, the function has a value on that part of the input box only, and
+ * the result is `partial` (`partialResult`).
+ */
+export function checkedCall(
+  f: (...args: unknown[]) => unknown,
+  domains: ReadonlyArray<ReadonlyArray<ParameterDomain> | null>,
+  ...args: unknown[]
+): unknown {
+  const passed = args.slice();
+  let partly = false;
+  for (let i = 0; i < passed.length; i++) {
+    const ds = domains[i];
+    if (ds === null || ds === undefined) continue;
+    for (const d of ds) {
+      const r = parameterDomainValue(passed[i], d);
+      if (r === undefined) return { kind: 'empty' };
+      passed[i] = r.value;
+      if (r.partly) partly = true;
+    }
+  }
+  const result = f(...passed);
+  return partly ? partialResult(result) : result;
+}

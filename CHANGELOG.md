@@ -272,6 +272,9 @@
 
 ### Bug Fixes
 
+- A `Table` whose term assigns a variable gives its list in a function body too:
+  `Apply(Function(Block(Table(Block(Assign(a, k), a), (k, 1, 3)))))` gave an
+  unevaluated `Tabulate(…)`, and gives `[1, 2, 3]`, as at the top level.
 - A closure created in a branch or a loop body of a function, whose own body
   assigns a name, is no longer refused with the `scope` effect error: its body
   keeps its own locals.

@@ -57,6 +57,18 @@ export function exitFunctionBody(): void {
 }
 
 /**
+ * True while the body of a function literal is canonicalized
+ * (`enterFunctionBody()`). A block canonicalized then is the body itself or
+ * a block nested in it. `canonicalBlock()` (`library/control-structures.ts`)
+ * then makes each name that an assignment in a nested block of a statement
+ * writes a local of the block, so that the body, which is canonicalized
+ * first, owns it.
+ */
+export function isInFunctionBody(): boolean {
+  return functionBodyDepth > 0;
+}
+
+/**
  * Record the assignment locals of the block scope `scope`, when the block is
  * canonicalized for the first time. The record also says whether the block
  * is canonicalized in the body of a function literal (`enterFunctionBody()`).
@@ -153,4 +165,26 @@ export function laterDeclarationLocalsOf(
   scope: object
 ): readonly string[] | undefined {
   return LATER_DECLARATION_LOCALS.get(scope);
+}
+
+/**
+ * Give the block scope `to` the records of the block scope `from`: its
+ * assignment locals, whether it is in a function body, and its locals of
+ * {@link recordLaterDeclarationLocals}. A record that `to` has already is
+ * kept.
+ *
+ * Call it when a block is rebuilt on a new scope without a new
+ * canonicalization: a closure re-rooted on the scopes it captures
+ * (`captureClosures()`, `function-utils.ts`). Without the record, a run of
+ * the rebuilt block does not give its assignment locals a new binding, and
+ * the effect inference counts a write to one as a write outside the
+ * function.
+ */
+export function copyAssignmentLocals(from: object, to: object): void {
+  const record = ASSIGNMENT_LOCALS.get(from);
+  if (record !== undefined && !ASSIGNMENT_LOCALS.has(to))
+    ASSIGNMENT_LOCALS.set(to, record);
+  const later = LATER_DECLARATION_LOCALS.get(from);
+  if (later !== undefined && !LATER_DECLARATION_LOCALS.has(to))
+    LATER_DECLARATION_LOCALS.set(to, later);
 }

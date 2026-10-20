@@ -730,9 +730,50 @@ describe('A NUMBER TO A NEGATIVE POWER', () => {
     expect(ce.box(['Power', 2, -1]).latex).toBe('\\frac{1}{2}');
   });
 
-  test('a product with a power of ten keeps the exact value', () => {
-    const expr = ce.box(['Multiply', 3, ['Power', 10, -30]]);
-    expect(expr.latex).toBe('\\frac{3}{10^{30}}');
-    expect(ce.parse(expr.latex).isEqual(expr)).toBe(true);
+  // In a product, the power is not moved to the denominator of a fraction:
+  // `\frac{3}{10^{30}}` parses back as the rational `3/10^30`, not as the
+  // product. A power of ten after a digit is in parentheses:
+  // `3\times10^{-30}` is the decimal number `3e-30`, which is not exact.
+  test.each<[MathJsonExpression, string]>([
+    [['Multiply', 3, ['Power', 10, -30]], '3\\times(10^{-30})'],
+    [['Multiply', -3, ['Power', 10, -30]], '-3\\times(10^{-30})'],
+    [['Negate', ['Multiply', 3, ['Power', 10, -30]]], '-3\\times(10^{-30})'],
+    [['Multiply', 3, ['Power', 10, -2]], '3\\times(10^{-2})'],
+    [['Multiply', 1.5, ['Power', 10, -30]], '1.5\\times(10^{-30})'],
+    [['Multiply', 3, ['Power', 2, -3]], '3\\times2^{-3}'],
+    [
+      ['Multiply', ['Rational', 3, 7], ['Power', 10, -30]],
+      '\\frac{3}{7}\\times10^{-30}',
+    ],
+    [
+      ['Multiply', ['Rational', -3, 7], ['Power', 10, -30]],
+      '-\\frac{3}{7}\\times10^{-30}',
+    ],
+    [['Multiply', 'x', ['Power', 10, -30]], 'x\\times10^{-30}'],
+    [['Multiply', 3, 'x', ['Power', 10, -30]], '3x\\times10^{-30}'],
+    [
+      ['Multiply', ['Rational', 3, 7], 'x', ['Power', 10, -30]],
+      '\\frac{3x}{7}\\times10^{-30}',
+    ],
+    [['Add', 1, ['Multiply', 3, ['Power', 10, -30]]], '1+3\\times(10^{-30})'],
+  ])('product %j', (json, expected) => {
+    const expr = ce.box(json);
+    expect(expr.latex).toBe(expected);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+
+  // A quotient of exact numbers is a rational: it is written as a fraction,
+  // which parses back as the same rational
+  test('a quotient by a power of ten is a rational', () => {
+    const expr = ce.box(['Divide', 3, ['Power', 10, 30]]);
+    expect(expr.json).toEqual(['Rational', 3, { num: '1e+30' }]);
+    expect(expr.latex).toBe('\\frac{3}{1\\cdot10^{30}}');
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+
+  test('the power is a factor after a fraction with a symbol', () => {
+    expect(
+      ce.box(['Multiply', ['Power', 'y', -1], ['Power', 10, -30]]).latex
+    ).toBe('\\frac{1}{y}\\times10^{-30}');
   });
 });

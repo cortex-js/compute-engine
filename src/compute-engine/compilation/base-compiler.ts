@@ -250,7 +250,11 @@ import {
 import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
 import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
-import { laterDeclarationLocalsOf } from '../assignment-locals.js';
+import {
+  assignmentLocalsOf,
+  isFunctionBodyBlock,
+  laterDeclarationLocalsOf,
+} from '../assignment-locals.js';
 import {
   EffectContractError,
   inferFunctionLiteralEffects,
@@ -2419,6 +2423,20 @@ function hasBroadcastableCoordinate(t: Type): boolean {
 type ReboundFunctionLocals = {
   rebound: Map<string, { literal?: Expression; decline?: string }>;
   writes: Map<Expression, Set<string>>;
+};
+
+/** See `BaseCompiler.checkedLocalReads`. */
+type CheckedLocalsFrame = {
+  /** The name of the marker object of each checked local. */
+  markers: ReadonlyMap<string, string>;
+  /** The spelling of each checked local. */
+  spelled: ReadonlyMap<string, string>;
+  /** The value definition of each checked local, when the scope of the
+   * body has one. A read is checked only when it reads this binding: a
+   * parameter or a local of another function with the same name is not. */
+  defs: ReadonlyMap<string, object>;
+  /** The reads that come after an assignment on every path. */
+  safe: ReadonlySet<Expression>;
 };
 
 export class BaseCompiler {
@@ -9869,9 +9887,20 @@ export class BaseCompiler {
       // the library constant still denotes π inside such a scope. That
       // symbol is read from the constants table, and a vars-object reference
       // the hook recorded is rolled back.
+      // A local of the compiled code with the same name hides the constant
+      // too, when the symbol was boxed before the local was declared: in
+      // `function g() { i + 1 }; let i = 2; g()`, the top-level block of the
+      // program declares `i` only at its `let` (`canonicalBlock()`,
+      // `library/control-structures.ts`), so the `i` of `g` is bound to the
+      // library constant, as when the run reads one statement at a time.
       else if (
         resolved !== target.constant?.(s) &&
-        BaseCompiler.libraryBoundConstantHidden(expr, s, target)
+        (BaseCompiler.libraryBoundConstantHidden(expr, s, target) ||
+          (target.constant?.(s) !== undefined &&
+            target.boundVars?.has(s) === true &&
+            target.varsKeys?.has(s) !== true &&
+            expr.valueDefinition !== undefined &&
+            !isShadowedSymbol(expr)))
       ) {
         resolved = target.constant!(s);
         if (!hadVarsRef) target.varsObjectRefs?.delete(s);
@@ -10029,7 +10058,11 @@ export class BaseCompiler {
         }
       }
       if (resolved !== undefined)
-        return BaseCompiler.liftWideReference(expr, resolved, target);
+        return BaseCompiler.liftWideReference(
+          expr,
+          BaseCompiler.checkedLocalRead(expr, s, resolved),
+          target
+        );
       // The target did not resolve the symbol (no `vars` mapping, constant, or
       // free-symbol plumbing). Before falling back to a bare reference — which
       // is a dangling identifier for a symbol the engine actually knows — fold
@@ -17459,8 +17492,15 @@ export class BaseCompiler {
       if ((definitionCount.get(s.ops[0].symbol) ?? 0) > 1) return false;
       return isFunction(s.ops[1], 'Function');
     };
-    const asDeclare = (s: Expression & FunctionInterface): Expression =>
-      s.engine._fn('Declare', [s.ops[0], s.engine.string('unknown'), s.ops[1]]);
+    const asDeclare = (
+      s: Expression & FunctionInterface,
+      type?: Expression
+    ): Expression =>
+      s.engine._fn('Declare', [
+        s.ops[0],
+        type ?? s.engine.string('unknown'),
+        s.ops[1],
+      ]);
 
     // HOISTED to the front, in their original relative order, rather than
     // rewritten in place. A `function` definition is visible to the WHOLE
@@ -17490,12 +17530,16 @@ export class BaseCompiler {
     // with the literal binds the name in the compiled code, so the two
     // statements are one binding. Kept, the `Declare` with no value was a
     // second binding of the name after the first one: the call `g(1)` did
-    // not resolve to the function (`Unknown operator \`g\``). The compiled
-    // code does not check the declared type, as for a function literal
-    // assigned to a declared name (`g = (k) => …`). A `Declare` with a value
-    // is kept: the interpreter refuses the definition of a name that holds
-    // a value, and the compilation fails too.
+    // not resolve to the function (`Unknown operator \`g\``). The declared
+    // type moves to the hoisted `Declare`, so the block keeps it as the
+    // declared type of the name (`statementListDeclaredVarTypes`), as for a
+    // function literal assigned to a declared name (`g = (k) => …`): a call
+    // of the local checks its arguments against the declared parameter
+    // types (`localParameterChecks`). A `Declare` with a value is kept: the
+    // interpreter refuses the definition of a name that holds a value, and
+    // the compilation fails too.
     const declaredBefore = new Set<number>();
+    const declaredTypes = new Map<string, Expression>();
     stmts.forEach((s, i) => {
       if (
         !isFunction(s, 'Declare') ||
@@ -17511,15 +17555,23 @@ export class BaseCompiler {
             rewritable(d, j) &&
             isSymbol((d as Expression & FunctionInterface).ops[0], name)
         )
-      )
+      ) {
         declaredBefore.add(i);
+        if (isString(s.ops[1])) declaredTypes.set(name, s.ops[1]);
+      }
     });
     const hoisted: Expression[] = [];
     const rest: Expression[] = [];
     stmts.forEach((s, i) => {
-      if (rewritable(s, i))
-        hoisted.push(asDeclare(s as Expression & FunctionInterface));
-      else if (!declaredBefore.has(i)) rest.push(s);
+      if (rewritable(s, i)) {
+        const d = s as Expression & FunctionInterface;
+        hoisted.push(
+          asDeclare(
+            d,
+            isSymbol(d.ops[0]) ? declaredTypes.get(d.ops[0].symbol) : undefined
+          )
+        );
+      } else if (!declaredBefore.has(i)) rest.push(s);
     });
     return [...hoisted, ...rest];
   }
@@ -17833,7 +17885,364 @@ export class BaseCompiler {
       );
     }
 
+    // A function body also owns the names that only an assignment in a
+    // nested block assigns (a branch of an `if`, a loop body, a `do`
+    // block): the canonicalization recorded them as assignment locals of
+    // the body (`nestedAssignmentNames()`, `library/control-structures.ts`).
+    // Declare each of them here, at the level of the body, so that the
+    // writes in the nested blocks and the reads after them use the same
+    // variable, and each call has its own. The names that a statement of
+    // this list assigns are done by the loop above.
+    const ce = node!.engine;
+    for (const name of assignmentLocalsOf(scope) ?? []) {
+      if (seen.has(name) || !scope.bindings.has(name)) continue;
+      if (
+        args.some(
+          (a) =>
+            (isFunction(a, 'Assign') || isFunction(a, 'Declare')) &&
+            isSymbol(a.ops[0]) &&
+            a.ops[0].symbol === name
+        )
+      )
+        continue;
+      if (
+        target.boundVars?.has(name) &&
+        laterDeclarationLocalsOf(scope)?.includes(name) !== true
+      )
+        continue;
+      seen.add(name);
+      implicit.push(
+        ce._fn(
+          'Declare',
+          [ce.symbol(name, { canonical: false }), ce.string('unknown')],
+          { canonical: false }
+        )
+      );
+    }
+
     return implicit.length === 0 ? args : [...implicit, ...args];
+  }
+
+  /**
+   * The frames of `checkedLocalReads`, innermost last, while the statements
+   * of their blocks are compiled.
+   */
+  private static _checkedLocals: CheckedLocalsFrame[] = [];
+
+  /**
+   * The locals of the function body `node` that a read can find with no
+   * value, so that the read must check it.
+   *
+   * In a function body, each call starts with no value for an assignment
+   * local (`declareAssignmentLocals()`, `function-utils.ts`), and the
+   * interpreter answers a read before its first assignment with the
+   * `read-before-declaration` error. Compiled code must not answer where the
+   * interpreter gives an error. So each read that the analysis below cannot
+   * prove to come after an assignment compiles with a check: the local
+   * starts with a marker object of its own, and the read throws when the
+   * local still holds the marker. In `function g(c) { if c { t = 1 }; t }`,
+   * the read after the `if` is checked. A read after a statement that
+   * assigns the local on every path (`t = 1`, an `if` that assigns in both
+   * branches) is not checked.
+   *
+   * The analysis follows the order of evaluation: a `Block` in order, both
+   * branches of an `If` (the local is assigned after the `If` when both
+   * assign it), the first operand of an `And` or an `Or`, the clauses of a
+   * `Loop` before its body. An assignment in any other construct (a loop
+   * body, which can run no time, a function literal, an operand of another
+   * operator) is not counted after it, and it does not prove a read in
+   * another operand of the same operator, whose order of evaluation is not
+   * known. A read in a function literal is checked unless the local is
+   * assigned when the literal is created. A read is compared by its
+   * binding: a read of another binding with the same name (a `let` of a
+   * nested block, a parameter of another function) is not checked
+   * (`checkedLocalRead`).
+   *
+   * The checks are written in the code of the function body only. While
+   * the definition of another function compiles (a module-level helper,
+   * `emitFunctionLiteralDefinition`), the frames are hidden
+   * (`hideCheckedLocals`): the marker objects are not visible there.
+   *
+   * Only the JavaScript and the interval JavaScript targets can write the
+   * check. On another target, a body with such a read is refused.
+   */
+  private static checkedLocalReads(
+    args: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>,
+    node: Expression | undefined,
+    target: CompileTarget<Expression>,
+    spellLocal: (name: string) => string
+  ): CheckedLocalsFrame | undefined {
+    const scope = node?.localScope;
+    if (scope === undefined || !isFunctionBodyBlock(scope)) return undefined;
+    const names = (assignmentLocalsOf(scope) ?? []).filter((name) =>
+      locals.includes(name)
+    );
+    if (names.length === 0) return undefined;
+    const markers = new Map<string, string>();
+    const spelled = new Map<string, string>();
+    const defs = new Map<string, object>();
+    const safe = new Set<Expression>();
+    // The reads that come before every assignment on one path at least. A
+    // symbol node can be shared by several places of the body: when one of
+    // them is not proved, the node is checked at all of them.
+    const unsafe = new Set<Expression>();
+    for (const name of names) {
+      const binding = scope.bindings.get(name);
+      const def =
+        binding !== undefined && 'value' in binding ? binding.value : undefined;
+      let unproved = false;
+      const isOurs = (e: Expression): boolean =>
+        isSymbol(e) &&
+        e.symbol === name &&
+        (def === undefined || e.valueDefinition === def);
+      // `shadowed`: in a block that declares its own `name` (a `let`), or in
+      // a function literal, where an assignment writes another binding.
+      // A node shared in several places (a dictionary that holds the same
+      // value under two keys) is walked once for each state.
+      const done = new Map<string, Map<Expression, boolean>>();
+      const walk = (
+        e: Expression,
+        assigned: boolean,
+        shadowed = false
+      ): boolean => {
+        const key = `${assigned}${shadowed}`;
+        let byNode = done.get(key);
+        if (byNode === undefined) done.set(key, (byNode = new Map()));
+        const known = byNode.get(e);
+        if (known !== undefined) return known;
+        const result = walkNode(e, assigned, shadowed);
+        byNode.set(e, result);
+        return result;
+      };
+      const walkNode = (
+        e: Expression,
+        assigned: boolean,
+        shadowed: boolean
+      ): boolean => {
+        if (isSymbol(e)) {
+          if (isOurs(e)) {
+            if (assigned) safe.add(e);
+            else {
+              unproved = true;
+              unsafe.add(e);
+            }
+          }
+          return assigned;
+        }
+        if (isDictionary(e)) {
+          let a = assigned;
+          for (const value of e.values) a = walk(value, a, shadowed);
+          return a;
+        }
+        if (!isFunction(e)) return assigned;
+        const ops = e.ops;
+        // A function literal, a block with a `let` of the name, or an
+        // operator whose index has the name: an assignment of the name in
+        // it writes another binding.
+        const inner =
+          shadowed ||
+          e.operator === 'Function' ||
+          e.localScope?.binderNames?.has(name) === true ||
+          (e.operator === 'Block' &&
+            ops.some(
+              (op) =>
+                (isFunction(op, 'Declare') ||
+                  isFunction(op, 'DefineFunction')) &&
+                isSymbol(op.ops[0], name)
+            ));
+        switch (e.operator) {
+          case 'Assign': {
+            const after =
+              ops[1] === undefined ? assigned : walk(ops[1], assigned, inner);
+            // The target of a canonical `Assign` is not bound: it is
+            // compared by name.
+            return !inner && isSymbol(ops[0], name) ? true : after;
+          }
+          case 'Declare': {
+            // The target is a name, not a read.
+            const value = BaseCompiler.declareValueOperand(ops);
+            return value === undefined
+              ? assigned
+              : walk(value, assigned, inner);
+          }
+          case 'Block': {
+            let a = assigned;
+            for (const op of ops) a = walk(op, a, inner);
+            return inner ? assigned : a;
+          }
+          case 'If': {
+            const c =
+              ops[0] === undefined ? assigned : walk(ops[0], assigned, inner);
+            const yes = ops[1] === undefined ? c : walk(ops[1], c, inner);
+            const no = ops[2] === undefined ? c : walk(ops[2], c, inner);
+            return yes && no;
+          }
+          case 'And':
+          case 'Or': {
+            const first =
+              ops[0] === undefined ? assigned : walk(ops[0], assigned, inner);
+            for (const op of ops.slice(1)) walk(op, first, inner);
+            return first;
+          }
+          case 'Loop': {
+            // The clauses (the collection of each `Element`) are evaluated
+            // before the body, which `Loop` stores first. The body can run
+            // no time: an assignment in it is not counted after the loop,
+            // and it does not prove a read in a clause.
+            let a = assigned;
+            for (const op of ops.slice(1)) a = walk(op, a, inner);
+            if (ops[0] !== undefined) walk(ops[0], a, inner);
+            return a;
+          }
+          default: {
+            // The operands may be evaluated in another order, or not at
+            // all: each one is analyzed with the state before the
+            // expression, so an assignment in one operand does not prove a
+            // read in another, and it is not counted after the expression.
+            for (const op of ops) walk(op, assigned, inner);
+            return assigned;
+          }
+        }
+      };
+      let assigned = false;
+      for (const arg of args) assigned = walk(arg, assigned);
+      if (!unproved) continue;
+      markers.set(name, BaseCompiler.tempVar(target));
+      spelled.set(name, spellLocal(name));
+      if (def !== undefined) defs.set(name, def);
+    }
+    if (markers.size === 0) return undefined;
+    for (const e of unsafe) safe.delete(e);
+    if (
+      target.language !== 'javascript' &&
+      target.language !== 'interval-javascript'
+    )
+      throw new Error(
+        `Could not compile \`Block\`: a statement can read the local ` +
+          `"${[...markers.keys()][0]}" of the function body when no ` +
+          `assignment gave it a value (after a branch that did not run). ` +
+          `The interpreter reports that read as \`read-before-declaration\`, ` +
+          `and target '${target.language ?? 'unknown'}' has no way to check it.`
+      );
+    return { markers, spelled, defs, safe };
+  }
+
+  /**
+   * The code of a read of the local `s`, which `resolved` spells: a check
+   * that the local has a value, when `checkedLocalReads` found that the read
+   * can come before every assignment of the local. Otherwise `resolved`.
+   */
+  private static checkedLocalRead(
+    expr: Expression,
+    s: string,
+    resolved: TargetSource
+  ): TargetSource {
+    const frames = BaseCompiler._checkedLocals;
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const frame = frames[i];
+      const marker = frame.markers.get(s);
+      if (marker === undefined) continue;
+      // A read of another binding with the same name: a parameter of a
+      // function whose definition compiles while this body compiles, or a
+      // `let` of a nested block.
+      const def = frame.defs.get(s);
+      if (
+        def !== undefined &&
+        (!isSymbol(expr) || expr.valueDefinition !== def)
+      )
+        continue;
+      if (frame.safe.has(expr) || resolved !== frame.spelled.get(s))
+        return resolved;
+      const message = JSON.stringify(
+        `read-before-declaration: "${s}" is read before its first assignment`
+      );
+      return `(${resolved} === ${marker} ? (() => { throw new Error(${message}); })() : ${resolved})`;
+    }
+    return resolved;
+  }
+
+  /**
+   * Hide the frames of `checkedLocalReads` and return them, so that the
+   * caller can restore them (`BaseCompiler._checkedLocals = saved`) when the
+   * compilation of code outside the body ends. Call it before compiling a
+   * definition that is not lexically nested in the body (a module-level
+   * helper): the marker objects of the body are not visible there, and a
+   * read of a name of the body there reads another binding.
+   */
+  private static hideCheckedLocals(): CheckedLocalsFrame[] {
+    const saved = BaseCompiler._checkedLocals;
+    BaseCompiler._checkedLocals = [];
+    return saved;
+  }
+
+  /**
+   * The locals of the statement list `args` that no statement of the list
+   * assigns or declares with a value, so that only an assignment in a
+   * nested block (a branch of an `if`, a loop body) gives them a value: a
+   * name that the canonicalization made a local of a function body because
+   * a nested block assigns it (`withImplicitLocalDeclares`), or a `let`
+   * with no value. Their shape is read from these nested assignments.
+   */
+  private static nestedOnlyLocals(
+    args: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>
+  ): ReadonlySet<string> {
+    return new Set(
+      locals.filter(
+        (name) =>
+          !args.some(
+            (a) =>
+              ((isFunction(a, 'Assign') && a.ops[1] !== undefined) ||
+                (isFunction(a, 'Declare') &&
+                  BaseCompiler.declareValueOperand(a.ops) !== undefined)) &&
+              isSymbol(a.ops[0]) &&
+              a.ops[0].symbol === name
+          )
+      )
+    );
+  }
+
+  /**
+   * The assignments in `expr`, in the order of the operands, whose target is
+   * a symbol in `names`. An assignment in a function literal is not
+   * included, nor an assignment in a nested block that declares the name
+   * (`let`) or in the body of an operator whose index has the name: these
+   * write another binding.
+   */
+  private static nestedAssignmentsTo(
+    expr: Expression,
+    names: ReadonlySet<string>
+  ): { assign: Expression; name: string; value: Expression }[] {
+    const result: { assign: Expression; name: string; value: Expression }[] =
+      [];
+    const walk = (e: Expression, hidden: ReadonlySet<string>): void => {
+      if (!isFunction(e) || e.operator === 'Function') return;
+      let inner = hidden;
+      const hide = (target: Expression | undefined) => {
+        if (isSymbol(target) && names.has(target.symbol))
+          inner = new Set([...inner, target.symbol]);
+      };
+      if (e.operator === 'Block') {
+        for (const s of e.ops)
+          if (isFunction(s, 'Declare') || isFunction(s, 'DefineFunction'))
+            hide(s.ops[0]);
+      } else
+        for (const clause of e.ops)
+          if (isFunction(clause, 'Element') || isFunction(clause, 'Limits'))
+            hide(clause.ops[0]);
+      if (
+        e.operator === 'Assign' &&
+        isSymbol(e.ops[0]) &&
+        e.ops[1] !== undefined &&
+        names.has(e.ops[0].symbol) &&
+        !inner.has(e.ops[0].symbol)
+      )
+        result.push({ assign: e, name: e.ops[0].symbol, value: e.ops[1] });
+      for (const op of e.ops) walk(op, inner);
+    };
+    walk(expr, new Set());
+    return result;
   }
 
   /**
@@ -18502,7 +18911,17 @@ export class BaseCompiler {
     const pushedEnforced =
       enforcedLocals !== undefined && enforcedLocals.size > 0;
     if (pushedEnforced) BaseCompiler._enforcedTargets.push(enforcedLocals!);
+    // The locals whose reads compile with a check (`checkedLocalReads`).
+    let checkedFrame: CheckedLocalsFrame | undefined;
+    // The statements of the block, for the proof of the type of a local by
+    // its assignments (`assignmentsProveType`).
+    const blockScope = node?.localScope;
+    if (blockScope !== undefined)
+      BaseCompiler._blockStatements.push({ scope: blockScope, args });
     try {
+      // The locals that only an assignment in a nested block gives a value
+      // (`nestedOnlyLocals`). Their shape is read from these assignments.
+      const nestedLocals = BaseCompiler.nestedOnlyLocals(args, locals);
       for (const arg of args) {
         // Complex-ness first, then width — the width of a complex value is
         // read THROUGH the complex frame (`aggregateComponentCount`).
@@ -18514,6 +18933,15 @@ export class BaseCompiler {
           if (arg.ops[1] !== undefined)
             noteVectorWidth(arg.ops[0].symbol, arg.ops[1]);
         }
+        if (nestedLocals.size > 0)
+          for (const {
+            assign,
+            name,
+            value,
+          } of BaseCompiler.nestedAssignmentsTo(arg, nestedLocals)) {
+            BaseCompiler.noteLocalComplex(assign, complexFrame);
+            noteVectorWidth(name, value);
+          }
       }
 
       // GPU type hints for block locals.
@@ -18600,6 +19028,15 @@ export class BaseCompiler {
           reboundLocals
         ),
       };
+      checkedFrame = BaseCompiler.checkedLocalReads(
+        args,
+        locals,
+        node,
+        target,
+        spellLocal
+      );
+      if (checkedFrame !== undefined)
+        BaseCompiler._checkedLocals.push(checkedFrame);
 
       if (target.language === 'javascript')
         recordBlockScalarLocals(args, localTarget);
@@ -18704,6 +19141,21 @@ export class BaseCompiler {
                       `has no statement form for a conditional with a ` +
                       `\`Return\` in a branch.`
                   );
+                // A local whose read is checked starts with its own marker
+                // of "no value" (`checkedLocalReads`). Only the JavaScript
+                // targets have such locals.
+                if (
+                  isFunction(arg, 'Declare') &&
+                  isSymbol(arg.ops[0]) &&
+                  BaseCompiler.declareValueOperand(arg.ops) === undefined
+                ) {
+                  const marker = checkedFrame?.markers.get(arg.ops[0].symbol);
+                  if (marker !== undefined)
+                    return [
+                      `const ${marker} = {}`,
+                      `let ${spellLocal(arg.ops[0].symbol)} = ${marker}`,
+                    ];
+                }
                 // For Declare, pass inferred type hint to the target hook
                 if (
                   isFunction(arg, 'Declare') &&
@@ -18924,6 +19376,8 @@ export class BaseCompiler {
       BaseCompiler._popLocalComplex();
       BaseCompiler._localVector.pop();
       if (pushedEnforced) BaseCompiler._enforcedTargets.pop();
+      if (checkedFrame !== undefined) BaseCompiler._checkedLocals.pop();
+      if (blockScope !== undefined) BaseCompiler._blockStatements.pop();
     }
   }
 
@@ -18959,6 +19413,31 @@ export class BaseCompiler {
 
     const body = args[0];
     const elements = args.slice(1);
+    // An assignment to the index in the body writes the binding of the loop
+    // for the rest of that iteration only: the interpreter gives the index
+    // the next element at the next iteration. The emitted loops cannot do
+    // that (a `const` index, or a counter that the assignment would move), so
+    // the interpreter evaluates such a loop.
+    const indexNames = new Set(
+      elements.flatMap((e) =>
+        isFunction(e, 'Element') && e.ops[0] !== undefined
+          ? isFunction(e.ops[0], 'Tuple')
+            ? tuplePatternNames(e.ops[0])
+            : isSymbol(e.ops[0])
+              ? [e.ops[0].symbol]
+              : []
+          : []
+      )
+    );
+    const assigned =
+      indexNames.size > 0
+        ? BaseCompiler.nestedAssignmentsTo(body, indexNames)[0]
+        : undefined;
+    if (assigned !== undefined)
+      throw new Error(
+        `Could not compile \`Loop\`: the body assigns the loop index \`${assigned.name}\`. ` +
+          `The interpreter evaluates it instead.`
+      );
     const lang = target.language ?? '';
     // The loop body is a statement list — an INERT region (§5.1(c)): nothing
     // binds at the list level (a body may run zero times), while each
@@ -22458,6 +22937,10 @@ export class BaseCompiler {
     }
     const savedComplex = BaseCompiler._localComplex;
     const savedVector = BaseCompiler._localVector;
+    // An isolated body is not lexically nested in the enclosing bodies, so
+    // the checks of their locals are not written in it either
+    // (`hideCheckedLocals`).
+    const savedChecked = isolate ? BaseCompiler.hideCheckedLocals() : undefined;
     if (isolate) {
       BaseCompiler._localComplex = [];
       BaseCompiler._localVector = [];
@@ -22474,6 +22957,8 @@ export class BaseCompiler {
     } finally {
       BaseCompiler._localVector = savedVector;
       BaseCompiler._localComplex = savedComplex;
+      if (savedChecked !== undefined)
+        BaseCompiler._checkedLocals = savedChecked;
       if (!isolate) {
         BaseCompiler._localVector.pop();
         BaseCompiler._localComplex.pop();
@@ -27653,6 +28138,34 @@ export class BaseCompiler {
         throw new Error(`Could not compile a call of \`${h}\`: ${mismatch}`);
     }
 
+    // An argument whose static type does not prove the declared type of its
+    // parameter is tested at run time where the target has a test
+    // (`declaredParameterCheck`): on JavaScript by the checking shim of the
+    // function (`checkingShimName`), on the interval target by
+    // `_IA.checkedCall`. Where the target has no test for a type that admits
+    // only some real numbers (`integer`, `real<0..>`, `rational`), the
+    // compilation fails: the interpreter gives an `incompatible-type` error
+    // for a value outside the type, and the compiled call would give a value.
+    const intervalChecks = args.map((a, i) => {
+      const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+      const check = BaseCompiler.declaredParameterCheck(declared, a, target);
+      if (check === 'refuse')
+        throw BaseCompiler.uncheckedParameterError(
+          h,
+          (literal === undefined
+            ? ''
+            : functionLiteralParameterName(literal.ops[i + 1])) || `#${i + 1}`,
+          declared!,
+          a,
+          target
+        );
+      return check === 'guard' &&
+        declared !== undefined &&
+        target.language === 'interval-javascript'
+        ? [declared]
+        : [];
+    });
+
     const specialized =
       literal === undefined
         ? undefined
@@ -27769,9 +28282,10 @@ export class BaseCompiler {
     // takes (the direct call, the broadcast dispatch over a list argument).
     // The invariant-prefix variant below has no shim (its extra parameters
     // are held values): a checked call takes the ordinary definition.
-    const checked = args.some((a, i) =>
-      BaseCompiler.parameterCheckNeeded(engine, h, a, i, target)
-    );
+    const checked =
+      args.some((a, i) =>
+        BaseCompiler.parameterCheckNeeded(engine, h, a, i, target)
+      ) || intervalChecks.some((t) => t.length > 0);
     if (
       prefixed !== undefined &&
       !checked &&
@@ -27835,6 +28349,8 @@ export class BaseCompiler {
       // the engine, so a `CancellationError` crossing a bundle boundary is
       // not an instance of the host's class (the `box.ts` convention).
       if (e instanceof Error && e.name === 'CancellationError') throw e;
+      // An inlined call does not test the declared parameter types.
+      if (checked) throw e;
       const inlined = BaseCompiler.tryInlineUserFunctionCall(
         engine,
         h,
@@ -27854,9 +28370,11 @@ export class BaseCompiler {
     const lowering = target.userFunctions?.lowering;
     if (lowering) return lowering.call({ id: h, name, args, target });
 
-    const callee = checked
-      ? (BaseCompiler.checkingShimName(engine, h, name, target) ?? name)
-      : name;
+    const callee = !checked
+      ? name
+      : target.language === 'interval-javascript'
+        ? BaseCompiler.intervalCheckingCallee(name, intervalChecks, target)
+        : (BaseCompiler.checkingShimName(engine, h, name, target) ?? name);
     return BaseCompiler.emitUserFunctionCall(
       callee,
       args,
@@ -27919,11 +28437,378 @@ export class BaseCompiler {
   ): boolean {
     const declared = BaseCompiler.checkedParameterType(engine, h, i, target);
     if (declared === undefined) return false;
-    const t = a.type.type;
-    if (BaseCompiler.provablyScalarArg(a)) return !isSubtype(t, declared);
+    return !BaseCompiler.argumentProvesParameterType(a, declared, target);
+  }
+
+  /**
+   * How a compiled call treats the declared type `declared` of a parameter
+   * whose argument is `a`:
+   *
+   * - `'none'`: no test. There is no declared type; the type is `number` or
+   *   a complex type (whose argument is coerced, `coerceToComplex`); the
+   *   static type of the argument proves it
+   *   (`argumentProvesParameterType`); or the target does not test it, as
+   *   before: a type that admits every real number (`real`, a union with a
+   *   non-numeric member) on a target other than JavaScript.
+   * - `'guard'`: the call tests the argument at run time. On JavaScript, a
+   *   type with a test (`jsClauseParamGuard`). On the interval target, an
+   *   integer type or a real type with bounds (`intervalParameterDomain`).
+   * - `'refuse'`: the compilation fails. The type admits only some real
+   *   numbers (an integer type, a bounded real type, `rational`), the
+   *   argument can be a real number outside of it, and the target has no
+   *   test for it. The interpreter gives an `incompatible-type` error for
+   *   such a value, and compiled code with no test would give a value.
+   */
+  private static declaredParameterCheck(
+    declared: Type | undefined,
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): 'none' | 'guard' | 'refuse' {
+    if (declared === undefined) return 'none';
+    if (declared === 'number' || isNonRealNumber(declared)) return 'none';
+    if (BaseCompiler.argumentProvesParameterType(a, declared, target))
+      return 'none';
+    const restrictsReals =
+      isSubtype(declared, 'real') && !isSubtype('real', declared);
+    if (target.language === 'javascript') {
+      const test = BaseCompiler.jsClauseParamGuard(declared, '_');
+      if (test === null) return 'none';
+      if (test !== undefined) return 'guard';
+    } else if (target.language === 'interval-javascript') {
+      if (BaseCompiler.intervalParameterDomain(declared) !== undefined)
+        return 'guard';
+    }
+    return restrictsReals ? 'refuse' : 'none';
+  }
+
+  /**
+   * The error of a call of `h` whose argument `a` can break the declared
+   * type `declared` of the parameter `param` (`declaredParameterCheck`
+   * answers `'refuse'`).
+   */
+  private static uncheckedParameterError(
+    h: string,
+    param: string,
+    declared: Type,
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): Error {
+    return new Error(
+      `Could not compile a call of \`${h}\`: the argument ` +
+        `\`${a.toString()}\` can have a value that is not of the type ` +
+        `\`${typeToString(declared)}\` declared for the parameter ` +
+        `\`${param}\`. The interpreter gives an \`incompatible-type\` error ` +
+        `for such a value, and target '${target.language ?? 'unknown'}' ` +
+        `has no run-time test for this type.`
+    );
+  }
+
+  /**
+   * The source of the `ParameterDomain` (`interval/util.ts`) of the
+   * declared parameter type `t` on the interval target, or `undefined` when
+   * the target has no test for `t`: an integer type, or a real type with
+   * bounds. A bound that the type excludes (`real<0<..>`) is marked as
+   * excluded, so a point interval at the bound is refused, as the
+   * interpreter refuses `g(0)` for `g: (real<0<..>) -> real`.
+   */
+  private static intervalParameterDomain(t: Type): string | undefined {
+    if (t === 'integer') return '{ integer: true }';
+    if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
+    if (t.type !== 'integer' && t.type !== 'real') return undefined;
+    const parts: string[] = [];
+    if (t.type === 'integer') parts.push('integer: true');
+    if (typeof t.lower === 'number' && Number.isFinite(t.lower)) {
+      parts.push(`lower: ${String(t.lower)}`);
+      if (t.lowerOpen === true) parts.push('lowerOpen: true');
+    }
+    if (typeof t.upper === 'number' && Number.isFinite(t.upper)) {
+      parts.push(`upper: ${String(t.upper)}`);
+      if (t.upperOpen === true) parts.push('upperOpen: true');
+    }
+    return `{ ${parts.join(', ')} }`;
+  }
+
+  /**
+   * Per argument of a call of the block-local function `h` (its literal
+   * `literal`), the declared parameter types that the call tests at run
+   * time (`declaredParameterCheck`).
+   *
+   * A parameter is declared by an annotation of the literal (`function g(k:
+   * integer) { … }`) and by a `Declare` statement of the name in an
+   * enclosing statement list (`let g: (integer) -> integer`, read from
+   * `CompileTarget.declaredVarTypes`). The interpreter checks the argument
+   * against both at each call: `g(1.5)` is an `incompatible-type` error.
+   *
+   * Throws when a number literal argument is not a value of a declared
+   * type (`g(1.5)`), and when the call would need a test that the target
+   * does not have.
+   */
+  private static localParameterChecks(
+    h: string,
+    literal: Expression & FunctionInterface,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): Type[][] {
+    const declaredSignature = target.declaredVarTypes?.[h];
+    return args.map((a, i) => {
+      const param = literal.ops[i + 1];
+      const declared = [
+        param === undefined ? undefined : functionLiteralParameterType(param),
+        BaseCompiler.signatureParamType(declaredSignature, i),
+      ].filter((t): t is Type => t !== undefined);
+      const name =
+        (param === undefined ? '' : functionLiteralParameterName(param)) ||
+        `#${i + 1}`;
+      const tested: Type[] = [];
+      for (const t of declared) {
+        // Only a number literal is refused here: the type of any other
+        // argument can rest on an inference from its use, and the run-time
+        // test below decides it.
+        if (isNumber(a) && !couldMatch(a.type.type, t))
+          throw new Error(
+            `Could not compile a call of \`${h}\`: the argument ` +
+              `\`${a.toString()}\` has the type ` +
+              `\`${typeToString(a.type.type)}\`, which does not match the ` +
+              `type \`${typeToString(t)}\` of the parameter \`${name}\`. ` +
+              `The interpreter gives an \`incompatible-type\` error for ` +
+              `this call.`
+          );
+        const check = BaseCompiler.declaredParameterCheck(t, a, target);
+        if (check === 'refuse')
+          throw BaseCompiler.uncheckedParameterError(h, name, t, a, target);
+        if (check === 'guard') tested.push(t);
+      }
+      return tested;
+    });
+  }
+
+  /**
+   * The callee that tests the arguments of a call of `callee` on the
+   * interval target before the call (`_IA.checkedCall`): `domains[i]` lists
+   * the declared types of parameter `i` that the call tests, empty for a
+   * parameter with no test. `callee` itself when no parameter is tested.
+   */
+  private static intervalCheckingCallee(
+    callee: string,
+    domains: ReadonlyArray<ReadonlyArray<Type>>,
+    target: CompileTarget<Expression>
+  ): string {
+    if (domains.every((d) => d.length === 0)) return callee;
+    const specs = domains.map((ds) =>
+      ds.length === 0
+        ? 'null'
+        : `[${ds.map((t) => BaseCompiler.intervalParameterDomain(t)!).join(', ')}]`
+    );
+    const rest = BaseCompiler.tempVar(target);
+    return (
+      `((...${rest}) => _IA.checkedCall(${callee}, ` +
+      `[${specs.join(', ')}], ...${rest}))`
+    );
+  }
+
+  /**
+   * The callee that tests the arguments of a call of the block-local
+   * function `callee` on the JavaScript target: `types[i]` lists the
+   * declared types of parameter `i` that the call tests. As the checking
+   * shim of an engine-level function (`checkingShimName`), the test reads
+   * the real projection of the argument, the function receives that
+   * projection, and the call answers `NaN` when a test fails: `NaN` is the
+   * value compiled code has where the interpreter answers an error. The
+   * shim is written at the call, since the value of a block local is read
+   * where the call runs. `callee` itself when no parameter is tested.
+   */
+  private static localCheckingCallee(
+    callee: string,
+    types: ReadonlyArray<ReadonlyArray<Type>>,
+    target: CompileTarget<Expression>
+  ): string {
+    if (types.every((t) => t.length === 0)) return callee;
+    const params = types.map(() => BaseCompiler.tempVar(target));
+    const tests: string[] = [];
+    const passed = params.map((p, i) => {
+      if (types[i].length === 0) return p;
+      const projected = `_SYS.creal(${p})`;
+      for (const t of types[i])
+        tests.push(BaseCompiler.jsClauseParamGuard(t, projected)!);
+      return projected;
+    });
+    return (
+      `((${params.join(', ')}) => (${tests.join(' && ')}) ? ` +
+      `${callee}(${passed.join(', ')}) : NaN)`
+    );
+  }
+
+  /**
+   * Whether the static type of the argument `a` proves that every value it
+   * gives at run time is in the declared parameter type `declared`. A list
+   * argument at a SCALAR parameter is read through its ELEMENT type, since
+   * the call maps over it and each element reaches the body; an element
+   * type that is not known is no proof.
+   *
+   * The static type is a proof only when it does not rest on a type that
+   * the engine inferred from a USE of a symbol
+   * (`staticTypeIsEvidence`). A symbol with no value takes the type of
+   * the first parameter it is passed to: in `h(x)` with `h` declared
+   * `(integer) -> integer`, the free `x` is typed `integer` because of this
+   * call, and `run({ x: 2.5 })` still hands the call `2.5`, where the
+   * interpreter, given `x = 2.5`, answers an `incompatible-type` error.
+   */
+  private static argumentProvesParameterType(
+    a: Expression,
+    declared: Type,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (!BaseCompiler.staticTypeIsEvidence(a, declared, target)) return false;
+    // An absent value is the business of the absent-argument check
+    // (`absentArgumentChecks`), which runs first.
+    const t = stripMissingFromType(a.type.type);
+    if (isSubtype(t, declared)) return true;
+    if (BaseCompiler.provablyScalarArg(a) || !isScalarType(declared))
+      return false;
     const element = collectionElementType(resolveTypeForCompilation(t));
-    if (element === undefined) return true;
-    return !isSubtype(element, declared);
+    if (element === undefined) return false;
+    return isSubtype(stripMissingFromType(element), declared);
+  }
+
+  /**
+   * Whether the static type of `a` is a fact about its run-time values, for
+   * a test against the parameter type `declared`: it does not rest on the
+   * type of a symbol that the engine inferred from the use of the symbol.
+   *
+   * - A symbol whose type is inferred (`inferredType`: a free input with no
+   *   declaration, a function parameter with no annotation, a block local
+   *   with no stated type) is no evidence. A block local whose `Declare`
+   *   states a type (`CompileTarget.declaredVarTypes`) is evidence: the
+   *   canonical form types it before its `Declare` runs, so its own
+   *   definition still reads as inferred. A block local with no stated type
+   *   is evidence when each value that the compiled code assigns to it is
+   *   evidence, and is in `declared` (`assignmentsProveType`): `let a = 3`
+   *   then `f(a)`.
+   * - A constant, a symbol with a declared type, and a function literal
+   *   (whose parameters it binds itself) are evidence.
+   * - An application is evidence when the result type that its operator
+   *   DECLARES is in `declared` (`Floor(x)` is an integer whatever `x`
+   *   is), or when each of its operands is evidence.
+   */
+  private static staticTypeIsEvidence(
+    a: Expression,
+    declared: Type,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (isSymbol(a)) {
+      if (a.isConstant) return true;
+      if (a.valueDefinition?.inferredType !== true) return true;
+      if (target.declaredVarTypes?.[a.symbol] !== undefined) return true;
+      return BaseCompiler.assignmentsProveType(a, declared, target);
+    }
+    // The parameters of a function literal operand (the predicate of
+    // `Filter`) are bound by it: their types are not the type of a value
+    // of `a`.
+    if (!isFunction(a)) return true;
+    if (a.operator === 'Function') return true;
+    const def = a.operatorDefinition;
+    if (def !== undefined && !def.inferredSignature) {
+      const result = functionResult(def.signature.type);
+      if (result !== undefined && isSubtype(result, declared)) return true;
+    }
+    return a.ops.every((op) =>
+      BaseCompiler.staticTypeIsEvidence(op, declared, target)
+    );
+  }
+
+  /**
+   * The statement list of each `Block` that is being compiled, with the
+   * scope of the block, innermost last (`assignmentsProveType`).
+   */
+  private static _blockStatements: {
+    scope: NonNullable<Expression['localScope']>;
+    args: ReadonlyArray<Expression>;
+  }[] = [];
+
+  /**
+   * The value definitions of the locals whose assignments
+   * `assignmentsProveType` reads now: a value that reads one of them again
+   * (`a = a + 1`, or `a = b` and `b = a`) is no proof.
+   */
+  private static _provingLocals = new Set<object>();
+
+  /**
+   * Whether the symbol `a` is a local of a block that is being compiled,
+   * and each value that the block assigns to it is in the type `declared`,
+   * with a static type that is evidence (`staticTypeIsEvidence`). Only the
+   * compiled code writes a block local, so these values are all the values
+   * that the local can hold: in `let a = 3; f(a)`, `a` is an integer.
+   *
+   * The assignments are read in all the statements of the block, at any
+   * depth (a branch, a loop body, a function literal). An assignment to a
+   * name of a nested scope with the same name is read too: it can only
+   * make the proof fail. A destructuring assignment of the name, and an
+   * assignment to a part of it, are no proof. A local with no assigned
+   * value is no proof: a read before its first assignment is checked in
+   * another way (`checkedLocalReads`).
+   */
+  private static assignmentsProveType(
+    a: Expression,
+    declared: Type,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (!isSymbol(a)) return false;
+    const def = a.valueDefinition;
+    if (def === undefined) return false;
+    const name = a.symbol;
+    const frames = BaseCompiler._blockStatements;
+    let frame: (typeof frames)[number] | undefined;
+    for (let i = frames.length - 1; i >= 0 && frame === undefined; i--) {
+      const binding = frames[i].scope.bindings.get(name);
+      if (binding !== undefined && 'value' in binding && binding.value === def)
+        frame = frames[i];
+    }
+    if (frame === undefined || BaseCompiler._provingLocals.has(def))
+      return false;
+    const values: Expression[] = [];
+    let unknown = false;
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): void => {
+      if (unknown || seen.has(e)) return;
+      seen.add(e);
+      if (isDictionary(e)) {
+        for (const value of e.values) visit(value);
+        return;
+      }
+      if (!isFunction(e)) return;
+      if (e.operator === 'Assign' || e.operator === 'Declare') {
+        const lhs = e.ops[0];
+        if (isSymbol(lhs, name)) {
+          const value =
+            e.operator === 'Assign'
+              ? e.ops[1]
+              : BaseCompiler.declareValueOperand(e.ops);
+          if (value === undefined) {
+            if (e.operator === 'Assign') unknown = true;
+          } else values.push(value);
+        } else if (
+          lhs !== undefined &&
+          !isSymbol(lhs) &&
+          (isFunction(lhs, 'Tuple')
+            ? tuplePatternNames(lhs).includes(name)
+            : lhs.has(name))
+        )
+          unknown = true;
+      }
+      for (const op of e.ops) visit(op);
+    };
+    for (const statement of frame.args) visit(statement);
+    if (unknown || values.length === 0) return false;
+    BaseCompiler._provingLocals.add(def);
+    try {
+      return values.every(
+        (v) =>
+          isSubtype(stripMissingFromType(v.type.type), declared) &&
+          BaseCompiler.staticTypeIsEvidence(v, declared, target)
+      );
+    } finally {
+      BaseCompiler._provingLocals.delete(def);
+    }
   }
 
   /**
@@ -28370,8 +29255,22 @@ export class BaseCompiler {
     //
     // A rebound local does not fold: the literal in the scope is one of its
     // values, not necessarily the one it holds at this call.
+    //
+    // A call that tests a declared parameter type at run time does not fold
+    // either: the fold applies the literal, which does not carry a type
+    // declared by a `Declare` statement, so `g(√2)` with `g` declared
+    // `(integer) -> integer` would fold to a value where the interpreter
+    // gives an error. An argument that cannot be of the declared type
+    // (`g(1.5)`) fails the compilation here.
+    const parameterChecks = BaseCompiler.localParameterChecks(
+      h,
+      literal,
+      args,
+      target
+    );
+    const checked = parameterChecks.some((t) => t.length > 0);
     const folded =
-      rebound === undefined
+      rebound === undefined && !checked
         ? BaseCompiler.tryConstantFold(
             literal.engine.function('Apply', [literal, ...args]),
             target,
@@ -28432,6 +29331,15 @@ export class BaseCompiler {
         );
     });
     const at = mapped.indexOf(true);
+    // The two calls written below without the ordinary call form (the map
+    // over a list of points, and the call written with the body of the
+    // function) do not test the declared parameter types.
+    if (checked && at >= 0)
+      throw new Error(
+        `Could not compile \`${h}\`: argument ${at + 1} is a list of points, ` +
+          `and the compiled call over it does not test the declared ` +
+          `parameter types at run time.`
+      );
     if (at >= 0) {
       const reason =
         `Could not compile \`${h}\`: argument ${at + 1} is a list of points ` +
@@ -28584,6 +29492,11 @@ export class BaseCompiler {
           `Could not compile \`${h}\`: a tuple argument at a parameter of ` +
           `the block-local function with no declared type is bound whole, ` +
           `and the compiled function maps over any array at run time`;
+        if (checked)
+          throw new Error(
+            `${reason}. The call is written with the body of the function, ` +
+              `which does not test the declared parameter types at run time.`
+          );
         // The value of a rebound local is known only at run time, so its
         // body cannot be written at the call.
         if (rebound !== undefined)
@@ -28658,8 +29571,16 @@ export class BaseCompiler {
       return pt !== undefined && isNonRealNumber(pt);
     });
 
+    // A declared parameter type that the static type of its argument does
+    // not prove is tested at run time (`localParameterChecks`), by a callee
+    // that tests the arguments and then calls the local.
+    const local = target.var(h) ?? h;
     return BaseCompiler.emitUserFunctionCall(
-      target.var(h) ?? h,
+      !checked
+        ? local
+        : target.language === 'interval-javascript'
+          ? BaseCompiler.intervalCheckingCallee(local, parameterChecks, target)
+          : BaseCompiler.localCheckingCallee(local, parameterChecks, target),
       args,
       target,
       coerceToComplex,
@@ -32802,6 +33723,9 @@ export class BaseCompiler {
       // promotion of the compile mode, also when the call site is the value
       // of a real ascription (see `withPromotionUnsuppressed`).
       const suppressed = BaseCompiler.liftPromotionSuppression();
+      // The definition is emitted at module level, outside the body that
+      // calls it (`hideCheckedLocals`).
+      const checkedLocals = BaseCompiler.hideCheckedLocals();
       try {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(literal, target, registry, h);
@@ -33125,6 +34049,7 @@ export class BaseCompiler {
       } finally {
         registry.compiling.delete(name);
         BaseCompiler.restorePromotionSuppression(suppressed);
+        BaseCompiler._checkedLocals = checkedLocals;
       }
     }
 
@@ -33783,6 +34708,8 @@ export class BaseCompiler {
     // The clause helpers are shared by every call site: they compile with the
     // promotion of the compile mode (see `withPromotionUnsuppressed`).
     const suppressed = BaseCompiler.liftPromotionSuppression();
+    // The helpers are emitted at module level (`hideCheckedLocals`).
+    const checkedLocals = BaseCompiler.hideCheckedLocals();
     try {
       // One helper per clause, in declaration order. `$` cannot appear in a
       // MathJSON symbol, so `_fn_f$c1` can never collide with the emitted
@@ -33880,6 +34807,7 @@ export class BaseCompiler {
     } finally {
       registry.compiling.delete(name);
       BaseCompiler.restorePromotionSuppression(suppressed);
+      BaseCompiler._checkedLocals = checkedLocals;
     }
     return name;
   }
@@ -34035,11 +34963,16 @@ export class BaseCompiler {
           // otherwise admit `Infinity`, which the type does not contain.
           base = `Number.isFinite(${a})`;
         else return undefined; // rational &c.: no faithful JS test
+        // A bound the type excludes (`real<0<..>`, x > 0) is a strict test.
         const parts = [base];
         if (typeof t.lower === 'number' && t.lower !== -Infinity)
-          parts.push(`${a} >= ${String(t.lower)}`);
+          parts.push(
+            `${a} ${t.lowerOpen === true ? '>' : '>='} ${String(t.lower)}`
+          );
         if (typeof t.upper === 'number' && t.upper !== Infinity)
-          parts.push(`${a} <= ${String(t.upper)}`);
+          parts.push(
+            `${a} ${t.upperOpen === true ? '<' : '<='} ${String(t.upper)}`
+          );
         return `(${parts.join(' && ')})`;
       }
       case 'union': {

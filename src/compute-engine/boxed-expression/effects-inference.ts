@@ -1737,6 +1737,21 @@ function withBlockLocals(block: Expression, ctx: WalkContext): WalkContext {
 }
 
 /**
+ * The context `ctx` with the index names of the scoped operator `expr` (a
+ * `Loop`, a `Sum`, a comprehension: the `binderNames` of its scope) added to
+ * its confinement frontier. Each such name is a binding of the scope of the
+ * operator, so a write to it in an operand does not leave the operator:
+ * `for k in [1, 2] { k = k * 10 }` writes the index, not a variable outside
+ * the function.
+ */
+function withBinderIndices(expr: Expression, ctx: WalkContext): WalkContext {
+  const names = expr.localScope?.binderNames;
+  if (names === undefined || names.size === 0) return ctx;
+  if ([...names].every((name) => ctx.declared.has(name))) return ctx;
+  return { declared: new Set([...ctx.declared, ...names]) };
+}
+
+/**
  * Infer the effect set of a `Function` literal from its body.
  *
  * The normative rules (`docs/EFFECTS-MODEL.md`, "Inference" and "Scope writes"):
@@ -2272,6 +2287,12 @@ class Walker {
     // Producing or storing a nested literal contributes ∅; its effects live on
     // its own arrow.
     if (head === 'Function') return;
+
+    // The index of a loop, of a comprehension or of a big operator is a
+    // binding of the scope of the operator (`binderNames`). An assignment to
+    // it in the body writes that binding, which does not outlive the
+    // operator, so the write is confined.
+    ctx = withBinderIndices(expr, ctx);
 
     // A sequence: `Block` is the only straight-line construct the confinement
     // analysis reasons about.

@@ -133,6 +133,7 @@ import {
 import { noteScopeDeclaration } from './scope-declaration-count.js';
 import {
   assignmentLocalsOf,
+  copyAssignmentLocals,
   enterFunctionBody,
   exitFunctionBody,
   isFunctionBodyBlock,
@@ -782,6 +783,18 @@ export function canonicalFunctionLiteralArguments(
     bodyOp = bodyOp.op1;
   }
 
+  // A body that was canonical before it became the body of this literal (a
+  // `Block` that the caller boxed first) was canonicalized outside every
+  // function body, so each of its nested blocks owns the names that it
+  // assigns. In a function body, the body owns them
+  // (`nestedAssignmentNames()`, `library/control-structures.ts`). When a
+  // nested block owns such a name, the body is boxed again from its MathJSON,
+  // and canonicalized below as a function body.
+  // The blocks of a body that was canonical are marked here
+  // (`markFunctionBodyBlocks()`), also when the body is kept.
+  if (bodyOp.isCanonical && markFunctionBodyBlocks(bodyOp))
+    bodyOp = ce.box(bodyOp.json, { form: 'raw' });
+
   // If the body is not scoped, we need to create a new scope
   // and add the parameters to it.
   // `["Function", ["Add", "_", 1], "_"]`
@@ -853,8 +866,8 @@ export function canonicalFunctionLiteralArguments(
     // A body that was canonical before it became the body of this literal
     // (a `Block` that the caller boxed first) was not canonicalized in a
     // function body, so its blocks recorded the rule of a block outside
-    // every function literal. They are in this body now.
-    if (bodyOp.isCanonical) markFunctionBodyBlocks(block);
+    // every function literal. They are in this body now: they were marked
+    // above (`markFunctionBodyBlocks()`), before the body was canonicalized.
     // Read the bindings the body's bare-parameter references auto-declared
     // (and shared) while the frame is still on the stack — the parameter
     // declarations below adopt them.
@@ -2421,22 +2434,39 @@ function createBlockLocals(
  * caller boxed first): without it, a read of an assignment local before its
  * first assignment stayed the bare symbol in that body, while the same
  * `Function` boxed in one step gave the `read-before-declaration` error.
+ *
+ * Returns true when a block nested in `body` (not `body` itself, and not a
+ * block in the body of a nested function literal) has assignment locals
+ * (`assignmentLocalsOf()`, `assignment-locals.ts`): in a function body, the
+ * body owns these names, so the caller canonicalizes the body again.
  */
-function markFunctionBodyBlocks(body: Expression): void {
+function markFunctionBodyBlocks(body: Expression): boolean {
+  // An expression can share a node in several places (a dictionary that
+  // holds the same value under two keys): each node is read once.
   const seen = new Set<Expression>();
-  const walk = (e: Expression): void => {
+  let nestedLocals = false;
+  const walk = (e: Expression, inLiteral: boolean): void => {
     if (seen.has(e)) return;
     seen.add(e);
     if (isDictionary(e)) {
-      for (const value of e.values) walk(value);
+      for (const value of e.values) walk(value, inLiteral);
       return;
     }
     if (!isFunction(e)) return;
-    if (e.operator === 'Block' && e.localScope !== undefined)
+    if (e.operator === 'Block' && e.localScope !== undefined) {
       markFunctionBodyBlock(e.localScope);
-    for (const op of e.ops) walk(op);
+      if (
+        !inLiteral &&
+        e !== body &&
+        (assignmentLocalsOf(e.localScope)?.length ?? 0) > 0
+      )
+        nestedLocals = true;
+    }
+    const literal = inLiteral || e.operator === 'Function';
+    for (const op of e.ops) walk(op, literal);
   };
-  walk(body);
+  walk(body, false);
+  return nestedLocals;
 }
 
 /**
@@ -3631,6 +3661,8 @@ function captureClosuresUncached(
         bindings: closureBindings,
       };
       FROZEN_CHAIN_SCOPES.add(closureScope);
+      // The rebuilt body keeps the assignment locals of the body.
+      copyAssignmentLocals(innerBlock.localScope, closureScope);
       // Rebuild the body's own ops against the NEW scope: a scoped `Block`
       // nested inside the body (an `If` branch, a loop body) keeps its
       // canonicalization-time parent chain otherwise, which reaches the stale
@@ -3689,6 +3721,7 @@ function captureClosuresUncached(
       parent: closureParent,
       bindings: new Map(expr.localScope.bindings),
     };
+    copyAssignmentLocals(expr.localScope, scope);
     return ce._fn(
       expr.operator!,
       expr.ops.map((op) => captureClosures(ce, op, scope, memo)),

@@ -4922,12 +4922,14 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
     ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
   ]);
-  /** …and the `Declare`+`Assign` sibling of the same body. */
-  const DECLARED_VEC2 = accumulate([
+  /** …and the `Declare`+`Assign` sibling of the same body. The function
+   * body owns a name that an assignment in its loop body writes, so the
+   * sibling declares `p` in the function body. */
+  const DECLARED_VEC2: MathJsonExpression = [
+    'Block',
     ['Declare', 'p'],
-    ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
-    ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
-  ]);
+    ...(IMPLICIT_VEC2 as MathJsonExpression[]).slice(1),
+  ] as MathJsonExpression;
 
   it('GLSL: a vector-valued loop-body local is declared `vec2`', () => {
     const glsl = new GLSLTarget();
@@ -4937,9 +4939,10 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     expect(r.preamble).toContain('p = vec2(t, 2.0 * t);');
     // The `float` default would disagree with that assignment.
     expect(r.preamble).not.toContain('float p;');
-    // …and the declaration is inside the loop, where the binding is.
-    expect(r.preamble!.indexOf('for (int k')).toBeLessThan(
-      r.preamble!.indexOf('vec2 p;')
+    // …and the declaration is in the function body, where the binding is:
+    // the function body owns a name that its loop body assigns.
+    expect(r.preamble!.indexOf('vec2 p;')).toBeLessThan(
+      r.preamble!.indexOf('for (int k')
     );
   });
 

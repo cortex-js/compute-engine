@@ -330,15 +330,21 @@ describe('a big operator does not keep a function assigned by its term', () => {
   });
 
   test('a Table of a block: each cell is a new call of the body', () => {
-    // `Table` applies a function literal to each index, and a local that an
-    // assignment makes in a block starts with no value in each new call
-    // (as `Table(Block(If(k = 2, a ≔ 5); a), (k, 1, 3))` gives `[a,5,a]`).
-    // Before, `h(1)` declared `h` in the global scope: the first evaluation
-    // gave `[h(1),4,6]` and the second `[2,4,6]`.
+    // `Table` applies a function literal to each index, so the block is a
+    // function body. A function body owns a name that an assignment in a
+    // nested branch writes, and each call starts with no value for it. So
+    // the call of `h` in a cell where the branch did not run reads `h`
+    // before its first assignment: the `read-before-declaration` error
+    // (`Table(Block(If(k = 2, a ≔ 5); a), (k, 1, 3))` gives the same error
+    // for `k = 1` and `k = 3`, and `5` for `k = 2`). Before, `h(1)` declared
+    // `h` in the global scope: the first evaluation gave `[h(1),4,6]` and
+    // the second `[2,4,6]`.
     const ce = new ComputeEngine();
     const e = ce.box(['Table', body, ['Tuple', 'k', 1, 3]] as never);
-    expect(e.evaluate().toString()).toBe('[h(1),4,h(3)]');
-    expect(e.evaluate().toString()).toBe('[h(1),4,h(3)]');
+    const expected =
+      '[Error(ErrorCode("read-before-declaration", "h", "assignment")),4,Error(ErrorCode("read-before-declaration", "h", "assignment"))]';
+    expect(e.evaluate().toString()).toBe(expected);
+    expect(e.evaluate().toString()).toBe(expected);
     expect(ce.lookupDefinition('h')).toBeUndefined();
   });
 });

@@ -222,15 +222,8 @@ function blockReadsBeforeAssignment(
       const writes = assigns(statement, name, false);
       const reads: Expression[] = [];
       if (!writes) collectReads(statement, def, conditional, reads);
-      else if (
-        kind === 'assignment' &&
-        isFunction(statement, 'Assign') &&
-        statement.ops[0] !== undefined &&
-        statement.ops[1] !== undefined &&
-        isTargetOf(statement.ops[0], name) &&
-        !assigns(statement.ops[1], name, false)
-      )
-        collectReads(statement.ops[1], def, conditional, reads);
+      else if (kind === 'assignment')
+        readsBeforeFirstWrite(statement, name, def, repeats, reads);
       if (reads.length > 0) {
         // The first use in the order of evaluation (the operands of the
         // canonical tree, in order), which is the use that gives the error
@@ -253,6 +246,96 @@ function blockReadsBeforeAssignment(
     }
   }
   return found;
+}
+
+/**
+ * Add to `out` the uses of the assignment local `def`, named `name`, that
+ * the statement `statement` makes before its first assignment of the local.
+ * `statement` assigns the local (`assigns()`), and no statement before it
+ * in its block does. `repeats` is true when the block of `statement` can
+ * run more than once with the same bindings.
+ *
+ * A function body owns the names that its nested blocks assign
+ * (`nestedAssignmentNames()`, `library/control-structures.ts`), so the
+ * first assignment can be in a branch of an `If`, in a loop body or in a
+ * `do` block. The analysis goes into these, in the order of evaluation:
+ *
+ * - `t = …`: the uses in the value come first (`t = t + 1`).
+ * - A `Block`: its statements, in order, as for the statements of the
+ *   enclosing block.
+ * - An `If`: the uses in the condition come first. When the block cannot
+ *   run more than once, a use in a branch comes before every assignment
+ *   too, when the branch runs: the branches are alternatives.
+ * - A `Loop` with at most one clause: the collection of the clause, then
+ *   the body, which can run more than once.
+ *
+ * Any other statement adds nothing: the order is not certain.
+ */
+function readsBeforeFirstWrite(
+  statement: Expression,
+  name: string,
+  def: object,
+  repeats: boolean,
+  out: Expression[]
+): void {
+  const s = isFunction(statement, 'Typed') ? statement.ops[0] : statement;
+  if (!isFunction(s)) return;
+  const conditional = !repeats;
+  const ops = s.ops;
+  switch (s.operator) {
+    case 'Assign':
+      if (
+        ops[0] !== undefined &&
+        ops[1] !== undefined &&
+        isTargetOf(ops[0], name) &&
+        !assigns(ops[1], name, false)
+      )
+        collectReads(ops[1], def, conditional, out);
+      return;
+    case 'Block':
+      for (const op of ops) {
+        if (assigns(op, name, false)) {
+          readsBeforeFirstWrite(op, name, def, repeats, out);
+          return;
+        }
+        collectReads(op, def, conditional, out);
+        if (
+          out.length > 0 ||
+          isFunction(op, 'Return') ||
+          isFunction(op, 'Break') ||
+          isFunction(op, 'Continue')
+        )
+          return;
+      }
+      return;
+    case 'If': {
+      const [condition, ...branches] = ops;
+      if (condition === undefined || assigns(condition, name, false)) return;
+      collectReads(condition, def, conditional, out);
+      if (out.length > 0 || repeats) return;
+      for (const branch of branches) {
+        if (assigns(branch, name, false))
+          readsBeforeFirstWrite(branch, name, def, repeats, out);
+        else collectReads(branch, def, true, out);
+      }
+      return;
+    }
+    case 'Loop': {
+      const [body, ...clauses] = ops;
+      if (body === undefined || clauses.length > 1) return;
+      const domain = isFunction(clauses[0], 'Element')
+        ? clauses[0].ops[1]
+        : undefined;
+      if (domain !== undefined) {
+        if (assigns(domain, name, false)) return;
+        collectReads(domain, def, conditional, out);
+        if (out.length > 0) return;
+      }
+      if (assigns(body, name, false))
+        readsBeforeFirstWrite(body, name, def, true, out);
+      return;
+    }
+  }
 }
 
 /**

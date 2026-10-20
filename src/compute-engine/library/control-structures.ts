@@ -8,6 +8,7 @@ import {
   resolveEscapingLambda,
 } from '../function-utils.js';
 import {
+  isInFunctionBody,
   recordAssignmentLocals,
   recordLaterDeclarationLocals,
 } from '../assignment-locals.js';
@@ -56,7 +57,8 @@ import {
 } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
+import type { FunctionSignature, Type } from '../../common/type/types.js';
+import { paramAt } from '../../common/type/instantiate.js';
 import {
   CancellationError,
   run,
@@ -93,7 +95,7 @@ import {
   isString,
   sym,
 } from '../boxed-expression/type-guards.js';
-import { isValueDef } from '../boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
@@ -3179,6 +3181,22 @@ function canonicalBlock(
     const at = firstIndex?.get(name);
     if (at !== undefined) firstDeclaration.set(name, at);
   };
+  // In the top-level block of a program, the `let` or `const` names of a
+  // library constant (`i`, `e`, `Pi`, …) that a statement after the first
+  // one declares. The block declares such a name, and makes it shadow the
+  // constant, only when it reaches that statement. So a statement before
+  // it, such as `function g() { i + 1 }`, reads the constant, as
+  // `executeEpsil()` does when it canonicalizes one statement at a time.
+  // The other names are declared before the first statement (see the hoist
+  // below), so a function reads a name that a later `let` declares.
+  const deferred = new Set(
+    firstIndex === undefined
+      ? []
+      : hoistedNames.filter(
+          (name) =>
+            (firstIndex.get(name) ?? 0) > 0 && isLibraryConstant(ce, name)
+        )
+  );
 
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
   // the statements. `Declare`/`Assign` only register their symbol at
@@ -3204,19 +3222,24 @@ function canonicalBlock(
   // runtime behavior is unchanged); it is what lets reads of the local later
   // in the block, and the compiler's operand type gates, see the type the
   // program declared.
+  const hoistDeclared = (scope: Scope, name: string): void => {
+    if (name === 'Nothing' || scope.bindings.has(name)) return;
+    const hoisted = ce._declareSymbolValue(
+      name,
+      { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
+      scope
+    );
+    // A block local, not a free symbol: see `_blockLocal`.
+    if (isValueDef(hoisted)) {
+      hoisted.value._blockLocal = true;
+      if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
+    }
+  };
   if (scope) {
     for (const name of hoistedNames) {
+      if (deferred.has(name)) continue;
       if (name !== 'Nothing' && !scope.bindings.has(name)) {
-        const hoisted = ce._declareSymbolValue(
-          name,
-          { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
-          scope
-        );
-        // A block local, not a free symbol: see `_blockLocal`.
-        if (isValueDef(hoisted)) {
-          hoisted.value._blockLocal = true;
-          if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
-        }
+        hoistDeclared(scope, name);
         noteHoisted(name);
       }
     }
@@ -3229,10 +3252,16 @@ function canonicalBlock(
     // taken, if a later statement of the top-level block of a program had
     // not declared it (`recordLaterDeclarationLocals`).
     const laterDeclarationLocals: string[] = [];
+    // In the body of a function literal, the block also owns the names that
+    // an assignment in a nested block of a statement writes (a branch of an
+    // `if`, a loop body, a `do` block), as in Python
+    // (`nestedAssignmentNames()`). The body is canonicalized before its
+    // nested blocks, so the nested blocks find these bindings in the scope
+    // chain and do not make locals of their own.
+    const ownsNestedAssignments = isInFunctionBody();
     for (const statement of ops) {
       const op = typedStatement(statement);
-      if (!isFunction(op, 'Assign')) continue;
-      const target = op.ops[0];
+      const target = isFunction(op, 'Assign') ? op.ops[0] : undefined;
       // A destructuring assignment `(x, y) := v` binds one local per pattern
       // leaf (nested patterns included, `_` positions bind nothing), on the
       // same rule as a plain symbol target: each leaf that is not visible in
@@ -3240,9 +3269,13 @@ function canonicalBlock(
       // hoisted, so a read of one on a route that never evaluates — a
       // compile — saw no binding at all, and the `Assign` canonical handler
       // had no binding to record the leaf's type on.
-      const names = isFunction(target, 'Tuple')
-        ? tuplePatternNames(target)
-        : [sym(target)];
+      const names =
+        target === undefined
+          ? []
+          : isFunction(target, 'Tuple')
+            ? tuplePatternNames(target)
+            : [sym(target)];
+      if (ownsNestedAssignments) names.push(...nestedAssignmentNames(ce, op));
       for (const name of names) {
         if (!name || name === 'Nothing') continue;
         if (scope.bindings.has(name) || isDeclaredInScopeChain(ce, name))
@@ -3326,7 +3359,14 @@ function canonicalBlock(
       else names.push(name);
     }
 
-  ce._pushShadowedParameters(hoistedNames);
+  // The scope that encloses the block: the boundary of the shadow of its
+  // names (`_shadowedParameterBoundary()`).
+  const boundary = ce.context.lexicalScope;
+  ce._pushShadowedParameters(
+    hoistedNames.filter((name) => !deferred.has(name))
+  );
+  // The number of frames pushed for the names in `deferred`.
+  let deferredFrames = 0;
   let statements: Expression[];
   try {
     // We canonicalize the statements in the local scope. A refused
@@ -3340,11 +3380,27 @@ function canonicalBlock(
         ops.map((op, i) => {
           if (later !== undefined)
             for (const name of declaredFirstAt.get(i) ?? []) later.delete(name);
+          // Declare the names in `deferred` that this statement declares
+          // first, and make them shadow the library constants from here on.
+          const declaredHere = [...deferred].filter(
+            (name) => firstIndex?.get(name) === i
+          );
+          if (declaredHere.length > 0) {
+            for (const name of declaredHere) hoistDeclared(scope!, name);
+            ce._pushShadowedParameters(
+              declaredHere,
+              undefined,
+              undefined,
+              boundary
+            );
+            deferredFrames += 1;
+          }
           return refused.get(op) ?? canonicalStatement(ce, op);
         })
       )
     );
   } finally {
+    for (; deferredFrames > 0; deferredFrames -= 1) ce._popShadowedParameters();
     ce._popShadowedParameters();
     if (later !== undefined) LATER_DECLARATIONS.delete(scope!);
   }
@@ -3364,6 +3420,158 @@ function canonicalBlock(
  */
 function typedStatement(op: Expression): Expression {
   return isFunction(op, 'Typed') ? op.op1 : op;
+}
+
+/**
+ * The names that an `Assign` in a nested block of the block statement `op`
+ * writes, at any depth: in a branch of an `if`, in a loop body, in a `do`
+ * block, or in the value of an assignment. `op` is not canonical. A part of
+ * `op` that is canonical is not read: it was canonicalized in its own
+ * scope, which decided then which binding each of its assignments writes.
+ *
+ * Some assignments write a binding that a nested construct makes, and not a
+ * name of the enclosing block. Their names are not included:
+ *
+ * - an assignment in the body of a function literal: that body owns its
+ *   names;
+ * - an assignment to a name that a `let` or `const` (a `Declare`) or a
+ *   `function` statement (a `DefineFunction`) of an enclosing nested block
+ *   declares: the assignment writes that block local;
+ * - an assignment to the index of a loop, of a comprehension or of a big
+ *   operator (the symbol of an `Element` or `Limits` clause) in its body:
+ *   the assignment writes the index;
+ * - an assignment in an operand that the operator applies as a function or
+ *   evaluates for each element after the statement has a value
+ *   (`deferredOperands()`): the term of a `Table`, the callback of a `Map`,
+ *   the term and the conditions of a comprehension. Such an operand is a
+ *   function body of its own, or it is evaluated when the collection is read,
+ *   which can be after the call of the function has returned.
+ *
+ * The term of a `Sum` or of a `Product`, and the body of a loop, are
+ * evaluated again at each index while the statement is evaluated, so the
+ * function body owns the names that they assign: the value of such a local
+ * is kept from one index to the next.
+ *
+ * Thus in `function g(c) { if c { t = 1 }; t }`, the body of `g` owns `t`,
+ * and a call of `g` with `c` false reads `t` before its first assignment.
+ */
+function nestedAssignmentNames(ce: ComputeEngine, op: Expression): string[] {
+  const result: string[] = [];
+  const walk = (e: Expression, bound: ReadonlySet<string>): void => {
+    if (!isFunction(e) || e.operator === 'Function') return;
+    // A part that is canonical already was canonicalized in its own scope,
+    // which decided then which binding each of its assignments writes
+    // (`lazyInexactElements()` in `library/core.ts` builds a function body
+    // around the canonical parts of a collection). That decision does not
+    // change.
+    if (e !== op && e.isCanonical) return;
+    let inner = bound;
+    const bind = (names: ReadonlyArray<string>): void => {
+      if (names.length === 0) return;
+      inner = new Set([...inner, ...names]);
+    };
+    if (e.operator === 'Block') {
+      for (const statement of e.ops) {
+        const s = typedStatement(statement);
+        if (isFunction(s, 'Declare') || isFunction(s, 'DefineFunction'))
+          bind(
+            isFunction(s.ops[0], 'Tuple')
+              ? tuplePatternNames(s.ops[0])
+              : [sym(s.ops[0])].filter((n) => n !== undefined)
+          );
+      }
+    } else {
+      for (const clause of e.ops)
+        if (
+          (isFunction(clause, 'Element') || isFunction(clause, 'Limits')) &&
+          clause.ops[0] !== undefined
+        )
+          bind(
+            isFunction(clause.ops[0], 'Tuple')
+              ? tuplePatternNames(clause.ops[0])
+              : [sym(clause.ops[0])].filter((n) => n !== undefined)
+          );
+    }
+    if (e !== op && e.operator === 'Assign' && e.ops[0] !== undefined) {
+      const target = e.ops[0];
+      const names = isFunction(target, 'Tuple')
+        ? tuplePatternNames(target)
+        : [sym(target)];
+      for (const name of names)
+        if (name !== undefined && name !== 'Nothing' && !inner.has(name))
+          result.push(name);
+    }
+    const deferred = deferredOperands(ce, e);
+    if (deferred === 'all') return;
+    e.ops.forEach((child, i) => {
+      if (!deferred.has(i)) walk(child, inner);
+    });
+  };
+  walk(op, new Set());
+  return result;
+}
+
+/**
+ * The positions of the operands of the expression `e`, not canonical, that
+ * its operator does not evaluate in the order of the statement that holds
+ * `e`, or `'all'` when this is true of every operand
+ * (`nestedAssignmentNames()`). The operator definition gives them:
+ *
+ * - an operand whose parameter type in the signature of the operator is a
+ *   function type (in one arm of an overloaded signature, at least): the
+ *   operator applies the operand, or makes a function literal of it, as
+ *   `Table` does with its term;
+ * - every operand of an operator that binds an index (a `scoped` operator)
+ *   and is a lazy collection, such as `Comprehension`: its term and its
+ *   conditions are evaluated when an element is read.
+ *
+ * An operator with no definition has no such operand.
+ */
+function deferredOperands(
+  ce: ComputeEngine,
+  e: Expression
+): ReadonlySet<number> | 'all' {
+  const def =
+    e.operator === undefined ? undefined : ce.lookupDefinition(e.operator);
+  if (!isOperatorDef(def)) return NO_DEFERRED_OPERANDS;
+  const operator = def.operator;
+  if (operator.scoped && operator.collection !== undefined) return 'all';
+  const signature = operator.signature?.type;
+  if (signature === undefined || typeof signature !== 'object')
+    return NO_DEFERRED_OPERANDS;
+  const arms: FunctionSignature[] =
+    signature.kind === 'signature'
+      ? [signature]
+      : signature.kind === 'intersection'
+        ? signature.types.filter(
+            (t): t is FunctionSignature =>
+              typeof t === 'object' && t.kind === 'signature'
+          )
+        : [];
+  let result: Set<number> | undefined;
+  const count = isFunction(e) ? e.nops : 0;
+  for (let i = 0; i < count; i++)
+    if (arms.some((arm) => isFunctionParameterType(paramAt(arm, i)))) {
+      result ??= new Set();
+      result.add(i);
+    }
+  return result ?? NO_DEFERRED_OPERANDS;
+}
+
+const NO_DEFERRED_OPERANDS: ReadonlySet<number> = new Set();
+
+/**
+ * True when the parameter type `t` is a function type, or a union with a
+ * function type arm (`Ordering` accepts a key function or a comparison
+ * function): the operand is a function, not a value of the statement.
+ */
+function isFunctionParameterType(t: Type | undefined): boolean {
+  if (t === undefined) return false;
+  if (t === 'function') return true;
+  if (typeof t !== 'object') return false;
+  if (t.kind === 'signature') return true;
+  if (t.kind === 'union') return t.types.some(isFunctionParameterType);
+  return false;
 }
 
 /**
@@ -3389,6 +3597,16 @@ function typedStatement(op: Expression): Expression {
  * `src/epsil/docs/declarations.md`.
  */
 const LATER_DECLARATIONS = new WeakMap<Scope, ReadonlySet<string>>();
+
+/**
+ * True when the standard library defines `name` as a constant (`i`, `e`,
+ * `Pi`, `ExponentialE`, …): the system scope, where the library is
+ * installed, binds it to a constant value definition.
+ */
+function isLibraryConstant(ce: ComputeEngine, name: string): boolean {
+  const def = ce.contextStack[0]?.lexicalScope.bindings.get(name);
+  return def !== undefined && isValueDef(def) && def.value.isConstant === true;
+}
 
 /**
  * True when `scope` is the scope of the top-level block of a program: a

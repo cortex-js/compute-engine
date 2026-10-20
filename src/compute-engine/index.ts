@@ -3194,14 +3194,15 @@ export class ComputeEngine implements IComputeEngine {
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
     types?: ReadonlyMap<string, Type>,
-    inferredTypes?: ReadonlyMap<string, Type>
+    inferredTypes?: ReadonlyMap<string, Type>,
+    boundary?: Scope
   ): void {
     this._shadowedParameterStack.push({
       names: new Set(names),
       types,
       inferredTypes,
       defs: new Map(),
-      boundary: this.context.lexicalScope,
+      boundary: boundary ?? this.context.lexicalScope,
     });
   }
 
