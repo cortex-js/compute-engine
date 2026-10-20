@@ -90,7 +90,10 @@ import {
 } from './type-guards.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
-import { logarithmAtExceptionalPoint } from './logarithm.js';
+import {
+  logarithmAtExceptionalPoint,
+  logOperandMayThread,
+} from './logarithm.js';
 
 /** Is the exact rational `r` equal to the double `re` under the engine's
  * DECIMAL reading of doubles? A double stands for the decimal number its
@@ -926,6 +929,11 @@ export class BoxedNumber
     // so on.
     const special = logarithmAtExceptionalPoint(ce, this, base);
     if (special !== undefined) return special;
+
+    // A base that could be a collection is threaded element-wise when the
+    // logarithm is evaluated, so none of the scalar reductions below apply.
+    if (base !== undefined && logOperandMayThread(base))
+      return ce._fn('Log', [this, base]);
 
     // A float argument or base makes the result a float, even when its value
     // is an integer (`\log_{10}(100.0)` is the float `2`): the exact

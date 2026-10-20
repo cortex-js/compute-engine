@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- Absence checks treat both numeric markers alike: `IsMissing(Indeterminate)`
+  is now `True`, and `Indeterminate ?? 5` returns `5`, as for `NaN`.
+  Exact arithmetic and reducers still produce `Indeterminate` where they did
+  before. `Nothing` passes through fallbacks and is not missing data.
+- `Coalesce(x, RuntimeError("absent"))` retains the successful type of `x`
+  instead of becoming `never`. Coalescing removes only whole-value absence:
+  a list's missing cells and a possible `Nothing` result remain in its type.
+  Compilation refuses absence tests that might confuse `Nothing` with missing
+  data until the target can represent that distinction.
+
 - LaTeX: an authored `\mathrm{Nothing}` (or `\operatorname{Nothing}`, also in
   braces or in `\smash{…}`) is an operand. Before, the parser skipped it, as it
   skips a presentational command, which lost the argument and broke the comma
@@ -30,6 +40,17 @@
   now `x`.
 
 ### Bug Fixes
+
+- **`Log(1, base)` threads over a list of bases** instead of folding to the
+  scalar `0`: `Log(1, [-10, e, 27])` was `0` and is now `[0, 0, 0]`, as
+  `Log(8, [2, 4])` is `[3, 3/2]`. The `Log(1, b) = 0` fold now applies only to
+  a base that cannot be a collection, so a symbol declared
+  `real | list<real>` is not folded either. A tuple base threads, as it
+  already did for `Log(8, (2, 3))`: `Log(1, (2, 3))` is `(0, 0)`. A set base
+  is an `incompatible-type` error, as it already was for `Log(8, Set(2, 3))`,
+  where it was the scalar `0` before
+  ([#455](https://github.com/cortex-js/compute-engine/issues/455), contributed
+  by [enumeratio](https://github.com/enumeratio)).
 
 - LaTeX: a chain of `\text` keyword operators such as
   `a \cdot b \text{and} a \cdot b \text{and} …` took time that grows

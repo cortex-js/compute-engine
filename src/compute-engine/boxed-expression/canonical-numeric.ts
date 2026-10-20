@@ -17,6 +17,7 @@ import { registerNumericCanonicalHandler } from './numeric-canonical-registry.js
 import { readJuxtaposition } from './invisible-operator.js';
 import { productMayHaveMatrix } from './matrix-operand.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { logOperandMayThread } from './logarithm.js';
 
 /**
  * The operators whose canonical form `canonicalNumericOperator` computes.
@@ -410,7 +411,7 @@ export function canonicalNumericOperator(
     // Not for a literal base of 1 or NaN: `Log(1, 1)` is the quotient
     // `0/0 = NaN` and `Log(1, NaN)` propagates the NaN — both are the
     // evaluate route's answers (`logarithmAtExceptionalPoint`). A
-    // SYMBOLIC base does fold: `Log(1, b) = 0` is the generic-point
+    // SYMBOLIC scalar base does fold: `Log(1, b) = 0` is the generic-point
     // convention, the same one that folds `1^x` to 1 without assuming
     // the exceptional exponent — the value `b` may later take is not
     // assumed to be 1.
@@ -421,12 +422,18 @@ export function canonicalNumericOperator(
     // and `Log(1, 2.0)` stay, and evaluate to the float `0`, as a float
     // operand gives a float result.
     const baseIsFloat = base !== undefined && isNumber(base) && !base.isExact;
+    // A base that could be a collection threads element-wise at evaluation,
+    // so the fold is withheld: `Log(1, [-10, e, 27])` is `[0, 0, 0]`, not
+    // the scalar `0`. This includes a union such as `real | list<real>`,
+    // since the base may hold a list when the expression is evaluated.
+    const baseIsCollection = base !== undefined && logOperandMayThread(base);
     if (
       isNumber(ops[0]) &&
       ops[0].isExact &&
       ops[0].isSame(1) &&
       !baseIsOneOrNaN &&
-      !baseIsFloat
+      !baseIsFloat &&
+      !baseIsCollection
     )
       return ce.Zero;
     // Ln(a) -> Ln(a), Log(a) -> Log(a)

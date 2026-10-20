@@ -1,6 +1,20 @@
 import type { Expression } from '../global-types.js';
 import { isNumber, isSymbol, indeterminateFormAnswer } from './type-guards.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
+import { typeCouldBeUnkeyedCollection } from '../collection-utils.js';
+
+/**
+ * Whether a logarithm operand could be a collection that the logarithm
+ * threads over element by element: a list, a range, a matrix, a tuple, a
+ * set, or a union with such an option (`real | list<real>`). The scalar
+ * shortcuts (`Log(1, b) = 0`, the exceptional points, the integer
+ * reductions) do not apply to such an operand: `Log(1, [2, 3])` is
+ * `[0, 0]`, not `0`. A symbol with no declared type (`unknown`) is not such
+ * an operand, so `Log(1, b)` keeps its generic-point value `0`.
+ */
+export function logOperandMayThread(x: Expression): boolean {
+  return typeCouldBeUnkeyedCollection(x.type.type);
+}
 
 /**
  * Where a logarithm operand sits among the exceptional points:
@@ -85,8 +99,10 @@ function lnBaseSign(base: Expression): 'positive' | 'negative' | 'complex' {
  *
  * `NaN` in either operand propagates. An operand with no known value has
  * no exceptional-point answer, with one generic-point exception: `Log(1, b)`
- * is 0 for a symbolic base — the same convention as `1^x = 1`, where the
- * exceptional base (`b = 1`, giving `0/0`) is not assumed.
+ * is 0 for a symbolic scalar base — the same convention as `1^x = 1`, where
+ * the exceptional base (`b = 1`, giving `0/0`) is not assumed. An operand
+ * that could be a collection has no answer here, because the logarithm
+ * threads over it element by element (`logOperandMayThread()`).
  *
  * Returns `undefined` when the ordinary logarithm applies (both operands
  * finite and away from 0 and 1). The answers are exact, so `evaluate()`
@@ -98,6 +114,13 @@ export function logarithmAtExceptionalPoint(
   x: Expression,
   base: Expression | undefined
 ): Expression | undefined {
+  // A collection operand threads element-wise; no scalar answer applies
+  // (`Log(1, [2, 3])` is `[0, 0]`, not `0`).
+  if (
+    logOperandMayThread(x) ||
+    (base !== undefined && logOperandMayThread(base))
+  )
+    return undefined;
   const natural = base === undefined || isSymbol(base, 'ExponentialE');
   // A float argument or base gives the float `0`, not the exact `0`:
   // `\ln(1.0)` is the float `0`, as `\ln(1.5)` is a float.
