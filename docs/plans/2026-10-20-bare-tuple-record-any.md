@@ -576,11 +576,30 @@ The boundary inventory is deliberately narrower than â€œall sequence operationsâ
 | Chained `Map` callback | Decided: bypass an input `Nothing`, retaining `Nothing` at that raw position |
 | `List` / `ListFrom` construction | Decided: omit immediate `Nothing` |
 | Data tuple / ordinary argument | Decided: retain the slot; parameter handling is separate |
-| Aggregating reducers | Decided: skip immediate `Nothing`; `Mean` counts participating results |
+| Aggregating reducers | Implemented for the numeric families listed below: skip immediate `Nothing`; `Mean` counts participating results |
 | Paired statistics (`Covariance`, `Correlation`) | Decided: skip the whole observation if any participating coordinate is `Nothing`; never compact inputs independently |
 | `Append`, `Insert`, `Join`, `Flatten` | Unclassified; specify boundaries and representation before implementation |
 | `SetFrom`, `TupleFrom`, `DictionaryFrom`, other structural conversions | Unclassified or dependent on the chosen representation and record policy |
 | `Sort`, `Ordering`, custom `Fold` / `Reduce` | Unclassified; raw retention alone does not select their handling |
+
+Implemented numeric-aggregate inventory:
+
+| Operators | Handling of a raw `Nothing` datum |
+| --- | --- |
+| `Sum`, `Product` | Skip it; no retained data gives the ordinary identities `0` and `1` |
+| `Min`, `Max`, `Infimum`, `Supremum` | Skip it while traversing their numeric data; all-omitted input uses their ordinary empty-input result |
+| `Mean`, `Median`, `Variance`, `PopulationVariance`, `StandardDeviation`, `PopulationStandardDeviation`, `Kurtosis`, `Skewness`, `Mode`, `Quartiles`, `InterquartileRange` | Skip immediate omitted data; all calculations and sample sizes use retained data; all-omitted input follows each operator's ordinary empty-input rule |
+
+These operations do not compact or change the source. A statistic does not
+silently remove an entire nested datum because it contains a marker: its
+existing rules for nested collections still apply. `Missing`, numeric absence,
+and errors retain their existing handling. `Product(collection)` is currently
+represented as a seeded `Multiply` reduction; this does not select a new policy
+for custom folds. Compilation refuses omission-capable sources until the target
+can preserve omission distinctly or safely implement it at the aggregate.
+`Histogram` and `BinCounts` are separate binning operations; their policies are
+not changed by this numeric-reducer slice. `Total` is not a registered operator
+in the current library; the sum operation is `Sum`.
 
 The inventory must be completed for affected operators before their
 implementation changes. If a custom fold always skips

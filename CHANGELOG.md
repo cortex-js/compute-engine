@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- Numeric aggregates skip `Nothing` yielded by raw lazy views. `Mean` of a
+  view exposing `1, Nothing, 3` now returns `2` instead of an incompatible-type
+  error; its denominator counts only retained data. The other univariate
+  statistics follow the same rule, and extrema such as `Min` now finish
+  evaluating after an omitted datum. All-omitted input follows each operator's
+  ordinary empty-input rule (`Sum` gives `0`, `Product` gives `1`). Source
+  counts and positions are unchanged; `Missing` still propagates normally.
+  Aggregate compilation refuses omission-capable source types, including
+  `collection<any>`, until targets can distinguish omission from missing data.
+
 - `Filter` drops immediate `Nothing` inputs without calling its predicate.
   Filtering a raw view yielding `1, Nothing, 3` with an always-true predicate
   now yields `1, 3`, rather than an incompatible-type error cell or a retained

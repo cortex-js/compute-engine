@@ -22,6 +22,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { withoutNothing } from '../../common/type/omission.js';
 import { describeType } from '../boxed-expression/operand-descriptor.js';
 import {
   negativeSign,
@@ -1652,7 +1653,7 @@ export function extendedReductionType(
       // the type carries no length claim) has no finite sum; it is left to
       // the top type, as an `indexed_collection` operand is.
       if (isUnboundedProducer(d)) return undefined;
-      v = t.elements;
+      v = withoutNothing(t.elements);
       mayBeEmpty = true;
     }
     // An index span is a finite, non-empty run of positive integers: its

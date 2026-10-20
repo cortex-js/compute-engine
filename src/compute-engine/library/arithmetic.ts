@@ -12007,7 +12007,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   //
   {
     Max: {
-      description: 'Maximum of two or more numbers',
+      description: 'Maximum of two or more numbers. Nothing data are omitted.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -12049,7 +12049,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Min: {
-      description: 'Minimum of two or more numbers',
+      description: 'Minimum of two or more numbers. Nothing data are omitted.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -12170,7 +12170,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Supremum: {
-      description: 'Like Max, but defined for open sets',
+      description:
+        'Like Max, but defined for open sets. Nothing data are omitted.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -12187,7 +12188,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Infimum: {
-      description: 'Like Min, but defined for open sets',
+      description:
+        'Like Min, but defined for open sets. Nothing data are omitted.',
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
@@ -12358,7 +12360,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Product: {
       description:
-        '`Product(f, a, b)` computes the product of `f` from `a` to `b`',
+        '`Product(f, a, b)` computes the product of `f` from `a` to `b`. Nothing factors are omitted.',
       wikidata: 'Q901718',
       complexity: 1000,
       broadcastable: false,
@@ -12689,7 +12691,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Sum: {
       description:
-        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`',
+        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. Nothing terms are omitted.',
       keywords: ['summation', 'sigma'],
       wikidata: 'Q218005',
       complexity: 1000,
@@ -13377,6 +13379,7 @@ function productAccumulate(
   term: Expression,
   numericApproximation: boolean | undefined
 ): Expression {
+  if (isSymbol(term, 'Nothing')) return acc;
   const err = reducerElementError(acc, term);
   if (err) return err;
   if (numericApproximation) return roundedToWorkingPrecision(acc.mul(term));
@@ -13530,7 +13533,7 @@ function addSumTerm(
   term: Expression,
   numericApproximation: boolean | undefined
 ): SumTerms {
-  if (acc.error !== undefined) return acc;
+  if (acc.error !== undefined || isSymbol(term, 'Nothing')) return acc;
   if (isString(term) || isCharacter(term)) {
     acc.error = term.engine.typeError('number', term.type);
     return acc;
@@ -14142,6 +14145,7 @@ function processMinMaxItem(
 ): [Expression | undefined, ReadonlyArray<Expression>] {
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
+  if (isSymbol(item, 'Nothing')) return [undefined, []];
 
   // An ABSENT datum (the `Missing` symbol or a `NaN` number) makes the whole
   // extremum absent, and in a numeric result absence is `NaN`. It is reported

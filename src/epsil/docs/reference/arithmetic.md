@@ -866,7 +866,7 @@ Indeterminate, the exact answer to an indeterminate form such as 0/0: a number w
 
 MathJSON `Infimum` · `(value*) -> number`
 
-Like Min, but defined for open sets
+Like Min, but defined for open sets. Nothing data are omitted.
 
 ```epsil
 [infimum(1, 3, 2), infimum(interval(0, 1))]
@@ -1047,7 +1047,7 @@ N(machineEpsilon)
 
 MathJSON `Max` · `(value*) -> number`
 
-Maximum of two or more numbers
+Maximum of two or more numbers. Nothing data are omitted.
 
 ```epsil
 [max(3, 7, 2), max([3, 7, 2])]
@@ -1074,7 +1074,7 @@ N(measurement(5, 0.2) * measurement(3, 0.4))
 
 MathJSON `Min` · `(value+) -> number`
 
-Minimum of two or more numbers
+Minimum of two or more numbers. Nothing data are omitted.
 
 ```epsil
 [min(3, 7, 2), min([3, 7, 2])]
@@ -1228,7 +1228,7 @@ PreIncrement(5)
 
 MathJSON `Product` · `(any, tuple*) -> number`
 
-`Product(f, a, b)` computes the product of `f` from `a` to `b`
+`Product(f, a, b)` computes the product of `f` from `a` to `b`. Nothing factors are omitted.
 
 ```epsil
 product(k, (k, 1, 5))
@@ -1370,7 +1370,7 @@ Difference between two or more values.
 
 MathJSON `Sum` · `(any, tuple*) -> number`
 
-`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`
+`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. Nothing terms are omitted.
 
 ```epsil
 sum(k^2, (k, 1, 10))
@@ -1386,7 +1386,7 @@ sum(1/k^2, (k, 1, oo))
 
 MathJSON `Supremum` · `(value*) -> number`
 
-Like Max, but defined for open sets
+Like Max, but defined for open sets. Nothing data are omitted.
 
 ```epsil
 [supremum(1, 3, 2), supremum(interval(0, 1))]

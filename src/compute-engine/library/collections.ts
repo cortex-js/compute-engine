@@ -4822,10 +4822,22 @@ function foldResultTypeD(
   };
   const s = op.structureOf?.();
   if (s?.kind === 'symbol' && BUILTIN_FOLD_HEADS.has(s.name)) {
-    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
-    if (init === undefined) return withFirst(absorb(elt));
+    // Product(collection) is a seeded Multiply fold. Multiply discards an
+    // omitted factor; an unseeded fold may instead return its first cell.
+    const supplied =
+      s.name === 'Multiply' &&
+      s.system === true &&
+      init !== undefined &&
+      elt !== undefined
+        ? withoutNothing(elt)
+        : elt;
+    if (supplied === undefined || !isSubtype(supplied, 'number'))
+      return undefined;
+    if (init === undefined) return withFirst(absorb(supplied));
     const seed = init.type;
-    return isSubtype(seed, 'number') ? absorb(widen(elt, seed)) : undefined;
+    return isSubtype(seed, 'number')
+      ? absorb(widen(supplied, seed))
+      : undefined;
   }
   return withFirst(absorb(callbackResultTypeD(op, engine)));
 }

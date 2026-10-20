@@ -689,7 +689,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           extendedReductionType('Mean', ops) ?? 'number',
           context.engine._typeResolver
         ),
-      description: 'Arithmetic mean (average) of a collection of numbers.',
+      description:
+        'Arithmetic mean (average) of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
@@ -784,7 +786,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      description: 'Median of a collection of numbers.',
+      description:
+        'Median of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       examples: ['Median([3, 1, 4, 2])  // 5/2'],
       evaluate: (ops, { engine, numericApproximation }) => {
         // The elements of an exact `Range` are an arithmetic sequence, so its
@@ -846,7 +850,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Variance: {
-      description: 'Sample variance of a collection of numbers.',
+      description:
+        'Sample variance of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
@@ -941,7 +947,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PopulationVariance: {
-      description: 'Population variance of a collection of numbers.',
+      description:
+        'Population variance of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> real<0..> | nan',
@@ -1037,7 +1045,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     StandardDeviation: {
       complexity: 1200,
       broadcastable: false,
-      description: 'Sample Standard Deviation of a collection of numbers.',
+      description:
+        'Sample Standard Deviation of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       keywords: ['stdev', 'std'],
       signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
       // The standard deviation is the square root of a mean of SQUARED
@@ -1139,7 +1149,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     PopulationStandardDeviation: {
       complexity: 1200,
       broadcastable: false,
-      description: 'Population Standard Deviation of a collection of numbers.',
+      description:
+        'Population Standard Deviation of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       signature: '((collection<any>|number)+) -> real<0..> | nan',
       // The population standard deviation is the square root of a mean of
       // SQUARED deviations over the divisor `n`, so it is real and
@@ -1230,7 +1242,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Kurtosis: {
-      description: 'Kurtosis of a collection of numbers.',
+      description:
+        'Kurtosis of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> real | nan',
@@ -1281,7 +1295,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Skewness: {
-      description: 'Skewness of a collection of numbers.',
+      description:
+        'Skewness of a collection of numbers.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> real | nan',
@@ -1333,7 +1349,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
     Mode: {
       examples: ['Mode([1, 2, 2, 3])  // 2'],
-      description: 'Most frequently occurring value in a collection.',
+      description:
+        'Most frequently occurring value in a collection.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> real | signed_infinity | nan',
@@ -1387,7 +1405,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Uses the Moore–McCabe (exclusive-hinges) convention: the sample is ' +
         'split at its median, and Q1/Q3 are the medians of the lower/upper ' +
         'halves with the overall median excluded from both halves when the ' +
-        'sample size is odd.',
+        'sample size is odd.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       keywords: ['percentile'],
       complexity: 1200,
       broadcastable: false,
@@ -1465,7 +1484,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     InterquartileRange: {
-      description: 'Interquartile range (Q3 - Q1) of a collection.',
+      description:
+        'Interquartile range (Q3 - Q1) of a collection.' +
+        ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> real<0..> | +oo | nan',
@@ -2010,6 +2031,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  * `NaN`. Absence in turn beats inertness, so a `Missing` alongside a valueless
  * symbol still answers `NaN`.
  *
+ * Immediate `Nothing` results contribute no datum. The raw walk still counts
+ * those pulls for enumeration checks; empty-input handling and every sample
+ * size use only retained data. Nested data keep their ordinary validation.
+ *
  * Collecting the data ONCE is load-bearing, not a tidiness measure. The
  * absence gate, the validation walk, the exact-path walk and the float-path
  * walk used to be separate enumerations of the same operand, so
@@ -2064,6 +2089,9 @@ function collectData(
       let walked = 0;
       for (const v of op.each()) {
         walked += 1;
+        // Count raw pulls for enumeration checks, but only retained data
+        // participate in the sample and its empty-input rule.
+        if (isSymbol(v, 'Nothing')) continue;
         sawData = true;
         // A failed cell (an element that is, or holds, an `Error`) is a
         // datum the statistic demands, so its error is the answer, as for

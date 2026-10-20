@@ -122,6 +122,10 @@ without an absence test.
 `Map`, `Filter`, predicate-form `Count`, `Covariance`, `PopulationCovariance`,
 and `Correlation` also refuse compilation when source element types admit `Nothing`; single-source paired
 statistics inspect tuple coordinates, and maps also check their result type.
+Numeric aggregates also refuse omission-capable sources, including the seeded
+`Multiply` fold used to represent `Product(collection)`. Tuple slots and union
+alternatives are checked before their element types can absorb omission.
+
 An unconstrained `collection<any>` therefore needs an annotation that excludes
 `Nothing` (for example, `list<real>`) to compile. This preserves callback bypass and aligned-observation semantics.
 
@@ -168,7 +172,9 @@ compilability and size, as it does for compilation (design section 5.7).
 `Map` now preserves immediate omission in its result type and bypasses callbacks
 for omitted inputs. `Filter` drops immediate omissions without invoking its
 predicate and removes them from its element type. Paired statistics now skip
-whole aligned observations.
+whole aligned observations. Numeric aggregates (sums, products, extrema, and
+univariate statistics) now skip omitted data, and statistics count retained
+observations for every denominator.
 The examples below record the original findings; other producers,
 tuple preservation, and the remaining consumers still need their own policies.
 

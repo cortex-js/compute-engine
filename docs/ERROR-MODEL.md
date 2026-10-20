@@ -242,8 +242,8 @@ counts two results, while its constructed list `[1]` counts one.
 “Nothing always erases from collections” is not an accurate description of
 this behavior. The user selected this raw-result model (R), with
 `ListFrom(view)` explicitly materializing a list and omitting `Nothing`.
-**Agreed direction, implementation pending:** aggregating reducers skip
-immediate `Nothing` results without requiring a materialized list. For a raw
+**Implemented for numeric aggregates:** sums, products, extrema, and the
+univariate statistics skip `Nothing` data without requiring a materialized list. For a raw
 view exposing `[1, Nothing, Nothing]`, `Length` is 3, while `Sum` and `Mean`
 are 1. The mean counts participating results; an all-omitted input uses the
 ordinary empty-input rule. This does not make `Missing` skippable.
@@ -778,8 +778,9 @@ implicitly erase the structure of ordinary data tuples.
 `Missing`/`NaN` preserve positions. Statistics over a constructed list
 therefore see no erased `Nothing` cells. The selected aggregate policy
 also skips immediate `Nothing` results in raw lazy views, without changing
-their raw counts or indices. Implementation is not yet consistent; see §1
-and `ROADMAP.md`.
+their raw counts or indices. This is implemented for sums, products, extrema,
+and univariate statistics. Binning, ordering, and custom-fold policies remain
+separate; see §1 and the design note.
 
 **`Undefined` in a numeric slot takes the same route as `Missing`** (ruled
 2026-09-21). The `Undefined` symbol names a value that does not exist. When

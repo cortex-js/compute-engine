@@ -119,13 +119,13 @@ histogram([1, 2, 2, 3], 3)
 
 MathJSON `InterquartileRange` · `((collection<any> | number)+) -> +oo | nan | real<0..>`
 
-Interquartile range (Q3 - Q1) of a collection.
+Interquartile range (Q3 - Q1) of a collection. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### kurtosis
 
 MathJSON `Kurtosis` · `((collection<any> | number)+) -> nan | real`
 
-Kurtosis of a collection of numbers.
+Kurtosis of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### linearRegression
 
@@ -137,13 +137,13 @@ Least-squares linear fit b0 + b1·x. Returns Tuple(b0, b1), or the fitted expres
 
 MathJSON `Mean` · `((collection<any> | distribution | number)+) -> number`
 
-Arithmetic mean (average) of a collection of numbers.
+Arithmetic mean (average) of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### median
 
 MathJSON `Median` · `((collection<any> | number)+) -> nan | real | signed_infinity`
 
-Median of a collection of numbers.
+Median of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ```epsil
 median([3, 1, 4, 2])
@@ -154,7 +154,7 @@ median([3, 1, 4, 2])
 
 MathJSON `Mode` · `((collection<any> | number)+) -> nan | real | signed_infinity`
 
-Most frequently occurring value in a collection.
+Most frequently occurring value in a collection. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ```epsil
 mode([1, 2, 2, 3])
@@ -195,13 +195,13 @@ Population covariance (n denominator) of paired data, given as two equal-length 
 
 MathJSON `PopulationStandardDeviation` · `((collection<any> | number)+) -> nan | real<0..>`
 
-Population Standard Deviation of a collection of numbers.
+Population Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### populationVariance
 
 MathJSON `PopulationVariance` · `((collection<any> | number)+) -> nan | real<0..>`
 
-Population variance of a collection of numbers.
+Population variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### quantile
 
@@ -213,7 +213,7 @@ Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. The firs
 
 MathJSON `Quartiles` · `((collection<any> | number)+) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>`
 
-Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd.
+Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ```epsil
 quartiles([1, 2, 3, 4, 5])
@@ -230,7 +230,7 @@ RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`
 
 MathJSON `Skewness` · `((collection<any> | number)+) -> nan | real`
 
-Skewness of a collection of numbers.
+Skewness of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### slidingWindow
 
@@ -252,7 +252,7 @@ slidingWindow("abcd", 2)
 
 MathJSON `StandardDeviation` · `((collection<any> | distribution | number)+) -> nan | real<0..>`
 
-Sample Standard Deviation of a collection of numbers.
+Sample Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### uniformDistribution
 
@@ -264,4 +264,4 @@ Continuous uniform distribution on the interval [a, b].
 
 MathJSON `Variance` · `((collection<any> | distribution | number)+) -> nan | real<0..>`
 
-Sample variance of a collection of numbers.
+Sample variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.

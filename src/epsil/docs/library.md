@@ -481,7 +481,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `imaginary` | `Imaginary` | `(complex \| infinity) -> number` | Imaginary part of a complex number. |
 | `imaginaryUnit` | `ImaginaryUnit` | constant `imaginary` = `i` | The imaginary unit, whose square is −1. |
 | — | `Indeterminate` | constant `number` = `Indeterminate` | Indeterminate, the exact answer to an indeterminate form such as 0/0: a number with no value. |
-| `infimum` | `Infimum` | `(value*) -> number` | Like Min, but defined for open sets |
+| `infimum` | `Infimum` | `(value*) -> number` | Like Min, but defined for open sets. |
 | `interpret` | `Interpret` | `(any) -> any` | Interpret a notational expression as its mathematical meaning. |
 | `isComposite` | `IsComposite` | `(number) -> boolean` | `IsComposite(n)` returns `True` if `n` is a composite number |
 | `isEven` | `IsEven` | `(number) -> boolean` | `IsEven(n)` returns `True` if `n` is an even number |
@@ -497,9 +497,9 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `log10` | `Log10` | `(number) -> number` | Base-10 Logarithm |
 | `log2` | `Log2` | `(number) -> number` | Base-2 Logarithm |
 | `machineEpsilon` | `MachineEpsilon` | constant `real` = `2.220446049250313e-16` | The difference between 1 and the next larger floating point number (machine epsilon). |
-| `max` | `Max` | `(value*) -> number` | Maximum of two or more numbers |
+| `max` | `Max` | `(value*) -> number` | Maximum of two or more numbers. |
 | `measurement` | `Measurement` | `(value, value) -> value` | A nominal value carrying a 1σ absolute uncertainty. |
-| `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers |
+| `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers. |
 | — | `Mod` | `(real, real) -> real` | Modulo: the remainder of the floored division of x by y. |
 | — | `Multiply` | `(number*) -> number` | Product of two or more values. |
 | — | `NaN` | constant `number` = `NaN` | Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. |
@@ -513,7 +513,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
-| `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b` |
+| `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b`. |
 | `rational` | `Rational` | `((integer, integer) -> rational) \| ((real) -> rational)` | Construct a rational number from a numerator and denominator. |
 | `rationalize` | `Rationalize` | `(real, real<0..>?) -> rational` | Approximate a real number by a rational. |
 | `re` | `Re` | `(complex \| infinity) -> number` | `Re` is an alias for `Real`, which is the preferred name. |
@@ -525,8 +525,8 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
 | — | `Square` | `(number) -> number` | Square of a number: x^2. |
 | — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
-| `sum` | `Sum` | `(any, tuple*) -> number` | `Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L` |
-| `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets |
+| `sum` | `Sum` | `(any, tuple*) -> number` | `Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. |
+| `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets. |
 | `trigamma` | `Trigamma` | `(complex \| infinity) -> number` | Trigamma function, the derivative of the digamma function |
 | `truncate` | `Truncate` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero. |
 | `zeta` | `Zeta` | `(complex \| infinity, (complex \| infinity)?) -> number` | Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ \|n+a\|^&#123;-s&#125; (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a &gt; 0; for a complex a, the Hurwitz sum. |

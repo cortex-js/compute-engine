@@ -14,7 +14,8 @@
  * accepts an array, a JavaScript `Set` or a numeric typed array at run time
  * and throws for any other value. `Sum`, `Product`, `Max` and `Min` read a
  * single number as a collection of one element where the interpreter accepts
- * one (a type with a number arm, or a type inferred from the uses). `Max` and
+ * one (a type with a number arm). An omission-capable `collection<any>`
+ * needs a narrower numeric annotation before compilation. `Max` and
  * `Min` also throw for an element that is not a real number. Operators that
  * read positions or order (`At`, `Reverse`) still refuse a declared abstract
  * collection, and a dictionary is refused by all.
@@ -141,8 +142,16 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       ['Sum', 0],
       ['Product', 1],
     ] as const) {
-      const re = compiled(new ComputeEngine(), ['Real', [op, 'w']], 'collection<complex>');
-      const im = compiled(new ComputeEngine(), ['Imaginary', [op, 'w']], 'collection<complex>');
+      const re = compiled(
+        new ComputeEngine(),
+        ['Real', [op, 'w']],
+        'collection<complex>'
+      );
+      const im = compiled(
+        new ComputeEngine(),
+        ['Imaginary', [op, 'w']],
+        'collection<complex>'
+      );
       for (const empty of [[], new Set()]) {
         expect(re(empty)).toBe(identity);
         expect(im(empty)).toBe(0);
@@ -281,11 +290,19 @@ describe('MAX/MIN OF AN INFERRED COLLECTION PARAMETER', () => {
     ['Count(a, p) + Max(a, 7)', ['Add', ['Count', 'a', P], ['Max', 'a', 7]], 9],
   ];
   for (const [label, body, expected] of CASES)
-    test(`h(a) := ${label} matches the interpreter`, () => {
+    test(`h(a) := ${label} needs numeric annotation to exclude omission`, () => {
       const ce = new ComputeEngine();
       ce.box(['Assign', 'h', ['Function', body, 'a']] as any).evaluate();
       expect(ce.box('h').type.toString()).toBe('(collection<any>) -> number');
-      const fn = compile(ce.box('h'), { fallback: false }).run!({}) as (
+      expect(() => compile(ce.box('h'), { fallback: false })).toThrow(
+        /Nothing/
+      );
+      const numeric = ce.box([
+        'Function',
+        body,
+        ['Typed', 'a', "'collection<real>'"],
+      ] as any);
+      const fn = compile(numeric, { fallback: false }).run as (
         a: unknown
       ) => unknown;
       expect(fn([3, 1, 2])).toBe(expected);
@@ -293,11 +310,13 @@ describe('MAX/MIN OF AN INFERRED COLLECTION PARAMETER', () => {
       expect(ce.box(['h', ['List', 3, 1, 2]] as any).evaluate().re).toBe(
         expected
       );
-      expect(() => fn('abc')).toThrow(/not a list or a set at run time/);
+      expect(() => fn('abc')).toThrow(
+        /not a list or a set at run time|does not accept a string/
+      );
     });
 });
 
-describe('A PARAMETER DECLARED `collection<any> | number`', () => {
+describe('A PARAMETER DECLARED `collection<real> | real`', () => {
   // The declared type admits a list, a set, or a single number, and the
   // interpreter reads a single number as itself. Before, `Max(xs)` compiled
   // to `Math.max(xs)`, which is `NaN` for a list.
@@ -309,7 +328,7 @@ describe('A PARAMETER DECLARED `collection<any> | number`', () => {
   ] as const)
     test(`${op}(xs) matches the interpreter for a list, a set and a number`, () => {
       const ce = new ComputeEngine();
-      ce.declare('f', '(collection<any> | number) -> number');
+      ce.declare('f', '(collection<real> | real) -> number');
       ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
       ce.declare('v', 'list<integer>');
       const r = compile(ce.box(['f', 'v']), {
@@ -327,6 +346,20 @@ describe('A PARAMETER DECLARED `collection<any> | number`', () => {
       expect(fn(new Set([3, 9, 2]))).toBe(list);
       expect(() => fn('abc')).toThrow(/not a list or a set at run time/);
     });
+});
+
+describe('omission-capable abstract numeric aggregate inputs', () => {
+  test.each(['Max', 'Min', 'Sum', 'Product'])(
+    '%s refuses a collection<any> alternative',
+    (op) => {
+      const ce = new ComputeEngine();
+      ce.declare('f', '(collection<any> | number) -> number');
+      ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
+      expect(() => compile(ce.box('f'), { fallback: false })).toThrow(
+        /Nothing/
+      );
+    }
+  );
 });
 
 describe('MAX/MIN OF A DICTIONARY IN THE INTERPRETER', () => {

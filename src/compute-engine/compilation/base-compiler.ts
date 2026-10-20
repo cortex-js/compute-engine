@@ -10364,6 +10364,27 @@ export class BaseCompiler {
     }
   }
 
+  private static readonly OMITTING_NUMERIC_AGGREGATES: ReadonlySet<string> =
+    new Set([
+      'Sum',
+      'Product',
+      'Min',
+      'Max',
+      'Infimum',
+      'Supremum',
+      'Mean',
+      'Median',
+      'Variance',
+      'PopulationVariance',
+      'StandardDeviation',
+      'PopulationStandardDeviation',
+      'Kurtosis',
+      'Skewness',
+      'Mode',
+      'Quartiles',
+      'InterquartileRange',
+    ]);
+
   /** Reject omission-sensitive collections until targets can preserve Nothing. */
   static assertCollectionOmissionSupported(
     h: string,
@@ -10375,15 +10396,18 @@ export class BaseCompiler {
     const selects =
       h === 'Filter' ||
       (h === 'Count' && args.length === 2 && args[1].isFunction === true);
-    if (
-      h === 'Map' ||
-      selects ||
-      h === 'Covariance' ||
-      h === 'PopulationCovariance' ||
-      h === 'Correlation'
-    ) {
+    // Product(collection) canonicalizes to a built-in multiplication fold.
+    const numericFold = h === 'Reduce' && isSymbol(args[1], 'Multiply');
+    const aggregate = BaseCompiler.OMITTING_NUMERIC_AGGREGATES.has(h);
+    const paired =
+      h === 'Covariance' || h === 'PopulationCovariance' || h === 'Correlation';
+    if (aggregate || numericFold || h === 'Map' || selects || paired) {
       const sources =
-        h === 'Map' ? args.slice(1) : selects ? args.slice(0, 1) : args;
+        h === 'Map'
+          ? args.slice(1)
+          : selects || numericFold
+            ? args.slice(0, 1)
+            : args;
       const pairMayOmit = (
         type: Type,
         seen: ReadonlySet<Type> = new Set()
@@ -10411,6 +10435,14 @@ export class BaseCompiler {
           const next = new Set(seen).add(t);
           return t.types.some((arm) => collectionMayOmit(arm, paired, next));
         }
+        // Joining tuple slot types can absorb nothing, so inspect each slot
+        // before asking for the collection's common element type.
+        if (
+          typeof t === 'object' &&
+          t.kind === 'tuple' &&
+          t.elements.some((slot) => isSubtype('nothing', slot.type))
+        )
+          return true;
         const element = collectionElementType(t);
         return (
           element !== undefined &&
@@ -10418,10 +10450,7 @@ export class BaseCompiler {
         );
       };
       const hasOmission = sources.some((source) =>
-        collectionMayOmit(
-          compilationType(source),
-          h !== 'Map' && !selects && args.length === 1
-        )
+        collectionMayOmit(compilationType(source), paired && args.length === 1)
       );
       if (
         hasOmission ||
