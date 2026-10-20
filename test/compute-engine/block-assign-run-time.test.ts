@@ -45,6 +45,44 @@ const SUM_OF_INCREMENTS: unknown = [
   ['Limits', 'k', 1, 3],
 ];
 
+/**
+ * Define `g(m, r) = Σ_{k=1}^{m} (t ≔ (k = 1 ? (r ? t : 0) : t) + 1; Tick(); t)`.
+ * The terms are `1`, `2`, …, so `g(2, False)` is `3`. With `r` true, the
+ * first term reads the local `t` before the call assigns it.
+ */
+function defineCounter(ce: ComputeEngine): void {
+  box(ce, [
+    'DefineFunction',
+    'g',
+    [
+      'Function',
+      [
+        'Typed',
+        [
+          'Block',
+          [
+            'Sum',
+            [
+              'Block',
+              [
+                'Assign',
+                't',
+                ['Add', ['If', ['Equal', 'k', 1], ['If', 'r', 't', 0], 't'], 1],
+              ],
+              ['Tick'],
+              't',
+            ],
+            ['Limits', 'k', 1, 'm'],
+          ],
+        ],
+        "'(m: unknown, r: unknown) scope -> unknown'",
+      ],
+      'm',
+      'r',
+    ],
+  ]).evaluate();
+}
+
 describe('an implicit local made in an asynchronous run', () => {
   test('keeps its value for the next run in the same evaluation', async () => {
     const ce = engineWithTick();
@@ -82,29 +120,20 @@ describe('an implicit local made in an asynchronous run', () => {
 
   test('each function call starts with no value for the local', async () => {
     const ce = engineWithTick();
-    box(ce, [
-      'DefineFunction',
-      'g',
-      [
-        'Function',
-        [
-          'Typed',
-          [
-            'Block',
-            [
-              'Sum',
-              ['Block', ['Assign', 't', ['Add', 't', 1]], ['Tick'], 't'],
-              ['Limits', 'k', 1, 'm'],
-            ],
-          ],
-          "'(m: unknown) scope -> unknown'",
-        ],
-        'm',
-      ],
-    ]).evaluate();
-    const calls = box(ce, ['Tuple', ['g', 2], ['g', 2]]);
-    expect((await calls.evaluateAsync()).toString()).toBe('(2t + 3, 2t + 3)');
-    expect(calls.evaluate().toString()).toBe('(2t + 3, 2t + 3)');
+    defineCounter(ce);
+    // With `r` true, the first term reads `t` before the call assigns it:
+    // the error of a read before assignment in a function body. The call
+    // does not read the `t` that the previous call left.
+    const calls = box(ce, [
+      'Tuple',
+      ['g', 2, 'False'],
+      ['g', 2, 'True'],
+      ['g', 2, 'False'],
+    ]);
+    const expected =
+      '(3, Error(ErrorCode("read-before-declaration", "t", "assignment")), 3)';
+    expect((await calls.evaluateAsync()).toString()).toBe(expected);
+    expect(calls.evaluate().toString()).toBe(expected);
   });
 
   test('the local does not leak to the enclosing scope', async () => {
@@ -229,32 +258,15 @@ describe('asynchronous evaluations that run at the same time', () => {
 
   test('two calls of a function', async () => {
     const ce = engineWithTick();
-    box(ce, [
-      'DefineFunction',
-      'g',
-      [
-        'Function',
-        [
-          'Typed',
-          [
-            'Block',
-            [
-              'Sum',
-              ['Block', ['Assign', 't', ['Add', 't', 1]], ['Tick'], 't'],
-              ['Limits', 'k', 1, 'm'],
-            ],
-          ],
-          "'(m: unknown) scope -> unknown'",
-        ],
-        'm',
-      ],
-    ]).evaluate();
-    const call = box(ce, ['g', 2]);
+    defineCounter(ce);
+    // Each call has its own `t`. With one `t` for the two calls, the second
+    // call would add 1 to the `t` of the first one, and give `4`.
+    const call = box(ce, ['g', 2, 'False']);
     const values = await Promise.all([
       call.evaluateAsync(),
       call.evaluateAsync(),
     ]);
-    expect(values.map((v) => v.toString())).toEqual(['2t + 3', '2t + 3']);
+    expect(values.map((v) => v.toString())).toEqual(['3', '3']);
   });
 });
 

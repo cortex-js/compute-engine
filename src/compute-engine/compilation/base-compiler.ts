@@ -78,6 +78,7 @@ import {
   resolveTypeAlias,
   resolveTypeForCompilation,
   signatureArms,
+  signatureEffects,
   stripMissingFromType,
   typeContainsMissing,
   typeElementCount,
@@ -141,6 +142,7 @@ import {
 } from '../../common/interruptible.js';
 import {
   functionLiteralBoundNames,
+  functionLiteralDeclaredEffects,
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameters,
@@ -247,6 +249,12 @@ import {
 import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
 import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { laterDeclarationLocalsOf } from '../assignment-locals.js';
+import {
+  EffectContractError,
+  inferFunctionLiteralEffects,
+} from '../boxed-expression/effects-inference.js';
+import { isEffectSubset } from '../../common/type/effects.js';
 
 import {
   COMPLEX_CONTINUATION_HEADS,
@@ -17407,14 +17415,183 @@ export class BaseCompiler {
     // statement runs, so a call before it is invalid there too. Those resolve
     // through the statement-ordered map in `compileBlock`, and a forward call
     // fails closed at compile time rather than reaching a dead zone.
+    //
+    // A `Declare` with no value of the same name, BEFORE the definition
+    // (`let g: (integer) -> integer` then `function g(k) { … }`), is removed.
+    // In the interpreter it declares the name and its type, and the
+    // definition then gives the name its function. The hoisted `Declare`
+    // with the literal binds the name in the compiled code, so the two
+    // statements are one binding. Kept, the `Declare` with no value was a
+    // second binding of the name after the first one: the call `g(1)` did
+    // not resolve to the function (`Unknown operator \`g\``). The compiled
+    // code does not check the declared type, as for a function literal
+    // assigned to a declared name (`g = (k) => …`). A `Declare` with a value
+    // is kept: the interpreter refuses the definition of a name that holds
+    // a value, and the compilation fails too.
+    const declaredBefore = new Set<number>();
+    stmts.forEach((s, i) => {
+      if (
+        !isFunction(s, 'Declare') ||
+        !isSymbol(s.ops[0]) ||
+        BaseCompiler.declareValueOperand(s.ops) !== undefined
+      )
+        return;
+      const name = s.ops[0].symbol;
+      if (
+        stmts.some(
+          (d, j) =>
+            j > i &&
+            rewritable(d, j) &&
+            isSymbol((d as Expression & FunctionInterface).ops[0], name)
+        )
+      )
+        declaredBefore.add(i);
+    });
     const hoisted: Expression[] = [];
     const rest: Expression[] = [];
     stmts.forEach((s, i) => {
       if (rewritable(s, i))
         hoisted.push(asDeclare(s as Expression & FunctionInterface));
-      else rest.push(s);
+      else if (!declaredBefore.has(i)) rest.push(s);
     });
     return [...hoisted, ...rest];
+  }
+
+  /**
+   * Refuse the compilation of a statement list when it defines a named
+   * function that the interpreter refuses to define because of its effects:
+   * a `DefineFunction(name, Function(…))` or an `Assign(name, Function(…))`
+   * statement (`function g(k) { … }`, `g(k) = …`, `g = (k) => …`).
+   *
+   * The interpreter checks the effects of the body when it installs the
+   * definition (`BoxedOperatorDefinition`, `defineFunctionClause()`):
+   *
+   * - When the function states no effects, a body that writes a variable
+   *   outside the function (or makes an assumption) is refused: such a
+   *   write requires the `scope` effect, which must be declared
+   *   (`docs/EFFECTS-MODEL.md`, "Scope is opt-in").
+   * - When the function states its effects (`function g() pure { … }`), the
+   *   effects of the body must be in the stated set.
+   *
+   * The compiled code does not run this check, so without this test the
+   * compiled program wrote the outer variable where the interpreter gives
+   * an error: with `let t = 0` before `function g(k) { t = k + 1; t }`, the
+   * compiled `[g(1), t]` was `[2, 2]`.
+   *
+   * A definition is not checked here, and is left to the interpreter, when
+   * an earlier `Declare` statement of the list or the binding of the name
+   * (`scope`, the scope of the statement list) states the effects of the
+   * name: the declaration is then the contract. A name that the list defines
+   * more than once is a set of clauses, which the compilation refuses for
+   * another reason (`withDefineFunctionDeclares()`).
+   */
+  private static refuseEffectContractViolations(
+    stmts: ReadonlyArray<Expression>,
+    scope: Expression['localScope']
+  ): void {
+    if (
+      !stmts.some(
+        (s) =>
+          (isFunction(s, 'DefineFunction') || isFunction(s, 'Assign')) &&
+          isFunction(s.ops[1], 'Function')
+      )
+    )
+      return;
+    const definitionCount = new Map<string, number>();
+    for (const s of stmts) {
+      if (!isFunction(s, 'DefineFunction') || !isSymbol(s.ops[0])) continue;
+      const name = s.ops[0].symbol;
+      definitionCount.set(name, (definitionCount.get(name) ?? 0) + 1);
+    }
+    // The names that an earlier `Declare` statement gives a type with stated
+    // effects (`let g: (integer) scope -> integer`).
+    const declaredEffects = new Set<string>();
+    // The names that an earlier statement defines with a function literal.
+    const definedBefore = new Set<string>();
+    for (const s of stmts) {
+      if (isFunction(s, 'Declare') && isSymbol(s.ops[0])) {
+        const type = s.ops[1];
+        const source = isString(type) ? type.string : undefined;
+        if (source === undefined) continue;
+        try {
+          const parsed = parseType(source, s.engine._typeResolver);
+          if (signatureEffects(parsed) !== undefined)
+            declaredEffects.add(s.ops[0].symbol);
+        } catch {
+          // Not a type: the `Declare` statement reports it.
+        }
+        continue;
+      }
+      if (!isFunction(s, 'DefineFunction') && !isFunction(s, 'Assign'))
+        continue;
+      const target = s.ops[0];
+      const literal = s.ops[1];
+      if (!isSymbol(target) || !isFunction(literal, 'Function')) continue;
+      const name = target.symbol;
+      if ((definitionCount.get(name) ?? 0) > 1) continue;
+      if (declaredEffects.has(name)) continue;
+      // The binding of a name that an earlier statement of the list defines
+      // holds the effects of that definition, not a declaration. The
+      // interpreter checks the new literal on its own then: with
+      // `function g(k) scope { … }` before it, `g = (k) => do { t = k + 2;
+      // t }` is refused, since the literal states no effects and writes
+      // `t`. The literal is checked here in the same way.
+      const redefinition = definedBefore.has(name);
+      definedBefore.add(name);
+      if (!redefinition && BaseCompiler.bindingStatesEffects(scope, name))
+        continue;
+      const stated = functionLiteralDeclaredEffects(literal);
+      const inferred = inferFunctionLiteralEffects(s.engine, literal, {
+        selfName: name,
+      });
+      let error: EffectContractError | undefined = undefined;
+      if (stated !== undefined) {
+        if (
+          !inferred.unresolvedHead &&
+          !isEffectSubset(inferred.effects, stated)
+        )
+          error = new EffectContractError(name, stated, inferred.effects);
+      } else if (inferred.escapingWrite)
+        error = new EffectContractError(
+          name,
+          undefined,
+          inferred.effects,
+          undefined,
+          /* scopeDefault */ true
+        );
+      if (error !== undefined)
+        throw new Error(
+          `Could not compile \`${s.operator}\`: ${error.message}.`
+        );
+    }
+  }
+
+  /** Whether the binding of `name` that `scope` or one of its parents holds
+   * states the effects of the function: an operator definition or a value
+   * definition whose effects are declared, or a value definition with a
+   * declared (not inferred) signature type that carries effects. */
+  private static bindingStatesEffects(
+    scope: Expression['localScope'],
+    name: string
+  ): boolean {
+    for (
+      let s: NonNullable<Expression['localScope']> | null | undefined = scope;
+      s;
+      s = s.parent
+    ) {
+      const def = s.bindings.get(name);
+      if (def === undefined) continue;
+      if ('operator' in def) return def.operator.effectsDeclared;
+      if ('value' in def) {
+        const value = def.value;
+        if (value.effectsDeclared) return true;
+        return (
+          !value.inferredType && signatureEffects(value.type.type) !== undefined
+        );
+      }
+      return false;
+    }
+    return false;
   }
 
   /**
@@ -17509,7 +17686,18 @@ export class BaseCompiler {
       if (!isSymbol(lhs)) continue;
       const name = lhs.symbol;
       if (seen.has(name)) continue;
-      if (target.boundVars?.has(name)) continue;
+      // A name that an enclosing compiled block or function binds is written
+      // there. The exception is a function defined in the top-level block of
+      // a program before the statement that declares the same name: the
+      // canonicalization made the name a local of the function body
+      // (`recordLaterDeclarationLocals()`, `assignment-locals.ts`), and the
+      // interpreter gives each call of the function its own local, so the
+      // compiled function declares its own variable too.
+      if (
+        target.boundVars?.has(name) &&
+        laterDeclarationLocalsOf(scope)?.includes(name) !== true
+      )
+        continue;
       // The canonicalizer hoists only a TOP-LEVEL assignment into the block's
       // scope. An assignment that was the value of another one (`t ≔ (u ≔
       // s)`) is declared by the interpreter when it runs, in the scope of the
@@ -17628,11 +17816,14 @@ export class BaseCompiler {
    * Fail closed when a statement of a block reads one of the block's locals
    * before any statement gives it a value.
    *
-   * The interpreter leaves such a read symbolic (`Block(x ≔ x + 1; 2x)`,
-   * where `x` is a local of the block, evaluates to `2(x + 1)`), and the
-   * compiled code has no value to give it: JavaScript read `undefined` and
-   * answered `NaN`, WGSL read the zero a `var` starts with, GLSL read an
-   * uninitialized variable, and Python read a parameter of the same name.
+   * Inside a function body (a block in a function literal), the interpreter
+   * reports such a read with the `read-before-declaration` error. In a
+   * top-level block it leaves the read symbolic (`Block(x ≔ x + 1; 2x)`,
+   * where `x` is a local of the block, evaluates to `2(x + 1)`). In both
+   * cases the compiled code has no value to give it: JavaScript read
+   * `undefined` and answered `NaN`, WGSL read the zero a `var` starts with,
+   * GLSL read an uninitialized variable, and Python read a parameter of the
+   * same name.
    *
    * The test is on the statements in order. A local has a value after a
    * statement that assigns it anywhere (in a branch or a loop too, so the
@@ -17726,9 +17917,11 @@ export class BaseCompiler {
   private static unassignedLocalRead(name: string): never {
     throw new Error(
       `Could not compile \`Block\`: a statement reads the block local ` +
-        `"${name}" before any statement gives it a value. The interpreter ` +
-        `leaves that read symbolic, and the compiled code would read an ` +
-        `uninitialized variable. Give "${name}" a value first, or give the ` +
+        `"${name}" before any statement gives it a value. Inside a function ` +
+        `body the interpreter reports that read as \`read-before-declaration\`, ` +
+        `and in a top-level block it leaves the read symbolic; the compiled ` +
+        `code would read an uninitialized variable. Give "${name}" a value ` +
+        `first, or give the ` +
         `local another name (\`Block(y ≔ ${name} + 1; 2y)\`), so that ` +
         `"${name}" is the input.`
     );
@@ -17985,6 +18178,9 @@ export class BaseCompiler {
 
     // …then `function` definitions, which are block-scoped exactly like a
     // `const` binding of the same literal and lower to the same value binding.
+    // A definition that the interpreter refuses for its effects is refused
+    // first.
+    BaseCompiler.refuseEffectContractViolations(args, node?.localScope);
     args = BaseCompiler.withDefineFunctionDeclares(args, target, valueUsed);
 
     // …then the block-locals introduced by bare ASSIGNMENT, which carry no
@@ -19798,7 +19994,9 @@ export class BaseCompiler {
       // INSIDE a loop body lowers and is callable there, exactly as one made
       // in an ordinary block is. A loop body carries no value, hence
       // `valueUsed: false`: every statement of it, the last included, is in
-      // statement position.
+      // statement position. A definition that the interpreter refuses for
+      // its effects is refused first, as in `compileBlock`.
+      BaseCompiler.refuseEffectContractViolations(stmts, expr.localScope);
       const withDecls = BaseCompiler.withImplicitLocalDeclares(
         BaseCompiler.withDefineFunctionDeclares(stmts, target, false),
         target,

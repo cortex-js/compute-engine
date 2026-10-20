@@ -396,7 +396,16 @@ function serializePrettyJsonFunction(
           metadata
         );
 
-      if (exp !== null && exp < 0 && !exclusions.includes('Divide')) {
+      // A number literal raised to a negative integer other than -1 keeps
+      // its power form (`10^{-30}`, `2^{-3}`): the quotient would compute
+      // the denominator (`\frac{1}{1\cdot10^{30}}`), which parses back as
+      // the rational `1/10^30`, not as the power `10^-30`.
+      if (
+        exp !== null &&
+        exp < 0 &&
+        !exclusions.includes('Divide') &&
+        !(exp !== -1 && isNumber(args[0]))
+      ) {
         return serializeJsonFunction(
           ce,
           'Divide',

@@ -167,12 +167,27 @@ describe('a read before the `let` has run is an error', () => {
   });
 
   test('the error is reported as a runtime error of the statement', () => {
+    // The read is in a closure called before the `let`: the static check
+    // does not follow the call, and the run reports it.
     const { diagnostics } = executeEpsil(
       new ComputeEngine(),
-      'let r = do { let a = k; let k = 2; a }\nr'
+      'let r = do { let f = () => k; let a = f(); let k = 2; a }\nr'
     );
     expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
     expect(diagnostics[0].message.at(-1)).toBe('read-before-declaration');
+  });
+
+  test('a read that is certain is reported once, by the static check', () => {
+    // The run does not report the same read a second time.
+    const source = 'let r = do { let a = k; let k = 2; a }\nr\n0';
+    const { diagnostics } = executeEpsil(new ComputeEngine(), source);
+    expect(
+      diagnostics.map((d) => [
+        d.message[0],
+        d.message.at(-1),
+        source.slice(d.range[0], d.range[1]),
+      ])
+    ).toEqual([['static-type-error', 'read-before-declaration', 'k']]);
   });
 });
 
@@ -228,11 +243,7 @@ describe('box route', () => {
       ],
       ['Element', 'i', ['List', 1, 2]],
     ],
-    [
-      'List',
-      ['Apply', ['At', 'fs', 1]],
-      ['Apply', ['At', 'fs', 2]],
-    ],
+    ['List', ['Apply', ['At', 'fs', 1]], ['Apply', ['At', 'fs', 2]]],
   ];
 
   test('Loop over a Block with a closure before the Declare', () => {
@@ -277,8 +288,9 @@ describe('a `const` function declared after a reference to its name', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.json).toEqual(6);
-    expect(
-      run('g(1)\nconst g = (x) => 2 * x\ng = 5')
-    ).toEqual(['Error', ['ErrorCode', "'constant-assignment'", "'g'"]]);
+    expect(run('g(1)\nconst g = (x) => 2 * x\ng = 5')).toEqual([
+      'Error',
+      ['ErrorCode', "'constant-assignment'", "'g'"],
+    ]);
   });
 });

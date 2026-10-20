@@ -4,7 +4,10 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
-import { awaitedOperandOptions } from '../boxed-expression/utils.js';
+import {
+  awaitedOperandOptions,
+  bignumPreferred,
+} from '../boxed-expression/utils.js';
 import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import {
   isSymbol,
@@ -331,6 +334,27 @@ export function canonicalUnit(ce: ComputeEngine, unit: Expression): Expression {
 }
 
 /**
+ * The magnitude `mag` when `unit` is a compound unit whose factors all
+ * cancel (`m/m`, `m·s/(s·m)`): the quantity `mag unit` is then the plain
+ * number `mag`, as in the quantity arithmetic, where `(6 m)/(2 m)` is `3`.
+ * Otherwise `undefined`, and the quantity stays a quantity. A unit symbol
+ * (`percent`, `rad`) is a named unit, and a compound unit whose factors do
+ * not cancel stays a unit also when its dimension is zero: `in/ft` (inches
+ * per foot) is the unit of a slope.
+ */
+function cancelledUnitValue(
+  ce: ComputeEngine,
+  mag: Expression,
+  unit: Expression
+): Expression | undefined {
+  if (!isFunction(unit)) return undefined;
+  const factors = unitFactors(ce, unit);
+  if (factors === null || unitFromFactors(ce, factors.values()) !== null)
+    return undefined;
+  return mag;
+}
+
+/**
  * The canonical unit for the factor map of a unit after a cancellation by
  * `cancelUnitFactors()`, whose exponents are machine numbers: `m^(2/3)·m^(2/3)`
  * gives the exponent `1.3333333333333333`. The exact exponents are recovered
@@ -441,16 +465,22 @@ export function isSymbolicValue(x: Expression): boolean {
  *   exact result exact. `Quantity(3, m) · π` is `Quantity(3π, m)`, not
  *   `Quantity(9.42…, m)`, and `Quantity(3, m)^-1` is `Quantity(1/3, m^-1)`.
  *   Under `.N()` the caller makes the result numeric;
- * - a value is not real: its `.re` drops the imaginary part.
+ * - a value is not real: its `.re` drops the imaginary part;
+ * - the precision of the engine is above the precision of a machine number
+ *   (`bignumPreferred()`): `.re` would round a big decimal value to about
+ *   16 digits. Under `.N()`, `π·(1 rad)` is `3.14159265358979323846 rad`
+ *   at 21 digits, not `3.141592653589793 rad`.
  *
- * Otherwise at least one value is a float and all the values are real: the
- * machine-number arithmetic gives the float result.
+ * Otherwise at least one value is a float, all the values are real, and the
+ * engine computes with machine numbers: the machine-number arithmetic gives
+ * the float result.
  */
 export function usesExpressionArithmetic(
   values: ReadonlyArray<Expression>
 ): boolean {
   if (values.some((x) => isMeasurement(x) || isSymbolicValue(x))) return true;
   if (!hasFloatOperand(values)) return true;
+  if (bignumPreferred(values[0].engine)) return true;
   return values.some((x) => x.im !== 0);
 }
 
@@ -631,8 +661,16 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
             ? ce.symbol(parsed)
             : ce.box(parsed as any, { form: 'raw' })
         );
-        return ce._fn('Quantity', [mag, canonicalUnit(ce, boxed)]);
+        return (
+          cancelledUnitValue(ce, mag, boxed) ??
+          ce._fn('Quantity', [mag, canonicalUnit(ce, boxed)])
+        );
       }
+
+      // A compound unit whose factors cancel (`m/m`) gives a plain number,
+      // as the quantity arithmetic does.
+      const value = cancelledUnitValue(ce, mag, unitArg);
+      if (value !== undefined) return value;
 
       // The unit takes its canonical form (see `canonicalUnit()`): a unit
       // has one tree, whatever the tree of the input.

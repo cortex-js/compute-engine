@@ -72,6 +72,45 @@ export function noteIncompleteWalk(): void {
  */
 export function takeBackIncompleteWalks(mark: number): void {
   if (incompleteWalks > mark) incompleteWalks = mark;
+  if (failedWalk !== undefined && failedWalk.mark > mark)
+    failedWalk = undefined;
+}
+
+/**
+ * The last walk that FAILED: a walk that stopped because a collection it
+ * must read evaluated to an error value, with the value of the count just
+ * after the walk was recorded. Only a comprehension records such a walk
+ * (`library/control-structures.ts`): its clause domains are evaluated when
+ * its elements are read, so a domain that is an error (a local of a
+ * function body read before its assignment) is found during the walk. The
+ * error is then the value of the whole comprehension, not one of its
+ * elements.
+ *
+ * The type of the error is not named, so that this module imports nothing.
+ */
+let failedWalk: { mark: number; error: unknown } | undefined;
+
+/**
+ * Record that the walk in progress failed with `error`. This is also an
+ * incomplete walk (`noteIncompleteWalk()`): every consumer that measures the
+ * count declines, and a consumer that can answer an error value
+ * (`failedWalkErrorSince()`) answers `error`.
+ */
+export function noteFailedWalk(error: unknown): void {
+  incompleteWalks += 1;
+  failedWalk = { mark: incompleteWalks, error };
+}
+
+/**
+ * The error of a walk that failed after `mark`, a value of
+ * `incompleteWalkCount()` read before the walk, or `undefined` when no walk
+ * failed since then. When several walks failed, this is the last one.
+ */
+export function failedWalkErrorSince(mark: number): unknown {
+  if (failedWalk === undefined) return undefined;
+  if (failedWalk.mark <= mark || failedWalk.mark > incompleteWalks)
+    return undefined;
+  return failedWalk.error;
 }
 
 /**

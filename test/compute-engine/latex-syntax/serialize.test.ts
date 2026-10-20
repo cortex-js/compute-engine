@@ -708,3 +708,31 @@ describe('DELIMITER WITH SQUARE BRACKETS', () => {
     );
   });
 });
+
+// A number raised to a negative integer is written as a power: the quotient
+// form computed the denominator (`\frac{1}{1\cdot10^{30}}`), which parses
+// back as a rational, not as the power.
+describe('A NUMBER TO A NEGATIVE POWER', () => {
+  test.each<[MathJsonExpression, string]>([
+    [['Power', 10, -30], '10^{-30}'],
+    [['Power', 10, -3], '10^{-3}'],
+    [['Power', 2, -3], '2^{-3}'],
+    [['Power', 2, -80], '2^{-80}'],
+    [['Power', 1.5, -2], '1.5^{-2}'],
+  ])('%j', (json, expected) => {
+    const expr = ce.box(json);
+    expect(expr.latex).toBe(expected);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+
+  test('a symbol to a negative power is still a fraction', () => {
+    expect(ce.box(['Power', 'x', -2]).latex).toBe('\\frac{1}{x^2}');
+    expect(ce.box(['Power', 2, -1]).latex).toBe('\\frac{1}{2}');
+  });
+
+  test('a product with a power of ten keeps the exact value', () => {
+    const expr = ce.box(['Multiply', 3, ['Power', 10, -30]]);
+    expect(expr.latex).toBe('\\frac{3}{10^{30}}');
+    expect(ce.parse(expr.latex).isEqual(expr)).toBe(true);
+  });
+});

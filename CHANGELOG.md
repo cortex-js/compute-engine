@@ -2,6 +2,9 @@
 
 ### Behavior Changes
 
+- `\sum_k y` and `\prod_k y`, a sum or a product with no bounds whose body
+  does not use the index, now keep their indexing clause in the canonical
+  form: `Sum(y, Limits(k, Nothing, Nothing))`. They were `y`.
 - An Epsil program that is compiled, or evaluated as one `Block`, follows the
   order of its top-level statements for the names a function body owns: in
   `function g(k) { t = k + 1; t }`, then `let t = 0`, then `[g(1), g(2), t]`,
@@ -199,6 +202,61 @@
 
 ### Bug Fixes
 
+- A symbol with two or more subscripts is written with nested subscripts, so
+  it reads back as the same symbol. The symbol `x_1_2` (the parse of `x_1_2`,
+  of `{x_1}_2`, and the canonical form of `Subscript(Subscript(x, 1), 2)`) is
+  now written `{x_1}_2`; it was `x_{1,2}`, which reads back as
+  `Subscript(x, Sequence(1, 2))`. Three subscripts give `{{x_1}_2}_3`. A name
+  with an upright base keeps the second subscript outside the `\mathrm{}`:
+  `speed_1_2` is `{\mathrm{speed_1}}_2` (it was `\mathrm{speed_{1,2}}`, which
+  did not parse). A name with digits before a subscript keeps them in the
+  name: `x1_2` is `\mathrm{x1_2}` (it was `x_{1,2}`). A single subscript
+  (`x_1`, `x_{12}`), a subscript with a comma list typed as `x_{1,2}`, and a
+  matrix element (`M[1, 2]`) are written as before. A name whose base is an
+  indexed collection does not read back in either spelling: with `A` a matrix,
+  the symbol `A_1_2` is written `{A_1}_2`, which reads back as
+  `Subscript(At(A, 1), 2)` (`A_{1,2}` read back as `At(A, 1, 2)`).
+- A symbol with a style and a subscript reads back as the same symbol.
+  `\mathbf{x}_1` (the symbol `x_bold_1`) was written `\mathbf{x_1}`, which
+  reads back as the different symbol `x_1_bold`; it is now written
+  `\mathbf{x}_1`, and `x_bold_1_2` is written `{\mathbf{x}_1}_2`. The parse of
+  `\mathbf{x_1}`, the symbol `x_1_bold`, was written `x_{\mathbf{1}}`, which
+  reads back as `x_one_bold`; it is now written `\mathbf{x_1}`, and
+  `x_1_2_bold` is written `\mathbf{{x_1}_2}`. The other styles work the same
+  way (`\mathit`, `\mathbb`, `\mathcal`, …). The upright style is the
+  exception for a style after a digit subscript: `x_1_upright` is still written
+  `x_{\mathrm{1}}`, which does not read back.
+- Two braced subscripts inside `\mathrm{}`, `\mathbf{}` or `\operatorname{}`
+  are two parts of the name: `\mathrm{x_{1}_{2}}` is the symbol `x_1_2`, as
+  `x_{1}_{2}` is. It was `x_12`. The body of such a command can also start
+  with a brace group that has its own subscripts: `\mathbf{{x_1}_2}` is the
+  symbol `x_1_2_bold`.
+- A sum or a product written with no bounds (`\sum_k x^k`, which is
+  `Sum(x^k, Limits(k, Nothing, Nothing))`) runs over the default domain. It
+  was read as a sum over the single point `k = Nothing`: `\sum_k x^{k-1}`
+  evaluated to `\frac{1}{x}`, `\sum_k x^k` and `\prod_k x^k` to an error, and
+  `\sum_k y` and `\prod_k y` became `y`. Now these stay unevaluated, as
+  `\sum_k k` did, and `\sum_k \frac{1}{k^2}` `.N()` is still `1.6449…`.
+  `simplify()` also keeps a sum or a product with no bounds, or with one
+  bound only, as it is: `\sum_k k` gave `1` and `\sum_{k=1} k` gave
+  `\frac{1}{2}`.
+- `simplify()` of a sum or a product with more than one indexing clause no
+  longer reads the second index as a free symbol and drops its clause:
+  `Sum(i·j, Limits(i, 1, 3), Limits(j, 1, 2))` gave `6j`. It now stays as it
+  is under `simplify()`, and `evaluate()` still gives 18.
+- Reading a variable whose value is an expression with no canonical form
+  (`r = Map(t, (x) => x * 2)`, with the arguments in the wrong order) no longer
+  loops forever: it gives the same result as the expression written in place.
+- In a comprehension, an element that does not match a tuple pattern
+  (`[p + q for (p, q) in [(1, 2), 5, (3, 4)]]`) is the `incompatible-type` error
+  in its position, and the other elements are kept (`[3, Error(…), 7]`); the
+  comprehension stopped at that element. A `for` loop still stops on it.
+- A trigonometric function of an angle quantity with an exact magnitude is
+  exact: `\sin(30\,\mathrm{deg})` evaluates to `1/2` (it was
+  `0.4999999999999999`), because the angle is converted with the exact factor of
+  its unit (`30 deg` is `π/6`).
+- A comprehension whose domain evaluates to an error has that error as its
+  value: `Length`, `Count`, `Sum` and an element read of it give the error.
 - An Epsil function declared with a type and then defined
   (`let g: (integer) -> integer`, then `function g(k) { k + 1 }`) compiles on
   JavaScript and interval-js and gives the interpreter's value; the compilation

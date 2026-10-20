@@ -2436,7 +2436,14 @@ function serializePower(
     const val2 = isFloatSpelling(exp) ? 1 : (machineValue(exp) ?? 1);
     if (val2 === -1) {
       return serializer.serialize(['Divide', '1', base]);
-    } else if (val2 < 0) {
+    } else if (
+      val2 < 0 &&
+      !(Number.isInteger(val2) && isNumberExpression(base))
+    ) {
+      // A number raised to a negative integer is written as a power
+      // (`10^{-30}`): `\frac{1}{10^{30}}` parses back as a rational, not as
+      // the power. A negative exponent that is not an integer is written as
+      // a fraction for a number too: `2^{-3/2}` is `\frac{1}{\sqrt{2}^3}`.
       return serializer.serialize(['Divide', '1', ['Power', base, -val2]]);
     } else if (operator(exp) === 'Divide' || operator(exp) === 'Rational') {
       const num = machineValue(operand(exp, 1));

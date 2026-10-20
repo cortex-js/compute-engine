@@ -10,9 +10,9 @@ function roundTrip(json: MathJsonExpression): [string, unknown] {
 }
 
 describe('A QUANTITY WHOSE MAGNITUDE IS NOT A NUMBER LITERAL', () => {
-  // Juxtaposed with a unit, such a magnitude parses as a product
-  // (`2\sqrt{2}\,\mathrm{m}` is `2·√2·m`), so it is written with the siunitx
-  // command `\qty`, which parses back as the same quantity.
+  // Such a magnitude is written with the siunitx command `\qty`, which
+  // parses back as the same quantity. Juxtaposed with a unit, a magnitude
+  // with a variable parses as a product (`x\,\mathrm{m}` is `x·m`).
   test.each<[string, MathJsonExpression, string]>([
     [
       'a radical',
@@ -126,5 +126,96 @@ describe('PARSING OF HAND-WRITTEN SIUNITX QUANTITIES', () => {
       ce.parse('\\qty{\\frac{1}{64}}{m} + \\qty{\\frac{1}{64}}{m}').evaluate()
         .json
     ).toEqual(['Quantity', ['Rational', 1, 32], 'm']);
+  });
+});
+
+// A numeric constant expression (a constant such as `\pi`, a power of ten,
+// a fraction, a radical, a product of these) juxtaposed with a unit is a
+// quantity with that magnitude, as a number literal is. A magnitude with a
+// variable is not: `x\,\mathrm{m}` stays a product.
+describe('A NUMERIC CONSTANT JUXTAPOSED WITH A UNIT', () => {
+  test.each<[string, MathJsonExpression]>([
+    ['\\pi\\,\\mathrm{rad}', ['Quantity', 'Pi', 'rad']],
+    ['\\pi\\mathrm{rad}', ['Quantity', 'Pi', 'rad']],
+    ['-\\pi\\,\\mathrm{rad}', ['Quantity', ['Negate', 'Pi'], 'rad']],
+    ['2\\pi\\,\\mathrm{rad}', ['Quantity', ['Multiply', 2, 'Pi'], 'rad']],
+    [
+      '\\frac{\\pi}{180}\\,\\mathrm{rad}',
+      ['Quantity', ['Multiply', ['Rational', 1, 180], 'Pi'], 'rad'],
+    ],
+    [
+      '\\frac{3\\pi}{2}\\,\\mathrm{rad/s}',
+      [
+        'Quantity',
+        ['Multiply', ['Rational', 3, 2], 'Pi'],
+        ['Divide', 'rad', 's'],
+      ],
+    ],
+    [
+      '(\\pi/2)\\,\\mathrm{rad}',
+      ['Quantity', ['Multiply', ['Rational', 1, 2], 'Pi'], 'rad'],
+    ],
+    ['10^{-30}\\,\\mathrm{rad}', ['Quantity', ['Power', 10, -30], 'rad']],
+    ['\\frac{1}{2}\\,\\mathrm{m}', ['Quantity', ['Rational', 1, 2], 'm']],
+    ['\\sqrt{2}\\,\\mathrm{m}', ['Quantity', ['Sqrt', 2], 'm']],
+    [
+      '3\\pi^2\\,\\mathrm{m}',
+      ['Quantity', ['Multiply', 3, ['Power', 'Pi', 2]], 'm'],
+    ],
+    ['\\mathrm{e}\\,\\mathrm{m}', ['Quantity', 'ExponentialE', 'm']],
+  ])('%s', (latex, json) => {
+    const q = ce.parse(latex);
+    expect(q.json).toEqual(json);
+    // The box route gives the same quantity
+    expect(q.isSame(ce.box(json))).toBe(true);
+    // The LaTeX of the quantity parses back as the same quantity
+    expect(ce.parse(q.latex).isSame(q)).toBe(true);
+  });
+
+  test('a magnitude with a variable is a product', () => {
+    expect(ce.parse('x\\,\\mathrm{m}').json).toEqual(['Multiply', 'm', 'x']);
+    expect(ce.parse('2x\\,\\mathrm{m}').json).toEqual([
+      'Multiply',
+      2,
+      'm',
+      'x',
+    ]);
+    expect(ce.parse('\\frac{x}{2}\\,\\mathrm{m}').json).toEqual([
+      'Multiply',
+      ['Rational', 1, 2],
+      'm',
+      'x',
+    ]);
+  });
+
+  test('an imaginary constant is a product', () => {
+    expect(ce.parse('\\mathrm{i}\\,\\mathrm{m}').operator).toBe('Multiply');
+  });
+
+  test('a sum of two such quantities is one quantity', () => {
+    const sum = ce
+      .parse(
+        '\\frac{\\pi}{180}\\cdot 1\\,\\mathrm{rad} + 10^{-30}\\,\\mathrm{rad}'
+      )
+      .evaluate();
+    expect(sum.operator).toBe('Quantity');
+    expect(sum.json).toEqual([
+      'Quantity',
+      [
+        'Add',
+        ['Rational', 1, { num: '1e+30' }],
+        ['Multiply', ['Rational', 1, 180], 'Pi'],
+      ],
+      'rad',
+    ]);
+    // It is more than 1 deg, by 10⁻³⁰ rad
+    expect(sum.isGreater(ce.parse('1\\,\\mathrm{deg}'))).toBe(true);
+    expect(
+      ce
+        .parse(
+          '\\pi\\,\\mathrm{rad} + 10^{-30}\\,\\mathrm{rad} > 180\\,\\mathrm{deg}'
+        )
+        .evaluate().symbol
+    ).toBe('True');
   });
 });

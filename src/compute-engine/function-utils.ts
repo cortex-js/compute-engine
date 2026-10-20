@@ -130,7 +130,13 @@ import {
   journalDefinitionRecord,
 } from './boxed-expression/boxed-value-definition.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
-import { assignmentLocalsOf } from './assignment-locals.js';
+import {
+  assignmentLocalsOf,
+  enterFunctionBody,
+  exitFunctionBody,
+  isFunctionBodyBlock,
+  markFunctionBodyBlock,
+} from './assignment-locals.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -812,6 +818,11 @@ export function canonicalFunctionLiteralArguments(
   let provisionalHeads: ReadonlySet<string> | undefined;
   let block: Expression;
   let shadowedDefs: ReadonlyMap<string, BoxedDefinition> = new Map();
+  // The blocks canonicalized from here to the `finally` are written in the
+  // body of this literal: a read of one of their assignment locals before
+  // its first assignment is an error (`isFunctionBodyBlock()`,
+  // `assignment-locals.ts`).
+  enterFunctionBody();
   try {
     if (returnTypeOp === undefined) {
       if (isFunction(bodyOp, 'Block')) {
@@ -838,11 +849,17 @@ export function canonicalFunctionLiteralArguments(
       );
       block = ce.function('Block', statements);
     }
+    // A body that was canonical before it became the body of this literal
+    // (a `Block` that the caller boxed first) was not canonicalized in a
+    // function body, so its blocks recorded the rule of a block outside
+    // every function literal. They are in this body now.
+    if (bodyOp.isCanonical) markFunctionBodyBlocks(block);
     // Read the bindings the body's bare-parameter references auto-declared
     // (and shared) while the frame is still on the stack — the parameter
     // declarations below adopt them.
     shadowedDefs = ce._currentShadowedParameterDefs();
   } finally {
+    exitFunctionBody();
     provisionalHeads = endProvisionalCapture();
     ce._popShadowedParameters();
   }
@@ -2393,6 +2410,35 @@ function createBlockLocals(
 }
 
 /**
+ * Record each block of `body` (the body itself, and each block nested in
+ * it, a `let` initializer too) as a block written in the body of a function
+ * literal (`markFunctionBodyBlock()`, `assignment-locals.ts`).
+ *
+ * A block that is canonicalized in a function body records this when it is
+ * canonicalized. This is for a body that was canonical before it became a
+ * function body (`ce.function('Function', [block])` with a block that the
+ * caller boxed first): without it, a read of an assignment local before its
+ * first assignment stayed the bare symbol in that body, while the same
+ * `Function` boxed in one step gave the `read-before-declaration` error.
+ */
+function markFunctionBodyBlocks(body: Expression): void {
+  const seen = new Set<Expression>();
+  const walk = (e: Expression): void => {
+    if (seen.has(e)) return;
+    seen.add(e);
+    if (isDictionary(e)) {
+      for (const value of e.values) walk(value);
+      return;
+    }
+    if (!isFunction(e)) return;
+    if (e.operator === 'Block' && e.localScope !== undefined)
+      markFunctionBodyBlock(e.localScope);
+    for (const op of e.ops) walk(op);
+  };
+  walk(body);
+}
+
+/**
  * When a run of a block starts, give each assignment local of the block
  * (`recordAssignmentLocals()`, `assignment-locals.ts`) a binding with no value in `run`, the scope
  * where the statements of this run write: the call frame of a function body,
@@ -2409,6 +2455,11 @@ function createBlockLocals(
  * definition, or entered later in the same engine, was written by
  * `function g(k) { t = k + 1; t }`. With it, each call of `g` has its own
  * `t`, and a later declaration of `t` is not changed by a call.
+ *
+ * In a block written in the body of a function literal, a read of the
+ * local before the run assigns it is the `read-before-declaration` error:
+ * in `function g(k) { u = t; t = k; u }` the call `g(1)` is that error, not
+ * the bare symbol `t`.
  */
 export function declareAssignmentLocals(
   ce: ComputeEngine,
@@ -2417,6 +2468,7 @@ export function declareAssignmentLocals(
 ): void {
   const names = assignmentLocalsOf(block);
   if (names === undefined) return;
+  const readIsError = isFunctionBodyBlock(block);
   for (const name of names) {
     if (run.bindings.has(name)) continue;
     // Installed by direct map surgery, journaled for `checkpoint()` and
@@ -2428,7 +2480,18 @@ export function declareAssignmentLocals(
     });
     half._blockLocal = true;
     ce._checkpointWindow?.noteCreated(half);
-    run.bindings.set(name, { value: half });
+    // In a block written in the body of a function literal, the mark tells
+    // a read that finds this binding with no value that the block has not
+    // assigned the local yet in this run: the read is the
+    // `read-before-declaration` error, not the bare symbol
+    // (`_readBeforeDeclaration` in `boxed-expression/boxed-symbol.ts`). In a
+    // block outside every function literal, the read stays the bare symbol
+    // (`isFunctionBodyBlock()`, `assignment-locals.ts`).
+    const local: BoxedDefinition & { _assignmentLocal?: boolean } = {
+      value: half,
+    };
+    if (readIsError) local._assignmentLocal = true;
+    run.bindings.set(name, local);
     noteScopeDeclaration(run);
   }
 }

@@ -14,6 +14,9 @@ const ce = new ComputeEngine();
 // equality methods answer `false`, `Equal` is `False` and `NotEqual` is
 // `True`. Their order has no meaning: the order methods answer `undefined`
 // and the order operators stay unevaluated (`quantityDimensionsDiffer()`).
+// A quantity whose unit is dimensionless and not logarithmic (`percent`,
+// `deg`, `rad`) and a number compare as two values: the number has a unit
+// of scale 1, so `6 percent` is `0.06` and `180 deg` is `π`.
 
 /** `unequal`: not equal, and not ordered (different dimensions). */
 type Verdict = 'equal' | 'less' | 'greater' | 'unequal' | 'undecided';
@@ -114,12 +117,93 @@ const ROWS: Row[] = [
     name: '6 percent vs 0.06 (a dimensionless quantity and a number)',
     latex: ['6\\,\\mathrm{percent}', '0.06'],
     json: [['Quantity', 6, 'percent'], 0.06],
-    verdict: 'undecided',
+    verdict: 'equal',
+  },
+  {
+    name: '6 percent vs 0.07',
+    latex: ['6\\,\\mathrm{percent}', '0.07'],
+    json: [['Quantity', 6, 'percent'], 0.07],
+    verdict: 'less',
+  },
+  {
+    name: '6 percent vs 3/50 (exact)',
+    latex: ['6\\,\\mathrm{percent}', '\\frac{3}{50}'],
+    json: [
+      ['Quantity', 6, 'percent'],
+      ['Rational', 3, 50],
+    ],
+    verdict: 'equal',
+  },
+  {
+    name: '1000000 ppm vs 1',
+    latex: ['1000000\\,\\mathrm{ppm}', '1'],
+    json: [['Quantity', 1000000, 'ppm'], 1],
+    verdict: 'equal',
   },
   {
     name: '30 deg vs 1 (an angle and a number)',
     latex: ['30\\,\\mathrm{deg}', '1'],
     json: [['Quantity', 30, 'deg'], 1],
+    verdict: 'less',
+  },
+  {
+    name: '30 deg vs π/6 (exact)',
+    latex: ['30\\,\\mathrm{deg}', '\\frac{\\pi}{6}'],
+    json: [
+      ['Quantity', 30, 'deg'],
+      ['Divide', 'Pi', 6],
+    ],
+    verdict: 'equal',
+  },
+  {
+    name: '180 deg vs π (exact)',
+    latex: ['180\\,\\mathrm{deg}', '\\pi'],
+    json: [['Quantity', 180, 'deg'], 'Pi'],
+    verdict: 'equal',
+  },
+  {
+    name: '180 deg vs 3.14159 (float)',
+    latex: ['180\\,\\mathrm{deg}', '3.14159'],
+    json: [['Quantity', 180, 'deg'], 3.14159],
+    verdict: 'greater',
+  },
+  {
+    name: '1 turn vs 2π (exact)',
+    latex: ['1\\,\\mathrm{turn}', '2\\pi'],
+    json: [
+      ['Quantity', 1, 'turn'],
+      ['Multiply', 2, 'Pi'],
+    ],
+    verdict: 'equal',
+  },
+  {
+    name: '1 rad vs 1',
+    latex: ['1\\,\\mathrm{rad}', '1'],
+    json: [['Quantity', 1, 'rad'], 1],
+    verdict: 'equal',
+  },
+  {
+    name: 'π rad vs 180 deg (a constant juxtaposed with a unit)',
+    latex: ['\\pi\\,\\mathrm{rad}', '180\\,\\mathrm{deg}'],
+    json: [
+      ['Quantity', 'Pi', 'rad'],
+      ['Quantity', 180, 'deg'],
+    ],
+    verdict: 'equal',
+  },
+  {
+    name: '6 dB vs 6 (a logarithmic unit and a number)',
+    latex: ['6\\,\\mathrm{dB}', '6'],
+    json: [['Quantity', 6, 'dB'], 6],
+    verdict: 'undecided',
+  },
+  {
+    name: '1 dB vs 1 Np (two logarithmic units)',
+    latex: ['1\\,\\mathrm{dB}', '1\\,\\mathrm{Np}'],
+    json: [
+      ['Quantity', 1, 'dB'],
+      ['Quantity', 1, 'Np'],
+    ],
     verdict: 'undecided',
   },
   {
@@ -805,23 +889,24 @@ describe('QUANTITIES OF DIFFERENT DIMENSIONS', () => {
   });
 
   // Not decided: a unit that is not in the unit table, a value that is not
-  // known to be a number, a dimensionless quantity and a number, an absent
-  // magnitude
+  // known to be a number, a quantity with a logarithmic unit and a number, an
+  // absent magnitude
   test('undecided cases', () => {
     expect(q(6, 'foo').isEqual(q(6, 'm'))).toBe(undefined);
     expect(evalStr(['Equal', Q(6, 'foo'), Q(6, 'm')])).toBe('Equal');
     expect(q(6, 'm').isEqual(ce.box('y'))).toBe(undefined);
     expect(evalStr(['Equal', Q(6, 'm'), 'y'])).toBe('Equal');
-    expect(q(6, 'percent').isEqual(ce.box(0.06))).toBe(undefined);
-    expect(q(6, 'rad').isEqual(ce.box(6))).toBe(undefined);
+    expect(q(6, 'percent').isEqual(ce.box('y'))).toBe(undefined);
+    expect(q(6, 'dB').isEqual(ce.box(6))).toBe(undefined);
+    expect(q(6, 'Np').isEqual(ce.box(6))).toBe(undefined);
     expect(q('Missing', 'm').isEqual(q(6, 's'))).toBe(undefined);
     // A list is not decided by the dimensions here
     expect(
       evalStr(['Equal', Q(6, 'm'), ['List', Q(6, 'm'), Q(600, 'cm')]])
     ).toBe('Equal');
-    // A dimensionless quantity and a number
-    expect(evalStr(['Equal', Q(6, 'percent'), 0.06])).toBe('Equal');
-    expect(evalStr(['Equal', Q(30, 'deg'), 1])).toBe('Equal');
+    // A quantity with a logarithmic unit and a number
+    expect(evalStr(['Equal', Q(6, 'dB'), 6])).toBe('Equal');
+    expect(evalStr(['Equal', Q(1, 'dB'), Q(1, 'Np')])).toBe('Equal');
     expect(evalStr(['Equal', Q('Missing', 'm'), Q(6, 's')])).not.toBe('False');
     // `Undefined` is an absent magnitude too
     expect(q('Undefined', 'm').isEqual(q(6, 's'))).toBe(undefined);
@@ -853,5 +938,210 @@ describe('QUANTITIES OF DIFFERENT DIMENSIONS', () => {
         .evaluate()
         .toString()
     ).toBe('[6 m,600 cm]');
+  });
+});
+
+// A quantity whose unit is dimensionless and not logarithmic is compared
+// with a number as a value: the number has a unit of scale 1
+// (`compareQuantities()`, `src/compute-engine/library/quantity-compare.ts`).
+describe('A DIMENSIONLESS QUANTITY AND A NUMBER', () => {
+  const Q = (mag: MathJsonExpression, unit: MathJsonExpression) =>
+    ['Quantity', mag, unit] as MathJsonExpression;
+  const q = (mag: MathJsonExpression, unit: MathJsonExpression) =>
+    ce.box(Q(mag, unit)).evaluate();
+  const str = (r: Expression) => r.symbol ?? r.toString();
+  const evalStr = (x: MathJsonExpression) => str(ce.box(x).evaluate());
+  const nStr = (x: MathJsonExpression) => str(ce.box(x).N());
+
+  test('every dimensionless unit of the unit table', () => {
+    expect(q(6, 'percent').isEqual(ce.box(0.06))).toBe(true);
+    expect(q(2, 'ppm').isEqual(ce.box(['Rational', 2, 1000000]))).toBe(true);
+    expect(q(2, 'rad').isEqual(ce.box(2))).toBe(true);
+    expect(q(180, 'deg').isEqual(ce.Pi)).toBe(true);
+    expect(q(100, 'grad').isEqual(ce.box(['Divide', 'Pi', 2]))).toBe(true);
+    expect(q(1, 'turn').isEqual(ce.box(['Multiply', 2, 'Pi']))).toBe(true);
+    expect(q(60, 'arcmin').isEqual(ce.box(['Divide', 'Pi', 180]))).toBe(true);
+    expect(q(3600, 'arcsec').isEqual(ce.box(['Divide', 'Pi', 180]))).toBe(true);
+    // A compound unit whose dimension is zero
+    expect(q(1, ['Divide', 'm', 'km']).isEqual(ce.box(0.001))).toBe(true);
+  });
+
+  test('exact comparison of two exact values', () => {
+    // `π/180 + 10⁻³⁰` is not `1 deg`, also at the working precision
+    const tiny = ['Power', 10, -30] as MathJsonExpression;
+    const piOver180 = ['Divide', 'Pi', 180] as MathJsonExpression;
+    expect(q(1, 'deg').isEqual(ce.box(['Add', piOver180, tiny]))).toBe(false);
+    expect(q(1, 'deg').isLess(ce.box(['Add', piOver180, tiny]))).toBe(true);
+    expect(evalStr(['Less', Q(1, 'deg'), ['Add', piOver180, tiny]])).toBe(
+      'True'
+    );
+    // Under `.N()` too
+    expect(nStr(['Less', Q(1, 'deg'), ['Add', piOver180, tiny]])).toBe('True');
+    expect(nStr(['Equal', Q(1, 'deg'), ['Add', piOver180, tiny]])).toBe(
+      'False'
+    );
+    const half = ['Subtract', ['Rational', 1, 2], tiny] as MathJsonExpression;
+    expect(nStr(['Less', Q(half, 'rad'), ['Rational', 1, 2]])).toBe('True');
+    expect(nStr(['Less', ['Rational', 1, 2], Q(half, 'rad')])).toBe('False');
+    // `.is()` keeps the tolerance
+    expect(q(1, 'deg').is(ce.box(['Add', piOver180, tiny]))).toBe(true);
+  });
+
+  test('a JavaScript number', () => {
+    expect(q(6, 'percent').is(0.06)).toBe(true);
+    expect(q(6, 'percent').is(0.07)).toBe(false);
+    expect(q(6, 'percent').is(0.0600000001, 1e-6)).toBe(true);
+    expect(q(100, 'percent').is(1n)).toBe(true);
+    expect(q(6, 'percent').isLess(0.07)).toBe(true);
+    expect(q(6, 'percent').isGreater(0.05)).toBe(true);
+    expect(q(6, 'percent').isLessEqual(0.06)).toBe(true);
+    expect(q(6, 'm').is(6)).toBe(false);
+  });
+
+  test('`.is()` is symmetric', () => {
+    expect(ce.box(0.06).is(q(6, 'percent'))).toBe(true);
+    expect(ce.box(['Rational', 3, 50]).is(q(6, 'percent'))).toBe(true);
+    expect(ce.Pi.is(q(180, 'deg'))).toBe(true);
+    expect(ce.box(['Divide', 'Pi', 6]).is(q(30, 'deg'))).toBe(true);
+    expect(ce.Pi.is(q(179, 'deg'))).toBe(false);
+  });
+
+  test('a number that is the value of an expression or of a symbol', () => {
+    ce.assign('ratioValue', 0.06);
+    const r = ce.box('ratioValue');
+    expect(q(6, 'percent').isEqual(r)).toBe(true);
+    expect(q(6, 'percent').is(r)).toBe(true);
+    expect(r.is(q(6, 'percent'))).toBe(true);
+    expect(q(6, 'percent').isLessEqual(r)).toBe(true);
+    expect(evalStr(['Equal', Q(6, 'percent'), 'ratioValue'])).toBe('True');
+    expect(q(6, 'percent').isEqual(ce.box(['Add', 0.05, 0.01]))).toBe(true);
+    expect(q(6, 'percent').isLess(ce.box(['Add', 0.05, 0.02]))).toBe(true);
+    expect(ce.box(['Add', 0.05, 0.02]).isGreater(q(6, 'percent'))).toBe(true);
+  });
+
+  test('a chain', () => {
+    expect(evalStr(['Less', Q(6, 'percent'), 0.07, Q(8, 'percent')])).toBe(
+      'True'
+    );
+    expect(evalStr(['Equal', Q(180, 'deg'), 'Pi', Q(0.5, 'turn')])).toBe(
+      'True'
+    );
+    expect(evalStr(['Equal', Q(180, 'deg'), 'Pi', Q(1, 'turn')])).toBe('False');
+  });
+
+  test('Max, Min, Sort and Clamp', () => {
+    // The operand is kept as it is written
+    expect(evalStr(['Max', Q(6, 'percent'), 0.05])).toBe('6 percent');
+    expect(evalStr(['Max', 0.05, Q(6, 'percent')])).toBe('6 percent');
+    expect(nStr(['Max', Q(6, 'percent'), 0.05])).toBe('6 percent');
+    expect(evalStr(['Min', Q(6, 'percent'), 0.05])).toBe('0.05');
+    expect(evalStr(['Min', Q(6, 'percent'), 0.05, Q(4, 'percent')])).toBe(
+      '4 percent'
+    );
+    expect(evalStr(['Max', 'Pi', Q(181, 'deg')])).toBe('181 deg');
+    expect(
+      evalStr([
+        'Sort',
+        ['List', Q(6, 'percent'), 0.05, Q(1, 'rad'), 'Pi', Q(90, 'deg')],
+      ])
+    ).toBe('[0.05,6 percent,1 rad,90 deg,pi]');
+    expect(evalStr(['Clamp', Q(6, 'percent'), 0, 0.05])).toBe('0.05');
+    expect(evalStr(['Clamp', 0.5, Q(10, 'percent'), Q(20, 'percent')])).toBe(
+      '20 percent'
+    );
+    // A quantity with a dimension is not ordered against a number
+    expect(evalStr(['Max', Q(6, 'm'), 0.05])).toBe('max(6 m, 0.05)');
+  });
+
+  test('a logarithmic unit is not compared with a number', () => {
+    expect(evalStr(['Max', Q(6, 'dB'), 5])).toBe('max(6 dB, 5)');
+    expect(q(1, 'dB').isEqual(q(1, 'Np'))).toBe(undefined);
+    expect(q(1, 'dB').isEqual(q(1, 'dB'))).toBe(true);
+    expect(q(1, 'dB').isLess(q(2, 'dB'))).toBe(true);
+  });
+
+  test('the parse route', () => {
+    const parsed = (latex: string) => str(ce.parse(latex).evaluate());
+    expect(parsed('6\\,\\mathrm{percent} = 0.06')).toBe('True');
+    expect(parsed('6\\,\\mathrm{percent} < 0.07')).toBe('True');
+    expect(parsed('180\\,\\mathrm{deg} = \\pi')).toBe('True');
+    expect(parsed('30\\,\\mathrm{deg} = \\frac{\\pi}{6}')).toBe('True');
+    expect(parsed('\\pi\\,\\mathrm{rad} = \\pi')).toBe('True');
+    expect(parsed('\\max(6\\,\\mathrm{percent}, 0.05)')).toBe('6 percent');
+  });
+});
+
+// A quantity whose magnitude is an expression with no unknowns is compared
+// by its value on every route, as the `Equal` operator compares it.
+describe('A QUANTITY WHOSE MAGNITUDE IS AN EXPRESSION', () => {
+  const Q = (mag: MathJsonExpression, unit: MathJsonExpression) =>
+    ['Quantity', mag, unit] as MathJsonExpression;
+  const q = (mag: MathJsonExpression, unit: MathJsonExpression) =>
+    ce.box(Q(mag, unit));
+
+  test('a sum of floats', () => {
+    const a = q(2, 'm');
+    const b = q(['Add', 1.5, 0.5], 'm');
+    expect(a.isEqual(b)).toBe(true);
+    expect(b.isEqual(a)).toBe(true);
+    expect(a.is(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
+    expect(a.isLess(q(['Add', 1.5, 1], 'm'))).toBe(true);
+    expect(q(['Add', 1.5, 1], 'm').isGreater(a)).toBe(true);
+    expect(
+      ce.box(['Equal', Q(2, 'm'), Q(['Add', 1.5, 0.5], 'm')]).evaluate().symbol
+    ).toBe('True');
+  });
+
+  test('a symbol with a value', () => {
+    ce.assign('magnitudeValue', 2);
+    const c = q('magnitudeValue', 'm');
+    expect(q(2, 'm').isEqual(c)).toBe(true);
+    expect(c.isLessEqual(q(200, 'cm'))).toBe(true);
+    expect(c.isLess(q(3, 'm'))).toBe(true);
+  });
+
+  test('a magnitude with an unknown is not decided', () => {
+    expect(q(['Add', 3, 'x'], 'm').isEqual(q(2, 'm'))).toBe(undefined);
+  });
+});
+
+// A quantity whose compound unit cancels is the plain number of its
+// magnitude, as the quotient of two quantities with the same unit is.
+describe('A QUANTITY WHOSE UNIT CANCELS', () => {
+  test.each<[MathJsonExpression, MathJsonExpression]>([
+    [['Quantity', 2, ['Divide', 'm', 'm']], 2],
+    [['Quantity', 2, ['Multiply', 'm', ['Power', 'm', -1]]], 2],
+    [['Quantity', 2, { str: 'm/m' }], 2],
+    [['Quantity', 'Pi', ['Divide', 'rad', 'rad']], 'Pi'],
+    [
+      ['Quantity', ['Measurement', 2, 0.1], ['Divide', 's', 's']],
+      ['Measurement', 2, 0.1],
+    ],
+  ])('%j', (json, expected) => {
+    expect(ce.box(json).json).toEqual(expected);
+  });
+
+  test('the parse route', () => {
+    expect(ce.parse('2\\,\\mathrm{m/m}').json).toEqual(2);
+    expect(ce.parse('2\\,\\mathrm{m/m} = 2').evaluate().symbol).toBe('True');
+  });
+
+  test('a named or a compound dimensionless unit stays a unit', () => {
+    expect(ce.box(['Quantity', 2, 'percent']).json).toEqual([
+      'Quantity',
+      2,
+      'percent',
+    ]);
+    expect(ce.box(['Quantity', 2, 'rad']).operator).toBe('Quantity');
+    expect(ce.box(['Quantity', 12, ['Divide', 'in', 'ft']]).json).toEqual([
+      'Quantity',
+      12,
+      ['Divide', 'in', 'ft'],
+    ]);
+    // `rad·s/s` cancels to the named unit `rad`
+    expect(
+      ce.box(['Quantity', 2, ['Multiply', 'rad', ['Divide', 's', 's']]]).json
+    ).toEqual(['Quantity', 2, 'rad']);
   });
 });

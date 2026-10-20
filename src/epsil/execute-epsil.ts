@@ -32,6 +32,7 @@ import {
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
+import { readBeforeDeclarationSite } from '../compute-engine/boxed-expression/read-before-declaration.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';
@@ -516,7 +517,11 @@ function executeEpsilBatch(
             d.message[1] === describeError(markerError.json) &&
             d.range[0] === constantSite?.[0] &&
             d.range[1] === constantSite?.[1]
-        ));
+        )) ||
+      // A use of a local before it has a value: see
+      // `reportedAsReadBeforeDeclaration()`.
+      (markerError !== undefined &&
+        reportedAsReadBeforeDeclaration(markerError, diagnostics));
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
         // A `Map` or `Filter` view that holds no error can still give one
@@ -1249,7 +1254,11 @@ function nestedStatementReporter(
       // splices a `ListJoin` operand. A value nested in other ways still can
       // be deep.)
       const errors = lazyError !== undefined ? [lazyError] : result.errors;
-      if (errors.length > 0 && !failures.has(failureKey(errors[0]))) {
+      if (
+        errors.length > 0 &&
+        !failures.has(failureKey(errors[0])) &&
+        !reportedAsReadBeforeDeclaration(errors[0], diagnostics)
+      ) {
         failures.add(failureKey(errors[0]));
         diagnostics.push(
           errorValueDiagnostic(
@@ -1696,6 +1705,35 @@ function constantAssignmentName(e: unknown): string | undefined {
     return undefined;
   const name = (e as { constantName?: unknown }).constantName;
   return typeof name === 'string' ? name : undefined;
+}
+
+/**
+ * Whether `error` is a `read-before-declaration` error value that the
+ * static check already reported: a use of a local before it has a value (a
+ * read, a call, the collection of a `for` loop). The static check reports
+ * it as a `static-type-error` with the engine code
+ * `read-before-declaration`, at the range of the use. The engine keeps the
+ * range of the use on the error (`readBeforeDeclarationSite()`). The two
+ * are the same problem when the ranges are the same and the descriptions
+ * are the same (the same name, and the same kind of local), and the run
+ * does not report it a second time.
+ */
+function reportedAsReadBeforeDeclaration(
+  error: BoxedExpression,
+  diagnostics: ReadonlyArray<ParsingDiagnostic>
+): boolean {
+  const site = readBeforeDeclarationSite(error);
+  if (site === undefined) return false;
+  const description = describeError(error.json);
+  return diagnostics.some(
+    (d) =>
+      Array.isArray(d.message) &&
+      d.message[0] === 'static-type-error' &&
+      d.message[3] === 'read-before-declaration' &&
+      d.message[1] === description &&
+      d.range[0] === site[0] &&
+      d.range[1] === site[1]
+  );
 }
 
 /** The source range of the `Assign` node that made the write, when `e` is

@@ -87,7 +87,8 @@ import {
 } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { angularChainFactor } from '../symbolic/angular-unit.js';
-import { getUnitScale } from './unit-data.js';
+import { exactUnitConversion, getUnitScale } from './unit-data.js';
+import { isExactConstantExpression } from '../boxed-expression/compare.js';
 import {
   bigFresnelC,
   bigFresnelS,
@@ -1836,6 +1837,14 @@ const ANGULAR_UNITS = new Set([
  * If `expr` is a `Quantity` with an angular unit (deg, rad, grad, etc.),
  * return a plain numeric expression in radians.  Otherwise return `null`.
  *
+ * An EXACT magnitude (an exact number literal, or an exact constant
+ * expression such as `π/2`) is converted with the exact factor of the unit
+ * (`exactUnitConversion()`, which gives the factor as a fraction and a power
+ * of π): `30 deg` is `π/6`, so `sin(30 deg)` evaluates to `1/2`, as `sin(π/6)`
+ * does. The machine factor gave the float `0.5235987755982988`, and
+ * `evaluate()` then gave `0.4999999999999999`. A float magnitude is
+ * converted with the machine factor.
+ *
  * Only handles simple symbol units (not compound expressions).
  * The `Number.isFinite` check intentionally rejects both `undefined`
  * (from `.re` on non-numeric expressions) and `Infinity`.
@@ -1848,6 +1857,21 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
   const unitSymbol = unitArg.symbol;
 
   if (!ANGULAR_UNITS.has(unitSymbol)) return null;
+
+  const m = expr.op1;
+  if (
+    (isNumber(m) && m.isExact && m.isFinite === true) ||
+    (!isNumber(m) && isExactConstantExpression(m))
+  ) {
+    const map = exactUnitConversion(unitSymbol, 'rad');
+    if (map !== null && map.offset[0] === 0n) {
+      const ce = expr.engine;
+      const factor: Expression[] = [ce.number(map.factor)];
+      if (map.piPower !== 0)
+        factor.push(ce.function('Power', [ce.Pi, ce.number(map.piPower)]));
+      return ce.function('Multiply', [...factor, m]);
+    }
+  }
 
   const scale = getUnitScale(unitSymbol);
   if (scale === null) return null;

@@ -223,13 +223,20 @@ describe('an implicit local keeps its value inside one evaluation', () => {
 
   test('each call of a function starts with no value for the local', () => {
     // The local `t` of the loop body keeps its value across the iterations
-    // of one call, and the second call starts again: `t + 3`, not `t + 5`.
-    expect(
-      executeEpsil(
-        new ComputeEngine(),
-        'function g(k) scope { let last = 0; for i in 1..k { t = t + 1; last = t }; last }; [g(2), g(3)]'
-      ).value?.json
-    ).toEqual(['List', ['Add', 't', 2], ['Add', 't', 3]]);
+    // of one call: the second iteration reads the `t` of the first one. The
+    // next call starts again with no value: with `r` true, the first
+    // iteration reads `t` before it is assigned, which is an error in a
+    // function body. It does not read the `t = 3` of the previous call.
+    const value = executeEpsil(
+      new ComputeEngine(),
+      'function g(k, r) scope { let last = 0; for i in 1..k { if i > 1 || r { last = t }; t = i }; last }; [g(3, false), g(3, true), g(3, false)]'
+    ).value?.json as unknown[];
+    expect(value[0]).toBe('List');
+    expect(value[1]).toBe(2);
+    expect(JSON.stringify(value[2])).toContain(
+      `"'read-before-declaration'","'t'","'assignment'"`
+    );
+    expect(value[3]).toBe(2);
   });
 });
 

@@ -97,6 +97,7 @@ import {
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
 import { signatureNotes } from './signature-notes.js';
+import { readsBeforeAssignment } from './read-before-assignment.js';
 import {
   matchExhaustivenessDiagnostics,
   type AnnotationScope,
@@ -991,6 +992,13 @@ function canonicalizationDiagnostics(
       ce._epsilDeclarationRoute = enclosingRoute;
       afterBox?.();
     }
+
+    // A use of a local that is certain to come before the local has a
+    // value: the run gives the `read-before-declaration` error when the use
+    // runs.
+    diagnostics.push(
+      ...readBeforeAssignmentDiagnostics(boxed, statement, source)
+    );
 
     // The `match` exhaustiveness lint runs on the RAW statement (the patterns
     // are only readable there), but only after the statement is boxed: a
@@ -2503,6 +2511,53 @@ function writesFromFunctionBodies(
   return result;
 }
 
+/**
+ * The diagnostics of the uses of a local, in the canonical statement
+ * `boxed`, that are certain to come before the local has a value: an
+ * assignment local of a function body before its first assignment, a `let`
+ * or `const` local before its declaration (`readsBeforeAssignment()`,
+ * `read-before-assignment.ts`).
+ * `statement` is the raw top-level statement, whose range is used when the
+ * canonical tree has no range for the read.
+ *
+ * Each diagnostic is a `static-type-error` that carries the engine code
+ * `read-before-declaration`, at the symbol that reads the local. The
+ * description is the one the run time gives for the error value.
+ */
+function readBeforeAssignmentDiagnostics(
+  boxed: ReturnType<ComputeEngine['box']>,
+  statement: MathJsonExpression,
+  source: string
+): ParsingDiagnostic[] {
+  return readsBeforeAssignment(boxed).map(
+    ({ name, kind, read, statement: held }) => {
+      const [start, end] = read ?? held ?? statementRange(statement, source);
+      const [from, to] = held ?? statementRange(statement, source);
+      let snippet = source.slice(from, to).replaceAll(/\s+/g, ' ').trim();
+      if (snippet.length > SNIPPET_LENGTH)
+        snippet = `${snippet.slice(0, SNIPPET_LENGTH - 1)}…`;
+      return {
+        severity: 'error',
+        message: [
+          'static-type-error',
+          describeError([
+            'Error',
+            [
+              'ErrorCode',
+              { str: 'read-before-declaration' },
+              { str: name },
+              ...(kind === 'assignment' ? [{ str: 'assignment' }] : []),
+            ],
+          ]),
+          snippet,
+          'read-before-declaration',
+        ],
+        range: [start, end, start],
+      };
+    }
+  );
+}
+
 /** The source ranges of the function literals (`Function` nodes) in the raw
  * expression `expr`, at any depth. A `function` statement holds one too. */
 function functionLiteralRanges(expr: MathJsonExpression): [number, number][] {
@@ -3631,12 +3686,17 @@ export function describeError(error: MathJsonExpression): string {
       break;
     }
     case 'read-before-declaration':
-      // Payload: [name]. A local of a block was read in a run of the block
-      // before its `let` or `const` statement ran in that run.
+      // Payload: [name] or [name, "assignment"]. A local of a block was read
+      // in a run of the block before its `let` or `const` statement ran in
+      // that run. With "assignment", the local is a name that a block of a
+      // function body assigns with no declaration (an assignment local), and
+      // it was read before its first assignment ran.
       detail =
         payload.length === 0
           ? 'a local is used before its declaration has run'
-          : `\`${payload[0]}\` is used before its \`let\` or \`const\` has run in this block`;
+          : payload[1] === 'assignment'
+            ? `\`${payload[0]}\` is read before its first assignment: the assignment makes \`${payload[0]}\` a local of the block, which has no value yet`
+            : `\`${payload[0]}\` is used before its \`let\` or \`const\` has run in this block`;
       break;
     case 'dot-call-not-a-protocol-function': {
       // Payload: [name, receiver type]. The dot reaches protocol members

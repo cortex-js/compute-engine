@@ -145,10 +145,18 @@ describe('LIBRARY BOOTSTRAP DECLARES NO NAME', () => {
     // The quotient cancels `J` and rebuilds the unit `K·s`
     expect(
       ce.box(['Divide', 'PlanckConstant', 'BoltzmannConstant']).evaluate().json
-    ).toEqual(['Quantity', 4.799243073366221e-11, ['Multiply', 'K', 's']]);
+    ).toEqual([
+      'Quantity',
+      { num: '4.79924307336622124812e-11' },
+      ['Multiply', 'K', 's'],
+    ]);
     expect(
       ce.box(['Multiply', 'PlanckConstant', 'SpeedOfLight']).N().json
-    ).toEqual(['Quantity', 1.9864458571489286e-25, ['Multiply', 'J', 'm']]);
+    ).toEqual([
+      'Quantity',
+      { num: '1.9864458571489287e-25' },
+      ['Multiply', 'J', 'm'],
+    ]);
     expect(boundUnitNames(ce)).toEqual([]);
   });
 

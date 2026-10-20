@@ -16,7 +16,8 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { asFloat } from '../boxed-expression/float-result.js';
+import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
 import {
   affineMagnitude,
   boxedToUnitExpression,
@@ -31,6 +32,7 @@ import {
   convertUnit,
   unitConversionCoefficients,
   convertCompoundUnit,
+  exactUnitConversion,
   dimensionsEqual,
   isDimensionless,
   getExpressionScale,
@@ -98,6 +100,32 @@ function convertMagnitude(
   targetUE: ReturnType<typeof boxedToUnitExpression>
 ): Expression | undefined {
   const numeric = !isMeasurement(mag) && !isSymbolicValue(mag);
+  // Above machine precision (`bignumPreferred()`), a float magnitude is
+  // converted with the exact factor and offset of the conversion
+  // (`exactUnitConversion()`), at the working precision: the machine factor
+  // `0.01` of `cm → m` converts `1.3 cm` to `0.013000000000000001 m`. An
+  // exact magnitude keeps the rule below: a conversion that is not exact
+  // gives a float.
+  if (
+    numeric &&
+    hasFloatOperand([mag]) &&
+    bignumPreferred(ce) &&
+    opUE &&
+    targetUE
+  ) {
+    const map = exactUnitConversion(opUE, targetUE);
+    if (map !== null) {
+      const factor = [ce.number(map.factor)];
+      if (map.piPower !== 0)
+        factor.push(ce.function('Power', [ce.Pi, ce.number(map.piPower)]));
+      return ce
+        .function('Add', [
+          ce.function('Multiply', [...factor, mag]),
+          ce.number(map.offset),
+        ])
+        .evaluate();
+    }
+  }
   // The conversion is numeric only when it is not exact, so the result is a
   // float, also when its value is an integer: `100 cm` converted to `m` is
   // the float `1`.

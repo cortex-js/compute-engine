@@ -2218,6 +2218,11 @@ export interface IComputeEngine {
   ): Expression | undefined;
   /** True while `_pushShadowedParameters` has registered `name`. @internal */
   _isShadowedParameter(name: string): boolean;
+  /** True while any construct has pushed names with
+   * `_pushShadowedParameters`, even no name: a function literal or a `Block`
+   * is being canonicalized. False at the top level of a canonicalization.
+   * @internal */
+  _hasShadowedParameterFrame(): boolean;
   /**
    * The `resolveSymbol` handler of the `ce.parse()` call in progress — the
    * caller's per-call handler, else the engine-wide one — or `undefined`

@@ -6,6 +6,7 @@ import {
 import {
   isAbsentSymbol,
   isCharacter,
+  isFunction,
   isNumber,
   isString,
   isSymbol,
@@ -50,8 +51,15 @@ export type QuantityCompareOptions = {
  * The order of the two quantities `a` and `b` by their physical value:
  * `-1` when `a < b`, `0` when they are equal, `1` when `a > b`.
  *
- * Returns `undefined` when `a` or `b` is not a `Quantity`, when the two
- * units have different dimensions (`6 W` and `6 m`: they are not equal, see
+ * One of `a` and `b` can be a number (a number literal, or an exact
+ * constant expression such as `π/6`) when the other is a quantity whose unit
+ * is dimensionless and not logarithmic: the number is a value with a unit
+ * of scale 1 (`quantityOperands()`). So `6 percent` and `0.06` are equal,
+ * `180 deg` and `π` are equal, and `6 percent` is less than `0.07`.
+ *
+ * Returns `undefined` when `a` or `b` is not a `Quantity` (except for the
+ * number above), when the two units have different dimensions (`6 W` and
+ * `6 m`: they are not equal, see
  * `quantityDimensionsDiffer()`, but they have no order), when a unit is not
  * known, when a magnitude has no real value (a symbol with no value, a
  * complex number, also `1 + 10⁻⁸⁰⁰i`), or when the order cannot be decided.
@@ -96,18 +104,25 @@ export function compareQuantities(
   b: Expression,
   options: QuantityCompareOptions
 ): -1 | 0 | 1 | undefined {
-  if (!isQuantity(a) || !isQuantity(b)) return undefined;
-
-  const aUE = boxedToUnitExpression(a.op2);
-  const bUE = boxedToUnitExpression(b.op2);
-  if (!aUE || !bUE) return undefined;
+  const operands = quantityOperands(a, b);
+  if (operands === undefined) return undefined;
+  const [aMagnitude, aUE, bMagnitude, bUE] = operands;
 
   const aDim = getExpressionDimension(aUE);
   const bDim = getExpressionDimension(bUE);
   if (!aDim || !bDim || !dimensionsEqual(aDim, bDim)) return undefined;
 
-  let aMag = a.op1;
-  let bMag = b.op1;
+  // The scale of a logarithmic unit (`dB`, `Np`) in the unit table is
+  // nominal: `1 Np` is not `1 dB`. Two quantities with different units of
+  // which one is logarithmic have no known order.
+  if (
+    JSON.stringify(aUE) !== JSON.stringify(bUE) &&
+    (hasLogarithmicUnit(aUE) || hasLogarithmicUnit(bUE))
+  )
+    return undefined;
+
+  let aMag = aMagnitude;
+  let bMag = bMagnitude;
   if (isMeasurement(aMag) || isMeasurement(bMag)) {
     if (!options.nominal) return undefined;
     aMag = measurementNominal(aMag);
@@ -207,10 +222,9 @@ export function compareQuantities(
  *
  * False when the dimension of a unit is not known (a symbol that is not in
  * the unit table), when a dimensionless quantity is compared with a number
- * (`6 percent` and `0.06`, `30 deg` and `1`: such a quantity can be equal to
- * a number), and when the magnitude is an
- * absent value, `Missing` or `Undefined` (an absent value is not known to be
- * different).
+ * (`6 percent` and `0.06`, `30 deg` and `1`: `compareQuantities()` compares
+ * them by their values), and when the magnitude is an absent value,
+ * `Missing` or `Undefined` (an absent value is not known to be different).
  */
 export function quantityDimensionsDiffer(
   a: Expression,
@@ -242,6 +256,75 @@ export function quantityDimensionsDiffer(
     isNumber(other) ||
     (isExactConstantExpression(other) && other.type.matches('number'))
   );
+}
+
+/**
+ * The unit of a dimensionless value that is not a quantity (a number): the
+ * radian. Its scale is exactly 1, with no power of π, and it is the
+ * coherent SI unit of a dimensionless value. So `6 percent` compared with
+ * the number `0.06` is `6 percent` compared with `0.06 rad`, and
+ * `180 deg` compared with `π` is `180 deg` compared with `π rad`.
+ */
+const SCALE_ONE_UNIT: UnitExpression = 'rad';
+
+/** The units of the unit table whose scale is nominal: a quantity with
+ * such a unit is not compared with a number, nor with a quantity that has
+ * another unit. */
+const LOGARITHMIC_UNITS = new Set(['dB', 'Np']);
+
+/** True when the unit expression `unit` has a logarithmic unit
+ * (`LOGARITHMIC_UNITS`) in it, at any depth. */
+function hasLogarithmicUnit(unit: UnitExpression): boolean {
+  if (typeof unit === 'string') return LOGARITHMIC_UNITS.has(unit);
+  return unit.some(
+    (part, i) =>
+      i > 0 &&
+      (typeof part === 'string' || Array.isArray(part)) &&
+      hasLogarithmicUnit(part as UnitExpression)
+  );
+}
+
+/**
+ * The magnitudes and the unit expressions of the two operands of
+ * `compareQuantities()`: `[aMagnitude, aUnit, bMagnitude, bUnit]`, or
+ * `undefined` when the two operands are not comparable as quantities.
+ *
+ * - Two quantities give their magnitudes and their units.
+ * - A quantity whose unit is dimensionless and not logarithmic (`percent`,
+ *   `deg`, `rad`), and a number (a number literal, or an exact constant
+ *   expression with a number type such as `π` or `π/6`): the number is a
+ *   value with the unit `SCALE_ONE_UNIT`, whose scale is 1. So
+ *   `6 percent` and `0.06` are equal, and `180 deg` and `π` are equal.
+ *
+ * A unit that the unit table does not know gives `undefined`.
+ */
+function quantityOperands(
+  a: Expression,
+  b: Expression
+): [Expression, UnitExpression, Expression, UnitExpression] | undefined {
+  const aQuantity = isQuantity(a);
+  const bQuantity = isQuantity(b);
+  if (aQuantity && bQuantity) {
+    const aUE = boxedToUnitExpression(a.op2);
+    const bUE = boxedToUnitExpression(b.op2);
+    if (!aUE || !bUE) return undefined;
+    return [a.op1, aUE, b.op1, bUE];
+  }
+  if (aQuantity === bQuantity) return undefined;
+  const [q, other] = aQuantity ? [a, b] : [b, a];
+  if (!isFunction(q, 'Quantity')) return undefined;
+  if (
+    !isNumber(other) &&
+    !(isExactConstantExpression(other) && other.type.matches('number'))
+  )
+    return undefined;
+  const unit = boxedToUnitExpression(q.op2);
+  if (!unit || hasLogarithmicUnit(unit)) return undefined;
+  const dim = getExpressionDimension(unit);
+  if (!dim || !isDimensionless(dim)) return undefined;
+  return aQuantity
+    ? [q.op1, unit, other, SCALE_ONE_UNIT]
+    : [other, SCALE_ONE_UNIT, q.op1, unit];
 }
 
 /** The dimension of the unit of the quantity `q`, or `null` when it is not

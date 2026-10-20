@@ -360,24 +360,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 
 ### Smaller defects found on 2026-10-19 by the derivative, LaTeX and matrix-power fixes (OPEN, small)
 
-- A sum or a product with no bounds reads its index as a one-point range.
-  `\sum_k x^k` is `Sum(x^k, Limits(k, Nothing, Nothing))`.
-  `Sum(x^(k-1), Limits(k, Nothing, Nothing))` evaluates to `1/x` and
-  `Sum(x^k, Limits(k, Nothing, Nothing))` to `Error("missing")`; `\prod_k x^k`
-  is also `Error("missing")`, and `\sum_k y` and `\prod_k y` canonicalize to
-  `y`. Expected: all of them stay unevaluated, as
-  `Sum(k, Limits(k, Nothing, Nothing))` does (a clause with no bounds runs over
-  the default domain: `\sum_k \frac{1}{k^2}` `.N()` is `1.6449…`). Cause:
-  `isDegenerateBounds()` (`library/utils.ts`) is true because
-  `lower.isSame(upper)` is true for two `Nothing` symbols; then
-  `degenerateBigOpTerm()` substitutes `k := Nothing` into the body, and on the
-  canonical route `isVacuousIndexingSet()` drops the indexing set. Fix:
-  `isDegenerateBounds()` is false when a bound is `Nothing`; also check the
-  telescoping step of `symbolicSumClosedForm()` and
-  `symbolicProductClosedForm()`, which substitutes the bounds without that
-  check. `\sum_k y` changes its canonical form, so count the changed snapshots.
-  (`library/utils.ts` was staged with other work on 2026-10-19, so this waits
-  for that commit.)
 - In a product that has a matrix, a nested product with no matrix loses the
   order of its factors: `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]`
   (with `A` a matrix and `g`, `k` undeclared functions) boxes to
@@ -397,8 +379,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   the expression is boxed. A decision is necessary: either a negative power of
   an operand that can be a matrix stays a `Power` (the matrix inverse once the
   value is known), or it stays element-wise. The code is in `canonicalPower`
-  (`boxed-expression/arithmetic-power.ts`). User decision 2026-10-19: a
-  negative power of an operand that can be a matrix stays a `Power`.
+  (`boxed-expression/arithmetic-power.ts`). User decision 2026-10-19: a negative
+  power of an operand that can be a matrix stays a `Power`.
 - A symbol declared `error` with no value (`ce.declare('e', 'error')`) is
   checked by two different rules. On a ground signature it is admitted:
   `g1: (number) -> number` with `g1(e)` is valid and evaluates to itself, and so
@@ -412,6 +394,35 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   the ground route too, at a parameter that does not accept `error`, or (B)
   admit it on the generic route too. If nothing is decided, the two routes keep
   giving different answers. User decision 2026-10-19: (B).
+- Found 2026-10-19 by the error pass-through work (worktree
+  `~/dev/ce-wt-errpass`, not yet applied). With `e` declared `error` and no
+  value, and `w` holding the error of `Ln("a")`:
+  - An overloaded signature `((number) -> number) & ((string) -> string)`
+    refuses `e` ("expected `number | string`, got `error`"), while the ground
+    signature `(number) -> number` admits it (`prefilterAdmits()`,
+    `boxed-expression/overload.ts`). Under the 2026-10-19 decision (a valueless
+    `error` symbol is admitted on the generic route as on the ground route), the
+    overload route should probably admit it too.
+  - Two ground `unknown` parameters disagree: a library operator declared
+    `(unknown) -> unknown` and a function-literal parameter `a: unknown` refuse
+    `e`, while a function name declared `(unknown) -> unknown` and a generic
+    `T: unknown` admit it.
+  - `Apply(w, 1)` and `w(1)` stay `w(1)` instead of giving the error of `Ln`
+    (`_invalidValue()` / `applyFunctionLiteral` in
+    `boxed-expression/boxed-function.ts`).
+  - `Length(e)` is valid when it is boxed but evaluates to "expected
+    `collection`, got `error`": the check at boxing and the check at evaluation
+    disagree.
+- A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix,
+  worktree `~/dev/ce-wt-nothing`, not yet applied). `.N()` runs `\sum_k f(k)`
+  over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is `1.6449…`), but `evaluate()`
+  tries no closed form and leaves it unevaluated, while
+  `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `π²/6`. A decision is
+  necessary: (A) a sum with no bounds means `k = 1..∞` on every route, so
+  `evaluate()` gives `π²/6`; (B) it is an indefinite sum (Mathematica reads
+  `Sum[f, k]` as an antidifference), and `.N()` should not give a number either;
+  (C) keep today's split. Also, `\sum x^k` with no subscript is `Sum(x^k)` with
+  no indexing clause and evaluates to `x^k`; check whether that is intended.
 - The parse route does not infer the type of a symbol in a juxtaposed product.
   `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
   `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
@@ -419,15 +430,38 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   symbol as a scalar on both routes (see `mayBeTensorProductOperand()` in
   `boxed-expression/order.ts`), so the difference does not change a product's
   order today.
-- A symbol with two subscripts does not round-trip through LaTeX. The canonical
-  form of `Subscript(Subscript(x, 1), 2)` is the symbol `x_1_2` (also the parse
-  of `x_1_2`, `x_{1}_{2}` and `{x_1}_2`). The symbol serializer
-  (`serializeSymbol` in `latex-syntax/serializer.ts`) joins the subscripts with
-  a comma, `x_{1,2}`, which reads back as `Subscript(x, Sequence(1, 2))` (or
-  `At(M, 1, 2)` for a matrix `M`). A decision is necessary: write such a symbol
-  in a form that reads back (for example `{x_{1}}_{2}`), or keep the comma
-  spelling and say that it is for display. User decision 2026-10-19: write
-  `{x_{1}}_{2}`.
+- A symbol with two subscripts whose base is an indexed collection does not
+  round-trip through LaTeX. With `A` declared as a matrix, the symbol `A_1_2` is
+  written `{A_1}_2`, which reads back as `Subscript(At(A, 1), 2)`; the older
+  spelling `A_{1,2}` read back as `At(A, 1, 2)`. With `M_1` declared as a list,
+  `{M_1}_2` reads back as `At(M_1, 2)`. The parser reads a subscript of a
+  collection as an index unless the joined name is declared
+  (`absorbSubscripts()` in `latex-syntax/parse-symbol.ts`), and a single
+  subscript has the same problem (`A_1`). The current output is pinned in
+  `test/compute-engine/latex-syntax/double-subscript-symbol.test.ts`.
+- A wildcard name with a style does not round-trip through LaTeX. The name is
+  written in `\operatorname{}` with the style inside it, and the parser does not
+  accept a style command there: `_a_bold` is written
+  `\operatorname{\_\mathbf{a}}`, `_a_bold_1` is `\operatorname{\_\mathbf{a}_1}`
+  and `_x_bold_1` is `\operatorname{\_\mathbf{x}_1}`, and each one is a parse
+  error. `_x_1_bold` is written `\operatorname{\_x_{\mathbf{1}}}`, which reads
+  back as `_x_one_bold`.
+- A name with the upright style after its first part does not round-trip when
+  the parser drops that style. The parser keeps `\mathrm{}` only around a
+  one-character body, so no spelling reads back as `x_1_upright` (it is written
+  `x_{\mathrm{1}}`, which reads back as `x_one`) or as `speed_upright_1` (it is
+  written `\mathrm{speed}_1`, which reads back as `speed_1`). The parser never
+  produces these names; they come from MathJSON.
+- A symbol whose name has a superscript part does not round-trip through LaTeX
+  when its base is one letter: `x__a` is written `x^{a}`, which reads back as
+  `Power(x, a)`, and `aleph__plus` is written `\aleph^{+}`, which reads back as
+  `PseudoInverse(aleph)`. A name with two superscript parts joins them with a
+  comma, `R_blackboard__0__plus` → `\mathbb{R^{0,+}}`, which does not parse. A
+  multi-letter base reads back (`mass__earth` → `\mathrm{mass^{earth}}`). A name
+  with a style and a superscript does not read back either: `x_bold__a` is
+  written `\mathbf{x^{a}}`, which reads back as `x__a_bold`. A decision is
+  necessary: choose a spelling that reads back as the symbol (for example
+  `\operatorname{x^{a}}`), or say that these names are for display only.
 - The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
   and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
   `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A

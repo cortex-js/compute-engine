@@ -3236,6 +3236,11 @@ export class ComputeEngine implements IComputeEngine {
     return false;
   }
 
+  /** See `IComputeEngine._hasShadowedParameterFrame`. @internal */
+  _hasShadowedParameterFrame(): boolean {
+    return this._shadowedParameterStack.length > 0;
+  }
+
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined {
     const stack = this._shadowedParameterStack;

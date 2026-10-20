@@ -45,7 +45,14 @@ import type { SmallInteger } from '../numerics/types.js';
 
 import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
-import { cmp, eq, eqIdentical, quantityOrder, same } from './compare.js';
+import {
+  cmp,
+  eq,
+  eqIdentical,
+  quantityComparableValue,
+  quantityOrder,
+  same,
+} from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import {
   isSymbol,
@@ -886,10 +893,31 @@ export abstract class _BoxedExpression implements Expression {
     // Two quantities with units of the same dimension compare by their
     // physical value within the tolerance: `1000 m` is `1 km`. Their unit
     // symbols are free variables, so the check below would answer `false`.
-    if (other instanceof _BoxedExpression) {
+    // A quantity whose unit is dimensionless compares with a number in the
+    // same way: `6 percent` is `0.06`, also when `0.06` is a JavaScript
+    // number.
+    const otherQuantityOperand =
+      other instanceof _BoxedExpression
+        ? other
+        : this.operator === 'Quantity' &&
+            (typeof other === 'number' || typeof other === 'bigint')
+          ? this.engine.number(other)
+          : undefined;
+    if (otherQuantityOperand !== undefined) {
+      // When one side only is a quantity, the other side can have a number
+      // value that is not a number literal as written (`0.05 + 0.01`, a
+      // symbol whose value is `0.06`): its value is compared, exact when it
+      // has an exact value, as `isEqual()` does
+      // (`quantityComparableValue()`). So `6 percent` is `0.05 + 0.01`, in
+      // both directions.
+      const oneQuantity =
+        (this.operator === 'Quantity') !==
+        (otherQuantityOperand.operator === 'Quantity');
       const order = quantityOrder(
-        this,
-        other,
+        oneQuantity ? quantityComparableValue(this) : this,
+        oneQuantity
+          ? quantityComparableValue(otherQuantityOperand)
+          : otherQuantityOperand,
         tolerance ?? this.engine.tolerance,
         false
       );

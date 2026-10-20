@@ -2,8 +2,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 // Quantity arithmetic follows the exactness contract: `evaluate()` keeps an
 // exact magnitude (an integer, a rational, a radical, an exact constant such
-// as `π`) exact, and `.N()` gives the float. A float operand makes the result
-// a float, also when its value is an integer.
+// as `π`) exact, and `.N()` gives the float, at the working precision (21
+// digits by default). A float operand makes the result a float, also when its
+// value is an integer.
 
 const ce = new ComputeEngine();
 
@@ -22,10 +23,10 @@ describe('QUANTITY ARITHMETIC KEEPS AN EXACT MAGNITUDE EXACT', () => {
       '3sqrt(2) m'
     );
     expect(numeric(['Multiply', ['Quantity', 3, 'm'], 'Pi'])).toBe(
-      '9.42477796076938 m'
+      '9.42477796076937971539 m'
     );
     expect(numeric(['Multiply', ['Quantity', 3, 'm'], ['Sqrt', 2]])).toBe(
-      '4.242640687119286 m'
+      '4.24264068711928514641 m'
     );
   });
 
@@ -35,7 +36,7 @@ describe('QUANTITY ARITHMETIC KEEPS AN EXACT MAGNITUDE EXACT', () => {
     ).toBe('3pi N⋅m');
     expect(
       numeric(['Multiply', ['Quantity', 3, 'N'], ['Quantity', 'Pi', 'm']])
-    ).toBe('9.42477796076938 N⋅m');
+    ).toBe('9.42477796076937971539 N⋅m');
   });
 
   test('an integer power gives an exact rational', () => {
@@ -76,13 +77,13 @@ describe('QUANTITY ARITHMETIC KEEPS AN EXACT MAGNITUDE EXACT', () => {
     ).toBe('4/3 m');
     expect(
       numeric(['Add', ['Quantity', 'Pi', 'm'], ['Quantity', 1, 'm']])
-    ).toBe('4.141592653589793 m');
+    ).toBe('4.14159265358979323846 m');
   });
 
   test('negation', () => {
     expect(evaluate(['Negate', ['Quantity', 'Pi', 'm']])).toBe('-pi m');
     expect(numeric(['Negate', ['Quantity', 'Pi', 'm']])).toBe(
-      '-3.141592653589793 m'
+      '-3.14159265358979323846 m'
     );
   });
 
@@ -232,5 +233,63 @@ describe('SERIALIZATION OF A SUM MAGNITUDE', () => {
       ['Add', 1, 'Pi'],
       'm',
     ]);
+  });
+});
+
+// Under `.N()`, quantity arithmetic computes at the working precision, as
+// the arithmetic of numbers does: the magnitude is not rounded to a machine
+// number.
+describe('QUANTITY ARITHMETIC UNDER N() KEEPS THE WORKING PRECISION', () => {
+  test('a constant times a quantity', () => {
+    expect(numeric(['Multiply', 'Pi', ['Quantity', 1, 'rad']])).toBe(
+      '3.14159265358979323846 rad'
+    );
+    expect(numeric(['Multiply', 'Pi', ['Quantity', 1, 'rad']])).toBe(
+      numeric(['Quantity', 'Pi', 'rad'])
+    );
+  });
+
+  test('a sum of quantities', () => {
+    const sum = ce
+      .box([
+        'Add',
+        ['Quantity', 'Pi', 'rad'],
+        ['Quantity', ['Power', 10, -30], 'rad'],
+      ])
+      .N();
+    expect(sum.operator).toBe('Quantity');
+    expect(sum.toString()).toBe('3.14159265358979323846 rad');
+    // The magnitude is a big decimal, not a machine number
+    expect(typeof sum.op1.json).toBe('object');
+  });
+
+  test('float magnitudes', () => {
+    expect(
+      numeric(['Add', ['Quantity', 0.1, 'm'], ['Quantity', 0.2, 'm']])
+    ).toBe('0.3 m');
+    expect(
+      numeric(['Multiply', ['Quantity', 1.5, 'm'], ['Quantity', 2, 's']])
+    ).toBe('3 m⋅s');
+  });
+
+  test('a float magnitude converted to another unit', () => {
+    // The machine factor `0.01` of `cm → m` gave `1.113000000000000001 m`
+    expect(
+      numeric(['Add', ['Quantity', 1.1, 'm'], ['Quantity', 1.3, 'cm']])
+    ).toBe('1.113 m');
+    expect(
+      numeric(['Add', ['Quantity', 1.5, 'deg'], ['Quantity', 0.5, 'rad']])
+    ).toBe('0.526179938779914943654 rad');
+  });
+
+  test('at machine precision, the machine numbers are used', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine
+        .box(['Multiply', 'Pi', ['Quantity', 1, 'rad']])
+        .N()
+        .toString()
+    ).toBe('3.141592653589793 rad');
   });
 });

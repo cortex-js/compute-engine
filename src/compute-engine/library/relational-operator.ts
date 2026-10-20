@@ -355,6 +355,10 @@ function exactPairAtNearTie(
 ): [Expression, Expression] | undefined {
   if (isFunction(a, 'Quantity') && isFunction(b, 'Quantity'))
     return exactQuantityPair(rawA, a, rawB, b);
+  if (isFunction(a, 'Quantity'))
+    return exactQuantityNumberPair(rawA, a, rawB, b, false);
+  if (isFunction(b, 'Quantity'))
+    return exactQuantityNumberPair(rawB, b, rawA, a, true);
   // An exact constant expression that is not a number (`π`,
   // `√(10⁶⁰ + 10⁴⁰) − 10³⁰`) is always compared by its exact form, also far
   // from a tie: its float at the working precision can be wrong by much more
@@ -419,6 +423,50 @@ function exactQuantityPair(
   const v1 = v ?? exactQuantityOf(rawB, b, true);
   if (v1 === undefined) return undefined;
   return [u1, v1];
+}
+
+/**
+ * `exactQuantityPair()` for a quantity `q` (the value of `rawQ` under
+ * `.N()`) and a number `n` (the value of `rawN`): a quantity whose unit is
+ * dimensionless is compared with a number (`compareQuantities()`). Returns
+ * the quantity with its exact magnitude and the exact value of the number,
+ * in the order of the operands (`[number, quantity]` when `swap`), or
+ * `undefined`.
+ *
+ * An exact magnitude or an exact number as written (`π`, `1/2`) is used at
+ * any distance from a tie. Otherwise the operands are evaluated again
+ * exactly only at a near tie, as in `exactQuantityPair()`: under `.N()`,
+ * `Quantity(1/2 − 10⁻³⁰, rad) < 1/2` must be `True`, as it is with
+ * `evaluate()`. A float operand has no exact value: the pair is then
+ * compared as it is.
+ */
+function exactQuantityNumberPair(
+  rawQ: Expression,
+  q: Expression,
+  rawN: Expression,
+  n: Expression,
+  swap: boolean
+): [Expression, Expression] | undefined {
+  if (!isFunction(q, 'Quantity')) return undefined;
+  let u = exactQuantityOf(rawQ, q, false);
+  let v: Expression | undefined =
+    isExactRealLiteral(n) || isExactConstantExpression(n)
+      ? n
+      : (exactConstantOf(rawN) ?? exactOperandOf(rawN, n));
+  if (u === undefined || v === undefined) {
+    const scale = Math.max(1, Math.abs(q.op1.re), Math.abs(n.re));
+    const near = compareQuantities(q, n, {
+      tolerance: nearJumpTolerance(q.engine) * scale,
+      exact: false,
+      nominal: false,
+    });
+    if (near !== 0) return undefined;
+    u ??= exactQuantityOf(rawQ, q, true);
+    if (u === undefined) return undefined;
+    v ??= exactValueOrConstant(rawN);
+    if (v === undefined) return undefined;
+  }
+  return swap ? [v, u] : [u, v];
 }
 
 /**

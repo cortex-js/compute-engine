@@ -197,6 +197,42 @@ let t = 0
 // ➔ [2, 3, 0]
 ```
 
+Each call starts with no value for such a local. A read of the local before
+its first assignment in the call is the `read-before-declaration` error, as a
+read of a `let` local before its `let`. The read is not the bare symbol `t`,
+and it does not read a `t` outside the function:
+
+```epsil
+function g(k) { u = t; t = k; u }
+g(1)
+// ➔ Error(ErrorCode("read-before-declaration", "t", "assignment"))
+```
+
+The same holds for a read in the value of the first assignment
+(`t = t + 1` as the first statement), and for a read in a branch that runs
+when no assignment ran before it (`if c { t = 1 }; t = t + 1` with `c`
+false). A call of the function that the local holds (`h(1)` before
+`h = (x) => x`) and the collection of a `for` loop (`for i in t { … }`
+before `t = [1, 2]`) use the local too, and give the same error; the loop
+then runs no iteration, and the error is its value. A closure that reads
+the local reads it when it is called, so
+`f = () => t; t = 1; f()` gives `1`. The body of a loop keeps its locals
+from one iteration to the next in one call, so the second iteration can read
+the value that the first one assigned.
+
+`epsil check` reports the read before the program runs when the order is
+certain from the source: the read is in a statement before every statement
+that assigns the local, or in the value of the first assignment. It reports
+a read of a `let` local before its `let` in the same way. The run then does
+not report the same read a second time. A read that
+comes before the first assignment only on some paths (after an `if` that
+assigns the local in one branch) is reported when it happens, by the run.
+
+A block outside every function — a `do` block, an `if` or a loop body at the
+top level of a program — owns the names it assigns too, but there a read
+before the first assignment stays the bare symbol, as a read of an
+undeclared name at the top level does.
+
 An assignment to a name that an enclosing scope declares when the function
 is defined — a top-level `let` or assignment written before the function, a
 parameter or a local of an enclosing function — writes that binding. In a

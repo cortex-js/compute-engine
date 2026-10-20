@@ -134,6 +134,7 @@ import {
   viewOverListedSource,
 } from '../collection-utils.js';
 import {
+  failedWalkErrorSince,
   incompleteWalkCount,
   takeBackIncompleteWalks,
   unlessWalkMissedElements,
@@ -357,6 +358,7 @@ import {
 } from '../../common/type/effects.js';
 import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 import { noteConstantAssignmentSite } from '../constant-assignment-error.js';
+import { readBeforeDeclarationError } from './read-before-declaration.js';
 import {
   CancellationError,
   checkDeadline,
@@ -6924,6 +6926,7 @@ export class BoxedFunction
       // literal is read as `NaN` (`declaredLambdaOperands`).
       const handlerOperands = declaredLambdaOperands(this.engine, def, tail);
       const walksBefore = walksMeasuredBy(def, handlerOperands);
+      const failuresBefore = failedWalksMeasuredBy(def);
       let evalResult: Expression | undefined;
       try {
         evalResult = def.evaluate?.(handlerOperands, {
@@ -6970,7 +6973,12 @@ export class BoxedFunction
       } finally {
         if (isScoped) this.engine._popEvalContext();
       }
-      if (handlerWalkMissedElements(walksBefore)) evalResult = undefined;
+      // A handler that read a walk which missed elements stays unevaluated.
+      // When the walk FAILED (a comprehension over a domain that is an
+      // error value, `noteFailedWalk()`), that error is the result.
+      if (handlerWalkMissedElements(walksBefore))
+        evalResult = handlerWalkFailure(walksBefore);
+      else evalResult ??= handlerWalkFailure(failuresBefore);
 
       // Fallback to a symbolic result if we could not evaluate. For a SCOPED
       // operator with NO evaluate handler (a lazy scoped collection —
@@ -8124,6 +8132,10 @@ export class BoxedFunction
       //
       let value: Expression | undefined;
       let handlerMissedElements = false;
+      // The error of a walk that failed in the handler (`handlerWalkFailure()`).
+      let handlerFailure: Expression | undefined;
+      // The same, for the synchronous part of an `evaluateAsync` handler.
+      let asyncSliceFailure: Expression | undefined;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
@@ -8250,8 +8262,16 @@ export class BoxedFunction
             const enclosingNumericRequest = engine._numericRequest;
             engine._numericRequest = numericApproximation;
             try {
-              if (def.evaluateAsync !== undefined)
-                return def.evaluateAsync(declaredOps, opts);
+              if (def.evaluateAsync !== undefined) {
+                // A walk that failed in the synchronous part of the call
+                // (before its first `await`), where no other evaluation can
+                // run, gives its error to a handler that declines
+                // (`failedWalksMeasuredBy()`).
+                const failuresBefore = failedWalksMeasuredBy(def);
+                const answer = def.evaluateAsync(declaredOps, opts);
+                asyncSliceFailure = handlerWalkFailure(failuresBefore);
+                return answer;
+              }
               // A user function: the body statements are awaited.
               const applyAwaiting = (
                 def.evaluate as
@@ -8269,10 +8289,20 @@ export class BoxedFunction
               if (applyAwaiting !== undefined)
                 return applyAwaiting(handlerOps, opts);
               const walksBefore = walksMeasuredBy(def, handlerOps);
+              const failuresBefore = failedWalksMeasuredBy(def);
+              let declined = false;
               try {
-                return def.evaluate?.(handlerOps, opts);
+                const answer = def.evaluate?.(handlerOps, opts);
+                declined = answer === undefined;
+                return answer;
               } finally {
                 handlerMissedElements = handlerWalkMissedElements(walksBefore);
+                if (handlerMissedElements)
+                  handlerFailure = handlerWalkFailure(walksBefore);
+                else if (declined) {
+                  handlerFailure = handlerWalkFailure(failuresBefore);
+                  handlerMissedElements = handlerFailure !== undefined;
+                }
               }
             } finally {
               engine._numericRequest = enclosingNumericRequest;
@@ -8281,7 +8311,8 @@ export class BoxedFunction
           contextStack,
           options?._precisionWindow
         );
-        if (handlerMissedElements) value = undefined;
+        if (handlerMissedElements) value = handlerFailure;
+        else value ??= asyncSliceFailure;
         // A handler that answers `undefined` leaves the operator as it is;
         // over evaluated operands that is the operator over the values, as
         // an inert comparison answers on the synchronous route.
@@ -8294,7 +8325,7 @@ export class BoxedFunction
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
         // An error that a handler throws after it read a walk that missed
         // elements is not used either (the synchronous route does the same).
-        if (handlerMissedElements) value = undefined;
+        if (handlerMissedElements) value = handlerFailure;
       } finally {
         // The frame is on this evaluation's own stack, not on the engine's
         // stack: remove it from there.
@@ -11437,6 +11468,19 @@ function applyFunctionLiteralWith(
       const call = expr.engine.function(expr.operator, expr.ops);
       return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
     }
+    // A call of a local of a block that has no value yet in this run (a
+    // `let` local before its `let`, an assignment local of a function body
+    // before its first assignment) is the `read-before-declaration` error,
+    // as a read of the symbol is. The arguments are not evaluated.
+    if (value === undefined) {
+      const unset = readBeforeDeclarationError(
+        expr.engine,
+        expr.operator,
+        opDef,
+        expr.sourceOffsets
+      );
+      if (unset !== undefined) return unset;
+    }
     const evaluated =
       evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
     // A name with no binding in the current scope: the application was
@@ -14518,9 +14562,15 @@ function materializeLazyResult(
   elementsMaterialized = false
 ): Expression {
   if ((options?.materialization ?? false) === false) return result;
-  return runMaterialization(
-    lazyResultSteps(result, options, elementsMaterialized),
-    options
+  const failure: WalkFailure = {};
+  return unlessWalkFailed(
+    result,
+    runMaterialization(
+      lazyResultSteps(result, options, elementsMaterialized),
+      options,
+      failure
+    ),
+    failure
   );
 }
 
@@ -14533,11 +14583,13 @@ function materializeLazyResultAsync(
 ): Promise<Expression> {
   if ((options?.materialization ?? false) === false)
     return Promise.resolve(result);
+  const failure: WalkFailure = {};
   return runMaterializationAsync(
     result.engine,
     lazyResultSteps(result, options, elementsMaterialized),
-    options
-  );
+    options,
+    failure
+  ).then((value) => unlessWalkFailed(result, value, failure));
 }
 
 /**
@@ -14632,7 +14684,61 @@ function materialize(
   def: BoxedOperatorDefinition,
   options?: Partial<EvaluateOptions>
 ): Expression {
-  return runMaterialization(materializationSteps(expr, def, options), options);
+  const failure: WalkFailure = {};
+  return unlessWalkFailed(
+    expr,
+    runMaterialization(
+      materializationSteps(expr, def, options),
+      options,
+      failure
+    ),
+    failure
+  );
+}
+
+/**
+ * The error of the first walk that failed (`noteFailedWalk()`) in a step of
+ * a materialization (`measureWalkFailure()`).
+ */
+type WalkFailure = { error?: Expression };
+
+/**
+ * Run `step`, one synchronous step of a materialization (a pull from the
+ * walk of the collection), and keep in `failure` the error of a walk that
+ * failed during it. Only the steps are measured, not the evaluation of the
+ * elements between them. On the asynchronous route, the evaluation of an
+ * element can `await`, and another evaluation can then record a failed walk
+ * of its own: that record is not read here, because no step runs during
+ * the `await`.
+ */
+function measureWalkFailure<T>(
+  failure: WalkFailure | undefined,
+  step: () => T
+): T {
+  if (failure === undefined || failure.error !== undefined) return step();
+  const before = incompleteWalkCount();
+  try {
+    return step();
+  } finally {
+    const error = failedWalkErrorSince(before);
+    if (isExpression(error)) failure.error = error;
+  }
+}
+
+/**
+ * The result of the materialization of `expr`, or the error of a walk that
+ * failed during it (`failure`, see `measureWalkFailure()`) when the
+ * materialization kept the lazy form. A comprehension over a domain that is
+ * an error value has that error as its value: its materialization is the
+ * error, not the comprehension as written.
+ */
+function unlessWalkFailed(
+  expr: Expression,
+  result: Expression,
+  failure: WalkFailure
+): Expression {
+  if (result !== expr || failure.error === undefined) return result;
+  return failure.error;
 }
 
 /**
@@ -14648,11 +14754,13 @@ function materializeAsync(
   def: BoxedOperatorDefinition,
   options?: Partial<EvaluateOptions>
 ): Promise<Expression> {
+  const failure: WalkFailure = {};
   return runMaterializationAsync(
     expr.engine,
     materializationSteps(expr, def, options),
-    options
-  );
+    options,
+    failure
+  ).then((value) => unlessWalkFailed(expr, value, failure));
 }
 
 /**
@@ -14679,18 +14787,20 @@ type ConditionalThreadingSteps = MaterializationSteps<Expression | undefined>;
  * yield with `evaluate(options)`. */
 function runMaterialization<R>(
   steps: MaterializationSteps<R>,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  failure?: WalkFailure
 ): R {
-  let step = steps.next();
+  let step = measureWalkFailure(failure, () => steps.next());
   while (!step.done) {
     let value: Expression;
     try {
       value = step.value.evaluate(options);
     } catch (e) {
-      step = steps.throw(e);
+      step = measureWalkFailure(failure, () => steps.throw(e));
       continue;
     }
-    step = steps.next(value);
+    const received = value;
+    step = measureWalkFailure(failure, () => steps.next(received));
   }
   return step.value;
 }
@@ -14704,19 +14814,26 @@ function runMaterialization<R>(
 async function runMaterializationAsync<R>(
   ce: ComputeEngine,
   steps: MaterializationSteps<R>,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  failure?: WalkFailure
 ): Promise<R> {
-  let step = ce.withEvaluationContext(options, () => steps.next());
+  let step = measureWalkFailure(failure, () =>
+    ce.withEvaluationContext(options, () => steps.next())
+  );
   while (!step.done) {
     let value: Expression;
     try {
       value = await step.value.evaluateAsync(options);
     } catch (e) {
-      step = ce.withEvaluationContext(options, () => steps.throw(e));
+      step = measureWalkFailure(failure, () =>
+        ce.withEvaluationContext(options, () => steps.throw(e))
+      );
       continue;
     }
     const received = value;
-    step = ce.withEvaluationContext(options, () => steps.next(received));
+    step = measureWalkFailure(failure, () =>
+      ce.withEvaluationContext(options, () => steps.next(received))
+    );
   }
   return step.value;
 }
@@ -14792,6 +14909,42 @@ function resultHoldsNoIncompleteWalk(result: Expression): boolean {
  * that {@link walksMeasuredBy} gave before the call of the handler. */
 function handlerWalkMissedElements(walksBefore: number | undefined): boolean {
   return walksBefore !== undefined && incompleteWalkCount() !== walksBefore;
+}
+
+/**
+ * The value of `incompleteWalkCount()` before a call of the `evaluate`
+ * handler of `def`, for a handler whose decline (an `undefined` answer) is
+ * replaced by the error of a walk that failed during the call
+ * (`handlerWalkFailure()`), or `undefined` for a user function.
+ *
+ * This applies to the handlers that {@link walksMeasuredBy} does not
+ * measure: a `lazy` operator that walks a collection (`Sum` over a
+ * comprehension whose domain is an error value) declines when the walk
+ * misses elements, and the error is then its value. A handler that answers
+ * keeps its answer: a nested evaluation that met the failed walk gave the
+ * error as its own value. A user function evaluates its body, which
+ * answers.
+ */
+function failedWalksMeasuredBy(
+  def: BoxedOperatorDefinition
+): number | undefined {
+  if (def.isUserFunctionDefinition) return undefined;
+  return incompleteWalkCount();
+}
+
+/**
+ * The error of a walk that failed after `walksBefore` (`noteFailedWalk()`),
+ * or `undefined`. A handler that read such a walk answers this error: the
+ * collection it read has the error as its value (a comprehension over a
+ * domain that is an error value). Any other walk that missed elements gives
+ * `undefined`, and the operator stays unevaluated.
+ */
+function handlerWalkFailure(
+  walksBefore: number | undefined
+): Expression | undefined {
+  if (walksBefore === undefined) return undefined;
+  const error = failedWalkErrorSince(walksBefore);
+  return isExpression(error) ? error : undefined;
 }
 
 /**

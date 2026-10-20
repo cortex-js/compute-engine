@@ -325,13 +325,16 @@ describe('CONTRACT 2b: non-canonical .latex round-trip fidelity', () => {
       }
     );
 
-    test('2^{-3} specifically: source ≠ first round-trip, then stable', () => {
+    test('2^{-3} specifically: an identity on the first round-trip', () => {
+      // A number literal raised to a negative integer is written as a power
+      // (`2^{-3}`), not as `\frac{1}{2^3}`, so the first round-trip already
+      // gives the source back. A symbol base (`x^{-2}`) is still written as a
+      // fraction and only reaches the fixed point after one round-trip.
       const ce = new ComputeEngine();
       const e0 = ce.parse('2^{-3}', { canonical: false });
       expect(J(e0.json)).toBe(J(['Power', 2, ['Negate', 3]]));
       const e1 = ce.parse(e0.latex, { canonical: false });
-      expect(J(e1.json)).toBe(J(['Divide', 1, ['Power', 2, 3]]));
-      expect(J(e1.json)).not.toBe(J(e0.json)); // not an initial identity
+      expect(J(e1.json)).toBe(J(e0.json));
       const e2 = ce.parse(e1.latex, { canonical: false });
       expect(J(e2.json)).toBe(J(e1.json)); // fixed point reached
     });

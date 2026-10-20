@@ -11,7 +11,7 @@ describe('SUPSUB', () => {
     expect(ce.parse('2^\\frac12')).toMatchInlineSnapshot(`["Sqrt", 2]`);
     expect(ce.parse('2^{3^4}')).toMatchInlineSnapshot(`["Power", 2, 81]`);
     expect(ce.parse('2^{10}')).toMatchInlineSnapshot(`1024`);
-    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Divide", 1, 4]`);
+    expect(ce.parse('2^{-2}')).toMatchInlineSnapshot(`["Power", 2, -2]`);
     // `2^3^4` is a "Double superscript" error in LaTeX. It must NOT be
     // gathered into a `List` (which would broadcast to [8, 16] on evaluation).
     expect(ce.parse('2^3^4')).toMatchInlineSnapshot(

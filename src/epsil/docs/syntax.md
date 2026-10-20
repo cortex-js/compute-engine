@@ -530,7 +530,11 @@ The binding is a name or a tuple destructuring pattern, with the same grammar
 as the `for` statement. The bound names are visible in the guard, in the later
 clauses and in the body, and nowhere outside the brackets. An element is kept
 only when its guard evaluates to `true`; a guard that cannot be decided
-excludes the element.
+excludes the element. An element that does not match a tuple pattern is the
+`incompatible-type` error value in its position, and the comprehension goes
+on with the next element: `[p + q for (p, q) in [(1, 2), 5, (3, 4)]]` has
+three elements, the second one the error. (A `for` loop stops on such an
+element.)
 
 A list comprehension is the engine's `Comprehension`, a lazy collection like
 `map`, `filter` and a range: it enumerates when it is indexed, aggregated or

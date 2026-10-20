@@ -9,6 +9,14 @@
  * the effect inference counts a write to it as confined (`withBlockLocals()`,
  * `boxed-expression/effects-inference.ts`).
  *
+ * The record also says whether the block is written in the body of a
+ * function literal (`isFunctionBodyBlock()`). In such a block, a read of an
+ * assignment local before the run has assigned it is the
+ * `read-before-declaration` error, as for a `let` local. In a block outside
+ * every function literal (a block that the host boxes, a `do` block or a
+ * loop body of the top level of an Epsil program), the read stays the bare
+ * symbol: `Block(x ≔ x + 1; 2x)` evaluates to `2(x + 1)`.
+ *
  * The record is kept here, apart from the scope bindings, because a run of
  * the block removes the bindings that the canonicalization made
  * (`sweepCanonicalizationBindings()` in `library/control-structures.ts`,
@@ -16,11 +24,42 @@
  * nothing, so that both the evaluation and the inference can read it.
  */
 
-const ASSIGNMENT_LOCALS = new WeakMap<object, readonly string[]>();
+type AssignmentLocals = {
+  readonly names: readonly string[];
+  readonly inFunctionBody: boolean;
+};
+
+const ASSIGNMENT_LOCALS = new WeakMap<object, AssignmentLocals>();
+
+/**
+ * The number of function literal bodies that are being canonicalized now,
+ * one inside the other (`enterFunctionBody()`). A block canonicalized while
+ * it is more than zero is written in the body of a function literal.
+ *
+ * Canonicalization is synchronous, so a count shared by all the engines is
+ * sufficient: no other canonicalization can start between the start and the
+ * end of the canonicalization of a body.
+ */
+let functionBodyDepth = 0;
+
+/**
+ * Call when the canonicalization of the body of a function literal starts
+ * (`canonicalFunctionLiteralArguments()`, `function-utils.ts`), and call
+ * `exitFunctionBody()` when it ends, also when it throws.
+ */
+export function enterFunctionBody(): void {
+  functionBodyDepth += 1;
+}
+
+/** See `enterFunctionBody()`. */
+export function exitFunctionBody(): void {
+  functionBodyDepth -= 1;
+}
 
 /**
  * Record the assignment locals of the block scope `scope`, when the block is
- * canonicalized for the first time.
+ * canonicalized for the first time. The record also says whether the block
+ * is canonicalized in the body of a function literal (`enterFunctionBody()`).
  *
  * A block that is built again with the same scope (`subs()`,
  * `rewriteWithBinders()` in `boxed-expression/binders.ts`, the simplifier)
@@ -38,7 +77,30 @@ export function recordAssignmentLocals(
   scope: object,
   names: readonly string[]
 ): void {
-  if (!ASSIGNMENT_LOCALS.has(scope)) ASSIGNMENT_LOCALS.set(scope, names);
+  if (!ASSIGNMENT_LOCALS.has(scope))
+    ASSIGNMENT_LOCALS.set(scope, {
+      names,
+      inFunctionBody: functionBodyDepth > 0,
+    });
+}
+
+/**
+ * Record that the block with the scope `scope` is in the body of a function
+ * literal, when it was canonicalized outside every function literal: a
+ * block that the host boxed first, then gave to
+ * `ce.function('Function', [block])`. The names of its assignment locals do
+ * not change. A block with no record (no assignment local) is not changed.
+ *
+ * The record is for the scope, which the block object keeps. So when the
+ * same block object is also evaluated alone, that evaluation follows the
+ * rule of a function body too after this call: a read of an assignment
+ * local before its first assignment is the `read-before-declaration` error,
+ * not the bare symbol. An evaluation before the call gives the bare symbol.
+ */
+export function markFunctionBodyBlock(scope: object): void {
+  const record = ASSIGNMENT_LOCALS.get(scope);
+  if (record === undefined || record.inFunctionBody) return;
+  ASSIGNMENT_LOCALS.set(scope, { names: record.names, inFunctionBody: true });
 }
 
 /** The assignment locals of the block scope `scope`, or `undefined` when
@@ -46,5 +108,49 @@ export function recordAssignmentLocals(
 export function assignmentLocalsOf(
   scope: object
 ): readonly string[] | undefined {
-  return ASSIGNMENT_LOCALS.get(scope);
+  return ASSIGNMENT_LOCALS.get(scope)?.names;
+}
+
+/**
+ * Whether the block with the scope `scope` was canonicalized in the body of
+ * a function literal: the body itself, or a block nested in it (a branch, a
+ * loop body, a `do` block). `false` when no block with this scope was
+ * canonicalized.
+ */
+export function isFunctionBodyBlock(scope: object): boolean {
+  return ASSIGNMENT_LOCALS.get(scope)?.inFunctionBody === true;
+}
+
+const LATER_DECLARATION_LOCALS = new WeakMap<object, readonly string[]>();
+
+/**
+ * Record the assignment locals of the block scope `scope` that a binding of
+ * an enclosing block would have taken, if a later statement of that block
+ * had not declared it. Such an enclosing block is the top-level block of a
+ * program: it declares all its names before it canonicalizes its
+ * statements, but a function body does not see a name that a later
+ * top-level statement declares (`canonicalBlock()` in
+ * `library/control-structures.ts`). In
+ * `function g(k) { t = k + 1; t }; let t = 0`, `t` is such a local of the
+ * body of `g`.
+ *
+ * The compiler reads the record (`withImplicitLocalDeclares()` in
+ * `compilation/base-compiler.ts`): it declares such a name as a local of the
+ * compiled function, although the compiled program also declares it. As
+ * with {@link recordAssignmentLocals}, the first record for a scope is kept.
+ */
+export function recordLaterDeclarationLocals(
+  scope: object,
+  names: readonly string[]
+): void {
+  if (!LATER_DECLARATION_LOCALS.has(scope))
+    LATER_DECLARATION_LOCALS.set(scope, names);
+}
+
+/** The names that {@link recordLaterDeclarationLocals} recorded for the
+ * block scope `scope`, or `undefined`. */
+export function laterDeclarationLocalsOf(
+  scope: object
+): readonly string[] | undefined {
+  return LATER_DECLARATION_LOCALS.get(scope);
 }

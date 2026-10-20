@@ -1643,6 +1643,12 @@ export class BoxedNumber
     // same as the double `1/3`, but `.is()` is the tolerant check.
     if (!(other instanceof _BoxedExpression)) return false;
 
+    // A quantity whose unit is dimensionless compares with a number
+    // (`0.06` is `6 percent`). The unit symbol of the quantity is a free
+    // variable, so the comparison is made by the quantity, as `.is()` is
+    // symmetric.
+    if (other.operator === 'Quantity') return other.is(this, tolerance);
+
     // BoxedExpression: evaluate other side and compare numerically
     if (other.freeVariables.length > 0) return false;
     const nOther = other.N();

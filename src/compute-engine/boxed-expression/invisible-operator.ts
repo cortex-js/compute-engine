@@ -1,7 +1,7 @@
 import { flatten } from './flatten.js';
 import { imaginaryNumber } from './canonical-utils.js';
 import { isImaginaryUnit, isOperatorDef } from './utils.js';
-import { isInferredDefinition } from './definition-guards.js';
+import { isInferredDefinition, isValueDef } from './definition-guards.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -466,20 +466,42 @@ export function canonicalInvisibleOperator(
       // minus sign as a prefix operator: it is the magnitude `-3`.
       const unwrap = (x: typeof a) =>
         isFunction(x, 'Delimiter') && x.nops === 1 ? x.op1 : x;
+      // A numeric constant expression (`\pi`, `10^{-30}`, `\frac{\pi}{180}`,
+      // `\sqrt{2}`) is a magnitude too: `\pi\,\mathrm{rad}` is the
+      // quantity `π rad`.
       const isMagnitude = (x: typeof a) => {
         const u = unwrap(x);
         if (isNumber(u) || isFunction(u, 'Measurement')) return true;
         if (isFunction(u, 'Negate') && isNumber(u.op1)) return true;
+        if (isNumericConstant(ce, u)) return true;
         return u !== x && (isFunction(u, 'Add') || isFunction(u, 'Subtract'));
       };
       // The canonical handler of `Quantity` boxes the unit resolve-only (a
       // unit name is not a variable, so a name with no definition is not
       // declared in the current scope) and gives it its canonical form, the
       // same tree as the unit of a quantity built by quantity arithmetic.
-      if (isMagnitude(a) && isFunction(b, '__unit__'))
+      // The unit side is tested first: it is a test of the operator only,
+      // and `isMagnitude()` can read definitions (`isNumericConstant()`).
+      if (isFunction(b, '__unit__') && isMagnitude(a))
         return ce.function('Quantity', [unwrap(a), b.op1]);
-      if (isMagnitude(b) && isFunction(a, '__unit__'))
+      if (isFunction(a, '__unit__') && isMagnitude(b))
         return ce.function('Quantity', [unwrap(b), a.op1]);
+    }
+    // A product of numeric constants juxtaposed with a unit is a quantity
+    // whose magnitude is that product: `2\pi\,\mathrm{rad}` is the
+    // quantity `2π rad`. A product with a factor that is not a constant
+    // (`2x\,\mathrm{m}`) is not a quantity.
+    if (significant.length > 2) {
+      const unit = significant[significant.length - 1];
+      const factors = significant.slice(0, -1);
+      if (
+        isFunction(unit, '__unit__') &&
+        factors.every((x) => isNumber(x) || isNumericConstant(ce, x))
+      )
+        return ce.function('Quantity', [
+          ce.function('Multiply', factors),
+          unit.op1,
+        ]);
     }
   }
 
@@ -721,6 +743,61 @@ function applyLiteralThroughPostfix(
 ): Expression | undefined {
   return applyThroughPostfix(ce, rhs, (args) =>
     ce.function('Apply', [literal, ...args])
+  );
+}
+
+/** The operators of a numeric constant expression (see
+ * `isNumericConstant()`). */
+const NUMERIC_CONSTANT_OPERATORS = new Set([
+  'Negate',
+  'Multiply',
+  // A juxtaposition inside the expression (`3\pi` in `\frac{3\pi}{2}`),
+  // whose operands are all constants, is a product.
+  'InvisibleOperator',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  'Rational',
+]);
+
+/**
+ * True when the non-canonical expression `x` is a real numeric constant
+ * expression: a constant symbol with a real value (`Pi`, `ExponentialE`), or
+ * a product, quotient, power, root or negation of number literals and such
+ * symbols (`10^{-30}`, `\frac{\pi}{180}`, `\frac{3\pi}{2}`, `\sqrt{2}`). A number literal
+ * alone is not one: the caller tests it first.
+ *
+ * The value must be real and finite: `\sqrt{-1}` (the imaginary unit),
+ * `\frac{1}{0}` (complex infinity) and `\frac{0}{0}` are not magnitudes, so
+ * `\sqrt{-1}\,\mathrm{m}` stays a product. This is read from the type of
+ * the canonical form of `x`.
+ *
+ * The test first reads the operators and the definitions of the symbols. A
+ * symbol with no definition (`x`) makes the answer false before `x` is
+ * given a canonical form, so the test declares no symbol.
+ */
+function isNumericConstant(ce: ComputeEngine, x: Expression): boolean {
+  const leavesAreConstant = (y: Expression): boolean => {
+    if (isNumber(y)) return true;
+    if (isSymbol(y)) {
+      const def = ce.lookupDefinition(y.symbol);
+      return (
+        isValueDef(def) &&
+        def.value.isConstant === true &&
+        def.value.type.matches('real')
+      );
+    }
+    return (
+      isFunction(y) &&
+      NUMERIC_CONSTANT_OPERATORS.has(y.operator) &&
+      y.ops.every(leavesAreConstant)
+    );
+  };
+  return (
+    !isNumber(x) &&
+    leavesAreConstant(x) &&
+    x.canonical.type.matches('finite_real')
   );
 }
 

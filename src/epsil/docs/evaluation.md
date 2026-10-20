@@ -167,6 +167,10 @@ s = 10
 // ➔ (3, 5, 10)
 ```
 
+Each call starts with no value for such a local: a read of it before its
+first assignment in the call (`function step(k) { r = s; s = k; r }`) is the
+`read-before-declaration` error, not the bare symbol, as for a `let` local.
+
 Reach for `const` when a name should not move at all. Constness is a property
 of the *binding*, not of the value it holds — every value is immutable
 already — and writing to one yields an `Error` value rather than quietly

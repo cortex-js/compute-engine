@@ -7,7 +7,10 @@ import {
   exitNestedBodyScopes,
   resolveEscapingLambda,
 } from '../function-utils.js';
-import { recordAssignmentLocals } from '../assignment-locals.js';
+import {
+  recordAssignmentLocals,
+  recordLaterDeclarationLocals,
+} from '../assignment-locals.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -78,6 +81,7 @@ import {
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
 import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
+import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
 import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
@@ -3149,6 +3153,24 @@ function canonicalBlock(
   }
   const hoistedNames = declaredNames.filter((name) => accepted.has(name));
 
+  // The names that this block hoists into its scope below, each with the
+  // index of the first statement that declares it (a `Declare`, an `Assign`
+  // or a `DefineFunction`). Kept only for the top-level block of a program
+  // (`isProgramBlock()`): see `LATER_DECLARATIONS`.
+  const firstDeclaration =
+    scope !== undefined && isProgramBlock(ce, scope)
+      ? new Map<string, number>()
+      : undefined;
+  // The index of the first statement that declares each name, read in one
+  // pass over the statements.
+  const firstIndex =
+    firstDeclaration !== undefined ? firstDeclarationIndex(ops) : undefined;
+  const noteHoisted = (name: string): void => {
+    if (firstDeclaration === undefined || firstDeclaration.has(name)) return;
+    const at = firstIndex?.get(name);
+    if (at !== undefined) firstDeclaration.set(name, at);
+  };
+
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
   // the statements. `Declare`/`Assign` only register their symbol at
   // *evaluation* time, so without this a reference to a block-local from a
@@ -3186,6 +3208,7 @@ function canonicalBlock(
           hoisted.value._blockLocal = true;
           if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
         }
+        noteHoisted(name);
       }
     }
     // The names that the `Assign` statements below make locals of the
@@ -3193,6 +3216,10 @@ function canonicalBlock(
     // assignment to it never writes a binding of the same name made later
     // (`declareAssignmentLocals`, `function-utils.ts`).
     const assignmentLocals: string[] = [];
+    // The assignment locals that a binding of an enclosing scope would have
+    // taken, if a later statement of the top-level block of a program had
+    // not declared it (`recordLaterDeclarationLocals`).
+    const laterDeclarationLocals: string[] = [];
     for (const statement of ops) {
       const op = typedStatement(statement);
       if (!isFunction(op, 'Assign')) continue;
@@ -3209,13 +3236,19 @@ function canonicalBlock(
         : [sym(target)];
       for (const name of names) {
         if (!name || name === 'Nothing') continue;
-        if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
+        if (scope.bindings.has(name) || isDeclaredInScopeChain(ce, name))
+          continue;
         // A parameter of an enclosing function literal is declared after
         // the body of that literal is canonicalized, so `lookupDefinition`
         // does not find it yet; the shadowed-parameter stack holds its name.
         // An assignment to it writes the parameter, and is not a local.
-        if (ce._isShadowedParameter(name)) continue;
+        if (isShadowedByEarlierDeclaration(ce, name)) continue;
         assignmentLocals.push(name);
+        if (
+          ce.lookupDefinition(name) !== undefined ||
+          ce._isShadowedParameter(name)
+        )
+          laterDeclarationLocals.push(name);
         const hoisted = ce._declareSymbolValue(
           name,
           { type: 'unknown', inferred: true },
@@ -3223,9 +3256,11 @@ function canonicalBlock(
         );
         // A block local introduced by assignment: see `_blockLocal`.
         if (isValueDef(hoisted)) hoisted.value._blockLocal = true;
+        noteHoisted(name);
       }
     }
     recordAssignmentLocals(scope, assignmentLocals);
+    recordLaterDeclarationLocals(scope, laterDeclarationLocals);
     // A one-step function definition written inside a block —
     // `DefineFunction(name, Function(…))`, the surface form `name(x) = …` —
     // is BLOCK-LOCAL, on the same rule as `Declare`: it binds in the block it
@@ -3259,8 +3294,28 @@ function canonicalBlock(
       if (scope.bindings.has(name)) continue;
       if (ce._typeRegistry[name]?.def !== undefined) continue;
       ce._declareSymbolValue(name, { type: 'function', inferred: true }, scope);
+      noteHoisted(name);
     }
   }
+
+  // The names hoisted above that no statement before the current one
+  // declares, for a top-level block of a program (`LATER_DECLARATIONS`).
+  // Before each statement is canonicalized, the names that it declares
+  // first are removed from the set.
+  const later =
+    firstDeclaration !== undefined && scope !== undefined
+      ? new Set(firstDeclaration.keys())
+      : undefined;
+  if (later !== undefined) LATER_DECLARATIONS.set(scope!, later);
+  // The same names, grouped by the index of the statement that declares
+  // them first.
+  const declaredFirstAt = new Map<number, string[]>();
+  if (firstDeclaration !== undefined)
+    for (const [name, at] of firstDeclaration) {
+      const names = declaredFirstAt.get(at);
+      if (names === undefined) declaredFirstAt.set(at, [name]);
+      else names.push(name);
+    }
 
   ce._pushShadowedParameters(hoistedNames);
   let statements: Expression[];
@@ -3273,11 +3328,16 @@ function canonicalBlock(
     // later assignment of the same loop records (`withEvidenceSession`).
     statements = withEvidenceSession(ce, () =>
       ce._inScope(scope, () =>
-        ops.map((op) => refused.get(op) ?? canonicalStatement(ce, op))
+        ops.map((op, i) => {
+          if (later !== undefined)
+            for (const name of declaredFirstAt.get(i) ?? []) later.delete(name);
+          return refused.get(op) ?? canonicalStatement(ce, op);
+        })
       )
     );
   } finally {
     ce._popShadowedParameters();
+    if (later !== undefined) LATER_DECLARATIONS.delete(scope!);
   }
 
   return ce._fn('Block', statements, { scope });
@@ -3295,6 +3355,118 @@ function canonicalBlock(
  */
 function typedStatement(op: Expression): Expression {
   return isFunction(op, 'Typed') ? op.op1 : op;
+}
+
+/**
+ * For the top-level block of a program, while one of its statements is
+ * canonicalized: the names that the block hoisted into its scope and that no
+ * earlier statement declares (with a `let`, a `const`, an assignment or a
+ * `function` statement). The key is the scope of the block.
+ *
+ * `canonicalBlock()` declares all the names of a block in its scope before
+ * it canonicalizes the statements, so that a forward reference finds its
+ * binding. A function body decides at canonicalization which names it owns
+ * (`isDeclaredInScopeChain()`): an assignment to a name that no enclosing
+ * scope declares makes a local of the body. For a name in this set, the
+ * hoisted binding does not count. Thus, in
+ * `function g(k) { t = k + 1; t }; let t = 0; [g(1), g(2), t]`, `t` is a
+ * local of `g`, and the value is `[2, 3, 0]`. This is also what
+ * `executeEpsil()` gives, because it canonicalizes one top-level statement
+ * at a time.
+ *
+ * A read of a name is not changed: it finds the hoisted binding, as before.
+ * A block that is not the top-level block of a program (a function body, a
+ * `do` block) declares its names when it starts, as documented in
+ * `src/epsil/docs/declarations.md`.
+ */
+const LATER_DECLARATIONS = new WeakMap<Scope, ReadonlySet<string>>();
+
+/**
+ * True when `scope` is the scope of the top-level block of a program: a
+ * block written directly in the global scope, outside `executeEpsil()`, and
+ * not in a function literal or another block that is being canonicalized
+ * (the body of a function literal written in the global scope is also a
+ * block whose scope has the global scope as parent).
+ *
+ * `executeEpsil()` does not canonicalize the top-level block of its program,
+ * only its statements, one at a time. A `do` block that is a top-level
+ * statement of an Epsil program is a nested block in the program block, so
+ * it is not a top-level block when `executeEpsil()` canonicalizes it.
+ */
+function isProgramBlock(ce: ComputeEngine, scope: Scope): boolean {
+  return (
+    ce._epsilBatchId === undefined &&
+    !ce._hasShadowedParameterFrame() &&
+    scope.parent !== null &&
+    scope.parent === ce._evalContextStack[1]?.lexicalScope
+  );
+}
+
+/** For each name that a statement of `ops` declares
+ * (`statementDeclaredNames()`), the index of the first such statement. */
+function firstDeclarationIndex(
+  ops: ReadonlyArray<Expression>
+): Map<string, number> {
+  const result = new Map<string, number>();
+  ops.forEach((op, i) => {
+    for (const name of statementDeclaredNames(op))
+      if (!result.has(name)) result.set(name, i);
+  });
+  return result;
+}
+
+/** The names that the block statement `op` declares: the target of a
+ * `Declare` or an `Assign` (each leaf of a destructuring pattern), or the
+ * name of a `DefineFunction`. */
+function statementDeclaredNames(op: Expression): string[] {
+  const statement = typedStatement(op);
+  if (isFunction(statement, 'DefineFunction')) {
+    const name = sym(statement.ops[0]);
+    return name === undefined ? [] : [name];
+  }
+  if (!isFunction(statement, 'Declare') && !isFunction(statement, 'Assign'))
+    return [];
+  const target = statement.ops[0];
+  if (isFunction(target, 'Tuple')) return tuplePatternNames(target);
+  const name = sym(target);
+  return name === undefined ? [] : [name];
+}
+
+/**
+ * True when a scope of the current scope chain declares `name`, as the
+ * engine looks it up (`lookupDefinition()`). A binding that the top-level
+ * block of a program hoisted for a later statement does not count
+ * (`LATER_DECLARATIONS`): the lookup continues in the enclosing scope.
+ */
+function isDeclaredInScopeChain(ce: ComputeEngine, name: string): boolean {
+  for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent) {
+    if (!s.bindings.has(name)) continue;
+    if (LATER_DECLARATIONS.get(s)?.has(name)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when `name` is on the shadowed-parameter stack
+ * (`_pushShadowedParameters()`) because of a parameter or of a declaration
+ * that is visible here. `canonicalBlock()` pushes the names of the `Declare`
+ * statements of a block, with the enclosing scope of the block as the
+ * boundary. When the innermost entry for `name` is that of a top-level block
+ * of a program, and a later statement of that block declares `name`
+ * (`LATER_DECLARATIONS`), the entry does not count. Nothing encloses such a
+ * block, so no other entry can name a parameter.
+ */
+function isShadowedByEarlierDeclaration(
+  ce: ComputeEngine,
+  name: string
+): boolean {
+  if (!ce._isShadowedParameter(name)) return false;
+  const boundary = ce._shadowedParameterBoundary(name);
+  for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
+    if (s.parent === boundary && LATER_DECLARATIONS.get(s)?.has(name))
+      return false;
+  return true;
 }
 
 /**
@@ -4035,6 +4207,11 @@ interface LoopState {
   stopped: boolean;
   value?: Expression;
   count: number;
+  /** The error value of a clause domain that stopped the walk (`runNested`).
+   * It is not an element: a `Loop` takes it as its value, and a
+   * `Comprehension` records a failed walk with it (`noteFailedWalk()`), so
+   * that the error is the value of the whole comprehension. */
+  domainError?: Expression;
 }
 
 /**
@@ -4100,6 +4277,10 @@ function* runLoop(
     // Any other result (including Continue) simply continues.
   });
 
+  // A domain that evaluates to an error value (a local read before it has a
+  // value, `for i in t { … }; t = [1]` in a function body) stopped the walk,
+  // and the error is the value of the loop, as an error of the body is.
+  if (state.domainError !== undefined) return state.domainError;
   if (state.stopped && state.value !== undefined) return state.value;
   return ce.Nothing;
 }
@@ -4279,7 +4460,16 @@ function* comprehensionStream(
       frame.captureAndRestore();
       if (scope) ce._popEvalContext();
     }
-    if (r.done) return;
+    if (r.done) {
+      // A clause domain that is an error value makes the error the value of
+      // the whole comprehension, also after some elements were given: the
+      // walk records that it failed, in the pull of its consumer that met
+      // the error (`noteFailedWalk()`). A consumer that reads the walk
+      // (`Length`, `Count`, `Sum`, a materialization) then answers the
+      // error, and the element memo does not keep the walk.
+      if (state.domainError !== undefined) noteFailedWalk(state.domainError);
+      return;
+    }
     if (indexNames.length > 0) subs = frame.subs(indexNames);
     const value =
       subs !== undefined && r.value.has(indexNames)
@@ -4350,6 +4540,12 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
       () => {}
     ))
       n += 1;
+    // A clause domain that is an error value: the count is not known, and
+    // the error is the value of the comprehension (see `comprehensionStream`).
+    if (state.domainError !== undefined) {
+      noteFailedWalk(state.domainError);
+      return undefined;
+    }
     return n;
   } catch (e) {
     if (
@@ -4388,6 +4584,12 @@ function scanIndependentClauses(
     for (const clause of clauses) {
       if (!isFunction(clause, 'Element')) return undefined;
       const coll = clause.ops[1]?.evaluate();
+      // A domain that is an error value: the error is the value of the
+      // comprehension (see `comprehensionStream`).
+      if (coll?.operator === 'Error') {
+        noteFailedWalk(coll);
+        return undefined;
+      }
       if (!coll?.isCollection) return undefined;
       // A count that is not a safe integer (a `bigint`) is read as unknown:
       // `Number.isFinite()` below would read it as infinite.
@@ -4715,6 +4917,16 @@ function* runNested(
     collExpr.sourceOffsets !== undefined
   )
     ce._epsilStatementResultHook(collExpr, collection);
+  // A collection that evaluates to an error value (a local read before it
+  // has a value, `for i in t { … }; t = [1]` in a function body) stops the
+  // walk. The error is not given as an element: the caller decides what it
+  // is the value of (`LoopState.domainError`). Without this, the error was
+  // not a collection, so the walk had no iteration and the error was lost.
+  if (collection?.operator === 'Error') {
+    state.stopped = true;
+    state.domainError = collection;
+    return;
+  }
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.
     return;
@@ -4730,15 +4942,23 @@ function* runNested(
       // A DESTRUCTURING loop variable (`for (p, q) in pairs { … }`): match the
       // element against the pattern and bind one leaf at a time. An element
       // that is not a tuple of the pattern's arity is the same shape-mismatch
-      // error value `let (p, q) = v` produces; it stops the loop and becomes
-      // its value, matching how `evaluateStatements` treats a fault.
+      // error value `let (p, q) = v` produces. It takes the place of the
+      // body value for this element, as the error of a guard does: a loop
+      // stops on it and it becomes the loop's value (`onLeaf`, matching how
+      // `evaluateStatements` treats a fault), and a comprehension keeps it as
+      // the failed cell of this element and goes on with the next element,
+      // as `Map` does with a destructuring callback
+      // (`[p + q for (p, q) in [(1, 2), 5, (3, 4)]]` is `[3, <error>, 7]`).
       const pairs: [name: string, value: Expression][] = [];
       const err = collectTuplePattern(pattern, value.evaluate(), pairs);
       if (err) {
-        state.stopped = true;
-        state.value = err;
+        state.count += 1;
+        if (state.count > ce.iterationLimit)
+          throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+        onLeaf(err);
         yield err;
-        return;
+        if (state.stopped) return;
+        continue;
       }
       // Ephemeral index write, as in the single-name branch below.
       for (const [leaf, v] of pairs) assignLoopIndex(ce, leaf, v);

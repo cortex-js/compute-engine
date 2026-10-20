@@ -73,9 +73,11 @@ export function _setQuantityDimensionsDiffer(fn: QuantityDimensionsDifferFn) {
  * The order of two `Quantity` expressions by their physical value (`1000 m`
  * and `1 km` are equal), or `undefined` when `a` or `b` is not a quantity,
  * when their units have different dimensions, or when a magnitude has no
- * real numeric value. See `compareQuantities()` in
- * `library/quantity-compare.ts`. A `Measurement` magnitude gives
- * `undefined`.
+ * real numeric value. A quantity whose unit is dimensionless is also
+ * ordered against a number, which is a value with a unit of scale 1:
+ * `6 percent` and `0.06` are equal, `180 deg` and `π` are equal. See
+ * `compareQuantities()` in `library/quantity-compare.ts`. A `Measurement`
+ * magnitude gives `undefined`.
  *
  * With `exact`, two exact magnitudes are compared exactly, with no
  * tolerance, as two exact numbers are compared by `eq()` and `cmp()`.
@@ -89,9 +91,68 @@ export function quantityOrder(
   tolerance: number,
   exact: boolean
 ): -1 | 0 | 1 | undefined {
-  if (typeof b === 'number' || _quantityOrder === undefined) return undefined;
-  if (a.operator !== 'Quantity' || b.operator !== 'Quantity') return undefined;
-  return _quantityOrder(a, b, { tolerance, exact, nominal: false });
+  if (_quantityOrder === undefined) return undefined;
+  if (typeof b === 'number') {
+    if (a.operator !== 'Quantity') return undefined;
+    b = a.engine.number(b);
+  }
+  if (a.operator !== 'Quantity' && b.operator !== 'Quantity') return undefined;
+  return _quantityOrder(quantityValue(a), quantityValue(b), {
+    tolerance,
+    exact,
+    nominal: false,
+  });
+}
+
+/**
+ * The value of `x` that is compared with a quantity whose unit is
+ * dimensionless (`quantityOrder()`), when `x` is not a number literal as
+ * written:
+ *
+ * - `x` itself when it is a quantity, a number literal or an exact constant
+ *   expression (`π/6`), or when it has unknowns;
+ * - else its exact value, when `evaluate()` gives a number literal or an
+ *   exact constant expression: the value of a symbol `n` assigned
+ *   `1/2 − 10⁻³⁰` is that exact rational, and `0.05 + 0.01` is the float
+ *   `0.06`;
+ * - else its value after `.N()`.
+ *
+ * The exact value comes first: the value after `.N()` of `1/2 − 10⁻³⁰` is
+ * rounded to `0.5` at the working precision, so it compared equal to
+ * `Quantity(1/2, rad)`.
+ */
+export function quantityComparableValue(x: Expression): Expression {
+  if (
+    x.operator === 'Quantity' ||
+    isNumber(x) ||
+    x.unknowns.length > 0 ||
+    isExactConstantExpression(x)
+  )
+    return x;
+  const value = x.evaluate();
+  if (isNumber(value) || isExactConstantExpression(value)) return value;
+  return x.N();
+}
+
+/**
+ * The quantity `x` with an evaluated magnitude, when the magnitude is an
+ * expression with no unknowns that is not a number literal or an exact
+ * constant expression: `Quantity(1.5 + 0.5, m)` is `Quantity(2, m)`, and
+ * `Quantity(k, m)` is `Quantity(2, m)` when the value of `k` is `2`. The
+ * `Equal` operator evaluates its operands in the same way. Otherwise `x`.
+ */
+function quantityValue(x: Expression): Expression {
+  if (!isFunction(x, 'Quantity')) return x;
+  const m = x.op1;
+  if (
+    isNumber(m) ||
+    m.unknowns.length > 0 ||
+    isExactConstantExpression(m) ||
+    isFunction(m, 'Measurement')
+  )
+    return x;
+  const value = m.evaluate();
+  return value === m ? x : x.engine._fn('Quantity', [value, x.op2]);
 }
 
 /**
@@ -651,12 +712,27 @@ function eqImpl(
   // unit symbols are unknowns, so the steps below cannot decide this.
   const quantity = quantityOrder(aExact, bExact, a.engine.tolerance, true);
   if (quantity !== undefined) return quantity === 0;
+  // An operand that is not a number literal as written can have a number
+  // value: `0.05 + 0.01` (the canonical form does not add floats), or a
+  // symbol whose value is `0.06`. Its value is compared then, exact when it
+  // has an exact value (`quantityComparableValue()`): `6 percent` is equal
+  // to `0.05 + 0.01`, and `Quantity(1/2, rad)` is not equal to `n` when the
+  // value of `n` is `1/2 − 10⁻³⁰`.
+  if (a !== aExact || b !== bExact) {
+    const u = quantityComparableValue(aExact);
+    const v = quantityComparableValue(bExact);
+    if (u !== aExact || v !== bExact) {
+      const order = quantityOrder(u, v, a.engine.tolerance, true);
+      if (order !== undefined) return order === 0;
+    }
+  }
   // Two values with different physical dimensions are not equal, whatever
   // their magnitudes: `6 W` and `6 m`, `0 m` and `0 s`, `6 m` and the
   // number `6`, `6 m` and the string `"a"`. The values after `.N()` are tested, so that an operand that
   // evaluates to a number (`2 + 3`, a symbol whose value is `5`) is a
-  // number. A unit whose dimension is not known, and a dimensionless
-  // quantity compared with a number, are not decided here.
+  // number. A unit whose dimension is not known is not decided here, and a
+  // dimensionless quantity compared with a number is compared by its value
+  // above (`quantityOrder()`).
   if (_quantityDimensionsDiffer?.(a, b) === true) return false;
 
   // Two exact values, one of them an exact constant expression that is not
@@ -1009,6 +1085,21 @@ export function cmp(
   const quantity = quantityOrder(a, b, tolerance, true);
   if (quantity !== undefined)
     return quantity < 0 ? '<' : quantity > 0 ? '>' : '=';
+  // A quantity whose unit is dimensionless is ordered against a number
+  // (`6 percent < 0.07`). The other operand can have a number value that is
+  // not a number literal as written (`0.05 + 0.02`, a symbol whose value is
+  // `0.07`): its value is used, exact when it has an exact value
+  // (`quantityComparableValue()`), as `eq()` does.
+  if (
+    typeof b !== 'number' &&
+    (a.operator === 'Quantity') !== (b.operator === 'Quantity')
+  ) {
+    const [u, v] = [quantityComparableValue(a), quantityComparableValue(b)];
+    if (u !== a || v !== b) {
+      const order = quantityOrder(u, v, tolerance, true);
+      if (order !== undefined) return order < 0 ? '<' : order > 0 ? '>' : '=';
+    }
+  }
 
   // Two exact values, one of them an exact constant expression that is not
   // a number (`π`,`√(10⁶⁰ + 10⁴⁰) − 10³⁰`), are ordered by enclosures at a
@@ -1561,12 +1652,13 @@ export function exactOrder(
   // `Measurement` operand is below; two quantities with equal nominals are
   // a tie only when they do not have two different uncertainties. Two
   // quantities with units of different dimensions (`6 W` and `6 m`) are not
-  // ordered here: the steps below give `undefined` for them.
+  // ordered here: the steps below give `undefined` for them. A quantity
+  // whose unit is dimensionless is ordered against a number, which is a
+  // value with a unit of scale 1: `Max(6 percent, 0.05)` is `6 percent`.
   // See `compareQuantities()` in `library/quantity-compare.ts`.
   if (
     _quantityOrder !== undefined &&
-    isFunction(a, 'Quantity') &&
-    isFunction(b, 'Quantity')
+    (isFunction(a, 'Quantity') || isFunction(b, 'Quantity'))
   ) {
     const order = _quantityOrder(a, b, {
       tolerance: 0,
@@ -1574,13 +1666,13 @@ export function exactOrder(
       nominal: true,
     });
     if (order !== undefined) {
-      const ma = a.op1;
-      const mb = b.op1;
       if (
         order === 0 &&
-        isFunction(ma, 'Measurement') &&
-        isFunction(mb, 'Measurement') &&
-        !(a.op2.isSame(b.op2) && ma.op2.isSame(mb.op2))
+        isFunction(a, 'Quantity') &&
+        isFunction(b, 'Quantity') &&
+        isFunction(a.op1, 'Measurement') &&
+        isFunction(b.op1, 'Measurement') &&
+        !(a.op2.isSame(b.op2) && a.op1.op2.isSame(b.op1.op2))
       )
         return undefined;
       return order;

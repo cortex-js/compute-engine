@@ -665,9 +665,12 @@ function isFiniteRealNumberLiteral(expr: MathJsonExpression): boolean {
  *
  * Any other magnitude (`2\sqrt{2}`, `\frac{1}{64}`, `\pi`, `x`, `1+\pi`, a
  * complex number) is written with the siunitx command `\qty`:
- * `\qty[parse-numbers=false]{2\sqrt{2}}{m}`. Juxtaposed with a unit, such a
- * magnitude parses as a product (`2\sqrt{2}\,\mathrm{m}` is
- * `2·√2·m`), but the parser reads the first argument of `\qty` as a LaTeX
+ * `\qty[parse-numbers=false]{2\sqrt{2}}{m}`. Juxtaposed with a unit, a
+ * numeric constant expression parses as a quantity too
+ * (`2\sqrt{2}\,\mathrm{m}`, `\pi\,\mathrm{rad}`; see the canonical form of
+ * `InvisibleOperator` in `boxed-expression/invisible-operator.ts`), but a
+ * magnitude with a variable parses as a product (`x\,\mathrm{m}` is `x·m`).
+ * The parser reads the first argument of `\qty` as a LaTeX
  * expression, so the `\qty` form parses back as the same quantity. The
  * option `parse-numbers=false` is necessary for real siunitx: without it,
  * siunitx reads the first argument as a number and stops with an

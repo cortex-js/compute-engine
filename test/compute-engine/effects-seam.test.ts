@@ -92,6 +92,13 @@ describe('The Function-literal construction seam is the only builder', () => {
       // operand's arrow through `refineDeclaredPlaceholders`; it never
       // builds one.
       'compute-engine/boxed-expression/validate.ts',
+      // The compiler refuses a named function definition that the
+      // interpreter refuses for its effects
+      // (`refuseEffectContractViolations`): it RUNS the walk over the
+      // definition's literal to read `escapingWrite` and the inferred set,
+      // and builds `EffectContractError` for the message. It builds no
+      // arrow.
+      'compute-engine/compilation/base-compiler.ts',
       'compute-engine/engine-declarations.ts',
       // The protocol dispatcher's DERIVED effect set: a function requirement
       // with a bare effect specifier imposes no bound, so the dispatcher's
