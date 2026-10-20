@@ -181,8 +181,9 @@ import {
   broadcastNumbersSlice,
   type BroadcastSlice,
 } from './broadcast.js';
-import type { BroadcastInputs, BroadcastOptions } from './types.js';
 import type {
+  BroadcastInputs,
+  BroadcastOptions,
   CompiledColor,
   CompiledColorSpace,
   ComplexResult,

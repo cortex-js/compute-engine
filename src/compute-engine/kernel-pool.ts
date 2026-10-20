@@ -65,12 +65,13 @@ export type { KernelPool, KernelPoolOptions, WorkerLike };
 /** The default pool size: one core kept for the main thread, at most 8
  * (the measured gain flattens there), at least 1. */
 export function defaultPoolSize(): number {
-  const n =
-    typeof navigator !== 'undefined' &&
-    typeof (navigator as { hardwareConcurrency?: unknown })
-      .hardwareConcurrency === 'number'
-      ? (navigator as { hardwareConcurrency: number }).hardwareConcurrency
-      : 4;
+  // Read through `globalThis`: `navigator` is a browser global, which the
+  // lint rule `no-restricted-globals` bans as a bare name. Node 21 and later
+  // also define it.
+  const cores = (
+    globalThis as { navigator?: { hardwareConcurrency?: unknown } }
+  ).navigator?.hardwareConcurrency;
+  const n = typeof cores === 'number' ? cores : 4;
   return Math.max(1, Math.min(8, n - 1));
 }
 
@@ -401,7 +402,7 @@ class KernelPoolImpl implements KernelPool {
     const task = slot.queue[0];
     try {
       await slot.ready;
-    } catch (e) {
+    } catch {
       // The slot failed while this task waited: `fail()` rejected it.
       return;
     }

@@ -107,7 +107,6 @@ import {
   IntervalArithmetic,
   INTERVAL_RUNTIME_VERSION,
 } from '../interval/index.js';
-import type { Interval } from '../interval/types.js';
 import {
   isPlainInterval,
   freshIntervalValue,

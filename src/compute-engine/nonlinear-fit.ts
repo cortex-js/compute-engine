@@ -952,7 +952,7 @@ function solveGlobal(
   const linearIdx: number[] = [];
   for (let j = 0; j < p; j++) if (!scanned.has(j)) linearIdx.push(j);
   const linearFresh = new Set(linearIdx.map((j) => cb.pFresh[j]));
-  let separable = linearIdx.every((j) =>
+  const separable = linearIdx.every((j) =>
     units.every((u) => {
       const unknowns = u.derivUnknowns[j];
       if (unknowns === null || u.stepLike[j]) return false;
