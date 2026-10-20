@@ -2224,6 +2224,28 @@ function callbackResultType(op: Expression | undefined): Type | undefined {
 }
 
 /**
+ * The element of a `Zip` made of `items`, one element of each source: their
+ * tuple, or `Missing` when every item is an absence marker (`Missing`,
+ * `Undefined`). This is the rule of the `Tuple` evaluate handler: a tuple
+ * whose every coordinate is absent is the absent value (user decision
+ * 2026-10-14). Without it, `.at()` and `.each()` of `Zip([1, Missing],
+ * [2, Missing])` gave the tuple `(Missing, Missing)` for the second element,
+ * while the printed value, which evaluates each element, showed `Missing`.
+ */
+function zipElement(
+  ce: ComputeEngine,
+  items: ReadonlyArray<Expression>
+): Expression {
+  // The tuple erases a `Nothing` item, so the test reads the operands of
+  // the tuple: `[Nothing, Missing]` is `(Missing)`, whose every coordinate
+  // is absent.
+  const t = ce.tuple(...items);
+  return isFunction(t, 'Tuple') && t.nops > 0 && t.ops.every(isAbsentSymbol)
+    ? ce.Missing
+    : t;
+}
+
+/**
  * The argument list `Iterate` applies its function to, at step `n` with
  * accumulator `acc`.
  *
@@ -3088,6 +3110,227 @@ function bareOperatorElementTypeD(
 }
 
 /**
+ * The element type of `Map(f, xs, …)` when `f` is a symbol that names a
+ * `broadcastable` operator and an element of a source may be a collection,
+ * or `undefined` when this does not apply.
+ *
+ * Such an operator applied to a collection element maps over it: with `U`
+ * holding `[[1, 2], [3]]`, `Map(Sqrt, U)` is `[[1, √2], [√3]]`. The result
+ * type in the signature of the operator (`Sqrt` answers a number) describes
+ * scalar arguments only, and a list of numbers was a wrong type for this
+ * value.
+ *
+ * - When the element type of a source does not say how deep its
+ *   collections are (`any`, `unknown`, `value`, no element type, or a
+ *   collection arm whose elements are one of these, as in
+ *   `integer | list<any>`), an element of the result can be a scalar or a
+ *   collection nested to any depth. The answer is
+ *   `R | indexed_collection<any>`, with `R` the declared result of the
+ *   operator: `Map(Sqrt, La)` with `La` holding `[4, [[9]]]` is
+ *   `[2, [[3]]]`. (`broadcastable<R>` is `R | indexed_collection<R>`, one
+ *   level only, so it does not hold this value.) With no declared result,
+ *   the answer is `unknown`, and the caller uses its rule for a callback
+ *   with an unknown result.
+ * - Otherwise (a union with a collection arm of known elements,
+ *   `integer | list<integer>`), the answer is the type of the operator
+ *   applied to one element of each source, from its own type handler
+ *   (`derive`): `complex | list<complex>` for `Sqrt`.
+ */
+function broadcastingCallbackElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol') return undefined;
+  const def = engine.lookupDefinition(s.name)?.operator;
+  if (def === undefined || !def.broadcastable) return undefined;
+  // The operator maps over a collection argument only at a scalar
+  // parameter. A parameter of another type (`total(t: tree<number>)`)
+  // receives the element whole, and its declared result is the type of
+  // the call.
+  const sig = def.signature.type;
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
+  const parameters = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+  for (let i = 0; i < sources.length; i++) {
+    const parameter = (parameters[i] ?? sig.variadicArg)?.type;
+    if (
+      parameter === undefined ||
+      !(isSubtype(parameter, 'number') || isSubtype(parameter, 'boolean'))
+    )
+      return undefined;
+  }
+  const elements = sources.map(
+    (d) => d.facts.elementType ?? collectionElementType(d.type)
+  );
+  if (elements.some((t) => t === undefined || hasOpenDepth(t))) {
+    const declared = callbackResultTypeD(fn, engine);
+    if (declared === undefined || declared === 'unknown' || declared === 'any')
+      return 'unknown';
+    return {
+      kind: 'union',
+      types: [declared, { kind: 'indexed_collection', elements: 'any' }],
+    };
+  }
+  if (!elements.some((t) => typeCouldBeCollection(t!))) return undefined;
+  const t = derive(
+    s.name,
+    elements.map((t, k) => describeBoundElement(t!, k))
+  );
+  if (
+    t === undefined ||
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'error' ||
+    t === 'never'
+  )
+    return 'unknown';
+  return t;
+}
+
+/**
+ * Whether a value of type `t` can be a collection whose depth the type does
+ * not state: `t` is `any`, `unknown` or `value`, or has a collection arm
+ * whose elements (at some depth) are one of these. `list<any>` and
+ * `integer | list<list<unknown>>` are such types, `integer | list<integer>`
+ * is not.
+ */
+function hasOpenDepth(t: Type): boolean {
+  if (t === 'any' || t === 'unknown' || t === 'value') return true;
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved !== 'string' && resolved.kind === 'union')
+    return resolved.types.some((x) => hasOpenDepth(x));
+  if (!typeCouldBeCollection(resolved) || isSubtype(resolved, 'string'))
+    return false;
+  const element = collectionElementType(resolved);
+  return element === undefined || hasOpenDepth(element);
+}
+
+/**
+ * The declared result of the callback `fn` (`callbackResultTypeD`), or,
+ * when that says nothing (no declared result, `unknown` or `any`), the type
+ * of the call of `fn` on one element of each source
+ * (`callbackCallElementTypeD`) when it is known.
+ */
+function declaredOrCallElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const declared = callbackResultTypeD(fn, engine);
+  if (declared !== undefined && declared !== 'unknown' && declared !== 'any')
+    return declared;
+  return callbackCallElementTypeD(fn, sources, engine, derive) ?? declared;
+}
+
+/**
+ * The element type of `Map(f, xs, …)` when `f` is a symbol that names a
+ * user function (a value that holds a `Function` literal, or an operator
+ * definition made from one) whose declared result says nothing (no
+ * function type, or a result `unknown` or `any`), from the type of the
+ * call of `f` on one element of each source (`derive`), or `undefined`
+ * when that type is not known either.
+ *
+ * A library operator is excluded: its type handler can read the STRUCTURE
+ * of its operand, and the element stands here for a synthetic bound symbol.
+ * `Hold` would answer `symbol` for `Map(Hold, [1, 2])`, whose elements are
+ * `Hold(1)` and `Hold(2)`. A library operator keeps its declared result.
+ *
+ * A user function with no declared result has the result type that the
+ * engine inferred from its body with each parameter `unknown`. When a
+ * branch of the body answers the parameter (`c ↦ "z" if c == "a" else c`),
+ * that inferred result is `unknown`. The call on an element of the source
+ * has the parameter typed by the element, and the body then has a known
+ * type: `string | character` over `characters(s)`. Without this, the
+ * element type of the `Map` was the element type of the source
+ * (`character`), while the elements were strings.
+ */
+function callbackCallElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol' || !isUserFunctionName(engine, s.name))
+    return undefined;
+  const elementTypes: Type[] = [];
+  for (const source of sources) {
+    const t = mappingSourceElementTypeD(source);
+    if (t === undefined) return undefined;
+    elementTypes.push(t);
+  }
+  const t = derive(
+    s.name,
+    elementTypes.map((t, k) => describeBoundElement(t, k))
+  );
+  if (
+    t === undefined ||
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'error' ||
+    t === 'never'
+  )
+    return undefined;
+  return t;
+}
+
+/**
+ * Whether `name` names a user function: a value whose value is a `Function`
+ * literal (`g := c ↦ …`), or an operator definition made from a `Function`
+ * literal (an Epsil `f(c) = …`, which keeps the literal as
+ * `_lambdaLiteral`). Read from the definition only, so nothing is declared.
+ */
+function isUserFunctionName(engine: PureEngineView, name: string): boolean {
+  const def = engine.lookupDefinition(name);
+  if (def === undefined) return false;
+  const literal =
+    def.operator !== undefined
+      ? (def.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
+      : def.value?.value;
+  return literal !== undefined && isFunction(literal, 'Function');
+}
+
+/**
+ * The type of the elements of `Iterate(f, initial)` when `f` is a symbol
+ * that names a user function (`isUserFunctionName`), or `undefined` when it
+ * is not known.
+ *
+ * Element `k` is `f(k, element(k - 1))`, or `f(element(k - 1))` for a unary
+ * function, with `element(0)` the initial value. The call is typed with the
+ * accumulator typed as the initial value (`unknown` when there is none),
+ * and once more with the accumulator typed as the join of the initial value
+ * and that first answer, so that a second step that can answer `Missing` is
+ * seen too. The answer is the join of the two.
+ */
+function iterateCallResultTypeD(
+  fn: OperandDescriptor,
+  initial: OperandDescriptor | undefined,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol' || !isUserFunctionName(engine, s.name))
+    return undefined;
+  const unary = functionArity(fn.type) === 1;
+  const call = (acc: Type): Type | undefined => {
+    const args = unary
+      ? [describeBoundElement(acc, 0)]
+      : [describeBoundElement('integer', 0), describeBoundElement(acc, 1)];
+    const t = derive(s.name, args);
+    return t === undefined || t === 'unknown' || t === 'error' ? undefined : t;
+  };
+  const seed = initial?.type ?? 'unknown';
+  const first = call(seed);
+  if (first === undefined) return undefined;
+  const second = call(widen(seed, first) as Type);
+  if (second === undefined) return undefined;
+  return reduceType({ kind: 'union', types: [first, second] });
+}
+
+/**
  * Is this `Set` application a set-builder (a comprehension) rather than a
  * literal set of its operands?
  *
@@ -3304,6 +3547,12 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
     const e = t.elements[position - 1]?.type;
     if (e) return elt !== undefined && isSubtype(elt, e) ? elt : e;
   }
+  // The type of an empty collection (`list<never>`, the type of `[]`) says
+  // that there is no element, and an access answers the absence marker:
+  // `First([])` is `Missing`. The `elttype` handler of a literal answers
+  // `unknown` for no element, which would make the access `missing |
+  // unknown`.
+  if (collectionElementType(t) === 'never') return 'never';
   if (elt !== undefined) return elt;
   return collectionElementType(t) ?? 'any';
 }
@@ -4156,24 +4405,81 @@ function withDeclaredCallbackAbsence(
     );
     const t = handler(present, context);
     if (t === undefined) return undefined;
-    return BoxedType.forResult(
-      // `Map` reads no point coordinate (`absentCellsStayMissing` is false)
-      // and is not `broadcastable`, as its definition says.
-      // A source that can hold an absent cell only through `any`
-      // (`list<any>`) has no `missing` arm for the absorption to read, so it
-      // is given as `list<missing>`, a list with an absent cell.
-      absorbOperandAbsence(
-        t.type,
-        ops.map((d) =>
-          typeCouldHoldMissing(d.type) && !typeContainsMissing(d.type)
-            ? { kind: 'list', elements: 'missing' }
-            : d.type
-        ),
-        false,
-        false
+    // `Map` reads no point coordinate (`absentCellsStayMissing` is false)
+    // and is not `broadcastable`, as its definition says.
+    // A source that can hold an absent cell only through `any`
+    // (`list<any>`) has no `missing` arm for the absorption to read, so it
+    // is given as `list<missing>`, a list with an absent cell.
+    const absorbed = absorbOperandAbsence(
+      t.type,
+      ops.map((d) =>
+        typeCouldHoldMissing(d.type) && !typeContainsMissing(d.type)
+          ? { kind: 'list', elements: 'missing' }
+          : d.type
       ),
+      false,
+      false
+    );
+    // The absorption makes an absent cell `NaN`, which a numeric element
+    // type holds. Some callbacks answer `Missing` for an absent cell instead
+    // (`Not(Missing)` and `IsPrime(Missing)` are `Missing`), so the element
+    // type gains a `missing` arm when the call of the callback on an absent
+    // value can be absent (`absentCellAnswerMayBeMissing`): `Map(IsPrime,
+    // L)` with `L: list<integer | missing>` holding `[4, Missing]` is
+    // `[False, Missing]`. A callback that answers `NaN` (`Sqrt`) or an error
+    // (`ToUpperCase`) for an absent value adds no arm.
+    return BoxedType.forResult(
+      absentCellAnswerMayBeMissing(ops[0], sources, context.derive)
+        ? withMissingElements(absorbed)
+        : absorbed,
       engine._typeResolver
     );
+  };
+}
+
+/**
+ * Whether the call of the callback `fn` of a `Map` on the cells of
+ * `sources`, with an absent cell, can answer `Missing`. The call is typed
+ * (`derive`) with each source that can hold an absent cell
+ * (`typeCouldHoldMissing`) given as `missing`, and each other source as its
+ * element type. Only a callback named by a symbol is typed: for any other
+ * callback, the answer is `false`.
+ */
+function absentCellAnswerMayBeMissing(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  derive: TypeHandlerContext['derive']
+): boolean {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol') return false;
+  const args = sources.map((d, k) =>
+    describeBoundElement(
+      typeCouldHoldMissing(d.type)
+        ? 'missing'
+        : (mappingSourceElementTypeD(d) ?? 'unknown'),
+      k
+    )
+  );
+  const t = derive(s.name, args);
+  return t !== undefined && typeContainsMissing(t);
+}
+
+/**
+ * The collection type `t` with a `missing` arm added to its element type,
+ * or `t` itself when it is not a collection type with an element type.
+ */
+function withMissingElements(t: Type): Type {
+  if (
+    typeof t === 'string' ||
+    (t.kind !== 'list' &&
+      t.kind !== 'set' &&
+      t.kind !== 'collection' &&
+      t.kind !== 'indexed_collection')
+  )
+    return t;
+  return {
+    ...t,
+    elements: reduceType({ kind: 'union', types: [t.elements, 'missing'] }),
   };
 }
 
@@ -9977,11 +10283,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // A bare symbol callback is unbound on the parse route and its own type
         // reads `unknown`, so its declared signature is read from its definition
         // (`callbackResultTypeD`). Only a symbol with no function type falls to
-        // the copied source type below (user decision 2026-09-27).
+        // the copied source type below (user decision 2026-09-27). A symbol
+        // whose declared result says nothing is typed by its call on an
+        // element first (`callbackCallElementTypeD`), and a broadcastable
+        // operator over elements that may be collections by its own type
+        // handler (`broadcastingCallbackElementTypeD`).
         const resultType =
           bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
           bareOperatorElementTypeD(ops[0], [ops[1]], engine, derive) ??
-          callbackResultTypeD(ops[0], engine);
+          broadcastingCallbackElementTypeD(ops[0], [ops[1]], engine, derive) ??
+          declaredOrCallElementTypeD(ops[0], [ops[1]], engine, derive);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `NumericApproximation`, whose
@@ -10057,7 +10368,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const resultType =
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
         bareOperatorElementTypeD(ops[0], ops.slice(1), engine, derive) ??
-        callbackResultTypeD(ops[0], engine);
+        broadcastingCallbackElementTypeD(
+          ops[0],
+          ops.slice(1),
+          engine,
+          derive
+        ) ??
+        declaredOrCallElementTypeD(ops[0], ops.slice(1), engine, derive);
       return BoxedType.forResult(
         zipMapResultType(
           ops.slice(1).map((_, i) => sourceType(i)),
@@ -12379,7 +12696,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             }
           }
         }
-        return xs.facts.elementType ?? collectionElementType(t) ?? 'any';
+        // An empty collection (`list<never>`, the type of `[]`) has no
+        // element, as in `componentTypeD`: `At([], 2)` is `Missing`. The
+        // `elttype` handler of a literal answers `unknown` for no element.
+        const declared = collectionElementType(t);
+        if (declared === 'never') return 'never';
+        return xs.facts.elementType ?? declared ?? 'any';
       };
 
       // The result type of a single SCALAR/string index (§3.C access-mode
@@ -16877,7 +17199,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                   return { value: undefined, done: true };
                 items.push(value);
               }
-              return { value: expr.engine.tuple(...items), done: false };
+              return { value: zipElement(expr.engine, items), done: false };
             },
           };
         },
@@ -16889,7 +17211,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // zip.
           const items = expr.ops.map((op) => op.at(index));
           if (items.some((x) => x === undefined)) return undefined;
-          return expr.engine.tuple(...(items as Expression[]));
+          return zipElement(expr.engine, items as Expression[]);
         },
       },
       hasUnindexedOperand
@@ -16919,6 +17241,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // uncallable). The primitive is shape-top and effect-top, which is the
     // honest statement of what is checkable here.
     signature: '(function, initial: any?) -> list',
+    // The bare `list` of the signature admits values only. An element can
+    // be absent when the initial value can be absent (`Iterate(x ↦ x,
+    // Missing)` is `[Missing, Missing, …]`) or when the function can answer
+    // `Missing` (`x ↦ If(x > 2, Missing, x + 1)`). The result type then
+    // admits an absent element: `list<any>`, because no other element type
+    // is known.
+    //
+    // A function whose result type is `unknown` says nothing about absence:
+    // `missing ⊔ unknown` is `unknown`, so `x ↦ If(x > 0, Missing, x)` and
+    // `x ↦ First(x)` are typed `(unknown) -> unknown`. For a user function
+    // named by a symbol, the call is typed on the type of the accumulator
+    // (`iterateCallResultTypeD`). For any other such function, an element
+    // may be absent.
+    type: (ops, { engine, derive }) => {
+      let result = callbackResultTypeD(ops[0], engine);
+      if (result === undefined || result === 'unknown')
+        result =
+          ops[0] === undefined
+            ? undefined
+            : iterateCallResultTypeD(ops[0], ops[1], engine, derive);
+      const mayBeAbsent =
+        (ops[1] !== undefined && typeCouldHoldMissing(ops[1].type)) ||
+        result === undefined ||
+        result === 'unknown' ||
+        typeCouldHoldMissing(result);
+      return BoxedType.forResult(
+        mayBeAbsent ? { kind: 'list', elements: 'any' } : 'list',
+        engine._typeResolver
+      );
+    },
     canonical: ([f, initialExpr], { engine }) => {
       const fn = canonicalCallbackOperand(f, {
         operator: 'Iterate',

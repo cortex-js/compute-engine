@@ -460,7 +460,9 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     [['Take', ['Cycle', 'B'], 4], 'list<any>'],
     [['Zip', 'B', 'B'], 'list<missing | tuple<any, any>>'],
     [['DictionaryFrom', 'Q'], 'dictionary<any>'],
-    [['Map', 'Sqrt', 'B'], 'list<number>'],
+    // An element typed `any` can be a list, nested to any depth, which
+    // `Sqrt` maps over: the element of the result is a number or a list.
+    [['Map', 'Sqrt', 'B'], 'list<indexed_collection<any> | number>'],
     [['Map', 'g', 'B'], 'list<number>'],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);

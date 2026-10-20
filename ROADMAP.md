@@ -115,32 +115,30 @@ The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
 and 26 other collection operators found these related defects. Each was measured
 on 2026-10-19:
 
-- `Map` with a user function that has no declared result claims a wrong element
-  type: with `atbashChar` returning strings,
-  `map(atbashChar, characters("abc"))` is typed `list<character^3>`, but its
-  elements are strings. A precise `Chunk` signature exposed it in the Epsil
-  corpus program `test/epsil/corpus/exercism/atbash-cipher.epsil`.
-- `Iterate(f, Missing)` is typed `list<unknown>`. The bare `unknown` excludes
-  absence markers, so the type does not hold the value.
-- An operand typed with `any` elements (`set<any>`, `list<any>`) is not covered:
-  `typeContainsMissing('any')` is false, so `Union(A, {2})` with `A: set<any>`,
-  `Join(A, {2})` and `Flatten(B)` with `B: list<any>` answer the bare result
-  types, which exclude `Missing`.
-- `Zip(L, L).toString()` prints `Missing` for the pair of two absent cells,
-  while `.at(2)` and `.each()` give `(Missing, Missing)`.
-- `First([])` of an empty list literal is typed `unknown`, but it evaluates to
-  `Missing`, and the bare `unknown` excludes `missing`.
-- `Map` with a declared scalar callback over a source typed `any` assumes a
-  scalar per element: `Map(Sqrt, U)` with `U: any` holding `[[1, 2], [3]]` is
-  typed `list<number>` (at HEAD `list<complex | infinity>`), but `Sqrt` maps
-  over each inner list, so the value is a list of lists.
+- DECIDED 2026-10-20 (implementation in progress): the printed value of a
+  lazy `Map` keeps a `Nothing` result, `[1, Nothing]`, so that every view
+  agrees. The case: a lazy `Map` whose callback returns `Nothing`.
+  `Map(x ↦ If(x > 1, Nothing, x), [1, 2])` is typed `vector<integer^2>` and
+  prints `[1]`, but its count is `2`, `.at(2)` is `Nothing`, `.each()` yields
+  `[1, Nothing]` and `Length(…)` is `2`. Making the views agree first needs a
+  decision: does `Map` erase a `Nothing` result (then `count`, `at` and
+  `isEmpty` must skip it, `at` becomes O(i), the count is no longer known in
+  O(1), and the type stops claiming the source length), or is the printed value
+  the one that is wrong?
+- `Map(PointX, ["a", "b"])` is typed `list<string^2>` (it copies the source
+  type), but its value is `list<character^2>`.
+- `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
+  call with two arguments, gets no answer, and falls back to `list<any>`: sound
+  but imprecise.
 - QUESTION: `TupleFrom(L)` and `Join` of records answer the bare `tuple` and
   `record`, but the value can be `tuple<integer, missing, integer>` or
   `record{a: missing}`. No type means "a tuple (or record) of any length whose
   slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
   new spelling for that type or a wider answer (`indexed_collection<any>`,
   `any`), which loses the information that the value is a tuple.
-- QUESTION: the access marker of a declared numeric list that holds no element.
+- DECIDED 2026-10-20 (option A, implementation in progress): the access
+  marker of a declared numeric list that holds no element comes from the
+  declared type, so `First(E)` below evaluates to `NaN`.
   With `E: list<integer> := []`, `First(E)` is typed `integer | nan` but
   evaluates to `Missing`. Rule 5 of `docs/ERROR-MODEL.md` computes the marker
   "from the element type of the access": the declared element type is `integer`
@@ -149,7 +147,8 @@ on 2026-10-19:
   from the declared type, so `First(E)` evaluates to `NaN`. Option B: add
   `missing` to the static type of every `First(xs)` over a numeric list
   (`integer | nan | missing`).
-- QUESTION: a `missing` arm for an access over `any` or `unknown` elements.
+- DESIGN (user decision 2026-10-20: a design item, not a small fix): a
+  `missing` arm for an access over `any` or `unknown` elements.
   `First(W)` with `W: list<any> := []` is typed `unknown`, but evaluates to
   `Missing`. Making `withMarker` answer `any` for `any` and `missing | unknown`
   for `unknown` broke 44 tests in 14 suites: two assert `unknown` directly
@@ -203,50 +202,6 @@ None of these involves an absent cell. Each was measured on 2026-10-19:
   absent cell (`absentCellMarker()` in `library/collections.ts`) does not read
   through an absent row.
 
-### Arithmetic on a list whose cells are a list or absent forgets the absent cell (OPEN, small — found 2026-10-19 by the `absorbScalarsIntoCells` fix)
-
-With `L: list<list<integer> | missing>` and `L := [[1, 2], Missing]`, `L + 0.5`
-and `L + 1` are typed `list<list<number>>`, but the value is `[[1.5, 2.5], NaN]`
-(type `list<nan | vector<real^2>>`): the absent cell becomes the number `NaN`,
-and the static type has no scalar arm for it. For `list<integer | missing>` the
-static type `list<number>` does hold `NaN`, so only a cell type that has a
-collection arm and a `missing` arm is affected. HEAD has the same result, so the
-cause is the handling of `missing` before the type handler runs
-(`derive-application-type.ts` replaces `missing` with `nan`, then the broadcast
-lift), not `absorbScalarsIntoCells`.
-
-### The type of a list plus a float keeps the integer list arm of a union cell (OPEN, small — found 2026-10-19 by the review of the self-referential alias guards)
-
-`absorbScalarsIntoCells` (`boxed-expression/arithmetic-add.ts`) folds a scalar
-operand into the cell type of a list. When the cell type is a union with a
-collection arm, the collection arm is kept unchanged, so the result type does
-not hold the result. Measured on 2026-10-19 with
-`L: list<list<integer> | integer>` and `L := [[1, 2], 3]`: `L + 0.5` is typed
-`list<integer | list<integer> | real>`, but its value `[[1.5, 2.5], 3.5]` has
-type `list<real | vector<real^2>>`, which is not a subtype of it. With
-`b = list<b | integer>` (an alias) and `d: list<b | integer>`, `d + 0.5` is
-typed `list<b | integer | real>` for the same reason. The fix is to fold the
-scalar into each collection arm as well, as the element-wise add does.
-
-### The result type of `Join` and `ListJoin` turns an absent element into `number` (OPEN, small — found 2026-10-19 by the tuple shape-test fix)
-
-The type handler of `Join` receives each operand type with `missing` replaced by
-`nan`. `derive-application-type.ts` (about line 536) does this for every
-operator that is not in `ABSENT_CELLS_STAY_MISSING` or
-`ABSENT_CELLS_PASS_THROUGH` (`boxed-expression/broadcast-lift-type.ts`).
-`Append` is in the pass-through set; `Join` and `ListJoin` are not. So the
-static type says that the result holds no absent element, while its value can
-hold one. Measured on 2026-10-19:
-
-- `L: list<integer | missing>`: `Join(L, [2])` and `ListJoin(L, [2])` are typed
-  `list<number>`, while `Append(L, 2)` is typed `list<integer | missing>`.
-- `t := (1, Missing)` declared `tuple<integer, missing>`: `Join(t, [3, 4])` is
-  typed `list<number | tuple<number, number>>`.
-
-The likely fix is to add `Join` and `ListJoin` to the pass-through set. Measure
-the snapshot count of the full suite before landing it, because it can change
-the result type of many expressions.
-
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
 The report of `npx tsx benchmarks/audit/integration-families.ts` lists the exact
@@ -273,21 +228,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   value when it is boxed again inside that scope. A result that leaves the scope
   is boxed with the library constant again, so the gap is limited to a JSON
   round trip inside the scope.
-
-### Temperatures with an offset (OPEN, decision)
-
-- A scalar multiple or a negation of a temperature with an offset does not agree
-  with the sum of temperatures (decision needed). A sum with a `degC` or `degF`
-  operand adds the values in kelvin, so `10 degC + 10 degC` is `566.3 K`, but
-  `2 · 10 degC` is `20 degC` (293.15 K), and `-(10 degC)` is `-10 degC` (263.15
-  K, not -283.15 K). Inside a sum, an operand written `Negate(…)` or `c·T` with
-  a negative number `c` is the negation of the temperature `|c|·T` (which keeps
-  the unit `degC`), converted to kelvin and then negated:
-  `20 degC - 2·(10 degC)` is `0 K`, while the kelvin values of the sum
-  `10 degC + 10 degC` give `293.15 K - 566.3 K`. Options: (a) a scalar multiple
-  or a negation of a `degC`/`degF` quantity also converts to kelvin; (b) keep
-  the unit `degC` (today). The code is `quantityMultiply()` and `kelvinSum()` in
-  `library/quantity-arithmetic.ts`.
 
 ### Smaller defects found on 2026-10-19 (batch 11) (OPEN, small)
 
@@ -389,8 +329,29 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   nothing is decided, the compiled code keeps answering where the run gives a
   type error. Recommendation: (A). User decision 2026-10-19: (A).
 
+### Questions found on 2026-10-19 (batch 15) (OPEN, decision)
+
+- **A `real` parameter and an infinite argument on the GLSL, WGSL, Python and
+  interval targets.** The interpreter refuses `±∞` at a parameter declared
+  `real`: with `g: (real) -> real` and the input `x = Infinity`, the run gives
+  an error. Compiled JavaScript tests this (`Number.isFinite`), but GLSL, WGSL,
+  Python and interval-js give `g(∞)`. (A) Keep this, as part of the existing
+  rule that a float target writes `~oo` as `Infinity`. (B) Refuse a `real` call
+  on those targets when the argument's type is not declared; this refuses many
+  shader programs that compile today. If nothing is decided, (A) stays.
+  Recommendation: (A).
+
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
+- A function value returned from a branch does not compile: `let a = mk(2)` then
+  `a(1)` fails with "Unknown operator `a`".
+- An assignment to the index of a comprehension (not a `for` statement) is not
+  refused on the compiled route; the shape is not tested.
+- Compiled code does not check a declared parameter type that is not a number
+  type (`list<integer>`, `tuple<…>`) at run time; the interpreter does.
+- An annotated function literal applied directly (`Apply`, or a lambda given to
+  `map`) is checked by compiled code only when its argument provably cannot
+  match the declared parameter type.
 - `Multiply(3, x, Power(y, -1))` is written `\frac{3x}{y}`, which parses back as
   `Divide(Multiply(3, x), y)`: the same value, but not the same expression. The
   canonical forms of `Divide` and `Multiply` differ for this shape.
@@ -440,7 +401,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   literal, and admits it on a function name declared `(unknown) -> unknown`.
   `Length(e)` is valid at boxing and evaluates to "expected `collection`, got
   `error`". A decision is necessary for the overload: admit `e` as the single
-  signature does, or keep the refusal.
+  signature does, or keep the refusal. User decision 2026-10-20: the overload admits `e`, as the single signature does.
 - A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix).
   `.N()` runs `\sum_k f(k)` over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is
   `1.6449…`), but `evaluate()` tries no closed form and leaves it unevaluated,
@@ -449,7 +410,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   `evaluate()` gives `π²/6`; (B) it is an indefinite sum (Mathematica reads
   `Sum[f, k]` as an antidifference), and `.N()` should not give a number either;
   (C) keep today's split. Also, `\sum x^k` with no subscript is `Sum(x^k)` with
-  no indexing clause and evaluates to `x^k`; check whether that is intended.
+  no indexing clause and evaluates to `x^k`; check whether that is intended. User decision 2026-10-20: (A), a sum with no bounds means `k = 1..∞` on every route.
 - The parse route does not infer the type of a symbol in a juxtaposed product.
   `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
   `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the
@@ -488,7 +449,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   with a style and a superscript does not read back either: `x_bold__a` is
   written `\mathbf{x^{a}}`, which reads back as `x__a_bold`. A decision is
   necessary: choose a spelling that reads back as the symbol (for example
-  `\operatorname{x^{a}}`), or say that these names are for display only.
+  `\operatorname{x^{a}}`), or say that these names are for display only. User decision 2026-10-20: write such a name in `\operatorname{}` (for example `\operatorname{x^{a}}`).
 - The `reciprocal` and `factor` fraction styles write `a/b` as `a\times b^{-1}`
   and `\frac{1}{b}a`. The value reads back correctly, but the round trip gives
   `Multiply(a, Divide(1, b))`, not `Divide(a, b)`: this is the open item "A

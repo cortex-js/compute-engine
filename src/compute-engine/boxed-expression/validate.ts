@@ -60,7 +60,10 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
-import { threadedPresentType } from './broadcast-lift-type.js';
+import {
+  absentCellsArePoints,
+  threadedPresentType,
+} from './broadcast-lift-type.js';
 import {
   freeTypeVariables,
   parameterPositions,
@@ -1317,27 +1320,12 @@ export function markAbsentPointCells(
   const hasNaNCell = (x: Expression): boolean =>
     isFunction(x, 'List') && x.ops.some((y) => isNaNCell(y) || hasNaNCell(y));
   if (!hasNaNCell(result)) return result;
-  let cell = collectionElementType(expression.type.type);
-  // The LEAF cell type: a list type whose cells are lists (a matrix type
-  // written `list<list<…>>`, or a row type) is read one level further down.
-  // A dimensioned list type keeps its leaf in `elements`.
-  for (;;) {
-    if (cell === undefined) return result;
-    const inner = resolveTypeAlias(cell);
-    if (typeof inner === 'string' || inner.kind !== 'list') break;
-    cell = inner.elements;
-  }
-  const r = resolveTypeAlias(cell);
-  if (typeof r === 'string' || r.kind !== 'union') return result;
-  let absent = false;
-  let point = false;
-  for (const arm of r.types) {
-    const a = resolveTypeAlias(arm);
-    if (a === 'missing') absent = true;
-    else if (typeof a !== 'string' && a.kind === 'tuple') point = true;
-    else return result;
-  }
-  if (!absent || !point) return result;
+  // The application's type says whether its absent cells are points: the
+  // leaf cells, read through nested lists and through rows that can be
+  // absent, are `missing | tuple<…>` (`absentCellsArePoints`). The static
+  // typing of the absent cells reads the same predicate
+  // (`absorbOperandAbsence`), so the value and its type agree.
+  if (!absentCellsArePoints(expression.type.type)) return result;
   const mark = (x: Expression): Expression =>
     isFunction(x, 'List') && hasNaNCell(x)
       ? ce._fn(

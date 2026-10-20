@@ -28,7 +28,13 @@
  * supplies them from its type, facts and structure
  * ({@link viewOfDescriptor}).
  */
-import type { TupleType, Type } from '../../common/type/types.js';
+import type {
+  BroadcastableType,
+  CollectionType,
+  ListType,
+  TupleType,
+  Type,
+} from '../../common/type/types.js';
 import {
   COLLECTION_SHAPE_TYPE,
   DICTIONARY_SHAPE_TYPE,
@@ -46,6 +52,8 @@ import {
   staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
+  collectionLevels,
+  MAX_CELL_DEPTH,
   descendIntoConstructor,
   isBareCutOnDescent,
   unfoldAliasOnDescent,
@@ -727,11 +735,18 @@ export function absorbOperandAbsence(
   let absentCell = false;
   let whole = false;
   let notNumeric: boolean | undefined;
+  // The depths at which an operand has an absent cell (1 for the cells of
+  // the operand, 2 for the cells of those cells), one set per operand, read
+  // by `withAbsentCellMarkers` below.
+  const absentDepths: Array<Set<number> | undefined> = [];
   for (let i = 0; i < operandTypes.length; i++) {
     const ot = operandTypes[i];
     if (!typeContainsMissing(ot)) continue;
     const wholeAbsence = hasTopLevelMissing(ot);
     const present = wholeAbsence ? stripTopMissing(ot) : ot;
+    const depths = new Set<number>();
+    collectAbsentCellDepths(present, 0, depths);
+    if (depths.size > 0) absentDepths[i] = depths;
     // Absent CELLS (`list<T | missing>`). An operand can carry both kinds
     // of absence, `missing | list<T | missing>` — a symbol declared with
     // that type, or a list of restricted cells that may itself be absent —
@@ -778,6 +793,34 @@ export function absorbOperandAbsence(
   }
   let result = cells ? absorbNumericAbsence(t) : t;
   if (wholeCells) result = withAbsentPointCells(result, absentCellsStayMissing);
+  // An absent cell whose result cell is a collection (the `Missing` row of
+  // `[[1, 2], Missing] + 1`) is not a numeric leaf, so the absorption above
+  // does not describe it: the element-wise kernel answers `NaN` for it, or
+  // `Missing` when the cells of the result are points
+  // (`absentCellsArePoints`). The result cell at that depth gains the arm of
+  // that marker. An absent cell that meets a row of another operand is not
+  // marked: the kernel maps the absence over that row
+  // (`[[1, 2], Missing] + [[1, 2], [3, 4]]` is `[[2, 4], [NaN, NaN]]`), and
+  // the absorption above already gave the leaves of that row their marker.
+  if (absentDepths.length > 0 && broadcastable && !absentCellsStayMissing) {
+    const marked = new Set<number>();
+    absentDepths.forEach((depths, i) => {
+      if (depths === undefined) return;
+      for (const d of depths)
+        if (
+          !operandTypes.some(
+            (other, j) => j !== i && definiteRowDepths(other).has(d)
+          )
+        )
+          marked.add(d);
+    });
+    if (marked.size > 0)
+      result = withAbsentCellMarkers(
+        result,
+        marked,
+        absentCellsArePoints(result) ? 'missing' : 'nan'
+      );
+  }
   // An operator that reads cells and answers ONE of them (`PointY([1,
   // Missing])` reads the flat point `[1, Missing]` and answers its second
   // cell) answers `Missing` when that cell is absent, so a result that is not
@@ -871,14 +914,7 @@ function withAbsentPointCells(
     case 'indexed_collection':
     case 'broadcastable': {
       const cell = r.elements;
-      const e = resolveTypeAlias(cell);
-      if (
-        typeof e !== 'string' &&
-        (e.kind === 'list' ||
-          e.kind === 'collection' ||
-          e.kind === 'indexed_collection' ||
-          e.kind === 'broadcastable')
-      ) {
+      if (isCellListKind(resolveTypeAlias(cell))) {
         const inner = withAbsentPointCells(
           cell,
           anyCell,
@@ -915,6 +951,250 @@ function isPointCellType(t: Type): boolean {
     tuple = true;
   }
   return tuple;
+}
+
+/** The list kinds whose `elements` are the cells of a broadcast. */
+function isCellListKind(
+  t: Type
+): t is ListType | CollectionType | BroadcastableType {
+  return (
+    typeof t !== 'string' &&
+    (t.kind === 'list' ||
+      t.kind === 'collection' ||
+      t.kind === 'indexed_collection' ||
+      t.kind === 'broadcastable')
+  );
+}
+
+/**
+ * Add to `out` each depth at which `t` has a `missing` arm outside a tuple:
+ * 1 for an absent cell of `t` (`list<list<integer> | missing>`), 2 for an
+ * absent cell of a cell (`list<list<integer | missing>>`), and so on. A
+ * `missing` component of a tuple is an absent coordinate, not an absent
+ * cell, and is not read. A dimensioned list (`list<integer^2x3>`) holds its
+ * leaf cells at the depth of its rank. The walk reads the same kinds as
+ * `missingOutsideTuples`.
+ *
+ * A self-referential alias unfolds under the descent guard. Its occurrence
+ * as a bare arm of its own union, with no constructor entered since it was
+ * last unfolded, adds no value of its own, so it adds no depth. Reached
+ * through a constructor, it stands for deeper cells that can be absent at
+ * any depth, so every remaining depth is added.
+ */
+function collectAbsentCellDepths(
+  t: Type,
+  depth: number,
+  out: Set<number>,
+  seen?: AliasDescent
+): void {
+  if (depth > MAX_CELL_DEPTH) return;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) {
+    if (isBareCutOnDescent(t, seen)) return;
+    for (let d = Math.max(depth, 1); d <= MAX_CELL_DEPTH; d++) out.add(d);
+    return;
+  }
+  const r = unfolded.type;
+  if (r === 'missing') {
+    if (depth > 0) out.add(depth);
+    return;
+  }
+  if (typeof r === 'string') return;
+  if (r.kind === 'union' || r.kind === 'intersection') {
+    for (const arm of r.types)
+      collectAbsentCellDepths(arm, depth, out, unfolded.seen);
+    return;
+  }
+  if (!isCellListKind(r) && r.kind !== 'set') return;
+  collectAbsentCellDepths(
+    r.elements,
+    depth + collectionLevels(r),
+    out,
+    descendIntoConstructor(unfolded.seen)
+  );
+}
+
+/**
+ * The depths at which every cell of `t` is a collection: 1 when the cells
+ * of `t` are lists, 2 when their cells are lists too, and so on
+ * (`list<list<integer>>` and `matrix<2x2>` give `{1}`). The walk follows
+ * the chain of list types and stops at the first cell that is not one, a
+ * union included. An operand that can be absent as a whole has no such
+ * depth.
+ */
+function definiteRowDepths(t: Type): Set<number> {
+  const out = new Set<number>();
+  let x = resolveTypeAlias(t);
+  let depth = 0;
+  for (let k = 0; k <= MAX_CELL_DEPTH && isCellListKind(x); k++) {
+    const levels = collectionLevels(x);
+    // The cells of a dimensioned list above its leaves are rows.
+    for (let d = depth + 1; d < depth + levels; d++) out.add(d);
+    depth += levels;
+    const cell = resolveTypeAlias(x.elements);
+    if (isCellListKind(cell)) out.add(depth);
+    x = cell;
+  }
+  return out;
+}
+
+/** Whether `t` is the type of a point that can be absent: a union with a
+ * `missing` arm whose other arms are all tuples (the bare `tuple` included,
+ * a point of no stated arity). */
+function isAbsentPointCellType(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return (
+    r.types.some((a) => resolveTypeAlias(a) === 'missing') && isPointCellType(r)
+  );
+}
+
+/**
+ * Whether the leaf cells of the cell type `t` are points that can be absent
+ * (`missing | tuple<…>`). The walk goes down through nested lists, and
+ * through a row that can be absent (a union of ONE list arm and `missing`
+ * arms, `list<missing | tuple<…>> | missing`), which is read as its list
+ * arm. An alias unfolds under the descent guard; at a cut the answer is
+ * `false`.
+ */
+function hasAbsentPointLeaves(t: Type): boolean {
+  let cell: Type = t;
+  let seen: AliasDescent | undefined;
+  for (let d = 0; d <= MAX_CELL_DEPTH; d++) {
+    const unfolded = unfoldAliasOnDescent(cell, seen);
+    if (unfolded === undefined) return false;
+    let r = unfolded.type;
+    seen = unfolded.seen;
+    if (typeof r !== 'string' && r.kind === 'union') {
+      let row: Type | undefined;
+      let rowSeen: AliasDescent | undefined;
+      let onlyRow = true;
+      for (const arm of r.types) {
+        const a = unfoldAliasOnDescent(arm, seen);
+        if (a === undefined) return false;
+        if (a.type === 'missing') continue;
+        if (row !== undefined || !isCellListKind(a.type)) {
+          onlyRow = false;
+          break;
+        }
+        row = a.type;
+        rowSeen = a.seen;
+      }
+      if (onlyRow && row !== undefined) {
+        r = row;
+        seen = rowSeen;
+      }
+    }
+    if (!isCellListKind(r)) return isAbsentPointCellType(r);
+    cell = r.elements;
+    seen = descendIntoConstructor(seen);
+  }
+  return false;
+}
+
+/**
+ * Whether the element-wise kernel answers `Missing`, not `NaN`, for an
+ * absent cell of a list whose type is `t`: the leaf cells are points that
+ * can be absent (`hasAbsentPointLeaves`), and an absent point is `Missing`
+ * (`docs/ERROR-MODEL.md`, the section on `Missing` in a numeric slot). For a
+ * union type, every list arm must have such leaves, since the value can be
+ * a list of any arm; the other arms (a `missing` arm, a scalar) do not hold
+ * a list. `markAbsentPointCells` (`validate.ts`) replaces the `NaN` cells of
+ * a list value by this predicate, and `absorbOperandAbsence` chooses the
+ * marker of an absent cell by it, so the two cannot disagree.
+ */
+export function absentCellsArePoints(t: Type): boolean {
+  const unfolded = unfoldAliasOnDescent(t, undefined);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (isCellListKind(r)) return hasAbsentPointLeaves(r.elements);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  let list = false;
+  for (const arm of r.types) {
+    const a = resolveTypeAlias(arm);
+    if (!isCellListKind(a)) continue;
+    if (!hasAbsentPointLeaves(a.elements)) return false;
+    list = true;
+  }
+  return list;
+}
+
+/**
+ * `t` with the absence marker `marker` added to each cell at a depth of
+ * `depths` (`collectAbsentCellDepths`) that does not admit it. An absent
+ * operand cell gives an absent result cell, and the element-wise kernel
+ * answers `NaN` for it (`[[1, 2], Missing] + 1` is `[[2, 3], NaN]`), or
+ * `Missing` when the cells of the result are points (`absentCellsArePoints`).
+ * A numeric cell (`number`) already admits `NaN`, and a point cell already
+ * has its `missing` arm (`withAbsentPointCells`); a collection cell had
+ * neither, so `list<list<integer> | missing> + 1` was typed
+ * `list<list<number>>`. With the marker it is `list<list<number> | nan>`.
+ *
+ * A dimensioned list type keeps its cells in one `elements` type
+ * (`matrix` is `list<number^(?x?)>`): when a marker falls on an inner
+ * depth, the list is written one level at a time, so the row can carry it
+ * (`list<list<number> | nan>`). The walk unfolds an alias under the descent
+ * guard, and keeps a cut as it is.
+ */
+function withAbsentCellMarkers(
+  t: Type,
+  depths: ReadonlySet<number>,
+  marker: 'nan' | 'missing',
+  depth = 0,
+  seen?: AliasDescent
+): Type {
+  if (depth >= MAX_CELL_DEPTH) return t;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return t;
+  const r = unfolded.type;
+  if (typeof r === 'string') return t;
+  if (r.kind === 'union') {
+    const arms = r.types.map((x) =>
+      withAbsentCellMarkers(x, depths, marker, depth, unfolded.seen)
+    );
+    if (arms.every((x, i) => x === r.types[i])) return t;
+    return { kind: 'union', types: arms };
+  }
+  if (!isCellListKind(r)) return t;
+  const levels = collectionLevels(r);
+  // A dimensioned list with a marker at one of its inner depths is written
+  // as a list of rows, one level at a time.
+  let list: ListType | CollectionType | BroadcastableType = r;
+  if (levels > 1 && r.kind === 'list' && r.dimensions !== undefined) {
+    let inner = false;
+    for (let d = depth + 1; d < depth + levels; d++)
+      if (depths.has(d)) inner = true;
+    if (inner) {
+      const [outer, ...rest] = r.dimensions;
+      // An open length of rank 1 (`[-1]`) adds nothing to a plain list.
+      const row: ListType =
+        rest.length === 1 && rest[0] === -1
+          ? { kind: 'list', elements: r.elements }
+          : { kind: 'list', elements: r.elements, dimensions: rest };
+      list = {
+        kind: 'list',
+        elements: row,
+        ...(outer === -1 ? {} : { dimensions: [outer] }),
+      };
+    }
+  }
+  const cellDepth = depth + collectionLevels(list);
+  let cell = withAbsentCellMarkers(
+    list.elements,
+    depths,
+    marker,
+    cellDepth,
+    descendIntoConstructor(unfolded.seen)
+  );
+  if (depths.has(cellDepth) && !isSubtype(marker, cell)) {
+    const c = resolveTypeAlias(cell);
+    cell =
+      typeof c !== 'string' && c.kind === 'union'
+        ? { kind: 'union', types: [...c.types, marker] }
+        : { kind: 'union', types: [cell, marker] };
+  }
+  if (cell === list.elements) return list === r ? t : list;
+  return { ...list, elements: cell };
 }
 
 /** `t` without its top-level `missing` arm (cells are kept as they are). */
@@ -1507,6 +1787,32 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // (`perElementCollection`); a collection or tuple `cellResult` is not
     // known to be one, and is not wrapped.
     const perComponent = elementCollection ?? cellResult;
+    // For an operator that propagates absence, the result is shaped from
+    // the PRESENT cells of the operands: an absent cell is given the marker
+    // of its result cell afterwards (`absorbOperandAbsence`). Read with its
+    // `missing` arm, the cell type `list<integer> | missing` is a union that
+    // has no rank, and the shaping gave the scalar `list<R>` for a list of
+    // rows, or mirrored the absent cell as a cell of `R`
+    // (`list<list<R> | R>`) instead of a cell of the marker.
+    const propagates = def.resolvedMissingBehavior === 'propagate';
+    const absentCells = types.some((t) => typeContainsMissing(t));
+    const shapeTypes =
+      propagates && absentCells
+        ? types.map((t) =>
+            typeContainsMissing(t) ? stripMissingFromType(t, 'keep') : t
+          )
+        : types;
+    // For an operator that does not propagate absence, the result for an
+    // absent cell is what its handler answers for a `missing` cell: `Missing`
+    // for `Less` (`Less(Missing, 2)` is `Missing`), a boolean for `And`
+    // (`And(Missing, False)` is `False`). The shaping mirrors an absent cell
+    // of a ragged list as that answer (`broadcastShapedResultType`).
+    const absentCell =
+      !propagates && absentCells
+        ? input.abstractCellResult?.(
+            views.map((v) => (broadcasting.includes(v) ? 'missing' : undefined))
+          )
+        : undefined;
     if (
       input.broadcastsOverTuples &&
       (elementCollection !== undefined ||
@@ -1515,15 +1821,19 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     ) {
       const arity = pointListArityOfTypes(types);
       if (arity !== undefined)
-        return broadcastShapedResultType(types, {
-          kind: 'tuple',
-          elements: Array.from({ length: arity }, () => ({
-            type: perComponent,
-          })),
-        });
+        return broadcastShapedResultType(
+          shapeTypes,
+          {
+            kind: 'tuple',
+            elements: Array.from({ length: arity }, () => ({
+              type: perComponent,
+            })),
+          },
+          absentCell
+        );
     }
 
-    return broadcastShapedResultType(types, perComponent);
+    return broadcastShapedResultType(shapeTypes, perComponent, absentCell);
   }
 
   // Arm 2 (possibly a collection): the operand's collection-ness is not

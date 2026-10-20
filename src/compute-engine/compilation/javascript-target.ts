@@ -87,6 +87,7 @@ import {
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
+  typeCouldHoldMissing,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
@@ -5876,11 +5877,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Element-wise combination: a list of tuples (compiled as arrays), with
   // the length of the shortest input.
+  //
+  // A tuple whose every coordinate is absent is the absent value `Missing`
+  // in the interpreter (the `Tuple` evaluate handler, and `zipElement` in
+  // `library/collections.ts`): `Zip([1, Missing], [2, Missing])` is
+  // `[(1, 2), Missing]`. This target spells `Missing` as `undefined`, so a
+  // row whose every item is `undefined` is `undefined`. The test is emitted
+  // only when the cells of every source can be absent, which is the case
+  // where the static type of the element has a `missing` arm.
   Zip: (args, compile) => {
     if (args.length === 0) return '[]';
     BaseCompiler.assertLockstepSourcesPure('Zip', args, 1);
     const colls = args.map((a, i) => collArg('Zip', a, compile, i + 1));
-    return `((..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _ls.map((_l) => _l[_i])))(${colls.join(', ')})`;
+    const rowMayBeAbsent = args.every((a) =>
+      typeCouldHoldMissing(collectionElementType(jsType(a)) ?? 'unknown')
+    );
+    const row = rowMayBeAbsent
+      ? `((_r) => (_r.every((_x) => _x === undefined) ? undefined : _r))(_ls.map((_l) => _l[_i]))`
+      : `_ls.map((_l) => _l[_i])`;
+    return `((..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => ${row}))(${colls.join(', ')})`;
   },
   // Evenly spaced numbers, both endpoints included. Defaults mirror the
   // interpreter: `Linspace(end)` → start 1; count defaults to 50 — also for

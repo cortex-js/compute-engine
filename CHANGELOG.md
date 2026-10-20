@@ -2,11 +2,41 @@
 
 ### Behavior Changes
 
+- The term of `Table` is a function body: a name that a branch of the term
+  assigns is `read-before-declaration` in a cell where the branch did not run
+  (`Table(Block(If(k = 2, h ≔ (z ↦ 2z)), h(k)), (k, 1, 3))` is
+  `[Error(…), 4, Error(…)]`; it was `[h(1), 4, h(3)]`). The term of `Sum` and
+  `Product` keeps its value from one index to the next, as before.
+- An assignment to a loop variable in the loop body changes it for the rest of
+  that iteration only, and is no longer the `scope` effect:
+  `function g() { s = 0; for k in 1..2 { k = k * 10; s = s + k }; s }` gives
+  `30` (it was refused). Compiled code does not compile such a loop.
+- Compiled JavaScript and interval code throws `read-before-declaration` when a
+  function-body local is read before any assignment gave it a value (after a
+  branch that did not run), as the interpreter reports; it gave `undefined`. A
+  read that follows an assignment on every path compiles without a check, and
+  other targets refuse such a body.
+
+- In an Epsil function body, an assignment to a name that no enclosing scope
+  declares makes a local of the whole body, also when the assignment is in a
+  branch of an `if`, a loop body or a `do` block, as in Python:
+  `function g(c) { if c { t = 1 }; t }` gives `1` for `g(true)` and the
+  `read-before-declaration` error for `g(false)` (both gave the symbol `t`). A
+  `let` in a nested block still declares a local of that block only, and a
+  function literal owns the names of its own body. `epsil check` reports a read
+  before the first assignment in a nested block, and does not report a read
+  after an `if` that assigns in only one branch.
+- In a program evaluated as one block, a `let` of a library constant name (`i`,
+  `e`, `Pi`, `ExponentialE`, …) shadows the constant only from its statement on:
+  with `function g() { i + 1 }`, then `let i = 2`, `g()` gives `1 + i` on every
+  route (the block and compiled routes gave `3`). A later `let` of a name that
+  is not a constant is still visible to a function defined before it.
+
 - A negative integer power of an operand that can be a matrix stays a power:
   `g(x)^{-1}`, with `g` a function that was not declared, is `Power(g(x), -1)`.
-  It was the quotient `1/g(x)`, which is the element-wise reciprocal when
-  `g(x)` is a matrix. When `g(x)` has a matrix value, the power is now the
-  matrix inverse: with `g` returning `[[2, 1], [1, 1]]`, `g(x)^{-1}` is
+  It was the quotient `1/g(x)`, which is the element-wise reciprocal when `g(x)`
+  is a matrix. When `g(x)` has a matrix value, the power is now the matrix
+  inverse: with `g` returning `[[2, 1], [1, 1]]`, `g(x)^{-1}` is
   `[[1, -1], [-1, 2]]` (it was `[[1/2, 1], [1, 1]]`). This applies to the call
   of a function that was not declared or that returns `any`, to a symbol
   declared `any`, and to a value of a type such as `number | matrix`. In a
@@ -20,32 +50,31 @@
   The LaTeX of the power is `g(x)^{-1}`, which reads back as the same power:
   `y g(x)^{-1}` is written `yg(x)^{-1}`, not `\frac{y}{g(x)}`. `simplify()`
   combines the integer powers of such an operand as `evaluate()` does: in a
-  product with no matrix, `f(x)^2 f(x)^{-1}` is `f(x)` and
-  `f(x)^{-1} f(x)^{-1}` is `f(x)^{-2}`; in a product with a matrix, only
-  adjacent powers with exponents of the same sign are combined.
+  product with no matrix, `f(x)^2 f(x)^{-1}` is `f(x)` and `f(x)^{-1} f(x)^{-1}`
+  is `f(x)^{-2}`; in a product with a matrix, only adjacent powers with
+  exponents of the same sign are combined.
 - A power with the exponent 1 is its base for any base: `g(x)^1` is `g(x)`, and
   `(f(x)^{-1})^{-1}` is `f(x)` (it was `f(x)^1`, which evaluated to
   `\sqrt[1]{f(x)}`).
 
-- A sum of quantities where at least one operand is a temperature with an
-  offset (`degC` or `degF`) now converts each operand to kelvin, with its
-  offset, and adds the values in kelvin. The result is in `K`. Before, the
-  result had the unit with the largest scale and the sum was wrong:
+- A sum of quantities where at least one operand is a temperature with an offset
+  (`degC` or `degF`) now converts each operand to kelvin, with its offset, and
+  adds the values in kelvin. The result is in `K`. Before, the result had the
+  unit with the largest scale and the sum was wrong:
   `Quantity(0, degC) + Quantity(0, degF)` gave `-17.78 degC`; it is now
   `47567/90 K` (273.15 K + 255.372… K = 528.522… K). An exact magnitude stays
   exact. The rule also applies when all the operands are in `degC`:
   `10 degC + 10 degC` was `20 degC` and is now `566.3 K` (283.15 K + 283.15 K).
-  A difference of two temperatures is the difference of their values in
-  kelvin: `20 degC - 10 degC` was `10 degC` (which reads as 283.15 K) and is
-  now `10 K`; `20 degC - 10 degF` was `-3.33 degC` and is now `290/9 K`
-  (32.22 K). A sum of temperatures with no offset (`10 K + 10 K`) does not
-  change. A scalar multiple (`2 · 10 degC`) and a negation (`-(10 degC)`) are
-  not changed: they keep the unit `degC`. So `20 degC - 2 · 10 degC` is
-  `20 degC - 20 degC`, that is `0 K`.
+  A difference of two temperatures is the difference of their values in kelvin:
+  `20 degC - 10 degC` was `10 degC` (which reads as 283.15 K) and is now `10 K`;
+  `20 degC - 10 degF` was `-3.33 degC` and is now `290/9 K` (32.22 K). A sum of
+  temperatures with no offset (`10 K + 10 K`) does not change. A scalar multiple
+  (`2 · 10 degC`) and a negation (`-(10 degC)`) are not changed: they keep the
+  unit `degC`. So `20 degC - 2 · 10 degC` is `20 degC - 20 degC`, that is `0 K`.
 
-- `\sum_k y` and `\prod_k y`, a sum or a product with no bounds whose body
-  does not use the index, now keep their indexing clause in the canonical
-  form: `Sum(y, Limits(k, Nothing, Nothing))`. They were `y`.
+- `\sum_k y` and `\prod_k y`, a sum or a product with no bounds whose body does
+  not use the index, now keep their indexing clause in the canonical form:
+  `Sum(y, Limits(k, Nothing, Nothing))`. They were `y`.
 - An Epsil program that is compiled, or evaluated as one `Block`, follows the
   order of its top-level statements for the names a function body owns: in
   `function g(k) { t = k + 1; t }`, then `let t = 0`, then `[g(1), g(2), t]`,
@@ -243,54 +272,77 @@
 
 ### Bug Fixes
 
+- A closure created in a branch or a loop body of a function, whose own body
+  assigns a name, is no longer refused with the `scope` effect error: its body
+  keeps its own locals.
+- A numeric type with an excluded bound excludes it when a value is checked:
+  with `g` declared `(real<0<..>) -> real`, `g(0)` is an `incompatible-type`
+  error (it gave a value), on `evaluate()`, `.N()` and a symbol holding `0`; the
+  compiled JavaScript call gives `NaN` and the interval call gives `empty`.
+- A compiled call of a function whose parameter has a declared type agrees with
+  the interpreter. With `let g: (integer) -> integer` then
+  `function g(k) { k + 1 }` (or `g = (k) => k + 1`), the compiled `g(1.5)` gave
+  `2.5` where the interpreter gives an `incompatible-type` error, and `g(x)`
+  with `x = 1.5` did the same. An argument that cannot be of the declared type
+  now fails the compilation. An argument whose type is not proven is tested when
+  the code runs: the JavaScript call gives `NaN` and the interval call gives
+  `empty` for a value outside the type. The GLSL, WGSL and Python targets, which
+  have no such test, refuse the call when the type allows only some real numbers
+  (an integer type, a bounded real type, `rational`). An argument whose type is
+  declared, or a constant, compiles with no test.
+- A product of a number and a number to a negative integer power, such as
+  `3·10^-30`, `(3/7)·10^-30` or `3·2^-3`, is written so that it parses back to
+  the same expression (`3\times(10^{-30})`, `\frac{3}{7}\times10^{-30}`,
+  `3\times2^{-3}`). It was written `\frac{3}{10^{30}}`, which parses back as a
+  rational.
 - A product nested in a product that has a matrix keeps the order of its
   factors. With `A` a matrix and `g`, `k` functions that were not declared,
   `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]`,
   `A\cdot(g(x)\cdot k(x)\cdot g(x))` and `A(g(x)k(x)g(x))` were
   `A·k(x)·g(x)·g(x)`, because the nested product was sorted on its own before
-  the matrix was seen. They are now `A·g(x)·k(x)·g(x)`, like the product
-  written without the nesting. A negation of a nested product and a nested
-  product divided by an integer are spliced too: `A\cdot(-g(x)k(x))` is
+  the matrix was seen. They are now `A·g(x)·k(x)·g(x)`, like the product written
+  without the nesting. A negation of a nested product and a nested product
+  divided by an integer are spliced too: `A\cdot(-g(x)k(x))` is
   `-(A·g(x)·k(x))`. A product with no factor that can be a matrix has the same
   canonical form as before, and a juxtaposition in parentheses that is not a
-  product (a mixed number such as `A(2\frac{1}{3})`, an imaginary number such
-  as `A(2i)`) is read as before.
-- Parsing a nested juxtaposition in parentheses takes a time proportional to
-  its depth. `(g(x)(g(x)(…)A)A)A` with 8 levels took about 7 seconds, because
-  each level was made canonical several times.
+  product (a mixed number such as `A(2\frac{1}{3})`, an imaginary number such as
+  `A(2i)`) is read as before.
+- Parsing a nested juxtaposition in parentheses takes a time proportional to its
+  depth. `(g(x)(g(x)(…)A)A)A` with 8 levels took about 7 seconds, because each
+  level was made canonical several times.
 - The empty numerator of a product whose factors are all negative powers is
   written `1`: `x^{-1}y^{-1}` in raw form is `\frac{1}{xy}`, not `\frac{}{xy}`.
 - On the `glsl` and `wgsl` targets, the product of the imaginary unit and a
   complex value is a rotation of that value: `iz` with `z` complex compiles to
   `vec2(-z.y, z.x)`, `i\tanh(z)` to `_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))`
   and `t + i\tanh(z)` adds the two complex terms. They compiled to
-  `vec2(0.0, z)`, `vec2(0.0, _gpu_ctanh(z))` and `vec2(t, _gpu_ctanh(z))`, and
-  a shader `vec2` constructor reads only the first component of a `vec2`
-  argument, so the value was `(0, Re w)` where `i·w` is `(−Im w, Re w)`. The
-  product with a real value (`it` is `vec2(0.0, t)`) is unchanged.
-- A negative base under a decimal exponent, or a decimal root degree, that
-  reads as a rational with an odd denominator compiles to the real signed root
-  on every target, as it evaluates: `x^{\frac{1}{2.2}}` (5/11) at x = −1 is −1
-  on `javascript`, `interval-js` (`_IA.powRational(x, 5, 11)`; it answered an
-  empty interval), `glsl`, `wgsl` and `python`, and `\sqrt[2.2]{x}` gives the
-  same (it compiled to `Math.pow`, NaN for a negative x), and `\sqrt[2.5]{x}`
-  (x^{2/5}, an even numerator) compiles to the positive real `|x|^{0.4}`. The
-  compiled code uses the exponent reading of the interpreter, so an exponent
-  such as `0.3` keeps its complex value. On `interval-js` the rational power
-  is used only when the literal is the double of that rational (`0.6`,
-  `1/2.2`); a literal that is not (`0.6000000000000001`) keeps the previous
-  lowering. In the interpreter, `Root` of a negative radicand
-  under a non-integer degree is `a^(1/b)` as `Power` reads it: `Root(-8, 0.5)`
-  is `64` (it was −64), `Root(-8, 2.5)` is `(-8)^{2/5}` = 2.297 (it was
-  −2.297) and `Root(-8, 2.4)` is the complex principal value.
+  `vec2(0.0, z)`, `vec2(0.0, _gpu_ctanh(z))` and `vec2(t, _gpu_ctanh(z))`, and a
+  shader `vec2` constructor reads only the first component of a `vec2` argument,
+  so the value was `(0, Re w)` where `i·w` is `(−Im w, Re w)`. The product with
+  a real value (`it` is `vec2(0.0, t)`) is unchanged.
+- A negative base under a decimal exponent, or a decimal root degree, that reads
+  as a rational with an odd denominator compiles to the real signed root on
+  every target, as it evaluates: `x^{\frac{1}{2.2}}` (5/11) at x = −1 is −1 on
+  `javascript`, `interval-js` (`_IA.powRational(x, 5, 11)`; it answered an empty
+  interval), `glsl`, `wgsl` and `python`, and `\sqrt[2.2]{x}` gives the same (it
+  compiled to `Math.pow`, NaN for a negative x), and `\sqrt[2.5]{x}` (x^{2/5},
+  an even numerator) compiles to the positive real `|x|^{0.4}`. The compiled
+  code uses the exponent reading of the interpreter, so an exponent such as
+  `0.3` keeps its complex value. On `interval-js` the rational power is used
+  only when the literal is the double of that rational (`0.6`, `1/2.2`); a
+  literal that is not (`0.6000000000000001`) keeps the previous lowering. In the
+  interpreter, `Root` of a negative radicand under a non-integer degree is
+  `a^(1/b)` as `Power` reads it: `Root(-8, 0.5)` is `64` (it was −64),
+  `Root(-8, 2.5)` is `(-8)^{2/5}` = 2.297 (it was −2.297) and `Root(-8, 2.4)` is
+  the complex principal value.
 - `At` with a NaN, indeterminate or infinite member in a list index gives the
   hole in that member's slot and reads the other members:
   `At([10, 20, 30], [NaN, 1])` is `[NaN, 10]` and
   `At([(1, 2), (3, 4)], [NaN, 1])` is `[Missing, (1, 2)]`, the same hole an
   out-of-range member gives. The call stayed unevaluated. The compiled
   `javascript` `_SYS.at` agrees (it gave a whole-result NaN).
-- A compiled Epsil program checks a function definition against the effects
-  that an earlier declaration of its name states: with
+- A compiled Epsil program checks a function definition against the effects that
+  an earlier declaration of its name states: with
   `let g: (integer) pure -> real` then `function g(k) { Random() }`, the
   compilation is refused, as the interpreter refuses the definition
   (`incompatible-type`). The compiled program ran the definition.
@@ -303,48 +355,47 @@
   function, so the body's read of the argument found the outer `c` or the
   library `i` by name. A free symbol of the body still reads the definition
   scope, and a loop or sum index still reads by name.
-- A symbol with two or more subscripts is written with nested subscripts, so
-  it reads back as the same symbol. The symbol `x_1_2` (the parse of `x_1_2`,
-  of `{x_1}_2`, and the canonical form of `Subscript(Subscript(x, 1), 2)`) is
-  now written `{x_1}_2`; it was `x_{1,2}`, which reads back as
+- A symbol with two or more subscripts is written with nested subscripts, so it
+  reads back as the same symbol. The symbol `x_1_2` (the parse of `x_1_2`, of
+  `{x_1}_2`, and the canonical form of `Subscript(Subscript(x, 1), 2)`) is now
+  written `{x_1}_2`; it was `x_{1,2}`, which reads back as
   `Subscript(x, Sequence(1, 2))`. Three subscripts give `{{x_1}_2}_3`. A name
   with an upright base keeps the second subscript outside the `\mathrm{}`:
   `speed_1_2` is `{\mathrm{speed_1}}_2` (it was `\mathrm{speed_{1,2}}`, which
-  did not parse). A name with digits before a subscript keeps them in the
-  name: `x1_2` is `\mathrm{x1_2}` (it was `x_{1,2}`). A single subscript
-  (`x_1`, `x_{12}`), a subscript with a comma list typed as `x_{1,2}`, and a
-  matrix element (`M[1, 2]`) are written as before. A name whose base is an
-  indexed collection does not read back in either spelling: with `A` a matrix,
-  the symbol `A_1_2` is written `{A_1}_2`, which reads back as
+  did not parse). A name with digits before a subscript keeps them in the name:
+  `x1_2` is `\mathrm{x1_2}` (it was `x_{1,2}`). A single subscript (`x_1`,
+  `x_{12}`), a subscript with a comma list typed as `x_{1,2}`, and a matrix
+  element (`M[1, 2]`) are written as before. A name whose base is an indexed
+  collection does not read back in either spelling: with `A` a matrix, the
+  symbol `A_1_2` is written `{A_1}_2`, which reads back as
   `Subscript(At(A, 1), 2)` (`A_{1,2}` read back as `At(A, 1, 2)`).
 - A symbol with a style and a subscript reads back as the same symbol.
-  `\mathbf{x}_1` (the symbol `x_bold_1`) was written `\mathbf{x_1}`, which
-  reads back as the different symbol `x_1_bold`; it is now written
-  `\mathbf{x}_1`, and `x_bold_1_2` is written `{\mathbf{x}_1}_2`. The parse of
-  `\mathbf{x_1}`, the symbol `x_1_bold`, was written `x_{\mathbf{1}}`, which
-  reads back as `x_one_bold`; it is now written `\mathbf{x_1}`, and
-  `x_1_2_bold` is written `\mathbf{{x_1}_2}`. The other styles work the same
-  way (`\mathit`, `\mathbb`, `\mathcal`, …). The upright style is the
-  exception for a style after a digit subscript: `x_1_upright` is still written
-  `x_{\mathrm{1}}`, which does not read back.
-- Two braced subscripts inside `\mathrm{}`, `\mathbf{}` or `\operatorname{}`
-  are two parts of the name: `\mathrm{x_{1}_{2}}` is the symbol `x_1_2`, as
-  `x_{1}_{2}` is. It was `x_12`. The body of such a command can also start
-  with a brace group that has its own subscripts: `\mathbf{{x_1}_2}` is the
-  symbol `x_1_2_bold`.
+  `\mathbf{x}_1` (the symbol `x_bold_1`) was written `\mathbf{x_1}`, which reads
+  back as the different symbol `x_1_bold`; it is now written `\mathbf{x}_1`, and
+  `x_bold_1_2` is written `{\mathbf{x}_1}_2`. The parse of `\mathbf{x_1}`, the
+  symbol `x_1_bold`, was written `x_{\mathbf{1}}`, which reads back as
+  `x_one_bold`; it is now written `\mathbf{x_1}`, and `x_1_2_bold` is written
+  `\mathbf{{x_1}_2}`. The other styles work the same way (`\mathit`, `\mathbb`,
+  `\mathcal`, …). The upright style is the exception for a style after a digit
+  subscript: `x_1_upright` is still written `x_{\mathrm{1}}`, which does not
+  read back.
+- Two braced subscripts inside `\mathrm{}`, `\mathbf{}` or `\operatorname{}` are
+  two parts of the name: `\mathrm{x_{1}_{2}}` is the symbol `x_1_2`, as
+  `x_{1}_{2}` is. It was `x_12`. The body of such a command can also start with
+  a brace group that has its own subscripts: `\mathbf{{x_1}_2}` is the symbol
+  `x_1_2_bold`.
 - A sum or a product written with no bounds (`\sum_k x^k`, which is
-  `Sum(x^k, Limits(k, Nothing, Nothing))`) runs over the default domain. It
-  was read as a sum over the single point `k = Nothing`: `\sum_k x^{k-1}`
-  evaluated to `\frac{1}{x}`, `\sum_k x^k` and `\prod_k x^k` to an error, and
-  `\sum_k y` and `\prod_k y` became `y`. Now these stay unevaluated, as
-  `\sum_k k` did, and `\sum_k \frac{1}{k^2}` `.N()` is still `1.6449…`.
-  `simplify()` also keeps a sum or a product with no bounds, or with one
-  bound only, as it is: `\sum_k k` gave `1` and `\sum_{k=1} k` gave
-  `\frac{1}{2}`.
+  `Sum(x^k, Limits(k, Nothing, Nothing))`) runs over the default domain. It was
+  read as a sum over the single point `k = Nothing`: `\sum_k x^{k-1}` evaluated
+  to `\frac{1}{x}`, `\sum_k x^k` and `\prod_k x^k` to an error, and `\sum_k y`
+  and `\prod_k y` became `y`. Now these stay unevaluated, as `\sum_k k` did, and
+  `\sum_k \frac{1}{k^2}` `.N()` is still `1.6449…`. `simplify()` also keeps a
+  sum or a product with no bounds, or with one bound only, as it is: `\sum_k k`
+  gave `1` and `\sum_{k=1} k` gave `\frac{1}{2}`.
 - `simplify()` of a sum or a product with more than one indexing clause no
   longer reads the second index as a free symbol and drops its clause:
-  `Sum(i·j, Limits(i, 1, 3), Limits(j, 1, 2))` gave `6j`. It now stays as it
-  is under `simplify()`, and `evaluate()` still gives 18.
+  `Sum(i·j, Limits(i, 1, 3), Limits(j, 1, 2))` gave `6j`. It now stays as it is
+  under `simplify()`, and `evaluate()` still gives 18.
 - Reading a variable whose value is an expression with no canonical form
   (`r = Map(t, (x) => x * 2)`, with the arguments in the wrong order) no longer
   loops forever: it gives the same result as the expression written in place.
@@ -406,33 +457,33 @@
   variable with a bound (`Conjugate(w)`, `Remainder(w, 2)`, a function declared
   `(T) -> T where T: number`), and the condition of `if` and `Which`. A function
   with several clauses (`op(a: number)`, `op(a: string)`) gave "expected
-  `number | string`, got `error`". The callback of a collection operator gave "expected `function`,
-  got `error`": `Any(xs, w)`, `All(xs, w)`, `Filter(xs, w)`, `Reduce(xs, w)`,
-  `Scan(xs, w)`, `TakeWhile(xs, w)`, `MaxBy(xs, w)` and `Map(w, xs)`. The call
-  now evaluates to the error of `Ln`, with the frame of the call, as it
-  already did for a parameter typed `number` or with no type, and for
-  `Sort(xs, w)`. An element read directly (`Map(w, xs).at(1)`, a walk of
-  `Filter(xs, w)`) is that error too. An operator that binds or reads such an
-  operand as an expression is not changed: `Integrate(w, Limits(w, 0, 1))` is
-  still `1/2`. An argument of the wrong type is still refused, and
-  `Map(w, f)`, with the arguments in the wrong order, still reports the wrong
-  order.
+  `number | string`, got `error`". The callback of a collection operator gave
+  "expected `function`, got `error`": `Any(xs, w)`, `All(xs, w)`,
+  `Filter(xs, w)`, `Reduce(xs, w)`, `Scan(xs, w)`, `TakeWhile(xs, w)`,
+  `MaxBy(xs, w)` and `Map(w, xs)`. The call now evaluates to the error of `Ln`,
+  with the frame of the call, as it already did for a parameter typed `number`
+  or with no type, and for `Sort(xs, w)`. An element read directly
+  (`Map(w, xs).at(1)`, a walk of `Filter(xs, w)`) is that error too. An operator
+  that binds or reads such an operand as an expression is not changed:
+  `Integrate(w, Limits(w, 0, 1))` is still `1/2`. An argument of the wrong type
+  is still refused, and `Map(w, f)`, with the arguments in the wrong order,
+  still reports the wrong order.
 - A symbol declared `error` that has no value, and a call typed `error` only by
-  its declared result type (`g(2)` with `g: (number) -> error`), are checked
-  by the same rule at a parameter typed by a type variable as at a ground
+  its declared result type (`g(2)` with `g: (number) -> error`), are checked by
+  the same rule at a parameter typed by a type variable as at a ground
   parameter. Neither holds an error value, so the call evaluates to itself.
   `Conjugate(e)` and a function declared `(T) -> T where T: number` applied to
   `e` gave "expected `number`, got `error`"; they are now valid, as `Sqrt(e)`
-  and a function declared `(number) -> number` applied to `e` are. The
-  condition of `If` and `Which` admits them too, as a parameter typed
-  `boolean` does, and selects no branch. A collection parameter (`list`, or a
-  type variable bounded by a collection) still refuses them, and so does an
-  overloaded function, with ground or generic arms.
+  and a function declared `(number) -> number` applied to `e` are. The condition
+  of `If` and `Which` admits them too, as a parameter typed `boolean` does, and
+  selects no branch. A collection parameter (`list`, or a type variable bounded
+  by a collection) still refuses them, and so does an overloaded function, with
+  ground or generic arms.
 - `Map(f, xs)` with a callback known to be a function with no known result type
-  (`f` declared `function`), or with a symbol that holds an error, is typed
-  with `unknown` elements: `Map(f, [1, 2])` is `list<unknown^2>`. It was typed
-  as the source, `vector<integer^2>`. A callback that is not declared still
-  gives the type of the source.
+  (`f` declared `function`), or with a symbol that holds an error, is typed with
+  `unknown` elements: `Map(f, [1, 2])` is `list<unknown^2>`. It was typed as the
+  source, `vector<integer^2>`. A callback that is not declared still gives the
+  type of the source.
 - An integer followed by a fraction is read as a mixed number only when the
   numerator and the denominator of the fraction are number literals.
   `2\frac{1+1}{3}` was read as `2 + 2/3`; it is now the product `4/3`, as
@@ -713,6 +764,30 @@
   ranges, `[1..3] + [1..3]`, is typed `list<list<integer>^1>`, where it was
   `list<range^1>`.
 
+- Arithmetic over a list whose element can be a list or absent has a static type
+  that holds the result. With `L: list<list<integer> | missing>` and
+  `L := [[1, 2], Missing]`, `L + 1` was typed `list<list<number>>`, but the
+  absent element becomes `NaN`; it is now typed `list<list<number> | nan>`. A
+  function over a list of rows and numbers keeps the rows: `Sin(L)` with
+  `L: list<list<integer> | integer>` was typed `list<number>` and is now
+  `list<list<number> | number>`. An absent row of points stays `Missing`, also
+  when the point type is the bare `tuple` (it was `NaN`).
+
+- Collection operators whose result can hold `Missing` say so in their type.
+  `Iterate(f, Missing)` and an `Iterate` whose callback can return `Missing` are
+  typed `list<any>`, where they were the values-only `list`. `First([])`,
+  `Last([])` and `At([], 2)` are typed `missing`, where they were `unknown`.
+  `Map` with a callback that is declared for numbers or booleans over a source
+  whose elements can be collections (`Map(Sqrt, U)` with `U: any`) admits a
+  collection element; with a callback such as `IsPrime` or `Not` over a list
+  that can hold `Missing`, the element type has a `missing` arm. `Map` with a
+  user function that has no declared result types the call: with
+  `g := c ↦ If(c == "a", "zz", c)`, `Map(g, ["a", "b"])` was typed as the source
+  and is now typed by what `g` returns. A `Zip` element whose items are all
+  absent is `Missing` through `.at()` and iteration too, as it already was in
+  the printed value, and compiled JavaScript writes it as an absent value; the
+  Python target declines such a `Zip`.
+
 - A complex number whose imaginary coefficient is written as an inline fraction
   keeps its value in a LaTeX round trip. At a deep level, or with an inline
   `fractionStyle`, `Complex(1/10, 1/10)` was written `1/10+1/10\imaginaryI`,
@@ -873,12 +948,12 @@
 - On the `javascript` target, a seeded random draw that reads no input of the
   compiled function, such as
   `WithRandomSeed(191268, RandomChoice([0, 1], 6561))`, is computed once per
-  compiled function, on its first call, and the stored value is read after
-  that: the draw is a pure function of its seed. It was drawn again at every
-  call, about 6,561 numbers per sample of a surface indexed by `9θ + 8φ`
-  (0.027 ms per call against 0.0002 ms for `sin(9θ + 8φ)`; now 0.0003 ms). A
-  draw whose seed or body reads an input, a loop index or a caller function,
-  and an unseeded draw, are still per call.
+  compiled function, on its first call, and the stored value is read after that:
+  the draw is a pure function of its seed. It was drawn again at every call,
+  about 6,561 numbers per sample of a surface indexed by `9θ + 8φ` (0.027 ms per
+  call against 0.0002 ms for `sin(9θ + 8φ)`; now 0.0003 ms). A draw whose seed
+  or body reads an input, a loop index or a caller function, and an unseeded
+  draw, are still per call.
 - A type string that names a type declared with `ce.declareType`, such as the
   signature `(integer_partition) -> number`, is parsed once and then read from a
   cache. Before, it was parsed twice at every `ce.declare`. Declaring 1000

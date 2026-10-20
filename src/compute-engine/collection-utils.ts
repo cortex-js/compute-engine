@@ -2055,8 +2055,12 @@ type UnionArm = {
 /** The arms of a collection branch `b` whose element type is `element`: one
  * arm per arm of the element (a `missing` arm, an absent cell of the list,
  * is not an arm; it is put back by the wrap), all in one group, all wrapped
- * back as the branch. */
-function collectionBranchArms(b: Type, element: Type): UnionArm[] {
+ * back as the branch. `undefined` when an arm of the element is itself a
+ * collection beside another arm (`list<tuple<…> | list<integer> | integer>`):
+ * the broadcast maps into that cell, so the handler's answer for the cell is
+ * not the result cell, and the caller types the list by its shape
+ * (`broadcastShapedResultType`, which mirrors each arm of a ragged cell). */
+function collectionBranchArms(b: Type, element: Type): UnionArm[] | undefined {
   // Only a `missing` ARM of the element is an absent cell. A `missing` arm
   // inside a tuple component (`tuple<number | missing, number>`, a point
   // with an absent coordinate) is a present point, and stays in its cell.
@@ -2066,6 +2070,16 @@ function collectionBranchArms(b: Type, element: Type): UnionArm[] {
       ? e.types.map((m) => resolveTypeAlias(m))
       : [e];
   const cells = members.filter((m) => m !== 'missing');
+  if (
+    cells.length > 1 &&
+    cells.some(
+      (m) =>
+        !isTupleShapedType(m) &&
+        !isSubtype(m, 'string') &&
+        isSubtype(m, COLLECTION_SHAPE_TYPE)
+    )
+  )
+    return undefined;
   const group = {};
   // An element that is `missing` and nothing else (`list<missing>`, a list
   // of absent cells) is one arm as it stands, so the branch survives: with
@@ -2144,7 +2158,9 @@ function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
     const b = resolveTypeAlias(branch);
     const element = dimensionlessIndexedElement(b, undefined, scalarSibling);
     if (element !== undefined) {
-      arms.push(...collectionBranchArms(b, element));
+      const branchArms = collectionBranchArms(b, element);
+      if (branchArms === undefined) return undefined;
+      arms.push(...branchArms);
     } else if (typeof b !== 'string' && b.kind === 'broadcastable') {
       arms.push({ cell: b.elements, rewrap: undefined });
       arms.push({

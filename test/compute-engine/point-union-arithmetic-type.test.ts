@@ -685,13 +685,17 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     );
     // An absent NUMBER cell evaluates to `NaN`, a number, so only a point
     // cell keeps a `missing` arm (`withAbsentPointCells`,
-    // `broadcast-lift-type.ts`): `[Missing, 3]` squared is `[NaN, 9]`.
+    // `broadcast-lift-type.ts`): `[Missing, 3]` squared is `[NaN, 9]`. The
+    // point cell has a `nan` arm too: the result is a list of points OR a
+    // list of numbers, so an absent cell of a list value stays `NaN`
+    // (`absentCellsArePoints` is false for this union), and the typing does
+    // not tell which arm of the operand an absent cell came from.
     ce.declare('G', {
       type: 'number | list<tuple<number, number>> | list<missing | number>',
     });
     const sq = ce.box(['Power', 'G', 2]);
     expect(sq.type.toString()).toBe(
-      'list<missing | tuple<number, number>> | list<number> | number'
+      'list<missing | nan | tuple<number, number>> | list<number> | number'
     );
     ce.assign('G', ce.box(['List', 'Missing', 3]));
     expect(sq.evaluate().toString()).toBe('[NaN,9]');

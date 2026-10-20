@@ -4,6 +4,7 @@ import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
 import {
+  COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   isValidType,
   NUMERIC_TYPES_SET,
@@ -1796,8 +1797,15 @@ export function staticCollectionDims(
  */
 export function broadcastShapedResultType(
   operandTypes: ReadonlyArray<Readonly<Type>>,
-  elementType: Readonly<Type>
+  elementType: Readonly<Type>,
+  absentCell?: Readonly<Type>
 ): Type {
+  const ragged = raggedBroadcastResultType(
+    operandTypes,
+    elementType,
+    absentCell
+  );
+  if (ragged !== undefined) return ragged;
   let dims: number[] | null = null;
   for (const t of operandTypes) {
     const d = staticCollectionDims(t);
@@ -1821,6 +1829,257 @@ export function broadcastShapedResultType(
     dimensions: dims,
   };
   return result;
+}
+
+/**
+ * The deepest cell level that a walk over the cells of a collection type
+ * reads. A data type does not nest deeper in practice, and the bound also
+ * stops a walk through a self-referential alias.
+ */
+export const MAX_CELL_DEPTH = 8;
+
+/**
+ * The number of list levels between a collection type and its one `elements`
+ * type: the rank of a dimensioned list (`list<integer^2x3>` holds its leaves
+ * two levels down), and 1 for any other collection.
+ */
+export function collectionLevels(t: Readonly<Type>): number {
+  return typeof t !== 'string' &&
+    t.kind === 'list' &&
+    t.dimensions !== undefined
+    ? Math.max(t.dimensions.length, 1)
+    : 1;
+}
+
+/** The type of one cell of the list type `t`: its `elements`, or, for a
+ * dimensioned list of rank 2 or more, the list of its remaining dimensions
+ * (`list<integer^2x3>` has cells of type `list<integer^3>`). */
+function listCellType(t: ListType): Type {
+  if (t.dimensions === undefined || t.dimensions.length < 2) return t.elements;
+  const rest = t.dimensions.slice(1);
+  // An open length of rank 1 (`[-1]`) adds nothing to a plain list.
+  if (rest.length === 1 && rest[0] === -1)
+    return { kind: 'list', elements: t.elements };
+  return { kind: 'list', elements: t.elements, dimensions: rest };
+}
+
+/** Whether `t` is a type that says nothing of the shape of its values (`any`,
+ * `unknown`, a bare collection kind such as `list`): a value of it may be a
+ * number or a list of any depth. */
+function isShapeOpenType(t: Readonly<Type>): boolean {
+  if (typeof t !== 'string') return false;
+  if (t === 'any' || t === 'unknown' || t === 'value' || t === 'expression')
+    return true;
+  if (t === 'never' || t === 'tuple' || isSubtype(t, 'string')) return false;
+  return isSubtype(t, COLLECTION_SHAPE_TYPE);
+}
+
+/** Whether the chain of cell types of `t` (its `elements`, their `elements`,
+ * …) reaches a union or a reference: only such a cell can be ragged. This
+ * check allocates nothing, so the common case, a list with no union in its
+ * cells, costs one walk down the chain. */
+function mayHaveRaggedCells(t: Readonly<Type>): boolean {
+  let x: Readonly<Type> = t;
+  for (let d = 0; d <= MAX_CELL_DEPTH; d++) {
+    if (typeof x === 'string') return false;
+    if (x.kind === 'union' || x.kind === 'reference') return true;
+    if (
+      x.kind !== 'list' &&
+      x.kind !== 'collection' &&
+      x.kind !== 'indexed_collection' &&
+      x.kind !== 'broadcastable'
+    )
+      return false;
+    x = x.elements;
+  }
+  return false;
+}
+
+/**
+ * The type of a broadcast over a list whose cells are RAGGED: at some depth,
+ * a cell type is a union whose arms have different ranks, a list arm beside
+ * a scalar arm (`list<list<integer> | integer>`) or lists of different depths
+ * (`list<list<list<integer>> | list<integer>>`), or a union with an arm that
+ * says nothing of its shape (`any | list<integer>`). The rank of such a list
+ * is not known (`staticCollectionDims` reads `list<list<integer> | integer>`
+ * as rank 1), so the shaped form gave `list<R>`, a type the value is not a
+ * member of. The broadcast maps every leaf, so each cell of the result has
+ * the structure of its operand cell, with each leaf replaced by
+ * `elementType`: `Sin` of `[[1, 2], 3]` is `[[Sin(1), Sin(2)], Sin(3)]`,
+ * typed `list<list<R> | R>`. The ranks are read from the operand types, so
+ * a per-element result that is itself a list does not hide them.
+ *
+ * Each arm is mirrored as follows:
+ * - a scalar arm is `elementType`;
+ * - a list arm is a list of the mirrored cell;
+ * - a tuple arm is `elementType` or a tuple of `elementType` components,
+ *   because a head can map a point component-wise (`Sin`) or read it as one
+ *   value (`Abs`);
+ * - an arm with no stated shape (`any`, `unknown`), a nominal type, and a
+ *   cut of a self-referential alias are `any`, which holds a cell of any
+ *   shape, an absent one included (`unknown` would be dropped as the empty
+ *   case when the absorption of an absent cell widens the cell type); a
+ *   transparent alias is read as its definition;
+ * - a `missing` arm is `absentCell`: the result for an absent cell, which is
+ *   `elementType` unless the caller knows better. For an operator that
+ *   propagates absence the caller strips the `missing` arms first and adds
+ *   the marker of an absent cell afterwards (`absorbOperandAbsence`,
+ *   `broadcast-lift-type.ts`).
+ *
+ * With two operands, a result cell takes the structure of the deeper of its
+ * two operand cells, so the result cell is the union of the mirrored cells of
+ * every operand.
+ *
+ * `undefined` when no operand is a list with a ragged cell: the caller then
+ * keeps the shaped form.
+ */
+function raggedBroadcastResultType(
+  operandTypes: ReadonlyArray<Readonly<Type>>,
+  elementType: Readonly<Type>,
+  absentCell: Readonly<Type> = elementType
+): Type | undefined {
+  if (!operandTypes.some(mayHaveRaggedCells)) return undefined;
+  let ragged = false;
+  // The rank of the cells of type `t` (0 for a scalar), or `undefined` when
+  // it is not one number. A union whose arms do not have one rank is ragged.
+  // A `missing` arm is a scalar arm: the result for an absent cell is a
+  // scalar (`NaN`, `Missing`, or the boolean of `And(Missing, False)`).
+  const rankOf = (
+    t: Readonly<Type>,
+    depth: number,
+    seen?: AliasDescent
+  ): number | undefined => {
+    if (depth > MAX_CELL_DEPTH) return undefined;
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return undefined;
+    const r = unfolded.type;
+    if (typeof r === 'string') return isShapeOpenType(r) ? undefined : 0;
+    switch (r.kind) {
+      case 'union': {
+        let rank: number | undefined;
+        let mixed = false;
+        for (const arm of r.types) {
+          const k = rankOf(arm, depth, unfolded.seen);
+          if (k === undefined || (rank !== undefined && k !== rank))
+            mixed = true;
+          else rank = k;
+        }
+        if (mixed) {
+          ragged = true;
+          return undefined;
+        }
+        return rank ?? 0;
+      }
+      case 'list':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable': {
+        const levels = collectionLevels(r);
+        const inner = rankOf(
+          r.elements,
+          depth + levels,
+          descendIntoConstructor(unfolded.seen)
+        );
+        return inner === undefined ? undefined : levels + inner;
+      }
+      case 'tuple':
+      case 'numeric':
+      case 'value':
+        return 0;
+      default:
+        return undefined;
+    }
+  };
+  for (const t of operandTypes) {
+    if (typeof t === 'string' || t.kind !== 'list') return undefined;
+    rankOf(listCellType(t), 1);
+  }
+  if (!ragged) return undefined;
+
+  // A union built here is flattened into a union that contains it, and an
+  // arm that occurs twice is kept once. Any other union (a union
+  // `elementType`) is kept as one arm.
+  const built = new WeakSet<object>();
+  const union = (arms: ReadonlyArray<Type>): Type => {
+    const keys = new Set<string>();
+    const types: Type[] = [];
+    const add = (arm: Type) => {
+      if (typeof arm !== 'string' && built.has(arm)) {
+        for (const m of (arm as { types: Type[] }).types) add(m);
+        return;
+      }
+      const key = typeToDedupKey(arm);
+      if (keys.has(key)) return;
+      keys.add(key);
+      types.push(arm);
+    };
+    for (const arm of arms) add(arm);
+    if (types.length === 1) return types[0];
+    const result: Type = { kind: 'union', types };
+    built.add(result);
+    return result;
+  };
+  const mirror = (
+    t: Readonly<Type>,
+    depth: number,
+    seen?: AliasDescent
+  ): Type => {
+    if (depth > MAX_CELL_DEPTH) return 'any';
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return 'any';
+    const r = unfolded.type;
+    if (typeof r === 'string') {
+      if (r === 'missing') return absentCell as Type;
+      if (r === 'tuple') return union([elementType as Type, 'tuple']);
+      return isShapeOpenType(r) ? 'any' : (elementType as Type);
+    }
+    switch (r.kind) {
+      case 'union':
+        return union(r.types.map((m) => mirror(m, depth, unfolded.seen)));
+      case 'list':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable': {
+        const elements = mirror(
+          r.elements,
+          depth + collectionLevels(r),
+          descendIntoConstructor(unfolded.seen)
+        );
+        return r.kind === 'list' && r.dimensions !== undefined
+          ? { kind: 'list', elements, dimensions: r.dimensions }
+          : { kind: 'list', elements };
+      }
+      case 'tuple':
+        // A component that is not a scalar has no mirrored form here.
+        if (
+          !r.elements.every(
+            (e) => rankOf(e.type, depth + 1, unfolded.seen) === 0
+          )
+        )
+          return 'any';
+        return union([
+          elementType as Type,
+          {
+            kind: 'tuple',
+            elements: r.elements.map((e) => ({
+              ...e,
+              type: elementType as Type,
+            })),
+          },
+        ]);
+      case 'numeric':
+      case 'value':
+        return elementType as Type;
+      default:
+        return 'any';
+    }
+  };
+  return {
+    kind: 'list',
+    elements: union(
+      operandTypes.map((t) => mirror(listCellType(t as ListType), 1))
+    ),
+  };
 }
 
 /** The scalar leaf type of a (possibly nested/dimensioned) collection type:
