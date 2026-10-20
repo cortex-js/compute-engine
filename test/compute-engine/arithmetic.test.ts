@@ -612,6 +612,27 @@ describe('ROOT', () => {
     expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
   });
 
+  // A negative radicand under a non-integer degree is `a^(1/b)`, read as
+  // `Power` reads it: the rational reading of `1/b` decides between a real
+  // root and a complex principal value. The old code negated `|a|^(1/b)`
+  // for every degree that was not an even integer, so `Root(-8, 0.5)`,
+  // which is `(-8)^2`, was −64. Found while fixing Tycho ledger row 400.
+  test(`Negative radicand under a non-integer degree follows Power`, () => {
+    expect(ce.expr(['Root', -8, 0.5]).N().re).toBeCloseTo(64, 10);
+    expect(ce.expr(['Root', -8, 1.5]).N().re).toBeCloseTo(4, 10);
+    // (-8)^(2/5): an even numerator gives a positive real value.
+    expect(ce.expr(['Root', -8, 2.5]).N().re).toBeCloseTo(2.2973967, 6);
+    // (-8)^(5/11): an odd denominator gives the real root, negative.
+    expect(ce.expr(['Root', -8, 2.2]).N().re).toBeCloseTo(-2.5733298, 6);
+    // (-8)^(5/12): an even denominator gives the complex principal value.
+    const c = ce.expr(['Root', -8, 2.4]).N();
+    expect(c.re).toBeCloseTo(0.6155789, 6);
+    expect(c.im).toBeCloseTo(2.2973717, 6);
+    // Controls: a positive radicand and an odd integer degree are unchanged.
+    expect(ce.expr(['Root', 8, 2.5]).N().re).toBeCloseTo(2.2973967, 6);
+    expect(ce.expr(['Root', -8, 3]).N().json).toEqual(-2);
+  });
+
   // A power that reaches `pow()` with both operands as numbers, but whose
   // `Power` node survived canonicalization — an element of a broadcast
   // over a list of exponents, or a symbol exponent that holds a unit

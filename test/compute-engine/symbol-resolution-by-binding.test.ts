@@ -95,6 +95,137 @@ describe('A parameter value mentioning the parameter’s own name', () => {
 });
 
 /**
+ * An argument keeps the binding of the caller's scope inside the call frame.
+ * The frame's parent is the scope that defined the function, so the caller's
+ * pushed scope is not in its chain. A symbol that the caller declared there
+ * without a value must still read that declaration when the body reads the
+ * parameter, not an outer definition of the same name: before the fix,
+ * `g(c)` read a global `c := 5` and `g(i)` read the imaginary unit
+ * (`callerBinding`, `boxed-expression/binders.ts`; Tycho ledger row 403).
+ */
+describe('A call argument declared without a value in an inner scope', () => {
+  /** `g := a ↦ a·x`, declared as a function before it is assigned. */
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('g', 'function');
+    ce.assign('g', ce.parse('a\\mapsto ax'));
+    return ce;
+  }
+
+  /** `c := 5` globally, then `c` declared real in a pushed scope. */
+  function innerC(): ComputeEngine {
+    const ce = engine();
+    ce.assign('c', 5);
+    ce.pushScope();
+    ce.declare('c', 'real');
+    return ce;
+  }
+
+  /** `i` declared real in a pushed scope. */
+  function innerI(): ComputeEngine {
+    const ce = engine();
+    ce.pushScope();
+    ce.declare('i', 'real');
+    return ce;
+  }
+
+  test('an outer value of the same name is not read (box route)', () => {
+    expect(innerC().box(['g', 'c']).evaluate().toString()).toBe('c * x');
+  });
+
+  test('an outer value of the same name is not read (parse route)', () => {
+    expect(innerC().parse('g(c)').evaluate().toString()).toBe('c * x');
+  });
+
+  test('a library constant of the same name is not read (box route)', () => {
+    expect(innerI().box(['g', 'i']).evaluate().toString()).toBe('i * x');
+  });
+
+  test('a library constant of the same name is not read (parse route)', () => {
+    expect(innerI().parse('g(i)').evaluate().toString()).toBe('i * x');
+  });
+
+  test('the derivative of a term with the call gains no imaginary unit', () => {
+    // d/dx [cos(ix)·ix] = i·cos(ix) − i²·x·sin(ix), with `i` real.
+    const result = innerI()
+      .box([
+        'D',
+        ['Multiply', ['Cos', ['Multiply', 'i', 'x']], ['g', 'i']],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toBe('-x * sin(i * x) * i^2 + i * cos(i * x)');
+    expect(JSON.stringify(result.json)).not.toMatch(/Complex|ImaginaryUnit/);
+  });
+
+  test('the same symbol outside a call reads the inner declaration', () => {
+    const ce = innerC();
+    expect(ce.box('c').evaluate().toString()).toBe('c');
+    expect(ce.box(['Multiply', 'c', 'x']).evaluate().toString()).toBe('c * x');
+  });
+
+  test('an inner declaration with its own value is read', () => {
+    const ce = innerC();
+    ce.assign('c', 7);
+    expect(ce.box(['g', 'c']).evaluate().toString()).toBe('7x');
+  });
+
+  test('a name declared real in the global scope is read', () => {
+    const ce = engine();
+    ce.declare('i', 'real');
+    expect(ce.box(['g', 'i']).evaluate().toString()).toBe('i * x');
+  });
+
+  test('an inner name with no outer meaning is read', () => {
+    const ce = engine();
+    ce.pushScope();
+    ce.declare('j', 'real');
+    expect(ce.box(['g', 'j']).evaluate().toString()).toBe('j * x');
+  });
+
+  test('a free symbol of the body still reads the definition scope', () => {
+    // The argument `c` is the caller's (valueless); the body's `c` is the
+    // global one (5).
+    const ce = engine();
+    ce.assign('c', 5);
+    ce.declare('h', 'function');
+    ce.assign('h', ce.parse('a\\mapsto a+c'));
+    ce.pushScope();
+    ce.declare('c', 'real');
+    expect(ce.box(['h', 'c']).evaluate().toString()).toBe('c + 5');
+  });
+
+  test('an argument passed on to a nested call keeps its binding', () => {
+    const ce = engine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.parse('b\\mapsto g(b)+1'));
+    ce.assign('c', 5);
+    ce.pushScope();
+    ce.declare('c', 'real');
+    expect(ce.box(['f', 'c']).evaluate().toString()).toBe('c * x + 1');
+  });
+
+  test('a newer declaration above the argument hides it in the call as in the caller', () => {
+    // `g(c)` is boxed with `c` bound to the first pushed scope. A second
+    // pushed scope declares `c` again and gives it a value. A direct read of
+    // the first `c` answers the newer declaration (the "Symbol identity" rule
+    // of docs/SCOPING-MODEL.md), and the call must read the same: `7x`, not
+    // the first `c` (`c * x`) and not the global `c := 5` (`5x`).
+    const ce = engine();
+    ce.assign('c', 5);
+    ce.pushScope();
+    ce.declare('c', 'real');
+    const call = ce.box(['g', 'c']);
+    const direct = ce.box('c');
+    ce.pushScope();
+    ce.declare('c', 'real');
+    ce.assign('c', 7);
+    expect(direct.evaluate().toString()).toBe('7');
+    expect(call.evaluate().toString()).toBe('7x');
+  });
+});
+
+/**
  * Tycho's twice-recursive document function: `R(i,x,y) = R(i-1,x,y) +
  * 0.5·S(x,y,R(i-1,x,y))` with a literal base case, declared then assigned a
  * clause-dispatch literal, the parameter renamed away from the imaginary

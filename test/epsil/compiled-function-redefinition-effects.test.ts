@@ -54,3 +54,35 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
     expect(compileProgram(plain).run!({} as never)).toEqual([6]);
   });
 });
+
+describe('A FUNCTION DEFINED UNDER A DECLARATION THAT STATES ITS EFFECTS', () => {
+  // `let g: (integer) pure -> real` is the contract of `g`. A definition
+  // whose body draws a random number does not meet it: the interpreter
+  // refuses the definition (`incompatible-type`, pure effects against
+  // random effects), and the compiled program must not run it either. The
+  // name was skipped by the compiled check (found by the Codex reviewer,
+  // 2026-10-19), so the program compiled and drew the number.
+  const source =
+    'let g: (integer) pure -> real\nfunction g(k) { Random() }\ng(1)';
+
+  test('the run refuses the definition', () => {
+    const { diagnostics } = run(source);
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics.join(' ')).toMatch(/pure/);
+  });
+
+  test('the compilation is refused', () => {
+    expect(() => compileProgram(source)).toThrow(
+      /Could not compile `DefineFunction`: .*pure/
+    );
+  });
+
+  test('a definition that meets the declared effects still compiles', () => {
+    const plain =
+      'let g: (integer) random -> real\nfunction g(k) { Random() }\ng(1)';
+    const value = compileProgram(plain).run!({} as never);
+    expect(typeof value).toBe('number');
+    const pure = 'let h: (integer) pure -> integer\nfunction h(k) { k + 1 }\nh(1)';
+    expect(compileProgram(pure).run!({} as never)).toBe(2);
+  });
+});

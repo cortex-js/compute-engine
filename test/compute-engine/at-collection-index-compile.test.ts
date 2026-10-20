@@ -11,9 +11,9 @@
  *
  * Projection convention: the interpreter's "no value" outcomes have no numeric
  * equivalent, so they compile to NaN. The absence marker (an out-of-range or
- * a provably non-integer index) projects to NaN in its own slot, so a gather
- * keeps the index list's length; a DECLINED `At` (an entry the interpreter
- * cannot decide — an unknown, a non-finite entry — leaves `At` unevaluated)
+ * a provably non-integer, NaN or infinite index) projects to NaN in its own
+ * slot, so a gather keeps the index list's length; a DECLINED `At` (an entry
+ * the interpreter cannot decide, such as an unknown, leaves `At` unevaluated)
  * projects to a scalar NaN for the whole result.
  */
 
@@ -136,9 +136,45 @@ describe('At with a non-integer entry in the index', () => {
     expect(r.success).toBe(true);
     expect(r.run!({ L: [10, 20, 30], J: [1, 1.5] })).toEqual([10, NaN]);
     expect(r.run!({ L: [10, 20, 30], J: [1, 7] })).toEqual([10, NaN]);
-    // A non-finite entry leaves the interpreter's `At` unevaluated, which
-    // projects to a whole-result NaN, as before.
-    expect(r.run!({ L: [10, 20, 30], J: [1, NaN] })).toBeNaN();
+    // A NaN or infinite entry names no position: its slot is NaN, as the
+    // interpreter puts the absence marker in its slot (Tycho ledger row 401).
+    expect(r.run!({ L: [10, 20, 30], J: [1, NaN] })).toEqual([10, NaN]);
+    expect(r.run!({ L: [10, 20, 30], J: [Infinity, 2, -Infinity] })).toEqual(
+      [NaN, 20, NaN]
+    );
+  });
+});
+
+describe('At with a NaN, infinite or absent entry in the index', () => {
+  // The entry names no position: the interpreter puts the absence marker in
+  // its slot and reads the other entries, and the compiled form projects the
+  // slot to NaN (Tycho ledger row 401).
+  test('a NaN entry', () => {
+    expect(parity(at(['List', 'NaN', 1]))).toEqual([NaN, 10]);
+  });
+
+  test('an infinite entry', () => {
+    expect(parity(at(['List', 'PositiveInfinity', 1]))).toEqual([NaN, 10]);
+    expect(parity(at(['List', 3, 'NegativeInfinity']))).toEqual([30, NaN]);
+  });
+
+  test('an absent entry', () => {
+    expect(parity(at(['List', 'Missing', 2]))).toEqual([NaN, 20]);
+  });
+
+  test('a complex-lane entry whose real part is NaN', () => {
+    // On the complex lane a NaN entry is the object `{re: NaN, im: NaN}`.
+    // It has a numeric real part, so it names no position like a number NaN
+    // does: its slot is NaN, not the whole result. An entry with no numeric
+    // real part at all (a string) is still the whole-result NaN, as the
+    // interpreter leaves such an `At` unevaluated.
+    const engine = new ComputeEngine();
+    engine.declare('ys', 'list<number>');
+    const r = compile(engine.box(['At', ['List', 10, 20, 30], 'ys']));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ ys: [{ re: NaN, im: NaN }, 2] as any })).toEqual([NaN, 20]);
+    expect(r!.run!({ ys: [{ re: 1, im: 0 }, 2] as any })).toEqual([10, 20]);
+    expect(r!.run!({ ys: ['a', 2] as any })).toBeNaN();
   });
 });
 

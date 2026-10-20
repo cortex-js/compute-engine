@@ -4594,11 +4594,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const nConst = tryGetConstant(n);
     // Odd integer degree: `np.power` is NaN for a negative base, but the real
     // root exists (interpreter convention, e.g. Root(-8, 3) = -2). Emit the
-    // sign-corrected form `sign(x)·|x|^(1/n)`.
-    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
+    // sign-corrected form `sign(x)·|x|^(1/n)`. A noninteger degree that the
+    // interpreter reads as a rational exponent with an odd denominator
+    // (`BaseCompiler.realRootDegreeTerms`) has a real root too: with an odd
+    // numerator (`\sqrt[2.2]{x}`, read as `x^{5/11}`) it is the same signed
+    // form, with an even numerator (`\sqrt[2.5]{x}`, read as `x^{2/5}`) it
+    // is the magnitude `|x|^(1/n)`.
+    const realRoot = BaseCompiler.realRootDegreeTerms(n);
+    if (
+      nConst !== undefined &&
+      ((Number.isInteger(nConst) && nConst % 2 !== 0) ||
+        realRoot?.oddNumerator === true)
+    ) {
       const c = compile(x);
       return `(np.sign(${c}) * np.power(np.abs(${c}), 1.0 / ${compile(n)}))`;
     }
+    if (nConst !== undefined && realRoot !== undefined)
+      return `np.power(np.abs(${compile(x)}), 1.0 / ${compile(n)})`;
     // An EVEN degree over an operand of unknown sign, under a promoting
     // discipline: `np.power` is `NaN` for a negative base where the
     // interpreter answers the principal complex root. `np.emath.power`

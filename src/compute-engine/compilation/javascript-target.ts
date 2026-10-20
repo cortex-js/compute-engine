@@ -7256,8 +7256,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         // enclosing expression reads `{re, im}` off it. (A canonical even root
         // of a negative already folds to an exact complex literal before
         // compile: `√-4` → `2i`.)
-        if (Number.isInteger(nConst) && nConst % 2 !== 0 && aConst < 0)
+        // A noninteger degree read as a rational exponent with an odd
+        // denominator (`BaseCompiler.realRootDegreeTerms`) has a real root
+        // too: negative when the numerator is odd, positive when it is even.
+        const realRoot =
+          aConst < 0 ? BaseCompiler.realRootDegreeTerms(exp) : undefined;
+        if (
+          aConst < 0 &&
+          ((Number.isInteger(nConst) && nConst % 2 !== 0) ||
+            realRoot?.oddNumerator === true)
+        )
           return String(-Math.pow(-aConst, 1 / nConst));
+        if (realRoot !== undefined)
+          return String(Math.pow(-aConst, 1 / nConst));
         if (resultIsComplexValued('Root', [arg, exp]))
           return complexPowLiteral(aConst, 1 / nConst);
         return NO_REAL_VALUE_FOLD;
@@ -7309,13 +7320,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (nConst === 2) return `Math.sqrt(${compile(arg)})`;
     if (nConst === 3) return `Math.cbrt(${compile(arg)})`;
     // Odd integer degree: `Math.pow` is NaN for a negative base, but the real
-    // root exists. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
-    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0)
+    // root exists. Emit the sign-corrected form `sign(x)·|x|^(1/n)`. A
+    // noninteger degree that the interpreter reads as a rational exponent
+    // with an odd denominator (`BaseCompiler.realRootDegreeTerms`) has a real
+    // root too: with an odd numerator (`\sqrt[2.2]{x}`, read as `x^{5/11}`)
+    // it is the same signed form, with an even numerator (`\sqrt[2.5]{x}`,
+    // read as `x^{2/5}`) it is the magnitude `|x|^(1/n)`.
+    const realRoot = BaseCompiler.realRootDegreeTerms(exp);
+    if (
+      nConst !== undefined &&
+      ((Number.isInteger(nConst) && nConst % 2 !== 0) ||
+        realRoot?.oddNumerator === true)
+    )
       return BaseCompiler.inlineExpression(
         target,
         `(Math.sign(\${x}) * Math.pow(Math.abs(\${x}), ${1 / nConst}))`,
         compile(arg)
       );
+    if (nConst !== undefined && realRoot !== undefined)
+      return `Math.pow(Math.abs(${compile(arg)}), ${1 / nConst})`;
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
@@ -8587,12 +8610,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // The seed expression is emitted in argument position, so it is evaluated
   // ONCE per frame entry, never per draw.
-  WithRandomSeed: (args, compile) => {
+  //
+  // A seeded draw whose seed and body read no per-call value is the same on
+  // every call. It is emitted as a preamble local that computes it at most
+  // once per compiled artifact, and the site calls that local
+  // (`BaseCompiler.hoistSeededDraw`).
+  WithRandomSeed: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error(
         `Could not compile \`WithRandomSeed\`: expected exactly two arguments.`
       );
-    return `_SYS.withRandomSeed(${compile(args[0])}, () => ${compile(args[1])})`;
+    const emit = (codes: ReadonlyArray<string>): string =>
+      `_SYS.withRandomSeed(${codes[0]}, () => ${codes[1]})`;
+    return (
+      BaseCompiler.hoistSeededDraw(target, args, compile, emit) ??
+      emit(args.map((x) => compile(x)))
+    );
   },
 };
 

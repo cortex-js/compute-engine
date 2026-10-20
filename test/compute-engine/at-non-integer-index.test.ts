@@ -9,8 +9,10 @@
  * four levels of that never finished evaluating.
  *
  * An index the numeric reading cannot decide — a symbol with no value, an
- * expression with unknowns, an infinity, an exact constant within rounding
- * of an integer — is left alone, as before.
+ * expression with unknowns, an exact constant within rounding of an
+ * integer — is left alone, as before. An infinite or NaN index names no
+ * position and answers the marker, as a scalar and as an entry of an index
+ * list.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -89,6 +91,73 @@ describe('At over a gather with a provably non-integer entry', () => {
 
   test('an undecidable entry keeps the gather inert', () => {
     expect(ce.parse('L[[1, x, 3]]').evaluate().operator).toBe('At');
+  });
+});
+
+describe('At over a gather with a NaN or infinite entry', () => {
+  // A NaN or infinite entry of an index list names no position. It gives the
+  // hole the scalar index gives, in its own slot, and the other entries are
+  // read as usual (Tycho ledger row 401). The hole is the one an out-of-range
+  // entry gives: `NaN` over numbers, `Missing` over points.
+  const ce = new ComputeEngine();
+  const ev = (json: any) => ce.box(json).evaluate().json;
+  const P = ['List', 10, 20, 30];
+  const T = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+
+  test('the reference holes: scalar NaN and out-of-range entry', () => {
+    expect(ev(['At', P, 'NaN'])).toEqual('NaN');
+    expect(ev(['At', P, ['List', 0, 1]])).toEqual(['List', 'NaN', 10]);
+    expect(ev(['At', T, 'NaN'])).toEqual('Missing');
+    expect(ev(['At', T, ['List', 0, 1]])).toEqual([
+      'List',
+      'Missing',
+      ['Tuple', 1, 2],
+    ]);
+  });
+
+  test('a NaN entry over numbers', () => {
+    expect(ev(['At', P, ['List', 'NaN', 1]])).toEqual(['List', 'NaN', 10]);
+    expect(ev(['At', P, ['List', ['Divide', 0, 0], 1]])).toEqual([
+      'List',
+      'NaN',
+      10,
+    ]);
+  });
+
+  test('an infinite entry over numbers', () => {
+    expect(ev(['At', P, ['List', 'PositiveInfinity', 1]])).toEqual([
+      'List',
+      'NaN',
+      10,
+    ]);
+    expect(ev(['At', P, ['List', 'NegativeInfinity', 2.5]])).toEqual([
+      'List',
+      'NaN',
+      'NaN',
+    ]);
+    expect(ev(['At', P, ['List', 3, 'ComplexInfinity']])).toEqual([
+      'List',
+      30,
+      'NaN',
+    ]);
+  });
+
+  test('a NaN entry over points', () => {
+    expect(ev(['At', T, ['List', 'NaN', 1]])).toEqual([
+      'List',
+      'Missing',
+      ['Tuple', 1, 2],
+    ]);
+  });
+
+  test('the parse route', () => {
+    const p = (latex: string) => ce.parse(latex).evaluate().toString();
+    expect(p('[10,20,30][[\\operatorname{NaN},1]]')).toBe('[NaN,10]');
+    expect(p('[10,20,30][[\\infty,1]]')).toBe('[NaN,10]');
+    expect(p('[10,20,30][[-\\infty,1]]')).toBe('[NaN,10]');
+    expect(p('[(1,2),(3,4)][[\\operatorname{NaN},1]]')).toBe(
+      '["Missing",(1, 2)]'
+    );
   });
 });
 

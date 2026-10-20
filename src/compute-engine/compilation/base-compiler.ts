@@ -110,6 +110,7 @@ import {
 import { substituteDeclaredBounds } from '../boxed-expression/generic-instantiation.js';
 import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import type {
+  EffectSet,
   FunctionSignature,
   NumericPrimitiveType,
   Type,
@@ -254,7 +255,11 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
 } from '../boxed-expression/effects-inference.js';
-import { isEffectSubset } from '../../common/type/effects.js';
+import {
+  hasDeclaredEffectLabel,
+  isEffectSubset,
+} from '../../common/type/effects.js';
+import { effectsOf } from '../boxed-expression/effects-of.js';
 
 import {
   COMPLEX_CONTINUATION_HEADS,
@@ -4853,14 +4858,18 @@ export class BaseCompiler {
    *   number (`realPowerExponent` lowers an exact rational), or the exponent
    *   is a float constant whose recovered denominator is even or absent (the
    *   principal value, which the power of the target gives);
-   * - `{ value, oddNumerator }` for a float constant exponent with an odd
-   *   recovered denominator, decided now, in the shape `realPowerExponent`
-   *   returns;
+   * - `{ value, oddNumerator, terms }` for a float constant exponent with an
+   *   odd recovered denominator, decided now, in the shape `realPowerExponent`
+   *   returns, with the recovered `[p, q]` as `terms` (the interval target
+   *   gives them to `_IA.powRational`);
    * - `'runtime'` for an exponent with an unknown: the rule needs its value.
    */
   static negativeBaseFloatPower(
     args: ReadonlyArray<Expression>
-  ): { value: number; oddNumerator: boolean } | 'runtime' | undefined {
+  ):
+    | { value: number; oddNumerator: boolean; terms: [p: number, q: number] }
+    | 'runtime'
+    | undefined {
     if (args.length !== 2) return undefined;
     const [base, exponent] = args;
     if (base.isNonNegative === true) return undefined;
@@ -4883,7 +4892,7 @@ export class BaseCompiler {
       if (!Number.isFinite(value) || Number.isInteger(value)) return undefined;
       const terms = realPowerBranchTerms(undefined, value);
       if (terms === undefined || terms[1] % 2 === 0) return undefined;
-      return { value, oddNumerator: terms[0] % 2 !== 0 };
+      return { value, oddNumerator: terms[0] % 2 !== 0, terms };
     }
     return exponent.unknowns.length > 0 || exponent.isPure !== true
       ? 'runtime'
@@ -5052,7 +5061,19 @@ export class BaseCompiler {
     return shadowsLibraryName(expr.engine, s, { customLibrary: false });
   }
 
-  /** An exact noninteger exponent whose reduced denominator permits a real root. */
+  /**
+   * A noninteger exponent number literal whose reduced denominator permits a
+   * real root of a negative base: an exact rational `p/q` with an odd `q`,
+   * or a float literal that the interpreter reads as such a rational.
+   *
+   * The interpreter reads a float exponent as the nearest small rational
+   * (`realPowerBranchTerms()`) and takes the real root when its denominator
+   * is odd: `x^{1/2.2}` is `x^{0.4545…}`, read as `x^{5/11}`, which is `−1`
+   * at `x = −1`. A float literal is decided by `negativeBaseFloatPower`, so
+   * every target, and the complex-lane analysis that reads this function,
+   * uses the same reading. Without it, a negative base compiles to no real
+   * value (`NaN`, an empty interval) or to the complex lane.
+   */
   static realPowerExponent(
     args: ReadonlyArray<Expression>
   ): { value: number; oddNumerator: boolean } | undefined {
@@ -5072,9 +5093,12 @@ export class BaseCompiler {
         return frame.realPower;
     }
     const exponent = args[1];
+    if (isNumber(exponent) && !exponent.isExact) {
+      const float = BaseCompiler.negativeBaseFloatPower(args);
+      return typeof float === 'object' ? float : undefined;
+    }
     if (
       !isNumber(exponent) ||
-      !exponent.isExact ||
       exponent.isComplex ||
       !Number.isFinite(exponent.re) ||
       Number.isInteger(exponent.re)
@@ -5086,6 +5110,49 @@ export class BaseCompiler {
     const q = BigInt(rational[1]);
     if (q <= 1n || q % 2n === 0n) return undefined;
     return { value: exponent.re, oddNumerator: p % 2n !== 0n };
+  }
+
+  /**
+   * The reduced terms `[p, q]` of the exponent `1/n` of `Root(x, n)`, when
+   * the degree `n` is a noninteger number literal and a negative radicand
+   * has a real root, with the parity of `p`. Returns `undefined` otherwise;
+   * an integer degree is not decided here (each target lowers an odd
+   * integer degree on its own).
+   *
+   * The interpreter evaluates a negative radicand under a noninteger degree
+   * as the power `x^(1/n)` (`root()` in `arithmetic-power.ts`), and reads
+   * the exponent as `Power` reads a float exponent (`realPowerBranchTerms()`).
+   * The degree is read here as a rational `a/b` with the same recognizer, so
+   * `\sqrt[2.2]{x}` is read as `x^{5/11}`, as `x^{1/2.2}` is. The exponent
+   * `1/n` is `b/a`. The value of a negative radicand is real when its
+   * denominator `a` is odd. Its sign is then given by the numerator `b`:
+   *
+   * - `b` odd (`oddNumerator`): the value is negative, `−|x|^(1/n)`
+   *   (`\sqrt[2.2]{x}` is `−2.573` at `x = −8`);
+   * - `b` even: the value is positive, `|x|^(1/n)` (`\sqrt[2.5]{x}`, read as
+   *   `x^{2/5}`, is `+2.297` at `x = −8`).
+   *
+   * When `a` is even (`\sqrt[2.4]{x}`, read as `x^{5/12}`), the value of a
+   * negative radicand is complex, and the targets keep their power lowering.
+   */
+  static realRootDegreeTerms(
+    degree: Expression | null | undefined
+  ): { terms: [p: number, q: number]; oddNumerator: boolean } | undefined {
+    if (degree === null || degree === undefined) return undefined;
+    if (!isNumber(degree) || degree.isComplex) return undefined;
+    const d = degree.re;
+    if (!Number.isFinite(d) || Number.isInteger(d)) return undefined;
+    const exact = degree.isExact ? asRational(degree) : undefined;
+    if (degree.isExact && exact === undefined) return undefined;
+    const terms = realPowerBranchTerms(exact, d);
+    if (terms === undefined) return undefined;
+    const [a, b] = terms;
+    if (a % 2 === 0) return undefined;
+    // The exponent `1/n` is `b/a`, with the sign on its numerator.
+    return {
+      terms: a < 0 ? [-b, -a] : [b, a],
+      oddNumerator: b % 2 !== 0,
+    };
   }
 
   /**
@@ -17503,9 +17570,14 @@ export class BaseCompiler {
       const name = s.ops[0].symbol;
       definitionCount.set(name, (definitionCount.get(name) ?? 0) + 1);
     }
-    // The names that an earlier `Declare` statement gives a type with stated
-    // effects (`let g: (integer) scope -> integer`).
-    const declaredEffects = new Set<string>();
+    // The effects that an earlier `Declare` statement states for a name
+    // (`let g: (integer) scope -> integer`, `let g: (integer) pure -> real`).
+    // A later definition of that name is checked against them: the
+    // interpreter refuses `function g(k) { Random() }` under the `pure`
+    // declaration (`incompatible-type`), and the compiled program must not
+    // run it either. (Before 2026-10-19 such a name was skipped, so the
+    // compiled program ran the definition the interpreter refused.)
+    const declaredEffects = new Map<string, EffectSet>();
     // The names that an earlier statement defines with a function literal.
     const definedBefore = new Set<string>();
     for (const s of stmts) {
@@ -17515,8 +17587,9 @@ export class BaseCompiler {
         if (source === undefined) continue;
         try {
           const parsed = parseType(source, s.engine._typeResolver);
-          if (signatureEffects(parsed) !== undefined)
-            declaredEffects.add(s.ops[0].symbol);
+          const effects = signatureEffects(parsed);
+          if (effects !== undefined)
+            declaredEffects.set(s.ops[0].symbol, effects);
         } catch {
           // Not a type: the `Declare` statement reports it.
         }
@@ -17529,7 +17602,26 @@ export class BaseCompiler {
       if (!isSymbol(target) || !isFunction(literal, 'Function')) continue;
       const name = target.symbol;
       if ((definitionCount.get(name) ?? 0) > 1) continue;
-      if (declaredEffects.has(name)) continue;
+      const declared = declaredEffects.get(name);
+      if (declared !== undefined) {
+        const inferred = inferFunctionLiteralEffects(s.engine, literal, {
+          selfName: name,
+        });
+        if (
+          !inferred.unresolvedHead &&
+          !isEffectSubset(inferred.effects, declared)
+        ) {
+          const error = new EffectContractError(
+            name,
+            declared,
+            inferred.effects
+          );
+          throw new Error(
+            `Could not compile \`${s.operator}\`: ${error.message}.`
+          );
+        }
+        continue;
+      }
       // The binding of a name that an earlier statement of the list defines
       // holds the effects of that definition, not a declaration. The
       // interpreter checks the new literal on its own then: with
@@ -26169,6 +26261,155 @@ export class BaseCompiler {
     (registry.hoistable ??= new Set()).add(name);
     literals.set(text, name);
     return name;
+  }
+
+  /**
+   * Emit a seeded random draw (`WithRandomSeed(seed, body)`) that reads no
+   * per-call value as a preamble local computed at most ONCE per compiled
+   * artifact, and return the code that reads it; `undefined` when the draw
+   * must stay inline.
+   *
+   * Inside a `WithRandomSeed` frame every draw is the counter-based hash of
+   * the seed and the draw's position in the frame, and a nested frame does
+   * not change the counter of its parent (`withRandomSeedFrame`). So when
+   * the seed and the body read no input, no binder index and no
+   * caller-supplied source, the value is a pure function of the seed: the
+   * same on every call. Emitted inline, it was drawn again on every call: a
+   * plot that indexed one cell of `RandomChoice([0, 1], 6561)` per sample
+   * drew the 6 561 numbers on every sample, over 100 times the cost of a
+   * `sin` call. An unseeded draw never reaches this function and stays per
+   * call.
+   *
+   * The local holds a function that computes the value on its first call
+   * and returns the stored value after that. The draw is computed only when
+   * the code reaches it, as the inline form does: a draw in a branch that is
+   * not taken costs nothing, and an error it raises is raised at that
+   * point, not when the runner is built. The local is recorded on
+   * `userFunctions.hoistable`, so the runner builds it once per artifact
+   * (`splitPreambleDefs`); if its text still reads a per-call binding, the
+   * split keeps it per call, where it computes the draw on each call as the
+   * inline form does.
+   *
+   * The draw stays inline when:
+   * - the target does not own the default user-function registry, or the
+   *   compile carries caller-supplied functions (`foldExcludedOps`), as for
+   *   `hoistConstantListLiteral`;
+   * - an operand has a free symbol (`unknowns`), names a symbol that an
+   *   enclosing binder binds (`boundVars`) or a `vars` key, or reaches one
+   *   of those through an assigned value or a user function
+   *   (`reachesExcludedName`);
+   * - an operand holds a caller-mapped operator or a string-valued `vars`
+   *   symbol, which splice live source, or the compilation recorded no
+   *   provenance predicates to check this against (`cseAdmission`);
+   * - the seed has the `random` effect (`WithRandomSeed(Random(), body)`):
+   *   it takes a fresh ambient draw on each call;
+   * - the emitted text reads the vars object, calls a definition that runs
+   *   per call (a user function), or calls a compiled integral, whose
+   *   Monte-Carlo samples are live inside a seeded frame too.
+   *
+   * Each operand compiles under its own nested CSE harvest
+   * (`withNestedCseHarvest`), so the text never reads a temporary that an
+   * enclosing region binds in the per-call code.
+   *
+   * Provenance: Tycho ledger row 399 (2026-10-19).
+   */
+  static hoistSeededDraw(
+    target: CompileTarget<Expression>,
+    operands: ReadonlyArray<Expression>,
+    compile: (expr: Expression) => TargetSource,
+    emit: (codes: ReadonlyArray<TargetSource>) => TargetSource
+  ): TargetSource | undefined {
+    const registry = target.userFunctions;
+    if (!registry || registry.lowering !== undefined) return undefined;
+    if (target.foldExcludedOps !== undefined && target.foldExcludedOps.size > 0)
+      return undefined;
+    const root = registry.valueRoot ?? registry.root ?? target;
+    const options = BaseCompiler.cseAdmission(root, new Set());
+    if (options === undefined) return undefined;
+    const bound = target.boundVars;
+    const vars = target.varsKeys;
+    const closed = (e: Expression): boolean => {
+      if (isSymbol(e))
+        return (
+          bound?.has(e.symbol) !== true &&
+          vars?.has(e.symbol) !== true &&
+          options.isStringVar?.(e.symbol) !== true
+        );
+      if (isDictionary(e)) return e.values.every(closed);
+      if (isFunction(e))
+        return !isCallerMapped(e, options) && e.ops.every(closed);
+      return true;
+    };
+    if (
+      operands.some(
+        (e) =>
+          e.unknowns.length > 0 ||
+          !closed(e) ||
+          BaseCompiler.reachesExcludedName(e, target)
+      )
+    )
+      return undefined;
+    // The seed is evaluated in the enclosing frame, before the seeded frame
+    // starts. A seed that draws (`WithRandomSeed(Random(), body)`) takes a
+    // fresh ambient draw on each evaluation, so the value of the frame is
+    // different on each call and must not be computed only once.
+    if (
+      operands.length > 0 &&
+      hasDeclaredEffectLabel(effectsOf(operands[0]), 'random')
+    )
+      return undefined;
+    // The operands are compiled once here, to test the emitted text. When the
+    // test refuses the hoist, the caller compiles them again, so the
+    // definitions that this compilation added to the registry (a nested
+    // seeded draw, a user function) are removed first: kept, they would be
+    // dead code in the preamble, next to the ones the second compilation
+    // adds.
+    const definedBefore = new Set(registry.defs.keys());
+    const seededDrawCountBefore = registry.seededDrawCount;
+    const refuse = (): undefined => {
+      BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+      registry.seededDrawCount = seededDrawCountBefore;
+      return undefined;
+    };
+    const text = emit(
+      operands.map((e) =>
+        BaseCompiler.withNestedCseHarvest(e, target, [], () => compile(e))
+      )
+    );
+    if (/_SYS\.integrate/.test(text)) return refuse();
+    const varsObject = root.varsObjectName;
+    if (
+      varsObject !== undefined &&
+      new RegExp(
+        `(?<![\\w$.])${varsObject.replace(/[$]/g, '\\$&')}\\.(?=[\\p{L}_$])`,
+        'u'
+      ).test(text)
+    )
+      return refuse();
+    for (const name of registry.defs.keys())
+      if (
+        registry.hoistable?.has(name) !== true &&
+        BaseCompiler.identifierPattern(name).test(text)
+      )
+        return refuse();
+    registry.seededDrawCount = (registry.seededDrawCount ?? 0) + 1;
+    const name = BaseCompiler.registryLocalName(
+      registry,
+      '_rnd_',
+      String(registry.seededDrawCount)
+    );
+    const value = `${name}$v`;
+    const done = `${name}$done`;
+    const thunk =
+      `(() => { let ${value}, ${done} = false; ` +
+      `return () => ${done} ? ${value} : (${value} = ${text}, ${done} = true, ${value}); })()`;
+    registry.defs.set(
+      name,
+      javascriptStatements(root)?.initialize(name, thunk) ??
+        `const ${name} = ${thunk};`
+    );
+    (registry.hoistable ??= new Set()).add(name);
+    return `${name}()`;
   }
 
   /**

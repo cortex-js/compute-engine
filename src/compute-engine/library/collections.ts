@@ -12875,6 +12875,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // index list (BREAKING — previously such entries were dropped).
             let marker: Expression | undefined;
             for (const m of indices) {
+              // An absent entry (`NaN`, `Missing`), an `Indeterminate` entry
+              // or an infinite entry names no position. It contributes the
+              // absence marker in its own slot, the hole a scalar index of
+              // the same kind gives, and the other entries are read as
+              // usual. Without this test such an entry left the whole gather
+              // unevaluated (Tycho ledger row 401).
+              if (
+                isAbsentValue(m) ||
+                (isNumber(m) && (m.isIndeterminate || m.isInfinity === true))
+              ) {
+                picked.push((marker ??= absenceMarker(ce, expr)));
+                continue;
+              }
               const k = m.re;
               // An entry that is not a safe integer is read exactly (see
               // `elementAtLargePosition()`).

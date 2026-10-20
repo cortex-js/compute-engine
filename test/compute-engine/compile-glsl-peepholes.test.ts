@@ -24,6 +24,7 @@ import {
   GPU_MEDIAN_PREAMBLE_GLSL,
   GPU_BESSELJ_PREAMBLE_WGSL,
 } from '../../src/compute-engine/compilation/gpu-target';
+import { shaderFunctions } from './gpu-shader-f32-eval';
 
 /**
  * A fresh engine per probe: `P` is ASSIGNED in the point-list probes, and the
@@ -379,5 +380,106 @@ describe('argument of a complex value, and rounding', () => {
       '(sign(v) * (floor(abs(v)) + ' +
         'ceil(0.5 + 0.5 * sign(abs(v) - floor(abs(v)) - 0.5))))'
     );
+  });
+});
+
+describe('the imaginary unit times a complex factor', () => {
+  // `i·X` was emitted as `vec2(0.0, X)` (and `t + i·X` as `vec2(t, X)`)
+  // whatever the type of `X`. When `X` is complex its code is a `vec2`, and a
+  // vec2 constructor reads only the first component of a vec2 argument in its
+  // second slot: the shader computed `(0, Re X)` where `i·X` is
+  // `(−Im X, Re X)`. Tycho ledger row 398.
+  function complexEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('z', 'complex');
+    ce.declare('t', 'real');
+    return ce;
+  }
+  const cases: [string, string, string][] = [
+    // A plain identifier is rotated by a swizzle, which reads it twice at no
+    // cost; a call goes through `_gpu_cmul` so that it is evaluated once.
+    ['iz', 'vec2(-z.y, z.x)', 'vec2f(-z.y, z.x)'],
+    ['2iz', '(2.0 * vec2(-z.y, z.x))', '(2.0 * vec2f(-z.y, z.x))'],
+    [
+      'i\\tanh(z)',
+      '_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))',
+      '_gpu_cmul(vec2f(0.0, 1.0), _gpu_ctanh(z))',
+    ],
+    [
+      't+i\\tanh(z)',
+      'vec2(t, 0.0) + _gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))',
+      'vec2f(t, 0.0) + _gpu_cmul(vec2f(0.0, 1.0), _gpu_ctanh(z))',
+    ],
+    // Controls: a real factor keeps the `vec2(0.0, X)` shortcut, and a
+    // product with a complex literal other than `k·i` keeps `_gpu_cmul`.
+    ['it', 'vec2(0.0, t)', 'vec2f(0.0, t)'],
+    ['t+2it', 'vec2(t, 2.0 * t)', 'vec2f(t, 2.0 * t)'],
+    [
+      '(1+i)\\tanh(z)',
+      '_gpu_cmul(vec2(1.0, 1.0), _gpu_ctanh(z))',
+      '_gpu_cmul(vec2f(1.0, 1.0), _gpu_ctanh(z))',
+    ],
+  ];
+  for (const [latex, glslCode, wgslCode] of cases) {
+    it(`${latex} on both shader targets`, () => {
+      const ce = complexEngine();
+      expect(new GLSLTarget().compile(ce.parse(latex)).code).toBe(glslCode);
+      expect(new WGSLTarget().compile(ce.parse(latex)).code).toBe(wgslCode);
+    });
+  }
+
+  it('the emitted shader computes the value of the interpreter', () => {
+    // Run the emitted text with the f32 shader interpreter, and compare with
+    // the engine's own value at the same point. The interpreter has no
+    // `sinh`/`cosh` built-in, so the call operand is `exp(z)` here, which
+    // takes the same `_gpu_cmul` lowering as `tanh(z)` above.
+    const z = { re: 1, im: 2 };
+    const t = 0.5;
+    for (const latex of ['iz', '2iz', '-iz', 'i\\exp(z)', 't+i\\exp(z)']) {
+      const ce = complexEngine();
+      ce.assign('z', ce.number(ce.complex(z.re, z.im)));
+      ce.assign('t', t);
+      const expected = ce.parse(latex).N();
+      for (const [language, Target, main] of [
+        [
+          'glsl',
+          GLSLTarget,
+          (code: string) => `vec2 _main(vec2 z, float t) { return ${code}; }`,
+        ],
+        [
+          'wgsl',
+          WGSLTarget,
+          (code: string) =>
+            `fn _main(z: vec2f, t: f32) -> vec2f { return ${code}; }`,
+        ],
+      ] as const) {
+        const r = new Target().compile(complexEngine().parse(latex));
+        const run = shaderFunctions(
+          `${r.preamble ?? ''}\n${main(r.code)}`,
+          language
+        );
+        const v = run('_main', { x: z.re, y: z.im }, t) as {
+          x: number;
+          y: number;
+        };
+        expect([latex, language, v.x]).toEqual([
+          latex,
+          language,
+          expect.closeTo(expected.re, 5),
+        ]);
+        expect([latex, language, v.y]).toEqual([
+          latex,
+          language,
+          expect.closeTo(expected.im, 5),
+        ]);
+      }
+    }
+    // `i·(1 + 2i)` is `−2 + i`.
+    const r = new GLSLTarget().compile(complexEngine().parse('iz'));
+    const run = shaderFunctions(
+      `${r.preamble ?? ''}\nvec2 _main(vec2 z) { return ${r.code}; }`,
+      'glsl'
+    );
+    expect(run('_main', { x: 1, y: 2 })).toEqual({ x: -2, y: 1 });
   });
 });

@@ -2860,6 +2860,30 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       ) {
         return `_IA.powRational(${compile(base)}, ${p}, ${q})`;
       }
+      // A FLOAT exponent is read by the interpreter as the nearest small
+      // rational, and a negative base takes the real root when the
+      // denominator of that rational is odd: `x^{1/2.2}` is `x^{0.4545…}`,
+      // read as `x^{5/11}`, which is `−1` at `x = −1`. The same reading
+      // (`BaseCompiler.negativeBaseFloatPower`) selects `powRational` here;
+      // `_IA.pow` would return `empty` for the negative part.
+      //
+      // The interpreter takes only the SIGN from the rational reading: it
+      // computes the magnitude `|x|^e` with the float `e` itself.
+      // `powRational` encloses the value of the rational power `x^(p/q)`,
+      // which is the interpreter's value only when the literal is the double
+      // nearest to `p/q` (`0.4`, `0.6`, `1/2.2`). Any other literal that
+      // reads as `p/q` (`0.6000000000000001`, read as `3/5`) keeps `_IA.pow`:
+      // at `x = −32`, `powRational(x, 3, 5)` is exactly `[−8, −8]`, which
+      // excludes the interpreter's value `−(32^0.6000000000000001)`, which is
+      // `−8.000000000000002`.
+      const floatPower = exp.isExact
+        ? undefined
+        : BaseCompiler.negativeBaseFloatPower(args);
+      if (
+        typeof floatPower === 'object' &&
+        floatPower.terms[0] / floatPower.terms[1] === expVal
+      )
+        return `_IA.powRational(${compile(base)}, ${floatPower.terms[0]}, ${floatPower.terms[1]})`;
       return `_IA.pow(${compile(base)}, ${expVal})`;
     }
     // Variable exponent - use powInterval
@@ -2876,6 +2900,22 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // an even degree reduces to x^(1/n) (no real value for a negative base).
       if (Number.isInteger(exp.re))
         return `_IA.nthRoot(${compile(arg)}, ${exp.re})`;
+      // A noninteger degree that the interpreter reads as a rational exponent
+      // `p/q` with an odd denominator (`\sqrt[2.2]{x}`, read as `x^{5/11}`,
+      // and `\sqrt[2.5]{x}`, read as `x^{2/5}`) has a real root over a
+      // negative radicand too (`BaseCompiler.realRootDegreeTerms`).
+      // `powRational` gives the sign of both cases (negative for an odd `p`,
+      // positive for an even `p`). For a float degree, the interpreter
+      // computes the magnitude with the float exponent `1/n`, and
+      // `powRational` encloses the value of `x^(p/q)`: the two agree only
+      // when `1/n` is the double nearest to `p/q`, as for the `Power`
+      // exponent above. Otherwise the degree keeps `_IA.pow`.
+      const realRoot = BaseCompiler.realRootDegreeTerms(exp);
+      if (
+        realRoot !== undefined &&
+        (exp.isExact || realRoot.terms[0] / realRoot.terms[1] === 1 / exp.re)
+      )
+        return `_IA.powRational(${compile(arg)}, ${realRoot.terms[0]}, ${realRoot.terms[1]})`;
       // Non-integer degree: nth root = x^(1/n).
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }

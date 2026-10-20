@@ -208,10 +208,23 @@ export function sameBindingDef(
  * the foreign activation makes a second evaluation of an evaluated value a
  * fixed point again.
  *
- * When `own` is reachable from nowhere in the chain (an occurrence bound in
- * a scope that has since been popped, or an unbound one), the innermost
- * binding by name answers, foreign activation included — what the name
- * lookup answered before.
+ * A call frame is the one place where the chain does not reach a scope that
+ * is still live: its parent is the scope that DEFINED the function, not the
+ * scope of the caller (`callerBinding` below). An argument is evaluated, and
+ * its symbols are bound, in the caller's scope; the frame then holds that
+ * value as the value of a parameter, and the body reads it in the frame.
+ * When `own` is not in the chain but is in the chain of the caller of a call
+ * frame on the evaluation stack, `own` answers, whatever binding of the same
+ * name the chain holds. Without this, with `c := 5` global, `c` declared
+ * real (and valueless) in a pushed scope, and `g := a ↦ a·x` defined
+ * globally, `g(c)` read the global `c` and gave `5x`, and with `i` declared
+ * real in a pushed scope `g(i)` gave `ImaginaryUnit·x`. (Tycho ledger row
+ * 403, 2026-10-19.)
+ *
+ * When `own` is reachable from nowhere (an occurrence bound in a scope that
+ * has since been popped, or an unbound one), the innermost binding by name
+ * answers, foreign activation included — what the name lookup answered
+ * before.
  */
 export function valueDefinitionInContext(
   ce: ComputeEngine,
@@ -235,17 +248,128 @@ export function bindingInContext(
   own: BoxedBaseDefinition | undefined,
   scope: Scope | null = ce.context.lexicalScope
 ): BoxedDefinition | undefined {
+  const start = scope;
   let skippedBinder: BoxedDefinition | undefined;
   while (scope) {
     const found = scope.bindings.get(name);
     if (found !== undefined) {
       if ('value' in found && isForeignBinderBinding(found.value, own)) {
         skippedBinder ??= found;
-      } else return found;
+      } else {
+        if (
+          own === undefined ||
+          sameBindingDef('value' in found ? found.value : found.operator, own)
+        )
+          return found;
+        return callerBinding(ce, name, own, start, scope.parent) ?? found;
+      }
     }
     scope = scope.parent;
   }
+  if (own !== undefined)
+    return callerBinding(ce, name, own, start, null) ?? skippedBinder;
   return skippedBinder;
+}
+
+/**
+ * The binding of `own` in the scope of a caller, when the occurrence bound
+ * to `own` is read inside a call frame that cannot see that scope, or
+ * `undefined`.
+ *
+ * The evaluation stack holds one context named `call` for each user-function
+ * application in progress (`makeLambda`, `function-utils.ts`). The scope of
+ * that context is the call frame, whose parent is the scope that defined the
+ * function, and the context just below it is the context of the caller. An
+ * argument is evaluated in the caller's context, so its symbols are bound to
+ * the caller's definitions, and the frame keeps the evaluated argument as
+ * the value of a parameter. When the body reads the parameter, the argument
+ * is read inside the frame, where the walk of `bindingInContext` follows the
+ * definition scope and never reaches the caller's scope. If the definition
+ * scope has a binding of the same name, that walk reads it: a symbol that
+ * the caller declared without a value in an inner scope then reads the value
+ * of an outer definition of its name.
+ *
+ * This answers the binding `own` has in the chain of the caller of any call
+ * frame on the stack (a nested call reaches the caller of an outer call:
+ * `f` can pass its argument on to `g`). Four conditions keep it narrow:
+ *
+ * - `own` is not a binder's variable (`markBinderVariable`). An index reads
+ *   by name (see `isForeignBinderBinding`), and a `bind` parameter of a
+ *   `hold` function relies on it: in `mySum(k^2, k, 3)` with `mySum(body,
+ *   bind i, n) = Sum(body, (i, 1, n))`, the `k` of the held `k^2` is the
+ *   call node's index, and the `Sum` of the body must read it as its own
+ *   index (`test/epsil/hold-functions.test.ts`).
+ * - The walk started at the current scope (`start`). A consumer that walks
+ *   from another scope (`bindLazyArgumentLocals` asks what the callee would
+ *   find) gets the plain walk.
+ * - `own` is not further up the current chain (`rest`, the part of the chain
+ *   after the binding that was found). There, a newer declaration of the
+ *   same name hides `own` on purpose: a document manager pushes a populated
+ *   scope again around an evaluation, and an expression boxed earlier must
+ *   read the new declaration (see `docs/SCOPING-MODEL.md`, "Symbol
+ *   identity").
+ * - A scope that has been popped is in no chain of the stack, so an
+ *   occurrence bound there still reads by name.
+ */
+function callerBinding(
+  ce: ComputeEngine,
+  name: string,
+  own: BoxedBaseDefinition,
+  start: Scope | null,
+  rest: Scope | null
+): BoxedDefinition | undefined {
+  if (start !== ce.context?.lexicalScope || isBinderVariable(own))
+    return undefined;
+  const stack = ce._evalContextStack;
+  // Most reads happen outside any call frame: nothing to do then.
+  let hasCall = false;
+  for (let i = stack.length - 1; i > 0; i--)
+    if (stack[i].name === 'call') {
+      hasCall = true;
+      break;
+    }
+  if (!hasCall) return undefined;
+  if (ownBindingInChain(name, own, rest) !== undefined) return undefined;
+  for (let i = stack.length - 1; i > 0; i--) {
+    if (stack[i].name !== 'call') continue;
+    const found = ownBindingInChain(name, own, stack[i - 1].lexicalScope);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * What a read of the occurrence bound to `own` answers in the chain that
+ * starts at `scope`, when `own` is in that chain; `undefined` when it is not.
+ *
+ * The answer is the innermost binding of `name` in the chain that is not a
+ * foreign binder's variable: `own` itself, or a declaration of the same name
+ * pushed above it, which hides `own` there exactly as it does for a read in
+ * that scope (the "Symbol identity" rule of `docs/SCOPING-MODEL.md`). So an
+ * argument read inside a call frame answers what the same expression
+ * answers in the caller's scope: with `c` declared in a pushed scope, `g(c)`
+ * boxed there, then `c` declared again and assigned 7 in a scope pushed
+ * above it, both `c` and `g(c)` read the 7.
+ */
+function ownBindingInChain(
+  name: string,
+  own: BoxedBaseDefinition,
+  scope: Scope | null
+): BoxedDefinition | undefined {
+  let innermost: BoxedDefinition | undefined;
+  while (scope) {
+    const found = scope.bindings.get(name);
+    if (
+      found !== undefined &&
+      !('value' in found && isForeignBinderBinding(found.value, own))
+    ) {
+      innermost ??= found;
+      if (sameBindingDef('value' in found ? found.value : found.operator, own))
+        return innermost;
+    }
+    scope = scope.parent;
+  }
+  return undefined;
 }
 
 /**

@@ -376,7 +376,9 @@ describe('compiled WithRandomSeed', () => {
       ['List', ['Random'], ['Random'], ['Random']],
     ];
     const r = compiled(ce, json);
-    expect(r.code).toContain('_SYS.withRandomSeed(42');
+    // The frame reads no per-call value, so it is emitted as a preamble
+    // local computed once per artifact (see the describe block below).
+    expect(r.preambleOnce).toContain('_SYS.withRandomSeed(42');
     const c = r.run!() as number[];
     expect(c).toEqual([0, 1, 2].map((n) => draw(42, n)));
     expect(c).toEqual(
@@ -453,6 +455,184 @@ describe('compiled WithRandomSeed', () => {
     const r = compiled(ce, ['WithRandomSeed', 's', ['Random']]);
     expect(() => r.run!({ s: Number.NaN })).toThrow(/WithRandomSeed/);
     expect(() => r.run!({ s: Infinity })).toThrow(/WithRandomSeed/);
+  });
+});
+
+describe('a seeded draw that reads no per-call value is computed once per artifact', () => {
+  // A `WithRandomSeed` frame whose seed and body read no input is a pure
+  // function of its seed: every draw inside it is the hash of the seed and
+  // the draw's position. It was drawn again on every call of the compiled
+  // function: indexing one cell of `RandomChoice([0, 1], 6561)` per sample
+  // cost over 100 times a `sin` call. It is now a preamble local the runner
+  // builds once, computed on first use (`BaseCompiler.hoistSeededDraw`).
+  // Provenance: Tycho ledger row 399.
+
+  /** Count the engine draws (framed or live) made while `fn` runs. */
+  function countDraws(ce: ComputeEngine, fn: () => void): number {
+    const original = ce._random;
+    let count = 0;
+    ce._random = function (this: ComputeEngine) {
+      count += 1;
+      return original.call(this);
+    };
+    try {
+      fn();
+    } finally {
+      ce._random = original;
+    }
+    return count;
+  }
+
+  const BIG_DRAW = [
+    'WithRandomSeed',
+    191268,
+    ['RandomChoice', ['List', 0, 1], 6561],
+  ];
+
+  it('the draw indexed by `At` lands in `preambleOnce` and matches the interpreter', () => {
+    const ce = new ComputeEngine();
+    ce.declare('theta', 'real');
+    ce.declare('phi', 'real');
+    const r = compiled(ce, [
+      'At',
+      BIG_DRAW,
+      ['Add', ['Multiply', 9, 'theta'], ['Multiply', 8, 'phi']],
+    ]);
+    expect(r.code).toBe('_SYS.at(_rnd_1(), 8 * _.phi + 9 * _.theta)');
+    expect(r.preambleOnce).toContain('const _rnd_1 = ');
+    expect(r.preambleOnce).toContain('_SYS.withRandomSeed(191268, ');
+    expect(r.preamblePerCall).toBeUndefined();
+    const interpreted = ce.box(BIG_DRAW).evaluate();
+    for (const [theta, phi] of [
+      [1, 2],
+      [3, 0],
+      [100, 400],
+    ]) {
+      const k = 9 * theta + 8 * phi;
+      const expected = interpreted.ops![k - 1].re;
+      expect(r.run!({ theta, phi })).toBe(expected);
+      expect(r.run!({ theta, phi })).toBe(expected);
+    }
+  });
+
+  it('draws on the first call only', () => {
+    const ce = new ComputeEngine();
+    ce.declare('i', 'integer');
+    const r = compiled(ce, [
+      'At',
+      ['WithRandomSeed', 5, ['List', ['Random'], ['Random'], ['Random']]],
+      'i',
+    ]);
+    expect(countDraws(ce, () => r.run!({ i: 1 }))).toBe(3);
+    expect(
+      countDraws(ce, () => {
+        for (let i = 1; i <= 30; i++) r.run!({ i: 1 + (i % 3) });
+      })
+    ).toBe(0);
+    expect(r.run!({ i: 2 })).toBe(draw(5, 1));
+  });
+
+  it('the lambda route builds the draw once too', () => {
+    const ce = new ComputeEngine();
+    const r = compiled(ce, [
+      'Function',
+      [
+        'At',
+        ['WithRandomSeed', 5, ['List', ['Random'], ['Random'], ['Random']]],
+        'n',
+      ],
+      'n',
+    ]);
+    expect(r.preambleOnce).toContain('_SYS.withRandomSeed(5, ');
+    const f = r.run as unknown as (n: number) => number;
+    expect(countDraws(ce, () => f(3))).toBe(3);
+    expect(countDraws(ce, () => f(1) + f(2))).toBe(0);
+    expect(f(3)).toBe(draw(5, 2));
+  });
+
+  it('a seed that reads an input keeps the draw per call', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', 'real');
+    const r = compiled(ce, [
+      'WithRandomSeed',
+      's',
+      ['List', ['Random'], ['Random'], ['Random']],
+    ]);
+    expect(r.code).toContain('_SYS.withRandomSeed(_.s, ');
+    expect(r.code).not.toContain('_rnd_');
+    expect(r.preambleOnce).toBeUndefined();
+    expect(countDraws(ce, () => r.run!({ s: 1 }))).toBe(3);
+    expect(countDraws(ce, () => r.run!({ s: 1 }))).toBe(3);
+    expect(r.run!({ s: 2 })).toEqual([0, 1, 2].map((n) => draw(2, n)));
+  });
+
+  it('a body that reads an input keeps the draw per call', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', 'real');
+    const r = compiled(ce, ['WithRandomSeed', 4, ['Multiply', 's', ['Random']]]);
+    expect(r.code).toContain('_SYS.withRandomSeed(4, ');
+    expect(r.code).not.toContain('_rnd_');
+    expect(r.preambleOnce).toBeUndefined();
+    expect(countDraws(ce, () => r.run!({ s: 2 }))).toBe(1);
+    expect(r.run!({ s: 3 })).toBe(3 * draw(4, 0));
+  });
+
+  it('a seed that draws keeps the frame per call', () => {
+    // The seed `Random()` takes a fresh ambient draw on each call, so the
+    // frame it seeds gives a different value on each call.
+    const ce = new ComputeEngine();
+    const r = compiled(ce, [
+      'WithRandomSeed',
+      ['Random'],
+      ['RandomChoice', ['List', 0, 1], 3],
+    ]);
+    expect(r.code).toContain('_SYS.withRandomSeed(');
+    expect(r.code).not.toContain('_rnd_');
+    expect(r.preambleOnce).toBeUndefined();
+    const values = new Set<string>();
+    for (let i = 0; i < 20; i++) values.add(JSON.stringify(r.run!()));
+    expect(values.size).toBeGreaterThan(1);
+  });
+
+  it('a refused hoist leaves no dead seeded-draw local', () => {
+    // The outer frame calls a user function, so it stays per call. The
+    // inner frame is hoisted. The trial compilation of the outer frame
+    // hoisted the inner one too; that definition is removed when the trial
+    // is refused, so the preamble holds one `_rnd_` local, the one the code
+    // reads.
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('x \\mapsto x+1'));
+    const r = compiled(ce, [
+      'WithRandomSeed',
+      1,
+      ['List', ['f', 1], ['WithRandomSeed', 2, ['Random']]],
+    ]);
+    expect(r.code).toBe('_SYS.withRandomSeed(1, () => [_fn_f(1), _rnd_1()])');
+    expect(r.preamble!.match(/const _rnd_\d+ =/g)).toEqual(['const _rnd_1 =']);
+    expect(r.run!()).toEqual([2, draw(2, 0)]);
+  });
+
+  it('a body that reads a binder index keeps the draw per iteration', () => {
+    const ce = new ComputeEngine();
+    const r = compiled(ce, [
+      'Sum',
+      ['WithRandomSeed', 'k', ['Random']],
+      ['Limits', 'k', 1, 3],
+    ]);
+    expect(r.code).not.toContain('_rnd_');
+    expect(r.run!()).toBeCloseTo(draw(1, 0) + draw(2, 0) + draw(3, 0), 12);
+  });
+
+  it('an unseeded draw stays per call', () => {
+    const ce = new ComputeEngine();
+    const r = compiled(ce, ['RandomChoice', ['List', 0, 1], 3]);
+    expect(r.code).not.toContain('_rnd_');
+    expect(r.preambleOnce).toBeUndefined();
+    expect(countDraws(ce, () => r.run!())).toBe(3);
+    expect(countDraws(ce, () => r.run!())).toBe(3);
+    const values = new Set<string>();
+    for (let i = 0; i < 20; i++) values.add(JSON.stringify(r.run!()));
+    expect(values.size).toBeGreaterThan(1);
   });
 });
 

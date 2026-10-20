@@ -6600,12 +6600,41 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       if (realFactors.length === 0)
         return `${v2}(0.0, ${formatFloat(iScale, target.language)})`;
-      const factors = realFactors.map((f) =>
-        gpuMultiplicativeFactor(f, target)
+      // The `vec2(0.0, product)` shortcut is correct only when every other
+      // factor is real (a `float`). When one of them is complex, the product
+      // is a `vec2`, and a vec2 constructor reads only the first component of
+      // a vec2 argument in its second slot: `i·z` emitted as `vec2(0.0, z)`
+      // computed `(0, Re z)` where `i·z` is `(−Im z, Re z)`. Such a product
+      // goes to the general complex multiply below, which multiplies the
+      // imaginary factor and the other complex factors with `_gpu_cmul`
+      // (`i·tanh(z)` is `_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))`). The
+      // exception is a single complex factor that is a symbol `w`: the
+      // product with `i` is then the quarter-turn swizzle `vec2(-w.y, w.x)`,
+      // which costs less than `_gpu_cmul`. It reads `w` twice, which is
+      // correct because reading a symbol has no side effect.
+      const complexFactors = realFactors.filter((f) =>
+        BaseCompiler.isComplexValued(f)
       );
-      if (iScale !== 1) factors.unshift(formatFloat(iScale, target.language));
-      const imCode = foldTerms(factors, '1.0', '*', target.language);
-      return `${v2}(0.0, ${imCode})`;
+      if (complexFactors.length === 0) {
+        const factors = realFactors.map((f) =>
+          gpuMultiplicativeFactor(f, target)
+        );
+        if (iScale !== 1) factors.unshift(formatFloat(iScale, target.language));
+        const imCode = foldTerms(factors, '1.0', '*', target.language);
+        return `${v2}(0.0, ${imCode})`;
+      }
+      if (complexFactors.length === 1 && isSymbol(complexFactors[0])) {
+        const code = compile(complexFactors[0]);
+        const w = /^[A-Za-z_][A-Za-z0-9_]*$/.test(code) ? code : `(${code})`;
+        const scalarCodes = realFactors
+          .filter((f) => f !== complexFactors[0])
+          .map((f) => gpuMultiplicativeFactor(f, target));
+        if (iScale !== 1)
+          scalarCodes.unshift(formatFloat(iScale, target.language));
+        const rotated = `${v2}(-${w}.y, ${w}.x)`;
+        const scalarCode = foldTerms(scalarCodes, '1.0', '*', target.language);
+        return scalarCode === '1.0' ? rotated : `(${scalarCode} * ${rotated})`;
+      }
     }
     // General complex multiply: separate real scalars and complex operands
     const realCodes: string[] = [];
@@ -7906,8 +7935,19 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // of a negative already folds to an exact complex literal before
       // compile: `√-4` → `2i`.)
       if (Number.isNaN(r)) {
-        if (Number.isInteger(nConst) && nConst % 2 !== 0 && xConst < 0)
+        // A noninteger degree read as a rational exponent with an odd
+        // denominator (`BaseCompiler.realRootDegreeTerms`) has a real root
+        // too: negative when the numerator is odd, positive when it is even.
+        const realRoot =
+          xConst < 0 ? BaseCompiler.realRootDegreeTerms(n) : undefined;
+        if (
+          xConst < 0 &&
+          ((Number.isInteger(nConst) && nConst % 2 !== 0) ||
+            realRoot?.oddNumerator === true)
+        )
           return formatFloat(-Math.pow(-xConst, 1 / nConst), target.language);
+        if (realRoot !== undefined)
+          return formatFloat(Math.pow(-xConst, 1 / nConst), target.language);
         if (gpuResultIsComplexValued('Root', [x, n]))
           return gpuComplexPowLiteral(xConst, 1 / nConst, target);
       }
@@ -7919,8 +7959,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (gpuResultIsComplexValued('Root', [x, n]))
       return `_gpu_cpow(${gpuComplexOperand(x, compile, target)}, ${gpuVec2(target)}(1.0 / (${compile(n)}), 0.0))`;
     // Odd integer degree: GPU has no `cbrt`, and `pow` is NaN for a negative
-    // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
-    if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
+    // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`. A noninteger
+    // degree that the interpreter reads as a rational exponent with an odd
+    // denominator (`BaseCompiler.realRootDegreeTerms`) has a real root too:
+    // with an odd numerator (`\sqrt[2.2]{x}`, read as `x^{5/11}`) it is the
+    // same signed form, with an even numerator (`\sqrt[2.5]{x}`, read as
+    // `x^{2/5}`) it is the magnitude `|x|^(1/n)`.
+    const realRoot = BaseCompiler.realRootDegreeTerms(n);
+    if (
+      nConst !== undefined &&
+      ((Number.isInteger(nConst) && nConst % 2 !== 0) ||
+        realRoot?.oddNumerator === true)
+    ) {
       // The operand is spliced TWICE — bind an impure (Random-family) one to a
       // hoisted temporary; a pure one compiles directly (byte-identical).
       const c = gpuOperandOnce('Root', x, compile, target);
@@ -7929,6 +7979,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target.language
       )}))`;
     }
+    if (nConst !== undefined && realRoot !== undefined)
+      return `pow(abs(${compile(x)}), ${formatFloat(
+        1 / nConst,
+        target.language
+      )})`;
     // The degree is parenthesized unless it is a single name or number:
     // `Root(x, u + 1)` is `pow(x, 1.0 / (u + 1.0))`, not `pow(x, 1.0 / u + 1.0)`.
     const degree = compile(n);

@@ -344,7 +344,7 @@ export function tryGetComplexParts(
   if (isFunction(expr, 'Multiply')) {
     const ops = expr.ops;
     const iIndex = imaginaryFactorIndex(ops);
-    if (iIndex >= 0) {
+    if (iIndex >= 0 && !hasComplexCofactor(ops, iIndex)) {
       const iFactor = ops[iIndex];
       // The imaginary scale: 1 for ImaginaryUnit, im for Complex(0, im)
       const iScale = isSymbol(iFactor, 'ImaginaryUnit')
@@ -385,6 +385,26 @@ function imaginaryFactorIndex(ops: ReadonlyArray<Expression>): number {
 }
 
 /**
+ * Whether a factor of `ops` other than the imaginary factor at `iIndex` is
+ * complex-valued.
+ *
+ * The product `i·X` decomposes as `{ re: null, im: X }` only when `X` is real.
+ * When `X` is complex, its code is a `vec2`, and splicing it into the
+ * imaginary slot of a `vec2(re, im)` constructor reads only its first
+ * component: `t + i·tanh(z)` emitted `vec2(t, _gpu_ctanh(z))`, which computes
+ * `t + i·Re(tanh z)`. Such a product is opaque instead, and the caller
+ * compiles it whole through the `Multiply` lowering.
+ */
+function hasComplexCofactor(
+  ops: ReadonlyArray<Expression>,
+  iIndex: number
+): boolean {
+  return ops.some(
+    (op, idx) => idx !== iIndex && BaseCompiler.isComplexValued(op)
+  );
+}
+
+/**
  * Whether `tryGetComplexParts` would DECLINE (`null`) for `expr` — an opaque
  * complex operand (a complex-valued call or symbol) with no structural re/im
  * decomposition.
@@ -400,8 +420,10 @@ function imaginaryFactorIndex(ops: ReadonlyArray<Expression>): number {
 export function isOpaqueComplexOperand(expr: Expression): boolean {
   if (isSymbol(expr, 'ImaginaryUnit')) return false;
   if (isNumber(expr) && expr.isComplex) return false;
-  if (isFunction(expr, 'Multiply') && imaginaryFactorIndex(expr.ops) >= 0)
-    return false;
+  if (isFunction(expr, 'Multiply')) {
+    const iIndex = imaginaryFactorIndex(expr.ops);
+    if (iIndex >= 0 && !hasComplexCofactor(expr.ops, iIndex)) return false;
+  }
   return BaseCompiler.isComplexValued(expr);
 }
 

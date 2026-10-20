@@ -1721,6 +1721,13 @@ export interface CompileTarget<Expr = unknown> {
      */
     listLiteralCount?: number;
     /**
+     * The number of seeded-draw locals (`_rnd_<n>`) handed out so far, the
+     * source of the next local's id. Each local holds a `WithRandomSeed`
+     * value that reads no per-call binding, computed at most once per
+     * compiled artifact. Recorded by `BaseCompiler.hoistSeededDraw`.
+     */
+    seededDrawCount?: number;
+    /**
      * The ids of the emitted user functions whose body was compiled in the
      * complex lane and returns a `{re, im}` object by construction — its
      * value position is a complex-propagating head, a non-real-typed node,

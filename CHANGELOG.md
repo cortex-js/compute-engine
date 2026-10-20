@@ -2,6 +2,47 @@
 
 ### Behavior Changes
 
+- A negative integer power of an operand that can be a matrix stays a power:
+  `g(x)^{-1}`, with `g` a function that was not declared, is `Power(g(x), -1)`.
+  It was the quotient `1/g(x)`, which is the element-wise reciprocal when
+  `g(x)` is a matrix. When `g(x)` has a matrix value, the power is now the
+  matrix inverse: with `g` returning `[[2, 1], [1, 1]]`, `g(x)^{-1}` is
+  `[[1, -1], [-1, 2]]` (it was `[[1/2, 1], [1, 1]]`). This applies to the call
+  of a function that was not declared or that returns `any`, to a symbol
+  declared `any`, and to a value of a type such as `number | matrix`. In a
+  product with a matrix the power keeps its position: `A·g(x)^{-1}·A` stays as
+  it is. The negative power of a scalar (`x^{-1}` for an undeclared symbol or a
+  real symbol, `\sin(x)^{-1}`) and of a list of numbers is still a quotient
+  (`1/x`), and the negative power of a matrix is still `Inverse(M)` or
+  `MatrixPower(M, -n)`. `evaluate()` and `simplify()` of a product keep the
+  power: `2g(x)^{-1}` stays `2g(x)^{-1}` (it was `2/g(x)`), and with the value
+  above it is `[[2, -2], [-2, 4]]`. The quotient `1/g(x)` is still a quotient.
+  The LaTeX of the power is `g(x)^{-1}`, which reads back as the same power:
+  `y g(x)^{-1}` is written `yg(x)^{-1}`, not `\frac{y}{g(x)}`. `simplify()`
+  combines the integer powers of such an operand as `evaluate()` does: in a
+  product with no matrix, `f(x)^2 f(x)^{-1}` is `f(x)` and
+  `f(x)^{-1} f(x)^{-1}` is `f(x)^{-2}`; in a product with a matrix, only
+  adjacent powers with exponents of the same sign are combined.
+- A power with the exponent 1 is its base for any base: `g(x)^1` is `g(x)`, and
+  `(f(x)^{-1})^{-1}` is `f(x)` (it was `f(x)^1`, which evaluated to
+  `\sqrt[1]{f(x)}`).
+
+- A sum of quantities where at least one operand is a temperature with an
+  offset (`degC` or `degF`) now converts each operand to kelvin, with its
+  offset, and adds the values in kelvin. The result is in `K`. Before, the
+  result had the unit with the largest scale and the sum was wrong:
+  `Quantity(0, degC) + Quantity(0, degF)` gave `-17.78 degC`; it is now
+  `47567/90 K` (273.15 K + 255.372… K = 528.522… K). An exact magnitude stays
+  exact. The rule also applies when all the operands are in `degC`:
+  `10 degC + 10 degC` was `20 degC` and is now `566.3 K` (283.15 K + 283.15 K).
+  A difference of two temperatures is the difference of their values in
+  kelvin: `20 degC - 10 degC` was `10 degC` (which reads as 283.15 K) and is
+  now `10 K`; `20 degC - 10 degF` was `-3.33 degC` and is now `290/9 K`
+  (32.22 K). A sum of temperatures with no offset (`10 K + 10 K`) does not
+  change. A scalar multiple (`2 · 10 degC`) and a negation (`-(10 degC)`) are
+  not changed: they keep the unit `degC`. So `20 degC - 2 · 10 degC` is
+  `20 degC - 20 degC`, that is `0 K`.
+
 - `\sum_k y` and `\prod_k y`, a sum or a product with no bounds whose body
   does not use the index, now keep their indexing clause in the canonical
   form: `Sum(y, Limits(k, Nothing, Nothing))`. They were `y`.
@@ -202,6 +243,66 @@
 
 ### Bug Fixes
 
+- A product nested in a product that has a matrix keeps the order of its
+  factors. With `A` a matrix and `g`, `k` functions that were not declared,
+  `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]`,
+  `A\cdot(g(x)\cdot k(x)\cdot g(x))` and `A(g(x)k(x)g(x))` were
+  `A·k(x)·g(x)·g(x)`, because the nested product was sorted on its own before
+  the matrix was seen. They are now `A·g(x)·k(x)·g(x)`, like the product
+  written without the nesting. A negation of a nested product and a nested
+  product divided by an integer are spliced too: `A\cdot(-g(x)k(x))` is
+  `-(A·g(x)·k(x))`. A product with no factor that can be a matrix has the same
+  canonical form as before, and a juxtaposition in parentheses that is not a
+  product (a mixed number such as `A(2\frac{1}{3})`, an imaginary number such
+  as `A(2i)`) is read as before.
+- Parsing a nested juxtaposition in parentheses takes a time proportional to
+  its depth. `(g(x)(g(x)(…)A)A)A` with 8 levels took about 7 seconds, because
+  each level was made canonical several times.
+- The empty numerator of a product whose factors are all negative powers is
+  written `1`: `x^{-1}y^{-1}` in raw form is `\frac{1}{xy}`, not `\frac{}{xy}`.
+- On the `glsl` and `wgsl` targets, the product of the imaginary unit and a
+  complex value is a rotation of that value: `iz` with `z` complex compiles to
+  `vec2(-z.y, z.x)`, `i\tanh(z)` to `_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))`
+  and `t + i\tanh(z)` adds the two complex terms. They compiled to
+  `vec2(0.0, z)`, `vec2(0.0, _gpu_ctanh(z))` and `vec2(t, _gpu_ctanh(z))`, and
+  a shader `vec2` constructor reads only the first component of a `vec2`
+  argument, so the value was `(0, Re w)` where `i·w` is `(−Im w, Re w)`. The
+  product with a real value (`it` is `vec2(0.0, t)`) is unchanged.
+- A negative base under a decimal exponent, or a decimal root degree, that
+  reads as a rational with an odd denominator compiles to the real signed root
+  on every target, as it evaluates: `x^{\frac{1}{2.2}}` (5/11) at x = −1 is −1
+  on `javascript`, `interval-js` (`_IA.powRational(x, 5, 11)`; it answered an
+  empty interval), `glsl`, `wgsl` and `python`, and `\sqrt[2.2]{x}` gives the
+  same (it compiled to `Math.pow`, NaN for a negative x), and `\sqrt[2.5]{x}`
+  (x^{2/5}, an even numerator) compiles to the positive real `|x|^{0.4}`. The
+  compiled code uses the exponent reading of the interpreter, so an exponent
+  such as `0.3` keeps its complex value. On `interval-js` the rational power
+  is used only when the literal is the double of that rational (`0.6`,
+  `1/2.2`); a literal that is not (`0.6000000000000001`) keeps the previous
+  lowering. In the interpreter, `Root` of a negative radicand
+  under a non-integer degree is `a^(1/b)` as `Power` reads it: `Root(-8, 0.5)`
+  is `64` (it was −64), `Root(-8, 2.5)` is `(-8)^{2/5}` = 2.297 (it was
+  −2.297) and `Root(-8, 2.4)` is the complex principal value.
+- `At` with a NaN, indeterminate or infinite member in a list index gives the
+  hole in that member's slot and reads the other members:
+  `At([10, 20, 30], [NaN, 1])` is `[NaN, 10]` and
+  `At([(1, 2), (3, 4)], [NaN, 1])` is `[Missing, (1, 2)]`, the same hole an
+  out-of-range member gives. The call stayed unevaluated. The compiled
+  `javascript` `_SYS.at` agrees (it gave a whole-result NaN).
+- A compiled Epsil program checks a function definition against the effects
+  that an earlier declaration of its name states: with
+  `let g: (integer) pure -> real` then `function g(k) { Random() }`, the
+  compilation is refused, as the interpreter refuses the definition
+  (`incompatible-type`). The compiled program ran the definition.
+- A call argument that is a symbol declared without a value in the caller's
+  scope keeps that declaration when the function body is evaluated: with
+  `g := a ↦ a·x` and `c := 5` in the global scope, after `pushScope()` and
+  `declare("c", "real")`, `g(c)` is `c·x` (it was `5x`), and with
+  `declare("i", "real")` in the pushed scope, `g(i)` is `i·x` (it was
+  `ImaginaryUnit·x`). A call frame's parent is the scope that defined the
+  function, so the body's read of the argument found the outer `c` or the
+  library `i` by name. A free symbol of the body still reads the definition
+  scope, and a loop or sum index still reads by name.
 - A symbol with two or more subscripts is written with nested subscripts, so
   it reads back as the same symbol. The symbol `x_1_2` (the parse of `x_1_2`,
   of `{x_1}_2`, and the canonical form of `Subscript(Subscript(x, 1), 2)`) is
@@ -305,11 +406,33 @@
   variable with a bound (`Conjugate(w)`, `Remainder(w, 2)`, a function declared
   `(T) -> T where T: number`), and the condition of `if` and `Which`. A function
   with several clauses (`op(a: number)`, `op(a: string)`) gave "expected
-  `number | string`, got `error`". The call now evaluates to the error of `Ln`,
-  with the frame of the call, as it already did for a parameter typed `number`
-  or with no type. An argument of the wrong type is still refused, and so are a
-  symbol declared `error` that has no value and a call typed `error` only by its
-  declared result type, at a parameter that does not accept `error`.
+  `number | string`, got `error`". The callback of a collection operator gave "expected `function`,
+  got `error`": `Any(xs, w)`, `All(xs, w)`, `Filter(xs, w)`, `Reduce(xs, w)`,
+  `Scan(xs, w)`, `TakeWhile(xs, w)`, `MaxBy(xs, w)` and `Map(w, xs)`. The call
+  now evaluates to the error of `Ln`, with the frame of the call, as it
+  already did for a parameter typed `number` or with no type, and for
+  `Sort(xs, w)`. An element read directly (`Map(w, xs).at(1)`, a walk of
+  `Filter(xs, w)`) is that error too. An operator that binds or reads such an
+  operand as an expression is not changed: `Integrate(w, Limits(w, 0, 1))` is
+  still `1/2`. An argument of the wrong type is still refused, and
+  `Map(w, f)`, with the arguments in the wrong order, still reports the wrong
+  order.
+- A symbol declared `error` that has no value, and a call typed `error` only by
+  its declared result type (`g(2)` with `g: (number) -> error`), are checked
+  by the same rule at a parameter typed by a type variable as at a ground
+  parameter. Neither holds an error value, so the call evaluates to itself.
+  `Conjugate(e)` and a function declared `(T) -> T where T: number` applied to
+  `e` gave "expected `number`, got `error`"; they are now valid, as `Sqrt(e)`
+  and a function declared `(number) -> number` applied to `e` are. The
+  condition of `If` and `Which` admits them too, as a parameter typed
+  `boolean` does, and selects no branch. A collection parameter (`list`, or a
+  type variable bounded by a collection) still refuses them, and so does an
+  overloaded function, with ground or generic arms.
+- `Map(f, xs)` with a callback known to be a function with no known result type
+  (`f` declared `function`), or with a symbol that holds an error, is typed
+  with `unknown` elements: `Map(f, [1, 2])` is `list<unknown^2>`. It was typed
+  as the source, `vector<integer^2>`. A callback that is not declared still
+  gives the type of the source.
 - An integer followed by a fraction is read as a mixed number only when the
   numerator and the denominator of the fraction are number literals.
   `2\frac{1+1}{3}` was read as `2 + 2/3`; it is now the product `4/3`, as
@@ -747,6 +870,15 @@
 
 ### Performance
 
+- On the `javascript` target, a seeded random draw that reads no input of the
+  compiled function, such as
+  `WithRandomSeed(191268, RandomChoice([0, 1], 6561))`, is computed once per
+  compiled function, on its first call, and the stored value is read after
+  that: the draw is a pure function of its seed. It was drawn again at every
+  call, about 6,561 numbers per sample of a surface indexed by `9θ + 8φ`
+  (0.027 ms per call against 0.0002 ms for `sin(9θ + 8φ)`; now 0.0003 ms). A
+  draw whose seed or body reads an input, a loop index or a caller function,
+  and an unseeded draw, are still per call.
 - A type string that names a type declared with `ce.declareType`, such as the
   signature `(integer_partition) -> number`, is parsed once and then read from a
   cache. Before, it was parsed twice at every `ce.declare`. Declaring 1000

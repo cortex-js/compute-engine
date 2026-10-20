@@ -2001,6 +2001,21 @@ export function root(
           })
         );
       }
+      // A negative radicand under a NON-INTEGER degree is `a^(1/b)`, and its
+      // real or complex value depends on the rational reading of `1/b`:
+      // `Root(-8, 2.2)` is `(-8)^(5/11)` = −2.573 (odd denominator, real),
+      // `Root(-8, 2.5)` is `(-8)^(2/5)` = +2.297 (even numerator, positive)
+      // and `Root(-8, 2.4)` is `(-8)^(5/12)`, a complex principal value.
+      // The sign rule below (`-|a|^(1/b)` for every non-even degree) is only
+      // right for an odd integer degree, so a non-integer degree is given to
+      // `pow`, which reads the exponent the way `Power` does. Found while
+      // fixing Tycho ledger row 400 (2026-10-19): `Root(-8, 0.5)` was −64.
+      if (isNegative && b.isInteger !== true) {
+        return pow(a, a.engine.function('Divide', [a.engine.One, b]), {
+          numericApproximation: true,
+        });
+      }
+
       if (isNegative) a = a.neg();
 
       return (

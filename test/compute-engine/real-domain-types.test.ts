@@ -137,7 +137,10 @@ describe('TYPE: Power/Root of a negative base', () => {
     [['Power', -8, ['Divide', 2, 3]], 4, 'real<0..>'],
     [['Power', -2, ['Divide', 2, 3]], 1.5874010519681994, 'real<0..>'],
     [['Root', -8, 3], -2, 'real'],
-    [['Root', -8, 2.5], -2.29739670999407, 'number'],
+    // `Root(-8, 2.5)` is `(-8)^(2/5)`: the even numerator makes it positive,
+    // as `Power(-8, 2/5)` already answers. (It was −2.297 before 2026-10-19,
+    // when `Root` negated `|a|^(1/b)` for every non-integer degree.)
+    [['Root', -8, 2.5], 2.29739670999407, 'number'],
   ] as [any, number, string][])(
     'the real branch of %j is not claimed complex',
     (mathjson, expected, type) => {

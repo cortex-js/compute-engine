@@ -4587,7 +4587,21 @@ export const SYS_HELPERS = {
       for (const m of i) {
         const mv = indexValue(m);
         if (!Number.isInteger(mv)) {
-          if (!Number.isFinite(mv)) return NaN;
+          // An entry with no numeric value at all (a string, an object with
+          // no numeric real part) makes the interpreter leave `At`
+          // unevaluated, which projects to a whole-result NaN. A `NaN` or
+          // infinite entry, as a number or as a complex-lane value whose real
+          // part is `NaN`, and an absent entry (`Missing` compiles to
+          // `undefined`), name no position: the interpreter puts the absence
+          // marker in its slot, as for a finite non-integer entry, so its
+          // slot is NaN here too.
+          const hasNumericValue =
+            typeof m === 'number' ||
+            m === undefined ||
+            (typeof m === 'object' &&
+              m !== null &&
+              typeof (m as { re?: unknown }).re === 'number');
+          if (!hasNumericValue) return NaN;
           picked.push(NaN);
           continue;
         }

@@ -87,6 +87,7 @@ const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f']);
 
 const COMMON_BUILTINS = new Set([
   'abs',
+  'sign',
   'max',
   'min',
   'sqrt',
@@ -308,6 +309,7 @@ const num = (v: Value): number => {
 
 const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   abs: (x) => Math.abs(num(x)),
+  sign: (x) => Math.sign(num(x)),
   max: (x, y) => Math.max(num(x), num(y)),
   min: (x, y) => Math.min(num(x), num(y)),
   sqrt: (x) => fr(Math.sqrt(num(x))),
