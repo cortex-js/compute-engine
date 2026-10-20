@@ -220,8 +220,7 @@ export function quantityAdd(
 
   if (unitExprs.some((ue) => isOffsetTemperatureUnit(ue))) {
     const negated = quantities.map(
-      (_, i) =>
-        rawOps?.length === ops.length && isNegatedOperand(rawOps[i])
+      (_, i) => rawOps?.length === ops.length && isNegatedOperand(rawOps[i])
     );
     return kelvinSum(ce, quantities, unitExprs, negated);
   }

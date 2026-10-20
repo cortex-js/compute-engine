@@ -190,7 +190,7 @@ export function locateError(
 ): { range: [number, number]; call?: MathJsonExpression } {
   const rejected: Rejected = { frames: new Set(), calls: new Set() };
   for (let k = 0; k < frames.length; k++) {
-    const { name, index } = frames[k];
+    const { name } = frames[k];
     const matches: MathJsonExpression[] = [];
     findWrittenCalls(stmt, name, matches);
     let found: { call: MathJsonExpression; arg: MathJsonExpression | null };

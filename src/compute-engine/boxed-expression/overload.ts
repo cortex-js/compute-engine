@@ -1207,7 +1207,9 @@ function unresolvedArm(
   const results = takeable.map((arm) => arm.result);
   return {
     ...takeable[0].instance,
-    result: results.some((r) => r === 'unknown') ? 'unknown' : widen(...results),
+    result: results.some((r) => r === 'unknown')
+      ? 'unknown'
+      : widen(...results),
   };
 }
 
@@ -1444,9 +1446,7 @@ function hasUndecidedOperand(
   return ops.some(
     (op) =>
       op.isValid &&
-      (op.type.isUnknown ||
-        op.type.type === 'any' ||
-        isErrorTypedOperand(op))
+      (op.type.isUnknown || op.type.type === 'any' || isErrorTypedOperand(op))
   );
 }
 

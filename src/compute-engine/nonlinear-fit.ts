@@ -701,7 +701,8 @@ function scanGrid(scans: GlobalScan[], n: number): number[][] {
     Array.from({ length: n }, (_, i) => s.lo + ((s.hi - s.lo) * i) / (n - 1));
   if (scans.length === 1) return axis(scans[0]).map((v) => [v]);
   const grid: number[][] = [];
-  for (const u of axis(scans[0])) for (const v of axis(scans[1])) grid.push([u, v]);
+  for (const u of axis(scans[0]))
+    for (const v of axis(scans[1])) grid.push([u, v]);
   return grid;
 }
 

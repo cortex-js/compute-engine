@@ -1,4 +1,4 @@
-import { negatedArgument } from '../symbolic/simplify-trig.js';
+import { negatedArgument } from './negated-argument.js';
 import {
   CancellationError,
   checkDeadline,

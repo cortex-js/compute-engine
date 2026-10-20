@@ -44,9 +44,7 @@ export function limitsHaveInfinitelyManyTerms(limits: Expression): boolean {
   const lowerIsNegInf = lower.isInfinity === true && lower.isNegative === true;
   const lowerIsPosInf = lower.isInfinity === true && lower.isPositive === true;
   const upperIsNegInf = upper.isInfinity === true && upper.isNegative === true;
-  return (
-    (upperIsPosInf && !lowerIsPosInf) || (lowerIsNegInf && !upperIsNegInf)
-  );
+  return (upperIsPosInf && !lowerIsPosInf) || (lowerIsNegInf && !upperIsNegInf);
 }
 
 /** Whether `e` is ±∞ or ~∞, or has such an operand at any depth. */

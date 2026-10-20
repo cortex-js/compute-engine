@@ -3714,9 +3714,7 @@ function closeImaginaryPointComponents(t: Type): Type {
     const type = closeImaginaryUnderArithmetic(e.type);
     return type === e.type ? e : { ...e, type };
   });
-  return elements.every((e, i) => e === t.elements[i])
-    ? t
-    : { ...t, elements };
+  return elements.every((e, i) => e === t.elements[i]) ? t : { ...t, elements };
 }
 
 /** The type handler of `Add`, also used by `Subtract`

@@ -108,7 +108,10 @@ function choleskySolve(M: number[][], b: number[]): number[] | null {
  * (`nonlinear-fit.ts`), which solves the normal equations of a linear
  * least-squares problem at each grid point with it.
  */
-export function solveWithInflation(M: number[][], b: number[]): number[] | null {
+export function solveWithInflation(
+  M: number[][],
+  b: number[]
+): number[] | null {
   const direct = choleskySolve(M, b);
   if (direct) return direct;
 
