@@ -104,23 +104,30 @@ export function isAbsentArithmeticOperand(
  *
  * It is also the test the operators that OWN their absence semantics run —
  * the ones declared `missingBehavior: 'handle'`, such as the statistics
- * reducers, `Min`/`Max`, `Coalesce` and `IsMissing`. So
- * `Mean([1, Undefined, 3])` is `NaN` exactly as `Mean([1, Missing, 3])` is,
- * and `Coalesce(Undefined, 2)` is `2` (user ruling of 2026-09-22).
+ * reducers and `Min`/`Max`. `Mean([1, Undefined, 3])` is `NaN` exactly as
+ * `Mean([1, Missing, 3])` is.
  *
  * The `Indeterminate` literal is NOT absent, although its value is `NaN`: it
  * is the exact answer to an indeterminate form (`0/0`), a value with no
- * number, not a missing entry. So `IsMissing(Indeterminate)` is `False`,
- * `Coalesce(Indeterminate, 5)` is `Indeterminate`, and the reducers above
- * forward it (`Mean([1, Indeterminate])` is `Indeterminate`, see
- * `nanOperandAnswer()`). Decision D7 of
- * `docs/plans/2026-09-28-indeterminate-value.md`.
+ * number, not a missing entry. The reducers above forward it
+ * (`Mean([1, Indeterminate])` is `Indeterminate`, see `nanOperandAnswer()`).
+ * Explicit absence checks and fallbacks instead use `isMissingValue`,
+ * which handles both numeric markers.
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
   return (
     isAbsentSymbol(expr) ||
     (isNumber(expr) && expr.isNaN === true && !expr.isIndeterminate)
   );
+}
+
+/**
+ * Absence handled by `IsMissing` and `Coalesce`. Both numeric markers count
+ * as absent here; arithmetic consumers keep their distinct propagation rules.
+ * `Nothing` is an omission marker and passes through these operations.
+ */
+export function isMissingValue(expr: Expression | null | undefined): boolean {
+  return isAbsentSymbol(expr) || (isNumber(expr) && expr.isNaN === true);
 }
 
 /**

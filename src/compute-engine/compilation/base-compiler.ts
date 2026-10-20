@@ -12741,6 +12741,11 @@ export class BaseCompiler {
         throw new Error(
           'Could not compile `IsMissing`: expected exactly one argument'
         );
+      if (isSubtype('nothing', compilationType(args[0])))
+        throw new Error(
+          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' ` +
+            `cannot distinguish a possible 'Nothing' input from an absent datum.`
+        );
       const axis = BaseCompiler.absenceAxisForType(
         args[0].type.type,
         target,
@@ -12760,23 +12765,25 @@ export class BaseCompiler {
         throw new Error(
           'Could not compile `Coalesce`: expected at least one argument'
         );
-      // The result's domain (its widened type — `T₁° | … | Tₙ₋₁° | Tₙ`, §3.D)
-      // picks the axis: numeric → NaN-coalesce, object → null-coalesce.
-      // Unfold each operand's declared type reference before the strip — the
-      // strip is structural and does not see through a `reference` (an alias of
-      // `T | missing` would keep its `missing` arm and mis-select the axis).
-      const resultType = widen(
-        ...args.map((a, i) => {
-          const t = compilationType(a);
-          return i < args.length - 1 ? stripMissingFromType(t) : t;
-        })
-      );
-      const axis = BaseCompiler.absenceAxisForType(
-        resultType,
-        target,
-        'Coalesce'
-      );
-      if (axis.coalesce === undefined)
+      if (
+        args.slice(0, -1).some((a) => isSubtype('nothing', compilationType(a)))
+      )
+        throw new Error(
+          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' ` +
+            `cannot distinguish a possible 'Nothing' input from an absent datum.`
+        );
+      // Test the domain of each operand, not the result: a numeric marker
+      // still needs a NaN check when the fallback is a string or a collection.
+      const axes = args
+        .slice(0, Math.max(1, args.length - 1))
+        .map((a) =>
+          BaseCompiler.absenceAxisForType(
+            compilationType(a),
+            target,
+            'Coalesce'
+          )
+        );
+      if (axes.some((axis) => axis.coalesce === undefined))
         throw new Error(
           `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' cannot ` +
             `discharge absence (no 'coalesce' capability).`
@@ -12791,7 +12798,7 @@ export class BaseCompiler {
       // Fold right: coalesce(a0, coalesce(a1, … coalesce(a_{n-1}, a_n))).
       let acc = codes[codes.length - 1];
       for (let i = codes.length - 2; i >= 0; i--)
-        acc = axis.coalesce(codes[i], acc);
+        acc = axes[i].coalesce!(codes[i], acc);
       return acc;
     }
 

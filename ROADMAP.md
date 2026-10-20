@@ -109,6 +109,24 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
+
+`IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
+their types admit `nothing`, including `any`, `nothing`, and unions such as
+`integer | nothing`. Current target representations cannot distinguish an
+omission/unit result from an absent datum in these checks. Treating both as
+missing would violate the selected rule that `Nothing` passes through.
+Constant expressions may fold before this check; a final fallback is returned
+without an absence test.
+
+Before lifting the refusal, a target must represent `Nothing` separately from
+`Missing`/`Undefined`/numeric absence, preserve it across inputs, intermediate
+values and results, and implement checks/fallbacks that leave it untouched.
+Cover interpreter/compiled parity and side-effect counts. Coordinate with raw
+view representation and serialization in
+`docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
+capability, not a change to the omission policy.
+
 ### Worker threads for parallel numeric kernels (IN PROGRESS — decided 2026-10-20, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a

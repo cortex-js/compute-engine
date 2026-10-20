@@ -1,4 +1,5 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { coalesceResultType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
@@ -114,7 +115,6 @@ import {
   functionResult,
   isValidType,
   signatureArms,
-  stripMissingFromType,
   widen,
   containsSignatureArm,
   isGroupedTypeText,
@@ -289,7 +289,7 @@ import {
   isFunction,
   isString,
   isCharacter,
-  isAbsentValue,
+  isMissingValue,
   isAbsentSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
@@ -4294,24 +4294,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     IsMissing: {
       description:
-        'True if the value is ABSENT — the `Missing` or `Undefined` symbol, ' +
-        'or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` ' +
-        'for both `NA` and `NaN`). There is no NaN-specific test operator ' +
-        '(R’s `is.nan`). `Indeterminate`, the exact answer to an ' +
-        'indeterminate form such as `0/0`, is a value and is not absent.',
+        'True for `Missing`, `Undefined`, `NaN`, or `Indeterminate`, ' +
+        'regardless of provenance. `Nothing` is not an absent datum.',
       complexity: 500,
       signature: '(any) -> boolean',
       examples: ['[IsMissing(Missing), IsMissing(NaN), IsMissing(0)]'],
+      // `Nothing` is an input to this test, not an omitted argument.
+      canonical: (args, { engine: ce }) => {
+        const xs = flattenSequence(args);
+        if (xs.length === 1 || (!ce.strict && xs.length > 0))
+          return ce._fn('IsMissing', xs);
+        // checkArity also erases Nothing, which must count as an argument here.
+        return ce._fn('IsMissing', [
+          xs[0] ?? ce.error('missing'),
+          ...xs
+            .slice(1)
+            .map((x) => ce.error('unexpected-argument', x.toString())),
+        ]);
+      },
       evaluate: ([x], { engine: ce }) =>
-        x !== undefined && isAbsentValue(x) ? ce.True : ce.False,
+        x !== undefined && isMissingValue(x) ? ce.True : ce.False,
     },
 
     Coalesce: {
       description:
         'Return the first operand that is not ABSENT (`Missing`, ' +
-        '`Undefined` or `NaN`), evaluated left-to-right. If every operand ' +
+        '`Undefined`, `NaN`, or `Indeterminate`), evaluated left-to-right. ' +
+        'If every operand ' +
         'is absent, the last operand’s value is returned verbatim (still ' +
-        'absent). `Indeterminate` is a value and is not absent.',
+        'absent). `Nothing` passes through without selecting a fallback.',
       complexity: 500,
       // Lazy so operands are evaluated on demand (short-circuit) rather than
       // all up front. Per the documented lazy-operator trap, a lazy operator
@@ -4328,24 +4339,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       signature: '(any+) -> unknown',
       examples: ['Coalesce(Missing, NaN, 3, 4)'],
-      // Result type `T₁° | … | Tₙ₋₁° | Tₙ` (§3.D): every operand but the last
-      // contributes its stripped type (its `| missing` arm removed), the last
-      // its full type. An arm-free final operand yields an arm-free result
-      // type — but that never promises presence (`NaN ∈ number`, I6).
-      //
-      // `'types'`-shape handler: reads operand descriptors, never operand
-      // expressions, so the derivation cannot touch engine state.
-      type: (operands, context) => {
-        if (operands.length === 0)
-          return BoxedType.forResult('nothing', context.engine._typeResolver);
-        const arms = operands.map((op, i) =>
-          i < operands.length - 1 ? stripMissingFromType(op.type) : op.type
-        );
-        return BoxedType.forResult(
-          widen(...arms) as Type,
+      // Only whole-value absence is discharged; absent cells remain data.
+      type: (operands, context) =>
+        BoxedType.forResult(
+          coalesceResultType(operands.map((op) => op.type)),
           context.engine._typeResolver
-        );
-      },
+        ),
       canonical: (args, { engine: ce, scope }) => {
         if (args.length === 0) return ce.error('missing');
         return ce._fn('Coalesce', canonical(ce, args, scope));
@@ -4356,8 +4355,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         for (let i = 0; i < ops.length; i++) {
           const v = ops[i].evaluate({ numericApproximation });
           last = v;
-          // Skip an absent operand (`Missing`, `Undefined` or `NaN`).
-          if (isAbsentValue(v)) continue;
+          if (isMissingValue(v)) continue;
           // An operand whose absence cannot be decided (it still carries free
           // variables) leaves the expression partially unevaluated from here
           // on: return `Coalesce` of this operand and the remaining tail —

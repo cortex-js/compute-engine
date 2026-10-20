@@ -332,7 +332,16 @@ export function deriveApplicationType(
   const binding = engine.lookupDefinition(operator);
   if (binding === undefined) return undefined;
 
-  if (operands.some((d) => d.type === 'never')) return 'never';
+  // Coalesce derives reachability itself: a failing fallback may be skipped.
+  if (
+    !(
+      operator === 'Coalesce' &&
+      'operator' in binding &&
+      binding.operator.selectsOperands
+    ) &&
+    operands.some((d) => d.type === 'never')
+  )
+    return 'never';
 
   // A declared function SYMBOL (`f: (integer) -> real`, a symbol holding a
   // function literal) has no operator definition: its application types from

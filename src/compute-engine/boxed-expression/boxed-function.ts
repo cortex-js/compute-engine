@@ -10935,7 +10935,10 @@ function type(expr: BoxedFunction): Type | BoxedType {
       // would build its literal type — which a container handler (`Tuple`,
       // `List`) deliberately never asks for — so literal operands are
       // skipped here.
+      // Coalesce derives reachability itself: a failing fallback need not
+      // be evaluated, so it cannot erase every earlier successful result.
       if (
+        !(expr.operator === 'Coalesce' && def.selectsOperands) &&
         descriptors.some((d, i) => !isNumber(expr.ops[i]) && d.type === 'never')
       )
         calculatedType = BoxedType.forResult(
@@ -10968,7 +10971,10 @@ function type(expr: BoxedFunction): Type | BoxedType {
         // BoxedType.forResult() owns this normalization and shares it for
         // immutable result types, along with their lazily computed facts.
       }
-    } else if (expr.ops.some((x) => x.type.type === 'never')) {
+    } else if (
+      !(expr.operator === 'Coalesce' && def.selectsOperands) &&
+      expr.ops.some((x) => x.type.type === 'never')
+    ) {
       // The same rule both handler shapes apply above, for a head with NO
       // type handler: an operand typed `never` has no value, so the
       // application has none either, whatever the declared result says

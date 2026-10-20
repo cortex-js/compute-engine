@@ -558,15 +558,13 @@ describe('INDETERMINATE — the absence rules are unchanged', () => {
   });
 });
 
-describe('INDETERMINATE — absence discharge (D7)', () => {
-  test('IsMissing and Coalesce read it as a value', () => {
-    expect(box(['IsMissing', 'Indeterminate']).symbol).toBe('False');
-    expect(box(['Coalesce', 'Indeterminate', 5]).toString()).toBe(
-      'Indeterminate'
-    );
-    expect(parse(`\\operatorname{IsMissing}(${I})`).symbol).toBe('False');
-    expect(epsil('isMissing(Indeterminate)').symbol).toBe('False');
-    expect(epsil('Indeterminate ?? 5').toString()).toBe('Indeterminate');
+describe('INDETERMINATE — absence discharge', () => {
+  test('IsMissing and Coalesce handle both numeric markers alike', () => {
+    expect(box(['IsMissing', 'Indeterminate']).symbol).toBe('True');
+    expect(box(['Coalesce', 'Indeterminate', 5]).toString()).toBe('5');
+    expect(parse(`\\operatorname{IsMissing}(${I})`).symbol).toBe('True');
+    expect(epsil('isMissing(Indeterminate)').symbol).toBe('True');
+    expect(epsil('Indeterminate ?? 5').toString()).toBe('5');
   });
 
   test('under .N() the operand is NaN first, which is absent', () => {

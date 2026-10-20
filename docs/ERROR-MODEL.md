@@ -10,6 +10,9 @@ marked:
   from it are listed in §7, not silently absorbed.
 - **Open** — a question that needs a ruling before it can be settled either
   way.
+- **Agreed direction, implementation pending** — the intended rule is
+  decided, but current behavior still differs. Do not use it as an
+  implemented guarantee.
 
 The Compute Engine serves two audiences with different needs. As the
 infrastructure for Epsil, precise early diagnostics with source provenance
@@ -20,6 +23,87 @@ This document says how those two needs are reconciled: which failure channel
 answers which kind of wrongness, when each fires (boxing time vs. evaluation
 time), how each propagates, and what function signatures do and do not
 promise.
+
+### Inference and content contracts — clarification of 2026-10-20
+
+**Agreed direction, implementation pending:** `unknown` is an inference
+marker/placeholder, not a concrete type requiring a position in the lattice.
+It asks the engine to determine a type. It does not promise either the
+presence or absence of a datum, and it does not establish that a runtime
+value satisfies the type a consumer requires.
+
+Use explicit content contracts for those restrictions:
+
+- `value` accepts data values, excluding functions, symbols, and the
+  immediate markers `missing`, `nothing`, and `error`.
+- `expression` also accepts functions and symbolic expressions, but still
+  excludes those immediate markers.
+- `any` accepts unrestricted content types, including the markers.
+- `list<expression>` excludes immediate `missing`, `nothing`, and `error`
+  elements.
+  `list<expression | missing>` permits missing elements; a missing whole
+  list is instead expressed by `list<expression> | missing`.
+- Under the agreed inference-marker interpretation, `list<unknown>` asks
+  to infer an element type. It must not impose an implicit absence
+  restriction. This behavior still requires implementation.
+
+These are immediate-content restrictions, not guarantees about every nested
+element. A collection containing `Missing` is itself a collection value.
+Both `value` and `expression` include numeric `nan`, and therefore `NaN`
+and `Indeterminate`. These contracts alone do not establish presence for
+`IsMissing`, `??`, or the proposed presence assertion; the agreed absence
+predicate includes both numeric markers, pending implementation.
+Evaluation failure is separate: an expression with a successful-value
+contract may still fail when evaluated.
+
+The current subtype implementation still places ordinary expression types
+below `unknown`, excludes `missing`, `nothing`, and `error` from it, and
+equates `list`, `set`, `dictionary`, `collection`, and `indexed_collection`
+with their `<unknown>` forms. Descriptions
+of those relationships below are implementation facts, not the agreed
+meaning of the inference marker. `never` is the bottom type, below every
+content type; it is neither an absent datum nor an inference placeholder.
+
+The collection-name change and assignment presence guarantees remain
+separate decisions. Raw callback results in lazy views (R) are now selected,
+with explicit materialization and omission through `ListFrom`. Follow-up
+decisions select aggregates skipping `Nothing`, no implicit compaction from
+storing/passing/nesting views, and preserved data-tuple slots. Open record
+types are retained. Record-field omission and the diagnostic default for
+possible absence remain open. A syntactic presence assertion is requested;
+postfix `?!` is a candidate spelling, not implemented or finally selected.
+The recommendation is a runtime check that establishes presence, following
+the same absence predicate as `??`, rather than an unchecked compiler
+override. Its checked return type removes the handled absence forms
+(`Missing`, `Undefined`, `NaN`, and `Indeterminate`) while preserving
+`nothing` and arbitrary other content types; `Nothing` is not handled.
+A compiler may eliminate the check only with proof; otherwise it must
+represent failure or reject compilation. This does not promise a new
+compiler lowering. See the
+[design note](plans/2026-10-20-bare-tuple-record-any.md) for their rules and
+open questions, and [type-system reference](TYPE-SYSTEM.md) for current
+subtyping. In particular, accepting a possibly absent argument can mean
+propagating it, handling it, or checking it at runtime; it does not make
+`missing` a subtype of the parameter's content type.
+
+### Numeric absence handling — agreed change of 2026-10-20
+
+**Implemented for checks and fallbacks; new assertion pending:** treat `NaN` and
+`Indeterminate` alike in `IsMissing`, `Coalesce` / `??`, and the proposed
+presence assertion. Both count as absent, both select a fallback, and both
+fail the assertion. `Missing` and `Undefined` continue to do so;
+`Nothing` remains an omission marker rather than an absent datum.
+
+This supersedes the earlier D7 rule that exact `Indeterminate` bypasses
+absence handling. The old distinction is migration history; current checks
+and fallbacks handle both numeric markers.
+The invariant is uniform treatment by these three observer, fallback, and
+assertion operations while preserving distinct numeric representations and
+existing exact arithmetic propagation: `Mean([1, Indeterminate])` and
+`Max(1, Indeterminate)` retain exact `Indeterminate`, while
+`Coalesce(Indeterminate, 5)` returns `5`. Consumers may need separate
+policies; this does not prescribe a helper name or mechanically broaden
+every absence gate, nor decide field omission or tuple normalization.
 
 ## 1. The response channels — Settled taxonomy; the host-throw amendment is Proposed
 
@@ -41,9 +125,12 @@ run time calls `RuntimeError(code)` (ruled 2026-09-03), a valid application
 typed `never` whose evaluation yields the `Error(code)` value. Its consumer is a
 human or an IDE, so it carries provenance: an error code, the offending
 sub-expression, and (as it propagates) a breadcrumb of the operators it
-passed through. In the type lattice `error` is deliberately out-of-band as
-well: it is a subtype of `any` but *not* of `unknown`, so no ordinary
-value type ever admits it.
+passed through. As a content type, `error` is a subtype of `any`, but not
+of `value` or `expression`. It is also outside `unknown` in the current
+subtype implementation; that relationship is not the definition of the
+inference marker. An explicit `any` or a union containing `error` can
+describe error content, while ordinary successful-value signatures need
+not enumerate evaluation failure.
 
 **`NaN` — the in-band numeric indeterminacy value.** `NaN` means *the
 mathematics was performed and has no answer in the numeric codomain*:
@@ -51,8 +138,8 @@ mathematics was performed and has no answer in the numeric codomain*:
 member of `nan`, `Indeterminate`, described below; with a float operand or
 under `.N()` they answer `NaN`). It carries no provenance and follows IEEE 754
 semantics: quiet, absorbing through numeric operations, `NaN == NaN` is
-`False`. Its lattice position: `NaN` is admitted **only by the top type
-`number` and by its own type `nan`** — every other numeric type excludes
+`False`. Within the numeric hierarchy, `NaN` is admitted **by `number`
+and its own type `nan`** — the other numeric branches exclude
 it (`complex`, `real`, `rational`, `integer`, all of which are
 finite-only; `infinity`; and the signed-pair spelling `+oo | -oo`, which
 is `±oo` exactly). `~oo` (`ComplexInfinity`) is likewise outside `complex`, but
@@ -95,18 +182,18 @@ because compile targets are float-only and `NaN` propagates there for
 free, whereas a symbolic marker cannot compile. This is an accepted,
 deliberate **information loss** and should be understood as such:
 `IsMissing(NaN) → True` means the engine cannot distinguish "a numeric
-datum was absent" from "a numeric computation produced `NaN`". The loss
-applies to `NaN` only: an exact indeterminate form answers `Indeterminate`,
-which is a value and not an absence, so `IsMissing(0/0)` and
-`IsMissing(Indeterminate)` are `False` under `evaluate()`. Under `.N()` the
-operand is numericized to `NaN` before `IsMissing` reads it, so there the
-answer is `True`. (The
+datum was absent" from "a numeric computation produced `NaN`".
+An exact indeterminate form retains its distinct `Indeterminate` result,
+but `IsMissing(0/0)` and `IsMissing(Indeterminate)` are `True`, as on the
+numeric route. The fallback operator handles both numeric markers too.
+(The
 propagation behavior is analogous to Julia's `missing`; note that Julia
 itself keeps `missing` as a distinct singleton type separate from `NaN` —
 the conflation is this engine's trade, made for the compile-target
 reason above.) Out-of-band collection access is type-directed: numeric
-element type → `NaN`, otherwise → `Missing`. When the element type is
-indeterminate (`unknown`/`any`), the marker falls back to runtime
+element type → `NaN`, otherwise → `Missing`. When the element type does not
+establish a numeric domain (the `unknown`/`any` paths in the implementation),
+the marker falls back to runtime
 evidence: a bounded prefix of a small, finite collection is probed,
 yielding `NaN` only when the probe saw numbers and nothing else, `Missing`
 otherwise (including for anything lazy, oversized, or empty). Dictionary
@@ -138,10 +225,49 @@ value awaiting numericization under the exactness contract (§2), not a
 pending question.
 
 Distinct from all four: **`Nothing` is an erasure marker, not a failure
-channel.** It is spliced out of argument lists and collections. Using it for
-a failed computation or an out-of-band access would silently shorten a
-result and misalign positional data — that is exactly what the `Missing`
-ruling fixed.
+channel.** Current implementation splices it out at argument and collection
+construction boundaries; the agreed direction below narrows those boundaries.
+“Erasure marker” does not imply universal erasure: `Nothing` is retained
+outcome data at specified boundaries and an omission request only at others.
+This boundary policy is distinct from the open question of an ordinary unit
+type and does not require that question to be decided.
+Using it for a failed computation or an out-of-band access
+would silently shorten a result and misalign positional data — that is
+exactly what the `Missing` ruling fixed.
+
+The October 20 implementation retains a `Nothing` callback result in an
+indexed lazy view's iteration, indexing, count, and display. Constructing
+a list from that view erases it. Thus a view exposing `[1, Nothing]`
+counts two results, while its constructed list `[1]` counts one.
+“Nothing always erases from collections” is not an accurate description of
+this behavior. The user selected this raw-result model (R), with
+`ListFrom(view)` explicitly materializing a list and omitting `Nothing`.
+**Agreed direction, implementation pending:** aggregating reducers skip
+immediate `Nothing` results without requiring a materialized list. For a raw
+view exposing `[1, Nothing, Nothing]`, `Length` is 3, while `Sum` and `Mean`
+are 1. The mean counts participating results; an all-omitted input uses the
+ordinary empty-input rule. This does not make `Missing` skippable.
+
+Storing, passing, or nesting a view does not implicitly compact it.
+Data tuples retain `Nothing` in its slot, and ordinary arguments do not
+shift when one evaluates to `Nothing`. This requires changes to current
+construction and assignment paths. Record fields, custom folds, ordering
+operations, and serialization still need detailed policies. See the design
+note; do not assume these follow-up rules or honest element/length typing
+are already implemented.
+
+Current dictionary construction omits an entry whose value is `Nothing`,
+including a value that becomes `Nothing` during evaluation. The user's
+current preference is to omit `Missing` fields instead and retain `Nothing`
+fields. **Open:** this omission candidate is not final; required versus
+optional keys and omission of
+the `Missing` marker versus all absence forms still need explicit rules.
+If omission is adopted, constructing `{a -> f(x)}` when `f(x)` may return
+`Missing` cannot promise a required `a` key.
+An existing key can instead be removed by filtering the
+dictionary's key/value entries and rebuilding with `DictionaryFrom`;
+this constructs a replacement dictionary. Retaining open record types
+does not decide whether a field value erases its key.
 
 **Host exceptions.** The settled core: throws are reserved for API misuse
 by the embedding program, cancellation, and compiled-code boundaries per
@@ -308,6 +434,13 @@ first three in `_invalidValue()`,
   a subtype of `number`. Giving containers a validity notion distinct from
   their cells (a valid list with invalid cells) is a possible future
   refinement, not current behavior.
+
+  The `unknown` element type here is a current fallback, not a contract
+  stating that the cells are present and successful. Under the agreed
+  inference-marker interpretation, element information must retain the
+  possible cell failure separately or explicitly represent error content.
+  The representation remains open; changing the meaning of `unknown` does
+  not itself change error propagation or container validity.
 
   **A `List` or `Set` literal with a failed cell is a collection that can be
   iterated** (decided 2026-10-19). Although its tree is invalid,
@@ -578,16 +711,18 @@ apply the rule in their handlers: `Max(1, Indeterminate)` and
 `Mean([1, Indeterminate])` are `Indeterminate`, and
 `Max(Indeterminate, NaN)` is `NaN`. Any other handler that receives an
 `Indeterminate` operand computes through its numeric kernel and answers
-`NaN` (`GCD(Indeterminate, 2)` is `NaN`). The absence-discharge operators
-do not treat `Indeterminate` as absent: `IsMissing(Indeterminate)` is
-`False` and `Coalesce(Indeterminate, 5)` is `Indeterminate`, where
-`IsMissing(NaN)` is `True` and `Coalesce(NaN, 5)` is `5`. Comparisons
+`NaN` (`GCD(Indeterminate, 2)` is `NaN`).
+Absence checks and fallbacks treat `Indeterminate` and `NaN` alike:
+`IsMissing` returns `True` for either, and `Coalesce` selects the fallback.
+This does not change arithmetic propagation. Comparisons
 (`Equal`, `Less`) with `Indeterminate` are `False`, and a Boolean context
 (`And`, `Not`, `If`) rejects it with `incompatible-type`, as for `NaN`.
 Provenance: `docs/plans/2026-09-28-indeterminate-value.md` §4 and §5.
 
 **`Missing` propagates by Kleene** in comparisons (`Less(Missing, 1) →
-Missing`) and is never erased. In a *numeric* slot, `Missing` is
+Missing`) and preserves positional slots. Whether it omits a key during
+record/dictionary construction remains open, as described in §1.
+In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
 survives only on data/object-domain results.
@@ -620,8 +755,20 @@ operator can reject, propagate, handle, or pass through an absent operand
 — is the `missingBehavior` mechanism in
 `src/compute-engine/types-definitions.ts`; elementwise and broadcast
 interactions follow `docs/COLLECTIONS-MODEL.md` and
-`docs/BROADCAST-MODEL.md`. **`Nothing` splices** (statistics skip it;
-`Missing`/`NaN` propagate).
+`docs/BROADCAST-MODEL.md`.
+
+**Compatibility amendment, implementation pending:** the tuple-collapse
+rule above describes current behavior. The selected data-tuple policy keeps
+a tuple with absent coordinates distinct from an absent whole tuple.
+Mathematical-point propagation needs a separate explicit rule; it must not
+implicitly erase the structure of ordinary data tuples.
+
+`Nothing` is omitted when constructing an ordinary list;
+`Missing`/`NaN` preserve positions. Statistics over a constructed list
+therefore see no erased `Nothing` cells. The selected aggregate policy
+also skips immediate `Nothing` results in raw lazy views, without changing
+their raw counts or indices. Implementation is not yet consistent; see §1
+and `ROADMAP.md`.
 
 **`Undefined` in a numeric slot takes the same route as `Missing`** (ruled
 2026-09-21). The `Undefined` symbol names a value that does not exist. When
@@ -632,8 +779,10 @@ under `.N()`, `Undefined + 1` is `NaN`, and an `Undefined` cell of a list
 under a broadcast head is `NaN` at that position. This closes the gap with
 the compiled lanes, which already answered `NaN` for the same input, and with
 the `Add` fold, which already read `Undefined` as `NaN`. A bare `Undefined`
-still evaluates to itself and its declared type is still `unknown`. The one
-predicate the numeric gate and its async twin share is `isAbsentScalarSymbol`
+still evaluates to itself and its declared type is still `unknown`. That is
+a current representation mismatch to address during the inference-marker
+migration: known absence must not be hidden as merely unresolved type
+information. The numeric gate and its async twin share `isAbsentScalarSymbol`
 (`src/compute-engine/boxed-expression/validate.ts`).
 
 **The operators that OWN their absence semantics read `Undefined` as absent
@@ -646,14 +795,12 @@ are `Median`, the variance family, `Max`/`Min`, `Quantile` and `Covariance`.
 `At` absorbs an `Undefined` base or index, and `Count`/`Tally` treat an
 `Undefined` cell exactly as a `Missing` one (both count it — neither erases a
 position). Until this ruling those operators read `Undefined` as an ordinary
-value, so `Mean([1, Undefined, 3])` stayed symbolic. The value-level test they
-all run is `isAbsentValue`
-(`src/compute-engine/boxed-expression/type-guards.ts`), which now shares its
-absence-SYMBOL choke point, `isAbsentSymbol`, with the numeric gate's
-`isAbsentScalarSymbol`; `isAbsentValue` adds the `NaN` arm on top of it.
-Since 2026-09-29 that arm excludes `Indeterminate` (a `NaN`-valued literal
-that is not absent), so none of the operators that call `isAbsentValue`
-reads an exact indeterminate form as a missing datum.
+value, so `Mean([1, Undefined, 3])` stayed symbolic. Arithmetic consumers use
+`isAbsentValue` (`src/compute-engine/boxed-expression/type-guards.ts`), which
+excludes exact `Indeterminate` so those consumers can preserve it. The
+explicit checks and fallbacks use `isMissingValue`, which includes both
+numeric markers. Both share `isAbsentSymbol` with the numeric gate's
+`isAbsentScalarSymbol`; the symbol test recognizes `Missing` and `Undefined`.
 
 Two families are deliberately NOT covered, because their scalar arm reads the
 `Missing` symbol BY NAME on a separate Kleene route rather than through that
@@ -823,15 +970,29 @@ collection test. So `list<missing | string>` is admitted at
 missing>` at `collection<number>`, and a symbol declared
 `collection<string | missing>` at `collection<string | character>`, while
 `list<string>` is still refused at `collection<integer>`. The rule reads the
-type of the operand, not where the type came from. Two things do not change.
-The type lattice keeps its rule that a bare or element-typed collection holds
-values only: `list<missing | string>` is still not a subtype of
-`collection<string>`, and the admission is made by the argument validation
-alone (`absentElementsMatchParam`, `boxed-expression/validate.ts`). A
-collection that can hold nothing but absent elements, `list<missing>` (the type
-of `[Missing, Missing]`), is still refused, as a scalar operand typed `missing`
-alone is refused by a text operator. The transform is the strip of a scalar
-operand at a position that strips `missing` (`stripMissingFromType`, through
+type of the operand, not where the type came from.
+The subtype relation keeps the written element constraint:
+`list<missing | string>` is not a subtype of `collection<string>`, and
+the admission is made by argument validation alone
+(`absentElementsMatchParam`, `boxed-expression/validate.ts`). Bare `list`,
+`set`, `dictionary`, `collection`, and `indexed_collection` currently expand
+to `<unknown>`, which excludes immediate `missing`, `nothing`, and `error`
+types in the implemented subtype relation, but includes numeric `nan`.
+This is not a rule that all
+element-typed collections exclude absence: `list<string | missing>` and
+`list<any>` explicitly permit it. Option B in the collection design note
+(distinct from the signature Contract B below) and the agreed
+inference-marker role of `unknown` require separate migration work.
+The current `NaN`-to-`Missing` repair in `boxed-expression/validate.ts`
+applies only within nested `List` expressions, not to record/dictionary
+values.
+
+A collection containing only missing data is not universally refused.
+`Map(x ↦ x + 10, [Missing, Missing])` is accepted and yields `[NaN, NaN]`;
+a text consumer such as `StringJoin` refuses an all-missing collection.
+Acceptance depends on the operation's argument policy, not just the fact
+that the element type is `missing`. The transform for deferred checking
+strips `missing` from a scalar operand (`stripMissingFromType`, through
 `stripMissingFromElements` in `src/common/type/utils.ts`), so the scalar case
 and the collection case cannot give different types.
 
@@ -879,14 +1040,16 @@ practical language does: a Java `int f(int)` may still throw; Haskell's
 `head :: [a] -> a` is partial on `[]`. Two consequences hold under both
 contracts below:
 
-- **`error` is an implicit evaluation *effect* of every application, not
-  a member of any declared type.** Since *every* application can produce
-  an error, annotating the possibility carries no information — the same
-  argument by which unchecked exceptions displaced checked ones.
+- **Evaluation failure is implicit; ordinary signatures need not append
+  `| error`.** A successful-value signature does not guarantee that
+  evaluation succeeds. This is distinct from explicitly describing error
+  content with `error`, a union containing it, or `any`.
 - **Input positions need no `| error` either**: §3's absorption guarantees
   a non-observer strict handler never receives an error operand.
 
-The open question is what the declared types *describe*. A signature is
+The following contracts distinguish what declared types *describe*; Contract
+B was adopted, while the broader presence questions remain in the design
+note. A signature is
 asked to do three jobs at once — **admission** (what input is a type
 error), **domain description** (where the successes live), and
 **documentation** (what a user, a doc page, or an Epsil hover learns) —
@@ -894,7 +1057,7 @@ and the two contracts split those jobs differently. Take `Heaviside` as
 the running example: its truth is "defined exactly on the real line
 (`H(±oo)` included), where it takes exactly the values 0, ½, 1".
 
-### Contract A — admission signatures (the status quo)
+### Contract A — admission signatures (historical model being migrated away from)
 
 The parameter type is the admission contract and must stay wide enough for
 anything the operator should quietly tolerate: `NaN` types as bare
@@ -968,12 +1131,11 @@ is mandatory:
      value of an application may still be the codomain marker at
      runtime (rule 4 of §2, the `definedWhen` gate, and NaN propagation
      all keep their obligations), but the derived application type
-     stays the sharp `S`: `Length(xs)` types `integer`, not
-     `integer | nan`. The reason is the same one this section gives
-     for `error`: an inferred, universal possibility carries no
-     information when annotated — `Length` never yields the marker and
-     `Sin` can, and a default cannot tell them apart — so spelling it
-     on every handler-less head would only destroy sharpness (measured
+     retains the success type `S` unless more specific typing applies.
+     The rationale was to avoid adding the marker indiscriminately: a
+     default alone cannot distinguish applications that return present
+     results from those that can produce a marker. Spelling it on every
+     handler-less head would lose precision (measured
      2026-09-01: binding `S | marker(S)` engine-wide broke 412 tests
      across 86 suites, turning `vector<integer^3>` into
      `list<integer | nan^3>`). For a numeric codomain this also matches
@@ -992,6 +1154,14 @@ is mandatory:
      `missingBehavior` / `nanBehavior` policies govern what happens —
      a `propagate` slot absorbs it to the result marker, `reject`
      errors, `handle` lets the handler answer.
+
+     **Clarification:** this rule describes the existing successful-value
+     convention, not proof that markers cannot occur. For example,
+     `Length(Missing)` produces `NaN`. Analysis and compiled code must not
+     use the absence of a displayed marker union as a presence guarantee.
+     Preserving known absence while keeping concise signatures is part of
+     the design note; it does not require turning `unknown` into a content
+     type that excludes markers.
 
      `may-marker` also covers
      *numeric-route* failures, not only mathematical ones: an exact
@@ -1020,8 +1190,9 @@ test. A restriction carries the absent case in its type — `3 {a > 0}`
 types `integer | missing` while `a` is unbound, and `(1, 2) {a > 0}` types
 `missing | tuple<integer, integer>` — so `ce.declare("n", "number")`
 followed by `ce.assign("n", 3 {a > 0})` binds, and so does a gated tuple
-into `tuple<number, number>`. The marker on its own binds too: absence is
-a state every type can take, the way `NaN` inhabits `number`. Three things
+into `tuple<number, number>`. The marker on its own can bind to a
+non-callable declaration under this assignment policy. This does not mean
+that every content type includes `missing`. Three things
 do NOT change. The DECLARED type stays exactly as written (`n.type` is
 `number`, not `number | missing`). Subtyping is untouched:
 `missing <: number` is still false, so `matches()` answers as it always
@@ -1038,6 +1209,15 @@ which is a subtype of every signature, and admitting it would install a
 callable definition under a contract nothing proved. Only that value is
 refused: a gated scalar assigned to `number | (number) -> number` strips
 to `integer` and binds through the scalar arm.
+
+This remains the implemented assignment behavior. It must not be read as
+the rule for the inference marker `unknown`: an explicit successful-value
+contract and a request to infer a type are different things. The design
+note's Q1 asks whether declarations retain this assignment policy with
+separate computed presence information or instead require explicit absence.
+Either way, a known missing value must not disappear from analysis merely
+because the declared contract says `string`, `tuple`, or another present
+content type.
 
 **An absent argument at an annotated parameter of a function literal —
 RULED 2026-09-30.** A function literal with at least one annotated
@@ -1372,7 +1552,7 @@ different questions (§1): `0/0` is a perfectly well-formed question whose
 answer is indeterminate, not a violated contract. Merging them would make
 every numeric signature reject its own outputs (`Sin: (complex) ->
 complex` would no longer accept `Sin(0/0)` as input to a further
-`Sin`), and would pull `error` — deliberately outside `unknown` — into
+`Sin`), and would pull `error` — deliberately outside `expression` — into
 the value lattice. `~oo` is likewise *not* an error and not a `nan`: it
 is a definite point with defined arithmetic (`1/~oo = 0`, `2·~oo = ~oo`),
 unlike `NaN`, which absorbs.

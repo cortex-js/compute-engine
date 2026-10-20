@@ -21,6 +21,47 @@ work belongs in `TYPE_SYSTEM_ROADMAP.md` or an active file under `plans/`.
 - Absence in a numeric result normalizes to `NaN`. `Missing` remains a
   non-numeric absence value and comparisons over it use three-valued logic.
 
+### Implemented hierarchy and the agreed role of `unknown`
+
+The current implementation includes these subtype relationships:
+
+```text
+integer <: value <: expression <: unknown <: any
+function <: expression
+symbol <: expression
+never <: every type
+```
+
+Thus, a diagram placing `unknown` and `expression` as sibling branches under
+`any` does not describe the implemented relation. Nor is `never` merely
+another branch under `any`: it is the bottom type, below all types,
+including `unknown`, `error`, `nothing`, and `missing`.
+
+`value` accepts data values, including scalars, collections, objects, and
+opaque values such as regular expressions. `expression` also accepts
+functions and symbols. Both exclude immediate `missing`, `nothing`, and
+`error` types, but include numeric `nan`, and therefore `NaN` and
+`Indeterminate`. These contracts alone do not establish presence for
+`IsMissing`, `??`, or the proposed presence assertion. The agreed absence
+predicate includes both numeric markers, pending implementation; see the
+[numeric absence amendment](ERROR-MODEL.md#numeric-absence-handling--agreed-change-of-2026-10-20).
+`unknown` currently accepts those ordinary expression types and represents
+unresolved information, but excludes `any`, `error`, `nothing`, and
+`missing`. This is the implementation's combination of a content supertype
+and an inference placeholder.
+
+**Agreed design direction, not yet implemented:** `unknown` is an inference
+marker/placeholder, not a concrete type requiring a position in the lattice.
+Use `value`, `expression`, and `any` for content contracts. An unresolved
+marker is not evidence that a runtime value is present or satisfies a
+particular contract. Inference must resolve it from valid evidence, or a
+check must remain deferred.
+
+The representation of unresolved types, subtype API behavior, and migration
+from the current relation remain open. See the
+[collection and inference design note](plans/2026-10-20-bare-tuple-record-any.md).
+Code must not assume the implemented subtype rules have already changed.
+
 ## Number literal types
 
 The public `.type` of a number literal is its literal type: the most precise

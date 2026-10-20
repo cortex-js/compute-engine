@@ -1251,9 +1251,10 @@ export function hasAbsentScalarOperand(
  *
  * The two names are read as the same absence everywhere else too: the
  * operators that OWN their absence semantics — the ones declared
- * `missingBehavior: 'handle'`, such as the statistics reducers, `Coalesce`
- * and `IsMissing` — test `isAbsentValue`, which shares this predicate's
- * {@link isAbsentSymbol} choke point (user ruling of 2026-09-22).
+ * `missingBehavior: 'handle'` — share this predicate's
+ * {@link isAbsentSymbol} test. Arithmetic consumers use `isAbsentValue`;
+ * explicit checks and fallbacks (`IsMissing`, `Coalesce`) use
+ * `isMissingValue`, which also includes exact `Indeterminate`.
  * `Undefined` keeps its own meaning outside an absence test: its declared
  * type is still `unknown`, and a bare `Undefined` evaluates to itself.
  */
