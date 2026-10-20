@@ -606,6 +606,331 @@ describeScipyMaybe('PYTHON EXECUTION PARITY — scipy special functions (venv)',
 });
 
 /**
+ * Upper incomplete gamma at a non-positive order (cortex-js/compute-engine#457).
+ *
+ * `scipy.special.gammaincc` is `nan` for every order `a < 0` and for
+ * `a = −1`, and `gamma(a)` is a pole at the non-positive integers, so the
+ * lowerings `GammaRegularized → gammaincc` and
+ * `Gamma(s, z) → gammaincc·gamma` gave `nan` where the interpreter has a
+ * value, and a constant `s ≤ 0` made `Gamma(s, z)` fail to compile. Both now
+ * go through the `_ce_ugamma` helper.
+ *
+ * Each row is `[a, z, Q(a, z), Γ(a, z)]`, with the references computed by
+ * mpmath at 60 digits or more (checked against 120 digits). A value beyond
+ * the double range is `±Infinity`, with the sign of the exact value; a value
+ * below it is 0. At `z = 0`, Q is `nan` for a non-positive integer `a` and
+ * `±Infinity` (the sign of `Γ(a)`) for another negative `a`, and Γ(a, 0) is
+ * `+Infinity` for a non-positive integer `a` (the limit as `z → 0⁺`).
+ */
+const UPPER_GAMMA_REFERENCES: Array<[number, number, number, number]> = [
+  [-0.5, 0, -Infinity, -3.5449077018110321],
+  [-0.5, 1e-8, -5640.8958918965211, 19996.455292298188],
+  [-0.5, 0.3, -0.3245125526871861, 1.1503670473551643],
+  [-0.5, 1, -0.050254541660012221, 0.17814771178156069],
+  [-0.5, 2, -0.0084907026168296375, 0.030098757100186466],
+  [-0.5, 9.9, -3.9861580819582001e-7, 1.4130562485369915e-6],
+  [-0.5, 30, -1.5321801591977471e-16, 5.4314372469021468e-16],
+  [-0.5, 120, -1.6253008746969714e-56, 5.7615415884735011e-56],
+  [-0.999999, 0, -Infinity, -1.0000004227569913e6],
+  [-0.999999, 1e-8, -99.998196828915809, 9.9998239103852633e7],
+  [-0.999999, 0.3, -1.5637157075865509e-6, 1.5637163686582986],
+  [-0.999999, 1, -1.4849549465073812e-7, 0.14849555742824666],
+  [-0.999999, 2, -1.8767140486992965e-8, 0.018767148420932812],
+  [-0.999999, 9.9, -4.3126278621222646e-13, 4.3126296853158441e-7],
+  [-0.999999, 30, -9.7655939425298826e-23, 9.7655980710029957e-17],
+  [-0.999999, 120, -5.2381802148338649e-63, 5.2381824293111723e-57],
+  [-1, 0, NaN, Infinity],
+  [-1, 1e-8, 0, 9.9999981156534914e7],
+  [-1, 0.3, 0, 1.5637174172632129],
+  [-1, 1, 0, 0.14849550677592205],
+  [-1, 2, 0, 0.018767130910245226],
+  [-1, 9.9, 0, 4.3126194550910807e-7],
+  [-1, 30, 0, 9.7655645591245657e-17],
+  [-1, 120, 0, 5.2381573090156101e-57],
+  [-1.000001, 0, Infinity, 999999.57729934338],
+  [-1.000001, 1e-8, 100.00176551047696, 1.0000172323966501e8],
+  [-1.000001, 0.3, 1.5637191268542545e-6, 1.5637184658691528],
+  [-1.000001, 1, 1.4849551889278088e-7, 0.14849545612362754],
+  [-1.000001, 2, 1.8767121332449327e-8, 0.018767113399574817],
+  [-1.000001, 9.9, 4.3126110478341319e-13, 4.3126092248906102e-7],
+  [-1.000001, 30, 9.765535175259279e-23, 9.7655310473611481e-17],
+  [-1.000001, 120, 5.2381344030033699e-63, 5.2381321888405183e-57],
+  [-2, 0, NaN, Infinity],
+  [-2, 1e-8, 0, 4.9999999000000095e15],
+  [-2, 0.3, 0, 3.3337980729334931],
+  [-2, 1, 0, 0.10969196719776014],
+  [-2, 2, 0, 0.0075333449494539733],
+  [-2, 9.9, 0, 4.0336183944636258e-8],
+  [-2, 30, 0, 3.1589714757114749e-18],
+  [-2, 120, 0, 4.3299148867889271e-59],
+  [-3.0001, 0, Infinity, 1666.4573519137095],
+  [-3.0001, 1e-8, 2.0038723780671768e20, 3.3393678567268552e23],
+  [-3.0001, 0.3, 0.0048218330652496277, 8.0353791612858595],
+  [-3.0001, 1, 5.1642849730910034e-5, 0.086060606607849962],
+  [-3.0001, 2, 1.8767864712997863e-6, 0.003127584613069717],
+  [-3.0001, 9.9, 2.2746189109637357e-12, 3.7905554069774728e-9],
+  [-3.0001, 30, 6.1349622943564012e-23, 1.0223653019143624e-19],
+  [-3.0001, 120, 2.146869018423641e-64, 3.5776656593478456e-61],
+  [-10.5, 0, -Infinity, -2.6401218205477163e-7],
+  [-10.5, 1e-8, -3.6073371101378068e89, 9.5238094185463644e82],
+  [-10.5, 0.3, -8.0106891825849281e10, 21149.195308568018],
+  [-10.5, 1, -120190.36849742541, 0.031731721448972367],
+  [-10.5, 2, -27.941055279334993, 7.3767789732102282e-6],
+  [-10.5, 9.9, -3.1977714813221354e-10, 8.4425062649637638e-17],
+  [-10.5, 30, -2.6578598244039052e-24, 7.0170737183658719e-31],
+  [-10.5, 120, -3.25832463615618e-70, 8.6023739703441294e-77],
+  [-60.3, 0, -Infinity, -1.3619676564644575e-82],
+  [-60.3, 1e-8, -Infinity, Infinity],
+  [-60.3, 0.3, -3.0382570321609184e111, 4.1380078098288639e29],
+  [-60.3, 1, -4.4051514012079002e79, 0.0059996737302742449],
+  [-60.3, 2, -1.1231049003680305e61, 1.5296325491179945e-21],
+  [-60.3, 9.9, -4.8116938680126657e15, 6.5533714210416109e-67],
+  [-60.3, 30, -6.4461236988128171e-23, 8.7794119873520928e-105],
+  [-60.3, 120, -1.3130257517171432e-98, 1.7882986059436801e-180],
+  [-150.5, 0, -Infinity, -4.4784476581506408e-264],
+  [-150.5, 1e-8, -Infinity, Infinity],
+  [-150.5, 0.3, -Infinity, 2.4241289114181957e76],
+  [-150.5, 1, -5.4218355049794989e260, 0.0024281406520153434],
+  [-150.5, 2, -9.816614926509487e214, 4.3963196128593037e-49],
+  [-150.5, 9.9, -1.0020467366749407e107, 4.4876138612193798e-157],
+  [-150.5, 30, -5.7070385460019191e25, 2.5558673411317733e-238],
+  [-150.5, 120, -7.6538141806818747e-105, 0],
+  [0.5, 0, 1, 1.772453850905516],
+  [0.5, 1e-8, 0.99988716208366658, 1.7722538509061827],
+  [0.5, 1, 0.15729920705028513, 0.27880558528066198],
+  [0.5, 120, 3.9328331793485131e-54, 6.970765313705256e-54],
+  [2, 0, 1, 1],
+  [2, 1, 0.73575888234288464, 0.73575888234288464],
+  [2, 120, 9.2778541692036196e-51, 9.2778541692036196e-51],
+  // Γ(s, z) for an order where `gamma(s)` overflows, and where Q underflows
+  // while Γ(s, z) is a normal double.
+  [200, 1000, 1.6065441803414137e-210, 6.3350685354768734e162],
+  [150, 1500, 0, 6.9386544596311331e-179],
+  // A positive order near 0 (Γ(s, z) ≈ E₁(z)), where the continued fraction
+  // does not converge and `gammaincc` loses digits, and a subnormal order.
+  [1e-305, 0.01, 4.0379295765381138e-305, 4.0379295765381138],
+  [1e-305, 1e-100, 2.2968129363450303e-303, 229.68129363450304],
+  [1e-310, 1e-5, 1.0935719800043662e-309, 10.935719800043696],
+  [-5e-324, 0.5, -5e-324, 0.55977359477616081],
+];
+
+/** Whether `actual` matches the reference `expected` of
+ * `UPPER_GAMMA_REFERENCES`: the same special value, or a relative error
+ * below 1e-12. */
+function upperGammaMatches(actual: number, expected: number): boolean {
+  if (Number.isNaN(expected)) return Number.isNaN(actual);
+  if (expected === 0 || !Number.isFinite(expected)) return actual === expected;
+  return Math.abs((actual - expected) / expected) < 1e-12;
+}
+
+/** Python's `repr` of a float, read back as a number. */
+function pythonFloat(x: string): number {
+  return { 'nan': NaN, 'inf': Infinity, '-inf': -Infinity }[x] ?? Number(x);
+}
+
+describeScipyMaybe(
+  'PYTHON EXECUTION PARITY — upper incomplete gamma at a non-positive order (venv)',
+  () => {
+    const python = new PythonTarget();
+
+    /** Run `program`, which prints a JSON list of float `repr`s. */
+    function runFloats(program: string, tag: string): number[] {
+      const file = path.join(
+        os.tmpdir(),
+        `ce-py-ugamma-${tag}-${process.pid}.py`
+      );
+      fs.writeFileSync(file, program);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      return (JSON.parse(out) as string[]).map(pythonFloat);
+    }
+
+    const header =
+      'import numpy as np\nimport cmath\nimport scipy.special\nimport json\n\n';
+    const fns =
+      `${python.compileFunction(ce.box(['GammaRegularized', 'a', 'z']), 'fn_q', ['a', 'z'])}\n` +
+      `${python.compileFunction(ce.box(['Gamma', 'a', 'z']), 'fn_g', ['a', 'z'])}\n`;
+
+    it('the order is a variable: the lowering goes through the helper', () => {
+      expect(fns).toContain('return _ce_ugamma(a, z, True)');
+      expect(fns).toContain('return _ce_ugamma(a, z, False)');
+    });
+
+    it('scalar operands match mpmath', () => {
+      let program = `${header}${fns}\nresults = []\n`;
+      for (const [a, z] of UPPER_GAMMA_REFERENCES)
+        program +=
+          `results.append(repr(float(fn_q(${a}, ${z}))))\n` +
+          `results.append(repr(float(fn_g(${a}, ${z}))))\n`;
+      program += 'print(json.dumps(results))\n';
+      const actual = runFloats(program, 'scalar');
+      expect(actual.length).toBe(2 * UPPER_GAMMA_REFERENCES.length);
+      // On a mismatch the message shows the operands and the actual value.
+      const check = (
+        what: string,
+        a: number,
+        z: number,
+        x: number,
+        e: number
+      ) =>
+        expect([what, a, z, upperGammaMatches(x, e) ? 'ok' : x]).toEqual([
+          what,
+          a,
+          z,
+          'ok',
+        ]);
+      UPPER_GAMMA_REFERENCES.forEach(([a, z, q, g], i) => {
+        check('Q', a, z, actual[2 * i], q);
+        check('Gamma', a, z, actual[2 * i + 1], g);
+      });
+    });
+
+    it('array operands broadcast and match mpmath element by element', () => {
+      const as = UPPER_GAMMA_REFERENCES.map(([a]) => a).join(', ');
+      const zs = UPPER_GAMMA_REFERENCES.map(([, z]) => z).join(', ');
+      // The orders as a column and the arguments as a row: a 2-D result whose
+      // diagonal is the table.
+      const program =
+        `${header}${fns}\n` +
+        `_a = np.array([${as}])\n_z = np.array([${zs}])\n` +
+        `_q = fn_q(_a[:, None], _z[None, :])\n_g = fn_g(_a[:, None], _z[None, :])\n` +
+        `assert _q.shape == (len(_a), len(_z)) and _g.shape == _q.shape\n` +
+        `print(json.dumps([repr(float(_x)) for _x in np.concatenate([np.diag(_q), np.diag(_g)])]))\n`;
+      const actual = runFloats(program, 'array');
+      const n = UPPER_GAMMA_REFERENCES.length;
+      expect(actual.length).toBe(2 * n);
+      const check = (
+        what: string,
+        a: number,
+        z: number,
+        x: number,
+        e: number
+      ) =>
+        expect([what, a, z, upperGammaMatches(x, e) ? 'ok' : x]).toEqual([
+          what,
+          a,
+          z,
+          'ok',
+        ]);
+      UPPER_GAMMA_REFERENCES.forEach(([a, z, q, g], i) => {
+        check('Q', a, z, actual[i], q);
+        check('Gamma', a, z, actual[n + i], g);
+      });
+    });
+
+    it('a complex element is nan unless it is exactly real', () => {
+      // `np.asarray(…, dtype=float)` of a complex array drops the imaginary
+      // part without an error, so the helper tests each element, as the
+      // runtime guard of a real-only head does.
+      const program =
+        `${header}${fns}\n` +
+        `_g = fn_g(np.array([-1 + 0j, -1 + 1j, 2]), 2)\n` +
+        `_q = fn_q(np.array([-1.5 + 0j, -1.5 + 1j]), 0.001)\n` +
+        `print(json.dumps([repr(float(_x)) for _x in list(_g) + list(_q)]))\n`;
+      const [g0, g1, g2, q0, q1] = runFloats(program, 'complex');
+      expect(upperGammaMatches(g0, 0.018767130910245226)).toBe(true);
+      expect(g1).toBeNaN();
+      expect(upperGammaMatches(g2, 0.40600584970983808)).toBe(true);
+      expect(upperGammaMatches(q0, 8894.845339577239695)).toBe(true);
+      expect(q1).toBeNaN();
+    });
+
+    it('an operand of Gamma(s, z) that is certainly not real fails closed', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('t', 'real');
+      expect(() =>
+        python.compileFunction(
+          scoped.box(['Gamma', ['Add', 't', 'ImaginaryUnit'], 2]),
+          'f',
+          ['t']
+        )
+      ).toThrow(/certainly not a real number/);
+    });
+
+    it('an infinite order matches the interpreter', () => {
+      const I = Infinity;
+      const points: Array<[number, number]> = [
+        [I, I],
+        [-I, I],
+        [I, -I],
+        [I, 0],
+        [I, 0.5],
+        [I, 2],
+        [I, -3],
+        [-I, 0],
+        [-I, 0.5],
+        [-I, 1],
+        [-I, 2],
+        [-I, -3],
+        [2, I],
+        [-0.5, I],
+        [-1, I],
+      ];
+      const py = (x: number) =>
+        x === I ? "float('inf')" : x === -I ? "-float('inf')" : String(x);
+      let program = `${header}${fns}\nresults = []\n`;
+      for (const [a, z] of points)
+        program +=
+          `results.append(repr(float(fn_q(${py(a)}, ${py(z)}))))\n` +
+          `results.append(repr(float(fn_g(${py(a)}, ${py(z)}))))\n`;
+      program += 'print(json.dumps(results))\n';
+      const actual = runFloats(program, 'infinite');
+      points.forEach(([a, z], i) => {
+        for (const [k, head] of [
+          [0, 'GammaRegularized'],
+          [1, 'Gamma'],
+        ] as const) {
+          const expected = ce.box([head, ce.number(a), ce.number(z)]).N().re;
+          const x = actual[2 * i + k];
+          expect([
+            head,
+            a,
+            z,
+            upperGammaMatches(x, expected) ? 'ok' : x,
+          ]).toEqual([head, a, z, 'ok']);
+        }
+      });
+      // Q(s, +∞) is a zero with the sign of Γ(s).
+      expect(Object.is(actual[2 * 13], -0)).toBe(true);
+      expect(Object.is(actual[2 * 12], 0)).toBe(true);
+    });
+
+    it('a constant order compiles, and matches mpmath and the interpreter', () => {
+      // Before #457 a constant `s ≤ 0` made `Gamma(s, z)` fail to compile.
+      // [expression, z, mpmath reference]
+      const cases: Array<[any, number, number]> = [
+        [['Gamma', -1, 'z'], 2, 0.018767130910245226],
+        [['Gamma', 0, 'z'], 2, 0.04890051070806112],
+        [['GammaRegularized', -1.5, 'z'], 0.001, 8894.845339577239695],
+        [['GammaRegularized', 0, 'z'], 1, 0],
+      ];
+      let program = `${header}\nresults = []\n`;
+      cases.forEach(([expr, z], i) => {
+        const code = python.compileFunction(ce.box(expr), `fn_${i}`, ['z']);
+        expect(code).toContain('_ce_ugamma(');
+        program += `${code}\nresults.append(repr(float(fn_${i}(${z}))))\n`;
+      });
+      program += 'print(json.dumps(results))\n';
+      const actual = runFloats(program, 'const');
+      cases.forEach(([expr, z, expected], i) => {
+        expect([expr, upperGammaMatches(actual[i], expected)]).toEqual([
+          expr,
+          true,
+        ]);
+        const interpreted = ce.box(expr).subs({ z }).N().re;
+        expect(Math.abs(interpreted - expected)).toBeLessThanOrEqual(
+          1e-12 * Math.max(1, Math.abs(expected))
+        );
+      });
+    });
+  }
+);
+
+/**
  * ElementMax / ElementMin / Clamp broadcasting parity (finding A8).
  *
  * `np.maximum`/`np.minimum`/`np.clip` broadcast by NumPy rules and raise

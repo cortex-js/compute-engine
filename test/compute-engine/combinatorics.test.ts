@@ -395,4 +395,43 @@ describe('Binomial of a large negative non-integer n', () => {
       expect(Math.abs(v / want - 1)).toBeLessThan(1e-13);
     }
   });
+
+  test('at machine precision, an n near a negative integer with an integer k', () => {
+    // A rounded n − k that is an integer was read as a pole of Γ(n − k + 1)
+    // (the value was 0), and the Γ ratio of two arguments near a pole, one
+    // of them the rounded n − k + 1, was off by up to 78%. mpmath at 30
+    // digits, at the exact double n.
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    for (const [n, k, want] of [
+      [-51.999999999999986, 87, -2.115931005176254346e38],
+      [-117.00000000000001, 153, -3.6244753868579740774e78],
+      [-15.000000000000016, 141, -2.8941453770919239947e19],
+      [-17.00000000000002, 114, 1.215154840510196953e20],
+    ]) {
+      const v = ce.box(['Binomial', n, k]).N().re;
+      expect(Math.abs(v / want - 1)).toBeLessThan(1e-12);
+    }
+  });
+
+  test('at machine precision, a value near the top of the double range', () => {
+    // For a negative n, C(n, k) is a sine ratio times a coefficient with
+    // positive Γ arguments. That coefficient can overflow while the product
+    // is in range: C(−426.1545291590769, 635.8454312348206) was −Infinity.
+    // mpmath at 50 digits, at the exact double operands.
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    for (const [n, k, want] of [
+      [-426.1545291590769, 635.8454312348206, -1.176746284479615128693311e305],
+      [-489.00000018460935, 505.46622839599104, -4.304466222868774943538681e303],
+      [-545.2549307487185, -1029.2448601864462, 1.405725279709474648410732e307],
+    ]) {
+      const v = ce.box(['Binomial', n, k]).N().re;
+      expect(Math.abs(v / want - 1)).toBeLessThan(1e-12);
+    }
+    // The true value 3.9e308 is above the double range.
+    expect(
+      ce.box(['Binomial', -592.0499321454442, -1042.6573232731166]).N().re
+    ).toBe(Infinity);
+  });
 });

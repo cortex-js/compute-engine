@@ -3,10 +3,8 @@ import {
   bigBetaRegularized,
   bigGammaQ,
   bigGammaQNegativeOrder,
-  gamma,
   betaRegularized,
   gammaQ,
-  incompleteGammaUpper,
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
@@ -555,14 +553,15 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         // A negative non-integer a with z > 0: Q(a, z) = Γ(a, z)/Γ(a), both
         // finite — Γ(a) off its poles, and the upper incomplete gamma
         // converges for every z > 0 whatever the order. The machine kernel is
-        // the Tricomi series and Legendre continued fraction of `Γ(a, z)`
-        // over `Γ(a)`; the bignum kernel is `bigGammaQNegativeOrder`. Both
-        // were checked against a direct quadrature of ∫_z^∞ t^{a−1}e^{−t} dt
-        // (small orders to twelve digits; orders down to −200 in log space).
-        // The machine quotient overflows past the double range and is 0/0
-        // when both factors underflow: such a value is not representable at
-        // machine precision, so the call stays symbolic there rather than
-        // report an infinity or a NaN at an interior point.
+        // `gammaQ`, the same one the compiled code calls; the bignum kernel is
+        // `bigGammaQNegativeOrder`. Both were checked against mpmath and a
+        // direct quadrature of ∫_z^∞ t^{a−1}e^{−t} dt. When |Q| is outside
+        // the normal double range, the machine kernel answers the IEEE result
+        // (±Infinity, a signed 0 or a subnormal value; the compiled code
+        // returns it as is), or NaN where it cannot tell. Q is never 0 or
+        // infinite at such a point, so such a value is not representable at
+        // machine precision, and the call stays symbolic there rather than
+        // report an infinity, a 0 or a NaN at an interior point.
         if (
           a.isNegative === true &&
           a.isInteger !== true &&
@@ -572,14 +571,17 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           const q = apply2(
             a,
             z,
-            (a, z) => incompleteGammaUpper(a, z) / gamma(a),
+            (a, z) => gammaQ(a, z),
             (a, z) => bigGammaQNegativeOrder(ce, a, z)
           );
           if (
             q !== undefined &&
             isNumber(q) &&
             q.bignumRe === undefined &&
-            !Number.isFinite(q.re)
+            // 2.2250738585072014e-308: the smallest normal double
+            !(
+              Number.isFinite(q.re) && Math.abs(q.re) >= 2.2250738585072014e-308
+            )
           )
             return undefined;
           return q;

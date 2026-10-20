@@ -80,9 +80,18 @@ describe('regularized incomplete gamma/beta kernels', () => {
       expect(gammaP(0, 1)).toBeNaN();
       expect(gammaP(-1, 1)).toBeNaN();
       expect(gammaP(3, -1)).toBeNaN();
-      expect(gammaQ(0, 1)).toBeNaN();
+      // a pole of Γ: 1/Γ(a) = 0, as the GammaRegularized head answers
+      expect(gammaQ(0, 1)).toBe(0);
+      expect(gammaQ(0, 0)).toBeNaN();
       expect(gammaP(NaN, 1)).toBeNaN();
       expect(gammaP(3, NaN)).toBeNaN();
+    });
+
+    test('P(a, +∞) = 1 and Q(a, +∞) = 0', () => {
+      expect(gammaP(3, Infinity)).toBe(1);
+      expect(gammaP(0.5, Infinity)).toBe(1);
+      expect(gammaP(Infinity, Infinity)).toBeNaN();
+      expect(gammaQ(3, Infinity)).toBe(0);
     });
 
     test('P + Q = 1 identity at assorted points', () => {

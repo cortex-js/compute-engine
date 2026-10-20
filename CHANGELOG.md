@@ -41,6 +41,44 @@
 
 ### Bug Fixes
 
+- **Compiled `GammaRegularized(a, z)` is correct for a non-positive order
+  `a`**, as `.N()` is
+  ([#457](https://github.com/cortex-js/compute-engine/issues/457), contributed
+  by [enumeratio](https://github.com/enumeratio)). With `a` and `z` declared
+  real, `compile(GammaRegularized(a, z)).run({a: -1.5, z: 0.001})` was `NaN`
+  and is now `8894.8453395772…`. At a non-positive integer `a` the compiled
+  value is `0` for `z > 0` and `NaN` at `z = 0`, as the interpreter answers; at
+  `z = 0` and a negative non-integer `a` it is `±Infinity` by the sign of
+  `Γ(a)`. The kernel works in logarithms at a large negative order, so
+  `GammaRegularized(-150.5, 120)` is `-7.65e-105`, not `0`. A value outside
+  the double range is `±Infinity`, or a signed `0`, as the IEEE rules give
+  it. The machine kernels were also made more accurate in related places,
+  each checked against mpmath:
+  - The Python target gives the same values. `GammaRegularized(a, z)` lowered
+    to `scipy.special.gammaincc`, which is `nan` for every `a < 0`, and the
+    two-operand `Gamma(s, z)` refused to compile for a constant `s ≤ 0`. Both
+    now use a helper that keeps SciPy for a positive order and computes a
+    non-positive order itself; the helper also fixes `Gamma(200, 1000)`,
+    which overflowed to `inf` (its value is `6.3e162`). `compileLambda()`
+    cannot hold the helper, as for `Power`. A lambda keeps the inline
+    lowering only where it is correct: `GammaRegularized` with a constant
+    order of at least `1e-20`, and `Gamma(s, z)` with a constant order from
+    `2.5e-4` to `7.5`. Any other order fails with "use compileFunction";
+    before, such a lambda gave `nan` or a wrong value.
+  - `Gamma`, `Digamma`, `Trigamma` and `ln|Γ|` near a negative integer: the
+    reflection formula now takes the sine of the exact remainder, so
+    `Gamma(-10.000000001)` has at least 12 correct digits instead of 7. The
+    interval enclosure of `Gamma(-1.000001)` is under `1e-12` wide
+    (relative), not `3.5e-9`.
+  - `GammaRegularized(a, z)` for `|a| ≤ 1/2` and `Gamma(s, z)` for
+    `-1 < s < 1/2` and a small `z`: `GammaRegularized(1e-9, 0.99)` had five
+    correct digits, and `Gamma(-0.9999, 0.001)` was `NaN`.
+  - `Binomial(n, k)` for an `n` close to a negative integer:
+    `Binomial(-51.999999999999986, 87)` was `0` (its interval enclosure was
+    `[0, 0]`, which did not hold the true value `-2.1e38`), and
+    `Binomial(-426.1545291590769, 635.8454312348206)` was `-Infinity`, not
+    `-1.18e305`.
+
 - **`Log(1, base)` threads over a list of bases** instead of folding to the
   scalar `0`: `Log(1, [-10, e, 27])` was `0` and is now `[0, 0, 0]`, as
   `Log(8, [2, 4])` is `[3, 3/2]`. The `Log(1, b) = 0` fold now applies only to

@@ -124,15 +124,38 @@ describe('PYTHON ARITY — Gamma(s, z) is the upper incomplete gamma', () => {
     expect(src(['Gamma', 'x'])).toBe('scipy.special.gamma(x)');
   });
 
-  it('the two-operand form multiplies the regularized Q(s, z) back by Γ(s)', () => {
-    expect(src(['Gamma', 2, 'x'])).toBe(
-      '(scipy.special.gammaincc(2, x) * scipy.special.gamma(2))'
-    );
+  it('the two-operand form goes through the `_ce_ugamma` helper', () => {
+    const code = src(['Gamma', 2, 'x']);
+    expect(code).toContain('def _ce_ugamma(');
+    expect(lastLine(code)).toBe('_ce_ugamma(2, x, False)');
   });
 
-  it('a statically non-positive `s` fails closed (scipy gammaincc needs s > 0)', () => {
-    expect(() => src(['Gamma', -1, 2])).toThrow(/Could not compile/);
-    expect(() => src(['Gamma', 0, 2])).toThrow(/Could not compile/);
+  it('a non-positive `s` compiles (cortex-js/compute-engine#457)', () => {
+    // `scipy.special.gammaincc` is `nan` for `s < 0` and `gamma(s)` is a pole
+    // at the non-positive integers, so the lowering used to fail closed.
+    expect(lastLine(src(['Gamma', -1, 2]))).toBe('_ce_ugamma(-1, 2, False)');
+    expect(lastLine(src(['Gamma', 0, 2]))).toBe('_ce_ugamma(0, 2, False)');
+  });
+
+  it('a bare lambda keeps the product only where it is accurate, and fails closed otherwise', () => {
+    // `gammaincc(s, z)·gamma(s)` is accurate for a constant `s` from 2.5e-4
+    // to 7.5. Beyond, Γ(s) overflows or a subnormal Q loses the digits of a
+    // normal Γ(s, z): Γ(200, 1000) gave inf, Γ(150, 1500) gave 0.
+    expect(python.compileLambda(ce.box(['Gamma', 2, 'x']), ['x'])).toBe(
+      'lambda x: (scipy.special.gammaincc(2, x) * scipy.special.gamma(2))'
+    );
+    for (const s of ['s', 10, 200, 150, 1e-5, -1])
+      expect(() =>
+        python.compileLambda(ce.box(['Gamma', s, 'x']), ['s', 'x'])
+      ).toThrow(/_ce_ugamma helper/);
+    expect(
+      python.compileLambda(ce.box(['GammaRegularized', 3, 'x']), ['x'])
+    ).toBe('lambda x: scipy.special.gammaincc(3, x)');
+    // `gammaincc` loses digits for an order below 1e-20.
+    for (const s of [-1.5, 1e-30, 'a'])
+      expect(() =>
+        python.compileLambda(ce.box(['GammaRegularized', s, 'x']), ['a', 'x'])
+      ).toThrow(/_ce_ugamma helper/);
   });
 });
 
@@ -814,8 +837,12 @@ describeScipy('PYTHON ARITY — Gamma(s, z) execution parity (venv + scipy)', ()
       [['Gamma', 0.5, 1.5], 0.14758251320409642],
     ];
     let program = 'import numpy as np\nimport scipy.special\nimport json\n\nresults = []\n';
-    for (const [expr] of cases)
-      program += `results.append(float(${src(expr)}))\n`;
+    // The source starts with the definition of the helpers it calls.
+    for (const [expr] of cases) {
+      const code = src(expr);
+      program += `${code.split('\n').slice(0, -1).join('\n')}\n`;
+      program += `results.append(float(${lastLine(code)}))\n`;
+    }
     program += 'print(json.dumps(results))\n';
 
     const file = path.join(os.tmpdir(), `ce-py-gamma-${process.pid}.py`);

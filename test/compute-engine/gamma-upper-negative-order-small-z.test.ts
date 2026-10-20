@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { incompleteGammaUpper } from '../../src/compute-engine/numerics/special-functions';
 
@@ -29,7 +30,7 @@ const cases: [number, number, number][] = [
   [-0.5, 0.01, 16.654759630333674212],
   [-0.5, 0.1, 3.4017693366916152574],
   [-0.5, 1, 0.17814771178156069019],
-  // Within 0.05 of a pole of Γ(a) after the shift: the complex kernel answers
+  // Within 0.05 of a pole of Γ(a) after the shift
   [-1.999, 0.001, 495816.22173622802606],
   [-2.001, 0.001, 502212.22802780242898],
 ];
@@ -58,6 +59,94 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
       expect(rel(r.run!({ s, z }) as number, ref)).toBeLessThan(TOLERANCE);
     });
   }
+
+  // −1 < s < −½ with s + 1 ≤ z ≲ 0.01: the Legendre fraction needed more
+  // than its iteration cap (NaN at (−0.9999, 0.001)) or lost digits (1.8e-12
+  // at (−0.9999, 0.01)). |s| ≤ ½ with z < s + 1: Γ(s) − γ(s, z) cancelled as
+  // s → 0 (6 correct digits at s = ±10⁻⁹). References: mpmath `gammainc`
+  // (40 digits) at the exact double operands.
+  for (const [s, z, ref] of [
+    [-0.9999, 0.001, 992.08060892319359656],
+    [-0.9999, 0.003, 326.94118900932730884],
+    [-0.9999, 0.01, 94.931930919533909047],
+    [-0.9999999999, 1e-6, 999985.76042306522382],
+    [-0.75, 0.3, 1.3313206439213457207],
+    [-0.6, 0.9, 0.21358486612207420543],
+    [-1e-9, 0.9, 0.26018393923034158549],
+    [-1e-6, 0.1, 1.8229259437100318248],
+    [1e-9, 0.6, 0.4543795032232775604],
+    [1e-6, 0.3, 0.90567629091561726317],
+    [0.3, 1.2, 0.18964967704654715886],
+    // A tiny |s|: Γ(s, z) = E₁(z). Γ(s)·Q(s, z) was Infinity at s = 1e-309,
+    // where Γ(s) ≈ 1/s overflows.
+    [1e-309, 0.5, 0.55977359477616081175],
+    [-1e-309, 0.99, 0.22309982579017724023],
+    [1e-300, 1e-300, 690.19831223331217232],
+    [-1e-300, 0.5, 0.55977359477616081175],
+    [1e-20, 0.99, 0.22309982579017724024],
+    [-1e-20, 1e-300, 690.19831223331217471],
+    // Within 0.05 of a pole of Γ after the shift to −1 < s + n < 0. The
+    // complex kernel answered there and was NaN for these orders.
+    [
+      -86.00000000000747, 0.00025828026131082796,
+      4.222244578830108113888993e306,
+    ],
+    [-35.00000000406394, 4.845221821381921e-7, 2.950893309817006972619293e219],
+    [-157.99999832559416, 0.01995847873524276, 2.357665435070730467583563e266],
+    [-8.999999276617382, 0.34338853700989597, 1138.68406525965139780709],
+    [-1.0005077417878792, 0.003694186837323924, 265.2958312889191747453224],
+  ]) {
+    test(`Gamma(${s}, ${z}) = ${ref} (kernel and compiled)`, () => {
+      expect(rel(incompleteGammaUpper(s, z), ref)).toBeLessThan(TOLERANCE);
+      const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
+      expect(rel(r.run!({ s, z }) as number, ref)).toBeLessThan(TOLERANCE);
+    });
+  }
+
+  test('an overflow within 0.05 of a pole after the shift is +Infinity', () => {
+    // mpmath: 1.73e323 and 4.6e1201 (the complex kernel answered NaN)
+    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
+    for (const [s, z] of [
+      [-57.00707326638518, 1.9909707833817464e-6],
+      [-212.9944237232914, 2.2248478364088193e-6],
+    ]) {
+      expect(incompleteGammaUpper(s, z)).toBe(Infinity);
+      expect(r.run!({ s, z })).toBe(Infinity);
+    }
+  });
+
+  test('Gamma(s, +Infinity) is 0 (kernel, compiled and .N())', () => {
+    // The continued fraction formed 0·∞: NaN for every order.
+    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
+    for (const s of [-1.5, -2, 0, 1e-9, 2.5]) {
+      expect(incompleteGammaUpper(s, Infinity)).toBe(0);
+      expect(r.run!({ s, z: Infinity })).toBe(0);
+      expect(ce.expr(['Gamma', s, 'PositiveInfinity']).N().re).toBe(0);
+    }
+    expect(incompleteGammaUpper(Infinity, Infinity)).toBeNaN();
+  });
+
+  test('a tiny order at the default precision (.N() and evaluate())', () => {
+    // The bignum kernel lost about −log₁₀|s| digits and declined, and the
+    // machine kernel answered −1.949e289 and 0.8666 (Γ(s) − γ(s, z) at a
+    // tiny s). Γ(s, z) = E₁(z) to the working precision there. mpmath at
+    // 60 digits for the decimal operands. The shared test engine runs at
+    // precision 100, where the subtraction route has enough guard digits.
+    const ce = new ComputeEngine();
+    for (const [s, z, ref] of [
+      [1e-305, 0.01, '4.03792957653811383178668'],
+      [-5e-324, 0.5, '0.559773594776160811746795'],
+    ] as const) {
+      for (const v of [
+        ce.expr(['Gamma', s, z]).N(),
+        ce.expr(['Gamma', s, z]).evaluate(),
+      ]) {
+        const big = (v as any).bignumRe;
+        expect(big).toBeDefined();
+        expect(big.div(ce.bignum(ref)).sub(1).abs().lt(1e-20)).toBe(true);
+      }
+    }
+  });
 
   test('Gamma(-1.5, 0.001) is 21020.93716712355, not 21020.6917...', () => {
     const v = ce.expr(['Gamma', -1.5, 0.001]).N() as any;

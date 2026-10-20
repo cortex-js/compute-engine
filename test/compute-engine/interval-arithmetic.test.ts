@@ -1037,6 +1037,44 @@ describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
     }
   });
 
+  // Point enclosures near a pole of Γ contain the mpmath value (30 digits).
+  // The reflection formula of Γ took sin(πx) as `Math.sin(Math.PI * x)`,
+  // and its error bound grew like 1/|sin(πx)|: the Γ(−1.000001) enclosure
+  // was 3.5e-9 wide (relative). A rounded n − k that is an integer was read
+  // as a pole of Γ(n − k + 1), and C(−51.999999999999986, 87) was [0, 0].
+  test('Γ, ln|Γ| and C(n, k) near a pole of Γ enclose the true value', () => {
+    const contains = (r: ReturnType<typeof gamma>, v: number) => {
+      expect(r.kind).toBe('interval');
+      if (r.kind !== 'interval') return;
+      expect(r.value.lo).toBeLessThanOrEqual(v);
+      expect(r.value.hi).toBeGreaterThanOrEqual(v);
+    };
+    const g = gamma({ lo: -1.000001, hi: -1.000001 });
+    contains(g, 999999.57729934337931);
+    if (g.kind === 'interval')
+      expect((g.value.hi - g.value.lo) / 999999.57729934337931).toBeLessThan(
+        1e-12
+      );
+    contains(gammaln({ lo: -1.000001, hi: -1.000001 }), 13.815510135263528145);
+    contains(gamma({ lo: -0.5, hi: -0.5 }), -3.5449077018110320546);
+    contains(gammaln({ lo: -0.5, hi: -0.5 }), 1.2655121234846453965);
+    for (const [n, k, v] of [
+      [-51.999999999999986, 87, -2.115931005176254346e38],
+      [-15.000000000000016, 141, -2.8941453770919239947e19],
+      [-117.00000000000001, 153, -3.6244753868579740774e78],
+      // The positive coefficient behind the sine ratio overflowed, and the
+      // enclosure was the point −Infinity.
+      [-426.1545291590769, 635.8454312348206, -1.176746284479615128693311e305],
+    ])
+      contains(binomial({ lo: n, hi: n }, { lo: k, hi: k }), v);
+  });
+
+  test('C(n, k) on a pole of Γ(n − k + 1) with integers n, k is exactly 0', () => {
+    const r = binomial({ lo: 5, hi: 5 }, { lo: 7, hi: 7 });
+    expect(r.kind).toBe('interval');
+    if (r.kind === 'interval') expect([r.value.lo, r.value.hi]).toEqual([0, 0]);
+  });
+
   // E10: sinc/fresnel must stay conservative past their tabulated extrema.
   test('E10: sinc on [38,40] encloses the true local maximum', () => {
     const r = sinc({ lo: 38, hi: 40 });

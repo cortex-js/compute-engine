@@ -1,6 +1,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { erfInv, gamma } from '../../src/compute-engine/numerics/special-functions';
+import {
+  digamma,
+  erfInv,
+  gamma,
+  trigamma,
+} from '../../src/compute-engine/numerics/special-functions';
 import { hypergeometric2F1Complex } from '../../src/compute-engine/numerics/numeric-complex';
 import { Complex } from 'complex.js';
 import { engine } from '../utils';
@@ -70,6 +75,27 @@ describe('TRIGAMMA FUNCTION', () => {
   test('ψ₁(0.5) = π²/2', () => {
     expectApprox(ce.expr(['Trigamma', 0.5]), (Math.PI * Math.PI) / 2);
   });
+});
+
+// Machine ψ and ψ₁ for x < 0 by reflection, against mpmath (30 digits). The
+// reflection took sin(πx) and tan(πx) as `Math.sin(Math.PI * x)` and
+// `Math.tan(Math.PI * x)`, which lose relative precision near an integer:
+// ψ(−10.000000001) was off by 1.5e-7 and ψ₁(−10.000000001) by 3.1e-7.
+describe('DIGAMMA AND TRIGAMMA NEAR A NEGATIVE INTEGER', () => {
+  const cases: [number, number, number][] = [
+    // [x, ψ(x), ψ₁(x)]
+    [-1.000001, 1000000.4228639568022, 1000000000167.1782104],
+    [-0.999999, -999999.57718426430315, 999999999945.13360463],
+    [-3.0001, 10001.255817042408529, 100000003.00563118426],
+    [-10.000000001, 999999919.61138843275, 999999834519278542.92],
+    [-100.25, 7.7542389592086454484, 19.729283325349363344],
+  ];
+  for (const [x, psi, psi1] of cases) {
+    test(`ψ(${x}) and ψ₁(${x})`, () => {
+      expect(Math.abs(digamma(x) / psi - 1)).toBeLessThan(1e-13);
+      expect(Math.abs(trigamma(x) / psi1 - 1)).toBeLessThan(1e-13);
+    });
+  }
 });
 
 describe('POLYGAMMA FUNCTION', () => {
@@ -283,6 +309,24 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
       expect(gamma(n)).toBe(factorial);
       factorial *= n;
     }
+  });
+
+  // Machine Γ(z) for z < ½ by reflection, against mpmath (30 digits). Near a
+  // negative integer `Math.sin(Math.PI * z)` lost relative precision
+  // (Γ(−1.000001) was off by 1e-10, Γ(−10.000000001) by 1.5e-7); past
+  // z ≈ −170.6 Γ(1 − z) overflows, and Γ(−170.9999) came out as −0.
+  test('machine Γ(z) near a negative integer and past the reflection overflow', () => {
+    const cases: [number, number][] = [
+      [-1.000001, 999999.57729934337931],
+      [-0.999999, -1000000.4227569912748],
+      [-2.0000001, -4999999.5467908204879],
+      [-3.0001, 1666.4573519137095329],
+      [-10.000000001, -275.57316879075266264],
+      [-170.9999, -8.0620470501669080858e-306],
+      [-171.0001, 8.0537561394733231167e-306],
+    ];
+    for (const [z, expected] of cases)
+      expect(Math.abs(gamma(z) / expected - 1)).toBeLessThan(1e-12);
   });
 });
 

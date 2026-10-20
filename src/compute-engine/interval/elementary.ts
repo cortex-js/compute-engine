@@ -44,6 +44,7 @@ import {
   binomial as scalarBinomial,
   gamma as scalarGamma,
   gammaln as scalarGammaln,
+  sinPi,
   erf as scalarErf,
   erfc as scalarErfc,
 } from '../numerics/special-functions.js';
@@ -1142,12 +1143,15 @@ const GAMMA_MIN_Y = 0.8856031944108887;
 // - `gamma(x)` for `x ≥ 0.5` (Lanczos and a product of up to 170 factors):
 //   up to 311 ulps at `x ≈ 148.6`, roughly `2|x|`.
 // - `gamma(x)` for `x < 0.5` goes through the reflection formula
-//   `π / (sin(πx)·Γ(1 − x))`. Rounding `πx` moves the sine by about
-//   `ε·π|x|`, a relative error of `ε·π|x| / |sin(πx)|`, which is large close
-//   to a pole.
+//   `π / (sin(πx)·Γ(1 − x))`, with the sine from the exact remainder of `x`
+//   (`sinPi()`), so a pole adds no error: the error is that of `Γ(1 − x)`.
+//   Measured against 40-digit mpmath values on 10,000 points, 8,000 of them
+//   within 1e-15 to 0.5 of a pole down to −171 (2026-10-20): up to 319 ulps
+//   at `x ≈ −127`, under 1/7 of the bound `256 + 16|x|`.
 // - `binomial(n, k)`: up to 2611 ulps at `C(1043.1, 607.6)`, about 3.7 ulps
 //   per unit of `|ln C|` (the log-Γ route), plus the error of the three Γ
-//   values on the Γ-ratio route.
+//   values on the Γ-ratio route. Near a pole of a Γ factor, measured on
+//   6,000 mpmath points (2026-10-20): under 1/4 of the bound.
 const GAMMA_SAFE_INTEGER_LIMIT = 19;
 
 // A kernel value below this magnitude is treated as underflowed: its digits
@@ -1158,7 +1162,7 @@ const UNDERFLOW_BOUND = 1e-280;
 function gammaErrorUlps(x: number): number {
   const base = 256 + 8 * Math.abs(x);
   if (x >= 0.5) return base;
-  return base + (16 * Math.PI * Math.abs(x)) / Math.abs(Math.sin(Math.PI * x));
+  return base + 8 * Math.abs(x);
 }
 
 /** `[v − r·|v|, v + r·|v|]` with `r = ulps·ε`, rounded outward. A
@@ -1177,14 +1181,17 @@ function gammaPointEnclosure(x: number): Interval {
   const v = scalarGamma(x);
   if (Number.isInteger(x) && x > 0 && x <= GAMMA_SAFE_INTEGER_LIMIT)
     return { lo: v, hi: v };
-  // Below about x = −171.6 the reflection formula divides by `Γ(1 − x)`,
-  // which overflows, so the kernel returns `0` or a subnormal value with
-  // no correct digits. The true value is still below `1e-280` there:
-  // `|Γ(x)| = π / (|sin(πx)|·Γ(1 − x))` with `Γ(1 − x) > 1.7e308`, and
-  // `|sin(πx)| > 1e-13` at every double this far from zero, because doubles
-  // near 172 are 2.8e-14 apart. The enclosure keeps the sign of `Γ` on
-  // the strip.
-  if (x < 0 && Math.abs(v) < UNDERFLOW_BOUND)
+  // Far left of 0, |Γ(x)| is below `UNDERFLOW_BOUND`, and past about
+  // x = −170.6 it can be subnormal or 0: `gamma()` takes it in log form there,
+  // and a subnormal value has fewer significant bits than the error bound
+  // assumes. The enclosure is then `[0, UNDERFLOW_BOUND]` with the sign of
+  // `Γ` on the strip. It holds wherever the kernel value is below half the
+  // bound: the kernel's relative error is far below ½ for a normal value,
+  // and past x = −171.6 the reflection formula bounds the true value,
+  // `|Γ(x)| = π / (|sin(πx)|·Γ(1 − x))` with `Γ(1 − x) > 1.7e308` and
+  // `|sin(πx)| > 1e-13` at every double this far from zero (doubles near
+  // 172 are 2.8e-14 apart), so `|Γ(x)| < 2e-295`.
+  if (x < 0 && Math.abs(v) < UNDERFLOW_BOUND / 2)
     return Math.floor(x) % 2 === 0
       ? { lo: 0, hi: UNDERFLOW_BOUND }
       : { lo: -UNDERFLOW_BOUND, hi: 0 };
@@ -1200,9 +1207,7 @@ function gammalnPointEnclosure(x: number): Interval {
   const v =
     x > 0
       ? scalarGammaln(x)
-      : Math.log(Math.PI) -
-        Math.log(Math.abs(Math.sin(Math.PI * x))) -
-        scalarGammaln(1 - x);
+      : Math.log(Math.PI) - Math.log(Math.abs(sinPi(x))) - scalarGammaln(1 - x);
   if (!Number.isFinite(v)) return { lo: v, hi: v };
   const d = (gammaErrorUlps(x) + 16 * Math.abs(v)) * Number.EPSILON;
   return { lo: nextDown(v - d), hi: nextUp(v + d) };
@@ -1211,13 +1216,19 @@ function gammalnPointEnclosure(x: number): Interval {
 /** An enclosure of `C(n, k)` at a point. A result at integer `n` and `k`
  *  below 2^53 is exact: the product loop of `binomial()` never forms an
  *  intermediate larger than its result. A `0` where a denominator `Γ`
- *  factor is on a pole (`k` or `n − k` a negative integer) is exact; any
- *  other `0` is a tiny value that underflowed. */
+ *  factor is on a pole (`k` a negative integer, or `n − k` a negative
+ *  integer with `n` and `k` both integers or `k` not one) is exact; any
+ *  other `0` is a tiny value that underflowed. With an integer `k` and a
+ *  non-integer `n`, `n − k` is not an integer, and a rounded `n − k` that is
+ *  one is not a pole (the same test as in `binomial()`). */
 function binomialPointEnclosure(n: number, k: number): Interval {
   const v = scalarBinomial(n, k);
   if (v === 0) {
     const denominatorPole =
-      (Number.isInteger(k) && k < 0) || (Number.isInteger(n - k) && n - k < 0);
+      (Number.isInteger(k) && k < 0) ||
+      (Number.isInteger(n - k) &&
+        n - k < 0 &&
+        (!Number.isInteger(k) || Number.isInteger(n)));
     return denominatorPole ? { lo: 0, hi: 0 } : { lo: -1e-300, hi: 1e-300 };
   }
   if (Number.isInteger(n) && Number.isInteger(k) && Number.isSafeInteger(v))

@@ -271,9 +271,14 @@ function binomialPoleValue(
     return undefined;
   // `Γ(k+1)` on a pole: `k` a negative integer, with nothing to cancel it.
   if (isNegativeIntegerLiteral(k)) return ce.Zero;
-  // `Γ(n−k+1)` on a pole: `n − k` a negative integer.
-  const nk = ce.function('Subtract', [n, k]).evaluate();
-  if (isNegativeIntegerLiteral(nk)) return ce.Zero;
+  // `Γ(n−k+1)` on a pole: `n − k` a negative integer. With an integer `k`
+  // and a non-integer `n`, `n − k` is not an integer, although the
+  // subtraction of a machine `n` can round to one: C(−51.999999999999986, 87)
+  // was 0, for −2.1e38.
+  if (!(k.isInteger === true && n.isInteger === false)) {
+    const nk = ce.function('Subtract', [n, k]).evaluate();
+    if (isNegativeIntegerLiteral(nk)) return ce.Zero;
+  }
   // `Γ(n+1)` on a pole and neither denominator factor on one.
   if (isNegativeIntegerLiteral(n)) return ce.ComplexInfinity;
   return undefined;

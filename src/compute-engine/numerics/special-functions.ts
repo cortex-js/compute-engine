@@ -32,7 +32,6 @@ import {
   HURWITZ_MAX_PASSED_TERMS,
   hurwitzZetaComplex,
   hypergeometric2F1Complex,
-  incompleteGammaUpperComplex,
   polygammaComplex,
   POLYGAMMA_MAX_ORDER,
   POLYLOG_SERIES_MIN_ORDER,
@@ -193,7 +192,19 @@ export function gamma(z: number): number {
   // applies at a negative integer, and the same one the interpreter's `~oo`
   // takes when it reaches a real-emitting compile target.
   if (z <= 0 && Number.isInteger(z)) return NaN;
-  if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+  // `sinPi()`, not `Math.sin(Math.PI * z)`: near a negative integer the
+  // rounding of the product is a large relative error of the small sine
+  // (Γ(−10.000000001) was off by 1.5e-7).
+  if (z < 0.5) {
+    const g = gamma(1 - z);
+    // Γ(1 − z) overflows past z ≈ −170.6 while Γ(z) can still be a normal
+    // double (Γ(−170.9999) = −8.06e-306 came out as −0): take it in log form.
+    if (g === Infinity) {
+      const [lnAbs, sign] = lnGammaSigned(z);
+      return sign * Math.exp(lnAbs);
+    }
+    return Math.PI / (sinPi(z) * g);
+  }
   if (z > GAMMA_OVERFLOW_THRESHOLD) return Infinity;
   // Positive integer: Γ(z) = (z-1)!, exact as a product of doubles
   // (bit-exact through 18!, correctly rounded beyond) — the Lanczos factor
@@ -294,7 +305,10 @@ export function binomial(n: number, k: number): number {
   // |n| ≥ 2^53 the float subtraction `n − k` rounds to an integer.
   if (Number.isInteger(k) && k < 0) return 0;
   if (Number.isInteger(n) && n < 0) return Infinity;
-  if (Number.isInteger(n - k) && n - k < 0) return 0;
+  // With an integer `k` and a non-integer `n`, `n − k` is not an integer: a
+  // rounded `n − k` that is one is not a pole (`C(−51.999999999999986, 87)`
+  // came out as `0`, for −2.1e38).
+  if (!Number.isInteger(k) && Number.isInteger(n - k) && n - k < 0) return 0;
   // A small non-negative integer `k`: the falling factorial
   // `n(n−1)⋯(n−k+1)/k!`, which is what the interpreter and the GPU targets
   // expand to. It has no pole, and it is more accurate than the Γ ratio
@@ -308,9 +322,14 @@ export function binomial(n: number, k: number): number {
   // that overflows to `Infinity` or underflows to `0` makes the quotient
   // `NaN`, `±Infinity` or a false `0` (`C(51.19, −162.95)` ≈ 3.1e-54 came out
   // as `0`: `Γ(215.1)` overflows while `Γ(−161.95)` does not).
-  const gN = gamma(n + 1);
-  const gK = gamma(k + 1);
-  const gNK = gamma(n - k + 1);
+  // Only for three positive Γ arguments: a negative one is reflected, and
+  // `n − k + 1` is the rounded difference, so near a pole its distance to
+  // the pole has no correct digits (`C(−15.000000000000016, 141)` was off by
+  // 78%). The reflected forms below take the sines from exact remainders.
+  const positiveArguments = n + 1 > 0 && k + 1 > 0 && n - k + 1 > 0;
+  const gN = positiveArguments ? gamma(n + 1) : NaN;
+  const gK = positiveArguments ? gamma(k + 1) : NaN;
+  const gNK = positiveArguments ? gamma(n - k + 1) : NaN;
   const usable = (g: number) => Number.isFinite(g) && Math.abs(g) > 1e-280;
   if (usable(gN) && usable(gK) && usable(gNK)) {
     // The product of the two denominator factors can overflow although each
@@ -334,12 +353,34 @@ export function binomial(n: number, k: number): number {
   // cancellation (`lnGammaRatio()`). The sines are computed from exact
   // remainders (`sinPi()`, `sinPiOfDifference()`).
   if (n + 1 < 0) {
-    if (k > n + 1)
-      return (sinPiOfDifference(n, k) / sinPi(n)) * binomial(k - n - 1, k);
-    if (k < n + 1) return (sinPi(k) / sinPi(n)) * binomial(-k - 1, n - k);
     // `k = n + 1`: `Γ(n−k+1) = Γ(0)` is a pole, and `C(n, k)` is `0`.
-    return 0;
+    if (!(k > n + 1) && !(k < n + 1)) return 0;
+    const [ratio, m, j] =
+      k > n + 1
+        ? [sinPiOfDifference(n, k) / sinPi(n), k - n - 1, k]
+        : [sinPi(k) / sinPi(n), -k - 1, n - k];
+    const inner = binomial(m, j);
+    if (Number.isFinite(inner) && Math.abs(inner) >= MIN_NORMAL)
+      return ratio * inner;
+    // The positive coefficient overflowed (or underflowed) while the
+    // product with the sine ratio can be in range: |sin(πn)| is as small as
+    // 1e-14 near an integer n. Combine them in log form
+    // (`C(−426.1545291590769, 635.8454312348206)` = −1.18e305 came out as
+    // −Infinity).
+    const [factor, log] = binomialLogForm(m, j);
+    const scale = ratio * factor;
+    return Math.sign(scale) * Math.exp(log + Math.log(Math.abs(scale)));
   }
+  const [factor, log] = binomialLogForm(n, k);
+  return factor * Math.exp(log);
+}
+
+/**
+ * `C(n, k)` as `factor·exp(log)` for `n + 1 > 0`, off the poles of the
+ * denominator factors, with `|factor| ≤ 1`. The caller multiplies the two,
+ * or combines them in log form when `exp(log)` is outside the double range.
+ */
+function binomialLogForm(n: number, k: number): [number, number] {
   // `Γ(n+1) > 0`. A negative `j`, where `j` is `k` or `n − k` (not an
   // integer; `C(n, k) = C(n, n − k)`), uses the reflection formula
   // `1/Γ(j+1) = sin(π(j+1))·Γ(−j)/π`, as `bigBinomialLogForm()` does, so
@@ -357,9 +398,7 @@ export function binomial(n: number, k: number): number {
     // `n − j + 1`, formed without the rounded `n − k`.
     const sum = k < 0 ? n - k + 1 : k + 1;
     const small = Math.min(n + 1, -j);
-    return (
-      (-sine / Math.PI) * Math.exp(gammaln(small) - lnGammaRatio(sum, small))
-    );
+    return [-sine / Math.PI, gammaln(small) - lnGammaRatio(sum, small)];
   }
   // The numerator is paired with the larger denominator argument, because
   // their log-Γ values are close and their difference must be computed
@@ -367,7 +406,7 @@ export function binomial(n: number, k: number): number {
   const [small, large] = k < n - k ? [k, n - k] : [n - k, k];
   const [lnSmall, signSmall] = lnGammaSigned(small + 1);
   const logValue = lnGammaRatio(n + 1, small) - lnSmall;
-  return signSmall * Math.exp(logValue) * gammaSign(large + 1);
+  return [signSmall * gammaSign(large + 1), logValue];
 }
 
 /**
@@ -380,7 +419,7 @@ export function binomial(n: number, k: number): number {
  * error of a small result. The parity of `m` is exact: `%` is exact, and
  * every double above 2⁵³ is even.
  */
-function sinPi(x: number): number {
+export function sinPi(x: number): number {
   const m = Math.round(x);
   const s = Math.sin(Math.PI * (x - m));
   return m % 2 === 0 ? s : -s;
@@ -414,7 +453,7 @@ function gammaSign(x: number): number {
  */
 function lnGammaSigned(x: number): [number, number] {
   if (x > 0) return [gammaln(x), 1];
-  const s = Math.sin(Math.PI * x);
+  const s = sinPi(x);
   return [
     Math.log(Math.PI) - Math.log(Math.abs(s)) - gammaln(1 - x),
     gammaSign(x),
@@ -571,13 +610,6 @@ function upperGammaNegIntReal(s: number, z: number): number {
  *  accurate, and the shift would subtract nearly equal terms. */
 const UPPER_GAMMA_SHIFT_LIMIT = 1;
 
-/** The shifted base order −1 < a < 0 must be at least this far from 0 and −1,
- *  the poles of Γ(a) that Γ(a, z) = Γ(a) − γ(a, z) cancels. Measured against
- *  mpmath over s = −(k + f), k ≤ 12, 10⁻¹⁰ ≤ z < 1: the relative error is
- *  below 3e-14 for 0.05 ≤ f ≤ 0.95, and 1e-11 at f = 0.01 and 1.8e-7 at
- *  f = 0.999. Closer to a pole the complex kernel answers (about 1e-14). */
-const UPPER_GAMMA_POLE_MARGIN = 0.05;
-
 /** The shift to −1 < s < 0 runs floor(−s) steps, so it is used only up to
  *  this order. Past the cap the Legendre continued fraction answers as
  *  before. For such orders the value overflows the double range for z below
@@ -589,16 +621,26 @@ const UPPER_GAMMA_SHIFT_MAX_ORDER = 4096;
  *  0 < z < UPPER_GAMMA_SHIFT_LIMIT. Starts from Γ(s + n, z) with
  *  −1 < s + n < 0 and applies Γ(a − 1, z) = (Γ(a, z) − z^{a−1} e^{−z})/(a − 1)
  *  (DLMF 8.8.2) n times. For z < 1 the subtracted term z^{a−1}e^{−z} exceeds
- *  Γ(a, z) ≈ z^{a}/(−a), so there is no cancellation. */
+ *  Γ(a, z) ≈ z^{a}/(−a), so there is no cancellation. The base Γ(s + n, z)
+ *  keeps its precision also next to the poles 0 and −1 of Γ (the small-order
+ *  and the a + 1 recurrence branches of `incompleteGammaUpper`); the complex
+ *  kernel that answered within 0.05 of a pole returned NaN for large orders.
+ *  Measured against mpmath on 2,423 points within 0.05 of a pole, s down to
+ *  −301, 10⁻¹² ≤ z < 1: relative error below 7.4e-14, and every overflow is
+ *  +Infinity. */
 function upperGammaShiftedReal(s: number, z: number): number {
   const n = Math.floor(-s);
   let a = s + n;
-  if (-a < UPPER_GAMMA_POLE_MARGIN || 1 + a < UPPER_GAMMA_POLE_MARGIN)
-    return incompleteGammaUpperComplex(new Complex(s, 0), new Complex(z, 0)).re;
   let g = incompleteGammaUpper(a, z);
   const emz = Math.exp(-z);
   for (let k = 0; k < n; k++) {
-    g = (g - Math.pow(z, a - 1) * emz) / (a - 1);
+    const t = Math.pow(z, a - 1) * emz;
+    // z^{a−1}·e^{−z} can overflow while Γ(a − 1, z) = (t − Γ(a, z))/(1 − a)
+    // is still a double (Γ(−86.00000000000747, 2.58e-4) = 4.2e306): divide
+    // by 1 − a inside the exponential.
+    g = Number.isFinite(t)
+      ? (g - t) / (a - 1)
+      : Math.exp((a - 1) * Math.log(z) - z - Math.log(1 - a)) - g / (1 - a);
     // Γ(s, z) > 0 for real s and z > 0: a non-finite value is an overflow
     if (!Number.isFinite(g)) return Infinity;
     a -= 1;
@@ -624,6 +666,8 @@ export function incompleteGammaUpper(s: number, z: number): number {
   if (Number.isNaN(s) || Number.isNaN(z)) return NaN;
   if (z < 0) return NaN; // complex result — defer to the complex kernel
   if (z === 0) return gamma(s); // Γ(s,0) = Γ(s) (∞ at non-positive integer s)
+  // Γ(s, +∞) = 0 for every finite s; the continued fraction would form 0·∞.
+  if (z === Infinity) return Number.isFinite(s) ? 0 : NaN;
 
   // For a non-positive integer s, the downward recurrence from E₁(z)
   // subtracts two nearly equal numbers once z is more than a few units (at
@@ -641,6 +685,24 @@ export function incompleteGammaUpper(s: number, z: number): number {
     Math.floor(-s) <= UPPER_GAMMA_SHIFT_MAX_ORDER
   )
     return upperGammaShiftedReal(s, z);
+  // For a small |s|, Γ(s) ≈ 1/s and γ(s, z) are both large, and Γ(s) −
+  // γ(s, z) lost about −log₁₀|s| digits (Γ(±10⁻⁹, 0.9) had 6 correct
+  // digits). Γ(s)·Q(s, z) has no cancellation (`gammaQSmallOrder`).
+  if (Math.abs(s) <= GAMMA_Q_SMALL_ORDER && z < s + 1)
+    return Math.abs(s) < GAMMA_TINY_ORDER
+      ? e1Real(z)
+      : gamma(s) * gammaQSmallOrder(s, z);
+  // −1 < s < −½ and z < 1: from Γ(s + 1, z) = s·Γ(s, z) + z^s·e^{−z}
+  // (DLMF 8.8.2), with 0 < s + 1 < ½ exact. The continued fraction below
+  // needed more than its iteration cap for z ≲ 0.01 (Γ(−0.9999, 0.001) was
+  // NaN) and lost digits just above (1.8e-12 at z = 0.01). For z < 1 the
+  // subtracted term is at most about 4 times the result.
+  if (s > -1 && s < -GAMMA_Q_SMALL_ORDER && z < 1) {
+    const e = s + 1;
+    return (
+      (Math.exp(s * Math.log(z) - z) - gamma(e) * gammaQSmallOrder(e, z)) / -s
+    );
+  }
   if (z < s + 1) return gamma(s) - lowerGammaSeriesReal(s, z);
   return upperGammaCFReal(s, z);
 }
@@ -685,6 +747,118 @@ function gammaQContinuedFraction(a: number, x: number): number {
   return Math.exp(a * Math.log(x) - x - gammaln(a)) * upperGammaCFValue(a, x);
 }
 
+/** The smallest positive normal double. Below it a double has fewer than 53
+ *  significant bits. */
+const MIN_NORMAL = 2.2250738585072014e-308;
+
+/** `gammaQSmallOrder` is used for 0 < |a| ≤ this bound, the domain of
+ *  `lnGamma1p`. */
+const GAMMA_Q_SMALL_ORDER = 0.5;
+
+/** Below this |a|, Γ(a, x) = E₁(x) and Q(a, x) = a·E₁(x) for x < 1, to a
+ *  relative error below 1e-17: the first-order terms are a·ψ(1) from
+ *  Γ(1 + a) and a·∫_x^∞ ln t·e^{−t}/t dt / E₁(x), at most a·|ln x| ≤ 7.1e-18
+ *  for x ≥ 1e-308. The general forms divide by a or by Γ(a) ≈ 1/a, which
+ *  overflows for a subnormal a (Γ(1e-309, 0.5) was Infinity), and lose
+ *  digits in subnormal arithmetic. */
+const GAMMA_TINY_ORDER = 1e-20;
+
+/**
+ * Upper regularized gamma Q(a,x) for 0 < |a| ≤ ½ and 0 < x < a + 1.
+ *
+ * As a → 0, Q(a,x) ≈ a·E₁(x) is small, while P(a,x) ≈ 1 and Γ(a) ≈ 1/a are
+ * large: 1 − P and Γ(a) − γ(a,x) lose about −log₁₀|a| digits (Q(10⁻⁹, 0.99)
+ * and Q(−10⁻⁹, 0.99) had 5 and 6 correct digits). From the power series
+ * γ(a,x) = Σ_{k≥0} (−1)^k x^{a+k} / (k!·(a+k)),
+ *   P(a,x) = x^a/Γ(1+a) · (1 + a·S),   S = Σ_{k≥1} (−x)^k / (k!·(a+k)),
+ * so with t = a·ln x − ln Γ(1+a) the 1 cancels exactly:
+ *   Q(a,x) = −expm1(t) − e^t·a·S.
+ * `lnGamma1p` keeps the relative precision of ln Γ(1+a) as a → 0, where
+ * Γ(1 + a) would round a away.
+ */
+function gammaQSmallOrder(a: number, x: number): number {
+  if (Math.abs(a) < GAMMA_TINY_ORDER) return a * e1Real(x);
+  const t = a * Math.log(x) - lnGamma1p(a);
+  let sum = 0;
+  let term = 1; // (−x)^k / k!
+  for (let k = 1; k < 1000; k++) {
+    term *= -x / k;
+    const add = term / (a + k);
+    sum += add;
+    if (Math.abs(add) < 1e-17 * Math.abs(sum)) break;
+  }
+  return -Math.expm1(t) - Math.exp(t) * a * sum;
+}
+
+/**
+ * Upper regularized gamma Q(a,x) = Γ(a,x)/Γ(a) for a negative non-integer a
+ * and x > 0. A |Q| outside the double range is the IEEE result: ±Infinity
+ * with the sign of Q when it overflows, a signed 0 or a subnormal value when
+ * it underflows. NaN only where the value is not known: a kernel that does
+ * not converge, or Γ(a,x) itself outside the normal double range in the
+ * quotient.
+ *
+ * For −½ ≤ a < 0 and x < a + 1, `gammaQSmallOrder` answers; for −1 < a < −½
+ * and x < 1, the recurrence from a + 1 (comment in the code).
+ *
+ * Elsewhere, where `incompleteGammaUpper` uses the Legendre continued
+ * fraction, Q is taken in log form, as `gammaQContinuedFraction` does for
+ * a > 0:
+ *   Q = sign(Γ(a))·exp(a·ln x − x − ln|Γ(a)| + ln(CF)).
+ * The quotient Γ(a,x)/Γ(a) forms x^a·e^{−x} first, which underflows to 0
+ * while Q is representable: Q(−150.5, 120) = −7.65e-105 came out as 0.
+ * Γ(a,x) > 0 for every real a and x > 0, so ln(CF) is real.
+ *
+ * In the remaining regime (x < 1 for −4097 < a < −1, the shift of
+ * `incompleteGammaUpper`) Γ(a,x) is large and the quotient is accurate while
+ * Γ(a) is a normal double. Past a ≈ −170.6, Γ(a) is subnormal or 0, and the
+ * log form is used instead.
+ *
+ * ln|Γ(a)| = ln π − ln|sin(πa)| − ln Γ(1 − a) (`lnGammaSigned()`).
+ */
+function gammaQNegativeOrder(a: number, x: number): number {
+  const [lnAbsGammaA, sign] = lnGammaSigned(a);
+  let q: number;
+  // The same regime split as `incompleteGammaUpper`.
+  const shifted =
+    a < -1 &&
+    x < UPPER_GAMMA_SHIFT_LIMIT &&
+    Math.floor(-a) <= UPPER_GAMMA_SHIFT_MAX_ORDER;
+  if (a >= -GAMMA_Q_SMALL_ORDER && x < a + 1) {
+    q = gammaQSmallOrder(a, x);
+  } else if (a > -1 && a < -GAMMA_Q_SMALL_ORDER && x < 1) {
+    // −1 < a < −½: Q(a,x) = Q(a+1,x) − x^a·e^{−x}/Γ(a+1), with e = a + 1
+    // exact (Sterbenz) and 0 < e < ½. For −½ ≤ a < 0 the two terms cancel
+    // (Q(−1e-10, 0.99999999995) lost 6 digits): the continued fraction
+    // below answers there. The continued fraction needs more than its
+    // iteration cap below x ≈ 0.01 (Q(−0.9999, 0.001) was NaN) and lost
+    // digits just above (1.8e-12 at x = 0.01). For x < 1 the subtracted
+    // term is at most about 4 times |Q(a,x)|.
+    const e = a + 1;
+    q =
+      gammaQSmallOrder(e, x) -
+      Math.exp(a * Math.log(x) - x - lnGamma1p(e) + Math.log(e));
+  } else if (!shifted && x >= a + 1) {
+    q =
+      sign *
+      Math.exp(
+        a * Math.log(x) - x - lnAbsGammaA + Math.log(upperGammaCFValue(a, x))
+      );
+  } else {
+    const g = incompleteGammaUpper(a, x);
+    // An overflowed Γ(a,x) gives an overflowed Q when |Γ(a)| ≤ 1. Otherwise
+    // an overflowed or underflowed Γ(a,x) does not give the magnitude of Q.
+    if (g === Infinity && lnAbsGammaA <= 0) return sign * Infinity;
+    if (!(g >= MIN_NORMAL && g < Infinity)) return NaN;
+    const gammaA = gamma(a);
+    q =
+      Math.abs(gammaA) >= MIN_NORMAL
+        ? g / gammaA
+        : sign * Math.exp(Math.log(g) - lnAbsGammaA);
+  }
+  return q;
+}
+
 /**
  * Lower regularized incomplete gamma P(a,x) = γ(a,x)/Γ(a), for real a > 0 and
  * x ≥ 0. Returns NaN outside that domain.
@@ -693,21 +867,49 @@ export function gammaP(a: number, x: number): number {
   if (Number.isNaN(a) || Number.isNaN(x)) return NaN;
   if (a <= 0 || x < 0) return NaN;
   if (x === 0) return 0;
+  // P(a, +∞) = 1. The continued fraction would form 0·∞ there.
+  if (x === Infinity) return Number.isFinite(a) ? 1 : NaN;
   if (x < a + 1) return gammaPSeries(a, x);
   return 1 - gammaQContinuedFraction(a, x);
 }
 
 /**
- * Upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x), for
- * real a > 0 and x ≥ 0. Returns NaN outside that domain. The continued
- * fraction is used directly for x ≥ a+1 so the tail keeps full relative
- * precision instead of coming from 1 − P.
+ * Upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a), for real x ≥ 0.
+ * Returns NaN for x < 0, where Q is complex.
+ *
+ * For a > 0 it is 1 − P(a,x), with the continued fraction used directly for
+ * x ≥ a+1 so the tail keeps full relative precision, and `gammaQSmallOrder`
+ * for a ≤ ½ and x < a+1, where 1 − P cancels.
+ *
+ * For a ≤ 0: Q(a,x) = 0 at a non-positive integer (1/Γ(a) = 0) for x > 0,
+ * and NaN at x = 0 (∞/∞). At a negative non-integer a and x = 0 it is
+ * sign(Γ(a))·∞, since Γ(a,x) diverges like x^a (Q(−1.5, 10⁻³) = 8894.8…).
+ * Otherwise `gammaQNegativeOrder` answers.
+ *
+ * At every order, a |Q| outside the double range is the IEEE result of the
+ * exact value (±Infinity, a signed 0 or a subnormal value), never a 0 from an
+ * intermediate underflow.
  */
 export function gammaQ(a: number, x: number): number {
   if (Number.isNaN(a) || Number.isNaN(x)) return NaN;
-  if (a <= 0 || x < 0) return NaN;
+  if (x < 0) return NaN;
+  // Q(a, +∞) = 0 for every finite a, approached with the sign of Γ(a) at a
+  // negative non-integer a (a signed 0, as for an underflow below).
+  if (x === Infinity) {
+    if (!Number.isFinite(a)) return NaN;
+    return a < 0 && !Number.isInteger(a) ? gammaSign(a) * 0 : 0;
+  }
+  if (a <= 0) {
+    if (!Number.isFinite(a)) return NaN;
+    if (Number.isInteger(a)) return x === 0 ? NaN : 0;
+    if (x === 0) return Math.floor(-a) % 2 === 1 ? Infinity : -Infinity;
+    return gammaQNegativeOrder(a, x);
+  }
   if (x === 0) return 1;
-  if (x < a + 1) return 1 - gammaPSeries(a, x);
+  if (x < a + 1)
+    return a <= GAMMA_Q_SMALL_ORDER
+      ? gammaQSmallOrder(a, x)
+      : 1 - gammaPSeries(a, x);
   return gammaQContinuedFraction(a, x);
 }
 
@@ -2304,6 +2506,12 @@ export function bigIncompleteGammaUpper(
   if (decimalMagnitude(z) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
     return BigDecimal.NAN;
   if (z.gt(UPPER_GAMMA_MAX_Z)) return BigDecimal.NAN;
+  // A tiny |s|: Γ(s, z) = E₁(z) = Γ(0, z) to a relative error of about
+  // |s|·(|ln z| + 1), below 10^−(p+6) here, since |ln z| < 10⁶ in the domain
+  // above. The subtraction route loses about −log₁₀|s| digits and declined
+  // (NaN), and the machine kernel answered with its 16 digits.
+  if (!s.isZero() && decimalMagnitude(s) < -(BigDecimal.precision + 12))
+    return bigIncompleteGammaUpper(ce, BigDecimal.ZERO, z);
   let usedFraction = false;
   const value = withGuardDigits(SPECIAL_FN_GUARD, () => {
     const fraction = bigUpperGammaFraction(ce, s, z);
@@ -3879,7 +4087,12 @@ export function digamma(x: number): number {
   // Reflection formula for negative values: ψ(1-x) = ψ(x) + π·cot(πx)
   if (x < 0) {
     if (Number.isInteger(x)) return NaN; // poles at non-positive integers
-    return digamma(1 - x) - Math.PI / Math.tan(Math.PI * x);
+    // cot(πx) has period 1, so it is taken at the exact remainder
+    // r = x − round(x), |r| ≤ ½: `Math.tan(Math.PI * x)` has an absolute
+    // error of about 1e-16·|x|, a large relative error of a small tangent
+    // near an integer (ψ(−10.000000001) was off by 1.5e-7).
+    const r = x - Math.round(x);
+    return digamma(1 - x) - Math.PI / Math.tan(Math.PI * r);
   }
 
   // Special value
@@ -3914,7 +4127,9 @@ export function trigamma(x: number): number {
   // Reflection formula: ψ₁(1-x) + ψ₁(x) = π²/sin²(πx)
   if (x < 0) {
     if (Number.isInteger(x)) return NaN;
-    const s = Math.sin(Math.PI * x);
+    // `sinPi()`, not `Math.sin(Math.PI * x)`, which loses relative
+    // precision near an integer (ψ₁(−10.000000001) was off by 3e-7).
+    const s = sinPi(x);
     return (Math.PI * Math.PI) / (s * s) - trigamma(1 - x);
   }
 

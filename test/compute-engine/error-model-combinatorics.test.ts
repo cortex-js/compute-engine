@@ -660,16 +660,23 @@ describe('GammaRegularized', () => {
   });
 
   test('at machine precision a value outside the double range stays symbolic', () => {
-    // The machine quotient Γ(a, z)/Γ(a) overflows past a ≈ −171 and is 0/0
-    // when both factors underflow: neither an infinity nor a NaN is the
-    // value, so the call stays symbolic there.
+    // |Q(−171.5, 0.3)| ≈ 1.1e397 is above the double range and
+    // |Q(−200.5, 400)| ≈ 2.2e-323 is below the normal range: neither an
+    // infinity, a 0 nor a NaN is the value, so the call stays symbolic there.
     const machine = new ComputeEngine();
     machine.precision = 'machine';
-    expect(machine.box(['GammaRegularized', -171.5, 2]).N().operator).toBe(
+    expect(machine.box(['GammaRegularized', -171.5, 0.3]).N().operator).toBe(
       'GammaRegularized'
     );
     expect(machine.box(['GammaRegularized', -200.5, 400]).N().operator).toBe(
       'GammaRegularized'
+    );
+    // Q(−171.5, 2) = 9.5392695139834e254 (mpmath) is in the double range,
+    // although Γ(−171.5) ≈ 1.9e-310 is subnormal: the machine kernel takes
+    // the quotient in log form and answers.
+    const inRange = machine.box(['GammaRegularized', -171.5, 2]).N().re;
+    expect(Math.abs(inRange / 9.5392695139833848982e254 - 1)).toBeLessThan(
+      1e-12
     );
     expect(machine.box(['GammaRegularized', -20.5, 5]).N().re).toBeCloseTo(
       -4.33707859213563,

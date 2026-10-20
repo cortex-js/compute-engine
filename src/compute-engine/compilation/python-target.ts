@@ -2862,6 +2862,194 @@ const PYTHON_PREDICATE_HELPER = `def _ce_predicate(_f, _kind, _mode):
     return _p
 `;
 
+/**
+ * `_ce_ugamma(s, z, reg)`: the upper incomplete gamma Γ(s, z) when `reg` is
+ * `False`, and the regularized one Q(s, z) = Γ(s, z)/Γ(s) when `reg` is
+ * `True`, for real `s` and `z`, elementwise over NumPy broadcasting. A
+ * scalar pair gives a NumPy scalar. The kernel is real-only: an element
+ * with a nonzero imaginary part gives `nan`, as the runtime guard of a
+ * real-only head does (`BaseCompiler.realOperandGuard`), and an element
+ * whose imaginary part is 0 is read as its real part.
+ *
+ * `scipy.special.gammaincc` is Q for `s > 0` only: it is `nan` for every
+ * `s < 0` and for `s = −1`, while the interpreter has a value there
+ * (Q(−1.5, 0.001) = 8894.8…, Γ(−1, 2) = 0.01876…), and it loses digits
+ * for `0 < s < 1e-20` (all of them for a subnormal `s`). So the elements
+ * with a finite `s ≥ 1e-20` use `gammaincc` (times `gamma(s)` for Γ), and
+ * the other elements use the scalar kernel `_ce_ug1`. For Γ, an element
+ * with `s ≥ 1e-20` also uses the kernel when `gamma(s)` overflows
+ * (`s > 171.6`) or when Q is below 1e-300, where `gammaincc` loses digits
+ * to underflow: Γ(150, 1500) = 6.9e-179 is finite while Q underflows to 0.
+ *
+ * The kernel computes `h = Γ(s, z)·z^(−s)·e^z`, which stays near
+ * `1/(z + 1 − s)` and never overflows:
+ *
+ *  - for `z ≥ 1`, or `s > ½`, or `s < −4096`, `h` is the Legendre continued
+ *    fraction (DLMF 8.9.2, modified Lentz, `_ce_ug_cf`), which converges for
+ *    every real `s` and `z > 0` and is accurate for `z ≥ 1`. It ends after
+ *    three consecutive factors within 4 ulp of 1, and is `nan` after 5000
+ *    iterations;
+ *  - for `0 < z < 1` and `s ≤ ½`, `s = a − m` with `m` the integer nearest
+ *    to `−s`, so `−½ ≤ a ≤ ½`. `Γ(a, z)` comes from
+ *    `Γ(a, z)·z^(−a) = (Γ(1 + a)·z^(−a) − 1)/a − Σ_{k≥1} (−z)^k/(k!·(a + k))`
+ *    (DLMF 8.7.3 with the pole of `Γ(a)` and of the `k = 0` term combined).
+ *    The bracket is `expm1(lnΓ(1 + a) − a·ln z)/a`, with `lnΓ(1 + a)` from
+ *    its Taylor series in `a` (DLMF 5.7.3, with the terms of `ln(1 + a)`
+ *    taken out so that the coefficients `(ζ(k) − 1)/k` fall as `2^(−k)`).
+ *    This has no cancellation when `a` is near 0, where `Γ(a)` is a pole:
+ *    `s = −1.000001` is as accurate as `s = −1.5`. For `|a| < 1e-200`
+ *    (`a = 0` included), `h` is `E₁(z)·e^z` (`scipy.special.exp1`): the
+ *    difference is far below the double precision, and the bracket would
+ *    divide by a subnormal `a`. Then `m` steps of the recurrence
+ *    `Γ(a − 1, z) = (Γ(a, z) − z^(a−1)·e^(−z))/(a − 1)` (DLMF 8.8.2),
+ *    which for `h` is `h ← (1 − z·h)/(1 − a)`. For `z < 1` the subtracted
+ *    term is the larger one, so the recurrence has no cancellation.
+ *
+ * Then `Γ(s, z) = h·z^s·e^(−z)` and `Q(s, z) = Γ(s, z)/Γ(s)`. When one of
+ * these values is outside the range of normal doubles, the logarithms are
+ * used instead: `ln Γ(s, z) = s·ln z − z + ln h`, and Q has the sign of
+ * `Γ(s)` (`gammasgn`) and the magnitude `exp(ln Γ(s, z) − ln|Γ(s)|)`, where
+ * `ln|Γ(s)|` is `−ln|s|` for `|s| ≤ 1e-300` (`gammaln` is `inf` for a
+ * subnormal `s`, and `ln|Γ(s)| = −ln|s| − γs + O(s²)` there). A
+ * value beyond the double range is then `±inf` with the sign of the exact
+ * value, and a value below it is 0, as the real part of the interpreter's
+ * value is.
+ *
+ * The special values are those of the interpreter: for a non-positive
+ * integer `s`, Q is 0 for `z > 0` (`1/Γ(s)` is 0) and `nan` at `z = 0`, and
+ * Γ(s, 0) is `+inf` (the limit as `z → 0⁺`); for another `s`, Γ(s, 0) is
+ * `Γ(s)` and Q(s, 0) is 1 for `s > 0` and `±inf`, with the sign of `Γ(s)`,
+ * for `s < 0`. Q(s, +inf) is a zero with the sign of `Γ(s)` (−0.0 for
+ * `s = −½`), the sign the logarithm route gives near it. A negative `z`
+ * gives `nan`: the value is complex there.
+ *
+ * An infinite order follows the interpreter's limits
+ * (`incompleteGammaValueAtInfinity()` in `library/arithmetic.ts` and
+ * `gammaRegularizedValueAtInfinity()` in `library/distributions.ts`): two
+ * infinite operands give `nan`; Γ(+inf, z) is `+inf` for a finite `z ≥ 0`;
+ * Γ(−inf, z) is `+inf` for `0 < z < 1`, 0 for a finite `z ≥ 1`, and `nan`
+ * for `z ≤ 0`; Q(+inf, z) is 1 for every finite `z`; Q(−inf, z) is `nan`.
+ *
+ * Measured against mpmath (1180 points, `s` from −5000.5 to 500 and `z`
+ * from 1e-300 to 1500, including `s` within 1e-12 of a non-positive
+ * integer): where the value is a normal double, the relative error is below
+ * 1.5e-13 for `s ≤ 0`, and below 3e-13 for `s > 0`, where it is the error
+ * of `gammaincc`. It is 2e-12 at Q(−5000.5, 1500), the ratio of two values
+ * far beyond the double range, where the error of the logarithms (about
+ * 37 600 for `ln|Γ(−5000.5)|`) dominates. Every special value and every
+ * value outside the double range matches.
+ */
+const PYTHON_UPPER_GAMMA_HELPER = `import math
+import scipy.special
+_ce_ug_zc = [float(scipy.special.zetac(_k)) / _k for _k in range(2, 48)]
+def _ce_ug_cf(_s, _z):
+    _b = _z + 1 - _s
+    _c = 1e300
+    _d = 1 / _b
+    _h = _d
+    _n = 0
+    for _i in range(1, 5001):
+        _an = -_i * (_i - _s)
+        _b += 2
+        _d = _an * _d + _b
+        if abs(_d) < 1e-300:
+            _d = 1e-300
+        _c = _b + _an / _c
+        if abs(_c) < 1e-300:
+            _c = 1e-300
+        _d = 1 / _d
+        _e = _d * _c
+        _h *= _e
+        _n = _n + 1 if abs(_e - 1) < 8.881784197001252e-16 else 0
+        if _n >= 3:
+            return _h
+    return math.nan
+def _ce_ug_h(_s, _z):
+    if _z >= 1 or _s > 0.5 or _s < -4096:
+        return _ce_ug_cf(_s, _z)
+    _m = round(-_s)
+    _a = _s + _m
+    if abs(_a) < 1e-200:
+        _h = float(scipy.special.exp1(_z)) * math.exp(_z)
+    else:
+        _l = -0.5772156649015329 * _a + (_a - math.log1p(_a))
+        _p = -_a
+        for _c in _ce_ug_zc:
+            _p *= -_a
+            _l += _c * _p
+        _t = 1.0
+        _sum = 0.0
+        for _k in range(1, 200):
+            _t *= -_z / _k
+            _d = _t / (_a + _k)
+            _sum += _d
+            if abs(_d) < 1e-17 * abs(_sum):
+                break
+        _h = math.exp(_z) * (math.expm1(_l - _a * math.log(_z)) / _a - _sum)
+    for _k in range(_m):
+        _h = (1 - _z * _h) / (1 - _a)
+        _a -= 1
+    return _h
+def _ce_ug1(_s, _z, _reg):
+    if math.isnan(_s) or math.isnan(_z):
+        return math.nan
+    if math.isinf(_s):
+        if math.isinf(_z) or (_s < 0 and (_reg or _z <= 0)):
+            return math.nan
+        if _reg:
+            return 1.0
+        if _z < 0:
+            return math.nan
+        return math.inf if _s > 0 or _z < 1 else 0.0
+    if _z < 0:
+        return math.nan
+    _int = _s <= 0 and _s == math.floor(_s)
+    if _reg and _int:
+        return 0.0 if _z > 0 else math.nan
+    if _z == 0:
+        if _s > 0:
+            return 1.0 if _reg else float(scipy.special.gamma(_s))
+        if _reg:
+            return math.copysign(math.inf, scipy.special.gammasgn(_s))
+        return math.inf if _int else float(scipy.special.gamma(_s))
+    if _z == math.inf:
+        return math.copysign(0.0, scipy.special.gammasgn(_s)) if _reg else 0.0
+    if _s > 0.5 and not _reg:
+        _q = float(scipy.special.gammaincc(_s, _z))
+        if _q > 1e-300 and _z < _s + 1:
+            return float(np.exp(scipy.special.gammaln(_s) + math.log(_q)))
+    _h = _ce_ug_h(_s, _z)
+    if not _h > 0:
+        return math.nan
+    _lg = _s * math.log(_z) - _z + math.log(_h)
+    _g = float(_h * np.power(_z, _s) * np.exp(-_z))
+    if not 2.2250738585072014e-308 <= _g < math.inf:
+        _g = math.nan
+    if not _reg:
+        return _g if _g == _g else float(np.exp(_lg))
+    _G = float(scipy.special.gamma(_s))
+    if _g == _g and 2.2250738585072014e-308 <= abs(_G) < math.inf:
+        return _g / _G
+    _lG = scipy.special.gammaln(_s) if abs(_s) > 1e-300 else -math.log(abs(_s))
+    return float(scipy.special.gammasgn(_s) * np.exp(_lg - _lG))
+def _ce_ugamma(_s, _z, _reg):
+    _s = np.asarray(_s)
+    _z = np.asarray(_z)
+    _nr = (np.imag(_s) != 0) | (np.imag(_z) != 0)
+    with np.errstate(all='ignore'):
+        _s, _z = np.broadcast_arrays(np.asarray(np.real(_s), dtype=float), np.asarray(np.real(_z), dtype=float))
+        _nr = np.broadcast_to(_nr, _s.shape)
+        _q = scipy.special.gammaincc(_s, _z)
+        _r = np.array(_q if _reg else _q * scipy.special.gamma(_s), dtype=float)
+        _slow = ~(_s >= 1e-20) | np.isinf(_s)
+        if not _reg:
+            _slow = _slow | ((_z > 0) & ~((_q > 1e-300) & (np.abs(_r) < np.inf)))
+        for _i in np.flatnonzero(_slow & ~_nr):
+            _r.flat[_i] = _ce_ug1(float(_s.flat[_i]), float(_z.flat[_i]), _reg)
+        _r[_nr] = np.nan
+    return _r[()]
+`;
+
 /** Prepend any referenced runtime helper definitions to the compiled `code`.
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
@@ -2889,6 +3077,7 @@ function withPythonHelpers(code: string): string {
     out = `${PYTHON_LIST_UPDATE_HELPER}\n${out}`;
   if (out.includes('_ce_predicate('))
     out = `${PYTHON_PREDICATE_HELPER}\n${out}`;
+  if (out.includes('_ce_ugamma(')) out = `${PYTHON_UPPER_GAMMA_HELPER}\n${out}`;
   return out;
 }
 
@@ -4063,6 +4252,72 @@ function compilePythonIfStatement(
 }
 
 /**
+ * The lowering of the two-operand `Gamma(s, z)`, the upper incomplete gamma
+ * Γ(s, z) (`regularized` is `false`), and of `GammaRegularized(s, z)`, the
+ * regularized upper incomplete gamma Q(s, z) = Γ(s, z)/Γ(s) (`regularized`
+ * is `true`).
+ *
+ * The helper `_ce_ugamma` (`PYTHON_UPPER_GAMMA_HELPER`) computes both for
+ * every real `s`, with the interpreter's values for `s ≤ 0`, where
+ * `scipy.special.gammaincc` is `nan` or has no meaning.
+ *
+ * When `s` is a constant of at least 1e-20, Q is
+ * `scipy.special.gammaincc(s, z)` itself, with no helper: measured against
+ * mpmath, its relative error there is below 1e-13 wherever Q is a normal
+ * double, while for a smaller `s` it loses digits (all of them for a
+ * subnormal `s`). For Γ the helper is used for every `s`, because
+ * `gammaincc(s, z)·gamma(s)` is `inf` when `gamma(s)` overflows
+ * (`s > 171.6`), and loses digits when Q is subnormal or 0 while Γ(s, z) =
+ * Q·Γ(s) is a normal double, which happens near the underflow threshold
+ * when Γ(s) is large. A bare lambda (`compileLambda`) has no place for the
+ * module helper, so there Γ keeps that product only for a constant `s` from
+ * 2.5e-4 to 7.5, where Γ(s) ≤ 4096: a subnormal Q then still has 40 bits,
+ * and the product's relative error, measured against mpmath for z from 0
+ * to 1100, is below 2e-13 (at `s = 10` and at `s = 1e-5` it is 1, near
+ * z = 765 and z = 700). Any other `s` makes `compileLambda` fail closed
+ * with the message that names the helper.
+ *
+ * The helper is real-only: like the runtime guard of the real-only heads
+ * (`BaseCompiler.realOperandGuard`), it gives `nan` for each element with a
+ * nonzero imaginary part. For `GammaRegularized` the base compiler applies
+ * that guard itself (`PYTHON_REAL_ONLY_FUNCTION_LOWERINGS`); `Gamma` is not
+ * real-only, because its one-operand form takes a complex argument, so an
+ * operand of `Gamma(s, z)` that is certainly not real fails closed here, as
+ * the base compiler does for a real-only head.
+ */
+function pyUpperGamma(
+  [s, z]: ReadonlyArray<Expression | null>,
+  compile: (expr: Expression) => string,
+  regularized: boolean
+): string {
+  const head = regularized ? 'GammaRegularized' : 'Gamma';
+  if (s == null || z == null)
+    throw new Error(`Could not compile \`${head}\`: missing argument`);
+  if (!regularized) {
+    const nonReal = [s, z].find((x) => BaseCompiler.isProvablyNonReal(x));
+    if (nonReal !== undefined)
+      throw new CompileDeclineError({
+        code: 'non-real-operand',
+        kind: 'capability',
+        message:
+          `Could not compile \`Gamma\`: the operand \`${nonReal.toString()}\` is ` +
+          `certainly not a real number, and this target's lowering of the ` +
+          `upper incomplete gamma is real-only.`,
+      });
+  }
+  const cs = compile(s);
+  const cz = compile(z);
+  const sConst = tryGetConstant(s);
+  if (sConst !== undefined) {
+    if (regularized && sConst >= 1e-20)
+      return `scipy.special.gammaincc(${cs}, ${cz})`;
+    if (!regularized && pythonLambdaBody && sConst >= 2.5e-4 && sConst <= 7.5)
+      return `(scipy.special.gammaincc(${cs}, ${cz}) * scipy.special.gamma(${cs}))`;
+  }
+  return `_ce_ugamma(${cs}, ${cz}, ${regularized ? 'True' : 'False'})`;
+}
+
+/**
  * The lowering of a head whose NumPy routine is real-only on this target for
  * some complex values: `np.sign`.
  *
@@ -5222,28 +5477,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // passed the second operand to a one-argument routine, a runtime TypeError
   // reported as a successful compilation. scipy has no direct upper incomplete
   // gamma, but `gammaincc` is the REGULARIZED one, Q(s, z) = Γ(s, z)/Γ(s), so
-  // `gammaincc(s, z)·gamma(s)` recovers it (verified against the interpreter:
-  // Γ(5, 2) → 22.736327583750935).
+  // for `s > 0` `gammaincc(s, z)·gamma(s)` recovers it (verified against the
+  // interpreter: Γ(5, 2) → 22.736327583750935). `gammaincc` is `nan` for
+  // `s < 0` and `gamma(s)` is a pole at the non-positive integers, where the
+  // interpreter has a finite value (Γ(-1, 2) = 0.01876…), so the lowering
+  // goes through the `_ce_ugamma` helper (`pyUpperGamma`).
   Gamma: (args, compile) => {
     const s = args[0];
     if (s == null) throw new Error('Could not compile `Gamma`: no argument');
     if (args.length < 2) return `scipy.special.gamma(${compile(s)})`;
-    // scipy's incomplete-gamma family is defined for `s >= 0` only, and the
-    // Γ(s) factor is a pole at the non-positive integers — the product is
-    // `nan` there, where the interpreter still has a finite value
-    // (Γ(-1, 2) = 0.01876…). A statically non-positive `s` therefore fails
-    // closed rather than compiling to a guaranteed `nan`.
-    const sConst = tryGetConstant(s);
-    if (sConst !== undefined && sConst <= 0)
-      throw new Error(
-        `Could not compile \`Gamma\`: the upper incomplete gamma Γ(s, z) lowers through the ` +
-          `REGULARIZED \`scipy.special.gammaincc\`, which is defined for ` +
-          `s > 0 only (s = ${sConst}).`
-      );
-    const cs = compile(s);
-    return `(scipy.special.gammaincc(${cs}, ${compile(
-      args[1]
-    )}) * scipy.special.gamma(${cs}))`;
+    return pyUpperGamma(args, compile, false);
   },
   // On the real axis the interpreter's `GammaLn` is ln|Γ(x)|, which is
   // `scipy.special.gammaln`: at −2.5 both answer −0.0562, while
@@ -5305,8 +5548,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `scipy.special.gamma((${compile(x)}) + 1)`;
   },
   // Regularized upper incomplete gamma Q(a, z); scipy's argument order matches
-  // ours directly.
-  GammaRegularized: 'scipy.special.gammaincc',
+  // ours directly. `scipy.special.gammaincc` is `nan` for `a < 0` and for
+  // `a = −1`, where the interpreter has a value, so an order that is not
+  // known to be positive goes through the `_ce_ugamma` helper
+  // (`pyUpperGamma`).
+  GammaRegularized: (args, compile) => pyUpperGamma(args, compile, true),
   // Regularized incomplete beta I_x(a, b); scipy.special.betainc(a, b, x)
   // takes a DIFFERENT argument order than ours (x, a, b) — reorder here.
   BetaRegularized: ([x, a, b], compile) => {
@@ -6066,7 +6312,9 @@ const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
  * cut from the sign of a zero part, which the interpreter does not have.
  * `Sign` is a function lowering (`pyComplexScalarLowering`): `np.sign` of a
  * complex value depends on the NumPy version. `np.arctan2` and `scipy.special.gammaincc`
- * take real arguments only.
+ * take real arguments only. `GammaRegularized` is a function lowering
+ * (`pyUpperGamma`) that computes with real numbers only, so it is listed in
+ * `PYTHON_REAL_ONLY_FUNCTION_LOWERINGS`.
  *
  * `Gamma` and `Factorial` are function lowerings through
  * `scipy.special.gamma`, which takes a complex argument too, and are not
@@ -6087,12 +6335,21 @@ const PYTHON_COMPLEX_CAPABLE_HELPERS: ReadonlySet<string> = new Set([
   'Diagonal',
 ]);
 
+/** The heads with a function lowering that computes with real numbers
+ * only. A head mapped to a helper name is real-only by that mapping
+ * (`BaseCompiler.stringHelperIsRealOnly`); a function lowering is not, so
+ * these heads are listed here. */
+const PYTHON_REAL_ONLY_FUNCTION_LOWERINGS: ReadonlySet<string> = new Set([
+  'GammaRegularized',
+]);
+
 /** `CompileTarget.isRealOnlyLowering` of this target. */
 function pythonIsRealOnlyLowering(
   head: string,
   lowering: CompiledFunction<Expression> | undefined
 ): boolean {
   if (BaseCompiler.REAL_ONLY_BY_DEFINITION.has(head)) return true;
+  if (PYTHON_REAL_ONLY_FUNCTION_LOWERINGS.has(head)) return true;
   return (
     BaseCompiler.stringHelperIsRealOnly(head, lowering) &&
     !PYTHON_COMPLEX_CAPABLE_HELPERS.has(head)
@@ -6724,6 +6981,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     )
       code += `${PYTHON_LIST_UPDATE_HELPER}\n`;
     if (body.includes('_ce_predicate(')) code += `${PYTHON_PREDICATE_HELPER}\n`;
+    if (body.includes('_ce_ugamma(')) code += `${PYTHON_UPPER_GAMMA_HELPER}\n`;
 
     code += `def ${ids.name(functionName)}(${params}):\n`;
 
@@ -6844,7 +7102,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // `Power` lowering does not use in a lambda body: listed as a guard;
     // `_ce_round` is the rounding of `Round`, which
     // `pythonRoundToInteger()` writes inline in a lambda body: also a guard;
-    // `_ce_predicate` is the check of a predicate's result, `pyFnArg`.)
+    // `_ce_predicate` is the check of a predicate's result, `pyFnArg`;
+    // `_ce_ugamma` is the upper incomplete gamma of `Gamma(s, z)` and
+    // `GammaRegularized`, `pyUpperGamma`.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
       ['_ce_rref(', 'RowReduce'],
@@ -6854,6 +7114,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_pow(', 'a power whose base may be negative'],
       ['_ce_round(', 'Round'],
       ['_ce_predicate(', 'a predicate whose result is not provably a boolean'],
+      [
+        '_ce_ugamma(',
+        'an upper incomplete gamma whose order is not known to be positive',
+      ],
       ['_ce_cplx(', 'the complex lift of the complex modes'],
       ['_ce_cisreal(', 'the realness test of the complex modes'],
       ['_ce_creal(', 'the real projection of the complex modes'],
