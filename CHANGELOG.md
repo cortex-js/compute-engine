@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **`Log(1, base)` threads over a list of bases** instead of folding to the
+  scalar `0`: `Log(1, [-10, e, 27])` was `0` and is `[0, 0, 0]`, as
+  `Log(8, [2, 4])` is `[3, 3/2]`. The `Log(1, b) = 0` fold now applies only to
+  a scalar base, in the canonical form and in the exceptional-point answers
+  (#455, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.158.0 _2026-10-20_
 
 ### Behavior Changes

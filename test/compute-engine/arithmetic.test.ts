@@ -1,5 +1,6 @@
 import { check, checkJson, engine } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { BigDecimal } from '../../src/big-decimal';
 import { indexingSetCartesianProductIterator } from '../../src/compute-engine/library/utils';
 
@@ -1017,6 +1018,49 @@ describe('Log', () => {
   test(`Log 'Pi'`, () => expect(checkJson(['Log', 'Pi'])).toMatchSnapshot());
   test(`Log ['Complex', 1.1, 1.1]`, () =>
     expect(checkJson(['Log', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
+});
+
+describe('Log with a collection operand threads', () => {
+  // `Log(1, b) = 0` and the other exceptional-point answers are scalar
+  // shortcuts that must not fire before the broadcast over a list.
+  const cases: [string, MathJsonExpression, string, string][] = [
+    [
+      'Log(1, [-10, e, 27])',
+      ['Log', 1, ['List', -10, 'ExponentialE', 27]],
+      '[0,0,0]',
+      '[0,0,0]',
+    ],
+    ['Log(1, [2, 4])', ['Log', 1, ['List', 2, 4]], '[0,0]', '[0,0]'],
+    [
+      'Log(1, [2, 1])',
+      ['Log', 1, ['List', 2, 1]],
+      '[0,Indeterminate]',
+      '[0,NaN]',
+    ],
+    ['Log(0, [2, 4])', ['Log', 0, ['List', 2, 4]], '[-oo,-oo]', '[-oo,-oo]'],
+    ['Log(2, [2, 4])', ['Log', 2, ['List', 2, 4]], '[1,1/2]', '[1,0.5]'],
+    ['Log(8, [2, 4])', ['Log', 8, ['List', 2, 4]], '[3,3/2]', '[3,1.5]'],
+    ['Log([1, 8], 2)', ['Log', ['List', 1, 8], 2], '[0,3]', '[0,3]'],
+    [
+      'Log([1, 2], [3, 4])',
+      ['Log', ['List', 1, 2], ['List', 3, 4]],
+      '[0,1/2]',
+      '[0,0.5]',
+    ],
+  ];
+  for (const [name, json, expected, expectedN] of cases) {
+    test(`${name} = ${expected} (evaluate)`, () =>
+      expect(ce.expr(json).evaluate().toString()).toBe(expected));
+    test(`${name} = ${expectedN} (.N())`, () =>
+      expect(ce.expr(json).N().toString()).toBe(expectedN));
+    test(`${name} stays a Log call (canonical)`, () =>
+      expect(ce.expr(json).operator).toBe('Log'));
+  }
+
+  test('a scalar Log(1, b) still folds to 0 (canonical)', () => {
+    expect(ce.expr(['Log', 1, 'b']).toString()).toBe('0');
+    expect(ce.expr(['Log', 1, 10]).toString()).toBe('0');
+  });
 });
 
 describe('LN', () => {

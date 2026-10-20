@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import { isNumber, isSymbol, indeterminateFormAnswer } from './type-guards.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
+import { isCollectionShaped } from '../collection-utils.js';
 
 /**
  * Where a logarithm operand sits among the exceptional points:
@@ -98,6 +99,10 @@ export function logarithmAtExceptionalPoint(
   x: Expression,
   base: Expression | undefined
 ): Expression | undefined {
+  // A collection operand threads element-wise; no scalar answer applies
+  // (`Log(1, [2, 3])` is `[0, 0]`, not `0`).
+  if (isCollectionShaped(x) || (base !== undefined && isCollectionShaped(base)))
+    return undefined;
   const natural = base === undefined || isSymbol(base, 'ExponentialE');
   // A float argument or base gives the float `0`, not the exact `0`:
   // `\ln(1.0)` is the float `0`, as `\ln(1.5)` is a float.

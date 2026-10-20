@@ -17,6 +17,7 @@ import { registerNumericCanonicalHandler } from './numeric-canonical-registry.js
 import { readJuxtaposition } from './invisible-operator.js';
 import { productMayHaveMatrix } from './matrix-operand.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { isCollectionShaped } from '../collection-utils.js';
 
 /**
  * The operators whose canonical form `canonicalNumericOperator` computes.
@@ -421,12 +422,16 @@ export function canonicalNumericOperator(
     // and `Log(1, 2.0)` stay, and evaluate to the float `0`, as a float
     // operand gives a float result.
     const baseIsFloat = base !== undefined && isNumber(base) && !base.isExact;
+    // A collection base threads element-wise at evaluation, so the fold is
+    // withheld: `Log(1, [-10, e, 27])` is `[0, 0, 0]`, not the scalar `0`.
+    const baseIsCollection = base !== undefined && isCollectionShaped(base);
     if (
       isNumber(ops[0]) &&
       ops[0].isExact &&
       ops[0].isSame(1) &&
       !baseIsOneOrNaN &&
-      !baseIsFloat
+      !baseIsFloat &&
+      !baseIsCollection
     )
       return ce.Zero;
     // Ln(a) -> Ln(a), Log(a) -> Log(a)
