@@ -1469,6 +1469,7 @@ numericization (§1) — it is not rule-7 inertness.
 | `Mod(1, 0)` | inert | `Indeterminate` | `NaN` | conforms (rule 4; `Indeterminate` since 2026-09-29, §1) |
 | `At([1,2], 99)` | inert | `NaN` | `NaN` | conforms (rule 5, numeric elements) |
 | `First([])` | inert | `Missing` | `Missing` | conforms (rule 5) |
+| `First(E)`, `At(E, 5)` with `E: list<integer>` and `E := []` | inert | `NaN` | `NaN` | conforms (rule 5: the element type of the read is the declared one, user decision 2026-10-20; with `E: list<string>`, or `E := []` with no declaration, it is `Missing`) |
 | `Sin(NaN)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
 | `Heaviside(NaN)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
 | `IsPrime(3.5)`, `IsPrime(π)`, `IsPrime(i)`, `IsPrime(NaN)` | inert | `False` | `False` | conforms (§4 predicates) |

@@ -232,7 +232,20 @@ export function listedElement(
   // `Dictionary` constructor reads as entries, as the display materialization
   // does (`materialize`, `boxed-function.ts`).
   if (isKeyed) return ce.function('Dictionary', elements);
-  return isSet ? ce.function('Set', elements) : ce._fn('List', elements);
+  if (isSet) return ce.function('Set', elements);
+  // The listing turns the view into a list, and a list erases a `Nothing`
+  // element as a list literal does: with `m` the view
+  // `Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `[m]` is `[[1]]`, and the
+  // inner list has one element. The view itself keeps the `Nothing`
+  // (`m.count` is 2), and so does its display preview (`materializationSteps`
+  // in `boxed-function.ts`); no caller of this function is a display. With
+  // the `Nothing` kept, the inner list printed two elements but counted one,
+  // because the collection handlers of a `List` read it as a literal whose
+  // `Nothing` elements are erased (user decision 2026-10-20).
+  return ce._fn(
+    'List',
+    elements.filter((x) => !isSymbol(x, 'Nothing'))
+  );
 }
 
 /**

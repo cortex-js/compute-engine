@@ -90,12 +90,26 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
 
   test('erasure applies to an operand that EVALUATES to `Nothing` (route parity)', () => {
     // `First([])`... is a marker, not Nothing; use an explicit Nothing-valued
-    // computation: `If`-like via a lazy Map body returning Nothing.
+    // computation: an element of a list literal that evaluates to `Nothing`.
+    const engine = new ComputeEngine();
+    const literal = engine.box([
+      'List',
+      1,
+      ['If', ['Greater', 'x', 2], 2, 'Nothing'],
+      3,
+    ]);
+    engine.assign('x', 1);
+    expect(literal.evaluate().toString()).toBe('[1,3]');
+
+    // A lazy `Map` whose callback answers `Nothing` is not a literal: it has
+    // 3 elements (`Length`, `.at()`, `.each()`), and its printed value keeps
+    // them. Before, it printed `[]`. Turning the view into a list erases
+    // them, as a list literal does (user decision 2026-10-20).
     const mapped = ce
       .box(['Map', ['Function', 'Nothing', 'x'], ['List', 1, 2, 3]])
       .evaluate();
-    // Every mapped element is `Nothing` → erased from the materialized list.
-    expect(mapped.toString()).toBe('[]');
+    expect(mapped.toString()).toBe('["Nothing","Nothing","Nothing"]');
+    expect(mapped.evaluate({ materialization: true }).toString()).toBe('[]');
   });
 
   test('a literal `Missing` is PRESERVED (position kept)', () => {

@@ -15491,10 +15491,29 @@ function* materializationSteps(
     return expr.engine.function('Dictionary', xs);
   }
 
-  // `Nothing` is an ERASURE marker: a lazy stream element that materialized as
-  // `Nothing` (e.g. a `Map` body producing `Nothing`) is spliced out of the
-  // resulting collection (§3.G). `Missing` is preserved. (The
-  // `ContinuationPlaceholder` sentinel is not `Nothing`, so it survives.)
+  // An element of a lazy indexed view that is `Nothing` (the result of a
+  // `Map` callback that answers `Nothing`) is an element of the view: the
+  // view counts it (`Length`), and `at()` and `each()` give it. So the
+  // display preview of the view (`toString()`, the `latex` getter,
+  // `toLatex()` with no `materialization` option) keeps it, in its position:
+  // `Map(x ↦ If(x > 1, Nothing, x), [1, 2])` prints `[1, Nothing]`, not `[1]`
+  // (user decision 2026-10-20). `_fn` builds that preview list without the
+  // canonical form of a `List` literal, which erases a `Nothing` element.
+  //
+  // Any other materialization (`evaluate({ materialization: true })`, an
+  // explicit bound) turns the view into a list, and a list erases a
+  // `Nothing` element as a list literal does (`[1, Nothing]` is `[1]`).
+  // Keeping it there gave a list that printed two elements but counted one,
+  // because the collection handlers of a `List` read it as a literal whose
+  // `Nothing` elements are erased. A `Set` has no positions, and always
+  // erases it.
+  if (isIndexed && isDisplayPreviewOf(expr, options))
+    return expr.engine._fn('List', xs);
+
+  // `Nothing` is an ERASURE marker: a lazy stream element that materialized
+  // as `Nothing` is spliced out of the resulting collection (§3.G).
+  // `Missing` is preserved. (The `ContinuationPlaceholder` sentinel is not
+  // `Nothing`, so it survives.)
   const materialized = xs.filter((x) => !isSymbol(x, 'Nothing'));
 
   if (isIndexed) return expr.engine._fn('List', materialized);

@@ -2,6 +2,26 @@
 
 ### Behavior Changes
 
+- A read past the end of a declared numeric list that holds no element is
+  `NaN`, taken from the declared element type (user decision 2026-10-20). With
+  `E: list<integer>` assigned `[]`, `First(E)`, `Last(E)`, `At(E, 5)` and
+  `E[1]` were `Missing`, which their type `integer | nan` does not hold; they
+  are now `NaN`, as a read past the end of a non-empty numeric list already
+  was. A list of strings, an undeclared `E := []` and the literal `First([])`
+  stay `Missing`.
+
+- A lazy view keeps a `Nothing` result in its own display, and erases it when
+  it becomes a list (user decision 2026-10-20). With
+  `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `m.toString()` was `[1]`
+  while `m` counted 2 elements and `m.at(2)` was `Nothing`; it now prints
+  `[1, Nothing]`. The same holds for `Tabulate`, `Table`, `Scan` and
+  `Iterate`. A list built from the view erases `Nothing` as a list literal
+  does, and its count agrees: `ListFrom(m)`,
+  `m.evaluate({ materialization: true })`, `[...m, 9]`, `ListJoin(m, [9])`,
+  `Sort(m)` and `Tally(m)` hold only `1`, and `Length(Sort(m))` is `1` (it
+  was `3`). A set-kind view does not count `Nothing`:
+  `Map(x ↦ If(x > 1, Nothing, x), Set(1, 2, 3))` has 1 element.
+
 - An overloaded function now accepts a symbol declared `error` that has no
   value, as a function with one signature does. With `ce.declare('e',
   'error')` and `ov` declared `((number) -> number) & ((string) -> string)`,

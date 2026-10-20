@@ -109,22 +109,62 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The type of a lazy view does not include the `Nothing` it yields (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
+
+User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,
+`Iterate`) keeps a `Nothing` result in its own display, count, `.at()` and
+`.each()`; turning it into a list erases it. But the view's TYPE does not say
+so: `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])` is typed
+`vector<integer^3>`, although `.at(2)` is `Nothing`. Consumers that read the
+element type then disagree (measured 2026-10-20):
+
+- `Filter(m, x ↦ True)` makes `incompatible-type integer nothing` error cells.
+- `Zip(m, [7, 8, 9])` gives `[(1, 7), (8), (9)]`: the tuple erases `Nothing`,
+  so each pair loses its first element.
+- `Mean(m)` is an error, while `Max(m)` and `Product(m)` skip `Nothing`;
+  `Total(m)` stays unevaluated.
+- A compiled `Map` falls back and returns `[1, null, null]`.
+
+Also: `Sort` over a view whose every element is `Nothing`
+(`Sort(Map(x ↦ Nothing, [1, 2]))`) stays unevaluated (as at HEAD before the
+decision), so `IsEmpty` of it stays unevaluated too; it should be `[]`. And
+whether `Ordering(m)` gives the positions of every element of the view (3)
+or of the erased list (1, today) depends on the same question.
+
+Question: does the element type of a view include `nothing` when its callback
+can return `Nothing`, and how does each reducer treat a `Nothing` element
+(skip it, as a list literal does, or treat it as an error)?
+
+### A tuple argument does not bind the element variable of a collection parameter (OPEN, small — found 2026-10-20 by the bare-`tuple` prototype, `docs/plans/2026-10-20-bare-tuple-record-any.md`)
+
+`Map(x ↦ x + 10, t)` with `t: tuple<integer, missing>` is an
+`incompatible-type` error, while `l: list<integer | missing>` gives
+`list<number>` and `t: tuple<integer, integer>` gives `list<integer>`
+(measured 2026-10-20). A list argument binds `T` of a `collection<T>` /
+`indexed_collection<T>` parameter to its element type; a tuple argument does
+not bind `T` from its slots, so `T` is read as its bound (`unknown` for an
+unbound variable) and an absent slot is refused. The same applies to every
+operator with such a parameter (`Filter`, `Any`, `All`, `Scan`, `Reduce`,
+`Fold`, `TakeWhile`, `FlatMap`, `Find`, `CountIf`, `Position`, `MaxBy`,
+`ArgMax`, `Partition`, `GroupBy`, …). Fix: bind `T` to the widening of the
+slot types. The bare-`tuple` proposal needs this fix first.
+
+### Two subtype-relation gaps found by the transitivity check (OPEN, small — found 2026-10-20 by the same prototype)
+
+- Five transitivity violations through a record with an extra field of type
+  `any`: `record{a: integer, b: any} <: record{a: integer} <: dictionary`,
+  but the first is not `<: dictionary` (record-to-record allows extra
+  fields, record-to-dictionary checks every field).
+- Fifteen `couldMatch` answers are `false` although the two types share a
+  subtype: tuples with an `any` slot against `indexed_collection` and
+  similar (`indexed_collection` vs `tuple<any>`).
+
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
 The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
 and 26 other collection operators found these related defects. Each was measured
 on 2026-10-19:
 
-- DECIDED 2026-10-20 (implementation in progress): the printed value of a lazy
-  `Map` keeps a `Nothing` result, `[1, Nothing]`, so that every view agrees. The
-  case: a lazy `Map` whose callback returns `Nothing`.
-  `Map(x ↦ If(x > 1, Nothing, x), [1, 2])` is typed `vector<integer^2>` and
-  prints `[1]`, but its count is `2`, `.at(2)` is `Nothing`, `.each()` yields
-  `[1, Nothing]` and `Length(…)` is `2`. Making the views agree first needs a
-  decision: does `Map` erase a `Nothing` result (then `count`, `at` and
-  `isEmpty` must skip it, `at` becomes O(i), the count is no longer known in
-  O(1), and the type stops claiming the source length), or is the printed value
-  the one that is wrong?
 - LaTeX cannot write a `Nothing` argument:
   `\mathrm{If}(x > 1, \mathrm{Nothing}, x)` loses the `Nothing` argument at
   parse time.
@@ -142,16 +182,6 @@ on 2026-10-19:
   slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
   new spelling for that type or a wider answer (`indexed_collection<any>`,
   `any`), which loses the information that the value is a tuple.
-- DECIDED 2026-10-20 (option A, implementation in progress): the access marker
-  of a declared numeric list that holds no element comes from the declared type,
-  so `First(E)` below evaluates to `NaN`. With `E: list<integer> := []`,
-  `First(E)` is typed `integer | nan` but evaluates to `Missing`. Rule 5 of
-  `docs/ERROR-MODEL.md` computes the marker "from the element type of the
-  access": the declared element type is `integer` (marker `NaN`), the held value
-  `[]` has element type `never` (marker `Missing`), and `componentAt` reads the
-  held value. Option A: take the marker from the declared type, so `First(E)`
-  evaluates to `NaN`. Option B: add `missing` to the static type of every
-  `First(xs)` over a numeric list (`integer | nan | missing`).
 - DESIGN (user decision 2026-10-20: a design item, not a small fix): a `missing`
   arm for an access over `any` or `unknown` elements. `First(W)` with
   `W: list<any> := []` is typed `unknown`, but evaluates to `Missing`. Making

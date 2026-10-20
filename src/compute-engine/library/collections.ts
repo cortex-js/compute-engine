@@ -22,6 +22,7 @@ import {
   validateArguments,
   widenUnannotatedLiteralParams,
   absentScalarMarker,
+  absentMarkerIsNumeric,
   checkCollectionOperand,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
@@ -782,6 +783,14 @@ const MEMBERSHIP_PRESERVING_WRAPPERS = [
   'Reverse',
   'Unique',
 ];
+// The wrappers that build a `List` when they are evaluated. A list erases a
+// `Nothing` element as a list literal does, while a lazy source that can
+// yield `Nothing` (`viewMayYieldNothing`) counts it, so such a wrapper is not
+// stripped from that source: with `m = Map(x ↦ If(x > 1, Nothing, x),
+// [1, 2, 3])`, `Sort(m)` is `[1]`, and `Length(Sort(m))` must be 1, not the
+// 3 of `Length(m)` (user decision 2026-10-20). `Reverse` is a lazy view that
+// keeps the `Nothing` in its position, so it is stripped as before.
+const LIST_BUILDING_WRAPPERS = ['Sort', 'RandomShuffle', 'Unique'];
 
 function peekWrappers(
   op: Expression | undefined,
@@ -808,7 +817,11 @@ function peekWrappers(
     // indexed collection; otherwise the consumer evaluates the wrapper, which
     // sorts an untyped list to count it but reports the error for a set.
     (!ORDER_WRAPPERS.includes(result.operator) ||
-      result.op1.type.matches('indexed_collection<any>'))
+      result.op1.type.matches('indexed_collection<any>')) &&
+    !(
+      LIST_BUILDING_WRAPPERS.includes(result.operator) &&
+      viewMayYieldNothing(result.op1)
+    )
   ) {
     result = result.op1;
   }
@@ -1055,9 +1068,57 @@ function hasUnindexedSource(expr: Expression): boolean {
  * `3`, where `Sort(c)` is an error.
  */
 function elementCountOfIndexedSource(expr: Expression): number | undefined {
-  return hasUnindexedSource(expr)
-    ? undefined
-    : elementCountOfFiniteSource(expr);
+  if (hasUnindexedSource(expr)) return undefined;
+  // These operators build a `List` of the elements of their source, and a
+  // list erases a `Nothing` element as a list literal does. A lazy source
+  // that can yield `Nothing` (a `Map` callback that answers `Nothing`) counts
+  // it, so its count is not the count of the result: with
+  // `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])`, `Sort(m)` is `[1]`, and
+  // `Length(Sort(m))` was 3. The count is then not known without the
+  // evaluation (user decision 2026-10-20).
+  if (isFunction(expr) && viewMayYieldNothing(expr.op1)) return undefined;
+  return elementCountOfFiniteSource(expr);
+}
+
+/**
+ * Whether the collection `xs` is a lazy view that can yield `Nothing`: a view
+ * whose callback is a function literal that names `Nothing`, a function
+ * value that names it, or an operator whose declared result admits it, or a
+ * view over such a view. A symbol is read through the value it holds. An
+ * eager collection (a `List` literal) answers `false`: a literal erases its
+ * `Nothing` elements itself. The test reads the structure only and evaluates
+ * nothing, as an `elementCount` handler must; it can answer `true` for a
+ * callback that never answers `Nothing`, which only costs an evaluation.
+ */
+function viewMayYieldNothing(xs: Expression | undefined, depth = 0): boolean {
+  if (xs === undefined || depth > 16) return xs !== undefined;
+  if (isSymbol(xs)) {
+    const def = xs.engine.lookupDefinition(xs.symbol);
+    if (!isValueDef(def)) return false;
+    return viewMayYieldNothing(def.value.value, depth + 1);
+  }
+  if (!isFunction(xs) || xs.isLazyCollection !== true) return false;
+  for (const op of xs.ops) {
+    if (isFunction(op, 'Function')) {
+      if (op.has('Nothing')) return true;
+      continue;
+    }
+    if (isSymbol(op)) {
+      const def = op.engine.lookupDefinition(op.symbol);
+      if (isValueDef(def)) {
+        const value = def.value.value;
+        if (isFunction(value, 'Function') && value.has('Nothing')) return true;
+        if (viewMayYieldNothing(value, depth + 1)) return true;
+      } else if (isOperatorDef(def)) {
+        const result = functionResult(def.operator.signature.type);
+        if (result !== undefined && typeIsNothingOrAdmitsNothing(result))
+          return true;
+      }
+      continue;
+    }
+    if (viewMayYieldNothing(op, depth + 1)) return true;
+  }
+  return false;
 }
 
 /**
@@ -6072,7 +6133,27 @@ function elementAtLargePosition(
   return unlessWalkMissedElements(() => atBigint(xs, position));
 }
 
-function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
+/**
+ * The absence marker of a read outside the collection `xs`: `NaN` when the
+ * elements of `xs` are numeric, and `Missing` otherwise (rule 5 of
+ * `docs/ERROR-MODEL.md`).
+ *
+ * `xs` is the value that the read sees. When that value does not show the
+ * domain of its elements, because it holds no element that is present (`[]`
+ * or `[Missing]`) or because its element type is not known, `readType`
+ * decides: it is the type of the read as written, which comes from the
+ * DECLARED type of the operand (user decision 2026-10-20). So with
+ * `E: list<integer>` and `E := []`, `First(E)` is typed `integer | nan` and
+ * evaluates to `NaN`, and with `E: list<string>` it is `Missing`. An operand
+ * with no declaration has the type of its value: for `E := []` and for the
+ * literal `First([])` the type of the read is `missing`, and the marker is
+ * `Missing`.
+ */
+function absenceMarker(
+  ce: ComputeEngine,
+  xs?: Expression,
+  readType?: Type
+): Expression {
   if (xs === undefined) return ce.Missing;
 
   // A dictionary/record is a KEYED collection: the value `At` returns is the
@@ -6120,6 +6201,8 @@ function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
     if (sawNumber) return ce.NaN;
   }
 
+  if (readType !== undefined)
+    return absentMarkerIsNumeric(readType, undefined) ? ce.NaN : ce.Missing;
   return ce.Missing;
 }
 
@@ -6139,12 +6222,19 @@ function isCollectionIndex(idx: Expression | undefined): boolean {
  * steps are absorbed and the result is absence in the FINAL position's domain.
  * Peel `collType`'s element type through `ops[fromIndex..]` and return `NaN`
  * for a numeric final domain, `Missing` otherwise.
+ *
+ * When the peeled type does not show the final domain (`collType` is the
+ * type of a value that holds no element, `list<never>`), `readType` decides
+ * when it is given: it is the type of the whole read as written, which comes
+ * from the DECLARED type of the base (user decision 2026-10-20, see
+ * `absenceMarker()`).
  */
 function chainAbsorbMarker(
   ce: ComputeEngine,
   collType: Type,
   ops: ReadonlyArray<Expression>,
-  fromIndex: number
+  fromIndex: number,
+  readType?: Type
 ): Expression {
   let t: Type = collType;
   for (let i = fromIndex; i < ops.length; i++) {
@@ -6153,7 +6243,11 @@ function chainAbsorbMarker(
       ? ({ kind: 'list', elements: peeled } as ListType)
       : peeled;
   }
-  if (t === 'unknown' || t === 'any' || t === 'never') return ce.Missing;
+  if (t === 'unknown' || t === 'any' || t === 'never') {
+    if (readType !== undefined)
+      return absentMarkerIsNumeric(readType, undefined) ? ce.NaN : ce.Missing;
+    return ce.Missing;
+  }
   return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
 }
 
@@ -6290,13 +6384,19 @@ function componentAt(
     if (position < 0 && xs.count === undefined) {
       const listed = listFiniteUncountedCollection(xs);
       if (listed !== undefined)
-        return listed[listed.length + position] ?? absenceMarker(ce, xs);
+        return (
+          listed[listed.length + position] ??
+          absenceMarker(ce, xs, expression?.type.type)
+        );
     }
     // A miss is the absence marker only when the position is provably
     // outside the collection. When the length is not known (`First(Range(0,
-    // n))` with `n` unassigned), the read stays unevaluated.
+    // n))` with `n` unassigned), the read stays unevaluated. The type of the
+    // application decides the marker when the value `xs` holds no element
+    // that shows the domain (`absenceMarker()`): `First(E)` is `NaN` for
+    // `E: list<integer>` assigned `[]` (user decision 2026-10-20).
     if (!isProvablyOutOfRange(xs, position)) return undefined;
-    return absenceMarker(ce, xs);
+    return absenceMarker(ce, xs, expression?.type.type);
   }
   if (xs.type.matches('indexed_collection<any>')) return undefined;
   // A symbolic operand that may be absent as a whole — a symbol declared
@@ -13060,6 +13160,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the result is absence in the FINAL position's domain (§3.C).
       let expr = ops[0];
       let index = 1;
+      // The type of the read as written. It decides the marker of a read
+      // outside a value that does not show the domain of its elements: with
+      // `E: list<integer>` assigned `[]`, `At(E, 5)` is typed `integer | nan`
+      // and is `NaN` (user decision 2026-10-20, see `absenceMarker()`).
+      const readType = expression?.type.type;
+      // The declared element type of the collection that the index at
+      // position `step` reads: the type of the base as written, peeled
+      // through the indices before `step`, as `chainAbsorbMarker()` peels.
+      // A gather that is not the last index builds an intermediate list of
+      // these elements, and its markers must keep the declared domain: with
+      // `E: list<integer>` assigned `[]`, `At(E, [1], 1)` is `NaN`, as
+      // `At(At(E, [1]), 1)` is (user decision 2026-10-20).
+      const declaredBase = isFunction(expression)
+        ? expression.ops[0]?.type.type
+        : undefined;
+      const declaredElementType = (step: number): Type | undefined => {
+        if (declaredBase === undefined) return undefined;
+        let t: Type = declaredBase;
+        for (let i = 1; i < step; i++) {
+          const peeled = collectionElementType(t) ?? 'any';
+          t = isCollectionIndex(ops[i])
+            ? ({ kind: 'list', elements: peeled } as ListType)
+            : peeled;
+        }
+        return collectionElementType(t);
+      };
       while (ops[index]) {
         // Value-level absorption: an absent current value (an absent base, or
         // an absent intermediate produced by a prior step) short-circuits the
@@ -13072,8 +13198,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `Missing` for a row or a point.
         if (index === 1 && isAbsentSymbol(expr))
           return absentOperandMarker(ce, expression);
+        // An absent INTERMEDIATE value (a row that is `Missing`) has no
+        // element type to peel, so the type of the read as written decides:
+        // with `M: list<list<integer> | missing>` assigned `[Missing]`,
+        // `At(M, 1, 1)` is `NaN`, as `First(First(M))` is (user decision
+        // 2026-10-20).
         if (isAbsentValue(expr))
-          return chainAbsorbMarker(ce, expr.type.type, ops, index);
+          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType);
 
         // An INTERMEDIATE value that is a restriction whose condition is not
         // decided yet — the row `[1, 2] {0 < t}` of `[[1, 2] {0 < t}, [3, 4]]`
@@ -13102,7 +13233,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (isNumber(opAtIndex) &&
             (opAtIndex.isIndeterminate || opAtIndex.isInfinity === true))
         )
-          return chainAbsorbMarker(ce, expr.type.type, ops, index);
+          return chainAbsorbMarker(ce, expr.type.type, ops, index, readType);
 
         // A string key, or a CHARACTER key read as its text: a character and
         // the one-character string with the same content are the same value,
@@ -13123,8 +13254,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const v = expr.get(key);
           if (v === undefined)
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index)
-              : absenceMarker(ce, expr);
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+              : absenceMarker(ce, expr, readType);
           expr = v;
           index += 1;
           continue;
@@ -13193,8 +13324,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const v = at(expr, key);
           if (v === undefined)
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index)
-              : absenceMarker(ce, expr);
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+              : absenceMarker(ce, expr, readType);
           expr = v;
           index += 1;
           continue;
@@ -13234,7 +13365,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // index. POSITION-PRESERVING — an out-of-range index contributes
             // the absence marker, so the result has the same length as the
             // index list (BREAKING — previously such entries were dropped).
+            // When the gather is the last index, the type of the read is a
+            // list, and its element type decides the marker of a value that
+            // does not show the domain of its elements (`absenceMarker()`).
+            // When more indices follow, the declared element type of the
+            // collection that the gather reads decides
+            // (`declaredElementType`).
             let marker: Expression | undefined;
+            const gatherReadType =
+              index + 1 === ops.length && readType !== undefined
+                ? collectionElementType(readType)
+                : declaredElementType(index);
             for (const m of indices) {
               // An absent entry (`NaN`, `Missing`), an `Indeterminate` entry
               // or an infinite entry names no position. It contributes the
@@ -13246,7 +13387,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 isAbsentValue(m) ||
                 (isNumber(m) && (m.isIndeterminate || m.isInfinity === true))
               ) {
-                picked.push((marker ??= absenceMarker(ce, expr)));
+                picked.push(
+                  (marker ??= absenceMarker(ce, expr, gatherReadType))
+                );
                 continue;
               }
               const k = m.re;
@@ -13255,7 +13398,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (Number.isInteger(k) && !Number.isSafeInteger(k)) {
                 const large = elementAtLargePosition(expr, m);
                 if (large === 'outside') {
-                  picked.push((marker ??= absenceMarker(ce, expr)));
+                  picked.push(
+                    (marker ??= absenceMarker(ce, expr, gatherReadType))
+                  );
                   continue;
                 }
                 if (large !== undefined) {
@@ -13267,7 +13412,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 // An entry that is provably not an integer selects nothing:
                 // the marker, in place, like an out-of-range entry.
                 if (!isProvablyNonIntegerIndex(m)) return undefined;
-                picked.push((marker ??= absenceMarker(ce, expr)));
+                picked.push(
+                  (marker ??= absenceMarker(ce, expr, gatherReadType))
+                );
                 continue;
               }
               // Route through the dispatcher so negative indices normalize.
@@ -13282,7 +13429,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 (missIsNotAProof(walksBefore) || !isProvablyOutOfRange(expr, k))
               )
                 return undefined;
-              picked.push(v ?? (marker ??= absenceMarker(ce, expr)));
+              picked.push(
+                v ?? (marker ??= absenceMarker(ce, expr, gatherReadType))
+              );
             }
           }
 
@@ -13302,8 +13451,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!Number.isInteger(i)) {
           if (!isProvablyNonIntegerIndex(opAtIndex)) return undefined;
           return index + 1 < ops.length
-            ? chainAbsorbMarker(ce, expr.type.type, ops, index)
-            : absenceMarker(ce, expr);
+            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+            : absenceMarker(ce, expr, readType);
         }
         // An index that is not a safe integer is read exactly (see
         // `elementAtLargePosition()`).
@@ -13311,8 +13460,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const large = elementAtLargePosition(expr, opAtIndex);
           if (large === 'outside')
             return index + 1 < ops.length
-              ? chainAbsorbMarker(ce, expr.type.type, ops, index)
-              : absenceMarker(ce, expr);
+              ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+              : absenceMarker(ce, expr, readType);
           if (large !== undefined) {
             expr = large;
             index += 1;
@@ -13334,8 +13483,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         if (v === undefined)
           return index + 1 < ops.length
-            ? chainAbsorbMarker(ce, expr.type.type, ops, index)
-            : absenceMarker(ce, expr);
+            ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
+            : absenceMarker(ce, expr, readType);
         expr = v;
         index += 1;
       }
@@ -19520,6 +19669,13 @@ function tally(
   };
 
   for (const op of walk) {
+    // A lazy view can yield `Nothing` (a `Map` callback that answers
+    // `Nothing`). The tallied values form a list, and a list erases a
+    // `Nothing` element as a list literal does, so `Nothing` is not tallied.
+    // Tallied, its count stayed in the list of counts while the list of
+    // values erased it: `Tally(m)` was `([1], [1, 2])` (user decision
+    // 2026-10-20).
+    if (isSymbol(op, 'Nothing')) continue;
     const index = indexOf(op);
     if (index >= 0) counts[index]++;
     else {
@@ -20264,6 +20420,14 @@ function snapshotListJoin(
       // is. Only the elements that a spread operand enumerates are listed.
       const isListLiteral = isFunction(op, 'List') && op.isCanonical;
       for (const x of op.each()) {
+        // A lazy operand can yield `Nothing` (a `Map` callback that answers
+        // `Nothing`). The snapshot is a list, and a list erases a `Nothing`
+        // element as a list literal does, so it is skipped: it uses no cell
+        // of the budget. Kept, the list printed `[1, Nothing, 9]` but had 2
+        // elements, because the collection handlers of a `List` read it as a
+        // literal whose `Nothing` elements are erased (user decision
+        // 2026-10-20).
+        if (isSymbol(x, 'Nothing')) continue;
         if (reserved === undefined) {
           if (budget.used >= budget.max) return undefined;
           budget.used += 1;
@@ -20763,7 +20927,15 @@ function keyedMergeIterator(
  * that equal values hash equal (`types-expression.ts`), so a bucket miss is a
  * definitive "not seen" and only same-hash candidates are compared. That
  * keeps the scan near-linear instead of comparing every element against every
- * one already kept. */
+ * one already kept.
+ *
+ * A `Nothing` that the source yields (a `Map` callback that answers
+ * `Nothing`) is not yielded either. A set has no positions, and a `Set`
+ * erases a `Nothing` element (`canonicalSet`), so the set that the view
+ * denotes does not hold it. Without this, `Map(x ↦ If(x > 1, Nothing, x),
+ * Set(1, 2, 3))` printed `Set(1)` but had a count of 2 (user decision
+ * 2026-10-20: a lazy INDEXED view keeps `Nothing` in its position, a set
+ * view does not). */
 function deduplicatingIterator(
   source: Iterator<Expression>,
   limit: number,
@@ -20792,8 +20964,12 @@ function deduplicatingIterator(
         if (done || value === undefined)
           return { value: undefined, done: true };
         const bucket = seen.get(value.hash);
-        if (bucket !== undefined && bucket.some((x) => x.isSame(value))) {
-          // A DUPLICATE — the only pull that counts toward the cap.
+        if (
+          isSymbol(value, 'Nothing') ||
+          (bucket !== undefined && bucket.some((x) => x.isSame(value)))
+        ) {
+          // A DUPLICATE or a `Nothing`: neither is emitted, so each pull
+          // counts toward the cap.
           if (++sinceEmit > limit)
             throw new CancellationError({
               cause: 'iteration-limit-exceeded',
