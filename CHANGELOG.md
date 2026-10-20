@@ -1,34 +1,77 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- The derivative of a `Sum` follows a call in a term or a bound into the body of
+  the called function (Tycho ledger row 405). With `g := a ↦ a·x`,
+  `D(Sum(g(k), Limits(k, 1, 5)), x)` was `0`: the rule read only the names
+  written in the term, and `x` is not one of them. It is now `15`, the value
+  that the derivative of each call (`D(g(2), x)` is `2`) gives. A bound that
+  calls a function whose body reads the variable (`N := a ↦ ⌊a·x⌋`,
+  `Limits(i, 1, N(1))`) depends on the variable, so the derivative stays
+  unevaluated, as for the bound `⌊x⌋`; it was differentiated term by term. A
+  function passed as an argument (`G(h, k)` with `h` a function) is followed
+  too. A call of a function that is not pure (its body draws a random number) is
+  not evaluated to find its body, and a call of a function whose body is not
+  known that way is taken to depend on the variable: a bound with such a call
+  keeps the derivative unevaluated.
+
+- On the `interval-js` target, a negative base under a float exponent that the
+  interpreter reads as a rational with an odd denominator, but that is not the
+  double nearest to that rational, has its real root (Tycho ledger row 406).
+  `x^{0.4545454545454545}` (16 digits, read as `5/11`) over `[−1.1, −0.9]` was
+  `empty`, while `evaluate()` and the `javascript` target give `−1` at `x = −1`;
+  it is now `[−1.0443, −0.9532]`. The same holds for `x^{0.6000000000000001}`, a
+  negative such exponent, and a root index such as
+  `\sqrt[2.2000000000000006]{x}`. The new routine
+  `_IA.powRealBranch(x, e, oddNumerator)` encloses `±|x|^e` with the float `e`,
+  the value the interpreter computes. An exponent that is the double of its
+  rational (`0.4`, `1/2.2`) still uses `_IA.powRational`.
+
+- A tuple with an absent slot is accepted as the source of `Map`, `Filter`,
+  `Reduce`, `Fold`, `Scan`, `TakeWhile`, `DropWhile`, `FlatMap`, `Any`, `All`,
+  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Dedup` and `Differences`, as a list
+  with an absent element already was. `Map(x ↦ x + 10, t)` with
+  `t: tuple<integer, missing>` was an `incompatible-type` error; it is now typed
+  `list<number>`. An alias of `list<integer | missing>` is accepted there too.
+  The result of these operators and of `Take`, `Reverse`, `Sort` and `Unique`
+  over a source that can be absent as a whole keeps its absent elements in its
+  type: with `w: missing | list<integer | missing>`, `Dedup(w)` was typed
+  `list<number> | missing` and is now `list<integer | missing> | missing`, and
+  `MaxBy(w, …)` is `missing | number`. `Dedup` over a tuple or a list with a
+  stated length is typed `list<…>`: `Dedup([1, 1, 2])` was typed
+  `vector<integer^3>`, which does not hold its value `[1, 2]`.
+
 ## 0.158.0 _2026-10-20_
 
 ### Behavior Changes
 
-- A read past the end of a declared numeric list that holds no element is
-  `NaN`, taken from the declared element type (user decision 2026-10-20). With
-  `E: list<integer>` assigned `[]`, `First(E)`, `Last(E)`, `At(E, 5)` and
-  `E[1]` were `Missing`, which their type `integer | nan` does not hold; they
-  are now `NaN`, as a read past the end of a non-empty numeric list already
-  was. A list of strings, an undeclared `E := []` and the literal `First([])`
-  stay `Missing`.
+- A read past the end of a declared numeric list that holds no element is `NaN`,
+  taken from the declared element type (user decision 2026-10-20). With
+  `E: list<integer>` assigned `[]`, `First(E)`, `Last(E)`, `At(E, 5)` and `E[1]`
+  were `Missing`, which their type `integer | nan` does not hold; they are now
+  `NaN`, as a read past the end of a non-empty numeric list already was. A list
+  of strings, an undeclared `E := []` and the literal `First([])` stay
+  `Missing`.
 
-- A lazy view keeps a `Nothing` result in its own display, and erases it when
-  it becomes a list (user decision 2026-10-20). With
-  `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `m.toString()` was `[1]`
-  while `m` counted 2 elements and `m.at(2)` was `Nothing`; it now prints
-  `[1, Nothing]`. The same holds for `Tabulate`, `Table`, `Scan` and
-  `Iterate`. A list built from the view erases `Nothing` as a list literal
-  does, and its count agrees: `ListFrom(m)`,
-  `m.evaluate({ materialization: true })`, `[...m, 9]`, `ListJoin(m, [9])`,
-  `Sort(m)` and `Tally(m)` hold only `1`, and `Length(Sort(m))` is `1` (it
-  was `3`). A set-kind view does not count `Nothing`:
-  `Map(x ↦ If(x > 1, Nothing, x), Set(1, 2, 3))` has 1 element.
+- A lazy view keeps a `Nothing` result in its own display, and erases it when it
+  becomes a list (user decision 2026-10-20). With
+  `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `m.toString()` was `[1]` while
+  `m` counted 2 elements and `m.at(2)` was `Nothing`; it now prints
+  `[1, Nothing]`. The same holds for `Tabulate`, `Table`, `Scan` and `Iterate`.
+  A list built from the view erases `Nothing` as a list literal does, and its
+  count agrees: `ListFrom(m)`, `m.evaluate({ materialization: true })`,
+  `[...m, 9]`, `ListJoin(m, [9])`, `Sort(m)` and `Tally(m)` hold only `1`, and
+  `Length(Sort(m))` is `1` (it was `3`). A set-kind view does not count
+  `Nothing`: `Map(x ↦ If(x > 1, Nothing, x), Set(1, 2, 3))` has 1 element.
 
 - An overloaded function now accepts a symbol declared `error` that has no
-  value, as a function with one signature does. With `ce.declare('e',
-  'error')` and `ov` declared `((number) -> number) & ((string) -> string)`,
-  `ov(e)` is valid, typed `number | string`, and evaluates to `ov(e)`. Before,
-  it was the error "expected `number | string`, got `error`", while `g(e)` with
-  `g` declared `(number) -> number` was valid. The same applies to a call
-  typed `error` only by its declared result type (`h(2)` with `h` declared
+  value, as a function with one signature does. With `ce.declare('e', 'error')`
+  and `ov` declared `((number) -> number) & ((string) -> string)`, `ov(e)` is
+  valid, typed `number | string`, and evaluates to `ov(e)`. Before, it was the
+  error "expected `number | string`, got `error`", while `g(e)` with `g`
+  declared `(number) -> number` was valid. The same applies to a call typed
+  `error` only by its declared result type (`h(2)` with `h` declared
   `(number) -> error`), and to an overload with a generic arm
   (`((string) -> string) & ((T) -> T where T: number)`, also typed
   `number | string`). An arm whose parameter is a collection (`list`,
@@ -36,21 +79,20 @@
   several clauses selects no clause for it: with `f(a: number) = a + 1` and
   `f(a: string) = "s"`, `f(e)` stays `f(e)`; it was the `no-matching-clause`
   error. A clause whose parameter is typed `error` or `any` is still selected
-  for it. The library operators that have a string form as well as a
-  collection form (`Reverse`, `Sort`, `Take`, `Drop`, `Slice`, `Unique`,
-  `Most`, `Rest`, `RotateLeft`, `RotateRight`, `Permutations`,
-  `Combinations`, `SlidingWindow`, `RandomSample`, `RandomShuffle`,
-  `DeleteAt`, `StringSplit`, `Chunk`) now accept such an argument through
-  their string form: `Reverse(e)` is valid, typed `string`, and evaluates to
-  `Reverse(e)`; it was refused. A parameter typed `unknown` now
-  accepts such an argument on every route: a library operator with the
-  signature `(unknown) -> unknown` and a function literal `(a: unknown) ↦ a`
-  refused it.
+  for it. The library operators that have a string form as well as a collection
+  form (`Reverse`, `Sort`, `Take`, `Drop`, `Slice`, `Unique`, `Most`, `Rest`,
+  `RotateLeft`, `RotateRight`, `Permutations`, `Combinations`, `SlidingWindow`,
+  `RandomSample`, `RandomShuffle`, `DeleteAt`, `StringSplit`, `Chunk`) now
+  accept such an argument through their string form: `Reverse(e)` is valid,
+  typed `string`, and evaluates to `Reverse(e)`; it was refused. A parameter
+  typed `unknown` now accepts such an argument on every route: a library
+  operator with the signature `(unknown) -> unknown` and a function literal
+  `(a: unknown) ↦ a` refused it.
 - A valid call of an overloaded function where no arm is selected is typed by
-  the arms that the call can take at run time. With `r` declared `real` and
-  `G` declared `((T) -> T where T: integer) & ((string) -> string)`, `G(r)` is
-  typed `integer`, as with the ground form `((integer) -> integer) &
-  ((string) -> string)`. It was typed `string`.
+  the arms that the call can take at run time. With `r` declared `real` and `G`
+  declared `((T) -> T where T: integer) & ((string) -> string)`, `G(r)` is typed
+  `integer`, as with the ground form
+  `((integer) -> integer) & ((string) -> string)`. It was typed `string`.
 
 - A sum or a product written with no bounds (`\sum_k f`, `\prod_k f`) runs over
   `k = 1, 2, 3, …` with every method: `evaluate()`, `N()`, `simplify()` and the
@@ -69,39 +111,39 @@
   `\operatorname{}`, and reads back as the same symbol. Before, `x__a` was
   written `x^{a}`, which reads back as the power `Power(x, a)`, and
   `aleph__plus` was written `\aleph^{+}`, which reads back as
-  `PseudoInverse(aleph)`. Now `x__a` is `\operatorname{x^{a}}` and
-  `aleph__plus` is `\operatorname{\aleph^{+}}`. The superscripts and the
-  subscripts are written in the order of the name, with a brace group where
-  the order or valid LaTeX needs one: `x__a_1` is `\operatorname{x^{a}_1}`,
-  `x_1__a` is `\operatorname{{x_1}^{a}}` (it was `x^{a}_1`, the same as
-  `x__a_1`), and two superscripts are nested, `R_doublestruck__0__plus` is
-  `\operatorname{{\mathbb{R}^0}^{+}}` (it was `\mathbb{R^{0,+}}`, which does
-  not parse). A style on the base stays on the base: `x_bold__a` is
-  `\operatorname{\mathbf{x}^{a}}` (it was `\mathbf{x^{a}}`, which reads back
-  as `x__a_bold`). A name with a base of more than one letter is written in
-  `\operatorname{}` too: `mass__earth` is `\operatorname{mass^{earth}}` (it
-  was `\mathrm{mass^{earth}}`, which also read back).
+  `PseudoInverse(aleph)`. Now `x__a` is `\operatorname{x^{a}}` and `aleph__plus`
+  is `\operatorname{\aleph^{+}}`. The superscripts and the subscripts are
+  written in the order of the name, with a brace group where the order or valid
+  LaTeX needs one: `x__a_1` is `\operatorname{x^{a}_1}`, `x_1__a` is
+  `\operatorname{{x_1}^{a}}` (it was `x^{a}_1`, the same as `x__a_1`), and two
+  superscripts are nested, `R_doublestruck__0__plus` is
+  `\operatorname{{\mathbb{R}^0}^{+}}` (it was `\mathbb{R^{0,+}}`, which does not
+  parse). A style on the base stays on the base: `x_bold__a` is
+  `\operatorname{\mathbf{x}^{a}}` (it was `\mathbf{x^{a}}`, which reads back as
+  `x__a_bold`). A name with a base of more than one letter is written in
+  `\operatorname{}` too: `mass__earth` is `\operatorname{mass^{earth}}` (it was
+  `\mathrm{mass^{earth}}`, which also read back).
 - A wildcard name with a style or an accent reads back as the same name: the
   `\_` is inside the style. `_x_bold` is `\operatorname{\mathbf{\_x}}` and
   `_x_hat` is `\operatorname{\hat{\_x}}` (they were
   `\operatorname{\_\mathbf{x}}` and `\operatorname{\_\hat{x}}`, which do not
   parse), and `_x_1_bold` is `\operatorname{\mathbf{\_x_1}}` (it was
   `\operatorname{\_x_{\mathbf{1}}}`, which reads back as `_x_one_bold`).
-- A name with a style on its base and a style after a subscript of digits
-  reads back: `x_bold_1_bold` is `\mathbf{\mathbf{x}_1}` (it was
-  `\mathbf{x}_{\mathbf{1}}`, which reads back as `x_bold_one_bold`). A name
-  with two such subscripts is written in `\operatorname{}`: `x_1_bold_1_bold`
-  is `\operatorname{\mathbf{\mathbf{x_1}_1}}`.
+- A name with a style on its base and a style after a subscript of digits reads
+  back: `x_bold_1_bold` is `\mathbf{\mathbf{x}_1}` (it was
+  `\mathbf{x}_{\mathbf{1}}`, which reads back as `x_bold_one_bold`). A name with
+  two such subscripts is written in `\operatorname{}`: `x_1_bold_1_bold` is
+  `\operatorname{\mathbf{\mathbf{x_1}_1}}`.
 - A symbol whose name has a subscript part that is a symbol (`plus`, `minus`,
-  `star`, `dag`, `circle`, …) is written in `\operatorname{}`, and reads back
-  as the same symbol. Before, `x_plus` was written `x_{+}`, which reads back as
-  `Subplus(x)`; `x_1_plus` was `{x_1}_{+}` (`Subplus(x_1)`), and `x_a_dag`
-  was `{x_{a}}_{\dag}`, which is a parse error. Now they are
-  `\operatorname{x_{+}}`, `\operatorname{{x_1}_{+}}` and
-  `\operatorname{{x_{a}}_{\dag}}`. `x_star` is `\operatorname{x_{\star}}` (it
-  was `x_{\star}`, which also read back). The operators do not change:
-  `Subplus(x)` is still `x_+`. The parser reads `\circ` in a name as `circle`,
-  so `x_{\circ}` is the symbol `x_circle` (it was a parse error).
+  `star`, `dag`, `circle`, …) is written in `\operatorname{}`, and reads back as
+  the same symbol. Before, `x_plus` was written `x_{+}`, which reads back as
+  `Subplus(x)`; `x_1_plus` was `{x_1}_{+}` (`Subplus(x_1)`), and `x_a_dag` was
+  `{x_{a}}_{\dag}`, which is a parse error. Now they are `\operatorname{x_{+}}`,
+  `\operatorname{{x_1}_{+}}` and `\operatorname{{x_{a}}_{\dag}}`. `x_star` is
+  `\operatorname{x_{\star}}` (it was `x_{\star}`, which also read back). The
+  operators do not change: `Subplus(x)` is still `x_+`. The parser reads `\circ`
+  in a name as `circle`, so `x_{\circ}` is the symbol `x_circle` (it was a parse
+  error).
 - A unicode escape in a symbol name stays in the part where it is:
   `x_a____002012` (the parse of `x_{a\unicode{"2012}}`) is written
   `x_{a\unicode{"2012}}`. It was `\operatorname{x\unicode{"2012}_{a}}`, which
@@ -109,9 +151,9 @@
   `x_____002012`, is written `x_{\unicode{"2012}}` (it was `x^{,}_{002012}`,
   which does not parse).
 - A name with the `deg` accent reads back: the parser reads `\degree` in the
-  body of `\mathrm{}` or `\operatorname{}` as the accent, so
-  `\mathrm{x\degree}` is the symbol `x_deg` (it was a parse error). Outside of
-  a name, `x\degree` is still `Degrees(x)`.
+  body of `\mathrm{}` or `\operatorname{}` as the accent, so `\mathrm{x\degree}`
+  is the symbol `x_deg` (it was a parse error). Outside of a name, `x\degree` is
+  still `Degrees(x)`.
 - A subscript of digits with only the `upright` style is written without the
   style: `x_1_upright` is written `x_1` (it was `x_{\mathrm{1}}`, which reads
   back as `x_one`). No spelling reads back as `x_1_upright`, and `x_1` is the
@@ -386,21 +428,6 @@
 
 ### Bug Fixes
 
-- A tuple with an absent slot is accepted as the source of `Map`, `Filter`,
-  `Reduce`, `Fold`, `Scan`, `TakeWhile`, `DropWhile`, `FlatMap`, `Any`, `All`,
-  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Dedup` and `Differences`, as a list
-  with an absent element already was. `Map(x ↦ x + 10, t)` with
-  `t: tuple<integer, missing>` was an `incompatible-type` error; it is now
-  typed `list<number>`. An alias of `list<integer | missing>` is accepted
-  there too. The result of these operators and of `Take`, `Reverse`, `Sort`
-  and `Unique` over a source that can be absent as a whole keeps its absent
-  elements in its type: with `w: missing | list<integer | missing>`,
-  `Dedup(w)` was typed `list<number> | missing` and is now
-  `list<integer | missing> | missing`, and `MaxBy(w, …)` is
-  `missing | number`. `Dedup` over a tuple or a list with a stated length is
-  typed `list<…>`: `Dedup([1, 1, 2])` was typed `vector<integer^3>`, which
-  does not hold its value `[1, 2]`.
-
 - A `Table` whose term assigns a variable gives its list in a function body too:
   `Apply(Function(Block(Table(Block(Assign(a, k), a), (k, 1, 3)))))` gave an
   unevaluated `Tabulate(…)`, and gives `[1, 2, 3]`, as at the top level.
@@ -544,12 +571,12 @@
     constant `c` is the limit of `c^n`: `0` for `|c| < 1`, `\infty` for `c > 1`.
     `evaluate()` and `N()` now give the same values (`\prod_k \frac{1}{2}` is
     `0`; it stayed unevaluated). For `c ≤ -1`, and for a free body (`\prod_k y`
-    simplified to `y^{\infty}`), the product stays as it is. The comparison
-    with 1 uses no tolerance: an exact number is compared exactly, and a float
-    within the engine tolerance of 1 (`1.000000000001`) keeps the product as
-    it is, since the float does not tell on which side of 1 the value is. A
-    body that is not pure (`\mathrm{Random}()`) is not compared, and an empty
-    range (`k` from `\infty` to 5) is not read as an infinite one.
+    simplified to `y^{\infty}`), the product stays as it is. The comparison with
+    1 uses no tolerance: an exact number is compared exactly, and a float within
+    the engine tolerance of 1 (`1.000000000001`) keeps the product as it is,
+    since the float does not tell on which side of 1 the value is. A body that
+    is not pure (`\mathrm{Random}()`) is not compared, and an empty range (`k`
+    from `\infty` to 5) is not read as an infinite one.
   - `\sum_k (1 + xk)` simplified to `\infty`, which is wrong for `x < 0`, and
     `\sum_k kx` to `\infty \cdot x`; both stay as they are. With no free symbol
     the closed form still applies: `\sum_k (1 + 2k)` is `\infty`.
@@ -566,8 +593,8 @@
   stays unevaluated. A sum with a closed form is differentiated through it: the
   derivative of `\sum_{k=1}^{\infty} \frac{x^k}{k!}` is `e^x`, and the
   derivative of `\sum_{k=1}^{\infty} x^{k-1}` is `\frac{1}{(1-x)^2}` when
-  `|x| < 1`. `explain('D')` shows the rewrite of the sum to its closed form as
-  a step before the steps of its derivative. A finite range is still
+  `|x| < 1`. `explain('D')` shows the rewrite of the sum to its closed form as a
+  step before the steps of its derivative. A finite range is still
   differentiated term by term.
 - `compile()` of a sum or a product with no bounds reports the infinite upper
   bound, as for `\sum_{k=1}^{\infty} f`. It reported that the `Nothing` marker
@@ -1151,25 +1178,26 @@
 ### New Features
 
 - `FindFit` takes an optional fifth argument, a dictionary of options. The
-  `global` option, `FindFit(data, model, params, vars, {global: {b: [0.1, 6]}})`,
-  searches the named parameters (at most two) over the given range for the
-  lowest sum of squared residuals, instead of returning the local minimum
-  nearest the start. In the MathJSON `dict` spelling the range is a two-element
-  array. When the model is linear in every other parameter, the range is
-  scanned on a grid, the other parameters are solved by linear least squares at
-  each grid point, and the lowest grid minima are refined by the bounded
-  Levenberg–Marquardt solver; otherwise the solver runs from each point of a
-  coarser grid and the lowest residual wins. The searched parameter stays
-  inside the range; a range is intersected with the parameter's own
-  `(a, a0, lo, hi)` bounds. The result record is unchanged; its `iterations` is
-  the total over every solver run, and a deadline that expires during the
-  search returns the best point found with `timedOut: True`. An unknown option
-  key, a name that is not a parameter, or a range that is not two finite
-  numbers with `lo < hi` is an `unexpected-argument` error. Example: on the five
-  points `(1, 4.3), (3.22, 1.18), (5.27, 0.01), (10.49, 1.48), (7.12, 3.44)`
-  with the model `a\cos(bx+c)+dx+e`, the fit from the default start has period
-  8.0 and a sum of squared residuals of 0.36; with `b` searched over `(0.1, 6)`
-  it has period 2.9 and 0.0057.
+  `global` option,
+  `FindFit(data, model, params, vars, {global: {b: [0.1, 6]}})`, searches the
+  named parameters (at most two) over the given range for the lowest sum of
+  squared residuals, instead of returning the local minimum nearest the start.
+  In the MathJSON `dict` spelling the range is a two-element array. When the
+  model is linear in every other parameter, the range is scanned on a grid, the
+  other parameters are solved by linear least squares at each grid point, and
+  the lowest grid minima are refined by the bounded Levenberg–Marquardt solver;
+  otherwise the solver runs from each point of a coarser grid and the lowest
+  residual wins. The searched parameter stays inside the range; a range is
+  intersected with the parameter's own `(a, a0, lo, hi)` bounds. The result
+  record is unchanged; its `iterations` is the total over every solver run, and
+  a deadline that expires during the search returns the best point found with
+  `timedOut: True`. An unknown option key, a name that is not a parameter, or a
+  range that is not two finite numbers with `lo < hi` is an
+  `unexpected-argument` error. Example: on the five points
+  `(1, 4.3), (3.22, 1.18), (5.27, 0.01), (10.49, 1.48), (7.12, 3.44)` with the
+  model `a\cos(bx+c)+dx+e`, the fit from the default start has period 8.0 and a
+  sum of squared residuals of 0.36; with `b` searched over `(0.1, 6)` it has
+  period 2.9 and 0.0057.
 - `Integrate` gives exact values for more families of definite integrals:
   substitutions that it composes with the existing solver, Beta and Beta-prime
   forms with logarithmic moments, rational functions of trigonometric and

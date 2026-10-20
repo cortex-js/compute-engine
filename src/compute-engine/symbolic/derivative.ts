@@ -2191,11 +2191,105 @@ function containsOperator(expr: Expression, op: string): boolean {
 }
 
 /**
+ * Whether `expr` can depend on the variable `v`.
+ *
+ * `expr.has(v)` sees only the names written in `expr`. A call of a user
+ * function also depends on `v` when the body of the function reads `v`: with
+ * `g := a ↦ a·x`, `g(k)` depends on `x`, and the derivative of the call,
+ * which expands the body (`differentiateUnknownApplication()`), is `k`. So a
+ * call is followed into the body of its function, and into the calls that
+ * this body makes. A function with no known body depends on `v` only through
+ * its arguments, as the chain rule reads it. A function that is being
+ * followed already (a recursive definition) adds nothing new when it is met
+ * again, so it is not followed a second time.
+ *
+ * A bare symbol that names a user function (`h` in `G(h, k)`, where `h` is
+ * passed to `G` as an argument) is followed too, as `differentiate()` expands
+ * it: its body is the function applied to the wildcard `_`.
+ *
+ * The body of a function is found by evaluating the function applied to
+ * wildcards (`userFunctionBody()`). A function that is not pure (its body
+ * draws a random number, or writes a variable) is not evaluated: the
+ * evaluation would run these effects. Such a function may depend on `v`, so
+ * the answer is then `true`, and a bound that calls it keeps the derivative
+ * unevaluated.
+ *
+ * The expression is walked once: each node is visited once, also when it is
+ * shared, and the body of each function (its name and its number of
+ * arguments) is followed once. The names written in the expression are
+ * tested before any body is followed.
+ */
+function dependsOnVariable(expr: Expression, v: string): boolean {
+  const ce = expr.engine;
+  // The nodes already walked, in `expr` and in the bodies followed.
+  const visited = new Set<Expression>();
+  // For each function followed (keyed by its name and its number of
+  // arguments), whether its body depends on `v`. The entry is `false` while
+  // the body is being walked, so that a recursive definition that meets the
+  // function again does not follow it a second time.
+  const followed = new Map<string, boolean>();
+
+  const follow = (name: string, nargs: number, fn?: Expression): boolean => {
+    const key = `${name}/${nargs}`;
+    const known = followed.get(key);
+    if (known !== undefined) return known;
+    followed.set(key, false);
+    fn ??= ce.symbol(name);
+    if (!isUserFunction(fn)) return false;
+    const wildcards =
+      nargs === 1
+        ? [ce.symbol('_')]
+        : Array.from({ length: nargs }, (_, i) => ce.symbol(`_${i + 1}`));
+    // A function with effects is not evaluated to find its body: it may
+    // depend on `v`. A body that is not valid is not known either: with
+    // `G := (f, a) ↦ f(a)·x`, the wildcard `_1` is not a function, so
+    // `G(_1, _2)` evaluates to an `Error` that no longer holds the `x`.
+    let result = true;
+    if (ce.function(name, wildcards).isPure) {
+      const body = userFunctionBody(fn, wildcards);
+      result = body !== undefined && (!body.isValid || walk(body));
+    }
+    followed.set(key, result);
+    return result;
+  };
+
+  const walk = (root: Expression): boolean => {
+    // The functions to follow once the names written in `root` are tested.
+    const calls: { name: string; nargs: number; fn?: Expression }[] = [];
+    const pending: Expression[] = [root];
+    while (pending.length > 0) {
+      const e = pending.pop()!;
+      if (visited.has(e)) continue;
+      visited.add(e);
+      if (isSymbol(e)) {
+        if (e.symbol === v) return true;
+        calls.push({ name: e.symbol, nargs: 1, fn: e });
+        continue;
+      }
+      if (!isFunction(e)) {
+        if (e.has(v)) return true;
+        continue;
+      }
+      if (e.operator === v) return true;
+      calls.push({ name: e.operator, nargs: e.nops });
+      // A store-backed list has only number operands, which never depend on
+      // `v`, so it is not walked (and its elements are not boxed).
+      if (e._numericStore !== undefined) continue;
+      for (const op of e.ops) pending.push(op);
+    }
+    return calls.some(({ name, nargs, fn }) => follow(name, nargs, fn));
+  };
+
+  return walk(expr);
+}
+
+/**
  * The derivative of a `Sum` or a `Product` with respect to `v`.
  *
  * The derivative is computed only when every indexing set is a `Limits`
  * clause (or, for a `Sum`, an `Element` clause) whose bounds, collection and
- * condition do not mention `v`. A bound that depends on `v` changes the set
+ * condition do not depend on `v`, also through a call of a user function
+ * whose body reads `v` (`dependsOnVariable()`). A bound that depends on `v` changes the set
  * of terms with `v`, and a clause with one `Nothing` (absent) bound gives no
  * definite set of terms: the derivative then stays unevaluated
  * (`undefined`). A `Limits` clause with no bounds at all runs over
@@ -2204,7 +2298,8 @@ function containsOperator(expr: Expression, op: string): boolean {
  * When `v` is the index of one of the indexing sets, every `v` in the body is
  * that index, not the variable of differentiation. The operator is then a
  * constant in `v`, and its derivative is 0. The same is true when the body
- * does not mention `v`.
+ * does not depend on `v`: it does not mention `v`, and it calls no user
+ * function whose body reads `v`.
  *
  * `Sum`: the sum rule applied term by term,
  *
@@ -2269,12 +2364,15 @@ function differentiateBigOp(
       isFunction(set, 'Limits') &&
       isSymbol(set.op2, 'Nothing') &&
       isSymbol(set.op3, 'Nothing');
-    if (!noBounds && others.some((x) => isSymbol(x, 'Nothing') || x.has(v)))
+    if (
+      !noBounds &&
+      others.some((x) => isSymbol(x, 'Nothing') || dependsOnVariable(x, v))
+    )
       return undefined;
     indexes.push(index.symbol);
   }
 
-  if (indexes.includes(v) || !body.has(v)) {
+  if (indexes.includes(v) || !dependsOnVariable(body, v)) {
     recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
   }

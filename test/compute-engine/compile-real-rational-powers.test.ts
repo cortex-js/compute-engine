@@ -298,17 +298,103 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     );
   });
 
-  test('interval-js: a decimal exponent that is not the double of its rational keeps `_IA.pow`', () => {
-    // The interpreter takes the sign of `x^0.6000000000000001` from the
-    // rational `3/5` and the magnitude from the float. `powRational(x, 3,
-    // 5)` encloses the value of `x^(3/5)`, which at `x = -32` is exactly
-    // `-8` and excludes `-(32^0.6000000000000001)`.
+  // The interpreter takes the sign of `x^0.6000000000000001` from the
+  // rational `3/5` and the magnitude from the float. `powRational(x, 3, 5)`
+  // encloses the value of `x^(3/5)`, which at `x = -32` is exactly `-8` and
+  // excludes `-(32^0.6000000000000001)`, so such an exponent uses
+  // `powRealBranch`, which encloses `±|x|^e` with the float `e`. `_IA.pow`
+  // was used before, and it is `empty` for a negative base, where the
+  // interpreter and the `javascript` target give the real root.
+  // `0.4545454545454545` is the 16-digit spelling of `5/11` (its double is
+  // `0.45454545454545453`), and `1/2.2000000000000006` is not the double of
+  // `5/11` either. (Tycho ledger row 406.)
+  test.each([
+    [
+      'x^{0.4545454545454545}',
+      '_IA.powRealBranch(_.x, 0.4545454545454545, true)',
+    ],
+    [
+      'x^{0.6000000000000001}',
+      '_IA.powRealBranch(_.x, 0.6000000000000001, true)',
+    ],
+    [
+      'x^{-0.4545454545454545}',
+      '_IA.powRealBranch(_.x, -0.4545454545454545, true)',
+    ],
+    [
+      'x^{0.4000000000000001}',
+      '_IA.powRealBranch(_.x, 0.4000000000000001, false)',
+    ],
+    [
+      '\\sqrt[2.2000000000000006]{x}',
+      '_IA.powRealBranch(_.x, 0.4545454545454544, true)',
+    ],
+  ])(
+    'interval-js: %s, an exponent that is not the double of its rational, encloses the real root',
+    (latex, code) => {
+      const ce = realEngine();
+      const expr = ce.parse(latex);
+      const result = compile(expr, { to: 'interval-js' });
+      expect(result.success).toBe(true);
+      expect(result.code).toBe(code);
+      const js = compile(expr, { constantFold: false });
+      for (const [lo, hi] of [
+        [-1.1, -0.9],
+        [-32, -32],
+        [-2, 3],
+        [0.5, 4],
+      ]) {
+        const out = result.run!({ x: { lo, hi } }) as {
+          kind: string;
+          value?: { lo: number; hi: number };
+        };
+        // A negative exponent has a pole at 0.
+        if (lo < 0 && hi > 0 && latex.includes('{-')) {
+          expect(out.kind).toBe('singular');
+          continue;
+        }
+        expect(out.kind).toBe('interval');
+        for (const x of [lo, (lo + hi) / 2, hi]) {
+          for (const want of [
+            expr.subs({ x: ce.number(x) }).N().re,
+            js.run!({ x }) as number,
+          ]) {
+            expect(out.value!.lo).toBeLessThanOrEqual(want);
+            expect(out.value!.hi).toBeGreaterThanOrEqual(want);
+          }
+        }
+      }
+    }
+  );
+
+  test('interval-js: an exponent that is the double of its rational keeps `powRational`', () => {
     const ce = realEngine();
     const code = (exp: number) =>
       compile(ce.box(['Power', 'x', exp]), { to: 'interval-js' }).code;
-    expect(code(0.6000000000000001)).not.toContain('powRational');
-    expect(code(0.6000000000000001)).toBe('_IA.pow(_.x, 0.6000000000000001)');
     expect(code(0.6)).toBe('_IA.powRational(_.x, 3, 5)');
+    expect(code(0.45454545454545453)).toBe('_IA.powRational(_.x, 5, 11)');
+  });
+
+  // The constant fold reads the emitted code and accepts it only when what
+  // is left after it removes the routine names and the known identifiers is
+  // digits and punctuation. The sign flag `true`/`false` of `powRealBranch`
+  // must be one of the removed identifiers, or a constant base is never
+  // folded.
+  test('interval-js: `powRealBranch` over a constant base folds', () => {
+    const ce = realEngine();
+    const result = compile(ce.box(['Power', -32, 0.4545454545454545]), {
+      to: 'interval-js',
+    });
+    expect(result.success).toBe(true);
+    expect(result.code).not.toContain('powRealBranch');
+    const out = result.run!({}) as {
+      kind: string;
+      value: { lo: number; hi: number };
+    };
+    expect(out.kind).toBe('interval');
+    const want = -(32 ** 0.4545454545454545);
+    expect(out.value.lo).toBeLessThanOrEqual(want);
+    expect(out.value.hi).toBeGreaterThanOrEqual(want);
   });
 
   test('python: Root(x, 2.2) takes the signed real root', () => {

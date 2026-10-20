@@ -179,6 +179,142 @@ describe('the derivative of a Sum', () => {
     expect(result.operator).toBe('D');
   });
 
+  // A term or a bound can read the variable through a call: with
+  // `g := a ↦ a·x`, `g(k)` depends on `x`, although the name `x` is not
+  // written in the sum. The derivative of the call (`D(g(2), x)` is 2)
+  // follows the call into the body of `g`, and the rule for a sum does the
+  // same. (Tycho ledger row 405.)
+  describe('a term or a bound that reads the variable through a call', () => {
+    function engine(): ComputeEngine {
+      const ce = new ComputeEngine();
+      ce.declare('g', 'function');
+      ce.assign('g', ce.box(['Function', ['Multiply', 'a', 'x'], 'a']));
+      ce.declare('w', 'function');
+      ce.assign('w', ce.box(['Function', ['g', ['Add', 'a', 1]], 'a']));
+      ce.declare('h', 'function');
+      ce.assign('h', ce.box(['Function', ['Multiply', 'a', 2], 'a']));
+      ce.declare('N', 'function');
+      ce.assign(
+        'N',
+        ce.box(['Function', ['Floor', ['Multiply', 'a', 'x']], 'a'])
+      );
+      return ce;
+    }
+
+    test('a term that calls a function whose body reads the variable', () => {
+      // Σ_{k=1}^{5} k·x = 15x
+      expect(
+        d(engine(), ['D', ['Sum', ['g', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+      ).toBe('15');
+    });
+
+    test('a call inside the body of the called function', () => {
+      // w(k) = g(k + 1) = (k + 1)·x, and Σ_{k=1}^{5} (k + 1) = 20
+      expect(
+        d(engine(), ['D', ['Sum', ['w', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+      ).toBe('20');
+    });
+
+    test('a function whose body does not read the variable: the derivative is 0', () => {
+      expect(
+        d(engine(), ['D', ['Sum', ['h', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+      ).toBe('0');
+    });
+
+    test('a function with no definition: the derivative is 0', () => {
+      expect(
+        d(engine(), ['D', ['Sum', ['f', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+      ).toBe('0');
+    });
+
+    test('a bound that calls a function whose body reads the variable: the derivative stays unevaluated', () => {
+      const result = engine()
+        .box([
+          'D',
+          [
+            'Sum',
+            ['Cos', ['Multiply', 'i', 'x']],
+            ['Limits', 'i', 1, ['N', 1]],
+          ],
+          'x',
+        ])
+        .evaluate();
+      expect(result.operator).toBe('D');
+    });
+
+    test('a function passed as an argument: its body is followed', () => {
+      // G(g, k) = g(k) = k·x reads `x` only through the bare symbol `g`.
+      // The engine does not differentiate a call of `G` today: it finds the
+      // body of `G` by applying `G` to wildcards, and `_1(_2)` is not valid.
+      // So the derivative stays unevaluated, but it is not the early 0.
+      const ce = engine();
+      ce.declare('G', 'function');
+      ce.assign('G', ce.box(['Function', ['f', 'a'], 'f', 'a']));
+      const result = ce
+        .box(['D', ['Sum', ['G', 'g', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+        .evaluate();
+      expect(result.operator).toBe('D');
+    });
+
+    test('a bound that passes a function as an argument', () => {
+      const ce = engine();
+      ce.declare('G', 'function');
+      ce.assign('G', ce.box(['Function', ['f', 'a'], 'f', 'a']));
+      // G(g, 3) = 3x: the bound depends on `x`
+      const term = ['Multiply', 'k', 'x'];
+      const result = ce
+        .box(['D', ['Sum', term, ['Limits', 'k', 1, ['G', 'g', 3]]], 'x'])
+        .evaluate();
+      expect(result.operator).toBe('D');
+      // G(h, 3) = 6 does not depend on `x`, but the body of `G` applied to
+      // wildcards, `_1(_2)`, is not valid, so the body of `G` is not known
+      // and the bound may depend on `x`: the derivative stays unevaluated.
+      // A bound that calls `h` directly is known: h(3) = 6, and
+      // Σ_{k=1}^{6} k = 21.
+      expect(
+        ce
+          .box(['D', ['Sum', term, ['Limits', 'k', 1, ['G', 'h', 3]]], 'x'])
+          .evaluate().operator
+      ).toBe('D');
+      expect(
+        d(ce, ['D', ['Sum', term, ['Limits', 'k', 1, ['h', 3]]], 'x'])
+      ).toBe('21');
+    });
+
+    test('a function whose body applied to wildcards is not valid may depend on the variable', () => {
+      // With `G2 := (f, a) ↦ f(a)·x`, `G2(_1, _2)` is an `Error` that no
+      // longer holds the `x`, so the body of `G2` is not known. The term
+      // `G2(h, k)` = 2k·x depends on `x`: the derivative is not the early 0.
+      const ce = engine();
+      ce.declare('G2', 'function');
+      ce.assign(
+        'G2',
+        ce.box(['Function', ['Multiply', ['f', 'a'], 'x'], 'f', 'a'])
+      );
+      expect(ce.box(['G2', 'h', 2]).evaluate().toString()).toBe('4x');
+      const result = ce
+        .box(['D', ['Sum', ['G2', 'h', 'k'], ['Limits', 'k', 1, 5]], 'x'])
+        .evaluate();
+      expect(result.toString()).not.toBe('0');
+    });
+
+    test('a bound that calls a function that is not pure: the derivative stays unevaluated', () => {
+      // The body of `r` is not evaluated to test it, since that would draw a
+      // random number. It may depend on `x`.
+      const ce = engine();
+      ce.declare('r', 'function');
+      ce.assign('r', ce.box(['Function', ['RandomInteger', 1, 'a'], 'a']));
+      const result = ce
+        .box([
+          'D',
+          ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, ['r', 5]]],
+          'x',
+        ])
+        .evaluate();
+      expect(result.operator).toBe('D');
+    });
+  });
+
   test('a value assigned to the variable is not substituted', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 5);

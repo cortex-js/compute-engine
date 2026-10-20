@@ -109,6 +109,31 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The derivative of a user-function call: an assigned value of the variable is substituted, and a function passed as an argument is not followed (OPEN, small — found 2026-10-20 by the fix of Tycho ledger rows 405 and 406)
+
+The derivative of a call of a user function finds the body of the function by
+applying it to wildcards and evaluating the call (`userFunctionBody()` in
+`symbolic/derivative.ts`). Two consequences, both measured on 2026-10-20:
+
+- **An assigned value of the variable is substituted.** With `h := a ↦ a·x` and
+  `x := 5`, `D(h(k), x)` is `0`: the evaluation of `h(_)` gives `5·_`. The
+  derivative of a sum written out keeps `x` (`D(Sum(k·x^k, Limits(k, 1, 3)), x)`
+  with `x := 5` is `9x^2 + 4x + 1`, a test of `derivative-big-operator.test.ts`
+  pins it), so the two routes disagree. The result `0` is wrong.
+- **A function passed as an argument is not followed.** With
+  `G := (f, a) ↦ f(a)` and `h` as above, `G(h, k)` evaluates to `k·x`, but
+  `D(G(h, k), x)` stays unevaluated: `G(_1, _2)` is an `Error` (the wildcard
+  `_1` is not a function), so no body is found. For the same reason, the
+  dependency test of a `Sum` term or bound (`dependsOnVariable()`) treats a call
+  of `G` as "may depend on the variable", so
+  `D(Sum(k·x, Limits(k, 1, G(h, 3))), x)` stays unevaluated although the bound
+  is the constant 6.
+
+A substitution of the actual arguments into the function literal would fix both,
+but `subs()` does not replace a parameter used as a function name (`f(a)` with
+`f → h` stays `f(k)`), so it needs an operator-aware substitution first.
+`partialFromFunctionLiteral()`, used for a lazy operator, has the same limit.
+
 ### The type of a lazy view does not include the `Nothing` it yields (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,
@@ -119,8 +144,8 @@ so: `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])` is typed
 element type then disagree (measured 2026-10-20):
 
 - `Filter(m, x ↦ True)` makes `incompatible-type integer nothing` error cells.
-- `Zip(m, [7, 8, 9])` gives `[(1, 7), (8), (9)]`: the tuple erases `Nothing`,
-  so each pair loses its first element.
+- `Zip(m, [7, 8, 9])` gives `[(1, 7), (8), (9)]`: the tuple erases `Nothing`, so
+  each pair loses its first element.
 - `Mean(m)` is an error, while `Max(m)` and `Product(m)` skip `Nothing`;
   `Total(m)` stays unevaluated.
 - A compiled `Map` falls back and returns `[1, null, null]`.
@@ -128,21 +153,20 @@ element type then disagree (measured 2026-10-20):
 Also: `Sort` over a view whose every element is `Nothing`
 (`Sort(Map(x ↦ Nothing, [1, 2]))`) stays unevaluated (as at HEAD before the
 decision), so `IsEmpty` of it stays unevaluated too; it should be `[]`. And
-whether `Ordering(m)` gives the positions of every element of the view (3)
-or of the erased list (1, today) depends on the same question.
+whether `Ordering(m)` gives the positions of every element of the view (3) or of
+the erased list (1, today) depends on the same question.
 
 Question: does the element type of a view include `nothing` when its callback
-can return `Nothing`, and how does each reducer treat a `Nothing` element
-(skip it, as a list literal does, or treat it as an error)?
+can return `Nothing`, and how does each reducer treat a `Nothing` element (skip
+it, as a list literal does, or treat it as an error)?
 
 ### Defects found by the tuple-source fix (OPEN, small — found 2026-10-20; the tuple-source fix itself landed the same day)
 
 Each also occurs on the list route:
 
 - `Any`/`All` are typed `boolean`, but `Any([1, Missing], x ↦ x > 2)` is
-  `Missing` (Kleene logic, locked in `collections-absent.test.ts`); typing
-  the result `boolean | missing` touches Epsil conditions and the compile
-  targets.
+  `Missing` (Kleene logic, locked in `collections-absent.test.ts`); typing the
+  result `boolean | missing` touches Epsil conditions and the compile targets.
 - `FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>` is typed
   `list<number>`, but its value is `[1, 1, Missing, Missing]`.
 - `Map(F, c)` and `Filter(c, …)` with `c: missing | list<integer>` print as
@@ -150,53 +174,52 @@ Each also occurs on the list route:
   `[11, 12]`.
 - At a lazy source, `list<missing>` is accepted (`Map` gives `[NaN]`) but
   `tuple<missing, missing>` is refused.
-- `collectionElementType(tuple<unknown, missing>)` widens to `missing`, so
-  that tuple is still refused.
+- `collectionElementType(tuple<unknown, missing>)` widens to `missing`, so that
+  tuple is still refused.
 - `Insert`, `ReplaceAt`, `RangeOf`, `ContainsSequence`, `StartsWith` and
   `EndsWith` are invalid with a bare `tuple` source (`Insert(tb, 1, 5)`).
-- The kind of result of `Dedup`/`Filter` over a source declared
-  `… | string` depends on how the symbol holds its string: a string literal
-  gives a list of characters, an application that evaluates to a string
-  gives a string. The type covers both (`list<character> | string`), but the
-  result kind should not depend on how the value is held.
-- A source typed `missing | string` is an `incompatible-type` error at
-  `Dedup`, `Filter` and `Map`, on the box and Epsil routes, while
-  `missing | list<…>` is admitted.
+- The kind of result of `Dedup`/`Filter` over a source declared `… | string`
+  depends on how the symbol holds its string: a string literal gives a list of
+  characters, an application that evaluates to a string gives a string. The type
+  covers both (`list<character> | string`), but the result kind should not
+  depend on how the value is held.
+- A source typed `missing | string` is an `incompatible-type` error at `Dedup`,
+  `Filter` and `Map`, on the box and Epsil routes, while `missing | list<…>` is
+  admitted.
 - `Map(x ↦ x + 10, q)` with `q: P` (an alias of `tuple<integer, missing>`) is
-  typed `collection<number>`, where the written-out tuple gives
-  `list<number>`: `Map`'s tuple check does not resolve the alias.
+  typed `collection<number>`, where the written-out tuple gives `list<number>`:
+  `Map`'s tuple check does not resolve the alias.
 - `Filter` and `Dedup` over a dictionary (alone or as a union arm) are typed
-  `dictionary<integer>`, but the value is a view that prints as
-  `Set(("a", 1))` and lists as `list<tuple<string, integer>>`, which the
-  dictionary type does not hold.
+  `dictionary<integer>`, but the value is a view that prints as `Set(("a", 1))`
+  and lists as `list<tuple<string, integer>>`, which the dictionary type does
+  not hold.
 
 ### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
 `x: list` (values only) assigned `[1, Missing]` is accepted, and `x` is then
-typed `list<integer | missing>`, which is not a subtype of the declared
-`list`; `t: tuple := TupleFrom(L)` with an absent slot is accepted the same
-way. The assignment check does not apply the subtype test that the
-declaration states. Either the check must refuse such a value, or the
-declaration must be read as admitting it (see
-`docs/plans/2026-10-20-bare-tuple-record-any.md`).
+typed `list<integer | missing>`, which is not a subtype of the declared `list`;
+`t: tuple := TupleFrom(L)` with an absent slot is accepted the same way. The
+assignment check does not apply the subtype test that the declaration states.
+Either the check must refuse such a value, or the declaration must be read as
+admitting it (see `docs/plans/2026-10-20-bare-tuple-record-any.md`).
 
 ### Two more subtype-relation gaps (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
 - `any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`
   (`broadcastable<any>` is a mutual subtype of both `any` and `unknown`).
-- `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`,
-  but `tuple<integer>` is not `<: broadcastable<integer>`; the same for
+- `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`, but
+  `tuple<integer>` is not `<: broadcastable<integer>`; the same for
   `matrix<integer>`.
 
 ### The type-variable solver binds nothing for an operand typed with an alias (OPEN, small — found 2026-10-20 by the review of the tuple-source fix)
 
 With `ce.declareType('L', 'list<integer | missing>', { alias: true })` and
 `a: L := [3, Missing]`, `Sort(a)` is typed `list<unknown>`; the value
-`[3, Missing]` is `list<integer | missing>`, which that type excludes. Also
-with no absent element: `Q = list<integer>` (alias), `b: Q`, `Sort(b)` is
+`[3, Missing]` is `list<integer | missing>`, which that type excludes. Also with
+no absent element: `Q = list<integer>` (alias), `b: Q`, `Sort(b)` is
 `list<unknown>` (sound, but the element type is lost). The written-out type
-gives `list<integer | missing>`. An alias operand should be unfolded before
-the polytype solve.
+gives `list<integer | missing>`. An alias operand should be unfolded before the
+polytype solve.
 
 ### `Total` builds an unreduced `any | unknown` element type (OPEN, small — found 2026-10-20 by the same review)
 
@@ -208,12 +231,12 @@ absorption, not by the element type itself.
 ### Two subtype-relation gaps found by the transitivity check (OPEN, small — found 2026-10-20 by the same prototype)
 
 - Five transitivity violations through a record with an extra field of type
-  `any`: `record{a: integer, b: any} <: record{a: integer} <: dictionary`,
-  but the first is not `<: dictionary` (record-to-record allows extra
-  fields, record-to-dictionary checks every field).
+  `any`: `record{a: integer, b: any} <: record{a: integer} <: dictionary`, but
+  the first is not `<: dictionary` (record-to-record allows extra fields,
+  record-to-dictionary checks every field).
 - Fifteen `couldMatch` answers are `false` although the two types share a
-  subtype: tuples with an `any` slot against `indexed_collection` and
-  similar (`indexed_collection` vs `tuple<any>`).
+  subtype: tuples with an `any` slot against `indexed_collection` and similar
+  (`indexed_collection` vs `tuple<any>`).
 
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
@@ -229,16 +252,17 @@ on 2026-10-19:
 - `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
   call with two arguments, gets no answer, and falls back to `list<any>`: sound
   but imprecise.
-- TABLED 2026-10-20 (design note `docs/plans/2026-10-20-bare-tuple-record-any.md`,
-  options A and B measured; the user is thinking it over; earlier: a design note for making bare
-  `tuple` and `record` accept any tuple or record, absent slots included;
-  `missing` stays opt-in everywhere else): `TupleFrom(L)` and `Join` of
-  records answer the bare `tuple` and
-  `record`, but the value can be `tuple<integer, missing, integer>` or
-  `record{a: missing}`. No type means "a tuple (or record) of any length whose
-  slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
-  new spelling for that type or a wider answer (`indexed_collection<any>`,
-  `any`), which loses the information that the value is a tuple.
+- TABLED 2026-10-20 (design note
+  `docs/plans/2026-10-20-bare-tuple-record-any.md`, options A and B measured;
+  the user is thinking it over; earlier: a design note for making bare `tuple`
+  and `record` accept any tuple or record, absent slots included; `missing`
+  stays opt-in everywhere else): `TupleFrom(L)` and `Join` of records answer the
+  bare `tuple` and `record`, but the value can be
+  `tuple<integer, missing, integer>` or `record{a: missing}`. No type means "a
+  tuple (or record) of any length whose slots may be absent": `tuple<any>` is a
+  one-slot tuple. A fix needs either a new spelling for that type or a wider
+  answer (`indexed_collection<any>`, `any`), which loses the information that
+  the value is a tuple.
 - DESIGN (user decision 2026-10-20: a design item, not a small fix): a `missing`
   arm for an access over `any` or `unknown` elements. `First(W)` with
   `W: list<any> := []` is typed `unknown`, but evaluates to `Missing`. Making

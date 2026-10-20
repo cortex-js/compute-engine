@@ -2872,18 +2872,22 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // `powRational` encloses the value of the rational power `x^(p/q)`,
       // which is the interpreter's value only when the literal is the double
       // nearest to `p/q` (`0.4`, `0.6`, `1/2.2`). Any other literal that
-      // reads as `p/q` (`0.6000000000000001`, read as `3/5`) keeps `_IA.pow`:
-      // at `x = −32`, `powRational(x, 3, 5)` is exactly `[−8, −8]`, which
-      // excludes the interpreter's value `−(32^0.6000000000000001)`, which is
-      // `−8.000000000000002`.
+      // reads as `p/q` (`0.6000000000000001`, read as `3/5`, or the
+      // 16-digit `0.4545454545454545`, read as `5/11`) uses
+      // `powRealBranch`, which encloses `±|x|^e` with the float `e`, as
+      // the interpreter and the `javascript` target compute it. At `x = −32`,
+      // `powRational(x, 3, 5)` is exactly `[−8, −8]`, which excludes the
+      // interpreter's value `−(32^0.6000000000000001)`, which is
+      // `−8.000000000000002`; `_IA.pow` is `empty` for a negative base.
       const floatPower = exp.isExact
         ? undefined
         : BaseCompiler.negativeBaseFloatPower(args);
-      if (
-        typeof floatPower === 'object' &&
-        floatPower.terms[0] / floatPower.terms[1] === expVal
-      )
-        return `_IA.powRational(${compile(base)}, ${floatPower.terms[0]}, ${floatPower.terms[1]})`;
+      if (typeof floatPower === 'object') {
+        const [p, q] = floatPower.terms;
+        return p / q === expVal
+          ? `_IA.powRational(${compile(base)}, ${p}, ${q})`
+          : `_IA.powRealBranch(${compile(base)}, ${expVal}, ${floatPower.oddNumerator})`;
+      }
       return `_IA.pow(${compile(base)}, ${expVal})`;
     }
     // Variable exponent - use powInterval
@@ -2909,13 +2913,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // computes the magnitude with the float exponent `1/n`, and
       // `powRational` encloses the value of `x^(p/q)`: the two agree only
       // when `1/n` is the double nearest to `p/q`, as for the `Power`
-      // exponent above. Otherwise the degree keeps `_IA.pow`.
+      // exponent above. Otherwise `powRealBranch` encloses `±|x|^(1/n)`
+      // with the float `1/n`, the value the interpreter computes.
       const realRoot = BaseCompiler.realRootDegreeTerms(exp);
-      if (
-        realRoot !== undefined &&
-        (exp.isExact || realRoot.terms[0] / realRoot.terms[1] === 1 / exp.re)
-      )
-        return `_IA.powRational(${compile(arg)}, ${realRoot.terms[0]}, ${realRoot.terms[1]})`;
+      if (realRoot !== undefined) {
+        const [p, q] = realRoot.terms;
+        if (exp.isExact || p / q === 1 / exp.re)
+          return `_IA.powRational(${compile(arg)}, ${p}, ${q})`;
+        return `_IA.powRealBranch(${compile(arg)}, ${1 / exp.re}, ${realRoot.oddNumerator})`;
+      }
       // Non-integer degree: nth root = x^(1/n).
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
@@ -4283,6 +4289,7 @@ const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
   'pow',
   'powInterval',
   'powRational',
+  'powRealBranch',
   'nthRoot',
   'exp',
   'ln',
@@ -4345,7 +4352,8 @@ const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
 /**
  * What may remain of a constant subtree's code once every `_IA.<routine>`
  * reference, every admitted `Math` member (`FOLDABLE_MATH_MEMBERS`),
- * `Number.EPSILON`, `Infinity`, `NaN` and the field names of an
+ * `Number.EPSILON`, `Infinity`, `NaN`, the boolean literals `true` and
+ * `false` (the sign flag of `powRealBranch`) and the field names of an
  * already-folded literal (`kind`, `'interval'`, `value`, `lo`, `hi`) are
  * removed: digits, the exponent letters of a numeric literal, the arithmetic a
  * constant's own spelling uses (`GoldenRatio` is `(1 + Math.sqrt(5)) / 2`),
@@ -4532,7 +4540,7 @@ function evaluateConstantIntervalCode(
     .replace(FOLDABLE_MATH_MEMBERS, '')
     .replace(/Number\.EPSILON/g, '')
     .replace(
-      /\bInfinity\b|\bNaN\b|'interval'|\bkind\b|\bvalue\b|\blo\b|\bhi\b/g,
+      /\bInfinity\b|\bNaN\b|\btrue\b|\bfalse\b|'interval'|\bkind\b|\bvalue\b|\blo\b|\bhi\b/g,
       ''
     );
   if (!admissible || !applies || !FOLDABLE_INTERVAL_RESIDUE.test(residue))

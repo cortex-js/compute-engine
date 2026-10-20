@@ -12,6 +12,7 @@ import {
   containsZero,
   isNegative,
   unwrapOrPropagate,
+  unionResults,
   liftJump,
   jump,
 } from './util.js';
@@ -397,6 +398,48 @@ function powRationalRaw(
   // is the rounded `div`, whose prover keeps an exact quotient exact, and it
   // reports the pole or the domain clip of a root that reaches 0.
   return div(POINT_ONE, pow(root, -p));
+}
+
+/**
+ * `base^e` for a FLOAT exponent `e` that the interpreter reads as a rational
+ * `p/q` with an ODD denominator, with the value the interpreter and the
+ * `javascript` target compute: `x^e` for `x ≥ 0`, and the real root
+ * `±|x|^e` for `x < 0`, negative when `p` is odd (`oddNumerator`). The
+ * magnitude uses the float `e` itself, not `p/q`.
+ *
+ * `powRational(base, p, q)` encloses `x^(p/q)` instead. The two values differ
+ * when `e` is not the double nearest to `p/q`: `x^{0.4545454545454545}` (16
+ * digits) is read as `5/11`, but the double of `5/11` is
+ * `0.45454545454545453`, and at `x = −32` the interpreter gives
+ * `−32^0.4545454545454545`, which the exact point that `powRational` gives
+ * for `5/11` does not contain. The compiler uses this routine for such an
+ * exponent, and `powRational` when `e` is the double of `p/q`.
+ *
+ * The enclosure is the hull of the two sides of 0, each computed by the
+ * rounded `pow` over the magnitude `|x|`; the negation and the hull compute
+ * no new real number, so this routine takes no step of its own, as
+ * `powRationalRaw` takes none. A negative exponent over a base that reaches
+ * below 0 and up to 0 or above has a pole at the origin, which is reported
+ * as for `powRationalRaw`.
+ */
+function powRealBranchRaw(
+  base: Interval | IntervalResult,
+  e: number,
+  oddNumerator: boolean
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(base);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [b] = unwrapped;
+  if (b.lo >= 0) return pow(ok(b), e);
+  if (e < 0 && b.hi >= 0) return { kind: 'singular', at: 0 };
+  // The magnitude over the negative part of the base, `|x|` for `x` in
+  // `[b.lo, min(b.hi, 0)]`.
+  const magnitude = pow(ok({ lo: Math.max(0, -b.hi), hi: -b.lo }), e);
+  const m = getValue(magnitude);
+  if (m === undefined) return magnitude;
+  const negativeSide = oddNumerator ? ok({ lo: -m.hi, hi: -m.lo }) : magnitude;
+  if (b.hi <= 0) return negativeSide;
+  return unionResults(negativeSide, pow(ok({ lo: 0, hi: b.hi }), e));
 }
 
 /**
@@ -1928,7 +1971,11 @@ export const powInterval = liftJump(
 // - `powRational` is built from the ROUNDED `nthRoot`, `pow` and `div` — see
 //   the comment on `powRationalRaw` for why a step at its export cannot bound
 //   its error.
+//
+// `powRealBranch` takes no step either: it is built from the rounded `pow`,
+// and adds only a negation and a hull, which compute no new real number.
 export const powRational = liftJump(powRationalRaw);
+export const powRealBranch = liftJump(powRealBranchRaw);
 export const nthRoot = liftJump(nthRootRaw);
 export const exp = liftJump(
   outwardUnlessExact(expRaw, exactInRange(0, Infinity))
