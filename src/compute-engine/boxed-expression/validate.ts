@@ -4114,19 +4114,18 @@ export function validateArguments(
   // position whose type variable the solver absorbed (see `unheldErrorIdx`
   // above). The operand is checked against the parameter with each absorbed
   // variable read at its declared bound, or at `any` when the variable has
-  // no bound. A parameter that accepts the type `error` (`any`, or `error`
-  // itself) admits the operand. Any other parameter refuses it: `(T) -> T
-  // where T: number` applied to `e` (declared `error`, with no value)
-  // reports "expected `number`, got `error`".
-  //
-  // This refusal is stricter than the ground route. The per-position checks
-  // above admit the same `e` at a ground scalar parameter such as `number`
-  // or `string`, because `typesOverlap()` reports that `error` overlaps
-  // every type (`overlapAdmission()`). `checkNumericArgs()` also passes
-  // every valid operand of type `error` to a library numeric operator. So
-  // `(number) -> number` applied to `e` and `Sqrt(e)` are valid and
-  // evaluate to themselves. A ground collection parameter such as `list`
-  // refuses `e`.
+  // no bound, by the same rule as the ground route:
+  // - a parameter that accepts the type `error` (`any`, or `error` itself)
+  //   admits the operand;
+  // - a scalar parameter such as `number`, `string` or `boolean` admits it,
+  //   because `typesOverlap()` reports that `error` overlaps every type
+  //   (`overlapAdmission()`). So `(T) -> T where T: number` applied to `e`
+  //   (declared `error`, with no value) is valid and evaluates to itself, as
+  //   `(number) -> number` applied to `e` and `Sqrt(e)` do;
+  // - a collection parameter (`T: list`, `T: indexed_collection`) refuses
+  //   it, as the ground parameter `list` does, because `overlapAdmission()`
+  //   does not apply to the parameters that the runtime conformance check
+  //   does not police.
   if (unheldErrorIdx.size > 0 && solved && polyArm) {
     const patterns = parameterPositions(polyArm, ops.length);
     const atBounds: Record<string, Type> = { ...solved.bindings };
@@ -4140,8 +4139,26 @@ export function validateArguments(
         (pattern !== undefined
           ? instantiatedParam(pattern, atBounds)
           : undefined) ?? 'any';
+      const op = ops[idx];
       if (isSubtype('error', expected)) continue;
-      result[idx] = ce.typeError(expected, ops[idx]?.type, ops[idx]);
+      // The admission on overlap, deferred as in the per-position checks.
+      // Never in an overload trial, the second pass (`overlapTrial`)
+      // included: there the overload prefilter (`prefilterAdmits()`,
+      // `overload.ts`) refuses the operand at a ground arm such as
+      // `(number) -> number`, because `error` is disjoint from `number`, but
+      // it admits it at a generic arm, whose absorbed variable reads
+      // `unknown`. Admitting it here would make `((string) -> string) &
+      // ((T) -> T where T: number)` accept `e` while `((string) -> string) &
+      // ((number) -> number)` refuses it.
+      if (
+        op !== undefined &&
+        !internals?.trial &&
+        overlapAdmission(op, expected)
+      ) {
+        deferredIdx.add(idx);
+        continue;
+      }
+      result[idx] = ce.typeError(expected, op?.type, op);
       isValid = false;
     }
   }

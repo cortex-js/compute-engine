@@ -452,7 +452,7 @@ describe('CANONICAL FORMS', () => {
        */
       expect(checkPower('{-j/4}^1')).toMatchInlineSnapshot(`
         box        = ["Power", ["Divide", ["Negate", "j"], 4], 1]
-        canonForms = ["Power", ["Divide", ["Negate", "j"], 4], 1]
+        canonForms = ["Divide", ["Negate", "j"], 4]
         canonical  = ["Multiply", ["Rational", -1, 4], "j"]
       `);
     });

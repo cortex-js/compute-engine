@@ -42,6 +42,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import {
   NUMERIC_CANONICAL_NAMES,
   canonicalNumericOperator,
+  canonicalProductOperands,
 } from './canonical-numeric.js';
 import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 
@@ -4304,10 +4305,17 @@ function makeNumericFunction(
   // operator (user decision 2026-10-01).
   if (shadowsLibraryName(ce, name) && !keepsNumericCanonicalForm(ce, name))
     return null;
+  // The factors of a nested product are spliced before they are sorted, so
+  // that the outer product orders all its factors at once (see
+  // `canonicalProductOperands()`).
+  const productOps =
+    name === 'Multiply'
+      ? canonicalProductOperands(ce, semiOps, scope)
+      : undefined;
   const result = canonicalNumericOperator(
     ce,
     name,
-    semiCanonical(ce, semiOps, scope),
+    productOps ?? semiCanonical(ce, semiOps, scope),
     metadata
   );
   return result === null ? null : withSourceOffsets(result, metadata);

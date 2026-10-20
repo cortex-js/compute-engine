@@ -8,15 +8,14 @@ import { isSymbol } from './type-guards.js';
  * (`validateArguments()`) passes such an operand through at every
  * parameter and does not replace it with a new `incompatible-type` error.
  * Overload resolution lets it through every arm, and the conditions of `If`
- * and `Which` pass it through too.
- *
- * The callback slots of the library collection operators do not pass it
- * through yet: `Map(w, xs)` and `Filter(xs, w)` still give "expected
- * `function`, got `error`" (`canonicalCallbackOperand()`,
- * `library/collections.ts`).
+ * and `Which` pass it through too. The callback parameters of the lazy
+ * collection operators pass it through (`canonicalCallbackOperand()`,
+ * `library/collections.ts`), and the evaluation of the call gives its error
+ * (`heldErrorCallback()`, `boxed-function.ts`): `Filter(xs, w)` and
+ * `Map(w, xs)` are the error of `w`.
  *
  * Only a symbol can qualify. Other operands of type `error` are not passed
- * through:
+ * through as an error:
  * - An inline error expression (`Ln("a")` at boxing) is invalid, and the
  *   checks for an invalid operand handle it.
  * - A valid application whose type is `error` (`g(2)` after
@@ -25,8 +24,8 @@ import { isSymbol } from './type-guards.js';
  *   value: with no body, `g(2)` evaluates to itself.
  * - A symbol declared `error` with no value (`ce.declare('e', 'error')`)
  *   evaluates to itself, not to an error.
- * A parameter that does not accept the type `error` refuses these operands
- * (see {@link isErrorTypedWithoutErrorValue}).
+ * These operands are checked as ordinary operands of type `error` (see
+ * {@link isErrorTypedWithoutErrorValue}).
  *
  * This predicate is in its own file because `validate.ts` imports
  * `overload.ts`, and both use it.
@@ -41,7 +40,12 @@ export function isErrorTypedOperand(op: Expression): boolean {
  * hold an error value: a symbol declared `error` with no value
  * (`ce.declare('e', 'error')`), or an application whose declared result
  * type is `error`. The type checks treat it as an ordinary operand of type
- * `error`, so a parameter that does not accept `error` refuses it. See
+ * `error`. The type `error` overlaps every type, so a scalar parameter
+ * (`number`, `boolean`, `T` with `T: number`) and the condition of `If`
+ * admit it, and the call evaluates to itself. A collection parameter
+ * (`list`, `T` with `T: list`) refuses it, and so does a parameter typed
+ * `unknown` of a library operator or of a function literal (the declared
+ * signature `(unknown) -> unknown` of a function name admits it). See
  * {@link isErrorTypedOperand}.
  */
 export function isErrorTypedWithoutErrorValue(op: Expression): boolean {

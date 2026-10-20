@@ -29,6 +29,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { displayDigits } from '../numeric-value/big-numeric-value.js';
 
 import { order } from './order.js';
+import { mayBeMatrixPowerBase } from './matrix-operand.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import type {
   IComputeEngine as ComputeEngine,
@@ -196,7 +197,12 @@ function structuralNumeratorDenominator(
         // A float exponent (`x^{-1.0}`) is kept: `1/x` would read back
         // with the exact exponent `-1`
         const n = isNumber(exp) && exp.isExact ? asSmallInteger(exp) : null;
-        if (n === -1) denominator.push(base);
+        // A negative integer power of a base that can be a matrix stays in
+        // the numerator: it is the matrix inverse when the base is a matrix
+        // (see `mayBeMatrixPowerBase()`)
+        if (n !== null && n < 0 && mayBeMatrixPowerBase(base))
+          numerator.push(arg);
+        else if (n === -1) denominator.push(base);
         else if (n !== null && n < 0)
           denominator.push(
             ce._fn('Power', [base, ce.number(-n)], { canonical: false })
@@ -399,12 +405,16 @@ function serializePrettyJsonFunction(
       // A number literal raised to a negative integer other than -1 keeps
       // its power form (`10^{-30}`, `2^{-3}`): the quotient would compute
       // the denominator (`\frac{1}{1\cdot10^{30}}`), which parses back as
-      // the rational `1/10^30`, not as the power `10^-30`.
+      // the rational `1/10^30`, not as the power `10^-30`. A negative
+      // integer power of a base that can be a matrix (`g(x)^{-1}`) is not
+      // written as a quotient either, which is element-wise for a matrix
+      // (see `mayBeMatrixPowerBase()`).
       if (
         exp !== null &&
         exp < 0 &&
         !exclusions.includes('Divide') &&
-        !(exp !== -1 && isNumber(args[0]))
+        !(exp !== -1 && isNumber(args[0])) &&
+        !mayBeMatrixPowerBase(args[0])
       ) {
         return serializeJsonFunction(
           ce,

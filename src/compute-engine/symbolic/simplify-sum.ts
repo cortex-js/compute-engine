@@ -12,6 +12,12 @@ import { asFloat } from '../boxed-expression/float-result.js';
  */
 export function simplifySum(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Sum')) return undefined;
+  // The rules below read only the first indexing clause, and the sums they
+  // build keep only that clause. With more than one clause
+  // (`Sum(i·j, Limits(i, 1, 3), Limits(j, 1, 2))`), the other indexes would
+  // be read as free symbols and their clauses lost (that sum gave `6j`, not
+  // 18), so the sum stays as it is.
+  if (x.nops > 2) return undefined;
 
   const body = x.op1;
   const limits = x.op2;
@@ -40,6 +46,13 @@ export function simplifySum(x: Expression): RuleStep | undefined {
       return { value: newSum, because: 'simplified nested sum/product' };
     }
   }
+
+  // A `Nothing` bound is an absent bound, not a value. With no bounds
+  // (`\sum_k f`, `Limits(k, Nothing, Nothing)`) the sum runs over the default
+  // domain; with one bound only (`\sum_{k=1} f`) it has no value. The rules
+  // below substitute the bounds into a closed form, so the sum stays as it
+  // is, as it does under `evaluate()` and `N()`.
+  if (sym(lower) === 'Nothing' || sym(upper) === 'Nothing') return undefined;
 
   // Handle numeric bounds edge cases
   if (isNumber(lower) && isNumber(upper)) {

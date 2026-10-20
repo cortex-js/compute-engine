@@ -135,9 +135,11 @@ describe('UNIT CONVERSION OF AN EXACT MAGNITUDE', () => {
         ['Divide', 'km', 'h'],
       ])
     ).toBe('1.2 km/h');
+    // A sum with a temperature that has an offset is a sum in kelvin, with
+    // the exact offset of the unit, so it stays exact: 5883/20 is 294.15.
     expect(
       evaluate(['Add', ['Quantity', 20, 'degC'], ['Quantity', 1, 'K']])
-    ).toBe('294.15 K');
+    ).toBe('5883/20 K');
   });
 });
 

@@ -32,11 +32,11 @@ import {
   convertUnit,
   unitConversionCoefficients,
   convertCompoundUnit,
-  exactUnitConversion,
   dimensionsEqual,
   isDimensionless,
   getExpressionScale,
   getExpressionDimension,
+  exactUnitConversion,
   flattenUnitFactors,
   cancelUnitFactors,
   unitExpressionFromFactors,
@@ -191,10 +191,18 @@ function divideMagnitudes(
  * Add Quantity expressions.  All operands must be Quantities with
  * compatible dimensions.  The result uses the unit with the largest
  * scale factor (e.g. `m` wins over `cm`, `km` wins over `m`).
+ *
+ * A sum with a temperature unit that has an offset (`degC`, `degF`) is a
+ * sum in kelvin (see `kelvinSum()`).
+ *
+ * `rawOps`, when given, are the operands as written, one for each operand of
+ * `ops`, in order. They tell which operands are negated (`Negate(…)`), which
+ * matters for a temperature with an offset.
  */
 export function quantityAdd(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  rawOps?: ReadonlyArray<Expression>
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
@@ -209,6 +217,14 @@ export function quantityAdd(
     unitExprs.push(ue);
   }
   if (quantities.length === 0) return undefined;
+
+  if (unitExprs.some((ue) => isOffsetTemperatureUnit(ue))) {
+    const negated = quantities.map(
+      (_, i) =>
+        rawOps?.length === ops.length && isNegatedOperand(rawOps[i])
+    );
+    return kelvinSum(ce, quantities, unitExprs, negated);
+  }
 
   // Find the unit with the largest scale factor
   let bestIdx = 0;
@@ -282,6 +298,125 @@ export function quantityAdd(
   // A float magnitude makes the sum a float, also when its value is an
   // integer.
   return ce._fn('Quantity', [asFloat(ce.number(total)), bestQ.op2]);
+}
+
+/**
+ * True when `ue` is a unit symbol of temperature with an offset: its zero is
+ * not the zero of the kelvin scale (`0 degC` is `273.15 K`). The unit table
+ * has two such units, `degC` and `degF`.
+ */
+function isOffsetTemperatureUnit(
+  ue: ReturnType<typeof boxedToUnitExpression>
+): boolean {
+  if (typeof ue !== 'string') return false;
+  const zero = convertUnit(0, ue, 'K');
+  return zero !== null && zero !== 0;
+}
+
+/**
+ * True when the operand `op`, as written in a sum, is a negated term: a
+ * `Negate(…)`, or a product whose coefficient is a negative real number. The
+ * canonical form puts the number coefficient of a product first: `a − b` is
+ * `Add(Negate(b), a)`, `a − 2b` is `Add(Multiply(-2, b), a)` and `a − b/2` is
+ * `Add(Multiply(-1/2, b), a)`.
+ */
+function isNegatedOperand(op: Expression | undefined): boolean {
+  if (op === undefined) return false;
+  if (op.operator === 'Negate') return true;
+  if (!isFunction(op, 'Multiply')) return false;
+  const c = op.ops[0];
+  return c !== undefined && isNumber(c) && c.im === 0 && c.re < 0;
+}
+
+/**
+ * The sum of the temperature quantities `quantities`, of which at least one
+ * has a unit with an offset (`degC`, `degF`), as a quantity in kelvin.
+ *
+ * The value of a temperature with an offset depends on the zero of its
+ * scale, so the sum of the magnitudes in that scale is not the sum of the
+ * temperatures: `0 degC + 0 degF` is not `-17.78 degC`. Each operand is
+ * converted to kelvin, with its offset, and the values in kelvin are added:
+ * `0 degC + 0 degF` is `273.15 K + 255.372… K`, that is `47567/90 K`. Two
+ * temperatures in `degC` give a value in kelvin too: `10 degC + 10 degC` is
+ * `566.3 K`.
+ *
+ * A negated operand (`negated[i]`, see `isNegatedOperand()`) is the negation
+ * of a temperature: `Negate(T)`, or `c·T` with a negative number `c`, which
+ * is the negation of the temperature `|c|·T` (a scalar multiple of a
+ * temperature keeps its unit: `2 · 10 degC` is `20 degC`). Its evaluated
+ * magnitude `e` is the negation of the magnitude `m` of that temperature. It
+ * is converted to kelvin first and then negated: its value is
+ * `−(k·m + c) = k·e − c`, with `k` the factor and `c` the offset of the
+ * conversion to kelvin. So a difference of two temperatures is a difference
+ * of their values in kelvin: `20 degC − 10 degC` is `10 K`, and
+ * `20 degC − 2 · 10 degC` is `0 K`.
+ *
+ * The value of the sum is `Σ kᵢ·eᵢ + Σ ±cᵢ`. The factors `kᵢ` and the offsets
+ * `cᵢ` are exact fractions (`exactUnitConversion()`), and the signed offsets
+ * are added as fractions, once: for a difference they cancel exactly. So an
+ * exact magnitude stays exact, and for a float magnitude the offsets add no
+ * rounding error (`20.1 degC − 10 degC` is `10.1 K`). A `Measurement`
+ * magnitude is scaled by the exact factor with the `Measurement` combinators,
+ * which scale its error too.
+ *
+ * Returns `undefined` when an operand is not a temperature.
+ */
+function kelvinSum(
+  ce: ComputeEngine,
+  quantities: ReadonlyArray<QuantityExpr>,
+  unitExprs: ReadonlyArray<ReturnType<typeof boxedToUnitExpression>>,
+  negated: ReadonlyArray<boolean>
+): Expression | undefined {
+  // A unit name is not a variable: it must not be declared in the current
+  // scope.
+  const kelvin = ce.symbol('K', { autoDeclare: false });
+
+  // The factor of the conversion of each operand to kelvin, and the sum of
+  // the signed offsets, as exact fractions.
+  const factors: [bigint, bigint][] = [];
+  let offset: [bigint, bigint] = [0n, 1n];
+  for (let i = 0; i < quantities.length; i++) {
+    const ue = unitExprs[i];
+    if (!ue) return undefined;
+    const map = exactUnitConversion(ue, 'K');
+    if (map === null || map.piPower !== 0) return undefined;
+    factors.push(map.factor);
+    const [on, od] = map.offset;
+    offset = [
+      offset[0] * od + (negated[i] ? -on : on) * offset[1],
+      offset[1] * od,
+    ];
+  }
+  const hasOffset = offset[0] !== 0n;
+
+  if (usesExpressionArithmetic(quantities.map((q) => q.op1))) {
+    const mags: Expression[] = [];
+    for (let i = 0; i < quantities.length; i++) {
+      const mag = quantities[i].op1;
+      const k = factors[i];
+      if (k[0] === k[1]) {
+        mags.push(mag);
+        continue;
+      }
+      const scaled = multiplyMagnitudes(ce, [mag, ce.number(k)]);
+      if (scaled === undefined) return undefined;
+      mags.push(scaled);
+    }
+    if (hasOffset) mags.push(ce.number(offset));
+    const combined = addMagnitudes(ce, mags);
+    if (combined === undefined) return undefined;
+    return ce._fn('Quantity', [combined, kelvin]);
+  }
+
+  let total = 0;
+  for (let i = 0; i < quantities.length; i++) {
+    const mag = quantities[i].op1.re;
+    if (mag === undefined) return undefined;
+    const [kn, kd] = factors[i];
+    total += kn === kd ? mag : (mag * Number(kn)) / Number(kd);
+  }
+  if (hasOffset) total += Number(offset[0]) / Number(offset[1]);
+  return ce._fn('Quantity', [asFloat(ce.number(total)), kelvin]);
 }
 
 /**

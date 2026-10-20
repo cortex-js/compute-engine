@@ -85,7 +85,7 @@ describe('SUPSUB', () => {
       `["OverVector", ["Multiply", "A", "B"]]`
     ); // @fixme: nope...
     expect(ce.parse('\\vec{AB}^{-1}')).toMatchInlineSnapshot(
-      `["Divide", 1, ["OverVector", ["Multiply", "A", "B"]]]`
+      `["Power", ["OverVector", ["Multiply", "A", "B"]], -1]`
     );
   });
 });

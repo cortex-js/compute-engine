@@ -153,8 +153,24 @@ function parseSymbolToken(
 // It can include a string of tokens (characters and commands)
 // and a list of modifiers (superscript, subscript, etc.)
 // and can be wrapped in a prefix (e.g. `\mathbb{}`).
-function parseSymbolBody(parser: Parser): string | null {
-  let id = matchPrefixedSymbol(parser);
+//
+// When `allowGroup` is true (the body of a prefix such as `\mathbf{}`), the
+// body can start with a brace group that has subscripts of its own:
+// `\mathbf{{x_1}_2}` is `x_1_2_bold`. This is the valid LaTeX for two
+// subscripts inside a prefix (`\mathbf{x_1_2}` is a "double subscript" error
+// in LaTeX).
+function parseSymbolBody(parser: Parser, allowGroup = false): string | null {
+  let id: string | null = null;
+  if (allowGroup && parser.peek === '<{>') {
+    const start = parser.index;
+    parser.nextToken();
+    const group = parseSymbolBody(parser, true);
+    if (group === null || group === '' || !parser.match('<}>')) {
+      parser.index = start;
+      return null;
+    }
+    id = group;
+  } else id = matchPrefixedSymbol(parser);
 
   const prefix = SYMBOL_MODIFIER[parser.peek] ?? null;
 
@@ -223,7 +239,9 @@ function parseSymbolBody(parser: Parser): string | null {
   }
 
   if (sups.length > 0) id += '__' + sups.join('');
-  if (subs.length > 0) id += '_' + subs.join('');
+  // Each subscript is a part of the name of its own: `\mathrm{x_{1}_{2}}` is
+  // `x_1_2`, as `x_{1}_{2}` is (joined without a separator, it was `x_12`).
+  if (subs.length > 0) id += '_' + subs.join('_');
 
   return id;
 }
@@ -274,7 +292,7 @@ function matchPrefixedSymbol(parser: Parser): string | null {
     // Check the body for `null` *before* concatenating: `body += null` would
     // coerce to the string "null" (so `\mathrm{\vec}` parsed as the symbol
     // "null"), and the `body === null` test below could never catch it.
-    const rest = parseSymbolBody(parser);
+    const rest = parseSymbolBody(parser, true);
     if (rest === null || !parser.match('<}>')) {
       parser.index = start;
       return null;

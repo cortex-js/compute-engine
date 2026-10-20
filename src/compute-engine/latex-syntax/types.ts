@@ -1844,6 +1844,20 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * @internal
    */
   readsAsCardinality?: (operand: MathJsonExpression) => boolean | undefined;
+
+  /**
+   * Whether `base` can be a matrix, although its type does not say so (the
+   * call `g(x)` of a function that was not declared). A negative integer
+   * power of such a base is the matrix inverse (or a power of it) when the
+   * base is a matrix, so it is written `g(x)^{-1}`, not `\frac{1}{g(x)}`:
+   * the fraction reads back as a quotient, which is element-wise. The
+   * compute engine supplies this function when it serializes an expression.
+   * A result of `undefined` means "unknown": the power is then written as a
+   * fraction, as when the function is not supplied.
+   *
+   * @internal
+   */
+  readsAsMatrixPowerBase?: (base: MathJsonExpression) => boolean | undefined;
 };
 
 /** The serialization options as seen by the serializer: the style options
@@ -1864,12 +1878,15 @@ export type ResolvedSerializeLatexOptions = Omit<
   | 'indexStyle'
   | 'readsAsPointList'
   | 'readsAsCardinality'
+  | 'readsAsMatrixPowerBase'
 > & {
   readsAsPointList:
     | ((operands: ReadonlyArray<MathJsonExpression>) => boolean | undefined)
     | undefined;
   readsAsCardinality:
     ((operand: MathJsonExpression) => boolean | undefined) | undefined;
+  readsAsMatrixPowerBase:
+    ((base: MathJsonExpression) => boolean | undefined) | undefined;
   applyFunctionStyle: (
     expr: MathJsonExpression,
     level: number

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { errorFrames } from '../../src/compute-engine/boxed-expression/error-value';
 
 //
@@ -247,27 +248,66 @@ describe('AN ERROR CONDITION', () => {
   });
 });
 
-describe('A SYMBOL DECLARED `error` WITH NO VALUE IS STILL REFUSED', () => {
+describe('A SYMBOL DECLARED `error` WITH NO VALUE', () => {
   // Such a symbol evaluates to itself, not to an error, so it is not passed
-  // through (`isErrorTypedOperand()`,
-  // `src/compute-engine/boxed-expression/error-typed-operand.ts`).
+  // through as an error (`isErrorTypedOperand()`,
+  // `src/compute-engine/boxed-expression/error-typed-operand.ts`). It is
+  // checked as an ordinary operand of type `error`. The type `error`
+  // overlaps every type (`overlapAdmission()`,
+  // `src/compute-engine/boxed-expression/validate.ts`), so a scalar
+  // parameter admits it on the ground and on the generic route alike (user
+  // decision 2026-10-19), and a collection parameter refuses it.
   beforeEach(() => ce.declare('e', 'error'));
 
-  test('at a parameter typed `list`', () => {
+  test('at a parameter typed `list`: refused', () => {
     defineIdentity('op', 'list');
     const call = ce.box(['op', 'e']);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.ops![0])).toBe('incompatible-type list error');
   });
 
-  test('at a parameter typed by a bounded type variable', () => {
-    ce.declare('g', { type: '(T) -> T where T: number' });
-    const call = ce.box(['g', 'e']);
+  test('at a function-literal parameter typed `unknown`: refused', () => {
+    defineIdentity('op', 'unknown');
+    const call = ce.box(['op', 'e']);
     expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type number error');
+    expect(errorCode(call.ops![0])).toBe('incompatible-type unknown error');
   });
 
-  test('at an overloaded function', () => {
+  test('at a ground parameter typed `number`: admitted, the call evaluates to itself', () => {
+    ce.declare('g', '(number) -> number');
+    const call = ce.box(['g', 'e']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('number');
+    expect(call.evaluate().toString()).toBe('g(e)');
+  });
+
+  test('at a parameter typed by a type variable bounded by `number`: admitted, the call evaluates to itself', () => {
+    ce.declare('g', { type: '(T) -> T where T: number' });
+    const call = ce.box(['g', 'e']);
+    expect(call.isValid).toBe(true);
+    // The variable is absorbed: the call is typed `unknown`, not `error`.
+    expect(call.type.toString()).toBe('unknown');
+    expect(call.evaluate().toString()).toBe('g(e)');
+  });
+
+  test('`Conjugate(e)` is valid and evaluates to itself, as `Sqrt(e)` does', () => {
+    for (const op of ['Conjugate', 'Sqrt']) {
+      const call = ce.box([op, 'e']);
+      expect(call.isValid).toBe(true);
+      expect(call.evaluate().isSame(call)).toBe(true);
+    }
+  });
+
+  test('at a parameter typed by a type variable bounded by a collection: refused, as at `list`', () => {
+    ce.declare('g', { type: '(T) -> T where T: indexed_collection' });
+    const call = ce.box(['g', 'e']);
+    expect(call.isValid).toBe(false);
+    expect(errorCode(call.ops![0])).toBe(
+      'incompatible-type indexed_collection error'
+    );
+  });
+
+  test('at an overloaded function: refused', () => {
     ce.declare('ov', { type: '((number) -> number) & ((string) -> string)' });
     const call = ce.box(['ov', 'e']);
     expect(call.isValid).toBe(false);
@@ -276,21 +316,27 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE IS STILL REFUSED', () => {
     );
   });
 
-  test('as a condition', () => {
-    expect(ce.box(['If', 'e', 1, 2]).isValid).toBe(false);
+  test('as a condition: admitted, as at a parameter typed `boolean`; no branch is selected', () => {
+    const call = ce.box(['If', 'e', 1, 2]);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('If(e, 1, 2)');
+    expect(ce.box(['Which', 'e', 1, 'True', 2]).isValid).toBe(true);
   });
 });
 
-describe('A SYMBOL DECLARED `error` WITH NO VALUE AT A TYPE VARIABLE THAT ACCEPTS `error`', () => {
+describe('A SYMBOL DECLARED `error` WITH NO VALUE AT A LIBRARY OPERATOR WITH A TYPE VARIABLE', () => {
   // The solver absorbs the type variable, and `validateArguments()` then
   // checks the symbol against the parameter with the variable read at its
-  // declared bound, or at `any` when it has no bound. The type `error` is a
-  // subtype of `any` and of `error`, so these calls are valid. The library
-  // operator route is used: the route of a function held as a value drops
-  // such a refusal on its own (`keepProvisionalOperands()`).
+  // declared bound, or at `any` when it has no bound, by the rule of the
+  // ground route.
   beforeEach(() => ce.declare('e', 'error'));
 
-  for (const where of ['where T: any', 'where T: error', 'where T']) {
+  for (const where of [
+    'where T: any',
+    'where T: error',
+    'where T',
+    'where T: number',
+  ]) {
     test(`\`(T) -> T ${where}\` admits it`, () => {
       ce.declare('f', {
         signature: `(T) -> T ${where}`,
@@ -302,14 +348,14 @@ describe('A SYMBOL DECLARED `error` WITH NO VALUE AT A TYPE VARIABLE THAT ACCEPT
     });
   }
 
-  test('`(T) -> T where T: number` still refuses it', () => {
+  test('`(T) -> T where T: list` refuses it', () => {
     ce.declare('f', {
-      signature: '(T) -> T where T: number',
+      signature: '(T) -> T where T: list',
       evaluate: (ops) => ops[0],
     });
     const call = ce.box(['f', 'e']);
     expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type number error');
+    expect(errorCode(call.ops![0])).toBe('incompatible-type list error');
   });
 });
 
@@ -317,7 +363,8 @@ describe('AN APPLICATION TYPED `error` BY ITS DECLARED RESULT TYPE IS NOT AN ERR
   // A declared result type is a promise of the host: `g(2)` is typed
   // `error`, but with no body it evaluates to itself. It is not passed
   // through as an error argument (`isErrorTypedOperand()`,
-  // `src/compute-engine/boxed-expression/error-typed-operand.ts`).
+  // `src/compute-engine/boxed-expression/error-typed-operand.ts`). It is
+  // checked as a symbol declared `error` with no value is.
   beforeEach(() => ce.declare('g', '(number) -> error'));
 
   test('`g(2)` is valid and typed `error`', () => {
@@ -326,32 +373,219 @@ describe('AN APPLICATION TYPED `error` BY ITS DECLARED RESULT TYPE IS NOT AN ERR
     expect(call.type.toString()).toBe('error');
   });
 
-  test('as a condition: `If(g(2), 1, 2)` is refused', () => {
+  test('as a condition: `If(g(2), 1, 2)` is valid and evaluates to itself', () => {
     const call = ce.box(['If', ['g', 2], 1, 2]);
-    expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type boolean error');
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('If(g(2), 1, 2)');
   });
 
-  test('at a parameter typed by a bounded type variable: `Conjugate(g(2))` is refused', () => {
+  test('at a parameter typed by a bounded type variable: `Conjugate(g(2))` is valid and evaluates to itself', () => {
     const call = ce.box(['Conjugate', ['g', 2]]);
-    expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type number error');
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('Conjugate(g(2))');
   });
 
-  test('at a parameter typed `list`', () => {
+  test('at a parameter typed `list`: refused', () => {
     defineIdentity('op', 'list');
     const call = ce.box(['op', ['g', 2]]);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.ops![0])).toBe('incompatible-type list error');
   });
 
-  test('a symbol declared `error` that holds `g(2)` is refused as a condition', () => {
+  test('a symbol declared `error` that holds `g(2)` is admitted as a condition', () => {
     // The value of `h` is not an `Error` expression.
     ce.declare('h', 'error');
     ce.assign('h', ce.box(['g', 2]));
     const call = ce.box(['If', 'h', 1, 2]);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('If(g(2), 1, 2)');
+  });
+});
+
+describe('AN ERROR ARGUMENT AT THE CALLBACK PARAMETER OF A COLLECTION OPERATOR', () => {
+  // The lazy operators (`Any`, `Filter`, `Reduce`, `Map`) hold their
+  // operands, so `w` is not evaluated before the handler runs. Their
+  // canonical form keeps `w` (`canonicalCallbackOperand()`,
+  // `src/compute-engine/library/collections.ts`), and their evaluation gives
+  // the error of `w` (`heldErrorCallback()`,
+  // `src/compute-engine/boxed-expression/boxed-function.ts`). Before, they
+  // reported "expected `function`, got `error`".
+  for (const [name, expr, index, frame] of [
+    ['Any', ['Any', ['List', 1, 2], 'w'], 2],
+    ['All', ['All', ['List', 1, 2], 'w'], 2],
+    ['Filter', ['Filter', ['List', 1, 2], 'w'], 2],
+    ['Reduce', ['Reduce', ['List', 1, 2], 'w'], 2],
+    ['Scan', ['Scan', ['List', 1, 2], 'w'], 2],
+    ['TakeWhile', ['TakeWhile', ['List', 1, 2], 'w'], 2],
+    ['MaxBy', ['MaxBy', ['List', 1, 2], 'w'], 2],
+    // `Fold` is canonicalized to `Reduce`, whose callback is the second
+    // operand.
+    ['Fold', ['Fold', 'w', 0, ['List', 1, 2]], 2, 'Reduce'],
+    ['Map', ['Map', 'w', ['List', 1, 2]], 1],
+    ['Map over a range', ['Map', 'w', ['Range', 1, 3]], 1],
+    // The eager operators already gave the error of `w`.
+    ['Count', ['Count', ['List', 1, 2], 'w'], 2],
+    ['CountIf', ['CountIf', ['List', 1, 2], 'w'], 2],
+    ['Sort', ['Sort', ['List', 2, 1], 'w'], 2],
+  ] as [string, unknown[], number, string?][]) {
+    test(`\`${name}\` is valid and evaluates to the error of the callback`, () => {
+      const call = ce.box(expr as MathJsonExpression);
+      expect(call.isValid).toBe(true);
+      const v = call.evaluate();
+      expect(errorCode(v)).toBe(LN_ERROR);
+      expect(errorFrames(v)).toEqual([
+        { operator: 'Ln', index: 1 },
+        { operator: frame ?? expr[0], index },
+      ]);
+    });
+  }
+
+  test('the asynchronous evaluation gives the same error', async () => {
+    const v = await ce.box(['Filter', ['List', 1, 2], 'w']).evaluateAsync();
+    expect(errorCode(v)).toBe(LN_ERROR);
+    expect(errorFrames(v)).toEqual([
+      { operator: 'Ln', index: 1 },
+      { operator: 'Filter', index: 2 },
+    ]);
+  });
+
+  test('a parameter named like the symbol shadows it', () => {
+    ce.assign('h', ce.box(['Function', ['Filter', ['List', 1, 2], 'w'], 'w']));
+    const v = ce.box(['h', ['Function', ['Greater', 'x', 1], 'x']]).evaluate();
+    expect(v.toString()).toBe('[2]');
+  });
+
+  test('the asynchronous evaluation of `Map(w, xs)` gives the same error', async () => {
+    const v = await ce.box(['Map', 'w', ['List', 1, 2]]).evaluateAsync();
+    expect(errorCode(v)).toBe(LN_ERROR);
+    expect(errorFrames(v)).toEqual([
+      { operator: 'Ln', index: 1 },
+      { operator: 'Map', index: 1 },
+    ]);
+  });
+
+  test('an element read directly is the error: `Map(w, [1, 2]).at(1)`', () => {
+    const x = ce.box(['Map', 'w', ['List', 1, 2]]).at(1);
+    expect(errorCode(x!)).toBe(LN_ERROR);
+  });
+
+  test('a walk of the elements gives the error: `Filter([1, 2], w).each()`', () => {
+    const xs = [...ce.box(['Filter', ['List', 1, 2], 'w']).each()];
+    expect(xs.map((x) => errorCode(x))).toEqual([LN_ERROR, LN_ERROR]);
+  });
+
+  test('`Map(w, xs)` is typed with `unknown` elements, not the elements of the source', () => {
+    expect(ce.box(['Map', 'w', ['List', 1, 2]]).type.toString()).toBe(
+      'list<unknown^2>'
+    );
+  });
+
+  test('`Map(f, xs)` with `f` declared `function` is typed with `unknown` elements', () => {
+    ce.declare('fd', 'function');
+    expect(ce.box(['Map', 'fd', ['List', 1, 2]]).type.toString()).toBe(
+      'list<unknown^2>'
+    );
+    expect(ce.box(['Map', 'fd', ['Range', 1, 3]]).type.toString()).toBe(
+      'list'
+    );
+  });
+
+  test('`Map(f, xs)` with `f` not declared still copies the type of the source', () => {
+    // User decision 2026-09-27: the source type is copied when the callback
+    // is not known.
+    expect(ce.box(['Map', 'fq', ['List', 1, 2]]).type.toString()).toBe(
+      'vector<integer^2>'
+    );
+  });
+
+  test('`Map(w, f)` with the arguments in the wrong order still reports the wrong order', () => {
+    ce.assign('f', ce.box(['Function', ['Multiply', 'x', 2], 'x']));
+    const call = ce.box(['Map', 'w', 'f']);
     expect(call.isValid).toBe(false);
-    expect(errorCode(call.ops![0])).toBe('incompatible-type boolean error');
+    expect(errorCode(call.ops![0])).toBe('incompatible-type function error');
+  });
+});
+
+describe('A SYMBOL HOLDING AN ERROR AT A PARAMETER THAT IS NOT A CALLBACK OF A COLLECTION OPERATOR', () => {
+  // Only the callback parameters of the lazy collection operators (a
+  // parameter typed by a signature) give the error of the symbol before the
+  // handler runs (`callbackSlots()`,
+  // `src/compute-engine/boxed-expression/boxed-function.ts`). Another lazy
+  // operator decides itself what such an operand gives.
+  test('`Integrate(w, Limits(w, 0, 1))` binds `w`: it is `1/2` (box route)', () => {
+    const v = ce.box(['Integrate', 'w', ['Limits', 'w', 0, 1]]).evaluate();
+    expect(v.toString()).toBe('1/2');
+  });
+
+  test('`Integrate(w, Limits(w, 0, 1))` binds `w`: it is `1/2` (function route)', () => {
+    const v = ce
+      .function('Integrate', [
+        ce.symbol('w'),
+        ce.function('Limits', [ce.symbol('w'), ce.number(0), ce.number(1)]),
+      ])
+      .evaluate();
+    expect(v.toString()).toBe('1/2');
+  });
+
+  test('`Integrate(w, w)` binds `w`', () => {
+    expect(ce.box(['Integrate', 'w', 'w']).evaluate().isValid).toBe(true);
+  });
+
+  test('`Limit(w, 0)` and `Pipe(3, w)` are not the error', () => {
+    expect(ce.box(['Limit', 'w', 0]).evaluate().operator).toBe('Limit');
+    expect(ce.box(['Pipe', 3, 'w']).evaluate().toString()).toBe('w(3)');
+  });
+
+  test('a lazy operator that selects its operands still selects', () => {
+    ce.declare('sel', {
+      signature: '(boolean, () -> any, () -> any) -> any',
+      lazy: true,
+      selectsOperands: true,
+      evaluate: (ops) => (ops[0].symbol === 'True' ? ops[1] : ops[2]),
+    });
+    const v = ce.box(['sel', 'True', ['Function', 5], 'w']).evaluate();
+    expect(v.isValid).toBe(true);
+    expect(v.operator).toBe('Function');
+  });
+
+  test('a change of the signature of an operator in place is seen at the next evaluation', () => {
+    // The callback parameters of a definition are cached with its
+    // `_writeVersion` (`callbackSlots()`), which a signature write increases.
+    ce.declare('cb', {
+      signature: '(list, (unknown) -> any) -> any',
+      lazy: true,
+      evaluate: () => ce.number(1),
+    });
+    const call = () => ce.box(['cb', ['List', 1], 'w']).evaluate();
+    expect(errorCode(call())).toBe(LN_ERROR);
+    const def = ce.lookupDefinition('cb') as {
+      operator: { signature: ReturnType<typeof ce.type> };
+    };
+    def.operator.signature = ce.type('(list, function) -> any');
+    expect(call().toString()).toBe('1');
+    def.operator.signature = ce.type('(list, (unknown) -> any) -> any');
+    expect(errorCode(call())).toBe(LN_ERROR);
+  });
+
+  test('a lazy operator with parameters typed `function` still selects', () => {
+    ce.declare('sel', {
+      signature: '(boolean, function, function) -> any',
+      lazy: true,
+      evaluate: (ops) => (ops[0].symbol === 'True' ? ops[1] : ops[2]),
+    });
+    const v = ce.box(['sel', 'True', ['Function', 5], 'w']).evaluate();
+    expect(v.isValid).toBe(true);
+    expect(v.operator).toBe('Function');
+  });
+});
+
+describe('A SYMBOL DECLARED `error` WITH NO VALUE AT AN OVERLOADED FUNCTION WITH A GENERIC ARM', () => {
+  test('the verdict is the verdict of the same overload with ground arms', () => {
+    ce.declare('e', 'error');
+    ce.declare('ovg', { type: '((string) -> string) & ((T) -> T where T: number)' });
+    ce.declare('ov', { type: '((string) -> string) & ((number) -> number)' });
+    expect(ce.box(['ov', 'e']).isValid).toBe(false);
+    expect(ce.box(['ovg', 'e']).isValid).toBe(false);
   });
 });
 

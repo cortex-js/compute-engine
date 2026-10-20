@@ -64,6 +64,7 @@ import {
   tuplePatternNames,
 } from './boxed-expression/tuple-pattern.js';
 import { liveScopeOf } from './boxed-expression/ambient-chain.js';
+import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
 import {
   errorValue,
   isInvalidNonCollection,
@@ -6433,11 +6434,21 @@ export function applicable(
   // which is what used to make an invalid callee answer `undefined` as a
   // side effect.
   if (errorValue(fn) !== undefined) return () => undefined;
-  return (
+  // A callee that is a symbol holding an error value (`w` after
+  // `w := Ln("a")`, see `isErrorTypedOperand()`) is valid, but it cannot be
+  // applied either. Each call gives the error of the symbol, read when the
+  // call is made, as an element-valued failure: `Map(w, [1, 2]).at(1)` and
+  // the elements of `Filter([1, 2], w)` are that error. (The evaluation of
+  // such a lazy collection operator gives the error for the whole call
+  // before it applies its callback: `heldErrorCallback()`,
+  // `boxed-function.ts`.)
+  const apply =
     makeLambda(fn) ??
-    ((xs, options) =>
-      fn.engine.function('Apply', [fn, ...xs]).evaluate(options))
-  );
+    ((xs: ReadonlyArray<Expression>, options?: ApplyOptions) =>
+      fn.engine.function('Apply', [fn, ...xs]).evaluate(options));
+  if (!isErrorTypedOperand(fn)) return apply;
+  return (xs, options) =>
+    isErrorTypedOperand(fn) ? fn.evaluate() : apply(xs, options);
 }
 
 /**

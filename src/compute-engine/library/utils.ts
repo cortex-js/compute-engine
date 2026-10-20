@@ -552,6 +552,11 @@ function sameBoundStructure(a: Expression, b: Expression): boolean {
  * same-spelling test would read two different endpoints as one. A FREE bound
  * (`d`) IS treated as a point, consistent with the engine's other
  * generic-symbol folds (`x/x → 1`).
+ *
+ * A `Nothing` bound is not a point either. `Limits(k, Nothing, Nothing)` is
+ * the clause of a sum or product written with no bounds (`\sum_k x^k`): it
+ * runs over the default domain, not over a single point, even though its two
+ * bounds are the same symbol.
  */
 function isDegenerateBounds(
   lower: Expression | undefined,
@@ -559,6 +564,7 @@ function isDegenerateBounds(
   structural: boolean
 ): boolean {
   if (!lower || !upper) return false;
+  if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing')) return false;
   if (lower.isNaN === true || upper.isNaN === true) return false;
   if (lower.isInfinity === true || upper.isInfinity === true) return false;
   if (!lower.isValid || !upper.isValid) return false;
@@ -611,12 +617,18 @@ export function degenerateBigOpTerm(
   const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
   if (index === undefined) return undefined;
   const lower = limits.op2;
-  if (!isDegenerateBounds(lower, limits.op3, false)) return undefined;
-
   // An index-less bounds pair (`Limits(Nothing, a, a)`) has no index to
-  // substitute: its body is already the single term. Reached on the
-  // STRUCTURAL route (`ce.function('Sum', …, { form: 'structural' })`), which
-  // bypasses `canonicalBigop` — and so its dropping of vacuous indexing sets.
+  // substitute: its body is already the single term. So has a clause with no
+  // index and no bounds (`Limits(Nothing, Nothing, Nothing)`), which
+  // `isDegenerateBounds()` rejects because of its `Nothing` bounds. Reached on
+  // the STRUCTURAL route (`ce.function('Sum', …, { form: 'structural' })`),
+  // which bypasses `canonicalBigop` — and so its dropping of vacuous indexing
+  // sets.
+  const noBounds =
+    isSymbol(lower, 'Nothing') && isSymbol(limits.op3, 'Nothing');
+  if (index === 'Nothing' && noBounds)
+    return body.evaluate({ numericApproximation });
+  if (!isDegenerateBounds(lower, limits.op3, false)) return undefined;
   if (index === 'Nothing') return body.evaluate({ numericApproximation });
 
   const binders = collectBinderNames(body);
@@ -649,6 +661,12 @@ export function symbolicSumClosedForm(
   const lower = limits.op2;
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
+  // A clause with no bounds (`Limits(k, Nothing, Nothing)`, from `\sum_k f`)
+  // runs over the default domain. The closed forms below substitute the
+  // bounds into the body, and a `Nothing` bound is not a value, so the sum
+  // stays symbolic.
+  if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
+    return undefined;
 
   // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
   // bound), and the named families that admit a free variable (exponential
@@ -752,6 +770,12 @@ export function symbolicProductClosedForm(
   const lower = limits.op2;
   const upper = limits.op3;
   if (!index || !lower || !upper) return undefined;
+  // A clause with no bounds (`Limits(k, Nothing, Nothing)`, from `\prod_k f`)
+  // runs over the default domain. The closed forms below substitute the
+  // bounds into the body, and a `Nothing` bound is not a value, so the
+  // product stays symbolic.
+  if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
+    return undefined;
 
   // Π_{k=1}^{n} k = n!  (bare index, lower bound 1).
   if (isSymbol(body) && body.symbol === index && lower.isSame(1))
@@ -3377,6 +3401,16 @@ function isVacuousIndexingSet(
   siblings: ReadonlyArray<Expression>
 ): boolean {
   if (!isFunction(set, 'Limits') || set.ops.length < 3) return false;
+  // A clause with no index and no bounds (`Limits(Nothing, Nothing,
+  // Nothing)`) describes nothing, so it is dropped. It is tested here
+  // because `isDegenerateBounds()` rejects `Nothing` bounds: with a real
+  // index, `Limits(k, Nothing, Nothing)` runs over the default domain.
+  if (
+    isSymbol(set.op1, 'Nothing') &&
+    isSymbol(set.op2, 'Nothing') &&
+    isSymbol(set.op3, 'Nothing')
+  )
+    return true;
   if (!isDegenerateBounds(set.op2, set.op3, true)) return false;
   if (!isSymbol(set.op1)) return false;
   const index = set.op1.symbol;

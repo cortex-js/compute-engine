@@ -25,6 +25,8 @@ import {
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { callResultType } from './call-result-type.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
+import { isWildcard } from './pattern-utils.js';
+import { isErrorTypedOperand } from './error-typed-operand.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   SimplifyOptions,
@@ -5818,6 +5820,13 @@ export class BoxedFunction
 
       const def = this._def.operator;
 
+      // 1b/ A lazy collection operator holds its callback: a symbol that
+      // holds an error at the callback parameter gives that error.
+      if (def.lazy === true && this._localScope === undefined) {
+        const heldError = heldErrorCallback(this, def);
+        if (heldError !== undefined) return heldError;
+      }
+
       //
       // 2/ Broadcast if applicable
       // Skip broadcasting for Add/Multiply with tensors - they have their own
@@ -7106,6 +7115,12 @@ export class BoxedFunction
         return applyFunctionLiteralAsync(this, this._def.value, options);
 
       const def = this._def.operator;
+
+      // 1b/ See the synchronous route.
+      if (def.lazy === true && this._localScope === undefined) {
+        const heldError = heldErrorCallback(this, def);
+        if (heldError !== undefined) return heldError;
+      }
 
       //
       // 2/ Broadcast if applicable
@@ -9705,6 +9720,97 @@ function restrictCells(
       value.ops.map((cell) => restrictCells(ce, cell, guard, options))
     );
   return ce._fn('When', [value, guard]).evaluate(options);
+}
+
+/**
+ * The error of a symbol that holds an error value, at the callback parameter
+ * of the lazy operator `expr`, with the frame of the call. Returns
+ * `undefined` when there is no such operand.
+ *
+ * A lazy operator holds its operands, so they are not evaluated before the
+ * handler runs, and the rule "an operand whose value is an error makes the
+ * call evaluate to that error" does not see the value of a symbol. With `w`
+ * holding the error of `Ln("a")` (`isErrorTypedOperand()`), `Filter([1, 2],
+ * w)`, `Any([1, 2], w)` and `Reduce([1, 2], w)` cannot apply `w`, so they
+ * evaluate to the error of `w`, as the eager `Sort([2, 1], w)` does.
+ *
+ * Only the parameters that {@link callbackSlots} gives are checked. The
+ * caller runs this only for a node with no scope of its own, so the symbol
+ * is read in the scope where the operator applies its callback.
+ */
+function heldErrorCallback(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition
+): Expression | undefined {
+  for (const i of callbackSlots(def)) {
+    const op = expr.ops[i];
+    if (op === undefined || !isSymbol(op) || isWildcard(op)) continue;
+    // A symbol with no value definition is not canonicalized: that would
+    // declare it.
+    if (!isValueDef(expr.engine.lookupDefinition(op.symbol))) continue;
+    const symbol = op.isCanonical ? op : op.canonical;
+    if (!isErrorTypedOperand(symbol)) continue;
+    return errorValue(symbol.evaluate(), {
+      operator: expr.operator,
+      index: i + 1,
+    });
+  }
+  return undefined;
+}
+
+/** The result of {@link callbackSlots} for each definition, with the
+ * `_writeVersion` of the definition when it was computed. A definition can
+ * change in place (a signature write, an update, a snapshot restore), and
+ * each change increases its `_writeVersion`, so a different version means
+ * that the result must be computed again. */
+const CALLBACK_SLOTS = new WeakMap<
+  BoxedOperatorDefinition,
+  { version: number; slots: readonly number[] }
+>();
+
+/**
+ * The positions of the callback parameters of a lazy operator: the required
+ * and optional parameters whose type is a signature, or a union of
+ * signatures (`predicate: (T) -> boolean` of `Filter`, `mapping: (T) -> U` of
+ * `Map`). These are the lazy collection operators (`Any`, `Filter`, `Map`,
+ * `Reduce`, `MaxBy`, ...).
+ *
+ * A parameter typed with the bare type `function` is not a callback
+ * parameter here: the operators that have one (`Integrate`, `Limit`, `ND`,
+ * `Pipe`, `Rule`, ...) can read the operand as an expression, or bind a
+ * symbol of that name. An operator that selects among its operands
+ * (`selectsOperands`) or inspects errors (`inspectsErrors`) has no callback
+ * parameter here either: it decides itself what an error operand gives.
+ */
+function callbackSlots(def: BoxedOperatorDefinition): readonly number[] {
+  const cached = CALLBACK_SLOTS.get(def);
+  if (cached !== undefined && cached.version === def._writeVersion)
+    return cached.slots;
+  const found: number[] = [];
+  const sig = def.signature.type;
+  if (
+    def.lazy === true &&
+    !def.selectsOperands &&
+    !def.inspectsErrors &&
+    typeof sig !== 'string' &&
+    sig.kind === 'signature'
+  ) {
+    const params = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+    params.forEach((p, i) => {
+      if (isSignatureParam(p.type)) found.push(i);
+    });
+  }
+  CALLBACK_SLOTS.set(def, { version: def._writeVersion, slots: found });
+  return found;
+}
+
+/** True when the parameter type `t` is a signature, or a union whose every
+ * member is a signature. */
+function isSignatureParam(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return false;
+  if (r.kind === 'signature') return true;
+  return r.kind === 'union' && r.types.every((a) => isSignatureParam(a));
 }
 
 /**

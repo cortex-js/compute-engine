@@ -8,6 +8,9 @@ import type {
   SymbolInterface,
 } from '../global-types.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
+import { canonicalMultiply } from './arithmetic-mul-div.js';
+import { productMayHaveMatrix } from './matrix-operand.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   typeCouldBeNumericTuple,
@@ -63,6 +66,51 @@ function typeIgnoringAbsence(x: Expression): BoxedType {
 }
 
 export function canonicalInvisibleOperator(
+  ops: ReadonlyArray<Expression>,
+  options: {
+    engine: ComputeEngine;
+    shadowed?: ReadonlySet<string>;
+  }
+): Expression | null {
+  // The outermost call keeps the canonical form of each operand it makes
+  // canonical, for the nested calls (see `canonicalOnce()`)
+  if (canonicalCache !== undefined) return canonicalJuxtaposition(ops, options);
+  canonicalCache = new WeakMap();
+  readingCache = new WeakMap();
+  try {
+    return canonicalJuxtaposition(ops, options);
+  } finally {
+    canonicalCache = undefined;
+    readingCache = undefined;
+  }
+}
+
+/**
+ * The canonical forms of the raw operands made canonical during the
+ * outermost call of `canonicalInvisibleOperator()`, and the readings of
+ * `readJuxtaposition()` during that call. A nested juxtaposition is read in
+ * several places (`lhs.canonical`, `combineFunctionApplications()`, the
+ * product route). Without these caches, each level of a nested
+ * juxtaposition was made canonical at least twice, which took a time
+ * exponential in the depth (`(g(x)(g(x)…)A)A`).
+ */
+let canonicalCache: WeakMap<Expression, Expression> | undefined;
+let readingCache:
+  WeakMap<Expression, JuxtapositionReading | undefined> | undefined;
+
+/** The canonical form of `x`, computed once during the outermost call of
+ * `canonicalInvisibleOperator()` (see `canonicalCache`). */
+function canonicalOnce(x: Expression): Expression {
+  if (x.isCanonical || canonicalCache === undefined) return x.canonical;
+  let result = canonicalCache.get(x);
+  if (result === undefined) {
+    result = x.canonical;
+    canonicalCache.set(x, result);
+  }
+  return result;
+}
+
+function canonicalJuxtaposition(
   ops: ReadonlyArray<Expression>,
   {
     engine: ce,
@@ -164,7 +212,7 @@ export function canonicalInvisibleOperator(
     //
     // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
     // to a symbol (f_a). Canonicalize first to handle this case.
-    const lhsCanon = lhs.canonical;
+    const lhsCanon = canonicalOnce(lhs);
     yieldInferredFunctionToOracle(ce, lhsCanon);
 
     // A name in parentheses is a factor, never the head of an application:
@@ -256,7 +304,12 @@ export function canonicalInvisibleOperator(
 
       // Parse the arguments first, in case they reference lhsCanon.symbol
       // i.e. `x(x+1)`.
-      let args = isFunction(rhs.op1, 'Sequence') ? rhs.op1.ops : [rhs.op1];
+      // A juxtaposition in the parentheses is made canonical once, by
+      // `readJuxtaposition()`, which also gives its factors
+      const inner = bindsOperand ? undefined : readJuxtaposition(ce, rhs.op1);
+      let args = isFunction(rhs.op1, 'Sequence')
+        ? rhs.op1.ops
+        : [inner?.canonical ?? rhs.op1];
       args = flatten(args);
 
       const def = ce.lookupDefinition(lhsCanon.symbol);
@@ -337,7 +390,13 @@ export function canonicalInvisibleOperator(
         // `provisional-application.ts`).
         if (couldBecomeFunction(def))
           noteProvisionalApplication(lhsCanon.symbol);
-        return ce.function('Multiply', [lhsCanon, ...args]);
+        return ce.function(
+          'Multiply',
+          splicedFactors([lhsCanon, ...args], [undefined, inner]) ?? [
+            lhsCanon,
+            ...args,
+          ]
+        );
       }
 
       // The single argument is non-numeric (e.g. a collection like `\cos(S)`
@@ -365,7 +424,13 @@ export function canonicalInvisibleOperator(
         (def && !isOperatorDef(def) && def.value && isScalable(lhsCanon)) ||
         (oracleType !== undefined && typeIsScalable(oracleType))
       ) {
-        return ce.function('Multiply', [lhsCanon, ...args]);
+        return ce.function(
+          'Multiply',
+          splicedFactors([lhsCanon, ...args], [undefined, inner]) ?? [
+            lhsCanon,
+            ...args,
+          ]
+        );
       }
 
       // Non-numeric args → treat as function call. A head with no type
@@ -529,6 +594,14 @@ export function canonicalInvisibleOperator(
   // yet on the partial-form route) turned an index named `i` into the
   // imaginary unit. Flattening itself is still wanted, so only the
   // canonicalization is suppressed.
+  // Each juxtaposition in parentheses among the operands is made canonical
+  // once, by `readJuxtaposition()`, which also gives its factors
+  const readings = bindsOperand
+    ? undefined
+    : ops.map((x) => readJuxtaposition(ce, x));
+  if (readings !== undefined)
+    ops = ops.map((x, i) => readings[i]?.canonical ?? canonicalOnce(x));
+  const canonicalFactors = ops;
   ops = flatten(ops, undefined, !bindsOperand);
 
   //
@@ -656,7 +729,11 @@ export function canonicalInvisibleOperator(
       })
     )
       return ce.function('Multiply', ops);
-    return ce._fn('Multiply', ops, opForm);
+    return ce._fn(
+      'Multiply',
+      splicedFactors(canonicalFactors, readings) ?? ops,
+      opForm
+    );
   }
 
   //
@@ -664,6 +741,93 @@ export function canonicalInvisibleOperator(
   // group them as a Tuple
   //
   return ce._fn('Tuple', ops, opForm);
+}
+
+/**
+ * A juxtaposition in parentheses, read once: its canonical form, and its
+ * canonical factors in their written order when it is a valid product.
+ */
+type JuxtapositionReading = {
+  /** The canonical form, as `.canonical` gives it */
+  canonical: Expression;
+  /** The factors, when the juxtaposition is a valid product */
+  factors: ReadonlyArray<Expression> | undefined;
+};
+
+/**
+ * Read `x` when it is a raw `InvisibleOperator`, or a raw `Delimiter` with
+ * one operand that is a raw `InvisibleOperator`: `(g(x)k(x)g(x))`. Return
+ * `undefined` for any other `x`, and when the library definition of
+ * `InvisibleOperator` (or of `Delimiter`, for the parentheses) is replaced:
+ * the replacement must then make the operand canonical.
+ *
+ * The canonical form is the one the `canonical` handler of the library
+ * `InvisibleOperator` (`library/core.ts`) makes. The factors are the
+ * operands of the product before it is sorted. A product made canonical on
+ * its own is sorted when it has no matrix, and this loses the written order
+ * of factors that can be matrices: with `A` a matrix and `g`, `k` functions
+ * that were not declared, `A(g(x)k(x)g(x))` became `A·k(x)·g(x)·g(x)`. The
+ * caller can put the factors in the outer product instead (see
+ * `splicedFactors()`), and the outer product then sorts all the factors at
+ * once (`sortProductOperands()` in `order.ts`).
+ *
+ * The caller uses the canonical form given here, and does not make `x`
+ * canonical again: each level of a nested juxtaposition is then made
+ * canonical once, not twice (which took a time exponential in the depth).
+ */
+export function readJuxtaposition(
+  ce: ComputeEngine,
+  x: Expression
+): JuxtapositionReading | undefined {
+  if (x.isCanonical || x.isStructural) return undefined;
+  if (readingCache?.has(x)) return readingCache.get(x);
+  const reading = readJuxtapositionOnce(ce, x);
+  readingCache?.set(x, reading);
+  if (reading !== undefined) canonicalCache?.set(x, reading.canonical);
+  return reading;
+}
+
+function readJuxtapositionOnce(
+  ce: ComputeEngine,
+  x: Expression
+): JuxtapositionReading | undefined {
+  if (isFunction(x, 'Delimiter') && x.nops === 1) {
+    if (shadowsLibraryName(ce, 'Delimiter')) return undefined;
+    x = x.op1;
+  }
+  if (!isFunction(x, 'InvisibleOperator') || x.isCanonical) return undefined;
+  if (shadowsLibraryName(ce, 'InvisibleOperator')) return undefined;
+  const y = canonicalInvisibleOperator(x.ops, { engine: ce });
+  let reading: JuxtapositionReading;
+  if (!y) reading = { canonical: ce.Nothing, factors: undefined };
+  else if (isFunction(y, 'Multiply') && y.isValid)
+    reading = { canonical: canonicalMultiply(ce, y.ops), factors: y.ops };
+  else reading = { canonical: y, factors: undefined };
+  // The `InvisibleOperator` in parentheses has the same canonical form
+  canonicalCache?.set(x, reading.canonical);
+  return reading;
+}
+
+/**
+ * The canonical operands `xs` of a product, with the factors of each
+ * juxtaposition that is a product (`readings[i].factors`) put in the place
+ * of its canonical form. Return `undefined` when no operand is such a
+ * juxtaposition, and when the product cannot have a matrix factor
+ * (`productMayHaveMatrix()`): the order of the factors then does not
+ * matter, and the nested products are kept as they were.
+ */
+function splicedFactors(
+  xs: ReadonlyArray<Expression>,
+  readings: ReadonlyArray<JuxtapositionReading | undefined> | undefined
+): ReadonlyArray<Expression> | undefined {
+  if (readings === undefined || readings.every((r) => r?.factors === undefined))
+    return undefined;
+  const factors = flatten(
+    xs.flatMap((x, i) => readings[i]?.factors ?? [x]),
+    undefined,
+    false
+  );
+  return productMayHaveMatrix(factors) ? factors : undefined;
 }
 
 function flattenInvisibleOperator(
@@ -867,7 +1031,7 @@ function functionSymbolOf(
 ): string | undefined {
   if (isParenthesizedFactorName(ce, op)) return undefined;
   const sym =
-    isFunction(op, 'Delimiter') && op.nops === 1 ? op.op1.canonical : op;
+    isFunction(op, 'Delimiter') && op.nops === 1 ? canonicalOnce(op.op1) : op;
   if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol)) return undefined;
   return sym.symbol;
 }
@@ -889,7 +1053,7 @@ function functionSymbolOf(
  */
 function isParenthesizedFactorName(ce: ComputeEngine, op: Expression): boolean {
   if (!isFunction(op, 'Delimiter') || op.nops !== 1) return false;
-  const sym = op.op1.canonical;
+  const sym = canonicalOnce(op.op1);
   if (!isSymbol(sym)) return false;
   const def = ce.lookupDefinition(sym.symbol);
   if (def === undefined) return true;
@@ -905,7 +1069,7 @@ function isParenthesizedFactorName(ce: ComputeEngine, op: Expression): boolean {
 function functionLiteralOf(op: Expression): Expression | undefined {
   if (isFunction(op, 'Function')) return op;
   if (isFunction(op, 'Delimiter') && op.nops === 1) {
-    const inner = op.op1.canonical;
+    const inner = canonicalOnce(op.op1);
     if (isFunction(inner, 'Function')) return inner;
   }
   return undefined;
@@ -951,7 +1115,7 @@ function combineFunctionApplications(
     if (i < ops.length - 1) {
       const head =
         isFunction(op, 'Delimiter') && op.nops === 1
-          ? op.op1.canonical
+          ? canonicalOnce(op.op1)
           : isSymbol(op)
             ? op.canonical
             : undefined;

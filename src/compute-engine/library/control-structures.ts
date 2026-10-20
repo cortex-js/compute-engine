@@ -80,7 +80,10 @@ import {
   errorValue,
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
-import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
+import {
+  isErrorTypedOperand,
+  isErrorTypedWithoutErrorValue,
+} from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
 import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
 import {
@@ -1768,6 +1771,12 @@ function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
   // operator does (`isErrorTypedOperand()`). The type `error` is disjoint
   // from `boolean`, so the refusals below would replace it with a new error.
   if (isErrorTypedOperand(cond)) return cond;
+  // A condition of type `error` that does not hold an error value (a symbol
+  // declared `error` with no value, or `g(2)` with `g: (number) -> error`)
+  // is kept too, as a parameter typed `boolean` keeps it
+  // (`overlapAdmission()` in `validate.ts`: the type `error` overlaps every
+  // type). Its evaluation does not select a branch.
+  if (isErrorTypedWithoutErrorValue(cond)) return cond;
   const type = t.type;
   const refuse = () => ce.typeError('boolean', t, cond);
   if (isSubtype(type, 'string') || isTupleShapedType(type)) return refuse();

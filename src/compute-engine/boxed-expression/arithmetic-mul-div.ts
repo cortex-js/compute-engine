@@ -87,6 +87,7 @@ import {
   sortProductOperands,
 } from './order.js';
 import { asRadical, isMatrixTyped } from './arithmetic-power.js';
+import { mayBeMatrixPowerBase } from './matrix-operand.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
@@ -211,10 +212,17 @@ export class Product {
   // Running literal products (if canonical)
   coefficient: NumericValue;
 
-  // Other terms of the product, `term` is the key
+  // Other terms of the product, `term` is the key.
+  //
+  // `quotient` is `true` when a negative exponent was added to the term by a
+  // quotient (`Divide(1, g(x))`, `div()`), not by a negative power
+  // (`Power(g(x), -1)`). For a term that can be a matrix, the two are
+  // different: the quotient is element-wise, the power is the matrix
+  // inverse (see `isMatrixInversePower()`).
   terms: {
     term: Expression;
     exponent: Rational;
+    quotient?: boolean;
   }[] = [];
 
   // If `false`, the running products are not calculated
@@ -314,7 +322,7 @@ export class Product {
    * If `this._isCanonical` a running product of exact terms is kept.
    * Otherwise, terms and their exponent are tallied.
    */
-  mul(term: Expression, exp?: Rational) {
+  mul(term: Expression, exp?: Rational, inversePower = false) {
     console.assert(term.isCanonical || term.isStructural);
     if (this._hasMatrix === false && hasCollectionShape(term))
       this._hasMatrix = true;
@@ -357,7 +365,7 @@ export class Product {
         this.terms.push({ term, exponent: e });
         return;
       }
-      for (const t of term.ops) this.mul(t, exp);
+      for (const t of term.ops) this.mul(t, exp, inversePower);
       return;
     }
 
@@ -375,7 +383,7 @@ export class Product {
         this.terms.push({ term, exponent: e });
         return;
       }
-      this.mul(term.op1, exp);
+      this.mul(term.op1, exp, inversePower);
       // (−u)^k = (−1)^k·u^k: sign only flips for odd integer exponents
       if (Number(e[0]) % 2 !== 0) this.coefficient = this.coefficient.neg();
       return;
@@ -714,7 +722,16 @@ export class Product {
           (!collectionShaped || expIsInteger) &&
           !(isNeg(product) && this.isNoncommutingTerm(term.op1))
         ) {
-          this.mul(term.op1, product);
+          // A negative integer power of a base that can be a matrix is
+          // tallied as a power, not as a quotient (see `quotient`)
+          this.mul(
+            term.op1,
+            product,
+            inversePower ||
+              (isNeg(product) &&
+                isIntegerRational(product) &&
+                mayBeMatrixPowerBase(term.op1))
+          );
           return;
         }
         // Otherwise, keep the Power expression as a single term
@@ -789,7 +806,7 @@ export class Product {
       tallyExp = rationalMul(exponent, norm.exp);
     }
 
-    this.tallyInOrder(tallyTerm, tallyExp);
+    this.tallyInOrder(tallyTerm, tallyExp, inversePower);
   }
 
   /**
@@ -814,7 +831,14 @@ export class Product {
    * the same base and exponents of opposite signs are not merged either:
    * `A·g(x)^{-1}·g(x)·A` is not `A^2`.
    */
-  private tallyInOrder(tallyTerm: Expression, tallyExp: Rational): void {
+  private tallyInOrder(
+    tallyTerm: Expression,
+    tallyExp: Rational,
+    inversePower = false
+  ): void {
+    // A negative exponent that does not come from a negative power is a
+    // quotient (see `quotient`)
+    const quotient = isNeg(tallyExp) && !inversePower;
     const tallyShaped = hasCollectionShape(tallyTerm);
     const noncommuting = tallyShaped || this.isNoncommutingTerm(tallyTerm);
     let found = false;
@@ -839,10 +863,16 @@ export class Product {
         if (isNeg(x.exponent) !== isNeg(tallyExp)) continue;
       }
       x.exponent = rationalAdd(x.exponent, tallyExp);
+      if (quotient) x.quotient = true;
       found = true;
       break;
     }
-    if (!found) this.terms.push({ term: tallyTerm, exponent: tallyExp });
+    if (!found)
+      this.terms.push(
+        quotient
+          ? { term: tallyTerm, exponent: tallyExp, quotient }
+          : { term: tallyTerm, exponent: tallyExp }
+      );
   }
 
   /**
@@ -969,6 +999,9 @@ export class Product {
     | {
         exponent: Rational;
         terms: Expression[];
+        /** A negative power of a term that can be a matrix, kept as a
+         * power (see `isMatrixInversePower()`) */
+        inversePower?: boolean;
       }[]
     | null {
     options ??= {};
@@ -998,7 +1031,11 @@ export class Product {
       }
     }
 
-    const xs: { exponent: Rational; terms: Expression[] }[] = [];
+    const xs: {
+      exponent: Rational;
+      terms: Expression[];
+      inversePower?: boolean;
+    }[] = [];
     // A float coefficient of 1 (from the literal `1.0`) is kept: it makes the
     // product numeric, as any other float coefficient does.
     if (!this.coefficient.isOne || !this.coefficient.isExact) {
@@ -1044,7 +1081,13 @@ export class Product {
       // product that has a matrix, a term whose type does not exclude a
       // matrix (`g(x)`) is also a group of its own: `g(x)·A·h(x)` is not
       // `g(x)·h(x)·A`.
-      const shaped = this.isNoncommutingTerm(t.term);
+      //
+      // A negative integer power of a term that can be a matrix (`g(x)^{-1}`,
+      // see `mayBeMatrixPowerBase()`) is also a group of its own: it stays a
+      // power of that term, which is the matrix inverse when the term is a
+      // matrix (`asNumeratorDenominator()` keeps it in the numerator).
+      const inversePower = isMatrixInversePower(t, exponent);
+      const shaped = this.isNoncommutingTerm(t.term) || inversePower;
       const mergeable =
         !shaped &&
         (isIntegerRational(exponent) || t.term.isNonNegative === true);
@@ -1065,7 +1108,11 @@ export class Product {
       }
       if (!found) {
         if (!mergeable) sealed.add(xs.length);
-        xs.push({ exponent, terms: [t.term] });
+        xs.push(
+          inversePower
+            ? { exponent, terms: [t.term], inversePower }
+            : { exponent, terms: [t.term] }
+        );
       }
     }
     return xs;
@@ -1222,9 +1269,14 @@ export class Product {
 
     if (xs === null) return [ce.NaN, ce.NaN];
 
-    const xsNumerator = xs.filter((x) => x.exponent[0] >= 0);
+    // A negative integer power of a term that can be a matrix stays in the
+    // numerator as a power: `2·g(x)^{-1}` is not `2/g(x)`, which is
+    // element-wise when `g(x)` is a matrix (see `mayBeMatrixPowerBase()`)
+    const inNumerator = (x: { exponent: Rational; inversePower?: boolean }) =>
+      x.exponent[0] >= 0 || x.inversePower === true;
+    const xsNumerator = xs.filter(inNumerator);
     const xsDenominator = xs
-      .filter((x) => x.exponent[0] < 0)
+      .filter((x) => !inNumerator(x))
       .map((x) => ({
         exponent: neg(x.exponent),
         terms: x.terms,
@@ -1304,6 +1356,28 @@ function numericRadicalBaseExp(
     if (r) return { base: term.op1, exp: inverse(r) };
   }
   return undefined;
+}
+
+/**
+ * True when the term `t` with the reduced exponent `exponent` is a negative
+ * integer power of a term that can be a matrix (`g(x)^{-1}` with `g` a
+ * function that was not declared, see `mayBeMatrixPowerBase()`), and no part
+ * of its exponent comes from a quotient (`t.quotient`). Such a power is the
+ * matrix inverse (or a power of it) when the term is a matrix, so a product
+ * keeps it as a power: it is not grouped with the other terms of the same
+ * exponent, and it is not moved to a denominator. The quotient `1/g(x)` is
+ * element-wise for a matrix, and it stays a quotient.
+ */
+function isMatrixInversePower(
+  t: { term: Expression; quotient?: boolean },
+  exponent: Rational
+): boolean {
+  return (
+    isNeg(exponent) &&
+    isIntegerRational(exponent) &&
+    t.quotient !== true &&
+    mayBeMatrixPowerBase(t.term)
+  );
 }
 
 function termsAsExpression(

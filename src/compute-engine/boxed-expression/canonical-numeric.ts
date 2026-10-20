@@ -1,16 +1,22 @@
 import type {
   Expression,
+  ExpressionInput,
   IComputeEngine as ComputeEngine,
   Metadata,
   Scope,
 } from '../global-types.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
+import { operands, operator } from '../../math-json/utils.js';
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
 import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 import { canonicalNegate } from './negate.js';
 import { checkArity, checkNumericArgs } from './validate.js';
-import { isNumber } from './type-guards.js';
+import { isExpression, isFunction, isNumber } from './type-guards.js';
 import { registerNumericCanonicalHandler } from './numeric-canonical-registry.js';
+import { readJuxtaposition } from './invisible-operator.js';
+import { productMayHaveMatrix } from './matrix-operand.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 
 /**
  * The operators whose canonical form `canonicalNumericOperator` computes.
@@ -31,6 +37,295 @@ export const NUMERIC_CANONICAL_NAMES: ReadonlySet<string> = new Set([
   'Root',
   'Divide',
 ]);
+
+/**
+ * The canonical operands of a product whose operands `ops` are not canonical
+ * yet, with the factors of each nested product put in its place:
+ * `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]` gives the operands
+ * `A, g(x), k(x), g(x)`. Return `undefined` when no operand is a nested
+ * product: the caller then makes the operands canonical as usual.
+ *
+ * A nested product is a raw `Multiply`, a juxtaposition that is a product
+ * (`A\cdot(g(x)k(x))`, a raw `InvisibleOperator`, read by
+ * `readJuxtaposition()` in `invisible-operator.ts`), the negation of a
+ * nested product (`-(g(x)k(x))`, spliced as the factor `-1` and the factors
+ * of the product), or the quotient of a nested product by an integer literal
+ * (`(g(x)k(x))/2`, spliced with the factor `1/2`). Each may be in
+ * parentheses (a `Delimiter` with one operand).
+ *
+ * The factors are put in place BEFORE they are sorted. A nested product
+ * that is made canonical on its own is sorted when it has no matrix, and
+ * this loses the written order of factors that can be matrices: with `A` a
+ * matrix and `g`, `k` functions that were not declared, the nested product
+ * `g(x)·k(x)·g(x)` became `k(x)·g(x)·g(x)` before the outer product saw the
+ * matrix. After the splice, the outer product sorts all the factors at once
+ * (`sortProductOperands()` in `order.ts`), so it keeps the order of the
+ * factors that can be matrices. The matrix product is associative, so the
+ * splice does not change the value.
+ *
+ * The splice is done only when the product can have a matrix factor
+ * (`productMayHaveMatrix()`). Otherwise each nested product is made
+ * canonical on its own, as before.
+ *
+ * A canonical or structural nested product is not changed: its operands
+ * already have their final order. Nothing is spliced in a product that holds
+ * an ellipsis (`ContinuationPlaceholder`) anywhere: the operands of such a
+ * product are fold barriers (see `isFoldBarrierProduct()` in
+ * `type-guards.ts`). A nested `Negate`, `Divide`, `Delimiter` or
+ * `InvisibleOperator` is not read when the library definition of that
+ * operator is replaced (`shadowsLibraryName()`).
+ */
+export function canonicalProductOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput | Expression>,
+  scope: Scope | undefined
+): ReadonlyArray<Expression> | undefined {
+  if (!ops.some(mayBeNestedProduct)) return undefined;
+  // A product with an ellipsis (`2·4·…·2n`) is not changed: the operands on
+  // each side of the ellipsis are read as the terms of a pattern, so a
+  // nested product such as `2n` must stay one operand.
+  if (ops.some(mentionsEllipsis)) return undefined;
+  const nodes = ops.map((x) => factorNode(ce, x, scope));
+  const factors = nodes.flatMap((node) => spliceList(ce, node, scope));
+  if (productMayHaveMatrix(factors)) return factors;
+  return nodes.map((node) => nodeCanonical(ce, node, scope));
+}
+
+/**
+ * An operand of a product, read before the product is made canonical (see
+ * `canonicalProductOperands()`). The canonical form of a `leaf` is computed
+ * once, when it is first needed, and kept in `value`.
+ */
+type FactorNode =
+  | { kind: 'leaf'; input: ExpressionInput | Expression; value?: Expression }
+  | { kind: 'product'; children: FactorNode[] }
+  | {
+      kind: 'juxtaposition';
+      factors: ReadonlyArray<Expression>;
+      value: Expression;
+    }
+  | { kind: 'negate'; child: FactorNode }
+  | { kind: 'divide'; child: FactorNode; divisor: number };
+
+/** The operator and the operands of `x` when it is a function expression
+ * that is not canonical yet (MathJSON, or a raw boxed expression). */
+function rawParts(
+  x: ExpressionInput | Expression
+):
+  | { name: string; ops: ReadonlyArray<ExpressionInput | Expression> }
+  | undefined {
+  if (isExpression(x)) {
+    if (x.isCanonical || x.isStructural || !isFunction(x)) return undefined;
+    return { name: x.operator, ops: x.ops };
+  }
+  if (typeof x !== 'object' || x === null) return undefined;
+  const name = operator(x as MathJsonExpression);
+  if (name === '') return undefined;
+  return { name, ops: operands(x as MathJsonExpression) };
+}
+
+const NESTED_PRODUCT_OPERATORS = new Set([
+  'Multiply',
+  'InvisibleOperator',
+  'Negate',
+  'Divide',
+  'Delimiter',
+]);
+
+/** A quick test: can `x` be a nested product (see `nestedProductNode()`)? */
+function mayBeNestedProduct(x: ExpressionInput | Expression): boolean {
+  const parts = rawParts(x);
+  return parts !== undefined && NESTED_PRODUCT_OPERATORS.has(parts.name);
+}
+
+function factorNode(
+  ce: ComputeEngine,
+  x: ExpressionInput | Expression,
+  scope: Scope | undefined
+): FactorNode {
+  return nestedProductNode(ce, x, scope) ?? { kind: 'leaf', input: x };
+}
+
+/**
+ * The node of `x` when it is a nested product (see
+ * `canonicalProductOperands()`), or a juxtaposition that is read as
+ * something else (then a `leaf` with its canonical form). Otherwise,
+ * `undefined`.
+ */
+function nestedProductNode(
+  ce: ComputeEngine,
+  x: ExpressionInput | Expression,
+  scope: Scope | undefined
+): FactorNode | undefined {
+  let parts = rawParts(x);
+  if (parts?.name === 'Delimiter' && parts.ops.length === 1) {
+    if (shadowsLibraryName(ce, 'Delimiter')) return undefined;
+    parts = rawParts(parts.ops[0]);
+  }
+  if (parts === undefined) return undefined;
+  if (parts.name === 'Multiply')
+    return {
+      kind: 'product',
+      children: parts.ops.map((op) => factorNode(ce, op, scope)),
+    };
+  if (parts.name === 'InvisibleOperator') {
+    const reading = readJuxtaposition(
+      ce,
+      isExpression(x) ? x : ce.expr(x, { form: 'raw', scope })
+    );
+    if (reading === undefined) return undefined;
+    if (reading.factors === undefined)
+      return { kind: 'leaf', input: x, value: reading.canonical };
+    return {
+      kind: 'juxtaposition',
+      factors: reading.factors,
+      value: reading.canonical,
+    };
+  }
+  if (
+    parts.name === 'Negate' &&
+    parts.ops.length === 1 &&
+    !shadowsLibraryName(ce, 'Negate')
+  ) {
+    const child = nestedProductNode(ce, parts.ops[0], scope);
+    if (child === undefined) return undefined;
+    if (child.kind === 'leaf')
+      return {
+        kind: 'leaf',
+        input: x,
+        value: canonicalOperation(ce, 'Negate', [
+          nodeCanonical(ce, child, scope),
+        ]),
+      };
+    return { kind: 'negate', child };
+  }
+  if (
+    parts.name === 'Divide' &&
+    parts.ops.length === 2 &&
+    !shadowsLibraryName(ce, 'Divide')
+  ) {
+    const divisor = integerLiteral(parts.ops[1]);
+    if (divisor === undefined) return undefined;
+    const child = nestedProductNode(ce, parts.ops[0], scope);
+    if (child === undefined) return undefined;
+    if (child.kind === 'leaf')
+      return {
+        kind: 'leaf',
+        input: x,
+        value: canonicalOperation(ce, 'Divide', [
+          nodeCanonical(ce, child, scope),
+          ce.number(divisor),
+        ]),
+      };
+    return { kind: 'divide', child, divisor };
+  }
+  return undefined;
+}
+
+/** The value of `x` when it is an exact integer literal other than 0. */
+function integerLiteral(x: ExpressionInput | Expression): number | undefined {
+  if (isExpression(x)) {
+    if (!isNumber(x) || !x.isExact || x.isInteger !== true) return undefined;
+    const n = x.re;
+    return Number.isSafeInteger(n) && n !== 0 ? n : undefined;
+  }
+  return typeof x === 'number' && Number.isSafeInteger(x) && x !== 0
+    ? x
+    : undefined;
+}
+
+/** The canonical factors of `node`, with each nested product spliced. */
+function spliceList(
+  ce: ComputeEngine,
+  node: FactorNode,
+  scope: Scope | undefined
+): Expression[] {
+  switch (node.kind) {
+    case 'leaf':
+      return [leafValue(ce, node, scope)];
+    case 'product':
+      return node.children.flatMap((child) => spliceList(ce, child, scope));
+    case 'juxtaposition':
+      return [...node.factors];
+    case 'negate':
+      return [ce.NegativeOne, ...spliceList(ce, node.child, scope)];
+    case 'divide':
+      return [
+        ...spliceList(ce, node.child, scope),
+        ce.number([1, node.divisor]),
+      ];
+  }
+}
+
+/** The canonical form of `node`: a nested product is spliced only when it
+ * can have a matrix factor, as `canonicalProductOperands()` does. */
+function nodeCanonical(
+  ce: ComputeEngine,
+  node: FactorNode,
+  scope: Scope | undefined
+): Expression {
+  switch (node.kind) {
+    case 'leaf':
+      return leafValue(ce, node, scope);
+    case 'juxtaposition':
+      return node.value;
+    case 'product': {
+      const factors = spliceList(ce, node, scope);
+      return canonicalOperation(
+        ce,
+        'Multiply',
+        productMayHaveMatrix(factors)
+          ? factors
+          : node.children.map((child) => nodeCanonical(ce, child, scope))
+      );
+    }
+    case 'negate':
+      return canonicalOperation(ce, 'Negate', [
+        nodeCanonical(ce, node.child, scope),
+      ]);
+    case 'divide':
+      return canonicalOperation(ce, 'Divide', [
+        nodeCanonical(ce, node.child, scope),
+        ce.number(node.divisor),
+      ]);
+  }
+}
+
+function leafValue(
+  ce: ComputeEngine,
+  node: { input: ExpressionInput | Expression; value?: Expression },
+  scope: Scope | undefined
+): Expression {
+  return (node.value ??= ce.expr(node.input, { scope }));
+}
+
+/** The canonical form of `name` applied to the canonical operands `ops`. */
+function canonicalOperation(
+  ce: ComputeEngine,
+  name: string,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  return canonicalNumericOperator(ce, name, ops) ?? ce.function(name, [...ops]);
+}
+
+/** True when the symbol `ContinuationPlaceholder` (an ellipsis) appears
+ * anywhere in `x`. */
+function mentionsEllipsis(x: ExpressionInput | Expression): boolean {
+  if (isExpression(x)) return x.has('ContinuationPlaceholder');
+  if (typeof x !== 'string' && (typeof x !== 'object' || x === null))
+    return false;
+  return mentionsSymbol(x as MathJsonExpression, 'ContinuationPlaceholder');
+}
+
+/** True when the symbol `name` appears anywhere in the MathJSON `expr`. */
+function mentionsSymbol(expr: MathJsonExpression, name: string): boolean {
+  if (typeof expr === 'string') return expr === name;
+  if (typeof expr !== 'object' || expr === null) return false;
+  if (Array.isArray(expr)) return expr.some((x) => mentionsSymbol(x, name));
+  if ('sym' in expr) return expr.sym === name;
+  if ('fn' in expr) return expr.fn.some((x) => mentionsSymbol(x, name));
+  return false;
+}
 
 /**
  * The canonical form of the arithmetic operator `name` applied to `ops`,
@@ -169,9 +464,15 @@ export function numericCanonicalHandler(
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ) => Expression | null {
   return registerNumericCanonicalHandler(name, (ops, { engine, scope }) => {
-    const xs = ops.every((x) => x.isCanonical)
-      ? ops
-      : ops.map((x) => (x.isCanonical ? x : engine.expr(x, { scope })));
+    const spliced =
+      name === 'Multiply'
+        ? canonicalProductOperands(engine, ops, scope)
+        : undefined;
+    const xs =
+      spliced ??
+      (ops.every((x) => x.isCanonical)
+        ? ops
+        : ops.map((x) => (x.isCanonical ? x : engine.expr(x, { scope }))));
     return (
       canonicalNumericOperator(engine, name, xs) ??
       engine._fn(name, ops, { canonical: true, scope })

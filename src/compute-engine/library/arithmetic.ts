@@ -15240,7 +15240,7 @@ function addEvaluatedOperands(
     );
   }
   if (evaluated.some((x) => x.operator === 'Quantity')) {
-    const r = quantityAdd(engine!, evaluated);
+    const r = quantityAdd(engine!, evaluated, ops);
     // An exact or Measurement magnitude is made numeric under `.N()`.
     return numericApproximation ? r?.N() : r;
   }

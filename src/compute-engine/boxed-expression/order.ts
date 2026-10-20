@@ -17,6 +17,9 @@ import {
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
+import { mayBeTensorProductOperand } from './matrix-operand.js';
+
+export { mayBeTensorProductOperand };
 export { DEFAULT_COMPLEXITY };
 
 /**
@@ -32,40 +35,6 @@ export function isTensorProductOperand(x: Expression): boolean {
   if (isFunction(x, 'Matrix')) return true;
   const facts = x.type.facts;
   return facts.matrix || facts.vector;
-}
-
-/**
- * Can this operand be a matrix, although its type does not say so? This is
- * `true` when the type of the operand is not known to exclude a collection:
- * the type is `unknown` or `any` (the call `g(x)` of a function that was not
- * declared), a union such as `number | matrix`, or a collection that is not
- * known to be a matrix or a vector (`g(A)` with `A` a matrix has the type
- * `list<unknown^(2x2)>`). A tuple is not a matrix. An operand of a scalar
- * type (`number`, `real`, `integer`) is `false`.
- *
- * A symbol of type `unknown` (a symbol with no declaration and no value) is
- * `false`: a symbol used in a product is a number. `ce.box(['Multiply', 'A',
- * 'x'])` infers the type `number` for `x`, but `ce.parse('A x')` leaves it
- * `unknown`, and the two must give the same product. A symbol declared with
- * the type `any` is not inferred to be a number, so it is `true`.
- *
- * In a product with a matrix, such an operand must not move past a matrix
- * or past another operand of this kind: if it is a matrix, the two factors
- * do not commute.
- *
- * Limit: a product with no matrix is sorted when it is made canonical, so a
- * product nested in a product with a matrix can lose the order of its
- * factors before the outer product sees the matrix.
- * `['Multiply', 'A', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']]]`
- * becomes `A·k(x)·g(x)·g(x)`, because the inner product has no matrix and
- * is sorted first. To keep that order, a product with no matrix must not be
- * sorted, and this changes the order of a scalar product such as
- * `g(x)·k(x)`.
- */
-export function mayBeTensorProductOperand(x: Expression): boolean {
-  const facts = x.type.facts;
-  if (facts.collection === false || facts.tupleShaped) return false;
-  return !(isSymbol(x) && x.type.type === 'unknown');
 }
 
 /**

@@ -511,9 +511,11 @@ describe('SYMBOLS', () => {
       expect(latex('`x_fraktur`')).toEqual(`\\mathfrak{x}`);
       expect(latex('`x_doublestruck`')).toEqual(`\\mathbb{x}`);
       expect(latex('`x_blackboard`')).toEqual(`\\mathbb{x}`);
-      expect(latex('`x_bold_talic`')).toEqual(`\\mathbf{x_{talic}}`);
+      // The style encloses the base only: `\mathbf{x_{talic}}` would read
+      // back as the different symbol `x_talic_bold`.
+      expect(latex('`x_bold_talic`')).toEqual(`\\mathbf{x}_{talic}`);
       expect(latex('`x_calligraphic`')).toEqual(`\\mathcal{x}`);
-      expect(latex('`x_script_old`')).toEqual(`\\mathscr{x_{old}}`);
+      expect(latex('`x_script_old`')).toEqual(`\\mathscr{x}_{old}`);
       expect(latex('`x_calligraphic_bold`')).toEqual(`\\mathbf{\\mathcal{x}}`);
       expect(latex('`x_gothic_bold`')).toEqual(`\\mathbf{\\mathfrak{x}}`);
       expect(latex('`x_fraktur_bold`')).toEqual(`\\mathbf{\\mathfrak{x}}`);
@@ -531,12 +533,12 @@ describe('SYMBOLS', () => {
         `\\mathcal{\\vec{\\hat{x}}}`
       );
       expect(latex('`x_calligraphic_hat_vec`')).toEqual(
-        `\\mathcal{x_{\\vec{hat}}}`
+        `\\mathcal{x}_{\\vec{hat}}`
       );
       expect(latex('`x_bold_italic`')).toEqual(`\\mathit{\\mathbf{x}}`);
       expect(latex('`x_calligraphic_bold`')).toEqual(`\\mathbf{\\mathcal{x}}`);
       expect(latex('`x_vec_bold_I_fraktur`')).toEqual(
-        `\\mathbf{\\vec{x}_{\\mathfrak{I}}}`
+        `\\mathbf{\\vec{x}}_{\\mathfrak{I}}`
       );
     });
 
@@ -549,7 +551,11 @@ describe('SYMBOLS', () => {
 
     test('superscripts and subscripts', () => {
       expect(latex('`speed_max`')).toEqual(`\\mathrm{speed_{max}}`);
-      expect(latex('`speed_light_max`')).toEqual(`\\mathrm{speed_{light,max}}`);
+      // Two subscripts are nested, outside the `\mathrm{}` wrapper, so the
+      // name reads back as the same symbol.
+      expect(latex('`speed_light_max`')).toEqual(
+        `{\\mathrm{speed_{light}}}_{max}`
+      );
       expect(latex('`mass__earth`')).toEqual(`\\mathrm{mass^{earth}}`);
       expect(latex('`radius__moon_min`')).toEqual(
         `\\mathrm{radius^{moon}_{min}}`
@@ -578,7 +584,9 @@ describe('SYMBOLS', () => {
       expect(latex('`aleph__plus`')).toMatchInlineSnapshot(`\\aleph^{+}`);
       expect(latex('`x_alpha`')).toEqual(`x_{\\alpha}`);
       expect(latex('`alpha_gamma`')).toEqual(`\\alpha_{\\gamma}`);
-      expect(latex('`alpha_gamma_delta`')).toEqual(`\\alpha_{\\gamma,\\delta}`);
+      expect(latex('`alpha_gamma_delta`')).toEqual(
+        `{\\alpha_{\\gamma}}_{\\delta}`
+      );
       expect(latex('`beta_bold`')).toEqual(`\\mathbf{\\beta}`);
       expect(latex('`beta_calligraphic`')).toMatchInlineSnapshot(
         `\\mathcal{\\beta}`

@@ -203,6 +203,7 @@ export class Serializer {
       angleNormalization: 'none',
       readsAsPointList: undefined,
       readsAsCardinality: undefined,
+      readsAsMatrixPowerBase: undefined,
       exponentialE: '\\exponentialE',
       ...normalizeStyleOptions(options),
     } as Required<ResolvedSerializeLatexOptions>;
@@ -855,11 +856,19 @@ function parseModifiers(
   return [body, accent, styles, rest];
 }
 
+/**
+ * Spell out the body of a symbol name.
+ *
+ * The second and later subscripts of a top-level name are not part of
+ * `result`: they are returned in `outerSubs`, and the caller applies them with
+ * `withOuterSubscripts()` after it has wrapped `result` (for example in
+ * `\operatorname{}`). See the comment where the subscripts are applied.
+ */
 function parseSymbolBody(
   s: string,
   topLevel = true,
   style: 'operator' | 'italic' | 'upright' | 'auto' | 'none' = 'auto'
-): [result: string, rest: string] {
+): [result: string, rest: string, outerSubs: string[]] {
   // eslint-disable-next-line prefer-const
   let [body, accents, styles, rest] = parseModifiers(s);
 
@@ -880,9 +889,17 @@ function parseSymbolBody(
 
   // Only the top level can have superscripts and subscripts
   let baseBody = body;
+  let outerSubs: string[] = [];
+  // Whether the name has a style of its own (`_bold`), which replaces the
+  // default `style`.
+  let explicitStyle = false;
   if (topLevel) {
     const sups: string[] = [];
     const subs: string[] = [];
+    // The styles of a subscript of digits (`bold` in `x_1_bold`), and the
+    // number of subscripts that the style encloses.
+    let subStyles: string[] = [];
+    let styledSubCount = 0;
 
     // Check if we have a string of digits at the end of the body.
     //
@@ -892,7 +909,16 @@ function parseSymbolBody(
     // the different symbol `x_2` (and a bare `x2` is not an option either: it
     // parses as the product `x·2`). A plain digit-suffixed name is therefore
     // spelled verbatim — upright, as `\mathrm{x2}`.
-    const m = s.includes('_') ? body.match(/^([^\d].*?)(\d+)$/) : null;
+    //
+    // A name that has a subscript after the digits (`x1_2`) does not get it
+    // either: the digits and the subscript would be written as two nested
+    // subscripts, `{x_1}_2`, which read back as the different symbol `x_1_2`.
+    // Nor does a name with a style (`x1_bold`): it is written `\mathbf{x1}`,
+    // because `\mathbf{x}_1` reads back as the different symbol `x_bold_1`.
+    const m =
+      s.includes('_') && styles.length === 0 && !/^_(?!_)/.test(rest)
+        ? body.match(/^([^\d].*?)(\d+)$/)
+        : null;
     if (m) {
       subs.push(m[2]);
       body = m[1];
@@ -917,6 +943,31 @@ function parseSymbolBody(
         sups.push(sup);
         rest = rest2;
       } else if (rest.startsWith('_')) {
+        // A subscript of digits followed by a style (`x_1_bold`) is the parse
+        // of a style written around the base and the subscript,
+        // `\mathbf{x_1}`. It cannot be written as a styled subscript,
+        // `x_{\mathbf{1}}`, because the parser spells out a styled digit:
+        // `\mathbf{1}` is `one_bold`. The style is applied below, around the
+        // base and the subscripts up to this one.
+        //
+        // This is not done for a wildcard name, the only top-level name
+        // spelled with the `'none'` style: it is wrapped in
+        // `\operatorname{}`, and `\operatorname{\_\mathbf{x_1}}` does not
+        // parse.
+        const styled =
+          style !== 'none' &&
+          styles.length === 0 &&
+          sups.length === 0 &&
+          subStyles.length === 0
+            ? styledDigitSubscript(rest)
+            : null;
+        if (styled) {
+          subs.push(styled.digits);
+          subStyles = styled.styles;
+          styledSubCount = subs.length;
+          rest = styled.rest;
+          continue;
+        }
         const [sub, rest2] = parseSymbolBody(rest.substring(1), false, 'none');
         subs.push(sub);
         rest = rest2;
@@ -933,16 +984,52 @@ function parseSymbolBody(
     // such as `speed_max` stay upright: `\mathrm{speed_{max}}`.)
     baseBody = body;
 
-    // Apply the superscripts and subscripts
+    // Apply the superscripts and the first subscript.
+    //
+    // A symbol with two or more subscripts (`x_1_2`, which is also the
+    // canonical form of `Subscript(Subscript(x, 1), 2)`) is written with
+    // nested subscripts, `{x_1}_2`, and `{{x_1}_2}_3` for three. The parser
+    // reads the nested form back as the same symbol. A comma list, `x_{1,2}`,
+    // reads back as a different expression, `Subscript(x, Sequence(1, 2))`.
+    // Neither spelling reads back when the base or a prefix of the name is an
+    // indexed collection: with a matrix `A`, `{A_1}_2` is
+    // `Subscript(At(A, 1), 2)`.
+    //
+    // The second and later subscripts are applied by the caller, outside of
+    // the style wrapper below and outside of the `\operatorname{}` of a
+    // wildcard name: `speed_1_2` is written `{\mathrm{speed_1}}_2`.
+    //
+    // A style is written around the base only, and the subscripts follow it:
+    // `x_bold_1` is `\mathbf{x}_1` and `x_bold_1_2` is `{\mathbf{x}_1}_2`.
+    // The parser reads a style around the base and the subscript,
+    // `\mathbf{x_1}`, as the different symbol `x_1_bold`. That symbol is
+    // written with the style around the base and the subscripts up to the
+    // styled one, nested inside the style: `x_1_2_bold` is
+    // `\mathbf{{x_1}_2}` (two subscripts in a row, `x_1_2`, are not valid
+    // LaTeX).
     if (sups.length > 0) body = supsub('^', body, sups.join(','));
-    if (subs.length > 0) body = supsub('_', body, subs.join(','));
+    if (styledSubCount > 0) {
+      for (const sub of subs.slice(0, styledSubCount))
+        body = supsub('_', body, sub);
+      for (const subStyle of subStyles) body = STYLE_MODIFIERS[subStyle](body);
+      outerSubs = subs.slice(styledSubCount);
+      explicitStyle = true;
+    } else {
+      for (const style of styles) {
+        if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
+      }
+      explicitStyle = styles.length > 0;
+      if (subs.length > 0) body = supsub('_', body, subs[0]);
+      outerSubs = subs.slice(1);
+    }
+  } else {
+    for (const style of styles) {
+      if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
+    }
+    explicitStyle = styles.length > 0;
   }
 
-  for (const style of styles) {
-    if (STYLE_MODIFIERS[style]) body = STYLE_MODIFIERS[style](body);
-  }
-
-  if (styles.length === 0 && style !== 'none') {
+  if (!explicitStyle && style !== 'none') {
     switch (style) {
       case 'auto':
         if (countTokens(baseBody) > 1) {
@@ -963,7 +1050,44 @@ function parseSymbolBody(
         break;
     }
   }
-  return [body, rest];
+  return [body, rest, outerSubs];
+}
+
+/**
+ * If `rest` starts with a subscript of digits followed by one or more styles
+ * (`_1_bold`, `_12_bold_italic`), return the digits, the styles and what
+ * follows them. Otherwise return `null`.
+ */
+function styledDigitSubscript(
+  rest: string
+): { digits: string; styles: string[]; rest: string } | null {
+  const m = rest.match(/^_(\d+)((?:_[a-zA-Z]+)*)(.*)$/s);
+  if (!m) return null;
+  const names = m[2].split('_').slice(1);
+  let count = 0;
+  while (count < names.length && STYLE_MODIFIERS[names[count]]) count += 1;
+  // The `upright` style is excluded: the parser drops it from a name of more
+  // than one character, so `\mathrm{x_1}` reads back as `x_1`, not as
+  // `x_1_upright`.
+  if (count === 0 || names.slice(0, count).includes('upright')) return null;
+  return {
+    digits: m[1],
+    styles: names.slice(0, count),
+    rest:
+      names
+        .slice(count)
+        .map((name) => `_${name}`)
+        .join('') + m[3],
+  };
+}
+
+/**
+ * Add the second and later subscripts of a symbol name to its spelled-out
+ * body, one level of nesting each: `x_1` and `["2", "3"]` give `{{x_1}_2}_3`.
+ */
+function withOuterSubscripts(body: string, outerSubs: string[]): string {
+  for (const sub of outerSubs) body = supsub('_', body, sub);
+  return body;
 }
 
 // If the name contains an underscore, e.g.'mu_0', make sure
@@ -1007,16 +1131,21 @@ function serializeSymbol(
   // But ____XXXXXX (4 underscores + 6 hex digits) is a unicode escape, not a wildcard.
   const m = s.match(/^(_+)(.*)/);
   if (m && !s.match(/^____[0-9A-Fa-f]{6}/)) {
-    const [body, rest] = parseSymbolBody(m[2], true, 'none');
-    return `\\operatorname{${'\\_'.repeat(m[1].length) + body + rest}}`;
+    const [body, rest, outerSubs] = parseSymbolBody(m[2], true, 'none');
+    const prefix = '\\_'.repeat(m[1].length);
+    // A text that could not be spelled out (`rest`) comes after the
+    // subscripts in the name, so the subscripts stay in front of it.
+    if (rest.length > 0)
+      return `\\operatorname{${prefix + withOuterSubscripts(body, outerSubs) + rest}}`;
+    return withOuterSubscripts(`\\operatorname{${prefix + body}}`, outerSubs);
   }
 
-  const [body, rest] = parseSymbolBody(s, true, style);
+  const [body, rest, outerSubs] = parseSymbolBody(s, true, style);
 
   // We couldn't parse the symbol, so just wrap it in \operatorname{...}
   if (rest.length > 0) return `\\operatorname{${s}}`;
 
-  return body;
+  return withOuterSubscripts(body, outerSubs);
 }
 
 export function serializeLatex(

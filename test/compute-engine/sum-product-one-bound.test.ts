@@ -127,6 +127,17 @@ describe('A SUM OR PRODUCT WITH ONE BOUND STAYS UNEVALUATED', () => {
     expect(value.json).toEqual(expr.json);
   });
 
+  // `simplify()` read the `Nothing` bound as a value: `\sum_{k=1} k` gave
+  // `1/2` and `\sum_{k=1} y` gave `0`.
+  test.each([
+    ...ONE_BOUND,
+    ['\\sum_{k=1} y', () => ce.parse('\\sum_{k=1} y')],
+    ['\\prod_{k=1} y', () => ce.parse('\\prod_{k=1} y')],
+  ] as [string, () => Expression][])('%s: simplify()', (_, make) => {
+    const expr = make();
+    expect(expr.simplify().json).toEqual(expr.json);
+  });
+
   test('evaluateAsync() stays unevaluated', async () => {
     const sum = ce.box(['Sum', 'k', ['Limits', 'k', 'Nothing', 10]]);
     expect((await sum.evaluateAsync()).json).toEqual(sum.json);

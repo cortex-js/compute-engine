@@ -1342,15 +1342,15 @@ describe('CONVERT COMPOUND UNIT WITH SIMPLE STRINGS', () => {
 });
 
 describe('TEMPERATURE ARITHMETIC EDGE CASES', () => {
-  test('Adding degC quantities uses convertUnit (affine-aware)', () => {
-    // Adding two degC values: the largest-scale-unit strategy picks degC
-    // for both, so no conversion needed — just sums the magnitudes.
-    // This is a "temperature difference" interpretation.
+  test('Adding degC quantities adds their values in kelvin', () => {
+    // A sum with a temperature that has an offset converts each operand to
+    // kelvin, with its offset: 293.15 K + 283.15 K = 576.3 K.
     const expr = engine
       .expr(['Add', ['Quantity', 20, 'degC'], ['Quantity', 10, 'degC']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
-    expect(expr.op1.re).toBe(30);
+    expect(expr.op2.toString()).toBe('K');
+    expect(expr.op1.re).toBe(576.3);
   });
 });
 

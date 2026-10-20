@@ -53,6 +53,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { mayBeMatrixPowerBase } from './matrix-operand.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -314,12 +315,13 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     const elementWiseMatrix = !isExactInteger(aPow) && isMatrixTyped(a);
 
     if ((baseNonNeg || outerIsInteger) && !elementWiseMatrix) {
-      return ce._fn('Power', [
-        base,
-        ce.expr(['Multiply', aPow, b], {
-          form: fullyCanonical ? 'canonical' : 'Power',
-        }),
-      ]);
+      const exponent = ce.expr(['Multiply', aPow, b], {
+        form: fullyCanonical ? 'canonical' : 'Power',
+      });
+      // `(a^n)^m` with `n·m = 1` is `a`: `(g(x)^{-1})^{-1}` is `g(x)`, also
+      // when `g(x)` is a matrix
+      if (isExactLiteral(exponent, 1)) return base;
+      return ce._fn('Power', [base, exponent]);
     }
     // Unsafe to combine — leave as nested Power, fall through
   }
@@ -487,10 +489,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     return indeterminateFormAnswer(ce, [a, b]);
   }
 
-  // One as exponent
-  // (Permit the base to be a FN-expr. here, too...)
-  if (isExactLiteral(b, 1) && a.type.matches('number' as NumericPrimitiveType))
-    return a;
+  // One as exponent: `a^1` is `a` for any base, a matrix too (`g(x)^1`,
+  // with `g` a function that was not declared, is `g(x)`)
+  if (isExactLiteral(b, 1)) return a;
 
   // -1 exponent
   if (isExactLiteral(b, -1)) {
@@ -514,6 +515,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
     // Matrix inverse: A^{-1} -> Inverse(A)
     if (isMatrixTyped(a)) return ce.function('Inverse', [a]);
+
+    // A base that can be a matrix (`g(x)` with `g` a function that was not
+    // declared) stays a `Power`. When its value is a matrix, the power is
+    // the matrix inverse (the `Power` evaluate handler gives it). The
+    // quotient `1/g(x)` would be the element-wise reciprocal of the matrix.
+    if (mayBeMatrixPowerBase(a)) return unchanged();
 
     // (note: case of `0^-1 = ~∞` is covered prior...)
     if (!(a.isCanonical || a.isStructural))
@@ -1805,6 +1812,8 @@ export function pow(
   // a^(b/c) -> root(a, c)^b if b = 1 or c = 1
   if (typeof exp !== 'number' && isNumber(exp)) {
     const r = asRational(exp);
+    // `a^1` is `a`, not `Root(a, 1)`
+    if (r !== undefined && r[0] === 1 && r[1] === 1) return x;
     if (r !== undefined && r[0] === 1)
       return root(x, ce.number(r[1]), { numericApproximation });
   }

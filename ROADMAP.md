@@ -140,6 +140,68 @@ on 2026-10-19:
   slots may be absent": `tuple<any>` is a one-slot tuple. A fix needs either a
   new spelling for that type or a wider answer (`indexed_collection<any>`,
   `any`), which loses the information that the value is a tuple.
+- QUESTION: the access marker of a declared numeric list that holds no element.
+  With `E: list<integer> := []`, `First(E)` is typed `integer | nan` but
+  evaluates to `Missing`. Rule 5 of `docs/ERROR-MODEL.md` computes the marker
+  "from the element type of the access": the declared element type is `integer`
+  (marker `NaN`), the held value `[]` has element type `never` (marker
+  `Missing`), and `componentAt` reads the held value. Option A: take the marker
+  from the declared type, so `First(E)` evaluates to `NaN`. Option B: add
+  `missing` to the static type of every `First(xs)` over a numeric list
+  (`integer | nan | missing`).
+- QUESTION: a `missing` arm for an access over `any` or `unknown` elements.
+  `First(W)` with `W: list<any> := []` is typed `unknown`, but evaluates to
+  `Missing`. Making `withMarker` answer `any` for `any` and `missing | unknown`
+  for `unknown` broke 44 tests in 14 suites: two assert `unknown` directly
+  (`types.test.ts:2683` `At(anIndexed, 1)`, `missing-value.test.ts:195`
+  `At(Missing, 1)`), and the `missing` arm then flows into use-driven inference,
+  so Epsil reports `sol[1][1]` as a static error (`programs.test.ts`). The
+  question is how a `missing` arm on an access result should flow through
+  inference.
+- `Map(x ↦ Sqrt(x), U)` with `U: any` holding lists is typed `list<number>` (the
+  value is a list of lists): the function literal's own type
+  `(unknown) -> number` assumes a scalar parameter.
+- `Map(First, [[1, 2], [3]])` is typed
+  `list<vector<integer^1> | vector<integer^2>>`, but the value is `[1, 3]`: a
+  library callback whose result is `any` falls back to copying the source type.
+- `Map(Sqrt, Uu)` with `Uu: unknown` (or a bare `list`) holding `[[1, 2], [3]]`
+  is an `incompatible-type` error at canonicalization, while `U: any` is
+  accepted.
+- A list literal types an `Undefined` element as its other elements:
+  `[1, Undefined]` is `list<integer>`, so `Zip([1, Undefined], [2, Undefined])`
+  is typed `list<tuple<integer, integer>>` while its second element is `Missing`
+  (`isAbsentSymbol` treats `Undefined` as absent). A propagating operator
+  already types an `Undefined` operand as `missing` (`deriveApplicationType`);
+  the list literal does not.
+- The several-source `Map((a, b) ↦ If(a == 1, "x", b), [1, 2], [5, 6])`: the
+  value `["x", 6]` is typed `list<integer | string>` (a list literal with mixed
+  elements records no length), so it does not match the static `list<…^2>`.
+
+### Broadcast result types of nested lists that do not hold their values (OPEN, small — found 2026-10-19 by the absent-cell arithmetic fix)
+
+None of these involves an absent cell. Each was measured on 2026-10-19:
+
+- A declared `list<list<integer>>` holding uneven rows `[[1, 2], [3]]`: `Sin(L)`
+  and `Sqrt(L)` are typed `matrix`, but the value is
+  `list<vector<real^1> | vector<real^2>>`. `staticCollectionDims`
+  (`common/type/utils.ts`) reads declared rows as rectangular.
+- `L^2` with `L: list<list<integer>> := [[1, 2]]` is typed `matrix`, but the
+  value is `Error("expected-square-matrix")`. Over `list<list<list<integer>>>`
+  the type is `list<number^(?x?x?)>` and the value is `[Error(…)]`.
+- `Abs` over `list<integer>`: the static type
+  `list<real<0..> | signed_infinity>` is correct, but the evaluated value is
+  typed `vector<integer^2>`, which is not a subtype of it.
+- A valueless `L: list<list<tuple<integer, integer>>>`: `L + 0.5` is typed
+  `list<list<tuple<real, real>>>`, but the value is an `incompatible-type`
+  error. A flat list of points plus a number is already typed `error`.
+- On the derive route, `derive('Subtract', [list<list<integer>>, 1])` gives
+  `matrix<list<integer>>`, one level too deep (the value `[[0, 1]]` is not a
+  member), and `derive('Divide', [list<list<tuple<integer, integer>>>, 2])`
+  gives `matrix`, but the value holds tuples. The box route rewrites `Subtract`
+  as a sum and does not have the first problem.
+- `Map` over `list<list<tuple<…>> | missing>` was not checked: its marker for an
+  absent cell (`absentCellMarker()` in `library/collections.ts`) does not read
+  through an absent row.
 
 ### Arithmetic on a list whose cells are a list or absent forgets the absent cell (OPEN, small — found 2026-10-19 by the `absorbScalarsIntoCells` fix)
 
@@ -212,14 +274,20 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   is boxed with the library constant again, so the gap is limited to a JSON
   round trip inside the scope.
 
-### Smaller defects found on 2026-10-18 (batch 5) (OPEN, small)
+### Temperatures with an offset (OPEN, decision)
 
-- Adding two temperatures that have an offset is not defined:
-  `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the
-  result unit is the one with the largest scale, and the offset of each operand
-  is applied). A decision is needed on what such a sum means (an error, or a
-  difference of temperatures). User decision 2026-10-19: convert each
-  temperature to kelvin and add the values in kelvin.
+- A scalar multiple or a negation of a temperature with an offset does not agree
+  with the sum of temperatures (decision needed). A sum with a `degC` or `degF`
+  operand adds the values in kelvin, so `10 degC + 10 degC` is `566.3 K`, but
+  `2 · 10 degC` is `20 degC` (293.15 K), and `-(10 degC)` is `-10 degC` (263.15
+  K, not -283.15 K). Inside a sum, an operand written `Negate(…)` or `c·T` with
+  a negative number `c` is the negation of the temperature `|c|·T` (which keeps
+  the unit `degC`), converted to kelvin and then negated:
+  `20 degC - 2·(10 degC)` is `0 K`, while the kelvin values of the sum
+  `10 degC + 10 degC` give `293.15 K - 566.3 K`. Options: (a) a scalar multiple
+  or a negation of a `degC`/`degF` quantity also converts to kelvin; (b) keep
+  the unit `degC` (today). The code is `quantityMultiply()` and `kelvinSum()` in
+  `library/quantity-arithmetic.ts`.
 
 ### Smaller defects found on 2026-10-19 (batch 11) (OPEN, small)
 
@@ -262,19 +330,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   is called ambiguous. Also, the frames of `3 - Ln(w)` (with `let w: any = "s"`)
   are `Negate argument 1, Add argument 1`, with no `Ln` frame, while `Ln(w) * 2`
   has one: find why the `Ln` call adds no frame there.
-- A lazy collection operator whose callback is a symbol holding an error reports
-  the wrong error. With `w` holding the error of `Ln("a")`, `Any([1, 2], w)`,
-  `Filter([1, 2], w)` and `Reduce([1, 2], w)` give "expected `function`, got
-  `error`" (`canonicalCallbackOperand()`, `library/collections.ts`), while the
-  eager `Sort([2, 1], w)` gives the error of `Ln`. Letting the symbol through
-  the canonical check is not enough: these operators hold their operands, so `w`
-  is never evaluated, and the call stays unevaluated (`Reduce` gives `w(1, 2)`).
-  Two places can fix it: the lazy evaluation in
-  `boxed-expression/boxed-function.ts` (a held operand at a function-typed slot
-  whose value is an error gives that error, with the frame of the call), or each
-  lazy callback `evaluate` handler in `library/collections.ts` (about 20
-  operators). The first is one change; `boxed-function.ts` was staged with other
-  work on 2026-10-19, so this waits for that commit.
 - A lazy call whose operand is a raw `["Function"]` with no body throws when its
   `.type` is read or when it is evaluated, from `functionLiteralSignatureType()`
   (`boxed-expression/function-literal.ts`), reached through `boxed-function.ts`
@@ -298,7 +353,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   (not checked). The comment near `addTypeOnTypes` that names a twin `addType`
   in `boxed-expression/arithmetic-add.ts` is out of date.
 
-### Questions found on 2026-10-19 (batch 14) (OPEN, decision)
+### Questions found on 2026-10-19 (batch 14) (OPEN, decided 2026-10-19)
 
 - **A name assigned in only one branch of an `if` in a function body.** In
   `function g(c) { if c { t = 1 }; t }`, the `if` branch owns `t` (it is a local
@@ -308,7 +363,7 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   gives `1`, and `g(false)` gives the `read-before-declaration` error. If
   nothing is decided, (A) stays. Recommendation: (B), because the result of (A)
   is almost always unexpected; it changes the scoping rule, so it needs a
-  decision.
+  decision. User decision 2026-10-19: (B).
 
 - **A read of a constant name (`i`, `e`, `Pi`) that a later top-level `let`
   declares.** In `function g() { i + 1 }`, then `let i = 2`, then `g()`, the run
@@ -320,7 +375,8 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   a top-level declaration follow statement order in the program block too, so
   every route gives `1 + i`. If nothing is decided, the routes keep giving
   different values for this shape. Recommendation: (B), because it completes the
-  same rule for reads; it changes name resolution, so it needs a decision.
+  same rule for reads; it changes name resolution, so it needs a decision. User
+  decision 2026-10-19: (B).
 
 - **Compiled code and a declared function type.** With
   `let g: (integer) -> integer`, then `function g(k) { k + 1 }` (or
@@ -331,17 +387,13 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
   a declared result type that the body clearly breaks. (B) Accept the difference
   and document that compiled code does not check declared function types. If
   nothing is decided, the compiled code keeps answering where the run gives a
-  type error. Recommendation: (A).
+  type error. Recommendation: (A). User decision 2026-10-19: (A).
 
 ### Smaller defects found on 2026-10-19 (batch 12) (OPEN, small)
 
-- `3·10^-30` (`Multiply(3, Power(10, -30))`) is written `\frac{3}{10^{30}}`,
-  which parses back as `Rational(3, 10^30)`: the same exact value, but not the
-  same expression. The canonical form keeps the product while it folds a
-  `Divide` of exact numbers into a rational.
-
-### Smaller defects found on 2026-10-18 (batch 7) (OPEN, small)
-
+- `Multiply(3, x, Power(y, -1))` is written `\frac{3x}{y}`, which parses back as
+  `Divide(Multiply(3, x), y)`: the same value, but not the same expression. The
+  canonical forms of `Divide` and `Multiply` differ for this shape.
 - The test "a parameter whose type is not declared is real" in
   `test/compute-engine/solve.test.ts` failed once in a full run on 2026-10-18
   (at commit `3bdee13b3`, full suite with the default workers) and passes alone:
@@ -360,64 +412,39 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 
 ### Smaller defects found on 2026-10-19 by the derivative, LaTeX and matrix-power fixes (OPEN, small)
 
-- In a product that has a matrix, a nested product with no matrix loses the
-  order of its factors: `['Multiply', 'A', ['Multiply', g(x), k(x), g(x)]]`
-  (with `A` a matrix and `g`, `k` undeclared functions) boxes to
-  `A·k(x)·g(x)·g(x)`, because the inner product is sorted when it is made
-  canonical, before the outer product sees the matrix. The flat product
-  `A·g(x)·k(x)·g(x)` keeps its order. A fix would keep a product with no matrix
-  unsorted until its context is known, which changes the order of scalar
-  products such as `g(x)·k(x)` (today always `k(x)·g(x)`). A decision is
-  necessary. (`test.todo` in
-  `test/compute-engine/matrix-unknown-factor-order.test.ts`.) User decision
-  2026-10-19: flatten the operands of a product first (a nested `Multiply` is
-  spliced into the outer one), then order them, so the written order is kept.
-- `g(x)^{-1}` has two readings. `Power(g(x), -1)` is made canonical as
-  `Divide(1, g(x))`, which is element-wise when `g(x)` is a matrix, while
-  `Power(M, -1)` for a symbol `M` declared as a matrix becomes `Inverse(M)`. So
-  the value of `g(x)^{-1}` depends on whether `g` is known to be a matrix when
-  the expression is boxed. A decision is necessary: either a negative power of
-  an operand that can be a matrix stays a `Power` (the matrix inverse once the
-  value is known), or it stays element-wise. The code is in `canonicalPower`
-  (`boxed-expression/arithmetic-power.ts`). User decision 2026-10-19: a negative
-  power of an operand that can be a matrix stays a `Power`.
-- A symbol declared `error` with no value (`ce.declare('e', 'error')`) is
-  checked by two different rules. On a ground signature it is admitted:
-  `g1: (number) -> number` with `g1(e)` is valid and evaluates to itself, and so
-  are `(string) -> string` and `(unknown) -> unknown`, because
-  `overlapAdmission()` accepts it (`typesOverlap('error', T)` is true for every
-  `T`); `Sqrt(e)` is valid because `checkNumericArgs()`
-  (`boxed-expression/validate.ts`) passes every valid operand of type `error`.
-  On a generic signature it is refused: `(T) -> T where T: number` gives
-  "expected `number`, got `error`" (the `unheldErrorIdx` block of
-  `validateArguments()`). A decision is necessary: (A) refuse such an operand on
-  the ground route too, at a parameter that does not accept `error`, or (B)
-  admit it on the generic route too. If nothing is decided, the two routes keep
-  giving different answers. User decision 2026-10-19: (B).
-- Found 2026-10-19 by the error pass-through work (worktree
-  `~/dev/ce-wt-errpass`, not yet applied). With `e` declared `error` and no
-  value, and `w` holding the error of `Ln("a")`:
-  - An overloaded signature `((number) -> number) & ((string) -> string)`
-    refuses `e` ("expected `number | string`, got `error`"), while the ground
-    signature `(number) -> number` admits it (`prefilterAdmits()`,
-    `boxed-expression/overload.ts`). Under the 2026-10-19 decision (a valueless
-    `error` symbol is admitted on the generic route as on the ground route), the
-    overload route should probably admit it too.
-  - Two ground `unknown` parameters disagree: a library operator declared
-    `(unknown) -> unknown` and a function-literal parameter `a: unknown` refuse
-    `e`, while a function name declared `(unknown) -> unknown` and a generic
-    `T: unknown` admit it.
-  - `Apply(w, 1)` and `w(1)` stay `w(1)` instead of giving the error of `Ln`
-    (`_invalidValue()` / `applyFunctionLiteral` in
-    `boxed-expression/boxed-function.ts`).
-  - `Length(e)` is valid when it is boxed but evaluates to "expected
-    `collection`, got `error`": the check at boxing and the check at evaluation
-    disagree.
-- A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix,
-  worktree `~/dev/ce-wt-nothing`, not yet applied). `.N()` runs `\sum_k f(k)`
-  over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is `1.6449…`), but `evaluate()`
-  tries no closed form and leaves it unevaluated, while
-  `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `π²/6`. A decision is
+- The LaTeX parser refuses a symbol of type `error`. With `w` holding the error
+  of `Ln("a")` (or `w` declared `error`), `ce.parse('w')`, `ce.parse('w+1')` and
+  `ce.parse('\int_0^1 w\,dw')` give `unexpected-symbol`, while `ce.box('w')` is
+  valid. The symbol branch of the parser (`latex-syntax/parse.ts`, the
+  `parseSymbol()` fallback that reports `unexpected-symbol`) does not read such
+  a symbol as a term.
+- A symbol holding an error, or a call of it, is not the error when it is
+  applied directly: with `w` holding the error of `Ln("a")`, `w(1)` and
+  `Apply(w, 1)` stay `w(1)`, while `Map(w, [1, 2])` is the error of `w`. The
+  value-definition branch of `_invalidValue()` and `applyFunctionLiteral`
+  (`boxed-expression/boxed-function.ts`) handle a callee whose value is not a
+  function.
+- `Tabulate(w, 3)`, with `w` holding an error, is a list of three copies of the
+  error, while `Map(w, [1, 2, 3])` is the error. The generator parameter of
+  `Tabulate` is typed with the bare `function`, so `callbackSlots()`
+  (`boxed-expression/boxed-function.ts`) does not check it, and each element is
+  the error that `applicable()` (`function-utils.ts`) gives. Typing the
+  parameter `(integer) -> any` would give one error, as for `Map`.
+- A symbol declared `error` with no value (`e`) is still checked by different
+  rules on three routes. An overloaded function refuses it
+  (`((number) -> number) & ((string) -> string)` applied to `e` gives "expected
+  `number | string`, got `error`"), because the overload prefilter
+  (`prefilterAdmits()`, `boxed-expression/overload.ts`) finds `error` disjoint
+  from each arm, while a single signature `(number) -> number` admits it. A
+  parameter typed `unknown` refuses it on a library operator and a function
+  literal, and admits it on a function name declared `(unknown) -> unknown`.
+  `Length(e)` is valid at boxing and evaluates to "expected `collection`, got
+  `error`". A decision is necessary for the overload: admit `e` as the single
+  signature does, or keep the refusal.
+- A sum with no bounds is read two ways (found 2026-10-19 by the no-bounds fix).
+  `.N()` runs `\sum_k f(k)` over `k = 1..∞` (`\sum_k \frac{1}{k^2}` `.N()` is
+  `1.6449…`), but `evaluate()` tries no closed form and leaves it unevaluated,
+  while `\sum_{k=1}^{\infty} \frac{1}{k^2}` evaluates to `π²/6`. A decision is
   necessary: (A) a sum with no bounds means `k = 1..∞` on every route, so
   `evaluate()` gives `π²/6`; (B) it is an indefinite sum (Mathematica reads
   `Sum[f, k]` as an antidifference), and `.N()` should not give a number either;

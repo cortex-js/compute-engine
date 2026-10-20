@@ -16,6 +16,7 @@ import {
 } from '../collection-utils.js';
 import { isNumberExpression, stringValue } from '../../math-json/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { mayBeMatrixPowerBase } from './matrix-operand.js';
 
 /**
  * The options the engine passes to the LaTeX serializer: the engine-wide
@@ -120,6 +121,17 @@ export function latexSerializeOptions(
         // As for `readsAsPointList` above: a time limit set by the caller
         // must expire, and any other failure to box the operand returns
         // `undefined`.
+        if (e instanceof CancellationError) throw e;
+        return undefined;
+      }
+    },
+    readsAsMatrixPowerBase: (base: MathJsonExpression) => {
+      // A number or a symbol with no declaration is a scalar
+      if (isNumberExpression(base)) return false;
+      try {
+        return ce._resolveOnly(() => mayBeMatrixPowerBase(ce.box(base)));
+      } catch (e) {
+        // As for `readsAsPointList` above
         if (e instanceof CancellationError) throw e;
         return undefined;
       }

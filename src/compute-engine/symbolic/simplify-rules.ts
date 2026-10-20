@@ -1052,19 +1052,19 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
 
       // A power of a term that can be a matrix is kept as it is, and keeps
-      // its position, unless the exponent is an exact positive integer
-      // literal, as for a matrix: a non-integer or float power of a matrix
-      // (`h(x)^{2.0}`) is element-wise.
+      // its position, unless the exponent is an exact integer literal, as
+      // for a matrix: a non-integer or float power of a matrix
+      // (`h(x)^{2.0}`) is element-wise. A run of adjacent powers with
+      // exponents of the same sign is combined (`g(x)^{-1}·g(x)^{-1}` is
+      // `g(x)^{-2}`). Two exponents of opposite signs are not combined:
+      // `g(x)^2·g(x)^{-1}` is `g(x)` only when `g(x)` is invertible. This is
+      // what `evaluate()` does (`tallyInOrder()` in `arithmetic-mul-div.ts`).
       if (mayBeMatrix(term) || mayBeMatrix(base)) {
-        const positiveInteger =
-          isNumber(exp) &&
-          exp.isExact &&
-          exp.isInteger === true &&
-          exp.isPositive === true;
-        const baseKey = JSON.stringify(base.json);
-        if (positiveInteger && run?.key === baseKey)
+        const sign = exactIntegerSign(exp);
+        const baseKey = `${JSON.stringify(base.json)}${sign}`;
+        if (sign !== '' && run?.key === baseKey)
           run.group.terms.push({ term, exp });
-        else if (positiveInteger) {
+        else if (sign !== '') {
           run = { key: baseKey, group: { base, terms: [{ term, exp }] } };
           nonScalarTerms.push(run.group);
         } else {
@@ -1073,6 +1073,17 @@ export const SIMPLIFY_RULES: Rule[] = [
         }
         continue;
       }
+
+      // In a product with no matrix, a term that can be a matrix (`f(x)`) is
+      // a scalar, and the integer powers of the same base are combined, as
+      // `evaluate()` combines them: `f(x)^2·f(x)^{-1}` is `f(x)`. The test
+      // `canCombineSameBase()` below does not combine them, because the type
+      // of `f(x)` does not exclude a collection.
+      const scalarPowerOfPossibleMatrix =
+        !hasMatrix &&
+        exactIntegerSign(exp) !== '' &&
+        !hasCollectionShape(base) &&
+        mayBeTensorProductOperand(base);
 
       const nonScalar =
         isCollectionShaped(term) ||
@@ -1087,7 +1098,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       // power (`A·A` is `A^2`). The conditions apply to each term separately,
       // so the test is done here, before a numeric coefficient is split into
       // powers of the bases found (second pass below).
-      if (!canCombineSameBase(base, [exp], [term], 'product')) {
+      if (
+        !scalarPowerOfPossibleMatrix &&
+        !canCombineSameBase(base, [exp], [term], 'product')
+      ) {
         if (nonScalar) {
           nonScalarTerms.push({ base, terms: [{ term, exp }] });
           run = undefined;
@@ -1096,7 +1110,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
 
       const baseKey = JSON.stringify(base.json);
-      if (nonScalar) {
+      if (nonScalar && !scalarPowerOfPossibleMatrix) {
         if (run?.key === baseKey) run.group.terms.push({ term, exp });
         else {
           run = { key: baseKey, group: { base, terms: [{ term, exp }] } };
@@ -1336,6 +1350,17 @@ export const SIMPLIFY_RULES: Rule[] = [
     };
   },
 ];
+
+/**
+ * `'+'` or `'-'` when `exp` is an exact integer literal other than 0, with
+ * its sign; otherwise `''`.
+ */
+function exactIntegerSign(exp: Expression): '+' | '-' | '' {
+  if (!isNumber(exp) || !exp.isExact || exp.isInteger !== true) return '';
+  if (exp.isPositive === true) return '+';
+  if (exp.isNegative === true) return '-';
+  return '';
+}
 
 // `primeFactors()` accepts only integers smaller than
 // `Number.MAX_SAFE_INTEGER`. A larger machine number (for example `1e30`, the

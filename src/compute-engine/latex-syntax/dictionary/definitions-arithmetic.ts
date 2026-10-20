@@ -246,12 +246,19 @@ function serializeNormOrder(
  * with a positive exponent (or no exponent) in the numerator.
  */
 function numeratorDenominator(
-  expr: MathJsonExpression
+  expr: MathJsonExpression,
+  serializer?: Serializer
 ): [MathJsonExpression[], MathJsonExpression[]] {
   if (operator(expr) !== 'Multiply') return [[], []];
   const numerator: MathJsonExpression[] = [];
   const denominator: MathJsonExpression[] = [];
   for (const arg of operands(expr)) {
+    // A negative integer power of a base that can be a matrix stays a
+    // factor of the numerator (see `keepsMatrixPower()`)
+    if (serializer !== undefined && keepsMatrixPower(serializer, arg)) {
+      numerator.push(arg);
+      continue;
+    }
     if (operator(arg) === 'Power') {
       const op1 = operand(arg, 1);
       const op2 = operand(arg, 2);
@@ -285,6 +292,30 @@ function numeratorDenominator(
     }
   }
   return [numerator, denominator];
+}
+
+/**
+ * True when `expr` is a power with a negative integer exponent whose base
+ * can be a matrix (the call `g(x)` of a function that was not declared, see
+ * the `readsAsMatrixPowerBase` option). Such a power is the matrix inverse
+ * (or a power of it) when the base is a matrix. It is written `g(x)^{-1}`,
+ * not as a fraction: `\frac{1}{g(x)}` reads back as a quotient, which is
+ * element-wise.
+ */
+function keepsMatrixPower(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): boolean {
+  if (operator(expr) !== 'Power' || nops(expr) !== 2) return false;
+  const exp = operand(expr, 2);
+  if (exp === null || isFloatSpelling(exp)) return false;
+  const n = machineValue(exp);
+  if (n === null || n >= 0 || !Number.isInteger(n)) return false;
+  return (
+    serializer.options.readsAsMatrixPowerBase?.(
+      missingIfEmpty(operand(expr, 1))
+    ) === true
+  );
 }
 
 function parseRoot(parser: Parser): MathJsonExpression | null {
@@ -1184,16 +1215,22 @@ function serializeMultiply(
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
   if (serializer.options.prettify === true && !isContinuationProduct) {
-    const [numer, denom] = numeratorDenominator(expr);
+    const [numer, denom] = numeratorDenominator(expr, serializer);
     if (denom.length > 0) {
       if (denom.length === 1 && denom[0] === 1) {
         if (numer.length === 0) result = '1';
         else if (numer.length === 1) result = serializer.serialize(numer[0]);
         else result = serializeMultiply(serializer, ['Multiply', ...numer]);
       } else {
+        // A product whose factors are all in the denominator has the
+        // numerator 1: `\frac{1}{ab}`, not `\frac{}{ab}`
         result = serializer.serialize([
           'Divide',
-          numer.length === 1 ? numer[0] : ['Multiply', ...numer],
+          numer.length === 0
+            ? 1
+            : numer.length === 1
+              ? numer[0]
+              : ['Multiply', ...numer],
           denom.length === 1 ? denom[0] : ['Multiply', ...denom],
         ]);
       }
@@ -2430,7 +2467,7 @@ function serializePower(
       exp
     );
 
-  if (serializer.options.prettify) {
+  if (serializer.options.prettify && !keepsMatrixPower(serializer, expr)) {
     // A float exponent (`x^{-1.0}`, `x^{-0.5}`) is written as it is: the
     // rewrites below write an exact exponent, which reads back exact
     const val2 = isFloatSpelling(exp) ? 1 : (machineValue(exp) ?? 1);
@@ -4071,7 +4108,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         if (explicitMultiply) {
           // ...but a product with a denominator serializes as a `\frac`,
           // which is a tight unit either way.
-          const [, denom] = numeratorDenominator(op!);
+          const [, denom] = numeratorDenominator(op!, serializer);
           const isFraction =
             serializer.options.prettify === true &&
             denom.length > 0 &&

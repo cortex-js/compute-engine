@@ -13,6 +13,7 @@ import {
 } from '../boxed-expression/collection-element-memo.js';
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
 import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
+import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
 import {
   checkArity,
   checkType,
@@ -2054,6 +2055,13 @@ function canonicalCallbackOperand(
   // to that name says nothing about the slot (`canonicalFunctionLiteral`
   // excepts `_` at its step 2 for the same reason).
   if (isSymbol(op) && !isWildcard(op)) {
+    // A symbol that holds an error value (`w` after `w := Ln("a")`) passes
+    // through, as it does at every parameter of an eager operator
+    // (`isErrorTypedOperand()`). The evaluation of the call gives that error
+    // (`heldErrorCallback()`, `boxed-function.ts`). The symbol is declared,
+    // so its canonical form declares nothing.
+    if (isDeclaredValue(op) && isErrorTypedOperand(op.canonical))
+      return op.canonical;
     const def = op.engine.lookupDefinition(op.symbol);
     const declared = def && 'value' in def ? def.value.type.type : undefined;
     if (declared !== undefined && provablyDisjoint(declared, 'function'))
@@ -4070,6 +4078,24 @@ function callbackResultTypeD(
       ? def.operator.signature.type
       : def.value?.type?.type;
   return declared === undefined ? undefined : functionResult(declared);
+}
+
+/**
+ * True when the callback `op` is known to be a function whose result type is
+ * not known (its type, or the declared type of the symbol, is the bare
+ * `function`), or when it holds an error (type `error`). A symbol with no
+ * definition is not such a callback: its type is not known at all.
+ */
+function callbackHasUnknownResult(
+  op: OperandDescriptor | undefined,
+  engine: PureEngineView
+): boolean {
+  if (op === undefined) return false;
+  const known = (t: Type | undefined) => t === 'function' || t === 'error';
+  if (known(op.type)) return true;
+  const s = op.structureOf?.();
+  if (s?.kind !== 'symbol') return false;
+  return known(engine.lookupDefinition(s.name)?.value?.type?.type);
 }
 
 /**
@@ -10008,6 +10034,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // by this echo. A source that is provably not a collection is only
           // reachable here through `derive`; a real `Map` application over
           // one is refused at canonicalization.
+          //
+          // The source type is not echoed for a callback that is known to be
+          // a function with no known result type (a symbol declared
+          // `function`), or that holds an error: its elements are not the
+          // elements of the source, so they are `unknown`.
+          if (
+            callbackHasUnknownResult(ops[0], engine) &&
+            isSubtype(s, COLLECTION_SHAPE_TYPE)
+          )
+            return BoxedType.forResult(
+              mapOperatorResultType(s, 'unknown'),
+              engine._typeResolver
+            );
           return BoxedType.forResult(ops[1].type, engine._typeResolver);
         }
         return BoxedType.forResult(

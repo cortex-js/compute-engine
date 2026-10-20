@@ -359,13 +359,174 @@ describe('A FACTOR THAT CAN BE A MATRIX KEEPS ITS POSITION', () => {
     ).toBe('x * k(x) * g(x)^2 + k(x) * g(x)^2');
   });
 
-  // A product with no matrix is sorted when it is made canonical, before an
-  // outer product with a matrix sees it: `A·(g(x)·k(x)·g(x))` becomes
-  // `A·k(x)·g(x)·g(x)`. See `mayBeTensorProductOperand()` in
-  // `src/compute-engine/boxed-expression/order.ts`.
-  test.todo(
-    'a nested product with no matrix keeps its order in a product with a matrix'
+  // A nested product that is not canonical yet is spliced into the outer
+  // product before its operands are made canonical, so the outer product
+  // sorts all the factors at once: `A·(g(x)·k(x)·g(x))` keeps the order
+  // `A·g(x)·k(x)·g(x)`, like the flat product. See
+  // `flattenRawProductOperands()` in
+  // `src/compute-engine/boxed-expression/canonical-numeric.ts`.
+  test.each([
+    [
+      ['Multiply', 'A', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']]],
+      'A * g(x) * k(x) * g(x)',
+    ],
+    [
+      ['Multiply', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']], 'A'],
+      'g(x) * k(x) * g(x) * A',
+    ],
+    [
+      [
+        'Multiply',
+        'A',
+        ['Multiply', ['g', 'x'], ['Multiply', ['k', 'x'], ['g', 'x']]],
+      ],
+      'A * g(x) * k(x) * g(x)',
+    ],
+    [
+      [
+        'Multiply',
+        ['Multiply', 'A', ['g', 'x']],
+        ['Multiply', ['k', 'x'], 'A'],
+      ],
+      'A * g(x) * k(x) * A',
+    ],
+    // A nested product in parentheses
+    [
+      [
+        'Multiply',
+        'A',
+        ['Delimiter', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']]],
+      ],
+      'A * g(x) * k(x) * g(x)',
+    ],
+  ])(
+    'a nested product with no matrix keeps its order in a product with a matrix: %j',
+    (input, expected) => {
+      const expr = ce.box(input as any);
+      expect(str(expr)).toBe(expected);
+      expect(str(expr.evaluate())).toBe(expected);
+      expect(str(expr.simplify())).toBe(expected);
+      // Each result has the value of the product in the written order. The
+      // parentheses do not change the value.
+      const written = JSON.parse(
+        JSON.stringify(input).replace(/\["Delimiter",(.*)\]\]$/, '$1]')
+      );
+      const expected_ = value(written);
+      expect(value(expr.json)).toEqual(expected_);
+      expect(value(expr.evaluate().json)).toEqual(expected_);
+      expect(value(expr.simplify().json)).toEqual(expected_);
+    }
   );
+
+  test('the parse route keeps the order of a nested product', () => {
+    expect(str(ce.parse('A\\cdot(g(x)\\cdot k(x)\\cdot g(x))'))).toBe(
+      'A * g(x) * k(x) * g(x)'
+    );
+  });
+
+  // A juxtaposition in parentheses is read first (a product, a mixed number,
+  // a function application…). When it is a product, its factors are put in
+  // the outer product in their written order, before the outer product
+  // sorts them. See `juxtaposedFactors()` in
+  // `src/compute-engine/boxed-expression/invisible-operator.ts`.
+  test.each([
+    [
+      'A(g(x)k(x)g(x))',
+      ['Multiply', 'A', ['g', 'x'], ['k', 'x'], ['g', 'x']],
+      'A * g(x) * k(x) * g(x)',
+    ],
+    [
+      'A\\left(g(x)k(x)g(x)\\right)',
+      ['Multiply', 'A', ['g', 'x'], ['k', 'x'], ['g', 'x']],
+      'A * g(x) * k(x) * g(x)',
+    ],
+    [
+      'A(g(x)k(x)g(x))A',
+      ['Multiply', 'A', ['g', 'x'], ['k', 'x'], ['g', 'x'], 'A'],
+      'A * g(x) * k(x) * g(x) * A',
+    ],
+    [
+      '(g(x)k(x)g(x))A',
+      ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x'], 'A'],
+      'g(x) * k(x) * g(x) * A',
+    ],
+    [
+      'A(g(x)(k(x)g(x)))',
+      ['Multiply', 'A', ['g', 'x'], ['k', 'x'], ['g', 'x']],
+      'A * g(x) * k(x) * g(x)',
+    ],
+    [
+      'A\\cdot(g(x)k(x)g(x))',
+      ['Multiply', 'A', ['g', 'x'], ['k', 'x'], ['g', 'x']],
+      'A * g(x) * k(x) * g(x)',
+    ],
+  ])(
+    'a juxtaposition in parentheses keeps its order in a product with a matrix: %s',
+    (latex, written, expected) => {
+      const expr = ce.parse(latex);
+      expect(str(expr)).toBe(expected);
+      expect(str(expr.evaluate())).toBe(expected);
+      expect(value(expr.json)).toEqual(value(written));
+      expect(value(expr.evaluate().json)).toEqual(value(written));
+    }
+  );
+
+  test('a juxtaposition in parentheses that is not a product with a matrix does not change', () => {
+    // A product with no matrix has the canonical form of the juxtaposition
+    // written with no parentheses
+    for (const [nested, flat] of [
+      ['2(3x)', '6x'],
+      ['x(yz)', 'xyz'],
+      ['(xy)(zw)', 'xyzw'],
+      ['2(g(x)k(x)g(x))', '2g(x)k(x)g(x)'],
+    ])
+      expect(str(ce.parse(nested))).toBe(str(ce.parse(flat)));
+    // A mixed number, an imaginary number and a function application are
+    // read as before
+    expect(str(ce.parse('A(2\\frac{1}{3})'))).toBe('A * (2 + 1/3)');
+    expect(str(ce.parse('A(2i)'))).toBe('2i * A');
+    expect(str(ce.parse('A\\cdot(2\\frac{1}{3})'))).toBe('A * (2 + 1/3)');
+    // `y` is not used in this engine before, so `y(…)` is an application
+    const fresh = new ComputeEngine();
+    expect(str(fresh.parse('y(g(x)k(x)g(x))'))).toBe('y(k(x) * g(x) * g(x))');
+  });
+
+  test('a nested product with no matrix in a product with no matrix does not change', () => {
+    // The raw nested product gives the same canonical form as the nested
+    // product made canonical first (`ce.function()` with a canonical
+    // operand), which is how it was made before the splice
+    for (const [outer, inner] of [
+      ['y', ['Multiply', ['g', 'x'], ['k', 'x'], ['g', 'x']]],
+      [2, ['Multiply', 3, 'x']],
+      ['x', ['Multiply', 'x', ['Power', 'x', -1]]],
+      ['y', ['Multiply', ['Sqrt', 2], ['Sqrt', 3], 'y']],
+      [
+        ['Sin', 'x'],
+        ['Multiply', -1, ['Cos', 'x'], ['Sin', 'x']],
+      ],
+    ] as [unknown, unknown][]) {
+      const nested = ce.box(['Multiply', outer, inner] as any);
+      const twoSteps = ce.function('Multiply', [
+        ce.box(outer as any),
+        ce.box(inner as any),
+      ]);
+      expect(str(nested)).toBe(str(twoSteps));
+      expect(nested.isSame(twoSteps)).toBe(true);
+    }
+  });
+
+  test('a product with an ellipsis is not spliced', () => {
+    // `2·4·…·2n`: the nested product `2n` is the last term of the pattern.
+    // The result is the same as when each operand is made canonical first.
+    const first = ['Multiply', ['Multiply', 2, 4], 'ContinuationPlaceholder'];
+    const last = ['Multiply', 2, 'n'];
+    const expr = ce.box(['Multiply', first, last] as any);
+    const twoSteps = ce.function('Multiply', [
+      ce.box(first as any),
+      ce.box(last as any),
+    ]);
+    expect(str(expr)).toBe(str(twoSteps));
+  });
 
   test('with values for A and g, the result is the product in the written order', () => {
     // `g(x)` with a scalar `x` is the matrix value of `g`, not a matrix
@@ -446,5 +607,79 @@ describe('A FLOAT POWER OF A FACTOR THAT CAN BE A MATRIX', () => {
     const result = expr.simplify();
     expect(result.has('Power')).toBe(true);
     expect(str(result)).not.toContain('^3');
+  });
+});
+
+describe('NESTED PRODUCTS: TIME, REPLACED DEFINITIONS, NEGATION, INVALID OPERANDS', () => {
+  test('each level of a nested juxtaposition is made canonical once', () => {
+    // Making each level canonical twice took a time exponential in the
+    // depth (5.7 s for 16 levels)
+    const ce2 = new ComputeEngine();
+    ce2.declare('a', 'real');
+    ce2.declare('b', 'real');
+    ce2.declare('A', 'matrix<2x2>');
+    const nest = (inner: string, wrap: (s: string) => string) => {
+      let latex = inner;
+      for (let i = 0; i < 16; i++) latex = wrap(latex);
+      return latex;
+    };
+    for (const latex of [
+      nest('x y', (s) => `y (${s})`),
+      nest('a b', (s) => `a(b ${s})`),
+      nest('g(x) A', (s) => `A(g(x) ${s})`),
+      nest('g(x) A', (s) => `(g(x) ${s}) A`),
+    ]) {
+      const start = Date.now();
+      const expr = ce2.parse(latex);
+      expect(Date.now() - start).toBeLessThan(100);
+      expect(expr.isValid).toBe(true);
+    }
+  });
+
+  test('a replaced definition of InvisibleOperator is used', () => {
+    // The juxtaposition is not read by the library rule when the host
+    // replaces the definition of `InvisibleOperator`
+    const ce2 = new ComputeEngine();
+    ce2.declare('InvisibleOperator', {
+      signature: '(number, number) -> number',
+      evaluate: (ops) => ops[0].add(ops[1]),
+    });
+    const expr = ce2.box(['Multiply', 7, ['InvisibleOperator', 2, 3]]);
+    expect(expr.evaluate().json).toBe(35);
+  });
+
+  test('a negation or a quotient by an integer of a nested product is spliced', () => {
+    expect(
+      str(
+        ce.box([
+          'Multiply',
+          'A',
+          ['Negate', ['Multiply', ['g', 'x'], ['k', 'x']]],
+        ])
+      )
+    ).toBe('-(A * g(x) * k(x))');
+    expect(str(ce.parse('A\\cdot(-g(x)k(x))'))).toBe('-(A * g(x) * k(x))');
+    expect(
+      str(
+        ce.box([
+          'Multiply',
+          'A',
+          ['Divide', ['Multiply', ['g', 'x'], ['k', 'x']], 2],
+        ])
+      )
+    ).toBe('1/2 * A * g(x) * k(x)');
+  });
+
+  test('a product with no factor that can be a matrix is not spliced', () => {
+    // A product with an invalid operand is not sorted: the nested product
+    // keeps its own canonical form
+    const ce2 = new ComputeEngine();
+    ce2.declare('f', 'function');
+    const expr = ce2.parse('f\\cdot(b a)');
+    expect(expr.isValid).toBe(false);
+    expect((expr.json as any[]).slice(2)).toEqual(['a', 'b']);
+    expect(str(ce2.parse('\\sum_{i=1}^3 x\\cdot(n i)'))).toBe(
+      'sum_(i=1)^(3)(i * n * x)'
+    );
   });
 });

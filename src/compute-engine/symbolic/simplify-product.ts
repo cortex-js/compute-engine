@@ -7,6 +7,12 @@ import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
  */
 export function simplifyProduct(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Product')) return undefined;
+  // The rules below read only the first indexing clause, and the products
+  // they build keep only that clause. With more than one clause
+  // (`Product(j, Limits(i, 1, 3), Limits(j, 1, n))`), the other indexes
+  // would be read as free symbols and their clauses lost (that product gave
+  // `j^3`), so the product stays as it is.
+  if (x.nops > 2) return undefined;
 
   const body = x.op1;
   const limits = x.op2;
@@ -27,6 +33,13 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
       return { value: newProduct, because: 'simplified nested sum/product' };
     }
   }
+
+  // A `Nothing` bound is an absent bound, not a value. With no bounds
+  // (`\prod_k f`, `Limits(k, Nothing, Nothing)`) the product runs over the
+  // default domain; with one bound only (`\prod_{k=1} f`) it has no value.
+  // The rules below substitute the bounds into a closed form, so the product
+  // stays as it is, as it does under `evaluate()` and `N()`.
+  if (sym(lower) === 'Nothing' || sym(upper) === 'Nothing') return undefined;
 
   // Handle numeric bounds edge cases
   if (isNumber(lower) && isNumber(upper)) {
