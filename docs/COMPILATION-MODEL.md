@@ -72,14 +72,22 @@ differences are accepted; they are not defects:
 | Expression | Input | Compiled (JavaScript) | Interpreter |
 |---|---|---|---|
 | `Heaviside(x)` | `x = ~oo` | `1` | `Error(incompatible-type, "real \| signed_infinity", "~oo")` |
-| `x > 0` | `x = ~oo` | `true` | `0 < ~oo`, not decided |
+| `x > 0` | `x = ~oo` | `true` | `False` (`~oo` has no order, user decision 2026-10-21; before, `0 < ~oo`, not decided) |
+| `\{1/x > 0: 1, 0\}` | `x = 0` | `1` (also `python`, with a NumPy `x`) | `0` (`~oo` has no order, user decision 2026-10-21) |
+| `x < 1/0` | `x = 1` | `true` (`_.x < Infinity`; also `python` and `interval-js`) | `False` (`~oo` has no order, user decision 2026-10-21) |
 | `Sign(1/x)` | `x = 0` | `1` | `Indeterminate` (`evaluate()`), `NaN` (`.N()`) |
 | `Floor(1/x)` | `x = 0` | `Infinity` | `~oo` |
 
 In the first two rows, the argument `~oo` (`{re: Infinity, im: Infinity}`)
-becomes `Infinity` at the entry of the compiled function. In the last two
-rows, the pole is computed inside the compiled code: `1/0` is the double
-`Infinity`, and `Sign` and `Floor` read it as `+∞`.
+becomes `Infinity` at the entry of the compiled function. In the third
+row and the last two rows, the pole is computed inside the compiled code:
+`1/0` is the double `Infinity`, and the comparison, `Sign` and `Floor` read
+it as `+∞`. In the fourth row, the constant pole is the literal `Infinity`
+next to the variable. A comparison with no variable is not a divergence:
+`0 < 1/0` and `1/0 = 1/0` fold to `false` on `javascript`, `glsl`, `wgsl`
+and `python`, also under `constantFold: false`, as the interpreter answers.
+`interval-js` does not fold a comparison and answers `'true'` for both
+(`docs/ERROR-MODEL.md`, "a value with no order").
 
 A point (a tuple of numbers) divided by zero is the same case, coordinate by
 coordinate. The interpreter gives `~oo` for each nonzero coordinate, and the

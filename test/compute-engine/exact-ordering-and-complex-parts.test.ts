@@ -45,12 +45,16 @@ describe('ORDER OF COMPLEX VALUES', () => {
     ).toBeUndefined();
   });
 
-  test('the relation stays unevaluated', () => {
-    expect(evaluate('\\pi+i < 4+i').operator).toBe('Less');
+  test('the relation is False', () => {
+    // A value that is not a real number has no order, so an ordered
+    // comparison with it is `False` (user decision of 2026-10-21, Tycho
+    // ledger row 413 (a); before, the relation stayed unevaluated). The
+    // `isLess()` method above still answers `undefined`.
+    expect(evaluate('\\pi+i < 4+i').symbol).toBe('False');
     // `a > b` is canonically `b < a`.
     expect(
-      evaluate(['Greater', ['Add', 'Pi', 'ImaginaryUnit'], 3]).operator
-    ).toBe('Less');
+      evaluate(['Greater', ['Add', 'Pi', 'ImaginaryUnit'], 3]).symbol
+    ).toBe('False');
   });
 
   test('a symbol declared complex is not ordered', () => {

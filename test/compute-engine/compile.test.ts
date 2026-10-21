@@ -4405,7 +4405,9 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
 
 describe('ordering over a complex-valued operand fails closed', () => {
   // The complex numbers are not ordered: the interpreter leaves `Less(i·x, 0)`
-  // symbolic. The compiled form used to emit a raw `<` over the `{re, im}`
+  // symbolic while `x` has no value, and answers `False` once the value of
+  // `i·x` is not a real number (user decision of 2026-10-21). The compiled
+  // form used to emit a raw `<` over the `{re, im}`
   // object — a silent `false` behind `success: true`. Since the compile-mode
   // migration (step 4, 2026-08-16) the default mode answers this with the D2
   // RUNTIME rule instead of a compile-time decline: `false` when the operand
@@ -4415,7 +4417,8 @@ describe('ordering over a complex-valued operand fails closed', () => {
     const ce = new ComputeEngine();
     // `i·x` is 0 (real) at x = 0 and complex elsewhere, so the two branches of
     // the rule are both witnessed; the interpreter answers `0 ≤ 0` = True and
-    // leaves `i < 0` symbolic.
+    // `i < 0` = False (user decision of 2026-10-21; before, it left `i < 0`
+    // symbolic).
     for (const [h, atZero] of [
       ['Less', false],
       ['LessEqual', true],

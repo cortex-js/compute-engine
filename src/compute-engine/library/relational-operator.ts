@@ -589,6 +589,7 @@ const CHAIN_PAIR_IS_FALSE = {
   Equal: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== undefined) return q !== 0;
+    if (unorderedChainPair(a, b, false, 'pole')) return true;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o !== 0;
     return eq(a, b) === false;
@@ -603,20 +604,52 @@ const CHAIN_PAIR_IS_FALSE = {
   Less: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== undefined) return q >= 0;
+    if (unorderedChainPair(a, b, false)) return true;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o >= 0;
-    return (a.isLess(b) ?? compareFromAssumedBounds(a, b, true)) === false;
+    const cmp = a.isLess(b) ?? compareFromAssumedBounds(a, b, true);
+    if (cmp === undefined) return unorderedChainPair(a, b, true);
+    return cmp === false;
   },
   LessEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
     const q = quantityCompare(a, b);
     if (q !== undefined) return q > 0;
+    if (unorderedChainPair(a, b, false)) return true;
     const o = exactLiteralOrder(a, b);
     if (o !== undefined) return o > 0;
-    return (
-      (a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false)) === false
-    );
+    const cmp = a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false);
+    // A `true` can come from a zero difference of two values with no order
+    // (`Ln(-1) ≤ Ln(-1)`): see `trueOrderedRelation()`.
+    if (cmp === false) return true;
+    return unorderedChainPair(a, b, true);
   },
 };
+
+/**
+ * True when the adjacent pair `(a, b)` of a chain is `False` because an
+ * operand has a value with no order (`nonRealKind()`; with `only: 'pole'`,
+ * only the pole, for `Equal`). This is the rule of the verdict
+ * (`decideLess`, `decideLessEqual`, `decideEqual`) applied to one pair, so
+ * that the chain stops there: `0 < i < Missing` is `False`, as
+ * `(0 < i) ∧ (i < Missing)` is, and the operands after the pair are not
+ * evaluated. A pair with a `Missing` operand is not decided here: the
+ * verdict gives it the Kleene `Missing`, as it does for the pair alone
+ * (`Less(i, Missing)` is `Missing`). With `approximate`, a constant
+ * expression is approximated (`Ln(-1)`); the callers ask for it only when
+ * the comparison methods did not decide the pair.
+ */
+function unorderedChainPair(
+  a: Expression,
+  b: Expression,
+  approximate: boolean,
+  only?: 'pole'
+): boolean {
+  if (isSymbol(a, 'Missing') || isSymbol(b, 'Missing')) return false;
+  return [a, b].some((x) => {
+    const kind = nonRealKind(x, approximate);
+    return kind !== undefined && (only === undefined || kind === only);
+  });
+}
 
 /**
  * Keep an undecidable comparison inert — but over the *evaluated* operands
@@ -646,6 +679,150 @@ function inertRelation(
   if (ops.length !== rawOps.length) return undefined;
   if (ops.every((x, i) => x.isSame(rawOps[i]))) return undefined;
   return ce._fn(op, ops);
+}
+
+/**
+ * The kind of numeric value that is not a real number that `x`, an
+ * evaluated operand of a comparison, has: `'pole'` for `ComplexInfinity`
+ * (the value of `1/0`), `'complex'` for a number with a nonzero imaginary
+ * part (`i`, `1 + i`), or `undefined`. The real numbers include `+∞` and
+ * `−∞`. `NaN` and `Indeterminate` give `undefined`: the comparison handlers
+ * test them first, with the IEEE rule.
+ *
+ * Such a value has no order, so an ordered comparison (`<`, `≤`, `>`, `≥`)
+ * with it is `False`. An equality with a pole is `False` too, since the
+ * pole has no value (`1/0 = 1/0` is `False`, as `NaN = NaN` is), but an
+ * equality with a complex number keeps its ordinary meaning (`i = i` is
+ * `True`). User decision of 2026-10-21 (Tycho ledger row 413 (a)), recorded
+ * in `docs/ERROR-MODEL.md`.
+ *
+ * A number literal is read without a tolerance: it is complex when its
+ * numeric value holds a nonzero imaginary part (`isComplex`), also one too
+ * small for a double (`1 + 10^{-800}i`, whose `im` is the double `0`).
+ *
+ * With `approximate`, an operand that is not a number literal but is a pure
+ * numeric expression with no free variable is approximated: `Ln(-1)` stays
+ * symbolic under `evaluate()`, and its value is `iπ`. An expression with a
+ * free variable has no value yet, and gives `undefined` (`0 < x` stays
+ * inert). No approximation is made for an expression whose type is `real`
+ * (`π`, `ln 2`), or that holds an operator whose numeric evaluation is an
+ * iteration with no fixed bound (`ITERATIVE_NUMERIC_OPERATORS`: an infinite
+ * `Sum` can take a second to fail to converge). The approximation of a
+ * quadrature is a `Measurement(v, σ)`, read through its nominal value `v`.
+ * An imaginary part of the approximation of size up to `10⁻¹⁴` times the
+ * modulus is not read as nonzero: it can be the rounding error of a real
+ * value that was computed through complex intermediate values. This is the
+ * noise rule of `boxComplexResult()` in `library/arithmetic.ts`.
+ */
+function nonRealKind(
+  x: Expression,
+  approximate = false
+): 'pole' | 'complex' | undefined {
+  if (isNumber(x)) return literalNonRealKind(x);
+  if (!approximate || !mayApproximateNonReal(x)) return undefined;
+  const v = measurementNominal(x.N());
+  if (!isNumber(v)) return undefined;
+  const kind = literalNonRealKind(v);
+  if (kind !== 'complex') return kind;
+  return isRoundingNoiseImaginaryPart(v) ? undefined : 'complex';
+}
+
+/** `nonRealKind()` of a number literal: no tolerance, no approximation. */
+function literalNonRealKind(
+  x: Expression & { readonly isComplex: boolean }
+): 'pole' | 'complex' | undefined {
+  if (x.isNaN === true || !x.isComplex) return undefined;
+  return x.isFinite === false ? 'pole' : 'complex';
+}
+
+/**
+ * The operators whose numeric evaluation is an iteration with no fixed
+ * bound: a series summed until it converges, a limit extrapolated, a
+ * differential equation integrated. `nonRealKind()` does not approximate an
+ * operand that holds one. The comparison has already paid one numeric
+ * evaluation of the operand (`isLess()` approximates it), and a second one
+ * doubled the time of an undecided comparison: `0 < Σ_{k≥1} sin(k)/k²` took
+ * 1.3 s instead of 0.7 s. A definite integral is not in the list: its
+ * quadrature has a bounded number of subintervals.
+ */
+const ITERATIVE_NUMERIC_OPERATORS: ReadonlySet<string> = new Set([
+  'Sum',
+  'Product',
+  'Limit',
+  'NLimit',
+  'NDSolve',
+]);
+
+/**
+ * True when `nonRealKind()` approximates `x`: a pure numeric function
+ * expression with no free variable, whose type is not `real`, and that
+ * holds no operator of `ITERATIVE_NUMERIC_OPERATORS`.
+ */
+function mayApproximateNonReal(x: Expression): boolean {
+  if (!isFunction(x) || x.unknowns.length > 0) return false;
+  if (!x.type.matches('number') || x.type.matches('real')) return false;
+  const holdsIteration = (e: Expression): boolean =>
+    isFunction(e) &&
+    (ITERATIVE_NUMERIC_OPERATORS.has(e.operator) || e.ops.some(holdsIteration));
+  if (holdsIteration(x)) return false;
+  return isTransitivelyPure(x);
+}
+
+/**
+ * True when the imaginary part of the complex number literal `v`, an
+ * approximation, is within the rounding noise of its modulus: at most
+ * `10⁻¹⁴·|v|`. The parts are read as doubles, and as big decimals when one
+ * of them is outside the double range.
+ */
+function isRoundingNoiseImaginaryPart(v: Expression): boolean {
+  const re = v.re;
+  const im = v.im;
+  if (Number.isFinite(re) && Number.isFinite(im))
+    return Math.abs(im) <= 1e-14 * Math.hypot(re, im);
+  const ce = v.engine;
+  const bre = (v.bignumRe ?? ce.bignum(re)).abs();
+  const bim = (v.bignumIm ?? ce.bignum(im)).abs();
+  const modulus = bre.gt(bim) ? bre : bim;
+  return bim.lte(modulus.mul(1e-14));
+}
+
+/**
+ * True when an operand of an ordered comparison has a value with no order
+ * (`nonRealKind()`, which approximates a constant expression), so that the
+ * comparison is `False`.
+ */
+function hasUnorderedOperand(ops: ReadonlyArray<Expression>): boolean {
+  return ops.some((x) => nonRealKind(x, true) !== undefined);
+}
+
+/**
+ * The answer of an ordered comparison (`Less`, `LessEqual`) that its
+ * operands did not decide: `False` when an operand is a constant expression
+ * whose value is not a real number (`hasUnorderedOperand()`), and otherwise
+ * the comparison kept inert (`inertRelation()`).
+ */
+function undecidedOrderedRelation(
+  ce: ComputeEngine,
+  op: 'Less' | 'LessEqual',
+  rawOps: ReadonlyArray<Expression>,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (hasUnorderedOperand(ops)) return ce.False;
+  return inertRelation(ce, op, rawOps, ops);
+}
+
+/**
+ * The answer of an ordered comparison whose operands decided it `True`:
+ * `False` when an operand is a constant expression whose value is not a
+ * real number. `isLessEqual()` can answer `true` for such an operand, when
+ * the difference of the operands is zero: `Ln(-1) ≤ Ln(-1)` is `False`, as
+ * `i ≤ i` is.
+ */
+function trueOrderedRelation(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  return hasUnorderedOperand(ops) ? ce.False : ce.True;
 }
 
 /**
@@ -778,6 +955,11 @@ function decideEqual(
   const vals = readComparisonAbsence(ce, rawOps, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  // The pole `ComplexInfinity` (`1/0`) has no value, so an equality with it
+  // is `False`, as with `NaN` (user decision of 2026-10-21). A complex
+  // number keeps the ordinary equality (`i = i` is `True`): see
+  // `nonRealKind()`.
+  if (vals.some((op) => nonRealKind(op) === 'pole')) return ce.False;
   let lhs: Expression | undefined = undefined;
   for (const arg of ops) {
     if (!lhs) lhs = arg;
@@ -804,7 +986,10 @@ function decideEqual(
       // that were later piped into `Solve` (Tycho 0.72.0 report,
       // item 8). Three-valued verification mode (`ce.isVerifying`)
       // behaves identically. `inertRelation` keeps the *evaluated*
-      // operands (`x^2 = 2+2` → `x^2 = 4`).
+      // operands (`x^2 = 2+2` → `x^2 = 4`). Only a pole LITERAL decides
+      // `False` (above): a constant expression is not approximated to find
+      // a pole, since `1/0` and the special functions at a pole evaluate to
+      // the literal `ComplexInfinity`.
       if (test === undefined) return inertRelation(ce, 'Equal', rawOps, ops);
     }
   }
@@ -916,6 +1101,11 @@ function decideLess(
   const vals = readComparisonAbsence(ce, rawOps, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  // A value that is not a real number (the pole `1/0`, a complex number
+  // such as `i`) has no order: `False` (user decision of 2026-10-21, see
+  // `nonRealKind()`). An undecided pair below also tests a constant
+  // expression such as `Ln(-1)` (`undecidedOrderedRelation()`).
+  if (vals.some((op) => nonRealKind(op) !== undefined)) return ce.False;
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
     // Try quantity comparison first
@@ -926,7 +1116,8 @@ function decideLess(
       order !== undefined
         ? order < 0
         : (lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true));
-    if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
+    if (cmp === undefined)
+      return undecidedOrderedRelation(ce, 'Less', rawOps, ops);
     return cmp ? ce.True : ce.False;
   }
   if (ops.length < 2) return ce.True;
@@ -944,7 +1135,8 @@ function decideLess(
           order !== undefined
             ? order < 0
             : (lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true));
-        if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
+        if (cmp === undefined)
+          return undecidedOrderedRelation(ce, 'Less', rawOps, ops);
         if (cmp === false) return ce.False;
       }
       lhs = arg;
@@ -977,6 +1169,8 @@ function decideLessEqual(
   const vals = readComparisonAbsence(ce, rawOps, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  // A value that is not a real number has no order: `False`. See `Less`.
+  if (vals.some((op) => nonRealKind(op) !== undefined)) return ce.False;
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
     const qcmp = quantityCompare(lhs, rhs);
@@ -986,8 +1180,9 @@ function decideLessEqual(
       order !== undefined
         ? order <= 0
         : (lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false));
-    if (cmp === undefined) return inertRelation(ce, 'LessEqual', rawOps, ops);
-    return cmp ? ce.True : ce.False;
+    if (cmp === undefined)
+      return undecidedOrderedRelation(ce, 'LessEqual', rawOps, ops);
+    return cmp ? trueOrderedRelation(ce, ops) : ce.False;
   }
   if (ops.length < 2) return ce.True;
   // LessEqual can have multiple arguments, i.e. a <= b <= c <= d
@@ -1006,13 +1201,13 @@ function decideLessEqual(
             : (lhs.isLessEqual(arg) ??
               compareFromAssumedBounds(lhs, arg, false));
         if (cmp === undefined)
-          return inertRelation(ce, 'LessEqual', rawOps, ops);
+          return undecidedOrderedRelation(ce, 'LessEqual', rawOps, ops);
         if (cmp === false) return ce.False;
       }
       lhs = arg;
     }
   }
-  return ce.True;
+  return trueOrderedRelation(ce, ops);
 }
 export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {

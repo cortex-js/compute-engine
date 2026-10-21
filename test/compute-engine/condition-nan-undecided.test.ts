@@ -628,3 +628,360 @@ describe('the absence guard of a compiled branch comparison', () => {
     ).toBe('false');
   });
 });
+
+/**
+ * A value that has no order: the pole `ComplexInfinity` (`1/0`) and a
+ * number that is not real (`i`, `\sqrt{-1}`, `\ln(-1)` = `iπ`).
+ *
+ * User decision of 2026-10-21 (Tycho ledger row 413 (a)), which extends the
+ * 2026-10-20 decision above: an ordered comparison (`<`, `≤`, `>`, `≥`)
+ * with such an operand is `False`, in a branch and everywhere else. `=` with
+ * the pole is `False` (the pole has no value, as `NaN` has none), while `=`
+ * with a complex number keeps the ordinary equality. `≠` is unchanged.
+ * `+∞` and `−∞` are real and keep their order. The comparison stays inert
+ * only when every operand is a free symbol or an unevaluated form that
+ * depends on one (`0 < x`, `0 < ix`): a value with no order decides `False`
+ * also next to a free symbol (`x < i`), as `NaN` does (`x < NaN`). Before,
+ * each of these comparisons stayed unevaluated, so a branch on it was held.
+ */
+describe('Tycho row 413 (a): a value with no order makes a comparison false', () => {
+  const ORDERED = ['Less', 'LessEqual', 'Greater', 'GreaterEqual'];
+
+  test('the table of the decision, parse route', () => {
+    const cases: [string, string][] = [
+      ['0 < \\frac{1}{0}', 'False'],
+      ['\\frac{1}{0} = \\frac{1}{0}', 'False'],
+      ['\\frac{1}{0} = 0', 'False'],
+      ['0 < i', 'False'],
+      ['0 < \\ln(-1)', 'False'],
+      ['i = i', 'True'],
+      ['i = 0', 'False'],
+      ['\\frac{1}{0} \\ne 0', 'True'],
+      ['0 < \\infty', 'True'],
+      ['\\infty = \\infty', 'True'],
+    ];
+    for (const [latex, expected] of cases) {
+      expect(ce.parse(latex).evaluate().symbol).toBe(expected);
+      expect(ce.parse(latex).N().symbol).toBe(expected);
+    }
+    expect(
+      ce.parse('\\left\\{\\frac{1}{0} > 0: 1, 0\\right\\}').evaluate().re
+    ).toBe(0);
+    expect(
+      ce.parse('\\left\\{\\sqrt{-1} > 0: 1, 0\\right\\}').evaluate().re
+    ).toBe(0);
+    // A free symbol keeps the comparison inert when no operand has a value.
+    expect(ce.parse('0 < x').evaluate().operator).toBe('Less');
+    expect(ce.parse('0 < i x').evaluate().operator).toBe('Less');
+    // A value with no order decides `False` next to a free symbol, as `NaN`
+    // does.
+    for (const latex of [
+      'x < i',
+      '\\ln(-1) < x',
+      'x < \\frac{1}{0}',
+      '\\frac{1}{0} = x',
+      'x < \\mathrm{NaN}',
+    ])
+      expect(ce.parse(latex).evaluate().symbol).toBe('False');
+  });
+
+  test('the four ordered relations, on the box and ce.function routes', () => {
+    const pole = ['Divide', 1, 0];
+    const operands: any[] = [
+      pole,
+      'ImaginaryUnit',
+      ['Sqrt', -1],
+      ['Ln', -1],
+      ['Complex', 1, 1],
+    ];
+    for (const head of ORDERED) {
+      for (const z of operands) {
+        expect(ce.box([head, 0, z]).evaluate().symbol).toBe('False');
+        expect(ce.box([head, z, 0]).evaluate().symbol).toBe('False');
+        expect(ce.box(['If', [head, z, 0], 1, -1]).evaluate().re).toBe(-1);
+        expect(
+          ce.function(head, [ce.box(z), ce.number(0)]).evaluate().symbol
+        ).toBe('False');
+        expect(
+          ce
+            .function('Which', [
+              ce.function(head, [ce.number(0), ce.box(z)]),
+              ce.number(1),
+              ce.True,
+              ce.number(0),
+            ])
+            .evaluate().re
+        ).toBe(0);
+      }
+      // `±∞` are real: their order is kept.
+      expect(ce.box([head, 0, 'PositiveInfinity']).evaluate().symbol).toBe(
+        head === 'Less' || head === 'LessEqual' ? 'True' : 'False'
+      );
+    }
+    // A chain is the conjunction of its pairs.
+    expect(ce.box(['Less', pole, 1, 2]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Less', 1, 2, pole]).evaluate().symbol).toBe('False');
+  });
+
+  test('Equal: the pole is False, a complex number keeps its equality', () => {
+    const pole = ['Divide', 1, 0];
+    expect(ce.box(['Equal', pole, pole]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Equal', pole, 0]).evaluate().symbol).toBe('False');
+    expect(
+      ce.function('Equal', [ce.ComplexInfinity, ce.ComplexInfinity]).evaluate()
+        .symbol
+    ).toBe('False');
+    expect(ce.box(['If', ['Equal', pole, pole], 1, -1]).evaluate().re).toBe(-1);
+    expect(
+      ce.box(['Equal', 'ImaginaryUnit', 'ImaginaryUnit']).evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce.box(['Equal', ['Sqrt', -1], 'ImaginaryUnit']).evaluate().symbol
+    ).toBe('True');
+    expect(ce.box(['Equal', 'ImaginaryUnit', 0]).evaluate().symbol).toBe(
+      'False'
+    );
+    expect(ce.box(['Equal', ['Ln', -1], ['Ln', -1]]).evaluate().symbol).toBe(
+      'True'
+    );
+    expect(
+      ce.box(['Equal', 'PositiveInfinity', 'PositiveInfinity']).evaluate()
+        .symbol
+    ).toBe('True');
+  });
+
+  test('NotEqual and Missing keep their reading', () => {
+    expect(ce.box(['NotEqual', ['Divide', 1, 0], 0]).evaluate().symbol).toBe(
+      'True'
+    );
+    expect(ce.box(['NotEqual', 'ImaginaryUnit', 0]).evaluate().symbol).toBe(
+      'True'
+    );
+    expect(ce.box(['Less', 'Missing', 'ImaginaryUnit']).evaluate().symbol).toBe(
+      'Missing'
+    );
+    expect(
+      ce.box(['Equal', 'Missing', ['Divide', 1, 0]]).evaluate().symbol
+    ).toBe('Missing');
+  });
+
+  test('a symbol holding such a value, and the asynchronous route', async () => {
+    const e = new ComputeEngine();
+    e.assign('p', e.ComplexInfinity);
+    e.assign('u', -1);
+    expect(e.parse('p > 0').evaluate().symbol).toBe('False');
+    expect(e.parse('\\ln(u) > 0').evaluate().symbol).toBe('False');
+    expect(e.parse('\\left\\{p > 0: 1, 0\\right\\}').evaluate().re).toBe(0);
+    expect((await e.parse('0 < \\ln(-1)').evaluateAsync()).symbol).toBe(
+      'False'
+    );
+  });
+
+  test("Tycho's shape: a sum of a piecewise over K(n) = 1/n", () => {
+    // `M(0)` compares `1/0`, the pole, and takes the else value 0.
+    const e = new ComputeEngine();
+    e.parse('M(n) := \\left\\{\\frac{1}{n} > 0: 1, 0\\right\\}').evaluate();
+    expect(e.parse('M(0)').evaluate().re).toBe(0);
+    expect(e.parse('\\sum_{n=0}^{10} M(n)').evaluate().re).toBe(10);
+  });
+
+  test('compiled routes: the pole of a variable is Infinity on javascript (a lane difference)', () => {
+    // Not changed by the decision: on `javascript` (and `python`, with NumPy)
+    // `1/0` is the IEEE `Infinity`, which is ordered, so the branch at x = 0
+    // takes the then arm. See `docs/ERROR-MODEL.md`.
+    const c = compile(ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(c.success).toBe(true);
+    expect(c.run!({ x: 0 } as never)).toBe(1);
+    // A closed comparison folds to the value of the interpreter.
+    const closed = compile(
+      ce.parse('\\left\\{\\frac{1}{0} > 0: 1, 0\\right\\}'),
+      { to: 'javascript', fallback: false } as never
+    );
+    expect(closed.run!({} as never)).toBe(0);
+    // A non-real value of a variable takes the else arm (the runtime rule of
+    // the complex modes).
+    const root = compile(ce.parse('\\left\\{\\sqrt{x} > 0: 1, 0\\right\\}'), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(root.run!({ x: -1 } as never)).toBe(0);
+    if (TEST_PYTHON !== undefined) {
+      // The same lane difference on `python`: with a NumPy `x`, `1 / x` at
+      // `x = 0` is `inf` (a plain Python float raises ZeroDivisionError).
+      const py = compile(
+        ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'),
+        { to: 'python' } as never
+      );
+      expect(py.success).toBe(true);
+      const script = `import numpy as np\nnp.seterr(all='ignore')\nx = np.float64(0.0)\nprint(float(${py.code}))\n`;
+      expect(
+        execFileSync(TEST_PYTHON, ['-I', '-c', script], {
+          encoding: 'utf8',
+        }).trim()
+      ).toBe('1.0');
+    }
+    // On interval-js `1/x` over the point [0, 0] is `empty`, so the
+    // comparison is `'false'` and the branch takes the else arm.
+    const iv = compile(ce.parse('\\left\\{\\frac{1}{x} > 0: 1, 0\\right\\}'), {
+      to: 'interval-js',
+    } as never);
+    expect(iv.run!({ x: { lo: 0, hi: 0 } } as never)).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 0 },
+    });
+  });
+});
+
+/**
+ * The rule of the 2026-10-21 decision (a value with no order makes an
+ * ordered comparison `False`) applied where the first implementation missed
+ * it or applied it too widely.
+ */
+describe('Tycho row 413 (a): the edges of the rule', () => {
+  /** The complex double `1/(a + bi)`. */
+  const inv = (a: number, b: number) => ({
+    re: a / (a * a + b * b),
+    im: -b / (a * a + b * b),
+  });
+
+  test('a convergent integral with a complex exponent is not dropped', () => {
+    // The convergence guard is over the real part of the exponent
+    // (`Re(p) > 0`), not over the exponent: `0 < 1 + iπ` is `False`.
+    const cases: [string, { re: number; im: number }][] = [
+      ['\\int_0^1 x^{i\\pi} dx', inv(1, Math.PI)],
+      ['\\int_0^1 x^{\\ln(-1)} dx', inv(1, Math.PI)],
+      ['\\int_0^1 x^{\\sqrt{-2}} dx', inv(1, Math.SQRT2)],
+      ['\\int_0^1 x^{1+\\ln(-1)} dx', inv(2, Math.PI)],
+      ['\\int_1^\\infty x^{-2+i\\pi} dx', inv(1, -Math.PI)],
+      ['\\int_0^\\infty e^{-(1+\\ln(-1))x} dx', inv(1, Math.PI)],
+    ];
+    for (const [latex, expected] of cases) {
+      const value = ce.parse(latex).evaluate();
+      expect(value.operator).not.toBe('Integrate');
+      const n = value.N();
+      expect(n.re).toBeCloseTo(expected.re, 12);
+      expect(n.im).toBeCloseTo(expected.im, 12);
+    }
+    // A real parameter keeps the guard as written.
+    expect(ce.parse('\\int_0^1 x^n dx').evaluate().toString()).toBe(
+      '1 / (n + 1) {0 < n + 1}'
+    );
+  });
+
+  test('a logarithm with a complex base keeps its root', () => {
+    // `(1 + i)² = 2i`: the base is not real, so `0 < 1 + i` is not a
+    // condition of the root (only `b ≠ 0` and `b ≠ 1` are).
+    const roots = ce.parse('\\log_{1+i}(x) = 2').solve('x');
+    expect(roots?.map((r) => r.toString())).toEqual(['2i']);
+    const [root] = ce.parse('\\log_i(x) + \\log_i(x+2) = 1').solve('x') ?? [];
+    expect(root).toBeDefined();
+    const lhs = ce.parse('\\log_i(x) + \\log_i(x+2)').subs({ x: root }).N();
+    expect(lhs.re).toBeCloseTo(1, 12);
+    expect(lhs.im).toBeCloseTo(0, 12);
+    // A real base keeps the positivity guard.
+    expect(
+      ce
+        .parse('\\log_a(x) = 3')
+        .solve('x')
+        ?.map((r) => r.toString())
+    ).toEqual(['a^3 {0 < a && a != 1}']);
+  });
+
+  test('a chain stops at a pair with a value with no order', async () => {
+    // `(0 < i) ∧ (i < Missing)` is `False ∧ Missing`, which is `False`.
+    expect(
+      ce.box(['Less', 0, 'ImaginaryUnit', 'Missing']).evaluate().symbol
+    ).toBe('False');
+    expect(
+      ce.box(['Less', 0, ['Divide', 1, 0], 'Missing']).evaluate().symbol
+    ).toBe('False');
+    expect(ce.box(['Less', 0, ['Ln', -1], 'Missing']).evaluate().symbol).toBe(
+      'False'
+    );
+    expect(
+      ce
+        .box(['Equal', ['Divide', 1, 0], ['Divide', 1, 0], 'Missing'])
+        .evaluate().symbol
+    ).toBe('False');
+    // A `Missing` in the same pair keeps the Kleene `Missing`.
+    expect(ce.box(['Less', 'ImaginaryUnit', 'Missing']).evaluate().symbol).toBe(
+      'Missing'
+    );
+    // The operands after the pair are not evaluated.
+    const e = new ComputeEngine();
+    e.assign('w', 0);
+    const chain = ['Less', 0, 'ImaginaryUnit', ['Assign', 'w', 5]] as const;
+    expect(e.box(chain as never).evaluate().symbol).toBe('False');
+    expect(e.box('w').evaluate().re).toBe(0);
+    expect((await e.box(chain as never).evaluateAsync()).symbol).toBe('False');
+    expect(e.box('w').evaluate().re).toBe(0);
+  });
+
+  test('a tie of two values with no order is not a true ≤', () => {
+    const ln = ['Ln', -1];
+    for (const head of ['LessEqual', 'GreaterEqual']) {
+      expect(ce.box([head, ln, ln]).evaluate().symbol).toBe('False');
+      expect(ce.box([head, ln, ln]).N().symbol).toBe('False');
+      expect(ce.box([head, ln, ln, ln]).evaluate().symbol).toBe('False');
+      expect(ce.box(['If', [head, ln, ln], 1, -1]).evaluate().re).toBe(-1);
+    }
+    expect(ce.box(['LessEqual', 'Pi', 'Pi']).evaluate().symbol).toBe('True');
+  });
+
+  test('an imaginary part too small for a double is not zero', () => {
+    const z = ce.number({ re: 1, im: ce.bignum('1e-800') });
+    expect(ce.function('LessEqual', [z, z]).evaluate().symbol).toBe('False');
+    expect(ce.function('Less', [ce.Zero, z]).evaluate().symbol).toBe('False');
+  });
+
+  test('the noise rule of an approximation is relative to the modulus', () => {
+    // `e^{25} + iπ`: the imaginary part is 4·10⁻¹¹ of the real part, far
+    // above the rounding noise.
+    expect(ce.parse('0 < e^{25} + \\ln(-1)').evaluate().symbol).toBe('False');
+    expect(
+      ce
+        .function('Less', [ce.Zero, ce.parse('e^{25} + \\ln(-1)').N()])
+        .evaluate().symbol
+    ).toBe('False');
+    // A real value computed through complex values is still ordered.
+    expect(ce.parse('0 < \\frac{(1+i)^2}{2i}').evaluate().symbol).toBe('True');
+  });
+
+  test('a closed integral whose value is not real', () => {
+    // The approximation of a quadrature is a `Measurement`: its nominal
+    // value is read.
+    const latex = '0 < \\int_0^1 e^{ix^2} dx';
+    expect(ce.parse(latex).evaluate().symbol).toBe('False');
+    expect(ce.parse(latex).N().symbol).toBe('False');
+    expect(ce.parse('0 < \\int_0^1 e^{-x^2} dx').evaluate().symbol).toBe(
+      'True'
+    );
+  });
+
+  test('a closed comparison with the pole folds under constantFold: false', () => {
+    for (const [latex, value] of [
+      ['0 < \\frac{1}{0}', false],
+      ['\\frac{1}{0} = \\frac{1}{0}', false],
+      ['\\frac{1}{0} \\ne 0', true],
+    ] as const) {
+      for (const constantFold of [true, false]) {
+        const js = compile(ce.parse(latex), {
+          to: 'javascript',
+          fallback: false,
+          constantFold,
+        } as never);
+        expect(js.code).toBe(String(value));
+        expect(js.run!({} as never)).toBe(value);
+        const py = compile(ce.parse(latex), {
+          to: 'python',
+          fallback: false,
+          constantFold,
+        } as never);
+        expect(py.code).toBe(value ? 'True' : 'False');
+      }
+    }
+  });
+});

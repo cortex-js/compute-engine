@@ -8411,11 +8411,23 @@ export class BaseCompiler {
     // before the fold's cost estimate and also under `constantFold: false`.
     // A node seen again answers `false`: had it held a float, the walk would
     // have stopped at the first visit.
+    // The pole `ComplexInfinity` (`1/0`) is not exact, but it is not a
+    // float approximation either: it is a value with no order, and the
+    // interpreter decides a comparison with it (`0 < 1/0` and `1/0 = 1/0`
+    // are `False`). The structural code of the pole is the double
+    // `Infinity`, which has an order (`0 < Infinity` is `true`), so a
+    // comparison with the pole folds. Only a comparison: the fold of
+    // `Floor(1/0)` would not change its value.
+    const isComparison = BaseCompiler.BRANCH_RELATIONS.has(expr.operator);
     const seen = new Set<Expression>();
     const hasFloat = (node: Expression): boolean => {
       if (seen.has(node)) return false;
       seen.add(node);
-      if (isNumber(node)) return !node.isExact;
+      if (isNumber(node))
+        return (
+          !node.isExact &&
+          !(isComparison && node.isFinite === false && node.isComplex)
+        );
       if (isFunction(node)) return node.ops.some(hasFloat);
       return false;
     };
@@ -11655,7 +11667,11 @@ export class BaseCompiler {
 
     // An ORDERING comparison over a complex-valued operand has no lowering:
     // the complex numbers are not ordered, so the interpreter leaves
-    // `Less(i·x, 0)` symbolic (no truth value), while both the infix path
+    // `Less(i·x, 0)` symbolic (no truth value) while `x` has no value, and
+    // answers `False` once the value of an operand is not a real number,
+    // whatever the other operands are (`x < i` is `False` with `x` free;
+    // user decision of 2026-10-21, `nonRealKind()` in
+    // `library/relational-operator.ts`), while both the infix path
     // below and the function codegen it falls through to emit a raw `<` over
     // the `{re, im}` object — a silent `false` behind `success: true`. Fail
     // closed instead. `Equal`/`NotEqual` are NOT affected: they have
@@ -11697,8 +11713,11 @@ export class BaseCompiler {
         throw new Error(
           `Could not compile \`${h}\`: an ordering comparison over the ` +
             `complex-valued operand \`${complexOperand.toString()}\` — the ` +
-            `complex numbers are not ordered, and the interpreter leaves the ` +
-            `comparison symbolic.`
+            `complex numbers are not ordered. The interpreter answers ` +
+            `\`False\` when an operand has a value that is not a real ` +
+            `number, whatever the other operands are (\`x < i\` is ` +
+            `\`False\`), and leaves the comparison symbolic while the ` +
+            `operand depends on a free symbol (\`i·x < 0\`).`
         );
     }
 

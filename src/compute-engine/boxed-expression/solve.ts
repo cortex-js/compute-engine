@@ -3230,8 +3230,19 @@ function solveSingleLogarithm(
   // `-√(a + 1) - 1` of the combined form of `log_a(x) + log_a(x + 2) = 1`
   // is not kept.
   if (base.isPositive === true && base.isEqual(1) === false) return roots;
+  // A base with a constant part that is not real (`1 + i`, `i`, `a + i`)
+  // is not a real base, and `0 < b` is `False` for it, since a value that
+  // is not real has no order. The logarithm of such a base is defined for
+  // `b ≠ 0` and `b ≠ 1` (`log_b(u) = ln(u)/ln(b)`): `log_{1+i}(x) = 2` has
+  // the root `(1 + i)² = 2i`. The positivity guard is kept for a real base.
+  const hasNonRealConstantPart = (e: Expression): boolean => {
+    if (e.unknowns.length === 0) return !e.type.matches('real');
+    return isFunction(e) && e.ops.some(hasNonRealConstantPart);
+  };
   const guard = ce.function('And', [
-    ce.function('Less', [ce.Zero, base]),
+    hasNonRealConstantPart(base)
+      ? ce.function('NotEqual', [base, ce.Zero])
+      : ce.function('Less', [ce.Zero, base]),
     ce.function('NotEqual', [base, ce.One]),
   ]);
   return validateRoots(original, x, roots, undefined, stats).flatMap((root) => {

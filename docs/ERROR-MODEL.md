@@ -200,6 +200,164 @@ the `nanTest` field of a relation test), and `hasEmptyOperand` and
 `holds` (`interval/comparison.ts`). Pinned in
 `test/compute-engine/condition-nan-undecided.test.ts`.
 
+#### Extension: a value with no order — user decision of 2026-10-21
+
+**Settled, implemented 2026-10-21** (Tycho ledger row 413 (a)). A value
+that is undefined for an ordering also decides `False` in an ordered
+comparison, in a branch and everywhere else. Such a value is the pole
+`ComplexInfinity` (`~oo`, the value of `1/0`), a number that is not real
+(`i`, `\sqrt{-1}`, `\ln(-1)`, any value with a nonzero imaginary part), or
+any other numeric value that is not a real number. The real numbers include
+`+∞` and `−∞`: `0 < \infty` stays `True`. The ordering of such a value is
+not defined, so `<`, `≤`, `>` and `≥` answer `False`, and an `If` or a
+`Which` on such a comparison takes its next arm.
+
+For `=`, the two kinds differ:
+
+- an operand that is the pole decides `False`: the pole has no value, so
+  `1/0 = 1/0` is `False`, as `NaN = NaN` is;
+- an operand that is a complex number keeps the ordinary equality, which is
+  defined: `i = i` is `True`, `i = 0` is `False`, unchanged.
+
+| Input | Before 2026-10-21 | Now |
+| --- | --- | --- |
+| `0 < \frac{1}{0}` | `Less(0, ComplexInfinity)` (unevaluated) | `False` |
+| `\frac{1}{0} = \frac{1}{0}` | `True` | `False` |
+| `\frac{1}{0} = 0` | `False` | `False` (unchanged) |
+| `0 < i` | `Less(0, Complex(0, 1))` | `False` |
+| `0 < \ln(-1)` | `Less(0, Ln(-1))` | `False` |
+| `i = i`, `i = 0` | `True`, `False` | unchanged |
+| `\left\{\frac{1}{0} > 0: 1, 0\right\}` | the held `Which` | `0` |
+| `\left\{\sqrt{-1} > 0: 1, 0\right\}` | the held `Which` | `0` |
+| `\frac{1}{0} \ne 0` | `True` | `True` (unchanged) |
+| `0 < \infty`, `\infty = \infty` | `True` | `True` (unchanged) |
+| `0 < x`, `x` free | `Less(0, x)` | `Less(0, x)` (unchanged) |
+| `x < i`, `x` free | `Less(x, Complex(0, 1))` | `False` |
+| `\ln(-1) \le \ln(-1)` | `True` | `False` |
+| `0 < i < \mathrm{Missing}` | `Missing` | `False` |
+| `\sum_{n=0}^{10} M(n)` with `M(n) := \left\{\frac{1}{n} > 0: 1, 0\right\}` | a held sum | `10` |
+
+What the extension does NOT change:
+
+- **`≠` (`NotEqual`)**, as in the 2026-10-20 decision: `1/0 ≠ 0` stays
+  `True`, and `i ≠ 0` is `True`.
+- **`Missing`** keeps its Kleene reading: `Less(Missing, i)` is `Missing`.
+  A chain is the conjunction of its adjacent pairs, and it stops at the
+  first pair that is `False`: `0 < i < Missing` is `(0 < i) ∧ (i <
+  Missing)`, which is `False ∧ Missing`, so `False`, and the operands after
+  that pair are not evaluated. A pair with a `Missing` operand is not decided
+  by the rule, so `Missing < 0 < i` is `False` too (the pair `0 < i`), as
+  `Missing < 2 < 1` is.
+
+The comparison stays inert only when no operand has a value with no order
+and every operand that is not a number is a free symbol or an unevaluated
+form that depends on one: `0 < x` with `x` free stays `Less(0, x)`, and so
+does `0 < ix`. A value with no order decides `False` also next to a free
+symbol, as `NaN` does (`x < NaN` is `False`): `x < i`, `\ln(-1) < x` and
+`x < \frac{1}{0}` are `False`, and so is `\frac{1}{0} = x`.
+
+How an operand is read:
+
+- A number literal is read without a tolerance: `1 + 10^{-800}i` is not
+  real, although its imaginary part is the double `0` (`isComplex`).
+- A constant expression with no free variable that `evaluate()` leaves
+  symbolic (`\ln(-1)`, `e^{25} + \ln(-1)`) is approximated to find its
+  imaginary part, when the comparison methods did not decide the comparison
+  and when a `≤` or `≥` was decided `True` (a tie: `\ln(-1) \le \ln(-1)` is
+  `False`, as `i \le i` is). An imaginary part of that approximation of at
+  most `10^{-14}` times the modulus is not read as nonzero: it can be the
+  rounding error of a real value computed through complex values. This is
+  the noise rule of `boxComplexResult()` in `library/arithmetic.ts`. The
+  approximation of a quadrature is a `Measurement`, read through its
+  nominal value: `0 < \int_0^1 e^{ix^2} dx` is `False`.
+- No approximation is made for an operand whose type is `real`, or that
+  holds a `Sum`, `Product`, `Limit`, `NLimit` or `NDSolve` (an iteration with
+  no fixed bound): `0 < \sum_{k=1}^{\infty} \frac{\ln(-k)}{k^3}` stays
+  unevaluated, and costs one numeric evaluation of the sum, not two.
+- `=` is not approximated: only the literal `ComplexInfinity` decides it
+  (`1/0`, `\Gamma(0)` and `\tan(\pi/2)` evaluate to it).
+
+The engine builds some conditions as ordered comparisons. Those that can
+see a complex constant are written for it:
+
+- the convergence condition of an improper integral is on the real part of
+  the exponent: `\int_0^1 x^{i\pi} dx` is `\frac{1}{1 + i\pi}` (the
+  condition `0 < \operatorname{Re}(1 + i\pi)` is `True`), where
+  `0 < 1 + i\pi` would have dropped the value;
+- the root of an equation in a logarithm with a base that is not real has
+  the condition `b \ne 0 \land b \ne 1`, not `0 < b`: `\log_{1+i}(x) = 2`
+  has the root `2i`.
+- **The comparison methods** (`isLess()`, `isGreater()`, `isLessEqual()`,
+  `isGreaterEqual()`) still answer `undefined` for a complex operand. Engine
+  code reads a `false` from them as "the other order holds", which is not
+  true of a complex value.
+
+Compiled routes. The compiled arithmetic does not change. On the
+`javascript` and `python` targets a pole computed at run time, and the
+constant pole next to a variable, is the IEEE `Infinity`, which is ordered
+(on `interval-js` the constant pole is a hoisted constant that compares as
+`+∞`): this is a lane difference, recorded with the other divergences of
+the `Infinity` projection in `docs/COMPILATION-MODEL.md`. Measured
+2026-10-21:
+
+| Expression | Input | Compiled | Interpreter |
+| --- | --- | --- | --- |
+| `\left\{\frac{1}{x} > 0: 1, 0\right\}` | `x = 0`, `javascript` | `1` (`(0 < 1 / _.x) ? 1 : 0`) | `0` |
+| the same | `x = 0`, `python`, `x` a NumPy float | `1.0` (a plain Python float raises `ZeroDivisionError`) | `0` |
+| `\frac{1}{x} = \frac{1}{x}` | `x = 0`, `javascript` and `python` | `true` | `False` |
+| `\left\{\frac{1}{x} > 0: 1, 0\right\}` | `x` = [0, 0], `interval-js` | [0, 0] (`\frac{1}{x}` is `empty`, so the comparison is `'false'`) | `0` |
+| `\left\{\sqrt{x} > 0: 1, 0\right\}` | `x = -1`, `javascript` | `0` (the runtime rule of the complex modes) | `0` |
+| `x < \frac{1}{0}` | `x = 1`, `javascript`, `python`, `interval-js` | `true` (`_.x < Infinity`, `x < np.inf`, `'true'`) | `False` |
+| `\frac{1}{0} = x` | `x = 1`, the same targets | `false` (`true` at `x = Infinity` on `javascript`) | `False` |
+| `0 < \frac{1}{0}`, closed | `interval-js` | `'true'` (`_IA.less(_k1, _k2)`; no fold) | `False` |
+| `\frac{1}{0} = \frac{1}{0}`, closed | `interval-js` | `'true'` (`_IA.equal(_k1, _k1)`; no fold) | `False` |
+
+A closed comparison (no variable) folds to the value of the interpreter on
+`javascript`, `glsl`, `wgsl` and `python`, with or without `constantFold`
+(a comparison folds under the opt-out because its result jumps at a point;
+`closedExactJump`, `compilation/base-compiler.ts`, which reads the pole
+`ComplexInfinity` as a value with no order, not as a float). Measured
+2026-10-21, the same code with `constantFold: true` and `constantFold:
+false`:
+
+| Expression | `javascript` | `glsl`, `wgsl` | `python` | `interval-js` |
+| --- | --- | --- | --- | --- |
+| `0 < \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
+| `\frac{1}{0} = \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
+| `\frac{1}{0} = 0` | `false` | `false` | `False` | `'false'` (no fold) |
+| `\frac{1}{0} \ne 0` | `true` | `true` | `True` | `'true'` (no fold) |
+| `0 < i`, `0 < \ln(-1)` | `false` | `false` | `False` | compile-time decline |
+| `i = i` | `true` | `true` | `True` | compile-time decline |
+| `0 \le \infty` | `true` | `true` | `True` | `'true'` |
+
+Before, the interpreter left the comparisons with a value with no order
+unevaluated, the fold failed and the code was structural (`0 < Infinity`,
+`true`), and on `python` and under `constantFold: false` the code of a
+comparison with the pole stayed structural also after the interpreter
+decided it, since the pole is not an exact number. `interval-js` never
+folds a comparison: its code computes an enclosure. `i < x` is still the
+compile-time decline of a statically non-real operand, although the
+interpreter answers `False` for it.
+
+On `interval-js`, `1/x` over the point [0, 0] is already `empty`, so the
+comparison is `'false'` (the 2026-10-20 rule) and nothing changed there.
+Other kernels answer a pole over a point cell with `singular`, not `empty`:
+`\frac{1}{x^2}`, `\cot x`, `\csc x` and `\Gamma(x)` at [0, 0], and
+`\sec(x - \frac{\pi}{2})` at [0, 0]. A comparison with them is `'maybe'`,
+which is sound but not the `'false'` of the interpreter; a `singular` result
+does not record the cell, so the comparison cannot tell a point cell from a
+wider one.
+
+Implementation: `nonRealKind()`, `undecidedOrderedRelation()`,
+`trueOrderedRelation()` and `unorderedChainPair()`
+(`library/relational-operator.ts`), called by `decideLess`,
+`decideLessEqual`, `decideEqual` and the adjacent-pair deciders of a chain
+(`CHAIN_PAIR_IS_FALSE`). The conditions built over a real part:
+`guardRealPart()` (`library/calculus.ts`) and the logarithm roots in
+`boxed-expression/solve.ts`. Pinned in
+`test/compute-engine/condition-nan-undecided.test.ts` ("Tycho row 413
+(a)").
+
 ## 1. The response channels — Settled taxonomy; the host-throw amendment is Proposed
 
 When an operator receives an argument that is wrong in some way, the engine
@@ -2029,8 +2187,10 @@ answer and the fix landed. An entry with no FIXED date is still open.
   clause type AND every non-finite value-literal clause still declines
   the whole function. Two accepted divergences, recorded in
   `ROADMAP.md`: compiled `Heaviside(~oo)` → `1` and compiled
-  `~oo > 0` → `true`, both symbolic in the interpreter. Details in
-  `docs/COMPILATION-MODEL.md`.
+  `~oo > 0` → `true`, both symbolic in the interpreter at the time (since
+  2026-10-21 the interpreter answers `~oo > 0` → `False`: see "An undefined
+  operand makes a comparison false" at the top of this document). Details
+  in `docs/COMPILATION-MODEL.md`.
 
 Open questions (each phrased so it can be answered without this
 document's history):

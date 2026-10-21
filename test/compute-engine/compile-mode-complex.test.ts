@@ -588,8 +588,17 @@ describe('complex mode — D2/D6 runtime rules', () => {
 
   it('a statically non-real operand is a compile-time capability decline in every mode', () => {
     for (const mode of ['strict', 'auto', 'complex'] as const) {
+      // A closed comparison with a non-real operand folds to the value of
+      // the interpreter, `False`: a value that is not a real number has no
+      // order (user decision of 2026-10-21, Tycho ledger row 413 (a)). A
+      // comparison folds even under `constantFold: false`, since its result
+      // jumps at a point. Before, the interpreter left `i < 2` unevaluated,
+      // the fold failed and the operand was the decline below.
+      const closed = compile(ce.parse('i < 2'), { mode, constantFold: false });
+      expect(closed.success).toBe(true);
+      expect(closed.run!({})).toBe(false);
       for (const expr of [
-        ce.parse('i < 2'),
+        ce.parse('i < x'),
         ce.box(['Floor', ['Complex', 0, 2]]),
         ce.box(['Erf', ['Multiply', 2, 'ImaginaryUnit']]),
       ]) {
@@ -601,7 +610,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
     // Complex mode names the operand.
     let caught: unknown;
     try {
-      compile(ce.parse('i < 2'), { ...CX, constantFold: false });
+      compile(ce.parse('i < x'), { ...CX, constantFold: false });
     } catch (e) {
       caught = e;
     }
@@ -627,10 +636,11 @@ describe('complex mode — D2/D6 runtime rules', () => {
     };
     expect(r.run!({ z: 2 })).toBe(false);
     expect(draws).toBe(0);
-    // `Or(True, i < 2)` still declines at compile time (no reachability
-    // reasoning).
+    // `Or(True, i < x)` still declines at compile time (no reachability
+    // reasoning). The operand `x` keeps the comparison from folding: the
+    // closed `i < 2` folds to `false` (user decision of 2026-10-21).
     expect(
-      compile(e.box(['Or', 'True', ['Less', 'ImaginaryUnit', 2]]), {
+      compile(e.box(['Or', 'True', ['Less', 'ImaginaryUnit', 'x']]), {
         mode: 'complex',
         constantFold: false,
       }).success

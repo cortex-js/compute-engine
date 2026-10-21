@@ -229,13 +229,19 @@ function classifyEndpointLeak(
   // x^p as x → 0⁺ : residual `0^p` → 0 when Re(p) > 0.
   if (base.isSame(0)) {
     if (isNumber(exp)) return null;
-    return { value: ce.Zero, guard: ce.function('Greater', [exp, ce.Zero]) };
+    return {
+      value: ce.Zero,
+      guard: ce.function('Greater', [guardRealPart(exp, ce), ce.Zero]),
+    };
   }
 
   // x^p as x → +∞ : residual `(+∞)^p` → 0 when Re(p) < 0.
   if (base.isInfinity === true && base.isPositive === true) {
     if (isNumber(exp)) return null;
-    return { value: ce.Zero, guard: ce.function('Less', [exp, ce.Zero]) };
+    return {
+      value: ce.Zero,
+      guard: ce.function('Less', [guardRealPart(exp, ce), ce.Zero]),
+    };
   }
 
   // (−∞)^p : sign oscillation — not in the table.
@@ -272,11 +278,36 @@ function classifyExpEndpointLeak(
   if (infSign === 0 || rest.length === 0) return null;
   const cofactor = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
   if (isNumber(cofactor)) return null; // decidable → would have folded
+  // `e^{c·(−∞)}` → 0 when Re(c) > 0, and `e^{c·(+∞)}` → 0 when Re(c) < 0.
+  const re = guardRealPart(cofactor, ce);
   const guard =
     infSign < 0
-      ? ce.function('Greater', [cofactor, ce.Zero])
-      : ce.function('Less', [cofactor, ce.Zero]);
+      ? ce.function('Greater', [re, ce.Zero])
+      : ce.function('Less', [re, ce.Zero]);
   return { value: ce.Zero, guard };
+}
+
+/**
+ * The operand of a convergence guard on the real part of `p` (`Re(p) > 0`,
+ * `Re(p) < 0`): `Real(p)` when `p` holds a constant that is not real, and
+ * `p` itself otherwise.
+ *
+ * An ordered comparison with a value that is not a real number is `False`
+ * (`0 < 1 + iπ` is `False`), so a guard written over `p` itself would reject
+ * a convergent integral with a complex exponent: `∫₀¹ x^{iπ} dx` converges
+ * to `1/(1 + iπ)`, because `Re(1 + iπ) = 1 > 0`. A constant part of `p` is
+ * not real when it has no free variable and its type is not `real`
+ * (`iπ`, `ln(−1)`, `√(−2)`). A `p` whose constants are all real (`n + 1`,
+ * with `n` free) keeps the guard `n + 1 > 0`, as written for a real
+ * parameter.
+ */
+function guardRealPart(p: Expression, ce: ComputeEngine): Expression {
+  const hasNonRealConstantPart = (e: Expression): boolean => {
+    if (e.unknowns.length === 0) return !e.type.matches('real');
+    return isFunction(e) && e.ops.some(hasNonRealConstantPart);
+  };
+  if (!hasNonRealConstantPart(p)) return p;
+  return ce.function('Real', [p]);
 }
 
 /**

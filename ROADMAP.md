@@ -178,8 +178,8 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   phase of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of
   8,000 points, a stratified 300-row sample with 24 re-scores; the deciding
   cases pass in 45 to 70 ms, 1,000 rows over `[0.3, 628]` in about 300 ms).
-  Phase B (the scan on the worker pool, step 5) LANDED 2026-10-21 (uncommitted,
-  dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the
+  Phase B (the scan on the worker pool, step 5) LANDED 2026-10-21, committed
+  `d4767dd06` (dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the
   grid scan on `ce.workers` when the fit is shippable and separable; 1,000
   rows over `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. Residue,
   not fixed: a POWER of a periodic function (`a cos(b x + c)²`) records the
@@ -334,11 +334,24 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   `interval-js`, so the else branch is taken; this reverses the ruling of
   2026-09-03 recorded in `docs/ERROR-MODEL.md`; `≠` and `Missing` keep their
   reading). FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 7
-  findings applied; `docs/ERROR-MODEL.md` has the new section). Open after it,
-  decision needed: (a) values that are undefined for Desmos but not `NaN` for
-  CE stay unevaluated in a comparison and so in a branch: `0 < ~oo` (from
-  `1/0`), `0 < i` (`\\sqrt{-1}`), `0 < \\ln(-1)`; with `K(n) := 1/n` Tycho's
-  `\\{K(n) > 0: 1, 0\\}` at `n = 0` is still a held `Which`, not `0`. (b) The
+  findings applied; `docs/ERROR-MODEL.md` has the new section). Open after it:
+  (a) values that are undefined for Desmos but not `NaN` for CE stayed
+  unevaluated in a comparison and so in a branch: `0 < ~oo` (from `1/0`),
+  `0 < i` (`\\sqrt{-1}`), `0 < \\ln(-1)`; with `K(n) := 1/n` Tycho's
+  `\\{K(n) > 0: 1, 0\\}` at `n = 0` was a held `Which`, not `0`. USER DECISION
+  2026-10-21: such a value decides FALSE too (an ordered comparison with
+  `ComplexInfinity` or a non-real complex operand is `False`; `=` with
+  `ComplexInfinity` is `False`, `=` of complex numbers keeps its meaning; `≠`
+  unchanged); FIXED 2026-10-21 on the main tree (uncommitted, dual-reviewed, 10
+  findings applied: the integral convergence guards and the logarithm-root
+  guard now test the real part or skip a complex base, chains and ties
+  included, `closedExactJump` folds a `ComplexInfinity` comparison on every
+  target). Remaining lane difference, recorded in `docs/COMPILATION-MODEL.md`:
+  a constant pole NEXT TO A VARIABLE compiles to IEEE infinity, so `x < 1/0` at
+  `x = 1` is `true` on `javascript`, `python` and `interval-js` where the
+  interpreter gives `False`. Open small question: `Less(0, NaN, Missing)` is
+  `Missing` while `Less(0, i, Missing)` is now `False`; by the chain rule (the
+  first false pair wins) the `NaN` chain should be `False` too. (b) The
   compiled presence guard of a branch (an unsupplied variable takes no arm)
   is static: a variable read only by an ARM of a nested `If`/`Which`, or by a
   later `Which` condition, is not guarded, so with `y` unsupplied
@@ -388,6 +401,37 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   on the boundary), two passes over the grid; eight to twenty-seven
   `_SYS.atNumeric` reads per cell are acceptable.
 
+### REGRESSION since `c43a44d41`: a `Sum`/`Product` term that assigns a function keeps it for the EARLIER indices (OPEN — found 2026-10-21 by a test run; 3 tests of `test/compute-engine/batch9-evaluation.test.ts` fail at HEAD)
+
+`Sum(Block(If(k = 2, h := z ↦ 2z), h(k)), k, 1, 3)` must give `10 + h(1)`: an
+implicit local of a block starts with no value at each top-level evaluation and
+keeps its value from one loop iteration to the next (user decision
+2026-10-18), so `h` is set at `k = 2`, still set at `k = 3` (`h(3) = 6`), and
+unset at `k = 1`. At HEAD it gives `12`: the `h(1)` term reads the function
+assigned later. The same for `Product` and for "a term whose argument changes
+when it is read again" (the three failing tests of the block "a big operator
+does not keep a function assigned by its term"). Bisected on 2026-10-21 with
+the suite alone in a clean worktree per commit: passes at `6d5c6d542` and
+`8fc104df4`, fails from `c43a44d41` ("refactor: enhance callable binding
+resolution and forward call handling", a peer session's work committed by the
+user) and at every later commit. The new forward-call resolution presumably
+binds `h(1)` to the function `h` holds after the loop instead of leaving the
+call inert for an index where `h` had no value yet. Owner: the session that
+did the callable-binding work (handoff notes in `docs/scratch/2026-10-20-call-binding-handoff.md`
+and `docs/scratch/2026-10-20-callable-evaluation-handoff.md`).
+
+### `isLess` on a long exact sum of logarithms throws a `RangeError` from `lcm` (OPEN, small — found 2026-10-21 by the review of the non-real comparison change)
+
+`ce.parse('0 < \\sum_{k=1}^{3000} \\frac{\\ln(-k)}{k^2}').evaluate()` throws
+`RangeError: The number Infinity cannot be converted to a BigInt` from `lcm`
+(`src/compute-engine/numerics/numeric.ts`, around line 295), reached through
+`addArray → Terms → exactSplit → factor → rationalGcd`; `ce.number(0).isLess(sum)`
+throws the same. With 30 terms the comparison answers `False`. The exact fold
+of the sum builds a rational denominator that overflows the double range before
+it reaches `lcm`. Fix: make `lcm`/`rationalGcd` refuse or fall back to a float
+when a denominator is not a finite double, or make the exact fold stop
+combining terms once a denominator exceeds the safe range.
+
 ### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
 
 `IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
@@ -429,7 +473,7 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 shipped in 0.159.0; step 5 LANDED 2026-10-21 on the main tree (uncommitted, dual-reviewed, 11 findings applied) as phase B of `docs/plans/2026-10-20-findfit-global-grid.md`: `FindFit.evaluateAsync()` scans on `ce.workers`, 1,000 rows over `[0.3, 628]` in 65 ms on 8 workers (233 ms inline); design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 shipped in 0.159.0; step 5 LANDED 2026-10-21, committed `d4767dd06` (dual-reviewed, 11 findings applied) as phase B of `docs/plans/2026-10-20-findfit-global-grid.md`: `FindFit.evaluateAsync()` scans on `ce.workers`, 1,000 rows over `[0.3, 628]` in 65 ms on 8 workers (233 ms inline); design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
@@ -697,29 +741,19 @@ remains the separate design item above.
   side.
 - The subtype relation of lists (`isSubtype()`, the `list` case in
   `common/type/subtype.ts`) is not transitive, so a union that drops an arm
-  because the arm is a subtype of another arm can drop values. Two rules
-  cause it, and both are on purpose according to their comments:
-  - When the scalars of a list with dimensions are in the element type of a
-    list with fixed dimensions, the rank must be equal ("a matrix is not a
-    `vector<unknown>`, although its rows are values"). So
-    `list<integer^(2x2x2)> <: list<list^2>` and
-    `list<list^2> <: vector<unknown>`, but `list<integer^(2x2x2)>` is not a
-    `vector<unknown>`: `reduceType(list<list^2> | vector<unknown>)` is
-    `vector<unknown>`, which does not hold the 2×2×2 tensor that the first
-    arm holds.
-  - A list of rows with fixed dimensions is merged into one list with more
-    dimensions only toward a target with two or more dimensions. So
-    `list<list<integer^2>^3> <: list<real^(3x-1)> <: list<real>`, but
-    `list<list<integer^2>^3>` is not a `list<real>`.
-  A random test of the meet (pairs of list and collection types against
-  concrete list values) finds these losses in the union reduction only,
-  never in the meet of two arms. A value literal always has the flat
-  spelling (`staticCollectionDims`), so the second rule matters for
-  declared types only. Question for the user: should a list with fixed
-  dimensions whose element type holds both a scalar and a list of scalars
-  (`list`, `unknown`, `any`) read a tensor through its rows, or should
-  `list<list^2>` stop being a subtype of `vector<unknown>`? Either answer
-  makes the relation transitive for these cases. Found 2026-10-21.
+  because the arm is a subtype of another arm can drop values. One known
+  cause: a list of rows with fixed dimensions is merged into one list with
+  more dimensions only toward a target with two or more dimensions (on
+  purpose, according to its comment). So
+  `list<list<integer^2>^3> <: list<real^(3x-1)> <: list<real>`, but
+  `list<list<integer^2>^3>` is not a `list<real>`. A value literal always
+  has the flat spelling (`staticCollectionDims`), so this matters for
+  declared types only. A random test of the meet (72,000 pairs of list and
+  collection types against concrete list values) finds 18 such losses, all
+  in the union reduction and none in the meet of two arms; not every one of
+  them has been traced to this rule. (The other known cause, a list of rows
+  being a `vector<unknown>`, was removed on 2026-10-21 by the user decision
+  that `vector<unknown>` is a list of scalars.) Found 2026-10-21.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is

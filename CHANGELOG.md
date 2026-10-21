@@ -62,6 +62,16 @@
   tensor can be in both: `list<list<list<real>>>` and `list<number>` share a
   rank-3 tensor of reals.
 
+- A list with dimensions whose element type is a top type (`vector<unknown>`,
+  `list<any^3>`, `list<(any | integer)^3>`) holds scalars, not lists:
+  `list<list^2>` and `list<list<integer>^2>` are no longer subtypes of
+  `vector<unknown>` and `list<any^2>`, as `list<integer^(2x2)>` already was
+  not. The relation was not transitive: `list<integer^(2x2x2)>` is a
+  `list<list^2>`, which was a `vector<unknown>`, but `list<integer^(2x2x2)>`
+  is not a `vector<unknown>`. The meet follows: `list<any^3> & list<list^3>`
+  is `never` (it was `list<list^3>`), and the two types do not overlap. A
+  list with no dimensions is unchanged: `list<list^2>` is a `list<unknown>`.
+
 - The meet of two collection types of the same kind no longer drops values
   that are in both. Two lists, two indexed collections or two collections
   whose elements are at different depths are kept as written:
@@ -269,6 +279,65 @@
   (`glsl`, `wgsl`) already took the else arm. This reverses the rule of
   2026-09-03, under which a `NaN` operand of any comparison made the branch
   take no arm (`docs/ERROR-MODEL.md`).
+
+- A value that has no order also makes a comparison false: the pole
+  `ComplexInfinity` (`~oo`, the value of `1/0`) and a number that is not real
+  (`i`, `\sqrt{-1}`, `\ln(-1)`, any value with a nonzero imaginary part). An
+  ordered comparison (`<`, `≤`, `>`, `≥`) with such an operand is now
+  `False`, alone and in the condition of an `If` or a `Which`, which then
+  takes its next arm. `+∞` and `−∞` are real and keep their order. An
+  equality with the pole is `False` (the pole has no value, as `NaN` has
+  none), but an equality with a complex number keeps its meaning. An exact
+  constant such as `\ln(-1)` is approximated to find its imaginary part (not
+  when it holds an infinite `Sum` or `Product` or a `Limit`), and the
+  imaginary part of a number literal is read exactly (`1 + 10^{-800}i` is not
+  real). A comparison stays unevaluated only when its operands are free
+  symbols or forms that depend on one (`0 < x`, `0 < ix`): a value with no
+  order decides `False` also next to a free symbol (`x < i`, `x < \frac{1}{0}`),
+  as `NaN` does. A chain stops at its first pair that is `False`. Before and
+  after:
+  - `0 < \frac{1}{0}`, `0 < i`, `0 < \ln(-1)`, `\pi + i < 4 + i`, `x < i`:
+    unevaluated before, `False` now.
+  - `\frac{1}{0} = \frac{1}{0}` and `\ln(-1) \le \ln(-1)`: `True` before,
+    `False` now.
+  - `0 < i < \mathrm{Missing}`: `Missing` before, `False` now.
+  - `\int_0^1 x^{i\pi} dx`: `\frac{1}{1+i\pi}` with the condition
+    `0 < 1 + i\pi` before, `\frac{1}{1+i\pi}` now (the convergence condition
+    is on the real part of the exponent), and the same for the other
+    convergent integrals of a power or an exponential with a complex
+    exponent.
+  - `\log_{1+i}(x) = 2`: the root `2i` with the condition `0 < 1 + i`
+    before, `2i` now (a base that is not real has the conditions `b \ne 0`
+    and `b \ne 1`).
+  - `\left\{\frac{1}{0} > 0: 1, 0\right\}` and
+    `\left\{\sqrt{-1} > 0: 1, 0\right\}`: a held `Which` before, `0` now.
+  - `\sum_{n=0}^{10} M(n)` with `M(n) := \left\{\frac{1}{n} > 0: 1, 0\right\}`:
+    a held expression before, `10` now.
+
+  Not changed: `\frac{1}{0} = 0` is `False`, `i = i` is `True`, `i = 0` is
+  `False`, `\frac{1}{0} \ne 0` is `True` (`≠` is not part of the decision),
+  `0 < \infty` and `\infty = \infty` are `True`, and `Missing` keeps its
+  Kleene reading. The methods `isLess()`, `isGreater()` and the others still
+  answer `undefined` for a complex operand.
+
+  Compiled code: the arithmetic does not change, so a pole computed at run
+  time is the IEEE `Infinity`, which has an order. `\left\{\frac{1}{x} > 0:
+  1, 0\right\}` at `x = 0` gives `1` on `javascript` and on `python` (with a
+  NumPy `x`; a plain Python float raises `ZeroDivisionError`), where the
+  interpreter gives `0`; `\frac{1}{x} = \frac{1}{x}` at `x = 0` is `true`
+  there. On `interval-js`, `\frac{1}{x}` over the point `[0, 0]` is `empty`,
+  so that branch already gives `0`. A non-real value at run time already gave
+  `false` (`\left\{\sqrt{x} > 0: 1, 0\right\}` at `x = -1` is `0`). A closed
+  comparison with such an operand now folds to the value of the interpreter
+  on `javascript`, `glsl`, `wgsl` and `python`, with or without
+  `constantFold`: `\left\{\frac{1}{0} > 0: 1, 0\right\}` compiles to `0` (it
+  was `1`), and `0 < \frac{1}{0}` and `\frac{1}{0} = \frac{1}{0}` to `false`
+  (they were `true`). `i < 2` compiles to `false` (it was a compile-time
+  decline; `i < x` still is one). `interval-js` does not fold a comparison:
+  `0 < \frac{1}{0}` and `\frac{1}{0} = \frac{1}{0}` there are still
+  `'true'`. The constant pole next to a variable is the IEEE `Infinity`:
+  `x < \frac{1}{0}` at `x = 1` is `true` on `javascript`, `python` and
+  `interval-js`, where the interpreter gives `False`.
 
 ### Bug Fixes
 
