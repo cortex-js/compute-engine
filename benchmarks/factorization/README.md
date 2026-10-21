@@ -22,7 +22,7 @@ rows for provenance, not as a supported implementation. Removing the optional
 backend does not change the TypeScript arithmetic. PARI remains an optional
 external benchmark comparator, not shipped CE code.
 
-Latest results: all 1,200 regular inputs verified on three trials; TypeScript
+Original PR results: all 1,200 regular inputs verified on three trials; TypeScript
 takes 9.652 s versus SymPy's 22.348 s and PARI WASM's 5.235 s. Default stress
 coverage is 39/42, or 42/42 with explicitly enlarged size limits and the same
 work budget. See [optimized results](#optimized-regular-corpus); the original
@@ -31,6 +31,12 @@ runs are retained below as baselines.
 ## Reproduce
 
 From the repository root with CE's development dependencies:
+
+Use **Node 26** for new benchmark measurements and record the precise version
+from the run manifest. Child TypeScript and PARI workers inherit that same
+executable. Node 22 remains a compatibility-test target; the historical Node 22
+timings below must not be interpreted as a controlled before/after algorithm
+comparison with a Node 26 run.
 
 ```sh
 node --import tsx benchmarks/factorization/run.ts --output build/factoring-run --backends typescript --count 1200 --repeats 3
