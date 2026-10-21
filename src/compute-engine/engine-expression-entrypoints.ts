@@ -242,7 +242,7 @@ export function createSymbolExpression(
         existingBare = s.bindings.get(name);
     } else existingBare = autoScope.bindings.get(name);
     // A bare parameter for which the caller supplied an INFERRED type (a
-    // fold's accumulator, see `refineFoldAccumulator` in
+    // fold's accumulator, see `canonicalFoldCombiner` in
     // `library/collections.ts`) is bound with that type, still as an
     // inferred type: a use may widen it, and nothing is enforced at apply
     // time. Without a hint the parameter starts `unknown`, as before.

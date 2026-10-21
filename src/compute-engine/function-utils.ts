@@ -666,7 +666,7 @@ export function canonicalFunctionLiteralArguments(
      * apply time); a parameter not in the map starts `unknown`. An annotated
      * parameter is never affected. This is how a fold types its accumulator
      * to the fixpoint of its seed and its combiner's result
-     * (`refineFoldAccumulator`, `library/collections.ts`). */
+     * (`canonicalFoldCombiner`, `library/collections.ts`). */
     inferredParamTypes?: ReadonlyMap<string, Type>;
   }
 ): Expression | undefined {

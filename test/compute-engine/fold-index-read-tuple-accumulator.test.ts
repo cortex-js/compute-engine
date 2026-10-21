@@ -5,7 +5,7 @@
  *
  * 1. The index reads of the accumulator (`q(s[1])` with `q: (integer) -> …`)
  *    typed it `tuple<integer>`, a tuple of ONE integer, and the fixpoint
- *    refinement of the accumulator (`refineFoldAccumulator`) did not run
+ *    refinement of the accumulator (`canonicalFoldCombiner`) did not run
  *    because that type counted as precise. A tuple made by index reads alone
  *    does not prove a length, so it now counts as imprecise and the
  *    accumulator is typed from its seed `[1, 0, 1]`.

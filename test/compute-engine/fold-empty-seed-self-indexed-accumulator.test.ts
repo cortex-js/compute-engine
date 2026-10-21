@@ -12,7 +12,7 @@
  *    `indexed_collection<boolean | character | indexed_collection<any> |
  *    number | string>` from that use (the index parameter of `At` accepts
  *    every kind of value), and the fixpoint refinement of the accumulator
- *    (`refineFoldAccumulator`) did not run because the element type was
+ *    (`canonicalFoldCombiner`) did not run because the element type was
  *    neither `unknown` nor `any`. The JavaScript target then refused `s[1]`
  *    ("may be text at run time") although the seed `[a, 0]` is a list of
  *    integers. An element type that admits a collection and a scalar at once

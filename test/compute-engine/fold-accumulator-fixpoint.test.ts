@@ -1,7 +1,7 @@
 /**
  * A fold's BARE accumulator is typed to the fixpoint of its seed and its
  * combiner's result (user decision 2026-09-29, option A of the design
- * question recorded for issue #369; `refineFoldAccumulator` in
+ * question recorded for issue #369; `canonicalFoldCombiner` in
  * `library/collections.ts`).
  *
  * The type is INFERRED, not an annotation: the printed literal is unchanged,

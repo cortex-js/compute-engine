@@ -2064,80 +2064,67 @@ function accumulatorTypeIsImprecise(t: Type): boolean {
   );
 }
 
+/** The arity admission a fold's canonical handler wires for its callback
+ * (`canonicalCallbackOperand`). */
+type FoldCallbackArity = {
+  operator: string;
+  supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
+  source?: Expression;
+};
+
 /**
- * Type a fold's BARE accumulator to the fixpoint of its seed and its
- * combiner's result (user decision 2026-09-29, option A of the design
- * question recorded for issue #369).
- *
- * The accumulator receives the seed on the first step and the combiner's own
- * result on every later step, so its type is the least `T` with
- * `widen(seed, result of the body with acc: T) <: T`. The iteration starts
- * from the seed's type, re-canonicalizes the RAW literal with the accumulator
- * PRE-DECLARED at the current `T` as an INFERRED type (`inferredParamTypes`
- * of `canonicalFunctionLiteral`), widens `T` by the body's result type, and
- * stops when `T` no longer changes; it settles in two steps for the usual
- * list-building fold (`list<never>`, then `list<integer | nan>`). An
- * inferred type is not an annotation: nothing is enforced at apply time, a
- * use may still widen it, and the printed literal is unchanged, which is
- * what keeps this compatible with the Design D audit that leaves the
- * accumulator's SLOT `unknown` in the operator's signature (a fold's
- * accumulator may change type mid-fold; the fixpoint covers that).
- *
- * Runs only when the accumulator's inferred type says too little
- * (`accumulatorTypeIsImprecise`): a numeric fold (`(a, x) => a + x`, inferred
- * `number` from `Add`) is not re-canonicalized, so its cost is unchanged. A
- * fixpoint that does not settle in three steps, a body whose result type is
- * a top type, an annotated accumulator, a callback that is not a raw
- * `Function` literal (a named function, an already canonical literal) all
- * keep the literal as it was canonicalized.
- *
- * Before this the fold `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was
- * typed `collection<any>`, so `Map(f, fold)` and `Filter(fold, …)`
- * materialized as a `Set` on the interpreter (a view over an abstract
- * collection follows the kind of the values its sources hold, and the fold
- * node held none) while the compiled result was an ordered array, and every
- * compiled consumer of the fold needed a run-time array check.
- *
- * `raw` is the callback operand as the canonical handler received it (the
- * stamped raw literal on the box and parse routes); `fn` is its canonical
- * form, returned unchanged whenever the refinement does not apply. The
- * refined literal goes through the same admission (`arity`) as the original.
+ * The name of the bare accumulator parameter of a RAW `Function` literal
+ * (`(acc, x) => …` as the canonical handler received it), or `undefined`
+ * when the operand is not such a literal: an already canonical literal, a
+ * named function, a literal with fewer than two parameters, or one whose
+ * accumulator is annotated. Only such a literal is re-canonicalized by
+ * `canonicalFoldCombiner`.
  */
-function refineFoldAccumulator(
-  raw: Expression | undefined,
-  fn: Expression,
-  seedType: Type | undefined,
-  arity: {
-    operator: string;
-    supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
-    source?: Expression;
-  }
-): Expression {
-  if (seedType === undefined || isKindOpenOperandType(seedType)) return fn;
+function bareAccumulatorName(raw: Expression | undefined): string | undefined {
   if (
     raw === undefined ||
     raw.isCanonical ||
     !isFunction(raw, 'Function') ||
     raw.nops < 3 ||
-    !isSymbol(raw.ops[1]) ||
-    !isFunction(fn, 'Function')
+    !isSymbol(raw.ops[1])
   )
-    return fn;
-  const accName = raw.ops[1].symbol;
-  // The gate reads the accumulator's BINDING (the canonical parameter
-  // operand), not the literal's printed signature, which keeps a scalar bare
-  // parameter as `unknown` whatever its binding infers: `(acc, i) => acc + i`
-  // infers `acc: number` and must not enter the loop.
-  const current = accumulatorBindingType(fn);
-  if (current !== undefined && !accumulatorTypeIsImprecise(current)) return fn;
-  let t: Type = seedType;
-  for (let step = 0; step < 3; step++) {
+    return undefined;
+  return raw.ops[1].symbol;
+}
+
+/**
+ * The fixpoint iteration of `canonicalFoldCombiner`, started at `start`: the
+ * raw literal is canonicalized with the accumulator pre-declared at the
+ * current type, the type is widened by the body's result, and the loop stops
+ * when it no longer changes. Returns the admitted literal (the admission's
+ * verdict, as `canonicalCallbackOperand` gives it) with the type it settled
+ * on, or `undefined` when the loop does not settle in three steps, the body's
+ * result is a top type, or the settled literal's accumulator does not admit
+ * the fixpoint.
+ *
+ * Each step is a pass over the body (`beginFoldPass`), and a nested fold
+ * refined in a step records its fixpoint for the next step
+ * (`recordedFixpoints`).
+ */
+function fixpointLiteral(
+  state: FoldRefinementState,
+  raw: Expression,
+  accName: string,
+  start: Type,
+  arity: FoldCallbackArity,
+  firstOrdinal: number,
+  maxSteps: number
+): { literal: Expression; type: Type } | undefined {
+  let t: Type = start;
+  for (let step = 0; step < maxSteps; step++) {
+    beginFoldPass(state, firstOrdinal);
     const literal = canonicalFunctionLiteral(raw, {
       inferredParamTypes: new Map([[accName, t]]),
     });
-    if (literal === undefined || !isFunction(literal, 'Function')) return fn;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
     const result = functionResult(literal.type.type);
-    if (result === undefined || isKindOpenOperandType(result)) return fn;
+    if (result === undefined || isKindOpenOperandType(result)) return undefined;
     const next = widen(t, result);
     if (isSubtype(next, t) && isSubtype(t, next)) {
       // The pre-declared type is an inferred one, so a use in the body may
@@ -2146,12 +2133,542 @@ function refineFoldAccumulator(
       // receives, or its signature would claim a narrower type than the
       // fold delivers.
       const bound = accumulatorBindingType(literal);
-      if (bound === undefined || !isSubtype(t, bound)) return fn;
-      return canonicalCallbackOperand(literal, arity) ?? fn;
+      if (bound === undefined || !isSubtype(t, bound)) return undefined;
+      const admitted = canonicalCallbackOperand(literal, arity);
+      if (admitted === undefined) return undefined;
+      return { literal: admitted, type: t };
     }
     t = next;
   }
-  return fn;
+  return undefined;
+}
+
+/** The fixpoint iteration runs at most this many steps from the seed. */
+const FIXPOINT_STEPS = 3;
+
+/**
+ * The state of the fold handlers of one engine (`Reduce`, `Fold`, `Scan`)
+ * while the outermost of them is running: the fixpoint types that
+ * `fixpointLiteral` settled on for the combiners of NESTED folds, keyed by
+ * the fold's site (`foldSiteKey`), and the bookkeeping of the sites and of
+ * the admission passes. One per engine (`foldRefinementState`), so a
+ * canonical handler of a user-defined operator that boxes an expression on
+ * ANOTHER engine while a pass runs does not see the pass.
+ *
+ * A fold nested in a combiner's body is canonicalized with that body: once
+ * when the enclosing handler admits its callback, and once more in every
+ * step of the enclosing accumulator's fixpoint (`canonicalFoldCombiner`).
+ * Each of those canonicalizations refined the nested fold from scratch (its
+ * own admission plus two fixpoint steps, so three canonicalizations of ITS
+ * body), and the work multiplied by about three at every level of nesting:
+ * boxing six nested folds whose accumulators are read by index took 2 s
+ * (issue #462). Two measures make the enclosing fold's work grow with the
+ * square of the depth instead:
+ *
+ * - While a handler ADMITS its callback (`canonicalCallbackOperand` on the
+ *   raw literal, a pass whose only purpose is to find the accumulator's
+ *   inferred type for the gate of `canonicalFoldCombiner`), the folds nested
+ *   in that callback are held back (`heldBack`): each is admitted and not
+ *   refined, so the pass is one canonicalization of the body, nested folds
+ *   included. When that pass turns out to be the literal the handler keeps
+ *   (a precise accumulator, a fixpoint that does not settle), the callback is
+ *   admitted once more with the nested folds refined, which is the literal
+ *   the handler returned before. A handler whose admission pass is the
+ *   literal it will keep whatever the gate says holds nothing back: a
+ *   callback that cannot be refined (an annotated accumulator, a named
+ *   function), and a body that uses the accumulator only in arithmetic
+ *   (`accumulatorUsedOnlyInArithmetic`), which the gate will call precise.
+ *   So a chain of numeric folds costs what it did; a wrong prediction costs
+ *   the passes it meant to save, never a type.
+ * - In the fixpoint steps, a nested fold that settles records its fixpoint,
+ *   and the next step canonicalizes it once, at the recorded type widened by
+ *   its seed's (`canonicalFoldCombiner`), with no admission pass of its own.
+ *   That one pass finds the records of the folds nested one level further
+ *   down, which the previous step wrote, so the whole subtree below a
+ *   recorded fold costs one pass per level.
+ *
+ * The record lives only as long as the outermost handler, so the type a fold
+ * is given depends on the expression alone, never on an earlier boxing of
+ * the same literal. A record is written in a fixpoint step and read in a
+ * later step of the same enclosing fold, never in or from an admission pass,
+ * whose enclosing accumulator has its inferred type, which is not comparable
+ * with the seed-derived types of the steps. From one step to the next the
+ * enclosing accumulator's type only widens, so the recorded type is at or
+ * below the fixpoint the next step would reach from the seed, and ONE pass at
+ * the recorded type (widened by the seed's) settles on that fixpoint when the
+ * body is monotone in the enclosing accumulator; a record at which that pass
+ * does not settle is dropped and the fold is refined from the seed. What a
+ * hit gives is a type closed under the body that admits the seed, the same
+ * one the iteration from the seed reaches when it settles. It can be MORE
+ * precise than the type the fold got without the record in two cases: the
+ * iteration from the seed under the wider enclosing type would have taken
+ * more than `FIXPOINT_STEPS` steps (the fold then kept its admitted
+ * literal), or the gate would have called the accumulator's new inferred
+ * binding precise (the hit does not read the gate: the binding was imprecise
+ * at the previous step for reasons the body alone decides). The gate itself
+ * reads the accumulator's binding from the admission pass that held the
+ * nested folds back, which is the binding of the pass that refines them
+ * unless the accumulator's inferred type depends on the refined type of a
+ * nested fold (a use that unifies the accumulator with one). None of these
+ * cases has been observed; every nested shape probed gives the type it got
+ * before.
+ *
+ * A fold that starts its iteration from the seed first removes the records
+ * under its own site (`forgetRecordsUnder`): the folds nested in it may have
+ * recorded fixpoints at an accumulator type above the one the iteration
+ * starts from, in the pass that did not settle, in an admission pass that
+ * refined them, or in an earlier invocation at this site.
+ *
+ * The key is the fold's position in the enclosing passes (`foldSiteKey`), so
+ * two folds that spell the same literal at different sites of one body never
+ * share a record, whatever their seeds or their enclosing bindings. The
+ * collection operand is canonicalized before the handler runs (the
+ * contextual solve of the polymorphic signatures of `Fold`, `Reduce` and
+ * `Scan`, `annotateCallbacksFromContextualSolve` in
+ * `boxed-expression/box.ts`), so a fold in it takes an ordinal of the
+ * enclosing pass, as a sibling that comes before the fold. A fold in the
+ * seed operand is canonicalized by the handler before the passes over the
+ * callback and takes the first ordinals of the handler's children; every
+ * pass over the callback numbers the body's folds from the next one
+ * (`beginFoldPass`), so a fold of the body never has an operand fold's site.
+ * A record also names the raw node that identifies the fold
+ * (`foldIdentity`), which must be the same object when the record is read.
+ * That node is the BODY of the raw callback literal: the raw tree of a body
+ * is canonicalized from the same objects in every pass, and the stamped copy
+ * of the callback that the signature-driven annotation of callback slots
+ * hands to the handler (`annotateFunctionLiteralParams`,
+ * `function-utils.ts`) keeps the body object of the raw literal. The other
+ * operands are not reliable: the contextual solve of a polymorphic signature
+ * (`Fold`, `Reduce`, `Scan`) replaces the collection operand by its canonical
+ * form, a new object in every pass, and an atom (a number, a symbol) or the
+ * empty list can be one interned object shared by unrelated expressions. So the
+ * identity is a function node with operands, the body when it is one, else
+ * such an operand, else none (the fold is then neither recorded nor held
+ * back). A pass whose handlers are not those of the previous pass (a
+ * canonicalization cut short by an error, an operand canonicalized twice by
+ * one handler) gives a miss, not a hit on another fold's record.
+ *
+ * The state is read by call depth, which assumes that every fold handler of
+ * this engine invoked while one of its handlers runs is canonicalizing a
+ * fold of that handler's operands. Canonicalization is synchronous, so a
+ * handler of another top-level canonicalization cannot interleave. A fold of
+ * this engine reached some other way during a pass (one in a definition
+ * bound for the first time, say, or one that a user-defined operator's
+ * canonical handler boxes and keeps) takes an ordinal of the pass, which can
+ * only make a later lookup miss, and is not held back unless its identity
+ * (`foldIdentity`) is a node of the callback being admitted, which an
+ * expression boxed on the side does not share. The passes that refine (the
+ * fixpoint steps, the admission that the handler keeps) run with nothing held
+ * back, whatever an enclosing admission holds back, and what a nested fold
+ * records during an admission pass is removed after that pass.
+ */
+type FoldRefinementState = {
+  /** The fixpoints of the nested folds, by site key, each with the raw node
+   * that identifies the fold at that site (`foldIdentity`). */
+  records: Map<string, { guard: Expression; type: Type }>;
+  /** How many fold canonical handlers are running, one inside the other. */
+  depth: number;
+  /**
+   * The site of the running fold handlers: for each handler on the stack,
+   * the ordinal of its invocation among the nested fold handlers of the
+   * enclosing handler's current pass. A pass canonicalizes one body, which
+   * invokes the handlers of its nested folds in a fixed order, so a nested
+   * fold has the same site in every pass of its enclosing fold and a
+   * different site from every sibling.
+   */
+  site: number[];
+  /** The ordinal the next nested fold handler receives, per depth:
+   * `nextOrdinal[d]` counts the handlers invoked at depth `d` in the current
+   * pass of the handler at depth `d - 1`. */
+  nextOrdinal: number[];
+  /** How many nested folds were held back since the outermost handler
+   * started: a handler compares the count before and after its admission
+   * pass to know whether that pass is complete. */
+  heldBackCount: number;
+  /** The raw function nodes of the callback a handler is admitting with its
+   * nested folds held back, or `undefined` outside such a pass. A nested fold
+   * is held back when its identity (`foldIdentity`) is among them. */
+  heldBack: Set<Expression> | undefined;
+};
+
+const foldRefinementStates = new WeakMap<ComputeEngine, FoldRefinementState>();
+
+/** The fold refinement state of `engine`, created on first use. */
+function foldRefinementState(engine: ComputeEngine): FoldRefinementState {
+  let state = foldRefinementStates.get(engine);
+  if (state === undefined) {
+    state = {
+      records: new Map(),
+      depth: 0,
+      site: [],
+      nextOrdinal: [0],
+      heldBackCount: 0,
+      heldBack: undefined,
+    };
+    foldRefinementStates.set(engine, state);
+  }
+  return state;
+}
+
+/**
+ * Run a fold's canonical handler as one of the running handlers of its
+ * engine (see `FoldRefinementState`): the outermost handler starts from a
+ * clean state and clears the records when it returns, a nested handler
+ * reads and extends them. Each handler takes the next ordinal of the
+ * enclosing pass (`site`).
+ */
+function withFixpointRecord<T>(engine: ComputeEngine, handler: () => T): T {
+  const state = foldRefinementState(engine);
+  if (state.depth === 0) {
+    state.records.clear();
+    state.site.length = 0;
+    state.nextOrdinal.length = 0;
+    state.nextOrdinal.push(0);
+    state.heldBackCount = 0;
+    state.heldBack = undefined;
+  }
+  const depth = state.depth;
+  state.site.push(state.nextOrdinal[depth]++);
+  state.depth++;
+  state.nextOrdinal[state.depth] = 0;
+  try {
+    return handler();
+  } finally {
+    state.depth--;
+    state.site.pop();
+    state.nextOrdinal.length = state.depth + 1;
+    if (state.depth === 0) {
+      state.records.clear();
+      state.heldBack = undefined;
+    }
+  }
+}
+
+/** Start a pass over the running handler's callback body: the nested fold
+ * handlers it invokes are numbered from `firstOrdinal` again (`site`), the
+ * ordinal after those the handler's other operands took. */
+function beginFoldPass(state: FoldRefinementState, firstOrdinal: number): void {
+  state.nextOrdinal[state.depth] = firstOrdinal;
+}
+
+/**
+ * The key of the running fold in `records`: its site (`site`), or
+ * `undefined` for the outermost fold (nothing re-canonicalizes it within its
+ * own window).
+ */
+function foldSiteKey(state: FoldRefinementState): string | undefined {
+  return state.depth < 2 ? undefined : state.site.join('.');
+}
+
+/**
+ * The raw node that identifies a fold across the passes of its enclosing
+ * fold (see `FoldRefinementState`): the body of its raw callback literal
+ * `raw`, or, when that body is an atom, the first of the handler's other raw
+ * operands `ops` that is a function node with operands; `undefined` when
+ * there is none.
+ */
+function foldIdentity(
+  ops: ReadonlyArray<Expression>,
+  raw: Expression | undefined
+): Expression | undefined {
+  if (raw !== undefined && !raw.isCanonical && isFunction(raw, 'Function')) {
+    const body = raw.ops[0];
+    if (isFunction(body) && body.nops > 0) return body;
+  }
+  return ops.find(
+    (op) => op !== raw && !op.isCanonical && isFunction(op) && op.nops > 0
+  );
+}
+
+/** Remove the records of the folds nested in the running fold's callback
+ * (the keys under its site), before a pass runs them at an accumulator type
+ * their records may be above (see `FoldRefinementState`). */
+function forgetRecordsUnder(state: FoldRefinementState): void {
+  if (state.records.size === 0) return;
+  const prefix = `${state.site.join('.')}.`;
+  for (const key of [...state.records.keys()])
+    if (key.startsWith(prefix)) state.records.delete(key);
+}
+
+/** Every function node with operands of the raw expression `e`, `e`
+ * included: the nodes that can identify a fold (`foldIdentity`). */
+function rawNodes(e: Expression, into: Set<Expression>): Set<Expression> {
+  if (!isFunction(e) || e.nops === 0) return into;
+  into.add(e);
+  // A list held in a numeric store (`ce.list()`) boxes an element on the
+  // first read of its operands: it holds no fold, so it is not walked.
+  if (e._numericStore !== undefined) return into;
+  for (const op of e.ops) rawNodes(op, into);
+  return into;
+}
+
+/**
+ * The canonical combiner of a fold: the callback operand admitted
+ * (`canonicalCallbackOperand`) with its BARE accumulator typed to the
+ * fixpoint of the seed and the body's result (user decision 2026-09-29,
+ * option A of the design question recorded for issue #369), or `undefined`
+ * when the operand is not accepted.
+ *
+ * The accumulator receives the seed on the first step and the combiner's own
+ * result on every later step, so its type is the least `T` with
+ * `widen(seed, result of the body with acc: T) <: T`. The iteration
+ * (`fixpointLiteral`) starts from the seed's type, re-canonicalizes the RAW
+ * literal with the accumulator PRE-DECLARED at the current `T` as an INFERRED
+ * type (`inferredParamTypes` of `canonicalFunctionLiteral`), widens `T` by
+ * the body's result type, and stops when `T` no longer changes; it settles in
+ * two steps for the usual list-building fold (`list<never>`, then
+ * `list<integer | nan>`). An inferred type is not an annotation: nothing is
+ * enforced at apply time, a use may still widen it, and the printed literal
+ * is unchanged, which is what keeps this compatible with the Design D audit
+ * that leaves the accumulator's SLOT `unknown` in the operator's signature (a
+ * fold's accumulator may change type mid-fold; the fixpoint covers that).
+ *
+ * The iteration runs only when the accumulator's inferred type says too
+ * little (`accumulatorTypeIsImprecise`): a numeric fold (`(a, x) => a + x`,
+ * inferred `number` from `Add`) is not re-canonicalized, so its cost is
+ * unchanged. The gate reads the accumulator's BINDING (the canonical
+ * parameter operand), not the literal's printed signature, which keeps a
+ * scalar bare parameter as `unknown` whatever its binding infers. A fixpoint
+ * that does not settle in `FIXPOINT_STEPS` steps, a body whose result type
+ * is a top type, an annotated accumulator, a callback that is not a raw
+ * `Function` literal (a named function, an already canonical literal) all
+ * keep the literal as it was admitted.
+ *
+ * Before this the fold `Fold((acc, i) => Join(acc, [2 p[i]]), [], 1..n)` was
+ * typed `collection<any>`, so `Map(f, fold)` and `Filter(fold, …)`
+ * materialized as a `Set` on the interpreter (a view over an abstract
+ * collection follows the kind of the values its sources hold, and the fold
+ * node held none) while the compiled result was an ordered array, and every
+ * compiled consumer of the fold needed a run-time array check.
+ *
+ * `ops` is the handler's operand list: the callback `raw` as the handler
+ * received it (the stamped raw literal on the box and parse routes), the raw
+ * seed, and the collection in canonical form (the contextual solve
+ * canonicalizes it before the handler runs). The refined literal goes through
+ * the same admission (`arity`) as the original. The handler canonicalizes the
+ * seed before it calls this, so the folds it holds have taken their ordinals
+ * (`beginFoldPass`); the folds of the collection took theirs in the enclosing
+ * pass.
+ *
+ * `seedType` is read after the admission, as before: a seed that is a
+ * valueless symbol is typed by the body's uses of it (`At(v, 1)` types `v`
+ * as an indexed collection of numbers), and read earlier it is `unknown`,
+ * which keeps the accumulator at its inferred type. It is also read before,
+ * for a fold whose fixpoint was recorded in the previous step of the
+ * enclosing fold (`FoldRefinementState`): that fold is canonicalized once,
+ * with the accumulator pre-declared at the recorded type widened by the
+ * seed's, and the admission pass is skipped. The literal is kept when that
+ * one pass settles and the seed's type is the same after it; otherwise the
+ * record is dropped and the literal is admitted and refined as a new one.
+ * While an enclosing handler admits its callback with the nested folds held
+ * back (`heldBack`), the operand is only admitted.
+ */
+function canonicalFoldCombiner(
+  engine: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  raw: Expression | undefined,
+  seedType: () => Type | undefined,
+  arity: FoldCallbackArity
+): Expression | undefined {
+  const state = foldRefinementState(engine);
+  const identity = foldIdentity(ops, raw);
+  if (
+    state.heldBack !== undefined &&
+    identity !== undefined &&
+    state.heldBack.has(identity)
+  ) {
+    state.heldBackCount++;
+    return canonicalCallbackOperand(raw, arity);
+  }
+  // The passes below refine, whatever an enclosing admission holds back.
+  const outerHeldBack = state.heldBack;
+  state.heldBack = undefined;
+  try {
+    return refinedFoldCombiner(state, raw, seedType, arity, identity);
+  } finally {
+    state.heldBack = outerHeldBack;
+  }
+}
+
+/** The passes of `canonicalFoldCombiner`: the record hit, the admission, the
+ * fixpoint iteration. `identity` is the fold's raw identity
+ * (`foldIdentity`), or `undefined` when it has none. */
+function refinedFoldCombiner(
+  state: FoldRefinementState,
+  raw: Expression | undefined,
+  seedType: () => Type | undefined,
+  arity: FoldCallbackArity,
+  identity: Expression | undefined
+): Expression | undefined {
+  const firstOrdinal = state.nextOrdinal[state.depth];
+  const accName = bareAccumulatorName(raw);
+  const key =
+    accName === undefined || identity === undefined
+      ? undefined
+      : foldSiteKey(state);
+  const entry = key === undefined ? undefined : state.records.get(key);
+  const recorded =
+    entry !== undefined && entry.guard === identity ? entry.type : undefined;
+  if (recorded !== undefined) {
+    const seed = seedType();
+    if (seed !== undefined && !isKindOpenOperandType(seed)) {
+      const settled = fixpointLiteral(
+        state,
+        raw!,
+        accName!,
+        widen(seed, recorded),
+        arity,
+        firstOrdinal,
+        1
+      );
+      const seedAfter = seedType();
+      if (
+        settled !== undefined &&
+        isFunction(settled.literal, 'Function') &&
+        seedAfter !== undefined &&
+        isSubtype(seedAfter, seed) &&
+        isSubtype(seed, seedAfter)
+      ) {
+        state.records.set(key!, { guard: identity!, type: settled.type });
+        return settled.literal;
+      }
+    }
+    // The record did not hold: the fold is refined from the seed below, and
+    // the next step must not start from this record either.
+    state.records.delete(key!);
+  }
+  // The passes below run the nested folds at this fold's inferred or seed
+  // accumulator type: what they recorded in the pass that did not settle or
+  // in an earlier invocation at this site, at a type that may be above
+  // those, must not start them.
+  forgetRecordsUnder(state);
+  // The admission pass. The nested folds are held back (admitted and not
+  // refined), and the pass counts as complete only when none was met, unless
+  // the pass is the literal the handler keeps whatever the gate says: the
+  // callback cannot be refined (no bare accumulator), or the body's uses of
+  // the accumulator say that the gate will call it precise
+  // (`accumulatorUsedOnlyInArithmetic`). The pass then refines the nested
+  // folds and costs what it did before the record existed. A wrong
+  // prediction costs the passes it meant to save, never a type: the gate
+  // decides on the pass's binding either way.
+  const predictedPrecise =
+    accName !== undefined &&
+    isFunction(raw) &&
+    accumulatorUsedOnlyInArithmetic(raw.ops[0], accName);
+  const admissionIsFinal = accName === undefined || predictedPrecise;
+  const heldBackBefore = state.heldBackCount;
+  state.heldBack = admissionIsFinal ? undefined : rawNodes(raw!, new Set());
+  let accepted: Expression | undefined;
+  try {
+    beginFoldPass(state, firstOrdinal);
+    accepted = canonicalCallbackOperand(raw, arity);
+  } finally {
+    state.heldBack = undefined;
+  }
+  // A nested fold that the pass did not hold back (one without an identity,
+  // or refined because this pass is final) recorded its fixpoint at this
+  // fold's inferred accumulator type: no step may start from it.
+  forgetRecordsUnder(state);
+  if (accepted === undefined) return undefined;
+  // A pass that held the nested folds back is complete when it met none. A
+  // pass that refined them is complete whatever the nested folds' own
+  // admission passes counted.
+  const complete = admissionIsFinal || state.heldBackCount === heldBackBefore;
+  // The literal the handler keeps when the refinement does not apply or
+  // does not settle: the admission pass, or, when that pass held the nested
+  // folds back, the callback admitted again with them refined.
+  const admitted = (): Expression => {
+    if (complete) return accepted!;
+    // An admission pass: the nested folds are refined from scratch, with a
+    // record of their own for their own steps, and never from the records
+    // the steps of this fold wrote (see `FoldRefinementState`).
+    const outerRecords = state.records;
+    state.records = new Map();
+    try {
+      beginFoldPass(state, firstOrdinal);
+      return canonicalCallbackOperand(raw, arity) ?? accepted!;
+    } finally {
+      state.records = outerRecords;
+    }
+  };
+  const seed = seedType();
+  if (
+    seed === undefined ||
+    isKindOpenOperandType(seed) ||
+    accName === undefined ||
+    !isFunction(accepted, 'Function')
+  )
+    return admitted();
+  const current = accumulatorBindingType(accepted);
+  if (current !== undefined && !accumulatorTypeIsImprecise(current))
+    return admitted();
+  const settled = fixpointLiteral(
+    state,
+    raw!,
+    accName,
+    seed,
+    arity,
+    firstOrdinal,
+    FIXPOINT_STEPS
+  );
+  if (settled === undefined) return admitted();
+  if (key !== undefined && isFunction(settled.literal, 'Function'))
+    state.records.set(key, { guard: identity!, type: settled.type });
+  return settled.literal;
+}
+
+/** The operators whose use of a bare parameter infers a numeric type for it,
+ * which `accumulatorTypeIsImprecise` calls precise. */
+const ARITHMETIC_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  'Square',
+  'Exp',
+  'Ln',
+  'Log',
+  'Abs',
+  'Max',
+  'Min',
+  'Mod',
+  'Floor',
+  'Ceil',
+  'Round',
+]);
+
+/**
+ * True when every occurrence of the accumulator `accName` in the RAW body is
+ * an operand of an arithmetic operator (`ARITHMETIC_OPERATORS`), and there
+ * is at least one: the admission pass then infers a numeric binding for it,
+ * and the fixpoint iteration does not run (`canonicalFoldCombiner`). A
+ * body that returns the accumulator, indexes it, joins it, puts it in a
+ * list, or does not use it, answers `false`. An occurrence inside a nested
+ * literal that declares the same name is counted as a use, which only
+ * makes the answer `false` more often.
+ */
+function accumulatorUsedOnlyInArithmetic(
+  body: Expression,
+  accName: string
+): boolean {
+  let used = false;
+  const walk = (e: Expression, parent: string | undefined): boolean => {
+    if (isSymbol(e)) {
+      if (e.symbol !== accName) return true;
+      used = true;
+      return parent !== undefined && ARITHMETIC_OPERATORS.has(parent);
+    }
+    // A list held in a numeric store (`ce.list()`) holds no symbol, and
+    // reading its operands would box every element.
+    if (!isFunction(e) || e._numericStore !== undefined) return true;
+    for (const op of e.ops) if (!walk(op, e.operator)) return false;
+    return true;
+  };
+  return walk(body, undefined) && used;
 }
 
 /** The type of the binding of a canonical literal's first parameter (its
@@ -11592,32 +12109,41 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     signature:
       '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T',
-    canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
-      const arity = {
-        operator: 'Reduce',
-        supply: ACCUMULATOR_SUPPLY,
-        // The compatibility gate's supply source: the reducer's ELEMENT
-        // parameter is judged against this collection's element type (its
-        // accumulator parameter is declared `unknown` and never judged).
-        source: collection,
-      };
-      const accepted = canonicalCallbackOperand(ops[1], arity);
-      if (isInvalidNonCollection(collection) || !accepted) return null;
-
-      const initial = ops[2]?.canonical;
-      // The bare accumulator is typed to the fixpoint of the seed and the
-      // body's result (`refineFoldAccumulator`), an inferred type only.
-      const fn = refineFoldAccumulator(
-        ops[1],
-        accepted,
-        foldSeedType(initial?.isValid ? initial : undefined, collection),
-        arity
-      );
-      if (initial?.isValid)
-        return engine._fn('Reduce', [collection, fn, initial]);
-      return engine._fn('Reduce', [collection, fn]);
-    },
+    canonical: (ops, { engine }) =>
+      withFixpointRecord(engine, () => {
+        const collection = checkCollectionOperand(engine, ops[0]);
+        const arity = {
+          operator: 'Reduce',
+          supply: ACCUMULATOR_SUPPLY,
+          // The compatibility gate's supply source: the reducer's ELEMENT
+          // parameter is judged against this collection's element type (its
+          // accumulator parameter is declared `unknown` and never judged).
+          source: collection,
+        };
+        // The seed is canonicalized before the reducer: its type is what the
+        // bare accumulator is typed from (the fixpoint of the seed and the
+        // body's result, `canonicalFoldCombiner`, an inferred type only).
+        const initial = ops[2]?.canonical;
+        // A collection operand that is an error gives `null` whatever the
+        // reducer: the reducer is admitted for its diagnostics, not refined.
+        const fn = isInvalidNonCollection(collection)
+          ? canonicalCallbackOperand(ops[1], arity)
+          : canonicalFoldCombiner(
+              engine,
+              ops,
+              ops[1],
+              () =>
+                foldSeedType(
+                  initial?.isValid ? initial : undefined,
+                  collection
+                ),
+              arity
+            );
+        if (isInvalidNonCollection(collection) || !fn) return null;
+        if (initial?.isValid)
+          return engine._fn('Reduce', [collection, fn, initial]);
+        return engine._fn('Reduce', [collection, fn]);
+      }),
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
@@ -11671,28 +12197,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     signature:
       '(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T',
-    canonical: (ops, { engine }) => {
-      // The collection is checked FIRST so the callback's compatibility gate
-      // can judge the reducer's element parameter against its element type.
-      const collection = checkCollectionOperand(engine, ops[2]);
-      const arity = {
-        operator: 'Fold',
-        supply: ACCUMULATOR_SUPPLY,
-        source: collection,
-      };
-      const accepted = canonicalCallbackOperand(ops[0], arity);
-      const initial = ops[1]?.canonical;
-      if (!accepted || !initial?.isValid || isInvalidNonCollection(collection))
-        return null;
-      // As `Reduce`: the bare accumulator is typed to its fixpoint.
-      const fn = refineFoldAccumulator(
-        ops[0],
-        accepted,
-        foldSeedType(initial, collection),
-        arity
-      );
-      return engine._fn('Reduce', [collection, fn, initial]);
-    },
+    canonical: (ops, { engine }) =>
+      withFixpointRecord(engine, () => {
+        // The collection is checked FIRST so the callback's compatibility
+        // gate can judge the reducer's element parameter against its element
+        // type, and the seed before the reducer, whose bare accumulator is
+        // typed from the seed's type (as `Reduce`).
+        const collection = checkCollectionOperand(engine, ops[2]);
+        const arity = {
+          operator: 'Fold',
+          supply: ACCUMULATOR_SUPPLY,
+          source: collection,
+        };
+        const initial = ops[1]?.canonical;
+        const fn = canonicalFoldCombiner(
+          engine,
+          ops,
+          ops[0],
+          () =>
+            initial?.isValid ? foldSeedType(initial, collection) : undefined,
+          arity
+        );
+        if (!fn || !initial?.isValid || isInvalidNonCollection(collection))
+          return null;
+        return engine._fn('Reduce', [collection, fn, initial]);
+      }),
   },
 
   // Julia `accumulate`: a cumulative fold that keeps the SAME length as the
@@ -11753,36 +12282,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         engine._typeResolver
       );
     },
-    canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(
-        engine,
-        ops[0],
-        'indexed_collection'
-      );
-      const arity = {
-        operator: 'Scan',
-        supply: ACCUMULATOR_SUPPLY,
-        // Same supply-source wiring as `Reduce`.
-        source: collection,
-      };
-      const accepted = canonicalCallbackOperand(ops[1], arity);
-      if (isInvalidNonCollection(collection) || !accepted) return null;
-      // An initial value is optional, but when one is PROVIDED it must not be
-      // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
-      // fold unseeded and diverge. Keep the (canonicalized) operand so the
-      // standard error machinery surfaces the error.
-      const initial = ops[2]?.canonical;
-      // As `Reduce`: the bare accumulator is typed to its fixpoint.
-      const fn = refineFoldAccumulator(
-        ops[1],
-        accepted,
-        foldSeedType(initial?.isValid ? initial : undefined, collection),
-        arity
-      );
-      if (initial !== undefined)
-        return engine._fn('Scan', [collection, fn, initial]);
-      return engine._fn('Scan', [collection, fn]);
-    },
+    canonical: (ops, { engine }) =>
+      withFixpointRecord(engine, () => {
+        const collection = checkCollectionOperand(
+          engine,
+          ops[0],
+          'indexed_collection'
+        );
+        const arity = {
+          operator: 'Scan',
+          supply: ACCUMULATOR_SUPPLY,
+          // Same supply-source wiring as `Reduce`.
+          source: collection,
+        };
+        // An initial value is optional, but when one is PROVIDED it must not
+        // be silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))`
+        // would fold unseeded and diverge. Keep the (canonicalized) operand so
+        // the standard error machinery surfaces the error. It is canonicalized
+        // before the reducer, whose bare accumulator is typed from the seed's
+        // type (as `Reduce`).
+        const initial = ops[2]?.canonical;
+        // As `Reduce`: an error collection gives `null` whatever the reducer.
+        const fn = isInvalidNonCollection(collection)
+          ? canonicalCallbackOperand(ops[1], arity)
+          : canonicalFoldCombiner(
+              engine,
+              ops,
+              ops[1],
+              () =>
+                foldSeedType(
+                  initial?.isValid ? initial : undefined,
+                  collection
+                ),
+              arity
+            );
+        if (isInvalidNonCollection(collection) || !fn) return null;
+        if (initial !== undefined)
+          return engine._fn('Scan', [collection, fn, initial]);
+        return engine._fn('Scan', [collection, fn]);
+      }),
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
