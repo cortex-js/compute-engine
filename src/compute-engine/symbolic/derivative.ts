@@ -1361,6 +1361,76 @@ function isLibraryExponentialE(base: Expression): boolean {
   );
 }
 
+/** The slot of a point that each point accessor reads. */
+const POINT_ACCESSOR_SLOT: Record<string, number> = {
+  PointX: 0,
+  PointY: 1,
+  PointZ: 2,
+};
+
+/** The containers whose operands are their elements, in order. */
+const LITERAL_CONTAINERS = new Set(['Tuple', 'PointList', 'List']);
+
+/** A `PointList` with a collection component: it zips its components into
+ * a list of points (`PointList([a, 2a], 5)` is `[(a, 5), (2a, 5)]`), so its
+ * operands are not its elements. */
+function isZippedPointList(expr: Expression): boolean {
+  return (
+    isFunction(expr, 'PointList') &&
+    expr.ops.some((op) => op.type.matches('collection'))
+  );
+}
+
+/** `PointX`, `PointY`, `PointZ` or `At` over a zipped `PointList`. */
+function isAccessorOfZippedPointList(
+  expr: Expression
+): expr is Expression & { op1: Expression; ops: Expression[] } {
+  if (!isFunction(expr)) return false;
+  const accessor =
+    (POINT_ACCESSOR_SLOT[expr.operator] !== undefined && expr.nops === 1) ||
+    (expr.operator === 'At' && expr.nops === 2);
+  return accessor && isZippedPointList(expr.op1);
+}
+
+/**
+ * The operand that an accessor of a literal container selects, or
+ * `undefined` when `expr` is not such an accessor: `PointX`, `PointY` or
+ * `PointZ` of a `Tuple` or a `PointList`, or `At` of a `Tuple`, a
+ * `PointList` or a `List` with a literal integer index, 1-based, a negative
+ * index counting from the end as `At` reads it. A slot the container does
+ * not have (`PointZ` of a 2-point, an index out of range) is `undefined`
+ * too: the accessor's value is then an absence, which the generic rule
+ * handles as it did.
+ *
+ * A `PointList` is a single point only when no component is a collection;
+ * otherwise it zips its components into a list of points (`PointList([a,
+ * 2a], 5)` is `[(a, 5), (2a, 5)]`), whose elements are not its operands,
+ * and the `At` reads a point while a coordinate accessor reads a column of
+ * the shortest zip. Such a `PointList` is left to the other rules.
+ */
+function selectedOperand(expr: Expression): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+  const container = expr.op1;
+  if (!isFunction(container)) return undefined;
+  if (isZippedPointList(container)) return undefined;
+  const slot = POINT_ACCESSOR_SLOT[expr.operator];
+  if (slot !== undefined && expr.nops === 1) {
+    if (container.operator !== 'Tuple' && container.operator !== 'PointList')
+      return undefined;
+    return container.ops[slot];
+  }
+  if (expr.operator === 'At' && expr.nops === 2) {
+    if (!LITERAL_CONTAINERS.has(container.operator)) return undefined;
+    const index = expr.op2;
+    if (!isNumber(index) || index.im !== 0 || !Number.isInteger(index.re))
+      return undefined;
+    const n = container.nops;
+    const k = index.re > 0 ? index.re - 1 : index.re < 0 ? n + index.re : -1;
+    return k >= 0 && k < n ? container.ops[k] : undefined;
+  }
+  return undefined;
+}
+
 /** The differentiation rules themselves. Always reached through
  * `differentiate()`, which applies the depth and size guards. */
 function differentiateNode(
@@ -1495,6 +1565,38 @@ function differentiateNode(
     );
     if (elements.some((e) => !e.isValid)) return undefined;
     return ce.function(expr.operator, elements);
+  }
+
+  // An accessor of a literal container selects one of its operands, so its
+  // derivative is that operand's: `PointX`, `PointY`, `PointZ` of a `Tuple`
+  // or a `PointList`, and `At` of a `Tuple`, a `PointList` or a `List` with
+  // a literal integer index. Without this rule the accessor fell through to
+  // the generic chain rule below, which read it as an unknown function of
+  // the whole container and gave `PointList(2, 0) · Apply(Derivative("PointX",
+  // 1), …)`, a product of a point and a number that is a type error; the
+  // Jacobian of `FindRoot` over `PointX(PointList(2a, 2)) = 4` was then NaN
+  // and the solver stopped at its start (Tycho row 415).
+  {
+    const selected = selectedOperand(expr);
+    if (selected !== undefined) {
+      recordD(trace, expr, v, 'derivative.rewrite', () =>
+        dPlaceholder(selected, v)
+      );
+      return differentiate(selected, v, depth + 1, trace);
+    }
+  }
+
+  // The same accessors over a `PointList` that zips (a component is a
+  // collection): the zip and the projection are linear in the components
+  // and commute with differentiation, so the derivative is the accessor of
+  // the differentiated `PointList` (the elementwise rule above):
+  // `d/da At(PointList([a, 2a], 5), 1)` is `At(PointList([1, 2], 0), 1)`,
+  // the point `(1, 0)`, and `PointY(PointList([1, 2, 3], 2a))` gives
+  // `[2, 2, 2]`, truncated to the shortest component as the zip is.
+  if (isAccessorOfZippedPointList(expr)) {
+    const dContainer = differentiate(expr.op1, v, depth + 1, trace);
+    if (dContainer === undefined || !dContainer.isValid) return undefined;
+    return ce.function(expr.operator, [dContainer, ...expr.ops.slice(1)]);
   }
 
   // Piecewise definitions (`Which`, and its two-branch form `If`): each value

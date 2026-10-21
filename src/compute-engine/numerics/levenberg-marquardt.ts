@@ -19,7 +19,22 @@ import { isTimeoutCancellation } from '../../common/interruptible.js';
 
 export interface LMResult {
   theta: number[];
+  /**
+   * Without `rootTolerance`: the solver's own stop test passed (`stationary`).
+   * With `rootTolerance`: the returned point is a root, that is, its residual
+   * norm is within the tolerance (`isRoot` below), and the solve was not cut
+   * short by a deadline.
+   */
   converged: boolean;
+  /**
+   * The solver's own stop test passed at the returned point: the projected
+   * gradient is below `gradTol`, or an accepted improving step was negligible
+   * (`stepTol`), or every parameter is blocked at a bound. This is a
+   * stationary point of the sum of squared residuals, which is a minimum of
+   * the misfit for a least-squares fit, and a root only when the residual is
+   * zero there. Without `rootTolerance` this is `converged`.
+   */
+  stationary: boolean;
   /** ‖r(θ̂)‖₂ at the returned point. */
   residualNorm: number;
   iterations: number;
@@ -45,6 +60,29 @@ export interface LMOptions {
   /** Relative step-size tolerance (default 1e-10). */
   stepTol?: number;
   /**
+   * The tolerance of a ROOT solve (`FindRoot`): the solver reports
+   * `converged` only at a point where every equation's residual is within
+   * it,
+   *
+   *     |rᵢ| ≤ rootTolerance · (1 + Σⱼ |Jᵢⱼ| · max(1, |θⱼ|))  for every i,
+   *
+   * an absolute part for a residual that is zero to within the tolerance,
+   * and a relative part for the scale of that equation: `Σⱼ |Jᵢⱼ| ·
+   * max(1, |θⱼ|)` is the change of its residual over a unit relative change
+   * of the parameters it reads, so the relative part says those parameters
+   * are determined to that relative precision. A non-finite residual or
+   * scale is never a root. A stationary point of the sum of squares whose
+   * residual is above the tolerance (a least-squares minimum that is not a
+   * root, `a² + 1 = 0`) is reported `converged: false`, with `stationary:
+   * true`. The projected-gradient test does not stop a root solve on its
+   * own: with an absolute `gradTol` a residual scaled small
+   * (`10⁻⁶ (a² − 4) = 0`) is "stationary" at every point, and the solve
+   * must go on to the root. It stops at a root, when an accepted step is
+   * negligible, when no step improves, or at `maxIterations`.
+   * Without this option (a least-squares fit) `converged` is `stationary`.
+   */
+  rootTolerance?: number;
+  /**
    * Called once at the top of each iteration with the (0-based) iteration
    * index. The caller uses this to check an evaluation deadline; throwing from
    * here aborts the solve and the exception propagates to the caller.
@@ -54,6 +92,16 @@ export interface LMOptions {
 
 const clampScalar = (x: number, lo: number, hi: number): number =>
   x < lo ? lo : x > hi ? hi : x;
+
+/**
+ * The relative reduction of the cost below which an accepted step gained
+ * nothing: rounding noise of a sum of squares, a thousand times the machine
+ * epsilon. Read only by a root solve that went on past the gradient test
+ * (`rootTolerance`), to tell a least-squares minimum that is not a root
+ * (nothing to gain) from a false stationary point far from the root (a
+ * residual scaled small, where the next step gains most of the cost).
+ */
+const RELATIVE_IMPROVEMENT_FLOOR = 1e-13;
 
 /** Euclidean norm of a vector. */
 function norm2(v: number[]): number {
@@ -143,9 +191,34 @@ export function levenbergMarquardt(
   const gradTol = options.gradTol ?? 1e-8;
   const stepTol = options.stepTol ?? 1e-10;
   const onIteration = options.onIteration;
+  const rootTolerance = options.rootTolerance;
 
   const clampVec = (t: number[]): number[] =>
     t.map((v, j) => clampScalar(v, lo[j], hi[j]));
+
+  // The root test of `rootTolerance` at a point: its residual, Jacobian and
+  // parameters (see the option). Always true for a least-squares fit, where
+  // convergence is the stationarity test alone. Each equation is tested
+  // against its own scale, from its own row of the Jacobian and the
+  // parameters it reads: one scale for the whole system would let a steep
+  // equation, or a large parameter of another equation, hide a residual
+  // that is not zero (`[a² + 1, 10¹² b]` at the start has a residual of 1
+  // and a system-wide scale of 10¹²). A residual or a scale that is not
+  // finite is not a root: an infinite Jacobian entry (`√a` at `a = 0`) or an
+  // overflowed square would otherwise pass as `Infinity ≤ Infinity`.
+  const isRoot = (rr: number[], JJ: number[][], t: number[]): boolean => {
+    if (rootTolerance === undefined) return true;
+    for (let i = 0; i < rr.length; i++) {
+      let scale = 0;
+      const row = JJ[i];
+      for (let j = 0; j < p; j++)
+        scale += Math.abs(row[j]) * Math.max(1, Math.abs(t[j]));
+      const allowance = rootTolerance * (1 + scale);
+      if (!Number.isFinite(allowance) || !(Math.abs(rr[i]) <= allowance))
+        return false;
+    }
+    return true;
+  };
 
   let theta = clampVec(theta0.slice());
   let r = residual(theta);
@@ -190,6 +263,12 @@ export function levenbergMarquardt(
     return mx;
   };
 
+  // `stationary` is the solver's own stop test at the current point; it is
+  // cleared by every accepted step, which moves the point. `converged` adds
+  // the root test of `rootTolerance` (always true for a least-squares fit).
+  // With a root tolerance, a root is reported as soon as an accepted step
+  // reaches it, even when the gradient test has not passed there.
+  let stationary = false;
   let converged = false;
   let iterations = 0;
   let timedOut = false;
@@ -218,9 +297,16 @@ export function levenbergMarquardt(
     let lambda = 1e-3;
     let nu = 2;
 
-    converged = projGradNorm(theta, g) < gradTol;
+    stationary = projGradNorm(theta, g) < gradTol;
+    converged = rootTolerance === undefined ? stationary : isRoot(r, J, theta);
 
-    while (!converged && iterations < maxIterations) {
+    // A root solve that has reached a root goes on until the point is also
+    // stationary (the gradient test, or a negligible accepted step): the
+    // first point within the root tolerance of a steep equation can still
+    // be polished (`10¹² x = 3 · 10¹²` is within its bound at a residual of
+    // 74, where one more step reaches 0.002). For a fit `converged` is
+    // `stationary`, so the condition is the plain one.
+    while (!(converged && stationary) && iterations < maxIterations) {
       if (onIteration) onIteration(iterations);
       iterations++;
 
@@ -235,8 +321,11 @@ export function levenbergMarquardt(
         free.push(j);
       }
       if (free.length === 0) {
-        // Every parameter is blocked at a bound: a projected minimizer.
-        converged = true;
+        // Every parameter is blocked at a bound: a projected minimizer. For
+        // a root solve it is a root only when its residual is within the
+        // tolerance; the bounds keep the solver from moving further anyway.
+        stationary = true;
+        converged = isRoot(r, J, theta);
         break;
       }
 
@@ -265,15 +354,19 @@ export function levenbergMarquardt(
       // Projected trial step.
       const thetaNew = clampVec(theta.map((v, j) => v + delta[j]));
       const step = thetaNew.map((v, j) => v - theta[j]);
-      const stepNorm = norm2(step);
-      // Whether the (projected) step is negligible relative to θ. This is NOT a
-      // convergence test on its own: it fires on the PROPOSED step, before the
-      // trial point is evaluated or accepted, so on the rejection path (λ growing,
-      // or the box projection zeroing the step) it would otherwise flag
-      // `converged` at a point that never improved. It is used only as a
-      // post-acceptance stall check (and a trust-region-collapse exit on
-      // rejection), both below.
-      const stepStalled = stepNorm < stepTol * (norm2(theta) + stepTol);
+      // Whether the (projected) step is negligible relative to θ, component
+      // by component: a step of 1 in a parameter near 2 is not negligible
+      // because another parameter is 10¹¹ (the stall measured against the
+      // norm of the whole vector stopped `[a² = 4, b = 10¹¹]` after one
+      // step, at `a = 2.5`). This is NOT a convergence test on its own: it
+      // fires on the PROPOSED step, before the trial point is evaluated or
+      // accepted, so on the rejection path (λ growing, or the box projection
+      // zeroing the step) it would otherwise flag `converged` at a point
+      // that never improved. It is used only as a post-acceptance stall
+      // check (and a trust-region-collapse exit on rejection), both below.
+      const stepStalled = step.every(
+        (s, j) => Math.abs(s) < stepTol * (Math.abs(theta[j]) + stepTol)
+      );
 
       const rNew = residual(thetaNew);
       const FNew = cost(rNew);
@@ -290,6 +383,14 @@ export function levenbergMarquardt(
         Number.isFinite(FNew) && predicted > 0 ? actual / predicted : -1;
 
       if (rho > 0) {
+        // A root solve that went on past the gradient test (below) and
+        // gained nothing from this step, to within rounding, is at a
+        // least-squares minimum that is not a root: it stops there, with
+        // the point still stationary. A step that gains more (the gradient
+        // test passed far from the root, on a residual scaled small) moves
+        // the point, which is no longer stationary.
+        if (stationary && actual <= RELATIVE_IMPROVEMENT_FLOOR * F) break;
+
         // Accept the step.
         theta = thetaNew;
         r = rNew;
@@ -297,6 +398,7 @@ export function levenbergMarquardt(
         J = jacobian(theta);
         g = gradient(J, r);
         A = normalMatrix(J);
+        stationary = false;
 
         if (F < bestF) {
           bestF = F;
@@ -305,10 +407,22 @@ export function levenbergMarquardt(
         }
 
         // Primary convergence test: the projected gradient is stationary.
-        if (projGradNorm(theta, g) < gradTol) {
-          converged = true;
-          break;
-        }
+        // It is read at every accepted point, so that a root reported below
+        // carries the stationarity of the point it was found at.
+        stationary = projGradNorm(theta, g) < gradTol;
+
+        // A root solve has converged at a root (see `rootTolerance`); it
+        // stops once the point is also stationary (the loop condition), so
+        // the first point within the bound of a steep equation is polished
+        // by the steps that follow. A least-squares fit stops at a
+        // stationary point. A root solve that is not at a root goes on past
+        // one: the gradient test is absolute, so a residual scaled small
+        // passes it far from the root, and at a least-squares minimum that
+        // is not a root the next steps are rejected until the step
+        // collapses, which exits below.
+        converged =
+          rootTolerance === undefined ? stationary : isRoot(r, J, theta);
+        if (converged && stationary) break;
 
         // Secondary (stall) convergence test — applied ONLY here, after an
         // accepted improving step: the step we just took, and accepted, is
@@ -316,9 +430,11 @@ export function levenbergMarquardt(
         // Because this only fires post-acceptance, it can no longer report
         // convergence on the rejection path (where λ growth or the box projection
         // shrink the PROPOSED step at a point that never improved) — the original
-        // bug.
+        // bug. A root solve that settles here keeps the root test's answer:
+        // at a minimum above its tolerance `converged` stays false.
         if (stepStalled) {
-          converged = true;
+          stationary = true;
+          if (rootTolerance === undefined) converged = true;
           break;
         }
 
@@ -328,11 +444,15 @@ export function levenbergMarquardt(
         // Reject: the trial point did not improve. If the step has already
         // collapsed (trust region underflow) we cannot find an acceptable step —
         // exit as NON-converged. Otherwise increase damping; λ overflow is the
-        // same collapse and also exits non-converged.
-        if (stepStalled) break;
+        // same collapse and also exits non-converged. A root solve that was
+        // polishing a root it had reached (`converged` holds) has settled:
+        // the point is reported stationary.
+        if (stepStalled || !Number.isFinite(lambda * nu)) {
+          if (converged) stationary = true;
+          break;
+        }
         lambda *= nu;
         nu *= 2;
-        if (!Number.isFinite(lambda)) break;
       }
     }
   } catch (e) {
@@ -345,6 +465,7 @@ export function levenbergMarquardt(
   return {
     theta: bestTheta,
     converged,
+    stationary,
     residualNorm: norm2(bestR),
     iterations,
     ...(timedOut ? { timedOut } : {}),

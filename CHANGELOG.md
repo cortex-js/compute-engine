@@ -1,161 +1,337 @@
 ## Unreleased
 
+### New Features
+
+- **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408).
+  A third argument `{global: {b: [lo, hi]}}` searches the named parameters
+  (at most two) over the range for the lowest sum of squared residuals of the
+  whole system, equations included, as `FindFit` does for a model over data:
+  the separable scan when the system is linear in the other parameters, a
+  multi-start otherwise, with `[lo, hi, step]` for a caller-given grid step.
+  A stacked system of fit rows next to a plain equation
+  (`a cos(b x_i + c) + d x_i + e = y_i` for each data point, and `d = 0`) is
+  searched for its best frequency; the constant phase coefficients of the
+  equations (`3.22` in `cos(3.22 b + c)`) space the grid as the span of a
+  variable does for a fit, so a point falls in every basin of the residual.
+  An equation built from a row at `x = 0` reads `a cos(0 · b + c) + 0 · d`,
+  which canonicalization keeps; such a parameter is no longer read as a step
+  function of the system, which turned the scan into the coarse multi-start.
+  The record is the usual one (see the `stationary` entry below). With a
+  kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid
+  on the workers, as `FindFit` does.
+
+- **`Parser.binderSymbol()` and `Parser.rebindSubscripts()` are public**, for
+  a custom LaTeX dictionary entry that binds a name (a `with` clause, a loop
+  form). Since 0.160.0 a subscripted name in a binder position is a new name
+  also when its base is declared as a list (`n_{0}` with `n: list<number>`
+  is `At(n, 0)` elsewhere); the two parser methods that the built-in binders
+  use for that were internal, so a custom clause could not: with `n` a list,
+  `n_{0} + 1 \operatorname{with} n_{0} = 2` through a custom infix entry
+  that read the binder with `parseSymbol()` was a parse error.
+  `binderSymbol(expr)` gives the name that an expression declares in a binder
+  position (`n_0` for the `At(n, 0)` that the symbol parser made from
+  `n_{0}`; a symbol is its own name; `null` otherwise), and
+  `rebindSubscripts(expr, names)` rewrites those element accesses in a body,
+  including a body parsed before the clause. See "Binding a Name in a Custom
+  Entry" in the LaTeX syntax guide.
+
 ### Improvements
 
 - `Factor` uses certified univariate factorization over the rationals, including
-  nonlinear factors such as `Factor(x^4+4) = (x^2-2x+2)(x^2+2x+2)`.
-  The `numerics` entry point exposes `factorRationalPolynomial` and its types
-  for structured exact factors, multiplicities and explicit incomplete results
-  when resource limits or certificate checks prevent completion.
+  nonlinear factors such as `Factor(x^4+4) = (x^2-2x+2)(x^2+2x+2)`. The
+  `numerics` entry point exposes `factorRationalPolynomial` and its types for
+  structured exact factors, multiplicities and explicit incomplete results when
+  resource limits or certificate checks prevent completion.
+
+### Behavior Changes
+
+- **`FindRoot` reports `converged` only at a root** (Tycho row 414).
+  `FindRoot(a^2 + 1 = 0, a)` gave `converged: True` with `residualNorm: 1`:
+  the solver's stop test is a stationary point of the sum of squared
+  residuals, which is a minimum of the misfit for a fit but a root only when
+  the residual is zero. `converged` is now true only when every residual
+  is within the engine's tolerance scaled by its own equation,
+  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))` with `J` the
+  Jacobian and `θ` the parameters: an absolute part for a residual that is
+  zero to within the tolerance, a relative part that says the parameters the
+  equation reads are determined to that relative precision (`a^2 = 10^{12}`
+  from `a = 1` is a root; `a^2 + 10^{-7} = 0` is not; a steep equation or a
+  large parameter does not hide another equation's residual). The tolerance
+  is never below 64 machine epsilons, and a non-finite residual or Jacobian
+  is never a root. The solver's stall test is now per component: the system
+  `a^2 = 4, b = 10^{11}` stalled after one step at `a = 2.5`, which was
+  reported as converged, because a step of 1 in `a` was negligible next to
+  the norm of the whole parameter vector. The record gains `stationary`, the solver's own stop test,
+  which is true at such a minimum too: a stacked system of data rows next to
+  an equation, whose misfit is not zero, reads it where it read `converged`.
+  The gradient test alone no longer stops a root solve:
+  `FindRoot(10^{-6} (a^2 - 4) = 0, a)` from `a = 1` stopped at its start
+  point as converged, since the absolute gradient tolerance passes everywhere
+  on a residual scaled small, and now reaches `a = 2`. The `FindFit` record
+  and its convergence test are unchanged.
+
+- A call between a typed declaration with no value and the definition of the
+  function now resolves. With `let g: (integer) -> integer`, then
+  `let a = String(g(2))`, then `function g(k) { 2k }`, `a` was `"g(2)"` on
+  the Epsil runner and on the whole-block route; it is now `"4"`, and the
+  call is checked against the declared signature (`String(g(1.5))` gives the
+  `incompatible-type` error). This also holds on each iteration of a loop
+  body, when a block is evaluated again (with `evaluate()` or
+  `evaluateAsync()`), and when a program runs again on the same engine. A
+  program that stopped (time or step budget) before its definition ran no
+  longer leaves that definition to a later program that declares the same
+  name. Inside a function body the declared signature is still not checked
+  (recorded in `ROADMAP.md`).
+
+- An `evaluateAsync()` call started by the host, or by a handler that passes
+  no options, now runs on its own copy of the engine's evaluation-context
+  stack, not on the engine's array. A scope that the host pushes or pops
+  while the call is pending no longer reaches it. Example: start
+  `Block(Tick(), w + 1).evaluateAsync()` with `Tick()` an operator that only
+  has an `evaluateAsync` handler, then run `ce.pushScope(); ce.declare('w',
+  'integer'); ce.assign('w', 5)` before awaiting it. The result was `6`; it
+  is now `w + 1`. Pending asynchronous evaluations no longer see each
+  other's scopes or the host's later scopes, as was already the case for
+  scopes that an evaluation pushes itself.
+
+### Bug Fixes
+
+- **`FindRoot` did not move a parameter read through `PointX` of a point**
+  (Tycho row 415). On `PointX(PointList(2a, 2)) = 4` the solver stopped after
+  one iteration at the start value: the symbolic derivative of the residual
+  was the generic chain rule's `PointList(2, 0) · Apply(Derivative("PointX",
+  1), …)`, a product of a point and a number that is a type error, which
+  compiled to a Jacobian of NaN. `D` now differentiates an accessor of a
+  literal container through the operand it selects: `PointX`, `PointY` and
+  `PointZ` of a `Tuple` or a `PointList`, and `At` of a `Tuple`, a `PointList`
+  or a `List` with a literal index (`D(PointY((2a, a^2)), a)` is `2a`,
+  `D(At([2a, a^2], -1), a)` is `2a`); over a `PointList` that zips (a
+  component is a collection) the accessor reads the differentiated
+  `PointList`, so `D(At(PointList([a, 2a], 5), 1), a)` is the point `(1, 0)`;
+  and `FindFit`/`FindRoot` take a finite difference for a derivative that
+  is not valid.
+
+- Boxing nested folds whose accumulator is read by index no longer takes about
+  three times longer for every level of nesting (#462). Since 0.158.0 such an
+  accumulator is typed to the fixpoint of its seed and its body's result, which
+  canonicalizes the combiner once per fixpoint step, and a fold nested in the
+  body was refined from scratch inside each of those canonicalizations. The
+  fixpoint found for a nested combiner is now kept for the duration of the
+  outermost fold's canonicalization, and a later pass canonicalizes the nested
+  combiner once, at that type. Six nested folds of the shape reported box in 81
+  ms instead of 1.5 s (0.156.0: 47 ms); eight in 156 ms instead of 13 s. Types
+  and values are unchanged.
+
+- A comparison with a long exact sum whose coefficients have many distinct
+  denominators no longer throws. `0 < \sum_{k=1}^{300} \ln(-k)/k^2` evaluated by
+  extracting the content of the sum, whose denominator (the least common
+  multiple of `k²` over the terms) is past the double range; `lcm` gave
+  `Infinity` and the next call threw
+  `RangeError: The number Infinity cannot be converted to a BigInt`.
+  `rationalGcd` now uses the bigint form past the safe integer range (with a
+  non-negative denominator), and the public `lcm` of the `numerics` entry point
+  answers `NaN` for a non-integer or non-finite operand, as `gcd` does, instead
+  of throwing.
+
+- The presence test of a compiled branch condition no longer follows a global's
+  value through a bound name of the same name. With `k := 2m` in the engine,
+  `\{\sum_{k=1}^{3} k > 0: 1, 0\}` compiled to a test of `m`
+  (`_.m !== undefined`), so an unsupplied `m` made the branch take no arm; the
+  `Sum` index `k` is not a read of the global, and the compiled code is now
+  `(0 < 6) ? 1 : 0`. The same held for a parameter of a called function literal
+  named like a valued global. A global that the condition does read (directly,
+  or through the body of a called function) is still tested.
+
+- A chain of `\text{for all}` or `\text{there exists}` clauses that have
+  no condition, such as `x_0 \text{ for all } y_0 \; x_1 \text{ for all }
+  y_1 \; …`, parsed in exponential time: 12 clauses took 10 to 30 seconds,
+  and a `(` after the chain (`… + (z > 0)`) made it slow too. A quantifier
+  parsed the rest of the input up to three times, to find a `(` that starts
+  its body and then for its condition, and each parse reached the next
+  quantifier. Now a quantifier parses its condition again only when its own
+  `(` test stopped the parse, so 12 clauses take less than 30 ms, or about
+  100 ms with a `(` after the chain. The parse results are unchanged.
+
+- An aborted `broadcastAsync()` or `FindFit.evaluateAsync()` no longer keeps
+  a worker of the kernel pool busy. Before, a slice that a worker was running
+  when the signal aborted ran to its end, and its result was dropped. Now the
+  pool tells the worker to stop through a cancel flag in shared memory; the
+  worker reads it every 64 cells, or at each grid point of a `FindFit` scan,
+  and is free again at once. A slice also stops within 64 cells of its
+  deadline, so a heavy kernel keeps the cells it computed, and a slice whose
+  deadline has passed before its turn is not sent to a worker. A worker that
+  has not answered within the new `cancelGrace` option of `createKernelPool()`
+  (default 250 ms, at most 2147483647; `Infinity` turns it off) after an
+  abort, or after the deadline of its task, is terminated and replaced by a
+  new one from `create`; the tasks that waited for it run on the new worker.
+  Without `SharedArrayBuffer` (a browser page that is not cross-origin
+  isolated), or on a host that cannot send the flag, only the termination
+  applies.
+
+- Each asynchronous evaluation now has its own top-level evaluation number,
+  carried by its evaluation-context stack. Before, all pending asynchronous
+  evaluations of an engine shared one number. So with
+  `B(h) = Block(r := h(k), h := z ↦ 2z, r)`,
+  `Promise.all([B(h).evaluateAsync(), B(q).evaluateAsync()])` gave `h(k)`
+  and `q(k)`, where the same two evaluations awaited one after the other
+  gave `2k` and `2k`. A synchronous evaluation of such a block while an
+  asynchronous one was pending also gave `q(k)`. Both now give `2k`. Related
+  fixes: when a symbol holds such a block (`p`),
+  `ce.symbol('p').evaluateAsync()` now gives `2k`, as `evaluate()` does; a
+  block in an operand of a function application stays a nested block on the
+  asynchronous route, as on the synchronous route (with `f(a, b) = (a, b)`,
+  `f(Tick(), B(h))` gave `(0, 2k)` and now gives `(0, h(k))`); a sticky
+  unresolved call read again after an `await` in one asynchronous evaluation
+  stays unresolved (it could resolve too early); and the locals of a block
+  are kept separately for each evaluation, so a synchronous evaluation of a
+  block between two iterations of a pending asynchronous loop over the same
+  block no longer removes the loop's locals (`t + 2` instead of `t + 3`),
+  and two evaluations whose runs of one block alternate no longer lose each
+  other's locals (`t + 1` instead of `t + 3`).
 
 ## 0.160.0 _2026-10-21_
 
 ### Behavior Changes
 
-- A call evaluated while its function had no definition stays symbolic for
-  the rest of the top-level evaluation that produced it, even when the name
-  is assigned later in that evaluation. `Sum(Block(If(k = 2, h := z ↦ 2z),
-  h(k)), k, 1, 3)` is `10 + h(1)`: the `h(1)` computed at `k = 1` is not
-  resolved by the assignment at `k = 2` (the unreleased callable-binding
-  change had made it `12`). A later evaluation resolves the stored call as
-  before: `r =
-  ce.parse('g(3)').evaluate()`, then `ce.assign('g', …)`, then `r.evaluate()`
-  is `9`. A `Block` evaluated directly by the host counts each statement as
-  its own evaluation, as the Epsil runner does, so `Block(r := fn(3), fn :=
-  Function(2z, z), (r, fn(3)))` is still `(6, 6)`, while the same block
-  nested in another expression, or a `do` block in an Epsil statement, keeps
-  `fn(3)`.
+- A call evaluated while its function had no definition stays symbolic for the
+  rest of the top-level evaluation that produced it, even when the name is
+  assigned later in that evaluation.
+  `Sum(Block(If(k = 2, h := z ↦ 2z), h(k)), k, 1, 3)` is `10 + h(1)`: the `h(1)`
+  computed at `k = 1` is not resolved by the assignment at `k = 2` (the
+  unreleased callable-binding change had made it `12`). A later evaluation
+  resolves the stored call as before: `r = ce.parse('g(3)').evaluate()`, then
+  `ce.assign('g', …)`, then `r.evaluate()` is `9`. A `Block` evaluated directly
+  by the host counts each statement as its own evaluation, as the Epsil runner
+  does, so `Block(r := fn(3), fn := Function(2z, z), (r, fn(3)))` is still
+  `(6, 6)`, while the same block nested in another expression, or a `do` block
+  in an Epsil statement, keeps `fn(3)`.
 
 - In an Epsil program, a `function` statement is installed before the first
-  statement runs when a statement before it calls the function: `let a =
-  String(g(3))` then `function g(k) { k^2 }` gives `"9"` (it gave `"g(3)"`;
-  `let a = g(3)` gave `9` on both routes already, by resolving the stored
-  call when `a` was read). The installation is skipped, and the program
-  behaves as before, when a `type` statement comes before the function, when
-  an earlier statement gives the name a value, when the body reads an
-  earlier variable whose type cannot be read statically, or when the
-  function is generic. An assignment of a function literal (`g = (k) =>
-  k^2`) takes effect when it runs, as before.
+  statement runs when a statement before it calls the function:
+  `let a = String(g(3))` then `function g(k) { k^2 }` gives `"9"` (it gave
+  `"g(3)"`; `let a = g(3)` gave `9` on both routes already, by resolving the
+  stored call when `a` was read). The installation is skipped, and the program
+  behaves as before, when a `type` statement comes before the function, when an
+  earlier statement gives the name a value, when the body reads an earlier
+  variable whose type cannot be read statically, or when the function is
+  generic. An assignment of a function literal (`g = (k) => k^2`) takes effect
+  when it runs, as before.
 
-- On the whole-block route, a `let g: (integer) -> integer` statement
-  followed by `function g(k) { 2k }` now checks a call written before the
-  `let`: `g(1.5)` is `incompatible-type` on every route (it was `3` on the
-  block route, which ran the clause installed before the declaration).
+- On the whole-block route, a `let g: (integer) -> integer` statement followed
+  by `function g(k) { 2k }` now checks a call written before the `let`: `g(1.5)`
+  is `incompatible-type` on every route (it was `3` on the block route, which
+  ran the clause installed before the declaration).
 
-- The closure documentation now states what the engine does: a function
-  literal captures the binding of a free variable, and reads the value that
-  binding holds when the function is called; the user guides describe how a
-  call resolves its head lexically and how a call before the definition
-  behaves.
+- The closure documentation now states what the engine does: a function literal
+  captures the binding of a free variable, and reads the value that binding
+  holds when the function is called; the user guides describe how a call
+  resolves its head lexically and how a call before the definition behaves.
 
-- Bare `list`, `set`, `dictionary`, `collection`, and `indexed_collection`
-  now admit arbitrary contents, matching their `<any>` forms. Bare `tuple`
-  accepts every arity and slot type, including absent coordinates; `tuple<any>`
-  still has one slot. Bare `record` covers records with absent fields.
-  Explicit element constraints remain restrictive, and explicit `<unknown>`
-  no longer collapses to the broader bare name. Numeric vector/matrix defaults
-  are unchanged. Compiled omission-sensitive operations require evidence that
-  raw Nothing positions cannot occur; use an explicit content constraint when
-  the broader bare family no longer provides that evidence.
+- Bare `list`, `set`, `dictionary`, `collection`, and `indexed_collection` now
+  admit arbitrary contents, matching their `<any>` forms. Bare `tuple` accepts
+  every arity and slot type, including absent coordinates; `tuple<any>` still
+  has one slot. Bare `record` covers records with absent fields. Explicit
+  element constraints remain restrictive, and explicit `<unknown>` no longer
+  collapses to the broader bare name. Numeric vector/matrix defaults are
+  unchanged. Compiled omission-sensitive operations require evidence that raw
+  Nothing positions cannot occur; use an explicit content constraint when the
+  broader bare family no longer provides that evidence.
 
 - Raw `Tabulate` / `Table`, `Scan`, and `Iterate` results retain possible
   `Nothing` in their element types. A two-dimensional tabulation returns lazy
   rows: accessing a row or its count does not evaluate its cells or erase
-  omitted positions. `Shape` preserves raw extents, including omitted cells
-  and empty axes. `ListFrom(row)` explicitly collects and omits those
-  entries. Compilation refuses omission-capable tabulations and scans until
-  targets can represent omission distinctly.
+  omitted positions. `Shape` preserves raw extents, including omitted cells and
+  empty axes. `ListFrom(row)` explicitly collects and omits those entries.
+  Compilation refuses omission-capable tabulations and scans until targets can
+  represent omission distinctly.
 
 - The type `broadcastable<T>` is now `T | list<T>`. It was `T` or an indexed
-  collection of `T` other than a tuple or a string, so the subtype relation
-  was not transitive: `tuple<integer>` is an `indexed_collection<integer>`,
-  which was a `broadcastable<integer>`, but `tuple<integer>` was not one. Now
-  every subtype of `list<T>` (a vector, a matrix, a `Range`) is a
-  `broadcastable<T>`, and a tuple, a string, a set and a value typed only
-  `indexed_collection<T>` are not. A tuple is now provably disjoint from
-  `broadcastable<number>`, as the rule that a tuple argument is passed whole
-  requires. Evaluation does not change, with two exceptions that follow from
-  the new meaning: `ce.assign` of a value typed `indexed_collection<T>` to a
-  symbol declared `broadcastable<T>` is refused, as it is for a symbol
-  declared `list<T>`; and `Map(f, [(1, 2), (3, 4)])` with
-  `f: (broadcastable<number>) -> number` is one `incompatible-type` error
-  instead of a list of errors, one for each point.
+  collection of `T` other than a tuple or a string, so the subtype relation was
+  not transitive: `tuple<integer>` is an `indexed_collection<integer>`, which
+  was a `broadcastable<integer>`, but `tuple<integer>` was not one. Now every
+  subtype of `list<T>` (a vector, a matrix, a `Range`) is a `broadcastable<T>`,
+  and a tuple, a string, a set and a value typed only `indexed_collection<T>`
+  are not. A tuple is now provably disjoint from `broadcastable<number>`, as the
+  rule that a tuple argument is passed whole requires. Evaluation does not
+  change, with two exceptions that follow from the new meaning: `ce.assign` of a
+  value typed `indexed_collection<T>` to a symbol declared `broadcastable<T>` is
+  refused, as it is for a symbol declared `list<T>`; and
+  `Map(f, [(1, 2), (3, 4)])` with `f: (broadcastable<number>) -> number` is one
+  `incompatible-type` error instead of a list of errors, one for each point.
 
 - The meet (intersection) of two collection types of different kinds is the
   narrower kind with the meet of the elements, not `never`:
   `list<number> & indexed_collection<integer>` is `list<integer>`,
   `set<number> & collection<integer>` is `set<integer>`, and
   `tuple<number, number> & indexed_collection<integer>` is
-  `tuple<integer, integer>`. So is the meet of a list with dimensions and a
-  list with none: `list<number^2> & list<integer>` is `list<integer^2>`. A
-  pair that can share a matrix by different readings
+  `tuple<integer, integer>`. So is the meet of a list with dimensions and a list
+  with none: `list<number^2> & list<integer>` is `list<integer^2>`. A pair that
+  can share a matrix by different readings
   (`list<number> & collection<list<integer>>`, which an integer matrix
-  inhabits), and a pair with two transparent aliases, are kept as written
-  unless they are provably disjoint; a single transparent alias is met
-  through its definition. One effect: with
-  `type alias json = list<json> | integer`, `Norm(j)` for `j: json` is valid
-  (it was refused when boxed), and with `j = 5` it evaluates to `5`.
+  inhabits), and a pair with two transparent aliases, are kept as written unless
+  they are provably disjoint; a single transparent alias is met through its
+  definition. One effect: with `type alias json = list<json> | integer`,
+  `Norm(j)` for `j: json` is valid (it was refused when boxed), and with `j = 5`
+  it evaluates to `5`.
 
-- The overlap test of types (`typesOverlap()`), used to admit arguments and
-  to detect protocol conformances that collide, compares the arms of a union
-  one by one, and two collections that share only the empty collection do
-  not overlap at any level, as for a parameter that is not a union. So a
-  call is refused when the argument type and a union parameter share only
-  empty collections: `f: (list<string> | string) -> integer` refuses an
-  argument typed `list<integer> | integer`, as
-  `f: (list<string>) -> integer` refuses an argument typed `list<integer>`.
-  Two collections whose elements are at different depths now overlap when a
-  tensor can be in both: `list<list<list<real>>>` and `list<number>` share a
-  rank-3 tensor of reals.
+- The overlap test of types (`typesOverlap()`), used to admit arguments and to
+  detect protocol conformances that collide, compares the arms of a union one by
+  one, and two collections that share only the empty collection do not overlap
+  at any level, as for a parameter that is not a union. So a call is refused
+  when the argument type and a union parameter share only empty collections:
+  `f: (list<string> | string) -> integer` refuses an argument typed
+  `list<integer> | integer`, as `f: (list<string>) -> integer` refuses an
+  argument typed `list<integer>`. Two collections whose elements are at
+  different depths now overlap when a tensor can be in both:
+  `list<list<list<real>>>` and `list<number>` share a rank-3 tensor of reals.
 
 - A list with dimensions whose element type is a top type (`vector<unknown>`,
   `list<any^3>`, `list<(any | integer)^3>`) holds scalars, not lists:
   `list<list^2>` and `list<list<integer>^2>` are no longer subtypes of
-  `vector<unknown>` and `list<any^2>`, as `list<integer^(2x2)>` already was
-  not. The relation was not transitive: `list<integer^(2x2x2)>` is a
-  `list<list^2>`, which was a `vector<unknown>`, but `list<integer^(2x2x2)>`
-  is not a `vector<unknown>`. The meet follows: `list<any^3> & list<list^3>`
-  is `never` (it was `list<list^3>`), and the two types do not overlap. A
-  list with no dimensions is unchanged: `list<list^2>` is a `list<unknown>`.
+  `vector<unknown>` and `list<any^2>`, as `list<integer^(2x2)>` already was not.
+  The relation was not transitive: `list<integer^(2x2x2)>` is a `list<list^2>`,
+  which was a `vector<unknown>`, but `list<integer^(2x2x2)>` is not a
+  `vector<unknown>`. The meet follows: `list<any^3> & list<list^3>` is `never`
+  (it was `list<list^3>`), and the two types do not overlap. A list with no
+  dimensions is unchanged: `list<list^2>` is a `list<unknown>`.
 
-- The meet of two collection types of the same kind no longer drops values
-  that are in both. Two lists, two indexed collections or two collections
-  whose elements are at different depths are kept as written:
+- The meet of two collection types of the same kind no longer drops values that
+  are in both. Two lists, two indexed collections or two collections whose
+  elements are at different depths are kept as written:
   `list<number> & list<list<integer>>` was `list<never>`, although an integer
-  matrix is in both. Two lists with different fixed shapes are met row by
-  row: `list<number^(2x2)> & list<list<integer>^2>` is
-  `list<integer^(2x2)>` (it was `never`), and `list<number^2> & list<integer^-1>`
-  is `list<integer^2>` (it was `never`). A list with a fixed length and no
-  common element is `never`: `list<number^2> & list<string^2>` was
-  `list<never^2>`. A bare `list` is read as `list<unknown>`:
-  `list<any^3> & list` is `list<unknown^3>` (it was `never`). The overlap
-  test follows: `list<number^(2x2)>` and `list<list<integer>^2>` now overlap,
-  which two protocol conformances on these types would show as a collision.
+  matrix is in both. Two lists with different fixed shapes are met row by row:
+  `list<number^(2x2)> & list<list<integer>^2>` is `list<integer^(2x2)>` (it was
+  `never`), and `list<number^2> & list<integer^-1>` is `list<integer^2>` (it was
+  `never`). A list with a fixed length and no common element is `never`:
+  `list<number^2> & list<string^2>` was `list<never^2>`. A bare `list` is read
+  as `list<unknown>`: `list<any^3> & list` is `list<unknown^3>` (it was
+  `never`). The overlap test follows: `list<number^(2x2)>` and
+  `list<list<integer>^2>` now overlap, which two protocol conformances on these
+  types would show as a collision.
 
 - Two recursive aliases that can share no finite value are disjoint: with
   `type alias A = tuple<A> | integer` and `type alias B = tuple<B> | string`,
-  `A & B` is `never` and the two types do not overlap (they were kept as
-  written and overlapped). `couldMatch()` reads the arms of a recursive
-  alias: with `type alias json = list<json> | integer`,
-  `couldMatch(number, json)` is `true` (it was `false`). The test reads
-  recursive aliases by their finite values, while the subtype relation
-  reads them coinductively: with `type alias V = tuple<V>`, `V` is a subtype
-  of `A` and of `B` although `A & B` is `never`. `V` has no value, so no
-  value is lost.
+  `A & B` is `never` and the two types do not overlap (they were kept as written
+  and overlapped). `couldMatch()` reads the arms of a recursive alias: with
+  `type alias json = list<json> | integer`, `couldMatch(number, json)` is `true`
+  (it was `false`). The test reads recursive aliases by their finite values,
+  while the subtype relation reads them coinductively: with
+  `type alias V = tuple<V>`, `V` is a subtype of `A` and of `B` although `A & B`
+  is `never`. `V` has no value, so no value is lost.
 
 - A generic alias whose arguments grow at each unfold
   (`A<T> = B<list<T>> | integer` with `B<T> = A<T>`) no longer overflows the
   stack in the subtype, overlap and meet tests: past a limit on the open
   unfolds, the answer is the conservative one.
 
-- The meet, the overlap test, `couldMatch()` and `provablyDisjoint()` of
-  types built from a chain of aliases with two branches at each level
-  (`Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>`) take a time that grows with the depth
-  of the chain. The work doubled at each level: at depth 20, the overlap
-  test took about 7 s and the meet did not finish in 10 minutes.
+- The meet, the overlap test, `couldMatch()` and `provablyDisjoint()` of types
+  built from a chain of aliases with two branches at each level
+  (`Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>`) take a time that grows with the depth of
+  the chain. The work doubled at each level: at depth 20, the overlap test took
+  about 7 s and the meet did not finish in 10 minutes.
 
-- A literal empty list at a required or optional point parameter is accepted
-  and maps to `[]` without invoking the function, matching evaluation.
+- A literal empty list at a required or optional point parameter is accepted and
+  maps to `[]` without invoking the function, matching evaluation.
 
 - Interpreted calls and collection callbacks now use their captured lexical
   binding, including lazy and asynchronous evaluation. Updating that binding
@@ -165,59 +341,59 @@
 - The coordinates of a point divided by a number that may be zero are typed
   `real | infinity | nan`, as a scalar quotient has been since 0.121.0: with
   `p: tuple<integer, integer>` and `x: integer`, `p / x` was typed
-  `tuple<rational, rational>`, but `x = 0` gives `(~oo, ~oo)`. The same
-  applies to a list of points and to a value typed `broadcastable<vector<…>>`.
-  A divisor proven not to be zero keeps the precise type: `p / 4` and `p / n`
-  with `n: integer<1..>` are `tuple<rational, rational>`. Also, `i / x` is
-  typed `imaginary | infinity` (was `imaginary`), and `(1 + 2i) / x` is typed
-  `number` (was `complex`). An imaginary divisor is never zero, so `w / j`
-  with `w: complex` and `j: imaginary` stays `complex`.
+  `tuple<rational, rational>`, but `x = 0` gives `(~oo, ~oo)`. The same applies
+  to a list of points and to a value typed `broadcastable<vector<…>>`. A divisor
+  proven not to be zero keeps the precise type: `p / 4` and `p / n` with
+  `n: integer<1..>` are `tuple<rational, rational>`. Also, `i / x` is typed
+  `imaginary | infinity` (was `imaginary`), and `(1 + 2i) / x` is typed `number`
+  (was `complex`). An imaginary divisor is never zero, so `w / j` with
+  `w: complex` and `j: imaginary` stays `complex`.
 
 - A collection divided by itself is no longer folded to `1`: `L / L` with
   `L: list<integer>` stays `L / L`, and with `L = [1, 2]` it evaluates to
-  `[1, 1]`. The fold `x / x → 1` still applies to a symbol that is not
-  declared as a collection.
+  `[1, 1]`. The fold `x / x → 1` still applies to a symbol that is not declared
+  as a collection.
 
 - A structural `Divide(a, b, c)` is typed as `(a / b) / c`. Only the first
   divisor was read: `Divide(1, 2, x)` was typed `rational` although `x = 0`
-  gives `~oo`. A real numerator that may be infinite, divided by an
-  imaginary number, is typed `number` (was `complex`): `+∞ / i` is `~oo`.
+  gives `~oo`. A real numerator that may be infinite, divided by an imaginary
+  number, is typed `number` (was `complex`): `+∞ / i` is `~oo`.
 
 - Calls through callback parameters retain their lexical contracts, including
   inside nested lambdas such as `Map(x ↦ h(x), xs)`. A same-named global no
   longer supplies the call's result type or introduces `Nothing`. A parameter
   first used as a call head now keeps its annotation and validates arguments
-  against it. Ordinary calls and captured operators follow the same binding
-  rule during body-based type inference. Compilation refuses a known captured
+  against it. Ordinary calls and captured operators follow the same binding rule
+  during body-based type inference. Compilation refuses a known captured
   function body when lowering it would substitute a different ambient binding.
 
-- Bare Map callbacks such as `Map(h, xs)` follow the callback's lexical
-  binding. A parameter named after a global function or library operator now
-  uses its own declared result type and argument contract. An opaque callback
-  result stays `any`; a shadowed global cannot supply a narrower result or
-  introduce `Nothing` into this callback's result. Reducer parameters also
-  retain their own result type when named after a built-in arithmetic operator.
+- Bare Map callbacks such as `Map(h, xs)` follow the callback's lexical binding.
+  A parameter named after a global function or library operator now uses its own
+  declared result type and argument contract. An opaque callback result stays
+  `any`; a shadowed global cannot supply a narrower result or introduce
+  `Nothing` into this callback's result. Reducer parameters also retain their
+  own result type when named after a built-in arithmetic operator.
 
-- Corrected Map inference to retain possible nested collections and missing
-  data when it excludes `Nothing` from callback inputs. Opaque `any` callback
-  results remain `any`; they no longer copy the source element type.
-  Positional callbacks over strings report character data. Compilation again
-  accepts tuple mappings whose callback bodies prove they cannot return
-  `Nothing`. Omission-capable sources remain refused; numeric collection
-  annotations restore compilation for affected aggregate and predicate code.
-  Explicit numeric callback contracts also compile for mutable local functions
-  and callback parameters; opaque runtime callbacks remain refused.
+- Corrected Map inference to retain possible nested collections and missing data
+  when it excludes `Nothing` from callback inputs. Opaque `any` callback results
+  remain `any`; they no longer copy the source element type. Positional
+  callbacks over strings report character data. Compilation again accepts tuple
+  mappings whose callback bodies prove they cannot return `Nothing`.
+  Omission-capable sources remain refused; numeric collection annotations
+  restore compilation for affected aggregate and predicate code. Explicit
+  numeric callback contracts also compile for mutable local functions and
+  callback parameters; opaque runtime callbacks remain refused.
 
 - Data tuples preserve `Nothing` coordinates: `(1, Nothing, 3)` has three
-  positions. A tuple whose coordinates are all missing remains a tuple.
-  `Zip` preserves these coordinates and all-missing rows, so source positions
-  stay aligned. JavaScript and Python compiled tuples retain all-missing
-  tuples; compilation refuses possible `Nothing` coordinates until targets
-  can represent omission distinctly. Lists and `TupleFrom` retain their
-  existing immediate omission behavior.
+  positions. A tuple whose coordinates are all missing remains a tuple. `Zip`
+  preserves these coordinates and all-missing rows, so source positions stay
+  aligned. JavaScript and Python compiled tuples retain all-missing tuples;
+  compilation refuses possible `Nothing` coordinates until targets can represent
+  omission distinctly. Lists and `TupleFrom` retain their existing immediate
+  omission behavior.
 
-- Numeric aggregates skip `Nothing` yielded by raw lazy views. `Mean` of a
-  view exposing `1, Nothing, 3` now returns `2` instead of an incompatible-type
+- Numeric aggregates skip `Nothing` yielded by raw lazy views. `Mean` of a view
+  exposing `1, Nothing, 3` now returns `2` instead of an incompatible-type
   error; its denominator counts only retained data. The other univariate
   statistics follow the same rule, and extrema such as `Min` now finish
   evaluating after an omitted datum. All-omitted input follows each operator's
@@ -230,9 +406,9 @@
   Filtering a raw view yielding `1, Nothing, 3` with an always-true predicate
   now yields `1, 3`, rather than an incompatible-type error cell or a retained
   omission. `Count(source, predicate)` follows the same selection rule.
-  `Missing` and nested markers still reach the predicate. Result
-  types exclude immediate `nothing`; compilation refuses sources that might
-  contain it until targets can distinguish omission from missing data.
+  `Missing` and nested markers still reach the predicate. Result types exclude
+  immediate `nothing`; compilation refuses sources that might contain it until
+  targets can distinguish omission from missing data.
 
 - `Map` bypasses its callback for immediate `Nothing` inputs and preserves their
   positions. A strict numeric callback over a view yielding `1, Nothing, 3` now
@@ -244,117 +420,111 @@
   lengths must still match; all terms use the same retained observations.
   Compilation refuses these statistics and maps whose inputs or map results may
   contain `Nothing` until targets can preserve its distinct representation.
-- `Dedup`, `Filter` and `TakeWhile` of a string held by a symbol of a wider
-  type give a string, as they do for a string literal: with
+- `Dedup`, `Filter` and `TakeWhile` of a string held by a symbol of a wider type
+  give a string, as they do for a string literal: with
   `c: list<integer> | string := "aab"`, `Dedup(c)` was `["a", "b"]` and is now
   `"ab"`; `Dedup(Filter(c, p))` is a string too.
 - `Filter` and `Dedup` over a dictionary give a `Dictionary` (also when the
   dictionary is an arm of a union type, through nested `Filter`/`Dedup` views,
-  and for a bare `record`); they gave a `Set` of entry tuples
-  (`Set(("a", 1))`). `Filter` over a record is typed `dictionary<any>`.
-- `Map` of a user function with scalar parameters over a list of lists is
-  typed with lists as elements (`Map(f, pr)` with `f: (number) -> number` is
+  and for a bare `record`); they gave a `Set` of entry tuples (`Set(("a", 1))`).
+  `Filter` over a record is typed `dictionary<any>`.
+- `Map` of a user function with scalar parameters over a list of lists is typed
+  with lists as elements (`Map(f, pr)` with `f: (number) -> number` is
   `list<list<number>>`, was `list<number>`), as the call broadcasts over each
-  row; a polymorphic callback with one parameter (`(T) -> T where T`) is
-  typed the same way (`list<list<integer>>`). `Map` of a function literal
-  written in place whose parameter is annotated as a scalar
-  (`(x: integer) ↦ x + 1`) over a list of lists is refused when it is boxed;
-  it was admitted and gave an error for each row. Over a source that can hold
-  `Missing`, such a literal is typed with the `NaN` it gives for an absent
-  cell: `Map((x: integer) ↦ x + 1, [1, Missing])` is `list<number>` (was
+  row; a polymorphic callback with one parameter (`(T) -> T where T`) is typed
+  the same way (`list<list<integer>>`). `Map` of a function literal written in
+  place whose parameter is annotated as a scalar (`(x: integer) ↦ x + 1`) over a
+  list of lists is refused when it is boxed; it was admitted and gave an error
+  for each row. Over a source that can hold `Missing`, such a literal is typed
+  with the `NaN` it gives for an absent cell:
+  `Map((x: integer) ↦ x + 1, [1, Missing])` is `list<number>` (was
   `list<integer>`, value `[2, NaN]`). A `Missing` that the body returns for a
   present cell stays in the type, also for several sources of an abstract
   collection type.
 - A view whose source can be absent (`Map(x ↦ x + 10, c)` with
-  `c: missing | list<integer>`) previews as a list; it previewed as a `Set`.
-  The preview, and a bounded materialization, of `Dedup`, `Filter`, `Join` or
-  `Append` over more than five dictionary entries show the expression as
-  written (`Dedup(d)`); they showed an `incompatible-type` error.
+  `c: missing | list<integer>`) previews as a list; it previewed as a `Set`. The
+  preview, and a bounded materialization, of `Dedup`, `Filter`, `Join` or
+  `Append` over more than five dictionary entries show the expression as written
+  (`Dedup(d)`); they showed an `incompatible-type` error.
 - Two mutually recursive aliases that describe the same values are subtypes of
-  each other: with `a = list<b>` and `b = list<a>`, `a <: b` is now `true`
-  (it was `false`, a conservative cutoff). A self-referential alias such as
-  `R = list<R>` is a subtype of `list`, `list<unknown>`,
-  `list<list<unknown>>` and `value`; `J = list<J> | missing` is still not a
-  subtype of `unknown`.
-- `Dedup`, `Filter` and `Map` accept a source typed `missing | string`
-  (typed `missing | string` or `list<character> | missing`); it was an
-  `incompatible-type` error. `Map` of a broadcastable operator over ragged
-  rows (`Map(Sqrt, [[1, 4], [9]])`) gives `list<vector<1> | vector<2>>`; it
-  was an `incompatible-type` error.
+  each other: with `a = list<b>` and `b = list<a>`, `a <: b` is now `true` (it
+  was `false`, a conservative cutoff). A self-referential alias such as
+  `R = list<R>` is a subtype of `list`, `list<unknown>`, `list<list<unknown>>`
+  and `value`; `J = list<J> | missing` is still not a subtype of `unknown`.
+- `Dedup`, `Filter` and `Map` accept a source typed `missing | string` (typed
+  `missing | string` or `list<character> | missing`); it was an
+  `incompatible-type` error. `Map` of a broadcastable operator over ragged rows
+  (`Map(Sqrt, [[1, 4], [9]])`) gives `list<vector<1> | vector<2>>`; it was an
+  `incompatible-type` error.
 
-- A comparison with an undefined operand is false in a branch condition too,
-  as in Desmos and IEEE 754. An ordered comparison (`<`, `≤`, `>`, `≥`) or an
-  equality (`=`) whose operand is `NaN` or `Indeterminate` already evaluated
-  to `False` on its own; an `If` or a `Which` on it now takes the next arm
-  (the else arm) instead of no arm. This holds in the interpreter and on the
+- A comparison with an undefined operand is false in a branch condition too, as
+  in Desmos and IEEE 754. An ordered comparison (`<`, `≤`, `>`, `≥`) or an
+  equality (`=`) whose operand is `NaN` or `Indeterminate` already evaluated to
+  `False` on its own; an `If` or a `Which` on it now takes the next arm (the
+  else arm) instead of no arm. This holds in the interpreter and on the
   `javascript`, `python` and `interval-js` targets. Before and after:
   - `\left\{\frac{0}{0}>0:1,0\right\}` (also with `<`, `≤`, `≥`, `=`), and
     `If(0/0 > 0, 1, 0)`: `Missing` before, `0` now.
-  - `\left\{x > 0: 1, 0\right\}` compiled to JavaScript and run at
-    `{x: NaN}`: `NaN` before, `0` now. The same on the Python target. The
-    compiled guard no longer tests the operand for NaN (`_.x === _.x`); it
-    still tests for a variable the caller did not supply (`_.x !==
-    undefined`), which still gives `NaN`, also through arithmetic
-    (`2x > 0`). The guard tests a variable of any type (`p.x > 0` tests
-    `p`), and a variable read through an assigned value (`a := \sin x`,
-    then `\cos a > 0`) or through the body of a called user function. It
-    does not test a variable read only by an arm of a nested `If`, `Which`
-    or `When`: `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y`
-    not supplied.
-  - `0 < \sqrt{x}` compiled to `interval-js` at `x = [-1, -1]`, where the
-    root has no value (`empty`): `'maybe'` before, `'false'` now. The same
-    for `≤`, `>`, `≥` and `=`.
-  - On `interval-js`, a comparison with an operand that has a value over
-    only part of the cell (`partial`) is now at most `'maybe'`:
-    `\sqrt{x} \ge 0` at `x = [-1, 1]` was `'true'`. `0 < \sqrt{x}` there
-    stays `'maybe'`.
+  - `\left\{x > 0: 1, 0\right\}` compiled to JavaScript and run at `{x: NaN}`:
+    `NaN` before, `0` now. The same on the Python target. The compiled guard no
+    longer tests the operand for NaN (`_.x === _.x`); it still tests for a
+    variable the caller did not supply (`_.x !== undefined`), which still gives
+    `NaN`, also through arithmetic (`2x > 0`). The guard tests a variable of any
+    type (`p.x > 0` tests `p`), and a variable read through an assigned value
+    (`a := \sin x`, then `\cos a > 0`) or through the body of a called user
+    function. It does not test a variable read only by an arm of a nested `If`,
+    `Which` or `When`: `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with
+    `y` not supplied.
+  - `0 < \sqrt{x}` compiled to `interval-js` at `x = [-1, -1]`, where the root
+    has no value (`empty`): `'maybe'` before, `'false'` now. The same for `≤`,
+    `>`, `≥` and `=`.
+  - On `interval-js`, a comparison with an operand that has a value over only
+    part of the cell (`partial`) is now at most `'maybe'`: `\sqrt{x} \ge 0` at
+    `x = [-1, 1]` was `'true'`. `0 < \sqrt{x}` there stays `'maybe'`.
   - A sum of such a piecewise, `\sum_{n=0}^{10000} M(n)` with
-    `M(n) := \{K(n) > 0: 1, 0\}` and `K(0)` undefined, is now `10000`
-    instead of `NaN`.
+    `M(n) := \{K(n) > 0: 1, 0\}` and `K(0)` undefined, is now `10000` instead of
+    `NaN`.
 
   Not changed: `≠` keeps its behavior (`\mathrm{NaN} \ne 0` is `True`, and a
   branch on a `≠` with a `NaN` operand still takes no arm: `Missing` in the
-  interpreter, `NaN` on `javascript` and `python`, `'maybe'` on
-  `interval-js`). `Missing` keeps its
-  Kleene reading (`Less(Missing, 1)` is `Missing`): a comparison with a
-  nested else-less `If` or default-less `Which` that selects no arm still
-  takes no arm (`If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` is `NaN` compiled),
-  and on `interval-js` that value is an `empty` with a `missing` flag, so
-  `Which(x > 5, 1) > 0` over `x = [0, 1]` stays `'maybe'`. A comparison of
-  two collections with an absent cell still takes no arm. The GPU targets
+  interpreter, `NaN` on `javascript` and `python`, `'maybe'` on `interval-js`).
+  `Missing` keeps its Kleene reading (`Less(Missing, 1)` is `Missing`): a
+  comparison with a nested else-less `If` or default-less `Which` that selects
+  no arm still takes no arm (`If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` is `NaN`
+  compiled), and on `interval-js` that value is an `empty` with a `missing`
+  flag, so `Which(x > 5, 1) > 0` over `x = [0, 1]` stays `'maybe'`. A comparison
+  of two collections with an absent cell still takes no arm. The GPU targets
   (`glsl`, `wgsl`) already took the else arm. This reverses the rule of
-  2026-09-03, under which a `NaN` operand of any comparison made the branch
-  take no arm (`docs/ERROR-MODEL.md`).
+  2026-09-03, under which a `NaN` operand of any comparison made the branch take
+  no arm (`docs/ERROR-MODEL.md`).
 
 - A value that has no order also makes a comparison false: the pole
   `ComplexInfinity` (`~oo`, the value of `1/0`) and a number that is not real
   (`i`, `\sqrt{-1}`, `\ln(-1)`, any value with a nonzero imaginary part). An
-  ordered comparison (`<`, `≤`, `>`, `≥`) with such an operand is now
-  `False`, alone and in the condition of an `If` or a `Which`, which then
-  takes its next arm. `+∞` and `−∞` are real and keep their order. An
-  equality with the pole is `False` (the pole has no value, as `NaN` has
-  none), but an equality with a complex number keeps its meaning. An exact
-  constant such as `\ln(-1)` is approximated to find its imaginary part (not
-  when it holds an infinite `Sum` or `Product` or a `Limit`), and the
-  imaginary part of a number literal is read exactly (`1 + 10^{-800}i` is not
-  real). A comparison stays unevaluated only when its operands are free
-  symbols or forms that depend on one (`0 < x`, `0 < ix`): a value with no
-  order decides `False` also next to a free symbol (`x < i`, `x < \frac{1}{0}`),
-  as `NaN` does. A chain stops at its first pair that is `False`. Before and
-  after:
+  ordered comparison (`<`, `≤`, `>`, `≥`) with such an operand is now `False`,
+  alone and in the condition of an `If` or a `Which`, which then takes its next
+  arm. `+∞` and `−∞` are real and keep their order. An equality with the pole is
+  `False` (the pole has no value, as `NaN` has none), but an equality with a
+  complex number keeps its meaning. An exact constant such as `\ln(-1)` is
+  approximated to find its imaginary part (not when it holds an infinite `Sum`
+  or `Product` or a `Limit`), and the imaginary part of a number literal is read
+  exactly (`1 + 10^{-800}i` is not real). A comparison stays unevaluated only
+  when its operands are free symbols or forms that depend on one (`0 < x`,
+  `0 < ix`): a value with no order decides `False` also next to a free symbol
+  (`x < i`, `x < \frac{1}{0}`), as `NaN` does. A chain stops at its first pair
+  that is `False`. Before and after:
   - `0 < \frac{1}{0}`, `0 < i`, `0 < \ln(-1)`, `\pi + i < 4 + i`, `x < i`:
     unevaluated before, `False` now.
   - `\frac{1}{0} = \frac{1}{0}` and `\ln(-1) \le \ln(-1)`: `True` before,
     `False` now.
   - `0 < i < \mathrm{Missing}`: `Missing` before, `False` now.
-  - `\int_0^1 x^{i\pi} dx`: `\frac{1}{1+i\pi}` with the condition
-    `0 < 1 + i\pi` before, `\frac{1}{1+i\pi}` now (the convergence condition
-    is on the real part of the exponent), and the same for the other
-    convergent integrals of a power or an exponential with a complex
-    exponent.
-  - `\log_{1+i}(x) = 2`: the root `2i` with the condition `0 < 1 + i`
-    before, `2i` now (a base that is not real has the conditions `b \ne 0`
-    and `b \ne 1`).
+  - `\int_0^1 x^{i\pi} dx`: `\frac{1}{1+i\pi}` with the condition `0 < 1 + i\pi`
+    before, `\frac{1}{1+i\pi}` now (the convergence condition is on the real
+    part of the exponent), and the same for the other convergent integrals of a
+    power or an exponential with a complex exponent.
+  - `\log_{1+i}(x) = 2`: the root `2i` with the condition `0 < 1 + i` before,
+    `2i` now (a base that is not real has the conditions `b \ne 0` and
+    `b \ne 1`).
   - `\left\{\frac{1}{0} > 0: 1, 0\right\}` and
     `\left\{\sqrt{-1} > 0: 1, 0\right\}`: a held `Which` before, `0` now.
   - `\sum_{n=0}^{10} M(n)` with `M(n) := \left\{\frac{1}{n} > 0: 1, 0\right\}`:
@@ -362,58 +532,58 @@
 
   Not changed: `\frac{1}{0} = 0` is `False`, `i = i` is `True`, `i = 0` is
   `False`, `\frac{1}{0} \ne 0` is `True` (`≠` is not part of the decision),
-  `0 < \infty` and `\infty = \infty` are `True`, and `Missing` keeps its
-  Kleene reading. The methods `isLess()`, `isGreater()` and the others still
-  answer `undefined` for a complex operand.
+  `0 < \infty` and `\infty = \infty` are `True`, and `Missing` keeps its Kleene
+  reading. The methods `isLess()`, `isGreater()` and the others still answer
+  `undefined` for a complex operand.
 
-  Compiled code: the arithmetic does not change, so a pole computed at run
-  time is the IEEE `Infinity`, which has an order. `\left\{\frac{1}{x} > 0:
-  1, 0\right\}` at `x = 0` gives `1` on `javascript` and on `python` (with a
-  NumPy `x`; a plain Python float raises `ZeroDivisionError`), where the
-  interpreter gives `0`; `\frac{1}{x} = \frac{1}{x}` at `x = 0` is `true`
-  there. On `interval-js`, `\frac{1}{x}` over the point `[0, 0]` is `empty`,
-  so that branch already gives `0`. A non-real value at run time already gave
-  `false` (`\left\{\sqrt{x} > 0: 1, 0\right\}` at `x = -1` is `0`). A closed
-  comparison with such an operand now folds to the value of the interpreter
-  on `javascript`, `glsl`, `wgsl` and `python`, with or without
-  `constantFold`: `\left\{\frac{1}{0} > 0: 1, 0\right\}` compiles to `0` (it
-  was `1`), and `0 < \frac{1}{0}` and `\frac{1}{0} = \frac{1}{0}` to `false`
-  (they were `true`). `i < 2` compiles to `false` (it was a compile-time
-  decline; `i < x` still is one). `interval-js` does not fold a comparison:
-  `0 < \frac{1}{0}` and `\frac{1}{0} = \frac{1}{0}` there are still
-  `'true'`. The constant pole next to a variable is the IEEE `Infinity`:
-  `x < \frac{1}{0}` at `x = 1` is `true` on `javascript`, `python` and
-  `interval-js`, where the interpreter gives `False`.
+  Compiled code: the arithmetic does not change, so a pole computed at run time
+  is the IEEE `Infinity`, which has an order.
+  `\left\{\frac{1}{x} > 0: 1, 0\right\}` at `x = 0` gives `1` on `javascript`
+  and on `python` (with a NumPy `x`; a plain Python float raises
+  `ZeroDivisionError`), where the interpreter gives `0`;
+  `\frac{1}{x} = \frac{1}{x}` at `x = 0` is `true` there. On `interval-js`,
+  `\frac{1}{x}` over the point `[0, 0]` is `empty`, so that branch already gives
+  `0`. A non-real value at run time already gave `false`
+  (`\left\{\sqrt{x} > 0: 1, 0\right\}` at `x = -1` is `0`). A closed comparison
+  with such an operand now folds to the value of the interpreter on
+  `javascript`, `glsl`, `wgsl` and `python`, with or without `constantFold`:
+  `\left\{\frac{1}{0} > 0: 1, 0\right\}` compiles to `0` (it was `1`), and
+  `0 < \frac{1}{0}` and `\frac{1}{0} = \frac{1}{0}` to `false` (they were
+  `true`). `i < 2` compiles to `false` (it was a compile-time decline; `i < x`
+  still is one). `interval-js` does not fold a comparison: `0 < \frac{1}{0}` and
+  `\frac{1}{0} = \frac{1}{0}` there are still `'true'`. The constant pole next
+  to a variable is the IEEE `Infinity`: `x < \frac{1}{0}` at `x = 1` is `true`
+  on `javascript`, `python` and `interval-js`, where the interpreter gives
+  `False`.
 
-- The subtype relation of lists now reads a value in every way it can be
-  read, so the relation is transitive and a union or a meet of list types
-  no longer drops values (user decisions 2026-10-21). Three rules changed.
-  The rows of a list with dimensions are read whether or not its scalar
-  element matches the target's element: `matrix<string>` is a
-  `vector<collection>` as `matrix<integer>` always was (a string is a
-  collection, so only its rank was read before), and `matrix<integer>` is a
-  `vector<integer | list>`; the elements of a `vector<unknown>` or
-  `vector<any>` stay scalars, and `matrix<unknown>` is not a
-  `vector<unknown>`. A list declared in the nested spelling answers as its
-  flat spelling toward every target: `list<vector<integer^1>^2>` is a
-  `list<number>`, a `collection<number>` and an `indexed_collection<real>`,
-  as `list<integer^(2x1)>` is (it was a `matrix` only). `collection<E>` and
-  `indexed_collection<E>` peel any number of outer axes, as `list<E>` does:
-  `list<boolean^(2x2x2)>` is a `collection<vector<boolean^2>>`. The meet
-  follows: `list<string> & vector<collection>` keeps the string matrices
-  (it was `vector<string>`). An outer list with no dimensions admits any
-  shape of its rows, so its flat spelling has no dimensions:
-  `list<vector<integer^3>>` is a `list<integer>` and a `collection<integer>`
-  but not a `matrix<integer>` (its missing length was read as one axis of
-  any length, which made it a matrix although it holds a 2×2 arrangement of
-  3-vectors), and at a `matrix<T^(MxN)>` parameter it pins no length (it
-  pinned `N`). A random check of 72,000 pairs of list and collection types
-  against concrete values finds no loss (it found 18).
+- The subtype relation of lists now reads a value in every way it can be read,
+  so the relation is transitive and a union or a meet of list types no longer
+  drops values (user decisions 2026-10-21). Three rules changed. The rows of a
+  list with dimensions are read whether or not its scalar element matches the
+  target's element: `matrix<string>` is a `vector<collection>` as
+  `matrix<integer>` always was (a string is a collection, so only its rank was
+  read before), and `matrix<integer>` is a `vector<integer | list>`; the
+  elements of a `vector<unknown>` or `vector<any>` stay scalars, and
+  `matrix<unknown>` is not a `vector<unknown>`. A list declared in the nested
+  spelling answers as its flat spelling toward every target:
+  `list<vector<integer^1>^2>` is a `list<number>`, a `collection<number>` and an
+  `indexed_collection<real>`, as `list<integer^(2x1)>` is (it was a `matrix`
+  only). `collection<E>` and `indexed_collection<E>` peel any number of outer
+  axes, as `list<E>` does: `list<boolean^(2x2x2)>` is a
+  `collection<vector<boolean^2>>`. The meet follows:
+  `list<string> & vector<collection>` keeps the string matrices (it was
+  `vector<string>`). An outer list with no dimensions admits any shape of its
+  rows, so its flat spelling has no dimensions: `list<vector<integer^3>>` is a
+  `list<integer>` and a `collection<integer>` but not a `matrix<integer>` (its
+  missing length was read as one axis of any length, which made it a matrix
+  although it holds a 2×2 arrangement of 3-vectors), and at a `matrix<T^(MxN)>`
+  parameter it pins no length (it pinned `N`). A random check of 72,000 pairs of
+  list and collection types against concrete values finds no loss (it found 18).
 
 ### Bug Fixes
 
-- `Factor` merges equal factors into a power and finds every copy of a
-  repeated root:
+- `Factor` merges equal factors into a power and finds every copy of a repeated
+  root:
   - `Factor((x^2-1)(x+1))` is `(x-1)(x+1)^2`; it was `(x-1)(x+1)(x+1)`.
   - `Factor(x^3+3x^2+3x+1)` is `(x+1)^3`; it was `(x+1)(x+1)(x+1)`.
   - `Factor(x^5-x^4-2x^3+2x^2+x-1)` is `(x-1)^3(x+1)^2`; it was
@@ -426,19 +596,20 @@
   matrix factors are not merged. `PartialFraction` now decomposes these
   denominators when they are given expanded, also with a negative leading
   coefficient (`1/(-x^3+3x-2)`). Before, it returned them unchanged.
+
 - A `Multiply` declared not commutative
-  (`ce.declare('Multiply', { commutative: false }, { extend: true })`)
-  removes its factors 1: `a·1·b` is `a·b`, and `Factor(a·b·a)` is `a·b·a`.
-  They were kept, and `Factor(a·b·a)` gave `a·1·b·1·a·1`. No other operand
-  moves, and no other simplification is applied to such a product.
-- Result types of broadcast arithmetic over nested lists hold their values.
-  Rows of different lengths are no longer typed `matrix`: `Sin(L)` with
+  (`ce.declare('Multiply', { commutative: false }, { extend: true })`) removes
+  its factors 1: `a·1·b` is `a·b`, and `Factor(a·b·a)` is `a·b·a`. They were
+  kept, and `Factor(a·b·a)` gave `a·1·b·1·a·1`. No other operand moves, and no
+  other simplification is applied to such a product.
+- Result types of broadcast arithmetic over nested lists hold their values. Rows
+  of different lengths are no longer typed `matrix`: `Sin(L)` with
   `L: list<list<integer>> := [[1, 2], [3]]`, and `Sin([[1, 2], [3]])`, are
   `list<list<number>>` (they were `matrix` and `list<number>`). A nested list of
   points plus a number (`L + 0.5` with `L: list<list<tuple<integer, integer>>>`)
   is refused as an `error`, as a flat list of points is. Rows of points beside
-  numbers keep point cells for `Divide`, `Power`, `Mod`, `Root`, `Log`,
-  `Round`, `Remainder` and `Arctan2`, with the rank of the deepest operand
+  numbers keep point cells for `Divide`, `Power`, `Mod`, `Root`, `Log`, `Round`,
+  `Remainder` and `Arctan2`, with the rank of the deepest operand
   (`Power(NQ, V)` is `list<list<tuple<number, number>>>`, was `list<number>`),
   also when the numbers can be absent; a divisor cell that may be zero gives
   `number` coordinates. On the derive route, `Subtract` of a nested list is no
@@ -446,97 +617,95 @@
   points.
 - Subtype relation: `matrix<T>` is a subtype of `broadcastable<T>`, and
   `couldMatch` no longer answers `false` for pairs that share a subtype (tuples
-  with an `any` slot against `indexed_collection`, `tuple` against
-  `tuple<any>`, `record{a: any}` against `dictionary<integer>`, a flat list
-  against a nested list such as `list<integer>` against
-  `list<list<integer>>`, which a matrix matches both, and others).
-  An operand typed with an alias is unfolded before the type variables are
-  solved: `Sort(a)` with `a: L`, `L` an alias of `list<integer | missing>`, is
-  `list<integer | missing>`; it was `list<unknown>`. A self-referential alias
-  (`cyc = cyc | list<integer>`) no longer overflows the stack.
-- `Total` no longer builds the union `any | unknown`. `Zip([1, Undefined],
-  [2, Undefined])` is typed with `missing` elements, as with `Missing`.
-- Collection operator types: `FlatMap` over a source with absent cells keeps
-  the absent cell (`FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>`
-  is `list<integer | missing>`, was `list<number>`; with an annotated
-  parameter, the `NaN` of an absent cell is in the type; a callback that can
-  answer a list or `Missing` is spliced arm by arm, so
+  with an `any` slot against `indexed_collection`, `tuple` against `tuple<any>`,
+  `record{a: any}` against `dictionary<integer>`, a flat list against a nested
+  list such as `list<integer>` against `list<list<integer>>`, which a matrix
+  matches both, and others). An operand typed with an alias is unfolded before
+  the type variables are solved: `Sort(a)` with `a: L`, `L` an alias of
+  `list<integer | missing>`, is `list<integer | missing>`; it was
+  `list<unknown>`. A self-referential alias (`cyc = cyc | list<integer>`) no
+  longer overflows the stack.
+- `Total` no longer builds the union `any | unknown`.
+  `Zip([1, Undefined], [2, Undefined])` is typed with `missing` elements, as
+  with `Missing`.
+- Collection operator types: `FlatMap` over a source with absent cells keeps the
+  absent cell (`FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>` is
+  `list<integer | missing>`, was `list<number>`; with an annotated parameter,
+  the `NaN` of an absent cell is in the type; a callback that can answer a list
+  or `Missing` is spliced arm by arm, so
   `FlatMap([[1, 2], Missing], x ↦ Reverse(x))` is `list<integer | missing>`).
   `couldMatch` of a record against a collection of entries compares each
   required field with its own key (`record{a: integer}` cannot match
-  `collection<tuple<"b", integer>>`). `Map` over an alias
-  is a `list` (was `collection<number>`). `Map` of an operator whose declared
-  result is `any` (`Map(PointX, ["a", "b"])`) is `list<any^2>`, not a copy of
-  the source type. `Map` of a function literal over `any` elements whose body
-  can return a collection (`x ↦ Sqrt(x)`) allows a collection element. `Map`
-  over mixed non-numeric elements no longer states a length. A `Map` over a
-  union with a dictionary or record arm types that arm as a collection of
-  entries.
+  `collection<tuple<"b", integer>>`). `Map` over an alias is a `list` (was
+  `collection<number>`). `Map` of an operator whose declared result is `any`
+  (`Map(PointX, ["a", "b"])`) is `list<any^2>`, not a copy of the source type.
+  `Map` of a function literal over `any` elements whose body can return a
+  collection (`x ↦ Sqrt(x)`) allows a collection element. `Map` over mixed
+  non-numeric elements no longer states a length. A `Map` over a union with a
+  dictionary or record arm types that arm as a collection of entries.
 
-- The derivative of a `Sum` no longer reads a global symbol as the index of
-  the sum when a function called in the sum reads a symbol with the name of
-  the index. With `k := 2` and `g := a ↦ a·k·x`, `Σ_{k=1}^{5} g(k)` is `30x`,
-  but its derivative in `x` was `55` (the sum of `k²`, the global `k` read as
-  the index): it is now `30`, as it is for the same sum with the index `j`.
-  When `k` has no value, the derivative was `55` too: it is now `15k`. When
-  this occurs, the derivative renames the index to a fresh name, such as
-  `k_1`: the derivative of `Σ_{k=1}^{n} g(k)` is `Σ_{k_1=1}^{n} k·k_1`.
+- The derivative of a `Sum` no longer reads a global symbol as the index of the
+  sum when a function called in the sum reads a symbol with the name of the
+  index. With `k := 2` and `g := a ↦ a·k·x`, `Σ_{k=1}^{5} g(k)` is `30x`, but
+  its derivative in `x` was `55` (the sum of `k²`, the global `k` read as the
+  index): it is now `30`, as it is for the same sum with the index `j`. When `k`
+  has no value, the derivative was `55` too: it is now `15k`. When this occurs,
+  the derivative renames the index to a fresh name, such as `k_1`: the
+  derivative of `Σ_{k=1}^{n} g(k)` is `Σ_{k_1=1}^{n} k·k_1`.
 
 - `\int \sin x + 1` parsed to `Integrate(0) + sin(x) + 1`: the integrand was
-  lost. It now parses to `Integrate(sin(x) + 1)`. A differential inside one
-  term of a sum or a difference now ends the integrand at that term, and the
-  terms after it keep their sign: `\int \frac{x\,dx}{2} - 1` parses to
+  lost. It now parses to `Integrate(sin(x) + 1)`. A differential inside one term
+  of a sum or a difference now ends the integrand at that term, and the terms
+  after it keep their sign: `\int \frac{x\,dx}{2} - 1` parses to
   `Integrate(x/2, x) - 1` (it was `Integrate(x/2, x) + 1`), and
   `\int 1 - \frac{dx}{x}` to `Integrate(1 - 1/x, x)` (the `dx` stayed in the
-  integrand). A parenthesized term in such a sum (`\int (\sin x\,dx) + 1`)
-  no longer becomes a tuple, and with `diagnostics: true` the variable of the
+  integrand). A parenthesized term in such a sum (`\int (\sin x\,dx) + 1`) no
+  longer becomes a tuple, and with `diagnostics: true` the variable of the
   integration is no longer reported as undeclared in the integrand of such a
   sum.
 
-- **A subscripted name in a binder position is a new name, also when its base
-  is a list.** With `n` declared as `list<number>`, a subscript on `n` is an
-  index: `n_{0}` is `At(n, 0)`. The parser read a binder spelled that way the
-  same way, so `\sum_{n_{0}=1}^{3}n_{0}` was
+- **A subscripted name in a binder position is a new name, also when its base is
+  a list.** With `n` declared as `list<number>`, a subscript on `n` is an index:
+  `n_{0}` is `At(n, 0)`. The parser read a binder spelled that way the same way,
+  so `\sum_{n_{0}=1}^{3}n_{0}` was
   `["Sum", ["At", "n", 0], ["Tuple", "Nothing", 1, 3]]` (a sum with no index)
   and it evaluated to `3·At(n, 0)`. It is now
-  `["Sum", "n_0", ["Tuple", "n_0", 1, 3]]` and evaluates to `6`, as when `n`
-  is not declared. The same applies to a product index, a comprehension
-  variable (`[n_{0}^2 \operatorname{for} n_{0} = [1,2,3]]`), a local of a
-  `where` clause or of a `;` block (`n_{0} \coloneq 3; n_{0}+1` is `4`, not an
-  assignment to a function named `At`), a function parameter
-  (`n_{0} \mapsto n_{0}^2`, `f(n_{0}) \coloneq n_{0}^2`, which were a parse
-  error and an invalid function), a `for … from … to … do` index, a limit
-  variable, a quantified variable, the variable of a set-builder
-  (`\{n_{0} \mid n_{0}>0\}`), an integration variable (`dn_{0}`) and a
-  differentiation variable (`\frac{d}{dn_{0}}`, `\partial n_{0}` in a
-  denominator). The occurrences of the binder in its scope are the new name
-  too. Elsewhere, a subscript on a list is still an index: in
-  `\sum_{k=1}^{3}n_{k}`, the body is `At(n, k)`, and in
+  `["Sum", "n_0", ["Tuple", "n_0", 1, 3]]` and evaluates to `6`, as when `n` is
+  not declared. The same applies to a product index, a comprehension variable
+  (`[n_{0}^2 \operatorname{for} n_{0} = [1,2,3]]`), a local of a `where` clause
+  or of a `;` block (`n_{0} \coloneq 3; n_{0}+1` is `4`, not an assignment to a
+  function named `At`), a function parameter (`n_{0} \mapsto n_{0}^2`,
+  `f(n_{0}) \coloneq n_{0}^2`, which were a parse error and an invalid
+  function), a `for … from … to … do` index, a limit variable, a quantified
+  variable, the variable of a set-builder (`\{n_{0} \mid n_{0}>0\}`), an
+  integration variable (`dn_{0}`) and a differentiation variable
+  (`\frac{d}{dn_{0}}`, `\partial n_{0}` in a denominator). The occurrences of
+  the binder in its scope are the new name too. Elsewhere, a subscript on a list
+  is still an index: in `\sum_{k=1}^{3}n_{k}`, the body is `At(n, k)`, and in
   `\frac{\partial n_{0}}{\partial x}`, the differentiand is `At(n, 0)`. A
-  top-level assignment `n_{0} \coloneq 3` is not a binder: it is still the
-  error `expected-a-symbol`, as before.
+  top-level assignment `n_{0} \coloneq 3` is not a binder: it is still the error
+  `expected-a-symbol`, as before.
 
-- **The variable of `Integrate` and `Limit` no longer reads a symbol of the
-  same name inside a called user function.** With `k := 2` and
-  `g := a ↦ a·k·x`, `\int_0^1 g(k)\,dk` was `x/3` and is now `x`, the value of
+- **The variable of `Integrate` and `Limit` no longer reads a symbol of the same
+  name inside a called user function.** With `k := 2` and `g := a ↦ a·k·x`,
+  `\int_0^1 g(k)\,dk` was `x/3` and is now `x`, the value of
   `\int_0^1 g(t)\,dt`; `\lim_{k\to 1} g(k)` was `x` and is now `2x`;
-  `\int g(k)\,dk` was `-x k^3/6 + k x k^2/2` and is now `x k^2`. When `k` has
-  no value, `\lim_{k\to 1} g(k)` is now `k x` (it was `x`) and
-  `\int_0^1 g(k)\,dk` is `k x/2` (it was `x/3`). These operators inline the
-  body of `g` and select the variable by its name, so the `k` of the body
-  became the variable. The variable is now renamed to a fresh name first. The
-  fresh name is not a name of the expression and not the name of a declared
-  symbol, with or without a value. The bounds of the integral and the point of
-  the limit keep their symbols: `\sum_{k=1}^{2} \int_0^k g(k)\,dk` is `5x`
-  (the bound is the index of the sum), and `\int_0^{k_1} g(k)\,dk` is
-  `x k_1^2`. An indefinite integral whose result also holds the global `k`
-  keeps the fresh name, and the printed result shows it: `\int g(k)\,dk` is
-  `\frac{1}{2}k x k_1^2` when `k` has no value (`k_2` when `k_1` is declared).
-  That result is correct: the `k` of `g` and the variable of the
-  antiderivative are different symbols. `Sum` and `Product` already gave
-  these answers. `Solve(g(k) = 1, k)` and `Solve(\{g(k) = 1, k \in 1..3\})`
-  had the same capture and answered `[]` (no solution); they now stay
-  unsolved.
+  `\int g(k)\,dk` was `-x k^3/6 + k x k^2/2` and is now `x k^2`. When `k` has no
+  value, `\lim_{k\to 1} g(k)` is now `k x` (it was `x`) and `\int_0^1 g(k)\,dk`
+  is `k x/2` (it was `x/3`). These operators inline the body of `g` and select
+  the variable by its name, so the `k` of the body became the variable. The
+  variable is now renamed to a fresh name first. The fresh name is not a name of
+  the expression and not the name of a declared symbol, with or without a value.
+  The bounds of the integral and the point of the limit keep their symbols:
+  `\sum_{k=1}^{2} \int_0^k g(k)\,dk` is `5x` (the bound is the index of the
+  sum), and `\int_0^{k_1} g(k)\,dk` is `x k_1^2`. An indefinite integral whose
+  result also holds the global `k` keeps the fresh name, and the printed result
+  shows it: `\int g(k)\,dk` is `\frac{1}{2}k x k_1^2` when `k` has no value
+  (`k_2` when `k_1` is declared). That result is correct: the `k` of `g` and the
+  variable of the antiderivative are different symbols. `Sum` and `Product`
+  already gave these answers. `Solve(g(k) = 1, k)` and
+  `Solve(\{g(k) = 1, k \in 1..3\})` had the same capture and answered `[]` (no
+  solution); they now stay unsolved.
 - **`Integrate` and `Solve` inline a function that is declared with a function
   type and then assigned** (`g: (real) -> real`, then `g := a ↦ a·x`), as they
   do for a function that is only assigned. `\int_0^1 g(t)\,dt` stayed
@@ -546,41 +715,40 @@
   `Solve`.** With `r(x) := r(x − 1) + 1`, `\int_0^1 x^2 + r(3)\,dx` ran for
   about 11 seconds and ended with a stack overflow (`RangeError`). The call now
   stays as it is, and its evaluation stops at the recursion limit with a
-  `CancellationError` at once, as it already did for a function declared with
-  a function type.
+  `CancellationError` at once, as it already did for a function declared with a
+  function type.
 - An element read over a collection whose element type is `any`, or over a
   symbol declared `any` or `value`, is typed `any`. It was `unknown`, and
   arithmetic reads an `unknown` operand as a number: with `P: any` (or
   `P: list<any>`), `P[i]` was `unknown` and `P[i] - P[j]` was
-  `broadcastable<number>`, although `P` can hold points and
-  `(3, 4) - (1, 1)` is `(2, 3)`. Now `P[i]` and `P[i] - P[j]` are `any`. This
-  applies to `At` (a single index, a gather, several indices, a dictionary
-  key, a dynamic index into a tuple or a record with an `any` field),
-  `First`, `Second`, `Third`, `Last` and `Field` (`D.a` with
-  `D: dictionary<any>` is `any`, was `unknown`). A function of such a read is
-  `any` too: `Sqrt(P[i])`, `Sin(P[i])` and `h(P[i])` with
-  `h: (number) -> number` were `broadcastable<number>`. A symbol whose type is
-  inferred from its uses is not changed: with `P` undeclared, `P[i]` is still
-  `unknown` and `P[i] - P[j]` still makes `P` an `indexed_collection<number>`
-  (and a read of `Rest(P)`, `Take(P, 2)`, `Sort(P)`, … is `unknown` as well).
-  A bare `list` (a synonym of `list<unknown>`) still gives `unknown`. A tuple
-  of such reads still compiles: `(P[1], P[2])` with `P: list<any>` or
-  `P: collection<any> | tuple` compiles to JavaScript, since a list element is
-  never `Nothing`.
-- `Sum` and `Product` of terms typed `any` or `value` are typed `any`. They
-  were `number`: with `P: any := [(3, 4), (1, 1), (0, 0)]`,
-  `Sum(P[k], k, 1, 3)` and `Sum(P)` evaluate to the point `(4, 5)`.
+  `broadcastable<number>`, although `P` can hold points and `(3, 4) - (1, 1)` is
+  `(2, 3)`. Now `P[i]` and `P[i] - P[j]` are `any`. This applies to `At` (a
+  single index, a gather, several indices, a dictionary key, a dynamic index
+  into a tuple or a record with an `any` field), `First`, `Second`, `Third`,
+  `Last` and `Field` (`D.a` with `D: dictionary<any>` is `any`, was `unknown`).
+  A function of such a read is `any` too: `Sqrt(P[i])`, `Sin(P[i])` and
+  `h(P[i])` with `h: (number) -> number` were `broadcastable<number>`. A symbol
+  whose type is inferred from its uses is not changed: with `P` undeclared,
+  `P[i]` is still `unknown` and `P[i] - P[j]` still makes `P` an
+  `indexed_collection<number>` (and a read of `Rest(P)`, `Take(P, 2)`,
+  `Sort(P)`, … is `unknown` as well). A bare `list` (a synonym of
+  `list<unknown>`) still gives `unknown`. A tuple of such reads still compiles:
+  `(P[1], P[2])` with `P: list<any>` or `P: collection<any> | tuple` compiles to
+  JavaScript, since a list element is never `Nothing`.
+- `Sum` and `Product` of terms typed `any` or `value` are typed `any`. They were
+  `number`: with `P: any := [(3, 4), (1, 1), (0, 0)]`, `Sum(P[k], k, 1, 3)` and
+  `Sum(P)` evaluate to the point `(4, 5)`.
 - A read of `Take(P, 2)`, `Rest(P)`, `Drop(P, 2)`, `Most(P)` or `Reverse(P)`
-  with `P` undeclared is `unknown`. It was `character | missing`, the element
-  of the `string` option of the type `list<unknown> | string`, so
-  `Rest(P)[i] + 1` was an `incompatible-type` error.
+  with `P` undeclared is `unknown`. It was `character | missing`, the element of
+  the `string` option of the type `list<unknown> | string`, so `Rest(P)[i] + 1`
+  was an `incompatible-type` error.
 
 ### New Features
 
 - **`broadcast()` and `broadcastAsync()` of a `javascript` result take shared
-  inputs and write several values per cell** (Tycho row 416). Two additions,
-  for a kernel that reads the field values around a cell and writes several
-  numbers per cell (the corners and edges of a 3-D implicit surface):
+  inputs and write several values per cell** (Tycho row 416). Two additions, for
+  a kernel that reads the field values around a cell and writes several numbers
+  per cell (the corners and edges of a 3-D implicit surface):
   - A shared input is bound once for the whole batch and read by index in the
     expression: with `F: list<number>` and `i: integer`, `F_{i+1}` over
     `{ i: Float64Array [0, 1, 2], F: [1, 2, 3, 4] }` gives `[1, 2, 3]`. A
@@ -588,89 +756,87 @@
     names any other one (`{ shared: ['G'] }`). A shared input is a plain array
     of numbers or a `Float64Array`, is not a column of the `cells` layout and
     not an axis of the `grid` layout, and goes to each worker of the pool once
-    per `broadcastAsync()` call instead of once per slice. A variable read as
-    a list was refused before ("cannot be broadcast"); a plain array for any
-    other variable throws.
+    per `broadcastAsync()` call instead of once per slice. A variable read as a
+    list was refused before ("cannot be broadcast"); a plain array for any other
+    variable throws.
   - An expression whose type is a tuple of two or more elements that can be
-    numbers (an element typed `unknown`, such as an undeclared symbol,
-    counts) writes that many values per cell into one output array: `(i, 2i)`
-    over
+    numbers (an element typed `unknown`, such as an undeclared symbol, counts)
+    writes that many values per cell into one output array: `(i, 2i)` over
     `{ i: Float64Array [1, 2, 3] }` gives `[1, 2, 2, 4, 3, 6]`. The result
     reports the count as `broadcastOutputs`, which a stored result keeps for
-    `createJavaScriptRuntime().loadBroadcast()` and the pool's workers; the
-    new `outputs` option overrides it. An element missing from an array
-    answer is `NaN`, and a non-array answer or a thrown cell is `NaN` in every
-    slot. `done` of `broadcastAsync()` is still a count of cells.
+    `createJavaScriptRuntime().loadBroadcast()` and the pool's workers; the new
+    `outputs` option overrides it. An element missing from an array answer is
+    `NaN`, and a non-array answer or a thrown cell is `NaN` in every slot.
+    `done` of `broadcastAsync()` is still a count of cells.
 
   An `interval-js` result throws a `TypeError` for either option.
 
-- **The grid of the `global` option of `FindFit` now has a point in every
-  basin of a frequency** (Tycho row 407). The search sampled a searched
-  parameter at a fixed number of points (400 for one parameter, 40 × 40 for
-  two), so a wide range for a frequency found the best fit only when a point
-  fell near it by chance. With `a cos(b x + c) + d x + e` on 200 points over
-  `x ∈ [0, 10]` (true `b = 2.2`), `b` over `[0.3, 120]` and `c` over
-  `[0, 2π]` gave a sum of squared residuals of 390 at `b = 0.3`; it now finds
-  `b = 2.2` (about `1e-27`). Three changes:
+- **The grid of the `global` option of `FindFit` now has a point in every basin
+  of a frequency** (Tycho row 407). The search sampled a searched parameter at a
+  fixed number of points (400 for one parameter, 40 × 40 for two), so a wide
+  range for a frequency found the best fit only when a point fell near it by
+  chance. With `a cos(b x + c) + d x + e` on 200 points over `x ∈ [0, 10]` (true
+  `b = 2.2`), `b` over `[0.3, 120]` and `c` over `[0, 2π]` gave a sum of squared
+  residuals of 390 at `b = 0.3`; it now finds `b = 2.2` (about `1e-27`). Three
+  changes:
   - A parameter that multiplies a variable inside `Sin`, `Cos`, `Tan`, `Cot`,
     `Sec` or `Csc` (`b` in `cos(b x + c)`) gets grid points
-    `π / (rate · span of x)` apart (half that for `Tan` and `Cot`), up to
-    4,000 points, in every angular unit (`ce.angularUnit`). A parameter whose
-    phase rate is not a constant (`cos(b² x)`) and a non-periodic model keep
-    the previous grid.
-  - A phase that is only added to the argument of a `Sin` or `Cos` multiplied
-    by a linear amplitude (`c` in `a cos(b x + c)`), searched over at least
-    one period, is solved by least squares with the linear parameters, since
+    `π / (rate · span of x)` apart (half that for `Tan` and `Cot`), up to 4,000
+    points, in every angular unit (`ce.angularUnit`). A parameter whose phase
+    rate is not a constant (`cos(b² x)`) and a non-periodic model keep the
+    previous grid.
+  - A phase that is only added to the argument of a `Sin` or `Cos` multiplied by
+    a linear amplitude (`c` in `a cos(b x + c)`), searched over at least one
+    period, is solved by least squares with the linear parameters, since
     `a cos(b x + c) = p cos(b x) + q sin(b x)`. It is then no longer sampled,
     and the search over `b` and `c` costs as much as a search over `b` alone.
-    The fitted phase is in its range. Otherwise two searched parameters share
-    a budget of 8,000 grid points.
+    The fitted phase is in its range. Otherwise two searched parameters share a
+    budget of 8,000 grid points.
   - A range can give the grid step as a third element:
-    `{global: {b: [0.3, 120, 0.05]}}`. It sets the grid of the scan that
-    solves the linear parameters; when the model is not linear in the other
-    parameters, the solver still runs from each point of the coarse grid (24
-    points, or 6 × 6). A step on a phase keeps that phase on the grid instead
-    of solving it by least squares. A step that is not a finite positive
-    number is an `unexpected-argument` error, as is a pair of steps that asks
-    for more than 8,000 points of the grid of that scan.
+    `{global: {b: [0.3, 120, 0.05]}}`. It sets the grid of the scan that solves
+    the linear parameters; when the model is not linear in the other parameters,
+    the solver still runs from each point of the coarse grid (24 points, or 6 ×
+    6). A step on a phase keeps that phase on the grid instead of solving it by
+    least squares. A step that is not a finite positive number is an
+    `unexpected-argument` error, as is a pair of steps that asks for more than
+    8,000 points of the grid of that scan.
 
   With more than 300 data rows, the grid is scanned on a stratified sample of
-  300 rows (the same rows for the same data, not a regular sub-grid, so that
-  an alias of the true frequency does not fit the sample), the 24 best grid
-  points are solved again on every row, and the 6 best of those are refined
-  on every row. When the deadline of the evaluation expires during the scan
-  of the sample, the record (`timedOut: True`) has the best scanned
-  parameters and `residualNorm: NaN`, since their residual over every row was
-  not computed. On 1,000 rows with `b` over `[0.3, 628]` the search took about
-  410 ms and missed the fit (residual sum 1,947); it now takes about 260 to
-  330 ms and finds it. On 200 rows the deciding cases take about 45 to 70 ms
-  (they took about 90 to 100 ms).
+  300 rows (the same rows for the same data, not a regular sub-grid, so that an
+  alias of the true frequency does not fit the sample), the 24 best grid points
+  are solved again on every row, and the 6 best of those are refined on every
+  row. When the deadline of the evaluation expires during the scan of the
+  sample, the record (`timedOut: True`) has the best scanned parameters and
+  `residualNorm: NaN`, since their residual over every row was not computed. On
+  1,000 rows with `b` over `[0.3, 628]` the search took about 410 ms and missed
+  the fit (residual sum 1,947); it now takes about 260 to 330 ms and finds it.
+  On 200 rows the deciding cases take about 45 to 70 ms (they took about 90 to
+  100 ms).
 
-- **`FindFit` with the `global` option runs its grid scan on the engine's
-  worker pool on the asynchronous route.** When the engine has a kernel pool
+- **`FindFit` with the `global` option runs its grid scan on the engine's worker
+  pool on the asynchronous route.** When the engine has a kernel pool
   (`ce.workers`, see `createKernelPool()`), `expr.evaluateAsync()` sends the
   grid points of the scan to the workers in one slice per worker; the
-  refinements by the solver stay on the calling thread. Each worker solves
-  its points with the code the calling thread uses, on the same numbers, so
-  the record is the record of `evaluate()`. The pool is used only when the
-  model and the derivatives the scan reads compile to JavaScript that a
-  worker can run (a model with a function that does not compile, such as
-  `LogGamma`, runs on the calling thread), and only for a model that is
-  linear in the parameters that are not searched (otherwise each grid point
-  is a solver run, on the calling thread). A worker that fails or refuses the
-  problem is replaced by the calling thread for its points, with the same
-  result. The engine's `iterationLimit` applies on the workers too. An
-  abort of the `signal` of `evaluateAsync()` rejects the evaluation with a
-  `CancellationError`, whatever the reason given to `abort()`; the fit on
-  the calling thread stops within a data row, and a slice that a worker runs
-  finishes there and its result is dropped. On the asynchronous route, with
-  or without a pool, the data operand is evaluated with `evaluateAsync()`, so
-  data from an operator that has only an asynchronous handler is read.
-  `evaluate()` does not use the pool. Measured with
+  refinements by the solver stay on the calling thread. Each worker solves its
+  points with the code the calling thread uses, on the same numbers, so the
+  record is the record of `evaluate()`. The pool is used only when the model and
+  the derivatives the scan reads compile to JavaScript that a worker can run (a
+  model with a function that does not compile, such as `LogGamma`, runs on the
+  calling thread), and only for a model that is linear in the parameters that
+  are not searched (otherwise each grid point is a solver run, on the calling
+  thread). A worker that fails or refuses the problem is replaced by the calling
+  thread for its points, with the same result. The engine's `iterationLimit`
+  applies on the workers too. An abort of the `signal` of `evaluateAsync()`
+  rejects the evaluation with a `CancellationError`, whatever the reason given
+  to `abort()`; the fit on the calling thread stops within a data row, and a
+  slice that a worker runs finishes there and its result is dropped. On the
+  asynchronous route, with or without a pool, the data operand is evaluated with
+  `evaluateAsync()`, so data from an operator that has only an asynchronous
+  handler is read. `evaluate()` does not use the pool. Measured with
   `a cos(b x + c) + d x + e` (`benchmarks/workers/fit-parallel.mts`, load
-  average 6 on 18 cores): 1,000 rows with `b` over `[0.3, 628]` take 62 ms
-  with 8 workers and 76 ms with 4, against 230 ms for `evaluate()`; the
-  200-row cases take 13 to 23 ms with 8 workers, against 34 to 42 ms.
+  average 6 on 18 cores): 1,000 rows with `b` over `[0.3, 628]` take 62 ms with
+  8 workers and 76 ms with 4, against 230 ms for `evaluate()`; the 200-row cases
+  take 13 to 23 ms with 8 workers, against 34 to 42 ms.
 
 ## 0.159.0 _2026-10-20_
 
@@ -20022,7 +20188,8 @@ from 95.3% to 97.1%:
 The numeric and symbolic state of this release is summarized below against the
 last packed comparator release (`0.66.0`), SymPy, math.js, and **Mathematica** —
 the reference baseline, since it is the broadest engine in the field. The tables
-are generated by the harness in [`benchmarks/`](https://github.com/cortex-js/compute-engine/tree/main/benchmarks)
+are generated by the harness in
+[`benchmarks/`](https://github.com/cortex-js/compute-engine/tree/main/benchmarks)
 (`node benchmarks/report_changelog.mjs`); every result is verified numerically
 against an independent `mpmath` reference, never another tool. "CE 0.69.0" is
 this release.
@@ -21688,7 +21855,8 @@ answer, lose exactness, hang, or silently accept invalid input.
 The numeric and symbolic gains in this release are summarized below against the
 last release (`0.59.0`), SymPy, math.js, and **Mathematica** — the reference
 baseline, since it is the broadest engine in the field. The tables are generated
-by the harness in [`benchmarks/`](https://github.com/cortex-js/compute-engine/tree/main/benchmarks)
+by the harness in
+[`benchmarks/`](https://github.com/cortex-js/compute-engine/tree/main/benchmarks)
 (`node benchmarks/report_changelog.mjs`); every result is verified numerically
 against an independent `mpmath` reference, never another tool. "CE 0.60.0" is
 this release.

@@ -144,7 +144,7 @@ import {
   canonicalSolve,
   evaluateSolve,
 } from '../boxed-expression/solve-domain.js';
-import { findRoot } from '../nonlinear-fit.js';
+import { findRoot, findRootAsync } from '../nonlinear-fit.js';
 import { BLOCK_DEFINITION } from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
@@ -8413,16 +8413,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'residual expression (read as `= 0`), or a list of either. `params` is',
         'a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with',
         'box constraints), matching `FindFit`. Returns a record',
-        '{parameters, converged, residualNorm, iterations}.',
+        '{parameters, converged, stationary, residualNorm, iterations}.',
+        '`converged` is true only at a root: every residual is within the',
+        "engine's tolerance scaled by its own equation (`|r_i| ≤ tolerance ·",
+        '(1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the Jacobian and `θ` the',
+        'parameters), so a minimum of the sum of squared residuals that is',
+        'not a root (`a^2 + 1 = 0`) is `converged: False`. `stationary` is',
+        "the solver's own stop test, true at such a minimum too; a stacked",
+        'system of data rows next to an equation reads it as `FindFit`',
+        'reads `converged`. An optional third argument is the options',
+        'dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the',
+        'named parameters (at most two) over the range for the lowest sum',
+        'of squared residuals of the whole system; the constant phase',
+        'coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space',
+        'the grid as the span of a variable does for a fit. With a kernel',
+        'pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid',
+        'on the workers.',
       ],
       keywords: ['roots', 'zeros'],
       // Hold the arguments: an `Equal` must not collapse to a boolean, and a
       // parameter symbol may carry a seeded value that must not be substituted
       // before solving.
       lazy: true,
-      signature: '(any, any) -> dictionary',
+      signature: '(any, any, dictionary?) -> dictionary',
       examples: ['FindRoot(x^2 - 2, [(x, 1)])'],
       evaluate: (ops, { engine: ce }) => findRoot(ce, ops),
+      // The global scan on the engine's kernel pool, when it has one and the
+      // equations compiled to code a worker can run; otherwise on this
+      // thread (see `FindFit`).
+      evaluateAsync: (ops, options) =>
+        findRootAsync(options.engine, ops, awaitedOperandOptions(options)),
     },
 
     NSolve: {

@@ -32,6 +32,7 @@ import { runWithEvaluationEffects } from './effects-registry.js';
 import {
   isDictionary,
   isFunction,
+  isNumber,
   isSymbol,
 } from './boxed-expression/type-guards.js';
 import { numberLiteralOf } from './boxed-expression/numerics.js';
@@ -99,7 +100,13 @@ interface GlobalScan {
 interface PeriodicRate {
   /** Index of the parameter. */
   param: number;
-  /** Index of the fit variable. */
+  /** Index of the fit variable, or −1 for a constant rate: the unit is an
+   * equation of a `FindRoot` system, which has no variable, and `rate` is
+   * the derivative of the argument with respect to the parameter itself
+   * (`3.22` for `cos(3.22 b + c)`). The equations of a system play the
+   * part of the rows of a fit, so `basinWidth` reads the span of these
+   * constants over the units as it reads the span of a variable over the
+   * rows. */
   variable: number;
   /** In radians per unit of the parameter and of the variable: the
    * derivative of the argument multiplied by the factor that converts the
@@ -285,8 +292,13 @@ function parseVars(varsExpr: Expression): string[] | null {
  * or more dimensions is too costly for the scan this file runs. */
 const MAX_GLOBAL_SCANS = 2;
 
+/** The operator a lowering runs for, which names it in its error messages. */
+type FitOperator = 'FindFit' | 'FindRoot';
+
 /**
- * Parse the optional fifth `FindFit` argument, a dictionary of options.
+ * Parse the options dictionary: the optional fifth argument of `FindFit`,
+ * the optional third of `FindRoot` (`operator` names the one the message of
+ * an error reports).
  *
  * The only option today is `global`: a dictionary that maps a parameter name
  * to a closed range `(lo, hi)`, or `(lo, hi, step)` with a finite positive
@@ -310,11 +322,12 @@ const MAX_GLOBAL_SCANS = 2;
 function parseFitOptions(
   ce: IComputeEngine,
   optionsExpr: Expression | undefined,
-  specs: ParamSpec[]
+  specs: ParamSpec[],
+  operator: FitOperator
 ): GlobalScan[] | Expression {
   if (optionsExpr === undefined) return [];
   const fail = (msg: string) =>
-    ce.error('unexpected-argument', `FindFit: ${msg}`);
+    ce.error('unexpected-argument', `${operator}: ${msg}`);
 
   const options = optionsExpr.canonical;
   if (!isDictionary(options))
@@ -571,7 +584,12 @@ function prepareUnit(
     // Fall back to finite differences when the column cannot be differentiated
     // symbolically, or when the derivative is left as an un-evaluable
     // `Derivative(…)` placeholder (e.g. `∂Zeta(b·x)/∂b`).
-    if (d === undefined || d.has('Derivative')) {
+    // An invalid derivative is a rule that produced a type error (the
+    // generic chain rule over an accessor of a point gave a product of a
+    // tuple and a number, Tycho row 415): it would compile to a column of
+    // NaN that stops the solver at its start, so it takes the finite
+    // difference too.
+    if (d === undefined || !d.isValid || d.has('Derivative')) {
       deriv.push(null);
       derivStored.push(undefined);
       derivUnknowns.push(null);
@@ -581,7 +599,17 @@ function prepareUnit(
       deriv.push(column.fn);
       derivStored.push(column.stored);
       derivUnknowns.push(new Set(d.unknowns));
-      stepLike.push(d.isSame(0) && renamed.has(pf));
+      // A zero derivative of a parameter the expression mentions is the
+      // signature of a step function of it, unless every occurrence is
+      // dead: a factor of a product with a literal zero, which
+      // canonicalization keeps (`0 · b` is not folded, since a symbol can
+      // be infinite). An equation of a `FindRoot` system built from a data
+      // row at `x = 0` reads `a cos(0 · b + c) + 0 · d`, and the step-like
+      // reading of `b` and `d` turned the separable scan of a global search
+      // into the coarse multi-start (Tycho row 408).
+      stepLike.push(
+        d.isSame(0) && renamed.has(pf) && !occursOnlyUnderZero(renamed, pf)
+      );
     }
   }
 
@@ -605,6 +633,24 @@ function prepareUnit(
 /** The periodic functions whose argument can carry a phase rate. The
  * hyperbolic functions are not periodic over the reals. */
 const PERIODIC_FUNCTIONS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
+
+/**
+ * True when every occurrence of the symbol `name` in `expr` is dead: inside
+ * a product that has a literal zero among its factors (`0 · b`, which
+ * canonicalization keeps for a symbol). The expression then does not depend
+ * on the symbol, although it mentions it. Vacuously true when the symbol
+ * does not occur at all, so a caller tests `expr.has(name)` first.
+ */
+function occursOnlyUnderZero(expr: Expression, name: string): boolean {
+  if (isSymbol(expr)) return expr.symbol !== name;
+  if (!isFunction(expr)) return true;
+  if (
+    expr.operator === 'Multiply' &&
+    expr.ops.some((op) => isNumber(op) && op.isSame(0))
+  )
+    return true;
+  return expr.ops.every((op) => occursOnlyUnderZero(op, name));
+}
 
 /** Call `visit` on `expr` and on each of its subexpressions. */
 function walkExpression(
@@ -675,6 +721,26 @@ export function analyzeGlobalShape(
       const arg = e.op1;
       const period =
         e.operator === 'Tan' || e.operator === 'Cot' ? Math.PI : 2 * Math.PI;
+      // An equation of a `FindRoot` system has no variable: the argument's
+      // derivative with respect to a parameter is itself the constant rate
+      // (`PeriodicRate.variable` is −1), `3.22` for `cos(3.22 b + c)`. A
+      // zero rate is recorded too (`cos(0 · b + c)`, the equation of a row
+      // at `x = 0`): the span of the rates over the equations stands for
+      // the span of the variable over the rows, and the row at zero is part
+      // of it.
+      if (varFresh.length === 0)
+        paramFresh.forEach((pf, j) => {
+          if (countSymbol(arg, pf) === 0) return;
+          const d = differentiate(arg, pf);
+          const rate = d === undefined ? NaN : realValue(d);
+          if (Number.isFinite(rate))
+            periodicRates.push({
+              param: j,
+              variable: -1,
+              rate: rate * toRadians,
+              period,
+            });
+        });
       varFresh.forEach((vf, k) => {
         if (countSymbol(arg, vf) === 0) return;
         const dx = differentiate(arg, vf);
@@ -740,6 +806,7 @@ function buildRecord(
   ce: IComputeEngine,
   paramNames: string[],
   result: LMResult,
+  operator: FitOperator,
   phase: FitPhase = 'solve'
 ): Expression {
   const paramEntries = paramNames.map((name, j) =>
@@ -759,6 +826,19 @@ function buildRecord(
     ),
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
   ];
+  // `FindRoot` only: `converged` is true only at a root (the residual is
+  // within the solver's tolerance, `rootToleranceOf`), while `stationary`
+  // is the solver's own stop test, a minimum of the sum of squared residuals
+  // that may not be a root (`a² + 1 = 0`, or a stacked system of data rows
+  // whose misfit is not zero). The `FindFit` record is unchanged: there
+  // `converged` is the stationarity test.
+  if (operator === 'FindRoot')
+    entries.push(
+      ce.tuple(
+        ce.string('stationary'),
+        result.stationary ? TRUE_(ce) : FALSE_(ce)
+      )
+    );
   // Present ONLY when the call was cut short by an evaluation deadline
   // (Tycho item 118 + addendum) — the normal-path record is unchanged, so
   // existing consumers see no new key. `phase` says whether anything was
@@ -778,6 +858,9 @@ function buildRecord(
  * so the in-band timeout record can carry it honestly.
  */
 interface SetupContext {
+  /** The operator the lowering runs for: it names the record's keys
+   * (`buildRecord`) and the error messages. */
+  operator: FitOperator;
   /** Parameter specs, once parsed — their starts are the only values we can
    * honestly report when no solve ran. Absent if the deadline fired first. */
   specs?: ParamSpec[];
@@ -785,6 +868,30 @@ interface SetupContext {
    * not mislabelled `"setup"`. */
   phase: FitPhase;
 }
+
+/**
+ * The root tolerance of the solver for an operator (`LMOptions.rootTolerance`):
+ * `FindRoot` reports `converged` only at a point whose residual norm is
+ * within the engine's tolerance, scaled by the system (Tycho row 414: a
+ * minimum of the sum of squares that is not a root, `a² + 1 = 0`, was
+ * reported converged). `FindFit` has none: its convergence is the solver's
+ * stationarity test, since the misfit of the data is not zero at a good fit.
+ */
+function rootToleranceOf(
+  ce: IComputeEngine,
+  operator: FitOperator
+): number | undefined {
+  if (operator !== 'FindRoot') return undefined;
+  // The solver runs in doubles: the residual at a root carries the rounding
+  // of its terms, so a tolerance below what doubles resolve could never be
+  // met (an engine tolerance of 1e-30 is allowed), and every root solve
+  // would report `converged: false`.
+  return Math.max(ce.tolerance, ROOT_TOLERANCE_FLOOR);
+}
+
+/** The smallest root tolerance (see `rootToleranceOf`): 64 machine
+ * epsilons, about 1.4e-14. */
+const ROOT_TOLERANCE_FLOOR = 64 * Number.EPSILON;
 
 /** In-band record for a deadline that expired during the SETUP phase (Tycho
  * item 118 addendum): a consumer whose whole budget goes to data evaluation,
@@ -800,10 +907,12 @@ function timeoutRecord(ce: IComputeEngine, ctx: SetupContext): Expression {
       // The starting point is all that is known: no residual was ever formed.
       theta: specs.map((s) => clamp(s.start, s.lo, s.hi)),
       converged: false,
+      stationary: false,
       residualNorm: NaN,
       iterations: 0,
       timedOut: true,
     },
+    ctx.operator,
     ctx.phase
   );
 }
@@ -940,6 +1049,7 @@ function solve(
   ce: IComputeEngine,
   units: FitUnit[],
   specs: ParamSpec[],
+  operator: FitOperator,
   deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
   signal?: AbortSignal
 ): Expression | undefined {
@@ -957,6 +1067,7 @@ function solve(
     deadlineFrame,
     signal
   );
+  const rootTolerance = rootToleranceOf(ce, operator);
 
   // A deadline expiring during the starting-point evaluation or the solver's
   // own initial residual/Jacobian — before any iteration completed — still
@@ -974,6 +1085,7 @@ function solve(
     result = levenbergMarquardt(residual, jacobian, theta0, {
       lo,
       hi,
+      rootTolerance,
       onIteration: () => {
         checkDeadline(deadlineFrame());
         checkAborted(signal);
@@ -984,6 +1096,7 @@ function solve(
     result = {
       theta: theta0.map((v, j) => clamp(v, lo[j], hi[j])),
       converged: false,
+      stationary: false,
       residualNorm: NaN,
       iterations: 0,
       timedOut: true,
@@ -993,7 +1106,8 @@ function solve(
   return buildRecord(
     ce,
     specs.map((s) => s.name),
-    result
+    result,
+    operator
   );
 }
 
@@ -1478,9 +1592,19 @@ function* globalSearchPlan(
  */
 function basinWidth(units: FitUnit[], param: number): number | undefined {
   let width: number | undefined;
+  // The constant rates of a system of equations (`PeriodicRate.variable`
+  // is −1), per period: the equations stand for the rows, so the span is
+  // taken over every unit, below.
+  const constants = new Map<number, number[]>();
   for (const unit of units) {
     for (const r of unit.periodicRates) {
       if (r.param !== param) continue;
+      if (r.variable < 0) {
+        const list = constants.get(r.period) ?? [];
+        list.push(r.rate);
+        constants.set(r.period, list);
+        continue;
+      }
       let min = Infinity;
       let max = -Infinity;
       for (const row of unit.rows) {
@@ -1494,6 +1618,19 @@ function basinWidth(units: FitUnit[], param: number): number | undefined {
       const w = r.period / 2 / (Math.abs(r.rate) * span);
       if (width === undefined || w < width) width = w;
     }
+  }
+  for (const [period, rates] of constants) {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of rates) {
+      if (!Number.isFinite(v)) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const span = max - min;
+    if (!Number.isFinite(span) || span <= 0) continue;
+    const w = period / 2 / span;
+    if (width === undefined || w < width) width = w;
   }
   return width;
 }
@@ -1625,9 +1762,10 @@ function solveGlobal(
   ce: IComputeEngine,
   units: FitUnit[],
   specs: ParamSpec[],
-  scans: GlobalScan[]
+  scans: GlobalScan[],
+  operator: FitOperator
 ): Expression | undefined {
-  const search = prepareGlobalSearch(ce, units, specs, scans);
+  const search = prepareGlobalSearch(ce, units, specs, scans, operator);
   if ('done' in search) return search.done;
   return search.finish(
     runFitPlanSync(search.plan(), new InlineFitExecutor(search.kernel))
@@ -1665,6 +1803,7 @@ function prepareGlobalSearch(
   units: FitUnit[],
   specs: ParamSpec[],
   scans: GlobalScan[],
+  operator: FitOperator,
   deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
   signal?: AbortSignal
 ): GlobalSearch | { done: Expression | undefined } {
@@ -1673,6 +1812,7 @@ function prepareGlobalSearch(
 
   const p = specs.length;
   const cb = makeCallbacks(ce, units, specs, deadlineFrame, signal);
+  const rootTolerance = rootToleranceOf(ce, operator);
   const lo = cb.lo.slice();
   const hi = cb.hi.slice();
   for (const s of scans) {
@@ -1733,7 +1873,7 @@ function prepareGlobalSearch(
     return {
       done: ce.error(
         'unexpected-argument',
-        `FindFit: the grid steps of "${b}" and "${c}" in the "global" option ask for more than ${SEPARABLE_BUDGET} grid points`
+        `${operator}: the grid steps of "${b}" and "${c}" in the "global" option ask for more than ${SEPARABLE_BUDGET} grid points`
       ),
     };
   }
@@ -1829,6 +1969,7 @@ function prepareGlobalSearch(
     levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
       lo,
       hi,
+      rootTolerance,
       onIteration,
     });
   // A phase that the scan solves by least squares is refined UNBOUNDED. The
@@ -1854,6 +1995,7 @@ function prepareGlobalSearch(
     const r = levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
       lo: phaseLo,
       hi: phaseHi,
+      rootTolerance,
       onIteration,
     });
     const theta = r.theta.slice();
@@ -1913,7 +2055,8 @@ function prepareGlobalSearch(
     kernel,
     separable,
     wire,
-    finish: (outcome) => globalRecord(ce, names, thetaAt, scans, outcome),
+    finish: (outcome) =>
+      globalRecord(ce, names, thetaAt, scans, outcome, operator),
   };
 }
 
@@ -1923,12 +2066,13 @@ function globalRecord(
   names: string[],
   thetaAt: (point: number[]) => number[],
   scans: GlobalScan[],
-  outcome: GlobalSearchOutcome | 'no-finite-value'
+  outcome: GlobalSearchOutcome | 'no-finite-value',
+  operator: FitOperator
 ): Expression {
   if (outcome === 'no-finite-value')
     return ce.error(
       'unexpected-argument',
-      'FindFit: the model has no finite value in the global range'
+      `${operator}: the ${operator === 'FindFit' ? 'model' : 'system'} has no finite value in the global range`
     );
   const { best, bestScanned, bestUnscored, iterations, timedOut } = outcome;
 
@@ -1942,35 +2086,52 @@ function globalRecord(
     (best === undefined || Math.sqrt(bestScanned[1]) < best.residualNorm)
   ) {
     const [theta, rss] = bestScanned;
-    return buildRecord(ce, names, {
-      theta,
-      converged: false,
-      residualNorm: Math.sqrt(rss),
-      iterations,
-      ...(timedOut ? { timedOut: true } : {}),
-    });
+    return buildRecord(
+      ce,
+      names,
+      {
+        theta,
+        converged: false,
+        stationary: false,
+        residualNorm: Math.sqrt(rss),
+        iterations,
+        ...(timedOut ? { timedOut: true } : {}),
+      },
+      operator
+    );
   }
   if (best === undefined) {
     // Nothing was evaluated on every row before the budget expired: the best
     // point of a scan on a sample of the rows, or else the lower corner of
     // the range, with no residual (`NaN`: it was not computed over every
     // row).
-    return buildRecord(ce, names, {
-      theta: bestUnscored ?? thetaAt(scans.map((s) => s.lo)),
-      converged: false,
-      residualNorm: NaN,
-      iterations,
-      ...(timedOut ? { timedOut: true } : {}),
-    });
+    return buildRecord(
+      ce,
+      names,
+      {
+        theta: bestUnscored ?? thetaAt(scans.map((s) => s.lo)),
+        converged: false,
+        stationary: false,
+        residualNorm: NaN,
+        iterations,
+        ...(timedOut ? { timedOut: true } : {}),
+      },
+      operator
+    );
   }
   // A search cut short by the deadline did not examine every candidate, so
   // it never reports convergence, even when the winning run converged.
-  return buildRecord(ce, names, {
-    ...best,
-    converged: best.converged && !timedOut,
-    iterations,
-    ...(timedOut ? { timedOut: true } : {}),
-  });
+  return buildRecord(
+    ce,
+    names,
+    {
+      ...best,
+      converged: best.converged && !timedOut,
+      iterations,
+      ...(timedOut ? { timedOut: true } : {}),
+    },
+    operator
+  );
 }
 
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -2012,9 +2173,10 @@ interface FitUnitWithParams extends FitUnit {
  */
 function withSetupDeadline(
   ce: IComputeEngine,
+  operator: FitOperator,
   body: (ctx: SetupContext) => Expression | undefined
 ): Expression | undefined {
-  const ctx: SetupContext = { phase: 'setup' };
+  const ctx: SetupContext = { operator, phase: 'setup' };
   try {
     return body(ctx);
   } catch (e) {
@@ -2023,25 +2185,35 @@ function withSetupDeadline(
   }
 }
 
+/** The prepared problem of a lowering (`findFitSetup`, `findRootSetup`):
+ * the answer when there is nothing to solve (an inert call, an error), or
+ * the units, the parameter specs and the global scans. */
+type FitSetup =
+  | { done: Expression | undefined }
+  | { units: FitUnitWithParams[]; specs: ParamSpec[]; scans: GlobalScan[] };
+
+/** The solve of a prepared problem on the calling thread: the global
+ * search when the options name a scan, the single solver run otherwise. */
+function solveSetup(
+  ce: IComputeEngine,
+  setup: FitSetup,
+  operator: FitOperator
+): Expression | undefined {
+  if ('done' in setup) return setup.done;
+  const { units, specs, scans } = setup;
+  return scans.length > 0
+    ? solveGlobal(ce, units, specs, scans, operator)
+    : solve(ce, units, specs, operator);
+}
+
 /** `FindFit(data, model, params, vars)`. */
 export function findFit(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
-  return withSetupDeadline(ce, (ctx) => findFitCore(ce, ops, ctx));
-}
-
-function findFitCore(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<Expression>,
-  ctx: SetupContext
-): Expression | undefined {
-  const setup = findFitSetup(ce, ops, ctx);
-  if ('done' in setup) return setup.done;
-  const { units, specs, scans } = setup;
-  return scans.length > 0
-    ? solveGlobal(ce, units, specs, scans)
-    : solve(ce, units, specs);
+  return withSetupDeadline(ce, 'FindFit', (ctx) =>
+    solveSetup(ce, findFitSetup(ce, ops, ctx), 'FindFit')
+  );
 }
 
 /**
@@ -2084,43 +2256,115 @@ export async function findFitAsync(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> = {}
 ): Promise<Expression | undefined> {
-  const signal = options.signal;
-  const frame = ce._deadlineFrame;
-  const deadlineFrame = () => frame;
-  const ctx: SetupContext = { phase: 'setup' };
-  const effects = options._effects;
-  const inContext = <T>(f: () => T): T =>
-    effects === undefined
-      ? f()
-      : runWithEvaluationEffects(
-          ce,
-          effects,
-          f,
-          options._contextStack,
-          options._precisionWindow
-        );
-  // A cancellation of the signal rejects, whatever its cause; a timeout of
-  // the deadline is reported in band, as on the synchronous route.
-  const timeoutOrThrow = (e: unknown): Expression => {
-    if (!isTimeoutCancellation(e)) throw e;
-    checkAborted(signal);
-    return timeoutRecord(ce, ctx);
-  };
-  const answer = (value: Expression | undefined): Expression | undefined => {
-    // A cancellation that the solver read as a timeout (the signal's reason
-    // was `'timeout'`) ended the fit early: the signal still rejects.
-    checkAborted(signal);
-    return value;
-  };
-
+  const route = asyncRoute(ce, 'FindFit', options);
   let data: Expression | undefined;
   try {
-    checkAborted(signal);
+    checkAborted(options.signal);
     if (ops.length >= 4) data = await ops[0].canonical.evaluateAsync(options);
   } catch (e) {
-    return timeoutOrThrow(e);
+    return route.timeoutOrThrow(e);
   }
+  return solveSetupAsync(ce, route, (ctx) =>
+    findFitSetup(ce, ops, ctx, { data, deadlineFrame: route.deadlineFrame })
+  );
+}
 
+/**
+ * `FindRoot(equations, params, options?)` on the asynchronous route (the
+ * `evaluateAsync` handler of `FindRoot`): as `findFitAsync`, the separable
+ * scan of a global search runs on the engine's kernel pool when it has one;
+ * otherwise, and without the `global` option, this is `findRoot`. There is
+ * no data operand to evaluate.
+ */
+export async function findRootAsync(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> = {}
+): Promise<Expression | undefined> {
+  const route = asyncRoute(ce, 'FindRoot', options);
+  try {
+    checkAborted(options.signal);
+  } catch (e) {
+    return route.timeoutOrThrow(e);
+  }
+  return solveSetupAsync(ce, route, (ctx) =>
+    findRootSetup(ce, ops, ctx, route.deadlineFrame)
+  );
+}
+
+/** What the asynchronous route of a lowering captures at the call: the
+ * deadline frame, the setup context, and the helpers that run a step with
+ * the evaluation's effects and report a cancellation. */
+interface AsyncRoute {
+  options: Partial<EvaluateOptions>;
+  signal: AbortSignal | undefined;
+  frame: DeadlineFrame | undefined;
+  deadlineFrame: () => DeadlineFrame | undefined;
+  ctx: SetupContext;
+  /** Run `f` with the evaluation's registry, context stack and precision
+   * window (`runWithEvaluationEffects`), as the synchronous handler would. */
+  inContext: <T>(f: () => T) => T;
+  /** A cancellation of the signal rejects, whatever its cause; a timeout of
+   * the deadline is reported in band, as on the synchronous route. */
+  timeoutOrThrow: (e: unknown) => Expression;
+  /** A cancellation that the solver read as a timeout (the signal's reason
+   * was `'timeout'`) ended the fit early: the signal still rejects. */
+  answer: (value: Expression | undefined) => Expression | undefined;
+}
+
+function asyncRoute(
+  ce: IComputeEngine,
+  operator: FitOperator,
+  options: Partial<EvaluateOptions>
+): AsyncRoute {
+  const signal = options.signal;
+  const frame = ce._deadlineFrame;
+  const ctx: SetupContext = { operator, phase: 'setup' };
+  const effects = options._effects;
+  return {
+    options,
+    signal,
+    frame,
+    deadlineFrame: () => frame,
+    ctx,
+    inContext: (f) =>
+      effects === undefined
+        ? f()
+        : runWithEvaluationEffects(
+            ce,
+            effects,
+            f,
+            options._contextStack,
+            options._precisionWindow
+          ),
+    timeoutOrThrow: (e) => {
+      if (!isTimeoutCancellation(e)) throw e;
+      checkAborted(signal);
+      return timeoutRecord(ce, ctx);
+    },
+    answer: (value) => {
+      checkAborted(signal);
+      return value;
+    },
+  };
+}
+
+/**
+ * The solve of the asynchronous route, shared by `findFitAsync` and
+ * `findRootAsync`: `setup` prepares the problem with the evaluation's
+ * effects; a global search whose separable scan compiled to code a worker
+ * can run goes to the engine's kernel pool, everything else runs on this
+ * thread.
+ */
+async function solveSetupAsync(
+  ce: IComputeEngine,
+  route: AsyncRoute,
+  setup: (ctx: SetupContext) => FitSetup
+): Promise<Expression | undefined> {
+  const { signal, frame, deadlineFrame, ctx, inContext, timeoutOrThrow } =
+    route;
+  const { answer } = route;
+  const operator = ctx.operator;
   const pool = fitSlicePool(ce.workers);
   type Pooled = {
     search: GlobalSearch;
@@ -2130,16 +2374,19 @@ export async function findFitAsync(
   let pooled: Pooled;
   try {
     const inline = inContext((): { value: Expression | undefined } | Pooled => {
-      const setup = findFitSetup(ce, ops, ctx, { data, deadlineFrame });
-      if ('done' in setup) return { value: setup.done };
-      const { units, specs, scans } = setup;
+      const prepared0 = setup(ctx);
+      if ('done' in prepared0) return { value: prepared0.done };
+      const { units, specs, scans } = prepared0;
       if (scans.length === 0)
-        return { value: solve(ce, units, specs, deadlineFrame, signal) };
+        return {
+          value: solve(ce, units, specs, operator, deadlineFrame, signal),
+        };
       const prepared = prepareGlobalSearch(
         ce,
         units,
         specs,
         scans,
+        operator,
         deadlineFrame,
         signal
       );
@@ -2213,9 +2460,7 @@ function findFitSetup(
     data: Expression | undefined;
     deadlineFrame: () => DeadlineFrame | undefined;
   }
-):
-  | { done: Expression | undefined }
-  | { units: FitUnitWithParams[]; specs: ParamSpec[]; scans: GlobalScan[] } {
+): FitSetup {
   const done = (value: Expression | undefined) => ({ done: value });
   if (ops.length < 4) return done(undefined);
   // The operator is `lazy`, so the operands arrive held and UNBOUND (raw box
@@ -2237,7 +2482,7 @@ function findFitSetup(
   ctx.specs = specs;
 
   // The optional fifth argument: the options dictionary (`global`).
-  const scans = parseFitOptions(ce, ops[4], specs);
+  const scans = parseFitOptions(ce, ops[4], specs, 'FindFit');
   if (!Array.isArray(scans)) return done(scans);
 
   const varNames = parseVars(varsOp);
@@ -2299,20 +2544,34 @@ function findFitSetup(
   return { units, specs, scans };
 }
 
-/** `FindRoot(equations, params)`. */
+/** `FindRoot(equations, params, options?)`. */
 export function findRoot(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
-  return withSetupDeadline(ce, (ctx) => findRootCore(ce, ops, ctx));
+  return withSetupDeadline(ce, 'FindRoot', (ctx) =>
+    solveSetup(ce, findRootSetup(ce, ops, ctx), 'FindRoot')
+  );
 }
 
-function findRootCore(
+/**
+ * The setup of `FindRoot`: parse the equations, the parameter specs and
+ * the options, and prepare one unit per equation, each with the single
+ * zero-target row. The optional third argument is the options dictionary
+ * of `FindFit` (`global`, Tycho row 408): a stacked system of equations
+ * (the rows of a fit next to a plain equation) is searched over the range
+ * of a parameter as a fit is. The constant phase coefficients of the
+ * equations (`3.22` in `cos(3.22 b + c)`) give the basin width of the
+ * grid, as the span of a variable does for a fit (`basinWidth`).
+ */
+function findRootSetup(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>,
-  ctx: SetupContext
-): Expression | undefined {
-  if (ops.length < 2) return undefined;
+  ctx: SetupContext,
+  deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame
+): FitSetup {
+  const done = (value: Expression | undefined) => ({ done: value });
+  if (ops.length < 2) return done(undefined);
   // See `findFit`: the operands arrive held and unbound, so canonicalize them
   // to resolve parse sugar and bind structure without substituting seeded
   // parameter values.
@@ -2321,12 +2580,15 @@ function findRootCore(
 
   const specs = parseParamSpecs(paramsOp);
   if (specs === 'error')
-    return ce.error(
-      'unexpected-argument',
-      'FindRoot: malformed parameter spec'
+    return done(
+      ce.error('unexpected-argument', 'FindRoot: malformed parameter spec')
     );
-  if (!specs) return undefined;
+  if (!specs) return done(undefined);
   ctx.specs = specs;
+
+  // The optional third argument: the options dictionary (`global`).
+  const scans = parseFitOptions(ce, ops[2], specs, 'FindRoot');
+  if (!Array.isArray(scans)) return done(scans);
 
   // Equation(s): a list of them, or a single equation/residual.
   const equations = isFunction(equationsOp, 'List')
@@ -2341,7 +2603,9 @@ function findRootCore(
       : eq
   );
   if (residuals.length === 0)
-    return ce.error('unexpected-argument', 'FindRoot: empty equation list');
+    return done(
+      ce.error('unexpected-argument', 'FindRoot: empty equation list')
+    );
 
   const paramNames = specs.map((s) => s.name);
   const avoid = new Set<string>(paramNames);
@@ -2357,9 +2621,10 @@ function findRootCore(
       [],
       [],
       paramNames,
-      paramFresh
+      paramFresh,
+      scans.length > 0
     );
-    if (!unit) return undefined;
+    if (!unit) return done(undefined);
     units.push({ ...unit, paramFresh });
   }
 
@@ -2367,7 +2632,7 @@ function findRootCore(
   // other deadline check of its own: the ones it used to reach were inside
   // the evaluation of the data, and written-out data evaluates to itself
   // without a walk.
-  checkDeadline(ce._deadlineFrame);
+  checkDeadline(deadlineFrame());
   ctx.phase = 'solve';
-  return solve(ce, units, specs);
+  return { units, specs, scans };
 }
