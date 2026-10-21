@@ -253,7 +253,9 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
       'list<list<tuple<integer, integer>>>',
       ['Divide', 'L', 2],
       ['List', ['List', ['Tuple', 1, 2]]],
-      'list<list<tuple<rational, rational>>>',
+      // The divisor is described by the type `integer` only (see below), so
+      // it may be zero: `1/0` is `~oo` and `0/0` is `NaN`.
+      'list<list<tuple<infinity | nan | real, infinity | nan | real>>>',
     ],
     [
       'a quotient of uneven rows',
@@ -299,7 +301,8 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
         ['List', ['Tuple', 1, 2]],
         ['List', ['Tuple', 3, 4], ['Tuple', 5, 6]],
       ],
-      'list<list<tuple<rational, rational>>>',
+      // `x: integer` may be zero.
+      'list<list<tuple<infinity | nan | real, infinity | nan | real>>>',
     ],
     [
       'list<list<tuple<integer, integer>> | missing>',

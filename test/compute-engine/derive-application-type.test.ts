@@ -212,9 +212,10 @@ describe('deriveApplicationType', () => {
     expect(ce.box(['Add', 'Tpt', 'r']).type.toString()).toBe('error');
     expect(ce.box(['Divide', 'r', 'Tpt']).type.toString()).toBe('error');
     // A point divided by a scalar, and a point beside an operand that is not
-    // known to be a number, are not errors.
+    // known to be a number, are not errors. A `real` divisor may be zero, so
+    // each coordinate may be `~oo` (`1/0`) or `NaN` (`0/0`).
     expect(derive('Divide', 'tuple<integer, integer>', 'real')).toBe(
-      'tuple<real, real>'
+      'tuple<infinity | nan | real, infinity | nan | real>'
     );
     expect(derive('Add', 'tuple<integer, integer>', 'unknown')).toBe(
       'tuple<integer, integer>'

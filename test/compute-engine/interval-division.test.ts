@@ -159,7 +159,9 @@ describe('INTERVAL DIVISION — headline claims', () => {
     expect(viaDivide).toBe('real<0.3333..<0.5>');
   });
 
-  it('a structural n-ary Divide gets no bounds (only two operands are read)', () => {
+  it('a structural n-ary Divide is typed one divisor at a time', () => {
+    // `x / y / y` is `(x / y) / y`: with `x` in (2, 3) and `y` in (1, 2),
+    // `x / y` is in (1, 3), and the quotient by `y` again is in (0.5, 3).
     const e = new ComputeEngine();
     e.declare('x', 'real<2<..<3>');
     e.declare('y', 'real<1<..<2>');
@@ -168,7 +170,7 @@ describe('INTERVAL DIVISION — headline claims', () => {
         form: 'structural',
       })
       .type.toString();
-    expect(t).toBe('real');
+    expect(t).toBe('real<0.5<..<3>');
   });
 
   it('a numerator that attains zero attains the quotient 0', () => {

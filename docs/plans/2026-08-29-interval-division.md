@@ -318,8 +318,18 @@ the rungs.
   first interval round.
 - Quotients through collection/tuple/broadcast cells — those arms keep
   their shape logic and get no bounds, like `Add`/`Multiply`.
+  **Update, user decision 2026-10-20:** the tier rule of §3.5 now also
+  applies to those cells. A coordinate of a point, of a list of points or
+  of a `broadcastable<vector<…>>` value divided by a divisor that is not
+  proven non-zero is typed `real | infinity | nan`
+  (`quotientComponentType()`, `library/arithmetic.ts`). The same change
+  types `i / x` as `imaginary | infinity` and a complex quotient over such a
+  divisor as `number`. The cells still get no bounds.
 - Making a structural n-ary `Divide` type from ALL its operands
   (pre-existing two-operand read; this plan only guards its bounds).
+  **Update 2026-10-20:** the `Divide` type handler now types
+  `Divide(a, b, c)` as `(a / b) / c`, one divisor at a time, so every
+  divisor is read, and the bounds follow from that.
 
 ## 6. The question that needs a ruling
 

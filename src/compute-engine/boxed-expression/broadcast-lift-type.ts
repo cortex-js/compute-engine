@@ -1718,12 +1718,12 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     );
     // A cell of a collection of numbers beside the points may be zero, and
     // the answer for such a cell is part of the cell type: a point divided
-    // by a zero cell of `[[0]]` is `(~oo, ~oo)`. The answer for an `integer`
-    // cell does not hold it: a point divided by a scalar `integer` claims
-    // rational coordinates (the possibly-zero convention of the `Divide`
-    // handler for a scalar divisor), and a cell type cannot tell the handler
-    // that the cell is `0`. So the handler is also asked with each such cell
-    // typed `number`, which admits every quotient, `~oo` and `NaN` included.
+    // by a zero cell of `[[0]]` is `(~oo, ~oo)`. The `Divide` handler types
+    // a point divided by an `integer` cell with coordinates that hold `~oo`
+    // and `NaN` (`real | infinity | nan`). The handler is also asked with
+    // each such cell typed `number`, which admits every quotient, so that
+    // the cell type holds the quotient by zero for any handler, not only for
+    // one that applies that rule.
     if (answer !== undefined && points?.zeroCells !== undefined) {
       const zero = input.abstractCellResult?.(points.zeroCells);
       if (zero !== undefined && zero !== 'error' && zero !== 'never')

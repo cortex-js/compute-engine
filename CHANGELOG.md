@@ -2,6 +2,27 @@
 
 ### Behavior Changes
 
+- The coordinates of a point divided by a number that may be zero are typed
+  `real | infinity | nan`, as a scalar quotient has been since 0.121.0: with
+  `p: tuple<integer, integer>` and `x: integer`, `p / x` was typed
+  `tuple<rational, rational>`, but `x = 0` gives `(~oo, ~oo)`. The same
+  applies to a list of points and to a value typed `broadcastable<vector<…>>`.
+  A divisor proven not to be zero keeps the precise type: `p / 4` and `p / n`
+  with `n: integer<1..>` are `tuple<rational, rational>`. Also, `i / x` is
+  typed `imaginary | infinity` (was `imaginary`), and `(1 + 2i) / x` is typed
+  `number` (was `complex`). An imaginary divisor is never zero, so `w / j`
+  with `w: complex` and `j: imaginary` stays `complex`.
+
+- A collection divided by itself is no longer folded to `1`: `L / L` with
+  `L: list<integer>` stays `L / L`, and with `L = [1, 2]` it evaluates to
+  `[1, 1]`. The fold `x / x → 1` still applies to a symbol that is not
+  declared as a collection.
+
+- A structural `Divide(a, b, c)` is typed as `(a / b) / c`. Only the first
+  divisor was read: `Divide(1, 2, x)` was typed `rational` although `x = 0`
+  gives `~oo`. A real numerator that may be infinite, divided by an
+  imaginary number, is typed `number` (was `complex`): `+∞ / i` is `~oo`.
+
 - Calls through callback parameters retain their lexical contracts, including
   inside nested lambdas such as `Map(x ↦ h(x), xs)`. A same-named global no
   longer supplies the call's result type or introduces `Nothing`. A parameter

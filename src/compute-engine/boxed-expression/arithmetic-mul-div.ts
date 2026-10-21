@@ -1750,12 +1750,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     return op2.isPositive === true ? op1 : op1.neg();
 
   // a/a = 1 (if a ≠ 0 and a is finite). Not for a float literal: `2.0/2.0`
-  // is a float quotient, computed when it is evaluated.
+  // is a float quotient, computed when it is evaluated. Not for an operand
+  // that is or may be a collection either, for the reason given at the a/0
+  // rule above: `L / L` with `L: list<integer>` is a list of ones (or of
+  // `Indeterminate` for a zero cell), not the scalar `1`.
   if (
     op2.isSame(0) === false &&
     op2.isFinite !== false &&
     !(isNumber(op1) && !op1.isExact) &&
-    !(isNumber(op2) && !op2.isExact)
+    !(isNumber(op2) && !op2.isExact) &&
+    !typeMayCarryQuotientShape(op1.type.type)
   ) {
     if (
       isSymbol(op1) &&

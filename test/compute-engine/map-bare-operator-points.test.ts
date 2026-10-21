@@ -88,7 +88,10 @@ describe('A BARE OPERATOR NAME OVER POINTS', () => {
       )
     ).toEqual({
       value: '[(1/2, 1),(3/4, 1)]',
-      type: 'list<tuple<rational, rational>^2>',
+      // The callback is typed from the element type `integer` of `[2, 4]`,
+      // not from its values, and an integer divisor may be zero (`1/0` is
+      // `~oo`, `0/0` is `NaN`).
+      type: 'list<tuple<infinity | nan | real, infinity | nan | real>^2>',
     });
   });
 

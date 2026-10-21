@@ -117,7 +117,8 @@ that script prints `READY` on an installed release. The readings below were
 reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 
 - **407 — the grid of the `FindFit` `global` option is too coarse for a wide
-  range.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
+  range (user decision 2026-10-20: proceed with the approach below, together
+  with step 5 of the worker-pool plan; design in progress).** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
   and `c` searched. The separable scan (`SEPARABLE_GRID` in
   `src/compute-engine/nonlinear-fit.ts`, 400 × 40 points, 6 refinements)
   finds the true `b = 2.2` over [0.3, 60] but not over [0.3, 120]; the basin
@@ -141,7 +142,12 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   solves a group of `~` rows that mixes fits with an equation row as one
   stacked `FindRoot` system, which gets no global search today.
 - **409 — the difference of two index reads of an `unknown` symbol is typed
-  `number`.** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
+  `number` (user decision 2026-10-20: NO engine change; a declared `unknown`
+  is an inference seed that each use narrows, and the type that means "a
+  number, a point or a list" is `any`; Tycho was told 2026-10-20 to declare
+  such heads `any`. Open small item: `P[i]` over `P: list<any>` or `P: any`
+  types `unknown` instead of `any`, so `P[i] - P[j]` types
+  `broadcastable<number>` while its value can be a point).** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
   `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
   `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type`
   error (`isValid` false). Control: with `P: list<tuple<number, number>>`
@@ -160,7 +166,7 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   position (comprehension variable, `Sum`/`Product` index, `with` local)
   keep a subscripted name whole, whatever its base is declared as. Tycho
   renames such binders before the parse as a workaround (`art/lrfx01y3cv`).
-- **410: FIXED 2026-10-20 on the main tree (uncommitted, dual-reviewed, 8
+- **410: FIXED 2026-10-20, committed `6d5c6d542` (dual-reviewed, 8
   findings applied; CHANGELOG "Bug Fixes"; test
   `test/compute-engine/tycho-row-410-binder-subscript.test.ts`).** Two
   residues of the same defect stay open, decision needed: (a) a `cases`
@@ -173,7 +179,10 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   `At(n, 0)`; the fix covers a variable named in the body or in a body
   `x \\in S`.
 - **411 — on `interval-js`, an ordered comparison with an operand that is
-  undefined over the whole interval answers `maybe`.** `0 < \sqrt{x}` at
+  undefined over the whole interval answers `maybe` (user decision
+  2026-10-20, with row 413: an `empty` operand of `<`, `≤`, `>`, `≥`, `=`
+  gives a definite false; `≠` and `partial` unchanged; fix in progress in the
+  worktree `/tmp/wt-ce-411`).** `0 < \sqrt{x}` at
   the point interval [-1, -1] gives `"maybe"`; the `javascript` target gives
   `false` (`NaN > 0`), and Desmos reads a comparison with an undefined value
   as false. Ask: for `<`, `≤`, `>`, `≥` and `=`, an `empty` operand gives a
@@ -209,7 +218,7 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   (`latex-syntax/dictionary/definitions-calculus.ts`, the `Add` branch) the
   test `if (indexes) rest.push(op)` checks an array, which is always true, so
   every term goes to `rest` and `parseSubintegrand()` never runs. FIXED
-  2026-10-20 on the main tree (uncommitted, dual-reviewed, 8 findings
+  2026-10-20, committed `6d5c6d542` (dual-reviewed, 8 findings
   applied; CHANGELOG "Bug Fixes"). Two pre-existing parser items found by the
   fix, not fixed, need a decision: (a) `\\int dx` and `\\int (dx)` parse to an
   `unexpected-command` error instead of `Integrate(1, x)`; (b) with
@@ -217,8 +226,8 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   (`\\int \\frac{dx}{x}`) is reported as an undeclared symbol `d`, because the
   pruning of the dummy variable does not know the `d` token; pruning every
   `d` in the integrand span would hide a real free variable named `d`.
-- **412, the `Integrate`/`Limit` evaluation capture: FIXED 2026-10-20 on the
-  main tree (uncommitted, dual-reviewed, 8 findings applied; CHANGELOG "Bug
+- **412, the `Integrate`/`Limit` evaluation capture: FIXED 2026-10-20,
+  committed `6d5c6d542` (dual-reviewed, 8 findings applied; CHANGELOG "Bug
   Fixes"; test `test/compute-engine/integrate-limit-user-function-capture.test.ts`).
   The derivative capture of row 412 itself is FIXED the same way
   (`derivative.ts`, `renameCapturedIndexes()`, dual-reviewed, 5 findings
@@ -237,7 +246,12 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   the enclosing binding (here the global `k`), as the fixed `Integrate`
   rename now does for a called function's body.
 - **413 — a piecewise whose condition compares an undefined value gives no
-  value; Desmos takes the else branch.** `\{0/0 > 0: 1, 0\}` is
+  value; Desmos takes the else branch (user decision 2026-10-20: an undefined
+  numeric operand of `<`, `≤`, `>`, `≥`, `=` decides FALSE inside a branch
+  condition on the interpreter, the `javascript` and `python` targets and
+  `interval-js`, so the else branch is taken; this reverses the ruling of
+  2026-09-03 recorded in `docs/ERROR-MODEL.md`; `≠` and `Missing` keep their
+  reading; fix in progress in the worktree `/tmp/wt-ce-411`).** `\{0/0 > 0: 1, 0\}` is
   `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and
   the `javascript` target gives `null`; Desmos and JavaScript's own
   `NaN > 0` read the comparison as false and give 0. `N = \sum_{n=0}^{10000}
@@ -294,7 +308,7 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 shipped in 0.159.0; step 5 approved 2026-10-20 with Tycho row 407 and designed as phase B of `docs/plans/2026-10-20-findfit-global-grid.md`; design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
@@ -517,16 +531,24 @@ remains the separate design item above.
   is not refused when it is boxed, as it is beside a flat `list<integer>` or a
   `matrix`. Both outcomes are errors (`docs/ERROR-MODEL.md` §4); only the
   shape of the error differs.
-- (needs a decision) A point divided by a scalar that may be zero is typed with
-  rational coordinates: `Q / x` with `Q: list<tuple<integer, integer>>` and
-  `x: integer`, and `(1, 2) / x`, but `x := 0` gives `(~oo, ~oo)`. The scalar
-  quotient `1/x` is already typed `infinity | nan | real`, so the scalar and
-  point rules disagree. The rule is stated in the comment of
-  `quotientComponentType()` and required by `derive-application-type`,
-  `tycho-item-188-broadcastable-vector-divide` and `map-bare-operator-points`
-  (changing it fails those 3 tests; changing collection cells too fails 18).
-  The flat `Q / L` with `L: list<integer> := [0]` has the same fault. The
-  nested cases beside a collection divisor were fixed on 2026-10-20.
+- A structural expression boxed from MathJSON is typed by the result of its
+  operator's signature, not by the operator's type handler. With
+  `t: tuple<integer, integer>`, `ce.box(['Add', 't', 't'], { form:
+  'structural' })` is typed `unknown`, and the `Divide`, `Multiply` and `Sqrt`
+  forms over a point or a list are typed `number`, but the value of the first
+  is `(2, 4)`. The same expressions built with
+  `ce.function(…, { form: 'structural' })` are typed by the handler
+  (`tuple<integer, integer>`, `list<integer>`). The two structural routes
+  must agree. Found 2026-10-20.
+- A list literal of points of two tuple types is typed with no length
+  (`shapedListTypeD()`, `library/collections.ts`): `[(1/2, 1), (~oo, ~oo)]` is
+  `list<tuple<…> | tuple<…>>`, not `list<(…)^2>`. So the value of
+  `[(1, 2), (3, 4)] / [2, 0]` does not match its static type
+  `list<tuple<number, number>^2>`, although that type is true of the value.
+  Either the literal keeps its length, or the static type of a quotient by
+  a list with a cell that may be zero drops it, as
+  `pointOverCollectionQuotientType()` (`library/arithmetic.ts`) does for a
+  point divided by a list. Found 2026-10-20.
 
 ### Defects found by the fix of the collection operator types (OPEN, small — found 2026-10-20)
 
@@ -6230,14 +6252,15 @@ prefactor would carry it to about `s = −63`. The Apple GPU compiler reassociat
 `s + (2b − 1)` into `(s + 2b) − 1` (6.7% error at `ζ(−1e−6, 1/2)`); the text
 guards it with `max(2b − 1, −1)`, and a test pins the guard.
 
-### Captured call heads and the interpreter's compatibility lookup
+### Captured callable evaluation (RESOLVED — 2026-10-20)
 
-Call-head type inference follows an explicit lexical callable's contract, while
-evaluation can resolve a same-named function in the current scope. For example,
-a view boxed with an inner `h := u ↦ 7` can materialize as `[9, 9]` after that
-scope closes and a global `h := u ↦ 9` is defined. These contracts can also
-have different result types. Compilation now refuses a captured held-function
-binding mismatch before folding or inlining, including bare callbacks. Decide
-separately whether evaluation should use captured definitions, and align the
-type model with the chosen evaluation rule. Forward references to functions
-not yet defined remain name-based and are not lexical captures.
+Direct calls and eager, lazy and async callbacks now resolve the captured
+binding, including function-valued variables and operator callbacks. Updates
+to that binding remain visible; unrelated declarations do not redirect calls.
+Forward references resolve in the lexical environment where they were created.
+Argument substitution, Map fusion and generated broadcast callbacks preserve
+that identity. Ordinary data-symbol lookup remains unchanged.
+
+Compiler support remains conservative: captured held functions with a different
+ambient binding still refuse compilation. Remove each refusal only when that
+lowering preserves binding identity and has interpreter/compiler parity tests.

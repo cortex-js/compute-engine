@@ -297,6 +297,22 @@ const POSSIBLY_ZERO_QUOTIENT_TYPE: Type = Object.freeze({
   kind: 'union',
   types: Object.freeze(['real', 'infinity', 'nan']) as unknown as Type[],
 }) as Type;
+/** The type of `i / x` where `x` is a finite real that may be zero: `i/0` is
+ * `~oo`, and the numerator is never zero, so the quotient is never `NaN`.
+ * Built as a literal node because the type parser is not yet initialized when
+ * this module loads under jest, and frozen because the handlers return it by
+ * reference. */
+const IMAGINARY_OVER_POSSIBLY_ZERO_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: Object.freeze(['imaginary', 'infinity']) as unknown as Type[],
+}) as Type;
+/** The value type `0`, built as a literal node and frozen for the same
+ * reasons as the two union types above: the type parser is not yet
+ * initialized when this module loads under jest, and the node is shared. */
+const ZERO_VALUE_TYPE: Type = Object.freeze({
+  kind: 'value',
+  value: 0,
+}) as Type;
 // The shared type-handler helpers take one `OperandDescriptor` per operand
 // instead of the operand expression. They are imported under an `OnTypes`
 // suffix: this file also defines value-path predicates of the same names
@@ -1880,26 +1896,34 @@ function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
  * is one component TYPE of a tuple- or collection-shaped `Divide` numerator
  * and `den` is the denominator expression.
  *
- * Mirrors the scalar branches of the `Divide` type handler exactly, including
- * their ratified possibly-zero-denominator convention (an unproven-nonzero
- * denominator still claims a finite tier; only a literal 0 yields the top
- * type — see the "Possibly-zero *denominators*" note in the handler), so a
+ * Mirrors the real-quotient branches of the `Divide` type handler, so a
  * component of a shaped numerator and a standalone scalar of the same tier
- * always type their quotients identically. The divergence shaped numerators
- * used to have — echoing the component type verbatim, so
- * `tuple<integer, integer> / integer` claimed INTEGER
- * components where `[6,2]/4 = [3/2,1/2]` is rational — is exactly what this
- * widening removes.
+ * type their quotients identically. In particular, a real component over a
+ * divisor that is not proven non-zero (by its range or by its sign) is
+ * `real | infinity | nan`: `(1, 2) / x` with `x = 0` is `(~oo, ~oo)`, and
+ * `(0, 1) / x` has a `NaN` coordinate. A real component that is not proven
+ * finite gets the same type, because `∞ / 2` is `∞`. A divisor proven
+ * non-zero keeps the finite tier. The component type is not echoed:
+ * `tuple<integer, integer> / 4` has rational components, because
+ * `[6, 2] / 4` is `[3/2, 1/2]`. The user decided this rule for scalar
+ * quotients on 2026-08-29 (`docs/plans/2026-08-29-interval-division.md`),
+ * and on 2026-10-20 for the components of tuples and collections.
  *
  * `floatNumerator` is true when the numerator holds a float literal with an
  * integer value as a component (`hasInexactRationalComponent()`): such a
  * component is typed `integer`, but its quotient is a float, typed `real`
  * (`(2.0, 4.0) / 3` evaluates to `(0.666…, 1.333…)`).
+ *
+ * `zeroTypedByCaller` is true when `den` describes the cells of a collection
+ * divisor and the caller adds the type of the quotient by a zero cell itself
+ * (`divisorCellZero()`, `pointByZeroCellType()`): the cells are then read as
+ * non-zero here.
  */
 function quotientComponentType(
   el: Type,
   den: OperandDescriptor,
-  floatNumerator: boolean
+  floatNumerator: boolean,
+  zeroTypedByCaller = false
 ): Type {
   // The handler checks the NaN and zero guards before its shape branches only
   // for the NUMERATOR side; re-check the denominator here so the
@@ -1913,12 +1937,30 @@ function quotientComponentType(
     if (factsOf(el).real && isExtendedRealOperand(den)) return 'integer';
     return 'number';
   }
-  // A float literal denominator makes each component a float (`p / 4.0`),
-  // typed `real` rather than `rational`.
-  if (factsOf(den.type).integer && factsOf(el).integer)
-    return floatNumerator ? 'real' : rationalTierOf([den]);
-  if (isExtendedRealOperand(den) && factsOf(el).real) return 'real';
-  if (factsOf(den.type).complex && factsOf(el).complex) return 'complex';
+  const integerQuotient = factsOf(den.type).integer && factsOf(el).integer;
+  if (
+    integerQuotient ||
+    (isExtendedRealOperand(den) && factsOf(el).extendedReal)
+  ) {
+    // A divisor that may be zero gives `~oo` (`1/0`) or `NaN` (`0/0`), and a
+    // component that may be infinite gives `±∞` or `NaN`.
+    if (
+      factsOf(el).finite !== true ||
+      (!zeroTypedByCaller && !divisorProvablyNonZero(den))
+    )
+      return POSSIBLY_ZERO_QUOTIENT_TYPE;
+    // A float literal denominator makes each component a float (`p / 4.0`),
+    // typed `real` rather than `rational`.
+    if (integerQuotient) return floatNumerator ? 'real' : rationalTierOf([den]);
+    return 'real';
+  }
+  // A complex quotient over a divisor that may be zero can be `~oo` or `NaN`.
+  if (
+    factsOf(den.type).complex &&
+    factsOf(el).complex &&
+    (zeroTypedByCaller || divisorProvablyNonZero(den))
+  )
+    return 'complex';
   return 'number';
 }
 
@@ -1939,12 +1981,14 @@ function quotientComponentType(
  * longer describes). A NOMINAL reference never reaches here: it is refused by
  * the operand gate upstream.
  *
- * `floatNumerator` is passed to `quotientComponentType` for each component.
+ * `floatNumerator` and `zeroTypedByCaller` are passed to
+ * `quotientComponentType` for each component.
  */
 function quotientShapeType(
   t: Type,
   den: OperandDescriptor,
   floatNumerator: boolean,
+  zeroTypedByCaller = false,
   seen?: AliasDescent
 ): Type {
   // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
@@ -1973,13 +2017,13 @@ function quotientShapeType(
       t === 'indexed_collection'
     )
       return t;
-    return quotientComponentType(t, den, floatNumerator);
+    return quotientComponentType(t, den, floatNumerator, zeroTypedByCaller);
   }
   if (t.kind === 'union')
     return {
       kind: 'union',
       types: t.types.map((a) =>
-        quotientShapeType(a, den, floatNumerator, seen)
+        quotientShapeType(a, den, floatNumerator, zeroTypedByCaller, seen)
       ),
     };
   if (t.kind === 'tuple')
@@ -1987,7 +2031,12 @@ function quotientShapeType(
       kind: 'tuple',
       elements: t.elements.map((e) => ({
         ...e,
-        type: quotientComponentType(e.type, den, floatNumerator),
+        type: quotientComponentType(
+          e.type,
+          den,
+          floatNumerator,
+          zeroTypedByCaller
+        ),
       })),
     };
   if (
@@ -2004,10 +2053,11 @@ function quotientShapeType(
         t.elements,
         den,
         floatNumerator,
+        zeroTypedByCaller,
         descendIntoConstructor(seen)
       ),
     };
-  return quotientComponentType(t, den, floatNumerator);
+  return quotientComponentType(t, den, floatNumerator, zeroTypedByCaller);
 }
 
 /**
@@ -2156,7 +2206,8 @@ function pointOverCollectionQuotientType(
     let cell = quotientShapeType(
       point,
       describeType(factsOf(elt).belowNumber ? elt : 'number'),
-      floatNumerator
+      floatNumerator,
+      true
     );
     // A cell of the divisor that can be zero gives the quotient of the point
     // by zero, as the scalar rule does (`pointByZeroCellType`).
@@ -2171,8 +2222,14 @@ function pointOverCollectionQuotientType(
       typeof r === 'object' && r.kind === 'list' ? r.dimensions : undefined;
     // A list of rank 1 of points of two tuple types (`(1, 2)` and `(~oo,
     // ~oo)`) is typed without dimensions, as the literal of its value is
-    // (`shapedListTypeD`, `library/collections.ts`).
-    if (dims?.length === 1 && typeof cell === 'object' && cell.kind === 'union')
+    // (`shapedListTypeD`, `library/collections.ts`). A divisor with a cell
+    // that may be zero can give such a list even when the cell types reduce
+    // to one tuple type: `(1, 2) / v` with `v = [0, 1]` is
+    // `[(Indeterminate, ~oo), (0, 1)]`, typed with no length.
+    if (
+      dims?.length === 1 &&
+      ((typeof cell === 'object' && cell.kind === 'union') || zero !== 'none')
+    )
       dims = undefined;
     results.push(
       dims !== undefined
@@ -2324,7 +2381,8 @@ function pointListOverMatrixQuotientType(
   let quotient = quotientShapeType(
     point,
     describeType(cell),
-    hasInexactRationalComponent(num)
+    hasInexactRationalComponent(num),
+    true
   );
   // A cell of the matrix that can be zero gives the quotient of a point by
   // zero (`pointByZeroCellType`).
@@ -2792,6 +2850,25 @@ function extendedPowerType(
 function provablyNonZeroSign(d: OperandDescriptor): boolean {
   const s = operandSgnOnTypes(d);
   return s === 'positive' || s === 'negative' || s === 'not-zero';
+}
+
+/**
+ * Is this divisor proven not to be zero? It is when its type cannot hold `0`
+ * (`imaginary`, `complex & !0` from an assumption `c ≠ 0`, `integer<1..>`),
+ * when it is a complex number literal other than `0`, when its range excludes
+ * `0`, or when its sign proves it.
+ */
+function divisorProvablyNonZero(d: OperandDescriptor): boolean {
+  if (!couldMatch(d.type, ZERO_VALUE_TYPE)) return true;
+  // The type of a complex literal is `complex` or `imaginary`, with no value,
+  // and its sign is `unsigned`: read the literal itself.
+  const s = d.structureOf?.();
+  if (s?.kind === 'number' && s.literal !== 0 && !factsOf(s.tier).real)
+    return factsOf(s.tier).complex;
+  const iv = intervalOfType(d.type);
+  return (
+    (iv !== undefined && intervalExcludesZero(iv)) || provablyNonZeroSign(d)
+  );
 }
 
 /**
@@ -6165,6 +6242,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['[6 / 4, x / 2]'],
       nanBehavior: 'propagate',
       type: (ops, context) => {
+        // A structural `Divide(a, b, c)` (never canonical) is `(a / b) / c`.
+        // The rules below read one divisor only, so type it one divisor at
+        // a time: otherwise `Divide(1, 2, x)` was typed `rational` although
+        // `x = 0` gives `~oo`.
+        if (ops.length > 2) {
+          let t = context.derive('Divide', [ops[0], ops[1]]);
+          for (const d of ops.slice(2)) {
+            if (t === undefined) return undefined;
+            t = context.derive('Divide', [describeType(t), d]);
+          }
+          return t === undefined
+            ? undefined
+            : BoxedType.forResult(t, context.engine._typeResolver);
+        }
         const [num, den] = ops;
         // A quotient that holds a residue class is not a number: it is a
         // class, or it stays unevaluated (see the `evaluate` handler).
@@ -6431,25 +6522,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `imaginary ∩ real = nothing` in the lattice, and 0 is real):
         // - i/i → real; i/r → pure imaginary; r/i → pure imaginary iff
         //   r ≠ 0 (0/i = 0, which is real, NOT `imaginary`).
-        // Possibly-zero *denominators* are treated like the real/real branch
-        // above (which claims `real` even when `den` may be 0): only
-        // a literal 0 denominator (caught earlier) yields the top type.
+        // A real or complex divisor that is not proven non-zero follows the
+        // rule of the real rung above: `i/0` is `~oo`, so `i/x` is
+        // `imaginary | infinity`, and a complex quotient over such a divisor
+        // is `number`, because `0/0` is `NaN` (user decision 2026-08-29,
+        // `docs/plans/2026-08-29-interval-division.md`).
         {
           const isImag = (x: OperandDescriptor) => factsOf(x.type).imaginary;
           if (isImag(num) && isImag(den))
             return BoxedType.forResult('real', context.engine._typeResolver);
-          if (isImag(num) && isExtendedRealOperand(den))
+          if (isImag(num) && isExtendedRealOperand(den)) {
+            // `i/∞` is `0`, which is not `imaginary`.
+            if (den.facts.finite !== true)
+              return BoxedType.forResult(
+                'number',
+                context.engine._typeResolver
+              );
             return BoxedType.forResult(
-              'imaginary',
+              divisorProvablyNonZero(den)
+                ? 'imaginary'
+                : IMAGINARY_OVER_POSSIBLY_ZERO_TYPE,
               context.engine._typeResolver
             );
-          if (isExtendedRealOperand(num) && isImag(den))
+          }
+          if (isExtendedRealOperand(num) && isImag(den)) {
+            // `+∞ / i` is `~oo`, which is not a finite complex number.
+            if (num.facts.finite !== true)
+              return BoxedType.forResult(
+                'number',
+                context.engine._typeResolver
+              );
             return BoxedType.forResult(
               provablyNonZeroSign(num) ? 'imaginary' : 'complex',
               context.engine._typeResolver
             );
-          // A quotient of finite complex operands is a finite complex number.
-          if (factsOf(num.type).complex && factsOf(den.type).complex)
+          }
+          // A quotient of finite complex operands is a finite complex number
+          // when the divisor is not zero.
+          if (
+            factsOf(num.type).complex &&
+            factsOf(den.type).complex &&
+            divisorProvablyNonZero(den)
+          )
             return BoxedType.forResult('complex', context.engine._typeResolver);
         }
         return BoxedType.forResult('number', context.engine._typeResolver);

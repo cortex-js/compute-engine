@@ -129,9 +129,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
       'broadcastable<vector<2>>'
     );
-    expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe(
-      'broadcastable<vector<2>>'
-    );
+    expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe('broadcastable<vector<2>>');
     // Scalar-path parity for the same denominators (the mirror the widening
     // is defined by). Distinct symbols: `s/s` would fold to 1 at
     // canonicalization (the generic-symbol `x/x → 1` convention).
@@ -158,13 +156,18 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('bvec', 'broadcastable<vector<integer^2>>');
     ce.declare('bscal', 'broadcastable<number>');
     ce.declare('intfn', '(number) -> integer');
+    ce.declare('posfn', '(number) -> integer<1..>');
     ce.declare('tt', 'number');
     // Truth: [6,2]/4 = [3/2,1/2] — the components are rational, not integer.
     expect(
       ce.parse('\\frac{\\lbrack6,2\\rbrack}{4}').evaluate().toString()
     ).toBe('[3/2,1/2]');
-    expect(ce.box(['Divide', 'bvec', ['intfn', 'tt']]).type.toString()).toBe(
+    expect(ce.box(['Divide', 'bvec', ['posfn', 'tt']]).type.toString()).toBe(
       'broadcastable<vector<rational^2>>'
+    );
+    // A divisor that may be zero: `1/0` is `~oo` and `0/0` is `NaN`.
+    expect(ce.box(['Divide', 'bvec', ['intfn', 'tt']]).type.toString()).toBe(
+      'broadcastable<list<infinity | nan | real^2>>'
     );
     // A broadcast-lifted SCALAR denominator (could be a scalar, or an indexed
     // collection dividing elementwise) preserves the shape either way.
@@ -178,12 +181,22 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('tup', 'tuple<integer, integer>');
     ce.declare('intfn', '(number) -> integer');
     ce.declare('realfn', '(number) -> real');
+    ce.declare('posfn', '(number) -> integer<1..>');
+    ce.declare('posrealfn', '(number) -> real<0.5..>');
     ce.declare('tt', 'number');
-    expect(ce.box(['Divide', 'tup', ['intfn', 'tt']]).type.toString()).toBe(
+    expect(ce.box(['Divide', 'tup', ['posfn', 'tt']]).type.toString()).toBe(
       'tuple<rational, rational>'
     );
-    expect(ce.box(['Divide', 'tup', ['realfn', 'tt']]).type.toString()).toBe(
+    expect(ce.box(['Divide', 'tup', ['posrealfn', 'tt']]).type.toString()).toBe(
       'tuple<real, real>'
+    );
+    // A divisor that may be zero: `1/0` is `~oo` and `0/0` is `NaN`, as for
+    // a scalar quotient.
+    expect(ce.box(['Divide', 'tup', ['intfn', 'tt']]).type.toString()).toBe(
+      'tuple<infinity | nan | real, infinity | nan | real>'
+    );
+    expect(ce.box(['Divide', 'tup', ['realfn', 'tt']]).type.toString()).toBe(
+      'tuple<infinity | nan | real, infinity | nan | real>'
     );
     expect(ce.box(['Divide', 'tup', 'tt']).type.toString()).toBe(
       'tuple<number, number>'
