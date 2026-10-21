@@ -163,6 +163,46 @@ describe('Numerator, Denominator and NumeratorDenominator keep extra operands', 
     }
   );
 
+  // A surplus TUPLE is not a source of cells either: the component-wise
+  // tuple broadcast leaves the call whole, with one error, and the type is
+  // the handler's, not a lift over the surplus collection.
+  test.each([
+    [
+      'Numerator',
+      ['Numerator', ['Rational', 6, 4], ['Tuple', 1, 2]],
+      "'(1, 2)'",
+    ],
+    ['Denominator', ['Denominator', 5, ['Tuple', 1, 2]], "'(1, 2)'"],
+    [
+      'NumeratorDenominator',
+      ['NumeratorDenominator', ['Rational', 6, 4], ['Tuple', 1, 2]],
+      "'(1, 2)'",
+    ],
+    ['Numerator', ['Numerator', ['Rational', 6, 4], ['List', 1, 2]], "'[1,2]'"],
+  ])(
+    '%s with a surplus collection is one error, not a fan-out',
+    (operator, input, where) => {
+      const expected = [
+        'Error',
+        "'unexpected-argument'",
+        where,
+        ['ErrorTrace', ['ErrorFrame', `'${operator}'`, 2]],
+      ];
+      expect(ce.box(input as any).evaluate().json).toEqual(expected);
+      expect(ce.box(input as any).N().json).toEqual(expected);
+      const surplus = ce.box(input as any);
+      const plain = ce.box([operator, 5, 'x'] as any);
+      expect(surplus.type.toString()).toBe(plain.type.toString());
+    }
+  );
+
+  test('evaluateAsync() refuses a surplus tuple the same way', async () => {
+    const result = await ce
+      .box(['Numerator', ['Rational', 6, 4], ['Tuple', 1, 2]])
+      .evaluateAsync();
+    expect(result.operator).toBe('Error');
+  });
+
   // An empty `Sequence` or a `Nothing` operand is not an operand, as in the
   // canonical form of every operator: the call is a one-operand call.
   test.each([

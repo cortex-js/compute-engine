@@ -8,6 +8,17 @@
   for structured exact factors, multiplicities and explicit incomplete results
   when resource limits or certificate checks prevent completion.
 
+### Bug Fixes
+
+- A call with an operand past the declared arity of `Numerator`,
+  `Denominator` or `NumeratorDenominator` is one `unexpected-argument` error
+  when the surplus operand is a tuple, as it is for a list:
+  `Numerator(3/2, (1, 2))` was `(Error, Error)`, a tuple of two errors, and
+  is now the one error. The call's type is no longer lifted over a surplus
+  list or tuple (it was `list<…>` or `tuple<…>`)
+  ([#467](https://github.com/cortex-js/compute-engine/issues/467), contributed
+  by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.160.0 _2026-10-21_
 
 ### Behavior Changes

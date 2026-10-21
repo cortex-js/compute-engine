@@ -8630,6 +8630,9 @@ function tupleBroadcastCells(
   tail: ReadonlyArray<Expression>
 ): Expression[][] | Expression | undefined {
   if (!broadcastsOverTuples(expr.operator, def)) return undefined;
+  // A call with a surplus operand is refused whole, never fanned over a
+  // surplus tuple (`hasSurplusOperands`, as for the list broadcast).
+  if (hasSurplusOperands(def, tail)) return undefined;
   if (skipBroadcastForVectorOps(def, false, tail)) return undefined;
   if (!tail.some(isTupleBroadcastParticipant)) return undefined;
   // A function applied to each coordinate of a tuple with a LIST coordinate
@@ -11095,7 +11098,13 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // signature, so without this gate the DECLARED spelling typed strictly
     // WEAKER (bare `unknown`) than the `(number)` one it is meant to refine.
     // (`declaredSlots` is computed above, next to the arm resolution.)
-    if ((def.broadcastable || declaredSlots) && !isLambdaDef(def)) {
+    // A call with a surplus operand evaluates to one error, so its value is
+    // not a collection: it keeps the handler's type (`hasSurplusOperands`).
+    if (
+      (def.broadcastable || declaredSlots) &&
+      !isLambdaDef(def) &&
+      !hasSurplusOperands(def, expr.ops)
+    ) {
       // The type handler called again with the operands in `cells` typed as
       // one cell of a broadcast (`cells[i]`), for the per-cell results the
       // lift reads. Every other operand is described exactly as for the main
