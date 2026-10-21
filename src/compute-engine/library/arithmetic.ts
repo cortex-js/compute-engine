@@ -89,7 +89,6 @@ import { rangeCount } from '../numerics/range-count.js';
 
 import {
   gamma as gammaComplex,
-  gammaln as lngammaComplex,
   incompleteGammaUpperComplex,
   zetaComplex,
   hurwitzZetaComplexWithError,
@@ -100,6 +99,7 @@ import {
 import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
 import {
   logGammaComplex,
+  logGammaPrincipal,
   logGammaComplexImError,
 } from '../numerics/log-gamma.js';
 import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
@@ -7408,7 +7408,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               x,
               (x) => gammaln(x),
               (x) => bigGammaln(engine, x),
-              (x) => lngammaComplex(x)
+              (x) => logGammaPrincipal(x)
             )
           : undefined;
       }),

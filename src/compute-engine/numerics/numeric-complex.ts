@@ -1120,8 +1120,9 @@ export function gamma(c: Complex): Complex {
 }
 
 /**
- * Natural logarithm of the Gamma function for a complex argument (principal
- * branch), via the Lanczos approximation.
+ * Natural logarithm of the Gamma function for a complex argument, via the
+ * Lanczos approximation. The imaginary part is not reduced to (−π, π]: it
+ * is a building block (`logGammaPrincipal` is `GammaLn`'s value).
  */
 export function gammaln(c: Complex): Complex {
   if (c.re < 0.5) {
