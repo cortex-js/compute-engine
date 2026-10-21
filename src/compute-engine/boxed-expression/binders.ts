@@ -298,7 +298,11 @@ export function callableBindingInContext(
     // declaration of `f` in an unrelated scope does not change the call.
     const retiredScope = retiredBindingScope(own.value);
     if (retiredScope !== undefined) {
-      for (let scope: Scope | null = retiredScope; scope; scope = scope.parent) {
+      for (
+        let scope: Scope | null = retiredScope;
+        scope;
+        scope = scope.parent
+      ) {
         const found = scope.bindings.get(name);
         if (
           found !== undefined &&

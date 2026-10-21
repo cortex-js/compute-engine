@@ -307,7 +307,8 @@ function parseSubintegrand(
   // legitimate subintegrand (`\int 0\,dx`) and must not be treated as absent.
   if (op1 === null) return [expr, []];
 
-  if (h === 'Sequence' && nops(expr) === 1) return parseSubintegrand(op1, binderName);
+  if (h === 'Sequence' && nops(expr) === 1)
+    return parseSubintegrand(op1, binderName);
 
   if (h === 'Multiply' || h === 'InvisibleOperator') {
     // Handle the case `3xdx` where the `dx` is the last term of a
