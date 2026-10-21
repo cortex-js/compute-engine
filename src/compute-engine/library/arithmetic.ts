@@ -124,7 +124,7 @@ import {
 } from '../numerics/bernoulli.js';
 import {
   gamma,
-  gammaln,
+  lnAbsGamma,
   estimatedFactorialDigits,
   incompleteGammaUpper,
   bigIncompleteGammaUpper,
@@ -7406,7 +7406,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return shouldNumericize(numericApproximation, x)
           ? apply(
               x,
-              (x) => gammaln(x),
+              (x) => lnAbsGamma(x),
               (x) => bigGammaln(engine, x),
               (x) => logGammaPrincipal(x)
             )

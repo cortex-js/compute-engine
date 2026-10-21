@@ -139,10 +139,30 @@ describe('GammaLn is the principal log of Γ(z), LogGamma the continuation', () 
     ).toThrow(/real-only/);
   });
 
-  test('compiled GammaLn(x) agrees with N() for real x > 0', () => {
-    const r = compile(ce.expr(['GammaLn', 'x']), { to: 'javascript' });
-    const f = r.run as (v: { x: number }) => number;
-    for (const x of [0.3, 7.25, 120.5])
-      expect(f({ x })).toBeCloseTo((ce.expr(['GammaLn', x]).N() as any).re, 10);
-  });
+  // mpmath `log(abs(gamma(x)))`
+  const realCases: [number, number][] = [
+    [-0.5, 1.2655121234846454],
+    [-2.5, -0.056243716497674054],
+    [-7.3, -7.7791016298268517],
+    [0.5, 0.5723649429247001],
+    [3, 0.6931471805599453],
+    [100, 359.1342053695754],
+  ];
+  for (const [x, want] of realCases) {
+    test(`GammaLn(${x}) = ${want} (compiled JS, N)`, () => {
+      const r = compile(ce.expr(['GammaLn', 'x']), { to: 'javascript' });
+      const f = r.run as (v: { x: number }) => number;
+      expect(f({ x })).toBeCloseTo(want, 10);
+      expect((ce.expr(['GammaLn', x]).N() as any).re).toBeCloseTo(want, 10);
+    });
+  }
+
+  for (const x of [0, -1, -4]) {
+    test(`GammaLn(${x}) = +oo at a pole (compiled JS, N)`, () => {
+      const r = compile(ce.expr(['GammaLn', 'x']), { to: 'javascript' });
+      const f = r.run as (v: { x: number }) => number;
+      expect(f({ x })).toBe(Infinity);
+      expect(ce.expr(['GammaLn', x]).N().toString()).toBe('+oo');
+    });
+  }
 });
