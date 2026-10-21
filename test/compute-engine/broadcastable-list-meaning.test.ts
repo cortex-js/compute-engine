@@ -943,3 +943,401 @@ describe('a branching chain of row aliases', () => {
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
+
+describe('the meet of two collections of the same kind', () => {
+  const meetOf = (a: string, b: string) =>
+    reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] });
+  const meet = (a: string, b: string) => typeToString(meetOf(a, b));
+  const overlap = (a: string, b: string) =>
+    typesOverlap(parseType(a), parseType(b)) ||
+    typesOverlap(parseType(b), parseType(a));
+  // `witness` is a value of `a` and of `b`, and must be a value of the meet.
+  const holds = (a: string, b: string, witness: string) => {
+    const w = parseType(witness);
+    expect(sub(witness, a) && sub(witness, b)).toBe(true);
+    expect(isSubtype(w, meetOf(a, b))).toBe(true);
+    expect(isSubtype(w, meetOf(b, a))).toBe(true);
+    expect(overlap(a, b)).toBe(true);
+  };
+
+  it('keeps two lists whose elements are at different depths', () => {
+    // An integer matrix: its cells are numbers, its rows lists of integers.
+    holds('list<number>', 'list<list<integer>>', 'list<integer^(2x2)>');
+    expect(meet('list<integer>', 'list<string>')).toBe('list<never>');
+  });
+
+  it('keeps two collections whose elements are at different depths', () => {
+    holds(
+      'collection<indexed_collection<integer>>',
+      'collection<integer>',
+      'list<integer^(2x2)>'
+    );
+    holds(
+      'indexed_collection<list<list<boolean>>>',
+      'indexed_collection<list<number> | boolean>',
+      'list<boolean^(2x2x2)>'
+    );
+  });
+
+  it('meets two fixed shapes row by row', () => {
+    expect(meet('list<number^(2x2)>', 'list<list<integer>^2>')).toBe(
+      'matrix<integer^(2x2)>'
+    );
+    expect(meet('list<list<integer>^2>', 'list<number^(2x3)>')).toBe(
+      'matrix<integer^(2x3)>'
+    );
+    expect(meet('list<number^(-1x2)>', 'list<list<integer>^3>')).toBe(
+      'matrix<integer^(3x2)>'
+    );
+    expect(meet('list<number^2>', 'list<integer^-1>')).toBe(
+      'vector<integer^2>'
+    );
+    expect(overlap('list<number^(2x2)>', 'list<list<integer>^2>')).toBe(true);
+  });
+
+  it('refutes two fixed shapes with no common value', () => {
+    expect(meet('list<number^(2x2)>', 'list<number^(2x3)>')).toBe('never');
+    expect(meet('list<number^(2x2)>', 'list<number^2>')).toBe('never');
+    expect(meet('list<number^2>', 'list<list<integer>^2>')).toBe('never');
+    expect(meet('list<number^2>', 'list<string^2>')).toBe('never');
+  });
+
+  it('applies the protocol rule to the rows of two fixed shapes', () => {
+    // They share the empty list only.
+    expect(overlap('list<integer^(-1x2)>', 'vector<list<string>>')).toBe(false);
+    expect(overlap('list<integer^0>', 'list<integer^(0x2)>')).toBe(false);
+  });
+
+  it('does not give a matrix that a list with one axis does not hold', () => {
+    // `list<number^(3x2)>` is not a `list<unknown^3>`: its cells are in
+    // `unknown`, so the subtype rule reads it with two axes.
+    const m = meetOf('list<unknown^3>', 'list<number^(3x2)>');
+    expect(typeToString(m)).not.toBe('matrix<3x2>');
+    expect(sub('list<number^(3x2)>', 'list<unknown^3>')).toBe(false);
+    // Rows with an axis of length -1 can differ in length.
+    expect(meet('list<unknown^-1>', 'list<number^(3x-1)>')).not.toBe(
+      'list<vector^3>'
+    );
+  });
+
+  it('keeps a fixed shape whose rows can hold deeper cells', () => {
+    holds('list<list^3>', 'list<vector<integer^2>>', 'list<integer^(3x2x2)>');
+    // A matrix with cells in `unknown` is not a `list<unknown^3>`.
+    expect(meet('list<unknown^3>', 'list<integer>')).toBe('vector<integer^3>');
+  });
+
+  it('reads a row of a list with no dimensions as a list too', () => {
+    // A value of `list<integer>` can be an integer matrix, whose rows are
+    // `vector<integer^2>`.
+    holds(
+      'list<list<integer>^-1>',
+      'list<list<number^-1>>',
+      'list<integer^(2x2x2)>'
+    );
+    holds(
+      'list<list<boolean>^2>',
+      'list<list<unknown | number^-1>>',
+      'list<boolean^(2x2x2)>'
+    );
+  });
+
+  it('reads a bare collection name as its <unknown> form', () => {
+    expect(meet('list<any^3>', 'list')).toBe('list<unknown^3>');
+    expect(overlap('list<any^3>', 'list')).toBe(true);
+  });
+});
+
+describe('the meet of two collections of the same kind: precision', () => {
+  const meetOf = (a: string, b: string) =>
+    reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] });
+  const meet = (a: string, b: string) => typeToString(meetOf(a, b));
+
+  it('does not merge rows whose cells can be lists', () => {
+    // The subtype rule reads this nested value by its rows; a list of
+    // `any` cells does not hold it.
+    const a = 'list<unknown^2>';
+    const b = 'list<list<any^2>^-1>';
+    const w = parseType('list<list<list<number^2>^2>^2>');
+    expect(sub('list<list<list<number^2>^2>^2>', a)).toBe(true);
+    expect(sub('list<list<list<number^2>^2>^2>', b)).toBe(true);
+    expect(isSubtype(w, meetOf(a, b))).toBe(true);
+    expect(meet(a, b)).not.toBe('list<any^(2x2)>');
+  });
+
+  it('meets two lists with no dimensions elementwise when that holds every value', () => {
+    // The meet `list<…>` reads its values at any depth.
+    expect(meet('list<list<integer>>', 'list<list<number^2>>')).toBe(
+      'list<vector<integer^2>>'
+    );
+    expect(meet('list<string>', 'list<list<integer>>')).toBe('list<never>');
+  });
+});
+
+describe('recursive aliases', () => {
+  const ce = new ComputeEngine();
+  const alias = (name: string, def: string) =>
+    ce.declareType(name, def, { alias: true });
+  alias('json', 'list<json> | integer');
+  alias('C', 'C | integer');
+  alias('TA', 'tuple<TA> | integer');
+  alias('TB', 'tuple<TB> | string');
+  alias('LA', 'list<LA> | integer');
+  alias('LB', 'list<LB> | string');
+  alias('RA', 'record{v: RA} | integer');
+  alias('RB', 'record{v: RB} | string');
+  const T = (s: string) => ce.type(s).type;
+  const meetOf = (a: string, b: string) =>
+    reduceType({ kind: 'intersection', types: [T(a), T(b)] });
+  const overlap = (a: string, b: string) =>
+    typesOverlap(T(a), T(b)) || typesOverlap(T(b), T(a));
+
+  it('couldMatch reads the arms of a recursive alias', () => {
+    // `json` and `number` share every integer.
+    expect(couldMatch(T('number'), T('json'))).toBe(true);
+    expect(couldMatch(T('json'), T('number'))).toBe(true);
+    expect(couldMatch(T('string'), T('json'))).toBe(false);
+    expect(couldMatch(T('list<integer>'), T('json'))).toBe(true);
+    expect(couldMatch(T('json'), T('json'))).toBe(true);
+    // The values of `C = C | integer` are those of `integer`.
+    expect(couldMatch(T('C'), T('number'))).toBe(true);
+    expect(couldMatch(T('C'), T('string'))).toBe(false);
+  });
+
+  it('refutes two recursive aliases that share no finite value', () => {
+    // A shared tuple would hold a smaller shared value in its slot.
+    expect(typeToString(meetOf('TA', 'TB'))).toBe('never');
+    expect(overlap('TA', 'TB')).toBe(false);
+    expect(typeToString(meetOf('RA', 'RB'))).toBe('never');
+    expect(overlap('RA', 'RB')).toBe(false);
+    expect(overlap('tuple<TA>', 'tuple<TB>')).toBe(false);
+    expect(overlap('TA', 'tuple<integer>')).toBe(true);
+    expect(overlap('TA', 'TA')).toBe(true);
+  });
+
+  it('keeps two recursive aliases that share lists', () => {
+    // `[]` and `[[]]` are in both.
+    const m = meetOf('LA', 'LB');
+    expect(typeToString(m)).not.toBe('never');
+    expect(isSubtype(T('list<never>'), m)).toBe(true);
+    expect(isSubtype(T('list<list<never>>'), m)).toBe(true);
+    // They share empty lists only, which the protocol rule does not count,
+    // but no proof refutes the pair, so the overlap test keeps the safe
+    // answer.
+    expect(overlap('LA', 'LB')).toBe(true);
+  });
+});
+
+describe('chains of aliases with two branches at each level', () => {
+  it('are compared in a time that grows with the depth only', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('A0', 'integer', { alias: true });
+    ce.declareType('B0', 'string', { alias: true });
+    ce.declareType('R0', 'integer', { alias: true });
+    ce.declareType('S0', 'number', { alias: true });
+    for (let n = 1; n <= 32; n++) {
+      ce.declareType(`A${n}`, `list<A${n - 1}^2> | list<A${n - 1}^3>`, {
+        alias: true,
+      });
+      ce.declareType(`B${n}`, `list<B${n - 1}^2> | list<B${n - 1}^3>`, {
+        alias: true,
+      });
+      ce.declareType(`R${n}`, `list<R${n - 1}^2> | list<R${n - 1}^-1>`, {
+        alias: true,
+      });
+      ce.declareType(
+        `S${n}`,
+        `list<S${n - 1}^(2x-1)> | list<S${n - 1}^(-1x2)>`,
+        { alias: true }
+      );
+    }
+    const T = (s: string) => ce.type(s).type;
+    const meet = (a: string, b: string) =>
+      reduceType({ kind: 'intersection', types: [T(a), T(b)] });
+    // Each of these took seconds to minutes at depth 20 (the work doubled
+    // at each level). They now take milliseconds at depth 32.
+    const start = Date.now();
+    expect(typesOverlap(T('A32'), T('B32'))).toBe(false);
+    expect(couldMatch(T('A32'), T('B32'))).toBe(false);
+    expect(provablyDisjoint(T('A32'), T('B32'))).toBe(false);
+    meet('A32', 'B32');
+    meet('R32', 'S32');
+    meet('list<R32^(2x-1)>', 'list<S32^(-1x3)>');
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
+describe('cases of the review of the recursive-alias fixes', () => {
+  it('compares a chain of self-recursive aliases in a bounded time', () => {
+    const ce = new ComputeEngine();
+    const alias = (name: string, def: string) =>
+      ce.declareType(name, def, { alias: true });
+    alias('A0', 'integer');
+    alias('B0', 'string');
+    for (let k = 1; k <= 32; k++) {
+      alias(
+        `A${k}`,
+        `tuple<A${k - 1}> | tuple<A${k - 1}, integer> | tuple<type A${k}>`
+      );
+      alias(
+        `B${k}`,
+        `tuple<B${k - 1}> | tuple<B${k - 1}, integer> | tuple<type B${k}>`
+      );
+    }
+    const T = (s: string) => ce.type(s).type;
+    // It did not finish in 60 s at depth 12 when a `false` reached through
+    // the self arm was never kept.
+    const start = Date.now();
+    expect(couldMatch(T('A32'), T('B32'))).toBe(false);
+    expect(
+      typeToString(
+        reduceType({ kind: 'intersection', types: [T('A12'), T('B12')] })
+      )
+    ).toBe('never');
+    expect(typesOverlap(T('A12'), T('B12'))).toBe(false);
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  it('does not overflow the stack on a generic alias whose arguments grow', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('GA', 'type GB<list<T>> | integer', {
+      alias: true,
+      typeParams: ['T'],
+    });
+    ce.declareType('GB', 'GA<T>', { alias: true, typeParams: ['T'] });
+    const T = (s: string) => ce.type(s).type;
+    const g = T('GA<integer>');
+    for (const other of ['any', 'string', 'integer', 'list<string>']) {
+      const t = T(other);
+      expect(() => couldMatch(g, t)).not.toThrow();
+      expect(() => isSubtype(g, t)).not.toThrow();
+      expect(() => isSubtype(t, g)).not.toThrow();
+      expect(() => provablyDisjoint(g, t)).not.toThrow();
+      expect(() => typesOverlap(g, t)).not.toThrow();
+      expect(() =>
+        reduceType({ kind: 'intersection', types: [g, t] })
+      ).not.toThrow();
+    }
+    expect(isSubtype(T('integer'), g)).toBe(true);
+  });
+
+  it('meets lists of recursive aliases elementwise when that holds every value', () => {
+    const ce = new ComputeEngine();
+    const alias = (name: string, def: string) =>
+      ce.declareType(name, def, { alias: true });
+    alias('json', 'list<json> | integer');
+    alias('M', 'list<M^2> | integer');
+    alias('Y', 'collection<Y> | integer');
+    const T = (s: string) => ce.type(s).type;
+    const meet = (a: string, b: string) =>
+      typeToString(reduceType({ kind: 'intersection', types: [T(a), T(b)] }));
+    // `json` holds every element of its lists, so an integer matrix, which
+    // is in both, is a `list<integer>`.
+    expect(meet('list<number>', 'list<json>')).toBe('list<integer>');
+    expect(meet('list<string>', 'list<json>')).toBe('list<never>');
+    // A list of `M` has two elements: it is never empty.
+    expect(meet('list<string>', 'M')).toBe('never');
+    expect(meet('list<string>', 'Y')).toBe('list<never>');
+  });
+});
+
+describe('cases of the third review', () => {
+  it('does not refute a cut alias without a proof', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('NA', 'list<NA> | (number & !integer)', { alias: true });
+    ce.declareType('FA', 'list<FA> | ((integer) -> integer)', { alias: true });
+    const T = (s: string) => ce.type(s).type;
+    // `[[[0.5]]]` is in both.
+    expect(typesOverlap(T('NA'), T('list<list<list<real>>>'))).toBe(true);
+    // A function `(number) -> integer` is in both.
+    expect(
+      typesOverlap(T('FA'), T('list<list<list<(number) -> number>>>'))
+    ).toBe(true);
+  });
+
+  it('keeps matrices whose cells share values that couldMatch does not see', () => {
+    const holds = (a: string, b: string, witness: string) => {
+      const w = parseType(witness);
+      expect(sub(witness, a) && sub(witness, b)).toBe(true);
+      const m = reduceType({
+        kind: 'intersection',
+        types: [parseType(a), parseType(b)],
+      });
+      expect(isSubtype(w, m)).toBe(true);
+    };
+    holds(
+      'list<list<tuple<number & !integer>>>',
+      'collection<tuple<real>>',
+      'list<tuple<real & !integer>^(2x2)>'
+    );
+    holds(
+      'list<list<record{a: (integer) -> integer}>>',
+      'collection<record{a: (number) -> number}>',
+      'list<record{a: (number) -> integer}^(2x2)>'
+    );
+    holds(
+      'list<list<(integer) -> integer>^2>',
+      'list<(number) -> number>',
+      'list<((number) -> integer)^(2x2)>'
+    );
+    holds(
+      'list<list<(integer) -> integer>>',
+      'collection<(number) -> number>',
+      'list<((number) -> integer)^(2x2)>'
+    );
+  });
+
+  it('does not take an application of a generic alias as a repeat', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('Id', 'T', { alias: true, typeParams: ['T'] });
+    const T = (s: string) => ce.type(s).type;
+    const a = T('list<Id<Id<list<integer>>>^2>');
+    const b = T('collection<number>');
+    const w = T('list<integer^(2x2)>');
+    expect(isSubtype(w, a) && isSubtype(w, b)).toBe(true);
+    expect(
+      isSubtype(w, reduceType({ kind: 'intersection', types: [a, b] }))
+    ).toBe(true);
+  });
+
+  it('follows a long chain of aliases to its end', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('C0', 'integer', { alias: true });
+    for (let n = 1; n <= 300; n++)
+      ce.declareType(`C${n}`, `C${n - 1}`, { alias: true });
+    const T = (s: string) => ce.type(s).type;
+    expect(isSubtype(T('C300'), T('number'))).toBe(true);
+    expect(isSubtype(T('list<C300>'), T('list<number>'))).toBe(true);
+  });
+
+  it('compares a graph of aliases that reach one alias twice in a bounded time', () => {
+    const ce = new ComputeEngine();
+    const alias = (name: string, def: string) =>
+      ce.declareType(name, def, { alias: true });
+    alias('V0', 'integer');
+    for (let n = 1; n <= 32; n++) {
+      alias(`A${n}`, `V${n - 1}`);
+      alias(`B${n}`, `V${n - 1} | integer`);
+      alias(`V${n}`, `A${n} | B${n}`);
+    }
+    alias('R0', 'list<R0> | integer');
+    alias('S0', 'list<integer | list<integer | list<number>>> | integer');
+    for (let n = 1; n <= 22; n++) {
+      alias(`R${n}`, `list<R${n - 1}^2> | list<R${n - 1}^3>`);
+      alias(`S${n}`, `list<S${n - 1}^2> | list<S${n - 1}^3>`);
+    }
+    const T = (s: string) => ce.type(s).type;
+    // About 100 s at depth 24 before, and 23 s for the subtype test.
+    const start = Date.now();
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [T('list<V32>'), T('list<list<string>>')],
+        })
+      )
+    ).toBe('list<never>');
+    expect(typesOverlap(T('list<V32>'), T('list<list<string>>'))).toBe(false);
+    isSubtype(T('R22'), T('S22'));
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});

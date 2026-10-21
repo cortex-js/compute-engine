@@ -328,12 +328,57 @@ const MEET_CACHE = new Map<string, PrimitiveType[]>();
  */
 let unfoldingRefs: Set<TypeReference> | null = null;
 
+/**
+ * The smallest stack index (in `subtypePairs.active`) of a question whose
+ * state a cycle guard of `isSubtype` or `provablyDisjoint` used since the
+ * current question of `subtypePairs` started: a pair assumed to hold by the
+ * lhs unfold names the question it repeats. The other guards (a re-entry
+ * refused by the rhs unfold, a reference met again, an assumed union arm)
+ * do not name one, and set `-1`. An answer that used the state of a
+ * question below it on the stack depends on where it was asked, so
+ * `subtypePairs` does not keep it; an answer whose guards all named the
+ * question itself, or one it asked, is exact and is kept (the lowlink rule
+ * of Tarjan's algorithm). Without the second case, a chain of
+ * self-recursive aliases was compared again on every path.
+ */
+let subtypeLow = Infinity;
+
+/** Record that a cycle guard answered from the state of the stack (see
+ * `subtypeLow`). */
+function noteSubtypeAssumption(at = -1): void {
+  if (at < subtypeLow) subtypeLow = at;
+}
+
+/**
+ * The answers of `isSubtype` for the pairs of one question that reaches a
+ * transparent alias, by the interning keys of the two types
+ * (`cyclePairKey`). Created by the outermost `isSubtype` call whose lhs or
+ * rhs is such an alias, or by the outermost `couldMatch` call, and dropped
+ * when that call returns.
+ *
+ * Without it, a chain of aliases with two branches at each level
+ * (`Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>`) asks the question `Aₙ₋₁ <: Bₙ₋₁`
+ * twice for each `Aₙ <: Bₙ` (once for each arm of `Bₙ`), and the work
+ * doubles at each level. The memo is limited to questions that reach an
+ * alias because the other questions are short, and a memo on them cost
+ * more than it saved (the measurement is recorded above
+ * `dimensionsCouldMatch()`).
+ */
+let subtypePairs:
+  { answers: Map<string, boolean>; active: Map<string, number> } | undefined;
+
 /** Enter an unfold frame for `ref`. Returns `false` when `ref` is already
  * being unfolded further up the stack — a cycle; the caller must then answer
  * conservatively rather than recurse. */
-function beginUnfold(ref: TypeReference): boolean {
+function beginUnfold(ref: TypeReference, decides = true): boolean {
   if (unfoldingRefs === null) unfoldingRefs = new Set();
-  else if (unfoldingRefs.has(ref)) return false;
+  else if (unfoldingRefs.has(ref)) {
+    // A refusal decides an answer of `provablyDisjoint` (see
+    // `subtypeLow`); the lhs unfold of `isSubtype` only registers the
+    // record, and passes `decides: false`.
+    if (decides) noteSubtypeAssumption();
+    return false;
+  }
   unfoldingRefs.add(ref);
   return true;
 }
@@ -380,6 +425,25 @@ let lhsUnfoldKeys: Map<TypeReference, Set<string>> | null = null;
  * pairs are finite by construction; this bound only stops a rule that would
  * build an ever larger rhs. */
 const MAX_LHS_UNFOLD_PAIRS = 32;
+
+/** The number of unfolds of applications of generic aliases (with type
+ * arguments) that `isSubtype` holds open now, on the lhs and the rhs. */
+let openAliasUnfolds = 0;
+
+/** The most unfolds of applications of generic aliases that `isSubtype`
+ * holds open at once. The guards above are keyed by the alias node, and a
+ * generic alias whose arguments grow at each unfold
+ * (`A<T> = B<list<T>> | integer`, `B<T> = A<T>`) makes a new node at each
+ * step, so without this bound the unfolds nested until the stack
+ * overflowed. Past it, the answer is the conservative `false`. An alias
+ * with no type argument is not counted: the guards above recognize its
+ * repeats, and a long chain of such aliases is followed to its end. */
+const MAX_OPEN_ALIAS_UNFOLDS = 256;
+
+/** Whether `t` is an application of a generic alias, with type arguments. */
+function isGenericApplication(t: TypeReference): boolean {
+  return (t.args?.length ?? 0) > 0;
+}
 
 /** A number for each object met by {@link cyclePairKey} that it names by
  * identity: a reference DECLARATION record, so that a key names a reference
@@ -603,12 +667,13 @@ function cycleDataKey(v: unknown): string {
 /** Whether the union arm `arm` is a structural alias already being unfolded
  * against `rhs` further up the stack: see `lhsUnfoldTargets`. */
 function isAssumedUnionArm(arm: Type, rhs: unknown): boolean {
-  return (
+  const assumed =
     typeof arm === 'object' &&
     arm.kind === 'reference' &&
     arm.alias === true &&
-    lhsUnfoldTargets?.get(arm)?.has(rhs) === true
-  );
+    lhsUnfoldTargets?.get(arm)?.has(rhs) === true;
+  if (assumed) noteSubtypeAssumption();
+  return assumed;
 }
 
 /**
@@ -640,7 +705,10 @@ function beginUnfoldAgainst(ref: TypeReference, lhs: unknown): boolean {
   if (seen === undefined) {
     seen = new Set();
     unfoldingPairs.set(ref, seen);
-  } else if (seen.has(lhs)) return false;
+  } else if (seen.has(lhs)) {
+    noteSubtypeAssumption();
+    return false;
+  }
   seen.add(lhs);
   return true;
 }
@@ -686,6 +754,58 @@ export function isEmptyType(t: Type): boolean {
 export function provablyDisjoint(a: Type, b: Type): boolean {
   assertGroundType('provablyDisjoint', a);
   assertGroundType('provablyDisjoint', b);
+  if (a === 'never' || b === 'never') return true; // empty set
+  if (a === 'any' || b === 'any') return false;
+
+  // A question that meets a reference keeps its answers in `disjointPairs`
+  // (see there). A question with no reference does not open it, so it pays
+  // nothing for it.
+  const isReference = (t: Type): boolean =>
+    typeof t === 'object' && t.kind === 'reference';
+  if (disjointPairs === undefined && !isReference(a) && !isReference(b))
+    return provablyDisjointRules(a, b);
+  const owned = disjointPairs === undefined;
+  if (owned) {
+    enterCycleKeys();
+    disjointPairs = new Map();
+  }
+  try {
+    const key = `${cyclePairKey(a)}#${cyclePairKey(b)}`;
+    const known = disjointPairs!.get(key);
+    if (known !== undefined) return known;
+    const outerLow = subtypeLow;
+    subtypeLow = Infinity;
+    try {
+      const answer = provablyDisjointRules(a, b);
+      if (subtypeLow === Infinity) disjointPairs!.set(key, answer);
+      return answer;
+    } finally {
+      subtypeLow = Math.min(outerLow, subtypeLow);
+    }
+  } finally {
+    if (owned) {
+      disjointPairs = undefined;
+      leaveCycleKeys();
+    }
+  }
+}
+
+/**
+ * The answers of `provablyDisjoint` for the pairs of one question that
+ * meets a reference, by the interning keys of the two types
+ * (`cyclePairKey`). Created by the outermost call whose operand is a
+ * reference, and dropped when it returns.
+ *
+ * Without it, a union of aliases that reach the same alias through two arms
+ * (`Vₙ = Aₙ | Bₙ` with `Aₙ = Vₙ₋₁` and `Bₙ = Vₙ₋₁ | integer`) is
+ * distributed again on each path, and the work doubles at each level. An
+ * answer that a cycle guard decided (`subtypeLow`) depends on where it was
+ * asked, and is not kept.
+ */
+let disjointPairs: Map<string, boolean> | undefined;
+
+/** The rules of {@link provablyDisjoint}. */
+function provablyDisjointRules(a: Type, b: Type): boolean {
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
 
@@ -1299,16 +1419,78 @@ function bareTupleOrRecordCouldMatch(bare: Type, other: Type): boolean {
   return false;
 }
 
+/**
+ * The state of `couldMatch()` for the pairs of one question, created when
+ * the question first unfolds a transparent alias, and dropped when the
+ * outermost `couldMatch()` call returns. The pairs are keyed by the
+ * interning keys of their two types (`cycleTypeKey()`).
+ *
+ * - `answers`: the answer for each pair already decided. A question can
+ *   meet one pair on many paths (each level of a chain of aliases with two
+ *   branches doubles them), so the work grows with the number of distinct
+ *   pairs, not with the number of paths.
+ * - `active`: the pairs being answered now, with their depth on the stack.
+ *   A pair met again while it is being answered (a recursive alias,
+ *   `json = list<json> | integer`) adds no value on that path, because a
+ *   value is finite: that path answers `false`, and the other arms decide.
+ * - `low`: the smallest depth of an active pair met again since the current
+ *   pair started. A `false` that relied on meeting a pair below the current
+ *   one (a smaller depth) holds on that path only, so it is not kept in
+ *   `answers`. When every pair met again is the current pair or one above
+ *   it, the `false` is exact and is kept: without this, a chain of
+ *   self-recursive aliases was compared again on every path (the lowlink
+ *   rule of Tarjan's algorithm). A `true` is a value found, and is kept.
+ * - `steps`: the pairs compared so far. Past `MAX_COULD_MATCH_STEPS`, or
+ *   past `MAX_COULD_MATCH_DEPTH` open pairs, the answer is `true`, "may
+ *   match": a generic alias whose arguments grow at each unfold
+ *   (`A<T> = B<list<T>> | integer`, `B<T> = A<T>`) never meets a pair
+ *   again.
+ */
+let couldMatchPairs:
+  | {
+      answers: Map<string, boolean>;
+      active: Map<string, number>;
+      low: number;
+      steps: number;
+      /** Whether this question created `subtypePairs`. */
+      ownsSubtypePairs: boolean;
+    }
+  | undefined;
+
+/** The most pairs one `couldMatch()` question compares once it unfolds an
+ * alias (see `couldMatchPairs`). */
+const MAX_COULD_MATCH_STEPS = 100_000;
+
+/** The most pairs one `couldMatch()` question holds open at once: a generic
+ * alias whose arguments grow at each unfold nests without end. Past it,
+ * the answer is `true`, "may match". */
+const MAX_COULD_MATCH_DEPTH = 512;
+
 export function couldMatch(a: Type, b: Type): boolean {
   // The question holds the interning table, and with it the memo of
   // `inhabitation()`, for all its recursive probes: the emptiness test
   // below runs at each of them, and each node is walked once.
+  const outer = couldMatchPairs === undefined;
   enterCycleKeys();
   try {
     return couldMatchWithin(a, b);
   } finally {
+    if (outer && couldMatchPairs !== undefined) {
+      closeSubtypePairs(couldMatchPairs.ownsSubtypePairs);
+      couldMatchPairs = undefined;
+    }
     leaveCycleKeys();
   }
+}
+
+/** Whether `t` is a reference to a transparent alias with a definition. */
+function isTransparentAliasReference(t: Type | TypeString): t is TypeReference {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'reference' &&
+    t.alias === true &&
+    t.def !== undefined
+  );
 }
 
 /** The body of {@link couldMatch}, run while the question holds the
@@ -1316,6 +1498,70 @@ export function couldMatch(a: Type, b: Type): boolean {
 function couldMatchWithin(a: Type, b: Type): boolean {
   // `never` is uninhabited: no value is one.
   if (a === 'never' || b === 'never') return false;
+  const aliasA = isTransparentAliasReference(a);
+  if (
+    !aliasA &&
+    !isTransparentAliasReference(b) &&
+    couldMatchPairs === undefined
+  )
+    return couldMatchStructure(a, b);
+  // The memo of `isSubtype` (`subtypePairs`) is opened with this state and
+  // stays open for the rest of the question: the fallback of
+  // `couldMatchStructure()` asks `isSubtype` for many pairs, and each answer
+  // that memo keeps does not depend on where it was asked. A question that
+  // meets no alias does not open it, so it pays nothing for it.
+  const pairs = (couldMatchPairs ??= {
+    answers: new Map(),
+    active: new Map(),
+    low: Infinity,
+    steps: 0,
+    ownsSubtypePairs: openSubtypePairs(),
+  });
+  const key = `${cycleTypeKey(a)}&${cycleTypeKey(b)}`;
+  const known = pairs.answers.get(key);
+  if (known !== undefined) return known;
+  const activeAt = pairs.active.get(key);
+  if (activeAt !== undefined) {
+    pairs.low = Math.min(pairs.low, activeAt);
+    return false;
+  }
+  if (
+    ++pairs.steps > MAX_COULD_MATCH_STEPS ||
+    pairs.active.size >= MAX_COULD_MATCH_DEPTH
+  )
+    return true;
+  const index = pairs.active.size;
+  const outerLow = pairs.low;
+  pairs.low = Infinity;
+  pairs.active.set(key, index);
+  let answer = false;
+  try {
+    if (aliasA || isTransparentAliasReference(b)) {
+      // A transparent alias IS its definition (`aliasDefinitionAt()`
+      // substitutes the arguments of a generic alias), so it is compared
+      // through it: with `type alias json = list<json> | integer`, `json`
+      // and `number` share every integer.
+      const alias = (aliasA ? a : b) as TypeReference;
+      const def = aliasDefinitionAt(alias);
+      answer =
+        def === undefined
+          ? couldMatchStructure(a, b)
+          : aliasA
+            ? couldMatchWithin(def, b)
+            : couldMatchWithin(a, def);
+    } else answer = couldMatchStructure(a, b);
+    if (answer || pairs.low >= index) pairs.answers.set(key, answer);
+    return answer;
+  } finally {
+    pairs.active.delete(key);
+    // A pair met again below this one is still open for the caller.
+    pairs.low = Math.min(outerLow, pairs.low < index ? pairs.low : Infinity);
+  }
+}
+
+/** The rules of {@link couldMatch} for two types that are not transparent
+ * aliases. */
+function couldMatchStructure(a: Type, b: Type): boolean {
   // Distribute over unions, at any depth. This is the whole point of the
   // predicate.
   if (typeof a === 'object' && a.kind === 'union')
@@ -1985,6 +2231,71 @@ export function isSubtype(
       return false;
   }
 
+  if (
+    subtypePairs === undefined &&
+    !isTransparentAliasReference(lhs) &&
+    !isTransparentAliasReference(rhs)
+  )
+    return isSubtypeRules(lhs, rhs);
+  const owned = openSubtypePairs();
+  const pairs = subtypePairs!;
+  try {
+    const key = `${cyclePairKey(lhs)}<:${cyclePairKey(rhs)}`;
+    const known = pairs.answers.get(key);
+    if (known !== undefined) return known;
+    // The same question asked again while it is open, by a route that is
+    // not a cycle guard: answered by the rules, and not kept.
+    const openAt = pairs.active.get(key);
+    if (openAt !== undefined) {
+      noteSubtypeAssumption(openAt);
+      return isSubtypeRules(lhs, rhs);
+    }
+    const index = pairs.active.size;
+    const outerLow = subtypeLow;
+    subtypeLow = Infinity;
+    pairs.active.set(key, index);
+    try {
+      const answer = isSubtypeRules(lhs, rhs);
+      if (subtypeLow >= index) pairs.answers.set(key, answer);
+      return answer;
+    } finally {
+      pairs.active.delete(key);
+      // A guard that used a question below this one is still open for the
+      // caller.
+      subtypeLow = Math.min(
+        outerLow,
+        subtypeLow < index ? subtypeLow : Infinity
+      );
+    }
+  } finally {
+    closeSubtypePairs(owned);
+  }
+}
+
+/** Create `subtypePairs` when no question holds it, and return whether
+ * this call created it (pass the result to {@link closeSubtypePairs}). */
+function openSubtypePairs(): boolean {
+  if (subtypePairs !== undefined) return false;
+  enterCycleKeys();
+  subtypePairs = { answers: new Map(), active: new Map() };
+  subtypeLow = Infinity;
+  return true;
+}
+
+/** Drop `subtypePairs` when `owned`, the result of
+ * {@link openSubtypePairs}, says this question created it. */
+function closeSubtypePairs(owned: boolean): void {
+  if (!owned) return;
+  subtypePairs = undefined;
+  subtypeLow = Infinity;
+  leaveCycleKeys();
+}
+
+/** The rules of {@link isSubtype}, after its fast paths. */
+function isSubtypeRules(
+  lhs: Type | TypeString,
+  rhs: Type | TypeString
+): boolean {
   //
   // A structural alias reference on the LHS unfolds to its definition
   //
@@ -2044,12 +2355,24 @@ export function isSubtype(
     try {
       const rhsKey = cyclePairKey(rhs);
       const activeKeys = lhsUnfoldKeys?.get(lhs);
-      if (activeKeys?.has(rhsKey)) return true;
-      if (activeKeys !== undefined && activeKeys.size >= MAX_LHS_UNFOLD_PAIRS)
+      if (activeKeys?.has(rhsKey)) {
+        // The question repeated is `lhs <: rhs` itself, open further up.
+        noteSubtypeAssumption(
+          subtypePairs?.active.get(`${cyclePairKey(lhs)}<:${rhsKey}`) ?? -1
+        );
+        return true;
+      }
+      const generic = isGenericApplication(lhs);
+      if (
+        (activeKeys !== undefined && activeKeys.size >= MAX_LHS_UNFOLD_PAIRS) ||
+        (generic && openAliasUnfolds >= MAX_OPEN_ALIAS_UNFOLDS)
+      ) {
+        noteSubtypeAssumption();
         return false;
+      }
       // The record is also entered in the record-keyed set that
       // `provablyDisjoint` reads, when it is not there yet.
-      const entered = beginUnfold(lhs);
+      const entered = beginUnfold(lhs, false);
       const keys = activeKeys ?? new Set<string>();
       keys.add(rhsKey);
       lhsUnfoldKeys ??= new Map();
@@ -2062,10 +2385,12 @@ export function isSubtype(
       }
       const addedTarget = !targets.has(rhs);
       if (addedTarget) targets.add(rhs);
+      if (generic) openAliasUnfolds += 1;
       try {
         const def = aliasDefinitionAt(lhs);
         return def === undefined ? false : isSubtype(def, rhs);
       } finally {
+        if (generic) openAliasUnfolds -= 1;
         if (addedTarget) targets.delete(rhs);
         if (targets.size === 0) lhsUnfoldTargets!.delete(lhs);
         if (lhsUnfoldTargets!.size === 0) lhsUnfoldTargets = null;
@@ -2467,6 +2792,11 @@ export function isSubtype(
       // the lhs unfold at the top of this function. Guarded on the PAIR, not
       // the record: see `beginUnfoldAgainst` for why this side cannot use the
       // record-keyed guard the lhs uses.
+      const generic = isGenericApplication(rhs);
+      if (generic && openAliasUnfolds >= MAX_OPEN_ALIAS_UNFOLDS) {
+        noteSubtypeAssumption();
+        return false;
+      }
       if (!beginUnfoldAgainst(rhs, lhs)) return false;
       // An assumption `A <: rhs` held for a live lhs unfold
       // (`lhsUnfoldTargets`) holds for the definition of `rhs` as well, since
@@ -2476,6 +2806,7 @@ export function isSubtype(
       // is an alias of `tuple<number, number>`.
       const extended: Set<unknown>[] = [];
       const def = aliasDefinitionAt(rhs);
+      if (generic) openAliasUnfolds += 1;
       try {
         if (def === undefined) return false;
         for (const targets of lhsUnfoldTargets?.values() ?? [])
@@ -2485,6 +2816,7 @@ export function isSubtype(
           }
         return isSubtype(lhs, def);
       } finally {
+        if (generic) openAliasUnfolds -= 1;
         for (const targets of extended) targets.delete(def);
         endUnfoldAgainst(rhs, lhs);
       }

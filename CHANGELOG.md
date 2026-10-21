@@ -71,7 +71,16 @@
   `A & B` is `never` and the two types do not overlap (they were kept as
   written and overlapped). `couldMatch()` reads the arms of a recursive
   alias: with `type alias json = list<json> | integer`,
-  `couldMatch(number, json)` is `true` (it was `false`).
+  `couldMatch(number, json)` is `true` (it was `false`). The test reads
+  recursive aliases by their finite values, while the subtype relation
+  reads them coinductively: with `type alias V = tuple<V>`, `V` is a subtype
+  of `A` and of `B` although `A & B` is `never`. `V` has no value, so no
+  value is lost.
+
+- A generic alias whose arguments grow at each unfold
+  (`A<T> = B<list<T>> | integer` with `B<T> = A<T>`) no longer overflows the
+  stack in the subtype, overlap and meet tests: past a limit on the open
+  unfolds, the answer is the conservative one.
 
 - The meet, the overlap test, `couldMatch()` and `provablyDisjoint()` of
   types built from a chain of aliases with two branches at each level

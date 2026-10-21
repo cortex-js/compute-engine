@@ -31,7 +31,7 @@ import type {
 import { isValidPrimitiveType } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
 import { unfoldAliasOnDescent, type AliasDescent } from './utils.js';
-import { aliasDefinitionAt } from './instantiate.js';
+import { aliasDefinitionAt, flattenNestedListType } from './instantiate.js';
 import { declarationOf } from './reference.js';
 
 /**
@@ -354,6 +354,10 @@ function reduceUnionType(type: AlgebraicType): Type {
   return decorate({ kind: 'union', types: sortUnionMembers(acc) });
 }
 
+/** The answers of `meet2()` during one top-level question, by pair of
+ * operands. `undefined` outside a question. */
+let meetMemo: Map<Type, Map<Type, Type | undefined>> | undefined;
+
 /**
  * The *meet* (intersection) of two types.
  *
@@ -378,7 +382,8 @@ function reduceUnionType(type: AlgebraicType): Type {
  *   ({@link isOverloadPair}), a pair that can share a matrix by different
  *   readings, a transparent alias that is cut on a recursion or beside
  *   another alias, and an operand that is itself a kept intersection, each
- *   unless {@link provablyDisjoint} refutes it. Everything else collapses
+ *   unless {@link provablyDisjoint} refutes it (or, for two aliases,
+ *   {@link mayShareFiniteValue}). Everything else collapses
  *   to `never`. Callers
  *   decide what an irreducible pair becomes — {@link reduceIntersectionType}
  *   keeps both members, {@link meetUnion} keeps the pair as one union member.
@@ -392,6 +397,29 @@ function reduceUnionType(type: AlgebraicType): Type {
  * the union never distributed.
  */
 function meet2(a: Type, b: Type): Type | undefined {
+  // One question can meet the same pair on several paths: the arms of
+  // `list<A^2> | list<A^3>` at each level of a chain of aliases, where the
+  // operands are the same alias reference objects of the definitions. Each
+  // answer is kept for the rest of the question, so the work grows with the
+  // number of distinct pairs, not with the number of paths. An answer is
+  // sound on any path (a pair cut by the unfold limit of an alias is kept
+  // as written, never refuted without a proof), so reusing it on another
+  // path never drops a value.
+  const outer = meetMemo === undefined;
+  const memo = (meetMemo ??= new Map());
+  try {
+    const row = memo.get(a);
+    if (row?.has(b)) return row.get(b);
+    const answer = meet2Uncached(a, b);
+    if (row === undefined) memo.set(a, new Map([[b, answer]]));
+    else row.set(b, answer);
+    return answer;
+  } finally {
+    if (outer) meetMemo = undefined;
+  }
+}
+
+function meet2Uncached(a: Type, b: Type): Type | undefined {
   // Dev tripwire (§4.2): the algebra helpers never see an OPEN type.
   assertGroundType('meet', a);
   assertGroundType('meet', b);
@@ -411,16 +439,24 @@ function meet2(a: Type, b: Type): Type | undefined {
     isTransparentAlias(b) &&
     (isRecursiveAlias(a) || isRecursiveAlias(b))
   )
-    return provablyDisjoint(a, b) ? 'never' : undefined;
+    return provablyDisjoint(a, b) || !mayShareFiniteValue(a, b)
+      ? 'never'
+      : undefined;
   const throughAlias = throughTransparentAlias(
     a,
     b,
     (x, y) => reduceType({ kind: 'intersection', types: [x, y] }),
     1
   );
-  // A cut alias is kept as written unless the pair is provably disjoint.
+  // A cut alias is kept as written unless the pair is provably disjoint, or
+  // can share no finite value (a recursive alias).
   if (throughAlias !== NO_ALIAS)
-    return throughAlias ?? (provablyDisjoint(a, b) ? 'never' : undefined);
+    return (
+      throughAlias ??
+      (provablyDisjoint(a, b) || !mayShareFiniteValue(a, b)
+        ? 'never'
+        : undefined)
+    );
 
   // `broadcastable<T>` denotes the union `T | list<T>` — the
   // same expansion `isSubtype` and `provablyDisjoint` use — so it is met by
@@ -558,13 +594,21 @@ function meet2(a: Type, b: Type): Type | undefined {
     if (an && bn) return meetNumericRanges(an, bn);
   }
 
+  // A bare collection name is read as its `<unknown>` form by the two rules
+  // below: `list<any^3> & list` is `list<unknown^3>`, not `never` (`any` is
+  // not a subtype of `unknown`, so the subtype tests above do not decide
+  // this pair).
+  const nodeA = bareCollectionAsNode(a);
+  const nodeB = bareCollectionAsNode(b);
+
   // A list with dimensions and a list with none.
-  const shaped = meetShapedWithUnshapedList(a, b);
+  const shaped = meetShapedWithUnshapedList(nodeA, nodeB);
   if (shaped !== undefined) return shaped === 'keep' ? undefined : shaped;
 
   // Two applications of the SAME collection constructor meet ELEMENTWISE.
-  const collection = meetCollections(a, b);
-  if (collection !== undefined) return collection;
+  const collection = meetCollections(nodeA, nodeB);
+  if (collection !== undefined)
+    return collection === 'keep' ? undefined : collection;
 
   // Collections of different kinds, one inside the other.
   const nested = meetCollectionKinds(a, b);
@@ -611,9 +655,15 @@ function expandBroadcastable(t: Type): Type | undefined {
  * So `list<integer> & list<string>` is `list<never>` — the type of the empty
  * list alone — and refuting the pair outright, as this used to, was unsound.
  *
- * A differing list SHAPE is not an elementwise question and takes no meet
- * here: no value is both a 2-vector and a 3-vector, so those stay refuted by
- * the caller.
+ * Two lists with different fixed shapes are met row by row
+ * (`meetShapedLists()`). Two lists with no dimensions, two indexed
+ * collections or two collections whose element types are at mixed depth
+ * (`elementsAtMixedDepth()`) give `'keep'`, the
+ * intersection as written: an integer matrix is a `list<number>` (its cells
+ * are numbers) and a `list<list<integer>>` (its rows are lists of
+ * integers), but the elementwise meet `list<never>` holds only `[]`. The
+ * empty list does not make a list with a fixed length and no zero axis
+ * inhabited, so `list<number^2> & list<string^2>` is `never`.
  *
  * Doing this does NOT disturb the protocol-conformance ruling that counts two
  * collections with disjoint element types as non-overlapping (an empty
@@ -621,7 +671,7 @@ function expandBroadcastable(t: Type): Type | undefined {
  * lives in {@link typesOverlap}, which answers from `sameHeadArguments`
  * BEFORE it ever consults this meet.
  */
-function meetCollections(a: Type, b: Type): Type | undefined {
+function meetCollections(a: Type, b: Type): Type | 'keep' | undefined {
   if (typeof a !== 'object' || typeof b !== 'object') return undefined;
   if (a.kind !== b.kind) return undefined;
 
@@ -631,22 +681,35 @@ function meetCollections(a: Type, b: Type): Type | undefined {
   switch (a.kind) {
     case 'list': {
       const other = b as ListType;
-      if (shapeKey(a) !== shapeKey(other)) return undefined;
-      return decorate({
-        ...a,
-        elements: meetElements(a.elements, other.elements),
-      });
+      if (shapeKey(a) !== shapeKey(other)) return meetShapedLists(a, other);
+      if (
+        a.dimensions === undefined &&
+        elementsAtMixedDepth(a.elements, other.elements, true)
+      )
+        return 'keep';
+      const elements = meetElements(a.elements, other.elements);
+      if (isEmptyType(elements) && a.dimensions?.every((d) => d > 0))
+        return 'never';
+      return decorate({ ...a, elements });
     }
 
-    case 'set':
     case 'collection':
     case 'indexed_collection':
+      // A list is in both kinds, so a matrix can be in two of them by
+      // different readings, as for two lists with no dimensions.
+      if (
+        elementsAtMixedDepth(a.elements, (b as CollectionType).elements, true)
+      )
+        return 'keep';
       return decorate({
         ...a,
-        elements: meetElements(
-          a.elements,
-          (b as SetType | CollectionType).elements
-        ),
+        elements: meetElements(a.elements, (b as CollectionType).elements),
+      });
+
+    case 'set':
+      return decorate({
+        ...a,
+        elements: meetElements(a.elements, (b as SetType).elements),
       });
 
     case 'dictionary':
@@ -743,6 +806,140 @@ function isRecursiveAlias(t: TypeReference): boolean {
   return walk(t.def);
 }
 
+/** How deep `mayShareFiniteValue()` follows the structure of two types
+ * before it answers `true`, "may share". A generic alias gives a new
+ * definition at each unfold, which the pair guard cannot recognize. */
+const SHARED_VALUE_DEPTH = 64;
+
+/** How many pairs `mayShareFiniteValue()` compares before it answers
+ * `true`, "may share". An answer reached through a pair met again is not
+ * kept, so aliases that name each other can be compared on many paths. */
+const SHARED_VALUE_STEPS = 100_000;
+
+/**
+ * Whether a finite value can be in both `a` and `b`. `false` is a proof
+ * that no value is in both; `true` means "may share" (the answer whenever
+ * the test is not sure). The empty collection counts as a shared value, as
+ * it does for the meet: `list<A>` and `list<B>` share `[]`.
+ *
+ * It decides pairs of recursive aliases, which `provablyDisjoint()` does
+ * not resolve: with `type alias A = tuple<A> | integer` and
+ * `type alias B = tuple<B> | string`, a shared value would be a tuple whose
+ * slot is a smaller shared value, so no finite value is in both.
+ *
+ * The walk unfolds the transparent aliases, takes the arms of the unions,
+ * and compares tuples slot by slot and records field by field. Any other
+ * pair is decided by `provablyDisjoint()`. A pair met again while it is
+ * being answered answers `false` on that path: a finite value of the pair
+ * that goes through the pair again contains a smaller value of the same
+ * pair, so the smallest one does not go through it. Such a `false` holds
+ * for that path only when the pair met again is below the current pair on
+ * the stack: the answer of a pair is kept when it is `true`, or when every
+ * pair met again is the pair itself or one above it (the lowlink rule of
+ * Tarjan's algorithm).
+ *
+ * The test reads a recursive alias by its finite values, while `isSubtype`
+ * reads it coinductively. So a type with no finite value can be a subtype
+ * of both operands of a meet that this test refutes: with
+ * `type alias V = tuple<V>`, `V` is a subtype of `A` and of `B` above, and
+ * `A & B` is `never`. No value is lost: `V` has none.
+ */
+function mayShareFiniteValue(a: Type, b: Type): boolean {
+  // A reference is identified by its declaration (two reference objects
+  // that name the same non-generic alias are one type); any other node by
+  // its identity.
+  const id = (t: Type): Type | TypeReference =>
+    typeof t === 'object' &&
+    t.kind === 'reference' &&
+    (t.args === undefined || t.args.length === 0)
+      ? declarationOf(t)
+      : t;
+  const answers = new Map<unknown, Map<unknown, boolean>>();
+  // The pairs being answered, with their depth on the stack.
+  const active = new Map<unknown, Map<unknown, number>>();
+  let open = 0;
+  // The smallest depth of an active pair met again since the current pair
+  // started.
+  let low = Infinity;
+  let steps = 0;
+  const walk = (x: Type, y: Type, depth: number): boolean => {
+    if (isEmptyType(x) || isEmptyType(y)) return false;
+    if (depth > SHARED_VALUE_DEPTH || ++steps > SHARED_VALUE_STEPS) return true;
+    const kx = id(x);
+    const ky = id(y);
+    const known = answers.get(kx)?.get(ky);
+    if (known !== undefined) return known;
+    const activeAt = active.get(kx)?.get(ky);
+    if (activeAt !== undefined) {
+      low = Math.min(low, activeAt);
+      return false;
+    }
+    let row = active.get(kx);
+    if (row === undefined) active.set(kx, (row = new Map()));
+    const index = open++;
+    row.set(ky, index);
+    const outerLow = low;
+    low = Infinity;
+    try {
+      const answer = walkPair(x, y, depth);
+      if (answer || low >= index) {
+        let known = answers.get(kx);
+        if (known === undefined) answers.set(kx, (known = new Map()));
+        known.set(ky, answer);
+      }
+      return answer;
+    } finally {
+      row.delete(ky);
+      open -= 1;
+      low = Math.min(outerLow, low < index ? low : Infinity);
+    }
+  };
+  const walkPair = (x: Type, y: Type, depth: number): boolean => {
+    if (isTransparentAlias(x)) {
+      const def = aliasDefinitionAt(x);
+      return def === undefined || walk(def, y, depth + 1);
+    }
+    if (isTransparentAlias(y)) {
+      const def = aliasDefinitionAt(y);
+      return def === undefined || walk(x, def, depth + 1);
+    }
+    if (typeof x === 'object' && x.kind === 'union')
+      return x.types.some((t) => walk(t, y, depth + 1));
+    if (typeof y === 'object' && y.kind === 'union')
+      return y.types.some((t) => walk(x, t, depth + 1));
+    if (
+      typeof x === 'object' &&
+      typeof y === 'object' &&
+      x.kind === 'tuple' &&
+      y.kind === 'tuple'
+    ) {
+      if (x.elements.length !== y.elements.length) return false;
+      return x.elements.every((e, i) => {
+        const f = y.elements[i];
+        if (e.name !== undefined && f.name !== undefined && e.name !== f.name)
+          return false;
+        return walk(e.type, f.type, depth + 1);
+      });
+    }
+    if (
+      typeof x === 'object' &&
+      typeof y === 'object' &&
+      x.kind === 'record' &&
+      y.kind === 'record'
+    ) {
+      // Records are open: a value of both has the fields of both, and a
+      // field that both declare holds a value of both types.
+      return Object.keys(x.elements).every(
+        (k) =>
+          !Object.prototype.hasOwnProperty.call(y.elements, k) ||
+          walk(x.elements[k], y.elements[k], depth + 1)
+      );
+    }
+    return !provablyDisjoint(x, y);
+  };
+  return walk(a, b, 0);
+}
+
 /** Whether `t` is a transparent alias with a definition. */
 function isTransparentAlias(t: Type): t is TypeReference {
   return (
@@ -773,11 +970,22 @@ function withoutBareSelfArms(
   // `type alias A = B | integer` and `type alias B = A | string`, the
   // values of `A` are those of `integer | string`; with `type alias A = B`
   // and `type alias B = A | integer`, they are those of `integer`.
+  //
+  // The arms are a set, so an alias with no type argument is expanded once
+  // for the whole walk (`expanded`): expanding it again on each path that
+  // reaches it doubled the work at each level of a union of aliases that
+  // reach one alias through two arms (`Vₙ = Aₙ | Bₙ`, `Aₙ = Vₙ₋₁`,
+  // `Bₙ = Vₙ₋₁ | integer`). An application of a generic alias is checked
+  // on its path only (`seen`): two applications of one declaration can have
+  // different arms.
   const arms: Type[] = [];
   let changed = false;
+  const expanded = new Set<TypeReference>([self]);
   const visit = (t: Type, seen: ReadonlySet<TypeReference>): void => {
     if (typeof t === 'object' && t.kind === 'reference' && t.alias === true) {
-      if (seen.has(declarationOf(t))) {
+      const decl = declarationOf(t);
+      const generic = (t.args?.length ?? 0) > 0;
+      if (seen.has(decl) || (!generic && expanded.has(decl))) {
         changed = true;
         return;
       }
@@ -789,7 +997,8 @@ function withoutBareSelfArms(
           (inner.kind === 'reference' && inner.alias === true))
       ) {
         changed = true;
-        const next = new Set([...seen, declarationOf(t)]);
+        if (!generic) expanded.add(decl);
+        const next = new Set([...seen, decl]);
         for (const u of inner.kind === 'union' ? inner.types : [inner])
           visit(u, next);
         return;
@@ -834,21 +1043,116 @@ function elementsAtMixedDepth(x: Type, y: Type, forMeet = false): boolean {
  * `list<list<integer>^3>` and `collection<number>` share an integer 3×2
  * matrix, but `list<integer^3>` and `collection<list<integer>>` share none.
  */
-function elementsCanNest(rows: Type, cells: Type, forMeet = false): boolean {
+function elementsCanNest(
+  rows: Type,
+  cells: Type,
+  forMeet = false,
+  fixedRows = false
+): boolean {
   // When one element type contains the other, the elementwise meet already
   // holds such a matrix: its cells are in both element types
   // (`list<unknown> & indexed_collection<boolean>` is `list<boolean>`, and a
   // boolean matrix is a `list<boolean>`), or its rows are.
+  if (isSubtype(rows, cells)) return false;
+  // The case `cells` inside `rows` needs a meet that reads cells, a
+  // collection with no fixed shape. When `rows` are the elements of a list
+  // with fixed dimensions (`fixedRows`), the meet is a list with the same
+  // dimensions, whose elements are its rows only, and it misses a tensor
+  // whose sub-tensors deeper down are values of `cells`:
+  // `list<list^3> & list<vector<integer^2>>` shares a 3×2×2 integer tensor,
+  // which `list<vector<integer^2>^3>` does not hold. Such a tensor needs a
+  // `cells` that can be a list, and scalars that are not in `rows`: the
+  // subtype rule does not read a tensor as a list of rows when its scalars
+  // are in the element type (`list<integer^(3x2)>` is not a
+  // `list<unknown^3>`), and every scalar is an `any`.
+  if (isSubtype(cells, rows))
+    return (
+      fixedRows &&
+      rows !== 'any' &&
+      couldMatch(cells, LIST_ANY_TYPE) &&
+      rowsCanHoldCells(rows, cells, forMeet, fixedRows)
+    );
+  // When `rows` holds every element of its own collections (`json` in
+  // `type alias json = list<json> | integer`), a cell of such a matrix,
+  // which is an element of a row at some depth, is in `rows` too, and in
+  // `cells`: a collection with no fixed shape of the meet of the two
+  // element types holds the matrix, read at the depth of that cell. A list
+  // with fixed dimensions reads its rows only, so the test does not apply
+  // to it.
+  if (!fixedRows && holdsItsElements(rows)) return false;
   // A matrix has cells, so both element types must hold a value:
   // `couldMatch(t, t)` also finds a type with no value that is not spelled
   // `never` (`tuple<list<never^1>>`).
   return (
-    !isSubtype(cells, rows) &&
-    !isSubtype(rows, cells) &&
     couldMatch(cells, cells) &&
     couldMatch(rows, rows) &&
-    rowsCanHoldCells(rows, cells, forMeet)
+    rowsCanHoldCells(rows, cells, forMeet, fixedRows)
   );
+}
+
+/**
+ * Whether every element of a collection value of `t` is a value of `t`:
+ * `json` in `type alias json = list<json> | integer`, whose lists hold
+ * `json` values. An arm that is not a collection has no element. An arm that
+ * is a list or an abstract collection of `E` must have its elements in `t`,
+ * and, since such a value can also be a matrix whose cells are values of
+ * `E`, the lists of `E` too. A set of `E` holds values of `E` only. Any
+ * other arm (a tuple, a record, a dictionary, a string, a top type, an
+ * application of a generic alias) answers `false`, "not shown". A
+ * transparent alias is read through its definition.
+ *
+ * The answer is a conjunction over the arms that can be reached, so it does
+ * not depend on the path: an alias or a union already visited anywhere in
+ * the walk is checked once (`visited`), and the work grows with the size
+ * of the alias graph, not with its number of paths.
+ */
+function holdsItsElements(
+  t: Type,
+  whole: Type = t,
+  visited: Set<unknown> = new Set()
+): boolean {
+  if (isTransparentAlias(t)) {
+    // Two applications of one generic declaration can be different types.
+    if ((t.args?.length ?? 0) > 0) return false;
+    const decl = declarationOf(t);
+    if (visited.has(decl)) return true;
+    visited.add(decl);
+    const def = aliasDefinitionAt(t);
+    return def !== undefined && holdsItsElements(def, whole, visited);
+  }
+  if (typeof t === 'object' && t.kind === 'union') {
+    if (visited.has(t)) return true;
+    visited.add(t);
+    return t.types.every((arm) => holdsItsElements(arm, whole, visited));
+  }
+  if (t === 'any' || t === 'unknown') return false;
+  if (provablyDisjoint(t, COLLECTION_ANY_TYPE)) return true;
+  if (typeof t !== 'object') return false;
+  switch (t.kind) {
+    case 'set':
+      return isSubtype(t.elements, whole);
+    case 'list': {
+      const dims = t.dimensions;
+      if (dims !== undefined && dims.length > 1)
+        return isSubtype(
+          { kind: 'list', elements: t.elements, dimensions: dims.slice(1) },
+          whole
+        );
+      return (
+        isSubtype(t.elements, whole) &&
+        (dims !== undefined ||
+          isSubtype({ kind: 'list', elements: t.elements }, whole))
+      );
+    }
+    case 'collection':
+    case 'indexed_collection':
+      return (
+        isSubtype(t.elements, whole) &&
+        isSubtype({ kind: 'list', elements: t.elements }, whole)
+      );
+    default:
+      return false;
+  }
 }
 
 /** `collection<any>`, built as a literal node and frozen for the same
@@ -863,8 +1167,14 @@ const COLLECTION_ANY_TYPE: Type = Object.freeze({
  * with the depth only; the limit stops a recursive alias. */
 const NESTED_ROW_DEPTH = 64;
 
-/** The empty set of aliases, for the first call of `rowsCanHoldCells()`. */
-const NO_ALIASES: ReadonlySet<TypeReference> = new Set();
+/** No alias unfolded yet, for the first call of `rowsCanHoldCells()`. */
+const NO_ALIASES: ReadonlyMap<TypeReference, number> = new Map();
+
+/** The state of one search of `rowsCanHoldCells()`: the answer for each row
+ * type already decided, the number of calls open on the stack, and the
+ * smallest stack index of a recursive alias met again since the current
+ * call started (see `rowsCanHoldCells()`). */
+type RowSearch = { memo: Map<Type, boolean>; open: number; low: number };
 
 /**
  * Whether a value of `rows` can be a non-empty list whose cells, at some
@@ -875,69 +1185,104 @@ const NO_ALIASES: ReadonlySet<TypeReference> = new Set();
  * arms of unions; a row must have an element that can be a cell, or that
  * holds cells deeper. A top type (`any`, `unknown`) holds such a list.
  *
- * Past `NESTED_ROW_DEPTH` levels, and for a transparent alias or an
- * intersection, the answer is not known: for the meet (`forMeet`) it is
- * whether `rows` can be a list at all, which only keeps an intersection as
- * written; for the overlap test it is `false`, which claims no common
- * value.
+ * A transparent alias is read as its definition. A recursive alias met
+ * again on the path asks the same question again (the cells do not change
+ * during a search), so that path adds nothing and answers `false`: a list
+ * that holds such cells holds them at a finite depth, without the repeat.
+ * Such a `false` holds on that path only while the call that unfolded the
+ * alias is open, so the answer of a row type is kept when it is `true`, or
+ * when every alias met again was unfolded by this call or by one it made
+ * (the lowlink rule of Tarjan's algorithm). With
+ * `type alias M = list<M^2> | integer`, `list<M^2>` cannot hold string
+ * cells at any depth.
  *
- * `couldMatch()` does not count an empty collection shared by two disjoint
- * element types, as the protocol rule of `typesOverlap()` requires. The
- * meet must count it, or it drops a value: a matrix of empty sets is a
- * `list<set<integer>>` and a `collection<list<set<string>>>`. So for the
- * meet, an element that can be a collection also matches cells that can be
- * collections.
+ * Past `NESTED_ROW_DEPTH` levels, and for an intersection, the answer is
+ * not known: for the meet (`forMeet`) it is whether `rows` can be a list at
+ * all, which only keeps an intersection as written; for the overlap test it
+ * is `false`, which claims no common value.
+ *
+ * For the meet, an element matches cells unless `provablyDisjoint()`
+ * refutes the pair: anything weaker drops a value. `couldMatch()` does not
+ * count an empty collection shared by two disjoint element types (a matrix
+ * of empty sets is a `list<set<integer>>` and a
+ * `collection<list<set<string>>>`), and its last test is assignability,
+ * which misses overlapping pairs such as two function signatures.
+ *
+ * With `fixedRows`, `rows` are the elements of a list with fixed
+ * dimensions, which the meet keeps with its dimensions and reads by its
+ * rows only. An element of a list with no dimensions, or of an abstract
+ * collection, met in the walk can then be a list of its element type too:
+ * a value of `list<integer>` can be an integer matrix, whose elements are
+ * lists of integers. Without `fixedRows` the meet is a collection with no
+ * fixed shape, which reads its values at any depth, and that reading adds
+ * no value it does not already hold.
  */
 function rowsCanHoldCells(
   rows: Type,
   cells: Type,
   forMeet: boolean,
+  fixedRows = false,
   depth = 0,
-  unfolded: ReadonlySet<TypeReference> = NO_ALIASES,
-  memo: Map<Type, boolean> = new Map()
+  unfolded: ReadonlyMap<TypeReference, number> = NO_ALIASES,
+  search: RowSearch = { memo: new Map(), open: 0, low: Infinity }
 ): boolean {
   // One question can meet the same row type on several branches (the arms
   // of `list<R^2> | list<R^3>` at each level of a chain of aliases): the
   // answer for a row type is kept for the rest of this search, so the work
   // grows with the number of distinct row types, not with the number of
   // paths.
-  const known = memo.get(rows);
+  const known = search.memo.get(rows);
   if (known !== undefined) return known;
-  const answer = rowsCanHoldCellsUncached(
-    rows,
-    cells,
-    forMeet,
-    depth,
-    unfolded,
-    memo
-  );
-  memo.set(rows, answer);
-  return answer;
+  const index = search.open++;
+  const outerLow = search.low;
+  search.low = Infinity;
+  try {
+    const answer = rowsCanHoldCellsUncached(
+      rows,
+      cells,
+      forMeet,
+      fixedRows,
+      depth,
+      unfolded,
+      search,
+      index
+    );
+    if (answer || search.low >= index) search.memo.set(rows, answer);
+    return answer;
+  } finally {
+    search.open -= 1;
+    // A repeat of an alias unfolded below this call is still open for the
+    // caller.
+    search.low = Math.min(outerLow, search.low < index ? search.low : Infinity);
+  }
 }
 
 function rowsCanHoldCellsUncached(
   rows: Type,
   cells: Type,
   forMeet: boolean,
+  fixedRows: boolean,
   depth: number,
-  unfolded: ReadonlySet<TypeReference>,
-  memo: Map<Type, boolean>
+  unfolded: ReadonlyMap<TypeReference, number>,
+  search: RowSearch,
+  index: number
 ): boolean {
   if (depth >= NESTED_ROW_DEPTH)
     return forMeet && couldMatch(rows, LIST_ANY_TYPE);
   const deeper = (t: Type, d: number, names = unfolded): boolean =>
-    rowsCanHoldCells(t, cells, forMeet, d, names, memo);
+    rowsCanHoldCells(t, cells, forMeet, fixedRows, d, names, search);
   // For the overlap test, a cell matches by `typesOverlap()`, so the
   // protocol rule applies to the cells too (`list<list<set<never>>>` and
   // `collection<set<integer>>` share empty sets only).
   const elementMatches = (e: Type): boolean =>
-    forMeet
-      ? couldMatch(e, cells) ||
-        (couldMatch(e, COLLECTION_ANY_TYPE) &&
-          couldMatch(cells, COLLECTION_ANY_TYPE))
-      : typesOverlap(e, cells);
+    forMeet ? !provablyDisjoint(e, cells) : typesOverlap(e, cells);
   const holdsThrough = (e: Type): boolean =>
     elementMatches(e) || deeper(e, depth + 1);
+  // An element of a list with no dimensions, or of an abstract collection,
+  // read as a list of the element type (see `fixedRows` above).
+  const holdsThroughUnshaped = (e: Type): boolean =>
+    holdsThrough(e) ||
+    (fixedRows && elementMatches({ kind: 'list', elements: e }));
   // A named type holds a non-empty list of any cells when it is a top type
   // or a bare collection name (the `<unknown>` form).
   if (typeof rows !== 'object')
@@ -952,38 +1297,49 @@ function rowsCanHoldCellsUncached(
     case 'union':
       return rows.types.some((t) => deeper(t, depth));
     case 'broadcastable':
-      return deeper(rows.elements, depth) || holdsThrough(rows.elements);
+      return (
+        deeper(rows.elements, depth) || holdsThroughUnshaped(rows.elements)
+      );
     case 'list': {
       // The elements of a list with two or more dimensions are its sub-rows,
       // not its scalar cells: a `2×0` row holds two empty rows and no cell.
       const dims = rows.dimensions;
-      if (dims?.[0] === 0) return false;
+      if (dims === undefined) return holdsThroughUnshaped(rows.elements);
+      if (dims[0] === 0) return false;
       return holdsThrough(
-        dims !== undefined && dims.length > 1
+        dims.length > 1
           ? { kind: 'list', elements: rows.elements, dimensions: dims.slice(1) }
           : rows.elements
       );
     }
     case 'indexed_collection':
     case 'collection':
-      return holdsThrough(rows.elements);
+      return holdsThroughUnshaped(rows.elements);
     case 'reference': {
       // A transparent alias is read as its definition, once on a path: a
       // chain of aliases with no cycle is followed to its end, and a
-      // recursive alias stops at its first repeat. (A budget of unfolds for
-      // the whole path stopped a long chain with no cycle.)
-      const def =
-        rows.alias === true &&
-        rows.def !== undefined &&
-        !unfolded.has(declarationOf(rows))
-          ? aliasDefinitionAt(rows)
-          : undefined;
-      if (def !== undefined)
-        return deeper(
-          def,
-          depth + 1,
-          new Set([...unfolded, declarationOf(rows)])
-        );
+      // recursive alias met again answers `false` (see above). (A budget
+      // of unfolds for the whole path stopped a long chain with no cycle.)
+      // An application of a generic alias is never taken as a repeat: two
+      // applications of one declaration can be different types
+      // (`Id<Id<list<integer>>>` with `type alias Id<T> = T`), so it is
+      // unfolded under the depth limit only.
+      if (rows.alias === true && rows.def !== undefined) {
+        const generic = (rows.args?.length ?? 0) > 0;
+        const decl = declarationOf(rows);
+        const unfoldedAt = generic ? undefined : unfolded.get(decl);
+        if (unfoldedAt !== undefined) {
+          search.low = Math.min(search.low, unfoldedAt);
+          return false;
+        }
+        const def = aliasDefinitionAt(rows);
+        if (def !== undefined)
+          return deeper(
+            def,
+            depth + 1,
+            generic ? unfolded : new Map([...unfolded, [decl, index]])
+          );
+      }
       return forMeet && couldMatch(rows, LIST_ANY_TYPE);
     }
     case 'intersection':
@@ -1045,7 +1401,7 @@ function mayShareMatrix(
   forMeet = false
 ): boolean {
   if (narrow.kind === 'list' && narrow.dimensions !== undefined)
-    return elementsCanNest(narrow.elements, elements, forMeet);
+    return elementsCanNest(narrow.elements, elements, forMeet, true);
   if (narrow.kind === 'list' || narrow.kind === 'indexed_collection')
     return elementsAtMixedDepth(narrow.elements, elements, forMeet);
   return false;
@@ -1068,10 +1424,8 @@ function isKeptOperand(t: Type): boolean {
  * The meet of a list with dimensions and a list with none, or `undefined`
  * when `a` and `b` are not such a pair. A list with no dimensions has any
  * shape, so the meet has the shape of the other list and the meet of the
- * elements: `list<number^2> & list<integer>` is `list<integer^2>`. The rule
- * for two lists, `meetCollections()`, refutes two different shapes. That is
- * a known gap even for two fixed shapes: `list<number^(2x2)>` and
- * `list<list<integer>^2>` share `list<integer^(2x2)>` (see ROADMAP.md).
+ * elements: `list<number^2> & list<integer>` is `list<integer^2>`. Two
+ * lists with different fixed shapes are met by `meetShapedLists()`.
  *
  * The answer is `'keep'`, the intersection as written, when the list with
  * dimensions has two or more of them (an element of the other list is then
@@ -1092,7 +1446,7 @@ function meetShapedWithUnshapedList(
   const unshaped = shaped === a ? b : a;
   const dims = shaped.dimensions!;
   if (dims.length > 1) return meetMatrixWith(shaped, unshaped.elements);
-  if (elementsCanNest(shaped.elements, unshaped.elements, true))
+  if (elementsCanNest(shaped.elements, unshaped.elements, true, true))
     return provablyDisjoint(a, b) ? 'never' : 'keep';
   const elements = reduceType({
     kind: 'intersection',
@@ -1100,6 +1454,87 @@ function meetShapedWithUnshapedList(
   });
   if (isEmptyType(elements) && dims[0] > 0) return 'never';
   return decorate({ ...shaped, elements });
+}
+
+/**
+ * The rows of a list with dimensions: a list with the outer axis removed,
+ * or the elements when there is one axis. `list<integer^(2x3)>` gives
+ * `list<integer^3>`. A non-empty value of the list is a list of `d₁`
+ * values of its rows, where `d₁` is the outer axis: the subtype rule for
+ * lists reads a value one axis down in the same way as the whole value.
+ * The reverse is not always true: `[[1], [2, 3]]` is a list of two values
+ * of `vector<integer>`, the rows of `matrix<integer^(2x?)>`, but not a
+ * matrix.
+ */
+function shapedListRows(t: ListType): Type {
+  const dims = t.dimensions!;
+  if (dims.length === 1) return t.elements;
+  return { kind: 'list', elements: t.elements, dimensions: dims.slice(1) };
+}
+
+/**
+ * The meet of two lists with dimensions and different shapes.
+ *
+ * A non-empty value of both has one length on the outer axis, which both
+ * must allow (`-1` allows any length), and each of its rows is a value of
+ * the rows of both (`shapedListRows()`). So two different fixed lengths
+ * give `never`, and so do rows with no common value and an outer axis
+ * that is not zero or `-1`.
+ *
+ * The candidate meet is a list of that length whose element is the meet of
+ * the rows, with the axes merged when that meet has a fixed shape:
+ * `list<number^(2x2)> & list<list<integer>^2>` is `list<integer^(2x2)>`,
+ * because the rows `list<number^2>` and `list<integer>` meet to
+ * `list<integer^2>`, and `list<number^2> & list<integer^-1>` is
+ * `list<integer^2>`. The candidate is the answer when its cells cannot be
+ * lists, and when it is a subtype of both operands. The first test keeps
+ * the candidate complete: when its cells can be lists (`any`, `unknown`),
+ * the subtype rule reads some values of the operands by deeper rows that
+ * the candidate does not hold. The second test refuses a candidate that the
+ * subtype rule reads differently: a list with one axis whose element type
+ * holds the cells of a matrix does not hold the matrix
+ * (`list<number^(3x2)>` is not a `list<unknown^3>`), and rows with an axis
+ * of length `-1` do not merge (they can differ in length). Any other pair
+ * is `'keep'`, the intersection as written, unless `provablyDisjoint()`
+ * refutes it.
+ *
+ * A dimension variable (in a pattern, not in a ground type) is not read:
+ * the answer is then `'keep'`.
+ */
+function meetShapedLists(a: ListType, b: ListType): Type | 'keep' {
+  if (a.dimensions === undefined || b.dimensions === undefined) return 'keep';
+  if (a.dimensionVariables !== undefined || b.dimensionVariables !== undefined)
+    return 'keep';
+  const da = a.dimensions[0];
+  const db = b.dimensions[0];
+  if (da !== -1 && db !== -1 && da !== db) return 'never';
+  const length = da === -1 ? db : da;
+  const rows = reduceType({
+    kind: 'intersection',
+    types: [shapedListRows(a), shapedListRows(b)],
+  });
+  if (isEmptyType(rows) && length > 0) return 'never';
+  const list: ListType = { kind: 'list', elements: rows, dimensions: [length] };
+  const candidate = (flattenNestedListType(list) ?? list) as ListType;
+  if (
+    provablyDisjoint(candidate.elements, LIST_ANY_TYPE) &&
+    isSubtype(candidate, a) &&
+    isSubtype(candidate, b)
+  )
+    return decorate(candidate);
+  return provablyDisjoint(a, b) ? 'never' : 'keep';
+}
+
+/** A bare `list`, `indexed_collection`, `collection` or `set` as its
+ * `<unknown>` form (`list<unknown>`), which it means; any other type
+ * unchanged. */
+function bareCollectionAsNode(t: Type): Type {
+  return t === 'list' ||
+    t === 'indexed_collection' ||
+    t === 'collection' ||
+    t === 'set'
+    ? ({ kind: t, elements: 'unknown' } as Type)
+    : t;
 }
 
 /**
@@ -1115,15 +1550,8 @@ function collectionKindPair(
 ):
   | [ListType | CollectionType | SetType | TupleType, CollectionType]
   | undefined {
-  const asNode = (t: Type): Type =>
-    t === 'list' ||
-    t === 'indexed_collection' ||
-    t === 'collection' ||
-    t === 'set'
-      ? ({ kind: t, elements: 'unknown' } as Type)
-      : t;
-  const x = asNode(a);
-  const y = asNode(b);
+  const x = bareCollectionAsNode(a);
+  const y = bareCollectionAsNode(b);
   if (typeof x !== 'object' || typeof y !== 'object') return undefined;
   const depth = (t: Type): number | undefined => {
     if (typeof t !== 'object') return undefined;
@@ -1495,10 +1923,20 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
   // A transparent alias is compared through its definition, so that the
   // rules below apply to it: with `type alias A = list<integer>`,
   // `list<A>` and `list<list<string>>` do not overlap, as `list<list<integer>>`
-  // and `list<list<string>>` do not. An alias cut on a recursion falls to the
-  // meet, which keeps it as written.
+  // and `list<list<string>>` do not. An alias cut on a recursion overlaps
+  // unless a proof refutes the pair: `provablyDisjoint()`, or
+  // `mayShareFiniteValue()` for a recursive alias with no finite value in
+  // common (`type alias A = tuple<A> | integer` and
+  // `type alias B = tuple<B> | string`). `couldMatch()` is not such a proof:
+  // its last test is assignability, which misses many overlapping pairs, and
+  // a pair called disjoint here refuses an argument. So two aliases that
+  // share empty lists only (`type alias A = list<A> | integer` and
+  // `type alias B = list<B> | string`) overlap here, the safe answer.
   const throughAlias = throughTransparentAlias(a, b, typesOverlap);
-  if (throughAlias !== NO_ALIAS) return throughAlias ?? !provablyDisjoint(a, b);
+  if (throughAlias !== NO_ALIAS)
+    return (
+      throughAlias ?? (!provablyDisjoint(a, b) && mayShareFiniteValue(a, b))
+    );
 
   // A union overlaps when one of its arms does, each arm with the rules
   // below.
@@ -1534,6 +1972,31 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
     return (
       unshaped(a) && unshaped(b) && elementsAtMixedDepth(a.elements, b.elements)
     );
+  }
+
+  // Two lists with different fixed shapes are compared row by row, as the
+  // meet does (`meetShapedLists()`), so that the protocol rule applies to
+  // the rows too: `list<integer^(2x2)>` and `list<list<integer>^2>` share
+  // integer matrices, and `list<integer^(-1x2)>` and
+  // `vector<list<string>>` share the empty list only. A list whose outer
+  // axis is zero holds `[]` only. Rows that overlap are not enough: the
+  // subtype rule reads some lists differently from their rows
+  // (`shapedListRows()`), so the meet must also be inhabited.
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'list' &&
+    b.kind === 'list' &&
+    a.dimensions !== undefined &&
+    b.dimensions !== undefined &&
+    a.dimensionVariables === undefined &&
+    b.dimensionVariables === undefined
+  ) {
+    const da = a.dimensions[0];
+    const db = b.dimensions[0];
+    if (da === 0 || db === 0) return false;
+    if (da !== -1 && db !== -1 && da !== db) return false;
+    if (!typesOverlap(shapedListRows(a), shapedListRows(b))) return false;
   }
 
   // A broadcastable is `T | list<T>`: its arms are compared one by one, with
