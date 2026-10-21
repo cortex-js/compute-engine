@@ -59,3 +59,24 @@ non-field, invalid congruences, noncoprime factors, cancellation and strategy
 agreement for rational/nonmonic/repeated/large inputs. The four initial focused
 suites pass 38 tests. Cross-CAS measurements follow separately; fewer lifting
 rounds alone do not imply less elapsed time.
+
+The forced-quadratic 1,200-case/three-trial comparison verifies all 10,800
+records: TS 7.890 s, SymPy 16.648 s, PARI 3.688 s. This first implementation
+regresses aggregate TS time relative to the 7.177 s linear baseline; it is not
+justification for enabling quadratic lifting universally. The 42-case stress
+comparison audits all 378 records, retaining 39/42 TS completions and only the
+three size-policy refusals. Crossover selection remains stage 5 work.
+
+## Stage 3 Exact integer lattice reduction
+
+An independent first-party LLL kernel uses normalized bigint rationals for
+Gram-Schmidt data and exact delta=3/4 Lovasz comparisons. It returns both the
+reduced basis and its unimodular row transformation. Size reductions update
+Gram-Schmidt coefficients without rebuilding rational orthogonal vectors;
+swaps recompute exact Gram-Schmidt data. No floating-point decisions are used.
+
+Six tests cover rectangular bases, negative entries, 100-bit inputs, generated
+unimodular shears, exact reduction inequalities, determinant +/-1, transformation
+reconstruction, input immutability, invalid/dependent bases and work/cancellation
+limits. This stage does not yet change polynomial factoring performance; the
+kernel is connected to recombination in stage 4.
