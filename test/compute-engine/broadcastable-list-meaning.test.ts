@@ -1053,15 +1053,13 @@ describe('the meet of two collections of the same kind: precision', () => {
   const meet = (a: string, b: string) => typeToString(meetOf(a, b));
 
   it('does not merge rows whose cells can be lists', () => {
-    // The subtype rule reads this nested value by its rows; a list of
-    // `any` cells does not hold it.
     const a = 'list<unknown^2>';
     const b = 'list<list<any^2>^-1>';
-    const w = parseType('list<list<list<number^2>^2>^2>');
-    expect(sub('list<list<list<number^2>^2>^2>', a)).toBe(true);
-    expect(sub('list<list<list<number^2>^2>^2>', b)).toBe(true);
-    expect(isSubtype(w, meetOf(a, b))).toBe(true);
     expect(meet(a, b)).not.toBe('list<any^(2x2)>');
+    // The elements of a list with dimensions and a top element type are
+    // scalars, so a list of rows is in neither type.
+    expect(sub('list<list<list<number^2>^2>^2>', a)).toBe(false);
+    expect(sub('list<list<list<number^2>^2>^2>', b)).toBe(false);
   });
 
   it('meets two lists with no dimensions elementwise when that holds every value', () => {
@@ -1339,5 +1337,137 @@ describe('cases of the third review', () => {
     expect(typesOverlap(T('list<V32>'), T('list<list<string>>'))).toBe(false);
     isSubtype(T('R22'), T('S22'));
     expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
+describe('a list with dimensions and a top element type holds scalars', () => {
+  // User decision 2026-10-21: `vector<unknown>` is a list of scalars.
+  it('does not hold a list of rows', () => {
+    expect(sub('list<list^2>', 'vector<unknown>')).toBe(false);
+    expect(sub('list<list<integer>^2>', 'list<any^2>')).toBe(false);
+    expect(sub('list<(integer | list<integer>)^3>', 'list<unknown^3>')).toBe(
+      false
+    );
+  });
+
+  it('is transitive with the rank rule', () => {
+    // `list<integer^(2x2x2)>` is a `list<list^2>` (two rows), and it is not
+    // a `vector<unknown>`; nor is `list<list^2>`.
+    expect(sub('list<integer^(2x2x2)>', 'list<list^2>')).toBe(true);
+    expect(sub('list<integer^(2x2x2)>', 'vector<unknown>')).toBe(false);
+  });
+
+  it('holds scalars, tuples and sets', () => {
+    expect(sub('list<integer^3>', 'vector<unknown>')).toBe(true);
+    expect(sub('list<unknown^3>', 'list<unknown^3>')).toBe(true);
+    expect(sub('list<tuple<real, real>^3>', 'vector<unknown>')).toBe(true);
+    expect(sub('list<string^3>', 'vector<unknown>')).toBe(true);
+    expect(sub('list<set<integer>^2>', 'vector<unknown>')).toBe(true);
+  });
+
+  it('leaves a list with no dimensions unchanged', () => {
+    expect(sub('list<list^2>', 'list<unknown>')).toBe(true);
+    expect(sub('list<list<integer>^3>', 'list<list^3>')).toBe(true);
+  });
+});
+
+describe('the meet of a list whose elements are scalars', () => {
+  const meet = (a: string, b: string) =>
+    typeToString(
+      reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] })
+    );
+  const overlap = (a: string, b: string) =>
+    typesOverlap(parseType(a), parseType(b)) ||
+    typesOverlap(parseType(b), parseType(a));
+  it('has no list element', () => {
+    expect(meet('list<any^3>', 'list<list^3>')).toBe('never');
+    expect(overlap('list<any^3>', 'list<list^3>')).toBe(false);
+    expect(meet('list<any^3>', 'indexed_collection<list>')).toBe('never');
+    expect(meet('list<any^3>', 'list<list<integer>^-1>')).toBe('never');
+    expect(meet('vector<unknown>', 'list<list<integer>>')).toBe(
+      'vector<never>'
+    );
+  });
+  it('keeps the scalar elements of the other type', () => {
+    expect(meet('list<any^3>', 'list<integer>')).toBe('vector<integer^3>');
+    // A bare `list` admits any contents, as `list<any>` does.
+    expect(meet('list<any^3>', 'list')).toBe('list<any^3>');
+    // `integer | list<integer>` has no spelling without its lists.
+    expect(
+      meet('list<unknown^3>', 'list<(integer | list<integer>)^3>')
+    ).not.toBe('never');
+  });
+});
+
+describe('cases of the review of the scalar elements of a vector', () => {
+  const overlap = (a: string, b: string) =>
+    typesOverlap(parseType(a), parseType(b)) ||
+    typesOverlap(parseType(b), parseType(a));
+
+  it('solves a generic list parameter from a list of lists', () => {
+    // `T` can stand for a list, so the loosest reading of `list<T^N>`
+    // admits a list of rows.
+    const ce = new ComputeEngine();
+    ce.declare('vv', 'list<list<integer>^2>');
+    ce.declare('mm', 'list<list<integer>^(2x2)>');
+    ce.declare('g', '(list<T^N>) -> T where T, N');
+    ce.declare('k', '(list<T^N>) -> N where T, N');
+    ce.declare('gv', '(vector<T^N>) -> T where T, N');
+    ce.declare('m', '(matrix<T^(M x N)>) -> T where T, M, N');
+    const call = (f: string, x: string) =>
+      ce.function(f, [ce.symbol(x)]).type.toString();
+    expect(call('g', 'vv')).toBe('list<integer>');
+    expect(call('k', 'vv')).toBe('2');
+    expect(call('gv', 'vv')).toBe('list<integer>');
+    expect(call('m', 'mm')).toBe('list<integer>');
+  });
+
+  it('does not overlap scalars with lists on every route', () => {
+    expect(overlap('list<any^3>', 'list<list^3>')).toBe(false);
+    expect(overlap('vector<unknown^3>', 'list<list>')).toBe(false);
+    expect(overlap('list<any^3>', 'list<list<number>>')).toBe(false);
+    expect(overlap('list<any^3>', 'indexed_collection<list>')).toBe(false);
+    expect(overlap('list<list<integer>^3>', 'list<unknown>')).toBe(true);
+  });
+
+  it('keeps the shape of a generic parameter in its loosest reading', () => {
+    const ce = new ComputeEngine();
+    ce.declare('mtt', 'list<integer^(2x3)>');
+    ce.declare('vfive', 'list<integer^5>');
+    ce.declare('s', 'string');
+    ce.declare('g3', '(list<T^3>) -> T where T');
+    ce.declare('m', '(matrix<T^(M x N)>) -> T where T, M, N');
+    ce.declare('h', '(list<T^3>, T) -> T where T');
+    const call = (f: string, ...xs: string[]) =>
+      ce
+        .function(
+          f,
+          xs.map((x) => ce.symbol(x))
+        )
+        .type.toString();
+    // An operand of another length or rank gives no bound to `T`.
+    expect(call('g3', 'mtt')).toBe('unknown');
+    expect(call('m', 'vfive')).toBe('unknown');
+    expect(call('h', 'vfive', 's')).toBe('string');
+    // A generic nominal constructor refuses a payload of another length.
+    ce.declareType('vthree', 'list<T^3>', { typeParams: ['T'] });
+    ce.assign(
+      'vthree',
+      ce.box([
+        'Function',
+        ['List', 'x', 'x', 'x', 'x', 'x'],
+        ['Typed', 'x', { str: 'integer' }],
+      ])
+    );
+    expect(ce.box(['vthree', 4]).evaluate().toString()).toBe('vthree(4)');
+  });
+
+  it('reads a range as a list', () => {
+    expect(sub('list<range^2>', 'list<unknown^2>')).toBe(false);
+  });
+
+  it('reads no element in a list with an axis of length 0', () => {
+    expect(sub('list<list^0>', 'list<unknown^0>')).toBe(true);
+    expect(sub('list<list^(2x0)>', 'list<unknown^(2x0)>')).toBe(true);
   });
 });

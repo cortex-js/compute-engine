@@ -6,6 +6,8 @@ import {
   couldMatch,
   isEmptyType,
   isSubtype,
+  isScalarTopElement,
+  holdsListElements,
   meetNumericRangeMembers,
   provablyDisjoint,
   meetPrimitiveTypes,
@@ -685,7 +687,11 @@ function meetCollections(a: Type, b: Type): Type | 'keep' | undefined {
         elementsAtMixedDepth(a.elements, other.elements, true)
       )
         return 'keep';
-      const elements = meetElements(a.elements, other.elements);
+      const elements =
+        a.dimensions === undefined
+          ? meetElements(a.elements, other.elements)
+          : meetDimensionedElements(a.elements, other.elements, true);
+      if (elements === 'keep') return 'keep';
       if (isEmptyType(elements) && a.dimensions?.every((d) => d > 0))
         return 'never';
       return decorate({ ...a, elements });
@@ -1047,6 +1053,9 @@ function elementsCanNest(
   forMeet = false,
   fixedRows = false
 ): boolean {
+  // The elements of a list with dimensions whose element type is a scalar
+  // top type are scalars (`isScalarTopElement()`), not rows.
+  if (fixedRows && isScalarTopElement(rows)) return false;
   // When one element type contains the other, the elementwise meet already
   // holds such a matrix: its cells are in both element types
   // (`list<unknown> & indexed_collection<boolean>` is `list<boolean>`, and a
@@ -1059,14 +1068,11 @@ function elementsCanNest(
   // whose sub-tensors deeper down are values of `cells`:
   // `list<list^3> & list<vector<integer^2>>` shares a 3×2×2 integer tensor,
   // which `list<vector<integer^2>^3>` does not hold. Such a tensor needs a
-  // `cells` that can be a list, and scalars that are not in `rows`: the
-  // subtype rule does not read a tensor as a list of rows when its scalars
-  // are in the element type (`list<integer^(3x2)>` is not a
-  // `list<unknown^3>`), and every scalar is an `any`.
+  // `cells` that can be a list, and `rows` that hold lists (a scalar top
+  // type does not, see the first test of this function).
   if (isSubtype(cells, rows))
     return (
       fixedRows &&
-      rows !== 'any' &&
       couldMatch(cells, LIST_ANY_TYPE) &&
       rowsCanHoldCells(rows, cells, forMeet, fixedRows)
     );
@@ -1446,12 +1452,58 @@ function meetShapedWithUnshapedList(
   if (dims.length > 1) return meetMatrixWith(shaped, unshaped.elements);
   if (elementsCanNest(shaped.elements, unshaped.elements, true, true))
     return provablyDisjoint(a, b) ? 'never' : 'keep';
-  const elements = reduceType({
-    kind: 'intersection',
-    types: [a.elements, b.elements],
-  });
+  const elements = meetDimensionedElements(
+    shaped.elements,
+    unshaped.elements,
+    false
+  );
+  if (elements === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
   if (isEmptyType(elements) && dims[0] > 0) return 'never';
   return decorate({ ...shaped, elements });
+}
+
+/**
+ * The meet of `x`, the element type of a list with dimensions, and `y`, an
+ * element type of the other operand, or `'keep'` when it has no spelling.
+ * When `x` is a scalar top type (`isScalarTopElement()`), the elements are
+ * scalars, so the meet is `y` without its lists: `never` when `y` holds
+ * lists only (`list<any^3> & list<list^3>` has no value), `y` when it holds
+ * none, and `'keep'` when it holds both (`integer | list<integer>`). When
+ * `yHasDimensions`, `y` is the element type of a list with dimensions too,
+ * and the same holds with `x` and `y` swapped. Otherwise a scalar top `y`
+ * (from `list<any>`, `collection<unknown>`) can hold lists, and is read as
+ * usual. Any other pair gives the meet of the two types.
+ */
+function meetDimensionedElements(
+  x: Type,
+  y: Type,
+  yHasDimensions: boolean
+): Type | 'keep' {
+  const scalars = scalarsBesideLists(x, y, yHasDimensions);
+  if (scalars === 'lists only') return 'never';
+  if (scalars === 'lists and scalars') return 'keep';
+  return reduceType({ kind: 'intersection', types: [x, y] });
+}
+
+/**
+ * When one of `x` and `y` is a scalar top element type of a list with
+ * dimensions (`isScalarTopElement()`) and the other is not: whether the
+ * other holds lists only, or lists and other values. `undefined` in any
+ * other case. `x` is the element type of a list with dimensions; `y` is
+ * one too when `yHasDimensions`.
+ */
+function scalarsBesideLists(
+  x: Type,
+  y: Type,
+  yHasDimensions: boolean
+): 'lists only' | 'lists and scalars' | undefined {
+  const sx = isScalarTopElement(x);
+  const sy = yHasDimensions && isScalarTopElement(y);
+  if (sx === sy) return undefined;
+  const other = sx ? y : x;
+  if (isSubtype(other, LIST_ANY_TYPE)) return 'lists only';
+  if (holdsListElements(other)) return 'lists and scalars';
+  return undefined;
 }
 
 /**
@@ -1507,10 +1559,20 @@ function meetShapedLists(a: ListType, b: ListType): Type | 'keep' {
   const db = b.dimensions[0];
   if (da !== -1 && db !== -1 && da !== db) return 'never';
   const length = da === -1 ? db : da;
-  const rows = reduceType({
-    kind: 'intersection',
-    types: [shapedListRows(a), shapedListRows(b)],
-  });
+  // A list with one axis has element rows, read as `meetDimensionedElements()`
+  // reads them: a scalar top type there holds no list.
+  const rows =
+    a.dimensions.length === 1 || b.dimensions.length === 1
+      ? meetDimensionedElements(
+          a.dimensions.length === 1 ? shapedListRows(a) : shapedListRows(b),
+          a.dimensions.length === 1 ? shapedListRows(b) : shapedListRows(a),
+          b.dimensions.length === 1 && a.dimensions.length === 1
+        )
+      : reduceType({
+          kind: 'intersection',
+          types: [shapedListRows(a), shapedListRows(b)],
+        });
+  if (rows === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
   if (isEmptyType(rows) && length > 0) return 'never';
   const list: ListType = { kind: 'list', elements: rows, dimensions: [length] };
   const candidate = (flattenNestedListType(list) ?? list) as ListType;
@@ -1620,7 +1682,11 @@ function meetCollectionKinds(a: Type, b: Type): Type | 'keep' | undefined {
     return meetMatrixWith(narrow, wide.elements);
   if (mayShareMatrix(narrow, wide.elements, true))
     return provablyDisjoint(a, b) ? 'never' : 'keep';
-  const elements = meetElements(narrow.elements);
+  const elements =
+    narrow.kind === 'list' && narrow.dimensions !== undefined
+      ? meetDimensionedElements(narrow.elements, wide.elements, false)
+      : meetElements(narrow.elements);
+  if (elements === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
   if (
     isEmptyType(elements) &&
     narrow.kind === 'list' &&
@@ -1957,6 +2023,19 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
   // could ever dispatch on.
   const args = sameHeadArguments(a, b);
   if (args !== null) {
+    // The elements of two lists with the same dimensions, one of them with
+    // a scalar top element type, share no value when the other's elements
+    // are all lists (`scalarsBesideLists()`): `list<any^3>` and
+    // `list<list^3>`.
+    if (
+      typeof a === 'object' &&
+      typeof b === 'object' &&
+      a.kind === 'list' &&
+      b.kind === 'list' &&
+      a.dimensions !== undefined &&
+      scalarsBesideLists(a.elements, b.elements, true) === 'lists only'
+    )
+      return false;
     if (args[0].every((t, i) => typesOverlap(t, args[1][i]))) return true;
     // Two collections of the same kind with no fixed shape can share a
     // tensor through elements at different depths (`elementsAtMixedDepth()`):
@@ -2034,6 +2113,16 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
   const wide = kinds?.[1] ?? shapes?.[1];
   if (narrow !== undefined && wide !== undefined) {
     if (isZeroLengthList(narrow)) return false;
+    // The scalar elements of a list with one axis share no value with
+    // elements that are all lists (`scalarsBesideLists()`):
+    // `vector<unknown^3>` and `list<list>` do not overlap. With two or more
+    // axes, an element of the other is a row, not a scalar cell.
+    if (
+      narrow.kind === 'list' &&
+      narrow.dimensions?.length === 1 &&
+      scalarsBesideLists(narrow.elements, wide.elements, false) === 'lists only'
+    )
+      return false;
     if (narrow.kind === 'tuple')
       return narrow.elements.every((e) => typesOverlap(e.type, wide.elements));
     // A list with two or more dimensions: an element of the other is one of

@@ -46,6 +46,7 @@ import { isEffectSubset } from './effects.js';
 import {
   _setTypeAlgebra,
   aliasDefinitionAt,
+  ANY_OR_LIST_ELEMENT,
   flattenNestedListType,
   instantiatesTo,
   substituteTypeVariables,
@@ -1911,6 +1912,71 @@ const MAX_WITNESS_CANDIDATES = 256;
 const LIST_OF_ANY_TYPE: Type = Object.freeze({ kind: 'list', elements: 'any' });
 
 /**
+ * Whether `t`, the element type of a list with dimensions, is a scalar top
+ * type: a type that contains `unknown` (`unknown`, `any`, `any | integer`).
+ * The elements of such a list are scalars, not lists: `vector<unknown>` is a
+ * list of scalars, of rank 1 (user decision 2026-10-21). A list arm beside a
+ * top arm (`any | vector<boolean>`) is absorbed by the union reduction, so
+ * it reads the same.
+ */
+export function isScalarTopElement(t: Type): boolean {
+  // The element type of a skeleton that stands for a type variable, which
+  // can be a list (`ANY_OR_LIST_ELEMENT` in `instantiate.ts`).
+  if (t === ANY_OR_LIST_ELEMENT) return false;
+  // Only a top name, or a type that can hold one (a union, a reference, an
+  // intersection, a negation), can contain `unknown`; the test runs for
+  // every list compared with a list with dimensions.
+  if (typeof t === 'string') return t === 'any' || t === 'unknown';
+  if (
+    t.kind !== 'union' &&
+    t.kind !== 'reference' &&
+    t.kind !== 'intersection' &&
+    t.kind !== 'negation'
+  )
+    return false;
+  return isSubtype('unknown', t);
+}
+
+/**
+ * Whether the element type `t` of a list can hold a list and is not a
+ * scalar top type (`isScalarTopElement()`): `list`, `list<integer>`,
+ * `integer | list<integer>`. Such elements are not in a list with
+ * dimensions whose element type is a scalar top type.
+ */
+export function holdsListElements(t: Type): boolean {
+  if (isScalarTopElement(t)) return false;
+  // A primitive name holds a list when `list` is below it, or when it is
+  // below `list` (`range`); most composite
+  // kinds are decided by their kind alone.
+  if (typeof t === 'string')
+    return (
+      isPrimitiveSubtype('list', t as PrimitiveType) ||
+      // `never` is below every type, but it has no value.
+      (t !== 'never' && isPrimitiveSubtype(t as PrimitiveType, 'list'))
+    );
+  switch (t.kind) {
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return true;
+    case 'numeric':
+    case 'value':
+    case 'tuple':
+    case 'record':
+    case 'object':
+    case 'set':
+    case 'dictionary':
+    case 'signature':
+    case 'symbol':
+    case 'expression':
+      return false;
+    default:
+      return !provablyDisjoint(t, LIST_OF_ANY_TYPE);
+  }
+}
+
+/**
  * Whether a dimensioned list type of rank 2 or more — a matrix or a tensor
  * whose element type is inhabited — is a subtype of both `a` and `b`, where
  * at least one of the two is a list type.
@@ -3116,7 +3182,24 @@ function isSubtypeRules(
     // only a list type: the bare `list` is a string representation,
     // and `collection`
     // admits a row as well.
-    const elementsMatch = isSubtype(lhs.elements, rhs.elements);
+    // The elements of a list with dimensions whose element type is a scalar
+    // top type are scalars (`isScalarTopElement()`), so a list whose
+    // elements can be lists (`list<list^2>`, a list of two rows) is not
+    // such a list, as the flat spelling of the same values
+    // (`list<integer^(2x2)>`) is not, by the rank rule below. Without this,
+    // the relation was not transitive: `list<integer^(2x2x2)>` is a
+    // `list<list^2>`, which was a `vector<unknown>`, but
+    // `list<integer^(2x2x2)>` is not a `vector<unknown>`.
+    const rhsHoldsScalars =
+      rhs.dimensions !== undefined &&
+      lhs.elements !== rhs.elements &&
+      isScalarTopElement(rhs.elements);
+    // A list with an axis of length 0 has no element, so its element type
+    // does not matter: `list<list^0>` is a `list<unknown^0>`.
+    const lhsHasElements = !(lhs.dimensions?.includes(0) ?? false);
+    const elementsMatch =
+      !(rhsHoldsScalars && lhsHasElements && holdsListElements(lhs.elements)) &&
+      isSubtype(lhs.elements, rhs.elements);
     if (
       !elementsMatch &&
       lhs.dimensions !== undefined &&
@@ -3135,6 +3218,8 @@ function isSubtypeRules(
         const rhsDims = rhs.dimensions;
         if (
           rhsDims.every((d, i) => d === -1 || d === lhsDims[i]) &&
+          // A peeled row is a list, which the scalars of `rhs` are not.
+          !rhsHoldsScalars &&
           isSubtype(peeled(rhsDims.length), rhs.elements)
         )
           return true;
@@ -3163,10 +3248,11 @@ function isSubtypeRules(
     if (
       rhs.dimensions !== undefined &&
       rhs.dimensions.length >= 2 &&
-      // Also when the elements match: at an rhs whose element type is a top
-      // type (`list<any^(-1x-1)>`, the admission skeleton of a generic
-      // `matrix<T^(MxN)>`) a row matches the element, and the shape check
-      // below then compares one axis with two.
+      // Also when the elements match: at an rhs whose element type admits a
+      // row (`list<(any | list<any>)^(-1x-1)>`, the admission skeleton of a
+      // generic `matrix<T^(MxN)>`, with `ANY_OR_LIST_ELEMENT`) a row matches
+      // the element, and the shape check below then compares one axis with
+      // two.
       (!elementsMatch ||
         (lhs.dimensions?.length ?? 1) < rhs.dimensions.length) &&
       typeof lhs.elements !== 'string' &&

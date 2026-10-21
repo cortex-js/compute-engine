@@ -1976,6 +1976,23 @@ export function groundSkeleton(t: Type, covariant = true): Type {
  * `out`, and `X<A> <: X<never>` always holds under `in` (the flipped position
  * already yields `never`), so both admit every application as they stand.
  */
+/**
+ * The element type `any | list<any>` of a list with dimensions in a
+ * skeleton (`admissionSkeleton()`, `groundSkeleton()`), where it stands for
+ * a type variable: any value, a list included. The element type `any` of a
+ * list with dimensions reads as scalars (`isScalarTopElement()` in
+ * `subtype.ts`), which recognizes this object by identity and does not read
+ * it that way. It is frozen and never reduced: the union reduction would
+ * absorb its list arm into `any`.
+ */
+export const ANY_OR_LIST_ELEMENT: Type = Object.freeze({
+  kind: 'union',
+  types: Object.freeze([
+    'any',
+    Object.freeze({ kind: 'list', elements: 'any' }),
+  ]),
+}) as unknown as Type;
+
 export function admissionSkeleton(t: Type, covariant = true): Type {
   if (!hasFreeTypeVariables(t)) return t;
   return skeleton(t, covariant, true);
@@ -2021,6 +2038,24 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
         elements: skeleton(t.elements, covariant, membership),
       };
       delete next.dimensionVariables;
+      // The element type of a list with dimensions that is a top type reads
+      // as scalars (`isScalarTopElement()` in `subtype.ts`), but here the
+      // top type stands for a type variable, which can be a list
+      // (`list<T^N>` with `T := list<integer>`). So it is replaced by
+      // `ANY_OR_LIST_ELEMENT`, which admits lists of rows too, and the
+      // dimensions are kept.
+      const top = (e: Type): boolean =>
+        e === 'any' ||
+        (typeof e === 'object' &&
+          e.kind === 'union' &&
+          e.types.includes('any'));
+      if (
+        covariant &&
+        next.dimensions !== undefined &&
+        hasFreeTypeVariables(t.elements) &&
+        top(next.elements)
+      )
+        next.elements = ANY_OR_LIST_ELEMENT;
       return next;
     }
     case 'set':
