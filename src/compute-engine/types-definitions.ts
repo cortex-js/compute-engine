@@ -2183,7 +2183,7 @@ export type BindingSiteSelector = (
 /**
  * A shape of operand (or result) whose broadcast handling an operator's own
  * handlers provide, exempting it from the generic broadcast machinery. See
- * {@link OperatorDefinitionFlags.broadcastExemptions} for the meaning of
+ * {@link OperatorDefinitionFlags | OperatorDefinitionFlags.broadcastExemptions} for the meaning of
  * each label.
  * @category Definitions
  */

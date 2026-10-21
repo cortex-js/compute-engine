@@ -21,7 +21,7 @@ export type SymbolTable = {
   ids: { [id: MathJsonSymbol]: BoxedType };
 };
 
-/** A prototype-free {@link SymbolTable.ids} map — see the note there. */
+/** A prototype-free {@link SymbolTable | SymbolTable.ids} map — see the note there. */
 export function newSymbolIds(): { [id: MathJsonSymbol]: BoxedType } {
   return Object.create(null) as { [id: MathJsonSymbol]: BoxedType };
 }
