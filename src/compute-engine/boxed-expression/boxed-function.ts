@@ -10351,7 +10351,12 @@ function derivedBroadcastElementResult(
     expr.operator,
     args,
     perElementResult,
-    (h, a) => deriveApplicationType(expr.engine, h, a)
+    (h, a) => deriveApplicationType(expr.engine, h, a),
+    expr.valueDefinition !== undefined
+      ? { value: expr.valueDefinition }
+      : expr.operatorDefinition !== undefined
+        ? { operator: expr.operatorDefinition }
+        : undefined
   );
 }
 
@@ -11182,7 +11187,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.operator,
         expr.ops.map((x) => describeOperand(x)),
         sigResult,
-        (h, a) => deriveApplicationType(expr.engine, h, a)
+        (h, a) => deriveApplicationType(expr.engine, h, a),
+        { operator: def }
       );
       if (inferred !== undefined) return maybeAbsorb(inferred);
     }
@@ -11335,7 +11341,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.operator,
         expr.ops.map((x) => describeOperand(x)),
         sigResult,
-        (h, a) => deriveApplicationType(expr.engine, h, a)
+        (h, a) => deriveApplicationType(expr.engine, h, a),
+        { value: expr.valueDefinition }
       ) ??
       // As on the operator-definition route: an argument that may be absent
       // as a whole and is otherwise a numeric tuple

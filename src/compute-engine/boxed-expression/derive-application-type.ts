@@ -1,5 +1,7 @@
+import { installOperatorCalleeDerivation } from './callee-type-derivation.js';
 import { callResultType } from './call-result-type.js';
 import type {
+  BoxedDefinition,
   BoxedOperatorDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
@@ -326,9 +328,10 @@ export function runsLibraryCanonicalForm(
 export function deriveApplicationType(
   engine: ComputeEngine,
   operator: string,
-  operands: ReadonlyArray<OperandDescriptor>
+  operands: ReadonlyArray<OperandDescriptor>,
+  ownBinding?: BoxedDefinition
 ): Type | undefined {
-  const binding = engine.lookupDefinition(operator);
+  const binding = ownBinding ?? engine.lookupDefinition(operator);
   if (binding === undefined) return undefined;
 
   // Coalesce derives reachability itself: a failing fallback may be skipped.
@@ -366,7 +369,8 @@ export function deriveApplicationType(
       operator,
       operands,
       functionResult(ft) ?? 'unknown',
-      (h, a) => deriveApplicationType(engine, h, a)
+      (h, a) => deriveApplicationType(engine, h, a),
+      binding
     );
     if (inferred !== undefined) return inferred;
     // A numeric tuple binds WHOLE to a parameter the signature types as a
@@ -613,7 +617,8 @@ export function deriveApplicationType(
     operator,
     operands,
     functionResult(sig) ?? 'unknown',
-    (h, a) => deriveApplicationType(engine, h, a)
+    (h, a) => deriveApplicationType(engine, h, a),
+    binding
   );
   if (inferred !== undefined) return absorb(inferred);
   // A function literal held by an operator definition (a literal assigned
@@ -1001,3 +1006,7 @@ export function withCodomainForAbsentAnswer(
     return answered;
   return reduceType({ kind: 'union', types: ['missing', declared] });
 }
+
+installOperatorCalleeDerivation((engine, head, args, definition) =>
+  deriveApplicationType(engine, head, args, { operator: definition })
+);

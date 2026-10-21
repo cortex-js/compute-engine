@@ -87,7 +87,10 @@ import {
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
-import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
+import {
+  deriveApplicationOf,
+  describeBoundSymbol,
+} from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
   isNumber,
@@ -3932,7 +3935,14 @@ function bodyTypeWithoutIndexRanges(
   ): OperandDescriptor => {
     if (derived.every((x, i) => x === operands[i])) return d;
     const head = headOf(structure);
-    const t = context.derive(head, derived);
+    const t = deriveApplicationOf(
+      {
+        head,
+        callee: structure.kind === 'application' ? structure.callee : undefined,
+      },
+      derived,
+      context
+    );
     if (t === undefined) {
       failed = true;
       return d;
@@ -3944,7 +3954,7 @@ function bodyTypeWithoutIndexRanges(
       structureOf: () =>
         (rebuilt ??=
           structure.kind === 'application'
-            ? { kind: 'application', head, children: derived }
+            ? { ...structure, children: derived }
             : structure.kind === 'tuple'
               ? { kind: 'tuple', arity: derived.length, elements: derived }
               : structure.kind === 'list-literal'

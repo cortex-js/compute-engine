@@ -1,3 +1,8 @@
+import { isForwardCallReference } from './forward-call-reference.js';
+import {
+  deriveCalleeType,
+  retainOperatorCallee,
+} from './callee-type-derivation.js';
 import { factsOf } from '../../common/type/facts.js';
 import type {
   IComputeEngine as ComputeEngine,
@@ -5,6 +10,7 @@ import type {
   OperandDescriptor,
   OperandFacts,
   OperandStructure,
+  TypeHandlerContext,
   Sign,
   Tri,
 } from '../global-types.js';
@@ -23,6 +29,60 @@ import {
   functionLiteralParameterType,
   isRestParameter,
 } from './function-literal.js';
+
+/** Derive an application without replacing a recorded lexical callee by an
+ * ambient function with the same name. Shared by structural rewrite walks. */
+export function deriveApplicationOf(
+  application: { head: string; callee?: OperandDescriptor },
+  operands: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): Type | undefined {
+  return application.callee === undefined
+    ? context.derive(application.head, operands)
+    : deriveCalleeType(application.callee, operands, context);
+}
+
+/** A call head's own contract when resolving its name would select a
+ * different binding. A held literal also keeps its body structure so omission
+ * inspection can see returned branches hidden by a broader signature. */
+export function describeCallee(
+  op: Expression,
+  walk?: DescriptorMemo
+): OperandDescriptor | undefined {
+  if (!isFunction(op)) return undefined;
+  const literal = (held: Expression, type: Type): OperandDescriptor => {
+    const body = describe(held, undefined, walk ?? new Map());
+    return { ...describeType(type), structureOf: body.structureOf };
+  };
+  const ambient = op.engine.lookupDefinition(op.operator);
+  const value = op.valueDefinition;
+  if (value !== undefined) {
+    if (ambient !== undefined && 'value' in ambient && ambient.value === value)
+      return undefined;
+    const held = value.value;
+    if (isForwardCallReference(value)) return undefined;
+    return held !== undefined && isFunction(held, 'Function')
+      ? literal(held, value.type.type)
+      : describeType(value.type.type);
+  }
+  const own = op.operatorDefinition;
+  if (own === undefined) return undefined;
+  if (
+    ambient !== undefined &&
+    'operator' in ambient &&
+    ambient.operator === own
+  )
+    return undefined;
+  const held = (own as { _lambdaLiteral?: Expression })._lambdaLiteral;
+  return held !== undefined
+    ? literal(held, own.signature.type)
+    : retainOperatorCallee(
+        describeBoundSymbol(own.signature.type, op.operator),
+        op.engine,
+        op.operator,
+        own
+      );
+}
 
 /**
  * Operand descriptors: what a `type` handler receives in place of the
@@ -258,9 +318,11 @@ function structureOfExpression(
   if (isFunction(op)) {
     const ops = op.ops;
     let children: ReadonlyArray<OperandDescriptor> | undefined;
+    const callee = describeCallee(op, memo);
     return {
       kind: 'application',
       head: op.operator,
+      ...(callee === undefined ? {} : { callee }),
       get children(): ReadonlyArray<OperandDescriptor> {
         return (children ??= ops.map((x) => describe(x, undefined, memo)));
       },

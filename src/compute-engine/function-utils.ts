@@ -1,3 +1,4 @@
+import { clearForwardCallReference } from './boxed-expression/forward-call-reference.js';
 import { MathJsonSymbol } from '../math-json.js';
 import {
   debugStatementHook,
@@ -922,6 +923,7 @@ export function canonicalFunctionLiteralArguments(
       // `engine-expression-entrypoints.ts`).
       const shared = shadowedDefs.get(name);
       if (shared !== undefined) {
+        clearForwardCallReference(shared);
         // Checkpoint journal (funnel 4): a binding write outside the declare
         // routes. The target is the literal's own block scope, which a
         // restore normally discards along with the literal — journaled all

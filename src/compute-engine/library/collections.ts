@@ -266,6 +266,7 @@ import {
 } from './type-handlers.js';
 import { internType } from '../../common/type/intern.js';
 import {
+  deriveApplicationOf,
   describeBoundSymbol,
   describe as describeOperand,
   typeFact,
@@ -3250,6 +3251,7 @@ function resultMayBeNothing(
       return false;
   }
   const seen = new Set<string>();
+  const seenBodies = new Set<OperandStructure>();
   const namedBody = (name: string): OperandStructure | undefined => {
     if (seen.has(name)) return undefined;
     seen.add(name);
@@ -3268,6 +3270,15 @@ function resultMayBeNothing(
     if (s?.kind !== 'application') return false;
     const returned = (d: OperandDescriptor) =>
       isSubtype('nothing', d.type) || result(d.structureOf?.());
+    if (s.callee !== undefined) {
+      if (isSubtype('nothing', functionResult(s.callee.type) ?? 'unknown'))
+        return true;
+      const literal = s.callee.structureOf?.();
+      if (literal?.kind !== 'function-literal' || seenBodies.has(literal.body))
+        return false;
+      seenBodies.add(literal.body);
+      return result(literal.body);
+    }
     if (s.head === 'If') return s.children.slice(1).some(returned);
     if (s.head === 'Which')
       return s.children.some((d, i) => i % 2 === 1 && returned(d));
@@ -3292,6 +3303,7 @@ function resultMayBeNothing(
   // Do not inspect nested function values or data held by other operators.
   const omittedReturn = (s: OperandStructure | undefined): boolean => {
     if (s?.kind !== 'application') return false;
+    if (s.callee !== undefined) return false;
     if (s.head === 'Return') return result(s);
     if (!['Block', 'If', 'Which', 'While', 'Loop', 'For'].includes(s.head))
       return false;
@@ -3391,11 +3403,15 @@ function withMapOmission(
  * APPLICATION. The two collection literals carry their own structure kinds
  * but are ordinary applications for this purpose — the expression shape
  * reached them through the same `isFunction(body)` test. */
-function applicationOfStructure(
-  s: OperandStructure | undefined
-): { head: string; children: ReadonlyArray<OperandDescriptor> } | undefined {
+function applicationOfStructure(s: OperandStructure | undefined):
+  | {
+      head: string;
+      callee?: OperandDescriptor;
+      children: ReadonlyArray<OperandDescriptor>;
+    }
+  | undefined {
   if (s === undefined) return undefined;
-  if (s.kind === 'application') return { head: s.head, children: s.children };
+  if (s.kind === 'application') return s;
   if (s.kind === 'list-literal') return { head: 'List', children: s.elements };
   if (s.kind === 'tuple') return { head: 'Tuple', children: s.elements };
   return undefined;
@@ -3521,6 +3537,7 @@ function bareMappingElementTypeD(
   let referenced = false;
   const deriveApplication = (app: {
     head: string;
+    callee?: OperandDescriptor;
     children: ReadonlyArray<OperandDescriptor>;
   }): Type | undefined => {
     // A binder declares variables when canonicalized; only an operator that
@@ -3528,7 +3545,8 @@ function bareMappingElementTypeD(
     // reason to decline — `Add` and `Multiply`, the operators every
     // arithmetic broadcast maps, are lazy.)
     const def = engine.lookupDefinition(app.head)?.operator;
-    if (def === undefined || def.scoped) return undefined;
+    if (app.callee === undefined && (def === undefined || def.scoped))
+      return undefined;
     const args: OperandDescriptor[] = [];
     for (const [i, arg] of app.children.entries()) {
       const s = arg.structureOf?.();
@@ -3551,7 +3569,7 @@ function bareMappingElementTypeD(
       // A name no operand can have: a derived operand is not a parameter.
       args.push(describeBoundSymbol(t, `__derivedOperand${i}`));
     }
-    const t = derive(app.head, args);
+    const t = deriveApplicationOf(app, args, { engine, derive });
     if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
       return undefined;
     return t;

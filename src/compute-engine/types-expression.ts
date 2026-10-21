@@ -370,6 +370,7 @@ type OperandStructureMirror =
   | {
       kind: 'application';
       head: string;
+      callee?: OperandDescriptorMirror;
       children: ReadonlyArray<OperandDescriptorMirror>;
     }
   | {

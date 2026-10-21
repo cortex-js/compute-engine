@@ -9,6 +9,18 @@ substitution, free-symbol analysis, closure capture, and dereference must use
 the binding selected by the scope chain. Raw-name fallback is a compatibility
 escape hatch, not the identity model.
 
+Call-head placeholders created before a function is defined are forward
+references: type inference resolves their names when the definition becomes
+available. A declaration adopted as a function parameter is a lexical binding,
+so its contract takes precedence over an unrelated function with the same name.
+
+Compilation refuses a captured callable whose held function body differs from
+the currently applicable definition, or whose definition is no longer in scope.
+This check runs before folding and inlining. It preserves evaluation's current
+compatibility reading rather than silently emitting a captured body that
+`evaluate()` would not call. Changing evaluation to call captured definitions
+is a separate decision; this refusal does not make that change.
+
 A stored symbol value is evaluated in the environment denoted by its own free
 symbols. Copying that value into the caller's scope and resolving it there can
 silently capture same-named bindings and is forbidden.

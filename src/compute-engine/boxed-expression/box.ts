@@ -1,3 +1,4 @@
+import { markForwardCallReference } from './forward-call-reference.js';
 import { Complex } from 'complex.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { BigDecimal } from '../../big-decimal/index.js';
@@ -2557,7 +2558,13 @@ function makeCanonicalFunctionCore(
   // the operator path (with its canonical handler) runs. `_bind()` performs
   // the same resolution, keeping construction and binding consistent.
   //
-  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  let def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  // A parameter first used as a call head needs its annotation before the
+  // value-callee path validates the arguments and records the binding.
+  if (def === undefined && ce._shadowedParameterType(name) !== undefined) {
+    ce.symbol(name);
+    def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  }
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
@@ -2585,6 +2592,8 @@ function makeCanonicalFunctionCore(
         autoScope = autoScope.parent;
       ce.declare(name, { type: 'function', inferred: true }, autoScope);
       const declared = autoScope.bindings.get(name);
+      if (declared !== undefined && !ce._isShadowedParameter(name))
+        markForwardCallReference(declared);
       if (declared !== undefined && ce._isShadowedParameter(name))
         ce._setShadowedParameterDef(name, declared);
     }

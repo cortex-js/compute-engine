@@ -6173,3 +6173,15 @@ whose `log2` is 2.5 ulp off, 17 values with `a > 16` and `s < −21` are up to
 prefactor would carry it to about `s = −63`. The Apple GPU compiler reassociates
 `s + (2b − 1)` into `(s + 2b) − 1` (6.7% error at `ζ(−1e−6, 1/2)`); the text
 guards it with `max(2b − 1, −1)`, and a test pins the guard.
+
+### Captured call heads and the interpreter's compatibility lookup
+
+Call-head type inference follows an explicit lexical callable's contract, while
+evaluation can resolve a same-named function in the current scope. For example,
+a view boxed with an inner `h := u ↦ 7` can materialize as `[9, 9]` after that
+scope closes and a global `h := u ↦ 9` is defined. These contracts can also
+have different result types. Compilation now refuses a captured held-function
+binding mismatch before folding or inlining, including bare callbacks. Decide
+separately whether evaluation should use captured definitions, and align the
+type model with the chosen evaluation rule. Forward references to functions
+not yet defined remain name-based and are not lexical captures.

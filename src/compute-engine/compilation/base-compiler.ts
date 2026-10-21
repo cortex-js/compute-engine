@@ -3036,12 +3036,74 @@ export class BaseCompiler {
   /**
    * Compile an expression to target language source code
    */
+  private static assertCapturedCallableBindings(
+    root: Expression,
+    target: CompileTarget<Expression>
+  ): void {
+    const seen = new WeakMap<Expression, Set<ReadonlySet<string>>>();
+    const walk = (node: Expression, bound: ReadonlySet<string>): void => {
+      const contexts = seen.get(node);
+      if (contexts?.has(bound)) return;
+      if (contexts) contexts.add(bound);
+      else seen.set(node, new Set([bound]));
+      const name = isSymbol(node)
+        ? node.symbol
+        : isFunction(node)
+          ? node.operator
+          : undefined;
+      if (
+        name !== undefined &&
+        !bound.has(name) &&
+        !BaseCompiler.isCompileBoundName(name) &&
+        target.varsKeys?.has(name) !== true &&
+        BaseCompiler.blockLocalFunction(name, target) === undefined
+      ) {
+        const value = node.valueDefinition;
+        const operator = node.operatorDefinition;
+        const held =
+          value?.value ??
+          (operator as { _lambdaLiteral?: Expression } | undefined)
+            ?._lambdaLiteral;
+        if (held !== undefined && isFunction(held, 'Function')) {
+          const ambient = lookupApplicable(
+            name,
+            node.engine.context.lexicalScope
+          );
+          if (
+            (value !== undefined &&
+              (!ambient || !isValueDef(ambient) || ambient.value !== value)) ||
+            (operator !== undefined &&
+              (!ambient ||
+                !isOperatorDef(ambient) ||
+                ambient.operator !== operator))
+          )
+            throw new Error(
+              ambient === undefined
+                ? `Could not compile \`${name}\`: the captured callable definition is not in scope.`
+                : `Could not compile \`${name}\`: the captured callable has a different binding from the ambient function.`
+            );
+        }
+      }
+      if (!isFunction(node)) return;
+      const binders = declaredBinders(node, 'post');
+      node.ops.forEach((arg, i) => {
+        const names = boundVariableNamesInOperand(node, i, binders);
+        walk(arg, names.length === 0 ? bound : new Set([...bound, ...names]));
+      });
+    };
+    walk(root, new Set());
+  }
+
   static compile(
     expr: Expression | undefined,
     target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
     if (expr === undefined) return '';
+    // Check before folding/inlining can replace a captured call by its body.
+    if (BaseCompiler._compileDepth === 0)
+      BaseCompiler.assertCapturedCallableBindings(expr, target);
+
     // A node whose emission the D2/D6 runtime rule has BOUND to a temporary
     // (`realOperandGuard`): the real lowering re-emits its head with the
     // operand's code replaced by the temporary's real projection.
@@ -10457,6 +10519,8 @@ export class BaseCompiler {
       // never fall through to a global function with the same spelling.
       if (BaseCompiler.isCompileBoundName(x.symbol))
         return declaredResultSafe(x.symbol);
+      const own = x.valueDefinition?.value;
+      if (own !== undefined && isFunction(own, 'Function')) return body(own);
       const literal = BaseCompiler.userFunctionLiteral(x.engine, x.symbol);
       if (literal) return body(literal);
       const declared = x.engine.lookupDefinition(x.symbol);
@@ -10488,6 +10552,14 @@ export class BaseCompiler {
           : undefined;
         if (local !== undefined) return local !== null && body(local);
         if (BaseCompiler.isCompileBoundName(x.operator)) return false;
+        // The node may call a captured value while the engine has another
+        // function under that name. A different ambient body is no proof
+        // that this callback cannot return an omission.
+        const own =
+          x.valueDefinition?.value ??
+          (x.operatorDefinition as { _lambdaLiteral?: Expression } | undefined)
+            ?._lambdaLiteral;
+        if (own !== undefined && isFunction(own, 'Function')) return body(own);
         const literal = BaseCompiler.userFunctionLiteral(x.engine, x.operator);
         if (literal) return body(literal);
         if (x.operatorDefinition?.inferredSignature) return false;
@@ -10636,6 +10708,45 @@ export class BaseCompiler {
     node?: Expression
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
+
+    // A known captured function body cannot be replaced by a different
+    // ambient function. Forward placeholders and target operator overrides
+    // still resolve actively; local compilation bindings supply their own code.
+    if (
+      node !== undefined &&
+      isFunction(node) &&
+      node.operator === h &&
+      !BaseCompiler.CONTROL_FLOW_HEADS.has(h) &&
+      !BaseCompiler.isCompileBoundName(h) &&
+      target.varsKeys?.has(h) !== true &&
+      BaseCompiler.blockLocalFunction(h, target) === undefined
+    ) {
+      const value = node.valueDefinition;
+      const operator = node.operatorDefinition;
+      const held =
+        value?.value ??
+        (operator as { _lambdaLiteral?: Expression } | undefined)
+          ?._lambdaLiteral;
+      const ambient =
+        held !== undefined && isFunction(held, 'Function')
+          ? lookupApplicable(h, engine.context.lexicalScope)
+          : undefined;
+      if (
+        held !== undefined &&
+        isFunction(held, 'Function') &&
+        ((value !== undefined &&
+          (!ambient || !isValueDef(ambient) || ambient.value !== value)) ||
+          (operator !== undefined &&
+            (!ambient ||
+              !isOperatorDef(ambient) ||
+              ambient.operator !== operator)))
+      )
+        throw new Error(
+          ambient === undefined
+            ? `Could not compile \`${h}\`: the captured callable definition is not in scope.`
+            : `Could not compile \`${h}\`: the captured callable has a different binding from the ambient function.`
+        );
+    }
 
     BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
 

@@ -1,3 +1,4 @@
+import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { coalesceResultType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
@@ -29,6 +30,7 @@ import {
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
+  deriveApplicationOf,
   describeBoundSymbol,
   describeType,
 } from '../boxed-expression/operand-descriptor.js';
@@ -959,18 +961,49 @@ function applyLiteralMapType(
   context?: TypeHandlerContext
 ): Type | undefined {
   const st = fn.structureOf?.();
-  if (st?.kind !== 'function-literal') return undefined;
+  const signature = fn.type;
+  if (st?.kind !== 'function-literal') {
+    // A type-only signature can map a scalar tuple position even when a
+    // different parameter consumes a list whole. Operator symbols keep their
+    // own policy; the all-scalar list-broadcast gate runs after the tuple rule.
+    if (
+      st !== undefined ||
+      typeof signature !== 'object' ||
+      signature.kind !== 'signature'
+    )
+      return undefined;
+  }
+  const annotatedParameter = (i: number): Type | undefined => {
+    if (st?.kind === 'function-literal') return st.parameters[i]?.annotated;
+    if (typeof signature !== 'object' || signature.kind !== 'signature')
+      return undefined;
+    return (
+      [...(signature.args ?? []), ...(signature.optArgs ?? [])][i]?.type ??
+      signature.variadicArg?.type
+    );
+  };
   // A tuple argument at a parameter declared as a scalar maps over its
   // components, as at evaluation (`declaredScalarTupleCells`), whatever the
   // other parameters are: the call is typed as the tuple of the results
   // (`declaredScalarTupleType`).
   const tupleMapped = declaredScalarTupleType(
-    (i) => isDeclaredScalarType(st.parameters[i]?.annotated),
+    (i) => isDeclaredScalarType(annotatedParameter(i)),
     args.map((a) => a.type),
     functionResult(fn.type) ?? 'unknown',
     literalParamsMap(fn.type)
   );
   if (tupleMapped !== undefined) return tupleMapped;
+  if (
+    st?.kind !== 'function-literal' &&
+    typeof signature === 'object' &&
+    signature.kind === 'signature' &&
+    ![
+      ...(signature.args ?? []),
+      ...(signature.optArgs ?? []),
+      ...(signature.variadicArg ? [signature.variadicArg] : []),
+    ].every((p) => isDeclaredScalarType(p.type))
+  )
+    return undefined;
   if (!literalParamsMap(fn.type)) return undefined;
   const mapsOver = (t: Type): boolean =>
     isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
@@ -1364,7 +1397,8 @@ function pipeImplicitTopicCallType(
   collectPlaceholderNames(st, placeholders);
   if (placeholders.size > 0) return undefined;
   const arms = signatureArms(
-    context.engine.lookupDefinition(st.head)?.operator?.signature.type
+    st.callee?.type ??
+      context.engine.lookupDefinition(st.head)?.operator?.signature.type
   );
   if (arms === undefined) return undefined;
   if (!implicitTopicArityFits(arms, st.children.length)) return undefined;
@@ -1376,7 +1410,7 @@ function pipeImplicitTopicCallType(
   );
   const operands = [...st.children];
   operands.splice(at, 0, describeType(topicType));
-  return context.derive(st.head, operands);
+  return deriveApplicationOf(st, operands, context);
 }
 
 /**
@@ -1582,9 +1616,12 @@ function pipeStageBodyType(
     if (inner !== undefined)
       return pipeStageBodyType(context, inner, param, elementType);
   }
-  return context.derive(
-    body.head,
-    body.children.map((c) => bindStageParameter(context, c, param, elementType))
+  return deriveApplicationOf(
+    body,
+    body.children.map((c) =>
+      bindStageParameter(context, c, param, elementType)
+    ),
+    context
   );
 }
 
@@ -1631,7 +1668,7 @@ function bindStageParameter(
       bindStageParameter(context, c, param, elementType)
     );
     return describeDerived(
-      context.derive(s.head, children) ?? 'unknown',
+      deriveApplicationOf(s, children, context) ?? 'unknown',
       children
     );
   }
@@ -1694,7 +1731,7 @@ function heldOperandType(
         : { kind: 'list', elements };
     }
     case 'application':
-      return context.derive(s.head, s.children) ?? 'unknown';
+      return deriveApplicationOf(s, s.children, context) ?? 'unknown';
   }
 }
 
@@ -3882,6 +3919,30 @@ const CANONICAL_FORM_NAMES: ReadonlySet<string> = new Set([
   'Order',
 ]);
 
+function anonymousApplicationType(
+  fn: OperandDescriptor,
+  args: readonly OperandDescriptor[],
+  context: TypeHandlerContext
+): Type {
+  const { engine } = context;
+  const t = fn.type;
+  // A function literal with scalar parameters maps over a collection
+  // argument (`applyLiteralMaps`): the call is typed as the mapped
+  // collection (`applyLiteralMapType`).
+  const mapped = applyLiteralMapType(fn, args, context);
+  if (mapped !== undefined) return mapped;
+  return (
+    instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
+      threadable: false,
+      resolver: engine._typeResolver,
+    }) ??
+    functionResult(t) ??
+    'unknown'
+  );
+}
+
+installAnonymousCalleeDerivation(anonymousApplicationType);
+
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // `Block` is in `core` because a function literal (`Function`, below)
@@ -5028,22 +5089,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // expression (`instantiatedResultTypeOverActuals`,
       // `boxed-expression/generic-instantiation.ts`).
       type: ([fn, ...args], context) => {
-        const { engine } = context;
-        const t = fn.type;
-        // A function literal with scalar parameters maps over a collection
-        // argument (`applyLiteralMaps`): the call is typed as the mapped
-        // collection (`applyLiteralMapType`).
-        const mapped = applyLiteralMapType(fn, args, context);
-        if (mapped !== undefined)
-          return BoxedType.forResult(mapped, engine._typeResolver);
         return BoxedType.forResult(
-          instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
-            threadable: false,
-            resolver: engine._typeResolver,
-          }) ??
-            functionResult(t) ??
-            'unknown',
-          engine._typeResolver
+          anonymousApplicationType(fn, args, context),
+          context.engine._typeResolver
         );
       },
       canonical: (args, { engine: ce }) => {

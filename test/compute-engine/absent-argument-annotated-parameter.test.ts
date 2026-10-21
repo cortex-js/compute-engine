@@ -380,7 +380,7 @@ describe('a value typed `never` is no assignment evidence', () => {
     );
     const last = expr.ops[expr.ops.length - 1];
     expect(last.op1.type.toString()).toBe(
-      'list<tuple<number, number, number, number>>'
+      'list<tuple<integer, real, integer, integer>>'
     );
     expect(compiled(expr)).toBe(3);
   });

@@ -1,3 +1,4 @@
+import { deriveApplicationOf } from '../boxed-expression/operand-descriptor.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -2556,7 +2557,10 @@ function denotedTypeOf(
 ): Type {
   const structure = d.structureOf?.();
   if (structure?.kind === 'application')
-    return derive(structure.head, structure.children) ?? d.type;
+    return (
+      deriveApplicationOf(structure, structure.children, { engine, derive }) ??
+      d.type
+    );
   if (structure?.kind === 'symbol') {
     // Four places a symbol's codomain can live, in decreasing precision: the
     // operand's own type (a bound symbol carries its signature there, while

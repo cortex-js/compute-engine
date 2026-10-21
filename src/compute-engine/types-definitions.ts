@@ -573,6 +573,10 @@ export type OperandStructure =
   | {
       kind: 'application';
       head: string;
+      /** The callable's own contract when ambient lookup would select a
+       * different binding. A held literal may also supply its body structure.
+       * Derive this call through Apply rather than resolving head by name. */
+      callee?: OperandDescriptor;
       children: ReadonlyArray<OperandDescriptor>;
     }
   | {

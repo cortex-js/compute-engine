@@ -1,5 +1,7 @@
+import { isForwardCallReference } from './forward-call-reference.js';
 import type {
   Expression,
+  BoxedDefinition,
   IComputeEngine,
   OperandDescriptor,
 } from '../global-types.js';
@@ -13,7 +15,12 @@ import {
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { absentMarkerIsNumeric } from './validate.js';
-import { describe, describeType } from './operand-descriptor.js';
+import {
+  deriveApplicationOf,
+  describe,
+  describeCallee,
+  describeType,
+} from './operand-descriptor.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -31,8 +38,7 @@ const cache = new WeakMap<
 >();
 const active = new WeakMap<IComputeEngine, Set<Expression>>();
 
-function userFunctionLiteral(engine: IComputeEngine, head: string) {
-  const binding = engine.lookupDefinition(head);
+function userFunctionLiteral(binding: BoxedDefinition | undefined) {
   const literal =
     binding &&
     ('operator' in binding
@@ -86,11 +92,9 @@ function mayBroadcast(type: Type): boolean {
  * instantiation types the call.
  */
 function bindsArgumentsWhole(
-  engine: IComputeEngine,
-  head: string,
+  binding: BoxedDefinition | undefined,
   literal: Expression
 ): boolean {
-  const binding = engine.lookupDefinition(head);
   if (!binding) return false;
   let sig: Type | undefined;
   if ('operator' in binding) sig = binding.operator.signature?.type;
@@ -117,7 +121,11 @@ export function callResultType(
   head: string,
   args: readonly OperandDescriptor[],
   declared: Type,
-  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  binding?: BoxedDefinition
 ): Type | undefined {
   // Scalar declarations already describe their result's representation. This
   // analysis refines collection alternatives, not numeric domains.
@@ -128,11 +136,14 @@ export function callResultType(
     declared === 'never'
   )
     return undefined;
-  const literal = userFunctionLiteral(engine, head);
+  if (binding && 'value' in binding && isForwardCallReference(binding.value))
+    binding = undefined;
+  binding ??= engine.lookupDefinition(head);
+  const literal = userFunctionLiteral(binding);
   if (
     !literal ||
     (args.some((x) => mayBroadcast(presentPart(x.type))) &&
-      !bindsArgumentsWhole(engine, head, literal))
+      !bindsArgumentsWhole(binding, literal))
   )
     return undefined;
   const params = literal.ops.slice(1);
@@ -372,7 +383,29 @@ export function callResultType(
           return result;
         }
       }
-      const t = derive(expr.operator, operands);
+      const callee = describeCallee(expr);
+      let t = deriveApplicationOf({ head: expr.operator, callee }, operands, {
+        engine,
+        derive,
+      });
+      if (callee !== undefined) {
+        const binding =
+          expr.valueDefinition !== undefined
+            ? { value: expr.valueDefinition }
+            : expr.operatorDefinition !== undefined
+              ? { operator: expr.operatorDefinition }
+              : undefined;
+        if (binding !== undefined)
+          t =
+            callResultType(
+              engine,
+              expr.operator,
+              operands,
+              t ?? 'unknown',
+              derive,
+              binding
+            ) ?? t;
+      }
       const result = t === undefined ? undefined : describeType(t);
       memo.set(expr, result);
       return result;
