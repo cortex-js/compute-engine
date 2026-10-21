@@ -30,6 +30,12 @@ import { typeToString } from '../../src/common/type/serialize';
  *    not only with a target of two or more dimensions.
  * 3. `collection<E>` and `indexed_collection<E>` peel any number of outer
  *    axes, as `list<E>` does.
+ * 4. An outer list with no dimensions admits any shape of its elements, so
+ *    its flat spelling has no dimensions (`list<vector<integer^3>>` reads as
+ *    `list<integer>`, the cells in any shape): it is not a `matrix<integer>`,
+ *    and the dimension solver pins no length from it. (Its missing length
+ *    was read as one axis of any length, which made it a matrix although it
+ *    holds a 2×2 arrangement of 3-vectors.)
  */
 
 new ComputeEngine();
@@ -203,6 +209,13 @@ describe('the flat spelling of a nested list is compared with every target (deci
     ['list<vector<integer>^2>', 'matrix<number>'],
     // A vector of two 1-rows is a 2×1 matrix, not a vector of numbers.
     ['list<vector<integer^1>^2>', 'vector<number>'],
+    // An outer list with no dimensions admits any shape of its rows, so
+    // its flat spelling has no dimensions and matches no target with
+    // dimensions (decision 4, 2026-10-21): it holds a 2×2 arrangement of
+    // 3-vectors, which is not a matrix.
+    ['list<vector<integer^3>>', 'matrix<integer>'],
+    ['list<vector<integer^3>>', 'list<integer^(?x3)>'],
+    ['list<list<list^2>>', 'list<value^(?x2)>'],
   ])('%s is not a %s', (a, b) => {
     expect(sub(a, b)).toBe(false);
   });
@@ -277,6 +290,39 @@ describe('the meet follows the readings', () => {
     expect(sub(w, b)).toBe(true);
     expect(inMeet(a, b, w)).toBe(true);
     expect(inMeet(b, a, w)).toBe(true);
+  });
+
+  test('an outer list with no dimensions is not absorbed by a list with dimensions', () => {
+    // A fourth cause of the non-transitive relation (decision 4 above): the
+    // missing outer length was merged as one axis, so `list<list<list^2>>` was a
+    // `list<value^(?x2)>` and the union reduction dropped it, although it
+    // holds a rank-3 value (a 1×1 arrangement of rows of two lists) that
+    // the rank-2 arm does not.
+    const w = 'list<list<integer>^(1x1x2)>';
+    const u = reduceType({
+      kind: 'union',
+      types: [parseType('list<list<list^2>>'), parseType('list<value^(?x2)>')],
+    });
+    expect(sub(w, 'list<list<list^2>>')).toBe(true);
+    expect(sub(w, 'list<value^(?x2)>')).toBe(false);
+    expect(typeToString(u)).toBe('list<list<list^2>> | list<value^(?x2)>');
+    expect(isSubtype(parseType(w), u)).toBe(true);
+  });
+
+  test('an outer list with no dimensions of empty rows is not the empty list', () => {
+    // `list<list<never^0>>` holds `[[], []]` (two empty rows), which a list
+    // whose first axis has length 0 does not; its flat spelling must not be
+    // `list<never>`, the type of `[]` alone, which such a list admits.
+    const w = 'list<never^(2x0)>';
+    expect(sub(w, 'list<list<never^0>>')).toBe(true);
+    expect(sub(w, 'vector<integer^0>')).toBe(false);
+    expect(sub('list<list<never^0>>', 'vector<integer^0>')).toBe(false);
+    expect(sub('list<never>', 'vector<integer^0>')).toBe(true);
+    const u = reduceType({
+      kind: 'union',
+      types: [parseType('list<list<never^0>>'), parseType('vector<integer^0>')],
+    });
+    expect(isSubtype(parseType(w), u)).toBe(true);
   });
 
   test('a meet is never wider than its operands', () => {

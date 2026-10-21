@@ -1094,19 +1094,30 @@ let _algebra: TypeAlgebra | undefined;
  * `matrix<integer^(2x3)>` describe the same values; the flat spelling is the
  * one the subtype relation and the dimension solver read lengths from. Each
  * level whose elements are a list with DIMENSIONS is merged into its parent:
- * the parent's dimensions (the length `-1`, any length, when it states
- * none) followed by the element's. A level whose elements are a list with
- * no dimensions stops the merge: its rows can differ in length. A level whose
- * elements state the length `-1` on any axis (`vector<integer>`, the rows of
- * `list<vector<integer>^2>`) also stops the merge: `-1` says only that each
- * row has SOME length, not that all rows have the same one, so `[[1], [2, 3]]`
- * is a value of `list<vector<integer>^2>` and is not a matrix. Used by
- * `isSubtype` (`subtype.ts`) and by the dimension pinning of `walkPattern`.
+ * the parent's dimensions followed by the element's. A level whose elements
+ * are a list with no dimensions stops the merge: its rows can differ in
+ * length. A level whose elements state the length `-1` on any axis
+ * (`vector<integer>`, the rows of `list<vector<integer>^2>`) also stops the
+ * merge: `-1` says only that each row has SOME length, not that all rows
+ * have the same one, so `[[1], [2, 3]]` is a value of
+ * `list<vector<integer>^2>` and is not a matrix.
+ *
+ * An OUTER list with no dimensions admits any shape of its elements, so its
+ * values can have any number of axes above the rows: `list<vector<integer^3>>`
+ * holds a 2×2 arrangement of rows of three integers (a rank-3 value) as well
+ * as a 2×3 matrix. Its flat spelling is therefore a list with NO dimensions
+ * of the cells (`list<integer>`): the cells in any shape. It is a
+ * `list<integer>` and a `collection<integer>`, and it is not a
+ * `matrix<integer>` (user decision 2026-10-21; reading the missing length as
+ * one axis of any length, `-1`, made it a matrix, which does not hold the
+ * rank-3 value, and the relation was not transitive). The dimension solver
+ * then pins no length from such a type. Used by `isSubtype` (`subtype.ts`)
+ * and by the dimension pinning of `walkPattern`.
  */
 export function flattenNestedListType(t: Type): Type | undefined {
   if (typeof t !== 'object' || t.kind !== 'list') return undefined;
   let elements = t.elements;
-  let dimensions = t.dimensions ?? [-1];
+  let dimensions = t.dimensions ?? [];
   let merged = false;
   while (
     typeof elements === 'object' &&
@@ -1118,7 +1129,19 @@ export function flattenNestedListType(t: Type): Type | undefined {
     elements = elements.elements;
     merged = true;
   }
-  return merged ? { kind: 'list', elements, dimensions } : undefined;
+  if (!merged) return undefined;
+  if (t.dimensions === undefined) {
+    // Rows with an axis of length 0 have no cell, so the cells read `never`
+    // (`list<list<never^0>>`, any arrangement of empty rows). A `list<never>`
+    // with no dimensions is the type of the empty list `[]` alone, which the
+    // subtype rule admits at a list whose first axis has length 0
+    // (`vector<integer^0>`); the nested type also holds `[[], []]`, which
+    // such a list does not. So that type keeps its nested spelling.
+    if (elements === 'never' && dimensions.includes(0)) return undefined;
+    // An outer list with no dimensions: the cells in any shape.
+    return { kind: 'list', elements };
+  }
+  return { kind: 'list', elements, dimensions };
 }
 
 /** @internal — called by `subtype.ts` at module load. */
@@ -2649,7 +2672,9 @@ function walkPattern(
       // `matrix<integer^(2x3)>`) is read as the flat shape when the pattern
       // states more axes than the actual (`flattenNestedListType`), so that
       // `cols(nl)` with `nl: list<vector<integer^3>^2>` pins `N` to 3, as
-      // the flat spelling does. A list whose element type is `never` (the
+      // the flat spelling does. An outer list with no dimensions
+      // (`list<vector<integer^3>>`) has a flat shape with no dimensions, so
+      // it pins nothing. A list whose element type is `never` (the
       // type of the empty list `[]`, which states no dimensions) can hold no
       // element, so its outer length is 0.
       if (

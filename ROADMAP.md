@@ -707,31 +707,6 @@ remains the separate design item above.
   does not. The general rule for a right side `unknown` in `isSubtype()`
   (`common/type/subtype.ts`) does not look inside a `broadcastable` left
   side.
-- An outer list with no dimensions is merged into its flat spelling as
-  exactly one axis (`list<vector<integer^3>>` is a `matrix<integer>`,
-  `flattenNestedListType()` reads the missing length as `-1`, and
-  `dimension-variables.test.ts` pins it: `cols(nu)` is `3` for
-  `nu: list<vector<integer^3>>`), while the row reading of a list with no
-  dimensions peels any number of axes, so the same type holds a rank-3
-  value (`list<integer^(2x2x3)>` is a `list<vector<integer^3>>`, a 2×2
-  arrangement of rows, pinned by `broadcastable-list-meaning.test.ts`). The
-  two readings disagree, so the relation is not transitive:
-  `list<list<integer>^(1x1x2)> <: list<list<list^2>> <: list<value^(?x2)>`,
-  but the first is not a `list<value^(?x2)>` (rank 3 against rank 2), and
-  a union that drops the middle arm drops the value. Reachable with any
-  element type that admits a list (`value`, `expression`, `collection`); a
-  random check whose element types include `value` finds one losing pair
-  in 36,000. **Needs a user decision.** Option (a), the value reading: the
-  merge of an outer list with no dimensions applies toward a list with no
-  dimensions and toward `collection`/`indexed_collection` only, not toward
-  a list with dimensions; `list<vector<integer^3>>` is no longer a
-  `matrix<integer>`, `cols(nu)` no longer pins `3`, and 3 tests of
-  `dimension-variables.test.ts` change; the random check is then clean
-  (measured 2026-10-21 with a toggle: 0 losses in 36,000 pairs, the 572
-  related test files green). Option (b), keep the one-axis merge and
-  accept the loss. Option (c), one axis everywhere (the row reading of a
-  list with no dimensions peels one axis only) was declined on 2026-10-21
-  (decision 3). Found 2026-10-21 by the review of the transitivity fix.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
@@ -6521,6 +6496,22 @@ can call it and the installation is safe (four conditions in
   carried in its options or its context stack, which is a redesign of the
   epoch module; pinned by a test in
   `test/compute-engine/sticky-unresolved-call.test.ts`.
+- **A call between a typed valueless `let` of a function's name and its
+  `function` statement is not resolved early, on either route.** With
+  `let g: (integer) -> integer`, then `let a = String(g(2))`, then
+  `function g(k) { 2k }`, `a` is `"g(2)"` on the Epsil runner and on the
+  whole-block route; with the call before the `let`, it is `"4"`. The
+  clause installed ahead of its statement (by the block hoist or the Epsil
+  preparation) is installed with its inferred signature, because
+  `declaredSignatureOf()` (`multi-clause.ts`) ignores a binding marked
+  `inferred`; the `Declare` statement then drops that clause
+  (`CLAUSE_INSTALLED_AHEAD`, `library/core.ts`) and the `function` statement
+  installs it again under the declared signature. Keeping the early clause
+  would skip the declared-type check (`g(1.5)` would answer `3`). Two fixes:
+  keep the literal, origin and attributes of each early install with the
+  marker and install them again right after the fresh declaration; or keep
+  the binding only when the installed signature is not inferred and equals
+  the declared type (fully annotated clauses only). Same before this work.
 - **Divergences between the Epsil runner and the block route that remain**
   (measured 2026-10-21): a call before the `let` of a variable the body
   reads (`let a = String(g())`, `let c = 2`, `function g() { c^2 }`) gives

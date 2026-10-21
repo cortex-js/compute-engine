@@ -3245,9 +3245,14 @@ function isSubtypeRules(
     // spelling `list<E^(2x3)>` is. A declared type can take the nested
     // spelling (a literal never does: `staticCollectionDims` flattens it),
     // and without this a symbol declared that way was admitted at a
-    // `matrix` parameter only provisionally. An outer list with no length
-    // reads as the length `-1` (any length), which only an rhs dimension of
-    // `-1` accepts. Rows with no dimensions are not read this way, and rows
+    // `matrix` parameter only provisionally. An outer list with no
+    // dimensions admits any shape of its rows, so its flat spelling has no
+    // dimensions (`list<vector<integer^3>>` reads as `list<integer>`, the
+    // cells in any shape): it matches a target with no dimensions and the
+    // collection kinds, and no target with dimensions (user decision
+    // 2026-10-21; reading the missing length as one axis made
+    // `list<vector<integer^3>>` a `matrix<integer>`, which does not hold its
+    // rank-3 values). Rows with no dimensions are not read this way, and rows
     // with the length `-1` on an axis (`list<vector<integer>^2>`) are not
     // either: in both cases the rows can differ in length (`[[1], [2, 3]]`),
     // and the rows of a matrix cannot. A flat length of `-1` says only that
@@ -3747,10 +3752,11 @@ function peeledRowMatches(lhs: ListType, elements: Type): boolean {
  * Whether `lhs`, a list whose elements are lists with dimensions (the
  * nested spelling of a matrix or a tensor, `list<vector<integer^3>^2>`), is
  * a subtype of `rhs` when read in its flat spelling (`list<integer^(2x3)>`,
- * `flattenNestedListType()`). The two spellings name the same values, so
- * every rhs that admits the flat one admits the nested one: a list with
- * fewer dimensions or none, a `collection`, an `indexed_collection`. `false`
- * when `lhs` has no nested spelling to merge.
+ * `flattenNestedListType()`; `list<integer>` with no dimensions when the
+ * outer list states none). The two spellings name the same values, so every
+ * rhs that admits the flat one admits the nested one: a list with fewer
+ * dimensions or none, a `collection`, an `indexed_collection`. `false` when
+ * `lhs` has no nested spelling to merge.
  */
 function flattenedListMatches(lhs: ListType, rhs: Type): boolean {
   if (

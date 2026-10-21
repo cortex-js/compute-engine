@@ -637,7 +637,11 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
 // declared type can. Before 2026-10-01 the subtype relation read a rank-2
 // list as a list of rows but not the reverse, so a symbol declared with the
 // nested spelling was admitted at a `matrix<T^(MxN)>` parameter only
-// provisionally, and its lengths pinned nothing.
+// provisionally, and its lengths pinned nothing. An OUTER list with no
+// dimensions (`list<vector<integer^3>>`) admits any shape of its rows, a
+// 2×2 arrangement of them as well as a 2×3 matrix, so it is not a matrix
+// and pins no length (user decision 2026-10-21; until then its missing
+// length was read as one axis of any length).
 describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape', () => {
   const ce = fresh();
   declare(ce, 'rows', '(x: matrix<T^(MxN)>) -> M where T, M, N');
@@ -656,9 +660,10 @@ describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape
   test('the lengths are pinned', () => {
     expect(ce.box(['rows', 'nl']).type.toString()).toBe('2');
     expect(ce.box(['cols', 'nl']).type.toString()).toBe('3');
-    // An outer list with no length pins only the row length.
+    // An outer list with no length is admitted provisionally and pins
+    // nothing: its values can have any number of axes above the rows.
     expect(ce.box(['rows', 'nu']).type.toString()).toBe('integer<0..>');
-    expect(ce.box(['cols', 'nu']).type.toString()).toBe('3');
+    expect(ce.box(['cols', 'nu']).type.toString()).toBe('integer<0..>');
   });
 
   test('a square constraint and a matrix product', () => {
@@ -675,8 +680,13 @@ describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape
     ['list<vector<integer^3>^2>', 'matrix<integer^(2x3)>', true],
     ['list<vector<integer^3>^2>', 'matrix<integer^(3x2)>', false],
     ['list<vector<integer^3>^2>', 'matrix<real>', true],
-    ['list<vector<integer^3>>', 'matrix<integer>', true],
+    // An outer list with no dimensions holds rank-3 values too: not a
+    // matrix, but a list of its cells in any shape.
+    ['list<vector<integer^3>>', 'matrix<integer>', false],
     ['list<vector<integer^3>>', 'matrix<integer^(2x3)>', false],
+    ['list<vector<integer^3>>', 'list<integer^(?x3)>', false],
+    ['list<vector<integer^3>>', 'list<integer>', true],
+    ['list<vector<integer^3>>', 'collection<integer>', true],
     ['list<list<vector<integer^2>^3>^4>', 'list<integer^(4x3x2)>', true],
     ['list<matrix<integer^(2x2)>^3>', 'list<integer^(3x2x2)>', true],
     // Rows with no length can differ in length: not a matrix.
