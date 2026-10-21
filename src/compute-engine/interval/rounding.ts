@@ -583,12 +583,21 @@ function powExactness(x: Interval, n: number, value: Interval): Exactness {
  * A NON-NEGATIVE INTEGER exponent only: the endpoint is then a product chain
  * that either reproduces exactly or does not. A negative exponent goes through
  * a reciprocal and a fractional one through `Math.pow`, and neither is decided
- * here.
+ * here, with one exception: a fractional exponent over a base whose upper end
+ * is exactly 0, where the routine writes the literal `[0, 0]` and computes no
+ * power.
  */
 export function exactPow(args: readonly unknown[], value: Interval): Exactness {
   const x = operandInterval(args[0]);
   const n = args[1];
   if (x === undefined || typeof n !== 'number') return INEXACT;
+  // A base whose upper end is exactly 0 under a FRACTIONAL exponent: the
+  // only point of the base in the domain is 0, and the routine answers the
+  // literal `[0, 0]` for a positive exponent (`powRaw`, `elementary.ts`),
+  // the true value, not a rounded one. A negative exponent has no answer
+  // to widen (`empty`), and a NaN exponent is an absent value, not a
+  // fraction.
+  if (!Number.isInteger(n) && !Number.isNaN(n) && x.hi === 0) return EXACT;
   return powExactness(x, n, value);
 }
 
@@ -612,6 +621,14 @@ export function exactPowInterval(
     // number.
     if (x.lo === -1 && x.hi === -1)
       return exactness(value.lo === -1, value.hi === 1);
+    // A base whose upper end is exactly 0: the only point of the base in the
+    // domain is 0, where the power is 0 for a positive exponent and 1 for
+    // the exponent 0, and the routine writes those literals down
+    // (`powIntervalRaw`, `elementary.ts`). Both endpoints are true values,
+    // so neither takes a step; `[0, 0]` is the answer the plot of `0^{x}`
+    // needs, not `[0, 5e-324]`. A NaN exponent is an absent value, which
+    // the routine propagates as a NaN interval, not a literal.
+    if (x.hi === 0 && !Number.isNaN(e.lo) && !Number.isNaN(e.hi)) return EXACT;
     // A non-integer exponent has a real value only over the non-negative part
     // of the base, so every value of the power is non-negative and the lower
     // bound of 0 the routine writes down for a base that reaches 0 is a true

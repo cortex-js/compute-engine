@@ -119,6 +119,20 @@
 
 ### Bug Fixes
 
+- **On the `interval-js` target, `0^x` over an exponent interval has the
+  value 0** (Tycho row 417). `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
+  answered `empty` for every exponent interval, as did a declared base
+  holding 0, so a plot that reads a row through the interval leg drew nothing
+  for a slider at 0. The interval-exponent power read a base whose upper end
+  is exactly 0 as a negative base. A base whose only point in the domain is 0
+  now answers `[0, 0]` for a positive exponent interval, `[0, 1]` for one that
+  reaches 0 (`x^0` is 1 in the interval library), a clipped enclosure for one
+  that reaches below 0, and `empty` for a wholly negative one, where no point
+  of the box is defined; the scalar-exponent power answered a clipped
+  enclosure `[+∞, +∞]` there and now also answers `empty`. The literal bounds
+  0 and 1 are certified exact, so the export does not move them one ulp
+  outward.
+
 - **A subscripted binder is a new name in a `cases` block and in a set-builder
   whose variable appears only in the condition** (the two residues of Tycho row
   410). With `n` declared a list, the first row of

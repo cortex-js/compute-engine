@@ -172,6 +172,11 @@ function powRaw(base: Interval | IntervalResult, exp: number): IntervalResult {
   const unwrapped = unwrapOrPropagate(base);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [baseVal] = unwrapped;
+  // An absent operand (a NaN bound, the compile target's absence marker)
+  // stays absent: every comparison with NaN is false, so without this guard
+  // the sign tests below fall through to an arm that answers a present
+  // interval (`isNaNInterval` above).
+  if (isNaNInterval(baseVal) || Number.isNaN(exp)) return ok(NAN_INTERVAL);
   if (Number.isInteger(exp)) {
     if (exp >= 0) {
       return ok(intPow(baseVal, exp));
@@ -189,6 +194,18 @@ function powRaw(base: Interval | IntervalResult, exp: number): IntervalResult {
     if (isNegative(baseVal)) {
       // Entirely negative - no real values
       return { kind: 'empty' };
+    }
+    if (baseVal.hi === 0) {
+      // The only point of the base in the domain is 0: the value there is 0
+      // for a positive exponent and undefined for a negative one, so a
+      // negative exponent leaves no defined point in the box (`empty`, not a
+      // clipped enclosure `[+∞, +∞]` from `0^e = +∞`). The box is clipped
+      // when the base reaches below 0.
+      if (exp < 0) return { kind: 'empty' };
+      const value = { lo: 0, hi: 0 };
+      if (baseVal.lo < 0)
+        return { kind: 'partial', value, domainClipped: 'lo' };
+      return ok(value);
     }
     if (baseVal.lo < 0) {
       // Straddles zero - valid for [0, base.hi]
@@ -235,6 +252,11 @@ function powIntervalRaw(
   const unwrapped = unwrapOrPropagate(base, exp);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [baseVal, expVal] = unwrapped;
+  // An absent operand stays absent (see `powRaw`): with a NaN exponent the
+  // sign tests below would answer a present interval for a base whose
+  // upper end is 0.
+  if (isNaNInterval(baseVal) || isNaNInterval(expVal))
+    return ok(NAN_INTERVAL);
 
   // Special case: exponent is a point interval with an integer value.
   // For integer exponents, negative bases are well-defined (parity matters).
@@ -251,8 +273,14 @@ function powIntervalRaw(
     return powRaw(baseVal, expVal.lo);
   }
 
-  // For real-valued results with non-integer exponents, base must be positive
-  if (baseVal.hi <= 0) {
+  // For real-valued results with non-integer exponents, base must be
+  // non-negative. The test is STRICT (`hi < 0`, as `isNegative()` reads it
+  // and as the scalar-exponent sibling `powRaw` tests): a base whose upper
+  // end is exactly 0 has the real value `0^e = 0` at that point for every
+  // positive exponent, so the point base `[0, 0]` (the literal `0^{x}`, or
+  // a slider at 0 in `T^{x}`) is not a negative base. With `hi <= 0` it was,
+  // and the whole box answered `empty` (Tycho ledger row 417).
+  if (baseVal.hi < 0) {
     // Special case: base is exactly -1 and exponent spans at least two
     // consecutive integers. (-1)^n alternates between -1 and 1, so the
     // tightest enclosure is [-1, 1].
@@ -264,6 +292,23 @@ function powIntervalRaw(
       return ok({ lo: -1, hi: 1 });
     }
     return { kind: 'empty' };
+  }
+  if (baseVal.hi === 0) {
+    // The only point of the base in the domain is 0, where the value is 0
+    // for a positive exponent, 1 for the exponent 0 (this file's convention,
+    // see `intPow`) and undefined for a negative one. A wholly negative
+    // exponent leaves no defined point in the box, so the answer is `empty`,
+    // not a clipped enclosure with an infinite bound (without this branch,
+    // the branch below would compute `0^e = +∞` at each corner). The box is
+    // clipped when the base reaches below 0 or the exponent reaches below 0.
+    if (expVal.hi < 0) return { kind: 'empty' };
+    const value = {
+      lo: expVal.hi > 0 ? 0 : 1,
+      hi: expVal.lo <= 0 ? 1 : 0,
+    };
+    if (baseVal.lo < 0 || expVal.lo < 0)
+      return { kind: 'partial', value, domainClipped: 'lo' };
+    return ok(value);
   }
   if (baseVal.lo <= 0) {
     // The base reaches 0. Two situations were previously collapsed into one
