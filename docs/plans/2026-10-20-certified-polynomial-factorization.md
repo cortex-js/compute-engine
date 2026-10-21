@@ -103,12 +103,29 @@ hybrid median times were essentially equal (1.43 and 1.44 ms). The first-party
 WASM file is 11,203 bytes; initialization took about 2 ms in the earlier pilot.
 No backend has been selected automatically; the default remains TypeScript.
 
-The full run and independent audit now cover 1,200 polynomials, three trials
+The original full run and independent audit cover 1,200 polynomials, three trials
 and four backends: 14,400 verified results. A separate 42-case stress run
 completed 36 cases in each first-party backend and all 42 in each external CAS;
 six explicit resource-limit results are not counted as successes. See the
 [benchmark report](../../benchmarks/factorization/README.md) for fingerprints,
 methodology, detailed outcomes and caveats.
+
+The optimized TypeScript path retains exact small-prime residues as JavaScript
+integers, with bigint coefficients for rational/integer arithmetic. It uses
+Rabin verification, direct Eisenstein certification, exact root-cluster
+translation, adaptive prime selection, certified early factor recovery and
+trace/constant-coefficient subset filters. Recovered composite groups are
+recursively certified; reconstruction alone never proves irreducibility.
+
+The final interleaved run verifies all 14,400 regular-corpus records. TS is
+faster than SymPy in aggregate but remains slower than PARI on the hard tail;
+Mathematica is excluded because no installation is available. Default stress
+coverage improves from 36/42 to 39/42 with unchanged limits. Explicitly allowing
+degree 256 and 16384-bit coefficients completes all 42 at the original operation
+budget. Both stress runs have three trials and four backends; together with
+the regular run, 15,408 records pass the independent coverage/reconstruction
+audit. Timings, fingerprints, limiting cases and remaining optimization targets
+are in the benchmark report rather than asserted in unit tests.
 
 Build the optional kernel with `node scripts/build-polynomial-wasm.mjs` after
 installing the compiler as described in that script. Run the comparison with
@@ -221,6 +238,27 @@ Remaining performance work includes faster Hensel lifting, LLL/van Hoeij
 recombination, sparse multivariate lifting and modular number-field arithmetic.
 Certified real/complex embeddings and compact defining-polynomial selection
 are additional capabilities, not claims made by this implementation.
+
+## PR review checklist
+
+- Preserve the distinction between exact reconstruction and certified complete
+  factorization. Resource limits return explicit incomplete results; increasing
+  a configured size limit is not an algorithmic coverage improvement.
+- Keep benchmark scores and timing thresholds out of unit tests. Node 22 passes
+  239 polynomial regression tests across 14 suites; Node 26.12.0 passes the 191
+  focused tests across 12 suites. Arithmetic tests include bigint cross-checks,
+  malicious modular output, large translated inputs and cancellation.
+- Source lint, PR-file formatting, source/added-code type checks, public
+  declarations, production build and ESM/CommonJS export smoke checks pass.
+  The optional WASM build reproduces its original binary hash after formatting.
+- The full repository test run was stopped with unrelated Windows/sandbox
+  failures documented in the benchmark report. Do not present this as a green
+  full-suite or CI run, and do not alter unrelated expectations to conceal it.
+- Keep external SymPy/PARI installations, generated corpora and raw reports in
+  ignored build storage. No external CAS code or dependency is shipped by CE.
+- Native TypeScript remains the default. Larger number fields, sparse
+  multivariate performance, lattice recombination and numerical embeddings
+  remain explicitly separate follow-up work.
 
 ## References
 

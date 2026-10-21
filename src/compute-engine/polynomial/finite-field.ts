@@ -1,14 +1,8 @@
-import {
-  FieldPolynomials,
-  PolynomialWork,
-  type ExactField,
-} from './exact-field.js';
+import { PolynomialWork, type ExactField } from './exact-field.js';
+import { checkSmallPrime, SmallPrimePolynomials } from './small-prime.js';
 
 export function primeField(prime: number): ExactField<bigint> {
-  if (!Number.isSafeInteger(prime) || prime < 2 || prime > 65521)
-    throw new RangeError('Prime must be at most 65521');
-  for (let d = 2; d * d <= prime; d++)
-    if (prime % d === 0) throw new RangeError('Composite field characteristic');
+  checkSmallPrime(prime);
   const p = BigInt(prime);
   const mod = (a: bigint) => ((a % p) + p) % p;
   return {
@@ -44,55 +38,62 @@ export type ModularFactorBackend = (
 
 /** Deterministic Berlekamp factorization, including characteristic two. */
 export const factorFiniteField: ModularFactorBackend = (input, prime, work) => {
-  const K = primeField(prime),
-    P = new FieldPolynomials(K, work);
-  const f = P.trim(input.map(K.fromInteger));
-  if (f.length < 2 || f[f.length - 1] !== 1n)
+  const P = new SmallPrimePolynomials(prime, work),
+    K = P.field;
+  const f = P.fromIntegers(input);
+  if (f.length < 2 || f[f.length - 1] !== 1)
     throw new RangeError('Expected a monic nonconstant polynomial');
   if (P.gcd(f, P.derivative(f)).length !== 1)
     throw new RangeError('Expected a square-free polynomial');
   const n = f.length - 1;
-  const matrix = Array.from({ length: n }, () => Array<bigint>(n).fill(0n));
-  const xp = P.powmod([0n, 1n], BigInt(prime), f);
-  let column = [1n];
+  if (n === 1) return [f.map(BigInt)];
+  const matrix = Array.from({ length: n }, () => Array<number>(n).fill(0));
+  const xp = P.powmod([0, 1], BigInt(prime), f);
+  let column = [1];
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++)
-      matrix[i][j] = K.add(column[i] ?? 0n, i === j ? -1n : 0n);
+      matrix[i][j] = K.add(column[i] ?? 0, i === j ? prime - 1 : 0);
     column = P.divrem(P.mul(column, xp), f)[1];
   }
   const pivots: number[] = [];
   for (let j = 0; j < n; j++) {
     const r = pivots.length;
     let k = r;
-    while (k < n && matrix[k][j] === 0n) k++;
+    while (k < n && matrix[k][j] === 0) k++;
     if (k === n) continue;
     [matrix[r], matrix[k]] = [matrix[k], matrix[r]];
     const inverse = K.inv(matrix[r][j]);
-    matrix[r] = matrix[r].map((c) => K.mul(c, inverse));
+    for (let h = j; h < n; h++) matrix[r][h] = K.mul(matrix[r][h], inverse);
     for (let i = 0; i < n; i++) {
-      if (i === r || matrix[i][j] === 0n) continue;
-      work.tick(n);
+      if (i === r || matrix[i][j] === 0) continue;
+      work.tick(n - j);
       const c = matrix[i][j];
-      matrix[i] = matrix[i].map((v, h) =>
-        K.add(v, K.neg(K.mul(c, matrix[r][h])))
-      );
+      for (let h = j; h < n; h++) {
+        const v = (matrix[i][h] - c * matrix[r][h]) % prime;
+        matrix[i][h] = v < 0 ? v + prime : v === 0 ? 0 : v;
+      }
     }
     pivots.push(j);
   }
-  const basis: bigint[][] = [];
+  const basis: number[][] = [];
   for (let j = 0; j < n; j++) {
     if (pivots.includes(j)) continue;
-    const v = Array<bigint>(n).fill(0n);
-    v[j] = 1n;
+    const v = Array<number>(n).fill(0);
+    v[j] = 1;
     for (let i = 0; i < pivots.length; i++) v[pivots[i]] = K.neg(matrix[i][j]);
     basis.push(P.trim(v));
   }
   let factors = [f];
   for (const b of basis) {
+    if (b.length <= 1) continue;
     for (let s = 0; s < prime && factors.length < basis.length; s++) {
-      const next: bigint[][] = [];
+      const next: number[][] = [];
       for (const g of factors) {
-        const d = P.gcd(g, P.sub(b, [BigInt(s)]));
+        if (g.length === 2) {
+          next.push(g);
+          continue;
+        }
+        const d = P.gcd(g, P.sub(b, [s]));
         if (d.length > 1 && d.length < g.length)
           next.push(d, P.exactDivide(g, d));
         else next.push(g);
@@ -102,5 +103,5 @@ export const factorFiniteField: ModularFactorBackend = (input, prime, work) => {
   }
   if (factors.length !== basis.length)
     throw new Error('Incomplete Berlekamp decomposition');
-  return factors;
+  return factors.map((g) => g.map(BigInt));
 };

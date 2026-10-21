@@ -5,6 +5,12 @@ source. No external CAS is a runtime dependency. The AssemblyScript runtime has
 its own notices, copied beside the optional binary by the build. A standalone
 npm package is not published here.
 
+Latest results: all 1,200 regular inputs verified on three trials; TypeScript
+takes 9.652 s versus SymPy's 22.348 s and PARI WASM's 5.235 s. Default stress
+coverage is 39/42, or 42/42 with explicitly enlarged size limits and the same
+work budget. See [optimized results](#optimized-regular-corpus); the original
+runs are retained below as baselines.
+
 ## Reproduce
 
 From the repository root with CE's development dependencies:
@@ -53,20 +59,23 @@ irreducibles, high-degree Eisenstein inputs, clustered integer roots, repeated
 nonmonic factors and coefficient growth. Cyclotomic irreducibility supplies an
 additional ground-truth theorem. Some inputs intentionally exceed defaults.
 
-All workers receive identical expanded coefficients and six warm-up cases.
-Backends and cases run serially in fixed order, not randomized/interleaved.
-`solveMs` is implementation-specific: TS/hybrid includes certification and
-reconstruction; SymPy times `factor_list`; PARI includes expression
-serialization and its GP call, but not output normalization. IPC, startup and
-journal audit are excluded. These are diagnostic timings, not a controlled
-language or matched proof-checking comparison. Conversion is recorded
-separately.
+All workers receive identical expanded coefficients and up to 60 warm-up cases.
+Measured case order is deterministically shuffled each trial (seed 1729), with
+backend order rotating per case. Persistent workers stay alive, but only one
+solve is in flight. This reduces ordering bias without claiming exclusive
+control of the host. The older runs below used six warm-up cases and fixed,
+non-interleaved order; their timings are not directly interchangeable. `solveMs`
+is implementation-specific: TS/hybrid includes certification and reconstruction;
+SymPy times `factor_list`; PARI includes expression serialization and its GP
+call, but not output normalization. IPC, startup and journal audit are excluded.
+These are diagnostic timings, not a controlled language or matched
+proof-checking comparison. Conversion is recorded separately.
 
-Timeout defaults to 30 seconds per case (15 in the stress run), with a fresh
-worker after timeout. First-party work limits can return incomplete earlier.
-Memory readings are whole-process RSS after calls, not kernel allocation peaks;
-SymPy memory is not measured. Percentiles with differing completion subsets must
-not be treated as measuring identical work.
+Timeout defaults to 30 seconds per case (15 in the original stress run), with a
+fresh worker after timeout. First-party work limits can return incomplete
+earlier. Memory readings are whole-process RSS after calls, not kernel
+allocation peaks; SymPy memory is not measured. Percentiles with differing
+completion subsets must not be treated as measuring identical work.
 
 ## Recorded results
 
@@ -75,7 +84,7 @@ Node 22.14.0; Python 3.12.14; SymPy 1.14.0; PARI WASM package 1.0.5;
 AssemblyScript 0.28.9. Machine load was not controlled. Run date: October 20,
 2026 local time (October 21 UTC). Raw artifacts are ignored build output.
 
-### Regular corpus: `build/factoring-full-01`
+### Original regular corpus: `build/factoring-full-01`
 
 Independent audit: all 14,400 unique backend/case/trial records present, with
 exact reconstruction checked without CE's polynomial arithmetic. All four
@@ -105,7 +114,7 @@ This source hash covers the eight files listed by the harness at the measured
 revision. Later harness edits extend it to assembly/build/stress sources.
 Extension-field additions do not change the measured rational kernel.
 
-### Stress corpus: `build/factoring-stress-01`
+### Original stress corpus: `build/factoring-stress-01`
 
 All 168 unique records audited. TS and hybrid each verified 36/42, with six
 explicitly incomplete. SymPy and PARI verified 42/42. No mismatches, errors or
@@ -144,8 +153,9 @@ This is local diagnostic evidence, not a portable speedup claim.
 
 Keep native TS as default. The small optional WASM kernel can help but does not
 replace bigint TS lifting/recombination and is not uniformly faster. Faster
-lifting, lattice-based recombination and modular irreducibility checks are
-justified next steps; merely increasing limits is not an optimization.
+lifting and lattice-based recombination remain justified next steps; merely
+increasing limits is not an optimization. Small-prime arithmetic and modular
+irreducibility checks now have the improvements described below.
 
 Multivariate Kronecker, Trager number-field factoring and splitting fields have
 exact family tests but are not in these cross-CAS timing tables. They need
@@ -154,13 +164,14 @@ separate performance corpora before competitive scaling claims. See the
 
 ## Verification
 
-Local Node 22.14.0 verification passes 181 tests across 11 focused suites,
-including existing factoring, assigned symbols and partial fractions. Generated
-family assertions include 50 irreducible-quadratic products, 25 expanded
-bivariate products and 20 algebraic-coefficient products across four quadratic
-fields. The field suites were rerun after the final constructor/immutability
-guards (23 tests), and the WASM suite after its largest-prime boundary check (2
-tests). Neither guard changes the timed rational kernel.
+Local Node 22.14.0 verification passes 239 tests across 14 polynomial regression
+suites, including existing factoring, assigned symbols and partial fractions. A
+focused run passes 191 tests across 12 suites. Generated family assertions
+include 50 irreducible-quadratic products, 25 expanded bivariate products and 20
+algebraic-coefficient products across four quadratic fields. The field suites
+were rerun after the final constructor/immutability guards (23 tests), and the
+WASM suite after its largest-prime boundary check (2 tests). Neither guard
+changes the timed rational kernel.
 
 Source and added-code typechecks, public declaration checks, changed-code
 Oxlint/Prettier checks, the production build, ESM/CommonJS package-export smoke
@@ -169,9 +180,10 @@ typecheck of old polynomial tests finds existing typing errors in
 `polynomial-coefficients`, `polynomial-gcd-inexact` and
 `polynomial-operators-assigned-symbols`; those files are unchanged.
 
-The Node 22/26 CI matrix now compiles the optional WASM kernel before running
-tests. Node 26 has not been executed locally. Benchmarks and tests use portable
-Node/Python scripts; no PowerShell-dependent code is added to the package.
+The Node 22/26 CI matrix compiles the optional WASM kernel before running tests.
+The same 191 focused tests pass locally on Node 26.12.0. Benchmarks and tests
+use portable Node/Python scripts; no PowerShell-dependent code is added to the
+package.
 
 The existing async-scope isolation test in `functions.test.ts` hit its 30-second
 limit during the loaded full-suite run, then passed in isolation (15.864 s test
@@ -182,9 +194,145 @@ reproduces in isolation. Their source and implementation are unchanged. Two
 unchanged `effects-registry.test.ts` coupling-audit assertions also differ only
 in Windows separators (`library\\core.ts` versus `library/core.ts`).
 
-The broad Jest run is still active at handoff (2026-10-21 03:53 UTC); it has
-reported the five failures above, but no final totals are claimed. It writes
-`build/factoring-regression-jest.json` when finished. This is not a passing
-full-suite/CI claim. The independent polynomial corpus runs and focused tests
-reported above are complete. Python-dependent cases in the broad run are skipped
-because its environment has no configured Python interpreter.
+The broad Jest run was stopped before profiling, without final totals. Besides
+the failures above, an existing runtime-bundle test could not read the
+`node_modules` junction from sandboxed esbuild. This is not a passing full-suite
+or CI claim. Python-dependent cases were skipped because that run had no
+configured Python interpreter. No unrelated test expectations or timeouts were
+changed to hide these failures.
+
+## TypeScript optimization rationale
+
+The next 60-factorization CPU profile found 400 samples in finite-field code and
+347 in generic polynomial division, versus 24 in integer GCD. The changes target
+this arithmetic and avoid unnecessary lifting, without changing the default
+degree, coefficient-size or two-million-operation limits:
+
+- Canonical residues modulo primes at most 65521 use exact JavaScript numbers.
+  Each multiply-add is below 2^32, safely below the 53-bit exact-integer limit;
+  no signed bitwise truncation is used. Bigint remains the rational/integer
+  coefficient representation. Division updates one remainder buffer, and
+  Berlekamp elimination avoids repeated row allocation and constant splitters.
+- Rabin verification checks the necessary Frobenius GCDs at n/q for each prime
+  divisor q of the degree, plus the final Frobenius identity. External backend
+  results still undergo reconstruction and irreducibility verification.
+- Eisenstein's criterion supplies a direct sufficient certificate when its
+  conditions hold. Exact integer translation can reduce coefficient height for
+  clustered roots; it is used only when it reduces the L1 norm substantially.
+- A prime producing at most four modular factors ends the prime search. The
+  remaining recombination problem is small enough that another complete modular
+  factorization usually costs more than it saves.
+- Early exact divisors are tried at geometrically spaced lifting precisions. A
+  single verified modular factor certifies an exact divisor immediately. Larger
+  recovered groups are recursively factored, reusing their verified modular
+  factors. Exact division alone never becomes an irreducibility claim.
+- Mahler-measure bounds on the constant coefficient and trace reject impossible
+  subsets before polynomial multiplication. Integer convolution and exact cross
+  multiplication replace repeated rational normalization in reconstruction.
+
+The early search is bounded; exhaustive Zassenhaus recombination at the proven
+coefficient bound remains the fallback. It is still exponential in the number of
+modular factors, not an implementation of lattice recombination. A trial with
+delayed modular reductions did not establish a benefit and was discarded.
+
+On the same profiling script, finite-field samples fell from 400 to 11 and
+division samples from 347 to 75. Profile duration including startup fell from
+3.954 s to 1.124 s. These are local profile snapshots, not portable speed
+ratios; the cross-CAS comparison below uses repeated, interleaved trials.
+
+References:
+[Rabin's criterion](https://mhostetter.github.io/galois/dev/api/galois.Poly.is_irreducible/),
+[early termination in rational factoring](https://www.math.fsu.edu/~hoeij/algorithms/Qx.html).
+These are algorithm references, not imported implementations.
+
+### Optimized regular corpus
+
+`build/factoring-optimized-interleaved` contains 14,400 verified records: 1,200
+distinct inputs, three trials, four backends. No errors, timeouts, incomplete
+results or incorrect factors occurred.
+
+| Backend                    | Median solve (ms) | p95 solve (ms) | Total solve (s) |
+| -------------------------- | ----------------: | -------------: | --------------: |
+| First-party TypeScript     |             0.835 |         12.167 |           9.652 |
+| First-party hybrid TS/WASM |             0.811 |         10.604 |           8.890 |
+| SymPy                      |             3.008 |         22.166 |          22.348 |
+| External PARI WASM         |             1.121 |          3.496 |           5.235 |
+
+TypeScript is 2.32 times faster than SymPy by aggregate solve time on this
+generated corpus. Its median is lower than PARI's, but its total is 1.84 times
+PARI's: the harder tail remains the important gap. This is not a claim of
+universal CAS superiority. Mathematica was not available and was explicitly
+excluded from comparison.
+
+The corpus hash is unchanged. Source hash:
+`4eec06c70d1037313a2acc2926b33082ee980dd300de112ca6c2271961abd19f`. The retained
+sources were rehashed after discarding the delayed-reduction experiment and
+matched this measured fingerprint. Subsequent source changes are lint-only
+(`modular` from `let` to `const`) and AssemblyScript formatting; no algorithm,
+limit or arithmetic changed. Rebuilding the formatted AssemblyScript source
+reproduces the identical WASM SHA-256 listed above; its behavior tests pass
+again after rebuilding.
+
+### Optimized stress corpus
+
+`build/factoring-optimized-stress` independently audits all 504 records (42
+inputs, three trials, four backends). Both first-party backends verify 39/42
+distinct inputs on every trial. The only refusals are the unchanged degree-128
+and coefficient-4096-bit limits. SymPy and PARI verify 42/42. No backend returns
+an incorrect factor, error or timeout.
+
+| Previously incomplete case           | Default result now                     | Counted TS operations |
+| ------------------------------------ | -------------------------------------- | --------------------: |
+| x^96-1                               | Complete                               |             1,973,784 |
+| x^128-1                              | Complete                               |               861,129 |
+| x^128+2                              | Complete                               |                   777 |
+| Degree-144 repeated nonmonic product | Explicit degree limit                  |                     0 |
+| Product containing 2^4096            | Explicit coefficient limit (4097 bits) |                     0 |
+| Product containing 2^8192            | Explicit coefficient limit (8193 bits) |                     0 |
+
+x^96-1 is still near the work limit, with 2,156 subset attempts. This is
+evidence for better recombination, not evidence of unrestricted high-degree
+coverage.
+
+On the **same 39 completed inputs**, total time across three trials is TS 1.719
+s, hybrid 1.546 s, SymPy 4.640 s and PARI 0.538 s. The audit reports this
+matched intersection separately so refusals cannot improve comparative
+percentiles.
+
+A separate opt-in run, `build/factoring-optimized-expanded`, sets
+`--max-degree 256 --max-coefficient-bits 16384` while retaining the same
+two-million-operation budget. All four backends verify **42/42 on all three
+trials**, with 504 records independently audited. TS takes 2.003 s, hybrid 1.876
+s, SymPy 4.879 s and PARI 0.884 s in aggregate. This demonstrates that the last
+three cases are size-policy refusals; it does not change the default contract.
+Both stress runs use the unchanged stress corpus hash and the optimized source
+hash above. The three final runs total 15,408 audited records.
+
+### Remaining performance priorities
+
+Eisenstein **products** account for 6.218 of TS's 9.652 seconds in the regular
+run, versus PARI's 1.583 seconds on those same cases. Certifying an individual
+Eisenstein polynomial is cheap; splitting a product of them still requires
+general modular factoring, lifting and recombination. Repeated factors account
+for another 1.842 seconds (PARI: 0.985). These are the next profiling targets.
+
+Prioritize quadratic/tree Hensel lifting and faster modular polynomial
+remainders for that tail; use LLL/van Hoeij recombination for inputs with many
+modular factors. Primitive integer GCD preprocessing remains relevant for
+repeated factors. None of these follow-ups requires changing the public
+coefficient-domain or backend interfaces. Multivariate and number-field
+performance need separate corpora before making comparable scaling claims.
+
+### Unit tests versus challenge benchmarks
+
+Unit tests assert exact factors, content, multiplicity, reconstruction,
+irreducibility rejection, arithmetic identities, cancellation and resource-limit
+behavior. They contain no solve-time thresholds, corpus scores or source-text
+assertions. The new arithmetic tests compare against bigint arithmetic,
+including the largest supported prime and dense products. A forged reducible
+degree-six factor that satisfies the final Frobenius identity is still rejected.
+
+The 1,200-case corpus and the stress corpus are manually invoked performance and
+challenge tools, not unit-test or CI timing gates. Keep profiling and large
+adversarial experiments here; add a small behavior test when they reveal a
+specific correctness contract.

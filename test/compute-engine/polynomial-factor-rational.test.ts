@@ -98,6 +98,51 @@ describe('Certified rational polynomial factorization', () => {
       })
     ).toBe(true);
     expect(r.factors).toHaveLength(2);
+    expect(
+      reconstructs(f, { ...r, coefficient: { numerator: 1n, denominator: 0n } })
+    ).toBe(false);
+    expect(
+      reconstructs(f, {
+        ...r,
+        factors: [{ coefficients: [0n, 0n], multiplicity: 1 }],
+      })
+    ).toBe(false);
+  });
+  test('translation preserves exact factors, rational content and multiplicity', () => {
+    const center = 2n ** 160n;
+    const a = [q(1n + center * center), q(-2n * center), q(1n)];
+    const b = [q(-center - 3n), q(1n)];
+    const f = P.scale(P.mul(P.mul(a, a), b), q(-5n, 7n));
+    const r = factor(f);
+    expect(r.status).toBe('complete');
+    expect(r.coefficient).toEqual(q(-5n, 7n));
+    expect(signature(r.factors)).toEqual(
+      [
+        `${1n + center * center},${-2n * center},1^2`,
+        `${-center - 3n},1^1`,
+      ].sort()
+    );
+    expect(reconstructs(f, r)).toBe(true);
+  });
+  test('Eisenstein certification requires the constant not to contain p squared', () => {
+    const irreducible = poly([6, 12, -6, 0, 1]);
+    expect(signature(factor(irreducible).factors)).toEqual(['6,12,-6,0,1^1']);
+    const reducible = poly([4, 0, 0, 0, 1]);
+    const r = factor(reducible);
+    expect(r.status).toBe('complete');
+    expect(signature(r.factors)).toEqual(['2,-2,1^1', '2,2,1^1']);
+  });
+  test('exact recovered groups are fully factored, not accepted by reconstruction alone', () => {
+    const f = P.mul(
+      P.mul(poly([1, 0, 0, 0, 1]), poly([1, 0, -1, 0, 1])),
+      poly([-1, 1])
+    );
+    const r = factor(f);
+    expect(r.status).toBe('complete');
+    expect(signature(r.factors)).toEqual(
+      ['-1,1^1', '1,0,0,0,1^1', '1,0,-1,0,1^1'].sort()
+    );
+    expect(reconstructs(f, r)).toBe(true);
   });
   test('generated products of proved irreducible quadratics', () => {
     for (let a = 1; a <= 10; a++)
@@ -144,5 +189,11 @@ describe('Finite-field factors and independent backend checks', () => {
     expect(() => verifyModularFactors([1n, 1n], [[0n, 1n]], 3)).toThrow(
       'reconstruct'
     );
+  });
+  test('rejects reducible degree-six factors even when the final Frobenius identity holds', () => {
+    const R = new FieldPolynomials(primeField(2));
+    const f = R.mul([1n, 1n, 0n, 1n], [1n, 0n, 1n, 1n]);
+    expect(R.sub(R.powmod([0n, 1n], 64n, f), [0n, 1n])).toEqual([]);
+    expect(() => verifyModularFactors(f, [f], 2)).toThrow('Reducible');
   });
 });

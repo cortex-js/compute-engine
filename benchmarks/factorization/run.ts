@@ -15,13 +15,15 @@ import { stressCorpus } from './stress-corpus.js';
 
 const { values } = parseArgs({
   options: {
-    output: { type: 'string' },
-    count: { type: 'string', default: '1200' },
-    python: { type: 'string' },
-    backends: { type: 'string', default: 'typescript,wasm,sympy' },
-    timeout: { type: 'string', default: '30' },
-    repeats: { type: 'string', default: '3' },
-    corpus: { type: 'string', default: 'regular' },
+    'output': { type: 'string' },
+    'count': { type: 'string', default: '1200' },
+    'python': { type: 'string' },
+    'backends': { type: 'string', default: 'typescript,wasm,sympy' },
+    'timeout': { type: 'string', default: '30' },
+    'repeats': { type: 'string', default: '3' },
+    'corpus': { type: 'string', default: 'regular' },
+    'max-degree': { type: 'string', default: '128' },
+    'max-coefficient-bits': { type: 'string', default: '4096' },
   },
 });
 if (!values.output) throw new Error('--output must name a new run directory');
@@ -39,18 +41,31 @@ const hash = createHash('sha256').update(serialized).digest('hex');
 mkdirSync(output, { recursive: true });
 writeFileSync(resolve(output, 'corpus.json'), serialized);
 const repeats = Number(values.repeats),
-  timeout = Number(values.timeout) * 1000;
+  timeout = Number(values.timeout) * 1000,
+  maxDegree = Number(values['max-degree']),
+  maxCoefficientBits = Number(values['max-coefficient-bits']);
+const backends = values.backends!.split(',');
+if (
+  new Set(backends).size !== backends.length ||
+  backends.some((b) => !['typescript', 'wasm', 'sympy', 'pari'].includes(b))
+)
+  throw new Error('Unknown or duplicate backend');
 if (
   !Number.isInteger(repeats) ||
   repeats < 1 ||
   !Number.isFinite(timeout) ||
-  timeout <= 0
+  timeout <= 0 ||
+  !Number.isSafeInteger(maxDegree) ||
+  maxDegree < 1 ||
+  !Number.isSafeInteger(maxCoefficientBits) ||
+  maxCoefficientBits < 1
 )
   throw new Error('Invalid run options');
 const sourceHash = createHash('sha256');
 for (const f of [
   'src/compute-engine/polynomial/exact-field.ts',
   'src/compute-engine/polynomial/finite-field.ts',
+  'src/compute-engine/polynomial/small-prime.ts',
   'src/compute-engine/polynomial/factor-rational.ts',
   'src/compute-engine/polynomial/wasm-backend.ts',
   'benchmarks/factorization/corpus.ts',
@@ -74,6 +89,14 @@ writeFileSync(
       repeats,
       timeout,
       backends: values.backends,
+      schedule: 'seeded-case-order-rotating-backends',
+      scheduleSeed: 1729,
+      warmupCases: Math.min(60, corpus.length),
+      rationalOptions: {
+        maxDegree,
+        maxCoefficientBits,
+        maxOperations: 2_000_000,
+      },
       wasmHash: existsSync('build/polynomial-wasm/factor.wasm')
         ? createHash('sha256')
             .update(readFileSync('build/polynomial-wasm/factor.wasm'))
@@ -166,7 +189,9 @@ class Runner {
       if (!ready.ready) return { error: 'backend unavailable', setup: ready };
     }
     const result = this.wait(timeout);
-    this.child!.stdin.write(JSON.stringify(c) + '\n');
+    this.child!.stdin.write(
+      JSON.stringify({ ...c, maxDegree, maxCoefficientBits }) + '\n'
+    );
     return result;
   }
 }
@@ -176,11 +201,9 @@ const signature = (fs: { coefficients: string[]; multiplicity: number }[]) =>
     .sort()
     .join(';');
 const summaries: Message[] = [];
-for (const backend of values.backends!.split(',')) {
-  if (!['typescript', 'wasm', 'sympy', 'pari'].includes(backend))
-    throw new Error('Unknown backend');
-  const runner = new Runner(backend),
-    rows: Message[] = [];
+const active: { runner: Runner; rows: Message[] }[] = [];
+for (const backend of backends) {
+  const runner = new Runner(backend);
   const setup = await runner.start();
   appendFileSync(
     resolve(output, 'initializations.jsonl'),
@@ -191,45 +214,65 @@ for (const backend of values.backends!.split(',')) {
     runner.child?.kill();
     continue;
   }
-  // Warm up outside reported trials; all measured backends see identical inputs.
-  for (const c of corpus.slice(0, 6)) await runner.run(c);
-  for (let repeat = 0; repeat < repeats; repeat++)
-    for (let i = 0; i < corpus.length; i++) {
-      const c = corpus[i],
-        r = await runner.run(c);
-      let status = r.timeout
-        ? 'timeout'
-        : r.error
-          ? 'error'
-          : (r.result?.status ?? 'unverified');
-      if (status === 'complete') {
-        const got = r.result;
-        status =
-          got.coefficient.numerator === c.expected.coefficient[0] &&
-          got.coefficient.denominator === c.expected.coefficient[1] &&
-          signature(got.factors) === signature(c.expected.factors)
-            ? 'verified'
-            : 'mismatch';
+  active.push({ runner, rows: [] });
+}
+try {
+  // Workers are persistent but only one solve is in flight. Interleaving and
+  // rotating backend order reduce drift from temperature, JIT and machine load.
+  for (const c of corpus.slice(0, 60))
+    for (const { runner } of active) await runner.run(c);
+  let state = 1729;
+  for (let repeat = 0; repeat < repeats; repeat++) {
+    const order = corpus.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const j = state % (i + 1);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    for (let i = 0; i < order.length; i++) {
+      const c = corpus[order[i]];
+      for (let k = 0; k < active.length; k++) {
+        const { runner, rows } = active[(i + repeat + k) % active.length];
+        const backend = runner.backend,
+          r = await runner.run(c);
+        let status = r.timeout
+          ? 'timeout'
+          : r.error
+            ? 'error'
+            : (r.result?.status ?? 'unverified');
+        if (status === 'complete') {
+          const got = r.result;
+          status =
+            got.coefficient.numerator === c.expected.coefficient[0] &&
+            got.coefficient.denominator === c.expected.coefficient[1] &&
+            signature(got.factors) === signature(c.expected.factors)
+              ? 'verified'
+              : 'mismatch';
+        }
+        const record = {
+          ...r,
+          id: c.id,
+          family: c.family,
+          backend,
+          repeat,
+          status,
+        };
+        appendFileSync(
+          resolve(output, 'results.jsonl'),
+          JSON.stringify(record) + '\n'
+        );
+        rows.push(record);
       }
-      const record = {
-        ...r,
-        id: c.id,
-        family: c.family,
-        backend,
-        repeat,
-        status,
-      };
-      appendFileSync(
-        resolve(output, 'results.jsonl'),
-        JSON.stringify(record) + '\n'
-      );
-      rows.push(record);
       if ((i + 1) % 100 === 0)
         console.log(
-          `${backend} trial ${repeat + 1}: ${i + 1}/${corpus.length}`
+          `trial ${repeat + 1}: ${i + 1}/${corpus.length} (${active.length} backends)`
         );
     }
-  runner.child?.kill();
+  }
+} finally {
+  for (const { runner } of active) runner.child?.kill();
+}
+for (const { runner, rows } of active) {
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
   const timings = rows
@@ -237,7 +280,7 @@ for (const backend of values.backends!.split(',')) {
     .map((r) => Number(r.solveMs))
     .sort((a, b) => a - b);
   summaries.push({
-    backend,
+    backend: runner.backend,
     counts,
     medianVerifiedMs: timings[Math.floor(timings.length / 2)],
     p95VerifiedMs: timings[Math.floor(timings.length * 0.95)],

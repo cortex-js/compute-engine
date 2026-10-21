@@ -129,6 +129,35 @@ console.log(
       sourceHash: manifest.sourceHash,
       records: seen.size,
       summaries,
+      matched: (() => {
+        // A case joins the matched set only if every backend verifies every
+        // repetition. Size refusals/timeouts must not improve comparative tails.
+        const completed = new Map<string, number>();
+        for (const r of rows)
+          if (r.status === 'verified')
+            completed.set(r.id, (completed.get(r.id) ?? 0) + 1);
+        const ids = new Set(
+          [...completed]
+            .filter(([, n]) => n === backends.length * manifest.repeats)
+            .map(([id]) => id)
+        );
+        return {
+          cases: ids.size,
+          backends: backends.map((backend) => {
+            const samples = rows
+              .filter((r) => r.backend === backend && ids.has(r.id))
+              .map((r) => r.solveMs)
+              .sort((a, b) => a - b);
+            return {
+              backend,
+              trials: samples.length,
+              medianMs: samples[Math.floor(samples.length / 2)],
+              p95Ms: samples[Math.floor(samples.length * 0.95)],
+              totalMs: samples.reduce((a, b) => a + b, 0),
+            };
+          }),
+        };
+      })(),
     },
     null,
     2
