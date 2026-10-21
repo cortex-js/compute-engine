@@ -249,6 +249,89 @@ describe('the kernel pool on worker threads', () => {
     counting.dispose();
   }, 30_000);
 
+  test('a shared input ships once per worker per call; a stride of 2 lands in place', async () => {
+    // Count the `run` messages, those that carry the shared inputs, and the
+    // `release` messages, on the way to each worker.
+    let runs = 0;
+    let shippedShared = 0;
+    let releases = 0;
+    const counting = createKernelPool({
+      create: () => {
+        const w = new Worker(WORKER_URL, { execArgv: ['--import', 'tsx'] });
+        return {
+          postMessage: (m: unknown, transfer?: ArrayBuffer[]) => {
+            const type = (m as { type?: string }).type;
+            if (type === 'run') {
+              runs++;
+              if ((m as { shared?: unknown }).shared !== undefined)
+                shippedShared++;
+            }
+            if (type === 'release') releases++;
+            w.postMessage(m, transfer ?? []);
+          },
+          terminate: () => w.terminate(),
+          on: (event, handler) => w.on(event as 'message', handler),
+        };
+      },
+      size: 2,
+    });
+    const own = new ComputeEngine({ workers: counting });
+    own.declare('F', 'list<number>');
+    own.declare('i', 'integer');
+    const r = compile(own.parse('(F_{i+1} - F_i, 2F_{i+1})'));
+    expect(r.broadcastOutputs).toBe(2);
+    const F = new Float64Array(5000);
+    for (let n = 0; n < 5000; n++) F[n] = Math.sin(n) * 10 + n / 7;
+    const i = new Float64Array(40_000);
+    for (let c = 0; c < 40_000; c++) i[c] = c % 4999;
+    const inline = r.broadcast!({ i, F });
+    const { out, done } = await r.broadcastAsync!({ i, F }, { chunk: 4000 });
+    expect(done).toBe(40_000);
+    expect(out.length).toBe(80_000);
+    expectSame(out, inline);
+    // Ten tasks over two workers: the shared array went to each worker
+    // once, with its first task, and each worker was told to release it.
+    expect(runs).toBe(10);
+    expect(shippedShared).toBe(2);
+    expect(releases).toBe(2);
+    // A second call is a new batch: shipped once more to each worker.
+    const again = await r.broadcastAsync!({ i, F }, { chunk: 4000 });
+    expectSame(again.out, inline);
+    expect(runs).toBe(20);
+    expect(shippedShared).toBe(4);
+    expect(releases).toBe(4);
+    // The caller's arrays are untouched (the pool sends copies).
+    expect(F[1]).toBe(Math.sin(1) * 10 + 1 / 7);
+    counting.dispose();
+  }, 60_000);
+
+  test('a shared input that structured clone cannot copy does not block the pool', async () => {
+    // Structured clone cannot copy a Proxy (a Vue `reactive()` array), nor
+    // an array with a function-valued property. The pool copies a plain
+    // shared array before it sends it, so the first two calls run on the
+    // workers. An element that is a function still fails the clone: the
+    // task is rejected and the call finishes inline, it does not wait
+    // forever.
+    engine.declare('G', 'list<number>');
+    engine.declare('k', 'integer');
+    const r = compile(engine.parse('G_{k+1}'));
+    const k = new Float64Array(40_000);
+    for (let c = 0; c < 40_000; c++) k[c] = c % 4;
+    const expected = r.broadcast!({ k, G: [1, 2, 3, 4, 5] });
+    const proxy = new Proxy([1, 2, 3, 4, 5], {});
+    const a = await r.broadcastAsync!({ k, G: proxy }, { chunk: 4000 });
+    expect(a.done).toBe(40_000);
+    expectSame(a.out, expected);
+    const withMeta = [1, 2, 3, 4, 5];
+    (withMeta as unknown as { meta: () => number }).meta = () => 0;
+    const b = await r.broadcastAsync!({ k, G: withMeta }, { chunk: 4000 });
+    expect(b.done).toBe(40_000);
+    expectSame(b.out, expected);
+    const withFunction = [1, 2, 3, 4, () => 0] as unknown as number[];
+    const c = await r.broadcastAsync!({ k, G: withFunction }, { chunk: 4000 });
+    expectSame(c.out, r.broadcast!({ k, G: withFunction }));
+  }, 20_000);
+
   test('an aborted batch reports what was done', async () => {
     const r = compile(engine.parse('\\sin(x)'), { to: 'interval-js' });
     const ctl = new AbortController();

@@ -26,9 +26,28 @@
  * key order of `inputs` varying fastest, and nothing is expanded on the
  * caller's side.
  *
- * **Output.** `javascript`: one value per cell; a boolean is `1` or `0`, a
+ * **Shared inputs** (`javascript` only). A variable that the compiled code
+ * reads as a list (the `lists` of the entry plan, from a declared list type),
+ * or that `options.shared` names, is bound once for the whole batch: the code
+ * reads it by index (`F_{i+1}` with `i` the per-cell variable). Its value is
+ * a plain array of numbers or a `Float64Array`. It is not a column of the
+ * `cells` layout and not an axis of the `grid` layout. The compiled code reads
+ * plain arrays only (its `at` helper gives `NaN` for a typed array), so a
+ * `Float64Array` is copied into a plain array once, before the cell loop. A
+ * plain array for any other variable throws.
+ *
+ * **Output.** `javascript`: `outputs` values per cell (`options.outputs`, or
+ * the default the result gives: the arity of an expression whose type is a
+ * tuple of two or more elements that can be numbers, an element typed
+ * `unknown` included; 1 otherwise), cell `c` at
+ * `[outputs·c, outputs·c + outputs)`. A value is
+ * converted as `run()` reports it: a boolean is `1` or `0`, a
  * complex value with a zero imaginary part is its real part, and a cell whose
- * evaluation throws or gives any other non-number is `NaN`. `interval-js`: a
+ * evaluation throws or gives any other non-number is `NaN`. With more than
+ * one output per cell, an array answer gives one value per element (an
+ * element past the end of the array is `NaN`), and any other answer, or a
+ * throw, gives `NaN` in every slot. With one output per cell, an array answer
+ * is `NaN`. `interval-js`: a
  * `lo, hi, kind` triple per cell; `kind` is one of the `INTERVAL_KIND` codes,
  * `lo`/`hi` hold the enclosure for the kinds that have one and `NaN`
  * otherwise. A cell never rejects the batch: a thrown error or malformed
@@ -97,6 +116,7 @@ export type IntervalKindCode =
 /** The inputs read into a form the loop walks: which variables are arrays,
  * which are scalars, the cell count, and the grid strides. */
 interface BroadcastShape {
+  /** The per-cell and per-batch scalar variables; not the shared inputs. */
   names: string[];
   /** The array of each name, or `null` for a scalar. */
   arrays: (Float64Array | null)[];
@@ -106,23 +126,114 @@ interface BroadcastShape {
   /** `grid` layout: the number of cells one step along each array axis
    * spans (1 for the first axis), and the axis length; `null` for `cells`. */
   grid: { stride: number; length: number }[] | null;
+  /** The shared inputs, as given: each is bound once on the vars object (a
+   * `Float64Array` after a copy into a plain array) and is neither a column
+   * nor an axis. Always empty for `interval-js`. */
+  shared: { name: string; value: Float64Array | readonly number[] }[];
+}
+
+const hasOwn = (o: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(o, key);
+
+/**
+ * The names of the shared inputs of a `javascript` batch, in key order of
+ * `inputs`: each key of `inputs` that `lists` holds (the variables the
+ * compiled code reads as lists, from the entry plan) or that
+ * `options.shared` names. A name in `options.shared` that is not a key of
+ * `inputs` throws, and so does a `shared` option that is not an array of
+ * strings.
+ */
+export function broadcastSharedNames(
+  lists: readonly string[] | undefined,
+  inputs: BroadcastInputs,
+  options: BroadcastOptions | undefined
+): string[] {
+  const named = options?.shared;
+  const wanted = new Set<string>();
+  if (named !== undefined) {
+    if (!Array.isArray(named) || named.some((name) => typeof name !== 'string'))
+      throw new TypeError(
+        'broadcast: `shared` must be an array of variable names'
+      );
+    for (const name of named) {
+      if (!hasOwn(inputs, name))
+        throw new TypeError(
+          `broadcast: the shared input "${name}" is not a key of the inputs`
+        );
+      wanted.add(name);
+    }
+  }
+  if (lists !== undefined) for (const name of lists) wanted.add(name);
+  if (wanted.size === 0) return [];
+  return Object.keys(inputs).filter((name) => wanted.has(name));
+}
+
+/**
+ * The count of numbers written per cell by a `javascript` batch:
+ * `options.outputs` when given, else `defaultOutputs` (the stride the
+ * result infers from the type of its expression), else 1. A value that is
+ * not a positive integer throws.
+ */
+export function broadcastStride(
+  options: BroadcastOptions | undefined,
+  defaultOutputs: number | undefined
+): number {
+  const m = options?.outputs ?? defaultOutputs ?? 1;
+  if (!Number.isInteger(m) || m < 1)
+    throw new TypeError(
+      `broadcast: \`outputs\` must be a positive integer (got ${String(m)})`
+    );
+  return m;
+}
+
+/** A shared input as the compiled code reads it: a plain array. A
+ * `Float64Array` is copied once; a plain array is returned as it is. */
+export function plainSharedArray(
+  value: Float64Array | readonly number[]
+): readonly number[] {
+  return value instanceof Float64Array ? Array.from(value) : value;
 }
 
 /**
  * Validate the inputs and compute the cell count. `perCell` is 1 for a
- * `javascript` input and 2 for an interval (`lo, hi` pair).
+ * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` is the
+ * `lists` of a `javascript` entry plan: those variables are shared inputs
+ * (see `broadcastSharedNames`). An interval batch takes neither the
+ * `shared` nor the `outputs` option: its loop writes a `lo, hi, kind`
+ * triple per cell and its compiled code reads no list.
  */
 function readShape(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
-  perCell: 1 | 2
+  perCell: 1 | 2,
+  lists?: readonly string[]
 ): BroadcastShape {
-  const names = Object.keys(inputs);
+  if (perCell === 2) {
+    for (const option of ['shared', 'outputs'] as const)
+      if (options?.[option] !== undefined)
+        throw new TypeError(
+          `broadcast: the \`${option}\` option is not supported by an interval-js result`
+        );
+  }
+  const sharedNames = new Set(
+    perCell === 1 ? broadcastSharedNames(lists, inputs, options) : []
+  );
+  const names: string[] = [];
   const arrays: (Float64Array | null)[] = [];
   const scalars: number[] = [];
-  for (const name of names) {
+  const shared: BroadcastShape['shared'] = [];
+  for (const name of Object.keys(inputs)) {
     const v = inputs[name];
+    if (sharedNames.has(name)) {
+      if (!(v instanceof Float64Array) && !Array.isArray(v))
+        throw new TypeError(
+          `broadcast: the shared input "${name}" must be an array of numbers or a Float64Array`
+        );
+      shared.push({ name, value: v });
+      continue;
+    }
     if (typeof v === 'number') {
+      names.push(name);
       arrays.push(null);
       scalars.push(v);
     } else if (v instanceof Float64Array) {
@@ -130,9 +241,16 @@ function readShape(
         throw new TypeError(
           `broadcast: the array for "${name}" must hold ${perCell === 2 ? 'lo, hi pairs' : 'one value per cell'} (its length is ${v.length})`
         );
+      names.push(name);
       arrays.push(v);
       scalars.push(NaN);
-    } else
+    } else if (Array.isArray(v))
+      throw new TypeError(
+        perCell === 2
+          ? `broadcast: the input for "${name}" must be a Float64Array or a number (a plain array is not accepted)`
+          : `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only for a shared input (a variable the compiled code reads as a list, or one the \`shared\` option names)`
+      );
+    else
       throw new TypeError(
         `broadcast: the input for "${name}" must be a Float64Array or a number`
       );
@@ -150,7 +268,7 @@ function readShape(
       grid.push({ stride, length });
       stride *= length;
     }
-    return { names, arrays, scalars, count: stride, grid };
+    return { names, arrays, scalars, count: stride, grid, shared };
   }
   if (layout !== 'cells')
     throw new TypeError(`broadcast: unknown layout "${String(layout)}"`);
@@ -172,6 +290,7 @@ function readShape(
     scalars,
     count: count === -1 ? 1 : count,
     grid: null,
+    shared,
   };
 }
 
@@ -215,18 +334,29 @@ function numberOf(r: unknown): number {
  * `run()` (the raw call of `ComputeEngineFunction`). `entry` is the entry
  * plan `run()` applies, used here to lift a real given to a complex-declared
  * symbol: such a symbol reads a `{ re, im }` object that the loop reuses. A
- * symbol the plan reads as a list cannot be broadcast and throws.
+ * symbol the plan reads as a list is a shared input, bound once for the
+ * batch. `defaultOutputs` is the count of values per cell when
+ * `options.outputs` is absent (the `broadcastOutputs` of the result).
  */
 export function broadcastNumbers(
   call: (vars: Record<string, unknown>) => unknown,
   entry: BroadcastEntryPlan | undefined,
   inputs: BroadcastInputs,
-  options?: BroadcastOptions
+  options?: BroadcastOptions,
+  defaultOutputs?: number
 ): Float64Array {
-  const shape = readShape(inputs, options, 1);
-  const out = outputArray(options?.out, shape.count);
-  broadcastNumbersRange(call, entry, shape, out, 0, shape.count);
+  const shape = readShape(inputs, options, 1, listsOf(entry));
+  const stride = broadcastStride(options, defaultOutputs);
+  const out = outputArray(options?.out, stride * shape.count);
+  broadcastNumbersRange(call, entry, shape, out, 0, shape.count, stride);
   return out;
+}
+
+/** The variables an entry plan reads as lists: the shared inputs. */
+function listsOf(
+  entry: BroadcastEntryPlan | undefined
+): readonly string[] | undefined {
+  return entry?.kind === 'vars' ? entry.lists : undefined;
 }
 
 /**
@@ -248,21 +378,27 @@ const DEADLINE_CHECK_EVERY = 1024;
 /**
  * Validate `inputs` and return the cell count of the batch, without
  * evaluating anything. `perCell` is 1 for `javascript`, 2 for `interval-js`.
+ * `lists` is the `lists` of a `javascript` entry plan: those variables are
+ * shared inputs, which do not count.
  */
 export function broadcastCellCount(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
-  perCell: 1 | 2
+  perCell: 1 | 2,
+  lists?: readonly string[]
 ): number {
-  return readShape(inputs, options, perCell).count;
+  return readShape(inputs, options, perCell, lists).count;
 }
 
 /**
  * The slice form of `broadcastNumbers`: evaluate the cells `[from, to)` of
  * the batch `inputs` describe and write them at the START of `out` (cell
- * `from` at index 0). Returns the number of cells written: `to - from`, or
- * fewer when `deadline` passed first. This is the loop a worker thread runs
- * for one task.
+ * `from` at index 0, `outputs` values per cell). Returns the number of cells
+ * written: `to - from`, or fewer when `deadline` passed first. This is the
+ * loop a worker thread runs for one task. A caller that runs several slices
+ * of one batch passes its `Float64Array` shared inputs already copied into
+ * plain arrays (`plainSharedArray`), so that the copy is made once per batch
+ * instead of once per slice.
  */
 export function broadcastNumbersSlice(
   call: (vars: Record<string, unknown>) => unknown,
@@ -270,9 +406,10 @@ export function broadcastNumbersSlice(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
   out: Float64Array,
-  slice: BroadcastSlice
+  slice: BroadcastSlice,
+  defaultOutputs?: number
 ): number {
-  const shape = readShape(inputs, options, 1);
+  const shape = readShape(inputs, options, 1, listsOf(entry));
   return broadcastNumbersRange(
     call,
     entry,
@@ -280,7 +417,32 @@ export function broadcastNumbersSlice(
     out,
     slice.from,
     slice.to,
+    broadcastStride(options, defaultOutputs),
     slice.deadline
+  );
+}
+
+/**
+ * The input arrays that the cell loop reads, with a copy of each array that
+ * shares its memory with `out` (the same `buffer`). The loop writes the
+ * values of cell `c` at `[m·c, m·c + m)`, with `m` the count of values per
+ * cell (`outputs`, or 3 for `interval-js`), and that range can start before
+ * the place where a later cell reads its input: with more than one value per
+ * cell, with an interval batch (a `lo, hi` pair read and three values written
+ * per cell), with a `grid` axis (read again for each row), or with a slice
+ * (written at the start of `out`). Without the copy, a later cell would read
+ * a value that an earlier cell wrote. The copy costs one pass over the array,
+ * and is made only when the caller gives an input that shares the buffer of
+ * the output, which is rare. An array that does not share it is returned as
+ * it is.
+ */
+function unaliasedInputs(
+  arrays: (Float64Array | null)[],
+  out: Float64Array
+): (Float64Array | null)[] {
+  if (!arrays.some((a) => a !== null && a.buffer === out.buffer)) return arrays;
+  return arrays.map((a) =>
+    a !== null && a.buffer === out.buffer ? a.slice() : a
   );
 }
 
@@ -291,22 +453,21 @@ function broadcastNumbersRange(
   out: Float64Array,
   from: number,
   to: number,
+  stride: number,
   deadline?: number
 ): number {
-  if (out.length < to - from)
+  if (out.length < stride * (to - from))
     throw new TypeError(
-      `broadcast: the output array holds ${out.length} values, ${to - from} are needed`
+      `broadcast: the output array holds ${out.length} values, ${stride * (to - from)} are needed`
     );
   const vars: Record<string, unknown> = Object.create(null);
+  // The shared inputs are bound once; the cell loop below never writes them.
+  for (const { name, value } of shape.shared)
+    vars[name] = plainSharedArray(value);
   const complexSlots: ({ re: number; im: number } | null)[] = [];
   const complexNames =
     entry?.kind === 'vars' ? new Set(entry.complex) : new Set<string>();
-  const listNames = entry?.kind === 'vars' ? new Set(entry.lists) : undefined;
   shape.names.forEach((name, k) => {
-    if (listNames?.has(name))
-      throw new TypeError(
-        `broadcast: "${name}" is read as a list by the compiled code and cannot be broadcast`
-      );
     if (complexNames.has(name)) {
       const slot = { re: shape.scalars[k], im: 0 };
       complexSlots.push(slot);
@@ -316,6 +477,7 @@ function broadcastNumbersRange(
       vars[name] = shape.scalars[k];
     }
   });
+  const arrays = unaliasedInputs(shape.arrays, out);
   for (let i = from; i < to; i++) {
     // Checked at the first cell too, so that a slice that starts after the
     // deadline (one queued behind another) computes nothing.
@@ -326,18 +488,32 @@ function broadcastNumbersRange(
     )
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
-      const a = shape.arrays[k];
+      const a = arrays[k];
       if (a === null) continue;
       const v = a[axisIndex(shape, k, i)];
       const slot = complexSlots[k];
       if (slot !== null) slot.re = v;
       else vars[shape.names[k]] = v;
     }
-    try {
-      out[i - from] = numberOf(call(vars));
-    } catch {
-      out[i - from] = NaN;
+    if (stride === 1) {
+      try {
+        out[i - from] = numberOf(call(vars));
+      } catch {
+        out[i - from] = NaN;
+      }
+      continue;
     }
+    const o = stride * (i - from);
+    let r: unknown;
+    try {
+      r = call(vars);
+    } catch {
+      r = undefined;
+    }
+    if (Array.isArray(r)) {
+      for (let k = 0; k < stride; k++)
+        out[o + k] = k < r.length ? numberOf(r[k]) : NaN;
+    } else out.fill(NaN, o, o + stride);
   }
   return to - from;
 }
@@ -499,6 +675,7 @@ function broadcastIntervalsRange(
     vars[name] = slot;
     return slot;
   });
+  const arrays = unaliasedInputs(shape.arrays, out);
   for (let i = from; i < to; i++) {
     // Checked at the first cell too, so that a slice that starts after the
     // deadline (one queued behind another) computes nothing.
@@ -509,7 +686,7 @@ function broadcastIntervalsRange(
     )
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
-      const a = shape.arrays[k];
+      const a = arrays[k];
       if (a === null) continue;
       const j = 2 * axisIndex(shape, k, i);
       slots[k].lo = a[j];

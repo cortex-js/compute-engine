@@ -6272,6 +6272,10 @@ export type StoredJavaScript = {
   reconstructionDigits?: number;
   /** The input checks and conversions `run()` applies; `load()` applies them. */
   entryPlan?: StoredEntryPlan;
+  /** The count of values per cell that `loadBroadcast()` and
+   * `loadBroadcastSlice()` write when the `outputs` option is absent: the
+   * arity of a tuple-of-numbers expression. Absent means 1. */
+  broadcastOutputs?: number;
   /** Required by `load()`. */
   runtimeVersion?: string;
 };
@@ -6299,8 +6303,10 @@ export interface JavaScriptRuntime {
   load(stored: StoredJavaScript): (...args: unknown[]) => unknown;
   /** The stored code as a batch evaluator: the `broadcast()` of the
    * compilation result (`compilation/broadcast.ts`), with the same inputs,
-   * layouts and output. Code compiled from an expression only; a lambda
-   * (`calling: 'lambda'`) throws. */
+   * layouts and output. The variables the stored entry plan reads as lists
+   * are shared inputs, and `broadcastOutputs` is the default count of values
+   * per cell, as on the result. Code compiled from an expression only; a
+   * lambda (`calling: 'lambda'`) throws. */
   loadBroadcast(
     stored: StoredJavaScript
   ): (inputs: BroadcastInputs, options?: BroadcastOptions) => Float64Array;
@@ -6478,11 +6484,20 @@ export function createSysRuntime(
         inputs: BroadcastInputs,
         options?: BroadcastOptions
       ) => Float64Array) => {
-        const { fn, plan, digits } = storedExpressionRunner(sys, stored);
+        const { fn, plan, digits, outputs } = storedExpressionRunner(
+          sys,
+          stored
+        );
         return (inputs, options) => {
           const previous = setReconstructionDigits(digits);
           try {
-            return broadcastNumbers((vars) => fn(vars), plan, inputs, options);
+            return broadcastNumbers(
+              (vars) => fn(vars),
+              plan,
+              inputs,
+              options,
+              outputs
+            );
           } finally {
             setReconstructionDigits(previous);
           }
@@ -6498,7 +6513,10 @@ export function createSysRuntime(
         out: Float64Array,
         slice: BroadcastSlice
       ) => number) => {
-        const { fn, plan, digits } = storedExpressionRunner(sys, stored);
+        const { fn, plan, digits, outputs } = storedExpressionRunner(
+          sys,
+          stored
+        );
         return (inputs, options, out, slice) => {
           const previous = setReconstructionDigits(digits);
           try {
@@ -6508,7 +6526,8 @@ export function createSysRuntime(
               inputs,
               options,
               out,
-              slice
+              slice,
+              outputs
             );
           } finally {
             setReconstructionDigits(previous);
@@ -6526,7 +6545,8 @@ export function createSysRuntime(
  * evaluated here, the per-call ones on every call, the exponent digits fixed
  * to the stored count), without the per-call entry check and result
  * normalization that `broadcastNumbers` applies itself. A lambda (positional
- * arguments) has no batch form.
+ * arguments) has no batch form. `outputs` is the stored default count of
+ * values per cell (`broadcastOutputs`), or `undefined` for one.
  */
 function storedExpressionRunner(
   sys: SysHelpers,
@@ -6535,6 +6555,7 @@ function storedExpressionRunner(
   fn: (...args: unknown[]) => unknown;
   plan: EntryPlan | undefined;
   digits: number;
+  outputs: number | undefined;
 } {
   if (stored.calling === 'lambda')
     throw new Error(
@@ -6547,6 +6568,13 @@ function storedExpressionRunner(
   if (stored.runtimeVersion !== RUNTIME_VERSION)
     throw new Error(
       `The code was compiled for runtime ${stored.runtimeVersion}, this is runtime ${RUNTIME_VERSION}`
+    );
+  // A stored result is plain data that a host can change: a stride that is
+  // not a positive integer would lay the cells out wrongly, so it throws.
+  const outputs = stored.broadcastOutputs;
+  if (outputs !== undefined && (!Number.isInteger(outputs) || outputs < 1))
+    throw new Error(
+      `The stored broadcastOutputs must be a positive integer (got ${String(outputs)})`
     );
   const plan = stored.entryPlan && restoreEntryPlan(stored.entryPlan);
   const storedDigits = stored.reconstructionDigits;
@@ -6565,7 +6593,7 @@ function storedExpressionRunner(
       ['_'],
       `${perCall ?? ''}\nreturn ${stored.code};`
     );
-    return { fn, plan: plan || undefined, digits };
+    return { fn, plan: plan || undefined, digits, outputs };
   } finally {
     setReconstructionDigits(previous);
   }

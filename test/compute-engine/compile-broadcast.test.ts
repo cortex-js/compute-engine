@@ -147,13 +147,15 @@ describe('broadcast on a javascript result', () => {
     expect(Number.isNaN(out[1])).toBe(true);
   });
 
-  test('a symbol the code reads as a list cannot be broadcast', () => {
+  test('a symbol the code reads as a list is a shared input, bound once', () => {
     const engine = new ComputeEngine();
     engine.declare('L', 'list<number>');
     const r = compile(engine.parse('\\mathrm{Sum}(L)'));
-    expect(() => r.broadcast!({ L: new Float64Array([1, 2]) })).toThrow(
-      /read as a list/
-    );
+    // Not a column: with no per-cell array, the batch is one cell.
+    expect(Array.from(r.broadcast!({ L: new Float64Array([1, 2]) }))).toEqual([
+      3,
+    ]);
+    expect(Array.from(r.broadcast!({ L: [1, 2, 4] }))).toEqual([7]);
   });
 
   test('a lambda result (positional arguments) has no broadcast', () => {

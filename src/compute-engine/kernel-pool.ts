@@ -15,8 +15,12 @@
  *
  * What a worker receives is text and numbers: the stored form of a
  * compilation result, which it rebuilds once and keeps under an id, and for
- * each task a slice of the batch's input arrays. What it returns is one
- * `Float64Array` per task. Both the main thread and the worker run the same
+ * each task a slice of the batch's input arrays. The shared inputs of a
+ * `javascript` batch (arrays the compiled code reads by index, bound once for
+ * the batch) go to each worker once per `broadcastAsync()` call, with the
+ * first task of the call that the worker receives; the worker keeps them
+ * under the call's batch id until the call ends (`release`). What it returns
+ * is one `Float64Array` per task. Both the main thread and the worker run the same
  * loop (`compilation/broadcast.ts`), so a cell computed on a worker holds the
  * value the main thread would have computed. A result whose code depends on
  * the main thread (a random draw, which follows the engine's random stream
@@ -49,6 +53,9 @@ import type {
 } from './compilation/types.js';
 import {
   broadcastCellCount,
+  broadcastSharedNames,
+  broadcastStride,
+  plainSharedArray,
   type BroadcastSlice,
 } from './compilation/broadcast.js';
 import { RUNTIME_VERSION } from './compilation/javascript-runtime.js';
@@ -59,6 +66,7 @@ import type {
   StoredKernel,
   WireFitProblem,
   WireInputs,
+  WireShared,
   WorkerToMainMessage,
 } from './kernel-protocol.js';
 import type { FitScanRows } from './fit-scan.js';
@@ -107,8 +115,18 @@ interface Task {
   slice: BroadcastSlice;
   iterationLimit: number | undefined;
   signal: AbortSignal | undefined;
+  /** The batch of the task when it has shared inputs: its id (one per
+   * `broadcastAsync()` call) and the names of the shared inputs, which are
+   * keys of `inputs`. */
+  batch: SharedBatch | undefined;
   resolve: (r: SliceResult) => void;
   reject: (e: Error) => void;
+}
+
+/** The shared inputs of one `broadcastAsync()` call, as the pool ships them. */
+export interface SharedBatch {
+  id: number;
+  names: readonly string[];
 }
 
 /** A task queued for a worker: one slice of the grid points of a `FindFit`
@@ -137,6 +155,9 @@ interface Slot {
   /** Kernels and fit problems the worker was sent (`load`, `fit-load`), by
    * id. */
   loaded: Set<number>;
+  /** The batches whose shared inputs the worker was sent and keeps, by
+   * batch id, until `releaseBatch()`. */
+  batches: Set<number>;
   /** Kernels and fit problems whose load the worker refused: their tasks are
    * rejected here. */
   refused: Map<number, string>;
@@ -181,6 +202,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
   private slots: (Slot | undefined)[];
   private nextJob = 1;
   private nextKernelId = 1;
+  private nextBatchId = 1;
   private kernelIds = new WeakMap<object, number>();
   /** Bumped by `dispose()`: a prewarm scheduled before it does nothing. */
   private generation = 0;
@@ -290,6 +312,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       ready,
       failReady,
       loaded: new Set(),
+      batches: new Set(),
       refused: new Map(),
       queue: [],
       running: undefined,
@@ -389,7 +412,9 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
    * Evaluate the cells of `slice` on a worker. Resolves to the slice's output
    * and the count of cells written (`done: 0` when the signal aborted before
    * the task ran). Rejects when the pool is unusable, the worker refused the
-   * kernel or failed; the caller then finishes inline.
+   * kernel or failed; the caller then finishes inline. `batch` names the
+   * shared inputs of the call (`newBatch()`); the caller releases them with
+   * `releaseBatch()` once every slice of the call has settled.
    */
   runSlice(
     kind: KernelKind,
@@ -398,7 +423,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     options: BroadcastOptions | undefined,
     slice: BroadcastSlice,
     iterationLimit: number | undefined,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    batch?: SharedBatch
   ): Promise<SliceResult> {
     if (this.unusable !== undefined)
       return Promise.reject(new Error(this.unusable));
@@ -414,10 +440,32 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         slice,
         iterationLimit,
         signal,
+        batch,
         resolve,
         reject,
       })
     );
+  }
+
+  /** A new batch id for the shared inputs `names` of one `broadcastAsync()`
+   * call. */
+  newBatch(names: readonly string[]): SharedBatch {
+    return { id: this.nextBatchId++, names };
+  }
+
+  /** Tell every worker that holds the shared inputs of `batch` to forget
+   * them: every slice of the call has settled. A worker still running an
+   * aborted slice of the call reads the message after that slice ends, as
+   * a worker handles its messages in order. */
+  releaseBatch(batch: SharedBatch): void {
+    for (const slot of this.slots) {
+      if (!slot || slot.dead || !slot.batches.has(batch.id)) continue;
+      slot.batches.delete(batch.id);
+      slot.worker.postMessage({
+        type: 'release',
+        batch: batch.id,
+      } satisfies MainToWorkerMessage);
+    }
   }
 
   /**
@@ -604,6 +652,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         preamblePerCall: task.stored.preamblePerCall,
         entryPlan: task.stored.entryPlan,
         reconstructionDigits: task.stored.reconstructionDigits,
+        broadcastOutputs: task.stored.broadcastOutputs,
       };
       slot.worker.postMessage({
         type: 'load',
@@ -614,40 +663,110 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     const job = this.nextJob++;
     const layout = task.options?.layout ?? 'cells';
     const perCell = task.kind === 'interval-js' ? 2 : 1;
+    const batch = task.batch;
+    const sharedNames = new Set(batch?.names);
     // The arrays travel as copies that are then transferred: for the
     // `cells` layout only the slice's own cells, which the worker reads as
     // its cells `[0, n)`; for the `grid` layout the whole axes, which are
-    // small, and the slice's range.
+    // small, and the slice's range. The shared inputs are not here.
     const wire: WireInputs = { names: [], values: [] };
     const transfer: ArrayBuffer[] = [];
     const { from, to } = task.slice;
+    // `makeBroadcastAsync()` validated the inputs (`broadcastCellCount()`)
+    // before it made any task, so a wrong input here is a caller that
+    // changed `inputs` during the batch: the task is rejected, and the
+    // caller finishes the batch inline, where the loop throws.
+    let invalid: string | undefined;
     for (const name of Object.keys(task.inputs)) {
+      if (sharedNames.has(name)) continue;
       const v = task.inputs[name];
       wire.names.push(name);
       if (typeof v === 'number') {
         wire.values.push(v);
         continue;
       }
+      if (!(v instanceof Float64Array)) {
+        invalid = `broadcast: the input for "${name}" must be a Float64Array or a number`;
+        break;
+      }
       const copy =
         layout === 'cells' ? v.slice(perCell * from, perCell * to) : v.slice();
       wire.values.push(copy);
       transfer.push(copy.buffer as ArrayBuffer);
     }
+    // The shared inputs travel with the first task of the batch that this
+    // worker receives, and the worker keeps them until `releaseBatch()`:
+    // each worker gets its own copy of a `Float64Array`, transferred, and a
+    // clone of a plain array. A plain array is first copied with
+    // `Array.from()`: `Array.isArray()` is also true for a Proxy of an array
+    // (a Vue `reactive()` or MobX observable array), and structured clone
+    // cannot copy a Proxy, nor an extra property of the array that holds a
+    // function or a symbol. The copy keeps only the elements, in a plain
+    // array, so the worker's `plainSharedArray()` does not copy it again.
+    let shared: WireShared | undefined;
+    if (
+      invalid === undefined &&
+      batch !== undefined &&
+      !slot.batches.has(batch.id)
+    ) {
+      shared = { names: [], values: [] };
+      for (const name of batch.names) {
+        const v = task.inputs[name];
+        shared.names.push(name);
+        if (v instanceof Float64Array) {
+          const copy = v.slice();
+          shared.values.push(copy);
+          transfer.push(copy.buffer as ArrayBuffer);
+        } else if (Array.isArray(v)) shared.values.push(Array.from(v));
+        else {
+          invalid = `broadcast: the shared input "${name}" must be an array of numbers or a Float64Array`;
+          break;
+        }
+      }
+      if (invalid === undefined) slot.batches.add(batch.id);
+    }
+    if (invalid !== undefined) {
+      task.reject(new TypeError(invalid));
+      void this.pump(slot);
+      return;
+    }
     slot.running = { job, task };
-    slot.worker.postMessage(
-      {
-        type: 'run',
-        job,
-        id,
-        inputs: wire,
-        layout,
-        from: layout === 'cells' ? 0 : from,
-        to: layout === 'cells' ? to - from : to,
-        deadline: task.slice.deadline,
-        iterationLimit: task.iterationLimit,
-      } satisfies MainToWorkerMessage,
-      transfer
-    );
+    // `postMessage()` throws a `DataCloneError` when structured clone cannot
+    // copy a value of the message: for example a shared array element that
+    // is a function. No worker reply then comes for this task, so the task
+    // must be settled here: otherwise `slot.running` stays set and blocks
+    // every later task of this slot, and the caller waits forever. The task
+    // is rejected, and the caller finishes the batch inline. When this task
+    // carried the shared inputs of its batch, the worker did not receive
+    // them, so the slot no longer records the batch, and the next task of
+    // the batch on this slot sends them again.
+    try {
+      slot.worker.postMessage(
+        {
+          type: 'run',
+          job,
+          id,
+          inputs: wire,
+          layout,
+          from: layout === 'cells' ? 0 : from,
+          to: layout === 'cells' ? to - from : to,
+          deadline: task.slice.deadline,
+          iterationLimit: task.iterationLimit,
+          ...(task.options?.outputs !== undefined
+            ? { outputs: task.options.outputs }
+            : {}),
+          ...(batch !== undefined ? { batch: batch.id } : {}),
+          ...(shared !== undefined ? { shared } : {}),
+        } satisfies MainToWorkerMessage,
+        transfer
+      );
+    } catch (e) {
+      slot.running = undefined;
+      if (shared !== undefined && batch !== undefined)
+        slot.batches.delete(batch.id);
+      task.reject(e instanceof Error ? e : new Error(String(e)));
+      void this.pump(slot);
+    }
   }
 }
 
@@ -748,6 +867,10 @@ export interface BroadcastAsyncSpec {
   /** The compilation result itself: the stored form a worker rebuilds, and
    * the identity the pool keys its kernel ids and calibration on. */
   stored: StoredResult;
+  /** `javascript` only: the variables the compiled code reads as lists (the
+   * `lists` of the result's entry plan). Each is a shared input of a batch,
+   * with the variables the `shared` option names. */
+  lists?: readonly string[];
   /** Whether the result can run on a worker at all (see the module
    * comment); a result that cannot always runs inline. */
   shippable: boolean;
@@ -788,10 +911,21 @@ export function makeBroadcastAsync(
   inputs: BroadcastInputs,
   options?: BroadcastAsyncOptions
 ) => Promise<BroadcastAsyncResult> {
-  const perCellIn = spec.kind === 'interval-js' ? 2 : 1;
-  const perCellOut = spec.kind === 'interval-js' ? 3 : 1;
+  const isInterval = spec.kind === 'interval-js';
+  const perCellIn = isInterval ? 2 : 1;
   return async (inputs, options) => {
-    const count = broadcastCellCount(inputs, options, perCellIn);
+    // Validates the inputs, the `shared` option, and refuses `shared` and
+    // `outputs` on an interval result.
+    const count = broadcastCellCount(inputs, options, perCellIn, spec.lists);
+    const sharedNames = isInterval
+      ? []
+      : broadcastSharedNames(spec.lists, inputs, options);
+    // The values per cell: the `lo, hi, kind` triple of an interval, or the
+    // stride of a `javascript` result (the `outputs` option, or the default
+    // the result stores, read at call time as the worker reads it).
+    const perCellOut = isInterval
+      ? 3
+      : broadcastStride(options, spec.stored.broadcastOutputs);
     const needed = perCellOut * count;
     const out = options?.out ?? new Float64Array(needed);
     if (out.length < needed)
@@ -812,10 +946,35 @@ export function makeBroadcastAsync(
       options?.deadline !== undefined
         ? Date.now() + options.deadline
         : undefined;
-    const layoutOptions: BroadcastOptions | undefined =
-      options?.layout !== undefined ? { layout: options.layout } : undefined;
+    // The options of each slice: the layout, and for `javascript` the
+    // resolved stride and the shared names, so that the main thread and a
+    // worker lay the cells out the same way.
+    const layoutOptions: BroadcastOptions | undefined = isInterval
+      ? options?.layout !== undefined
+        ? { layout: options.layout }
+        : undefined
+      : {
+          ...(options?.layout !== undefined ? { layout: options.layout } : {}),
+          outputs: perCellOut,
+          ...(sharedNames.length > 0 ? { shared: sharedNames } : {}),
+        };
     const pastDeadline = (): boolean =>
       deadline !== undefined && Date.now() > deadline;
+
+    // The inputs of the inline slices: the compiled code reads plain arrays
+    // only, so a `Float64Array` shared input is copied into one once for the
+    // whole call, not once per slice. Built on the first inline slice.
+    let inlineInputs: BroadcastInputs | undefined;
+    const plainInputs = (): BroadcastInputs => {
+      if (inlineInputs !== undefined) return inlineInputs;
+      if (sharedNames.length === 0) return (inlineInputs = inputs);
+      const copy: BroadcastInputs = { ...inputs };
+      for (const name of sharedNames) {
+        const v = inputs[name];
+        if (typeof v !== 'number') copy[name] = plainSharedArray(v);
+      }
+      return (inlineInputs = copy);
+    };
 
     /** Run the cells from `start` inline, in slices with a yield between
      * two; returns the count of leading valid cells from `start`. */
@@ -835,7 +994,7 @@ export function makeBroadcastAsync(
         const to = Math.min(count, from + chunk);
         const t0 = Date.now();
         const n = spec.slice(
-          inputs,
+          plainInputs(),
           layoutOptions,
           out.subarray(perCellOut * from, perCellOut * to),
           { from, to, deadline }
@@ -865,6 +1024,10 @@ export function makeBroadcastAsync(
     for (let from = 0; from < count; from += chunk)
       slices.push({ from, to: Math.min(count, from + chunk), deadline });
     const iterationLimit = spec.iterationLimit();
+    // One batch id per call: each worker receives the shared inputs once,
+    // with the first slice of this call it runs, and forgets them below.
+    const batch =
+      sharedNames.length > 0 ? pool.newBatch(sharedNames) : undefined;
     // The slices' results are kept aside and committed in order, so that no
     // cell after `done` is written when an earlier slice stopped short.
     const results = await Promise.allSettled(
@@ -876,10 +1039,12 @@ export function makeBroadcastAsync(
           layoutOptions,
           slice,
           iterationLimit,
-          signal
+          signal,
+          batch
         )
       )
     );
+    if (batch !== undefined) pool.releaseBatch(batch);
     let done = 0;
     let failed = false;
     for (let s = 0; s < slices.length; s++) {

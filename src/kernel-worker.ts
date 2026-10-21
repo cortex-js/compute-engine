@@ -10,7 +10,11 @@
 // evaluates slices of batches with the same loop the main thread runs
 // (`compilation/broadcast.ts`), so a cell computed here holds the value the
 // main thread would compute. The pool sends one task at a time and ships the
-// engine's iteration limit and the batch deadline with it.
+// engine's iteration limit and the batch deadline with it. The shared inputs
+// of a batch (arrays the compiled code reads by index) come with the first
+// task of the batch that this worker receives: the worker copies each into a
+// plain array once, keeps it under the batch id, binds it in every later task
+// of the batch, and forgets it on `release`.
 //
 // It also solves the grid points of the separable scan of a `FindFit` global
 // search (`FindFit.evaluateAsync()` on an engine with a pool; design:
@@ -40,7 +44,10 @@ import type {
   BroadcastInputs,
   BroadcastOptions,
 } from './compute-engine/compilation/types.js';
-import type { BroadcastSlice } from './compute-engine/compilation/broadcast.js';
+import {
+  plainSharedArray,
+  type BroadcastSlice,
+} from './compute-engine/compilation/broadcast.js';
 import type {
   MainToWorkerMessage,
   StoredKernel,
@@ -57,8 +64,10 @@ import {
 
 export const version = '{{SDK_VERSION}}';
 
-/** A loaded kernel: its slice loop and the values it writes per cell (1 for
- * `javascript`, 3 for `interval-js`). */
+/** A loaded kernel: its slice loop and the values it writes per cell by
+ * default (3 for `interval-js`; for `javascript`, the stored
+ * `broadcastOutputs`, or 1, which the `outputs` of a `run` message
+ * overrides). */
 interface Kernel {
   slice: (
     inputs: BroadcastInputs,
@@ -66,7 +75,8 @@ interface Kernel {
     out: Float64Array,
     slice: BroadcastSlice
   ) => number;
-  perCellOut: 1 | 3;
+  interval: boolean;
+  perCellOut: number;
 }
 
 /** The two ends of the message channel, in a browser worker or a Node
@@ -122,17 +132,28 @@ const kernels = new Map<number, Kernel>();
 
 function loadKernel(kernel: StoredKernel): Kernel {
   if (kernel.kind === 'interval-js')
-    return { slice: intervalRuntime.loadBroadcastSlice(kernel), perCellOut: 3 };
+    return {
+      slice: intervalRuntime.loadBroadcastSlice(kernel),
+      interval: true,
+      perCellOut: 3,
+    };
   return {
+    // `loadBroadcastSlice` refuses a stored `broadcastOutputs` that is not a
+    // positive integer.
     slice: jsRuntime.loadBroadcastSlice({
       ...kernel,
       entryPlan: kernel.entryPlan as Parameters<
         typeof jsRuntime.loadBroadcastSlice
       >[0]['entryPlan'],
     }),
-    perCellOut: 1,
+    interval: false,
+    perCellOut: kernel.broadcastOutputs ?? 1,
   };
 }
+
+/** The shared inputs of each batch this worker was sent, as plain arrays,
+ * by batch id, until `release`. */
+const batches = new Map<number, Map<string, readonly number[]>>();
 
 const fits = new Map<number, FitScanProblem>();
 
@@ -193,6 +214,9 @@ port.on((m) => {
     case 'unload':
       kernels.delete(m.id);
       fits.delete(m.id);
+      return;
+    case 'release':
+      batches.delete(m.batch);
       return;
     case 'fit-run': {
       const problem = fits.get(m.id);
@@ -255,12 +279,33 @@ port.on((m) => {
       return;
     }
     case 'run': {
+      // The shared inputs are kept first, before the kernel is checked, so
+      // that the later tasks of the batch find them even when this one
+      // fails. Each is copied into a plain array once per batch: the
+      // compiled code reads plain arrays only.
+      const wireShared = m.shared;
+      if (m.batch !== undefined && wireShared !== undefined) {
+        const kept = new Map<string, readonly number[]>();
+        wireShared.names.forEach((name, k) =>
+          kept.set(name, plainSharedArray(wireShared.values[k]))
+        );
+        batches.set(m.batch, kept);
+      }
       const kernel = kernels.get(m.id);
       if (kernel === undefined) {
         port.post({
           type: 'error',
           job: m.job,
           message: `kernel ${m.id} is not loaded`,
+        });
+        return;
+      }
+      const shared = m.batch === undefined ? undefined : batches.get(m.batch);
+      if (m.batch !== undefined && shared === undefined) {
+        port.post({
+          type: 'error',
+          job: m.job,
+          message: `the shared inputs of batch ${m.batch} are not loaded`,
         });
         return;
       }
@@ -274,8 +319,20 @@ port.on((m) => {
         m.inputs.names.forEach(
           (name, k) => (inputs[name] = m.inputs.values[k])
         );
-        const out = new Float64Array(kernel.perCellOut * (m.to - m.from));
-        const done = kernel.slice(inputs, { layout: m.layout }, out, {
+        if (shared !== undefined)
+          for (const [name, value] of shared) inputs[name] = value;
+        const perCellOut = kernel.interval
+          ? kernel.perCellOut
+          : (m.outputs ?? kernel.perCellOut);
+        const options: BroadcastOptions = kernel.interval
+          ? { layout: m.layout }
+          : {
+              layout: m.layout,
+              outputs: perCellOut,
+              ...(shared !== undefined ? { shared: [...shared.keys()] } : {}),
+            };
+        const out = new Float64Array(perCellOut * (m.to - m.from));
+        const done = kernel.slice(inputs, options, out, {
           from: m.from,
           to: m.to,
           deadline: m.deadline,
@@ -283,7 +340,7 @@ port.on((m) => {
         // Only the written prefix travels back, and its buffer is
         // transferred, not copied.
         const sent =
-          done === m.to - m.from ? out : out.slice(0, kernel.perCellOut * done);
+          done === m.to - m.from ? out : out.slice(0, perCellOut * done);
         port.post({ type: 'result', job: m.job, out: sent, done }, [
           sent.buffer as ArrayBuffer,
         ]);

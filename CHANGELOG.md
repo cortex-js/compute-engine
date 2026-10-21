@@ -506,6 +506,33 @@
 
 ### New Features
 
+- **`broadcast()` and `broadcastAsync()` of a `javascript` result take shared
+  inputs and write several values per cell** (Tycho row 416). Two additions,
+  for a kernel that reads the field values around a cell and writes several
+  numbers per cell (the corners and edges of a 3-D implicit surface):
+  - A shared input is bound once for the whole batch and read by index in the
+    expression: with `F: list<number>` and `i: integer`, `F_{i+1}` over
+    `{ i: Float64Array [0, 1, 2], F: [1, 2, 3, 4] }` gives `[1, 2, 3]`. A
+    variable whose declared type is a list is shared; the new `shared` option
+    names any other one (`{ shared: ['G'] }`). A shared input is a plain array
+    of numbers or a `Float64Array`, is not a column of the `cells` layout and
+    not an axis of the `grid` layout, and goes to each worker of the pool once
+    per `broadcastAsync()` call instead of once per slice. A variable read as
+    a list was refused before ("cannot be broadcast"); a plain array for any
+    other variable throws.
+  - An expression whose type is a tuple of two or more elements that can be
+    numbers (an element typed `unknown`, such as an undeclared symbol,
+    counts) writes that many values per cell into one output array: `(i, 2i)`
+    over
+    `{ i: Float64Array [1, 2, 3] }` gives `[1, 2, 2, 4, 3, 6]`. The result
+    reports the count as `broadcastOutputs`, which a stored result keeps for
+    `createJavaScriptRuntime().loadBroadcast()` and the pool's workers; the
+    new `outputs` option overrides it. An element missing from an array
+    answer is `NaN`, and a non-array answer or a thrown cell is `NaN` in every
+    slot. `done` of `broadcastAsync()` is still a count of cells.
+
+  An `interval-js` result throws a `TypeError` for either option.
+
 - **The grid of the `global` option of `FindFit` now has a point in every
   basin of a frequency** (Tycho row 407). The search sampled a searched
   parameter at a fixed number of points (400 for one parameter, 40 × 40 for

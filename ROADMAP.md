@@ -342,7 +342,7 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   2026-10-21: such a value decides FALSE too (an ordered comparison with
   `ComplexInfinity` or a non-real complex operand is `False`; `=` with
   `ComplexInfinity` is `False`, `=` of complex numbers keeps its meaning; `≠`
-  unchanged); FIXED 2026-10-21 on the main tree (uncommitted, dual-reviewed, 10
+  unchanged); FIXED 2026-10-21, committed `8fd9f7394` (dual-reviewed, 10
   findings applied: the integral convergence guards and the logarithm-root
   guard now test the real part or skip a complex base, chains and ties
   included, `closedExactJump` folds a `ComplexInfinity` comparison on every
@@ -373,52 +373,43 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   including `x = 0` where the value is `0/0`. A quotient by a literal zero
   with a symbolic numerator is a pole only when the numerator is not zero;
   whether the fold should wait for the value is a canonical-form decision.
-- **416 (filed 2026-10-21, on CE 0.159.0) — a stencil batch for `broadcast`.**
-  Tycho marches 3-D implicit surfaces in its own workers from the stored
-  `javascript` compilation results; about 40 % of a build is the cell step
-  (eight corner reads per cell, the case, twelve edge fractions
-  `F_a / (F_a - F_b)`, the gradient by central differences), which cannot use
-  `broadcast` because it takes one number per variable per cell (a list input
-  is refused: "the array for i holds 2 cells, the first array 4") and gives
-  one number per cell (a tuple-valued expression gives NaN). Ask: (1) a shared
-  input bound once and read by index in the expression (`F[i+1]` with
-  `F: list<real>`; the compiled code already reads it as
-  `_SYS.atNumeric(_.F, _.i + 1, "real")`), shipped to a worker once per call;
-  (2) several outputs per cell for a tuple-valued expression, one output of
-  stride `m`; (3) as sugar, a `window` option of the `grid` layout naming a
-  shared input's neighbours by offset. CE's answer (sent to Tycho 2026-10-21):
-  (1) and (2) together as the next pool step after row 407 phase B, inferring
-  `shared` from a `list`/`indexed_collection`-typed variable and `m` from a
-  fixed-arity numeric tuple result type, with `shared: [...]` and `outputs: m`
-  as explicit overrides; (3) waits for a measurement. Instrument:
-  `scripts/repros/2026-10-21-ce416-stencil-batch-probe.mts`
-  (`row 416: NOT READY on 0.159.0`); closes when it prints `READY`. Expected
-  gain measured by Tycho: a build about 2.5× faster. Tycho's shape (answered
-  2026-10-21): two tuple-valued kernels in the stride layout, a cell kernel of
-  thirteen numbers (the case index 0 to 255 and twelve edge fractions
+- **416, part (3) — a `window` option of the `grid` layout of `broadcast`
+  (OPEN, waits for a measurement).** Parts (1) and (2) of row 416 (shared
+  inputs and several outputs per cell) landed 2026-10-21. Part (3) is sugar:
+  a `window` option naming a shared input's neighbours by offset, which also
+  lets the pool chunk the grid by slabs with a one-cell halo. It is held until
+  Tycho measures its two kernels on the stride layout and shows that the sugar
+  buys speed: the neighbours are index arithmetic on the shared array, and the
+  halo chunking follows from the shared input. Tycho's kernels: a cell kernel
+  of thirteen numbers (the case index 0 to 255 and twelve edge fractions
   `F_a / (F_a - F_b)`, NaN on an edge with no sign change) and a point kernel
   of three (the gradient by central differences of the shared array, one-sided
   on the boundary), two passes over the grid; eight to twenty-seven
-  `_SYS.atNumeric` reads per cell are acceptable.
+  `_SYS.atNumeric` reads per cell are acceptable. A direct typed-array read
+  for a provably in-range index is a later optimization of the same kernels.
 
-### REGRESSION since `c43a44d41`: a `Sum`/`Product` term that assigns a function keeps it for the EARLIER indices (OPEN — found 2026-10-21 by a test run; 3 tests of `test/compute-engine/batch9-evaluation.test.ts` fail at HEAD)
+### The 3 `batch9-evaluation.test.ts` failures: an evaluated unresolved call is re-resolved by a later assignment in the same evaluation (OPEN since `c43a44d41`, 2026-10-20; bisected 2026-10-21; the fix is the "sticky" rule of "Function declaration hoisting across execution routes" below)
 
 `Sum(Block(If(k = 2, h := z ↦ 2z), h(k)), k, 1, 3)` must give `10 + h(1)`: an
 implicit local of a block starts with no value at each top-level evaluation and
 keeps its value from one loop iteration to the next (user decision
-2026-10-18), so `h` is set at `k = 2`, still set at `k = 3` (`h(3) = 6`), and
-unset at `k = 1`. At HEAD it gives `12`: the `h(1)` term reads the function
-assigned later. The same for `Product` and for "a term whose argument changes
-when it is read again" (the three failing tests of the block "a big operator
-does not keep a function assigned by its term"). Bisected on 2026-10-21 with
-the suite alone in a clean worktree per commit: passes at `6d5c6d542` and
-`8fc104df4`, fails from `c43a44d41` ("refactor: enhance callable binding
-resolution and forward call handling", a peer session's work committed by the
-user) and at every later commit. The new forward-call resolution presumably
-binds `h(1)` to the function `h` holds after the loop instead of leaving the
-call inert for an index where `h` had no value yet. Owner: the session that
-did the callable-binding work (handoff notes in `docs/scratch/2026-10-20-call-binding-handoff.md`
-and `docs/scratch/2026-10-20-callable-evaluation-handoff.md`).
+2026-10-18), so `h` is unset at `k = 1`, set at `k = 2`, still set at `k = 3`.
+At HEAD it gives `12`: the call `h(1)`, evaluated while `h` had no value, is
+resolved again once the loop has assigned `h`. The same for `Product` and for
+"a term whose argument changes when it is read again" (the three tests of the
+block "a big operator does not keep a function assigned by its term").
+Bisected 2026-10-21 with the suite alone in a clean worktree per commit: passes
+at `6d5c6d542` and `8fc104df4`, fails from `c43a44d41` ("refactor: enhance
+callable binding resolution and forward call handling", the callable-binding
+work) and at every later commit. The owning session confirmed 2026-10-21 that
+the failures are known and that their fix is the "sticky evaluated unresolved
+call" of the PLANNED entry "Function declaration hoisting across execution
+routes": once a call has evaluated as unresolved, it stays symbolic in that
+evaluation even when the name is bound later, while the original unevaluated
+call remains a forward reference. That rule cannot land alone, because the
+sequential Epsil runner today relies on the later resolution where whole-block
+boxing and the compiler hoist the function declaration; it lands with the
+declaration-preparation step of that entry.
 
 ### `isLess` on a long exact sum of logarithms throws a `RangeError` from `lcm` (OPEN, small — found 2026-10-21 by the review of the non-real comparison change)
 

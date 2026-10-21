@@ -351,6 +351,58 @@ Tycho's adaptive implicit plotter refines cells by depth. It can submit all
 cells of one depth as one batch, which is where the 512×512 and larger cases
 come from; a 1D plot of 2000 columns stays inline.
 
+#### 5.4.2 Shared inputs and several outputs per cell (row 416, 2026-10-21)
+
+Tycho marches 3-D implicit surfaces: per grid cell it reads the eight corner
+values of a field array and writes thirteen numbers. Two additions to
+`broadcast()` and `broadcastAsync()`, for the `javascript` target only:
+
+- **Shared inputs.** An input bound once for the whole batch, read by index
+  in the expression (`F_{i+1}`, compiled to
+  `_SYS.atNumeric(_.F, _.i + 1, "number")`). A variable is shared when the
+  entry plan reads it as a list (its declared type is a list or an indexed
+  collection), or when the `shared` option names it (the override for an
+  untyped variable). A name in `shared` that is not a key of `inputs` throws,
+  and so does a `shared` option that is not an array of strings. The value is
+  a plain `number[]` or a `Float64Array`; a plain array for a variable that is
+  not shared throws. The compiled code reads plain arrays only (its `at`
+  helper gives `NaN` for a typed array), so the loop copies a `Float64Array`
+  into a plain array once per batch, before the cell loop, and binds it once
+  on the vars object. A shared input is not a column of the `cells` layout and
+  not an axis of the `grid` layout. The earlier error ("read as a list ...
+  cannot be broadcast") is gone: such a variable is shared.
+- **Several outputs per cell.** A tuple-valued expression (`(i, 2i)`, whose
+  code returns a JavaScript array) writes `m` numbers per cell in one output
+  array of length `cells × m`, cell `c` at `[m·c, m·c + m)`. `m` is the arity
+  of the expression's type when it is a tuple of two or more elements that are
+  all numbers, otherwise 1; the `outputs` option (a positive integer)
+  overrides it. The result stores the inferred `m` as `broadcastOutputs` (only
+  when it is more than 1), and `loadBroadcast()`, `loadBroadcastSlice()`, the
+  result's own entries and the worker read it as the default, so a stored
+  result run by a host's own workers lays out the cells the same way. Per
+  cell: an array answer gives element `k` through the usual number conversion
+  (a boolean is 1 or 0, a complex value with a zero imaginary part is its real
+  part, anything else `NaN`); an element past the end is `NaN`; a non-array
+  answer, or a thrown cell, is `NaN` in every slot. With `m = 1` the rule is
+  unchanged: an array answer is `NaN`. `options.out` must hold `m × cells`
+  values; `done` of `broadcastAsync()` stays a count of cells.
+
+On the pool, `broadcastAsync()` allocates a batch id per call when the call
+has shared inputs. The first task of the call that a worker receives carries
+them (a `Float64Array` as a transferred copy, a plain array cloned); the pool
+records per worker which batches it holds, and the later tasks of the call to
+that worker carry only the batch id. The worker copies each shared input into
+a plain array once, keeps it by batch id, and binds it in each task of the
+batch. After every slice of the call has settled, a `release` message frees
+the batch on every worker that received it; a worker reads it after any slice
+of the call it still runs, since a worker handles its messages in order. The
+per-cell columns keep the `WireInputs` shape; the shared inputs travel in a
+separate `shared` field of the `run` message, with the resolved stride in
+`outputs`. The fit messages are unchanged.
+
+An `interval-js` result throws a `TypeError` for either option: its loop
+writes a `lo, hi, kind` triple per cell and its code reads no list.
+
 ### 5.5 `FindFit` on the pool
 
 1. Refactor `solveGlobal` so that each start of the multi-start and each grid

@@ -10169,6 +10169,26 @@ function varsEntryPlan(
   return { kind: 'vars', real, complex, lists, strings };
 }
 
+/**
+ * The count of values per cell that `broadcast()` writes by default for an
+ * expression of type `t`: the arity of a tuple of two or more elements whose
+ * every element can be a number (the compiled code then returns a JavaScript
+ * array of that length), and 1 for any other type, a tuple of one element
+ * included. An element counts when its type overlaps `number`, not only when
+ * it is a subtype of it: an undeclared symbol has the type `unknown`, so
+ * `(x, y)` has the type `tuple<unknown, unknown>`, and a subtype test would
+ * give 1 and a `NaN` for every cell with nothing that tells the caller to
+ * pass `outputs`. An element that is not a number at run time gives `NaN`
+ * in its slot in all cases, so the wider test loses nothing. An element that
+ * cannot be a number (`(x, "a")` is `tuple<number, string>`) gives 1.
+ */
+function broadcastStrideOfType(t: Type): number {
+  if (typeof t !== 'object' || t.kind !== 'tuple') return 1;
+  const n = t.elements.length;
+  if (n < 2) return 1;
+  return t.elements.every((e) => couldMatch(e.type, 'number')) ? n : 1;
+}
+
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -10361,6 +10381,7 @@ function compileToTarget(
   const entryPlan = entryChecks
     ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
     : undefined;
+  const broadcastOutputs = broadcastStrideOfType(expr.type.type);
   const reconstructionDigits = realPowerReconstructionDigits();
   // A body that writes an input first makes the vars object a local copy, so
   // the object of the caller does not change (`localVarsObjectStatement`).
@@ -10394,25 +10415,35 @@ function compileToTarget(
     calling: 'expression' as const,
     reconstructionDigits,
     ...(entryPlan ? { entryPlan: storeEntryPlan(entryPlan) } : {}),
+    // The default count of values per cell of `broadcast()`, stored so that
+    // a runtime that rebuilds the result applies the same default.
+    ...(broadcastOutputs > 1 ? { broadcastOutputs } : {}),
     run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
     // The whole batch runs inside one reconstruction-digit frame, as each
     // `run()` call does (see the constructor of `ComputeEngineFunction`).
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
-        return broadcastNumbers(fn.rawCall, entryPlan, inputs, options);
+        return broadcastNumbers(
+          fn.rawCall,
+          entryPlan,
+          inputs,
+          options,
+          result.broadcastOutputs
+        );
       } finally {
         setReconstructionDigits(previous);
       }
     },
   };
   // `broadcastAsync` ships the result itself (its `code`, preambles, entry
-  // plan and version) to the engine's worker pool, and runs slices here when
-  // there is none (`kernel-pool.ts`).
+  // plan, default stride and version) to the engine's worker pool, and runs
+  // slices here when there is none (`kernel-pool.ts`).
   const engine = expr.engine;
   result.broadcastAsync = makeBroadcastAsync({
     kind: 'javascript',
     stored: result,
+    lists: entryPlan?.kind === 'vars' ? entryPlan.lists : undefined,
     // A worker has no engine: code that names a host identifier or draws
     // from the engine's random stream stays on this thread.
     shippable:
@@ -10428,7 +10459,8 @@ function compileToTarget(
           inputs,
           options,
           out,
-          slice
+          slice,
+          result.broadcastOutputs
         );
       } finally {
         setReconstructionDigits(previous);

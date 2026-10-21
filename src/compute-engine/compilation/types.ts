@@ -2628,25 +2628,51 @@ export type StoredEntryPlan = {
 /**
  * The inputs of `CompilationResult.broadcast()`: one `Float64Array` per free
  * variable (one value per cell; a `lo, hi` pair per cell for `interval-js`),
- * or one number, the same value for every cell. See
+ * or one number, the same value for every cell. A shared input of a
+ * `javascript` result (a variable that the compiled code reads as a list, or
+ * one that `BroadcastOptions.shared` names) is a plain array of numbers or a
+ * `Float64Array`, bound once for the whole batch. See
  * `compilation/broadcast.ts` for the layouts and the output encoding.
  */
-export type BroadcastInputs = Record<string, Float64Array | number>;
+export type BroadcastInputs = Record<
+  string,
+  Float64Array | number | readonly number[]
+>;
 
 export interface BroadcastOptions {
   /**
    * `'cells'` (default): every array holds one entry per cell and all have
    * the same cell count. `'grid'`: the arrays are the axes of a regular grid,
    * in key order of `inputs`, the first varying fastest; the cell count is
-   * the product of their lengths.
+   * the product of their lengths. A shared input is neither a column nor an
+   * axis.
    */
   layout?: 'cells' | 'grid';
   /**
    * A caller-owned output array, filled and returned instead of a new one. It
-   * must hold at least one value per cell (`javascript`) or three
+   * must hold at least `outputs` values per cell (`javascript`) or three
    * (`interval-js`); a longer array is filled from the start.
    */
   out?: Float64Array;
+  /**
+   * `javascript` only. The inputs that are bound once for the whole batch
+   * instead of one value per cell: the compiled code reads them by index
+   * (`F_{i+1}`). A variable whose declared type is a list is shared without
+   * being named here; this option is for a variable with no such type. Each
+   * name must be a key of `inputs`. An `interval-js` result throws.
+   */
+  shared?: readonly string[];
+  /**
+   * `javascript` only. The count of numbers written per cell, a positive
+   * integer: cell `c` is at `[outputs·c, outputs·c + outputs)` of the output.
+   * Default: the arity of the expression's type when it is a tuple of two
+   * or more elements that can be numbers
+   * (`CompilationResult.broadcastOutputs`), 1 otherwise. With more
+   * than 1, a cell whose answer is an array writes its elements (a missing
+   * element is `NaN`), and any other answer is `NaN` in every slot. An
+   * `interval-js` result throws.
+   */
+  outputs?: number;
 }
 
 export interface BroadcastAsyncOptions extends BroadcastOptions {
@@ -2995,15 +3021,29 @@ export type CompilationResult<
   run?: CompiledRunner<R, V>;
 
   /**
+   * JavaScript only, on a result called with a vars object. The count of
+   * numbers `broadcast()` writes per cell by default: present when the
+   * expression's type is a tuple of two or more elements that can be
+   * numbers (`(i, 2i)` gives 2); an element typed `unknown` counts, so
+   * `(x, y)` with undeclared `x` and `y` gives 2 too. Absent otherwise (one
+   * number per cell). A runtime that rebuilds the
+   * stored result (`loadBroadcast()`, a kernel worker) uses it as the same
+   * default. `BroadcastOptions.outputs` overrides it.
+   */
+  broadcastOutputs?: number;
+
+  /**
    * Evaluate the compiled function at many points in one call. Present on a
    * `javascript` result called with a vars object (`calling: 'expression'`)
    * and on an `interval-js` result. `inputs` maps each free variable to a
    * `Float64Array` (one value per cell; a `lo, hi` pair per cell for
-   * `interval-js`) or to one number for every cell. The result is a
-   * `Float64Array`: one value per cell, or a `lo, hi, kind` triple per cell
-   * with the `INTERVAL_KIND` codes. Cell for cell, the value is the one
-   * `run()` gives. The input layout, the output encoding and the error rules
-   * are in `compilation/broadcast.ts`.
+   * `interval-js`) or to one number for every cell; a `javascript` result
+   * also takes shared inputs, bound once for the batch. The result is a
+   * `Float64Array`: one value per cell (`outputs` values per cell for a
+   * tuple), or a `lo, hi, kind` triple per cell with the `INTERVAL_KIND`
+   * codes. Cell for cell, the value is the one `run()` gives. The input
+   * layout, the output encoding and the error rules are in
+   * `compilation/broadcast.ts`.
    */
   broadcast?: (
     inputs: BroadcastInputs,

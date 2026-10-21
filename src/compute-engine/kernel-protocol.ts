@@ -35,6 +35,10 @@ export interface StoredKernel {
   /** The stored entry plan of a `javascript` result, as the result carries it. */
   entryPlan?: unknown;
   reconstructionDigits?: number;
+  /** The default count of values per cell of a `javascript` result (the
+   * arity of a tuple-of-numbers expression), as the result carries it;
+   * absent means 1. */
+  broadcastOutputs?: number;
 }
 
 /** The inputs of a batch in wire form: the names and, in the same order, a
@@ -42,6 +46,15 @@ export interface StoredKernel {
 export interface WireInputs {
   names: string[];
   values: (Float64Array | number)[];
+}
+
+/** The shared inputs of a `javascript` batch in wire form: the names and, in
+ * the same order, the arrays that the compiled code reads by index, bound
+ * once for the whole batch. A `Float64Array` travels as a transferred copy;
+ * a plain array is cloned. */
+export interface WireShared {
+  names: string[];
+  values: (Float64Array | readonly number[])[];
 }
 
 /**
@@ -89,10 +102,21 @@ export type MainToWorkerMessage =
       /** The engine's iteration limit at the time of the call, for the
        * lazy-stream helpers of the compiled-code runtime. */
       iterationLimit?: number;
+      /** `javascript` only: the count of values written per cell. Absent
+       * means the kernel's `broadcastOutputs`, or 1. */
+      outputs?: number;
+      /** The batch whose shared inputs the cells read, when the batch has
+       * shared inputs. The worker keeps them under this id until `release`. */
+      batch?: number;
+      /** The shared inputs of `batch`: sent with the first task of the
+       * batch that a worker receives, absent from its later tasks. */
+      shared?: WireShared;
     }
   /** Forget kernel or fit problem `id`: its compilation result was
    * collected, or the fit is over. */
-  | { type: 'unload'; id: number };
+  | { type: 'unload'; id: number }
+  /** Forget the shared inputs of batch `batch`: the batch is over. */
+  | { type: 'release'; batch: number };
 
 export type WorkerToMainMessage =
   | {
