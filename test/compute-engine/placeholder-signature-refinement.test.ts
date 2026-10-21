@@ -345,10 +345,15 @@ describe('lattice invariants preserved', () => {
     expect(ce.type('unknown').matches('number')).toBe(false);
   });
 
-  test('absence is opt-in: nothing/missing do not match unknown', () => {
+  test('absence is opt-in for a contract; unknown restricts nothing', () => {
+    // `expression` and `value` are the content contracts that exclude the
+    // markers; `unknown` is a type still to be inferred and every type is a
+    // subtype of it (user decision D1, 2026-10-21).
     const ce = freshEngine();
-    expect(ce.type('nothing').matches('unknown')).toBe(false);
-    expect(ce.type('missing').matches('unknown')).toBe(false);
+    expect(ce.type('nothing').matches('expression')).toBe(false);
+    expect(ce.type('missing').matches('expression')).toBe(false);
+    expect(ce.type('nothing').matches('unknown')).toBe(true);
+    expect(ce.type('missing').matches('unknown')).toBe(true);
     expect(ce.type('nothing').matches('any')).toBe(true);
     expect(ce.type('missing').matches('any')).toBe(true);
   });

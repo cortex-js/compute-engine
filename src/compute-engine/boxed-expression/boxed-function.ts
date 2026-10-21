@@ -214,6 +214,7 @@ import { internType, isInternedType } from '../../common/type/intern.js';
 import {
   couldMatch,
   isSubtype,
+  provablyAdmits,
   resolveTypeReference,
 } from '../../common/type/subtype.js';
 import {
@@ -11524,7 +11525,7 @@ function declaredScalarConformance(
       p === undefined ||
       runtimeCheckExemptParam(p) ||
       isSubtype(p, 'number') ||
-      isSubtype('missing', p)
+      provablyAdmits('missing', p)
     )
       continue;
     return ce.typeError(p, ops[i].type, ops[i]);

@@ -12,7 +12,13 @@ import {
 import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
-import { isSubtype, provablyDisjoint, widen } from './subtype.js';
+import {
+  isSubtype,
+  joinUnresolvedArm,
+  provablyAdmits,
+  provablyDisjoint,
+  widen,
+} from './subtype.js';
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
@@ -611,10 +617,15 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 
   if (type.kind === 'tuple') {
     const slots = type.elements.map((x) => x.type);
-    const joined = widen(...slots);
+    // The slots are a value's cells: an `unknown` slot beside absence
+    // markers only is kept as an arm (`joinUnresolvedArm`), so
+    // `tuple<unknown, missing>` reads `missing | unknown`, not `missing`;
+    // beside value slots it reads as those values (`(1, x)` with a free
+    // `x` stays numeric).
+    const joined = joinUnresolvedArm(slots, true);
     // Evidence widening absorbs Nothing; reading tuple slots must preserve it.
-    return !isSubtype('nothing', joined) &&
-      slots.some((t) => isSubtype('nothing', t))
+    return !provablyAdmits('nothing', joined) &&
+      slots.some((t) => provablyAdmits('nothing', t))
       ? {
           kind: 'union',
           types: [
@@ -1199,7 +1210,7 @@ export function widenCellsWithMarker(t: Readonly<Type>): Type {
         };
     }
   }
-  if (isSubtype('missing', t)) return t as Type;
+  if (provablyAdmits('missing', t)) return t as Type;
   return { kind: 'union', types: [t as Type, 'missing'] };
 }
 

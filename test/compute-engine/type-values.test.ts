@@ -207,10 +207,14 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
   });
 
   test('the relation is the one annotations use (2026-08-17 rulings)', () => {
-    // The unknown relation is unchanged; bare list and list<any> agree.
+    // `unknown` restricts nothing (user decision D1, 2026-10-21): `any` and
+    // `unknown` are mutual subtypes; bare list and list<any> agree.
     expect(ev(['Subtype', { str: 'any' }, { str: 'unknown' }]).toString()).toBe(
-      '"False"'
+      '"True"'
     );
+    expect(
+      ev(['Subtype', { str: 'unknown' }, { str: 'expression' }]).toString()
+    ).toBe('"False"');
     expect(
       ev(['Subtype', { str: 'list' }, { str: 'list<any>' }]).toString()
     ).toBe('"True"');

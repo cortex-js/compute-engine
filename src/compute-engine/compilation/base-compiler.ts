@@ -89,6 +89,7 @@ import {
 import {
   couldMatch,
   isSubtype,
+  provablyAdmits,
   isSubtypeOfBroadcastOrIndexed,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
@@ -10680,13 +10681,14 @@ export class BaseCompiler {
     if (
       h === 'Tuple' &&
       (args.some(
-        (x, i) => isSubtype('nothing', compilationType(x)) && !readsNoNothing(i)
+        (x, i) =>
+          provablyAdmits('nothing', compilationType(x)) && !readsNoNothing(i)
       ) ||
         (typeof tupleType === 'object' &&
           tupleType.kind === 'tuple' &&
           tupleType.elements.some(
             (x, i) =>
-              isSubtype('nothing', x.type) &&
+              provablyAdmits('nothing', x.type) &&
               !(tupleType.elements.length === args.length && readsNoNothing(i))
           )))
     )
@@ -10733,10 +10735,10 @@ export class BaseCompiler {
       ): boolean => {
         const t = resolveTypeForCompilation(type);
         if (seen.has(t)) return false;
-        if (isSubtype('nothing', t)) return true;
+        if (provablyAdmits('nothing', t)) return true;
         if (typeof t !== 'object') return false;
         if (t.kind === 'tuple')
-          return t.elements.some((e) => isSubtype('nothing', e.type));
+          return t.elements.some((e) => provablyAdmits('nothing', e.type));
         if (t.kind === 'union') {
           const next = new Set(seen).add(t);
           return t.types.some((arm) => pairMayOmit(arm, next));
@@ -10759,13 +10761,13 @@ export class BaseCompiler {
         if (
           typeof t === 'object' &&
           t.kind === 'tuple' &&
-          t.elements.some((slot) => isSubtype('nothing', slot.type))
+          t.elements.some((slot) => provablyAdmits('nothing', slot.type))
         )
           return true;
         const element = collectionElementType(t);
         return (
           element !== undefined &&
-          (isSubtype('nothing', element) ||
+          (provablyAdmits('nothing', element) ||
             (paired && pairMayOmit(element)) ||
             (h === 'Tabulate' &&
               collectionMayOmit(element, false, new Set(seen).add(t))))
@@ -10794,7 +10796,7 @@ export class BaseCompiler {
                 true ||
                 callbackResult === undefined ||
                 callbackResult === 'unknown' ||
-                isSubtype('nothing', callbackResult)))) &&
+                provablyAdmits('nothing', callbackResult)))) &&
           !BaseCompiler.callbackExcludesNothing(args[callbackIndex], target))
       )
         throw new Error(
@@ -13241,7 +13243,7 @@ export class BaseCompiler {
         throw new Error(
           'Could not compile `IsMissing`: expected exactly one argument'
         );
-      if (isSubtype('nothing', compilationType(args[0])))
+      if (provablyAdmits('nothing', compilationType(args[0])))
         throw new Error(
           `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' ` +
             `cannot distinguish a possible 'Nothing' input from an absent datum.`
@@ -13266,7 +13268,9 @@ export class BaseCompiler {
           'Could not compile `Coalesce`: expected at least one argument'
         );
       if (
-        args.slice(0, -1).some((a) => isSubtype('nothing', compilationType(a)))
+        args
+          .slice(0, -1)
+          .some((a) => provablyAdmits('nothing', compilationType(a)))
       )
         throw new Error(
           `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' ` +

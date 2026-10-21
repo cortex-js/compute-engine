@@ -1,14 +1,22 @@
 # Inference Roadmap — Collection Elements and Placeholder Refinement
 
 _Drafted 2026-08-18, immediately after the bare-type synonym ruling shipped
-(bare `list` ≡ `list<unknown>`; `any` strictly above `unknown` — see the
-"Bare collection constructors: RULED AND IMPLEMENTED 2026-08-17" entry in
-`ROADMAP.md` and `doc/08-guide-types.md` §"`unknown` vs `any`, and What a
-Bare Type Means"). Status, updated 2026-09-05: **the Phase 0 guard, Phase 1
+(at that time bare `list` was `list<unknown>` and `any` sat strictly above
+`unknown`). Status, updated 2026-09-05: **the Phase 0 guard, Phase 1
 and Phase 2 are SHIPPED (2026-08-18). The row 4 question (union parameters)
 is CLOSED with no change needed (§4). Phase 3 (use-driven element
 inference) is IMPLEMENTED (2026-09-05, §5). Only the full Phase 0 bounds
 remain OPEN, and they stay deferred (§8.2).**_
+
+_Updated 2026-10-21: `unknown` is an inference marker
+(`docs/plans/2026-10-21-unknown-inference-marker.md`). Every type is a
+subtype of it, `any` and the absence markers included, and it proves no
+contract. The bare collection names, their explicit `<unknown>` forms and
+bare `tuple`/`record` all refine from each assignment (the third row of the
+table below is implemented by `placeholderSkeletonOf` and
+`refineConstructorPlaceholder` in `boxed-value-definition.ts`); `list<any>`
+stays the contract. Statements below about `list<unknown>` being a fixed
+content type or the bare name's synonym describe the state of August 2026._
 
 ## 1. The design intent this roadmap serves
 
@@ -24,7 +32,7 @@ That pair is already ruled and implemented at two granularities
 |---|---|---|
 | Whole symbol | `x: unknown` narrows from use, exactly like an undeclared symbol | the movability gate `inferredType \|\| type.isUnknown` (`assignValue` in `engine-declarations.ts`, mirrored wherever "can a use move this type?" is asked) |
 | Signature slot | `f: (unknown) -> unknown` has each slot refined per-position by the assigned definition. The declaration as written is kept as the signature skeleton, and the refined signature is derived from the current function value on each read, so it follows the body (a head the body calls that is bound later changes the result) and each re-assignment refines the skeleton again | `refineDeclaredPlaceholders` (`boxed-expression/effects-inference.ts`), run at the three install routes and in `matchesDeclaredTypeAxes`; `_signatureSkeleton` on the value and operator definitions |
-| **Constructor argument** | **`list<unknown>` (= bare `list`) — the element slot NEVER refines** | none — this roadmap |
+| **Constructor argument** | bare `list`, `list<unknown>`, bare `tuple`/`record`: the element slot (or the slots and fields) refines from each assignment; `list<any>` is the contract | `placeholderSkeletonOf` + `refineConstructorPlaceholder` (`boxed-expression/boxed-value-definition.ts`); Phase 1 for the bare names (2026-08-18), the explicit `<unknown>` forms, `tuple`/`record` and aliases on 2026-10-21 |
 
 The missing third row is a granularity gap, not a semantic disagreement: the
 user-stated intent (2026-08-18) is that `let a: list` means "definitely a
@@ -34,8 +42,9 @@ The symmetry worth preserving, because it makes the whole system teachable:
 
 - `(any) -> any` is the function **contract**; `(unknown) -> unknown` is the
   refinable **placeholder**.
-- `list<any>` is the collection **contract** (absence-admitting, never
-  moves); bare `list` (= `list<unknown>`) is the refinable **placeholder**.
+- `list<any>` is the collection **contract** (never moves); bare `list` and
+  the explicit `list<unknown>` are the refinable **placeholder**. The three
+  denote the same set of values.
 
 Same pair, same semantics, one level down.
 

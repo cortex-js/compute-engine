@@ -172,15 +172,11 @@ describe('isPrimitiveSubtype and isSubtype agree (SYM P2-22)', () => {
 
   test('the unknown cells (the P2-22 disagreement) now agree in both directions', () => {
     for (const t of PRIMITIVE_TYPES) {
-      // `X <: unknown`: unknown is the top of the VALUE types — every
-      // primitive except the unit types `nothing` and `missing` (each a
-      // subtype only of `any` and itself) and `any` itself, which
-      // additionally admits the absence markers and therefore sits STRICTLY
-      // above `unknown` (lattice repair, 2026-08-17).
+      // `X <: unknown`: `unknown` is a type still to be inferred, which
+      // restricts nothing, so every primitive is a subtype of it, the unit
+      // types, `error` and `any` included (user decision D1, 2026-10-21).
       expect(isPrimitiveSubtype(t, 'unknown')).toBe(isSubtype(t, 'unknown'));
-      expect(isPrimitiveSubtype(t, 'unknown')).toBe(
-        t !== 'nothing' && t !== 'missing' && t !== 'any' && t !== 'error'
-      );
+      expect(isPrimitiveSubtype(t, 'unknown')).toBe(true);
       // `unknown <: X`: only `any`/`unknown`.
       expect(isPrimitiveSubtype('unknown', t)).toBe(isSubtype('unknown', t));
       expect(isPrimitiveSubtype('unknown', t)).toBe(

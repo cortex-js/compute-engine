@@ -31,8 +31,11 @@ describe('P0 — `missing` unit type in the lattice (I3)', () => {
   test('`missing` is a disjoint unit type (subtype only of any/itself)', () => {
     expect(isSubtype('missing', 'missing')).toBe(true);
     expect(isSubtype('missing', 'any')).toBe(true);
-    // Not a subtype of unknown, number, value, or nothing.
-    expect(isSubtype('missing', 'unknown')).toBe(false);
+    // Not a subtype of number, value, expression or nothing. It IS a subtype
+    // of `unknown`, a type still to be inferred that restricts nothing (user
+    // decision D1, 2026-10-21).
+    expect(isSubtype('missing', 'unknown')).toBe(true);
+    expect(isSubtype('missing', 'expression')).toBe(false);
     expect(isSubtype('missing', 'number')).toBe(false);
     expect(isSubtype('missing', 'value')).toBe(false);
     expect(isSubtype('missing', 'nothing')).toBe(false);
@@ -62,10 +65,14 @@ describe('P0 — subtype union-self-membership fix (prerequisite)', () => {
     expect(isSubtype('unknown', parseType('unknown | integer'))).toBe(true);
   });
 
-  test('order is load-bearing: nothing ⊄ unknown but unknown <: unknown', () => {
-    expect(isSubtype('nothing', 'unknown')).toBe(false);
-    expect(isSubtype('missing', 'unknown')).toBe(false);
+  test('order is load-bearing: nothing ⊄ expression, but every type <: unknown', () => {
+    expect(isSubtype('nothing', 'expression')).toBe(false);
+    expect(isSubtype('missing', 'expression')).toBe(false);
+    // `unknown` restricts nothing (user decision D1, 2026-10-21).
+    expect(isSubtype('nothing', 'unknown')).toBe(true);
+    expect(isSubtype('missing', 'unknown')).toBe(true);
     expect(isSubtype('unknown', 'unknown')).toBe(true);
+    expect(isSubtype('unknown', 'nothing')).toBe(false);
   });
 });
 

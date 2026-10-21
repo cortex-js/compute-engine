@@ -49,7 +49,11 @@ describe('isSubtype with an intersection on the right', () => {
       expect(typeToString(parseType(`${kind}<unknown>`))).toBe(
         `${kind}<unknown>`
       );
-      expect(ce.type(kind).matches(`${kind}<unknown>`)).toBe(false);
+      // An explicit `<unknown>` requests inference and restricts nothing
+      // (user decision D1, 2026-10-21): the three spellings denote one set of
+      // values.
+      expect(ce.type(kind).matches(`${kind}<unknown>`)).toBe(true);
+      expect(ce.type(`${kind}<unknown>`).matches(kind)).toBe(true);
       const source = `${kind}<any>`;
       expect(typeToString(parseType(source))).toBe(source);
       expect(ce.type(kind).matches(source)).toBe(true);
@@ -173,43 +177,55 @@ describe('intersection parameters at the call boundary', () => {
   });
 });
 
-describe('`any` / `unknown` lattice (repaired 2026-08-17)', () => {
-  // `unknown` is the top of the VALUE types; `any` sits STRICTLY above it,
-  // additionally admitting the absence markers. `any <: unknown` used to be
-  // (wrongly) true, which made the two mutual subtypes while they disagreed
-  // on `nothing` — so the relation was not transitive.
-  test('`any` is strictly above `unknown`', () => {
+describe('`any` / `unknown` lattice (inference marker, 2026-10-21)', () => {
+  // `unknown` is a type still to be inferred. As a set of values it restricts
+  // nothing, so every type is a subtype of it, the absence markers, `error`
+  // and `any` included (user decision D1, 2026-10-21,
+  // `docs/plans/2026-10-21-unknown-inference-marker.md`). `any` and
+  // `unknown` are mutual subtypes: the same set of values, two instructions
+  // (a contract, a request to infer). The reverse direction never holds: an
+  // unresolved type proves no contract.
+  test('`any` and `unknown` are mutual subtypes; `unknown` proves nothing', () => {
     expect(isSubtype('unknown', 'any')).toBe(true);
-    expect(isSubtype('any', 'unknown')).toBe(false);
+    expect(isSubtype('any', 'unknown')).toBe(true);
     expect(isSubtype('nothing', 'any')).toBe(true);
-    expect(isSubtype('nothing', 'unknown')).toBe(false);
+    expect(isSubtype('nothing', 'unknown')).toBe(true);
+    expect(isSubtype('missing', 'unknown')).toBe(true);
+    expect(isSubtype('error', 'unknown')).toBe(true);
+    expect(isSubtype('unknown', 'expression')).toBe(false);
+    expect(isSubtype('unknown', 'integer')).toBe(false);
+    expect(isSubtype('unknown', 'missing')).toBe(false);
   });
 
   test('transitivity holds through the list family', () => {
-    // The witness chain that used to break: with `any <: unknown`,
-    // `list<nothing> <: list<any> <: list<unknown>` both held while
-    // `list<nothing> <: list<unknown>` did not.
+    // The chain that broke in August (`any <: unknown` while `nothing` was
+    // not): every step holds now.
     expect(isSubtype('list<nothing>', 'list<any>')).toBe(true);
-    expect(isSubtype('list<any>', 'list<unknown>')).toBe(false);
-    expect(isSubtype('list<nothing>', 'list<unknown>')).toBe(false);
+    expect(isSubtype('list<any>', 'list<unknown>')).toBe(true);
+    expect(isSubtype('list<nothing>', 'list<unknown>')).toBe(true);
   });
 
-  test('a union with an absence arm is not a value type', () => {
-    // The blanket "everything <: unknown" rule must not admit a union whose
-    // arm is an absence marker — that is what keeps a Missing-bearing list
-    // out of the values-only bare `list`.
-    expect(isSubtype('integer | missing', 'unknown')).toBe(false);
+  test('a union with an absence arm fits unknown, not expression', () => {
+    // `expression` is the content contract that excludes the immediate
+    // markers; `unknown` restricts nothing.
+    expect(isSubtype('integer | missing', 'unknown')).toBe(true);
+    expect(isSubtype('integer | missing', 'expression')).toBe(false);
     expect(isSubtype('integer | string', 'unknown')).toBe(true);
     expect(isSubtype('list<integer | missing>', 'list')).toBe(true);
     expect(isSubtype('list<integer | missing>', 'list<any>')).toBe(true);
+    expect(isSubtype('list<integer | missing>', 'list<unknown>')).toBe(true);
+    expect(isSubtype('list<integer | missing>', 'list<expression>')).toBe(
+      false
+    );
   });
 
   test('bare constructors relate as unrestricted family contracts', () => {
     expect(isSubtype('list', 'list<any>')).toBe(true);
     expect(isSubtype('list<any>', 'list')).toBe(true);
-    expect(isSubtype('list', 'collection<unknown>')).toBe(false);
+    expect(isSubtype('list', 'collection<unknown>')).toBe(true);
     expect(isSubtype('list', 'list<integer>')).toBe(false);
-    expect(isSubtype('record', 'dictionary<unknown>')).toBe(false);
+    expect(isSubtype('list', 'list<expression>')).toBe(false);
+    expect(isSubtype('record', 'dictionary<unknown>')).toBe(true);
     expect(isSubtype('tuple', 'indexed_collection')).toBe(true);
     expect(isSubtype('tuple<integer, missing>', 'tuple')).toBe(true);
   });

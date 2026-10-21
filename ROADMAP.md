@@ -28,40 +28,39 @@ Option B's bare-family rules are implemented. The broader absence proposal is
 separate; the following items do not block the original tuple/record task:
 
 - `unknown` as an inference marker: residues of the 2026-10-21 migration
-  (`docs/plans/2026-10-21-unknown-inference-marker.md`, decisions D1 to D6).
-  (a) `Sort(tu)` with `tu: tuple<unknown, missing> := (1, Missing)` is still
-  typed `list<missing>` for the value `[1, Missing]`: the generic solver drops
-  a nested `unknown` bound when another slot says something (`joinBounds`,
-  `instantiate.ts`); `Filter(tu, p)` is fixed. (b) The literal `[1,
-  Error("x")]` is typed `list<unknown>`, which holds the value but is not the
-  literal's known type `list<error | integer>` (`classifyCellD`,
-  `library/collections.ts`). (c) The Epsil hover shows the refined type of a
-  placeholder declaration (`list<integer>`), not the written contract beside
-  it (rule R6 of the plan). (d) Decision D6 (rewrite the library's `-> unknown`
-  and `(unknown)` slots to `any` where no handler refines them) was not
-  applied: a result slot `-> any` is a contract that stops downstream
-  inference (`f(1) + 1` is `any`, where `-> unknown` gives
-  `broadcastable<number>`), and a parameter `any` narrows an inferable
-  operand to `any`, so the rewrite changes behavior; the inventory is in the
-  plan's section 5 and each site needs its own review. (e) A nested `unknown`
-  position (`tuple<unknown, integer>`, `list<list<unknown>>`,
-  `record{a: unknown}`) is unrestricted and does not refine from an
-  assignment yet (D2 scope).
-- Choose presence-assertion syntax and the default diagnostic/assignment
-  policy for possible absence (Q1/Q3).
+  (`docs/plans/2026-10-21-unknown-inference-marker.md`, decisions D1 to D6). (a)
+  `Sort(tu)` with `tu: tuple<unknown, missing> := (1, Missing)` is still typed
+  `list<missing>` for the value `[1, Missing]`: the generic solver drops a
+  nested `unknown` bound when another slot says something (`joinBounds`,
+  `instantiate.ts`); `Filter(tu, p)` is fixed. (b) The literal `[1, Error("x")]`
+  is typed `list<unknown>`, which holds the value but is not the literal's known
+  type `list<error | integer>` (`classifyCellD`, `library/collections.ts`). (c)
+  The Epsil hover shows the refined type of a placeholder declaration
+  (`list<integer>`), not the written contract beside it (rule R6 of the plan).
+  (d) Decision D6 (rewrite the library's `-> unknown` and `(unknown)` slots to
+  `any` where no handler refines them) was not applied: a result slot `-> any`
+  is a contract that stops downstream inference (`f(1) + 1` is `any`, where
+  `-> unknown` gives `broadcastable<number>`), and a parameter `any` narrows an
+  inferable operand to `any`, so the rewrite changes behavior; the inventory is
+  in the plan's section 5 and each site needs its own review. (e) A nested
+  `unknown` position (`tuple<unknown, integer>`, `list<list<unknown>>`,
+  `record{a: unknown}`) is unrestricted and does not refine from an assignment
+  yet (D2 scope).
+- Choose presence-assertion syntax and the default diagnostic/assignment policy
+  for possible absence (Q1/Q3).
 - Decide record-field omission, optional-field representation and an explicit
   key-removal operation; classify outstanding custom folds, Dot, ordering and
   structural conversions (Q5/Q10).
 - Define ordinary value capture on assignment, mutable-object boundaries and
   repeated/effectful view-read behavior (Q11).
 - Implement sticky evaluated unresolved-call results together with function
-  declaration hoisting across the sequential runner, whole-block interpreter
-  and compiler. Preserve earlier bindings, declared signatures and constructors.
+  declaration hoisting across the sequential runner, whole-block interpreter and
+  compiler. Preserve earlier bindings, declared signatures and constructors.
 - Add a distinct compiled representation of Nothing. Keep sound compiler
   refusals where omission cannot currently be represented. Audit iterator
   domains too: `Sum(f(x), Element(x, xs))` does not inspect `xs` for raw Nothing
-  positions in its current omission check. This gap also predates Option B;
-  the clause itself is binding syntax, not a collection operand.
+  positions in its current omission check. This gap also predates Option B; the
+  clause itself is binding syntax, not a collection operand.
 
 - The existing open-record relation still constrains only listed fields when
   comparing `record{a: integer}` with `dictionary<integer>`, although width
@@ -70,10 +69,10 @@ separate; the following items do not block the original tuple/record task:
   dictionary validation; changing the relation alone rejects valid dictionary
   literals and assignments. This independent pre-existing gap is deferred.
 
-- `Scan([Missing, Missing], Add)` retains its initial Missing entry but
-  reports a numeric vector type. The list control reproduces this before and
-  after Option B; the newly admitted all-absent tuple route exposes the same
-  gap. Include the uncombined seed in result typing in a separate absence fix.
+- `Scan([Missing, Missing], Add)` retains its initial Missing entry but reports
+  a numeric vector type. The list control reproduces this before and after
+  Option B; the newly admitted all-absent tuple route exposes the same gap.
+  Include the uncombined seed in result typing in a separate absence fix.
 - An assigned inferred callback can understate broadcast results at an opaque
   tuple source: define `g = x -> x + 10`, declare `t: tuple`, form `Map(g,t)`,
   then assign `t = ([1,2],3)`. The value is `[[11,12],13]`, but baseline typing
@@ -179,324 +178,343 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Tycho ledger rows 407 to 416 (OPEN — filed by Tycho 2026-10-20 and 2026-10-21 at its 0.158.0 and 0.159.0 adoptions; read from `~/dev/tycho/docs/COMPUTE_ENGINE.md` and all reproduced on the main tree 2026-10-20)
+### Tycho ledger rows 407 to 417 (OPEN — filed by Tycho 2026-10-20 and 2026-10-21 at its 0.158.0, 0.159.0 and 0.160.0 adoptions; read from `~/dev/tycho/docs/COMPUTE_ENGINE.md` and all reproduced on the main tree 2026-10-20)
 
-Each row is an ask of Tycho's Compute Engine ledger; its instrument is a
-script in Tycho's `scripts/repros/` named in the row, and the row closes when
-that script prints `READY` on an installed release. The readings below were
+Each row is an ask of Tycho's Compute Engine ledger; its instrument is a script
+in Tycho's `scripts/repros/` named in the row, and the row closes when that
+script prints `READY` on an installed release. The readings below were
 reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 
 - **407 — the grid of the `FindFit` `global` option is too coarse for a wide
   range. Phase A FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 9
   findings applied; design and measurements in
-  `docs/plans/2026-10-20-findfit-global-grid.md`: basin-aware spacing, the
-  phase of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of
-  8,000 points, a stratified 300-row sample with 24 re-scores; the deciding
-  cases pass in 45 to 70 ms, 1,000 rows over `[0.3, 628]` in about 300 ms).
-  Phase B (the scan on the worker pool, step 5) LANDED 2026-10-21, committed
-  `d4767dd06` (dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the
-  grid scan on `ce.workers` when the fit is shippable and separable; 1,000
-  rows over `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. The
-  residue (a POWER of a periodic function, `a cos(b x + c)²`, recorded the
-  inner function's period, so its basin was half as wide as the grid
-  assumed) is FIXED 2026-10-21 (dual-reviewed, 3 findings applied;
-  `composedPeriod()` in `nonlinear-fit.ts` reads the expression around the
-  periodic node as `k · sin(θ)^p · cos(θ)^q`, so a square, an absolute value
-  or a product of periodic functions of one argument get the period π or
-  π/2; CHANGELOG "Bug Fixes"). Still open from it, decision needed: an even
-  function applied on the OUTSIDE (`cos(cos θ)`, `sec(sin θ)`) has the
-  period π but still records 2π, because `Cos` and `Sec` of another
-  expression are not part of that form; should `Cos`, `Sec`, `Cosh` and
-  `Sech` count as ancestors that halve the period? Such models are rare.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
-  and `c` searched. The separable scan (`SEPARABLE_GRID` in
-  `src/compute-engine/nonlinear-fit.ts`, 400 × 40 points, 6 refinements)
-  finds the true `b = 2.2` over [0.3, 60] but not over [0.3, 120]; the basin
-  of the true minimum in `b` is about π/(span of x) = 0.3 wide, so a fixed
-  number of grid points over a wide range lands in it only by chance. Cost:
-  about 360 ms on 1,000 rows, over Tycho's 250 ms backstop, so Tycho scans a
-  sample of 500 rows and then fits locally on every row. Ask: space the grid
-  of a searched parameter by the basin width (for a parameter that
-  multiplies a variable inside a periodic function, a step of at most about
-  π/(span of that variable), or a refinement around the best cells), or an
-  option for the step or the number of grid points; and keep the cost
-  bounded on many rows (a scan on a sample, then a refinement on every row)
-  so Tycho can remove its sampling. This is the natural first use of step 5
-  of the worker-pool plan (`docs/plans/2026-10-20-worker-kernel-pool.md`,
-  section 5.5): the scan batches are the work the pool would spread.
+  `docs/plans/2026-10-20-findfit-global-grid.md`: basin-aware spacing, the phase
+  of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of 8,000
+  points, a stratified 300-row sample with 24 re-scores; the deciding cases pass
+  in 45 to 70 ms, 1,000 rows over `[0.3, 628]` in about 300 ms). Phase B (the
+  scan on the worker pool, step 5) LANDED 2026-10-21, committed `d4767dd06`
+  (dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the grid
+  scan on `ce.workers` when the fit is shippable and separable; 1,000 rows over
+  `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. The residue (a POWER of a
+  periodic function, `a cos(b x + c)²`, recorded the inner function's period, so
+  its basin was half as wide as the grid assumed) is FIXED 2026-10-21
+  (dual-reviewed, 3 findings applied; `composedPeriod()` in `nonlinear-fit.ts`
+  reads the expression around the periodic node as `k · sin(θ)^p · cos(θ)^q`, so
+  a square, an absolute value or a product of periodic functions of one argument
+  get the period π or π/2; CHANGELOG "Bug Fixes"). Still open from it, decision
+  needed: an even function applied on the OUTSIDE (`cos(cos θ)`, `sec(sin θ)`)
+  has the period π but still records 2π, because `Cos` and `Sec` of another
+  expression are not part of that form; should `Cos`, `Sec`, `Cosh` and `Sech`
+  count as ancestors that halve the period? Such models are rare.** Model
+  `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b` and `c` searched.
+  The separable scan (`SEPARABLE_GRID` in `src/compute-engine/nonlinear-fit.ts`,
+  400 × 40 points, 6 refinements) finds the true `b = 2.2` over [0.3, 60] but
+  not over [0.3, 120]; the basin of the true minimum in `b` is about π/(span of
+  x) = 0.3 wide, so a fixed number of grid points over a wide range lands in it
+  only by chance. Cost: about 360 ms on 1,000 rows, over Tycho's 250 ms
+  backstop, so Tycho scans a sample of 500 rows and then fits locally on every
+  row. Ask: space the grid of a searched parameter by the basin width (for a
+  parameter that multiplies a variable inside a periodic function, a step of at
+  most about π/(span of that variable), or a refinement around the best cells),
+  or an option for the step or the number of grid points; and keep the cost
+  bounded on many rows (a scan on a sample, then a refinement on every row) so
+  Tycho can remove its sampling. This is the natural first use of step 5 of the
+  worker-pool plan (`docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.5):
+  the scan batches are the work the pool would spread.
 - **409 — the difference of two index reads of an `unknown` symbol is typed
-  `number` (user decision 2026-10-20: NO engine change; a declared `unknown`
-  is an inference seed that each use narrows, and the type that means "a
-  number, a point or a list" is `any`; Tycho was told 2026-10-20 to declare
-  such heads `any`; CORRECTED 2026-10-21 by the user: the declaration for a
-  list head of unknown content is `list<value>`, not `any` or `list<any>`,
-  and Tycho's ledger row 409 carries the correction. The small item found
-  with it, `P[i]` over `P: list<any>`
-  or `P: any` typed `unknown` instead of `any`, is FIXED 2026-10-20, committed
-  `c240193f0` (dual-reviewed, 7 findings applied: also `Sum`/`Product`
-  of `any` terms, reads of `Rest`/`Take`/… of an inferred base, and a tuple of
-  such reads compiling again). Found with it: (a)
-  `Sum(P)` and `Mean(P)` with `P: list<any>` refuse to compile ("possible
-  'Nothing' elements require a distinct omission representation") because
-  `collectionMayOmit()` reads the element `any` as admitting `nothing`.
-  NOT A DEFECT (user, 2026-10-21): an `any` element admits the absence marker
-  by the 0.160.0 bare-type reading, and the right declaration, `list<value>`,
-  compiles (measured on the 0.160.0 bundle: `P[i]` is `missing | value`, the
+  `number` (user decision 2026-10-20: NO engine change; a declared `unknown` is
+  an inference seed that each use narrows, and the type that means "a number, a
+  point or a list" is `any`; Tycho was told 2026-10-20 to declare such heads
+  `any`; CORRECTED 2026-10-21 by the user: the declaration for a list head of
+  unknown content is `list<value>`, not `any` or `list<any>`, and Tycho's ledger
+  row 409 carries the correction. The small item found with it, `P[i]` over
+  `P: list<any>` or `P: any` typed `unknown` instead of `any`, is FIXED
+  2026-10-20, committed `c240193f0` (dual-reviewed, 7 findings applied: also
+  `Sum`/`Product` of `any` terms, reads of `Rest`/`Take`/… of an inferred base,
+  and a tuple of such reads compiling again). Found with it: (a) `Sum(P)` and
+  `Mean(P)` with `P: list<any>` refuse to compile ("possible 'Nothing' elements
+  require a distinct omission representation") because `collectionMayOmit()`
+  reads the element `any` as admitting `nothing`. NOT A DEFECT (user,
+  2026-10-21): an `any` element admits the absence marker by the 0.160.0
+  bare-type reading, and the right declaration, `list<value>`, compiles
+  (measured on the 0.160.0 bundle: `P[i]` is `missing | value`, the
   tuple-parameter call is valid, `Sum(P)`, `Mean(P)` and `P[i] + 1` compile).
   (b) `Filter(P, x ↦ x > 0)` typed `list<!nothing>` and `At(Filter(…), 1)`
-  `!nothing` with `P` inferred: NO LONGER REPRODUCES at `932c56ecf`
-  (2026-10-21, after the 0.160.0 bare-type work): with `P` inferred from
-  `P[i] - P[j]` (`indexed_collection<number>`) the filter is `list<number>`
-  and its element `number`; closed.)** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
-  `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
-  `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type`
-  error (`isValid` false). Control: with `P: list<tuple<number, number>>`
-  the difference types `missing | tuple<number, number>` and the call is
-  valid; `Q - P_0` with `Q: unknown` and `P_0` a tuple already types
-  `number | tuple<number, number>`. Ask: arithmetic over two `unknown`
-  operands stays `unknown` (or a union over the shapes arithmetic admits) so
-  that a point-valued result is admitted by a tuple parameter. The Desmos
-  importer declares every value head `unknown` before the rows are
-  normalized, so `neyret/uussbs3e0g` error-paused.
+  `!nothing` with `P` inferred: NO LONGER REPRODUCES at `932c56ecf` (2026-10-21,
+  after the 0.160.0 bare-type work): with `P` inferred from `P[i] - P[j]`
+  (`indexed_collection<number>`) the filter is `list<number>` and its element
+  `number`; closed.)** With `P: unknown`, `i, j: integer`, `P[i]` types
+  `unknown` but `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
+  `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type` error
+  (`isValid` false). Control: with `P: list<tuple<number, number>>` the
+  difference types `missing | tuple<number, number>` and the call is valid;
+  `Q - P_0` with `Q: unknown` and `P_0` a tuple already types
+  `number | tuple<number, number>`. Ask: arithmetic over two `unknown` operands
+  stays `unknown` (or a union over the shapes arithmetic admits) so that a
+  point-valued result is admitted by a tuple parameter. The Desmos importer
+  declares every value head `unknown` before the rows are normalized, so
+  `neyret/uussbs3e0g` error-paused.
 - **410 — with `n` declared a list, a subscripted BINDER `n_0` is read as
   `At(n, 0)`.** `\sum_{n_0=1}^{3} n_0` with `n: list<number>` parses to
-  `Sum(At(n, 0), Limits(Nothing, 1, 3))` and evaluates to `3 n[0]`; the
-  binder of `[n_0^2 for n_0 = [1,2,3]]`, a product index and a `with` local
-  fold the same way; with `n` undeclared each keeps `n_0`. Ask: in a binder
-  position (comprehension variable, `Sum`/`Product` index, `with` local)
-  keep a subscripted name whole, whatever its base is declared as. Tycho
-  renames such binders before the parse as a workaround (`art/lrfx01y3cv`).
-- **410: FIXED 2026-10-20, committed `6d5c6d542` (dual-reviewed, 8
-  findings applied; CHANGELOG "Bug Fixes"; test
-  `test/compute-engine/tycho-row-410-binder-subscript.test.ts`).** Two
-  residues of the same defect, (a) the first row of a `cases` block and (b)
-  a set-builder whose variable appears only in the condition, FIXED
-  2026-10-21 (user decision 2026-10-21 to fix both; the same test file; an
-  assignment row of a `cases` environment gets a second reading, the block
-  local, which the block branch of the `cases` parser swaps in, the stored
-  second reading this entry asked for, through the parser's
-  `environmentName()` and `blockRowAlternative()`; a membership of a
-  set-builder condition names the variable when the body reads it). (c) Found 2026-10-21 when the fix was pre-run against the
-  published 0.160.0 package with Tycho's instrument: Tycho's own
-  `\\operatorname{with}` parselet (a custom infix dictionary entry in
-  `~/dev/tycho/src/graph-paper/desmos-import/with-dictionary.ts`, which
-  parses `expr with a = v` to `Block(Declare(a), Assign(a, v), expr)`)
-  cannot use the fix: the body is parsed before the clause, so with `n` a
-  list the body already holds `At(n, 0)`, and `parser.parseSymbol()` cannot
-  read `n_{0}` as a new name, so the parselet returns `null` and the row is
-  an `unexpected-operator` error (on 0.159.0 and 0.160.0 alike). The two
-  parser members the fix added for the `where` clause, `_binderSymbol()`
-  (the name an element access spelled as a subscript stands for in a binder
-  position) and `_rebindSubscripts()` (the rewrite of those accesses in a
-  body), are internal, and Tycho does not call underscore members. Decision
-  needed: publish both as parser API for custom binder parselets (the
-  recommendation; a rename, a public type in `latex-syntax/types.ts`, and a
-  paragraph in the custom-dictionary guide), or have Tycho spell its `with`
-  through the `where` reading. Until then Tycho keeps its pre-parse rename
-  for the `with` local only. User 2026-10-21: goes into a prompt follow-up
-  release together with rows 414 and 415; Tycho was told. FIXED 2026-10-21
-  (uncommitted, session ce-POC): `binderSymbol()` and `rebindSubscripts()`
-  are public, required members of `Parser` (the underscore names are gone;
-  CHANGELOG "New Features"; test
+  `Sum(At(n, 0), Limits(Nothing, 1, 3))` and evaluates to `3 n[0]`; the binder
+  of `[n_0^2 for n_0 = [1,2,3]]`, a product index and a `with` local fold the
+  same way; with `n` undeclared each keeps `n_0`. Ask: in a binder position
+  (comprehension variable, `Sum`/`Product` index, `with` local) keep a
+  subscripted name whole, whatever its base is declared as. Tycho renames such
+  binders before the parse as a workaround (`art/lrfx01y3cv`).
+- **410: FIXED 2026-10-20, committed `6d5c6d542` (dual-reviewed, 8 findings
+  applied; CHANGELOG "Bug Fixes"; test
+  `test/compute-engine/tycho-row-410-binder-subscript.test.ts`).** Two residues
+  of the same defect, (a) the first row of a `cases` block and (b) a set-builder
+  whose variable appears only in the condition, FIXED 2026-10-21 (user decision
+  2026-10-21 to fix both; the same test file; an assignment row of a `cases`
+  environment gets a second reading, the block local, which the block branch of
+  the `cases` parser swaps in, the stored second reading this entry asked for,
+  through the parser's `environmentName()` and `blockRowAlternative()`; a
+  membership of a set-builder condition names the variable when the body reads
+  it). (c) Found 2026-10-21 when the fix was pre-run against the published
+  0.160.0 package with Tycho's instrument: Tycho's own `\\operatorname{with}`
+  parselet (a custom infix dictionary entry in
+  `~/dev/tycho/src/graph-paper/desmos-import/with-dictionary.ts`, which parses
+  `expr with a = v` to `Block(Declare(a), Assign(a, v), expr)`) cannot use the
+  fix: the body is parsed before the clause, so with `n` a list the body already
+  holds `At(n, 0)`, and `parser.parseSymbol()` cannot read `n_{0}` as a new
+  name, so the parselet returns `null` and the row is an `unexpected-operator`
+  error (on 0.159.0 and 0.160.0 alike). The two parser members the fix added for
+  the `where` clause, `_binderSymbol()` (the name an element access spelled as a
+  subscript stands for in a binder position) and `_rebindSubscripts()` (the
+  rewrite of those accesses in a body), are internal, and Tycho does not call
+  underscore members. Decision needed: publish both as parser API for custom
+  binder parselets (the recommendation; a rename, a public type in
+  `latex-syntax/types.ts`, and a paragraph in the custom-dictionary guide), or
+  have Tycho spell its `with` through the `where` reading. Until then Tycho
+  keeps its pre-parse rename for the `with` local only. User 2026-10-21: goes
+  into a prompt follow-up release together with rows 414 and 415; Tycho was
+  told. FIXED 2026-10-21 (uncommitted, session ce-POC): `binderSymbol()` and
+  `rebindSubscripts()` are public, required members of `Parser` (the underscore
+  names are gone; CHANGELOG "New Features"; test
   `test/compute-engine/latex-syntax/custom-binder-parselet.test.ts`, a `with`
   entry of the importer's shape; guide section "Binding a Name in a Custom
-  Entry" in `doc/07-guide-latex-syntax.md`). Tycho's half: its `with`
-  parselet reads the binding with `parseExpression()`, then `binderSymbol()`
-  on the left-hand side and `rebindSubscripts()` on the body.
+  Entry" in `doc/07-guide-latex-syntax.md`). Tycho's half: its `with` parselet
+  reads the binding with `parseExpression()`, then `binderSymbol()` on the
+  left-hand side and `rebindSubscripts()` on the body.
 - **411 — on `interval-js`, an ordered comparison with an operand that is
-  undefined over the whole interval answers `maybe` (user decision
-  2026-10-20, with row 413: an `empty` operand of `<`, `≤`, `>`, `≥`, `=`
-  gives a definite false; `≠` and `partial` unchanged). FIXED 2026-10-20 with row 413, committed
-  `c240193f0` (dual-reviewed, 7 findings applied;
-  `docs/ERROR-MODEL.md` records the decision). The two `interval-js` sites
-  that were listed as residues (`integrate.ts` rebuilding `{ kind: v.kind }`
-  without the `missing` flag, and `toIntervalValue` writing a plain `empty`)
-  were checked on 2026-10-21 and are NOT defects: an integral adds up its
-  integrand, and the interpreter's `Sum`, `NIntegrate` and `Missing + 1` of
-  an absent value are all `NaN`, so a comparison with them is `False` on
-  every route; and the runner of compiled code removes the flag from every
-  `empty` it returns (`freshIntervalValue`, `run-support.ts`), as a test
-  pins. The comments of both sites now say so, and
-  `test/compute-engine/interval-missing-flag.test.ts` locks the parity.
-  Found by that check, decisions needed: (i) the interpreter leaves an
-  integral whose integrand has no value symbolic, even under `.N()`
-  (`Integrate(Which(t > 5, 1), Limits(t, 0, 1)).N()` stays unevaluated,
-  the `sawNumeric` guard of `library/calculus.ts` around line 2325), where
+  undefined over the whole interval answers `maybe` (user decision 2026-10-20,
+  with row 413: an `empty` operand of `<`, `≤`, `>`, `≥`, `=` gives a definite
+  false; `≠` and `partial` unchanged). FIXED 2026-10-20 with row 413, committed
+  `c240193f0` (dual-reviewed, 7 findings applied; `docs/ERROR-MODEL.md` records
+  the decision). The two `interval-js` sites that were listed as residues
+  (`integrate.ts` rebuilding `{ kind: v.kind }` without the `missing` flag, and
+  `toIntervalValue` writing a plain `empty`) were checked on 2026-10-21 and are
+  NOT defects: an integral adds up its integrand, and the interpreter's `Sum`,
+  `NIntegrate` and `Missing + 1` of an absent value are all `NaN`, so a
+  comparison with them is `False` on every route; and the runner of compiled
+  code removes the flag from every `empty` it returns (`freshIntervalValue`,
+  `run-support.ts`), as a test pins. The comments of both sites now say so, and
+  `test/compute-engine/interval-missing-flag.test.ts` locks the parity. Found by
+  that check, decisions needed: (i) the interpreter leaves an integral whose
+  integrand has no value symbolic, even under `.N()`
+  (`Integrate(Which(t > 5, 1), Limits(t, 0, 1)).N()` stays unevaluated, the
+  `sawNumeric` guard of `library/calculus.ts` around line 2325), where
   `NIntegrate` of the same integrand is `NaN` and the compiled routes give
   `NaN`/`'false'`; should such an integral be `NaN` under `.N()`? (ii) the
-  interval fallback never answers `'true'`/`'false'`/`'maybe'` for a
-  declined comparison: `Greater(Fibonacci(x), 0)` at [5, 5] gives
-  `{kind: 'entire'}` (booleans map to `entire` on purpose, and the public
-  `IntervalValue` type has no answer strings although compiled code returns
-  them); should the fallback map `True`/`False` to the answer strings, which
-  changes the public type? (iii) with `x := 0.5` and `w` assigned
-  `Which(x > 5, 1)`, `Block(w := Which(x > 5, 1); w > 0)` evaluates to
-  `False` (`readComparisonAbsence` reads `w` as a numeric slot that can hold
-  `Missing`, so the `Missing` counts as `NaN`) but
+  interval fallback never answers `'true'`/`'false'`/`'maybe'` for a declined
+  comparison: `Greater(Fibonacci(x), 0)` at [5, 5] gives `{kind: 'entire'}`
+  (booleans map to `entire` on purpose, and the public `IntervalValue` type has
+  no answer strings although compiled code returns them); should the fallback
+  map `True`/`False` to the answer strings, which changes the public type? (iii)
+  with `x := 0.5` and `w` assigned `Which(x > 5, 1)`,
+  `Block(w := Which(x > 5, 1); w > 0)` evaluates to `False`
+  (`readComparisonAbsence` reads `w` as a numeric slot that can hold `Missing`,
+  so the `Missing` counts as `NaN`) but
   `Block(w := Which(x > 5, 1); If(w > 0, 1, 0))` gives the absent-condition
-  error (`evaluateCondition`, `library/control-structures.ts` around line
-  1610, rebuilds the comparison from evaluated operands and loses the slot
-  type); the `javascript` target (`NaN`, no arm) and `interval-js`
-  (`'maybe'`) agree with the `If` reading. Whichever reading is chosen for a
-  variable whose type admits `Missing` beside a number, the standalone
-  comparison and the branch condition must agree.** `0 < \sqrt{x}` at
-  the point interval [-1, -1] gives `"maybe"`; the `javascript` target gives
-  `false` (`NaN > 0`), and Desmos reads a comparison with an undefined value
-  as false. Ask: for `<`, `≤`, `>`, `≥` and `=`, an `empty` operand gives a
-  definite false (`≠` is not part of the ask). Tycho's restriction masks
-  read such a comparison as false as a workaround (`neyret/3qkygakl9m`).
+  error (`evaluateCondition`, `library/control-structures.ts` around line 1610,
+  rebuilds the comparison from evaluated operands and loses the slot type); the
+  `javascript` target (`NaN`, no arm) and `interval-js` (`'maybe'`) agree with
+  the `If` reading. Whichever reading is chosen for a variable whose type admits
+  `Missing` beside a number, the standalone comparison and the branch condition
+  must agree.** `0 < \sqrt{x}` at the point interval [-1, -1] gives `"maybe"`;
+  the `javascript` target gives `false` (`NaN > 0`), and Desmos reads a
+  comparison with an undefined value as false. Ask: for `<`, `≤`, `>`, `≥` and
+  `=`, an `empty` operand gives a definite false (`≠` is not part of the ask).
+  Tycho's restriction masks read such a comparison as false as a workaround
+  (`neyret/3qkygakl9m`).
 - **412 — the derivative rule for `Sum` reads a declared symbol as the index
-  when a called function's body names it.** With `k: real` assigned 2, `x:
-  real`, `g := a ↦ a k x`: `\sum_{k=1}^{5} g(k)` evaluates to `30x`
-  (correct), but `d/dx` of it evaluates to `55` (Σ k²: the body of `g`,
-  inlined under the binder, reads the slider `k` as the index); with the
-  index `j` it is `30`. The "valueless" case (`k` declared without a value,
-  2 substituted after the derivative) captures too. Found when Tycho tried
-  to remove its term-by-term step after row 405 shipped in 0.159.0. Ask:
-  the derivative of a call under a binder keeps the binder's index distinct
-  from a declared symbol of the same name that the callee's body reads
-  (rename the index, or substitute the argument before the body is
-  inlined). The fix of 2026-10-20 (`928a5c29c`, `D` follows its variable's
-  name into a called body) is where the capture happens.
-- **412, found while fixing it (2026-10-20): the EVALUATION of `Integrate`
-  and `Limit` captures the same way.** With `k: real` assigned 2 and `g := a
-  ↦ a k x`: `\\int_0^1 g(k)\\,dk` evaluates to `x/3` (the body's slider `k`
-  read as the integration variable; with the variable `t` it is `x`), the
+  when a called function's body names it.** With `k: real` assigned 2,
+  `x: real`, `g := a ↦ a k x`: `\sum_{k=1}^{5} g(k)` evaluates to `30x`
+  (correct), but `d/dx` of it evaluates to `55` (Σ k²: the body of `g`, inlined
+  under the binder, reads the slider `k` as the index); with the index `j` it is
+  `30`. The "valueless" case (`k` declared without a value, 2 substituted after
+  the derivative) captures too. Found when Tycho tried to remove its
+  term-by-term step after row 405 shipped in 0.159.0. Ask: the derivative of a
+  call under a binder keeps the binder's index distinct from a declared symbol
+  of the same name that the callee's body reads (rename the index, or substitute
+  the argument before the body is inlined). The fix of 2026-10-20 (`928a5c29c`,
+  `D` follows its variable's name into a called body) is where the capture
+  happens.
+- **412, found while fixing it (2026-10-20): the EVALUATION of `Integrate` and
+  `Limit` captures the same way.** With `k: real` assigned 2 and
+  `g := a ↦ a k x`: `\\int_0^1 g(k)\\,dk` evaluates to `x/3` (the body's slider
+  `k` read as the integration variable; with the variable `t` it is `x`), the
   indefinite `\\int g(k)\\,dk` mixes the two (`-x k³/6 + k x k²/2`), and
-  `\\lim_{k \\to 1} g(k)` is `x` (expected `2x`; `k x` when `k` has no
-  value). The 2026-09-21 decision says an index never reads a global inside
-  a called function. `Sum` and `Product` do not capture (they call `g`
-  instead of expanding its body). Also seen: with `g` DECLARED as a function
-  first, `\\int_0^1 g(t)\\,dt` stays unevaluated for every variable name.
-- **Found 2026-10-20 while fixing row 410 (not a Tycho row): an integral
-  with no differential whose integrand is a sum parses to garbage.**
-  `\\int \\sin x + 1` and `\\int x^2 + 1` parse to
-  `Add(Integrate(Add(), Nothing), Sin(x), 1)`: in `parseIntegral()`
-  (`latex-syntax/dictionary/definitions-calculus.ts`, the `Add` branch) the
-  test `if (indexes) rest.push(op)` checks an array, which is always true, so
-  every term goes to `rest` and `parseSubintegrand()` never runs. FIXED
-  2026-10-20, committed `6d5c6d542` (dual-reviewed, 8 findings
+  `\\lim_{k \\to 1} g(k)` is `x` (expected `2x`; `k x` when `k` has no value).
+  The 2026-09-21 decision says an index never reads a global inside a called
+  function. `Sum` and `Product` do not capture (they call `g` instead of
+  expanding its body). Also seen: with `g` DECLARED as a function first,
+  `\\int_0^1 g(t)\\,dt` stays unevaluated for every variable name.
+- **Found 2026-10-20 while fixing row 410 (not a Tycho row): an integral with no
+  differential whose integrand is a sum parses to garbage.** `\\int \\sin x + 1`
+  and `\\int x^2 + 1` parse to `Add(Integrate(Add(), Nothing), Sin(x), 1)`: in
+  `parseIntegral()` (`latex-syntax/dictionary/definitions-calculus.ts`, the
+  `Add` branch) the test `if (indexes) rest.push(op)` checks an array, which is
+  always true, so every term goes to `rest` and `parseSubintegrand()` never
+  runs. FIXED 2026-10-20, committed `6d5c6d542` (dual-reviewed, 8 findings
   applied; CHANGELOG "Bug Fixes"). Two pre-existing parser items found by the
   fix, not fixed, need a decision: (a) `\\int dx` and `\\int (dx)` parse to an
   `unexpected-command` error instead of `Integrate(1, x)`; (b) with
   `diagnostics: true`, the `d` of a differential inside a fraction
   (`\\int \\frac{dx}{x}`) is reported as an undeclared symbol `d`, because the
-  pruning of the dummy variable does not know the `d` token; pruning every
-  `d` in the integrand span would hide a real free variable named `d`.
-- **412, the `Integrate`/`Limit` evaluation capture: FIXED 2026-10-20,
-  committed `6d5c6d542` (dual-reviewed, 8 findings applied; CHANGELOG "Bug
-  Fixes"; test `test/compute-engine/integrate-limit-user-function-capture.test.ts`).
-  The derivative capture of row 412 itself is FIXED the same way
-  (`derivative.ts`, `renameCapturedIndexes()`, dual-reviewed, 5 findings
-  applied). The three items found with the evaluation fix are FIXED
-  2026-10-21 (dual-reviewed, 10 findings applied; CHANGELOG "Bug Fixes"):
-  (a) `Solve` renames a captured unknown (`solveWithRenamedUnknowns()`,
-  `solve-domain.ts`); (b) `Solve(t x = 1, t)` with declared reals
-  (`isRealWhereNumber()`, `solve.ts`); (c) the bounds of a `Limits` clause
-  and the collection of an `Element` clause of `Sum`, `Product`, `Integrate`
-  and `NDSolveFunction` read the enclosing symbol (`box.ts`,
-  `binding-sites.ts`, and every walk that tracks shadowed names). Found by
-  that round, still open: `Solve(t^3 x = 1, t)` with `t, x: real` stays
-  unevaluated because the `Root` type handler (`library/arithmetic.ts`)
-  types `Root(1/x, 3)` as `number`, wider than needed; with `k := 2`,
-  `Sum(j, Element(j, Range(1, k)))` gives `sum(j)` while the same sum over
-  the list `[1, k]` gives `3` (a `Range` with a symbolic bound is not
-  evaluated in the clause; not a capture defect); and four integration
-  helpers (`bindsVariableInOperand` and `evaluateInnerIntegrals` in
-  `calculus.ts`, `binds` in `piecewise-integrate.ts`, `special-integrate.ts`
-  around line 103) still treat a whole clause as bound when they skip an
-  inner binder's operand, which at worst skips an optimization.
+  pruning of the dummy variable does not know the `d` token; pruning every `d`
+  in the integrand span would hide a real free variable named `d`.
+- **412, the `Integrate`/`Limit` evaluation capture: FIXED 2026-10-20, committed
+  `6d5c6d542` (dual-reviewed, 8 findings applied; CHANGELOG "Bug Fixes"; test
+  `test/compute-engine/integrate-limit-user-function-capture.test.ts`). The
+  derivative capture of row 412 itself is FIXED the same way (`derivative.ts`,
+  `renameCapturedIndexes()`, dual-reviewed, 5 findings applied). The three items
+  found with the evaluation fix are FIXED 2026-10-21 (dual-reviewed, 10 findings
+  applied; CHANGELOG "Bug Fixes"): (a) `Solve` renames a captured unknown
+  (`solveWithRenamedUnknowns()`, `solve-domain.ts`); (b) `Solve(t x = 1, t)`
+  with declared reals (`isRealWhereNumber()`, `solve.ts`); (c) the bounds of a
+  `Limits` clause and the collection of an `Element` clause of `Sum`, `Product`,
+  `Integrate` and `NDSolveFunction` read the enclosing symbol (`box.ts`,
+  `binding-sites.ts`, and every walk that tracks shadowed names). Found by that
+  round, still open: `Solve(t^3 x = 1, t)` with `t, x: real` stays unevaluated
+  because the `Root` type handler (`library/arithmetic.ts`) types `Root(1/x, 3)`
+  as `number`, wider than needed; with `k := 2`,
+  `Sum(j, Element(j, Range(1, k)))` gives `sum(j)` while the same sum over the
+  list `[1, k]` gives `3` (a `Range` with a symbolic bound is not evaluated in
+  the clause; not a capture defect); and four integration helpers
+  (`bindsVariableInOperand` and `evaluateInnerIntegrals` in `calculus.ts`,
+  `binds` in `piecewise-integrate.ts`, `special-integrate.ts` around line 103)
+  still treat a whole clause as bound when they skip an inner binder's operand,
+  which at worst skips an optimization.
 - **413 — a piecewise whose condition compares an undefined value gives no
   value; Desmos takes the else branch (user decision 2026-10-20: an undefined
   numeric operand of `<`, `≤`, `>`, `≥`, `=` decides FALSE inside a branch
   condition on the interpreter, the `javascript` and `python` targets and
   `interval-js`, so the else branch is taken; this reverses the ruling of
   2026-09-03 recorded in `docs/ERROR-MODEL.md`; `≠` and `Missing` keep their
-  reading). FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 7
-  findings applied; `docs/ERROR-MODEL.md` has the new section). Open after it:
-  (a) values that are undefined for Desmos but not `NaN` for CE stayed
-  unevaluated in a comparison and so in a branch: `0 < ~oo` (from `1/0`),
-  `0 < i` (`\\sqrt{-1}`), `0 < \\ln(-1)`; with `K(n) := 1/n` Tycho's
-  `\\{K(n) > 0: 1, 0\\}` at `n = 0` was a held `Which`, not `0`. USER DECISION
-  2026-10-21: such a value decides FALSE too (an ordered comparison with
-  `ComplexInfinity` or a non-real complex operand is `False`; `=` with
-  `ComplexInfinity` is `False`, `=` of complex numbers keeps its meaning; `≠`
-  unchanged); FIXED 2026-10-21, committed `8fd9f7394` (dual-reviewed, 10
-  findings applied: the integral convergence guards and the logarithm-root
-  guard now test the real part or skip a complex base, chains and ties
-  included, `closedExactJump` folds a `ComplexInfinity` comparison on every
-  target). Remaining lane difference, recorded in `docs/COMPILATION-MODEL.md`:
-  a constant pole NEXT TO A VARIABLE compiles to IEEE infinity, so `x < 1/0` at
-  `x = 1` is `true` on `javascript`, `python` and `interval-js` where the
-  interpreter gives `False`. Open question, decision needed (measured
-  2026-10-21): `Less(0, NaN, Missing)` is `Missing` while
+  reading). FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 7 findings
+  applied; `docs/ERROR-MODEL.md` has the new section). Open after it: (a) values
+  that are undefined for Desmos but not `NaN` for CE stayed unevaluated in a
+  comparison and so in a branch: `0 < ~oo` (from `1/0`), `0 < i` (`\\sqrt{-1}`),
+  `0 < \\ln(-1)`; with `K(n) := 1/n` Tycho's `\\{K(n) > 0: 1, 0\\}` at `n = 0`
+  was a held `Which`, not `0`. USER DECISION 2026-10-21: such a value decides
+  FALSE too (an ordered comparison with `ComplexInfinity` or a non-real complex
+  operand is `False`; `=` with `ComplexInfinity` is `False`, `=` of complex
+  numbers keeps its meaning; `≠` unchanged); FIXED 2026-10-21, committed
+  `8fd9f7394` (dual-reviewed, 10 findings applied: the integral convergence
+  guards and the logarithm-root guard now test the real part or skip a complex
+  base, chains and ties included, `closedExactJump` folds a `ComplexInfinity`
+  comparison on every target). Remaining lane difference, recorded in
+  `docs/COMPILATION-MODEL.md`: a constant pole NEXT TO A VARIABLE compiles to
+  IEEE infinity, so `x < 1/0` at `x = 1` is `true` on `javascript`, `python` and
+  `interval-js` where the interpreter gives `False`. Open question, decision
+  needed (measured 2026-10-21): `Less(0, NaN, Missing)` is `Missing` while
   `Less(0, i, Missing)` is now `False`. `docs/ERROR-MODEL.md` says that an
   ordered comparison with an undefined numeric operand is `False` and that a
-  chain stops at the first pair that is `False`, which reads the `NaN` chain
-  as `False`; but `test/compute-engine/compile-comparison-absent-operand.test.ts`
+  chain stops at the first pair that is `False`, which reads the `NaN` chain as
+  `False`; but `test/compute-engine/compile-comparison-absent-operand.test.ts`
   (line 194, `Less(x, 0, Missing)` at `x = NaN`) pins `Missing` on the
-  interpreter and `undefined` on the compiled route, and the `javascript`
-  target emits a deliberate guard (`_.x === _.x ? (_.x < 0) : undefined`)
-  that makes a NaN pair undecided inside a chain. A prototype of the chain
-  reading in `unorderedChainPair()` (`relational-operator.ts`) made the
-  interpreter answer `False` for every variant and broke that test, while
-  the compiled route still answered `undefined`; so the change needs the
-  chain guard of the compiled code and that test row as well. Yes: change
-  all three. No: correct the ERROR-MODEL chain sentence to say that
-  `Missing` wins over a NaN pair. (b) The
-  compiled presence guard of a branch (an unsupplied variable takes no arm)
-  is static: a variable read only by an ARM of a nested `If`/`Which`, or by a
-  later `Which` condition, is not guarded, so with `y` unsupplied
-  `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = 1` is `0`, not `NaN`; and a
-  variable in a nested connective that could decide without it is guarded
-  anyway. A dynamic guard cannot recover the absence through arithmetic in
-  the arm (`2y` of an unsupplied `y` is `NaN`, not `undefined`), so this is
-  part of the compiled representation of absence (see "Compiled absence
-  checks need a distinct representation for `Nothing`"). The third part of
-  this item, a bound name (a `Sum` index, a parameter of a called function
-  literal) that shares its name with a valued global making the walk follow
-  the global's value, is FIXED 2026-10-21 (`operandInputNodes`,
-  `base-compiler.ts`; test in `compile-which.test.ts`).** `\{0/0 > 0: 1, 0\}` is
-  `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and
-  the `javascript` target gives `null`; Desmos and JavaScript's own
-  `NaN > 0` read the comparison as false and give 0. `N = \sum_{n=0}^{10000}
-  M_x(n)` with `M_x(n) = \{K_x(n) > 0: 1, 0\}` and `K_x(0)` undefined is
-  `NaN`, so a bar in `neyret/3qkygakl9m` draws nothing. Ask: in `Which`/`If`,
-  an ordered comparison or `=` with an undefined operand decides as false on
-  every route (interpreter, `javascript`, `glsl`), so the next branch is
-  taken. Row 411 asks the same for `interval-js`. Discovered while
-  reproducing (not in Tycho's row, decision needed): with `x: real` and no
-  value, `\{x/0 > 0: 1, 0\}` canonicalizes `x/0` to `ComplexInfinity`, so
-  the compiled code is `(0 < Infinity) ? 1 : 0` and gives 1 at every `x`,
-  including `x = 0` where the value is `0/0`. A quotient by a literal zero
-  with a symbolic numerator is a pole only when the numerator is not zero;
-  whether the fold should wait for the value is a canonical-form decision.
-- **416, part (3) — a `window` option of the `grid` layout of `broadcast`
-  (OPEN, waits for a measurement).** Parts (1) and (2) of row 416 (shared
-  inputs and several outputs per cell) landed 2026-10-21. Part (3) is sugar:
-  a `window` option naming a shared input's neighbours by offset, which also
-  lets the pool chunk the grid by slabs with a one-cell halo. It is held until
-  Tycho measures its two kernels on the stride layout and shows that the sugar
-  buys speed: the neighbours are index arithmetic on the shared array, and the
-  halo chunking follows from the shared input. Tycho's kernels: a cell kernel
-  of thirteen numbers (the case index 0 to 255 and twelve edge fractions
-  `F_a / (F_a - F_b)`, NaN on an edge with no sign change) and a point kernel
-  of three (the gradient by central differences of the shared array, one-sided
-  on the boundary), two passes over the grid; eight to twenty-seven
-  `_SYS.atNumeric` reads per cell are acceptable. A direct typed-array read
-  for a provably in-range index is a later optimization of the same kernels.
+  interpreter and `undefined` on the compiled route, and the `javascript` target
+  emits a deliberate guard (`_.x === _.x ? (_.x < 0) : undefined`) that makes a
+  NaN pair undecided inside a chain. A prototype of the chain reading in
+  `unorderedChainPair()` (`relational-operator.ts`) made the interpreter answer
+  `False` for every variant and broke that test, while the compiled route still
+  answered `undefined`; so the change needs the chain guard of the compiled code
+  and that test row as well. Yes: change all three. No: correct the ERROR-MODEL
+  chain sentence to say that `Missing` wins over a NaN pair. (b) The compiled
+  presence guard of a branch (an unsupplied variable takes no arm) is static: a
+  variable read only by an ARM of a nested `If`/`Which`, or by a later `Which`
+  condition, is not guarded, so with `y` unsupplied
+  `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = 1` is `0`, not `NaN`; and a variable
+  in a nested connective that could decide without it is guarded anyway. A
+  dynamic guard cannot recover the absence through arithmetic in the arm (`2y`
+  of an unsupplied `y` is `NaN`, not `undefined`), so this is part of the
+  compiled representation of absence (see "Compiled absence checks need a
+  distinct representation for `Nothing`"). The third part of this item, a bound
+  name (a `Sum` index, a parameter of a called function literal) that shares its
+  name with a valued global making the walk follow the global's value, is FIXED
+  2026-10-21 (`operandInputNodes`, `base-compiler.ts`; test in
+  `compile-which.test.ts`).** `\{0/0 > 0: 1, 0\}` is
+  `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and the
+  `javascript` target gives `null`; Desmos and JavaScript's own `NaN > 0` read
+  the comparison as false and give 0. `N = \sum_{n=0}^{10000} M_x(n)` with
+  `M_x(n) = \{K_x(n) > 0: 1, 0\}` and `K_x(0)` undefined is `NaN`, so a bar in
+  `neyret/3qkygakl9m` draws nothing. Ask: in `Which`/`If`, an ordered comparison
+  or `=` with an undefined operand decides as false on every route (interpreter,
+  `javascript`, `glsl`), so the next branch is taken. Row 411 asks the same for
+  `interval-js`. Discovered while reproducing (not in Tycho's row, decision
+  needed): with `x: real` and no value, `\{x/0 > 0: 1, 0\}` canonicalizes `x/0`
+  to `ComplexInfinity`, so the compiled code is `(0 < Infinity) ? 1 : 0` and
+  gives 1 at every `x`, including `x = 0` where the value is `0/0`. A quotient
+  by a literal zero with a symbolic numerator is a pole only when the numerator
+  is not zero; whether the fold should wait for the value is a canonical-form
+  decision.
+- **416, part (3) — a `window` option of the `grid` layout of `broadcast` (OPEN,
+  waits for a measurement).** Parts (1) and (2) of row 416 (shared inputs and
+  several outputs per cell) landed 2026-10-21. Part (3) is sugar: a `window`
+  option naming a shared input's neighbours by offset, which also lets the pool
+  chunk the grid by slabs with a one-cell halo. It is held until Tycho measures
+  its two kernels on the stride layout and shows that the sugar buys speed: the
+  neighbours are index arithmetic on the shared array, and the halo chunking
+  follows from the shared input. Tycho's kernels: a cell kernel of thirteen
+  numbers (the case index 0 to 255 and twelve edge fractions
+  `F_a / (F_a - F_b)`, NaN on an edge with no sign change) and a point kernel of
+  three (the gradient by central differences of the shared array, one-sided on
+  the boundary), two passes over the grid; eight to twenty-seven
+  `_SYS.atNumeric` reads per cell are acceptable. A direct typed-array read for
+  a provably in-range index is a later optimization of the same kernels.
+
+- **417 — on the `interval-js` target, `0^x` over an exponent interval is
+  `empty` (filed 2026-10-21 on 0.160.0; reproduced on the main tree at
+  `f79330e17` the same day).** `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
+  answers `{kind: 'empty'}` for `x` in `[0.2, 0.4]`, for the point interval
+  `[0.5, 0.5]`, and for every other exponent interval, where the value is 0
+  at every point; the control `0.5^{x}` answers `[0.758, 0.871]`. With the
+  base a declared symbol holding 0 (`T^{x}`, `T := 0`) the answer is `empty`
+  too (Tycho reports `entire` on its plot's compile route). The scalar target
+  gives 0. Expected: `[0, 0]` for an exponent interval above 0, an interval
+  that contains 1 when the exponent interval contains 0 (`0^0` is read as 1
+  by the scalar target), and undefined only where the exponent reaches below
+  0. Cause: the `Power` entry of
+  `src/compute-engine/compilation/interval-javascript-target.ts` compiles a
+  non-literal exponent to `powInterval`, whose kernel `powIntervalRaw()` in
+  `src/compute-engine/interval/elementary.ts` answers `empty` for a base
+  with `hi <= 0` before the "base reaches 0" branch runs, so the point base
+  `[0, 0]` is treated as a negative base. That next branch already answers
+  `[0, 0]` for a positive exponent interval, `[0, 1]` for one that reaches
+  0 and a partial answer with `+∞` for one that reaches below 0, so the test
+  must be `hi < 0` (the `(-1)^n` special case inside it keeps its
+  `lo === hi === -1` condition). Effect on Tycho: the adaptive
+  line sampler reads a row through the interval leg, so
+  `(1-x^2(1-T^x))^{V/x^3}` with the slider `T = 0` draws nothing (Desmos
+  tracker row D-346). Instrument:
+  `scripts/repros/2026-10-21-ce417-zero-base-interval-power-repro.mts` in
+  Tycho; the row closes when it prints `READY` on an installed release.
 
 ### Four collection test suites fail at HEAD (OPEN — measured 2026-10-21 on `23db30a67`)
 
 `collection-absent-followups`, `collection-type-followups`,
-`map-over-tuple-result` and `tuple-argument-binding` fail 59 of their 330
-tests on a clean checkout of `23db30a67` (one example: `FlatMap` over a
-source with absent cells expects `list<integer | missing>` and gets
-`list<number>`). The failures appeared with the user's commit `780a7d39f`
-("Fix type handling in various functions and improve test coverage",
-2026-10-21), which last touched these test files; the bare-collection
-change (`docs/plans/2026-10-20-bare-tuple-record-any.md`, 0.160.0) is the
-area. Either the expectations or the typing must change; the session that
-owns that plan decides. Reproduce:
+`map-over-tuple-result` and `tuple-argument-binding` fail 59 of their 330 tests
+on a clean checkout of `23db30a67` (one example: `FlatMap` over a source with
+absent cells expects `list<integer | missing>` and gets `list<number>`). The
+failures appeared with the user's commit `780a7d39f` ("Fix type handling in
+various functions and improve test coverage", 2026-10-21), which last touched
+these test files; the bare-collection change
+(`docs/plans/2026-10-20-bare-tuple-record-any.md`, 0.160.0) is the area. Either
+the expectations or the typing must change; the session that owns that plan
+decides. Reproduce:
 `npx jest --config ./config/jest.config.cjs -w 4 -- test/compute-engine/collection-absent-followups.test.ts test/compute-engine/collection-type-followups.test.ts test/compute-engine/map-over-tuple-result.test.ts test/compute-engine/tuple-argument-binding.test.ts`.
 
 ### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
@@ -505,32 +523,34 @@ owns that plan decides. Reproduce:
 their types admit `nothing`, including `any`, `nothing`, and unions such as
 `integer | nothing`. Current target representations cannot distinguish an
 omission/unit result from an absent datum in these checks. Treating both as
-missing would violate the selected rule that `Nothing` passes through.
-Constant expressions may fold before this check; a final fallback is returned
-without an absence test.
+missing would violate the selected rule that `Nothing` passes through. Constant
+expressions may fold before this check; a final fallback is returned without an
+absence test.
 
 `Map`, `Filter`, predicate-form `Count`, `Covariance`, `PopulationCovariance`,
-and `Correlation` also refuse compilation when source element types admit `Nothing`; single-source paired
-statistics inspect tuple coordinates. Maps also check their result type,
-but a broad result can compile when inspection of the callback body proves
-that every return path excludes omission. This restores safe tuple mappings
-without weakening source checks or adding a compiled omission representation.
-An opaque callback result stays `any`; an input type cannot stand in for it.
-Numeric aggregates also refuse omission-capable sources, including the seeded
-`Multiply` fold used to represent `Product(collection)`. Tuple slots and union
-alternatives are checked before their element types can absorb omission.
-Data tuple construction and `Zip` now preserve slots and all-missing tuples;
-they also refuse compilation when coordinates may be `Nothing`. Structural
-conversion (`TupleFrom` still omits immediate `Nothing`), ordinary arguments,
-the unit/empty-tuple type, and Q11 binding capture remain separate decisions.
-A limitation of the refusal: tuple-call lowering can leave an unannotated
-pass-through result typed `any` even when the argument is a numeric tuple.
-The constructor then refuses compilation; annotating that parameter with its
-numeric tuple type restores compilation. Improving this proof does not require
-changing the selected slot policy or conflating omission with missing data.
+and `Correlation` also refuse compilation when source element types admit
+`Nothing`; single-source paired statistics inspect tuple coordinates. Maps also
+check their result type, but a broad result can compile when inspection of the
+callback body proves that every return path excludes omission. This restores
+safe tuple mappings without weakening source checks or adding a compiled
+omission representation. An opaque callback result stays `any`; an input type
+cannot stand in for it. Numeric aggregates also refuse omission-capable sources,
+including the seeded `Multiply` fold used to represent `Product(collection)`.
+Tuple slots and union alternatives are checked before their element types can
+absorb omission. Data tuple construction and `Zip` now preserve slots and
+all-missing tuples; they also refuse compilation when coordinates may be
+`Nothing`. Structural conversion (`TupleFrom` still omits immediate `Nothing`),
+ordinary arguments, the unit/empty-tuple type, and Q11 binding capture remain
+separate decisions. A limitation of the refusal: tuple-call lowering can leave
+an unannotated pass-through result typed `any` even when the argument is a
+numeric tuple. The constructor then refuses compilation; annotating that
+parameter with its numeric tuple type restores compilation. Improving this proof
+does not require changing the selected slot policy or conflating omission with
+missing data.
 
 An unconstrained `collection<any>` therefore needs an annotation that excludes
-`Nothing` (for example, `list<real>`) to compile. This preserves callback bypass and aligned-observation semantics.
+`Nothing` (for example, `list<real>`) to compile. This preserves callback bypass
+and aligned-observation semantics.
 
 Before lifting the refusal, a target must represent `Nothing` separately from
 `Missing`/`Undefined`/numeric absence, preserve it across inputs, intermediate
@@ -544,29 +564,27 @@ capability, not a change to the omission policy.
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
-parallel. Measured 2026-10-20 (`benchmarks/workers/*.mts`): an implicit plot
-of 512×512 interval cells takes 152 ms serially and 27 ms on 8 workers; a
-1000-row global fit takes 200 to 500 ms; a 5-point fit or a 2000-column plot
-takes under 10 ms and cannot gain. The design is an executor with a serial
-default, a `kernel-worker` bundle holding the compiled-code runtime, an
-interval runtime and the Levenberg-Marquardt core, a `runBatch` entry on the
-compilation result, and an `evaluateAsync` handler for `FindFit`. The public
-`interval` entry already exports the whole `IntervalArithmetic` namespace,
-so a worker can rebuild interval code from its text; the missing piece is a
-loader with a `runtimeVersion` check.
-User decision 2026-10-20: steps 1 to 4 of the design go ahead (array
-evaluation on compiled results, the executor with a serial default, the
-`kernel-worker` bundle and interval runtime, `broadcastAsync` on a pool); step 5
-(the pooled `FindFit`) and the Epsil asynchronous route wait for Tycho's
+parallel. Measured 2026-10-20 (`benchmarks/workers/*.mts`): an implicit plot of
+512×512 interval cells takes 152 ms serially and 27 ms on 8 workers; a 1000-row
+global fit takes 200 to 500 ms; a 5-point fit or a 2000-column plot takes under
+10 ms and cannot gain. The design is an executor with a serial default, a
+`kernel-worker` bundle holding the compiled-code runtime, an interval runtime
+and the Levenberg-Marquardt core, a `runBatch` entry on the compilation result,
+and an `evaluateAsync` handler for `FindFit`. The public `interval` entry
+already exports the whole `IntervalArithmetic` namespace, so a worker can
+rebuild interval code from its text; the missing piece is a loader with a
+`runtimeVersion` check. User decision 2026-10-20: steps 1 to 4 of the design go
+ahead (array evaluation on compiled results, the executor with a serial default,
+the `kernel-worker` bundle and interval runtime, `broadcastAsync` on a pool);
+step 5 (the pooled `FindFit`) and the Epsil asynchronous route wait for Tycho's
 integration feedback (Tycho caps fits at 10 000 rows and samples 500 for the
 global search). Steps 1 to 4 landed 2026-10-20 (dual-reviewed):
 `broadcast`/`broadcastAsync` on compiled results, `INTERVAL_KIND`,
-`createIntervalRuntime`, `createKernelPool`, `ce.workers`, the
-`kernel-worker` entry; step 2 (the fit plan and `fit-executor.ts`, no
-behavior change) landed the same day; the
-default pool size is `hardwareConcurrency - 1` capped at 8; no whole-engine
-worker protocol for now. Open: the name of the array-evaluation pair
-(working name `broadcast`/`broadcastAsync`, alternative `runMany`). No
+`createIntervalRuntime`, `createKernelPool`, `ce.workers`, the `kernel-worker`
+entry; step 2 (the fit plan and `fit-executor.ts`, no behavior change) landed
+the same day; the default pool size is `hardwareConcurrency - 1` capped at 8; no
+whole-engine worker protocol for now. Open: the name of the array-evaluation
+pair (working name `broadcast`/`broadcastAsync`, alternative `runMany`). No
 keyword for parallel execution in Epsil: the engine decides from purity,
 compilability and size, as it does for compilation (design section 5.7).
 
@@ -608,9 +626,9 @@ it, as a list literal does, or treat it as an error)?
 
 ### Defects found by the tuple-source fix (OPEN, small — found 2026-10-20; the tuple-source fix itself landed the same day)
 
-Each also occurs on the list route. The other items of this entry were fixed
-on 2026-10-20 (FlatMap absent cells, the `Set` preview, the string result
-kind, `missing | string` sources, `Map` over an alias, `Filter`/`Dedup` over a
+Each also occurs on the list route. The other items of this entry were fixed on
+2026-10-20 (FlatMap absent cells, the `Set` preview, the string result kind,
+`missing | string` sources, `Map` over an alias, `Filter`/`Dedup` over a
 dictionary). These remain, each measured with a fix and reverted:
 
 - `Any`/`All` are typed `boolean`, but `Any([1, Missing], x ↦ x > 2)` is
@@ -620,12 +638,12 @@ dictionary). These remain, each measured with a fix and reverted:
   rows of `tuple-argument-binding.test.ts` fail (those that assert `boolean`);
   no compile or Epsil test fails.
 - At a lazy source, `list<missing>` is accepted (`Map` gives `[NaN]`) but
-  `tuple<missing, missing>` is refused. A fix was reverted on 2026-10-20
-  because a tuple whose slots are all absent evaluated to `Missing` (`Scan(m,
-  Add)` typed `list<number>`, value `Missing`). Since `2081e5469` such a tuple
-  stays a tuple (`Sort(m)` is `["Missing", "Missing"]`, `CountIf(m, p)` is
-  `0`), so the admission looks possible now; `Scan`, `ArgMax`, `Reduce` and
-  `Any` over it must be probed again when it is landed.
+  `tuple<missing, missing>` is refused. A fix was reverted on 2026-10-20 because
+  a tuple whose slots are all absent evaluated to `Missing` (`Scan(m, Add)`
+  typed `list<number>`, value `Missing`). Since `2081e5469` such a tuple stays a
+  tuple (`Sort(m)` is `["Missing", "Missing"]`, `CountIf(m, p)` is `0`), so the
+  admission looks possible now; `Scan`, `ArgMax`, `Reduce` and `Any` over it
+  must be probed again when it is landed.
 - ~~`collectionElementType(tuple<unknown, missing>)` widens to `missing`~~
   (reads `missing | unknown` since 2026-10-21, and the tuple is admitted:
   `Map(x ↦ x + 1, tu)` is `[2, NaN]`).
@@ -638,14 +656,14 @@ dictionary). These remain, each measured with a fix and reverted:
 
 - ~~`any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`~~
   (every type is a subtype of `unknown` since 2026-10-21, decision D1).
-- (needs a decision) `tuple<integer> <: indexed_collection<integer> <:
-  broadcastable<integer>`, but `tuple<integer>` is not
-  `<: broadcastable<integer>` (the `matrix<integer>` case was fixed on
-  2026-10-20). A rule excludes tuples and strings from `broadcastable<T>`, and
-  `broadcastable-type.test.ts` ("a tuple is excluded from the collection
-  branch") and the type guide lock it. Option A, accept tuples and strings in
-  `broadcastable<T>`: 8 tests fail in 6 suites, including the locked test and
-  the Dot-of-tuple-of-tuples compile tests. Option B, remove
+- (needs a decision)
+  `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`, but
+  `tuple<integer>` is not `<: broadcastable<integer>` (the `matrix<integer>`
+  case was fixed on 2026-10-20). A rule excludes tuples and strings from
+  `broadcastable<T>`, and `broadcastable-type.test.ts` ("a tuple is excluded
+  from the collection branch") and the type guide lock it. Option A, accept
+  tuples and strings in `broadcastable<T>`: 8 tests fail in 6 suites, including
+  the locked test and the Dot-of-tuple-of-tuples compile tests. Option B, remove
   `indexed_collection<T> <: broadcastable<T>`: 14 tests fail in 8 suites,
   including Tycho item 332 compiled-program parity and the point-list compile
   tests.
@@ -658,39 +676,64 @@ dictionary). These remain, each measured with a fix and reverted:
   record-to-dictionary checks every field). The plan's decision Q6 keeps open
   records with width subtyping, so a record is not a dictionary of its known
   field types; that rule for explicit value types (`record{a: integer}` no
-  longer `<: dictionary<integer>`) makes 44 tests fail in 4 suites
-  (`types`, `collections`, `compile-extremum-collection-operand`,
+  longer `<: dictionary<integer>`) makes 44 tests fail in 4 suites (`types`,
+  `collections`, `compile-extremum-collection-operand`,
   `named-arguments-record-field`), and the bare-name cases also involve
   `unknown`. This belongs with the plan's implementation.
 - (found 2026-10-20 by the `couldMatch` fix) `couldMatch('any', '!any')` is
   `true`, although `!any` is empty: the last step of `couldMatch` accepts the
   pair because `!any <: any` holds, and it does not see that a negation is
-  empty. The same step makes `record{a: never}` match `dictionary<integer>`
-  and `collection<tuple<string, integer>>`, although no value has a field of
-  type `never` (a record with an empty field type is a subtype of those
-  types). Changing that step changes the answers of the general subtype
-  fallback, so it needs its own measurement.
-- (found 2026-10-20) `isSubtype` takes time exponential in the depth of a
-  union whose two arms are the same node: with `U0 = string` and
-  `Un = Un-1 | Un-1` built with shared nodes, `isSubtype('integer', U30)`
-  walks 2^30 paths before it answers `false`. The union rule visits each arm
-  without remembering a node it has already answered for. Such a type is
-  built by hand, not by the parser, which reduces a union.
+  empty. The same step makes `record{a: never}` match `dictionary<integer>` and
+  `collection<tuple<string, integer>>`, although no value has a field of type
+  `never` (a record with an empty field type is a subtype of those types).
+  Changing that step changes the answers of the general subtype fallback, so it
+  needs its own measurement.
+- (found 2026-10-20) `isSubtype` takes time exponential in the depth of a union
+  whose two arms are the same node: with `U0 = string` and `Un = Un-1 | Un-1`
+  built with shared nodes, `isSubtype('integer', U30)` walks 2^30 paths before
+  it answers `false`. The union rule visits each arm without remembering a node
+  it has already answered for. Such a type is built by hand, not by the parser,
+  which reduces a union.
+
+### A fold whose body assigns its accumulator is typed from the seed alone (OPEN, small — found 2026-10-21 by the review of the nested-fold refinement cost fix, issue #462)
+
+- `ce.box(["Fold", ["Function", ["Block", ["Assign", "a", ["List", 1, 2]], "a"], "a", "k"], ["List", "'s'"], ["Range", 1, 2]])`
+  is typed `list<string^1>` and evaluates to `[1, 2]`, a `vector<integer^2>`.
+  The fixpoint that types the bare accumulator (`canonicalFoldCombiner`,
+  `library/collections.ts`) reads the body's result type with the accumulator
+  pre-declared at the current type, and an assignment to the accumulator inside
+  the body does not widen that type: the iteration settles on the seed's type.
+  The same on the tree before the fix of #462. Either the iteration declines
+  when the raw body assigns the accumulator (the literal keeps its admitted
+  type), or the assigned value's type joins the result type.
+
+### The LaTeX serialization of `Reduce` drops the initial value (OPEN, small — found 2026-10-21 by the review of the nested-fold refinement cost fix, issue #462)
+
+- `ce.box(["Reduce", ["List", 1, 2], ["Function", ["Add", "a", "x"], "a", "x"], 10])`
+  serializes to `\operatorname{Reduce}\left([1, 2], (a, x)\mapsto a+x\right)`:
+  the `Reduce` entry of `latex-syntax/dictionary/definitions-arithmetic.ts`
+  writes the first two operands only. The expression evaluates to `13` before
+  the round trip and to `3` after it. Every `Fold` canonicalizes to a `Reduce`
+  with a seed, so every seeded fold loses its seed in LaTeX. The fix is to write
+  the third operand when it is present, and to check that the parser reads the
+  three-argument form back; the `\sum`/`\prod` shorthand for
+  `Reduce(xs, Add)`/`Reduce(xs, Multiply)` applies only when there is no seed.
 
 ### A list of one-element vectors is a subtype of a list of scalars (OPEN, small — found 2026-10-21 by the review of the nested-fold refinement cost fix, issue #462)
 
 - `list<vector<integer^1>>` matches `list<integer>` (and
   `list<list<vector<integer^1>>^2>` matches `list<list<integer>^2>`), while
-  `vector<integer^1>` does not match `integer`. The list rule accepts an
-  element type that is a one-element vector of the other list's element type,
-  so the relation is not consistent with its element rule. The join of the
-  two then keeps the narrower type: `[Map(p ↦ Fold((a, j) ↦ Join(a, [p]), [],
-  1..2), [1, 2]), Map(same, [[1], [2]])]` is typed `list<list<list<integer>^2>>`
-  while its second element is `[[[1], [1]], [[2], [2]]]`, a list of lists of
-  one-element lists. Probe: `ce.type('list<vector<integer^1>>').matches('list<integer>')`
-  on the main tree at `23db30a67`. The list subtype rules changed on
-  2026-10-21 (user decisions, commits `5c08b87cc` and `900d4f059`), so the
-  fix belongs with that work and was not attempted here.
+  `vector<integer^1>` does not match `integer`. The list rule accepts an element
+  type that is a one-element vector of the other list's element type, so the
+  relation is not consistent with its element rule. The join of the two then
+  keeps the narrower type:
+  `[Map(p ↦ Fold((a, j) ↦ Join(a, [p]), [], 1..2), [1, 2]), Map(same, [[1], [2]])]`
+  is typed `list<list<list<integer>^2>>` while its second element is
+  `[[[1], [1]], [[2], [2]]]`, a list of lists of one-element lists. Probe:
+  `ce.type('list<vector<integer^1>>').matches('list<integer>')` on the main tree
+  at `23db30a67`. The list subtype rules changed on 2026-10-21 (user decisions,
+  commits `5c08b87cc` and `900d4f059`), so the fix belongs with that work and
+  was not attempted here.
 
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
@@ -731,14 +774,14 @@ possibilities of `any`, retains lazy descriptor facts, and does not substitute
 its input type for an opaque callback result. The compiler can accept a broad
 Map result when the callback body proves every return path excludes `Nothing`.
 
-User decision: keep refusing omission-capable sources. The unannotated Tycho
-332 and recursive gasket programs therefore remain refused; their numeric
-collection annotations compile and produce the same 224 circles. Tests cover
-both refusals and annotated counterparts. Tuple disjointness follows the
-position-preserving tuple rule. A full-suite measurement passed all 4,273
-snapshots and left three outdated expectations; the two affected suites pass
-after those expectations were corrected. Distinct compiled omission support
-remains the separate design item above.
+User decision: keep refusing omission-capable sources. The unannotated Tycho 332
+and recursive gasket programs therefore remain refused; their numeric collection
+annotations compile and produce the same 224 circles. Tests cover both refusals
+and annotated counterparts. Tuple disjointness follows the position-preserving
+tuple rule. A full-suite measurement passed all 4,273 snapshots and left three
+outdated expectations; the two affected suites pass after those expectations
+were corrected. Distinct compiled omission support remains the separate design
+item above.
 
 ### Two defects found by the nested-list broadcast fix (OPEN, small — found 2026-10-20)
 
@@ -747,48 +790,47 @@ remains the separate design item above.
   The type `list<number>` holds the value, so the defect is in the value: a
   failed level probably gets the absence marker of its level in
   `makeSpineRunner()` (`library/collections.ts`).
-- `ce.declare('L', 'list<list<integer>^2>')` then assigning
-  `[[1, 2], [3]]` throws a type-compatibility error. The value is 2 rows of
-  integers, but its own type, `list<vector<integer^1> | vector<integer^2>>`,
-  has no outer length, so the check against the declared length fails.
+- `ce.declare('L', 'list<list<integer>^2>')` then assigning `[[1, 2], [3]]`
+  throws a type-compatibility error. The value is 2 rows of integers, but its
+  own type, `list<vector<integer^1> | vector<integer^2>>`, has no outer length,
+  so the check against the declared length fails.
 - With `Q: list<list<tuple<integer, integer>>> := [[(1,2),(3,4)],[(5,6)]]` and
   `M: list<list<integer>> := [[1,2],[3]]`, `Q · M` is typed
   `list<list<list<integer> | list<tuple<integer, integer>>>>`, but its value
-  `[[(1, 2),(6, 8)],[(15, 18)]]` is not a member. The cause is in the
-  `Multiply` type handler; the `Divide` case was fixed on 2026-10-20.
-- With the same `Q` and `M`, `Q + M` is typed `error`, but the value is a
-  nested list of `incompatible-type` errors, not one error:
-  `isProvablyNumberList()` does not read a list of rows of numbers, so the sum
-  is not refused when it is boxed, as it is beside a flat `list<integer>` or a
-  `matrix`. Both outcomes are errors (`docs/ERROR-MODEL.md` §4); only the
-  shape of the error differs.
+  `[[(1, 2),(6, 8)],[(15, 18)]]` is not a member. The cause is in the `Multiply`
+  type handler; the `Divide` case was fixed on 2026-10-20.
+- With the same `Q` and `M`, `Q + M` is typed `error`, but the value is a nested
+  list of `incompatible-type` errors, not one error: `isProvablyNumberList()`
+  does not read a list of rows of numbers, so the sum is not refused when it is
+  boxed, as it is beside a flat `list<integer>` or a `matrix`. Both outcomes are
+  errors (`docs/ERROR-MODEL.md` §4); only the shape of the error differs.
 - A structural expression boxed from MathJSON is typed by the result of its
   operator's signature, not by the operator's type handler. With
-  `t: tuple<integer, integer>`, `ce.box(['Add', 't', 't'], { form:
-  'structural' })` is typed `unknown`, and the `Divide`, `Multiply` and `Sqrt`
-  forms over a point or a list are typed `number`, but the value of the first
-  is `(2, 4)`. The same expressions built with
-  `ce.function(…, { form: 'structural' })` are typed by the handler
-  (`tuple<integer, integer>`, `list<integer>`). The two structural routes
-  must agree. Found 2026-10-20.
+  `t: tuple<integer, integer>`,
+  `ce.box(['Add', 't', 't'], { form: 'structural' })` is typed `unknown`, and
+  the `Divide`, `Multiply` and `Sqrt` forms over a point or a list are typed
+  `number`, but the value of the first is `(2, 4)`. The same expressions built
+  with `ce.function(…, { form: 'structural' })` are typed by the handler
+  (`tuple<integer, integer>`, `list<integer>`). The two structural routes must
+  agree. Found 2026-10-20.
 - A list literal of points of two tuple types is typed with no length
   (`shapedListTypeD()`, `library/collections.ts`): `[(1/2, 1), (~oo, ~oo)]` is
   `list<tuple<…> | tuple<…>>`, not `list<(…)^2>`. So the value of
   `[(1, 2), (3, 4)] / [2, 0]` does not match its static type
   `list<tuple<number, number>^2>`, although that type is true of the value.
-  Either the literal keeps its length, or the static type of a quotient by
-  a list with a cell that may be zero drops it, as
-  `pointOverCollectionQuotientType()` (`library/arithmetic.ts`) does for a
-  point divided by a list. Found 2026-10-20.
+  Either the literal keeps its length, or the static type of a quotient by a
+  list with a cell that may be zero drops it, as
+  `pointOverCollectionQuotientType()` (`library/arithmetic.ts`) does for a point
+  divided by a list. Found 2026-10-20.
 
 ### Defects found by the fix of the collection operator types (OPEN, small — found 2026-10-20)
 
-- A generic function declared `(broadcastable<T>) -> T where T` fails on
-  each element of a list: with `gid := x ↦ x`, `gid([1, 2])` is a list of two
+- A generic function declared `(broadcastable<T>) -> T where T` fails on each
+  element of a list: with `gid := x ↦ x`, `gid([1, 2])` is a list of two
   `incompatible-type` errors (`"T"` against `1`), not `[1, 2]`. The type
-  variable is not bound before the element-wise call checks its result.
-  Found by the review of the `broadcastable<T>` = `T | list<T>` change; it
-  is the same before that change.
+  variable is not bound before the element-wise call checks its result. Found by
+  the review of the `broadcastable<T>` = `T | list<T>` change; it is the same
+  before that change.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
@@ -796,11 +838,11 @@ remains the separate design item above.
   `indexed_collection` can be a list, which `vec2` cannot hold.
 
 - `Sqrt(x)` with `x: vector<integer^1> | vector<integer^2>` is typed `number`:
-  the broadcast type does not lift over a union of collections. Only `Map`
-  works around it.
-- With `c: list<integer> | string := "aab"`, `Dedup(c)` evaluates to `"ab"`,
-  but the display preview of the unevaluated `Dedup(c)` prints `["a","b"]`:
-  the preview does not evaluate its source.
+  the broadcast type does not lift over a union of collections. Only `Map` works
+  around it.
+- With `c: list<integer> | string := "aab"`, `Dedup(c)` evaluates to `"ab"`, but
+  the display preview of the unevaluated `Dedup(c)` prints `["a","b"]`: the
+  preview does not evaluate its source.
 - ~~`Filter(tu, x ↦ x > 0)` with `tu: tuple<unknown, missing>` is typed
   `list<missing>`~~ (`list<missing | unknown>` since 2026-10-21); `Sort(tu)`
   still is, see the `unknown` residues at the top of this file.
@@ -808,48 +850,47 @@ remains the separate design item above.
   `k: cyc := [1, 2]`, `Map(x ↦ x + 10, k)` is typed `collection<integer>` and
   prints and evaluates as `Set(11, 12)`: the fallback that reads the value of
   the source does not see through the alias.
-- `Map(h, s)` with `h: (T) -> T where T: number` and `s: list<string>` (or
-  rows of strings) is admitted when it is boxed, and each element evaluates to
-  an `incompatible-type` error, but the direct call `h("a")` is refused when it
-  is boxed: the callback admission of `Map` does not check the bound of a
-  type variable against the element type.
+- `Map(h, s)` with `h: (T) -> T where T: number` and `s: list<string>` (or rows
+  of strings) is admitted when it is boxed, and each element evaluates to an
+  `incompatible-type` error, but the direct call `h("a")` is refused when it is
+  boxed: the callback admission of `Map` does not check the bound of a type
+  variable against the element type.
 - `Map(h, fs)` with `h: ((integer) -> T) -> T where T` and `fs := [[x ↦ x + 1]]`
   is typed `list<(unknown) -> number^(1x1)>` for the value `[[2]]`: the source
   type is copied. The broadcast reading of a polymorphic callback over rows
   binds a type variable only when it is the parameter itself (`(T) -> T`), so
   this shape falls back to that copy.
-- A declared `record{a: integer}` is open, so `{a: 1, b: Missing}` matches
-  it, but the entry type read from it is `tuple<string, integer>`, which
-  leaves out the undeclared fields. With `ra: record{a: integer}` holding that
-  value, `Map(x ↦ At(x, 2), Dedup(ra))` is typed `collection<integer>` and
-  evaluates to `Set(1, Missing)`, and `FlatMap(ra, x ↦ [At(x, 2)])` is an
-  `incompatible-type` error for the entry `("b", Missing)`. An open record's
-  entry type should be `tuple<string, any>` wherever its elements are read
-  (`collectionElementType` and the `elttype` handlers). Also,
-  `ce.assign('rm', {a: Missing})` with `rm: record` is accepted although the
-  value does not match the declaration (see "A declared collection accepts an
-  assigned value that is not of its type").
+- A declared `record{a: integer}` is open, so `{a: 1, b: Missing}` matches it,
+  but the entry type read from it is `tuple<string, integer>`, which leaves out
+  the undeclared fields. With `ra: record{a: integer}` holding that value,
+  `Map(x ↦ At(x, 2), Dedup(ra))` is typed `collection<integer>` and evaluates to
+  `Set(1, Missing)`, and `FlatMap(ra, x ↦ [At(x, 2)])` is an `incompatible-type`
+  error for the entry `("b", Missing)`. An open record's entry type should be
+  `tuple<string, any>` wherever its elements are read (`collectionElementType`
+  and the `elttype` handlers). Also, `ce.assign('rm', {a: Missing})` with
+  `rm: record` is accepted although the value does not match the declaration
+  (see "A declared collection accepts an assigned value that is not of its
+  type").
 
 ### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
 
-`Factor` claims to return "a product of irreducible factors", but its
-strategies (perfect square, difference of squares, quadratic, rational roots)
-miss every irreducible factor of degree 3 or more that has no rational root:
+`Factor` claims to return "a product of irreducible factors", but its strategies
+(perfect square, difference of squares, quadratic, rational roots) miss every
+irreducible factor of degree 3 or more that has no rational root:
 
 - `x^{12}-1` gives `(x^2+x+1)(x^2-x+1)(x-1)(x+1)(x^6+1)`; `x^6+1` is
   `(x^2+1)(x^4-x^2+1)`.
 - `x^{130}-1` leaves two factors of degree 64, each of which is reducible.
-- `x^4+4` (= `(x^2-2x+2)(x^2+2x+2)`) and `x^4+x^2+1` (=
-  `(x^2+x+1)(x^2-x+1)`) are returned unchanged.
+- `x^4+4` (= `(x^2-2x+2)(x^2+2x+2)`) and `x^4+x^2+1` (= `(x^2+x+1)(x^2-x+1)`)
+  are returned unchanged.
 - The expanded form of `(x-1)(x-2)…(x-20)` is returned unchanged, because
-  `factorByRationalRoots` gives up when there are more than 100 candidate
-  roots.
+  `factorByRationalRoots` gives up when there are more than 100 candidate roots.
 
-PR #461 (exact modular factoring over Q, by an outside contributor) fixes all
-of these; changes were requested on 2026-10-20 (two `Factor` defects, a
-smaller public API, documentation). If that PR is not merged, the fix is a
-modular factoring step in `factorPolynomial` (`boxed-expression/factor.ts`).
-Reproduce: `npx tsx scripts/probe.ts '\operatorname{Factor}(x^{12}-1)'`.
+PR #461 (exact modular factoring over Q, by an outside contributor) fixes all of
+these; changes were requested on 2026-10-20 (two `Factor` defects, a smaller
+public API, documentation). If that PR is not merged, the fix is a modular
+factoring step in `factorPolynomial` (`boxed-expression/factor.ts`). Reproduce:
+`npx tsx scripts/probe.ts '\operatorname{Factor}(x^{12}-1)'`.
 
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
@@ -1324,14 +1365,14 @@ coordinates for `W(L[5], 2)`. Inside the body `PointX(p)` is not provably
 numeric (the parameter is inferred `collection<any> | tuple`), so each
 coordinate keeps `Missing`. The JavaScript target compiles the accessor as
 `undefined[idx]` guarded to `NaN` (the top-level `PointX(Missing)` reading), so
-it returns `[NaN, NaN, NaN]`. Data tuple construction now preserves the row
-on both routes; the old `tupleOrAbsent` helper is removed. The remaining
-question is coordinate normalization: the compiled accessor should preserve
-`undefined` when its written type is not provably numeric, or the interpreter
-body contract must explicitly change. Normalizing every unknown result to
-`NaN` was tried and reverted: a product over a `-> unknown` result must keep
-`Missing` (`absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
-point and a hole alike, so no consumer reading is known to differ.
+it returns `[NaN, NaN, NaN]`. Data tuple construction now preserves the row on
+both routes; the old `tupleOrAbsent` helper is removed. The remaining question
+is coordinate normalization: the compiled accessor should preserve `undefined`
+when its written type is not provably numeric, or the interpreter body contract
+must explicitly change. Normalizing every unknown result to `NaN` was tried and
+reverted: a product over a `-> unknown` result must keep `Missing`
+(`absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN` point and a
+hole alike, so no consumer reading is known to differ.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
@@ -4298,17 +4339,16 @@ makes a NaN operand of `<`, `≤`, `>`, `≥` and `=` decide FALSE in a scalar
 branch condition on every route, so the scalar and the element-wise forms of
 `Which([1, NaN, 3] < 2, 1, True, 0)` now agree (`[1, 0, 0]`, and the indexed
 scalar form `Which(b < 2, 1, True, 0)` with `b = NaN` is `0`). What remains is
-`NotEqual`, which the decision left as it was: the element-wise cell
-`NaN ≠ 2` is `True`, so `Which([a, b, c] ≠ 2, 1, True, 0)` with `b = NaN` is
-`[1, 1, 1]` and the indexed form is `1`, while the scalar
-`Which(b ≠ 2, 1, True, 0)` takes no arm (`Missing` in the interpreter, `NaN`
-on the `javascript` and `python` targets; the GPU targets take the then arm).
-The pre-pass index push-through of 2026-09-12 (`fixed-width-unroll.ts`,
-`indexedOperands`) rewrites the indexed element-wise form to the scalar one, so
-it can still change the answer for a `NotEqual` condition. Fix: decide what
-`NaN ≠ 2` means in a branch (IEEE true, as the cell does, or no arm, as the
-scalar does) and align the other form; then the pre-pass note on
-`indexedOperands` can go.
+`NotEqual`, which the decision left as it was: the element-wise cell `NaN ≠ 2`
+is `True`, so `Which([a, b, c] ≠ 2, 1, True, 0)` with `b = NaN` is `[1, 1, 1]`
+and the indexed form is `1`, while the scalar `Which(b ≠ 2, 1, True, 0)` takes
+no arm (`Missing` in the interpreter, `NaN` on the `javascript` and `python`
+targets; the GPU targets take the then arm). The pre-pass index push-through of
+2026-09-12 (`fixed-width-unroll.ts`, `indexedOperands`) rewrites the indexed
+element-wise form to the scalar one, so it can still change the answer for a
+`NotEqual` condition. Fix: decide what `NaN ≠ 2` means in a branch (IEEE true,
+as the cell does, or no arm, as the scalar does) and align the other form; then
+the pre-pass note on `indexedOperands` can go.
 
 ### A shared subexpression inside a shader lazy operand with no statement position expands once per occurrence (OPEN — found 2026-09-13, narrowed 2026-09-13)
 
@@ -6484,8 +6524,8 @@ guards it with `max(2b − 1, −1)`, and a test pins the guard.
 ### Captured callable evaluation (RESOLVED — 2026-10-20)
 
 Direct calls and eager, lazy and async callbacks now resolve the captured
-binding, including function-valued variables and operator callbacks. Updates
-to that binding remain visible; unrelated declarations do not redirect calls.
+binding, including function-valued variables and operator callbacks. Updates to
+that binding remain visible; unrelated declarations do not redirect calls.
 Forward references resolve in the lexical environment where they were created.
 Argument substitution, Map fusion and generated broadcast callbacks preserve
 that identity. Ordinary data-symbol lookup remains unchanged.
@@ -6505,70 +6545,69 @@ unsupported. Custom accumulator delivery policies are unchanged.
 
 ### Function declaration hoisting: follow-ups (OPEN — found 2026-10-21 while implementing the evaluation-scoped unresolved call and the Epsil declaration preparation; design and measurements in `docs/plans/2026-10-21-function-declaration-hoisting.md`)
 
-The rules landed 2026-10-21: a call evaluated while its head had no value
-stays symbolic for the rest of the top-level evaluation that produced it, and
-a later evaluation resolves it again; a `Block` evaluated directly by the
-host counts each statement as its own evaluation; the Epsil runner installs
-a `function` statement before the first statement when a statement before it
-can call it and the installation is safe (four conditions in
-`prepareFunctionDeclarations`, `src/epsil/execute-epsil.ts`). What remains:
+The rules landed 2026-10-21: a call evaluated while its head had no value stays
+symbolic for the rest of the top-level evaluation that produced it, and a later
+evaluation resolves it again; a `Block` evaluated directly by the host counts
+each statement as its own evaluation; the Epsil runner installs a `function`
+statement before the first statement when a statement before it can call it and
+the installation is safe (four conditions in `prepareFunctionDeclarations`,
+`src/epsil/execute-epsil.ts`). What remains:
 
 - **A declared parameter type is not checked at run time when the argument's
   static type was unknown.** With `h` declared `(integer) -> integer` and
-  defined `h(k) = 2k`, the host block
-  `Block(r := g(h(m)), m := 1.5, r)` nested in a tuple gives `g(3)`: `h(m)`
-  was canonicalized while `m` had type `unknown`, so no static check ran,
-  and the application of `1.5` to the integer parameter is not checked at
-  run time either. `h(1.5)` written directly, and `h(x)` with `x` known to
-  be `real`, give `incompatible-type`. Same at `8fc104df4`. Question for
-  the user: should a value-definition function with a declared signature
-  check its arguments at run time when their static type did not decide
-  (a check per call), or is the static check the contract?
-- **A prepared `function` statement stays defined when the program is
-  cancelled before its statement runs** (time or step budget). The clause
-  is installed in the program scope at preparation; the loop breaks, and
-  a later program on the same engine sees the function. The whole-block
-  route has the same early install, in the block scope, which dies with the
-  block. Removing the binding is not faithful either (the clause may have
-  been accumulated onto a function of an earlier program). Documented in
-  the plan; decision wanted. Since 2026-10-21 a later program that declares
-  the same name no longer re-installs the clause that the stopped program
-  prepared (the early-clause re-install keeps only the installs of the
-  current batch); the prepared clause itself still stays defined.
-- **The declared signature of a function is not checked inside a function
-  body** (found 2026-10-21 by the fix of the early clause; same at HEAD
-  before it). With `function h(x) { let g: (integer) -> integer; function
-  g(k) { 2k }; g(x) }`, `h(1.5)` answers `3` on both routes, also when the
-  call comes after the `function` statement: the body's `Declare` runs in a
-  new scope for each call, so it never finds the binding that holds the
-  clause installed ahead, and the body's call reads that clause without
-  the declared signature. The re-install of early clauses after a
-  declaration (`BLOCK_REINSTALLS`, `library/core.ts`) is keyed on the
-  activation template of a block and covers a loop body and a block run
-  again, synchronously or asynchronously, but not a function body; its
+  defined `h(k) = 2k`, the host block `Block(r := g(h(m)), m := 1.5, r)` nested
+  in a tuple gives `g(3)`: `h(m)` was canonicalized while `m` had type
+  `unknown`, so no static check ran, and the application of `1.5` to the integer
+  parameter is not checked at run time either. `h(1.5)` written directly, and
+  `h(x)` with `x` known to be `real`, give `incompatible-type`. Same at
+  `8fc104df4`. Question for the user: should a value-definition function with a
+  declared signature check its arguments at run time when their static type did
+  not decide (a check per call), or is the static check the contract?
+- **A prepared `function` statement stays defined when the program is cancelled
+  before its statement runs** (time or step budget). The clause is installed in
+  the program scope at preparation; the loop breaks, and a later program on the
+  same engine sees the function. The whole-block route has the same early
+  install, in the block scope, which dies with the block. Removing the binding
+  is not faithful either (the clause may have been accumulated onto a function
+  of an earlier program). Documented in the plan; decision wanted. Since
+  2026-10-21 a later program that declares the same name no longer re-installs
+  the clause that the stopped program prepared (the early-clause re-install
+  keeps only the installs of the current batch); the prepared clause itself
+  still stays defined.
+- **The declared signature of a function is not checked inside a function body**
+  (found 2026-10-21 by the fix of the early clause; same at HEAD before it).
+  With
+  `function h(x) { let g: (integer) -> integer; function g(k) { 2k }; g(x) }`,
+  `h(1.5)` answers `3` on both routes, also when the call comes after the
+  `function` statement: the body's `Declare` runs in a new scope for each call,
+  so it never finds the binding that holds the clause installed ahead, and the
+  body's call reads that clause without the declared signature. The re-install
+  of early clauses after a declaration (`BLOCK_REINSTALLS`, `library/core.ts`)
+  is keyed on the activation template of a block and covers a loop body and a
+  block run again, synchronously or asynchronously, but not a function body; its
   comment states the limit.
-- **A program run again on a warm engine with a changed declared signature
-  keeps the old parameter type** (found 2026-10-21 by the same fix; same at
-  HEAD). `executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) {
-  2*n }\nf(3)')` gives `6`; then `executeEpsil(ce, 'let f: (real) -> real\n
-  function f(n) { 2*n }\nf(2.5)')` on the same engine gives
-  `Error("no-matching-clause", f(2.5))` where a new engine gives `5`. The
-  preparation step boxes `function f` while `f` still holds the signature
-  declared by the first program, and the `DefineFunction` canonical handler
-  writes that old parameter type into the canonical literal
-  (`declaredForParams` → `ascribeDeclaredParameterTypes`, `library/core.ts`),
-  so both the statement's own install and the re-install use `n: integer`.
-  A fix belongs in `prepareFunctionDeclarations()`
-  (`src/epsil/execute-epsil.ts`): for example, do not prepare a function
-  when an earlier `let` of the program declares its name again while the
-  program scope already holds the name with another type.
+- **A program run again on a warm engine with a changed declared signature keeps
+  the old parameter type** (found 2026-10-21 by the same fix; same at HEAD).
+  `executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) { 2*n }\nf(3)')`
+  gives `6`; then
+  `executeEpsil(ce, 'let f: (real) -> real\n function f(n) { 2*n }\nf(2.5)')` on
+  the same engine gives `Error("no-matching-clause", f(2.5))` where a new engine
+  gives `5`. The preparation step boxes `function f` while `f` still holds the
+  signature declared by the first program, and the `DefineFunction` canonical
+  handler writes that old parameter type into the canonical literal
+  (`declaredForParams` → `ascribeDeclaredParameterTypes`, `library/core.ts`), so
+  both the statement's own install and the re-install use `n: integer`. A fix
+  belongs in `prepareFunctionDeclarations()` (`src/epsil/execute-epsil.ts`): for
+  example, do not prepare a function when an earlier `let` of the program
+  declares its name again while the program scope already holds the name with
+  another type.
 - **Divergences between the Epsil runner and the block route that remain**
-  (measured 2026-10-21): a call before the `let` of a variable the body
-  reads (`let a = String(g())`, `let c = 2`, `function g() { c^2 }`) gives
-  `"c^2"` on the runner (the top level has no "declared, not yet
-  initialized" state) and `read-before-declaration` on the block route; a
-  `function` statement the runner does not prepare (after a `type`
-  statement, a body that reads an earlier value with no static type, a
-  generic function) resolves a call before it when the stored result is
-  read again, so the value agrees with the block route, but a value
-  computed from the call in the same statement (`String(g(3))`) does not.
+  (measured 2026-10-21): a call before the `let` of a variable the body reads
+  (`let a = String(g())`, `let c = 2`, `function g() { c^2 }`) gives `"c^2"` on
+  the runner (the top level has no "declared, not yet initialized" state) and
+  `read-before-declaration` on the block route; a `function` statement the
+  runner does not prepare (after a `type` statement, a body that reads an
+  earlier value with no static type, a generic function) resolves a call before
+  it when the stored result is read again, so the value agrees with the block
+  route, but a value computed from the call in the same statement
+  (`String(g(3))`) does not.

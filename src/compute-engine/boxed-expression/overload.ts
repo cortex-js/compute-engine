@@ -4,6 +4,7 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
@@ -597,6 +598,11 @@ function trialGuaranteedToPass(
     const param = paramAt(instance, i);
     if (param === undefined) return false;
     if (!op.type.matches(param)) return false;
+    // An operand typed `error` with no error value matches a parameter
+    // that reads `unknown` (`error <: unknown`, user decision D1,
+    // 2026-10-21), but the strict trial refuses it there
+    // (`strictTrialRefusesUnheldError`, `validate.ts`): the trial decides.
+    if (isErrorTypedWithoutErrorValue(op)) return false;
     // A match is NOT a proof at an arrow-typed slot NO ARM of which can apply
     // the callback. Subtyping does not settle arity at such a slot: an arm
     // with an optional or variadic tail admits a callback wider than any call
@@ -1343,6 +1349,17 @@ function takesByOverlap(
       policies?.couldBeUnkeyedCollection?.(op)
     )
       return false;
+    // An operand typed `error` with no error value at a parameter that reads
+    // `unknown`: a subtype since `error <: unknown` (user decision D1,
+    // 2026-10-21), but admitted by overlap, as the strict trial refuses it
+    // there (`strictTrialRefusesUnheldError`, `validate.ts`), so the arm's
+    // result is read at the bound of its variable (`undecidedResultOf`).
+    if (isErrorTypedWithoutErrorValue(op)) {
+      const r = resolveTypeAlias(param);
+      const arms =
+        typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+      if (arms.some((a) => resolveTypeAlias(a) === 'unknown')) return true;
+    }
     return !op.type.matches(param);
   });
 }
@@ -1635,13 +1652,40 @@ export function triStateSelect(
  * no call-site bound and carries no declared bound falls to `unknown` — so
  * the instantiated parameter reads `indexed_collection<unknown>`, an
  * impossible-looking requirement for what is really "any indexed
- * collection". For display only, such a variable is shown at its GROUND
- * SKELETON (`any`, which `reduceType` normalizes back to the bare
- * constructor), restoring the declared signature's wording. This mirrors the
- * single-signature path's `displayParam` in `validate.ts` (§8), so an
- * overload set diagnoses a bad operand with the same words a plain signature
- * would. Nothing that types the call reads this.
+ * collection". For display only, such a variable is shown by its NAME, as
+ * the declared signature wrote it (`indexed_collection<T>`; user decision
+ * D5, 2026-10-21). This mirrors the single-signature path's `displayParam`
+ * in `validate.ts` (§8), so an overload set diagnoses a bad operand with the
+ * same words a plain signature would. The display type is printed, never
+ * reduced or compared: nothing that types the call reads this.
  */
+/**
+ * The join of two DISPLAY types (`displayParamAt`) for a diagnostic that
+ * names what several arms expected at one position. A display type can be
+ * open (an unbound variable shown by its name, decision D5), and the type
+ * algebra never sees an open type, so two types of which one is open are
+ * joined as a plain union, members deduplicated by their spelling; two
+ * ground types are joined by `widen` as before.
+ */
+function displayJoin(a: Type, b: Type): Type {
+  if (freeTypeVariables(a).size === 0 && freeTypeVariables(b).size === 0)
+    return widen(a, b);
+  const members: Type[] = [];
+  const seen = new Set<string>();
+  const push = (t: Type): void => {
+    const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
+    for (const arm of arms) {
+      const key = typeToString(arm);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      members.push(arm);
+    }
+  };
+  push(a);
+  push(b);
+  return members.length === 1 ? members[0] : { kind: 'union', types: members };
+}
+
 function displayParamAt(
   arm: FunctionSignature,
   declared: FunctionSignature,
@@ -1653,18 +1697,13 @@ function displayParamAt(
   if (solution === undefined || solution.unbound.size === 0) return ground;
   const pattern = paramAt(declared, index);
   if (pattern === undefined) return ground;
-  // Display-only substitution retains the generic solver's current
-  // `unknown` default. Explicit content arguments no longer collapse to bare
-  // family names; diagnostic presentation follows the deferred generic-default
-  // migration in ROADMAP.md.
-  const displayBindings: Record<string, Type> = {
-    ...solution.bindings,
-    ...Object.fromEntries(
-      [...solution.unbound].map((v) => [v, 'unknown' as Type])
-    ),
-  };
+  const displayBindings: Record<string, Type> = Object.fromEntries(
+    Object.entries(solution.bindings).filter(
+      ([v]) => !solution.unbound.has(v)
+    )
+  );
   const t = substituteTypeVariables(pattern, displayBindings);
-  return freeTypeVariables(t).size === 0 ? reduceType(t) : ground;
+  return freeTypeVariables(t).size === 0 ? reduceType(t) : t;
 }
 
 /**
@@ -1791,7 +1830,7 @@ export function diagnoseNoMatch(
       const param = displayParamAt(arm, declared, solution, i);
       if (param === undefined) continue;
       const prior = refuted.get(i);
-      refuted.set(i, prior === undefined ? param : widen(prior, param));
+      refuted.set(i, prior === undefined ? param : displayJoin(prior, param));
     }
   }
   return { arityViable, arityTarget: undefined, refuted };

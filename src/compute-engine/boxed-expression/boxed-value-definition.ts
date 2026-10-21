@@ -27,6 +27,7 @@ import {
   containsSignatureArm,
   functionResult,
   isValidType,
+  resolveTypeAlias,
   widen,
 } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -423,8 +424,8 @@ export class _BoxedValueDefinition
 
       this._type = new BoxedType(type, ce._typeResolver);
       this.inferredType = def.inferred ?? false;
-      if (!this.inferredType && isConstructorPlaceholderType(type))
-        this._placeholderSkeleton = type;
+      if (!this.inferredType)
+        this._placeholderSkeleton = placeholderSkeletonOf(type);
       if (hasSignaturePlaceholder(type)) this._signatureSkeleton = type;
     }
 
@@ -1236,9 +1237,7 @@ export class _BoxedValueDefinition
     // new explicit one (review catch, 2026-08-18). Element-REFINEMENT
     // writes use `_setElementRefinement` below, which preserves the
     // skeleton by construction.
-    this._placeholderSkeleton = isConstructorPlaceholderType(this._type.type)
-      ? this._type.type
-      : undefined;
+    this._placeholderSkeleton = placeholderSkeletonOf(this._type.type);
     // The same rule for a signature skeleton: a write of a signature with
     // `unknown` slots (re)establishes it, any other write clears it. The
     // skeleton is not gated on `inferredType` here, because some callers
@@ -1371,16 +1370,62 @@ function isSelfReferentialValue(
   return !!value && value.symbols.includes(name);
 }
 
+/**
+ * The placeholder skeleton a declared type denotes, or `undefined` when the
+ * declared type is a contract that never moves.
+ *
+ * A declaration whose contents are left to inference refines its element
+ * part from each assignment while its kind stays the contract (user
+ * decisions D2, D3 and rule R7 of
+ * `docs/plans/2026-10-21-unknown-inference-marker.md`, 2026-10-21):
+ *
+ * - a bare collection family name: `list`, `set`, `dictionary`,
+ *   `collection`, `indexed_collection`, and, since D3, `tuple` and `record`
+ *   (the slot types, or the field types, come from the assigned value);
+ * - the same families with an explicit `unknown` content argument
+ *   (`list<unknown>`, `dictionary<unknown>`), an explicit request to infer
+ *   that until D2 was read as a fixed content contract;
+ * - a transparent alias of one of those (`type L = list`): an alias IS its
+ *   definition, so it carries the definition's instruction.
+ *
+ * An explicit content contract (`list<any>`, `list<integer>`,
+ * `tuple<integer, string>`) is never a placeholder. The answer is the
+ * resolved skeleton, which `refineConstructorPlaceholder` reads.
+ */
+export function placeholderSkeletonOf(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string')
+    return isConstructorPlaceholderType(r) ? r : undefined;
+  switch (r.kind) {
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      // A list with dimensions (`list<unknown^3>`) states a shape, which is
+      // a contract on its own; only the shapeless spelling is a placeholder.
+      if (r.kind === 'list' && r.dimensions !== undefined) return undefined;
+      return r.elements === 'unknown' ? r.kind : undefined;
+    case 'dictionary':
+      return r.values === 'unknown' ? 'dictionary' : undefined;
+    default:
+      return undefined;
+  }
+}
+
 /** Is this declared type a bare collection family whose element refinement
- * is tracked separately from its unrestricted declared contract? Explicit
- * content arguments, including `<unknown>`, do not trigger this behavior. */
+ * is tracked separately from its unrestricted declared contract? The
+ * explicit `<unknown>` spellings and the transparent aliases are read by
+ * `placeholderSkeletonOf`, which callers use; this predicate answers for the
+ * primitive names alone. */
 export function isConstructorPlaceholderType(t: Type): boolean {
   return (
     t === 'list' ||
     t === 'set' ||
     t === 'dictionary' ||
     t === 'collection' ||
-    t === 'indexed_collection'
+    t === 'indexed_collection' ||
+    t === 'tuple' ||
+    t === 'record'
   );
   // NOTE deliberately NOT `t === 'function'`: a bare `function` declaration
   // is the WILDCARD-CALLEE contract, and its type deliberately stays bare
@@ -1407,6 +1452,10 @@ export function refineConstructorPlaceholder(
   skeleton: Type,
   valueType: Type
 ): Type {
+  // The value's own type can be a transparent alias (`k: cyc := [1, 2]`
+  // with `type alias cyc = cyc | list<integer>`); the refinement reads its
+  // structure.
+  valueType = resolveTypeAlias(valueType);
   switch (skeleton) {
     case 'list':
     case 'indexed_collection':
@@ -1416,6 +1465,10 @@ export function refineConstructorPlaceholder(
       // `integer`), so a string-form value type is not rejected up front:
       // `a: indexed_collection; a = "abc"` refines to
       // `indexed_collection<character>` (review catch, 2026-08-18).
+      // An element type that is a bare `unknown` says nothing yet, so the
+      // skeleton stays; a union with an `unknown` arm (`integer | unknown`,
+      // what the join keeps for `[opq(1), 2]` under decision D4) is kept, as
+      // it does say something about the resolved cells.
       const elements = collectionElementType(valueType);
       if (elements === undefined || elements === 'unknown') return skeleton;
       return { kind: skeleton, elements } as Type;
@@ -1439,6 +1492,23 @@ export function refineConstructorPlaceholder(
       if (values === undefined || values === 'unknown') return skeleton;
       return { kind: 'dictionary', values };
     }
+    // A bare `tuple` takes the assigned tuple's slot types, names included
+    // (`t: tuple := (1, Missing)` reports `tuple<integer, missing>`); the
+    // next assignment re-refines, with another arity if it has one. A value
+    // that is not a tuple (the declaration admits only tuples, so this is a
+    // value whose static type is wider, such as `indexed_collection`) leaves
+    // the skeleton. (User decision D3, 2026-10-21.)
+    case 'tuple':
+      if (typeof valueType === 'string' || valueType.kind !== 'tuple')
+        return skeleton;
+      return { kind: 'tuple', elements: valueType.elements };
+    // A bare `record` takes the assigned record's field types
+    // (`r: record := {a: 1}` reports `record{a: integer}`); the record stays
+    // open, so a later field is still admitted by the contract. (D3.)
+    case 'record':
+      if (typeof valueType === 'string' || valueType.kind !== 'record')
+        return skeleton;
+      return { kind: 'record', elements: valueType.elements };
     default:
       return skeleton;
   }

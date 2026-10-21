@@ -213,6 +213,21 @@ export function isPrimitiveSubtype(
   // `any` is the top type
   if (rhs === 'any') return true;
 
+  // `unknown` is an inference marker: a type still to be inferred. As a set
+  // of values it restricts nothing, so every type is a subtype of it,
+  // including `any`, `error` and the absence markers (user decision D1,
+  // 2026-10-21, `docs/plans/2026-10-21-unknown-inference-marker.md`). Before
+  // that decision `any`, `error`, `nothing` and `missing` were excluded, which
+  // made `list<unknown>` a narrower contract than bare `list` and refused
+  // `[1, Missing]` to a declaration that asked to infer its elements. `any`
+  // and `unknown` are therefore mutual subtypes: two spellings of the same
+  // set of values with different instructions (a contract, a request to
+  // infer), exactly as bare `list` and `list<any>` are. The reverse direction
+  // stays false (below): an unresolved type never proves a contract. This
+  // rule comes before the unit-type rules so that `nothing <: unknown` and
+  // `missing <: unknown` hold.
+  if (rhs === 'unknown') return true;
+
   // `never` is the bottom type — a subtype of every type
   if (lhs === 'never') return true;
   // No other type is a subtype of `never`
@@ -231,18 +246,8 @@ export function isPrimitiveSubtype(
   if (rhs === 'missing') return lhs === 'missing';
   if (lhs === 'missing') return false;
 
-  // `unknown` is the top of the VALUE types: every remaining type is a
-  // subtype of it, and it is a subtype only of `any`/`unknown`. `any` itself
-  // is NOT below `unknown`: `any` additionally admits the absence markers
-  // (`nothing`, `missing`), which `unknown` excludes, so `any` sits strictly
-  // above. (When `any <: unknown` was granted here, the two were mutual
-  // subtypes while disagreeing on `nothing`, so the relation was not
-  // transitive: `list<nothing> <: list<any> <: list<unknown>` both held
-  // while `list<nothing> <: list<unknown>` did not.) `error` is excluded for
-  // the same reason: it is not a value, and it is a subtype only of itself
-  // and `any` (the rule above says so) — letting it ride the blanket rule
-  // put `list<error>` inside `list<unknown>`.
-  if (rhs === 'unknown') return lhs !== 'any' && lhs !== 'error';
+  // `unknown` is a subtype only of `any` and itself (both handled above): an
+  // unresolved type never proves a contract.
   if (lhs === 'unknown') return false;
 
   // Identity
@@ -2161,6 +2166,51 @@ function sharesDimensionedListSubtype(a: Type, b: Type): boolean {
  * below the compute-engine layer.
  */
 /**
+ * Whether a function whose parameter is typed `accepting` accepts an
+ * argument of type `supplied`: the contravariant step of the signature
+ * subtype rule, `supplied <: accepting`, with one reading for an
+ * unresolved parameter.
+ *
+ * A parameter typed `unknown` is a lambda parameter that is not inferred
+ * yet (`x ↦ x^2` is `(unknown) -> number`). Under the subtype relation every
+ * type is a subtype of `unknown` (user decision D1, 2026-10-21), so the
+ * plain step would read such a function as satisfying `(any) -> number`,
+ * and a declared signature would then be callable under a contract that
+ * nothing proved (the types guide: a declared function signature keeps
+ * refusing an `unknown` value). The parameter is therefore read as what the
+ * body will be refined to accept, a value of some kind: the function
+ * accepts a value, a function or a symbol, and does not promise to accept
+ * absence, an error or `any`. This is the reading the relation gave before
+ * D1, when `unknown` excluded exactly those. A supplied `unknown` (the
+ * other signature's own unresolved parameter) is accepted, which keeps the
+ * rule reflexive: `(unknown*) -> unknown` is a subtype of itself, as every
+ * library definition's self-check requires.
+ *
+ * The reading applies to an `unknown` ARM too, spelled directly or through
+ * a transparent alias: a parameter `unknown | missing` (a read from an
+ * unresolved element that can miss) accepts a marker only when one of its
+ * other arms states it, so `(unknown | missing) -> number` does not satisfy
+ * `(any) -> number` either.
+ */
+function acceptsParameter(accepting: Type, supplied: Type): boolean {
+  const unfold = (t: Type): Type =>
+    isTransparentAliasReference(t) ? (aliasDefinitionAt(t) ?? t) : t;
+  const resolved = unfold(accepting);
+  const arms = (
+    typeof resolved === 'object' && resolved.kind === 'union'
+      ? resolved.types
+      : [resolved]
+  ).map(unfold);
+  if (!arms.some((a) => a === 'unknown')) return isSubtype(supplied, accepting);
+  if (supplied === 'unknown') return true;
+  if (supplied === 'any') return false;
+  const others = arms.filter((a) => a !== 'unknown');
+  const markerStated = (m: 'nothing' | 'missing' | 'error'): boolean =>
+    !provablyAdmits(m, supplied) || others.some((o) => isSubtype(m, o));
+  return markerStated('nothing') && markerStated('missing') && markerStated('error');
+}
+
+/**
  * The parameter type a signature binds at supplied position `i`, walking
  * required → optional → variadic; `undefined` past a non-variadic signature's
  * last parameter.
@@ -2253,6 +2303,49 @@ function alphaEquivalentSignatures(
  * `CE_CACHE_STATS`), never reset.
  */
 export const subtypeStats = { queries: 0 };
+
+/**
+ * Whether the type `t` STATES that it admits a value of the marker type
+ * `marker` (`nothing`, `missing` or `error`): some arm of `t` other than the
+ * inference marker `unknown` is a supertype of `marker`.
+ *
+ * `isSubtype(marker, t)` answers a different question, "could a value of
+ * type `t` be a `marker`?", and since `unknown` is a type still to be
+ * inferred that every type is a subtype of (user decision D1, 2026-10-21,
+ * `docs/plans/2026-10-21-unknown-inference-marker.md`), that answer is
+ * `true` through an `unknown` arm. A site that reads the answer as EVIDENCE
+ * (a `Tuple` slot that may hold `Nothing`, a callback that may return
+ * `Nothing`, a compiler refusal of an omission-capable source) must not
+ * take an unresolved type for a proof: an unresolved type proves nothing
+ * either way. Such a site asks this function. `any` is evidence: a contract
+ * that admits everything admits the marker. A transparent alias is read
+ * through its definition; a recursive alias (`cyc = cyc | list<integer>`)
+ * is opened once on each descent, and its second occurrence is no evidence
+ * (`seen` holds the declarations opened so far, as `resolveTypeAlias` in
+ * `utils.ts` does), so the walk ends.
+ */
+export function provablyAdmits(
+  marker: 'nothing' | 'missing' | 'error',
+  t: Type | TypeString,
+  seen?: ReadonlySet<unknown>
+): boolean {
+  if (typeof t === 'string') {
+    if (t === 'unknown') return false;
+    if (!PRIMITIVE_TYPES_SET.has(t as PrimitiveType)) t = parseType(t);
+  }
+  if (typeof t === 'object') {
+    if (t.kind === 'union')
+      return t.types.some((arm) => provablyAdmits(marker, arm, seen));
+    if (isTransparentAliasReference(t)) {
+      const decl: unknown = declarationOf(t) ?? t;
+      if (seen?.has(decl)) return false;
+      const def = aliasDefinitionAt(t);
+      if (def !== undefined && def !== t)
+        return provablyAdmits(marker, def, new Set(seen).add(decl));
+    }
+  }
+  return isSubtype(marker, t);
+}
 
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
@@ -2467,6 +2560,18 @@ function isSubtypeRules(
   // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
 
+  // Every type is a subtype of `unknown`, `any`, `error` and the absence
+  // markers included: `unknown` is a type still to be inferred, and as a set
+  // of values it restricts nothing (user decision D1, 2026-10-21,
+  // `docs/plans/2026-10-21-unknown-inference-marker.md`; the same rule as
+  // `isPrimitiveSubtype`). A union therefore fits too, whatever its arms.
+  // Until that decision `any`, `error`, `nothing` and `missing` were
+  // excluded, so that `list<integer | missing>` was not a `list<unknown>`
+  // while it was a bare `list`: the explicit request to infer was the
+  // narrowest of the three spellings. The rule comes before the unit-type
+  // rules below so that `nothing <: unknown` and `missing <: unknown` hold.
+  if (rhs === 'unknown') return true;
+
   // `never` is the bottom type — a subtype of every type (including itself).
   // This must precede the `rhs === 'never'` check below so `never <: never`
   // is true (reflexivity).
@@ -2495,33 +2600,14 @@ function isSubtypeRules(
   // primitive rhs so a composite rhs (e.g. `integer | missing`) falls through.
   if (lhs === 'missing' && typeof rhs === 'string') return false;
 
-  // Every type is a subtype of `unknown` — except `any`, which additionally
-  // admits the absence markers (`nothing`, `missing`) that `unknown`
-  // excludes, and therefore sits STRICTLY above `unknown`. (Granting
-  // `any <: unknown` made the two mutual subtypes while they disagreed on
-  // `nothing`, so the relation was not transitive.)
-  if (rhs === 'unknown') {
-    if (lhs === 'any') return false;
-    // `error` is not a value either: it is a subtype only of itself and
-    // `any`, so it must not ride the blanket rule (mirrors
-    // `isPrimitiveSubtype`).
-    if (lhs === 'error') return false;
-    // A union fits `unknown` only when every arm does: an absence arm must
-    // not ride under the blanket rule (`integer | missing ⊄ unknown`, which
-    // is what keeps a `list<integer|missing>` out of `list<unknown>`). The absence PRIMITIVES themselves (`nothing`, `missing`)
-    // returned false above, before this rule.
-    if (typeof lhs !== 'string' && lhs.kind === 'union')
-      return lhs.types.every(
-        (t) => isAssumedUnionArm(t, 'unknown') || isSubtype(t, 'unknown')
-      );
-    return true;
-  }
-  // 'unknown' is only a subtype of `any` (handled above); gate on a primitive
-  // rhs so `unknown <: unknown | integer` falls through to the union handler.
+  // 'unknown' is only a subtype of `any` (handled above) and of itself; gate
+  // on a primitive rhs so `unknown <: unknown | integer` falls through to the
+  // union handler. An unresolved type never proves a contract: `unknown <:
+  // integer` is false, and the engine admits an `unknown` operand by its own
+  // gate (`validateArguments`), decided when the program runs.
   //
-  // ⚠️ Do NOT make this bidirectional. TRIED AND REVERTED (2026-08-15). The
-  // structural reason comes first because no downstream patch can route
-  // around it: if `unknown <: T` and `T <: unknown` both held for every `T`,
+  // ⚠️ Do NOT make this true for every rhs. TRIED AND REVERTED (2026-08-15).
+  // If `unknown <: T` and `T <: unknown` both held for every `T`,
   // antisymmetry is gone — `unknown` becomes lattice-EQUIVALENT to every
   // type, and union subsumption and `meet2`'s subtype-based tie-breaks stop
   // being order-independent. That is not a bug to fix in the callers; it is
@@ -2529,13 +2615,16 @@ function isSubtypeRules(
   // `matches()` doubles as the engine's dispatch predicate, and within one
   // probe of the flip an element access typed `unknown` "matched" `matrix`,
   // so `P[1]^2` canonicalized as `MatrixPower`, broadcast decisions flipped,
-  // and even undeclared-function definitions went inert. A bidirectional
-  // "compatible with everything" reading of `unknown` therefore cannot live
-  // in this relation at all. The placeholder semantics users actually need
-  // lives at the DECLARATION boundary instead: `refineDeclaredPlaceholders`
+  // and even undeclared-function definitions went inert. (`unknown` and `any`
+  // being mutual subtypes is a different, harmless thing: they are the same
+  // set of values, so the order merges two spellings of one point, as it
+  // does for bare `list` and `list<any>`.) The placeholder semantics users
+  // need lives at the DECLARATION boundary instead: `refineDeclaredPlaceholders`
   // (compute-engine/boxed-expression/effects-inference.ts) replaces declared
-  // `unknown` slots with the definition's inferred slots. Full record: the
-  // placeholder-signature entry in ROADMAP.md (ruled 2026-08-15).
+  // `unknown` slots with the definition's inferred slots, and
+  // `refineConstructorPlaceholder` (boxed-value-definition.ts) does the same
+  // for an element slot. Full record: the placeholder-signature entry in
+  // ROADMAP.md (ruled 2026-08-15).
   if (lhs === 'unknown' && typeof rhs === 'string') return false;
 
   //
@@ -2998,7 +3087,7 @@ function isSubtypeRules(
       // The arity check above guarantees a parameter here, but a signature
       // with fewer positions than its own arity range would slip through.
       if (lhsParam === undefined) return false;
-      if (!isSubtype(rhsParam, lhsParam)) return false;
+      if (!acceptsParameter(lhsParam, rhsParam)) return false;
     }
 
     // A variadic rhs also supplies arguments PAST its named positions, all of
@@ -3006,7 +3095,7 @@ function isSubtypeRules(
     if (rhs.variadicArg) {
       const lhsTail = lhs.variadicArg?.type;
       if (lhsTail === undefined) return false;
-      if (!isSubtype(rhs.variadicArg.type, lhsTail)) return false;
+      if (!acceptsParameter(lhsTail, rhs.variadicArg.type)) return false;
     }
 
     return true;
@@ -3884,8 +3973,18 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === 'any') return b;
   if (b === 'any') return a;
 
-  // `nothing`, `never` and `unknown` deliberately have NO short-circuit here;
-  // the subtype tests below give each the right answer, and the short-circuits
+  // A meet with `unknown` (a type still to be inferred) resolves it: the
+  // constraint is the answer, so `narrow('unknown', 'integer')` is `integer`
+  // and `narrow('unknown', 'missing')` is `missing`. Stated as a
+  // short-circuit rather than left to the subtype tests below so that the
+  // answer does not depend on the operand order: `unknown` and `any` are
+  // mutual subtypes (user decision D1, 2026-10-21), and the first subtype
+  // test would otherwise return whichever came first.
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
+
+  // `nothing` and `never` deliberately have NO short-circuit here; the
+  // subtype tests below give each the right answer, and the short-circuits
   // they used to have gave the wrong one.
   //
   // `nothing` is the UNIT type (its one member is the symbol `Nothing`), not
@@ -3893,9 +3992,7 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   // 'integer')` shares no value and is `never`, which is what the disjoint
   // fallback returns. `never` IS the bottom, so it absorbs rather than yields
   // — `isSubtype('never', b)` holds for every `b`, so the first test below
-  // returns it. And `unknown` excludes the absence types by ruling (absence is
-  // opt-in), so `narrow('nothing', 'unknown')` is likewise `never`; every
-  // ordinary type still narrows through `isSubtype(b, 'unknown')`.
+  // returns it.
   //
   // Placeholder semantics for a declared `unknown` slot deliberately do NOT
   // live in this relation — they are applied by `refineDeclaredPlaceholders`
@@ -3962,9 +4059,6 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === 'never') return b;
   if (b === 'never') return a;
 
-  if (a === 'unknown') return b;
-  if (b === 'unknown') return a;
-
   // `nothing` is absorbed rather than joined: `widen('nothing', 'integer')` is
   // `integer`, not `integer | nothing`. As pure lattice algebra that is wrong
   // — the join must be a supertype of both sides, and `integer` is not a
@@ -3972,16 +4066,31 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   // confusion `narrow2` above had, and it is not. It is deliberate and ruled;
   // see `ROADMAP.md`, "An empty meet was spelled `nothing`, the UNIT type".
   //
-  // The reason is that absence is OPT-IN in this type system: `nothing` and
-  // `missing` are excluded from `unknown`, and a type admits them only by
-  // saying so (`integer | nothing`). Joining them in would contradict that at
-  // every inference site that widens a series of observed types — most
-  // visibly element-type inference, where `[1, Nothing, 3]` is meant to infer
-  // `list<integer>` rather than `list<integer | nothing>`.
+  // The reason is that absence is OPT-IN in this type system: a type admits
+  // `nothing` or `missing` only by saying so (`integer | nothing`). Joining
+  // them in would contradict that at every inference site that widens a
+  // series of observed types — most visibly element-type inference, where
+  // `[1, Nothing, 3]` is meant to infer `list<integer>` rather than
+  // `list<integer | nothing>`.
   //
   // Do not "fix" this to match `narrow2`. The two are asymmetric on purpose.
   if (a === 'nothing') return b;
   if (b === 'nothing') return a;
+
+  // `unknown` is NEUTRAL in this join, like `never`: `widen('unknown',
+  // 'integer')` is `integer`. The engine's inference joins read `unknown` as
+  // "no information yet" (the seed of a recursion fixpoint, the result of a
+  // call whose callee is not derived yet, a lambda parameter before its
+  // first use), and a join that kept it as an arm spread `| unknown`
+  // through every derived signature (measured 2026-10-21: about 60 tests
+  // in 20 suites). A join of types DERIVED FROM A VALUE, where an `unknown`
+  // slot is a cell whose contents are not resolved, keeps the arm instead:
+  // `joinUnresolvedArm()` below, used by `collectionElementType` for tuple
+  // slots and by the `ListJoin` element join (user decision D4, 2026-10-21,
+  // `docs/plans/2026-10-21-unknown-inference-marker.md`, narrowed to the
+  // value-derived joins by that measurement).
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
 
   if (isSubtype(a, b)) return b;
   if (isSubtype(b, a)) return a;
@@ -4145,6 +4254,54 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
 }
 
 /**
+ * The join of types DERIVED FROM A VALUE, where an `unknown` member is a
+ * cell whose contents are not resolved rather than "no information yet":
+ * `widenAll` of the members, with an `unknown` member kept as an arm of the
+ * result (user decision D4, 2026-10-21,
+ * `docs/plans/2026-10-21-unknown-inference-marker.md`). The ordinary
+ * `widen` drops it, as the inference joins need (see `widen2`), so the
+ * slots of `tu: tuple<unknown, missing>` joined to `missing` and `Filter(tu,
+ * p)` was typed `list<missing>` for the value `[1]`; here they join to
+ * `missing | unknown`. A top (`any`) absorbs the arm: a contract that
+ * admits everything has nothing left to infer. The union is built without
+ * reduction, as the other unions of this join are; the reducer absorbs a
+ * value arm into `unknown` and keeps an absence arm beside it
+ * (`reduceUnionType`, `reduce.ts`), so a reduced result is `unknown` or
+ * `missing | unknown`. A union with an `error` arm reduces to `error` (the
+ * reducer's standing rule), so an `error` member absorbs the arm too.
+ *
+ * With `besideMarkersOnly`, the arm is kept only when the other members
+ * are all absence markers. The slots of a tuple literal are read that way:
+ * a free symbol in a point, `(1, x)`, is an `unknown` slot, and the
+ * engine's generic-symbol convention reads such a point as numeric
+ * (`Third((1, x))` out of range is `NaN`, the numeric marker), which the
+ * arm would turn into a non-numeric domain. Beside markers only, as in
+ * `tuple<unknown, missing>`, the arm is kept, since `missing` alone would
+ * claim that every cell is absent.
+ */
+export function joinUnresolvedArm(
+  types: ReadonlyArray<Readonly<Type>>,
+  besideMarkersOnly = false
+): Readonly<Type> {
+  const joined = widenAll(types);
+  if (
+    joined === 'unknown' ||
+    joined === 'any' ||
+    joined === 'error' ||
+    !types.includes('unknown')
+  )
+    return joined;
+  if (besideMarkersOnly) {
+    const arms =
+      typeof joined === 'object' && joined.kind === 'union'
+        ? joined.types
+        : [joined];
+    if (!arms.every((t) => t === 'missing' || t === 'nothing')) return joined;
+  }
+  return unionTypes(joined, 'unknown');
+}
+
+/**
  * `widen` over a list of types. Use this form for a list whose length the
  * source does not bound — the operands of a flattened sum or product, the
  * elements of a literal collection: spreading such a list into `widen(...)`
@@ -4248,10 +4405,10 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
   if (a === 'any' || b === 'any') return 'any';
   if (a === 'never') return b;
   if (b === 'never') return a;
-  if (a === 'unknown') return b;
-  if (b === 'unknown') return a;
   if (a === 'nothing') return b;
   if (b === 'nothing') return a;
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
 
   // Fast path: for a pair of primitive types, use a direct lookup table
   // (computed on demand from the closure sets, then memoized)

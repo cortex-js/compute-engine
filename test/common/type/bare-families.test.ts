@@ -33,12 +33,17 @@ describe('bare collection families constrain kind, not contents', () => {
   );
 
   test.each(families)('%s preserves an explicit unknown argument', (kind) => {
+    // The explicit `<unknown>` is kept as written (it is a request to infer
+    // the contents, which the bare name also is) and denotes the same set
+    // of values as the bare name: mutual subtypes (user decision D1,
+    // 2026-10-21).
     const spelling = `${kind}<unknown>`;
     const type = parseType(spelling);
     expect(typeToString(type)).toBe(spelling);
     expect(typeToString(reduceType(type))).toBe(spelling);
-    expect(isSubtype(parseType(kind), type)).toBe(false);
+    expect(isSubtype(parseType(kind), type)).toBe(true);
     expect(isSubtype(type, parseType(kind))).toBe(true);
+    expect(isSubtype(type, parseType(`${kind}<expression>`))).toBe(false);
   });
 
   test('bare tuple accepts arbitrary arity and absent positions', () => {

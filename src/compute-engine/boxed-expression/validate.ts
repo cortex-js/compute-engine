@@ -18,6 +18,7 @@ import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import {
   isSubtype,
+  provablyAdmits,
   provablyDisjoint,
   widenAll,
 } from '../../common/type/subtype.js';
@@ -70,6 +71,7 @@ import {
   freeTypeVariables,
   parameterPositions,
   readTypeVariablesAsBounds,
+  substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import {
@@ -1928,6 +1930,33 @@ function inferredNarrowTarget(current: Type, param: Type): Type | undefined {
 }
 
 /**
+ * Whether the STRICT pass of an overload trial refuses `op` at `param`: the
+ * operand is typed `error` but holds no error value (a symbol declared
+ * `error` with no value, see `isErrorTypedWithoutErrorValue()`) and the
+ * parameter reads `unknown` (an absorbed type variable, or a declared
+ * `unknown` slot). Such an operand only OVERLAPS the parameter, and the
+ * design admits it on the second, overlap pass (`overlapAdmission` below),
+ * where a generic arm's result is then read at the bound of its variable
+ * (`undecidedResultOf`, `overload.ts`): `Reverse(e)` is typed `string`.
+ * Before `error <: unknown` held (user decision D1, 2026-10-21), the plain
+ * subtype test refused the operand on the strict pass; this keeps that
+ * verdict, which the relation no longer gives. Outside a trial nothing
+ * changes: a plain call admits the operand as before.
+ */
+function strictTrialRefusesUnheldError(
+  op: Expression,
+  param: Type,
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  return (
+    internals?.trial === true &&
+    internals.overlapTrial !== true &&
+    isErrorTypedWithoutErrorValue(op) &&
+    paramArms(param).some((a) => a === 'unknown')
+  );
+}
+
+/**
  * R1 overlap admission (§4.4 of
  * `docs/plans/2026-08-22-type-handlers-on-types.md`) — the verdict for
  * "every other parameter" once the specialized admissions (arrow slots,
@@ -1971,6 +2000,7 @@ function inferredNarrowTarget(current: Type, param: Type): Type | undefined {
  *   (`overlapTrial`), and the selected arm's real validation admits — see
  *   the second-pass block in `validateArguments`.
  */
+
 function overlapAdmission(op: Expression, param: Type): boolean {
   // A callable-plus-numeric union parameter is exempt from the classifier
   // only on account of its callable arm, which is no authority over a
@@ -3326,23 +3356,27 @@ export function validateArguments(
     });
   }
 
-  // §8 DISPLAY ONLY. Retain the solver's current `unknown` default for
-  // unbound variables. Explicit content arguments no longer collapse to bare
-  // family names; presentation follows the deferred generic-default migration
-  // in ROADMAP.md. These bindings never type the call itself.
+  // §8 DISPLAY ONLY. A variable that got no call-site bound and carries no
+  // declared bound is shown by its NAME, as the signature wrote it: the
+  // message reads `expected indexed_collection<T>`, which says that the
+  // slot is generic, rather than the solver's fallback
+  // `indexed_collection<unknown>` (user decision D5, 2026-10-21,
+  // `docs/plans/2026-10-21-unknown-inference-marker.md`). The bound
+  // variables are substituted; the open ones stay variables, so the display
+  // type is not reduced (the algebra never sees an open type) and is only
+  // ever printed. These bindings never type the call itself.
   const displayBindings =
     solved && solved.unbound.size > 0
-      ? {
-          ...solved.bindings,
-          ...Object.fromEntries(
-            [...solved.unbound].map((v) => [v, 'unknown' as Type])
-          ),
-        }
+      ? Object.fromEntries(
+          Object.entries(solved.bindings).filter(
+            ([v]) => !solved.unbound.has(v)
+          )
+        )
       : undefined;
   const displayParam = (param: Type, ground: Type): Type => {
     if (displayBindings === undefined) return ground;
-    const t = instantiatedParam(param, displayBindings);
-    return t === undefined ? ground : reduceType(t);
+    const t = substituteTypeVariables(param, displayBindings);
+    return freeTypeVariables(t).size === 0 ? reduceType(t) : t;
   };
   const displayParams =
     sig.args?.map((x, k) => displayParam(x.type, params[k])) ?? [];
@@ -3405,6 +3439,11 @@ export function validateArguments(
     if (isErrorTypedOperand(op)) {
       result.push(op);
       deferredIdx.add(result.length - 1);
+      continue;
+    }
+    if (strictTrialRefusesUnheldError(op, param, internals)) {
+      result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
+      isValid = false;
       continue;
     }
     if (op.type.isUnknown || op.type.type === 'any') {
@@ -3757,6 +3796,14 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    if (strictTrialRefusesUnheldError(op, param, internals)) {
+      result.push(
+        ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
+      );
+      isValid = false;
+      i += 1;
+      continue;
+    }
     if (op.type.isUnknown || op.type.type === 'any') {
       // An expression with an unknown or any type is assumed to be valid,
       // we'll infer the type later
@@ -4031,6 +4078,11 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
+      if (strictTrialRefusesUnheldError(op, varParam, internals)) {
+        result.push(ce.typeError(displayVarParam ?? varParam, op.type, op));
+        isValid = false;
+        continue;
+      }
       if (op.type.isUnknown || op.type.type === 'any') {
         // An expression with an unknown or any type is assumed to be valid,
         // we'll infer the type later
@@ -4271,7 +4323,7 @@ export function validateArguments(
           ? instantiatedParam(pattern, atBounds)
           : undefined) ?? 'any';
       const op = ops[idx];
-      if (isSubtype('error', expected)) continue;
+      if (provablyAdmits('error', expected)) continue;
       // The admission on overlap, deferred as in the per-position checks.
       // As there, it is not active in the first, strict pass of overload
       // resolution, and it is active in the second pass (`overlapTrial`).

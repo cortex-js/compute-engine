@@ -26,11 +26,16 @@ promise.
 
 ### Inference and content contracts — clarification of 2026-10-20
 
-**Agreed direction, implementation pending:** `unknown` is an inference
-marker/placeholder, not a concrete type requiring a position in the lattice.
+**Implemented 2026-10-21** (`docs/plans/2026-10-21-unknown-inference-marker.md`):
+`unknown` is an inference marker/placeholder, not a concrete content type.
 It asks the engine to determine a type. It does not promise either the
 presence or absence of a datum, and it does not establish that a runtime
-value satisfies the type a consumer requires.
+value satisfies the type a consumer requires. In the subtype relation every
+type is a subtype of `unknown` (the markers and `any` included) and
+`unknown` is a subtype only of `any` and itself. A site that needs
+EVIDENCE that a type admits a marker asks `provablyAdmits()`
+(`common/type/subtype.ts`), which does not read an `unknown` arm as a
+proof.
 
 Use explicit content contracts for those restrictions:
 
@@ -43,9 +48,9 @@ Use explicit content contracts for those restrictions:
   elements.
   `list<expression | missing>` permits missing elements; a missing whole
   list is instead expressed by `list<expression> | missing`.
-- Under the agreed inference-marker interpretation, `list<unknown>` asks
-  to infer an element type. It must not impose an implicit absence
-  restriction. This behavior still requires implementation.
+- `list<unknown>` asks to infer an element type from each assignment, as
+  the bare `list` does, and imposes no absence restriction:
+  `xs: list<unknown> := [1, Missing]` reports `list<integer | missing>`.
 
 These are immediate-content restrictions, not guarantees about every nested
 element. A collection containing `Missing` is itself a collection value.
@@ -56,13 +61,10 @@ predicate includes both numeric markers, pending implementation.
 Evaluation failure is separate: an expression with a successful-value
 contract may still fail when evaluated.
 
-The current subtype implementation still places ordinary expression types
-below `unknown`, excludes `missing`, `nothing`, and `error` from it, and
-equates `list`, `set`, `dictionary`, `collection`, and `indexed_collection`
-with their `<unknown>` forms. Descriptions
-of those relationships below are implementation facts, not the agreed
-meaning of the inference marker. `never` is the bottom type, below every
-content type; it is neither an absent datum nor an inference placeholder.
+A join keeps the unresolved part (`widen(unknown, integer)` is
+`integer | unknown`), so a value-derived type does not drop a slot it could
+not resolve. `never` is the bottom type, below every content type; it is
+neither an absent datum nor an inference placeholder.
 
 The collection-name change and assignment presence guarantees remain
 separate decisions. Raw callback results in lazy views (R) are now selected,
@@ -379,9 +381,8 @@ typed `never` whose evaluation yields the `Error(code)` value. Its consumer is a
 human or an IDE, so it carries provenance: an error code, the offending
 sub-expression, and (as it propagates) a breadcrumb of the operators it
 passed through. As a content type, `error` is a subtype of `any`, but not
-of `value` or `expression`. It is also outside `unknown` in the current
-subtype implementation; that relationship is not the definition of the
-inference marker. An explicit `any` or a union containing `error` can
+of `value` or `expression`. It is a subtype of the inference marker
+`unknown`, which restricts nothing. An explicit `any` or a union containing `error` can
 describe error content, while ordinary successful-value signatures need
 not enumerate evaluation failure.
 
@@ -699,12 +700,10 @@ first three in `_invalidValue()`,
   their cells (a valid list with invalid cells) is a possible future
   refinement, not current behavior.
 
-  The `unknown` element type here is a current fallback, not a contract
-  stating that the cells are present and successful. Under the agreed
-  inference-marker interpretation, element information must retain the
-  possible cell failure separately or explicitly represent error content.
-  The representation remains open; changing the meaning of `unknown` does
-  not itself change error propagation or container validity.
+  The `unknown` element type here is a fallback, not a contract stating
+  that the cells are present and successful: an unresolved type proves
+  nothing either way. The meaning of `unknown` does not change error
+  propagation or container validity.
 
   **A `List` or `Set` literal with a failed cell is a collection that can be
   iterated** (decided 2026-10-19). Although its tree is invalid,
@@ -1246,7 +1245,7 @@ now admit unrestricted contents, just like their explicit `<any>` forms.
 Bare tuple and record likewise cover their entire families. Explicit content
 contracts such as `list<string>` or `list<expression>` retain their restrictions;
 a missing whole list is still different from a list containing missing cells.
-The agreed inference-marker role of `unknown` requires separate migration work.
+The inference-marker role of `unknown` is implemented (2026-10-21).
 The current `NaN`-to-`Missing` repair in `boxed-expression/validate.ts`
 applies only within nested `List` expressions, not to record/dictionary
 values.

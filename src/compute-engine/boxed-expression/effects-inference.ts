@@ -18,6 +18,7 @@ import {
 } from '../../common/type/utils.js';
 import {
   isSubtype,
+  provablyAdmits,
   objectLayoutOfType,
   provablyDisjoint,
   widenAll,
@@ -430,7 +431,7 @@ export function adoptTopPlaceholderSlots(value: Type, expected: Type): Type {
     // A TOP-LEVEL `missing` arm only: `list<integer | missing>` is already a
     // subtype of `unknown`, and its absent cells say nothing about an absent
     // argument.
-    if (e !== undefined && isSubtype('missing', e)) {
+    if (e !== undefined && provablyAdmits('missing', e)) {
       argsChanged = true;
       return {
         ...a,

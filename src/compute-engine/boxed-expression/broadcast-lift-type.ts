@@ -59,7 +59,11 @@ import {
   unfoldAliasOnDescent,
   type AliasDescent,
 } from '../../common/type/utils.js';
-import { isSubtype, widen } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  provablyAdmits,
+  widen,
+} from '../../common/type/subtype.js';
 import { reduceType } from '../../common/type/reduce.js';
 import type {
   BoxedOperatorDefinition,
@@ -662,7 +666,7 @@ export function movesAbsentCells(operator: string): boolean {
  * Both answers are possible, so the type is `number | missing`.
  */
 export function withPresentCellAbsence(result: Type, absorbed: Type): Type {
-  if (!isSubtype('missing', result) || isSubtype('missing', absorbed))
+  if (!provablyAdmits('missing', result) || provablyAdmits('missing', absorbed))
     return absorbed;
   return widen('missing', absorbed);
 }

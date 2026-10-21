@@ -195,7 +195,7 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
 
   it('a self-referential alias of a list of values is a list of values', () => {
     // A value of `R = list<R>` is a list of lists of values, so it is a
-    // `list<unknown>` under the values-only reading of `unknown`.
+    // `list<unknown>` and a `list<expression>`.
     const ce = new ComputeEngine();
     ce.declareType('R', 'list<R>', { alias: true });
     ce.declareType('J', 'list<J> | missing', { alias: true });
@@ -203,24 +203,32 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
     expect(ce.type('R').matches('list')).toBe(true);
     expect(ce.type('R').matches('list<unknown>')).toBe(true);
     expect(ce.type('R').matches('list<list<unknown>>')).toBe(true);
+    expect(ce.type('R').matches('list<expression>')).toBe(true);
     expect(ce.type('R').matches('value')).toBe(true);
     expect(ce.type('R').matches('integer')).toBe(false);
-    // An absence marker in the body, at the top level or in a cell, is seen.
-    expect(ce.type('J').matches('unknown')).toBe(false);
+    // An absence marker in the body, at the top level or in a cell, is seen
+    // by the `expression` contract; `unknown` restricts nothing (user
+    // decision D1, 2026-10-21).
+    expect(ce.type('J').matches('expression')).toBe(false);
+    expect(ce.type('J').matches('unknown')).toBe(true);
     expect(ce.type('M').matches('list')).toBe(true);
     expect(ce.type('M').matches('list<any>')).toBe(true);
+    expect(ce.type('M').matches('list<expression>')).toBe(false);
   });
 
   it('a mutually recursive alias is checked against each new target', () => {
     // `A = B`, `B = list<A> | missing`: `[Missing]` is an `A`, and it is not a
-    // `list<unknown> | missing`. The check reaches `A <: unknown` while `A`
-    // and `B` are being unfolded against another target; that is a new
-    // question, which the `missing` arm of `B` answers.
+    // `list<expression> | missing`. The check reaches `A <: expression` while
+    // `A` and `B` are being unfolded against another target; that is a new
+    // question, which the `missing` arm of `B` answers. (`list<unknown> |
+    // missing` restricts nothing, so `A` fits it: user decision D1,
+    // 2026-10-21.)
     const ce = new ComputeEngine();
     ce.declareType('B', 'list<type A> | missing', { alias: true });
     ce.declareType('A', 'B', { alias: true });
     expect(ce.box(['List', 'Missing']).type.matches('A')).toBe(true);
-    expect(ce.type('A').matches('list<unknown> | missing')).toBe(false);
+    expect(ce.type('A').matches('list<expression> | missing')).toBe(false);
+    expect(ce.type('A').matches('list<unknown> | missing')).toBe(true);
     expect(ce.type('A').matches('list<any> | missing')).toBe(true);
     // Two aliases that each hold a list of the other are the same type.
     ce.declareType('ma', 'list<type mb>', { alias: true });

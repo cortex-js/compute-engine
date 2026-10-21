@@ -344,12 +344,37 @@ function reduceUnionType(type: AlgebraicType): Type {
   // `integer | number` reduces to `number`. If `current` is already
   // covered by an existing (super)type, drop it; otherwise drop any
   // existing types that `current` subsumes, then add `current`.
+  //
+  // An `unknown` arm (a type still to be inferred, which every type is a
+  // subtype of: user decision D1, 2026-10-21) absorbs a value arm, as a top
+  // does: `integer | unknown` is `unknown`, "to be inferred". It does not
+  // absorb an absence arm: `missing | unknown` and `nothing | unknown` keep
+  // both arms, so a read from an unresolved element that can miss keeps the
+  // miss visible (`provablyAdmits` reads the marker arm as evidence; the
+  // `unknown` arm alone is none). An `error` arm is the standing rule above:
+  // the whole union is `error`. `any` covers `unknown` and `unknown` does not
+  // cover `any`, in either member order: a contract that admits everything
+  // has nothing left to infer. A transparent alias of one of these names is
+  // read as the name it stands for.
+  const spelled = (t: Type): Type => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.alias === true) {
+      const def = aliasDefinitionAt(t);
+      if (typeof def === 'string') return def;
+    }
+    return t;
+  };
+  const covers = (t: Type, by: Type): boolean => {
+    if (t === 'never') return true;
+    if (spelled(by) !== 'unknown') return isSubtype(t, by);
+    const s = spelled(t);
+    return s !== 'any' && s !== 'missing' && s !== 'nothing';
+  };
   const acc: Type[] = [];
   for (const current of reducedTypes) {
-    const coveredBy = acc.findIndex((t) => isSubtype(current, t));
+    const coveredBy = acc.findIndex((t) => covers(current, t));
     if (coveredBy !== -1) continue;
     for (let i = acc.length - 1; i >= 0; i--)
-      if (isSubtype(acc[i], current)) acc.splice(i, 1);
+      if (covers(acc[i], current)) acc.splice(i, 1);
     acc.push(current);
   }
 

@@ -114,6 +114,8 @@ import { reduceType } from '../../common/type/reduce.js';
 import {
   isObjectType,
   isSubtype,
+  joinUnresolvedArm,
+  provablyAdmits,
   objectLayoutOfType,
   provablyDisjoint,
   resolveTypeReference,
@@ -1335,7 +1337,7 @@ function unknownElementMapArm(t: Type): Type {
   if (typeof t === 'string') return t;
   if (t.kind === 'indexed_collection') return 'list';
   if (t.kind === 'tuple')
-    return t.elements.some((e) => isSubtype('missing', e.type))
+    return t.elements.some((e) => provablyAdmits('missing', e.type))
       ? {
           kind: 'list',
           elements: { kind: 'union', types: ['unknown', 'missing'] },
@@ -2173,7 +2175,7 @@ function checkCallbackSource(
       const element = collectionElementType(t);
       if (
         element !== undefined &&
-        isSubtype('nothing', element) &&
+        provablyAdmits('nothing', element) &&
         isSubtype(stripMissingFromType(withoutNothing(element)), 'value')
       )
         return x;
@@ -3171,10 +3173,12 @@ function resultMayBeNothing(
   const result = (s: OperandStructure | undefined): boolean => {
     if (s?.kind === 'symbol') return s.name === 'Nothing' && s.system === true;
     if (s?.kind !== 'application') return false;
+    // Evidence only: an `unknown` result (a callback whose type is not
+    // inferred yet) does not prove an omission (`provablyAdmits`).
     const returned = (d: OperandDescriptor) =>
-      isSubtype('nothing', d.type) || result(d.structureOf?.());
+      provablyAdmits('nothing', d.type) || result(d.structureOf?.());
     if (s.callee !== undefined) {
-      if (isSubtype('nothing', functionResult(s.callee.type) ?? 'unknown'))
+      if (provablyAdmits('nothing', functionResult(s.callee.type) ?? 'unknown'))
         return true;
       const literal = s.callee.structureOf?.();
       if (literal?.kind !== 'function-literal' || seenBodies.has(literal.body))
@@ -3214,7 +3218,7 @@ function resultMayBeNothing(
   };
   const shape = fn.structureOf?.();
   return (
-    isSubtype(
+    provablyAdmits(
       'nothing',
       callback
         ? (inferredResult ?? callbackResultTypeD(fn, engine) ?? 'unknown')
@@ -3238,7 +3242,9 @@ function withMapOmission(
   return (ops, context) => {
     const bypass = ops.slice(1).some((d) => {
       const t = d.facts.elementType ?? collectionElementType(d.type);
-      return d.type === 'any' || (t !== undefined && isSubtype('nothing', t));
+      return (
+        d.type === 'any' || (t !== undefined && provablyAdmits('nothing', t))
+      );
     });
     // Excluding omission from any still leaves arbitrary depth and missing
     // data. Keep that inference envelope instead of turning it into a
@@ -4597,6 +4603,12 @@ function joinedElementTypeD(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
   const eltTypes: Type[] = [];
+  // An operand whose WHOLE type is `unknown` (a call whose callee is not
+  // derived yet, the hypothesis of a recursion such as `F(n) = Join(F(n -
+  // 1), [n])`) says nothing yet: it contributes no element type, so the
+  // other operands decide, and the fixpoint of the recursion resolves to
+  // `list<number>`. When every operand is such, the join is `unknown`.
+  let wholeUnknown = false;
   for (const op of ops) {
     if (isAtomicJoinOperandD(op)) {
       eltTypes.push(op.type);
@@ -4604,15 +4616,20 @@ function joinedElementTypeD(
     }
     const elt = collectionElementType(op.type);
     if (elt !== undefined) eltTypes.push(elt);
-    else if (isKindOpenOperandType(op.type))
-      eltTypes.push(op.type === 'unknown' ? 'unknown' : 'any');
+    else if (op.type === 'unknown') wholeUnknown = true;
+    else if (isKindOpenOperandType(op.type)) eltTypes.push('any');
     else return undefined;
   }
-  if (eltTypes.length === 0) return undefined;
+  if (eltTypes.length === 0) return wholeUnknown ? 'unknown' : undefined;
   // `widenAll` keeps the arms of a union apart: `integer | missing` widened
   // with `real` is `integer | missing | real`. `reduceType` merges the
-  // numeric arms, `missing | real`.
-  return reduceType(widenAll(eltTypes));
+  // numeric arms, `missing | real`. The element types are a value's cells:
+  // an `unknown` ELEMENT (`fs: list<unknown>`, a cell whose contents are
+  // not resolved) is kept as an arm (`joinUnresolvedArm`), and the reducer
+  // then reads `integer | unknown` as `unknown`, so `ListJoin(fs, [2])` is
+  // `list<unknown>` and holds a value such as `[Error(…), 2]` (it was
+  // `list<integer>`).
+  return reduceType(joinUnresolvedArm(eltTypes));
 }
 
 /**

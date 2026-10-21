@@ -2833,6 +2833,14 @@ function walkPattern(
         // bound join (`joinBounds`). Another operand that does constrain the
         // variable therefore wins outright, and when none does the solution is
         // `never`, the bottom of the family: `opt(Missing)` is an `opt<never>`.
+        // (A lambda whose parameters are not inferred yet, `(unknown,
+        // unknown) -> number`, does not fit a ground arrow arm such as
+        // `(any, any) -> number`: the signature rule reads an `unknown`
+        // parameter as accepting a value of some kind, never `any` and never
+        // an absence or error marker that no other arm of the parameter
+        // states (`acceptsParameter`, `subtype.ts`), so the comparator of
+        // `Sort(zs, (a, b) ↦ b - a)` contributes nothing here and the
+        // variable falls back to its declared bound.)
         if (algebra().isSubtype(actual, arm)) {
           for (const name of freeTypeVariables(pattern))
             addBound(s.lower, name, 'never', index, false);

@@ -119,22 +119,22 @@
 
 ### Bug Fixes
 
-- **A subscripted binder is a new name in a `cases` block and in a
-  set-builder whose variable appears only in the condition** (the two
-  residues of Tycho row 410). With `n` declared a list, the first row of
+- **A subscripted binder is a new name in a `cases` block and in a set-builder
+  whose variable appears only in the condition** (the two residues of Tycho row
+  410). With `n` declared a list, the first row of
   `\begin{cases} n_{0}\coloneq 3\\ n_{0}+1\end{cases}` was read before the
-  parser knew the environment is a block, so the target was the element
-  access `At(n, 0)` and the block declared a function `At`; such a row of a
-  `cases`, `dcases` or `rcases` environment now gets a second reading, the
-  declaration of the local `n_0`, which the block swaps in for its first,
-  middle and last rows alike (a single row, a row with a condition and a
-  matrix keep the top-level reading). `\{2n_{0} \mid n_{0}\in\Z\}` read
-  its variable as `At(n, 0)` because the body names no variable; a
-  membership of the condition (`v \in S`, alone or in a conjunction) whose
-  variable the body reads now names it, while a side condition on another
-  subscript keeps its index. Both parse as with `n` undeclared. The parser's
-  `environmentName()` gives a dictionary entry the innermost environment
-  being read, and `blockRowAlternative()` the second reading of a row.
+  parser knew the environment is a block, so the target was the element access
+  `At(n, 0)` and the block declared a function `At`; such a row of a `cases`,
+  `dcases` or `rcases` environment now gets a second reading, the declaration of
+  the local `n_0`, which the block swaps in for its first, middle and last rows
+  alike (a single row, a row with a condition and a matrix keep the top-level
+  reading). `\{2n_{0} \mid n_{0}\in\Z\}` read its variable as `At(n, 0)` because
+  the body names no variable; a membership of the condition (`v \in S`, alone or
+  in a conjunction) whose variable the body reads now names it, while a side
+  condition on another subscript keeps its index. Both parse as with `n`
+  undeclared. The parser's `environmentName()` gives a dictionary entry the
+  innermost environment being read, and `blockRowAlternative()` the second
+  reading of a row.
 
 - `Solve` no longer lets a called user function's global take the place of the
   unknown. With `h := a ↦ a − k`, `Solve(h(k) = 1, k)` gives `[k + 1]`, and
@@ -202,9 +202,9 @@
   nested fold is not refined while the enclosing fold only admits its callback,
   and the fixpoint found for it in one step of the enclosing fold is the
   starting point of the next step, where one canonicalization settles it. Six
-  nested folds of the shape reported box in about 100 ms instead of 1.5 s
-  (0.156.0: 47 ms); eight in about 200 ms instead of 13 s. Types and values are
-  unchanged, and a chain of numeric folds costs what it did.
+  nested folds of the shape reported box in 66 ms instead of 1.4 s (0.156.0:
+  47 ms); eight in 121 ms instead of 13 s. Types and values are unchanged, and
+  a chain of numeric folds costs what it did.
 
 - A comparison with a long exact sum whose coefficients have many distinct
   denominators no longer throws. `0 < \sum_{k=1}^{300} \ln(-k)/k^2` evaluated by
