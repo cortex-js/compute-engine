@@ -20,6 +20,7 @@ const { values } = parseArgs({
     'python': { type: 'string' },
     'backends': { type: 'string', default: 'typescript' },
     'profile': { type: 'boolean', default: false },
+    'lifting': { type: 'string', default: 'auto' },
     'timeout': { type: 'string', default: '30' },
     'repeats': { type: 'string', default: '3' },
     'corpus': { type: 'string', default: 'regular' },
@@ -46,6 +47,8 @@ const repeats = Number(values.repeats),
   maxDegree = Number(values['max-degree']),
   maxCoefficientBits = Number(values['max-coefficient-bits']);
 const backends = values.backends!.split(',');
+if (!['auto', 'linear', 'quadratic'].includes(values.lifting!))
+  throw new Error('Unknown lifting strategy');
 if (
   new Set(backends).size !== backends.length ||
   backends.some((b) => !['typescript', 'sympy', 'pari'].includes(b))
@@ -69,6 +72,7 @@ for (const f of [
   'src/compute-engine/polynomial/small-prime.ts',
   'src/compute-engine/polynomial/factor-rational.ts',
   'src/compute-engine/polynomial/factor-work.ts',
+  'src/compute-engine/polynomial/hensel.ts',
   'benchmarks/factorization/corpus.ts',
   'benchmarks/factorization/worker.ts',
   'benchmarks/factorization/sympy_worker.py',
@@ -96,6 +100,7 @@ writeFileSync(
         maxCoefficientBits,
         maxOperations: 2_000_000,
         profile: values.profile,
+        lifting: values.lifting,
       },
       runtime: process.version,
     },
@@ -190,6 +195,7 @@ class Runner {
         maxDegree,
         maxCoefficientBits,
         profile: values.profile,
+        lifting: values.lifting,
       }) + '\n'
     );
     return result;

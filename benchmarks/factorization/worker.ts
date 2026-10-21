@@ -110,6 +110,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         maxDegree: message.maxDegree ?? 128,
         maxCoefficientBits: message.maxCoefficientBits ?? 4096,
         profile: message.profile ?? false,
+        lifting: message.lifting ?? 'auto',
       });
       console.log(
         JSON.stringify(

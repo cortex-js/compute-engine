@@ -41,3 +41,21 @@ Source fingerprint: `5d6e7130adf85bef3f14bfc614ef2a3cf31c3b3069897747410941228a8
 Algorithm references: [van Hoeij's overview](https://www.math.fsu.edu/~hoeij/algorithms/Qx.html)
 and [FLINT factoring documentation](https://flintlib.org/doc/fmpz_poly_factor.html).
 These guide independent implementations; no third-party source is copied.
+
+## Stage 2 Quadratic lifting implementation
+
+The degree-balanced Hensel tree maintains each product and the inverse of its
+right child modulo its left child. At modulus m, it solves the product error
+modulo m, updates both factors modulo m squared, and Newton-lifts the inverse
+at the changed polynomial modulus. Monic division in Z/mZ never assumes a
+composite-modulus ring is a field. A whole precision round commits atomically,
+so rejection or cancellation cannot leave a half-lifted tree.
+
+Early exact recovery remains enabled. If recovery removes leaves, the remaining
+polynomial restarts from its already verified modular factorization. The
+linear strategy remains available for matched diagnostics. Unit tests cover
+multiple primes/doublings, unequal factor degrees, monic division over a
+non-field, invalid congruences, noncoprime factors, cancellation and strategy
+agreement for rational/nonmonic/repeated/large inputs. The four initial focused
+suites pass 38 tests. Cross-CAS measurements follow separately; fewer lifting
+rounds alone do not imply less elapsed time.

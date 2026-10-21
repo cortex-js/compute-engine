@@ -13,6 +13,7 @@ import {
 } from './finite-field.js';
 import { SmallPrimePolynomials } from './small-prime.js';
 import { FactorWork, type FactorProfile } from './factor-work.js';
+import { HenselTree } from './hensel.js';
 
 export interface RationalFactorOptions {
   maxOperations?: number;
@@ -22,6 +23,8 @@ export interface RationalFactorOptions {
   modularBackend?: ModularFactorBackend;
   /** Opt-in exclusive phase diagnostics; disabled on the normal Factor path. */
   profile?: boolean;
+  /** Force a strategy for reproducible diagnostics; auto selects the default. */
+  lifting?: 'linear' | 'quadratic' | 'auto';
 }
 export interface RationalPolynomialFactor {
   /** Primitive integer coefficients, ascending in degree, positive leading coefficient. */
@@ -288,7 +291,9 @@ function factorMonicImpl(
       P.inverseMod(P.divrem(P.exactDivide(reduced, b), b)[1], b)
     );
   };
-  let inverses = makeInverses();
+  const tree =
+    work.lifting === 'linear' ? undefined : new HenselTree(base, prime, work);
+  let inverses = tree ? [] : makeInverses();
   let lifted = base.map((b) => [...b]),
     modulus = p;
   const factors: bigint[][] = [];
@@ -348,6 +353,14 @@ function factorMonicImpl(
         if (f.length > 1) factors.push(f);
         return factors;
       }
+      if (removed && tree)
+        return [
+          ...factors,
+          ...factorMonic(f, work, backend, stats, {
+            prime,
+            factors: modular.map((g) => g.map(BigInt)),
+          }),
+        ];
       // A small early subset search discovers exact splits, not certificates.
       // Re-factor both proper divisors to prove irreducibility. This cannot
       // return a reducible factor merely because reconstruction succeeded.
@@ -395,6 +408,13 @@ function factorMonicImpl(
     }
     work.phase('lifting');
     stats.lifts++;
+    if (tree) {
+      tree.lift(f);
+      lifted = tree.factors();
+      modulus = tree.modulus;
+      exponent *= 2;
+      continue;
+    }
     const product = lifted.reduce((a, b) => multiply(a, b, work), [1n]);
     const error = f.map((c, i) => {
       const e = c - (product[i] ?? 0n);
@@ -503,7 +523,8 @@ export function factorRationalPolynomial(
   const work = new FactorWork(
     options.maxOperations ?? 2_000_000,
     options.check,
-    options.profile
+    options.profile,
+    options.lifting
   );
   const P = new FieldPolynomials(Q, work);
   const coefficients = P.trim(

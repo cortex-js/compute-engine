@@ -14,7 +14,12 @@ export class FactorWork extends PolynomialWork {
   private time = 0;
   private counted = 0;
 
-  constructor(limit: number, check?: () => void, profile = false) {
+  constructor(
+    limit: number,
+    check?: () => void,
+    profile = false,
+    readonly lifting: 'linear' | 'quadratic' | 'auto' = 'auto'
+  ) {
     super(limit, check);
     if (profile) {
       this.profile = Object.fromEntries(
