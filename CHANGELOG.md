@@ -42,6 +42,11 @@
   structured exact factors, multiplicities and explicit incomplete results when
   resource limits or certificate checks prevent completion.
 
+- `.N()` of `Power`, `Exp`, `Ln` and the other numeric heads of a number operand
+  is about 1.6x faster at `ce.precision = 30`: the check for a collection
+  operand no longer runs a type match on a number literal (#465, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ### Behavior Changes
 
 - **`unknown` is an inference marker, not a content type.** Every type is now a
