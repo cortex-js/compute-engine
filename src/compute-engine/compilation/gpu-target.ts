@@ -9721,8 +9721,9 @@ export function compileGPUMatrix(
  * GPU gamma function using Lanczos approximation (g=7, n=9 coefficients).
  *
  * Uses reflection formula for z < 0.5 (with inlined, non-recursive Lanczos)
- * and Lanczos for z >= 0.5. `_gpu_gammaln` is the Stirling asymptotic
- * expansion of ln(Gamma(z)), valid for z > 0. GLSL syntax.
+ * and Lanczos for z >= 0.5. `_gpu_gammaln` is ln|Gamma(z)|: the Stirling
+ * asymptotic expansion for z > 0, the reflection formula for z < 0, and
+ * +Infinity at a pole. GLSL syntax.
  */
 export const GPU_GAMMA_PREAMBLE_GLSL = `
 float _gpu_gamma(float z) {
@@ -9755,9 +9756,25 @@ float _gpu_gamma(float z) {
 }
 
 float _gpu_gammaln(float z) {
+  const float PI = 3.14159265358979;
+  // ln|Gamma(z)|, as the interpreter answers on the real axis: +Infinity at
+  // a pole (a non-positive integer), and the reflection formula
+  // ln(PI) - ln|sin(PI z)| - lnGamma(1 - z) for z < 0. |sin(PI z)| is
+  // sin(PI fract(z)); the product PI z loses its fraction for a large |z|.
+  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) return _gpu_inf();
+  if (z < 0.0) {
+    float w = 1.0 - z;
+    float w3 = w * w * w;
+    float lw = w * log(w) - w - 0.5 * log(w)
+      + 0.5 * log(2.0 * PI)
+      + 1.0 / (12.0 * w)
+      - 1.0 / (360.0 * w3)
+      + 1.0 / (1260.0 * w3 * w * w);
+    return log(PI) - log(sin(PI * (z - floor(z)))) - lw;
+  }
   float z3 = z * z * z;
   return z * log(z) - z - 0.5 * log(z)
-    + 0.5 * log(2.0 * 3.14159265358979)
+    + 0.5 * log(2.0 * PI)
     + 1.0 / (12.0 * z)
     - 1.0 / (360.0 * z3)
     + 1.0 / (1260.0 * z3 * z * z);
@@ -9799,9 +9816,23 @@ fn _gpu_gamma(z: f32) -> f32 {
 }
 
 fn _gpu_gammaln(z: f32) -> f32 {
+  let PI = 3.14159265358979;
+  // See the GLSL preamble: ln|Gamma(z)|, +Infinity at a pole, reflection for
+  // z < 0.
+  if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) { return _gpu_inf(); }
+  if (z < 0.0) {
+    let w = 1.0 - z;
+    let w3 = w * w * w;
+    let lw = w * log(w) - w - 0.5 * log(w)
+      + 0.5 * log(2.0 * PI)
+      + 1.0 / (12.0 * w)
+      - 1.0 / (360.0 * w3)
+      + 1.0 / (1260.0 * w3 * w * w);
+    return log(PI) - log(sin(PI * (z - floor(z)))) - lw;
+  }
   let z3 = z * z * z;
   return z * log(z) - z - 0.5 * log(z)
-    + 0.5 * log(2.0 * 3.14159265358979)
+    + 0.5 * log(2.0 * PI)
     + 1.0 / (12.0 * z)
     - 1.0 / (360.0 * z3)
     + 1.0 / (1260.0 * z3 * z * z);

@@ -174,11 +174,14 @@
   was `31.7745 - 139.4559i`). Real arguments are unchanged: `GammaLn(-2.5)` is
   still `ln|Γ(-2.5)|`.
 
-- **Compiled JavaScript `GammaLn` of a negative real is `ln|Γ(x)|`,** as the
-  interpreter gives (#463, contributed by
+- **Compiled `GammaLn` of a negative real is `ln|Γ(x)|` on JavaScript and the
+  shader targets,** as the interpreter gives (#463, contributed by
   [enumeratio](https://github.com/enumeratio)). `GammaLn(-2.5)` compiled to
-  `NaN`; it is now `-0.0562`, and `GammaLn(-7.3)` is `-7.7791`. A pole
-  (`0`, `-1`, `-4`) is `+Infinity`, as in the interpreter.
+  JavaScript gave `NaN`; it is now `-0.0562`, and `GammaLn(-7.3)` is `-7.7791`.
+  A pole (`0`, `-1`, `-4`) is `+Infinity`. The GLSL and WGSL `_gpu_gammaln`
+  used the Stirling series, which is meaningless for x < 0; it now reflects
+  (`ln π - ln|sin πx| - ln Γ(1 - x)`) and answers `+Infinity` at a pole, as
+  `_gpu_gamma` does.
 
 - `Factor` merges equal factors into a power and finds every copy of a
   repeated root:

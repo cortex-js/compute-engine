@@ -5,6 +5,8 @@
  */
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 
@@ -163,6 +165,36 @@ describe('GammaLn is the principal log of Γ(z), LogGamma the continuation', () 
       const f = r.run as (v: { x: number }) => number;
       expect(f({ x })).toBe(Infinity);
       expect(ce.expr(['GammaLn', x]).N().toString()).toBe('+oo');
+    });
+  }
+
+  // Shape checks: the repo has no GPU preamble evaluator for GammaLn.
+  const gpu: [string, { compile: (e: any) => any }, RegExp, RegExp][] = [
+    [
+      'GLSL',
+      new GLSLTarget(),
+      /float _gpu_gammaln\(float z\)/,
+      /return _gpu_inf\(\);/,
+    ],
+    [
+      'WGSL',
+      new WGSLTarget(),
+      /fn _gpu_gammaln\(z: f32\) -> f32/,
+      /return _gpu_inf\(\);/,
+    ],
+  ];
+  for (const [name, target, decl, pole] of gpu) {
+    test(`${name} _gpu_gammaln reflects for z < 0 and answers +inf at a pole`, () => {
+      const r = target.compile(ce.expr(['GammaLn', 'x']));
+      expect(r.code).toContain('_gpu_gammaln(x)');
+      expect(r.preamble).toMatch(decl);
+      // Pole guard, as in `_gpu_gamma`.
+      expect(r.preamble).toContain('z <= 0.0 && z == floor(z)');
+      expect(r.preamble).toMatch(pole);
+      // ln(pi) - ln|sin(pi z)| - lnGamma(1 - z)
+      expect(r.preamble).toContain('log(PI) - log(sin(PI * (z - floor(z))))');
+      expect(r.preamble).toContain('1.0 - z');
+      expect(r.preamble).toContain('_gpu_inf');
     });
   }
 });
