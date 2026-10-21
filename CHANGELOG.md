@@ -321,6 +321,11 @@
   of the `string` option of the type `list<unknown> | string`, so
   `Rest(P)[i] + 1` was an `incompatible-type` error.
 
+- `.N()` of `Power`, `Exp`, `Ln` and the other numeric heads of a number
+  operand is about 1.6x faster at `ce.precision = 30`: the check for a
+  collection operand no longer runs a type match on a number literal
+  (#465, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.159.0 _2026-10-20_
 
 ### Behavior Changes

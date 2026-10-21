@@ -15182,6 +15182,7 @@ function walksMeasuredBy(
 /** True when `op` is a collection, or an expression of a collection type
  * (a valueless symbol declared `list<integer>`). */
 function isCollectionOperand(op: Expression): boolean {
+  if (isNumber(op)) return false; // a number literal is never a collection
   return op.isCollection || op.type.matches('collection<any>');
 }
 
