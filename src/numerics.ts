@@ -16,6 +16,11 @@ export type {
 } from './compute-engine/polynomial/factor-rational.js';
 export { rationalCoefficient } from './compute-engine/polynomial/exact-field.js';
 export type { RationalCoefficient } from './compute-engine/polynomial/exact-field.js';
+export { factorSparseRationalPolynomial } from './compute-engine/polynomial/factor-multivariate.js';
+export type {
+  SparseRationalPolynomial,
+  SparseRationalFactorization,
+} from './compute-engine/polynomial/factor-multivariate.js';
 
 //
 // Types (numerics)

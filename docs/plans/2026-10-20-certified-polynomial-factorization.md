@@ -109,6 +109,25 @@ installing the compiler as described in that script. Run the comparison with
 The optional PARI comparator requires its separately installed package under
 `build/factoring-backends`; it is not required by CE or its native tests.
 
+## Multivariate baseline
+
+Stage 3 uses a bounded general Kronecker substitution algorithm as the initial
+certified implementation, rather than claiming a production sparse Hensel
+implementation. Mixed-radix encoding is injective on the input's degree box.
+Every true factor maps to a product of irreducible factors of that encoding;
+enumerating their multisets and verifying exact sparse division rejects
+spurious factors introduced by the substitution. Exhaustion proves
+irreducibility; hitting a budget reports incomplete. The encoded degree is
+checked before allocating a dense array. This method is exponential in the
+worst case and is not the Fateman-scale performance solution.
+
+`factorSparseRationalPolynomial` accepts explicit variable names and exact
+sparse rational terms. It is a structured API rather than a change to Factor's
+single-variable signature. Tests cover spurious univariate factors, genuine
+multivariate factors, rational content, repeated factors, monomials, constants,
+zero and degree/work limits. Sparse evaluation/lifting remains a performance
+upgrade, not a prerequisite for the bounded algorithm's correctness.
+
 ## References
 
 - [SymPy polynomial algorithms](https://docs.sympy.org/latest/modules/polys/internals.html)
