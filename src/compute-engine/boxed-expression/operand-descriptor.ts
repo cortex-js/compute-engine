@@ -158,6 +158,13 @@ function structureOfExpression(
     const node: OperandStructure = { kind: 'symbol', name: op.symbol };
     const def = op.valueDefinition;
     if (def !== undefined) {
+      const ambient = op.engine.lookupDefinition(op.symbol);
+      if (
+        ambient === undefined ||
+        !('value' in ambient) ||
+        ambient.value !== def
+      )
+        node.lookupByName = false;
       if (def.inferredType === true) node.inferred = true;
       if (def._blockLocal === true) node.local = true;
       const systemBinding =
@@ -675,7 +682,7 @@ export function describeBoundSymbol(
     // operand at a possible pole (`Tan(π/2)`) keeps its claim for the
     // element.
     facts: new TypeOperandFacts(t, false),
-    structureOf: () => ({ kind: 'symbol', name }),
+    structureOf: () => ({ kind: 'symbol', name, lookupByName: false }),
   };
 }
 

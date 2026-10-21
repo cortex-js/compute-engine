@@ -150,16 +150,20 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### A shadowed Map callback can borrow a global function's inferred result (OPEN — 2026-10-20)
+### Calls to callback parameters can borrow a global function's inferred result (OPEN — 2026-10-20)
 
-With global `h := u ↦ 7`, the function `(h: (real) -> any) ↦ Map(h, [1, 2])`
-is typed with an integer-list result instead of `list<any>`. Without that global,
-the callback's own `any` result is preserved. Descriptor call derivation resolves
-user functions by name rather than the callback symbol's lexical binding.
-Compilation now checks the bound callback's own contract and refuses this
-omission-capable case even when the inferred Map result is too narrow. Correcting
-the inferred type requires preserving binding identity through descriptor-based
-call derivation; the compiler check must remain until that is done.
+Bare callback operands such as `Map(h, xs)` retain their lexical contract, but
+calls inside a lambda body still lose the callee's binding in descriptor-based
+inference. With global `h := u ↦ 7`, the function
+`(h: (real) -> real) ↦ Map(x ↦ h(x), [1, 2])` reports an integer-list result
+instead of a real-list result. With global `h := u ↦ Nothing`, it can also
+add an unrelated `nothing` arm. The application descriptor carries a head name,
+so body derivation and omission inspection look up the ambient definition.
+Preserve the callee's lexical binding when describing and deriving application
+heads, including ordinary calls outside Map. Cover nested lambdas, compatible
+and incompatible global signatures, and omission-returning globals. Keep the
+compiler's independent callback-contract checks; do not relax omission refusals
+based on these inferred results.
 
 ### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 

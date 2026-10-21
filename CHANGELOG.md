@@ -2,6 +2,13 @@
 
 ### Behavior Changes
 
+- Bare Map callbacks such as `Map(h, xs)` follow the callback's lexical
+  binding. A parameter named after a global function or library operator now
+  uses its own declared result type and argument contract. An opaque callback
+  result stays `any`; a shadowed global cannot supply a narrower result or
+  introduce `Nothing` into this callback's result. Reducer parameters also
+  retain their own result type when named after a built-in arithmetic operator.
+
 - Corrected Map inference to retain possible nested collections and missing
   data when it excludes `Nothing` from callback inputs. Opaque `any` callback
   results remain `any`; they no longer copy the source element type.

@@ -1822,11 +1822,12 @@ function callbackCompatibilityError(
     // declared/held type — the same two-branch read `callbackArity` uses.
     const fnDef = ce.lookupDefinition(fn.symbol);
     opType =
-      fnDef && 'operator' in fnDef
+      fn.valueDefinition?.type.type ??
+      (fnDef && 'operator' in fnDef
         ? fnDef.operator.signature.type
         : fnDef && 'value' in fnDef
           ? fnDef.value.type?.type
-          : undefined;
+          : undefined);
   } else opType = widenUnannotatedLiteralParams(fn, fn.type.type);
   if (opType === undefined || typeof opType === 'string') return undefined;
   if (freeTypeVariables(opType).size > 0) return undefined;
@@ -1856,7 +1857,10 @@ function callbackCompatibilityError(
   // `incompatible-type` error for `Reduce([Missing], Multiply, 1)`, the
   // canonical form of `Product([Missing])`, while `[1, Missing]` was
   // accepted and folded to `NaN`.
-  const fnDef = isSymbol(fn) ? ce.lookupDefinition(fn.symbol) : undefined;
+  const fnDef =
+    isSymbol(fn) && fn.valueDefinition === undefined
+      ? ce.lookupDefinition(fn.symbol)
+      : undefined;
   const fnTakesAbsence =
     fnDef !== undefined &&
     'operator' in fnDef &&
@@ -1972,7 +1976,7 @@ function pointArithmeticAdmits(
   supplyArrow: FunctionSignature,
   opType: Type
 ): boolean {
-  if (!isSymbol(fn)) return false;
+  if (!isSymbol(fn) || fn.valueDefinition !== undefined) return false;
   const ce = fn.engine;
   const def = ce.lookupDefinition(fn.symbol);
   if (def === undefined || !('operator' in def)) return false;
@@ -2285,6 +2289,15 @@ function canonicalCallbackOperand(
   // to that name says nothing about the slot (`canonicalFunctionLiteral`
   // excepts `_` at its step 2 for the same reason).
   if (isSymbol(op) && !isWildcard(op)) {
+    // Parameters under canonicalization live in a provisional binding frame;
+    // a name lookup can still see an unrelated outer declaration here.
+    if (op.engine._isShadowedParameter(op.symbol)) {
+      const bound = op.canonical;
+      if (isErrorTypedOperand(bound)) return bound;
+      if (provablyDisjoint(bound.type.type, 'function'))
+        return reject(bound.type.type);
+      return accept(bound);
+    }
     // A symbol that holds an error value (`w` after `w := Ln("a")`) passes
     // through, as it does at every parameter of an eager operator
     // (`isErrorTypedOperand()`). The evaluation of the call gives that error
@@ -2296,7 +2309,10 @@ function canonicalCallbackOperand(
     const declared = def && 'value' in def ? def.value.type.type : undefined;
     if (declared !== undefined && provablyDisjoint(declared, 'function'))
       return reject(declared);
-    return accept(fn);
+    // Bind an existing declaration while its lexical scope is active. Lazy
+    // callbacks otherwise keep a raw symbol and later type reads resolve its
+    // name in whichever scope happens to be current.
+    return accept(def !== undefined && 'value' in def ? fn.canonical : fn);
   }
   // `["Function", body, ...params]`: a lift with no parameter is a constant.
   if (isFunction(fn, 'Function') && fn.nops < 2) return reject();
@@ -3195,7 +3211,7 @@ function resultMayBeNothing(
         ? shape
         : shape?.kind === 'function-literal'
           ? shape.body
-          : shape?.kind === 'symbol'
+          : shape?.kind === 'symbol' && shape.lookupByName !== false
             ? namedBody(shape.name)
             : undefined
     )
@@ -3468,7 +3484,7 @@ function bareOperatorElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const s = fn.structureOf?.();
-  if (s?.kind !== 'symbol') return undefined;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
   const def = engine.lookupDefinition(s.name)?.operator;
   if (def === undefined || !def.broadcastExemptions.includes('tuples'))
     return undefined;
@@ -3532,7 +3548,7 @@ function broadcastingCallbackElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const s = fn.structureOf?.();
-  if (s?.kind !== 'symbol') return undefined;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
   const def = engine.lookupDefinition(s.name)?.operator;
   if (def === undefined || !def.broadcastable) return undefined;
   // The operator maps over a collection argument only at a scalar
@@ -3646,6 +3662,7 @@ function callbackCallElementTypeD(
   const s = fn.structureOf?.();
   if (
     s?.kind !== 'symbol' ||
+    s.lookupByName === false ||
     (!isUserFunctionName(engine, s.name) &&
       ![
         'First',
@@ -3714,7 +3731,11 @@ function iterateCallResultTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const s = fn.structureOf?.();
-  if (s?.kind !== 'symbol' || !isUserFunctionName(engine, s.name))
+  if (
+    s?.kind !== 'symbol' ||
+    s.lookupByName === false ||
+    !isUserFunctionName(engine, s.name)
+  )
     return undefined;
   const unary = functionArity(fn.type) === 1;
   const call = (acc: Type): Type | undefined => {
@@ -4721,7 +4742,7 @@ function callbackResultTypeD(
   const direct = functionResult(op.type);
   if (direct !== undefined) return direct;
   const s = op.structureOf?.();
-  if (s?.kind !== 'symbol') return undefined;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
   const def = engine.lookupDefinition(s.name);
   if (def === undefined) return undefined;
   const declared =
@@ -4745,7 +4766,7 @@ function callbackHasUnknownResult(
   const known = (t: Type | undefined) => t === 'function' || t === 'error';
   if (known(op.type)) return true;
   const s = op.structureOf?.();
-  if (s?.kind !== 'symbol') return false;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return false;
   return known(engine.lookupDefinition(s.name)?.value?.type?.type);
 }
 
@@ -4853,7 +4874,7 @@ function absentCellAnswerMayBeMissing(
   derive: TypeHandlerContext['derive']
 ): boolean {
   const s = fn.structureOf?.();
-  if (s?.kind !== 'symbol') return false;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return false;
   const args = sources.map((d, k) =>
     describeBoundElement(
       typeCouldHoldMissing(d.type)
@@ -4914,7 +4935,12 @@ function foldResultTypeD(
     return reduceType({ kind: 'union', types: [t, rawElt] });
   };
   const s = op.structureOf?.();
-  if (s?.kind === 'symbol' && BUILTIN_FOLD_HEADS.has(s.name)) {
+  if (
+    s?.kind === 'symbol' &&
+    s.lookupByName !== false &&
+    BUILTIN_FOLD_HEADS.has(s.name) &&
+    engine.lookupDefinition(s.name)?.operator !== undefined
+  ) {
     // Product(collection) is a seeded Multiply fold. Multiply discards an
     // omitted factor; an unseeded fold may instead return its first cell.
     const supplied =

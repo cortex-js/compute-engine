@@ -66,7 +66,8 @@ type CallbackArity = { required: number; max: number };
  * (`InverseFunction(f)`, a protocol member) whose arity is only known once it
  * is applied.
  *
- * The symbol's type is read through `lookupDefinition` rather than `.type`:
+ * A bound symbol uses its own definition. A raw symbol's type is read
+ * through `lookupDefinition` rather than `.type`:
  * a LAZY operator holds its callback operand RAW, where every symbol still
  * reports `unknown`, and `.canonical` would DECLARE an undeclared name as a
  * side effect of the read.
@@ -78,6 +79,8 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
     return { required: n, max: n };
   }
   if (!isSymbol(fn)) return undefined;
+  if (fn.valueDefinition !== undefined)
+    return signatureArity(fn.valueDefinition.type.type);
   const def = fn.engine.lookupDefinition(fn.symbol);
   if (def === undefined) return undefined;
   const declared =

@@ -521,6 +521,11 @@ export type OperandStructure =
   | {
       kind: 'symbol';
       name: string;
+      /** False when resolving this name in the current engine context would
+       * select a different binding, or when this is a synthetic bound symbol.
+       * Type handlers must then use the descriptor's own type rather than
+       * derive a call or read a declaration by name. */
+      lookupByName?: false;
       /** Present (`true`) when the symbol resolves to the definition the
        * engine's SYSTEM scope binds under this name — the library constant
        * or operator, not a user or local declaration that shadows it. The
