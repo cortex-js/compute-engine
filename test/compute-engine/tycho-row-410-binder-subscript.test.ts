@@ -106,6 +106,44 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
     expect(value('n_{0}\\coloneq 3; n_{0}+1')).toBe('4');
   });
 
+  test('a `cases` block local (residue (a) of the row)', () => {
+    // The rows are read before the parser knows the environment is a
+    // block: an assignment row gets a second reading, the declaration of
+    // the local, which the block swaps in: for the first row, a middle row
+    // and the last row.
+    const block = '\\begin{cases} n_{0}\\coloneq 3\\\\ n_{0}+1\\end{cases}';
+    expect(raw(block)).toBe(
+      '["Block",["Declare","n_0"],["Assign","n_0",3],["Add","n_0",1]]'
+    );
+    expect(raw(block)).toBe(raw(block, false));
+    expect(value(block)).toBe('4');
+    for (const env of ['dcases', 'rcases']) {
+      const b = `\\begin{${env}} n_{0}\\coloneq 3\\\\ n_{0}+1\\end{${env}}`;
+      expect(raw(b)).toBe(raw(block));
+    }
+    const last = '\\begin{cases} m\\coloneq 1\\\\ n_{0}\\coloneq 3\\end{cases}';
+    expect(raw(last)).toBe(
+      '["Block",["Declare","m"],["Assign","m",1],["Declare","n_0"],["Assign","n_0",3]]'
+    );
+    const middle =
+      '\\begin{cases} m\\coloneq 1\\\\ n_{0}\\coloneq 3\\\\ n_{0}+m\\end{cases}';
+    expect(raw(middle)).toBe(raw(middle, false));
+    expect(value(middle)).toBe('4');
+    // An environment that is not a block keeps the top-level reading of
+    // the row: a single row, a trailing row break (one row), a row with a
+    // condition (a `Which`), a matrix.
+    const topLevel = '["Assign","At",["Function",3,"n",0]]';
+    for (const latex of [
+      '\\begin{cases} n_{0}\\coloneq 3\\end{cases}',
+      '\\begin{cases} n_{0}\\coloneq 3\\\\ \\end{cases}',
+      '\\begin{cases} n_{0}\\coloneq 3\\\\ 0 & x>0\\end{cases}',
+      '\\begin{pmatrix} n_{0}\\coloneq 3\\\\ 1\\end{pmatrix}',
+    ]) {
+      expect(raw(latex)).toContain(topLevel);
+      expect(raw(latex)).not.toContain('Block');
+    }
+  });
+
   test('a function parameter', () => {
     expect(raw('n_{0}\\mapsto n_{0}^2')).toBe(
       '["Function",["Power","n_0",2],"n_0"]'
@@ -196,6 +234,25 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
     // A subscript in the condition on another variable is an index
     expect(raw('\\{x \\mid x>n_{0}\\}')).toBe(
       '["Set","x",["Condition",["Greater","x",["At","n",0]]]]'
+    );
+  });
+
+  test('a set-builder variable named only in the condition (residue (b) of the row)', () => {
+    // The body is an expression of the variable, so the variable is read
+    // from the membership `n_0 \in \Z` of the condition.
+    const builder = '\\{2n_{0} \\mid n_{0}\\in\\Z\\}';
+    expect(raw(builder)).toBe(
+      '["Set",["InvisibleOperator",2,"n_0"],["Condition",["Element","n_0","Integers"]]]'
+    );
+    expect(raw(builder)).toBe(raw(builder, false));
+    // Also in a conjunction of conditions.
+    expect(raw('\\{2n_{0} \\mid n_{0}\\in\\Z, n_{0}>1\\}')).toBe(
+      '["Set",["InvisibleOperator",2,"n_0"],["Condition",["And",["Element","n_0","Integers"],["Greater","n_0",1]]]]'
+    );
+    // A membership of a subscript that the body does not read is a side
+    // condition: its subscript stays an index.
+    expect(raw('\\{2k \\mid k\\in\\Z, n_{1}\\in S\\}')).toBe(
+      '["Set",["InvisibleOperator",2,"k"],["Condition",["And",["Element","k","Integers"],["Element",["At","n",1],"S"]]]]'
     );
   });
 

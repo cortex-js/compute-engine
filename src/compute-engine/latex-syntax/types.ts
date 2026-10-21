@@ -1134,6 +1134,27 @@ export interface Parser {
   _takeDeclinedSubscriptJoin?(base: string): string | null;
 
   /**
+   * The name of the innermost environment (`\begin{name} … \end{name}`)
+   * whose body is being read, or `null` outside an environment. A row of a
+   * `cases` environment records a second reading of an assignment to a
+   * subscripted name (see `parseAssign()` in `definitions-core.ts`).
+   */
+  environmentName?(): string | null;
+
+  /**
+   * Record `local` as the second reading of the row expression `expr` of a
+   * `cases` environment: the declaration of a block local, which the block
+   * branch of `parseCasesEnvironment()` swaps in when the environment turns
+   * out to be a block. */
+  _recordBlockRowAlternative?(
+    expr: MathJsonExpression,
+    local: MathJsonExpression
+  ): void;
+
+  /** The recorded second reading of a row expression, or `null`. */
+  blockRowAlternative?(expr: MathJsonExpression): MathJsonExpression | null;
+
+  /**
    * The name that `expr` declares when it is read in a binder position: the
    * index of a sum or a product, the variable of a comprehension, a function
    * parameter, a local variable of a `where` clause. A symbol is its own

@@ -492,10 +492,17 @@ const COMPARISON_HEADS = new Set<string>([
  * `{body \mid condition}` or `{body : condition}`.
  *
  * The variable of the set-builder is the body (`{x \mid x > 0}`), or the
- * left operand of a body `x \in S`. A variable spelled as a subscript on an
- * indexed collection (`n_{0}` when `n` is a list, read as `At(n, 0)`) is the
- * new name `n_0`, in the body and in the condition, as when `n` is not
- * declared (see `Parser.binderSymbol()`).
+ * left operand of a body `x \in S`, or, when the body names no variable
+ * (`{2 n_{0} \mid n_{0} \in \Z}`, a body that is an expression of the
+ * variable), the left operand of a membership `v \in S` of the condition,
+ * at its top level or in a conjunction (`{2k \mid k \in \Z, k > 1}` is
+ * `k \in \Z \land k > 1`), when that operand occurs in the body. A variable
+ * spelled as a subscript on an indexed collection (`n_{0}` when `n` is a
+ * list, read as `At(n, 0)`) is the new name `n_0`, in the body and in the
+ * condition, as when `n` is not declared (see `Parser.binderSymbol()`). A
+ * subscript in the condition that is not the variable stays an index: the
+ * `n_{0}` of `{x \mid x > n_{0}}`, and the `a_{1}` of the side condition
+ * `{2k \mid k \in \Z, a_{1} \in S}`, which the body does not read.
  */
 function setBuilder(
   parser: Parser,
@@ -509,6 +516,22 @@ function setBuilder(
   ]) {
     const name = parser.binderSymbol(v) ?? null;
     if (name !== null) names.add(name);
+  }
+  if (names.size === 0) {
+    // A membership names the variable only when the body reads it: the
+    // rebinding of the body with that name alone changes the body.
+    const memberships = (e: MathJsonExpression): void => {
+      if (operator(e) === 'Element') {
+        const name = parser.binderSymbol(operand(e, 1)) ?? null;
+        if (
+          name !== null &&
+          parser.rebindSubscripts(body, new Set([name])) !== body
+        )
+          names.add(name);
+      } else if (operator(e) === 'And')
+        for (const op of operands(e)) memberships(op);
+    };
+    memberships(condition);
   }
   const rebind = (e: MathJsonExpression) =>
     parser.rebindSubscripts(e, names) ?? e;

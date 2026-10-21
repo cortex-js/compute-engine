@@ -663,7 +663,7 @@ evaluateAt(x => x^2, 1, 3)
 
 ### findRoot
 
-MathJSON `FindRoot` · `(any, any) -> dictionary`
+MathJSON `FindRoot` · `(any, any, dictionary?) -> dictionary`
 
 FindRoot(equations, params): numerically find parameter values that
 
@@ -675,11 +675,41 @@ a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with
 
 box constraints), matching `FindFit`. Returns a record
 
-&#123;parameters, converged, residualNorm, iterations&#125;.
+&#123;parameters, converged, stationary, residualNorm, iterations&#125;.
+
+`converged` is true only at a root: every residual is within the
+
+engine's tolerance scaled by its own equation,
+
+`|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the
+
+Jacobian and `θ` the parameters, so a minimum of the sum of squared
+
+residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.
+
+`stationary` is the solver's own stop test, true at such a minimum
+
+too; a stacked system of data rows next to an equation reads it as
+
+`FindFit` reads `converged`. An optional third argument is the options
+
+dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the
+
+named parameters (at most two) over the range for the lowest sum
+
+of squared residuals of the whole system; the constant phase
+
+coefficients of the equations (`3.22` in `cos(3.22 b + c)`) space
+
+the grid as the span of a variable does for a fit. With a kernel
+
+pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid
+
+on the workers.
 
 ```epsil
 findRoot(x^2 - 2, [(x, 1)])
-// ➔ {"parameters" -> {"x" -> 1.4142135624638652}, "converged" -> "True", "residualNorm" -> 2.567368539985182e-10, "iterations" -> 4}
+// ➔ {"parameters" -> {"x" -> 1.4142135624638652}, "converged" -> "True", "residualNorm" -> 2.567368539985182e-10, "iterations" -> 4, "stationary" -> "True"}
 ```
 
 ### Function

@@ -2877,7 +2877,15 @@ export class _Parser implements Parser {
 
     for (const def of this.getDefs('environment') as IndexedEnvironmentEntry[])
       if (def.symbolTrigger === name) {
-        const expr = def.parse(this, until);
+        // The name is visible to the entries that parse the rows
+        // (`environmentName()`) while the body is read.
+        this._environmentNames.push(name);
+        let expr: MathJsonExpression | null;
+        try {
+          expr = def.parse(this, until);
+        } finally {
+          this._environmentNames.pop();
+        }
 
         this.skipSpace();
         if (!this.matchBoundary())
@@ -4091,6 +4099,42 @@ export class _Parser implements Parser {
   // the parser reads such an `At` as this name: `\sum_{n_{0}=1}^{3}n_{0}` is
   // a sum over the new index `n_0`, also when `n` is a list.
   private _subscriptAtNames = new WeakMap<object, string>();
+
+  // The names of the environments whose bodies are being read, innermost
+  // last: pushed by `parseEnvironment()` around the entry's parse. A row
+  // of a `cases` environment records a second reading of an assignment to
+  // a subscripted binder (`environmentName()` in `parseAssign()`).
+  private _environmentNames: string[] = [];
+
+  environmentName(): string | null {
+    return this._environmentNames[this._environmentNames.length - 1] ?? null;
+  }
+
+  // The second reading of a row of a `cases` environment, keyed by the
+  // expression of the first reading: an assignment whose target is a
+  // subscript on an indexed collection (`n_{0}\coloneq 3` with `n` a list)
+  // is read as a top-level assignment (`At(n, 0) := 3`), and also as the
+  // declaration of a block local `n_0`. The rows are read before the
+  // environment is known to be a block; the block branch of
+  // `parseCasesEnvironment()` swaps the local reading in.
+  private _blockRowAlternatives = new WeakMap<object, MathJsonExpression>();
+
+  _recordBlockRowAlternative(
+    expr: MathJsonExpression,
+    local: MathJsonExpression
+  ): void {
+    if (typeof expr === 'object' && expr !== null)
+      this._blockRowAlternatives.set(expr, local);
+  }
+
+  blockRowAlternative(expr: MathJsonExpression): MathJsonExpression | null {
+    if (typeof expr !== 'object' || expr === null) return null;
+    const direct = this._blockRowAlternatives.get(expr);
+    if (direct !== undefined) return direct;
+    // A decorated expression (`{ latex, fn }`) keys by its `fn` array.
+    const fn = functionElements(expr);
+    return fn === null ? null : (this._blockRowAlternatives.get(fn) ?? null);
+  }
 
   _recordDeclinedSubscriptJoin(
     base: string,

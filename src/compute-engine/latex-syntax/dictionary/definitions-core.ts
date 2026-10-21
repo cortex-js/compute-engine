@@ -6085,13 +6085,34 @@ function parseFunctionDefinitionBody(
  */
 const INFIX_ASSIGNS = new WeakSet<object>();
 
+/**
+ * The environments that `parseCasesEnvironment()` reads (the `cases`,
+ * `dcases` and `rcases` entries below): two or more single-column rows
+ * make a `Block`, so an assignment row gets a second reading as a block
+ * local (`parseAssignStatement()`).
+ */
+const CASES_ENVIRONMENTS = new Set(['cases', 'dcases', 'rcases']);
+
+/**
+ * True while `parseAssignStatement()` reads the top-level reading of a
+ * `cases` row whose local reading it has already read: the binder branch
+ * is skipped, so the same tokens are not read a third time.
+ */
+let readingTopLevel = false;
+
 function parseAssign(
   parser: Parser,
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
   const result = parseAssignStatement(parser, lhs, until);
-  if (result !== null && typeof result === 'object') INFIX_ASSIGNS.add(result);
+  if (result !== null && typeof result === 'object') {
+    INFIX_ASSIGNS.add(result);
+    // The recorded local reading of a `cases` row is the same `\coloneq`
+    // statement: marked too, so that the block declares its local.
+    const local = parser.blockRowAlternative?.(result);
+    if (local !== null && typeof local === 'object') INFIX_ASSIGNS.add(local);
+  }
   return result;
 }
 
@@ -6116,16 +6137,26 @@ function parseAssignStatement(
   // local when the assignment is a statement of a block: in a local-binding
   // context (a `where` binding, a statement after a `;`), or when a `;`
   // follows the assignment (the first statement of a `;` block, which is
-  // read before the `;`). `buildBlockFromSequence()` makes the local
-  // `n_0` from the `Subscript(n, 0)` target that step 0 below gives.
+  // read before the `;`). `buildBlockFromSequence()` makes the local `n_0`
+  // from the `Subscript(n, 0)` target that step 0 below gives.
   // Otherwise the target is not converted: at the top level,
   // `Assign(Subscript(n, 0), 3)` is a term of a sequence definition on the
   // list `n`, which evaluates to `Nothing` and does not change `n`. The
   // target `At(n, 0)` reads as the definition of a function `At`, with the
   // error `expected-a-symbol` for its parameter `0`, which the user sees.
+  //
+  // A row of a `cases` environment (`dcases`, `rcases` too) is read before
+  // the parser knows whether the environment is a block: two or more
+  // single-column rows make a `Block` (`parseCasesEnvironment()`), one row
+  // or a row with a condition make a `Which`. So such a row gets BOTH
+  // readings: the top-level one is returned, and the local one is recorded
+  // beside it (`Parser.blockRowAlternative()`); the block branch swaps the
+  // local reading in, for the first row, a middle row and the last row
+  // alike, and a `Which` keeps the top-level one. `readingTopLevel` keeps
+  // the second parse of the same tokens from recording a third.
   const binderTarget =
     symbol(lhs) === null ? (parser.binderSymbol(lhs) ?? null) : null;
-  if (binderTarget !== null) {
+  if (binderTarget !== null && !readingTopLevel) {
     if (isLocalBindingContext) lhs = binderTarget;
     else {
       const start = parser.index;
@@ -6136,6 +6167,21 @@ function parseAssignStatement(
       parser.index = end;
       if (local !== null && firstOfBlock) return local;
       parser.index = start;
+      if (
+        local !== null &&
+        CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? '')
+      ) {
+        readingTopLevel = true;
+        let topLevel: MathJsonExpression | null;
+        try {
+          topLevel = parseAssignStatement(parser, lhs, until);
+        } finally {
+          readingTopLevel = false;
+        }
+        if (topLevel !== null)
+          parser._recordBlockRowAlternative?.(topLevel, local);
+        return topLevel;
+      }
     }
   }
 
@@ -6328,10 +6374,14 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
   //
   // The rows are the statements of a block, read as in a `;` list: a
   // `\coloneq` row declares a local and a `let` row is spliced in (see
-  // `buildBlockFromSequence()`).
+  // `buildBlockFromSequence()`). A row whose target is a subscript on an
+  // indexed collection (`n_{0}\coloneq 3` with `n` a list) was read as a
+  // top-level assignment, since the rows are read before the environment is
+  // known to be a block; its recorded second reading, the declaration of
+  // the local `n_0`, replaces it here (`parseAssignStatement()`).
   if (rows.length >= 2 && rows.every((row) => row.length === 1))
     return buildBlockFromSequence(
-      rows.map((row) => row[0]),
+      rows.map((row) => parser.blockRowAlternative?.(row[0]) ?? row[0]),
       parser
     );
 
