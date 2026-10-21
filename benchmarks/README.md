@@ -21,6 +21,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Wester suite** | `audit/wester.ts` | CE · CE+R/F · SymPy · **Mathematica** | `audit/REPORT-wester.md` |
 | **Solving** | `audit/solve.ts` | CE · CE+Fungrim · SymPy · **Mathematica** | `audit/REPORT-solve.md` |
 | **ODE solving** | `audit/dsolve.ts` | CE · SymPy | `audit/REPORT-dsolve.md` |
+| **Certified polynomial factoring** | `factorization/run.ts` | CE TypeScript strategies · SymPy · PARI | [Factorization methodology and results](factorization/README.md) |
 | **Bondarenko ∫** | `audit/bondarenko.ts` | CE · CE+R/F · SymPy · Mathematica | `audit/REPORT-bondarenko.md` |
 | **Definite ∫ families** | `audit/integration-families.ts` | CE · CE+Rubi | `audit/REPORT-integration-families.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
