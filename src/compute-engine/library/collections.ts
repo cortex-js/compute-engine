@@ -2154,6 +2154,33 @@ function accumulatorBindingType(literal: Expression): Type | undefined {
   return isSymbol(param) ? param.type.type : undefined;
 }
 
+/** Admit omitted callback cells without broadening the bare tuple family. */
+function checkCallbackSource(
+  engine: ComputeEngine,
+  source: Expression | undefined
+): Expression {
+  const x = source?.canonical;
+  if (x !== undefined) {
+    const t = resolveTypeAlias(x.type.type);
+    if (typeof t === 'object' && t.kind === 'tuple') {
+      const element = collectionElementType(t);
+      if (
+        element !== undefined &&
+        isSubtype('nothing', element) &&
+        isSubtype(stripMissingFromType(withoutNothing(element)), 'value')
+      )
+        return x;
+    } else if (
+      isSubtype(mapImmediateElements(t, withoutNothing), {
+        kind: 'collection',
+        elements: 'unknown',
+      })
+    )
+      return x;
+  }
+  return checkCollectionOperand(engine, x);
+}
+
 /**
  * The canonical function literal for a higher-order operator's callback slot,
  * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
@@ -2426,26 +2453,12 @@ function callbackResultType(op: Expression | undefined): Type | undefined {
   return declared === undefined ? undefined : functionResult(declared);
 }
 
-/**
- * The element of a `Zip` made of `items`, one element of each source: their
- * tuple, or `Missing` when every item is an absence marker (`Missing`,
- * `Undefined`). This is the rule of the `Tuple` evaluate handler: a tuple
- * whose every coordinate is absent is the absent value (user decision
- * 2026-10-14). Without it, `.at()` and `.each()` of `Zip([1, Missing],
- * [2, Missing])` gave the tuple `(Missing, Missing)` for the second element,
- * while the printed value, which evaluates each element, showed `Missing`.
- */
+/** Build one present Zip row, preserving every source coordinate. */
 function zipElement(
   ce: ComputeEngine,
   items: ReadonlyArray<Expression>
 ): Expression {
-  // The tuple erases a `Nothing` item, so the test reads the operands of
-  // the tuple: `[Nothing, Missing]` is `(Missing)`, whose every coordinate
-  // is absent.
-  const t = ce.tuple(...items);
-  return isFunction(t, 'Tuple') && t.nops > 0 && t.ops.every(isAbsentSymbol)
-    ? ce.Missing
-    : t;
+  return ce.tuple(...items);
 }
 
 /**
@@ -2497,8 +2510,8 @@ function iterateArgs(
  */
 /**
  * The collection a lazy view walks for the source `xs`: the VALUE of a
- * `List` or `Tuple` literal that is impure or has an element that may
- * evaluate to `Nothing`, evaluated once per walk, and `xs` itself otherwise.
+ * impure literal, or of a List with an element that may erase, evaluated
+ * once per walk, and `xs` itself otherwise. Tuple slots never erase.
  *
  * The literal's own handlers serve its value when it is pure and may erase
  * an element (`erasedLiteralValue`, `collection-utils.ts`) and the operands
@@ -2507,14 +2520,21 @@ function iterateArgs(
  * element in that application anyway, and over the operands it emitted the
  * operand itself (`Random()`, drawn again by every consumer, and a filter's
  * predicate had judged another draw), and an element that evaluates to
- * `Nothing` as `Nothing` (an error element in the result, where the literal
- * erases it). A store-backed list holds numbers only.
+ * `Nothing` as `Nothing` (an error element where a List erases it). Map
+ * separately resolves possible omission in each retained coordinate. A store-backed list holds numbers only.
  */
 function walkedSource(xs: Expression): Expression {
   if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return xs;
   if (xs._numericStore !== undefined) return xs;
   if (!literalMayEraseElement(xs) && isTransitivelyPure(xs)) return xs;
   return xs.evaluate();
+}
+
+/** Resolve possible omission before a Map callback sees the datum. Other
+ * computations stay deferred to the callback, including numeric requests. */
+function mappedElementValue(x: Expression): Expression {
+  if (isNumber(x)) return x;
+  return resultMayBeNothing(describeOperand(x), x.engine) ? x.evaluate() : x;
 }
 
 /**
@@ -3036,10 +3056,18 @@ function stringLiteralOf(d: OperandDescriptor): string | undefined {
  * two reals in a 5,000-point list is typed by one `tuple<real, real>`
  * object and the list's cells join by identity.
  */
-function tupleTypeOfD(ops: ReadonlyArray<OperandDescriptor>): Type {
+function tupleTypeOfD(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine?: PureEngineView
+): Type {
   return internType({
     kind: 'tuple',
-    elements: ops.map((op) => ({ type: storedComponentTypeD(op) })),
+    elements: ops.map((op) => ({
+      type:
+        engine !== undefined && resultMayBeNothing(op, engine)
+          ? withNothing(storedComponentTypeD(op))
+          : storedComponentTypeD(op),
+    })),
   });
 }
 
@@ -3087,10 +3115,24 @@ function mappingSourceElementTypeD(x: OperandDescriptor): Type | undefined {
 }
 
 /** Omission can be a returned branch even when an evidence join erased its type. */
-function mappingReturnsNothing(
+function resultMayBeNothing(
   fn: OperandDescriptor,
-  engine: PureEngineView
+  engine: PureEngineView,
+  callback = false
 ): boolean {
+  // Literal data cannot return an omission. Keep the numeric tuple fast path
+  // free of subtype walks for every coordinate in large point lists.
+  if (!callback) {
+    const kind = fn.structureOf?.()?.kind;
+    if (
+      kind === 'number' ||
+      kind === 'string' ||
+      kind === 'tuple' ||
+      kind === 'list-literal' ||
+      kind === 'function-literal'
+    )
+      return false;
+  }
   const seen = new Set<string>();
   const namedBody = (name: string): OperandStructure | undefined => {
     if (seen.has(name)) return undefined;
@@ -3141,13 +3183,18 @@ function mappingReturnsNothing(
   };
   const shape = fn.structureOf?.();
   return (
-    isSubtype('nothing', callbackResultTypeD(fn, engine) ?? 'unknown') ||
+    isSubtype(
+      'nothing',
+      callback ? (callbackResultTypeD(fn, engine) ?? 'unknown') : fn.type
+    ) ||
     result(
-      shape?.kind === 'function-literal'
-        ? shape.body
-        : shape?.kind === 'symbol'
-          ? namedBody(shape.name)
-          : undefined
+      !callback
+        ? shape
+        : shape?.kind === 'function-literal'
+          ? shape.body
+          : shape?.kind === 'symbol'
+            ? namedBody(shape.name)
+            : undefined
     )
   );
 }
@@ -3182,7 +3229,7 @@ function withMapOmission(
       answer === undefined ||
       (!bypass &&
         (ops[0] === undefined ||
-          !mappingReturnsNothing(ops[0], context.engine)))
+          !resultMayBeNothing(ops[0], context.engine, true)))
     )
       return answer;
     return BoxedType.forResult(
@@ -3868,7 +3915,7 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
 
 /**
  * The canonical `Tuple` of `elements`, built as `ce.tuple()` builds it: each
- * element canonical, and `Nothing` erased. `ce.tuple(...elements)` spreads
+ * element canonical, and every position retained. `ce.tuple(...elements)` spreads
  * the array into the arguments of a call, which exceeds the argument limit
  * of the JavaScript engine for a very large array: `TupleFrom(Range(1,
  * 300000))` was an `internal-error`.
@@ -3879,7 +3926,7 @@ function tupleOf(
 ): Expression {
   return ce._fn(
     'Tuple',
-    elements.map((x) => x.canonical).filter((x) => !isSymbol(x, 'Nothing'))
+    elements.map((x) => x.canonical)
   );
 }
 
@@ -5099,23 +5146,6 @@ function tupleComponentType(
     return comps.length > 0 ? (widen(...comps) as Type) : undefined;
   }
   return undefined;
-}
-
-/** Whether a tuple coordinate is absent for sure: typed `missing`, or the
- * written absence symbol `Missing` or `Undefined` (typed `unknown`). */
-function absentCoordinateD(op: OperandDescriptor): boolean {
-  if (resolveTypeAlias(op.type) === 'missing') return true;
-  const s = op.structureOf?.();
-  return (
-    s?.kind === 'symbol' && (s.name === 'Missing' || s.name === 'Undefined')
-  );
-}
-
-/** Whether a tuple coordinate may be absent: absent for sure, or typed with
- * a `missing` arm (`missing | tuple<…>`, an index read that may be out of
- * range). */
-function mayBeAbsentCoordinateD(op: OperandDescriptor): boolean {
-  return absentCoordinateD(op) || typeContainsMissing(op.type);
 }
 
 /** Descriptor twin of {@link pointComponentType}. */
@@ -8488,59 +8518,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Tuple: {
     examples: ['(1, "a", True)'],
-    description: 'A fixed number of heterogeneous elements',
+    description:
+      'A fixed number of heterogeneous elements. Nothing retains its slot, and a tuple whose coordinates are all Missing remains a tuple.',
     // A pure container: it STORES its operands, and no position ever invokes
     // a function-valued one (`List(randomF)` is pure to build). See the
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
-    // A tuple whose EVERY coordinate is absent is the absent value: the
-    // evaluate handler below answers `Missing` for it. Its type is
-    // `missing | tuple<…>` when every coordinate MAY be absent (`(L[k],
-    // L[j])` over two index reads: both out of range is `Missing`, one is a
-    // tuple with an absent coordinate). When every coordinate IS absent
-    // (typed `missing`, or a written absence symbol), the type is the same
-    // union: `(Missing, Missing)` is `missing | tuple<missing, missing>`.
-    // The tuple arm describes the unevaluated literal, which is still a
-    // tuple, and it keeps the component types, so a consumer that reads the
-    // components of the argument (the numeric-tuple rule of a call,
-    // `isNumericTupleArgumentType`) sees a tuple of absent components. The
-    // answer `missing` alone strips to `never`, and the application
-    // boundary then widens it to the declared result, the bare `tuple`
-    // (`withCodomainForAbsentAnswer`), which loses the components. A tuple
-    // with a coordinate that is never absent is a tuple (`(Missing, 1)` is
-    // a value, the absent coordinate is positioned).
-    type: (ops, context) => {
-      const resolver = context.engine._typeResolver;
-      // A coordinate that may evaluate to `Nothing` is erased, which changes
-      // the arity: `(If(c, 1, Nothing), 2)` is `(2)` when `c` is false. The
-      // arity and the component positions are then not known, and the type
-      // is the bare `tuple`.
-      if (ops.some(mayEvaluateToNothingD))
-        return BoxedType.forResult('tuple', resolver);
-      const t = tupleTypeOfD(ops);
-      if (ops.length > 0 && ops.every(mayBeAbsentCoordinateD))
-        return BoxedType.forResult(
-          { kind: 'union', types: ['missing', t] },
-          resolver
-        );
-      return BoxedType.forResult(t, resolver);
-    },
-    // Run the framework's default flatten step, which a custom `canonical`
-    // handler would otherwise short-circuit. It does two things here, and
-    // both change the ARITY (and therefore the type) of the tuple:
-    //
-    // - `Sequence` is SPLICED into the operand list: `(1, Sequence(2, 3), 4)`
-    //   is the 4-tuple `(1, 2, 3, 4)`, not a 3-tuple holding a pair. A
-    //   `Sequence` is the engine-wide "these operands, inlined here" marker,
-    //   so a collection literal must never store one as an element.
-    // - `Nothing` is ERASED: `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. Use
-    //   `Missing` for an absent-but-positioned coordinate.
-    //
-    // `tupleOf` filters `Nothing` on its own but does NOT splice
-    // `Sequence`, so the flatten call is load-bearing, not decorative.
-    canonical: (ops, { engine }) => tupleOf(engine, flatten(ops)),
+    // A present tuple retains its arity and coordinates, including markers.
+    type: (ops, context) =>
+      BoxedType.forResult(
+        tupleTypeOfD(ops, context.engine),
+        context.engine._typeResolver
+      ),
+    // Sequence is an explicit splice; Nothing itself occupies one slot.
+    canonical: (ops, { engine }) =>
+      tupleOf(engine, flatten(ops, undefined, true, true)),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -8556,22 +8550,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // evaluated, because `Tuple` is not `lazy`. When no operand is listed,
     // the handler declines and the tuple is built from its evaluated
     // operands.
-    //
-    // A tuple whose every coordinate evaluates to an absence marker
-    // (`Missing`, `Undefined`) is the absent value, `Missing`: a tuple is
-    // atomic, and a tuple of absent coordinates is not a value any consumer
-    // reads (`docs/ERROR-MODEL.md` §3; the product `Missing · (1, 1, 1)`
-    // collapses on the same ground). The case arises when a user function
-    // builds a point from the coordinates of an absent point: with `W = (p,
-    // s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L[k]` out of range,
-    // each coordinate is `Missing` (inside the body the accessor is not
-    // provably numeric, so the absence keeps its marker), and `W(L[k], 2)`
-    // is `Missing`, as its type `missing | tuple<number, number, number>`
-    // says (user decision 2026-10-14, Tycho ledger row 374). A tuple with
-    // one present coordinate is a value: `(Missing, 1)` stays a tuple. The
-    // empty tuple is not absent.
     evaluate: (ops, { engine, numericApproximation }) => {
-      if (ops.length > 0 && ops.every(isAbsentSymbol)) return engine.Missing;
       const listed = listedLiteralElements(
         engine,
         ops,
@@ -9180,7 +9159,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(value: T) -> tuple<T> where T',
-    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 1)),
+    canonical: (ops, { engine }) =>
+      engine.tuple(...checkArity(engine, ops, 1, true)),
   },
 
   Pair: {
@@ -9192,7 +9172,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(first: T, second: U) -> tuple<T, U> where T, U',
-    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 2)),
+    canonical: (ops, { engine }) =>
+      engine.tuple(...checkArity(engine, ops, 2, true)),
   },
 
   Triple: {
@@ -9206,7 +9187,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V',
 
-    canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 3)),
+    canonical: (ops, { engine }) =>
+      engine.tuple(...checkArity(engine, ops, 3, true)),
   },
 
   //
@@ -10784,7 +10766,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `collections[0]` is the source with a readable element type.
       const collections = ops
         .slice(1)
-        .map((c) => checkCollectionOperand(engine, c));
+        .map((c) => checkCallbackSource(engine, c));
       const fn = canonicalCallbackOperand(
         ops[0],
         sourceCount === 0
@@ -11032,17 +11014,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
     },
     canonical: (ops, { engine }) => {
-      const source = ops[0]?.canonical;
-      // A source is also acceptable when its only non-value elements are
-      // omissions: these are dropped before the predicate receives anything.
-      const collection =
-        source !== undefined &&
-        isSubtype(mapImmediateElements(source.type.type, withoutNothing), {
-          kind: 'collection',
-          elements: 'unknown',
-        })
-          ? source
-          : checkCollectionOperand(engine, source);
+      const collection = checkCallbackSource(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Filter',
         supply: PER_ELEMENT_SUPPLY,
@@ -17552,7 +17524,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Zip: {
     examples: ['Zip([1, 2, 3], ["a", "b", "c"])'],
     description:
-      'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.',
+      'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input. Nothing retains its coordinate and source position; a row whose coordinates are all Missing remains a tuple.',
     complexity: 8200,
     // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
@@ -17587,18 +17559,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         kind: 'tuple',
         elements: elements.map((t) => ({ type: t })),
       };
-      // A tuple whose every coordinate is absent is the absent value (see
-      // the `Tuple` type handler): when the cell of every source may be
-      // absent, the pair of two absent cells is `Missing`, and the element
-      // type keeps a `missing` arm. The sources come with the `missing` arm
-      // of their cells (`ABSENT_CELLS_PASS_THROUGH`,
-      // `broadcast-lift-type.ts`).
       return BoxedType.forResult(
         {
           kind: 'list',
-          elements: elements.every((t) => typeCouldHoldMissing(t))
-            ? { kind: 'union', types: ['missing', tuple] }
-            : tuple,
+          elements: tuple,
         },
         context.engine._typeResolver
       );
@@ -18283,7 +18247,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           for (const x of xs.each()) elements.push(x);
         }
       }
-      return tupleOf(ce, elements);
+      return tupleOf(
+        ce,
+        elements.filter((x) => !isSymbol(x, 'Nothing'))
+      );
     },
   },
 
@@ -20803,14 +20770,17 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     let items: Expression[];
     if (levels[0].arity > 1) {
       if (index < 1) return undefined;
-      const xs = spine.bases.map((c) => mapSource(c).at(index));
+      const xs = spine.bases
+        .map((c) => mapSource(c).at(index))
+        .map((x) => (x === undefined ? undefined : mappedElementValue(x)));
       if (xs.some((x) => x === undefined)) return undefined;
       items = xs as Expression[];
     } else {
       const source = mapSource(spine.bases[0]);
       if (source.isIndexedCollection === false) return undefined;
       if (!Number.isFinite(index) || index === 0) return undefined;
-      const item = source.at(index);
+      const raw = source.at(index);
+      const item = raw === undefined ? undefined : mappedElementValue(raw);
       if (!item) return undefined;
       items = [item];
     }
@@ -20826,7 +20796,9 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     // needed (a source with an unknown count still answers `at`).
     const collections = expr.ops.slice(1);
     if (index < 1) return undefined;
-    const items = collections.map((c) => mapSource(c).at(index));
+    const items = collections
+      .map((c) => mapSource(c).at(index))
+      .map((x) => (x === undefined ? undefined : mappedElementValue(x)));
     if (items.some((x) => x === undefined)) return undefined;
     if (items.some((x) => isSymbol(x, 'Nothing'))) return expr.engine.Nothing;
     // Each at() access is its own micro-drain (resets the
@@ -20853,7 +20825,8 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
   const source = mapSource(expr.op2);
   if (source.isIndexedCollection === false) return undefined;
   if (!Number.isFinite(index) || index === 0) return undefined;
-  const item = source.at(index);
+  const raw = source.at(index);
+  const item = raw === undefined ? undefined : mappedElementValue(raw);
   if (!item) return undefined;
   if (isSymbol(item, 'Nothing')) return expr.engine.Nothing;
   // Each at() access is its own micro-drain (see the zip form above).
@@ -20995,7 +20968,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
             const { value, done } = source.next();
             if (done || value === undefined)
               return { value: undefined, done: true };
-            items.push(value);
+            items.push(mappedElementValue(value));
           }
           // A level that produced no value is a COMPUTATION FAILURE,
           // not an erasure: the runner already substituted the marker,
@@ -21008,8 +20981,9 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     const source = walkedSource(spine.bases[0]).each();
     return {
       next: () => {
-        const { value, done } = source.next();
-        if (done) return { value: undefined, done: true };
+        const { value: raw, done } = source.next();
+        if (done || raw === undefined) return { value: undefined, done: true };
+        const value = mappedElementValue(raw);
         // See above: a failed mapping is the marker, not an erasure.
         // The runner substitutes it; this fallback is unreachable.
         const v = run([value]) ?? absenceMarker(ce, expr);
@@ -21042,7 +21016,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
           const { value, done } = source.next();
           if (done || value === undefined)
             return { value: undefined, done: true };
-          items.push(value);
+          items.push(mappedElementValue(value));
         }
         if (items.some((v) => isSymbol(v, 'Nothing')))
           return { value: expr.engine.Nothing, done: false };
@@ -21069,8 +21043,9 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
   return {
     next: () => {
       while (true) {
-        const { value, done } = source.next();
-        if (done) return { value: undefined, done: true };
+        const { value: raw, done } = source.next();
+        if (done || raw === undefined) return { value: undefined, done: true };
+        const value = mappedElementValue(raw);
         if (isSymbol(value, 'Nothing')) return { value, done: false };
         const compiled = auto?.([value]);
         if (compiled !== undefined) return { value: compiled, done: false };

@@ -744,13 +744,15 @@ its `missing` arm stripped, not off the operator's declared result: the
 answer is `NaN` when that type is a subtype of `number`, and `Missing` when
 it is a point, a collection, or any type that is not provably numeric. An
 absent addend or an absent factor beside a tuple makes the whole point
-absent, because a tuple is atomic — there is no cell for the absence to
-land in, and a tuple of absent coordinates is not a value any consumer
-reads — so a tuple whose EVERY coordinate evaluates to an absence marker is
-itself `Missing` (the `Tuple` evaluate handler; a user function that builds
-a point from the coordinates of an absent point answers `Missing`, typed
-`missing | tuple<…>`), while a tuple with one present coordinate stays a
-tuple. For example, with `P` declared `list<tuple<number, number, number>>`
+absent under the mathematical-point arithmetic contract. Explicit data-tuple
+construction has a different rule: it preserves every coordinate, including
+`Nothing`, `Missing` and `Undefined`. `(Missing, Missing)` is a present pair,
+not `Missing`; indexing it returns a missing coordinate, and its count is two.
+A user function that explicitly rebuilds a tuple from the coordinates of an
+absent point therefore returns a present tuple of missing coordinates.
+`Zip` follows the same construction rule, preserving row and coordinate
+alignment even when every coordinate of a row is missing.
+For example, with `P` declared `list<tuple<number, number, number>>`
 and holding two points, the out-of-range access `P[0]` is `Missing`, so
 `2 · P[0]` is `Missing` — an absent point scaled is an absent point — and
 `2 · P[0] + (1, 1, 1)` is `Missing` in turn. It was the scalar `NaN`
@@ -768,11 +770,10 @@ operator can reject, propagate, handle, or pass through an absent operand
 interactions follow `docs/COLLECTIONS-MODEL.md` and
 `docs/BROADCAST-MODEL.md`.
 
-**Compatibility amendment, implementation pending:** the tuple-collapse
-rule above describes current behavior. The selected data-tuple policy keeps
-a tuple with absent coordinates distinct from an absent whole tuple.
-Mathematical-point propagation needs a separate explicit rule; it must not
-implicitly erase the structure of ordinary data tuples.
+The tuple constructor no longer performs all-absent point normalization.
+Whole-point absence still propagates through point arithmetic; further point
+normalization must be specified by the mathematical operation rather than by
+erasing an explicitly constructed data tuple.
 
 `Nothing` is omitted when constructing an ordinary list;
 `Missing`/`NaN` preserve positions. Statistics over a constructed list

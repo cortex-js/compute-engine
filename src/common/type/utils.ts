@@ -623,7 +623,23 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 
   if (type.kind === 'broadcastable') return type.elements;
 
-  if (type.kind === 'tuple') return widen(...type.elements.map((x) => x.type));
+  if (type.kind === 'tuple') {
+    const slots = type.elements.map((x) => x.type);
+    const joined = widen(...slots);
+    // Evidence widening absorbs Nothing; reading tuple slots must preserve it.
+    return !isSubtype('nothing', joined) &&
+      slots.some((t) => isSubtype('nothing', t))
+      ? {
+          kind: 'union',
+          types: [
+            ...(typeof joined === 'object' && joined.kind === 'union'
+              ? joined.types
+              : [joined]),
+            'nothing',
+          ],
+        }
+      : joined;
+  }
 
   if (type.kind === 'dictionary')
     return parseType(`tuple<string, ${typeToString(type.values)}>`);

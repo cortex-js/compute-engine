@@ -852,11 +852,15 @@ fusion at an explicit omission boundary; otherwise reject compilation.
 
 Two inherited conventions also need explicit compatibility checks:
 
-- A tuple whose coordinates are all absent currently evaluates to
-  `Missing`, including a tuple produced by `Zip`. The selected data-tuple
-  policy preserves slots, so a present tuple with absent coordinates must
-  remain distinct from an absent whole tuple. Any mathematical-point
-  normalization needs a separate explicit rule and migration review.
+- Implemented for data tuples and `Zip`: `Nothing` retains its slot, and a
+  tuple whose coordinates are all absent remains a present tuple. Mathematical
+  point arithmetic still propagates a missing whole point; the constructor
+  does not collapse an explicitly rebuilt tuple. Tuple slot types preserve
+  `nothing`. Compilation declines omission-capable construction/zip until
+  targets can distinguish `Nothing`. `TupleFrom` keeps its prior omission
+  behavior until structural conversions are classified; ordinary argument
+  retention and Q11 remain separate. The legacy empty-tuple type still reduces
+  to `nothing`, pending the unit/empty-tuple representation decision.
 - `Undefined` participates in absence handling but is still declared
   `unknown` in some paths. Align its analysis with its runtime behavior;
   a separate spelling must not hide an absent element.

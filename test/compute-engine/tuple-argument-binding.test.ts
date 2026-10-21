@@ -270,8 +270,6 @@ describe('THE LIMITS OF THE ADMISSION', () => {
     ['tuple<integer, integer> | boolean'],
     ['tuple<integer, missing> | nothing'],
     ['tuple<error, missing>'],
-    ['tuple<integer, nothing, missing>'],
-    ['tuple<integer, nothing>'],
   ])('%s stays refused', (type) => {
     const engine = new ComputeEngine();
     engine.declare('v', type);

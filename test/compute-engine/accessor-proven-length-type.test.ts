@@ -81,9 +81,12 @@ describe('an access into an operand proved NOT to hold the position', () => {
   });
 
   test('the value is the marker', () => {
-    expect(ce.box(['Third', POINTS] as any).evaluate().toString()).toBe(
-      '"Missing"'
-    );
+    expect(
+      ce
+        .box(['Third', POINTS] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
     expect(ce.box(['At', ['List', 7, 8, 9], 9]).evaluate().isNaN).toBe(true);
   });
 
@@ -166,16 +169,14 @@ describe('an access that can find nothing keeps its absent member', () => {
     expect(typeOf(ce, ['Transpose', rows])).toBe('list<list<integer>>');
   });
 
-  test('a tuple coordinate that may evaluate to Nothing drops the arity', () => {
-    // The tuple erases a coordinate that evaluates to `Nothing`, so
-    // `(If(c, 1, Nothing), 2)` is `(2)` when `c` is false. It was typed
-    // `tuple<integer, integer>`.
+  test('a tuple coordinate that may evaluate to Nothing keeps its position', () => {
+    // A possible omission remains in the coordinate type, with fixed arity.
     const ce = engine();
     ce.declare('c', 'boolean');
     const t = ['Tuple', ['If', 'c', 1, 'Nothing'], 2];
-    expect(typeOf(ce, t)).toBe('tuple');
+    expect(typeOf(ce, t)).toBe('tuple<integer | nothing, integer>');
     ce.assign('c', false);
-    expect(ce.box(t as any).evaluate().nops).toBe(1);
+    expect(ce.box(t as any).evaluate().json).toEqual(['Tuple', 'Nothing', 2]);
   });
 });
 

@@ -136,7 +136,7 @@ const CASES: Case[] = [
     'Zip',
     ['Zip', 'L', 'L'],
     '\\mathrm{Zip}(L, L)',
-    'list<missing | tuple<integer | missing, integer | missing>>',
+    'list<tuple<integer | missing, integer | missing>>',
   ],
   [
     'ListFrom',
@@ -458,7 +458,7 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     [['Chunk', 'B', 2], 'list<list<any>>'],
     [['GroupBy', 'B', ['Function', 'x', 'x']], 'dictionary<list<any>>'],
     [['Take', ['Cycle', 'B'], 4], 'list<any>'],
-    [['Zip', 'B', 'B'], 'list<missing | tuple<any, any>>'],
+    [['Zip', 'B', 'B'], 'list<tuple<any, any>>'],
     [['DictionaryFrom', 'Q'], 'dictionary<any>'],
     // An element typed `any` can be a list, nested to any depth, which
     // `Sqrt` maps over: the element of the result is a number or a list.

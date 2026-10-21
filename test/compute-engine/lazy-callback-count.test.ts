@@ -123,7 +123,7 @@ describe('lazy collection: one consumption runs the callback once per element', 
       run(
         `let s = Reduce(Filter([1, 2, 3, 4, 5], (x) => no1()), (a, x) => a + x)\n(s, n)`
       )
-    ).toBe('(5)');
+    ).toBe('("Nothing", 5)');
   });
 
   test('Product over a lazy Map: 3 elements, 3 runs', () => {

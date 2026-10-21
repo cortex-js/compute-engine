@@ -57,7 +57,6 @@ import {
   TRIG_POLE_EPSILON,
 } from '../numerics/numeric.js';
 import {
-  isAbsentSymbol,
   isFunction,
   isNumber,
   isString,
@@ -73,7 +72,6 @@ import {
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
-  typeCouldHoldMissing,
 } from '../../common/type/utils.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -5572,19 +5570,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // comma: `(True)` is a parenthesized SCALAR, not a 1-tuple, so `len(...)`
   // raises and `_ce_eqcoll` would see a scalar where the interpreter has a
   // point. `()` is already the empty tuple.
-  //
-  // A tuple whose EVERY coordinate may be absent is refused: the interpreter
-  // answers `Missing` for a tuple of absent coordinates, and this target
-  // spells an absence as `math.nan`, which is also a legitimate numeric
-  // coordinate, so the collapse cannot be decided at run time.
   Tuple: (args, compile) => {
-    if (
-      args.length > 0 &&
-      args.every((x) => isAbsentSymbol(x) || typeContainsMissing(x.type.type))
-    )
-      throw new Error(
-        'Could not compile `Tuple`: every coordinate may be absent, and the Python target cannot tell an absent coordinate from a NaN one'
-      );
     const parts = args.map((x) => compile(x));
     if (parts.length === 1) return `(${parts[0]},)`;
     return `(${parts.join(', ')})`;
@@ -5842,26 +5828,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Zip: (args, compile) => {
     if (args.length === 0) return '[]';
     BaseCompiler.assertLockstepSourcesPure('Zip', args, 1);
-    // A tuple whose every coordinate is absent is the absent value `Missing`
-    // in the interpreter (the `Tuple` evaluate handler, and `zipElement` in
-    // `library/collections.ts`), while a tuple of `NaN` coordinates is a
-    // tuple. This target spells `Missing` as `nan`, so the two rows cannot
-    // be told apart at run time. When the cells of every source can be
-    // absent, the zip is refused.
-    if (
-      args.every((a) =>
-        typeCouldHoldMissing(
-          collectionElementType(resolveTypeForCompilation(a.type.type)) ??
-            'unknown'
-        )
-      )
-    )
-      throw new Error(
-        'Could not compile `Zip`: every source may hold the absent value ' +
-          '`Missing`, and a row of absent cells is `Missing` in the ' +
-          'interpreter. This target spells `Missing` as `nan`, so such a row ' +
-          'cannot be told apart from a row of `NaN` values.'
-      );
     const colls = args.map((a, i) => pyCollArg('Zip', a, compile, i + 1));
     return `[list(_t) for _t in zip(${colls.join(', ')})]`;
   },

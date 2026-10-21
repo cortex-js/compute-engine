@@ -644,11 +644,6 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   // "an empty collection inhabits both" caveat at the bottom of this
   // function does not apply: the empty tuple inhabits `tuple<>` only.
   //
-  // The rule is not applied when a component admits `nothing`: writing
-  // `Nothing` into a positional slot removes the slot, so such a tuple type
-  // can hold values that are shorter than its type, and the positions of the
-  // following components move.
-  //
   // `box.ts` keeps an argument-type error only when every candidate
   // parameter is provably disjoint from the operand
   // (`keepProvisionalOperands`). Without this rule, a symbol typed
@@ -660,14 +655,9 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
     typeof b === 'object' &&
     b.kind === 'tuple'
   ) {
-    const admitsNothing = (e: { type: Type }) => isSubtype('nothing', e.type);
-    if (!a.elements.some(admitsNothing) && !b.elements.some(admitsNothing)) {
-      if (a.elements.length !== b.elements.length) return true;
-      if (
-        a.elements.some((e, i) => provablyDisjoint(e.type, b.elements[i].type))
-      )
-        return true;
-    }
+    if (a.elements.length !== b.elements.length) return true;
+    if (a.elements.some((e, i) => provablyDisjoint(e.type, b.elements[i].type)))
+      return true;
   }
 
   // Category test: every type sits in a primitive "bucket" the lattice knows

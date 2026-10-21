@@ -12,13 +12,28 @@ import { isFoldBarrierProduct, isFunction, isSymbol } from './type-guards.js';
  * with the same operator.
  *  e.g. `["f", a, ["f", b, c]]` -> `["f", a, b, c]`
  *
+ * `preserveNothing` retains tuple coordinates; explicit Sequences still splice
+ * and omit Nothing under their ordinary rules.
+ *
  * Note: *not* recursive
  */
 export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
   ops: T,
   operator?: string,
-  canonicalize = true
+  canonicalize = true,
+  preserveNothing = false
 ): T {
+  // An explicit Sequence still splices (and uses its own omission rules),
+  // even when it canonicalizes to Nothing before the outer tuple is built.
+  if (preserveNothing && ops.some((x) => isFunction(x, 'Sequence'))) {
+    const spliced: Expression[] = [];
+    for (const x of ops) {
+      if (isFunction(x, 'Sequence')) {
+        for (const y of flatten([x], operator, canonicalize)) spliced.push(y);
+      } else spliced.push(x);
+    }
+    return flatten(spliced, operator, canonicalize, true) as T;
+  }
   // Optionally make all the arguments canonical.
   const xs: ReadonlyArray<Expression> =
     !canonicalize || ops.every((x) => x.isCanonical)
@@ -27,7 +42,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
 
   if (operator) {
     const shouldFlatten = (x: Expression) =>
-      isSymbol(x, 'Nothing') ||
+      (!preserveNothing && isSymbol(x, 'Nothing')) ||
       x.operator === operator ||
       x.operator === 'Sequence';
 
@@ -38,31 +53,41 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
     const ys: Expression[] = [];
     for (const x of xs) {
       // Skip Nothing
-      if (isSymbol(x, 'Nothing')) continue;
+      if (!preserveNothing && isSymbol(x, 'Nothing')) continue;
 
       // If the operator matches, flatten the expression
       if (
         isFunction(x) &&
         (x.operator === operator || x.operator === 'Sequence')
       )
-        for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
+        for (const y of flatten(x.ops, operator, canonicalize, preserveNothing))
+          ys.push(y);
       else ys.push(x);
     }
     return ys as T;
   }
 
-  if (xs.every((x) => !(isSymbol(x, 'Nothing') || x.operator === 'Sequence')))
+  if (
+    xs.every(
+      (x) =>
+        !(
+          (!preserveNothing && isSymbol(x, 'Nothing')) ||
+          x.operator === 'Sequence'
+        )
+    )
+  )
     return xs as T;
 
   // Iterate over the list of expressions and flatten them
   const ys: Expression[] = [];
   for (const x of xs) {
     // Skip Nothing
-    if (isSymbol(x, 'Nothing')) continue;
+    if (!preserveNothing && isSymbol(x, 'Nothing')) continue;
 
     // If the operator matches, flatten the expression
     if (isFunction(x, 'Sequence'))
-      for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
+      for (const y of flatten(x.ops, operator, canonicalize, preserveNothing))
+        ys.push(y);
     else ys.push(x);
   }
   return ys as T;

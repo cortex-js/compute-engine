@@ -51,11 +51,8 @@ export function collectTuplePattern(
   const ce = pattern.engine;
   if (!isFunction(pattern, 'Tuple'))
     return ce.typeError('tuple', pattern.type, pattern.toString());
-  // An absent value binds each leaf of the pattern to `Missing`: a tuple
-  // whose every coordinate is absent evaluates to `Missing` (the `Tuple`
-  // evaluate handler), so a pair of optional values arrives as the absent
-  // value exactly when both are absent, and `((a, b)) ↦ IsMissing(a)` must
-  // read it as it reads `(Missing, Missing)`.
+  // Destructuring a missing whole value binds every leaf to Missing, just
+  // as destructuring a present tuple with missing coordinates does.
   if (isAbsentSymbol(v)) {
     for (const p of pattern.ops) {
       if (isFunction(p, 'Tuple')) {

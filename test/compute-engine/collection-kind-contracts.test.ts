@@ -68,11 +68,11 @@ describe('a collection literal splices `Sequence` and erases `Nothing`', () => {
     ]);
   });
 
-  test('`Nothing` erasure still holds in every literal', () => {
+  test('lists and sets omit Nothing; tuples preserve its slot', () => {
     expect(elementsOf(ce.box(['List', 1, 'Nothing', 4]))).toEqual(['1', '4']);
     expect(elementsOf(ce.box(['Set', 1, 'Nothing', 3]))).toEqual(['1', '3']);
     expect(ce.box(['Tuple', 1, 'Nothing', 3]).evaluate().toString()).toBe(
-      '(1, 3)'
+      '(1, "Nothing", 3)'
     );
   });
 

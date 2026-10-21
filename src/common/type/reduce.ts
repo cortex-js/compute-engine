@@ -1022,7 +1022,7 @@ function reduceBroadcastableType(type: BroadcastableType): Type {
 }
 
 function reduceTupleType(type: TupleType): Type {
-  let reducedElements = type.elements.map((element) => ({
+  const reducedElements = type.elements.map((element) => ({
     ...element,
     type: reduceType(element.type),
   }));
@@ -1036,24 +1036,9 @@ function reduceTupleType(type: TupleType): Type {
   if (reducedElements.some((element) => element.type === 'error'))
     return 'error';
 
-  // An uninhabited slot empties the whole tuple: every slot must hold a value,
-  // so if one of them can hold none, no tuple exists. Note this is the
-  // opposite of the `nothing` rule just below, and deliberately so — `nothing`
-  // is the unit type, so its slot collapses, while `never` is the empty type,
-  // so its slot can never be filled.
+  // Every slot must be inhabited. Nothing occupies a slot; never cannot.
   if (reducedElements.some((element) => isEmptyType(element.type)))
     return 'never';
-
-  reducedElements = reducedElements.filter(
-    (element) => element.type !== 'nothing'
-  );
-
-  // A `nothing` slot collapses (mirroring the value-level rule: writing
-  // `Nothing` into a positional slot deletes it), so a tuple whose every
-  // slot was `nothing` is the empty tuple — and the empty tuple is
-  // `nothing`, per the check above. Without this re-check, `tuple<nothing>`
-  // reduced to a bare `tuple`, silently widening it to "any tuple".
-  if (reducedElements.length === 0) return 'nothing';
 
   return decorate({
     ...type,

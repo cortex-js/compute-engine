@@ -4150,20 +4150,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // several values side by side and stays a `Tuple`, and so does a
         // list with other delimiters (`Delimiter(Sequence(A, B), "[,]")`).
         //
-        // Otherwise this site builds the `Tuple` DIRECTLY (`_fn` does not run
-        // `Tuple`'s canonical handler), so it has to apply the same two
-        // operand-list rules that handler applies, or the two routes to a
-        // tuple disagree: a `Sequence` operand is SPLICED (it is the
-        // engine-wide "these operands, inlined here" marker and must never be
-        // stored as an element) and `Nothing` is ERASED, so `(1, Nothing, 3)`
-        // is the 2-tuple `(1, 3)`. Both are what `flatten` does. In practice
-        // the enclosing `Sequence` has already flattened recursively by the
-        // time it gets here, so the splice half is defensive; the erasure
-        // half is load-bearing.
+        // Preserve data coordinates here just as the Tuple constructor does.
+        // Sequence remains an explicit splice; Nothing itself is a slot.
         const delim = isString(args[1]) ? args[1].string : undefined;
 
         if (isFunction(body, 'Sequence')) {
-          const xs = flatten(canonical(ce, body.ops));
+          const xs = flatten(
+            canonical(ce, flatten(body.ops, undefined, false, true)),
+            undefined,
+            true,
+            true
+          );
           if (
             (delim === undefined || delim === '(,)') &&
             isPointListReading(xs)

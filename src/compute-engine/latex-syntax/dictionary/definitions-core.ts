@@ -2945,6 +2945,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const spelling = { trailingEmpty: false };
       const seq = parseSequence(parser, terminator, lhs, 20, ',', spelling);
       if (seq === null) return null;
+      // A sole trailing comma spells a singleton tuple, not an omitted
+      // second coordinate. An authored Nothing remains an actual coordinate.
+      if (spelling.trailingEmpty && seq.length === 2) seq.pop();
       const sequence: MathJsonExpression = ['Sequence', ...seq];
       if (spelling.trailingEmpty) TRAILING_EMPTY_SEQUENCES.add(sequence);
       return ['Delimiter', sequence, { str: ',' }];

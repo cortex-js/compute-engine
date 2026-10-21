@@ -162,10 +162,9 @@ export function mayBeNumericTupleType(t0: Type): boolean {
  *
  * The `missing` arm comes from an argument that may be absent as a whole:
  * an index read that can be out of range (`L[k]` over a list of points is
- * `missing | tuple<integer, integer>`), or a tuple literal whose every
- * coordinate is absent (`(Missing, Missing)` is `missing | tuple<missing,
- * missing>`, because it evaluates to `Missing`). Each arm of the argument
- * types the call on its own, and the call is the union of the arms. With
+ * `missing | tuple<integer, integer>`). An explicitly constructed tuple
+ * remains present even when all its coordinates are absent. Each arm of the
+ * argument types the call on its own, and the call is the union of the arms. With
  * `f := x ↦ (-x, x)`, the `missing` arm gives `tuple<number, missing>`, as
  * `f(Missing)` is `(NaN, Missing)`, and the tuple arm gives `any`, as
  * `f((1, 2))` does. The union of the two is `any`, so the callers answer

@@ -4574,7 +4574,7 @@ export function collectionSubset(
 }
 
 /**
- * The value of the `List` or `Tuple` literal `expr` when it has an element
+ * The value of the `List` literal `expr` when it has an element
  * that may evaluate to `Nothing` (`literalMayEraseElement()`), and `undefined`
  * otherwise.
  *
@@ -4607,7 +4607,7 @@ function erasedLiteralValue(
   expr: Expression
 ): (Expression & FunctionInterface) | undefined {
   if (!isFunction(expr) || expr._numericStore !== undefined) return undefined;
-  if (expr.operator !== 'List' && expr.operator !== 'Tuple') return undefined;
+  if (expr.operator !== 'List') return undefined;
   if (!literalMayEraseElement(expr)) return undefined;
   if (!isTransitivelyPure(expr)) return undefined;
   const value = expr.engine._numericRequest
@@ -4820,6 +4820,8 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
 
     elttype: (expr) => {
       if (!isFunction(expr) || expr.nops === 0) return 'unknown';
+      if (expr.operator === 'Tuple')
+        return collectionElementType(expr.type.type) ?? 'unknown';
       const store = expr._numericStore;
       if (store !== undefined) {
         // Parity with the operand walk below: one element answers its own

@@ -6,8 +6,8 @@ import type {
 import { isFunction, isSymbol } from './type-guards.js';
 
 /**
- * Whether the expression `expr`, an element of a `List` or `Tuple` literal,
- * may evaluate to `Nothing`. A list or a tuple erases such an element:
+ * Whether the expression `expr`, an element of a `List` literal,
+ * may evaluate to `Nothing`. A list erases such an element:
  * `[If(c, "a", Nothing)]` is `[]` when `c` is false. The number of
  * operands of the literal then does not prove the length of its value. The
  * type of `expr` cannot tell: `nothing` is the bottom type, so the type of
@@ -38,7 +38,7 @@ export function mayEvaluateToNothingD(d: OperandDescriptor): boolean {
 }
 
 /**
- * Whether `xs` is a `List` or `Tuple` literal with an element that may
+ * Whether `xs` is a `List` literal with an element that may
  * evaluate to `Nothing` ({@link mayEvaluateToNothing}).
  *
  * A broadcast walks the operands of a list literal and evaluates each one in
@@ -48,7 +48,7 @@ export function mayEvaluateToNothingD(d: OperandDescriptor): boolean {
  * walks the elements of its value: `[Sin(2)]`.
  */
 export function literalMayEraseElement(xs: Expression): boolean {
-  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return false;
+  if (!isFunction(xs, 'List')) return false;
   // The scan reads the type of every element, and a collection handler asks
   // this question on every call: a loop of `at(1)` … `at(n)` over a literal
   // scanned n elements n times. The answer is kept per literal. The types of
@@ -64,7 +64,7 @@ export function literalMayEraseElement(xs: Expression): boolean {
 }
 
 /**
- * The `List` or `Tuple` literal `xs` with its erasure resolved: each element
+ * The `List` literal `xs` with its erasure resolved: each element
  * that may evaluate to `Nothing` ({@link mayEvaluateToNothing}) is evaluated
  * exactly and dropped when its value is `Nothing`, and every other element
  * is kept as it is written. The answer is `undefined` when an element still
@@ -94,7 +94,7 @@ export function literalWithErasureResolved(
   xs: Expression,
   options?: Partial<EvaluateOptions>
 ): Expression | undefined {
-  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return undefined;
+  if (!isFunction(xs, 'List')) return undefined;
   const kept: Expression[] = [];
   for (const x of xs.ops) {
     if (!mayEvaluateToNothing(x)) {
@@ -119,7 +119,7 @@ export async function literalWithErasureResolvedAsync(
   xs: Expression,
   options?: Partial<EvaluateOptions>
 ): Promise<Expression | undefined> {
-  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return undefined;
+  if (!isFunction(xs, 'List')) return undefined;
   const kept: Expression[] = [];
   for (const x of xs.ops) {
     if (!mayEvaluateToNothing(x)) {

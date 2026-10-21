@@ -347,21 +347,6 @@ export function callResultType(
       const absentAt = (i: number) =>
         resolveTypeAlias(operands[i].type) === 'missing';
       const absentOperand = operands.some((_, i) => absentAt(i));
-      // A tuple whose every coordinate is absent evaluates to `Missing`
-      // (the `Tuple` evaluate handler, `library/collections.ts`). Its type
-      // handler answers `missing | tuple<missing, …>`, because the
-      // unevaluated literal is still a tuple, and that tuple arm would
-      // absorb the present arm's `tuple<number, …>` in the join. In the
-      // body, the tuple is evaluated, so the exact `missing` is read here.
-      if (
-        absentOperand &&
-        expr.operator === 'Tuple' &&
-        operands.every((_, i) => absentAt(i))
-      ) {
-        const result = describeType('missing');
-        memo.set(expr, result);
-        return result;
-      }
       if (absentOperand && !operands.some((x) => mayBroadcast(x.type))) {
         const def = expr.operatorDefinition as
           | {

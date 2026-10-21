@@ -537,15 +537,8 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
         ).not.toBe('any');
       });
 
-      // An argument that may be absent as a whole: a tuple whose every
-      // coordinate is absent evaluates to `Missing`, so the literal
-      // `(Missing, Missing)` is typed `missing | tuple<missing, missing>`.
-      // The `missing` arm alone gives `tuple<number, missing>`, as
-      // `f(Missing)` does, and the tuple arm gives `any`, as `f((1, 2))`
-      // does. The call is the union of the two, `any`. Before, the
-      // argument was typed `missing | tuple` (no components), and the call
-      // kept the signature result `tuple<number, number>`, which the value
-      // `(NaN, Missing)` does not fit.
+      // An explicit tuple remains present even when every coordinate is
+      // missing. A missing whole argument follows its own absence rule.
       test(`${route}: a tuple whose every coordinate is absent is typed any`, () => {
         const ce = engine(declared);
         const whole = ce.box(['f', 'Missing']);
@@ -557,10 +550,14 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           ce.parse('f((\\operatorname{Missing}, \\operatorname{Missing}))'),
         ]) {
           expect(call.op1.type.toString()).toMatch(
-            /^missing \| tuple<(missing|unknown), missing>$/
+            /^tuple<(missing|unknown), missing>$/
           );
           expect(call.type.toString()).toBe('any');
-          expect(call.evaluate().toString()).toBe('(NaN, "Missing")');
+          expect(call.evaluate().json).toEqual([
+            'Tuple',
+            ['Tuple', 'NaN', 'NaN'],
+            call.op1.json,
+          ]);
         }
         // An index read that may be out of range is the same union with
         // number components: the tuple arm gives a pair of pairs.
@@ -677,33 +674,36 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       'number'
     );
     expect(ce.parse('W(L[k], 2)').type.toString()).toBe(
-      'missing | tuple<number, number, number>'
+      'tuple<missing, missing, missing> | tuple<number, number, number>'
     );
     // A plain absent argument is the absent arm alone, and the two
     // literal-shaped readings of row 373 are unchanged.
-    expect(ce.box(['W', 'Missing', 2]).type.toString()).toBe('missing');
+    expect(ce.box(['W', 'Missing', 2]).type.toString()).toBe(
+      'tuple<missing, missing, missing>'
+    );
     expect(ce.parse('W((1,2,3), 2)').type.toString()).toBe(
       'tuple<integer | nan, integer | nan, integer | nan>'
     );
     expect(ce.parse('W(L, 2)').type.toString()).toBe(
       'tuple<list<number>, list<number>, list<number>>'
     );
-    // An in-range index gives the scaled point. An out-of-range one gives
-    // `Missing`: inside the body `PointX(p)` is typed `unknown` (the
-    // parameter is inferred `collection<any> | tuple`), so each coordinate
-    // keeps the `Missing` marker, and a tuple whose every coordinate is
-    // absent is the absent value (the `Tuple` evaluate handler; user
-    // decision 2026-10-14). The value is in the type.
+    // Rebuilding coordinates from a missing whole point produces a present
+    // data tuple. Arithmetic on the missing whole point remains separate.
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 1);
     expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe('(2, 4, 6)');
     ce.assign('k', 5);
     const absent = ce.parse('W(L[k], 2)').evaluate();
-    expect(absent.toString()).toBe('"Missing"');
+    expect(absent.json).toEqual(['Tuple', 'Missing', 'Missing', 'Missing']);
     expect(isSubtype(absent.type.type, ce.parse('W(L[k], 2)').type.type)).toBe(
       true
     );
-    expect(ce.box(['W', 'Missing', 2]).evaluate().toString()).toBe('"Missing"');
+    expect(ce.box(['W', 'Missing', 2]).evaluate().json).toEqual([
+      'Tuple',
+      'Missing',
+      'Missing',
+      'Missing',
+    ]);
   });
 
   test('row 374: a body that passes the argument through keeps the absent case', () => {
@@ -746,7 +746,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ce.assign('F', ce.parse('(p, q) \\mapsto (p, q)'));
     const e = ce.parse('F(L[k], L[j])');
     expect(e.type.toString()).toBe(
-      'missing | tuple<missing, tuple<number, number, number>> | tuple<tuple<number, number, number>, missing> | tuple<tuple<number, number, number>, tuple<number, number, number>>'
+      'tuple<missing, missing> | tuple<missing, tuple<number, number, number>> | tuple<tuple<number, number, number>, missing> | tuple<tuple<number, number, number>, tuple<number, number, number>>'
     );
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     for (const [k, j] of [

@@ -385,23 +385,21 @@ describe('MAP OF A USER FUNCTION WITH NO DECLARED RESULT', () => {
 });
 
 describe('ZIP OF ABSENT CELLS', () => {
-  // A tuple whose every coordinate is absent evaluates to `Missing` (the
-  // `Tuple` evaluate handler, user decision 2026-10-14), so the element of
-  // the zip made of two absent cells is `Missing` in every view.
+  // Each row is a present tuple, including a row of missing coordinates.
   const engine = new ComputeEngine();
   engine.declare('L', 'list<integer | missing>');
   engine.assign('L', engine.box(['List', 1, 'Missing', 3]));
 
   function checkViews(zip: Expression): void {
     expect(zip.type.toString()).toBe(
-      'list<missing | tuple<integer | missing, integer | missing>>'
+      'list<tuple<integer | missing, integer | missing>>'
     );
     const value = zip.evaluate();
-    expect(value.toString()).toBe('[(1, 1),"Missing",(3, 3)]');
-    expect(symbolOf(value.at(2))).toBe('Missing');
+    expect(value.toString()).toBe('[(1, 1),("Missing", "Missing"),(3, 3)]');
+    expect(value.at(2)?.json).toEqual(['Tuple', 'Missing', 'Missing']);
     expect([...value.each()].map((x) => x.toString())).toEqual([
       '(1, 1)',
-      '"Missing"',
+      '("Missing", "Missing")',
       '(3, 3)',
     ]);
     expect(listed(value).type.matches(zip.type)).toBe(true);
@@ -412,9 +410,11 @@ describe('ZIP OF ABSENT CELLS', () => {
   test('parse route', () => checkViews(engine.parse('\\mathrm{Zip}(L, L)')));
 
   test('an element access', () => {
-    expect(symbolOf(engine.box(['At', ['Zip', 'L', 'L'], 2]).evaluate())).toBe(
-      'Missing'
-    );
+    expect(engine.box(['At', ['Zip', 'L', 'L'], 2]).evaluate().json).toEqual([
+      'Tuple',
+      'Missing',
+      'Missing',
+    ]);
   });
 
   test('a pair with one present cell stays a tuple', () => {
@@ -427,7 +427,7 @@ describe('ZIP OF ABSENT CELLS', () => {
 
   test('Epsil route', () => {
     const { value } = runEpsil('let xs = [1, Missing, 3]\nzip(xs, xs)[2]');
-    expect(symbolOf(value)).toBe('Missing');
+    expect(value.json).toEqual(['Tuple', 'Missing', 'Missing']);
     const { value: destructured } = runEpsil(
       'let xs = [1, Missing, 3]\nmap(((a, b)) => b ?? 0, zip(xs, xs))'
     );
@@ -440,12 +440,12 @@ describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
   engine.declare('L', 'list<integer | missing>');
   engine.declare('I', 'list<integer>');
 
-  test('JavaScript: a row of absent cells is `undefined`', () => {
+  test('JavaScript: a row of absent cells remains a row', () => {
     const r = compile(engine.box(['Zip', 'L', 'L']), { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.run!({ L: [1, undefined, 3] } as never)).toEqual([
       [1, 1],
-      undefined,
+      [undefined, undefined],
       [3, 3],
     ]);
   });
@@ -465,19 +465,16 @@ describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
     expect(r.code).not.toContain('_x === undefined');
   });
 
-  // Python spells `Missing` as `nan`, so a row of absent cells cannot be
-  // told apart from a row of `NaN` values: the zip is refused.
-  test('Python: a zip whose every source may hold an absent cell is refused', () => {
+  test('Python: all-missing rows need no collapse test', () => {
     const r = compile(engine.box(['Zip', 'L', 'L']), { to: 'python' });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
     expect(
       compile(engine.box(['Zip', 'L', 'I']), { to: 'python' }).success
     ).toBe(true);
   });
 
-  test('an item erased from the row: the tuple of the remaining items', () => {
-    // `.at(2)` of the `Map` is `Nothing`, which the tuple erases, and
-    // `(Missing)` is absent.
+  test('an omitted item keeps its row coordinate', () => {
+    // A raw Nothing result keeps the first coordinate of the second row.
     const zip = engine
       .box([
         'Zip',
@@ -489,10 +486,10 @@ describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
         ['List', 3, 'Missing'],
       ])
       .evaluate();
-    expect(symbolOf(zip.at(2))).toBe('Missing');
+    expect(zip.at(2)?.json).toEqual(['Tuple', 'Nothing', 'Missing']);
     expect([...zip.each()].map((x) => x.toString())).toEqual([
       '(1, 3)',
-      '"Missing"',
+      '("Nothing", "Missing")',
     ]);
   });
 });

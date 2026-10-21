@@ -655,9 +655,10 @@ export function refusedCollectionSourceOperands(
 export function checkArity(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  count: number
+  count: number,
+  preserveNothing = false
 ): ReadonlyArray<Expression> {
-  ops = flatten(ops);
+  ops = flatten(ops, undefined, true, preserveNothing);
 
   // @fastpath
   if (!ce.strict) {

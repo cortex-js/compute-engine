@@ -25,6 +25,7 @@ import {
   matchesString,
   matchesSymbol,
   missingIfEmpty,
+  operator as mathJsonOperator,
   stringValue,
   symbol,
 } from '../../math-json/utils.js';
@@ -3702,7 +3703,26 @@ function applyOperatorDefinition(
       ? boxInternal
       : box;
   const xs: Expression[] = [];
-  for (const x of ops) xs.push(boxOne(ce, x));
+  if (
+    ['Tuple', 'Single', 'Pair', 'Triple'].includes(name) &&
+    !opDef.isUserFunctionDefinition
+  ) {
+    // Expand explicit splices before an empty Sequence canonicalizes to
+    // Nothing. A written Nothing remains one coordinate of these containers.
+    for (const x of ops) {
+      const head =
+        x instanceof _BoxedExpression
+          ? x.operator
+          : mathJsonOperator(x as MathJsonExpression);
+      if (head === 'Sequence') {
+        const raw = boxOperands(ce, [x], RAW_OPERAND);
+        for (const y of flatten(raw, undefined, false, true))
+          xs.push(boxOne(ce, y));
+      } else xs.push(boxOne(ce, x));
+    }
+  } else {
+    for (const x of ops) xs.push(boxOne(ce, x));
+  }
 
   // A symbolic `Spread` operand (`f(...p)` where `p` is not a literal tuple
   // — a literal one already spliced to a `Sequence` when the operand

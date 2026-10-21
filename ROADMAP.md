@@ -125,6 +125,15 @@ statistics inspect tuple coordinates, and maps also check their result type.
 Numeric aggregates also refuse omission-capable sources, including the seeded
 `Multiply` fold used to represent `Product(collection)`. Tuple slots and union
 alternatives are checked before their element types can absorb omission.
+Data tuple construction and `Zip` now preserve slots and all-missing tuples;
+they also refuse compilation when coordinates may be `Nothing`. Structural
+conversion (`TupleFrom` still omits immediate `Nothing`), ordinary arguments,
+the unit/empty-tuple type, and Q11 binding capture remain separate decisions.
+A limitation of the refusal: tuple-call lowering can leave an unannotated
+pass-through result typed `any` even when the argument is a numeric tuple.
+The constructor then refuses compilation; annotating that parameter with its
+numeric tuple type restores compilation. Improving this proof does not require
+changing the selected slot policy or conflating omission with missing data.
 
 An unconstrained `collection<any>` therefore needs an annotation that excludes
 `Nothing` (for example, `list<real>`) to compile. This preserves callback bypass and aligned-observation semantics.
@@ -174,9 +183,10 @@ for omitted inputs. `Filter` drops immediate omissions without invoking its
 predicate and removes them from its element type. Paired statistics now skip
 whole aligned observations. Numeric aggregates (sums, products, extrema, and
 univariate statistics) now skip omitted data, and statistics count retained
-observations for every denominator.
-The examples below record the original findings; other producers,
-tuple preservation, and the remaining consumers still need their own policies.
+observations for every denominator. Data tuples now preserve `Nothing` slots,
+and `Zip` preserves coordinate alignment and all-missing rows. The examples
+below record the original findings; other producers and remaining consumers
+still need their own policies.
 
 User decision 2026-10-20: a lazy view (`Map`, `Tabulate`, `Table`, `Scan`,
 `Iterate`) keeps a `Nothing` result in its own display, count, `.at()` and
@@ -323,7 +333,7 @@ on 2026-10-19:
   accepted.
 - A list literal types an `Undefined` element as its other elements:
   `[1, Undefined]` is `list<integer>`, so `Zip([1, Undefined], [2, Undefined])`
-  is typed `list<tuple<integer, integer>>` while its second element is `Missing`
+  is typed `list<tuple<integer, integer>>` while its second element is a present tuple of absent coordinates
   (`isAbsentSymbol` treats `Undefined` as absent). A propagating operator
   already types an `Undefined` operand as `missing` (`deriveApplicationType`);
   the list literal does not.
@@ -848,20 +858,18 @@ declared-result-type rule does), so the two routes agree.
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
 With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of
-two points, the interpreter answers `Missing` for `W(L[5], 2)`: inside the body
-`PointX(p)` is not provably numeric (the parameter is inferred
-`collection<any> | tuple`), so each coordinate keeps the `Missing` marker, and a
-tuple of absent coordinates is the absent value. The JavaScript target compiles
-the same accessor as `undefined[idx]` guarded to `NaN` (the top-level reading,
-`PointX(Missing)` is `NaN`), so the compiled call answers `[NaN, NaN, NaN]`;
-`_SYS.tupleOrAbsent` collapses only coordinates that are `undefined` at run
-time. The two lanes already differed before the collapse (`[NaN, NaN, NaN]`
-against a tuple of three `Missing`). Closing it means one of: the compiled
-accessor keeps `undefined` for an absent point when its written type is not
-provably numeric (then `tupleOrAbsent` collapses the tuple), or the
-interpreter's body route normalizes to `NaN` as the top level does (tried
-2026-10-14 and reverted: a product over a `-> unknown` result must keep
-`Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
+two points, the interpreter now returns a present tuple of three `Missing`
+coordinates for `W(L[5], 2)`. Inside the body `PointX(p)` is not provably
+numeric (the parameter is inferred `collection<any> | tuple`), so each
+coordinate keeps `Missing`. The JavaScript target compiles the accessor as
+`undefined[idx]` guarded to `NaN` (the top-level `PointX(Missing)` reading), so
+it returns `[NaN, NaN, NaN]`. Data tuple construction now preserves the row
+on both routes; the old `tupleOrAbsent` helper is removed. The remaining
+question is coordinate normalization: the compiled accessor should preserve
+`undefined` when its written type is not provably numeric, or the interpreter
+body contract must explicitly change. Normalizing every unknown result to
+`NaN` was tried and reverted: a product over a `-> unknown` result must keep
+`Missing` (`absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
 point and a hole alike, so no consumer reading is known to differ.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)

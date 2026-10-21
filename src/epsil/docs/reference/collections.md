@@ -1802,7 +1802,7 @@ Triple(1, 2, 3)
 
 `(any*) -> tuple`
 
-A fixed number of heterogeneous elements
+A fixed number of heterogeneous elements. Nothing retains its slot, and a tuple whose coordinates are all Missing remains a tuple.
 
 ```epsil
 (1, "a", True)
@@ -1857,7 +1857,7 @@ values({"a" -> 1, "b" -> 2})
 
 MathJSON `Zip` · `(indexed_collection<any>+) -> list`
 
-Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.
+Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input. Nothing retains its coordinate and source position; a row whose coordinates are all Missing remains a tuple.
 
 ```epsil
 zip([1, 2, 3], ["a", "b", "c"])

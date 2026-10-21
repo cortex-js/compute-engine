@@ -78,10 +78,10 @@ const isMarker = (x: any): boolean =>
   x.isNaN === true || x.symbol === 'Missing';
 
 describe('P1 — `Nothing` erasure (§3.G)', () => {
-  test('List / Set / Tuple / Sequence splice a literal `Nothing`', () => {
+  test('List / Set / Sequence omit Nothing; Tuple preserves its slot', () => {
     expect(ce.box(['List', 1, 'Nothing', 3]).toString()).toBe('[1,3]');
     expect(ce.box(['Set', 1, 'Nothing', 3]).toString()).toBe('Set(1, 3)');
-    expect(ce.box(['Tuple', 1, 'Nothing', 3]).toString()).toBe('(1, 3)');
+    expect(ce.box(['Tuple', 1, 'Nothing', 3]).toString()).toBe('(1, "Nothing", 3)');
     // A Sequence splices into its host operator list (Add erases too).
     expect(ce.box(['List', 1, ['Sequence', 'Nothing', 2], 3]).toString()).toBe(
       '[1,2,3]'

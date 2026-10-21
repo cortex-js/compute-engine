@@ -8921,7 +8921,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A fixed number of heterogeneous elements",
+      "description": "A fixed number of heterogeneous elements. Nothing retains its slot, and a tuple whose coordinates are all Missing remains a tuple.",
       "examples": [
         "(1, \"a\", True)"
       ]
@@ -9303,7 +9303,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.",
+      "description": "Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input. Nothing retains its coordinate and source position; a row whose coordinates are all Missing remains a tuple.",
       "examples": [
         "Zip([1, 2, 3], [\"a\", \"b\", \"c\"])"
       ]

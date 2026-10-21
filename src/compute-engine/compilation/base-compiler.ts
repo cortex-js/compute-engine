@@ -10391,6 +10391,17 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     node?: Expression
   ): void {
+    const tupleType = h === 'Tuple' && node ? compilationType(node) : undefined;
+    if (
+      h === 'Tuple' &&
+      (args.some((x) => isSubtype('nothing', compilationType(x))) ||
+        (typeof tupleType === 'object' &&
+          tupleType.kind === 'tuple' &&
+          tupleType.elements.some((x) => isSubtype('nothing', x.type))))
+    )
+      throw new Error(
+        'Could not compile `Tuple`: possible Nothing coordinates require a distinct omission representation.'
+      );
     // Current targets cannot distinguish an omitted element from a missing
     // datum. Do not invoke callbacks or compact paired columns independently.
     const selects =
@@ -10401,7 +10412,14 @@ export class BaseCompiler {
     const aggregate = BaseCompiler.OMITTING_NUMERIC_AGGREGATES.has(h);
     const paired =
       h === 'Covariance' || h === 'PopulationCovariance' || h === 'Correlation';
-    if (aggregate || numericFold || h === 'Map' || selects || paired) {
+    if (
+      aggregate ||
+      numericFold ||
+      h === 'Map' ||
+      h === 'Zip' ||
+      selects ||
+      paired
+    ) {
       const sources =
         h === 'Map'
           ? args.slice(1)

@@ -127,9 +127,8 @@ describe('A KEYED JOIN WITH AN ELEMENT THAT IS NOT AN ENTRY', () => {
     ).toBe('{"x" -> 1}');
   });
 
-  test('a tuple whose arity may change is decided when evaluated', () => {
-    // `If(c, 3, Nothing)` is dropped when `c` is false, and the tuple is
-    // then the entry `("y", 2)`.
+  test('a Nothing coordinate does not turn a triple into an entry', () => {
+    // The third coordinate remains present, so this is never a key/value pair.
     const engine = new ComputeEngine();
     const input = [
       'Append',
@@ -138,8 +137,8 @@ describe('A KEYED JOIN WITH AN ELEMENT THAT IS NOT AN ENTRY', () => {
     ] as any;
     expect(engine.box(input).operator).toBe('Append');
     engine.assign('c', false);
-    expect(engine.box(input).evaluate().toString()).toBe(
-      '{"x" -> 1, "y" -> 2}'
+    expect(engine.box(input).evaluate().toString()).toMatch(
+      /incompatible-type.*tuple<string, integer, nothing>/
     );
   });
 

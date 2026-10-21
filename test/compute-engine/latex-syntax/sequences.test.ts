@@ -305,14 +305,12 @@ describe('DELIMITERS PARSING', () => {
       box-latex = (a\\times(c+d))
       latex     = a\\times(c+d)
     `);
-    // Sequence with empty element. The empty slot parses as `Nothing`, an
-    // ERASURE marker, so it is spliced out of the tuple literal: `(a,,b)` is
-    // the 2-tuple `(a, b)` (BREAKING, §3.G).
+    // An empty coordinate parses as Nothing and retains its tuple slot.
     expect(check('(a,,b)')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "a", "Nothing", "b"], "(,)"]
-      canonical = ["Pair", "a", "b"]
+      canonical = ["Triple", "a", "Nothing", "b"]
       box-latex = (a,\\mathrm{Nothing},b)
-      latex     = (a,b)
+      latex     = (a,\\mathrm{Nothing},b)
     `);
   });
 
@@ -335,9 +333,15 @@ describe('DELIMITERS PARSING', () => {
         ],
         "(;)"
       ]
-      canonical = ["Triple", ["Pair", "a", "b"], ["Pair", "c", "d"], ["Pair", "n", "m"]]
+      canonical = [
+        "Tuple",
+        ["Pair", "a", "b"],
+        ["Triple", "c", "d", "Nothing"],
+        "Nothing",
+        ["Triple", "n", "Nothing", "m"]
+      ]
       box-latex = (a,b;c,d,\\mathrm{Nothing};\\mathrm{Nothing};n,\\mathrm{Nothing},m)
-      latex     = ((a,b),(c,d),(n,m))
+      latex     = ((a,b),(c,d,\\mathrm{Nothing}),\\mathrm{Nothing},(n,\\mathrm{Nothing},m))
     `);
     expect(check('(a, (b, c))')).toMatchInlineSnapshot(`
       box       = [
@@ -370,23 +374,23 @@ describe('DELIMITERS PARSING', () => {
     // Sequence with missing element
     expect(check('a,, c')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "a", "Nothing", "c"], ","]
-      canonical = ["Pair", "a", "c"]
+      canonical = ["Triple", "a", "Nothing", "c"]
       box-latex = a,\\mathrm{Nothing},c
-      latex     = (a,c)
+      latex     = (a,\\mathrm{Nothing},c)
     `);
     // Sequence with missing final element
     expect(check('a,c,')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "a", "c", "Nothing"], ","]
-      canonical = ["Pair", "a", "c"]
+      canonical = ["Triple", "a", "c", "Nothing"]
       box-latex = a,c,\\mathrm{Nothing}
-      latex     = (a,c)
+      latex     = (a,c,\\mathrm{Nothing})
     `);
     // Sequence with missing initial element
     expect(check(',c,b')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", "Nothing", "c", "b"], ","]
-      canonical = ["Pair", "c", "b"]
+      canonical = ["Triple", "Nothing", "c", "b"]
       box-latex = \\mathrm{Nothing},c,b
-      latex     = (c,b)
+      latex     = (\\mathrm{Nothing},c,b)
     `);
   });
   test('Subsequences', () => {

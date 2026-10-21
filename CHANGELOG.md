@@ -2,6 +2,14 @@
 
 ### Behavior Changes
 
+- Data tuples preserve `Nothing` coordinates: `(1, Nothing, 3)` has three
+  positions. A tuple whose coordinates are all missing remains a tuple.
+  `Zip` preserves these coordinates and all-missing rows, so source positions
+  stay aligned. JavaScript and Python compiled tuples retain all-missing
+  tuples; compilation refuses possible `Nothing` coordinates until targets
+  can represent omission distinctly. Lists and `TupleFrom` retain their
+  existing immediate omission behavior.
+
 - Numeric aggregates skip `Nothing` yielded by raw lazy views. `Mean` of a
   view exposing `1, Nothing, 3` now returns `2` instead of an incompatible-type
   error; its denominator counts only retained data. The other univariate

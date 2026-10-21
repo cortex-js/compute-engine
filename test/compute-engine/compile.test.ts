@@ -6558,6 +6558,20 @@ describe('COMPILE the tuple-call rewrites keep the meaning of evaluate()', () =>
       ['Tuple', 1, 2],
       ['Tuple', ['Random'], 0],
     ]);
+    // The unannotated pass-through result is currently any and can include
+    // Nothing. The compiler conservatively refuses that tuple construction.
+    expect(() => new JavaScriptTarget().compile(untyped)).toThrow(/Nothing/);
+    const typedTuple = ce.box([
+      'Apply',
+      [
+        'Function',
+        'w',
+        ['Typed', 'u', 'real'],
+        ['Typed', 'w', 'tuple<real, real>'],
+      ],
+      ['Tuple', 1, 2],
+      ['Tuple', ['Random'], 0],
+    ]);
     const list = ce.box([
       'Apply',
       [
@@ -6571,7 +6585,7 @@ describe('COMPILE the tuple-call rewrites keep the meaning of evaluate()', () =>
     ]);
     const draws = (v: unknown): unknown[] =>
       Array.isArray(v) ? v.flatMap(draws) : [v];
-    for (const expr of [untyped, list]) {
+    for (const expr of [typedTuple, list]) {
       const value = jsValueOf(expr.evaluate().json) as unknown[];
       const js = new JavaScriptTarget().compile(expr).run!(
         {} as never

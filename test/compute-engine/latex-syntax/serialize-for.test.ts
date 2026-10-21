@@ -441,7 +441,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     // block only when it follows a LONE statement.
     expect(ce.parse('(1;2;)').json).toEqual(['Tuple', 1, 2]);
     // Interior empties are untouched.
-    expect(ce.parse('(a;;b)').json).toEqual(['Tuple', 'a', 'b']);
+    expect(ce.parse('(a;;b)').json).toEqual(['Tuple', 'a', 'Nothing', 'b']);
   });
 
   test('edge: nested single-statement blocks', () => {
@@ -467,7 +467,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     );
     // No `Assign` and no marker, so this is a `;` sequence, not a block —
     // exactly as it parsed before the marker existed.
-    expect(ce.parse('(a;\\mathrm{Nothing})').json).toEqual(['Tuple', 'a']);
+    expect(ce.parse('(a;\\mathrm{Nothing})').json).toEqual(['Tuple', 'a', 'Nothing']);
   });
 
   test('an authored trailing `Nothing` keeps a block VALUED `Nothing`', () => {

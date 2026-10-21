@@ -30,6 +30,39 @@ Elementwise `If`/`Which` belongs to the strict lifted regime. Conditions and
 selected list-valued arms share a length; selection is lazy per element;
 unmatched positions preserve shape with the documented absence value.
 
+## Tuple slots and aligned rows
+
+A data tuple has fixed positions. `Nothing` occupies a slot rather than
+removing it: `(1, Nothing, 3)` has three coordinates, and its second coordinate
+is `Nothing`. Counting or indexing the tuple does not evaluate earlier
+coordinates to discover which ones survive. Tuple types retain the same slots,
+including `nothing` and possible `nothing` results. `Map` resolves possible
+omission in the coordinate it reads before deciding whether to invoke its
+callback; reading a later index does not scan earlier coordinates.
+
+A tuple whose coordinates are all missing is still present:
+`(Missing, Missing)` is a pair, not a missing whole value. `Zip` constructs one
+such tuple per aligned source position, up to the shortest source length. It
+keeps `Nothing` coordinates and all-missing rows. `ListFrom(Zip(...))` retains
+these rows because each row is a present tuple; omission is immediate, not
+recursive into its coordinates.
+
+The LaTeX spelling `(x,)` still constructs a singleton tuple; its trailing
+comma is syntax. `(x, Nothing)` constructs a pair with an actual omitted
+coordinate. Explicit `Sequence` operands still splice under their ordinary
+omission rules.
+`Single`, `Pair` and `Triple` retain `Nothing` slots and validate the resulting
+arity. Lists continue to omit immediate `Nothing` during construction.
+`TupleFrom` retains its existing omission behavior pending a separate decision
+on structural conversions. Ordinary function arguments and the effect/capture
+rules for nested views are separate work. The legacy empty-tuple type reduces
+to `nothing`; a distinct unit/empty-tuple type remains a design question.
+
+Compilation refuses tuple construction with possible `Nothing` coordinates and
+`Zip` sources with possible immediate `Nothing` until targets can distinguish
+it from missing data. JavaScript and Python preserve explicitly constructed
+all-missing tuples in their existing tuple representations.
+
 ## Lazy collections
 
 Laziness is a depth property, not permission to skip operand evaluation.
