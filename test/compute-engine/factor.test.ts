@@ -290,13 +290,36 @@ describe('Full factorization: monomial content and pre-factored products', () =>
   test('re-factors a pre-factored product with shared factor: x(x²+x) = x²(x+1)', () => {
     const input = parse('x(x^2+x)');
     const f = factorPolynomial(input, 'x');
-    // x·(x²+x) = x²·(x+1) by value. CE keeps the repeated factor as x·x rather
-    // than collapsing to x² (collectFactors merges it), so assert value
-    // equivalence + that it factored further and is now idempotent.
     sameValue(f, input);
-    sameValue(f, parse('x^2(x+1)'));
-    expect(f.isSame(input)).toBe(false);
+    expect(f.isSame(parse('x^2(x+1)'))).toBe(true);
     expect(f.isSame(factorPolynomial(f, 'x'))).toBe(true);
+  });
+
+  // Factoring each operand of a product on its own can return the same
+  // irreducible factor from two operands. The canonical Multiply does not
+  // combine two equal sums, so the factors must be merged into a power.
+  test.each([
+    ['(x^2-1)(x+1)', '(x-1)(x+1)^2'],
+    ['(x+1)^2(x^2-1)', '(x-1)(x+1)^3'],
+    ['(x^2-1)^3(x+1)^2', '(x-1)^3(x+1)^5'],
+    ['(x^6-1)(x-1)', '(x-1)^2(x+1)(x^2+x+1)(x^2-x+1)'],
+    ['2(x+1)(x+1)', '2(x+1)^2'],
+  ])('merges equal factors of a product: %s → %s', (input, expected) => {
+    const f = factorPolynomial(parse(input), 'x');
+    expect(f.isSame(parse(expected))).toBe(true);
+    sameValue(f, parse(input));
+  });
+
+  test('merges equal factors of a multivariate product: (x²−y²)(x+y) → (x−y)(x+y)²', () => {
+    const f = ce.box(['Factor', parse('(x^2-y^2)(x+y)')]).evaluate();
+    expect(f.isSame(parse('(x-y)(x+y)^2'))).toBe(true);
+  });
+
+  test('factors the base of a perfect square: x⁴−2x²+1 → (x−1)²(x+1)²', () => {
+    const input = parse('x^4-2x^2+1');
+    const f = factorPolynomial(input, 'x');
+    expect(f.isSame(parse('(x-1)^2(x+1)^2'))).toBe(true);
+    sameValue(f, input);
   });
 
   test('fully factors a pre-factored denominator, preserving irreducible quadratics', () => {
@@ -491,6 +514,64 @@ describe('Rational Root Factoring (degree 3+)', () => {
         expr.subs({ x: v }).N().re
       );
     }
+  });
+
+  // Each candidate root is tested once, so a repeated root must be found by
+  // factoring the quotient again.
+  test.each([
+    ['x^3+3x^2+3x+1', '(x+1)^3'],
+    ['x^5-x^4-2x^3+2x^2+x-1', '(x-1)^3(x+1)^2'],
+    ['x^4-4x^3+6x^2-4x+1', '(x-1)^4'],
+    // A root p/q with q ≠ 1 gives the factor (qx − p), with its multiplicity
+    ['4x^5-8x^4+x^3+7x^2-5x+1', '(2x-1)^2(x-1)^2(x+1)'],
+    // A root is used in lowest terms: −2, not −4/2, so the factor is x+2
+    ['4x^4+12x^3+x^2-12x+4', '(2x-1)^2(x+2)^2'],
+    // A negative leading coefficient stays a number factor
+    ['-x^3+3x-2', '-(x-1)^2(x+2)'],
+    ['-x^2+2x-1', '-(x-1)^2'],
+  ])('finds a repeated root: %s → %s', (input, expected) => {
+    const f = factorPolynomial(parse(input), 'x');
+    expect(f.isSame(parse(expected))).toBe(true);
+  });
+
+  // Matrices do not commute: A·B·A is not A²·B, so the factors that can be
+  // matrices are not merged and keep their order.
+  test('does not merge matrix factors of a product', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('A', 'matrix<2x2>');
+    ce2.declare('B', 'matrix<2x2>');
+    const factorOf = (json: unknown) =>
+      ce2
+        .box(['Factor', json] as any)
+        .evaluate()
+        .toString();
+    expect(factorOf(['Multiply', 'A', 'B', 'A'])).toBe('A * B * A');
+    expect(
+      factorOf(['Multiply', ['Add', 'x', 1], 'A', 'B', ['Add', 'x', 1]])
+    ).toBe('(x + 1)^2 * A * B');
+  });
+
+  // (1 + Random())² takes one random value; the product of two factors takes
+  // two. So equal factors that are not pure are not merged.
+  test('does not merge factors that are not pure', () => {
+    const f = ce
+      .box([
+        'Factor',
+        ['Multiply', ['Add', 1, ['Random']], ['Add', 1, ['Random']]],
+      ])
+      .evaluate();
+    expect(f.json).toEqual([
+      'Multiply',
+      ['Add', 1, ['Random']],
+      ['Add', 1, ['Random']],
+    ]);
+  });
+
+  test('does not merge factors when Multiply is declared not commutative', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Multiply', { commutative: false }, { extend: true });
+    const f = ce2.box(['Factor', ce2.parse('(x^2-1)(x+1)')]).evaluate();
+    expect(f.toString()).toBe('(x + 1) * (x - 1) * (x + 1)');
   });
 
   test('irreducible cubic returns equivalent expression', () => {
@@ -701,11 +782,12 @@ describe('Factor(xⁿ − 1) returns polynomial factors (ROADMAP B4)', () => {
   });
 
   // A genuine even perfect power must still factor as a difference of squares,
-  // now using the polynomial root x³ instead of |x|³.
+  // now using the polynomial root x³ instead of |x|³. The base x³+1 is then
+  // factored too.
   test('perfect-square trinomial with x⁶ uses x³, not |x|³', () => {
     const f = factored('x^6 + 2x^3 + 1');
     expect(f.has('Abs')).toBe(false);
-    expect(f.toString()).toBe('(x^3 + 1)^2');
+    expect(f.toString()).toBe('(x^2 - x + 1)^2 * (x + 1)^2');
   });
 });
 

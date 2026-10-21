@@ -2,6 +2,37 @@
 
 ### Behavior Changes
 
+- Raw `Tabulate` / `Table`, `Scan`, and `Iterate` results retain possible
+  `Nothing` in their element types. A two-dimensional tabulation returns lazy
+  rows: accessing a row or its count does not evaluate its cells or erase
+  omitted positions. `ListFrom(row)` explicitly collects and omits those
+  entries. Compilation refuses omission-capable tabulations and scans until
+  targets can represent omission distinctly.
+
+- An already evaluated unresolved call remains symbolic after a later
+  assignment. For example, an early `h(1)` in a loop does not run again when
+  a later iteration defines `h`. The original forward-call expression can
+  still resolve on a later evaluation. Compilation refuses the frozen
+  symbolic result rather than substituting a subsequently defined function.
+
+- The type `broadcastable<T>` is now `T | list<T>`. It was `T` or an indexed
+  collection of `T` other than a tuple or a string, so the subtype relation
+  was not transitive: `tuple<integer>` is an `indexed_collection<integer>`,
+  which was a `broadcastable<integer>`, but `tuple<integer>` was not one. Now
+  every subtype of `list<T>` (a vector, a matrix, a `Range`) is a
+  `broadcastable<T>`, and a tuple, a string, a set and a value typed only
+  `indexed_collection<T>` are not. A tuple is now provably disjoint from
+  `broadcastable<number>`, as the rule that a tuple argument is passed whole
+  requires. Evaluation does not change, with two exceptions that follow from
+  the new meaning: `ce.assign` of a value typed `indexed_collection<T>` to a
+  symbol declared `broadcastable<T>` is refused, as it is for a symbol
+  declared `list<T>`; and `Map(f, [(1, 2), (3, 4)])` with
+  `f: (broadcastable<number>) -> number` is one `incompatible-type` error
+  instead of a list of errors, one for each point. Also, the meet of a list
+  with an `indexed_collection` or a `collection` is the list of the meet of
+  the elements: `list<number> & indexed_collection<integer>` is
+  `list<integer>`, not `never`.
+
 - A literal empty list at a required or optional point parameter is accepted
   and maps to `[]` without invoking the function, matching evaluation.
 
@@ -132,6 +163,20 @@
 
 ### Bug Fixes
 
+- `Factor` merges equal factors into a power and finds every copy of a
+  repeated root:
+  - `Factor((x^2-1)(x+1))` is `(x-1)(x+1)^2`; it was `(x-1)(x+1)(x+1)`.
+  - `Factor(x^3+3x^2+3x+1)` is `(x+1)^3`; it was `(x+1)(x+1)(x+1)`.
+  - `Factor(x^5-x^4-2x^3+2x^2+x-1)` is `(x-1)^3(x+1)^2`; it was
+    `(x^3-x^2-x+1)(x-1)(x+1)`.
+  - `Factor(x^4-2x^2+1)` is `(x-1)^2(x+1)^2`; it was `(x^2-1)^2`.
+  - A rational root is used in lowest terms, so `Factor(4x^4+12x^3+x^2-12x+4)`
+    is `(2x-1)^2(x+2)^2`; it was `(x+2)(x-\frac{1}{2})(2x-1)(2x+4)`.
+
+  With `A` and `B` matrices, `Factor(A·B·A)` keeps the product as written:
+  matrix factors are not merged. `PartialFraction` now decomposes these
+  denominators when they are given expanded, also with a negative leading
+  coefficient (`1/(-x^3+3x-2)`). Before, it returned them unchanged.
 - Result types of broadcast arithmetic over nested lists hold their values.
   Rows of different lengths are no longer typed `matrix`: `Sin(L)` with
   `L: list<list<integer>> := [[1, 2], [3]]`, and `Sin([[1, 2], [3]])`, are
@@ -249,6 +294,32 @@
   stays as it is, and its evaluation stops at the recursion limit with a
   `CancellationError` at once, as it already did for a function declared with
   a function type.
+- An element read over a collection whose element type is `any`, or over a
+  symbol declared `any` or `value`, is typed `any`. It was `unknown`, and
+  arithmetic reads an `unknown` operand as a number: with `P: any` (or
+  `P: list<any>`), `P[i]` was `unknown` and `P[i] - P[j]` was
+  `broadcastable<number>`, although `P` can hold points and
+  `(3, 4) - (1, 1)` is `(2, 3)`. Now `P[i]` and `P[i] - P[j]` are `any`. This
+  applies to `At` (a single index, a gather, several indices, a dictionary
+  key, a dynamic index into a tuple or a record with an `any` field),
+  `First`, `Second`, `Third`, `Last` and `Field` (`D.a` with
+  `D: dictionary<any>` is `any`, was `unknown`). A function of such a read is
+  `any` too: `Sqrt(P[i])`, `Sin(P[i])` and `h(P[i])` with
+  `h: (number) -> number` were `broadcastable<number>`. A symbol whose type is
+  inferred from its uses is not changed: with `P` undeclared, `P[i]` is still
+  `unknown` and `P[i] - P[j]` still makes `P` an `indexed_collection<number>`
+  (and a read of `Rest(P)`, `Take(P, 2)`, `Sort(P)`, … is `unknown` as well).
+  A bare `list` (a synonym of `list<unknown>`) still gives `unknown`. A tuple
+  of such reads still compiles: `(P[1], P[2])` with `P: list<any>` or
+  `P: collection<any> | tuple` compiles to JavaScript, since a list element is
+  never `Nothing`.
+- `Sum` and `Product` of terms typed `any` or `value` are typed `any`. They
+  were `number`: with `P: any := [(3, 4), (1, 1), (0, 0)]`,
+  `Sum(P[k], k, 1, 3)` and `Sum(P)` evaluate to the point `(4, 5)`.
+- A read of `Take(P, 2)`, `Rest(P)`, `Drop(P, 2)`, `Most(P)` or `Reverse(P)`
+  with `P` undeclared is `unknown`. It was `character | missing`, the element
+  of the `string` option of the type `list<unknown> | string`, so
+  `Rest(P)[i] + 1` was an `incompatible-type` error.
 
 ## 0.159.0 _2026-10-20_
 

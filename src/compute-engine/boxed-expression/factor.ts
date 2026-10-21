@@ -14,8 +14,11 @@ import {
   cancelCommonFactors,
 } from './polynomials.js';
 import { asExactSmallInteger, asSmallInteger } from './numerics.js';
+import { isTensorProductOperand } from './order.js';
+import { mayHaveOrderedArithmetic } from './arithmetic-order-override.js';
+import { mayBeTensorProductOperand } from './matrix-operand.js';
 import { expand } from './expand.js';
-import { hasVolatileDigest } from './utils.js';
+import { hasVolatileDigest, isOperatorDef } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
 
@@ -501,6 +504,10 @@ export function factorByRationalRoots(
   const seen = new Set<number>();
   for (const p of pDivisors) {
     for (const q of qDivisors) {
+      // Keep only p/q in lowest terms. The same root in lowest terms is also
+      // in the list, and a root that is not reduced gives a factor that is
+      // not primitive: −4/2 gives 2x+4, where −2/1 gives x+2.
+      if (gcd(BigInt(p), BigInt(q)) !== 1n) continue;
       const pos = p / q;
       const neg = -p / q;
       if (!seen.has(pos)) {
@@ -521,39 +528,48 @@ export function factorByRationalRoots(
   let remaining = expr;
 
   for (const [p, q] of candidates) {
-    // Check remaining degree
-    const remDeg = polynomialDegree(remaining, variable);
-    if (remDeg <= 0) break;
-
     const root = q === 1 ? ce.number(p) : ce.number(p).div(ce.number(q));
-    // Evaluate the remaining polynomial at the candidate root
-    const value = remaining.subs({ [variable]: root }).N();
-    if (!value.isSame(0)) continue;
-
-    // Root found — divide out (x - root)
     const linearFactor =
       q === 1 ? x.sub(ce.number(p)) : ce.number(q).mul(x).sub(ce.number(p));
 
-    const divResult = polynomialDivide(remaining, linearFactor, variable);
-    if (!divResult) continue;
+    // Divide out the same root as many times as it divides: a root of
+    // multiplicity m gives m equal factors (qx − p), which
+    // `mergeEqualFactors` turns into (qx − p)^m. Testing each candidate only
+    // once would leave the other copies in the quotient, where they could
+    // come back in another form, (x − p/q) or (p − qx), that does not merge.
+    while (polynomialDegree(remaining, variable) > 0) {
+      // Evaluate the remaining polynomial at the candidate root
+      const value = remaining.subs({ [variable]: root }).N();
+      if (!value.isSame(0)) break;
 
-    factors.push(linearFactor);
-    remaining = divResult[0];
+      // The root test above is numeric, so it can accept a value that is
+      // only close to a root. Keep the factor only when the division is
+      // exact.
+      const divResult = polynomialDivide(remaining, linearFactor, variable);
+      if (!divResult || !divResult[1].isSame(0)) break;
+
+      factors.push(linearFactor);
+      remaining = divResult[0];
+    }
   }
 
   if (factors.length === 0) return null;
 
-  // Try quadratic factoring on any remaining degree-2 polynomial
-  const remDeg = polynomialDegree(remaining, variable);
-  if (remDeg === 2) {
-    const quadFactored = factorQuadratic(remaining, variable);
-    if (quadFactored !== null) remaining = quadFactored;
-  }
+  // Every rational root of the quotient is a root of the input, so the loop
+  // above has divided out all of them. The quotient can still factor in
+  // other ways: x⁶+x⁴−x²−1 leaves (x²+1)², a perfect square. Factor it
+  // again without the rational-root step, which would only repeat the
+  // candidate search. The recursion ends because the quotient has a lower
+  // degree than the input.
+  if (polynomialDegree(remaining, variable) >= 2)
+    remaining = factorPolynomialWith(remaining, variable, false);
 
   factors.push(remaining);
 
   if (factors.length === 1) return factors[0];
-  return ce.expr(['Multiply', ...factors.map((f) => f.json)]);
+  // A repeated root gives the same linear factor more than once:
+  // x³+3x²+3x+1 → (x+1)³, not (x+1)(x+1)(x+1).
+  return mergeEqualFactors(ce, factors);
 }
 
 /**
@@ -643,6 +659,19 @@ export function factorPolynomial(
   expr: Expression,
   variable?: string
 ): Expression {
+  return factorPolynomialWith(expr, variable, true);
+}
+
+/**
+ * The body of `factorPolynomial()`. When `useRationalRoots` is `false`, the
+ * rational-root step is skipped: `factorByRationalRoots()` uses this for a
+ * quotient that it knows has no rational root left.
+ */
+function factorPolynomialWith(
+  expr: Expression,
+  variable: string | undefined,
+  useRationalRoots: boolean
+): Expression {
   // If no variable was specified, try to infer it. Most factoring
   // strategies (content extraction, quadratic, rational roots) require a
   // variable; for a univariate polynomial the single unknown is the
@@ -676,8 +705,11 @@ export function factorPolynomial(
   }
 
   // Try perfect square trinomial
+  // The base of the square can factor further: x⁴−2x²+1 = (x²−1)² →
+  // (x−1)²(x+1)².
   const perfectSquare = factorPerfectSquare(expr);
-  if (perfectSquare !== null) return perfectSquare;
+  if (perfectSquare !== null)
+    return refactorProductFactors(perfectSquare, variable);
 
   // Try difference of squares. A difference of squares only peels off a single
   // layer (e.g. x⁶−1 → (x³−1)(x³+1)); recursively factor each half so the
@@ -689,12 +721,16 @@ export function factorPolynomial(
 
   if (variable !== undefined) {
     // Try quadratic factoring
+    // A double root gives two equal linear factors: −x²+2x−1 →
+    // −(x−1)(x−1), merged here into −(x−1)².
     const quadratic = factorQuadratic(expr, variable);
-    if (quadratic !== null) return quadratic;
+    if (quadratic !== null) return mergeEqualFactors(expr.engine, [quadratic]);
 
     // Try rational root factoring (degree 3+)
-    const rationalRoot = factorByRationalRoots(expr, variable);
-    if (rationalRoot !== null) return rationalRoot;
+    if (useRationalRoots) {
+      const rationalRoot = factorByRationalRoots(expr, variable);
+      if (rationalRoot !== null) return rationalRoot;
+    }
   }
 
   // Fall back to existing factor function (GCD-based)
@@ -702,11 +738,14 @@ export function factorPolynomial(
 }
 
 /**
- * Recursively factor each operand of a product. Used to fully factor the
- * result of a single difference-of-squares split, whose halves may themselves
- * be factorable (e.g. (x³−1)(x³+1)). Non-product inputs are returned
- * unchanged. Recursion is bounded: each call factors strictly lower-degree
- * factors.
+ * Factor each operand of a product, or the base of a power, and merge equal
+ * factors with `mergeEqualFactors()`. The callers are `factorPolynomial()`
+ * for an input that is already a product or a power, and the
+ * perfect-square and difference-of-squares steps, whose result can factor
+ * further (x⁶−1 → (x³−1)(x³+1) → (x−1)(x²+x+1)(x+1)(x²−x+1)). A `Power`
+ * whose exponent is not an exact positive integer, and any input that is not
+ * a `Multiply` or a `Power`, is returned unchanged. The recursion ends,
+ * because each call factors expressions of lower degree.
  */
 function refactorProductFactors(
   product: Expression,
@@ -727,19 +766,118 @@ function refactorProductFactors(
     const baseFactors = isFunction(factoredBase, 'Multiply')
       ? factoredBase.ops
       : [factoredBase];
-    return ce.function(
-      'Multiply',
-      baseFactors.map(
-        (f) => ce.function('Power', [f.json, product.op2.json]).json
-      )
+    return mergeEqualFactors(
+      ce,
+      baseFactors.map((f) => ce.function('Power', [f.json, product.op2.json]))
     );
   }
 
   if (!isFunction(product, 'Multiply')) return product;
-  const factors = product.ops.map((f) => factorPolynomial(f, variable));
+  return mergeEqualFactors(
+    ce,
+    product.ops.map((f) => factorPolynomial(f, variable))
+  );
+}
+
+/**
+ * Build the product of `factors` with equal factors merged into one power:
+ * [(x−1)(x+1), x+1] → (x−1)(x+1)². Factoring the operands of a product one
+ * at a time can return the same irreducible factor from two operands, and
+ * the canonical `Multiply` does not combine two equal sums, so without this
+ * step `Factor((x²−1)(x+1))` would give (x−1)(x+1)(x+1).
+ *
+ * A nested `Multiply` operand is flattened, and `Negate(f)` counts as the
+ * factors −1 and `f`. A factor `Power(b, n)` with an exact positive integer
+ * `n` counts as `n` copies of `b`. Two bases merge only when `isSame()` is
+ * true, so (x−1) and (1−x) stay separate. Number literals are kept as they
+ * are; the canonical `Multiply` folds them.
+ *
+ * A matrix product does not commute: with `A` and `B` matrices, A·B·A is not
+ * A²·B. So when two or more factors are, or can be, matrices (the same test
+ * as `sortProductOperands()` in `order.ts`), those factors are not merged
+ * and keep their written order, after the other factors. When a host has
+ * declared `Multiply` not commutative
+ * (`ce.declare('Multiply', { commutative: false }, { extend: true })`),
+ * nothing is merged and the factors keep their order.
+ *
+ * A factor that is not pure, such as 1 + Random(), is not merged either:
+ * (1 + Random())² would take one random value where the product of two
+ * factors takes two.
+ */
+function mergeEqualFactors(
+  ce: Expression['engine'],
+  factors: readonly Expression[]
+): Expression {
+  if (mayHaveOrderedArithmetic(ce)) {
+    const def = ce.lookupDefinition('Multiply');
+    if (def && isOperatorDef(def) && !def.operator.commutative)
+      return factors.length === 1
+        ? factors[0]
+        : ce.function(
+            'Multiply',
+            factors.map((f) => f.json)
+          );
+  }
+
+  const flat: Expression[] = [];
+  const numbers: Expression[] = [];
+  const flatten = (f: Expression) => {
+    if (isFunction(f, 'Multiply')) for (const op of f.ops) flatten(op);
+    else if (isFunction(f, 'Negate')) {
+      numbers.push(ce.NegativeOne);
+      flatten(f.op1);
+    } else if (isNumber(f)) numbers.push(f);
+    else flat.push(f);
+  };
+  for (const f of factors) flatten(f);
+
+  const isTensor = flat.map(isTensorProductOperand);
+  if (isTensor.some(Boolean))
+    for (let i = 0; i < flat.length; i++)
+      if (!isTensor[i]) isTensor[i] = mayBeTensorProductOperand(flat[i]);
+  const keepOrder = isTensor.filter(Boolean).length >= 2;
+
+  const merged: { base: Expression; exp: number }[] = [];
+  const others: Expression[] = [];
+  const inOrder: Expression[] = [];
+  flat.forEach((f, i) => {
+    if (keepOrder && isTensor[i]) {
+      inOrder.push(f);
+      return;
+    }
+    if (!f.isPure) {
+      others.push(f);
+      return;
+    }
+    let base = f;
+    let exp = 1;
+    if (isFunction(f, 'Power')) {
+      const n = asExactSmallInteger(f.op2);
+      if (n === null || n <= 0) {
+        others.push(f);
+        return;
+      }
+      base = f.op1;
+      exp = n;
+    }
+    const entry = merged.find((m) => m.base.isSame(base));
+    if (entry) entry.exp += exp;
+    else merged.push({ base, exp });
+  });
+
+  const ops = [
+    ...numbers,
+    ...others,
+    ...merged.map(({ base, exp }) =>
+      exp === 1 ? base : ce.function('Power', [base.json, exp])
+    ),
+    ...inOrder,
+  ];
+  if (ops.length === 0) return ce.One;
+  if (ops.length === 1) return ops[0];
   return ce.function(
     'Multiply',
-    factors.map((f) => f.json)
+    ops.map((f) => f.json)
   );
 }
 
@@ -1026,6 +1164,14 @@ function collectFactorsRaw(
     for (const op of expr.ops) {
       collectFactorsRaw(op, variable, result);
     }
+    return;
+  }
+
+  // −(x−1)²(x+2) has the factors of (x−1)²(x+2); the sign is a constant, and
+  // constants are not collected. Without this, the whole negated product
+  // counts as one factor and the decomposition fails.
+  if (isFunction(expr, 'Negate')) {
+    collectFactorsRaw(expr.op1, variable, result);
     return;
   }
 

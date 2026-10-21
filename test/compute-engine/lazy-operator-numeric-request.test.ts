@@ -182,27 +182,43 @@ describe('a lazy operator at the top level under .N()', () => {
   });
 });
 
-describe('the cost of the numeric request', () => {
-  test('an argument far from a jump is not evaluated exactly', () => {
-    const ce = engineWith(['If', ['Less', 'x', 10], ['Floor', 'x'], 0]);
-    const start = Date.now();
-    expect(n(ce, H)).toBe('9');
-    // The exact sum (a rational with thousands of digits) takes seconds.
-    expect(Date.now() - start).toBeLessThan(2000);
-  });
+// The exact value of H is a rational with thousands of digits: evaluating it
+// exactly takes about 30 s (measured 2026-10-20 on an M5), while the numeric
+// route takes about 0.1 s locally and up to 4 s on a loaded continuous-
+// integration runner. A limit of 15 s separates the two routes on any of
+// these machines; a limit of 2 s failed on the Node 26 runner. Each test sets
+// a jest timeout above the limit, so a regression fails on the assertion and
+// not on the default 5 s jest timeout.
+const EXACT_ROUTE_LIMIT_MS = 15_000;
+const TEST_TIMEOUT_MS = 20_000;
 
-  test('the condition of an If at the top level is evaluated numerically', () => {
-    const ce = new ComputeEngine();
-    const start = Date.now();
-    expect(
-      ce
-        .box(['If', ['Less', H, 10], 0, 1])
-        .N()
-        .toString()
-    ).toBe('0');
-    // The condition was evaluated exactly: about 28 s.
-    expect(Date.now() - start).toBeLessThan(2000);
-  });
+describe('the cost of the numeric request', () => {
+  test(
+    'an argument far from a jump is not evaluated exactly',
+    () => {
+      const ce = engineWith(['If', ['Less', 'x', 10], ['Floor', 'x'], 0]);
+      const start = Date.now();
+      expect(n(ce, H)).toBe('9');
+      expect(Date.now() - start).toBeLessThan(EXACT_ROUTE_LIMIT_MS);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  test(
+    'the condition of an If at the top level is evaluated numerically',
+    () => {
+      const ce = new ComputeEngine();
+      const start = Date.now();
+      expect(
+        ce
+          .box(['If', ['Less', H, 10], 0, 1])
+          .N()
+          .toString()
+      ).toBe('0');
+      expect(Date.now() - start).toBeLessThan(EXACT_ROUTE_LIMIT_MS);
+    },
+    TEST_TIMEOUT_MS
+  );
 });
 
 describe('the operands of a condition under .N() given to the relation as written', () => {

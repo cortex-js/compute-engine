@@ -145,9 +145,19 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   `number` (user decision 2026-10-20: NO engine change; a declared `unknown`
   is an inference seed that each use narrows, and the type that means "a
   number, a point or a list" is `any`; Tycho was told 2026-10-20 to declare
-  such heads `any`. Open small item: `P[i]` over `P: list<any>` or `P: any`
-  types `unknown` instead of `any`, so `P[i] - P[j]` types
-  `broadcastable<number>` while its value can be a point).** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
+  such heads `any`. The small item found with it, `P[i]` over `P: list<any>`
+  or `P: any` typed `unknown` instead of `any`, is FIXED 2026-10-20 on the
+  main tree (uncommitted, dual-reviewed, 7 findings applied: also `Sum`/`Product`
+  of `any` terms, reads of `Rest`/`Take`/… of an inferred base, and a tuple of
+  such reads compiling again). Found with it, not fixed, decision needed: (a)
+  `Sum(P)` and `Mean(P)` with `P: list<any>` refuse to compile ("possible
+  'Nothing' elements require a distinct omission representation") because
+  `collectionMayOmit()` reads the element `any` as admitting `nothing`,
+  although a list element is never `Nothing`; same mistake as the fixed tuple
+  case, in the aggregate, `Map`, `Zip` and `Filter` checks (see "Compiled
+  absence checks need a distinct representation for `Nothing`"); (b) with `P`
+  inferred, `Filter(P, x ↦ x > 0)` is typed `list<!nothing>` and
+  `At(Filter(…), 1)` is `!nothing`.)** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
   `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
   `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type`
   error (`isValid` false). Control: with `P: list<tuple<number, number>>`
@@ -552,6 +562,24 @@ remains the separate design item above.
 
 ### Defects found by the fix of the collection operator types (OPEN, small — found 2026-10-20)
 
+- A generic function declared `(broadcastable<T>) -> T where T` fails on
+  each element of a list: with `gid := x ↦ x`, `gid([1, 2])` is a list of two
+  `incompatible-type` errors (`"T"` against `1`), not `[1, 2]`. The type
+  variable is not bound before the element-wise call checks its result.
+  Found by the review of the `broadcastable<T>` = `T | list<T>` change; it
+  is the same before that change.
+- `isSubtype(broadcastable<any>, unknown)` is `true`, while
+  `isSubtype(any, unknown)` and `isSubtype(nothing, unknown)` are `false`, so
+  `nothing <: broadcastable<any> <: unknown` holds but `nothing <: unknown`
+  does not. The general rule for a right side `unknown` in `isSubtype()`
+  (`common/type/subtype.ts`) does not look inside a `broadcastable` left
+  side.
+- Reported by the same review and not yet reproduced: GLSL compiles
+  `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
+  `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
+  refused; and `AsOklch(icC)` compiles to `icC`. A value typed
+  `indexed_collection` can be a list, which `vec2` cannot hold.
+
 - `Sqrt(x)` with `x: vector<integer^1> | vector<integer^2>` is typed `number`:
   the broadcast type does not lift over a union of collections. Only `Map`
   works around it.
@@ -595,6 +623,67 @@ remains the separate design item above.
   `ce.assign('rm', {a: Missing})` with `rm: record` is accepted although the
   value does not match the declaration (see "A declared collection accepts an
   assigned value that is not of its type").
+
+### Nine tests of scopes and closures fail at commit `c43a44d41` (OPEN — found 2026-10-20 by the full suite run for the `Factor` merge fix)
+
+The full suite at `c43a44d41` ("enhance callable binding resolution and
+forward call handling") fails 9 tests in 6 files. The commit's handoff note
+(`docs/scratch/2026-10-20-callable-evaluation-handoff.md`) records a run of
+431 test files, not the full suite. With the uncommitted peer changes in the
+main tree at 2026-10-20 23:10, 6 of the 9 still fail:
+
+- `undeclare.test.ts`: "a call reads a new definition made in the same
+  scope", "a call reads the definition of an enclosing scope".
+- `tycho-item-330-loop-var-recursion.test.ts`: "recursive factory: each level
+  keeps its own local".
+- `resolve-symbol-facts.test.ts`: "ordinary free-variable inference stays in
+  the caller scope".
+- `named-arguments-record-field.test.ts`: "a field symbol bound to a value is
+  not rewritten to an inner operator".
+- `block-locals-per-run.test.ts`: "an assignment that changes the kind of the
+  local is visible to the closure".
+
+The 3 that the uncommitted changes fix are in `batch9-evaluation.test.ts` ("a
+big operator does not keep a function assigned by its term": Sum, Product,
+and a term whose argument changes). Reproduce: `npx jest --config
+./config/jest.config.cjs -w 4 -- <the files above>`.
+
+### With `Multiply` declared not commutative, a factor of 1 is kept (OPEN, question — found 2026-10-20 by the review of the `Factor` merge fix)
+
+After `ce.declare('Multiply', { commutative: false }, { extend: true })`,
+`ce.box(['Multiply', 'a', 1])` stays `a * 1`, and `Factor(a·b·a)` gives
+`a * 1 * b * 1 * a * 1`. With the default definition the 1 is removed. The
+1 comes from the product that `factor()` builds for each operand,
+`Product.from(together(a)).asExpression()` (`arithmetic-mul-div.ts`), which
+relies on the canonical `Multiply` to remove a coefficient of 1; other
+callers of `Product` rely on it in the same way, so a fix in `factor()` alone
+would not cover them. The number 1 is the identity of a product whether or
+not the product commutes, so removing it would not change the order of the
+operands. Question for the user: should the canonical `Multiply` remove a
+factor of 1 when a host has declared it not commutative? The tests of this
+setting (`test/compute-engine/declare-extend.test.ts`) check only the operand
+order.
+
+### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
+
+`Factor` claims to return "a product of irreducible factors", but its
+strategies (perfect square, difference of squares, quadratic, rational roots)
+miss every irreducible factor of degree 3 or more that has no rational root:
+
+- `x^{12}-1` gives `(x^2+x+1)(x^2-x+1)(x-1)(x+1)(x^6+1)`; `x^6+1` is
+  `(x^2+1)(x^4-x^2+1)`.
+- `x^{130}-1` leaves two factors of degree 64, each of which is reducible.
+- `x^4+4` (= `(x^2-2x+2)(x^2+2x+2)`) and `x^4+x^2+1` (=
+  `(x^2+x+1)(x^2-x+1)`) are returned unchanged.
+- The expanded form of `(x-1)(x-2)…(x-20)` is returned unchanged, because
+  `factorByRationalRoots` gives up when there are more than 100 candidate
+  roots.
+
+PR #461 (exact modular factoring over Q, by an outside contributor) fixes all
+of these; changes were requested on 2026-10-20 (two `Factor` defects, a
+smaller public API, documentation). If that PR is not merged, the fix is a
+modular factoring step in `factorPolynomial` (`boxed-expression/factor.ts`).
+Reproduce: `npx tsx scripts/probe.ts '\operatorname{Factor}(x^{12}-1)'`.
 
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 
@@ -4059,27 +4148,24 @@ list-valued operand", `base-compiler.ts`), because `C_c` carries a
 `s8ishknvhe` bullet of "JavaScript list-arithmetic declines, triaged"; after the
 `conj` release the interpreted route serves `C_cf`.
 
-### An element-wise ordering relation compares a NaN operand where the scalar branch treats it as undecided (OPEN — found 2026-09-12 by the Codex review of the selection index push-through)
+### The element-wise `NotEqual` decides a NaN cell where the scalar branch takes no arm (OPEN, narrowed 2026-10-20 — found 2026-09-12 by the Codex review of the selection index push-through)
 
-A scalar branch whose relation has a NaN operand is UNDECIDED: the interpreter
-answers `Which(NaN < 2, 1, True, 0)` with `Missing`, and the JavaScript target
-guards the operand (`_.b === _.b && _.b !== undefined`) and answers `NaN`. The
-element-wise form of the same selection decides the position instead:
-`Which([1, NaN, 3] < 2, 1, True, 0)` is `[1, 0, 0]` in the interpreter (the cell
-`NaN < 2` evaluates to `False`) and in the compiled run-time selection (the
-fused loop reads `NaN < 2` as `false` and takes the default). The element-wise
-EQUALITY already marks such a cell absent (the compiled-equality absent marker
-landed 2026-09-10), so `select` consumes the position and answers `NaN` there;
-the ordering relations (`Less`, `LessEqual`, `Greater`, `GreaterEqual`) do not
-mark it, in the interpreter's element-wise relation handler or in the JavaScript
-emitter. The pre-pass index push-through of 2026-09-12 (`fixed-width-unroll.ts`,
-`indexedOperands`) rewrites `Which([a, b, c] < 2, 1, True, 0)[2]` to the scalar
-`Which(b < 2, 1, True, 0)`, so a NaN `b` now answers the undecided value (`NaN`,
-`Missing`) where the element-wise form answered `0`. The rewrite is kept: the
-scalar answer is the ratified undecided-condition contract, and the fix belongs
-in the element-wise ordering relations — mark a cell whose operand is NaN
-absent, as the equality does — after which the two forms agree and the pre-pass
-note on `indexedOperands` can go.
+The user decision of 2026-10-20 (Tycho rows 411 and 413, `docs/ERROR-MODEL.md`)
+makes a NaN operand of `<`, `≤`, `>`, `≥` and `=` decide FALSE in a scalar
+branch condition on every route, so the scalar and the element-wise forms of
+`Which([1, NaN, 3] < 2, 1, True, 0)` now agree (`[1, 0, 0]`, and the indexed
+scalar form `Which(b < 2, 1, True, 0)` with `b = NaN` is `0`). What remains is
+`NotEqual`, which the decision left as it was: the element-wise cell
+`NaN ≠ 2` is `True`, so `Which([a, b, c] ≠ 2, 1, True, 0)` with `b = NaN` is
+`[1, 1, 1]` and the indexed form is `1`, while the scalar
+`Which(b ≠ 2, 1, True, 0)` takes no arm (`Missing` in the interpreter, `NaN`
+on the `javascript` and `python` targets; the GPU targets take the then arm).
+The pre-pass index push-through of 2026-09-12 (`fixed-width-unroll.ts`,
+`indexedOperands`) rewrites the indexed element-wise form to the scalar one, so
+it can still change the answer for a `NotEqual` condition. Fix: decide what
+`NaN ≠ 2` means in a branch (IEEE true, as the cell does, or no arm, as the
+scalar does) and align the other form; then the pre-pass note on
+`indexedOperands` can go.
 
 ### A shared subexpression inside a shader lazy operand with no statement position expands once per occurrence (OPEN — found 2026-09-13, narrowed 2026-09-13)
 
@@ -6264,3 +6350,21 @@ that identity. Ordinary data-symbol lookup remains unchanged.
 Compiler support remains conservative: captured held functions with a different
 ambient binding still refuse compilation. Remove each refusal only when that
 lowering preserves binding identity and has interpreter/compiler parity tests.
+
+### Previously evaluated unresolved calls in loop terms (RESOLVED — 2026-10-20)
+
+User decision: a completed unresolved call stays symbolic after later assignment;
+the original call remains a live forward reference. A private unset binding
+preserves the completed result, so Sum/Product no longer retroactively run an
+early h(1) when h is defined by a later term. Compilation refuses the completed
+symbolic result rather than substituting the new definition. The existing
+batch9-evaluation regressions and a direct forward-call/result test cover it.
+
+### Raw lazy producer omission (RESOLVED — 2026-10-20)
+
+Tabulate/Table, Scan and Iterate retain possible Nothing in element types.
+Two-dimensional Tabulate returns lazy rows, preserving omitted coordinates and
+avoiding callback work merely to read row counts. Collecting a row with ListFrom
+omits its immediate Nothing entries. Compiler guards refuse omission-capable
+Tabulate/Scan until targets have a distinct representation; Iterate remains
+unsupported. Custom accumulator delivery policies are unchanged.

@@ -80,17 +80,27 @@ describe('a user function with a jump body under .N()', () => {
     expect(ce.box('n').evaluate().json).toBe(1);
   });
 
-  test('an argument far from a jump is not evaluated exactly', () => {
-    const ce = new ComputeEngine();
-    ce.assign('f', ce.box(['Function', ['Floor', 'x'], 'x']));
-    const sum = ['Sum', ['Divide', 1, 'k'], ['Tuple', 'k', 1, 10000]];
-    const start = Date.now();
-    const viaFunction = ce.box(['f', sum]).N().toString();
-    const elapsed = Date.now() - start;
-    expect(viaFunction).toBe(ce.box(['Floor', sum]).N().toString());
-    // The exact sum (a rational with thousands of digits) takes seconds.
-    expect(elapsed).toBeLessThan(2000);
-  });
+  // The exact value of the sum is a rational with thousands of digits:
+  // evaluating it exactly takes about 30 s (measured 2026-10-20 on an M5),
+  // while the numeric route takes about 0.1 s locally and up to 4 s on a
+  // loaded continuous-integration runner. A limit of 15 s separates the two
+  // routes on any of these machines; a limit of 2 s failed on the Node 26
+  // runner. The jest timeout is set above the limit, so a regression fails on
+  // the assertion and not on the default 5 s jest timeout.
+  test(
+    'an argument far from a jump is not evaluated exactly',
+    () => {
+      const ce = new ComputeEngine();
+      ce.assign('f', ce.box(['Function', ['Floor', 'x'], 'x']));
+      const sum = ['Sum', ['Divide', 1, 'k'], ['Tuple', 'k', 1, 10000]];
+      const start = Date.now();
+      const viaFunction = ce.box(['f', sum]).N().toString();
+      const elapsed = Date.now() - start;
+      expect(viaFunction).toBe(ce.box(['Floor', sum]).N().toString());
+      expect(elapsed).toBeLessThan(15_000);
+    },
+    20_000
+  );
 
   test('a body with no jump is unchanged', () => {
     const ce = new ComputeEngine();
