@@ -106,6 +106,7 @@ import {
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isEmptyType, isSubtype } from '../../common/type/subtype.js';
 import {
+  awaitedOperandOptions,
   bignumPreferred,
   boxBignumResult,
   withDrawRollback,
@@ -113,7 +114,7 @@ import {
 import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
 import { randomCount } from './random-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { findFit } from '../nonlinear-fit.js';
+import { findFit, findFitAsync } from '../nonlinear-fit.js';
 import {
   distributionMean,
   distributionStandardDeviation,
@@ -1865,7 +1866,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         '`a cos(b x + c)` keeps it on the grid; without a step the phase is ' +
         'solved by least squares. With more than 300 data rows the grid is ' +
         'scanned on a stratified sample of 300 rows, and the best grid ' +
-        'points are then solved again and refined on every row.',
+        'points are then solved again and refined on every row. ' +
+        'With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` ' +
+        'scans the grid on the workers and gives the record of `evaluate()`; ' +
+        'the solver runs stay on the calling thread.',
       complexity: 1200,
       broadcastable: false,
       // Hold the arguments: a parameter symbol may carry a seeded document
@@ -1874,6 +1878,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, any, any, any, dictionary?) -> dictionary',
       evaluate: (ops, { engine: ce }) => findFit(ce, ops),
+      // The global scan on the engine's kernel pool, when it has one and the
+      // model compiled to code a worker can run; otherwise on this thread.
+      // The data operand is evaluated with `evaluateAsync()` and the
+      // handler's options (the registry, the context stack, the precision
+      // window and the abort signal).
+      evaluateAsync: (ops, options) =>
+        findFitAsync(options.engine, ops, awaitedOperandOptions(options)),
     },
   },
   {

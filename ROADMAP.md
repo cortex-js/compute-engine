@@ -22,6 +22,34 @@ Two conventions follow from that, both worth keeping:
   bullet needs it to make sense; say so in the surviving bullet rather than
   relying on the reader to look upward, since the landed one will go.
 
+## Collection family types: bounded completion scope
+
+Implement the Option B rules in
+`docs/plans/2026-10-20-bare-tuple-record-any.md`: bare collection names constrain
+kind without restricting contents; explicit element contracts remain restrictive;
+`tuple<any>` still means exactly one slot; retain numeric vector/matrix defaults.
+Complete the compatibility migration and validation before closing this task.
+
+The following work is deferred, rather than a prerequisite for Option B:
+
+- Migrate `unknown` to an inference marker, including declaration intent,
+  subtype API behavior and generic-default migration (plan Q2/Q7/Q8).
+- Choose presence-assertion syntax and the default diagnostic/assignment
+  policy for possible absence (Q1/Q3).
+- Decide record-field omission, optional-field representation and an explicit
+  key-removal operation; classify outstanding custom folds, Dot, ordering and
+  structural conversions (Q5/Q10).
+- Define ordinary value capture on assignment, mutable-object boundaries and
+  repeated/effectful view-read behavior (Q11).
+- Implement sticky evaluated unresolved-call results together with function
+  declaration hoisting across the sequential runner, whole-block interpreter
+  and compiler. Preserve earlier bindings, declared signatures and constructors.
+- Add a distinct compiled representation of Nothing. Keep sound compiler
+  refusals where omission cannot currently be represented.
+
+Independent defects found while validating this change should be recorded here
+with reproductions; they do not reopen the broader design in this task.
+
 ## Current state
 
 The 2026-06 release shipped:
@@ -123,7 +151,10 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   phase of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of
   8,000 points, a stratified 300-row sample with 24 re-scores; the deciding
   cases pass in 45 to 70 ms, 1,000 rows over `[0.3, 628]` in about 300 ms).
-  Phase B (the scan on the worker pool, step 5) is the next step. Residue,
+  Phase B (the scan on the worker pool, step 5) LANDED 2026-10-21 (uncommitted,
+  dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the
+  grid scan on `ce.workers` when the fit is shippable and separable; 1,000
+  rows over `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. Residue,
   not fixed: a POWER of a periodic function (`a cos(b x + c)²`) records the
   inner function's period, but `cos²` has period π, so its basin is half as
   wide as the grid assumes; the fix needs the period of the composed
@@ -302,6 +333,33 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   including `x = 0` where the value is `0/0`. A quotient by a literal zero
   with a symbolic numerator is a pole only when the numerator is not zero;
   whether the fold should wait for the value is a canonical-form decision.
+- **416 (filed 2026-10-21, on CE 0.159.0) — a stencil batch for `broadcast`.**
+  Tycho marches 3-D implicit surfaces in its own workers from the stored
+  `javascript` compilation results; about 40 % of a build is the cell step
+  (eight corner reads per cell, the case, twelve edge fractions
+  `F_a / (F_a - F_b)`, the gradient by central differences), which cannot use
+  `broadcast` because it takes one number per variable per cell (a list input
+  is refused: "the array for i holds 2 cells, the first array 4") and gives
+  one number per cell (a tuple-valued expression gives NaN). Ask: (1) a shared
+  input bound once and read by index in the expression (`F[i+1]` with
+  `F: list<real>`; the compiled code already reads it as
+  `_SYS.atNumeric(_.F, _.i + 1, "real")`), shipped to a worker once per call;
+  (2) several outputs per cell for a tuple-valued expression, one output of
+  stride `m`; (3) as sugar, a `window` option of the `grid` layout naming a
+  shared input's neighbours by offset. CE's answer (sent to Tycho 2026-10-21):
+  (1) and (2) together as the next pool step after row 407 phase B, inferring
+  `shared` from a `list`/`indexed_collection`-typed variable and `m` from a
+  fixed-arity numeric tuple result type, with `shared: [...]` and `outputs: m`
+  as explicit overrides; (3) waits for a measurement. Instrument:
+  `scripts/repros/2026-10-21-ce416-stencil-batch-probe.mts`
+  (`row 416: NOT READY on 0.159.0`); closes when it prints `READY`. Expected
+  gain measured by Tycho: a build about 2.5× faster. Tycho's shape (answered
+  2026-10-21): two tuple-valued kernels in the stride layout, a cell kernel of
+  thirteen numbers (the case index 0 to 255 and twelve edge fractions
+  `F_a / (F_a - F_b)`, NaN on an edge with no sign change) and a point kernel
+  of three (the gradient by central differences of the shared array, one-sided
+  on the boundary), two passes over the grid; eight to twenty-seven
+  `_SYS.atNumeric` reads per cell are acceptable.
 
 ### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
 
@@ -344,7 +402,7 @@ view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
 
-### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 shipped in 0.159.0; step 5 approved 2026-10-20 with Tycho row 407 and designed as phase B of `docs/plans/2026-10-20-findfit-global-grid.md`; design `docs/plans/2026-10-20-worker-kernel-pool.md`)
+### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 shipped in 0.159.0; step 5 LANDED 2026-10-21 on the main tree (uncommitted, dual-reviewed, 11 findings applied) as phase B of `docs/plans/2026-10-20-findfit-global-grid.md`: `FindFit.evaluateAsync()` scans on `ce.workers`, 1,000 rows over `[0.3, 628]` in 65 ms on 8 workers (233 ms inline); design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads can run in
@@ -373,6 +431,16 @@ worker protocol for now. Open: the name of the array-evaluation pair
 (working name `broadcast`/`broadcastAsync`, alternative `runMany`). No
 keyword for parallel execution in Epsil: the engine decides from purity,
 compilability and size, as it does for compilation (design section 5.7).
+
+Open after phase B of the FindFit pool scan (found 2026-10-21 by its dual
+review): an aborted `broadcastAsync` slice or `FindFit` scan slice that is
+already RUNNING on a worker finishes there and its result is dropped; the pool
+has no `cancel` message and does not terminate a worker that does not answer
+(design item 4 of section 5.5 of `docs/plans/2026-10-20-worker-kernel-pool.md`).
+The cost is a worker busy for the rest of its slice (at most a few tens of
+milliseconds on the fit route, up to one broadcast slice on the other). Fix:
+a `cancel` message the worker checks between cells or points, and a grace
+period after which the pool terminates and replaces a worker that still runs.
 
 ### Remaining raw-view omission and typing policies (OPEN, design — found 2026-10-20 by the review of the `Nothing`-in-views decision)
 
@@ -600,37 +668,31 @@ remains the separate design item above.
   does not. The general rule for a right side `unknown` in `isSubtype()`
   (`common/type/subtype.ts`) does not look inside a `broadcastable` left
   side.
-- With `type alias json = list<json> | integer`, `couldMatch(number, json)` is
-  `false`, although the two share every integer: `couldMatch()` does not
-  unfold the recursive alias to reach its `integer` arm. (The meet unfolds a
-  transparent alias since the `broadcastable<T>` change, so `number & json`
-  is `integer`; HEAD gave `never`.) Found 2026-10-21.
-- Two recursive aliases are kept as written by the meet unless
-  `provablyDisjoint()` refutes them, and `provablyDisjoint()` does not
-  resolve such a cycle. So with `type alias A = tuple<A> | integer` and
-  `type alias B = tuple<B> | string`, which share no finite value,
-  `typesOverlap(A, B)` is `true`, through the kept `tuple<A & B>`. The answer
-  is on the safe side for argument admission, but a protocol check can see a
-  collision that does not exist. Deciding it needs an inhabitation test for
-  recursive pairs (a pair memo and a witness). Found 2026-10-21.
-- `provablyDisjoint()` and `couldMatch()` (`common/type/subtype.ts`) do work
-  that grows exponentially along a chain of aliases with two branches at
-  each level: with `A0 = integer`, `B0 = string`, and
-  `Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>` (and the same for `B`),
-  `typesOverlap(A20, B20)` takes about 3 s at HEAD and 5 s after the
-  `broadcastable<T>` change. `typesOverlap()` and the row search of
-  `reduce.ts` cache their answers for one question; these two do not.
-  Found 2026-10-21.
-- The meet of two lists of the same kind (`meetCollections()`,
-  `common/type/reduce.ts`) is elementwise, and loses values in two cases:
-  `list<number> & list<list<integer>>` is `list<never>`, although an integer
-  matrix is in both (its cells are numbers, its rows lists of integers); and
-  two fixed shapes that spell the same shape differently are refuted:
-  `list<number^(2x2)> & list<list<integer>^2>` is `never`, although
-  `list<integer^(2x2)>` is in both. The meet of collections of different
-  kinds keeps such a pair as written (`elementsAtMixedDepth()`); the same
-  rule could apply here. Found 2026-10-21 by the review of the
-  `broadcastable<T>` change; HEAD gives the same answers.
+- The subtype relation of lists (`isSubtype()`, the `list` case in
+  `common/type/subtype.ts`) is not transitive, so a union that drops an arm
+  because the arm is a subtype of another arm can drop values. Two rules
+  cause it, and both are on purpose according to their comments:
+  - When the scalars of a list with dimensions are in the element type of a
+    list with fixed dimensions, the rank must be equal ("a matrix is not a
+    `vector<unknown>`, although its rows are values"). So
+    `list<integer^(2x2x2)> <: list<list^2>` and
+    `list<list^2> <: vector<unknown>`, but `list<integer^(2x2x2)>` is not a
+    `vector<unknown>`: `reduceType(list<list^2> | vector<unknown>)` is
+    `vector<unknown>`, which does not hold the 2×2×2 tensor that the first
+    arm holds.
+  - A list of rows with fixed dimensions is merged into one list with more
+    dimensions only toward a target with two or more dimensions. So
+    `list<list<integer^2>^3> <: list<real^(3x-1)> <: list<real>`, but
+    `list<list<integer^2>^3>` is not a `list<real>`.
+  A random test of the meet (pairs of list and collection types against
+  concrete list values) finds these losses in the union reduction only,
+  never in the meet of two arms. A value literal always has the flat
+  spelling (`staticCollectionDims`), so the second rule matters for
+  declared types only. Question for the user: should a list with fixed
+  dimensions whose element type holds both a scalar and a list of scalars
+  (`list`, `unknown`, `any`) read a tensor through its rows, or should
+  `list<list^2>` stop being a subtype of `vector<unknown>`? Either answer
+  makes the relation transitive for these cases. Found 2026-10-21.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
@@ -704,6 +766,26 @@ The 3 that the uncommitted changes fix are in `batch9-evaluation.test.ts` ("a
 big operator does not keep a function assigned by its term": Sum, Product,
 and a term whose argument changes). Reproduce: `npx jest --config
 ./config/jest.config.cjs -w 4 -- <the files above>`.
+
+Status 2026-10-21: the full suite at `b8ee30edc` still failed all 9. The 6
+listed above are fixed by commit `c0ee6d784` (`binders.ts`,
+`forward-call-reference.ts`, `function-utils.ts`, `index.ts`,
+`engine-declarations.ts`, with tests). The causes were these:
+
+- A closure scope made by `captureNestedLocals()` did not record the block
+  scope that it copies. A call in the closure then did not find a local whose
+  binding changed from a value to a function (`let k = i; k = (x) => i * x`).
+- A call bound to a record that `ce.undeclare()` emptied, or to a
+  `resolveSymbol` fact of `ce.parse()`, kept the empty binding. Now such a
+  call reads the definition in the scope the binding came from, or in a scope
+  that encloses it.
+- The `Field` test expected the old lookup by name. It now expects the
+  binding of the stored symbol, as `docs/SCOPING-MODEL.md` ("Callable
+  resolution") states.
+
+The 3 `batch9-evaluation.test.ts` failures remain. Their fix is the "sticky"
+evaluated unresolved call of "Function declaration hoisting across execution
+routes" (below), which must land together with the hoisting rule.
 
 ### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
 

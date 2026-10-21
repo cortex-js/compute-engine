@@ -4,59 +4,98 @@
 //   npx tsx benchmarks/workers/<file>.mts
 // Worker threads inherit the tsx loader, so the workers import the engine from
 // source too. The results of 2026-10-20 are in the design document.
-// Whole-engine-in-a-worker emulation of a parallel global fit: K workers each
-// boot an engine and run FindFit with a K-th of the global range of b; the
-// main thread keeps the lowest residual. Each worker still runs the full
-// 24-point multi-start grid over its sub-range, so K workers do K times the
-// starts of the serial call: the table reports wall time and throughput.
-import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { CE_SRC, TYCHO, makeData, fitCall, median, ms } from './common.mts';
-if (isMainThread) {
-  const { ComputeEngine } = await import(CE_SRC);
-  const ce = new ComputeEngine();
-  const K = [1, 2, 4, 8];
-  const t0b = performance.now();
-  const pool = await Promise.all(Array.from({ length: Math.max(...K) }, () => new Promise<Worker>((res) => {
-    const w = new Worker(new URL(import.meta.url), { workerData: {} });
-    w.once('message', () => res(w));
-  })));
-  console.log(`boot of ${pool.length} engine workers (parallel): ${ms(performance.now() - t0b)} ms`);
-  console.log('rows | serial full range ms (iters) | ' + K.map((k) => `${k} workers ms (total iters)`).join(' | ') + ' | throughput gain at best K');
-  for (const [label, data] of [['Tycho 5', TYCHO], ['1000', makeData(1000)], ['10000', makeData(10000)]] as const) {
-    const full = { dict: { global: { dict: { b: [0.1, 6] } } } };
-    const expr = ce.box(fitCall(data.xs, data.ys, full) as any);
-    let rec: any;
-    const reps = data.xs.length >= 10000 ? 3 : 5;
-    const tSerial = median(Array.from({ length: reps }, () => { const t0 = performance.now(); rec = expr.evaluate(); return performance.now() - t0; }));
-    const itSerial = rec.get('iterations').re;
-    const cells: string[] = [];
-    let bestGain = 0;
-    for (const k of K) {
-      const ts: number[] = []; let iters = 0;
-      for (let rep = 0; rep < reps; rep++) {
-        const t0 = performance.now();
-        const results = await Promise.all(pool.slice(0, k).map((w, j) => new Promise<{ rss: number; iterations: number }>((res) => {
-          const lo = 0.1 + (5.9 * j) / k, hi = 0.1 + (5.9 * (j + 1)) / k;
-          w.once('message', res);
-          w.postMessage({ call: fitCall(data.xs, data.ys, { dict: { global: { dict: { b: [lo, hi] } } } }) });
-        })));
-        iters = results.reduce((s, r) => s + r.iterations, 0);
-        ts.push(performance.now() - t0);
-      }
-      const t = median(ts);
-      const gain = (iters / t) / (itSerial / tSerial);
-      bestGain = Math.max(bestGain, gain);
-      cells.push(`${ms(t)} (${iters})`);
-    }
-    console.log(`${label} | ${ms(tSerial)} (${itSerial}) | ${cells.join(' | ')} | ${bestGain.toFixed(2)}x`);
-  }
-  for (const w of pool) w.terminate();
-} else {
-  const { ComputeEngine } = await import(CE_SRC);
-  const ce = new ComputeEngine();
-  parentPort!.postMessage('ready');
-  parentPort!.on('message', (job: { call: unknown[] }) => {
-    const rec: any = ce.box(job.call as any).evaluate();
-    parentPort!.postMessage({ rss: rec.get('residualNorm')?.re ?? NaN, iterations: rec.get('iterations')?.re ?? 0 });
-  });
+//
+// The global search of `FindFit` on the kernel pool
+// (docs/plans/2026-10-20-findfit-global-grid.md, section 4): each case runs
+// through `evaluate()` on an engine with no pool, and through
+// `evaluateAsync()` on engines whose pool has 1, 4 and 8 workers (the
+// separable scan runs on the workers, the solver runs on this thread). The
+// table gives the median wall time of one call, in ms, and whether every
+// pooled record is the record of `evaluate()`. The cases are Tycho's
+// deciding cases of row 407 (200 rows), its five-point control, and the
+// 1,000-row case over b in [0.3, 628] (target: under 250 ms with 8 workers).
+// The time includes the setup of each call (data, differentiation,
+// compilation) and, on the pool, the transfer of the rows to each worker.
+import { Worker } from 'node:worker_threads';
+import { loadavg } from 'node:os';
+import { CE_SRC, TYCHO, MODEL, PARAMS, median, ms } from './common.mts';
+
+const { ComputeEngine, createKernelPool } = await import(CE_SRC);
+const WORKER = new URL('../../src/kernel-worker.ts', import.meta.url);
+
+/** `n` points evenly spaced on `[0, 10]`, with no noise, from `a = 2`,
+ * `b`, `c = 0.5`, `d = 0.1`: the data of Tycho's instrument. */
+function dense(n: number, b: number): { xs: number[]; ys: number[] } {
+  const xs = Array.from({ length: n }, (_, i) => (10 * i) / (n - 1));
+  const ys = xs.map((x) => 2 * Math.cos(b * x + 0.5) + 0.1 * x + Math.E);
+  return { xs, ys };
 }
+const call = (
+  { xs, ys }: { xs: number[]; ys: number[] },
+  ranges: Record<string, number[]>
+): unknown[] => [
+  'FindFit',
+  ['List', ...xs.map((x, i) => ['Tuple', x, ys[i]])],
+  MODEL,
+  PARAMS,
+  ['List', 'x'],
+  { dict: { global: { dict: ranges } } },
+];
+const HI_200 = (2 * Math.PI) / (10 / 199);
+const C = [0, 2 * Math.PI];
+const cases: [string, unknown[]][] = [
+  ['200 rows, b = 2.2, [0.3, 2π/gap]', call(dense(200, 2.2), { b: [0.3, HI_200], c: C })],
+  ['200 rows, b = 50, [0.3, 2π/gap]', call(dense(200, 50), { b: [0.3, HI_200], c: C })],
+  ['200 rows, b = 2.2, [0.3, 120]', call(dense(200, 2.2), { b: [0.3, 120], c: C })],
+  ['200 rows, b = 2.2, [0.3, 60]', call(dense(200, 2.2), { b: [0.3, 60], c: C })],
+  ['5 rows (5hn1azxfc8), [0.1, 6]', call(TYCHO, { b: [0.1, 6] })],
+  ['1,000 rows, b = 2.2, [0.3, 628]', call(dense(1000, 2.2), { b: [0.3, 628], c: C })],
+];
+
+const load = () => loadavg().map((x) => x.toFixed(1)).join(' / ');
+console.log(`load average at start: ${load()}`);
+
+const SIZES = [1, 4, 8];
+const pools = SIZES.map((size) =>
+  createKernelPool({ create: () => new Worker(WORKER), size })
+);
+const t0 = performance.now();
+await Promise.all(pools.map((p) => p.prewarm()));
+console.log(`start-up of ${SIZES.reduce((a, b) => a + b, 0)} workers: ${ms(performance.now() - t0)} ms`);
+const plain = new ComputeEngine();
+const pooled = pools.map((workers) => new ComputeEngine({ workers }));
+
+const REPS = 7;
+console.log(`case | evaluate | ${SIZES.map((k) => `evaluateAsync, ${k} worker${k > 1 ? 's' : ''}`).join(' | ')} | same record`);
+for (const [label, c] of cases) {
+  const expr = plain.box(c as any);
+  let reference = '';
+  const times = (run: () => unknown) => {
+    const t: number[] = [];
+    for (let i = 0; i < REPS; i++) {
+      const s = performance.now();
+      run();
+      t.push(performance.now() - s);
+    }
+    return t;
+  };
+  reference = expr.evaluate().toString(); // warm-up
+  const serial = median(times(() => expr.evaluate()));
+  const cells: string[] = [];
+  let same = true;
+  for (const ce of pooled) {
+    const e = ce.box(c as any);
+    same &&= (await e.evaluateAsync()).toString() === reference; // warm-up
+    const t: number[] = [];
+    for (let i = 0; i < REPS; i++) {
+      const s = performance.now();
+      const rec = await e.evaluateAsync();
+      t.push(performance.now() - s);
+      same &&= rec.toString() === reference;
+    }
+    cells.push(ms(median(t)));
+  }
+  console.log(`${label} | ${ms(serial)} | ${cells.join(' | ')} | ${same ? 'yes' : 'NO'}`);
+}
+console.log(`load average at end: ${load()}`);
+for (const p of pools) p.dispose();

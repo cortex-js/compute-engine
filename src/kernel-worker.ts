@@ -12,6 +12,18 @@
 // main thread would compute. The pool sends one task at a time and ships the
 // engine's iteration limit and the batch deadline with it.
 //
+// It also solves the grid points of the separable scan of a `FindFit` global
+// search (`FindFit.evaluateAsync()` on an engine with a pool; design:
+// `docs/plans/2026-10-20-findfit-global-grid.md`, section 4). `fit-load`
+// sends the problem once per fit: the stored compiled code of the model and
+// of its linear columns, and the rows. The worker rebuilds each function with
+// `createJavaScriptRuntime().load()`, which refuses code compiled for another
+// runtime version. Each `fit-run` is a slice of grid points, solved by
+// `linearScanSolve()` (`src/compute-engine/fit-scan.ts`), the code the main
+// thread runs for the points it solves itself, so a point solved here is the
+// point the main thread would solve. The loop stops at the deadline it was
+// sent and returns the points done.
+//
 // The file is built self-contained (no chunk imports) so that a host can copy
 // it next to its own files and start it with
 // `new Worker(url, { type: 'module' })`; in Node, with `worker_threads`. The
@@ -23,6 +35,7 @@ import {
 } from './compute-engine/compilation/javascript-runtime.js';
 import { createIntervalRuntime } from './compute-engine/compilation/interval-runtime.js';
 import { INTERVAL_RUNTIME_VERSION } from './compute-engine/interval/index.js';
+import { isTimeoutCancellation } from './common/interruptible.js';
 import type {
   BroadcastInputs,
   BroadcastOptions,
@@ -31,8 +44,16 @@ import type { BroadcastSlice } from './compute-engine/compilation/broadcast.js';
 import type {
   MainToWorkerMessage,
   StoredKernel,
+  WireFitProblem,
   WorkerToMainMessage,
 } from './compute-engine/kernel-protocol.js';
+import {
+  linearScanSolve,
+  scanResultWidth,
+  writeScanSolution,
+  type FitScanProblem,
+  type RecordFn,
+} from './compute-engine/fit-scan.js';
 
 export const version = '{{SDK_VERSION}}';
 
@@ -113,6 +134,41 @@ function loadKernel(kernel: StoredKernel): Kernel {
   };
 }
 
+const fits = new Map<number, FitScanProblem>();
+
+/**
+ * The fit problem with its functions rebuilt from the stored code. Each
+ * function gives a number, or `NaN` for any other value, as the main thread's
+ * compiled functions do (`implicitCompileNumeric()` in
+ * `implicit-compile.ts`). `load()` refuses a stored result compiled for
+ * another runtime version.
+ */
+function loadFit(problem: WireFitProblem): FitScanProblem {
+  const numeric = (kernel: StoredKernel): RecordFn => {
+    const f = jsRuntime.load({
+      ...kernel,
+      entryPlan: kernel.entryPlan as Parameters<
+        typeof jsRuntime.load
+      >[0]['entryPlan'],
+    });
+    return (record) => {
+      const v = f(record);
+      return typeof v === 'number' ? v : NaN;
+    };
+  };
+  return {
+    ...problem,
+    units: problem.units.map((u) => ({
+      ...u,
+      model: numeric(u.model),
+      columns: u.columns.map(numeric),
+    })),
+  };
+}
+
+/** Thrown by the deadline check of a `fit-run` loop. */
+const DEADLINE = new Error('deadline');
+
 const messageOf = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
@@ -126,9 +182,78 @@ port.on((m) => {
         port.post({ type: 'error', id: m.id, message: messageOf(e) });
       }
       return;
+    case 'fit-load':
+      try {
+        fits.set(m.id, loadFit(m.problem));
+        port.post({ type: 'loaded', id: m.id });
+      } catch (e) {
+        port.post({ type: 'error', id: m.id, message: messageOf(e) });
+      }
+      return;
     case 'unload':
       kernels.delete(m.id);
+      fits.delete(m.id);
       return;
+    case 'fit-run': {
+      const problem = fits.get(m.id);
+      if (problem === undefined) {
+        port.post({
+          type: 'error',
+          job: m.job,
+          message: `fit problem ${m.id} is not loaded`,
+        });
+        return;
+      }
+      try {
+        // The runtime state the compiled code's helpers read, as for `run`.
+        jsRuntime.iterationLimit = m.iterationLimit ?? defaultIterationLimit;
+        jsRuntime.deadline = m.deadline;
+        const p = problem.start.length;
+        const stride = scanResultWidth(p);
+        const count = m.width > 0 ? m.points.length / m.width : 0;
+        const out = new Float64Array(stride * count);
+        const deadline = m.deadline;
+        // The clock is read before each point and every 256 rows of a pass
+        // over the rows, which bounds the overrun to a few rows' work.
+        let ticks = 0;
+        const check =
+          deadline === undefined
+            ? (): void => undefined
+            : (): void => {
+                if ((++ticks & 0xff) === 0 && Date.now() >= deadline)
+                  throw DEADLINE;
+              };
+        let done = 0;
+        try {
+          for (let i = 0; i < count; i++) {
+            if (deadline !== undefined && Date.now() >= deadline) break;
+            const s = linearScanSolve(
+              problem,
+              m.points.subarray(i * m.width, (i + 1) * m.width),
+              m.allRows,
+              check
+            );
+            writeScanSolution(out, i * stride, s, p);
+            done = i + 1;
+            // The main thread reads no point after a nonlinear one.
+            if (s === 'nonlinear') break;
+          }
+        } catch (e) {
+          // The scan's own deadline check, or the deadline check of a loop
+          // in a helper of the compiled code (`jsRuntime.deadline`), which
+          // throws a timeout `CancellationError`: either way the slice ends
+          // here and the points done are sent.
+          if (e !== DEADLINE && !isTimeoutCancellation(e)) throw e;
+        }
+        const sent = done === count ? out : out.slice(0, stride * done);
+        port.post({ type: 'fit-result', job: m.job, out: sent, done }, [
+          sent.buffer as ArrayBuffer,
+        ]);
+      } catch (e) {
+        port.post({ type: 'error', job: m.job, message: messageOf(e) });
+      }
+      return;
+    }
     case 'run': {
       const kernel = kernels.get(m.id);
       if (kernel === undefined) {

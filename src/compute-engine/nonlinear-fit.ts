@@ -17,11 +17,18 @@
  */
 
 import {
+  CancellationError,
   checkDeadline,
   isTimeoutCancellation,
+  type DeadlineFrame,
 } from '../common/interruptible.js';
 
-import type { Expression, IComputeEngine } from './global-types.js';
+import type {
+  EvaluateOptions,
+  Expression,
+  IComputeEngine,
+} from './global-types.js';
+import { runWithEvaluationEffects } from './effects-registry.js';
 import {
   isDictionary,
   isFunction,
@@ -30,20 +37,30 @@ import {
 import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
 import { angularChainFactor } from './symbolic/angular-unit.js';
-import { implicitCompileNumeric } from './implicit-compile.js';
+import { implicitCompileNumericResult } from './implicit-compile.js';
 import {
   levenbergMarquardt,
-  solveWithInflation,
   type LMResult,
 } from './numerics/levenberg-marquardt.js';
 import {
   InlineFitExecutor,
+  PoolFitExecutor,
+  runFitPlanAsync,
   runFitPlanSync,
   type FitBatchResult,
   type FitKernel,
   type FitTask,
   type StartTask,
 } from './fit-executor.js';
+import {
+  linearScanSolve,
+  sumOfSquares,
+  wrapPhase,
+  type FitScanProblem,
+  type FitScanRows,
+} from './fit-scan.js';
+import { fitSlicePool, isShippableCode } from './kernel-pool.js';
+import type { StoredKernel, WireFitProblem } from './kernel-protocol.js';
 
 type NumFn = (vars: Record<string, number>) => number;
 
@@ -125,6 +142,12 @@ interface FitUnit {
   fn: NumFn;
   /** Analytic derivative per parameter, or `null` to use finite differences. */
   deriv: (NumFn | null)[];
+  /** The stored compiled code of `fn`, when it compiled to code that can
+   * run on a kernel worker (`storedKernel`); `undefined` otherwise (an
+   * interpreted fallback, or code that reads the engine's random stream). */
+  stored: StoredKernel | undefined;
+  /** The same, per analytic derivative of `deriv`. */
+  derivStored: (StoredKernel | undefined)[];
   /**
    * The free symbols (fresh names) of each analytic derivative, or `null`
    * when the column uses finite differences. The global fit reads them to
@@ -444,21 +467,63 @@ function freshNames(
 }
 
 /** Compile `expr` (whose only free symbols are in `freeNames`) to a numeric
- * function, or fall back to interpreted `subs` + `.N()`. */
+ * function, or fall back to interpreted `subs` + `.N()`. `stored` is the
+ * compiled code in the form a kernel worker loads, when there is code a
+ * worker can run (`storedKernel`). */
 function makeNumericFn(
   ce: IComputeEngine,
   expr: Expression,
   freeNames: string[]
-): NumFn {
-  const compiled = implicitCompileNumeric(ce, expr);
-  if (compiled) return compiled;
-  return (vars: Record<string, number>) => {
+): { fn: NumFn; stored: StoredKernel | undefined } {
+  const compiled = implicitCompileNumericResult(ce, expr);
+  if (compiled)
+    return { fn: compiled.fn, stored: storedKernel(compiled.result) };
+  const fn = (vars: Record<string, number>) => {
     const sub: Record<string, Expression> = {};
     for (const name of freeNames) sub[name] = ce.number(vars[name] ?? NaN);
     // Match the compiled path (`implicitCompileNumeric`'s projection): a
     // nonzero imaginary part is a domain escape and coerces to NaN, rather
     // than being silently truncated to its real part.
     return realValue(expr.subs(sub));
+  };
+  return { fn, stored: undefined };
+}
+
+/**
+ * The stored form of a compilation result that a kernel worker can load and
+ * run, or `undefined` when it cannot: a result of another target than
+ * `javascript`, a lambda, a result with no `runtimeVersion`, or code that
+ * names a helper reading the engine's random stream or entropy handler
+ * (`isShippableCode`). The implicit compile of the fit passes no `functions`,
+ * `vars` or `preamble` option, so the code names no identifier of the host
+ * (the condition `CompileTarget.hostNames` records for `broadcastAsync`).
+ */
+function storedKernel(
+  result: ReturnType<IComputeEngine['_compile']>
+): StoredKernel | undefined {
+  if (
+    result.target !== 'javascript' ||
+    result.calling !== 'expression' ||
+    result.runtimeVersion === undefined
+  )
+    return undefined;
+  const text = [
+    result.preamble,
+    result.preambleOnce,
+    result.preamblePerCall,
+    result.code,
+  ].join('\n');
+  if (!isShippableCode(text)) return undefined;
+  return {
+    kind: 'javascript',
+    runtimeVersion: result.runtimeVersion,
+    code: result.code,
+    calling: result.calling,
+    preamble: result.preamble,
+    preambleOnce: result.preambleOnce,
+    preamblePerCall: result.preamblePerCall,
+    entryPlan: result.entryPlan,
+    reconstructionDigits: result.reconstructionDigits,
   };
 }
 
@@ -495,9 +560,10 @@ function prepareUnit(
   for (const u of renamed.unknowns) if (!allowed.has(u)) return undefined;
 
   const freeNames = [...varFresh, ...paramFresh];
-  const fn = makeNumericFn(ce, renamed, freeNames);
+  const { fn, stored } = makeNumericFn(ce, renamed, freeNames);
 
   const deriv: (NumFn | null)[] = [];
+  const derivStored: (StoredKernel | undefined)[] = [];
   const derivUnknowns: (ReadonlySet<string> | null)[] = [];
   const stepLike: boolean[] = [];
   for (const pf of paramFresh) {
@@ -507,10 +573,13 @@ function prepareUnit(
     // `Derivative(…)` placeholder (e.g. `∂Zeta(b·x)/∂b`).
     if (d === undefined || d.has('Derivative')) {
       deriv.push(null);
+      derivStored.push(undefined);
       derivUnknowns.push(null);
       stepLike.push(false);
     } else {
-      deriv.push(makeNumericFn(ce, d, freeNames));
+      const column = makeNumericFn(ce, d, freeNames);
+      deriv.push(column.fn);
+      derivStored.push(column.stored);
       derivUnknowns.push(new Set(d.unknowns));
       stepLike.push(d.isSame(0) && renamed.has(pf));
     }
@@ -520,7 +589,17 @@ function prepareUnit(
     ? analyzeGlobalShape(renamed, varFresh, paramFresh)
     : { mentions: [], periodicRates: [], phaseShapes: [] };
 
-  return { fn, deriv, derivUnknowns, stepLike, rows, varFresh, ...shape };
+  return {
+    fn,
+    deriv,
+    stored,
+    derivStored,
+    derivUnknowns,
+    stepLike,
+    rows,
+    varFresh,
+    ...shape,
+  };
 }
 
 /** The periodic functions whose argument can carry a phase rate. The
@@ -753,11 +832,30 @@ interface FitCallbacks {
   jacobian: (theta: number[]) => number[][];
 }
 
-/** Assemble the residual/Jacobian callbacks over all units. */
+/**
+ * Throw when `signal` was aborted: the `CancellationError` whose `cause` is
+ * the signal's reason, as the other asynchronous evaluations reject with
+ * (`runAsync` in `common/interruptible.ts`).
+ */
+function checkAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new CancellationError({ cause: signal.reason });
+}
+
+/**
+ * Assemble the residual/Jacobian callbacks over all units. `deadlineFrame`
+ * gives the deadline frame the row walk checks: by default the engine's
+ * frame at the time of each check; the asynchronous route
+ * (`findFitAsync`) gives the frame it captured when it started, since the
+ * engine's frame after an `await` is another evaluation's. The row walk also
+ * checks `signal`, the abort signal of the asynchronous route, so that an
+ * abort stops the fit within a row.
+ */
 function makeCallbacks(
   ce: IComputeEngine,
   units: FitUnit[],
-  specs: ParamSpec[]
+  specs: ParamSpec[],
+  deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
+  signal?: AbortSignal
 ): FitCallbacks {
   const p = specs.length;
   const lo = specs.map((s) => s.lo);
@@ -781,7 +879,8 @@ function makeCallbacks(
     for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
     for (const unit of units) {
       for (const row of unit.rows) {
-        checkDeadline(ce._deadlineFrame);
+        checkDeadline(deadlineFrame());
+        checkAborted(signal);
         for (let k = 0; k < unit.varFresh.length; k++)
           record[unit.varFresh[k]] = row.x[k];
         visit(unit, row, record);
@@ -835,11 +934,14 @@ function makeCallbacks(
   return { pFresh, lo, hi, eachRow, residual, jacobian };
 }
 
-/** Run LM from the single start of the specs and report the record. */
+/** Run LM from the single start of the specs and report the record.
+ * `deadlineFrame` and `signal` are as for `makeCallbacks`. */
 function solve(
   ce: IComputeEngine,
   units: FitUnit[],
-  specs: ParamSpec[]
+  specs: ParamSpec[],
+  deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
+  signal?: AbortSignal
 ): Expression | undefined {
   // Defensive: an empty model/equation list yields zero units; `units[0]`
   // in `makeCallbacks` would otherwise throw (see the guards in
@@ -848,7 +950,13 @@ function solve(
     return ce.error('unexpected-argument', 'no residual units');
 
   const theta0 = specs.map((s) => s.start);
-  const { lo, hi, residual, jacobian } = makeCallbacks(ce, units, specs);
+  const { lo, hi, residual, jacobian } = makeCallbacks(
+    ce,
+    units,
+    specs,
+    deadlineFrame,
+    signal
+  );
 
   // A deadline expiring during the starting-point evaluation or the solver's
   // own initial residual/Jacobian — before any iteration completed — still
@@ -866,7 +974,10 @@ function solve(
     result = levenbergMarquardt(residual, jacobian, theta0, {
       lo,
       hi,
-      onIteration: () => checkDeadline(ce._deadlineFrame),
+      onIteration: () => {
+        checkDeadline(deadlineFrame());
+        checkAborted(signal);
+      },
     });
   } catch (e) {
     if (!isTimeoutCancellation(e)) throw e;
@@ -1065,13 +1176,6 @@ export function sampleRowCounts(sizes: number[], total: number): number[] {
     }
   }
   return counts;
-}
-
-/** Sum of squares of a residual vector, or `Infinity` for a non-finite one. */
-function sumOfSquares(r: number[]): number {
-  let s = 0;
-  for (const v of r) s += v * v;
-  return Number.isFinite(s) ? s : Infinity;
 }
 
 /**
@@ -1512,6 +1616,10 @@ function linearPhases(
  * Its residuals then only rank the grid points: the best local minima are
  * solved again on every row before the best of them are refined (see
  * `globalSearchPlan`). The refinements and the multi-start run on every row.
+ *
+ * The synchronous `evaluate()` runs the plan on the calling thread
+ * (`InlineFitExecutor`); `findFitAsync` can run its separable scan on a
+ * kernel pool (`PoolFitExecutor`), from the same `prepareGlobalSearch`.
  */
 function solveGlobal(
   ce: IComputeEngine,
@@ -1519,11 +1627,52 @@ function solveGlobal(
   specs: ParamSpec[],
   scans: GlobalScan[]
 ): Expression | undefined {
+  const search = prepareGlobalSearch(ce, units, specs, scans);
+  if ('done' in search) return search.done;
+  return search.finish(
+    runFitPlanSync(search.plan(), new InlineFitExecutor(search.kernel))
+  );
+}
+
+/** A global search ready to run: the plan, the operations of its tasks,
+ * and the step that turns the plan's outcome into the record. */
+interface GlobalSearch {
+  /** A new run of the plan (`globalSearchPlan`). */
+  plan: () => Generator<
+    FitTask[],
+    GlobalSearchOutcome | 'no-finite-value',
+    FitBatchResult
+  >;
+  kernel: FitKernel;
+  /** The plan uses the separable scan. */
+  separable: boolean;
+  /** The separable scan in the form a kernel worker loads, when every
+   * function it evaluates compiled to code a worker can run; `undefined`
+   * otherwise (and when the search is not separable). */
+  wire: WireFitProblem | undefined;
+  finish: (outcome: GlobalSearchOutcome | 'no-finite-value') => Expression;
+}
+
+/**
+ * Prepare the global search of `solveGlobal`: the plan, its kernel and the
+ * step that builds the record. Returns `{ done }` with the answer when there
+ * is nothing to search (no unit, or two caller-given steps over the grid
+ * budget). `deadlineFrame` gives the deadline frame the kernel checks, and
+ * `signal` the abort signal it checks with it (see `makeCallbacks`).
+ */
+function prepareGlobalSearch(
+  ce: IComputeEngine,
+  units: FitUnit[],
+  specs: ParamSpec[],
+  scans: GlobalScan[],
+  deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
+  signal?: AbortSignal
+): GlobalSearch | { done: Expression | undefined } {
   if (units.length === 0)
-    return ce.error('unexpected-argument', 'no residual units');
+    return { done: ce.error('unexpected-argument', 'no residual units') };
 
   const p = specs.length;
-  const cb = makeCallbacks(ce, units, specs);
+  const cb = makeCallbacks(ce, units, specs, deadlineFrame, signal);
   const lo = cb.lo.slice();
   const hi = cb.hi.slice();
   for (const s of scans) {
@@ -1562,18 +1711,6 @@ function solveGlobal(
   // the parameters that stay on its grid.
   const phases = separable ? linearPhases(units, scans, linearIdx, lo, hi) : [];
   const phaseIndices = new Set(phases.map((ph) => ph.phase));
-  /** The value of the phase of `ph` brought into its range modulo its period
-   * `2π / |rate|`: `lo + ((value − lo) mod period)`, at most `hi`. The range
-   * is at least one period wide (`linearPhases`), so every phase has a
-   * value in it. */
-  const wrapPhase = (value: number, ph: LinearPhase): number => {
-    const period = (2 * Math.PI) / Math.abs(ph.rate);
-    const phLo = lo[ph.phase];
-    return Math.min(
-      hi[ph.phase],
-      phLo + ((((value - phLo) % period) + period) % period)
-    );
-  };
   const gridScans = scans.filter((s) => !phaseIndices.has(s.index));
   const gridAxes = gridScans.map((s) => ({
     lo: s.lo,
@@ -1593,236 +1730,101 @@ function solveGlobal(
   // the separable scan builds this grid.
   if (gridCountList === 'over-budget' && separable) {
     const [b, c] = gridScans.map((s) => names[s.index]);
-    return ce.error(
-      'unexpected-argument',
-      `FindFit: the grid steps of "${b}" and "${c}" in the "global" option ask for more than ${SEPARABLE_BUDGET} grid points`
-    );
+    return {
+      done: ce.error(
+        'unexpected-argument',
+        `FindFit: the grid steps of "${b}" and "${c}" in the "global" option ask for more than ${SEPARABLE_BUDGET} grid points`
+      ),
+    };
   }
 
-  // The separable scan on a sample of the rows when there are many: the
-  // same units with fewer rows, and their own callbacks. The rows are
-  // shared among the units in proportion to their sizes. The refinements,
-  // the re-scoring of the best sampled points and the multi-start use `cb`,
-  // over every row.
+  // The separable scan on a sample of the rows when there are many: each
+  // unit carries a sample of its rows, shared among the units in proportion
+  // to their sizes. The re-scoring of the best sampled points uses every
+  // row, and so do the refinements and the multi-start (`cb`).
   const totalRows = units.reduce((n, u) => n + u.rows.length, 0);
   const sampled = separable && totalRows > SCAN_SAMPLE_ROWS;
   const sampleCounts = sampleRowCounts(
     units.map((u) => u.rows.length),
     SCAN_SAMPLE_ROWS
   );
-  const scanCb = sampled
-    ? makeCallbacks(
-        ce,
-        units.map((u, k) => ({
-          ...u,
-          rows: sampleRowIndices(u.rows.length, sampleCounts[k]).map(
-            (i) => u.rows[i]
-          ),
-        })),
-        specs
-      )
-    : cb;
 
-  /** Separable step: with the scanned parameters fixed at `point`, solve the
-   * linear parameters by least squares. The model is linear in them, so with
-   * them at zero `unit.fn` is the offset and each analytic derivative is the
-   * basis column of its parameter. A linear parameter with a box constraint
-   * is solved by an active-set loop: a value outside its bounds is fixed at
-   * the bound it crossed, its column moves to the offset, and the free
-   * parameters are solved again, until every free value is inside its bounds.
-   * The sum of squared residuals the linear system predicts is then compared
-   * with the model's actual residual at the solved point: a disagreement means
-   * the model is not linear in those parameters after all (a step function the
-   * structural test did not see), and the answer is `'nonlinear'` so the
-   * caller falls back to the multi-start. Returns the full vector and its sum
-   * of squared residuals, or `null` when the normal equations cannot be solved
-   * or the point is not finite.
-   *
-   * `point` gives the values of `gridScans`. Each phase of `phases` is solved
-   * here instead: with the phase at 0, the column of its amplitude is
-   * `g(B)`; with the phase at a quarter turn, `g(B + π/2)`. Both columns go
-   * into the least-squares system with unbounded coefficients `p` and `q`,
-   * and the amplitude and the phase are then `√(p² + q²)` and
-   * `atan2(q, p) / rate`, the phase brought into its range.
-   *
-   * With many rows the scan uses a sample of the rows (`scanCb`); with
-   * `allRows` (the re-scoring of the best sampled points) every row (`cb`). */
-  const linearSolveAt = (
-    point: number[],
-    allRows: boolean
-  ): [number[], number] | null | 'nonlinear' => {
-    const rowsCb = allRows ? cb : scanCb;
-    const theta = specs.map((s, j) => clamp(s.start, lo[j], hi[j]));
-    gridScans.forEach((s, k) => (theta[s.index] = point[k]));
-    for (const j of linearIdx) theta[j] = 0;
-    for (const ph of phases) theta[ph.phase] = 0;
-    const nl = linearIdx.length;
-    // The unknowns of the system: one per linear parameter, then one per
-    // phase (the coefficient `q` of its quarter-turn column). The amplitude
-    // of a phase and its `q` are unbounded: the bounds of the amplitude were
-    // checked by `linearPhases`.
-    const ns = nl + phases.length;
-    const amplitudeSlots = new Set(
-      phases.map((ph) => linearIdx.indexOf(ph.amplitude))
-    );
-    const slotLo: number[] = [];
-    const slotHi: number[] = [];
-    for (let a = 0; a < ns; a++) {
-      const bounded = a < nl && !amplitudeSlots.has(a);
-      slotLo.push(bounded ? lo[linearIdx[a]] : -Infinity);
-      slotHi.push(bounded ? hi[linearIdx[a]] : Infinity);
-    }
-    const quarterTurns = phases.map((ph) => Math.PI / (2 * ph.rate));
-    // Per data row: the offset (the model with the linear parameters at zero)
-    // and the basis column values, kept for the active-set loop and the check.
-    const offsets: number[] = [];
-    const targets: number[] = [];
-    const columns: number[][] = [];
-    let finite = true;
-    rowsCb.eachRow(theta, (unit, row, rec) => {
-      const offset = unit.fn(rec);
-      const phi = linearIdx.map((j) => unit.deriv[j]!(rec));
-      phases.forEach((ph, m) => {
-        const name = rowsCb.pFresh[ph.phase];
-        rec[name] = quarterTurns[m];
-        phi.push(unit.deriv[ph.amplitude]!(rec));
-        rec[name] = 0;
+  // The problem of the separable scan, over plain numbers (`fit-scan.ts`):
+  // `linearScanSolve()` solves one grid point of it, on this thread or on a
+  // kernel worker. A column is read only when the search is separable,
+  // which requires an analytic derivative for every linear parameter.
+  const noColumn = (): number => NaN;
+  const scanProblem: FitScanProblem = {
+    units: units.map((u, k) => ({
+      varFresh: u.varFresh,
+      rows: scanRows(u.rows, u.varFresh.length),
+      ...(sampled
+        ? {
+            sample: scanRows(
+              sampleRowIndices(u.rows.length, sampleCounts[k]).map(
+                (i) => u.rows[i]
+              ),
+              u.varFresh.length
+            ),
+          }
+        : {}),
+      model: u.fn,
+      columns: linearIdx.map((j) => u.deriv[j] ?? noColumn),
+    })),
+    paramFresh: cb.pFresh,
+    linearIdx,
+    gridIdx: gridScans.map((s) => s.index),
+    lo,
+    hi,
+    start: specs.map((s, j) => clamp(s.start, lo[j], hi[j])),
+    phases: phases.map(({ amplitude, phase, rate, positive }) => ({
+      amplitude,
+      phase,
+      rate,
+      positive,
+    })),
+  };
+  // The same problem with the stored code of each function, for a kernel
+  // worker, when every function the scan evaluates has one.
+  let wire: WireFitProblem | undefined;
+  if (separable) {
+    const wireUnits: WireFitProblem['units'] = [];
+    for (let k = 0; k < units.length; k++) {
+      const model = units[k].stored;
+      const columns = linearIdx.map((j) => units[k].derivStored[j]);
+      if (model === undefined || columns.some((c) => c === undefined)) {
+        wireUnits.length = 0;
+        break;
+      }
+      wireUnits.push({
+        ...scanProblem.units[k],
+        model,
+        columns: columns as StoredKernel[],
       });
-      if (!Number.isFinite(offset) || phi.some((v) => !Number.isFinite(v))) {
-        finite = false;
-        return;
-      }
-      offsets.push(offset);
-      targets.push(row.y);
-      columns.push(phi);
-    });
-    if (!finite) return null;
-
-    // Active-set loop over the unknowns: `fixed[a]` holds the value an
-    // unknown is pinned at (a bound it crossed), or NaN while it is free.
-    const values: number[] = new Array(ns).fill(0);
-    const fixed: number[] = new Array(ns).fill(NaN);
-    // An unknown whose column is zero, or nearly a combination of the
-    // columns before it, is pinned at 0 (or the bound nearest 0) first. At
-    // such a point (`b x` a whole number of turns at every row, so the sine
-    // column vanishes and the cosine column is constant) the normal equations
-    // are singular, and solving them anyway gives two huge coefficients that
-    // cancel: the model at those values then loses its precision and fails
-    // the linearity check below. The test is an incremental Cholesky
-    // factorization of the Gram matrix of the columns: a column is dependent
-    // when its squared distance from the span of the kept columns is at most
-    // `1e-12` times its squared norm. The two columns of a phase have the
-    // same scale (the amplitude's coefficient times `g(B)` and `g(B + π/2)`),
-    // so one of them is also dropped when its squared norm is at most
-    // `1e-12` times their sum: rounding leaves such a column at about 1e-14
-    // instead of 0, which is not dependent on the others but carries no
-    // information either.
-    {
-      const gram: number[][] = Array.from({ length: ns }, () =>
-        new Array(ns).fill(0)
-      );
-      for (const phi of columns)
-        for (let u = 0; u < ns; u++)
-          for (let v = 0; v <= u; v++) gram[u][v] += phi[u] * phi[v];
-      phases.forEach((ph, m) => {
-        const u = linearIdx.indexOf(ph.amplitude);
-        const v = nl + m;
-        const total = gram[u][u] + gram[v][v];
-        if (gram[v][v] <= 1e-12 * total) fixed[v] = 0;
-        else if (gram[u][u] <= 1e-12 * total) fixed[u] = 0;
-      });
-      const kept: number[] = [];
-      const factor: number[][] = [];
-      for (let i = 0; i < ns; i++) {
-        if (!Number.isNaN(fixed[i])) continue;
-        const l: number[] = [];
-        for (let t = 0; t < kept.length; t++) {
-          let s = gram[i][kept[t]];
-          for (let u = 0; u < t; u++) s -= l[u] * factor[t][u];
-          l.push(s / factor[t][t]);
-        }
-        let d = gram[i][i];
-        for (const v of l) d -= v * v;
-        if (!(d > 1e-12 * gram[i][i])) {
-          fixed[i] = clamp(0, slotLo[i], slotHi[i]);
-          continue;
-        }
-        l.push(Math.sqrt(d));
-        factor.push(l);
-        kept.push(i);
-      }
     }
-    for (let pass = 0; pass <= ns; pass++) {
-      const free: number[] = [];
-      for (let a = 0; a < ns; a++) if (Number.isNaN(fixed[a])) free.push(a);
-      const nf = free.length;
-      const A: number[][] = Array.from({ length: nf }, () =>
-        new Array(nf).fill(0)
-      );
-      const b: number[] = new Array(nf).fill(0);
-      for (let r = 0; r < columns.length; r++) {
-        const phi = columns[r];
-        let target = targets[r] - offsets[r];
-        for (let a = 0; a < ns; a++)
-          if (!Number.isNaN(fixed[a])) target -= phi[a] * fixed[a];
-        for (let u = 0; u < nf; u++) {
-          b[u] += phi[free[u]] * target;
-          for (let v = 0; v < nf; v++) A[u][v] += phi[free[u]] * phi[free[v]];
-        }
-      }
-      const sol = nf > 0 ? solveWithInflation(A, b) : [];
-      if (!sol) return null;
-      let crossed = false;
-      free.forEach((a, u) => {
-        if (sol[u] < slotLo[a]) {
-          fixed[a] = slotLo[a];
-          crossed = true;
-        } else if (sol[u] > slotHi[a]) {
-          fixed[a] = slotHi[a];
-          crossed = true;
-        } else values[a] = sol[u];
-      });
-      if (!crossed) break;
-    }
-    for (let a = 0; a < ns; a++)
-      if (!Number.isNaN(fixed[a])) values[a] = fixed[a];
-    for (let a = 0; a < nl; a++) theta[linearIdx[a]] = values[a];
-    phases.forEach((ph, m) => {
-      const p = values[linearIdx.indexOf(ph.amplitude)];
-      const q = values[nl + m];
-      let amplitude = Math.hypot(p, q);
-      let angle = Math.atan2(q, p);
-      // `−A · g(t + π) = A · g(t)` for a sinusoid `g`: a non-positive
-      // amplitude when its bounds ask for one.
-      if (!ph.positive) {
-        amplitude = -amplitude;
-        angle += Math.PI;
-      }
-      theta[ph.amplitude] = amplitude;
-      theta[ph.phase] = wrapPhase(angle / ph.rate, ph);
-    });
-
-    // The linear prediction against the model itself at the solved point.
-    let predicted = 0;
-    for (let r = 0; r < columns.length; r++) {
-      let value = offsets[r];
-      for (let a = 0; a < ns; a++) value += columns[r][a] * values[a];
-      predicted += (value - targets[r]) ** 2;
-    }
-    const rss = sumOfSquares(rowsCb.residual(theta));
-    if (!Number.isFinite(rss)) return null;
-    if (Math.abs(rss - predicted) > 1e-8 * (1 + rss + predicted))
-      return 'nonlinear';
-    return [theta, rss];
+    if (wireUnits.length === units.length)
+      wire = { ...scanProblem, units: wireUnits };
+  }
+  const scanDeadline = (): void => {
+    checkDeadline(deadlineFrame());
+    checkAborted(signal);
   };
 
+  /** Separable step: with the scanned parameters fixed at `point` (the
+   * values of `gridScans`), solve the linear parameters, and the phases of
+   * `phases`, by least squares (`linearScanSolve()` in `fit-scan.ts`). With
+   * many rows the scan uses a sample of the rows; with `allRows` (the
+   * re-scoring of the best sampled points) every row. */
+  const linearSolveAt = (point: number[], allRows: boolean) =>
+    linearScanSolve(scanProblem, point, allRows, scanDeadline);
+
   // The pure-number operations of a task (`fit-executor.ts`): the plan below
-  // decides which tasks to run, the executor runs them. Today the executor
-  // runs them here, in order; the plan is written so that a worker pool can
-  // run the same tasks (design: `docs/plans/2026-10-20-worker-kernel-pool.md`,
+  // decides which tasks to run, the executor runs them, on this thread
+  // (`InlineFitExecutor`) or, for the scan, on a kernel pool
+  // (`PoolFitExecutor`; design: `docs/plans/2026-10-20-worker-kernel-pool.md`,
   // section 5.5). The scan of `linearSolveAt` may run on a sample of the
   // rows; the solver runs always use every row.
-  const onIteration = () => checkDeadline(ce._deadlineFrame);
+  const onIteration = scanDeadline;
   const boundedLM = (theta0: number[]): LMResult =>
     levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
       lo,
@@ -1863,7 +1865,7 @@ function solveGlobal(
         phase += Math.PI / ph.rate;
       }
       theta[ph.amplitude] = amplitude;
-      theta[ph.phase] = wrapPhase(phase, ph);
+      theta[ph.phase] = wrapPhase(phase, ph, lo, hi);
     }
     if (theta.every((v, j) => v === r.theta[j])) return r;
     let norm: number;
@@ -1897,7 +1899,7 @@ function solveGlobal(
     startRss: (theta0) => sumOfSquares(cb.residual(theta0)),
     lm,
   };
-  const outcome = runFitPlanSync(
+  const plan = () =>
     globalSearchPlan(separable, scans, thetaAt, {
       gridScans,
       // Not read by the multi-start, the only strategy left when the
@@ -1905,9 +1907,24 @@ function solveGlobal(
       gridCounts: gridCountList === 'over-budget' ? [] : gridCountList,
       startCounts: startCountList,
       sampled,
-    }),
-    new InlineFitExecutor(kernel)
-  );
+    });
+  return {
+    plan,
+    kernel,
+    separable,
+    wire,
+    finish: (outcome) => globalRecord(ce, names, thetaAt, scans, outcome),
+  };
+}
+
+/** The record of a global search from the outcome of its plan. */
+function globalRecord(
+  ce: IComputeEngine,
+  names: string[],
+  thetaAt: (point: number[]) => number[],
+  scans: GlobalScan[],
+  outcome: GlobalSearchOutcome | 'no-finite-value'
+): Expression {
   if (outcome === 'no-finite-value')
     return ce.error(
       'unexpected-argument',
@@ -1959,6 +1976,18 @@ function solveGlobal(
 const clamp = (x: number, lo: number, hi: number): number =>
   x < lo ? lo : x > hi ? hi : x;
 
+/** The rows of a unit as the separable scan reads them (`FitScanRows`): one
+ * `Float64Array` per fit variable, and the targets. */
+function scanRows(rows: DataRow[], nvars: number): FitScanRows {
+  const x = Array.from({ length: nvars }, () => new Float64Array(rows.length));
+  const y = new Float64Array(rows.length);
+  rows.forEach((row, i) => {
+    for (let k = 0; k < nvars; k++) x[k][i] = row.x[k];
+    y[i] = row.y;
+  });
+  return { x, y };
+}
+
 // The parameter fresh-name array is attached to every unit so `solve` can read
 // it back without re-threading it through the signature.
 interface FitUnitWithParams extends FitUnit {
@@ -2007,7 +2036,188 @@ function findFitCore(
   ops: ReadonlyArray<Expression>,
   ctx: SetupContext
 ): Expression | undefined {
-  if (ops.length < 4) return undefined;
+  const setup = findFitSetup(ce, ops, ctx);
+  if ('done' in setup) return setup.done;
+  const { units, specs, scans } = setup;
+  return scans.length > 0
+    ? solveGlobal(ce, units, specs, scans)
+    : solve(ce, units, specs);
+}
+
+/**
+ * `FindFit(data, model, params, vars)` on the asynchronous route (the
+ * `evaluateAsync` handler of `FindFit`): with a kernel pool on the engine
+ * (`ce.workers`), the separable scan of a global search runs on the pool's
+ * workers; the solver runs (the refinements, the multi-start, a fit with no
+ * `global` option) stay on the calling thread. The record is the one
+ * `findFit` gives: the workers solve each grid point with the same code
+ * (`linearScanSolve()` in `fit-scan.ts`) on the same numbers, and the plan
+ * reads the results by index. Only a search cut short by the deadline can
+ * differ, since the pool solves points in another order
+ * (`docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.5).
+ *
+ * The pool is used when the search is separable and every function its
+ * scan evaluates compiled to code a worker can run (`storedKernel`).
+ * Otherwise, and with no pool, this is `findFit`.
+ *
+ * The data operand is evaluated with `evaluateAsync(options)`, so data from
+ * an operator that has only an asynchronous handler is read, and a long data
+ * operand yields to the event loop. `options` are the handler's options in
+ * the form an operand evaluation takes (`awaitedOperandOptions()`): the
+ * setup and the work on this thread after the `await` run with the
+ * evaluation's registry, context stack and precision window
+ * (`runWithEvaluationEffects`), as the synchronous handler would.
+ *
+ * The deadline is the engine's deadline frame at the call: the kernel checks
+ * that frame on this thread, and the workers get its time. The engine's
+ * iteration limit at the call is sent to the workers.
+ *
+ * An abort of `options.signal` rejects with a `CancellationError` whose
+ * `cause` is the signal's reason, whatever that reason is (a reason of
+ * `'timeout'` does not turn into a timeout record). The fit on this thread
+ * checks the signal at each row and at each solver iteration, so it stops
+ * within a row; a slice that a worker runs finishes on the worker, and its
+ * result is dropped.
+ */
+export async function findFitAsync(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> = {}
+): Promise<Expression | undefined> {
+  const signal = options.signal;
+  const frame = ce._deadlineFrame;
+  const deadlineFrame = () => frame;
+  const ctx: SetupContext = { phase: 'setup' };
+  const effects = options._effects;
+  const inContext = <T>(f: () => T): T =>
+    effects === undefined
+      ? f()
+      : runWithEvaluationEffects(
+          ce,
+          effects,
+          f,
+          options._contextStack,
+          options._precisionWindow
+        );
+  // A cancellation of the signal rejects, whatever its cause; a timeout of
+  // the deadline is reported in band, as on the synchronous route.
+  const timeoutOrThrow = (e: unknown): Expression => {
+    if (!isTimeoutCancellation(e)) throw e;
+    checkAborted(signal);
+    return timeoutRecord(ce, ctx);
+  };
+  const answer = (value: Expression | undefined): Expression | undefined => {
+    // A cancellation that the solver read as a timeout (the signal's reason
+    // was `'timeout'`) ended the fit early: the signal still rejects.
+    checkAborted(signal);
+    return value;
+  };
+
+  let data: Expression | undefined;
+  try {
+    checkAborted(signal);
+    if (ops.length >= 4) data = await ops[0].canonical.evaluateAsync(options);
+  } catch (e) {
+    return timeoutOrThrow(e);
+  }
+
+  const pool = fitSlicePool(ce.workers);
+  type Pooled = {
+    search: GlobalSearch;
+    pool: NonNullable<typeof pool>;
+    wire: WireFitProblem;
+  };
+  let pooled: Pooled;
+  try {
+    const inline = inContext((): { value: Expression | undefined } | Pooled => {
+      const setup = findFitSetup(ce, ops, ctx, { data, deadlineFrame });
+      if ('done' in setup) return { value: setup.done };
+      const { units, specs, scans } = setup;
+      if (scans.length === 0)
+        return { value: solve(ce, units, specs, deadlineFrame, signal) };
+      const prepared = prepareGlobalSearch(
+        ce,
+        units,
+        specs,
+        scans,
+        deadlineFrame,
+        signal
+      );
+      if ('done' in prepared) return { value: prepared.done };
+      if (
+        pool === undefined ||
+        !prepared.separable ||
+        prepared.wire === undefined
+      )
+        return {
+          value: prepared.finish(
+            runFitPlanSync(
+              prepared.plan(),
+              new InlineFitExecutor(prepared.kernel)
+            )
+          ),
+        };
+      return { search: prepared, pool, wire: prepared.wire };
+    });
+    if ('value' in inline) return answer(inline.value);
+    pooled = inline;
+  } catch (e) {
+    return timeoutOrThrow(e);
+  }
+  const { search, pool: fitPool, wire } = pooled;
+  // The kernel's work on this thread (the refinements, the multi-start, a
+  // slice that the pool could not take) runs after an `await`: with the
+  // evaluation's registry and context stack, for a model that is
+  // interpreted.
+  const kernel: FitKernel = {
+    linearSolveAt: (point, allRows) =>
+      inContext(() => search.kernel.linearSolveAt(point, allRows)),
+    startRss: (theta0) => inContext(() => search.kernel.startRss(theta0)),
+    lm: (theta0) => inContext(() => search.kernel.lm(theta0)),
+  };
+  try {
+    const outcome = await runFitPlanAsync(
+      search.plan(),
+      new PoolFitExecutor(kernel, fitPool, wire, {
+        deadline: frame?.at,
+        iterationLimit: ce.iterationLimit,
+        signal,
+      })
+    );
+    return answer(inContext(() => search.finish(outcome)));
+  } catch (e) {
+    // The executors catch the deadline in the tasks; this is the net for
+    // one that escapes between them, reported as the synchronous route
+    // reports a timeout in the solve.
+    return timeoutOrThrow(e);
+  } finally {
+    fitPool.releaseFit(wire);
+  }
+}
+
+/**
+ * The setup of `FindFit`: parse the operands and the options, evaluate the
+ * data, and prepare one unit per model. Returns `{ done }` with the answer
+ * when there is nothing to fit (an inert call, an error), or the units, the
+ * parameter specs and the global scans.
+ *
+ * The asynchronous route (`findFitAsync`) gives `evaluated`: the value of the
+ * data operand, which it evaluated with `evaluateAsync()`, and the deadline
+ * frame it captured at the call, which the final deadline check reads.
+ */
+function findFitSetup(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  ctx: SetupContext,
+  evaluated?: {
+    data: Expression | undefined;
+    deadlineFrame: () => DeadlineFrame | undefined;
+  }
+):
+  | { done: Expression | undefined }
+  | { units: FitUnitWithParams[]; specs: ParamSpec[]; scans: GlobalScan[] } {
+  const done = (value: Expression | undefined) => ({ done: value });
+  if (ops.length < 4) return done(undefined);
   // The operator is `lazy`, so the operands arrive held and UNBOUND (raw box
   // or parse output). Canonicalize each here to resolve parse sugar
   // (`InvisibleOperator` juxtaposition → `Multiply`) and bind collections —
@@ -2020,25 +2230,27 @@ function findFitCore(
 
   const specs = parseParamSpecs(paramsOp);
   if (specs === 'error')
-    return ce.error('unexpected-argument', 'FindFit: malformed parameter spec');
-  if (!specs) return undefined;
+    return done(
+      ce.error('unexpected-argument', 'FindFit: malformed parameter spec')
+    );
+  if (!specs) return done(undefined);
   ctx.specs = specs;
 
   // The optional fifth argument: the options dictionary (`global`).
   const scans = parseFitOptions(ce, ops[4], specs);
-  if (!Array.isArray(scans)) return scans;
+  if (!Array.isArray(scans)) return done(scans);
 
   const varNames = parseVars(varsOp);
-  if (!varNames) return undefined;
+  if (!varNames) return done(undefined);
   const nvars = varNames.length;
 
   // Model list (joint form) vs single model.
   const models = isFunction(modelOp, 'List') ? [...modelOp.ops] : [modelOp];
   const k = models.length;
   if (k === 0)
-    return ce.error('unexpected-argument', 'FindFit: empty model list');
+    return done(ce.error('unexpected-argument', 'FindFit: empty model list'));
 
-  const data = dataOp.evaluate();
+  const data = evaluated?.data ?? dataOp.evaluate();
 
   // Datasets: one per model (joint), or a single shared/broadcast dataset.
   let datasets: DataRow[][];
@@ -2047,12 +2259,12 @@ function findFitCore(
     if (perModel) datasets = perModel;
     else {
       const shared = extractDataset(data, nvars);
-      if (!shared) return undefined;
+      if (!shared) return done(undefined);
       datasets = models.map(() => shared);
     }
   } else {
     const ds = extractDataset(data, nvars);
-    if (!ds) return undefined;
+    if (!ds) return done(undefined);
     datasets = [ds];
   }
 
@@ -2074,7 +2286,7 @@ function findFitCore(
       paramFresh,
       scans.length > 0
     );
-    if (!unit) return undefined; // unresolved symbol → inert
+    if (!unit) return done(undefined); // unresolved symbol → inert
     units.push({ ...unit, paramFresh });
   }
 
@@ -2082,11 +2294,9 @@ function findFitCore(
   // other deadline check of its own: the ones it used to reach were inside
   // the evaluation of the data, and written-out data evaluates to itself
   // without a walk.
-  checkDeadline(ce._deadlineFrame);
+  checkDeadline(evaluated?.deadlineFrame() ?? ce._deadlineFrame);
   ctx.phase = 'solve';
-  return scans.length > 0
-    ? solveGlobal(ce, units, specs, scans)
-    : solve(ce, units, specs);
+  return { units, specs, scans };
 }
 
 /** `FindRoot(equations, params)`. */

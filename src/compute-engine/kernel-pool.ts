@@ -33,6 +33,12 @@
  * result reports `done`, the number of leading cells that are valid: all of
  * them, or fewer when the `deadline` or the `signal` stopped the batch. The
  * cells after `done` are never written.
+ *
+ * The same queue carries the slices of grid points of a `FindFit` separable
+ * scan (`runFitSlice`, used by `PoolFitExecutor` in `fit-executor.ts`): the
+ * worker is sent the fit problem once (`fit-load`), then each slice
+ * (`fit-run`). These methods are not part of the public `KernelPool`
+ * interface; `fitSlicePool()` reaches them.
  */
 
 import type {
@@ -51,9 +57,12 @@ import type {
   KernelKind,
   MainToWorkerMessage,
   StoredKernel,
+  WireFitProblem,
   WireInputs,
   WorkerToMainMessage,
 } from './kernel-protocol.js';
+import type { FitScanRows } from './fit-scan.js';
+import type { FitSlicePool } from './fit-executor.js';
 import type {
   KernelPool,
   KernelPoolOptions,
@@ -90,6 +99,7 @@ interface SliceResult {
 
 /** A task queued for a worker: one slice of one batch. */
 interface Task {
+  type: 'cells';
   kind: KernelKind;
   stored: StoredResult;
   inputs: BroadcastInputs;
@@ -101,20 +111,42 @@ interface Task {
   reject: (e: Error) => void;
 }
 
+/** A task queued for a worker: one slice of the grid points of a `FindFit`
+ * separable scan (`runFitSlice`). */
+interface FitSliceTask {
+  type: 'fit';
+  problem: WireFitProblem;
+  /** Owned by the task: its buffer is transferred to the worker. */
+  points: Float64Array;
+  allRows: boolean;
+  deadline: number | undefined;
+  iterationLimit: number | undefined;
+  signal: AbortSignal | undefined;
+  resolve: (r: SliceResult) => void;
+  reject: (e: Error) => void;
+}
+
+type QueuedTask = Task | FitSliceTask;
+
 interface Slot {
   worker: WorkerLike;
   ready: Promise<void>;
   /** Settles `ready` with an error: a worker that failed to start, a version
    * mismatch, or `dispose()` while starting. */
   failReady: (e: Error) => void;
-  /** Kernels the worker was sent (`load`), by id. */
+  /** Kernels and fit problems the worker was sent (`load`, `fit-load`), by
+   * id. */
   loaded: Set<number>;
-  /** Kernels whose load the worker refused: their tasks are rejected here. */
+  /** Kernels and fit problems whose load the worker refused: their tasks are
+   * rejected here. */
   refused: Map<number, string>;
   /** The tasks waiting for this worker, in order. */
-  queue: Task[];
-  /** The task the worker runs now, by job id, or none. */
-  running: { job: number; task: Task } | undefined;
+  queue: QueuedTask[];
+  /** The task the worker runs now, by job id, or none. `settled` is set when
+   * the signal aborted the task while it ran: its caller has its answer, and
+   * the job stays here until the worker replies, since the worker is busy
+   * until then. */
+  running: { job: number; task: QueuedTask; settled?: boolean } | undefined;
   /** Set when the worker is gone (failed, exited, disposed). */
   dead: boolean;
 }
@@ -143,7 +175,7 @@ export function isShippableCode(text: string): boolean {
   return !RANDOM_HELPERS.test(text);
 }
 
-class KernelPoolImpl implements KernelPool {
+class KernelPoolImpl implements KernelPool, FitSlicePool {
   readonly [POOL_BRAND] = true;
   readonly size: number;
   private slots: (Slot | undefined)[];
@@ -195,8 +227,9 @@ class KernelPoolImpl implements KernelPool {
     this.slots.fill(undefined);
   }
 
-  /** The kernel id of a stored result, assigned on first use. */
-  private kernelId(stored: StoredResult): number {
+  /** The kernel id of a stored result or a fit problem, assigned on first
+   * use. */
+  private kernelId(stored: object): number {
     let id = this.kernelIds.get(stored);
     if (id === undefined) {
       id = this.nextKernelId++;
@@ -278,13 +311,16 @@ class KernelPoolImpl implements KernelPool {
           resolveReady();
           return;
         }
-        case 'result': {
+        case 'result':
+        case 'fit-result': {
           const running = slot.running;
-          // A late result of a task the main thread settled on abort.
           if (!running || running.job !== m.job) return;
           slot.running = undefined;
-          running.task.resolve({ out: m.out, done: m.done });
-          this.pump(slot);
+          // A late result of a task the main thread settled on abort is
+          // dropped; the worker is free again either way.
+          if (!running.settled)
+            running.task.resolve({ out: m.out, done: m.done });
+          void this.pump(slot);
           return;
         }
         case 'error': {
@@ -295,8 +331,8 @@ class KernelPoolImpl implements KernelPool {
           const running = slot.running;
           if (!running || running.job !== m.job) return;
           slot.running = undefined;
-          running.task.reject(new Error(m.message));
-          this.pump(slot);
+          if (!running.settled) running.task.reject(new Error(m.message));
+          void this.pump(slot);
           return;
         }
         default:
@@ -366,9 +402,11 @@ class KernelPoolImpl implements KernelPool {
   ): Promise<SliceResult> {
     if (this.unusable !== undefined)
       return Promise.reject(new Error(this.unusable));
-    const slot = this.pickSlot();
-    return new Promise<SliceResult>((resolve, reject) => {
-      const task: Task = {
+    const slot = this.pickSlotOrReject();
+    if (slot instanceof Promise) return slot;
+    return new Promise<SliceResult>((resolve, reject) =>
+      this.enqueue(slot, {
+        type: 'cells',
         kind,
         stored,
         inputs,
@@ -378,22 +416,152 @@ class KernelPoolImpl implements KernelPool {
         signal,
         resolve,
         reject,
+      })
+    );
+  }
+
+  /**
+   * Solve a slice of the grid points of a `FindFit` separable scan on a
+   * worker (`FitSlicePool.runFitSlice` in `fit-executor.ts`). The worker is
+   * sent the problem once (`fit-load`), then the points (`fit-run`); the
+   * buffer of `points` is transferred. Resolves to the encoded solutions and
+   * the count of points solved (`done: 0` when the signal aborted before
+   * the task ran). Rejects when the pool is unusable, the worker refused the
+   * problem or failed; the caller then solves the points inline.
+   */
+  runFitSlice(
+    problem: WireFitProblem,
+    points: Float64Array,
+    allRows: boolean,
+    deadline: number | undefined,
+    iterationLimit: number | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<SliceResult> {
+    if (this.unusable !== undefined)
+      return Promise.reject(new Error(this.unusable));
+    const slot = this.pickSlotOrReject();
+    if (slot instanceof Promise) return slot;
+    return new Promise<SliceResult>((resolve, reject) =>
+      this.enqueue(slot, {
+        type: 'fit',
+        problem,
+        points,
+        allRows,
+        deadline,
+        iterationLimit,
+        signal,
+        resolve,
+        reject,
+      })
+    );
+  }
+
+  /** The slot `pickSlot()` gives, or a rejected promise when it throws (the
+   * host's worker factory failed, for example because the page may not
+   * create workers): the caller then finishes inline. */
+  private pickSlotOrReject(): Slot | Promise<never> {
+    try {
+      return this.pickSlot();
+    } catch (e) {
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
+    }
+  }
+
+  /** Tell every worker that loaded the fit problem to forget it: the fit
+   * is over. A later slice of the same problem loads it again. */
+  releaseFit(problem: WireFitProblem): void {
+    const id = this.kernelIds.get(problem);
+    if (id === undefined) return;
+    this.unloadEverywhere(id);
+    for (const slot of this.slots) slot?.refused.delete(id);
+  }
+
+  /** Queue `task` on `slot` and send it when the worker is free. */
+  private enqueue(slot: Slot, task: QueuedTask): void {
+    slot.queue.push(task);
+    // An abort settles the task here, whether it waits in the queue or
+    // runs on the worker. A queued task leaves the queue. A running task
+    // stays the slot's running job until the worker replies (the worker is
+    // busy until then), and its late reply is dropped; the reply then sends
+    // the next task of the queue.
+    const signal = task.signal;
+    if (signal !== undefined) {
+      const onAbort = (): void => {
+        const q = slot.queue.indexOf(task);
+        if (q >= 0) slot.queue.splice(q, 1);
+        else if (slot.running?.task === task) slot.running.settled = true;
+        task.resolve({ out: new Float64Array(0), done: 0 });
+        // The aborted task may be the one a pending `pump()` waits to send:
+        // that call then stops, and this one sends the next task.
+        void this.pump(slot);
       };
-      slot.queue.push(task);
-      // An abort settles the task here, whether it waits in the queue or
-      // runs on the worker: the worker's late result is then ignored.
-      signal?.addEventListener(
-        'abort',
-        () => {
-          const q = slot.queue.indexOf(task);
-          if (q >= 0) slot.queue.splice(q, 1);
-          else if (slot.running?.task === task) slot.running = undefined;
-          resolve({ out: new Float64Array(0), done: 0 });
-        },
-        { once: true }
-      );
+      signal.addEventListener('abort', onAbort, { once: true });
+      // The listener holds the task, and a fit task holds every row of the
+      // problem: remove it when the task settles, so that a long-lived
+      // signal shared by many evaluations does not keep their data alive.
+      const { resolve, reject } = task;
+      task.resolve = (r) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(r);
+      };
+      task.reject = (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      };
+    }
+    void this.pump(slot);
+  }
+
+  /** Send a fit task to the slot's worker, the problem first if the worker
+   * does not hold it. */
+  private sendFit(slot: Slot, task: FitSliceTask): void {
+    const id = this.kernelId(task.problem);
+    const refusal = slot.refused.get(id);
+    if (refusal !== undefined) {
+      task.reject(new Error(refusal));
       void this.pump(slot);
-    });
+      return;
+    }
+    if (!slot.loaded.has(id)) {
+      slot.loaded.add(id);
+      // Each worker gets its own copy of the rows, transferred: several
+      // workers load the same problem.
+      const transfer: ArrayBuffer[] = [];
+      const copyRows = (rows: FitScanRows): FitScanRows => {
+        const x = rows.x.map((a) => a.slice());
+        const y = rows.y.slice();
+        for (const a of x) transfer.push(a.buffer as ArrayBuffer);
+        transfer.push(y.buffer as ArrayBuffer);
+        return { x, y };
+      };
+      const problem: WireFitProblem = {
+        ...task.problem,
+        units: task.problem.units.map((u) => ({
+          ...u,
+          rows: copyRows(u.rows),
+          ...(u.sample ? { sample: copyRows(u.sample) } : {}),
+        })),
+      };
+      slot.worker.postMessage(
+        { type: 'fit-load', id, problem } satisfies MainToWorkerMessage,
+        transfer
+      );
+    }
+    const job = this.nextJob++;
+    slot.running = { job, task };
+    slot.worker.postMessage(
+      {
+        type: 'fit-run',
+        job,
+        id,
+        points: task.points,
+        width: task.problem.gridIdx.length,
+        allRows: task.allRows,
+        deadline: task.deadline,
+        iterationLimit: task.iterationLimit,
+      } satisfies MainToWorkerMessage,
+      [task.points.buffer as ArrayBuffer]
+    );
   }
 
   /** Send the slot's next queued task once the worker is ready and idle. */
@@ -411,6 +579,10 @@ class KernelPoolImpl implements KernelPool {
     if (task.signal?.aborted) {
       task.resolve({ out: new Float64Array(0), done: 0 });
       void this.pump(slot);
+      return;
+    }
+    if (task.type === 'fit') {
+      this.sendFit(slot, task);
       return;
     }
     const id = this.kernelId(task.stored);
@@ -486,6 +658,18 @@ function isKernelPool(pool: unknown): pool is KernelPoolImpl {
     pool !== null &&
     (pool as { [POOL_BRAND]?: unknown })[POOL_BRAND] === true
   );
+}
+
+/**
+ * The pool `pool` as the `FindFit` scan uses it (`PoolFitExecutor` in
+ * `fit-executor.ts`), or `undefined` when it is not a pool this module built
+ * or it is unusable (its workers hold another runtime version). The fit
+ * methods are not part of the public `KernelPool` interface.
+ */
+export function fitSlicePool(
+  pool: unknown
+): (FitSlicePool & { releaseFit(problem: WireFitProblem): void }) | undefined {
+  return isKernelPool(pool) && pool.unusable === undefined ? pool : undefined;
 }
 
 export function createKernelPool(options: KernelPoolOptions): KernelPool {

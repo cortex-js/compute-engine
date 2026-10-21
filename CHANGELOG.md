@@ -52,6 +52,33 @@
   tensor can be in both: `list<list<list<real>>>` and `list<number>` share a
   rank-3 tensor of reals.
 
+- The meet of two collection types of the same kind no longer drops values
+  that are in both. Two lists, two indexed collections or two collections
+  whose elements are at different depths are kept as written:
+  `list<number> & list<list<integer>>` was `list<never>`, although an integer
+  matrix is in both. Two lists with different fixed shapes are met row by
+  row: `list<number^(2x2)> & list<list<integer>^2>` is
+  `list<integer^(2x2)>` (it was `never`), and `list<number^2> & list<integer^-1>`
+  is `list<integer^2>` (it was `never`). A list with a fixed length and no
+  common element is `never`: `list<number^2> & list<string^2>` was
+  `list<never^2>`. A bare `list` is read as `list<unknown>`:
+  `list<any^3> & list` is `list<unknown^3>` (it was `never`). The overlap
+  test follows: `list<number^(2x2)>` and `list<list<integer>^2>` now overlap,
+  which two protocol conformances on these types would show as a collision.
+
+- Two recursive aliases that can share no finite value are disjoint: with
+  `type alias A = tuple<A> | integer` and `type alias B = tuple<B> | string`,
+  `A & B` is `never` and the two types do not overlap (they were kept as
+  written and overlapped). `couldMatch()` reads the arms of a recursive
+  alias: with `type alias json = list<json> | integer`,
+  `couldMatch(number, json)` is `true` (it was `false`).
+
+- The meet, the overlap test, `couldMatch()` and `provablyDisjoint()` of
+  types built from a chain of aliases with two branches at each level
+  (`Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>`) take a time that grows with the depth
+  of the chain. The work doubled at each level: at depth 20, the overlap
+  test took about 7 s and the meet did not finish in 10 minutes.
+
 - A literal empty list at a required or optional point parameter is accepted
   and maps to `[]` without invoking the function, matching evaluation.
 
@@ -432,6 +459,32 @@
   410 ms and missed the fit (residual sum 1,947); it now takes about 260 to
   330 ms and finds it. On 200 rows the deciding cases take about 45 to 70 ms
   (they took about 90 to 100 ms).
+
+- **`FindFit` with the `global` option runs its grid scan on the engine's
+  worker pool on the asynchronous route.** When the engine has a kernel pool
+  (`ce.workers`, see `createKernelPool()`), `expr.evaluateAsync()` sends the
+  grid points of the scan to the workers in one slice per worker; the
+  refinements by the solver stay on the calling thread. Each worker solves
+  its points with the code the calling thread uses, on the same numbers, so
+  the record is the record of `evaluate()`. The pool is used only when the
+  model and the derivatives the scan reads compile to JavaScript that a
+  worker can run (a model with a function that does not compile, such as
+  `LogGamma`, runs on the calling thread), and only for a model that is
+  linear in the parameters that are not searched (otherwise each grid point
+  is a solver run, on the calling thread). A worker that fails or refuses the
+  problem is replaced by the calling thread for its points, with the same
+  result. The engine's `iterationLimit` applies on the workers too. An
+  abort of the `signal` of `evaluateAsync()` rejects the evaluation with a
+  `CancellationError`, whatever the reason given to `abort()`; the fit on
+  the calling thread stops within a data row, and a slice that a worker runs
+  finishes there and its result is dropped. On the asynchronous route, with
+  or without a pool, the data operand is evaluated with `evaluateAsync()`, so
+  data from an operator that has only an asynchronous handler is read.
+  `evaluate()` does not use the pool. Measured with
+  `a cos(b x + c) + d x + e` (`benchmarks/workers/fit-parallel.mts`, load
+  average 6 on 18 cores): 1,000 rows with `b` over `[0.3, 628]` take 62 ms
+  with 8 workers and 76 ms with 4, against 230 ms for `evaluate()`; the
+  200-row cases take 13 to 23 ms with 8 workers, against 34 to 42 ms.
 
 ## 0.159.0 _2026-10-20_
 

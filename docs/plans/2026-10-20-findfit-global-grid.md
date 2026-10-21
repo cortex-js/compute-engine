@@ -2,8 +2,8 @@
 
 Status: approved 2026-10-20 by the user (Tycho ledger row 407, with step 5 of
 `docs/plans/2026-10-20-worker-kernel-pool.md`). Phase A, INCLUDING phase A2,
-IMPLEMENTED 2026-10-20 on the main tree (uncommitted, dual-reviewed, 9
-findings applied; test `test/compute-engine/find-fit-global-grid.test.ts`).
+IMPLEMENTED 2026-10-20, committed `c240193f0` (dual-reviewed, 9 findings
+applied; test `test/compute-engine/find-fit-global-grid.test.ts`).
 Measured (section 3.5 gate): with 3.1 to 3.4 alone the two-parameter grid of
 398 × 20 points cost about 400 ms on 200 rows, over the 250 ms budget, so A2
 was required; with A2 the three deciding cases take 45 to 70 ms and the
@@ -17,7 +17,9 @@ timeout during a sampled scan reports `residualNorm: NaN` (3.4); the rates are
 converted to radians with the engine's angular unit, and `Tan`/`Cot` use the
 period π (3.1). Open residue: a power of a periodic function (`cos(b x + c)²`,
 period π) is spaced as the inner function (period 2π). Phase B follows once
-Tycho has adopted phase A.
+Tycho has adopted phase A. Phase B (section 4) IMPLEMENTED 2026-10-21 in the
+worktree `ce-407b-pool-scan` (not reviewed yet): the 1,000-row case takes
+62 ms with 8 workers (section 4.2).
 
 ## 1. The problem (Tycho row 407)
 
@@ -163,6 +165,107 @@ scan of about 400 points.
 - The LM refinements stay on the calling thread (six short runs).
 - Measured target: the 1,000-row, `[0.3, 628]` case under 250 ms with 8
   workers.
+
+### 4.1 What was built (2026-10-21, worktree `ce-407b-pool-scan`)
+
+- `src/compute-engine/fit-scan.ts` (new, no engine import): the linear
+  solve of one grid point, `linearScanSolve(problem, point, allRows,
+  checkDeadline)`, over a `FitScanProblem` (per unit the rows as one
+  `Float64Array` per variable plus the targets, every row and the sample;
+  the fresh names; the model and one column per linear parameter as
+  `(record) => number`; the linear and grid indices; the bounds; the start
+  vector; the amplitude–phase pairs). It is the former `linearSolveAt`
+  closure of `solveGlobal`, moved, with one difference: a non-finite row
+  returns `null` at once instead of after the remaining rows. The main
+  thread's `linearSolveAt` is now a call of it, and the worker calls it on
+  the same problem rebuilt from stored code, so a point solved on a worker is
+  the point the main thread solves. The shared code lives in `fit-scan.ts`,
+  not in `fit-executor.ts` as the bullet above said, so that the worker
+  bundle does not take in the executor.
+- `prepareUnit()` keeps the stored form of the compiled model and of each
+  analytic column (`storedKernel()`): `javascript` target, `calling:
+  'expression'`, a `runtimeVersion`, and code that passes `isShippableCode`.
+  The implicit compile passes no `functions`, `vars` or `preamble`, so the
+  code names nothing of the host. A fit ships when every unit's model and
+  every linear column has a stored form; an interpreted fallback does not.
+- Protocol (`kernel-protocol.ts`): `fit-load` (the problem in wire form,
+  `WireFitProblem = FitScanProblemOf<StoredKernel>`, the rows copied and
+  transferred per worker), `fit-run` (a slice of points, flattened, `width`
+  values per point, `allRows`, `deadline`, and the engine's
+  `iterationLimit`, which the worker sets on its runtime before the slice,
+  as for `run`), and the reply `fit-result`
+  (per point a code 0 solved, 1 no solution, 2 nonlinear, the residual sum
+  and the parameter vector; `done` points). `unload` forgets a problem too.
+  A slice stops after a nonlinear point, which is then its last point.
+- Worker: rebuilds each function with `createJavaScriptRuntime().load()`
+  (which refuses another runtime version), projects a non-number to `NaN`
+  as `implicitCompileNumeric` does, and runs `linearScanSolve` with a
+  `Date.now()` check before each point and every 256 rows. A timeout
+  `CancellationError` thrown by a loop of a compiled helper (the runtime's
+  `deadline`) also ends the slice: the points done are sent.
+- Pool: `runFitSlice(problem, points, allRows, deadline, iterationLimit,
+  signal)` and `releaseFit(problem)` on the internal pool class only,
+  reached with `fitSlicePool(ce.workers)`. The queue, the abort, the
+  one-load-per-worker and the remembered refusal are those of `runSlice`;
+  `releaseFit` also forgets the refusal. A worker factory that throws
+  rejects the slice, which is then solved on the calling thread. An abort
+  of a slice that a worker runs settles the slice at once, but there is no
+  cancel message: the slice finishes on its worker, its result is dropped,
+  and the worker's reply sends the next slice of its queue.
+- Executor: `PoolFitExecutor(kernel, pool, problem, { deadline,
+  iterationLimit, signal })`
+  and `runFitPlanAsync`. The scan points of a batch go in one slice per
+  worker; every returned prefix is committed by index; a rejected slice is
+  solved on the calling thread; a slice cut short with no nonlinear point
+  sets `timedOut` (a slice after a nonlinear point at a lower index does
+  not, and a rejected slice after it is not solved: the plan reads no index
+  after a nonlinear point). Start tasks run through `InlineFitExecutor`. An
+  abort rejects with a `CancellationError` whose cause is the signal's
+  reason. `globalSearchPlan` did not change.
+- `findFitAsync` (the `evaluateAsync` of `FindFit`): the data operand is
+  evaluated with `evaluateAsync()` and the handler's options, so data from
+  an operator with only an asynchronous handler is read. The setup then runs
+  with the evaluation's registry, context stack and precision window
+  (`runWithEvaluationEffects`), the search is prepared by
+  `prepareGlobalSearch` (shared with `solveGlobal`), and the plan runs on
+  `PoolFitExecutor` when there is a pool and the search is separable and
+  ships, inline otherwise. The deadline is the frame armed when
+  `findFitAsync` is called. On the public route this frame is normally
+  absent: the span of `withTimeLimit` closes before an `evaluateAsync`
+  handler runs (measured: `ce._deadlineFrame` is `undefined` at the
+  handler's start), so the asynchronous route is bounded by its `signal`,
+  as the other asynchronous evaluations are. The test of a deadline cut
+  calls `findFitAsync` inside a span.
+- The abort: the fit on the calling thread (with or without a pool) checks
+  the signal with the deadline, at each row and each solver iteration, so
+  an abort stops it within a row. An abort rejects with a
+  `CancellationError` whatever its reason: a reason of `'timeout'` does not
+  become a timeout record. A slice that a worker runs when the signal
+  aborts finishes on its worker and its result is dropped (a `cancel`
+  message to the worker is not implemented).
+
+### 4.2 Measured (2026-10-21)
+
+`benchmarks/workers/fit-parallel.mts`, median of 7 calls, setup included,
+load average 6.0 / 9.4 / 13.3 on 18 cores (shared box, under the box lock).
+Every pooled record was the record of `evaluate()`.
+
+| case | `evaluate()` | 1 worker | 4 workers | 8 workers |
+| --- | ---: | ---: | ---: | ---: |
+| 200 rows, b = 2.2, `[0.3, 2π/gap]` | 42 ms | 36 | 21 | 23 |
+| 200 rows, b = 50, `[0.3, 2π/gap]` | 36 | 30 | 18 | 20 |
+| 200 rows, b = 2.2, `[0.3, 120]` | 34 | 28 | 14 | 13 |
+| 200 rows, b = 2.2, `[0.3, 60]` | 37 | 29 | 16 | 13 |
+| 5 rows (`5hn1azxfc8`), `[0.1, 6]` | 3.7 | 3.7 | 3.6 | 3.6 |
+| 1,000 rows, b = 2.2, `[0.3, 628]` | 230 | 184 | 76 | 62 |
+
+The 1,000-row case is under the 250 ms target with 8 workers (62 ms). The
+five-point case is a multi-start (the model is not linear in `c`, which is
+not searched) and stays on the calling thread. One worker is faster than the
+calling thread (184 ms against 230 ms); the cause was not measured. The two
+call the same code through different wrappers: `run()` on the calling
+thread goes through a proxy (`ComputeEngineFunction`), the worker through
+the closure that `load()` returns.
 
 ## 5. Tests and records
 

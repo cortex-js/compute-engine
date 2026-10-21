@@ -68,12 +68,32 @@ export function implicitCompileNumeric(
   ce: IComputeEngine,
   expr: Expression
 ): ((vars: Record<string, number>) => number) | undefined {
+  return implicitCompileNumericResult(ce, expr)?.fn;
+}
+
+/**
+ * `implicitCompileNumeric`, with the compilation result the function comes
+ * from: a caller that ships the stored code to a worker (the `FindFit` scan
+ * on a kernel pool) reads its `code`, preambles and `runtimeVersion`.
+ */
+export function implicitCompileNumericResult(
+  ce: IComputeEngine,
+  expr: Expression
+):
+  | {
+      fn: (vars: Record<string, number>) => number;
+      result: ReturnType<IComputeEngine['_compile']>;
+    }
+  | undefined {
   const compiled = implicitCompile(ce, expr);
   if (!compiled?.success || typeof compiled.run !== 'function')
     return undefined;
   const run = compiled.run as (vars: Record<string, number>) => unknown;
-  return (vars) => {
-    const v = run(vars);
-    return typeof v === 'number' ? v : NaN;
+  return {
+    fn: (vars) => {
+      const v = run(vars);
+      return typeof v === 'number' ? v : NaN;
+    },
+    result: compiled,
   };
 }

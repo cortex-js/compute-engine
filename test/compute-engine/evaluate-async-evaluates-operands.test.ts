@@ -712,7 +712,6 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
     'Expand',
     'ExpandAll',
     'Factor',
-    'FindFit',
     'FindRoot',
     'FlatMap',
     'Function',
@@ -822,6 +821,8 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
       'ArgMax',
       'ArgMin',
       'Reduce',
+      // The global scan on the engine's kernel pool (`findFitAsync`).
+      'FindFit',
     ]) {
       expect(def(name).evaluatesOperands).toBe(false);
       expect(typeof def(name).evaluateAsync).toBe('function');

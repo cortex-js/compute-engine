@@ -266,6 +266,10 @@ describe('the kernel pool on worker threads', () => {
     const after = await r.broadcastAsync!({ x: xs });
     expect(after.done).toBe(30_000);
     expectSame(after.out, r.broadcast!({ x: xs }));
+    // The batch above may have created the workers of the disposed pool
+    // again (a batch after `dispose()` does): terminate them, or they keep
+    // the test process alive.
+    pool.dispose();
     // A fresh pool for the remaining tests and `afterAll`.
     pool = createKernelPool({
       create: () => new Worker(WORKER_URL, { execArgv: ['--import', 'tsx'] }),
