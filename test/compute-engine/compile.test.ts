@@ -140,14 +140,16 @@ describe('COMPILE', () => {
   });
 
   describe('Conditionals / Ifs', () => {
-    // `x` is declared `number` in this suite, so `x > 0` is undecided at
-    // `x = NaN` and the emitted ternary is wrapped in the operand NaN test the
-    // undecided-condition ruling (2026-09-02) added. See the "compiled
-    // If/Which take no branch on an undecided condition" describe below.
+    // An unsupplied `x` leaves `x > 0` undecided, so the emitted ternary is
+    // wrapped in the operand test the undecided-condition ruling (2026-09-02)
+    // added. A NaN `x` decides `x > 0` false (user decision 2026-10-20), so
+    // the test has no NaN conjunct (`_.x === _.x`) any more. See the
+    // "compiled If/Which take no branch on an undecided condition" describe
+    // in `compile-elementwise-which.test.ts`.
     it('should compile an if statement', () => {
       const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
+        `((_.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
       );
     });
 
@@ -159,7 +161,7 @@ describe('COMPILE', () => {
         ['Block', ['Negate', 'x']],
       ]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
+        `((_.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
       );
     });
   });

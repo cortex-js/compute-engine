@@ -164,11 +164,20 @@ describe('a lazy operator at the top level under .N()', () => {
     ).toBe('0');
   });
 
-  test('a condition decided by NaN selects no branch', () => {
+  test('a condition decided by NaN takes the else branch, NotEqual none', () => {
+    // User decision 2026-10-20: `NaN < 0` is `False` in a branch condition
+    // too (before it, the `If` selected no branch and gave `Missing`). A
+    // `NotEqual` with a NaN operand still selects no branch.
     const ce = new ComputeEngine();
     expect(
       ce
         .box(['If', ['Less', 'NaN', 0], 1, 2])
+        .N()
+        .toString()
+    ).toBe('2');
+    expect(
+      ce
+        .box(['If', ['NotEqual', 'NaN', 0], 1, 2])
         .N()
         .toString()
     ).toBe('"Missing"');

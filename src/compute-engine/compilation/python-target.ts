@@ -4026,7 +4026,8 @@ function compilePythonBranch(
         ' and '
       )}) else ${absent})`;
     },
-    PYTHON_CONDITION_DIALECT
+    PYTHON_CONDITION_DIALECT,
+    decidability.test.nanTest
   );
   return bindings.length === 0 ? value : target.bindExpr!(bindings, value);
 }
@@ -4243,7 +4244,8 @@ function compilePythonIfStatement(
           : [...conjuncts, `(${code})`].join(' and ');
       return suite(`if ${test}:`, branch(1));
     },
-    PYTHON_CONDITION_DIALECT
+    PYTHON_CONDITION_DIALECT,
+    decidability.test.nanTest
   );
   if (bindings.length === 0) return value;
   return `${bindings.map(([n, c]) => `${n} = ${c}`).join('\n')}\n${value}`;

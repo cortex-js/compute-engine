@@ -281,3 +281,197 @@ describe('a broadcast over a list literal with an element that may evaluate to N
     }
   });
 });
+
+// An element read over a base that declares `any` elements (`list<any>`,
+// `collection<any>`, `indexed_collection<any>`) or that is a top type which
+// may hold a collection (`any`, `value`) is typed `any`. It used to be
+// `unknown`, the values-only top, so `P[i] - P[j]` typed
+// `broadcastable<number>` while its value can be a point: `(3, 4) - (1, 1)`
+// is `(2, 3)` (Tycho ledger row 409). A base whose type was inferred keeps
+// `unknown`: there `any` means "no element type yet", and a numeric use
+// refines the base (`elementReadType()`, `library/collections.ts`).
+describe('an element read over a base that declares any elements', () => {
+  function declared(t?: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    if (t !== undefined) ce.declare('P', t);
+    ce.declare('i', 'integer');
+    ce.declare('j', 'integer');
+    return ce;
+  }
+
+  test.each([
+    ['list<any>', 'any'],
+    ['collection<any>', 'any'],
+    ['indexed_collection<any>', 'any'],
+    ['any', 'any'],
+    ['value', 'any'],
+    // Controls
+    ['list<number>', 'number'],
+    ['list<integer>', 'integer | nan'],
+    ['list', 'unknown'],
+  ])('P: %s, P[i] is %s on the parse and box routes', (t, expected) => {
+    const ce = declared(t);
+    expect(ce.parse('P[i]').type.toString()).toBe(expected);
+    expect(typeOf(ce, ['At', 'P', 'i'])).toBe(expected);
+    expect(
+      ce.function('At', [ce.symbol('P'), ce.symbol('i')]).type.toString()
+    ).toBe(expected);
+  });
+
+  test.each([['list<any>'], ['any']])(
+    'P: %s, the difference of two reads is any',
+    (t) => {
+      const ce = declared(t);
+      expect(ce.parse('P[i]-P[j]').type.toString()).toBe('any');
+      expect(ce.symbol('P').type.toString()).toBe(t);
+    }
+  );
+
+  test('P: list<number>, the difference of two reads is a number', () => {
+    const ce = declared('list<number>');
+    expect(ce.parse('P[i]-P[j]').type.toString()).toBe('number');
+  });
+
+  test.each([['unknown'], [undefined]])(
+    'P: %s (inferred), a read is unknown and a numeric use refines P',
+    (t) => {
+      const ce = declared(t);
+      expect(ce.parse('P[i]').type.toString()).toBe('unknown');
+      expect(ce.parse('P[i]-P[j]').type.toString()).toBe('number');
+      expect(ce.symbol('P').type.toString()).toBe('indexed_collection<number>');
+    }
+  );
+
+  test('the other accessors and access forms', () => {
+    const ce = declared('list<any>');
+    ce.declare('A', 'any');
+    ce.declare('M', 'list<list<any>>');
+    ce.declare('D', 'dictionary<any>');
+    ce.declare('k', 'string');
+    expect(typeOf(ce, ['First', 'P'])).toBe('any');
+    expect(typeOf(ce, ['Last', 'P'])).toBe('any');
+    expect(typeOf(ce, ['First', 'A'])).toBe('any');
+    expect(typeOf(ce, ['At', 'P', ['List', 1, 2]])).toBe('list<any>');
+    expect(typeOf(ce, ['At', 'M', 'i', 'j'])).toBe('any');
+    expect(typeOf(ce, ['At', 'A', 'i', 'j'])).toBe('any');
+    expect(typeOf(ce, ['At', 'D', 'k'])).toBe('any');
+    expect(typeOf(ce, ['Field', 'D', { str: 'a' }])).toBe('any');
+    ce.declare('E', 'dictionary<number>');
+    expect(typeOf(ce, ['Field', 'E', { str: 'a' }])).toBe('number');
+  });
+
+  test('P: any holding points, the type of the difference holds its value', () => {
+    const ce = declared('any');
+    ce.assign('P', ce.box(['List', ['Tuple', 3, 4], ['Tuple', 1, 1]]));
+    const expr = ce.parse('P[1]-P[2]');
+    const value = expr.evaluate();
+    expect(value.toString()).toBe('(2, 3)');
+    expect(value.type.matches(expr.type)).toBe(true);
+  });
+
+  // A function of a read keeps `any`: the read may be a point or a list, and
+  // `any` is the declared element.
+  test.each([
+    [['Sqrt', ['At', 'P', 'i']]],
+    [['Sin', ['At', 'P', 'i']]],
+    [['h', ['At', 'P', 'i']]],
+  ])('P: list<any>, %j is any', (json) => {
+    const ce = declared('list<any>');
+    ce.declare('h', '(number) -> number');
+    expect(typeOf(ce, json)).toBe('any');
+  });
+
+  test.each([
+    ['tuple<any, any>', ['At', 'T', 'i'], 'any'],
+    ['tuple<number, any>', ['At', 'T', 'i'], 'any'],
+    ['tuple<number, any>', ['At', 'T', 1], 'number'],
+    ['record{a: any, b: number}', ['At', 'T', 'k'], 'any'],
+    ['record{a: any, b: number}', ['At', 'T', { str: 'b' }], 'number'],
+    ['list<any>', ['Second', 'T'], 'any'],
+    ['list<any>', ['Third', 'T'], 'any'],
+  ])('T: %s, %j is %s', (t, json, expected) => {
+    const ce = declared();
+    ce.declare('T', t);
+    ce.declare('k', 'string');
+    expect(typeOf(ce, json)).toBe(expected);
+  });
+
+  // `Rest(P)` holds the elements of `P`: with `P` inferred, a read of it is
+  // `unknown` as a read of `P` is, not `any`.
+  test('P inferred, a read of Rest(P) is unknown', () => {
+    const ce = declared();
+    ce.box(['First', 'P']);
+    expect(ce.symbol('P').type.toString()).toBe('indexed_collection<any>');
+    expect(typeOf(ce, ['At', ['Rest', 'P'], 1])).toBe('unknown');
+    expect(typeOf(ce, ['Add', ['At', ['Rest', 'P'], 1], 1])).toBe(
+      'broadcastable<number>'
+    );
+  });
+
+  // `Take(P, 2)` and `Rest(P)` with `P` undeclared are typed
+  // `list<unknown> | string`. A read of them is `unknown`, not the
+  // `character` of the `string` option, so a numeric use is valid.
+  test.each([[['Take', 'P', 2]], [['Rest', 'P']]])(
+    'P inferred, a numeric use of a read of %j is valid',
+    (part) => {
+      const ce = declared();
+      expect(typeOf(ce, ['At', part, 'i'])).toBe('unknown');
+      const sum = ce.box(['Add', ['At', part, 'i'], 1] as any);
+      expect(sum.isValid).toBe(true);
+      expect(sum.type.toString()).toBe('broadcastable<number>');
+    }
+  );
+});
+
+// A read of an element of a list, a set or an abstract collection is never
+// `Nothing` (a list literal drops it), so its type `any` does not make a
+// tuple of such reads refuse to compile as a tuple with omitted coordinates
+// (`BaseCompiler.isElementReadWithoutNothing()`).
+describe('a tuple of reads of a collection with any elements compiles', () => {
+  const POINT = ['Tuple', ['At', 'P', 1], ['At', 'P', 2]];
+
+  test.each([['list<any>'], ['collection<any> | tuple']])(
+    'P: %s, on javascript',
+    (t) => {
+      const ce = new ComputeEngine();
+      ce.declare('P', t);
+      const result = compile(ce.box(POINT as any), { to: 'javascript' });
+      expect(result.success).toBe(true);
+      if (result.success)
+        expect(result.run({ P: [5, 6] } as never)).toEqual([5, 6]);
+    }
+  );
+
+  test('P: list<any^2>, on glsl', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<any^2>');
+    const result = compile(ce.box(POINT as any), { to: 'glsl' });
+    expect(result.success).toBe(true);
+    expect(result.code).toBe('vec2(P.x, P.y)');
+  });
+
+  // GLSL still refuses a base with no known length, but not for an omission.
+  test.each([['list<any>'], ['collection<any> | tuple']])(
+    'P: %s, on glsl, the refusal is not about Nothing',
+    (t) => {
+      const ce = new ComputeEngine();
+      ce.declare('P', t);
+      const result = compile(ce.box(POINT as any), { to: 'glsl' });
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.message ?? '').not.toMatch(/Nothing/);
+    }
+  );
+
+  // A tuple slot may hold `Nothing`: a read of a slot typed `any` still
+  // refuses.
+  test('T: tuple<number, any>, the refusal stands', () => {
+    const ce = new ComputeEngine();
+    ce.declare('T', 'tuple<number, any>');
+    const result = compile(
+      ce.box(['Tuple', ['At', 'T', 1], ['At', 'T', 2]] as any),
+      { to: 'javascript' }
+    );
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+  });
+});

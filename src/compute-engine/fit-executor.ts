@@ -38,11 +38,14 @@ import { isTimeoutCancellation } from '../common/interruptible.js';
 import type { LMResult } from './numerics/levenberg-marquardt.js';
 
 /** A point of the separable scan: the scanned parameters fixed at `point`,
- * the linear ones solved by least squares. */
+ * the linear ones solved by least squares. With `allRows`, the solve uses
+ * every data row even when the scan runs on a sample of the rows (the
+ * re-scoring of the best points of a sampled scan). */
 export interface LinearScanTask {
   kind: 'linear';
   index: number;
   point: number[];
+  allRows?: boolean;
 }
 
 /**
@@ -103,7 +106,7 @@ export interface FitBatchResult {
  * `CancellationError`; `lm` may instead return a result with `timedOut`.
  */
 export interface FitKernel {
-  linearSolveAt: (point: number[]) => LinearScanSolution;
+  linearSolveAt: (point: number[], allRows: boolean) => LinearScanSolution;
   startRss: (theta0: number[]) => number;
   lm: (theta0: number[]) => LMResult;
 }
@@ -122,7 +125,10 @@ export class InlineFitExecutor implements FitExecutor {
     for (const task of tasks) {
       try {
         if (task.kind === 'linear') {
-          const solved = this.kernel.linearSolveAt(task.point);
+          const solved = this.kernel.linearSolveAt(
+            task.point,
+            task.allRows === true
+          );
           results.push({ kind: 'linear', index: task.index, solved });
           // The structural test was wrong about this model: the plan falls
           // back to a multi-start, and the points after this one would be

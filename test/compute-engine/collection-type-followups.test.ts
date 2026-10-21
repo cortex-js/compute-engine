@@ -194,11 +194,14 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
   test.each([
     [['Add', 'x', 1], 'list<number>', '[2,NaN]'],
     [['List', 'x'], 'list<vector<1>>', '[[1],[NaN]]'],
-    // A `Missing` that the body returns for a present cell is kept.
+    // A `Missing` that the body returns for a present cell is kept. For the
+    // absent cell `x` is `NaN`, and `NaN > 0` is `False` (user decision
+    // 2026-10-20), so the else arm gives `NaN` (before the decision the `If`
+    // took no arm and gave `Missing`).
     [
       ['If', ['Greater', 'x', 0], 'Missing', 'x'],
       'list<missing | number>',
-      '["Missing","Missing"]',
+      '["Missing",NaN]',
     ],
     [['Greater', 'x', 0], 'list<boolean>', '["True","False"]'],
   ] as [MathJsonExpression, string, string][])('%j', (body, type, value) => {
@@ -213,7 +216,8 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
 
   test('several sources of an abstract collection type', () => {
     // The result is an `indexed_collection`: the `Missing` that the body
-    // returns for a present cell is kept.
+    // returns for a present cell is kept. The absent cell gives `NaN`: the
+    // else arm of `NaN > 0` (user decision 2026-10-20).
     const e = new ComputeEngine();
     e.declare('ca', 'collection<integer | missing>');
     e.assign('ca', e.box(['List', 1, 'Missing']));
@@ -237,7 +241,7 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
     ])
       expect(
         expectTypeHoldsValue(e, expr, 'indexed_collection<missing | number>')
-      ).toBe('["Missing","Missing"]');
+      ).toBe('["Missing",NaN]');
   });
 
   test('the parse route', () => {

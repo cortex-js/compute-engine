@@ -65,3 +65,40 @@ describe('SUM OF A COLLECTION OF POINTS OR ROWS', () => {
     expect(ce.box(['Sum', 'xs']).type.toString()).toBe('integer');
   });
 });
+
+// A term typed `any` may be a point, and the sum of points is a point, so the
+// sum keeps the type `any` (`bigOpTopType()`, `library/type-handlers.ts`).
+describe('SUM OF TERMS TYPED ANY', () => {
+  test.each([
+    ['any', ['Sum', ['At', 'P', 'k'], ['Limits', 'k', 1, 3]]],
+    ['any', ['Sum', 'P']],
+    ['list<any>', ['Sum', ['At', 'P', 'k'], ['Limits', 'k', 1, 3]]],
+    ['list<any>', ['Sum', 'P']],
+  ])('P: %s, %j holds its value', (t, json) => {
+    const ce = new ComputeEngine();
+    ce.declare('P', t);
+    ce.assign('P', ce.parse('[(3,4),(1,1),(0,0)]'));
+    const expr = ce.box(json as any);
+    expect(expr.type.toString()).toBe('any');
+    const value = expr.evaluate();
+    expect(value.toString()).toBe('(4, 5)');
+    expect(value.type.matches(expr.type)).toBe(true);
+  });
+
+  test('a product of terms typed any is any', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<any>');
+    expect(
+      ce
+        .box(['Product', ['At', 'P', 'k'], ['Limits', 'k', 1, 3]])
+        .type.toString()
+    ).toBe('any');
+  });
+
+  // A symbol whose type was inferred keeps the numeric reading.
+  test('P inferred, the sum is a number', () => {
+    const ce = new ComputeEngine();
+    ce.box(['First', 'P']);
+    expect(ce.box(['Sum', 'P']).type.toString()).toBe('number');
+  });
+});

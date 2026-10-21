@@ -126,6 +126,10 @@ export function freshIntervalValue(value: unknown): unknown {
     Number.isNaN(value.value.lo)
   )
     return { kind: 'empty' };
+  // The `missing` flag of an `empty` result (an absent value whose
+  // interpreter value is `Missing`) is read by the comparisons inside the
+  // compiled code only. The runner gives every absent value one spelling.
+  if (value.kind === 'empty') return { kind: 'empty' };
   const copy: Record<string, unknown> = { ...value };
   if (isPlainInterval(copy.value)) copy.value = { ...copy.value };
   else if (Array.isArray(copy.value))

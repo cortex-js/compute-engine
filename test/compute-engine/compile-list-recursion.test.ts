@@ -176,10 +176,12 @@ describe('list-building recursion compiles to a loop', () => {
   });
 
   it('an undecided guard at depth zero answers undefined, as the recursive arrow did', () => {
-    // `D` is unassigned, so `n = D - 1` compares against NaN and the
-    // compiled `Which` answers `undefined` on its first step; nothing was
-    // collected, so that is the result, on the loop as on the recursive
-    // arrow.
+    // `D` is not supplied, so `n = D - 1` is undecided and the compiled
+    // `Which` answers `undefined` on its first step; nothing was collected,
+    // so that is the result, on the loop as on the recursive arrow. Until
+    // the user decision of 2026-10-20 the case was run with `D = NaN`; a
+    // NaN operand now decides `n = D - 1` false, and the recursion runs to
+    // the iteration limit, as it does for any `D` it never reaches.
     const ce = new ComputeEngine();
     ce.declare('D', 'number');
     ce.declare('F', '(number) -> list<number>');
@@ -191,21 +193,25 @@ describe('list-building recursion compiles to a loop', () => {
     );
     const r = compile(ce.box(['F', 0]), { fallback: false });
     expect(String(r!.preamble)).toContain('_SYS.listRecursion');
-    expect(r!.run!({ D: NaN })).toBeUndefined();
+    expect(r!.run!({})).toBeUndefined();
+    expect(() => r!.run!({ D: NaN })).toThrow(/Iteration limit of 1024/);
   });
 
   it('an undecided guard after a collected prefix throws the TypeError the nested spread threw', () => {
     // The next argument `n / m` turns NaN when `m` is 0 after the first
-    // step; the recursive arrow then spread `undefined` into the collected
-    // prefix (`[...[n], ...undefined]`), a `TypeError`, and the loop keeps
-    // that outcome.
+    // step, and `NaN ≠ 5` is undecided (a NaN operand leaves only `≠`
+    // undecided since the user decision of 2026-10-20; the case used the
+    // guard `n = 5` with the arms swapped before it). The recursive arrow
+    // then spread `undefined` into the collected prefix
+    // (`[...[n], ...undefined]`), a `TypeError`, and the loop keeps that
+    // outcome.
     const ce = new ComputeEngine();
     ce.declare('m', 'number');
     ce.declare('F', '(number) -> list<number>');
     ce.assign(
       'F',
       ce.parse(
-        String.raw`n \mapsto \left\{n=5:\left[n\right], \left[n\right].\operatorname{join}\left(F(\frac{n}{m})\right)\right\}`
+        String.raw`n \mapsto \left\{n \ne 5:\left[n\right].\operatorname{join}\left(F(\frac{n}{m})\right), \left[n\right]\right\}`
       )
     );
     const r = compile(ce.box(['F', 0]), { fallback: false });

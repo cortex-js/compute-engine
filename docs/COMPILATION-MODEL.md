@@ -354,7 +354,11 @@ value (decided by the user, 2026-10-18):
   way: `[x, 3]` over `x = [−1, 1]` gives
   `[{ kind: 'interval', value: { lo: −1, hi: 1 } }, { kind: 'interval', value: { lo: 3, hi: 3 } }]`.
 - A relation is a tri-state verdict: the string `'true'`, `'false'` or
-  `'maybe'`.
+  `'maybe'`. An ordered comparison or an `Equal` with an `empty` operand
+  (no value over the cell) is `'false'`, as the scalar targets answer
+  `NaN > 0` with `false`; with a `partial` operand it is at most `'maybe'`.
+  A `NotEqual` with an `empty` operand is `'maybe'` (user decision
+  2026-10-20, `docs/ERROR-MODEL.md`).
 
 The interpreter fallback (`success: false`, with `fallback` not `false`)
 gives the same shapes: a number is the `interval` result of a point, and an

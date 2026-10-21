@@ -1,7 +1,10 @@
 # Web workers for parallel numeric kernels: `FindFit` and array evaluation
 
-Status: steps 1 to 4 IMPLEMENTED 2026-10-20 (on the main tree, dual-reviewed,
-17 findings applied); step 5 waits for Tycho's integration
+Status: steps 1 to 4 SHIPPED in 0.159.0 (2026-10-20, dual-reviewed, 17
+findings applied); step 5 APPROVED 2026-10-20 with Tycho row 407 (its first
+feedback) and specified as phase B of
+`docs/plans/2026-10-20-findfit-global-grid.md`; before that decision it waited
+for Tycho's integration
 feedback (section 8). The user approved steps 1 to 5 and the default pool size
 on 2026-10-20, and declined the whole-engine worker protocol for now.
 Measurements: `benchmarks/workers/*.mts`, results below.

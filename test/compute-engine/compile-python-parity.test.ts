@@ -1643,14 +1643,15 @@ describeMaybe('PYTHON EXECUTION PARITY — statement If and rank-3 Norm (venv)',
         `${fn}\n` +
         'print(json.dumps([fn_stmt_if(3), fn_stmt_if(-3), fn_stmt_if(float("nan"))]))\n'
     );
-    // Decided: the selected assignment runs. Undecided (NaN): NEITHER branch
-    // runs and `r` keeps its initial 0 — the interpreter holds such an `If`
-    // rather than choosing an arm, and the JavaScript statement form agrees.
-    expect(JSON.parse(out)).toEqual([1, 2, 0]);
-    // …and the two decided answers ARE the interpreted ones.
+    // The selected assignment runs. At NaN, `x > 0` is decided false (user
+    // decision 2026-10-20, Tycho rows 411 and 413), so the else assignment
+    // runs; before the decision NEITHER branch ran and `r` kept its 0.
+    expect(JSON.parse(out)).toEqual([1, 2, 2]);
+    // …and the three answers ARE the interpreted ones.
     for (const [x, expected] of [
       [3, 1],
       [-3, 2],
+      [NaN, 2],
     ] as const) {
       const run = new ComputeEngine();
       run.assign('x', x);

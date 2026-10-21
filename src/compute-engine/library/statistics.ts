@@ -1854,7 +1854,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         '`{global: {b: [lo, hi]}}` searches the named parameters (at most ' +
         'two) over the given range for the lowest sum of squared residuals ' +
         'instead of returning the local minimum nearest the start; ' +
-        '`iterations` is then the total over every solver run.',
+        '`iterations` is then the total over every solver run. The search ' +
+        'samples each parameter on a grid: a parameter that scales the ' +
+        'phase of a periodic function of a variable (`b` in `cos(b x + c)`) ' +
+        'gets a point in every basin of the residual, about ' +
+        '`π / (span of x)` apart; `{global: {b: [lo, hi, step]}}` sets the ' +
+        'step of the grid instead (when the model is linear in the other ' +
+        'parameters; otherwise the solver runs from each point of a coarse ' +
+        'grid of 24 points, or 6 × 6). A step on the phase `c` of ' +
+        '`a cos(b x + c)` keeps it on the grid; without a step the phase is ' +
+        'solved by least squares. With more than 300 data rows the grid is ' +
+        'scanned on a stratified sample of 300 rows, and the best grid ' +
+        'points are then solved again and refined on every row.',
       complexity: 1200,
       broadcastable: false,
       // Hold the arguments: a parameter symbol may carry a seeded document

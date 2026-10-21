@@ -1925,6 +1925,46 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
 }
 
 /**
+ * The top type (`any` or `value`) of a `Sum`/`Product` whose terms are
+ * typed with it, or `undefined` for other terms. The terms are the body in
+ * the `(body, limits…)` form, and the elements of the operand in the
+ * `Sum(L)` form (or the operand itself, when it is typed `any` or `value`).
+ *
+ * A term of a top type may be a point or a list, and the sum of points is a
+ * point: with `P: any` and `P := [(3, 4), (1, 1), (0, 0)]`,
+ * `Sum(At(P, k), k, 1, 3)` evaluates to `(4, 5)`. So the type `number` does
+ * not hold the value, and the result keeps the top type.
+ *
+ * A symbol whose type was inferred does not count: there `any` means "no
+ * element type yet" (the validation of `First` writes
+ * `indexed_collection<any>` on an undeclared base), and a numeric use
+ * refines it.
+ */
+function bigOpTopType(
+  ops: ReadonlyArray<OperandDescriptor>
+): 'any' | 'value' | undefined {
+  const body = ops[0];
+  if (body === undefined) return undefined;
+  const s = body.structureOf?.();
+  if (s?.kind === 'symbol' && s.inferred === true) return undefined;
+  const top = (type: Type | undefined): 'any' | 'value' | undefined => {
+    const t = type === undefined ? undefined : resolveTypeAlias(type);
+    return t === 'any' || t === 'value' ? t : undefined;
+  };
+  if (ops.length > 1) return top(body.type);
+  const t = resolveTypeAlias(body.type);
+  if (typeof t === 'string') return top(t);
+  if (
+    t.kind === 'list' ||
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  )
+    return top(t.elements);
+  return undefined;
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
@@ -1942,6 +1982,8 @@ export function bigOpResultType(
   ops: ReadonlyArray<OperandDescriptor>,
   operator?: 'Sum' | 'Product'
 ): Type {
+  const top = bigOpTopType(ops);
+  if (top !== undefined) return top;
   if (ops.length === 1 && operator !== undefined) {
     const reduced = extendedReductionType(operator, ops);
     if (reduced !== undefined) return reduced;

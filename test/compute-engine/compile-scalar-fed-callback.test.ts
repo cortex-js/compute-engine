@@ -50,8 +50,10 @@ describe('a callback fed a literal-start range', () => {
     expect(code).not.toContain('Array.isArray');
     expect(code).not.toContain('q === q');
     expect(code).not.toContain('typeof (q)');
-    // The free input `m` keeps its tests: the caller may leave it out.
-    expect(code).toContain('_.m === _.m');
+    // The free input `m` keeps its test: the caller may leave it out. A NaN
+    // `m` decides `q = m` false (user decision 2026-10-20), so the test is
+    // for an unsupplied value only (`_.m === _.m` before the decision).
+    expect(code).toContain('_.m !== undefined');
   });
 
   test('computes what the interpreter computes', () => {
@@ -76,9 +78,12 @@ describe('a callback fed a literal-start range', () => {
   });
 
   test('a range with a symbolic start keeps the wrapper and its tests', () => {
+    // The relation is `NotEqual`, the one relation whose NaN operand still
+    // leaves a branch undecided (user decision 2026-10-20), so the NaN test
+    // on the parameter is the witness that `q` is not exempted.
     const r = js([
       'Map',
-      ['Function', ['If', ['Equal', 'q', 'm'], 1, 0], 'q'],
+      ['Function', ['If', ['NotEqual', 'q', 'm'], 0, 1], 'q'],
       ['Range', 'm', 5],
     ]);
     expect(r.code).toContain('bcastFn');
@@ -138,24 +143,29 @@ describe('an Apply of a literal to scalar arguments', () => {
 // such a parameter is neither a decided value nor a scalar in the body.
 describe('a parameter the body reassigns', () => {
   test('a range-fed parameter assigned NaN keeps its NaN test', () => {
-    const r = js([
+    // `q ≠ 0` is undecided for NaN: the interpreter answers no value, and the
+    // compiled function answers NaN, not the `else` branch `2`. The relation
+    // is `NotEqual` because since the user decision of 2026-10-20 it is the
+    // only one whose NaN operand leaves the branch undecided; `q < 0` (the
+    // relation this case used before) now decides `false` and gives `2`.
+    const body = (rel: string): unknown => [
       'Map',
       [
         'Function',
         [
           'Block',
           ['Assign', 'q', ['Divide', 0, 0]],
-          ['If', ['Less', 'q', 0], 1, 2],
+          ['If', [rel, 'q', 0], 1, 2],
         ],
         ['Typed', 'q', "'number'"],
       ],
       ['Range', 1, 3],
-    ]);
+    ];
+    const r = js(body('NotEqual'));
     expect(r.code).not.toContain('bcastFn');
     expect(r.code).toContain('q === q');
-    // `q < 0` is undecided for NaN: the interpreter answers no value, and the
-    // compiled function answers NaN, not the `else` branch `2`.
     expect(r.run!({})).toEqual([NaN, NaN, NaN]);
+    expect(js(body('Less')).run!({})).toEqual([2, 2, 2]);
   });
 
   test('a parameter assigned a list is not read as a scalar', () => {

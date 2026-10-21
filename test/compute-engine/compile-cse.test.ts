@@ -280,13 +280,15 @@ describe('COMPILE CSE — conditionality', () => {
     expect(result.code.indexOf('_cse1')).toBeGreaterThan(
       result.code.indexOf('?')
     );
-    // The outer `_.x === _.x` is the undecided-condition guard (ruling
-    // 2026-09-02): `x` is declared `number`, so `x > 0` is undecided at
-    // `x = NaN` and the whole `Which` must answer NaN rather than the default
-    // arm. It sits OUTSIDE the ternary and binds no temporary of its own, so
-    // the arm-only CSE binding this test is about is unaffected.
+    // The outer `_.x !== undefined` is the undecided-condition guard (ruling
+    // 2026-09-02): an unsupplied `x` leaves `x > 0` undecided, and the whole
+    // `Which` must answer NaN rather than the default arm. A NaN `x` decides
+    // `x > 0` false and takes the default arm (user decision 2026-10-20), so
+    // the guard has no NaN test (`_.x === _.x`) any more. It sits OUTSIDE the
+    // ternary and binds no temporary of its own, so the arm-only CSE binding
+    // this test is about is unaffected.
     expect(result.code).toMatchInlineSnapshot(
-      `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()) : (0)) : NaN)`
+      `((_.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()) : (0)) : NaN)`
     );
 
     // The unselected arm evaluates NOTHING: a getter on the vars object counts
@@ -863,12 +865,13 @@ describe('COMPILE CSE — statement regions', () => {
     const result = compile(expr, { fallback: false });
 
     // The early exit carries the undecided-condition guard (ruling
-    // 2026-09-02): `u` may be absent from the vars object or NaN, and a
-    // `Return` must not fire on a condition that decided nothing. What this
-    // case is about is unchanged — the guarded exit still precedes the
-    // candidate's binding, so nothing was hoisted past it.
+    // 2026-09-02): `u` may be absent from the vars object, and a `Return`
+    // must not fire on a condition that decided nothing. A NaN `u` decides
+    // `u < 0` false (user decision 2026-10-20), so the guard has no NaN test.
+    // What this case is about is unchanged — the guarded exit still precedes
+    // the candidate's binding, so nothing was hoisted past it.
     expect(result.code).toContain(
-      'if (_.u === _.u && _.u !== undefined && (_.u < 0)) { return 0 }'
+      'if (_.u !== undefined && (_.u < 0)) { return 0 }'
     );
     expect(result.code.indexOf('(_.u < 0)')).toBeLessThan(
       result.code.indexOf('const _cse1')

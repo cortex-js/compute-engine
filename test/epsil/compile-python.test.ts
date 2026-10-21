@@ -52,16 +52,15 @@ describe('EPSIL → PYTHON', () => {
       's',
     ].join('\n');
     // The parser desugars `while c { … }` to `Loop(Block(If(Not(c), Break),
-    // …))`, a genuine `If` statement, so its exit test carries the same
-    // decidedness guard every statement-form `If` does (an undecided
-    // condition runs neither branch) — the JavaScript target emits
-    // `if (k === k && (!(k < 5))) { break }` for this program.
+    // …))`, a genuine `If` statement. Its exit test carried the NaN guard
+    // `k == k` until the user decision of 2026-10-20: a NaN operand now
+    // decides `k < 5` false, so the test is the comparison alone.
     expect(compileToPythonDef(source, 'g', [])).toBe(
       'def g():\n' +
         '    s = 0\n' +
         '    k = 0\n' +
         '    while True:\n' +
-        '        if k == k and (not (k < 5)):\n' +
+        '        if not (k < 5):\n' +
         '            break\n' +
         '        s = k + s\n' +
         '        k = k + 1\n' +

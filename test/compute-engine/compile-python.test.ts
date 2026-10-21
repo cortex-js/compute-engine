@@ -850,42 +850,44 @@ describe('PYTHON TARGET', () => {
       const code = python.compile(
         ce.box(['If', ['Greater', 'x', 0], 1, ['Negate', 'x']])
       ).code;
-      // The conditional expression sits behind the operand test the
-      // undecided-condition rule adds: `0 < nan` is an ordinary `False` in
-      // Python, so an undecided comparison is invisible in the condition's own
-      // value and the arm would be taken on no evidence.
-      expect(code).toBe(
-        "(((1) if (0 < x) else (-x)) if (x == x) else float('nan'))"
-      );
+      // `0 < nan` is an ordinary `False` in Python, and since the user
+      // decision of 2026-10-20 (Tycho rows 411 and 413) that is the answer:
+      // a NaN operand decides an ordered comparison false, so the
+      // conditional expression has no operand test (it had `if (x == x) else
+      // float('nan')` before the decision).
+      expect(code).toBe('((1) if (0 < x) else (-x))');
     });
 
     it('Which emits nested Python conditional expressions', () => {
       const code = python.compile(
         ce.box(['Which', ['Less', 'x', 0], -1, 'True', 1])
       ).code;
-      expect(code).toBe(
-        "(((-1) if (x < 0) else ((1))) if (x == x) else float('nan'))"
-      );
+      expect(code).toBe('((-1) if (x < 0) else ((1)))');
     });
 
     it('an undecided condition takes NO arm and answers float(nan)', () => {
       // The ruling: the Python target follows the same undecided-condition
-      // rule as the JavaScript one. `0 < nan` is an ordinary `False` in
-      // Python, so the else arm used to be handed a confident wrong answer.
+      // rule as the JavaScript one. Since the user decision of 2026-10-20 a
+      // NaN operand leaves only a `NotEqual` undecided (`nan != 0` is `True`
+      // in Python, which would hand the then arm a confident answer); an
+      // ordered comparison or an `Equal` with a NaN operand is decided false.
       // There is no Python execution harness in this suite, so the pins are on
       // the emitted SOURCE; its behavior was checked by running the emitted
       // shapes under CPython.
       const e = new ComputeEngine();
       e.declare('x', 'number');
       const code = (json: any): string => python.compile(e.box(json)).code!;
+      expect(code(['If', ['NotEqual', 'x', 0], 1, -1])).toBe(
+        "(((1) if (((x) != (0))) else (-1)) if (x == x) else float('nan'))"
+      );
       expect(code(['If', ['Greater', 'x', 0], 1, -1])).toBe(
-        "(((1) if (0 < x) else (-1)) if (x == x) else float('nan'))"
+        '((1) if (0 < x) else (-1))'
       );
       // A costly operand is bound to a lambda parameter and computed ONCE:
       // the condition embeds it and the test names it twice more.
-      const sin = code(['If', ['Greater', ['Sin', 'x'], 0], 1, -1]);
+      const sin = code(['If', ['NotEqual', ['Sin', 'x'], 0], 1, -1]);
       expect(sin).toBe(
-        "(lambda _tv1: (((1) if (0 < _tv1) else (-1)) if (_tv1 == _tv1) else float('nan')))(np.sin(x))"
+        "(lambda _tv1: (((1) if (((_tv1) != (0))) else (-1)) if (_tv1 == _tv1) else float('nan')))(np.sin(x))"
       );
       expect(sin.split('np.sin').length - 1).toBe(1);
     });
@@ -914,10 +916,17 @@ describe('PYTHON TARGET', () => {
       );
       expect(notB).not.toContain('logical_not');
       // A `Not` over a RELATION keeps the operand test: `Not` changes neither
-      // operand of the comparison under it.
+      // operand of the comparison under it. The relation is `NotEqual`, the
+      // one whose NaN operand is still undecided (user decision 2026-10-20);
+      // `Not(x > 0)` takes no test.
+      expect(
+        python.compile(e.box(['If', ['Not', ['NotEqual', 'x', 0]], 1, 2])).code
+      ).toBe(
+        "(((1) if (not ((x) != (0))) else (2)) if (x == x) else float('nan'))"
+      );
       expect(
         python.compile(e.box(['If', ['Not', ['Greater', 'x', 0]], 1, 2])).code
-      ).toBe("(((1) if (not (0 < x)) else (2)) if (x == x) else float('nan'))");
+      ).toBe('((1) if (not (0 < x)) else (2))');
     });
 
     it('a condition decided by construction emits no extra test', () => {
@@ -941,11 +950,14 @@ describe('PYTHON TARGET', () => {
       // first has not already settled the `and`. See
       // `compile-three-valued-connectives.test.ts` for the full table, the
       // short-circuit pins and the execution parity.
+      // The first leaf is a `NotEqual`, whose NaN operand is undecided; the
+      // second, `x < 2`, is decided by construction since the user decision
+      // of 2026-10-20 (a NaN operand makes it false), so it takes no test.
       const e = new ComputeEngine();
       e.declare('x', 'number');
       expect(
         python.compile(
-          e.box(['If', ['And', ['Greater', 'x', 0], ['Less', 'x', 2]], 1, 2])
+          e.box(['If', ['And', ['NotEqual', 'x', 0], ['Less', 'x', 2]], 1, 2])
         ).code
       ).toBe(
         '(lambda _CND: ((1) if (isinstance(_CND, (bool, np.bool_)) and _CND) ' +
@@ -953,8 +965,14 @@ describe('PYTHON TARGET', () => {
           '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
           '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
           '(False if _tv2 is not None and not _tv2 else None)))' +
-          '(((x < 2) if x == x else None))))(((0 < x) if x == x else None)))'
+          '((x < 2))))(((((x) != (0))) if x == x else None)))'
       );
+      // Every leaf an ordered comparison: decided by construction.
+      expect(
+        python.compile(
+          e.box(['If', ['And', ['Greater', 'x', 0], ['Less', 'x', 2]], 1, 2])
+        ).code
+      ).toBe('((1) if (0 < x and x < 2) else (2))');
     });
 
     it('When with no default uses float(nan), not a bare NaN', () => {
@@ -1706,49 +1724,59 @@ describe('PYTHON TARGET', () => {
           '    s = 0\n' +
           '    k = 1\n' +
           '    while True:\n' +
-          '        if k == k and (5 <= k):\n' +
+          '        if 5 <= k:\n' +
           '            break\n' +
           '        s = k + s\n' +
           '        k = k + 1\n' +
           '    return s\n'
       );
-      // `k == k` is the decidedness test: a condition that is not exactly
-      // `True` or `False` when the function runs takes NEITHER branch, so an
-      // undecided `k` does not fire the `break`. The JavaScript statement form
-      // emits the same test (`k === k`, `BaseCompiler.compileLoopBody`).
-      // The If compiled to a statement, not `(break) if (…) else …` (a
-      // SyntaxError); the loop is a `while`, not a JS IIFE.
+      // Until the user decision of 2026-10-20 the test was
+      // `if k == k and (5 <= k):` (an undecided NaN `k` fired no `break`).
+      // A NaN operand now decides `5 <= k` false, so no decidedness test is
+      // emitted. The If compiled to a statement, not `(break) if (…) else …`
+      // (a SyntaxError); the loop is a `while`, not a JS IIFE.
       expect(code).not.toContain('=>');
       expect(code).not.toMatch(/return for|return while/);
     });
 
     it('If/else with Continue in one branch', () => {
-      const expr = ce.box([
-        'Loop',
-        [
-          'Block',
+      const loop = (rel: string, k: number) =>
+        ce.box([
+          'Loop',
           [
-            'If',
-            ['Greater', 'k', 2],
-            ['Continue'],
-            ['Assign', 's', ['Add', 's', 'k']],
+            'Block',
+            [
+              'If',
+              [rel, 'k', k],
+              ['Continue'],
+              ['Assign', 's', ['Add', 's', 'k']],
+            ],
           ],
-        ],
-        ['Element', 'k', ['Range', 1, 5]],
-      ]);
-      const code = python.compileFunction(expr, 'g', ['s']);
+          ['Element', 'k', ['Range', 1, 5]],
+        ]);
       // With an else branch the decidedness test (`k == k`) guards BOTH arms,
       // so it is a second `if` wrapped around the selection: an undecided `k`
       // must neither `continue` nor add to `s`. Same shape as the JavaScript
-      // statement form's `if (k === k) { if (2 < k) … else … }`.
-      expect(code).toBe(
+      // statement form's `if (k === k) { if (2 < k) … else … }`. The relation
+      // is `NotEqual`: since the user decision of 2026-10-20 it is the only
+      // one whose NaN operand is undecided.
+      expect(python.compileFunction(loop('NotEqual', 2), 'g', ['s'])).toBe(
         'def g(s):\n' +
           '    for k in range(1, 6):\n' +
           '        if k == k:\n' +
-          '            if 2 < k:\n' +
+          '            if ((k) != (2)):\n' +
           '                continue\n' +
           '            else:\n' +
           '                s = k + s\n'
+      );
+      // An ordered comparison takes no decidedness test.
+      expect(python.compileFunction(loop('Greater', 2), 'g', ['s'])).toBe(
+        'def g(s):\n' +
+          '    for k in range(1, 6):\n' +
+          '        if 2 < k:\n' +
+          '            continue\n' +
+          '        else:\n' +
+          '            s = k + s\n'
       );
     });
 
@@ -1782,9 +1810,9 @@ describe('PYTHON TARGET', () => {
         if (bare[0] === 'Return') {
           const expected = python.compile(arms(bare, 1)).code;
           expect(python.compile(arms(wrapped, 1)).code).toBe(expected);
-          expect(expected).toBe(
-            "(((x) if (0 < x) else (1)) if (x == x) else float('nan'))"
-          );
+          // No decidedness test: a NaN operand decides `x > 0` false (user
+          // decision 2026-10-20).
+          expect(expected).toBe('((x) if (0 < x) else (1))');
           continue;
         }
         // A control-flow arm against a value arm: the statement block has no
@@ -1809,9 +1837,10 @@ describe('PYTHON TARGET', () => {
           expected
         );
         // The loop arm assigns the input `x`, so the code reads and writes a
-        // local copy of `x`.
+        // local copy of `x`. (The `x == x` decidedness test that preceded the
+        // selection is gone since the user decision of 2026-10-20.)
         expect(expected).toMatch(
-          bare === loop ? /^_tv1 = x\nif _tv1 == _tv1:\n/ : /^if x == x:\n/
+          bare === loop ? /^_tv1 = x\nif 0 < _tv1:\n/ : /^if 0 < x:\n/
         );
       }
       // A nested selection that mixes the two kinds is refused too.
@@ -1823,13 +1852,7 @@ describe('PYTHON TARGET', () => {
       // Both arms wrapped, and the emission spelled out.
       expect(
         python.compile(arms(['Block', ['Break']], ['Block', ['Continue']])).code
-      ).toBe(
-        'if x == x:\n' +
-          '    if 0 < x:\n' +
-          '        break\n' +
-          '    else:\n' +
-          '        continue'
-      );
+      ).toBe('if 0 < x:\n' + '    break\n' + 'else:\n' + '    continue');
     });
 
     it('a Block-wrapped Break in a loop body matches the unwrapped form', () => {
@@ -1843,10 +1866,11 @@ describe('PYTHON TARGET', () => {
           ],
         ] as any);
       const expected = python.compileFunction(body(['Break']), 'f', ['k']);
+      // No `k == k` test since the user decision of 2026-10-20.
       expect(expected).toBe(
         'def f(k):\n' +
           '    while True:\n' +
-          '        if k == k and (5 <= k):\n' +
+          '        if 5 <= k:\n' +
           '            break\n' +
           '        k = k + 1\n'
       );
@@ -1884,10 +1908,11 @@ describe('PYTHON TARGET', () => {
         ],
       ]);
       const code = python.compileFunction(expr, 'r', ['k']);
+      // No `k == k` test since the user decision of 2026-10-20.
       expect(code).toBe(
         'def r(k):\n' +
           '    while True:\n' +
-          '        if k == k and (3 <= k):\n' +
+          '        if 3 <= k:\n' +
           '            return k\n' +
           '        k = k + 1\n'
       );
@@ -1903,24 +1928,29 @@ describe('PYTHON TARGET', () => {
   // ternary here.)
   describe('Block → statement-position If', () => {
     it('an If whose branches are assignments compiles to an `if:`/`else:` block', () => {
-      const scoped = new ComputeEngine();
-      const expr = scoped.box([
-        'Block',
-        ['Declare', 'r', { str: 'unknown' }, 0],
-        ['If', ['Greater', 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
-        'r',
-      ] as any);
-      const code = python.compileFunction(expr, 'f', ['x']);
+      const fn = (rel: string): string => {
+        const scoped = new ComputeEngine();
+        const expr = scoped.box([
+          'Block',
+          ['Declare', 'r', { str: 'unknown' }, 0],
+          ['If', [rel, 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
+          'r',
+        ] as any);
+        return python.compileFunction(expr, 'f', ['x']);
+      };
       // `x == x` is the decidedness test: a condition that is not exactly
       // `True` or `False` when the function runs takes NEITHER branch, so `r`
       // keeps its initial 0. With an else branch that test guards both arms,
       // so it is a second `if` wrapped around the selection — the shape the
-      // JavaScript statement form uses (`BaseCompiler.compileLoopBody`).
+      // JavaScript statement form uses (`BaseCompiler.compileLoopBody`). The
+      // relation is `NotEqual`: since the user decision of 2026-10-20 it is
+      // the only one whose NaN operand is undecided.
+      const code = fn('NotEqual');
       expect(code).toBe(
         'def f(x):\n' +
           '    r = 0\n' +
           '    if x == x:\n' +
-          '        if 0 < x:\n' +
+          '        if ((x) != (0)):\n' +
           '            r = 1\n' +
           '        else:\n' +
           '            r = 2\n' +
@@ -1928,6 +1958,16 @@ describe('PYTHON TARGET', () => {
       );
       // The invalid emission this replaces.
       expect(code).not.toContain('(r = 1)');
+      // An ordered comparison takes no decidedness test.
+      expect(fn('Greater')).toBe(
+        'def f(x):\n' +
+          '    r = 0\n' +
+          '    if 0 < x:\n' +
+          '        r = 1\n' +
+          '    else:\n' +
+          '        r = 2\n' +
+          '    return r\n'
+      );
     });
 
     it('an ELSE-LESS If in a Block still declines', () => {
@@ -1997,14 +2037,12 @@ describe('PYTHON TARGET', () => {
     it('keeps the scalar Which on the ordinary conditional-expression path', () => {
       // A scalar condition still lowers to nested Python conditional
       // expressions — never to the collection helper this describe is about.
-      // The outer test is the undecided-condition rule's, not a fail-closed
-      // guard: it selects no clause when the comparison cannot be decided.
+      // There is no outer test: a NaN `x` decides `x < 3` false (user
+      // decision 2026-10-20; before it an `x == x` test selected no clause).
       const code = python.compile(
         ce.box(['Which', ['Less', 'x', 3], 1, 'True', 0])
       ).code;
-      expect(code).toBe(
-        "(((1) if (x < 3) else ((0))) if (x == x) else float('nan'))"
-      );
+      expect(code).toBe('((1) if (x < 3) else ((0)))');
     });
   });
 });

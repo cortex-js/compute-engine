@@ -1080,8 +1080,10 @@ describe('FindFit global option (Tycho row 404)', () => {
       ],
       ['a range with lo >= hi', { dict: { global: { dict: { b: [6, 0.1] } } } }],
       [
-        'a range that is not a pair',
-        { dict: { global: { dict: { b: [0.1, 3, 6] } } } },
+        // A third element is the grid step (`[lo, hi, step]`); a fourth is
+        // not accepted.
+        'a range with more than three elements',
+        { dict: { global: { dict: { b: [0.1, 3, 0.5, 6] } } } },
       ],
       [
         'a range outside the parameter bounds',

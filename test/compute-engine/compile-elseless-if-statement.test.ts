@@ -51,10 +51,12 @@ describe('an else-less If as a block statement', () => {
     ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
+    // The guard tests only for an unsupplied `x`: a NaN `x` decides `x > 0`
+    // false (user decision 2026-10-20), so it has no `_.x === _.x` test.
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      if (_.x === _.x && _.x !== undefined && (0 < _.x)) { s = -1 };
+      if (_.x !== undefined && (0 < _.x)) { s = -1 };
       return s
       })()"
     `);
@@ -258,8 +260,9 @@ describe('an else-less If as a block statement', () => {
   // The `If` still lowers to the expression-position TERNARY, not to the
   // `if (…) { … }` statement the else-less shape gets — that is what this case
   // pins. The ternary now sits inside the undecided-condition guard (ruling
-  // 2026-09-02): `x` is declared `number`, so `x > 0` is undecided at
-  // `x = NaN` and neither assignment may run.
+  // 2026-09-02): an unsupplied `x` leaves `x > 0` undecided and neither
+  // assignment may run. A NaN `x` decides `x > 0` false (user decision
+  // 2026-10-20), so the else assignment runs there.
   test('an If WITH an else stays the ternary', () => {
     ce.declare('x', 'number');
     const expr = ce.box([
@@ -273,14 +276,15 @@ describe('an else-less If as a block statement', () => {
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      ((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (s = -1) : (s = 2)) : NaN);
+      ((_.x !== undefined) ? ((0 < _.x) ? (s = -1) : (s = 2)) : NaN);
       return s
       })()"
     `);
     expect(r.run!({ x: 3 })).toBe(-1);
     expect(r.run!({ x: -3 })).toBe(2);
+    expect(r.run!({ x: NaN })).toBe(2);
     // Undecided: neither assignment runs, so `s` keeps its initial value.
-    expect(r.run!({ x: NaN })).toBe(1);
+    expect(r.run!({} as any)).toBe(1);
   });
 });
 
@@ -388,10 +392,11 @@ describe('the admission is plain-JavaScript only', () => {
     ]);
     const r = compile(expr, { to: 'python', fallback: false });
     expect(r.success).toBe(true);
-    // The loop-body `If` carries the same decidedness conjunct as every
-    // other statement-form `If` (an undecided condition runs neither
-    // branch), so the emitted test is guarded by `i == i`.
-    expect(r.code).toMatch(/if i == i and \(2 < i\):/);
+    // The loop-body `If` carried the NaN conjunct `i == i` until the user
+    // decision of 2026-10-20: a NaN operand now decides `i > 2` false, and
+    // Python has no unsupplied-variable test, so the emitted test is the
+    // comparison alone.
+    expect(r.code).toMatch(/if 2 < i:/);
   });
 
   test('INTERVAL JavaScript still declines — the emission would be WRONG', () => {
@@ -491,7 +496,9 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     // Decided: the assignment runs on each of the three iterations, or none.
     expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
     expect((r.run as any)({ x: -3 })).toEqual([0, 3]);
-    // Undecided: `s` is untouched and the loop still completes its 3 rounds.
+    // A NaN `x` decides `x > 0` false (user decision 2026-10-20), and an
+    // unsupplied `x` decides nothing: in both, `s` is untouched and the loop
+    // still completes its 3 rounds.
     expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
     expect((r.run as any)({})).toEqual([0, 3]);
   });
@@ -506,12 +513,12 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
     ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain(
-      'if (_.x === _.x && _.x !== undefined) { if (0 < _.x)'
-    );
+    // Only an unsupplied `x` is undecided: a NaN `x` decides `x > 0` false
+    // and runs the else branch (user decision 2026-10-20).
+    expect(r.code).toContain('if (_.x !== undefined) { if (0 < _.x)');
     expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
     expect((r.run as any)({ x: -3 })).toEqual([-3, 3]);
-    expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
+    expect((r.run as any)({ x: NaN })).toEqual([-3, 3]);
     expect((r.run as any)({})).toEqual([0, 3]);
   });
 

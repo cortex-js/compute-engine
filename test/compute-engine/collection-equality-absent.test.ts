@@ -181,7 +181,7 @@ describe('the element-wise shape is unchanged', () => {
 });
 
 describe('the marker as a branch condition', () => {
-  test('`Which` takes no arm, as it does for a NaN comparison', () => {
+  test('`Which` takes no arm, as it does for a NaN NotEqual', () => {
     const ce = engine();
     const e = [
       'Which',
@@ -192,10 +192,17 @@ describe('the marker as a branch condition', () => {
     ];
     expect(ev(ce, e)).toBe('"Missing"');
     expect(js(ce, e)).toBeNaN();
-    // The behavior this aligns with.
-    const nan = ['Which', ['Equal', 'NaN', 5], 1, 'True', 0];
+    // The behavior this aligns with: a `NotEqual` with a NaN operand. An
+    // `Equal` with a NaN operand is decided `False` since the user decision
+    // of 2026-10-20 and takes the default arm; the absent-cell marker of a
+    // whole-collection comparison (ruling of 2026-09-21) is not covered by
+    // that decision and still takes no arm.
+    const nan = ['Which', ['NotEqual', 'NaN', 5], 1, 'True', 0];
     expect(ev(ce, nan)).toBe('"Missing"');
     expect(js(ce, nan)).toBeNaN();
+    const eq = ['Which', ['Equal', 'NaN', 5], 1, 'True', 0];
+    expect(ev(ce, eq)).toBe('0');
+    expect(js(ce, eq)).toBe(0);
   });
 
   test('`If` takes no arm either', () => {

@@ -313,8 +313,18 @@ describe('A threaded operand whose present result type is unknown', () => {
   // `missing` alone would claim the application is always absent.
   test('At of a possibly absent collection of unknown elements is unknown', () => {
     const ce = new ComputeEngine();
+    // A bare `list` is `list<unknown>`.
+    ce.declare('q', 'list | missing');
+    expect(ce.box(['At', 'q', 2]).type.toString()).toBe('unknown');
+    // DECLARED `any` elements give `any`, not `unknown`. `any` admits the
+    // absence markers, so no marker is added. `unknown` also holds points
+    // and lists, but an arithmetic parent reads an `unknown` operand as a
+    // number, while an `any` operand contributes itself
+    // (`broadcastableResultTypeOfOperands()`, `library/arithmetic.ts`;
+    // `elementReadType()`, `library/collections.ts`). This expectation was
+    // `unknown` before that fix. `missing` alone is still not the answer.
     ce.declare('r', 'dictionary<any> | indexed_collection<any> | missing');
-    expect(ce.box(['At', 'r', 2]).type.toString()).toBe('unknown');
+    expect(ce.box(['At', 'r', 2]).type.toString()).toBe('any');
   });
 
   test('a chained access still infers number elements', () => {

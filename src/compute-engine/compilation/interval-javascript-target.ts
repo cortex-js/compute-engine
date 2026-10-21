@@ -872,7 +872,7 @@ function compileIntervalSelectionValue(
         BaseCompiler.compileValueOperand(args[i], target)
     );
   const build = (i: number, bounds: IntervalArmBounds): string => {
-    if (i >= reach) return `({ kind: 'empty' })`;
+    if (i >= reach) return `(${INTERVAL_MISSING})`;
     const cond = args[i];
     const region = isSymbol(cond, 'True')
       ? undefined
@@ -1008,20 +1008,38 @@ function literalRootPointOps(
  * interval, for a position whose interpreter value is `NaN` (`Max` of an
  * empty list) or that reads past the end of a point. `_IA.isAbsent` reads it
  * as absent. An absent value proper (a written `Missing`, an `At` that
- * selects nothing) is `INTERVAL_EMPTY` instead.
+ * selects nothing) is `INTERVAL_MISSING` or `INTERVAL_EMPTY` instead.
  */
 const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
 
 /**
  * The emitted spelling of an ABSENT value on this target: the `empty`
  * result, the value a restriction whose condition fails (`_IA.restrict`)
- * gives. A written absence symbol (`Missing`, `Undefined`) and an `At` whose
- * index selects nothing compile to it, so that a host reads one spelling of
+ * gives. An `At` whose index selects nothing compiles to it, and a written
+ * absence symbol (`Missing`, `Undefined`) compiles to the same result with
+ * the `missing` flag (`INTERVAL_MISSING`), so that a host reads one spelling of
  * "no value" (the interpreter fallback gives `empty` too). The whole-NaN bare
  * interval `INTERVAL_ABSENCE` has no `kind`, and so is not an interval result.
  * `_IA.isAbsent` and `_IA.coalesce` read both as absent.
  */
 const INTERVAL_EMPTY = "{ kind: 'empty' }";
+
+/**
+ * The emitted spelling of an absent value whose interpreter value is
+ * `Missing`: a written absence symbol (`Missing`, `Undefined`, also the
+ * missing else arm of an `If`) and the tail of a `Which` with no default arm
+ * that selects no clause. It is the `empty` result with the `missing` flag
+ * (`IntervalResult`). The flag tells a comparison that the operand is
+ * absent, so the comparison gives `'maybe'` (the Kleene reading of
+ * `Missing`), where an `empty` without the flag, a value undefined over the
+ * whole cell (`\sqrt{x}` over `[-1, -1]`), makes it `'false'`
+ * (`hasEmptyOperand`, `interval/comparison.ts`). An `At` that selects
+ * nothing keeps `INTERVAL_EMPTY`: the interpreter answers a numeric
+ * undefined value there, and a comparison with it is `False`. Every other
+ * consumer reads the two spellings alike: `_IA.isAbsent` and `_IA.coalesce`
+ * read both as absent, and the runner gives both as `{ kind: 'empty' }`.
+ */
+const INTERVAL_MISSING = "{ kind: 'empty', missing: true }";
 
 /**
  * The type of the coordinate `k` (0-based) that a point accessor reads out of
@@ -1851,7 +1869,8 @@ function isIntervalPointValuedOperand(
  *   `success: true`;
  * - by structure, a coordinate accessor (`PointX`/`PointY`/`PointZ`) whose
  *   operand may be a list of points while the accessor's own type says
- *   nothing (`unknown`): the parameter a helper reads with `PointX(v)` types
+ *   nothing (`unknown`, or `any` when the operand declares `any`
+ *   elements): the parameter a helper reads with `PointX(v)` types
  *   `collection<any> | tuple`, which the accessor's type handler cannot
  *   distribute, yet its lowering decides at the value
  *   (`compileIntervalPointComponent`, `_IA.pointComponent`) and answers an
@@ -1870,7 +1889,7 @@ function isPossiblyNumericListOperand(e: Expression): boolean {
     (isFunction(e, 'PointX') ||
       isFunction(e, 'PointY') ||
       isFunction(e, 'PointZ')) &&
-    e.type.isUnknown &&
+    (e.type.isUnknown || e.type.type === 'any') &&
     e.op1 !== undefined
   ) {
     const operandType = compilationType(e.op1);
@@ -2109,7 +2128,7 @@ function isIntervalResultCode(
 ): boolean {
   // The exhausted tail of a `Which` with no default arm, written by the
   // `Which` entry of the function table.
-  if (code === `({ kind: 'empty' })`) return true;
+  if (code === `(${INTERVAL_MISSING})`) return true;
   const codes = INTERVAL_RESULT_CODES.get(BaseCompiler.namingContext(target));
   return codes !== undefined && codes.has(code);
 }
@@ -3146,7 +3165,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // reached: each arm is compiled over the inputs narrowed to the part of
     // the interval where it can be selected (`compileNarrowedIntervalArm`).
     const buildPiecewise = (i: number, bounds: IntervalArmBounds): string => {
-      if (i >= args.length) return `({ kind: 'empty' })`;
+      if (i >= args.length) return `(${INTERVAL_MISSING})`;
       const cond = args[i];
       const val = args[i + 1];
       // If condition is the symbol True, it's the default branch
@@ -5386,12 +5405,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // propagates a non-array operand), an absent condition is the verdict
       // `'false'` (`_IA.restrict` over a relation), so the object-domain
       // gate does not apply (`coversValueModel`). No object axis. A written
-      // absence symbol is spelled by `make`, and is the `empty` result
-      // (`INTERVAL_EMPTY`), as an absent value of this target is wherever it
-      // arises at run time.
+      // absence symbol is spelled by `make`, and is the `empty` result, as an
+      // absent value of this target is wherever it arises at run time, with
+      // the `missing` flag (`INTERVAL_MISSING`): a comparison with it has no
+      // value, as a comparison with `Missing` has none in the interpreter.
       absence: {
         numeric: {
-          make: () => INTERVAL_EMPTY,
+          make: () => INTERVAL_MISSING,
           isAbsent: (x) => `_IA.isAbsent(${x})`,
           coalesce: (x, d) => `_IA.coalesce(${x}, () => ${d})`,
           coversValueModel: true,

@@ -161,6 +161,50 @@
   rows (`Map(Sqrt, [[1, 4], [9]])`) gives `list<vector<1> | vector<2>>`; it
   was an `incompatible-type` error.
 
+- A comparison with an undefined operand is false in a branch condition too,
+  as in Desmos and IEEE 754. An ordered comparison (`<`, `≤`, `>`, `≥`) or an
+  equality (`=`) whose operand is `NaN` or `Indeterminate` already evaluated
+  to `False` on its own; an `If` or a `Which` on it now takes the next arm
+  (the else arm) instead of no arm. This holds in the interpreter and on the
+  `javascript`, `python` and `interval-js` targets. Before and after:
+  - `\left\{\frac{0}{0}>0:1,0\right\}` (also with `<`, `≤`, `≥`, `=`), and
+    `If(0/0 > 0, 1, 0)`: `Missing` before, `0` now.
+  - `\left\{x > 0: 1, 0\right\}` compiled to JavaScript and run at
+    `{x: NaN}`: `NaN` before, `0` now. The same on the Python target. The
+    compiled guard no longer tests the operand for NaN (`_.x === _.x`); it
+    still tests for a variable the caller did not supply (`_.x !==
+    undefined`), which still gives `NaN`, also through arithmetic
+    (`2x > 0`). The guard tests a variable of any type (`p.x > 0` tests
+    `p`), and a variable read through an assigned value (`a := \sin x`,
+    then `\cos a > 0`) or through the body of a called user function. It
+    does not test a variable read only by an arm of a nested `If`, `Which`
+    or `When`: `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y`
+    not supplied.
+  - `0 < \sqrt{x}` compiled to `interval-js` at `x = [-1, -1]`, where the
+    root has no value (`empty`): `'maybe'` before, `'false'` now. The same
+    for `≤`, `>`, `≥` and `=`.
+  - On `interval-js`, a comparison with an operand that has a value over
+    only part of the cell (`partial`) is now at most `'maybe'`:
+    `\sqrt{x} \ge 0` at `x = [-1, 1]` was `'true'`. `0 < \sqrt{x}` there
+    stays `'maybe'`.
+  - A sum of such a piecewise, `\sum_{n=0}^{10000} M(n)` with
+    `M(n) := \{K(n) > 0: 1, 0\}` and `K(0)` undefined, is now `10000`
+    instead of `NaN`.
+
+  Not changed: `≠` keeps its behavior (`\mathrm{NaN} \ne 0` is `True`, and a
+  branch on a `≠` with a `NaN` operand still takes no arm: `Missing` in the
+  interpreter, `NaN` on `javascript` and `python`, `'maybe'` on
+  `interval-js`). `Missing` keeps its
+  Kleene reading (`Less(Missing, 1)` is `Missing`): a comparison with a
+  nested else-less `If` or default-less `Which` that selects no arm still
+  takes no arm (`If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` is `NaN` compiled),
+  and on `interval-js` that value is an `empty` with a `missing` flag, so
+  `Which(x > 5, 1) > 0` over `x = [0, 1]` stays `'maybe'`. A comparison of
+  two collections with an absent cell still takes no arm. The GPU targets
+  (`glsl`, `wgsl`) already took the else arm. This reverses the rule of
+  2026-09-03, under which a `NaN` operand of any comparison made the branch
+  take no arm (`docs/ERROR-MODEL.md`).
+
 ### Bug Fixes
 
 - `Factor` merges equal factors into a power and finds every copy of a
@@ -177,6 +221,11 @@
   matrix factors are not merged. `PartialFraction` now decomposes these
   denominators when they are given expanded, also with a negative leading
   coefficient (`1/(-x^3+3x-2)`). Before, it returned them unchanged.
+- A `Multiply` declared not commutative
+  (`ce.declare('Multiply', { commutative: false }, { extend: true })`)
+  removes its factors 1: `a·1·b` is `a·b`, and `Factor(a·b·a)` is `a·b·a`.
+  They were kept, and `Factor(a·b·a)` gave `a·1·b·1·a·1`. No other operand
+  moves, and no other simplification is applied to such a product.
 - Result types of broadcast arithmetic over nested lists hold their values.
   Rows of different lengths are no longer typed `matrix`: `Sin(L)` with
   `L: list<list<integer>> := [[1, 2], [3]]`, and `Sin([[1, 2], [3]])`, are
@@ -320,6 +369,50 @@
   with `P` undeclared is `unknown`. It was `character | missing`, the element
   of the `string` option of the type `list<unknown> | string`, so
   `Rest(P)[i] + 1` was an `incompatible-type` error.
+
+### New Features
+
+- **The grid of the `global` option of `FindFit` now has a point in every
+  basin of a frequency** (Tycho row 407). The search sampled a searched
+  parameter at a fixed number of points (400 for one parameter, 40 × 40 for
+  two), so a wide range for a frequency found the best fit only when a point
+  fell near it by chance. With `a cos(b x + c) + d x + e` on 200 points over
+  `x ∈ [0, 10]` (true `b = 2.2`), `b` over `[0.3, 120]` and `c` over
+  `[0, 2π]` gave a sum of squared residuals of 390 at `b = 0.3`; it now finds
+  `b = 2.2` (about `1e-27`). Three changes:
+  - A parameter that multiplies a variable inside `Sin`, `Cos`, `Tan`, `Cot`,
+    `Sec` or `Csc` (`b` in `cos(b x + c)`) gets grid points
+    `π / (rate · span of x)` apart (half that for `Tan` and `Cot`), up to
+    4,000 points, in every angular unit (`ce.angularUnit`). A parameter whose
+    phase rate is not a constant (`cos(b² x)`) and a non-periodic model keep
+    the previous grid.
+  - A phase that is only added to the argument of a `Sin` or `Cos` multiplied
+    by a linear amplitude (`c` in `a cos(b x + c)`), searched over at least
+    one period, is solved by least squares with the linear parameters, since
+    `a cos(b x + c) = p cos(b x) + q sin(b x)`. It is then no longer sampled,
+    and the search over `b` and `c` costs as much as a search over `b` alone.
+    The fitted phase is in its range. Otherwise two searched parameters share
+    a budget of 8,000 grid points.
+  - A range can give the grid step as a third element:
+    `{global: {b: [0.3, 120, 0.05]}}`. It sets the grid of the scan that
+    solves the linear parameters; when the model is not linear in the other
+    parameters, the solver still runs from each point of the coarse grid (24
+    points, or 6 × 6). A step on a phase keeps that phase on the grid instead
+    of solving it by least squares. A step that is not a finite positive
+    number is an `unexpected-argument` error, as is a pair of steps that asks
+    for more than 8,000 points of the grid of that scan.
+
+  With more than 300 data rows, the grid is scanned on a stratified sample of
+  300 rows (the same rows for the same data, not a regular sub-grid, so that
+  an alias of the true frequency does not fit the sample), the 24 best grid
+  points are solved again on every row, and the 6 best of those are refined
+  on every row. When the deadline of the evaluation expires during the scan
+  of the sample, the record (`timedOut: True`) has the best scanned
+  parameters and `residualNorm: NaN`, since their residual over every row was
+  not computed. On 1,000 rows with `b` over `[0.3, 628]` the search took about
+  410 ms and missed the fit (residual sum 1,947); it now takes about 260 to
+  330 ms and finds it. On 200 rows the deciding cases take about 45 to 70 ms
+  (they took about 90 to 100 ms).
 
 ## 0.159.0 _2026-10-20_
 

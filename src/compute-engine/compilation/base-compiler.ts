@@ -718,13 +718,20 @@ type ConditionTest =
   /**
    * `expr` is a relation whose compiled value is a genuine boolean, so an
    * undecided comparison has already collapsed into it (see
-   * `BRANCH_RELATIONS`). Test these operands of it for NaN instead. An EMPTY
+   * `BRANCH_RELATIONS`). Test these operands of it instead. An EMPTY
    * operand list means the relation is decided by construction.
+   *
+   * `nanTest` is true when a NaN operand leaves the relation undecided, so
+   * each operand is tested for NaN. That is the case for `NotEqual` only. An
+   * ordered comparison or an `Equal` with a NaN operand is decidedly false
+   * (user decision 2026-10-20), so its operands are tested only for an
+   * absent value: a `missing`-typed operand and an unsupplied variable.
    */
   | {
       readonly kind: 'operands';
       readonly expr: Expression;
       readonly operands: ReadonlyArray<Expression>;
+      readonly nanTest: boolean;
     }
   /**
    * `expr` is an `And` or an `Or`. It is decided when one operand already
@@ -10579,6 +10586,62 @@ export class BaseCompiler {
     return callable(fn);
   }
 
+  /**
+   * True when `x` reads one element of a collection that cannot hold
+   * `Nothing`, and its type is `any` only because the collection declares
+   * `any` elements. The reads are `At(xs, i)` with one index, `First`,
+   * `Second`, `Third` and `Last`.
+   *
+   * `nothing <: any` is true, so the type `any` alone says that the read may
+   * be `Nothing`. But a list, a set or an abstract collection never holds
+   * `Nothing` (a list literal drops it: `List(1, Nothing, 3)` is `[1, 3]`),
+   * and a string holds characters. So with `P: list<any>`,
+   * `P: collection<any> | tuple` or `P: any`, the read `At(P, 1)` is a value
+   * or an absence marker (`NaN`, `Missing`), never `Nothing`. A tuple base
+   * is accepted only when no slot type admits `nothing`: a tuple slot may
+   * hold `Nothing`, and a slot typed `any` may be one.
+   */
+  static isElementReadWithoutNothing(x: Expression): boolean {
+    if (!isFunction(x)) return false;
+    if (x.operator === 'At') {
+      if (x.nops !== 2) return false;
+    } else if (!['First', 'Second', 'Third', 'Last'].includes(x.operator))
+      return false;
+    if (resolveTypeForCompilation(compilationType(x)) !== 'any') return false;
+    const baseExcludesNothing = (type: Type, depth: number): boolean => {
+      if (depth > 8) return false;
+      const t = resolveTypeForCompilation(type);
+      if (typeof t === 'string')
+        return [
+          'any',
+          'value',
+          'missing',
+          'string',
+          'list',
+          'set',
+          'collection',
+          'indexed_collection',
+          'tuple',
+        ].includes(t);
+      switch (t.kind) {
+        case 'union':
+          return t.types.every((arm) => baseExcludesNothing(arm, depth + 1));
+        case 'list':
+        case 'set':
+        case 'collection':
+        case 'indexed_collection':
+          return true;
+        case 'tuple':
+          return t.elements.every((slot) => !isSubtype('nothing', slot.type));
+        default:
+          return false;
+      }
+    };
+    return (
+      x.op1 !== undefined && baseExcludesNothing(compilationType(x.op1), 0)
+    );
+  }
+
   /** Reject omission-sensitive collections until targets can preserve Nothing. */
   static assertCollectionOmissionSupported(
     h: string,
@@ -10587,12 +10650,26 @@ export class BaseCompiler {
     target?: CompileTarget<Expression>
   ): void {
     const tupleType = h === 'Tuple' && node ? compilationType(node) : undefined;
+    // A coordinate that reads an element of a collection that cannot hold
+    // `Nothing` is not an omission, although its type `any` admits
+    // `nothing` (`isElementReadWithoutNothing`). The slot `i` of the
+    // tuple's own type is the type of the coordinate `i` when the two have
+    // the same length.
+    const readsNoNothing = (i: number): boolean =>
+      args[i] !== undefined &&
+      BaseCompiler.isElementReadWithoutNothing(args[i]);
     if (
       h === 'Tuple' &&
-      (args.some((x) => isSubtype('nothing', compilationType(x))) ||
+      (args.some(
+        (x, i) => isSubtype('nothing', compilationType(x)) && !readsNoNothing(i)
+      ) ||
         (typeof tupleType === 'object' &&
           tupleType.kind === 'tuple' &&
-          tupleType.elements.some((x) => isSubtype('nothing', x.type))))
+          tupleType.elements.some(
+            (x, i) =>
+              isSubtype('nothing', x.type) &&
+              !(tupleType.elements.length === args.length && readsNoNothing(i))
+          )))
     )
       throw new Error(
         'Could not compile `Tuple`: possible Nothing coordinates require a distinct omission representation.'
@@ -20868,7 +20945,9 @@ export class BaseCompiler {
           (c) => {
             conjuncts = c;
             return compileCond();
-          }
+          },
+          CONDITION_DIALECT_JS,
+          decidability.test.kind !== 'operands' || decidability.test.nanTest
         );
         cond = bound.value;
         bindings = bound.bindings;
@@ -24665,9 +24744,14 @@ export class BaseCompiler {
   // clause matched (`_SYS.select`).
   //
   // Choosing a branch by JavaScript truthiness instead would answer from no
-  // evidence: `NaN > 0` is `false`, so `If(x > 0, 1, -1)` would give `-1` at
-  // `x = NaN`; an unset `b` is `undefined` and `"a"` is truthy, so
+  // evidence: an unset `b` is `undefined` and `"a"` is truthy, so
   // `If(b, 1, -1)` would give `-1` for the first and `1` for the second.
+  //
+  // A NaN operand is not such a case for an ordered comparison or an
+  // `Equal`: `NaN > 0` is `false`, and `If(x > 0, 1, -1)` gives `-1` at
+  // `x = NaN`, as the interpreter and Desmos do (user decision 2026-10-20,
+  // Tycho rows 411 and 413; from 2026-09-02 to that date it gave NaN). Only
+  // `NotEqual` with a NaN operand stays undecided (`BRANCH_RELATIONS`).
   //
   // A condition built from the logical connectives is decided by the
   // three-valued (Kleene) tables, not by the emitted `&&`/`||`/`!`, which
@@ -24696,9 +24780,9 @@ export class BaseCompiler {
   // needs it — `And(undecided, false)` is `false`.
   //
   // Because every leaf is bound once and reached at most once, an IMPURE
-  // condition takes the same lowering: `If(Random() < 2 ∧ x > 0, a, b)`
+  // condition takes the same lowering: `If(Random() < 2 ∧ x ≠ 0, a, b)`
   // draws once per call, and answers the absence marker at `x = NaN`
-  // instead of the else arm the plain `&&` chose. What is left of the old
+  // instead of the arm the plain `&&` chose. What is left of the old
   // exemption is listed at `conditionNode`: a target with no binding form,
   // an impure chain, and one impure node in two positions.
   //
@@ -24722,8 +24806,11 @@ export class BaseCompiler {
    * that value: JavaScript answers `false` both for `NaN > 0` and for
    * `NaN <= 0`, and the tolerant equality lowering (`Math.abs(a - b) <= tol`)
    * answers `false` for a NaN operand as well. Decidedness is therefore read
-   * off the comparison's OPERANDS — a NaN operand makes the relation
-   * undecided — which is what `conditionDecidability` returns for these heads.
+   * off the comparison's OPERANDS, which is what `conditionDecidability`
+   * returns for these heads. A NaN operand makes only `NotEqual` undecided:
+   * for the ordered comparisons and `Equal` the compiled `false` IS the
+   * answer (user decision 2026-10-20, Tycho rows 411 and 413), and only an
+   * absent operand leaves them undecided.
    */
   private static readonly BRANCH_RELATIONS = new Set([
     'Less',
@@ -24800,7 +24887,7 @@ export class BaseCompiler {
       links.push(ce._fn(h, [args[i], args[i + 1]]));
     const nodes: ConditionNode[] = [];
     for (const link of links) {
-      const node = BaseCompiler.conditionNode(link, true, target);
+      const node = BaseCompiler.conditionNode(link, true, target, true);
       if (node === null)
         throw new Error(
           `Could not compile \`${h}\`: a link of a chained comparison with ` +
@@ -24973,16 +25060,23 @@ export class BaseCompiler {
    * `conditionDecidability`, a sub-expression that is decided by construction
    * still gets a node: its VALUE takes part in the test of the connective
    * above it.
+   *
+   * `nanUndecided` makes a NaN operand leave a relation undecided whatever
+   * its head. A link of a chained comparison with an absent operand needs
+   * it (`compileAbsentRelation`): the interpreter answers `Missing` for
+   * `Less(NaN, 0, Missing)`, because an absent operand wins over a NaN one,
+   * so the compiled link must not decide `NaN < 0` as `false` there.
    */
   private static conditionNode(
     cond: Expression,
     canBind: boolean,
-    target?: CompileTarget<Expression>
+    target?: CompileTarget<Expression>,
+    nanUndecided = false
   ): ConditionNode | null {
     if (isSymbol(cond, 'True') || isSymbol(cond, 'False'))
       return {
         negate: false,
-        test: { kind: 'operands', expr: cond, operands: [] },
+        test: { kind: 'operands', expr: cond, operands: [], nanTest: false },
       };
     if (!isFunction(cond))
       return { negate: false, test: { kind: 'value', expr: cond } };
@@ -25070,16 +25164,115 @@ export class BaseCompiler {
       if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
         return null;
     }
+    // An ordered comparison or an `Equal` with a NaN operand is decidedly
+    // false, as the compiled comparison already answers, so the branch takes
+    // its next arm (user decision 2026-10-20, Tycho rows 411 and 413). Only
+    // `NotEqual`, whose compiled value on a NaN operand is `true`, keeps the
+    // NaN test that makes the branch take no arm. The other relations test
+    // only for an ABSENT value: an operand typed with a `missing` arm
+    // (`operandMayBeAbsent`) is tested itself, and, on a target that reads
+    // its variables off a vars object, every variable the operand reads on
+    // every evaluation is tested for `undefined` (`operandInputNodes`,
+    // `operandDecidedConjuncts`): an unsupplied variable leaves the branch
+    // undecided whatever arithmetic surrounds it (ruled 2026-09-02). `2r > 0`
+    // therefore tests `_.r !== undefined`, not the product, and a comparison
+    // that reads no variable (`Random() < 0.5`) is decided by construction.
+    const nanTest = nanUndecided || h === 'NotEqual';
+    const readsVarsObject = target?.varsObjectName !== undefined;
+    const operands: Expression[] = [];
+    for (const op of cond.ops) {
+      if (!BaseCompiler.mayBeUndecided(op, target)) continue;
+      if (nanTest || BaseCompiler.operandMayBeAbsent(op)) {
+        operands.push(op);
+        continue;
+      }
+      if (!readsVarsObject) continue;
+      for (const s of BaseCompiler.operandInputNodes(op, target))
+        if (!operands.some((o) => o.isSame(s))) operands.push(s);
+    }
     return {
       negate: false,
-      test: {
-        kind: 'operands',
-        expr: cond,
-        operands: cond.ops.filter((op) =>
-          BaseCompiler.mayBeUndecided(op, target)
-        ),
-      },
+      test: { kind: 'operands', expr: cond, operands, nanTest },
     };
+  }
+
+  /**
+   * One symbol node for each variable that the compiled code of `expr` reads
+   * off the vars object EVERY time `expr` is evaluated: the inputs whose
+   * absence makes a comparison of `expr` undecided. Each node is the first
+   * occurrence of its name, taken from the expression that reads it, so no
+   * symbol is boxed (and declared) for the test.
+   *
+   * - A variable that nothing binds or assigns (`unknowns`) is an input.
+   * - A symbol with a value (an assignment `a := \sin x`) is compiled from
+   *   that value, so the inputs of the value are inputs of `expr`. So are
+   *   the inputs of the body of a user function that `expr` calls. Each
+   *   value and body is walked once, which also stops a value or a function
+   *   that refers to itself.
+   * - Only the CONDITION of a nested `If`, the first condition of a `Which`,
+   *   and the condition of a `When` are read every time. An arm, and a later
+   *   condition of a `Which`, are read only when they are selected, so their
+   *   variables are left to the nested conditional itself: with
+   *   `If(If(x > 0, y, 1) > 0, 1, 0)` and `x = -1`, `y` is never read and
+   *   the answer is 1. When an arm that reads an unsupplied variable IS
+   *   selected, its value is NaN (or `undefined` for a bare read). A nested
+   *   conditional whose result may be absent (no else arm, no default) is
+   *   then caught by its own absence and NaN tests (`operandMayBeAbsent`);
+   *   for any other, the comparison decides false, as for any NaN operand.
+   * - The operands of `Coalesce` and `IsMissing` are not inputs: those
+   *   operators give a value for an absent operand.
+   *
+   * A name the target itself binds to a loop index with literal bounds
+   * (`isDecidedLoopIndex`) is never absent and is left out.
+   */
+  private static operandInputNodes(
+    expr: Expression,
+    target?: CompileTarget<Expression>
+  ): Expression[] {
+    const engine = expr.engine;
+    const found = new Map<string, Expression>();
+    // The names whose value or function body was already walked.
+    const followed = new Set<string>();
+    const collect = (root: Expression): void => {
+      const names = new Set(root.unknowns);
+      const visit = (e: Expression): void => {
+        if (isSymbol(e)) {
+          const s = e.symbol;
+          if (names.has(s)) {
+            if (!found.has(s) && !isDecidedLoopIndex(s, target?.boundVars))
+              found.set(s, e);
+            return;
+          }
+          if (followed.has(s)) return;
+          followed.add(s);
+          const value = engine._getSymbolValue(s);
+          if (value !== undefined) collect(value);
+          return;
+        }
+        if (!isFunction(e)) return;
+        const h = e.operator;
+        if (h === 'Coalesce' || h === 'IsMissing') return;
+        if (h === 'If' || h === 'Which') {
+          if (e.nops > 0) visit(e.ops[0]);
+          return;
+        }
+        if (h === 'When') {
+          if (e.nops > 1) visit(e.ops[1]);
+          return;
+        }
+        if (!followed.has(h)) {
+          const literal = BaseCompiler.userFunctionLiteral(engine, h);
+          if (literal !== undefined) {
+            followed.add(h);
+            collect(literal);
+          }
+        }
+        for (const x of e.ops) visit(x);
+      };
+      visit(root);
+    };
+    collect(expr);
+    return [...found.values()];
   }
 
   /**
@@ -25163,12 +25356,23 @@ export class BaseCompiler {
    * the analysis only when the caller can bind — `conditionDecidability`). A
    * fragment that is not a single token is parenthesized, because `===`
    * binds looser than most operators an operand may contain.
+   *
+   * `nanTest` is false for a relation that a NaN operand decides false (every
+   * branch relation but `NotEqual`, user decision 2026-10-20): the NaN test
+   * is then left out, and only the absence tests remain. An operand that may
+   * be absent (`present` is given) keeps the NaN test whatever `nanTest`
+   * says: in compiled numeric code NaN is also the absence marker of such an
+   * operand. A nested else-less `If` or a default-less `Which` with a numeric
+   * result answers NaN when it selects no arm, where the interpreter answers
+   * `Missing`, so `If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` must take no arm
+   * (the interpreter's absent-condition error), not the else arm.
    */
   private static operandDecidedConjuncts(
     code: TargetSource,
     target: CompileTarget<Expression>,
     decided: DecidedNumberTest = DECIDED_NUMBER_JS,
-    present?: DecidedNumberTest
+    present?: DecidedNumberTest,
+    nanTest = true
   ): TargetSource[] {
     // A fragment the compiler already reduced to a finite numeric literal
     // holds that number at every call, so it can decide every comparison it
@@ -25179,8 +25383,9 @@ export class BaseCompiler {
     // `present` tests that an operand which may hold the object null does
     // not (`operandMayBeAbsent`). It comes first: Python's NaN test raises on
     // `None`, and the conjunction stops at the first false conjunct.
-    const conjuncts: TargetSource[] =
-      present === undefined ? [decided(atom)] : [present(atom), decided(atom)];
+    const conjuncts: TargetSource[] = [];
+    if (present !== undefined) conjuncts.push(present(atom));
+    if (nanTest || present !== undefined) conjuncts.push(decided(atom));
     if (BaseCompiler.isVarsObjectRead(code, target))
       conjuncts.push(`${atom} !== undefined`);
     return conjuncts;
@@ -25431,6 +25636,7 @@ export class BaseCompiler {
     test: {
       readonly expr: Expression;
       readonly operands: ReadonlyArray<Expression>;
+      readonly nanTest: boolean;
     },
     negate: boolean,
     target: CompileTarget<Expression>,
@@ -25450,7 +25656,8 @@ export class BaseCompiler {
           code,
           target,
           dialect.decidedNumber,
-          present
+          present,
+          test.nanTest
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
@@ -25472,7 +25679,8 @@ export class BaseCompiler {
             name,
             target,
             dialect.decidedNumber,
-            present
+            present,
+            test.nanTest
           )
         );
       }
@@ -25586,13 +25794,17 @@ export class BaseCompiler {
    * compiled by `kleeneRelationLeaf`, which binds its operands to parameters
    * of the leaf instead, so that an operand a sibling short-circuits away is
    * never evaluated.
+   *
+   * `nanTest` is the relation's own flag (the `nanTest` of its `'operands'`
+   * condition test): false leaves the NaN test out of the conjuncts.
    */
   static withConditionOperands<T>(
     operands: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     canBind: boolean,
     fn: (conjuncts: ReadonlyArray<TargetSource>) => T,
-    dialect: ConditionDialect = CONDITION_DIALECT_JS
+    dialect: ConditionDialect = CONDITION_DIALECT_JS,
+    nanTest = true
   ): { value: T; bindings: Array<[string, TargetSource]> } {
     const bindings: Array<[string, TargetSource]> = [];
     const installed: Expression[] = [];
@@ -25607,7 +25819,8 @@ export class BaseCompiler {
           code,
           target,
           dialect.decidedNumber,
-          present
+          present,
+          nanTest
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
@@ -25629,7 +25842,8 @@ export class BaseCompiler {
             name,
             target,
             dialect.decidedNumber,
-            present
+            present,
+            nanTest
           )
         );
       }
@@ -25727,7 +25941,9 @@ export class BaseCompiler {
       decidability.test.operands,
       target,
       target.bindExpr !== undefined,
-      (conjuncts) => ({ code: BaseCompiler.compile(cond, target), conjuncts })
+      (conjuncts) => ({ code: BaseCompiler.compile(cond, target), conjuncts }),
+      CONDITION_DIALECT_JS,
+      decidability.test.nanTest
     );
     return { ...value, bindings, negate: false };
   }

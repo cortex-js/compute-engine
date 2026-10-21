@@ -183,7 +183,13 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     expect(draws).toBe(2);
   });
 
-  test('the piecewise NaN guard stays: a NaN condition answers NaN', () => {
+  test('a NaN operand of a piecewise equality takes the default arm', () => {
+    // Until the user decision of 2026-10-20 (Tycho rows 411 and 413) a NaN
+    // operand of the `Equal` made the piecewise answer NaN (the interpreter:
+    // `Missing`). Now `NaN = 5` is `false` in the condition as everywhere
+    // else, on both routes, and the default arm is taken. The guard that is
+    // left tests each variable the operand reads, the list `P` and the index
+    // `k`, for an unsupplied value.
     const c = new ComputeEngine();
     c.declare('P', 'list<number^5>');
     c.declare('k', 'integer');
@@ -193,15 +199,18 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     );
     if (!r.success) throw new Error(r.error?.message);
     expect(r.code).toBe(
-      '((_tv1) => ((_tv1 === _tv1) ? ((((_tv1) === (5))) ? (1) : (0)) : NaN))(_SYS.atNumeric(_.P, _.k, "number"))'
+      '((_.P !== undefined && _.k !== undefined) ? ((((_SYS.atNumeric(_.P, _.k, "number")) === (5))) ? (1) : (0)) : NaN)'
     );
+    expect(r.run({ k: 2 })).toBeNaN();
     expect(r.run({ P: [1, 2, 3, 4, 5], k: 5 })).toBe(1);
     expect(r.run({ P: [1, 2, 3, 4, 5], k: 2 })).toBe(0);
-    // Out of range reads NaN: the interpreter answers `Missing`, not 0.
-    expect(r.run({ P: [1, 2, 3, 4, 5], k: 7 })).toBeNaN();
+    // Out of range reads NaN, and `NaN = 5` is false on both routes.
+    expect(r.run({ P: [1, 2, 3, 4, 5], k: 7 })).toBe(0);
     expect(
-      c.box(['Which', ['Equal', 'NaN', 5], 1, 'True', 0]).evaluate().symbol
-    ).toBe('Missing');
+      c.box(['Which', ['Equal', 'NaN', 5], 1, 'True', 0]).evaluate().re
+    ).toBe(0);
+    // An unsupplied `k` is still undecided.
+    expect(r.run({ P: [1, 2, 3, 4, 5] } as any)).toBeNaN();
   });
 
   test('the collection helpers compare exactly', () => {

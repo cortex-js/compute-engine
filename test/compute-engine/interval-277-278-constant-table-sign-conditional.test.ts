@@ -406,8 +406,8 @@ describe('interval-js: a conditional lowers without closures', () => {
     // `Which` with no default — already answers an `IntervalResult`, so it is
     // handed on as it is.
     const r = compileInterval('\\begin{cases}x&x<1\\\\x^2&x<2\\end{cases}');
-    expect(r.code).toContain("({ kind: 'empty' })");
-    expect(r.code).not.toContain("_IA.res(({ kind: 'empty' })");
+    expect(r.code).toContain("({ kind: 'empty', missing: true })");
+    expect(r.code).not.toContain("_IA.res(({ kind: 'empty'");
     expect(r.code).not.toContain('_IA.res(((_tv');
     expect(r.code).not.toContain('_IA.res(_IA.hull(');
     // An arm that is a plain value still is wrapped.

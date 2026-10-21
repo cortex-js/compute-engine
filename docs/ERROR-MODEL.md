@@ -105,6 +105,101 @@ existing exact arithmetic propagation: `Mean([1, Indeterminate])` and
 policies; this does not prescribe a helper name or mechanically broaden
 every absence gate, nor decide field omission or tuple normalization.
 
+### An undefined operand makes a comparison false, in a branch too — user decision of 2026-10-20
+
+**Settled, implemented 2026-10-20** (Tycho ledger rows 411 and 413; Desmos
+and IEEE 754 parity). An ordered comparison (`<`, `≤`, `>`, `≥`) or an
+equality (`=`) whose operand is an undefined numeric value (`NaN`,
+`Indeterminate`) is `False`. This was already its value when it is
+evaluated alone; it is now also its value in the condition of an `If` or a
+`Which`, so the branch takes its next arm (the else arm). The rule holds on
+every route: the interpreter, the `javascript` and `python` compile
+targets, and `interval-js` for an operand that is undefined over the WHOLE
+cell (`empty`). The GPU targets (`glsl`, `wgsl`) already selected by the
+IEEE `false` and did not change.
+
+| Input | Before 2026-10-20 | Now |
+| --- | --- | --- |
+| `0/0 > 0`, `0/0 = 0`, evaluated alone | `False` | `False` (unchanged) |
+| `\left\{\frac{0}{0}>0:1,0\right\}` (also `<`, `≤`, `≥`, `=`), interpreter | `Missing` | `0` |
+| `If(0/0 > 0, 1, 0)`, interpreter | `Missing` | `0` |
+| `\left\{x > 0: 1, 0\right\}`, `javascript`, run at `{x: NaN}` | `NaN` | `0` |
+| the same, `python`, `x = nan` | `nan` | `0` |
+| `0 < \sqrt{x}`, `interval-js`, `x` = [-1, -1] (`\sqrt{x}` is `empty`) | `'maybe'` | `'false'` |
+| the same, `x` = [-1, 1] (`\sqrt{x}` is `partial`) | `'maybe'` | `'maybe'` (unchanged) |
+| `\sqrt{x} \ge 0`, `interval-js`, `x` = [-1, 1] | `'true'` | `'maybe'` |
+| `\mathrm{NaN} \ne 0`, interpreter | `True` | `True` (unchanged) |
+| `\sum_{n=0}^{100} M(n)` with `M(n) := \{K(n) > 0: 1, 0\}` and `K(0)` undefined | `NaN` | `100` |
+
+What the decision does NOT change:
+
+- **`≠` (`NotEqual`)** keeps its earlier behavior. `NaN ≠ 0` evaluates to
+  `True` (IEEE), and a branch on a `NotEqual` with a NaN operand still
+  takes no arm: the interpreter answers `Missing`, the `javascript` and
+  `python` targets answer `NaN` (the GPU targets take the then arm, as
+  before), and `interval-js` answers `'maybe'` for an `empty` operand.
+  So `If(NaN ≠ 0, a, b)` takes no arm, while `If(¬(NaN = 0), a, b)` takes
+  `a`.
+- **`Missing`** keeps its Kleene reading: `Less(Missing, 1)` is `Missing`,
+  and an `If` on it is the absent-condition error (§3.D); compiled, a
+  `missing`-typed operand still makes the branch take no arm. On
+  `javascript` and `python` such an operand is tested both for the object
+  null and for NaN, because NaN is the value a nested else-less `If` or a
+  default-less `Which` with a numeric result answers when it selects no
+  arm: `If(If(c > 0, 1) > 0, 1, 0)` at `c = -1` is `NaN`, as the
+  interpreter gives the absent-condition error. A consequence: a NaN that
+  such an operand holds as a value (an arm that is itself NaN) also makes
+  the branch take no arm. Arithmetic over a `missing`-typed value is typed
+  `number` and is not tested: `Missing + 1` is `NaN` in the interpreter
+  too, and `If(If(c > 0, 1) + 1 > 0, 1, 0)` at `c = -1` is `0` in the
+  interpreter, on `javascript` and on `python`. On `interval-js` the no-selection value of a default-less `Which`
+  and a written `Missing` is the `empty` result with the `missing` flag,
+  and a comparison with it is `'maybe'`, not `'false'` (`hasEmptyOperand`,
+  `interval/comparison.ts`): `Which(x > 5, 1) > 0` over `x` = [0, 1] is
+  `'maybe'`. A `When` whose condition is false and an `At` that selects
+  nothing are numeric undefined values in the interpreter (`When(1, False)`
+  is `NaN`), so they keep the plain `empty` and a comparison with them is
+  `'false'`.
+- **A comparison of two collections with an absent cell** keeps the
+  2026-09-21 marker ruling: the comparison is `Missing` and a branch on it
+  takes no arm.
+- **An unsupplied variable** of a compiled JavaScript function (a variable
+  the caller leaves out of the vars object, which reads as `undefined`)
+  still makes a branch on a comparison that reads it take no arm (`NaN`),
+  whether the comparison reads it directly (`x > 0`) or through arithmetic
+  (`2x > 0`, `\sin x > 0`). The compiled guard tests each variable the
+  comparison reads for `undefined` (`_.x !== undefined`) instead of testing
+  each operand for NaN (`_.x === _.x`). The test applies to a variable of
+  any type (`p.x > 0` tests `_.p`), and to a variable the comparison reads
+  through an assigned value (`a := \sin x`, then `\cos a > 0` tests `_.x`)
+  or through the body of a user function it calls. A variable read only by
+  an ARM of a nested `If`, `Which` or `When`, or by a later condition of a
+  `Which`, is not tested, since it is read only when that arm is selected:
+  `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y` unsupplied, as
+  in the interpreter. The operands of `Coalesce` and `IsMissing` are not
+  tested either. What remains: when such an arm IS selected and reads an
+  unsupplied variable, its value is `NaN` (or `undefined`), and the branch
+  takes no arm only when the nested conditional's result may be absent (no
+  else arm, no default; see the `Missing` item above); otherwise the
+  comparison decides false, as for any NaN operand
+  (`BaseCompiler.operandInputNodes`, `compilation/base-compiler.ts`).
+- **A `partial` operand** on `interval-js` (undefined over part of the cell
+  only) gives at most `'maybe'`: where it is undefined the comparison is
+  false, so it cannot hold over the whole cell. Before 2026-10-20 the
+  verdict was read off the enclosure of the defined part alone, so
+  `\sqrt{x} \ge 0` over [-1, 1] answered `'true'`; it now answers `'maybe'`
+  (`holds`, `interval/comparison.ts`). A `partial` operand that is false
+  where it is defined stays `'false'`.
+
+History: from 2026-09-02 (compiled) and 2026-09-03 (interpreter) to
+2026-10-20, a NaN operand of any of these relations, `≠` included, made the
+branch take no arm — see the 2026-09-02 entry in §7. Implementation:
+`evaluateCondition` (`library/control-structures.ts`, which now flags only
+`NotEqual`), `BaseCompiler.conditionNode` (`compilation/base-compiler.ts`,
+the `nanTest` field of a relation test), and `hasEmptyOperand` and
+`holds` (`interval/comparison.ts`). Pinned in
+`test/compute-engine/condition-nan-undecided.test.ts`.
+
 ## 1. The response channels — Settled taxonomy; the host-throw amendment is Proposed
 
 When an operator receives an argument that is wrong in some way, the engine
@@ -2300,7 +2395,13 @@ document's history):
   `Distance((NaN, 0), (0, 0))` is NaN, in band, where a `!isFinite` guard
   used to answer an out-of-band `Error("expected-value")`.
 - **FIXED 2026-09-02 (ruled the same day): a compiled `If`/`Which` takes
-  no branch on an undecided condition.** The compiled JavaScript picked a
+  no branch on an undecided condition.** SUPERSEDED IN PART 2026-10-20 by
+  the user decision at the top of this document ("An undefined operand
+  makes a comparison false, in a branch too"): a NaN operand of `<`, `≤`,
+  `>`, `≥` or `=` now decides the comparison `False` on every route, and
+  the branch takes its next arm; what follows is the history, and it still
+  holds for `≠`, for an absent (`Missing`) operand, and for an unsupplied
+  variable. The compiled JavaScript picked a
   branch by JavaScript truthiness — `If(x > 0, 1, -1)` at `x = NaN`
   returned `-1`, an unset boolean parameter returned the else arm — while
   the interpreter holds such an application inert. A compiled condition
@@ -2363,7 +2464,21 @@ document's history):
   statement-form `If` in a block runs neither branch and the block
   continues. An element-wise condition is unchanged: a NaN CELL takes the
   else cell on both lanes (measured). Pinned in
-  `test/compute-engine/condition-nan-undecided.test.ts`.
+  `test/compute-engine/condition-nan-undecided.test.ts`. REVERSED
+  2026-10-20 by the user (Tycho rows 411 and 413, Desmos and IEEE parity)
+  for `Less`, `LessEqual`, `Greater`, `GreaterEqual` and `Equal`: a NaN or
+  `Indeterminate` operand decides them `False` in a branch as everywhere
+  else, on the interpreter and the compiled lanes, so `If(NaN > 0, 1, -1)`
+  is `-1` again and the two lanes now agree on the IEEE answer instead of
+  on no arm. `evaluateCondition` flags only `NotEqual`, and the compiled
+  operand test keeps its NaN conjunct only for `NotEqual` (for the other
+  relations it tests each variable the comparison reads for an unsupplied
+  value, so the 2026-09-02 rule for an unsupplied variable holds). Consequences
+  for the companion rulings above: `If(Random() > 0.5 ∧ x > 0, a, b)` at
+  `x = NaN` answers `b` (or `NaN` only through a `≠` leaf); a desugared
+  `while` whose exit test compares a NaN with `<`, `≤`, `>`, `≥` or `=`
+  exits instead of running to the iteration cap. The table and the
+  exceptions are in the decision at the top of this document.
 - **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
   condition is refused at boxing.** The 2026-08-31 inertness ruling
   removed the host throw that carried the only diagnostic for

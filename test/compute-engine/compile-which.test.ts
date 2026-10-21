@@ -211,13 +211,15 @@ describe('COMPILE Which', () => {
 
     it('needs no `_SYS.cond` guard, and answers NaN for an unsupplied operand', () => {
       // A relation is boolean-valued, so it never needed the throwing
-      // `_SYS.cond` guard; what it needs is the operand test, because a NaN
-      // or absent operand makes the comparison answer an ordinary `false`.
+      // `_SYS.cond` guard; what it needs is the operand test, because an
+      // absent operand makes the comparison answer an ordinary `false`.
       // `2r` is `real`-typed and the type says it is never NaN, but that
       // promise does not survive an absent `r`: `2 * undefined` IS NaN.
-      // The operand is not a bare name, so it is bound to a temporary: the
-      // condition and the operand test would otherwise compute the product
-      // three times per call.
+      // A NaN operand decides the comparison `false` (user decision
+      // 2026-10-20), so the test is on the variable the operand reads,
+      // `_.r !== undefined`, and the product is computed once, in the
+      // comparison. Before the decision the product was bound to a temporary
+      // and tested for NaN.
       const engine = new ComputeEngine();
       engine.declare('r', 'real');
       const expr = engine.expr([
@@ -230,11 +232,12 @@ describe('COMPILE Which', () => {
       const result = compile(expr, { fallback: false })!;
       expect(result.code).not.toContain('_SYS.cond');
       expect(result.code).toBe(
-        '((_tv1) => ((_tv1 === _tv1) ? ((0 < _tv1) ? (1) : (-1)) : NaN))(2 * _.r)'
+        '((_.r !== undefined) ? ((0 < 2 * _.r) ? (1) : (-1)) : NaN)'
       );
       expect(result.run!({ r: 5 })).toBe(1);
       expect(result.run!({ r: -3 })).toBe(-1);
       expect(result.run!({} as any)).toBeNaN();
+      expect(result.run!({ r: NaN })).toBe(-1);
     });
   });
 });

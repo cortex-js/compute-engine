@@ -29,6 +29,7 @@ import {
 } from './boxed-expression/type-guards.js';
 import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
+import { angularChainFactor } from './symbolic/angular-unit.js';
 import { implicitCompileNumeric } from './implicit-compile.js';
 import {
   levenbergMarquardt,
@@ -41,7 +42,6 @@ import {
   type FitBatchResult,
   type FitKernel,
   type FitTask,
-  type LinearScanSolution,
   type StartTask,
 } from './fit-executor.js';
 
@@ -64,6 +64,54 @@ interface GlobalScan {
   index: number;
   lo: number;
   hi: number;
+  /** The grid step the caller gave as the third element of the range,
+   * `b: [lo, hi, step]`. It wins over the automatic spacing. */
+  step?: number;
+}
+
+/**
+ * A parameter that scales the phase of a periodic function across the data:
+ * the argument of a `Sin`, `Cos`, `Tan`, `Cot`, `Sec` or `Csc` node changes
+ * by `rate · b_j` per unit of the variable `x_k` (`rate` is the mixed
+ * derivative of the argument with respect to `x_k` and `b_j`, a nonzero
+ * constant, converted to radians). Two values of `b_j` that differ by more
+ * than about `(period / 2) / (|rate| · span of x_k)` are half a period apart
+ * at the far end of the data, so that is the width of a basin of the
+ * residual in `b_j`.
+ */
+interface PeriodicRate {
+  /** Index of the parameter. */
+  param: number;
+  /** Index of the fit variable. */
+  variable: number;
+  /** In radians per unit of the parameter and of the variable: the
+   * derivative of the argument multiplied by the factor that converts the
+   * engine's angular unit to radians. */
+  rate: number;
+  /** The period of the function in radians: π for `Tan` and `Cot`, 2π for
+   * the others. */
+  period: number;
+}
+
+/**
+ * A parameter `c` that is only an additive term of the argument of one `Sin`
+ * or `Cos` node, `g(B + rate · c)`, where the node is a factor of a product
+ * that also has the parameter `a` as a factor, and neither `a` nor `c`
+ * appears anywhere else in the model. Then
+ * `a · g(B + rate · c) = p · g(B) + q · g(B + π/2)` with `p = a cos(rate · c)`
+ * and `q = a sin(rate · c)`, so when the model is linear in `a` the pair
+ * `(a, c)` is linear in `(p, q)` and the global scan can solve `c` by least
+ * squares instead of sampling it on a grid.
+ */
+interface PhaseShape {
+  /** Index of the amplitude parameter `a`. */
+  amplitude: number;
+  /** Index of the phase parameter `c`. */
+  phase: number;
+  /** The constant derivative of the node's argument with respect to `c`,
+   * in radians per unit of `c` (converted from the engine's angular unit,
+   * as for `PeriodicRate`). */
+  rate: number;
 }
 
 interface DataRow {
@@ -96,6 +144,15 @@ interface FitUnit {
   stepLike: boolean[];
   rows: DataRow[];
   varFresh: string[];
+  /** Per parameter: the model mentions it. Computed only for a global fit
+   * (empty otherwise). */
+  mentions: boolean[];
+  /** The phase rates of the parameters in periodic functions of the fit
+   * variables. Computed only for a global fit (empty otherwise). */
+  periodicRates: PeriodicRate[];
+  /** The amplitude–phase pairs of the model. Computed only for a global fit
+   * (empty otherwise). */
+  phaseShapes: PhaseShape[];
 }
 
 //
@@ -209,10 +266,18 @@ const MAX_GLOBAL_SCANS = 2;
  * Parse the optional fifth `FindFit` argument, a dictionary of options.
  *
  * The only option today is `global`: a dictionary that maps a parameter name
- * to a closed range `(lo, hi)`. Each named parameter is searched over that
- * range for the lowest sum of squared residuals, instead of from its single
- * start (see `solveGlobal`). At most two parameters can be named. The range is
+ * to a closed range `(lo, hi)`, or `(lo, hi, step)` with a finite positive
+ * grid step. Each named parameter is searched over that range for the lowest
+ * sum of squared residuals, instead of from its single start (see
+ * `solveGlobal`). At most two parameters can be named. The range is
  * intersected with the parameter's own box constraint when the spec has one.
+ *
+ * A step on a phase that the scan could otherwise solve by least squares
+ * (`c` in `a cos(b x + c)`, see `linearPhases`) keeps that phase on the grid:
+ * the caller asked for a grid over it. Two caller-given steps on the grid of
+ * the separable scan must not ask for more than `SEPARABLE_BUDGET` points
+ * together; `solveGlobal` checks that on the grid it builds (a multi-start
+ * keeps its coarse grid whatever the steps, so it is never over the budget).
  *
  * Returns the scans (an empty list when nothing is searched globally), or an
  * `unexpected-argument` error for a malformed option. The options argument is
@@ -245,16 +310,27 @@ function parseFitOptions(
         return fail(`"${name}" is named twice in the "global" option`);
       // In the MathJSON `dict` spelling a value is JSON data, so the range is
       // written as a two-element array, `b: [0.1, 6]`, which boxes to a
-      // `List`; a `Tuple`/`Pair` built with `ce.tuple()` is accepted too.
+      // `List`; a `Tuple`/`Pair` built with `ce.tuple()` is accepted too. A
+      // third element is the grid step, `b: [0.1, 6, 0.05]`.
       const parts = specParts(rangeExpr.canonical);
-      if (!parts || parts.length !== 2)
-        return fail(`the global range of "${name}" must be a pair [lo, hi]`);
+      if (!parts || (parts.length !== 2 && parts.length !== 3))
+        return fail(
+          `the global range of "${name}" must be [lo, hi] or [lo, hi, step]`
+        );
       const lo = realValue(parts[0]);
       const hi = realValue(parts[1]);
       if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(lo < hi))
         return fail(
           `the global range of "${name}" must be two finite numbers with lo < hi`
         );
+      let step: number | undefined;
+      if (parts.length === 3) {
+        step = realValue(parts[2]);
+        if (!Number.isFinite(step) || !(step > 0))
+          return fail(
+            `the grid step of "${name}" in the "global" option must be a finite positive number`
+          );
+      }
       const spec = specs[index];
       const scanLo = Math.max(lo, spec.lo);
       const scanHi = Math.min(hi, spec.hi);
@@ -262,7 +338,12 @@ function parseFitOptions(
         return fail(
           `the global range of "${name}" does not overlap its bounds`
         );
-      scans.push({ index, lo: scanLo, hi: scanHi });
+      scans.push({
+        index,
+        lo: scanLo,
+        hi: scanHi,
+        ...(step === undefined ? {} : { step }),
+      });
     }
   }
   if (scans.length > MAX_GLOBAL_SCANS)
@@ -386,6 +467,11 @@ function makeNumericFn(
  * renamed model has no unresolved free symbol, then build the model function
  * and its per-parameter derivatives.
  *
+ * With `analyzeGlobal` (a `FindFit` with the `global` option), the renamed
+ * model is also read for the shapes the global search uses: which
+ * parameters it mentions, the phase rates of its periodic functions, and its
+ * amplitude–phase pairs (`analyzeGlobalShape`).
+ *
  * Returns `undefined` when the model carries an unresolved symbol beyond
  * `vars`/`params` (→ inert per § 3.4).
  */
@@ -396,7 +482,8 @@ function prepareUnit(
   varNames: string[],
   varFresh: string[],
   paramNames: string[],
-  paramFresh: string[]
+  paramFresh: string[],
+  analyzeGlobal = false
 ): FitUnit | undefined {
   const rename: Record<string, Expression> = {};
   varNames.forEach((n, k) => (rename[n] = ce.symbol(varFresh[k])));
@@ -429,7 +516,126 @@ function prepareUnit(
     }
   }
 
-  return { fn, deriv, derivUnknowns, stepLike, rows, varFresh };
+  const shape = analyzeGlobal
+    ? analyzeGlobalShape(renamed, varFresh, paramFresh)
+    : { mentions: [], periodicRates: [], phaseShapes: [] };
+
+  return { fn, deriv, derivUnknowns, stepLike, rows, varFresh, ...shape };
+}
+
+/** The periodic functions whose argument can carry a phase rate. The
+ * hyperbolic functions are not periodic over the reals. */
+const PERIODIC_FUNCTIONS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
+
+/** Call `visit` on `expr` and on each of its subexpressions. */
+function walkExpression(
+  expr: Expression,
+  visit: (e: Expression) => void
+): void {
+  visit(expr);
+  if (isFunction(expr)) for (const op of expr.ops) walkExpression(op, visit);
+}
+
+/** The number of occurrences of the symbol `name` in `expr`. */
+function countSymbol(expr: Expression, name: string): number {
+  if (isSymbol(expr)) return expr.symbol === name ? 1 : 0;
+  if (!isFunction(expr)) return 0;
+  let count = 0;
+  for (const op of expr.ops) count += countSymbol(op, name);
+  return count;
+}
+
+/** The value of `expr` when it is a nonzero finite real constant, otherwise
+ * `undefined`. */
+function nonzeroConstant(expr: Expression | undefined): number | undefined {
+  if (expr === undefined) return undefined;
+  const v = realValue(expr);
+  return Number.isFinite(v) && v !== 0 ? v : undefined;
+}
+
+/**
+ * Read a renamed model (variables and parameters already replaced by their
+ * fresh names) for the shapes that the global search of `FindFit` uses:
+ *
+ * - `mentions`: per parameter, whether the model mentions it.
+ * - `periodicRates`: for each `Sin`, `Cos`, `Tan`, `Cot`, `Sec` or `Csc`
+ *   node with argument `arg`, each fit variable `x_k` and each parameter
+ *   `b_j`, the mixed derivative `∂(∂arg/∂x_k)/∂b_j` when it is a nonzero
+ *   constant (`cos(b x + c)` gives 1 for `b`; `cos(b² x)` and `cos(b x y)`
+ *   give no constant and record nothing), with the period of the function.
+ * - `phaseShapes`: the pairs `(a, c)` of a product that has the parameter `a`
+ *   and a `Sin` or `Cos` node as factors, where `c` appears only in the
+ *   node's argument, with a constant nonzero derivative, and neither `a` nor
+ *   `c` appears anywhere else in the model (see `PhaseShape`).
+ *
+ * The trigonometric functions read their argument in the engine's angular
+ * unit (`ce.angularUnit`), so every rate is multiplied by the factor that
+ * converts that unit to radians (`angularChainFactor()`, 1 in radian mode,
+ * π/180 in degree mode): the basin widths, the quarter turn and the period
+ * of a phase computed from the rates are then correct in every unit.
+ *
+ * Exported for the tests.
+ */
+export function analyzeGlobalShape(
+  renamed: Expression,
+  varFresh: string[],
+  paramFresh: string[]
+): {
+  mentions: boolean[];
+  periodicRates: PeriodicRate[];
+  phaseShapes: PhaseShape[];
+} {
+  const counts = paramFresh.map((pf) => countSymbol(renamed, pf));
+  const mentions = counts.map((n) => n > 0);
+  const periodicRates: PeriodicRate[] = [];
+  const phaseShapes: PhaseShape[] = [];
+  const toRadians = realValue(angularChainFactor(renamed.engine));
+  walkExpression(renamed, (e) => {
+    if (!isFunction(e)) return;
+    if (PERIODIC_FUNCTIONS.has(e.operator) && e.nops === 1) {
+      const arg = e.op1;
+      const period =
+        e.operator === 'Tan' || e.operator === 'Cot' ? Math.PI : 2 * Math.PI;
+      varFresh.forEach((vf, k) => {
+        if (countSymbol(arg, vf) === 0) return;
+        const dx = differentiate(arg, vf);
+        if (dx === undefined) return;
+        paramFresh.forEach((pf, j) => {
+          if (countSymbol(dx, pf) === 0) return;
+          const rate = nonzeroConstant(differentiate(dx, pf));
+          if (rate !== undefined)
+            periodicRates.push({
+              param: j,
+              variable: k,
+              rate: rate * toRadians,
+              period,
+            });
+        });
+      });
+    }
+    if (e.operator !== 'Multiply') return;
+    for (const node of e.ops) {
+      if (!isFunction(node) || node.nops !== 1) continue;
+      if (node.operator !== 'Sin' && node.operator !== 'Cos') continue;
+      const arg = node.op1;
+      paramFresh.forEach((af, a) => {
+        // The amplitude is a factor of this product and appears nowhere else.
+        if (counts[a] !== 1) return;
+        if (!e.ops.some((f) => isSymbol(f) && f.symbol === af)) return;
+        paramFresh.forEach((cf, c) => {
+          if (c === a || counts[c] === 0) return;
+          // The phase appears only in the argument of this node.
+          if (countSymbol(arg, cf) !== counts[c]) return;
+          const rate = nonzeroConstant(differentiate(arg, cf));
+          if (rate === undefined) return;
+          // The argument must be affine in the phase: its derivative is a
+          // constant, so it is.
+          phaseShapes.push({ amplitude: a, phase: c, rate: rate * toRadians });
+        });
+      });
+    }
+  });
+  return { mentions, periodicRates, phaseShapes };
 }
 
 //
@@ -684,13 +890,182 @@ function solve(
 // Global fit (the `global` option, Tycho row 404)
 //
 
-/** Grid resolution per scanned parameter. The separable scan is cheap (one
- * linear solve per grid point), so it can afford a fine grid; a multi-start
- * runs a full LM solve per grid point, so its grid is coarse. */
+/** Default grid resolution per scanned parameter, for one or two scanned
+ * parameters. The separable scan is cheap (one linear solve per grid point),
+ * so it can afford a fine grid; a multi-start runs a full LM solve per grid
+ * point, so its grid is coarse. */
 const SEPARABLE_GRID = [400, 40];
 const MULTISTART_GRID = [24, 6];
 /** How many grid-point local minima the separable scan refines by LM. */
 const SEPARABLE_REFINEMENTS = 6;
+/** The largest number of grid points of one scanned parameter, whether the
+ * count comes from the basin width or from a step the caller gave. */
+const MAX_SCAN_POINTS_PER_PARAM = 4000;
+/** The largest number of points of a two-parameter grid. */
+const SEPARABLE_BUDGET = 8000;
+/** The fewest points a parameter is reduced to when a two-parameter grid is
+ * over the budget. A phase inside a periodic function has a basin about a
+ * quarter turn wide, so 8 points over one period are enough for the
+ * refinement to reach it from the nearest point. */
+const MIN_REDUCED_POINTS = 8;
+/** Above this many rows in total, the separable scan runs on a sample of
+ * this many rows (`sampleRowIndices`); the refinements use every row. */
+const SCAN_SAMPLE_ROWS = 300;
+/** How many of the best grid-point local minima of a scan on a sample of the
+ * rows are solved again on every row before the `SEPARABLE_REFINEMENTS` best
+ * of them are refined. The sample can rank a wrong minimum first (an alias
+ * of the true frequency that fits the sample rows but not the others), so
+ * the ranking that picks the refinements uses every row. */
+const SAMPLE_RESCORES = 24;
+
+/** One axis of a search grid, the input of `gridCounts`. */
+export interface GridAxis {
+  lo: number;
+  hi: number;
+  /** The step the caller gave: it sets the count and is never reduced. */
+  step?: number;
+  /** The width of the narrowest basin of the residual in this parameter,
+   * when the model shows one (a phase rate): the count is then at least
+   * the number of basins over the range. */
+  basin?: number;
+}
+
+/**
+ * The number of grid points of each axis of a search grid.
+ *
+ * - A caller-given step gives `ceil((hi − lo) / step) + 1` points, between 2
+ *   and `MAX_SCAN_POINTS_PER_PARAM`.
+ * - Otherwise a basin width gives `ceil((hi − lo) / basin) + 1` points, not
+ *   less than `defaultCount` and not more than `MAX_SCAN_POINTS_PER_PARAM`,
+ *   so that a point falls in each basin.
+ * - Otherwise the axis has `defaultCount` points.
+ *
+ * With two axes whose product is over `budget`, the axes without a
+ * caller-given step are reduced until the product is within the budget:
+ * first the one without a basin width (the second when both or neither have
+ * one) to `max(MIN_REDUCED_POINTS, floor(budget / other count))`, then, if
+ * the product is still over the budget, the other one the same way, and then
+ * the same two steps with a floor of 2 points instead of
+ * `MIN_REDUCED_POINTS`. An axis is never increased by a reduction. When both
+ * axes have a caller-given step and the product is over the budget, the
+ * answer is `'over-budget'`. A caller-given step gives at most
+ * `MAX_SCAN_POINTS_PER_PARAM` points, which is at most half the budget, so
+ * one automatic axis of 2 points always fits.
+ *
+ * Exported for the tests.
+ */
+export function gridCounts(
+  axes: GridAxis[],
+  defaultCount: number,
+  budget = SEPARABLE_BUDGET
+): number[] | 'over-budget' {
+  const pointsFor = (range: number, step: number): number =>
+    Math.ceil(range / step - 1e-9) + 1;
+  const counts = axes.map((axis) => {
+    const range = axis.hi - axis.lo;
+    if (axis.step !== undefined)
+      return Math.min(
+        MAX_SCAN_POINTS_PER_PARAM,
+        Math.max(2, pointsFor(range, axis.step))
+      );
+    if (axis.basin !== undefined && axis.basin > 0)
+      return Math.min(
+        MAX_SCAN_POINTS_PER_PARAM,
+        Math.max(defaultCount, pointsFor(range, axis.basin))
+      );
+    return defaultCount;
+  });
+  if (axes.length !== 2 || counts[0] * counts[1] <= budget) return counts;
+  const reducible = [0, 1].filter((i) => axes[i].step === undefined);
+  if (reducible.length === 0) return 'over-budget';
+  const withoutBasin = reducible.filter((i) => axes[i].basin === undefined);
+  const target =
+    reducible.length === 1
+      ? reducible[0]
+      : withoutBasin.length === 1
+        ? withoutBasin[0]
+        : 1;
+  const order = reducible.length === 1 ? [target] : [target, 1 - target];
+  for (const least of [MIN_REDUCED_POINTS, 2])
+    for (const i of order) {
+      if (counts[0] * counts[1] <= budget) return counts;
+      counts[i] = Math.min(
+        counts[i],
+        Math.max(least, Math.floor(budget / counts[1 - i]))
+      );
+    }
+  return counts[0] * counts[1] <= budget ? counts : 'over-budget';
+}
+
+/** The fractional part of the golden ratio, `(√5 − 1) / 2`: the step of the
+ * low-discrepancy sequence `frac(i · φ)` that places each sampled row inside
+ * its stratum. */
+const GOLDEN_FRACTION = 0.6180339887498949;
+
+/**
+ * The indices of a stratified sample of `count` of `n` rows, in increasing
+ * order. The rows are cut into `count` consecutive strata of
+ * `floor(n / count)` or `ceil(n / count)` rows, and one row is taken from
+ * each: the first row of the first stratum, the last row of the last one,
+ * and in stratum `i` the row at the fraction `frac(i · φ)` of the stratum
+ * (`φ` the golden ratio), a low-discrepancy sequence. The offsets do not
+ * depend on the data, so the same `n` and `count` always give the same rows.
+ *
+ * The sample is not a regular sub-grid on purpose. For rows evenly spaced
+ * along a variable, rows taken every `k`-th row are evenly spaced `k` times
+ * farther apart, and a sinusoid at any alias of the true frequency (the
+ * true one plus a multiple of `2π / (k · spacing)`) fits those rows exactly:
+ * the scan cannot tell the aliases from the true frequency. Uneven offsets
+ * break that.
+ *
+ * With `count >= n`, every row; with `count <= 0`, none.
+ *
+ * Exported for the tests.
+ */
+export function sampleRowIndices(n: number, count: number): number[] {
+  if (count >= n) return Array.from({ length: n }, (_, i) => i);
+  if (count <= 0) return [];
+  if (count === 1) return [0];
+  return Array.from({ length: count }, (_, i) => {
+    if (i === 0) return 0;
+    if (i === count - 1) return n - 1;
+    const start = Math.floor((i * n) / count);
+    const end = Math.floor(((i + 1) * n) / count);
+    const offset = (i * GOLDEN_FRACTION) % 1;
+    return start + Math.floor(offset * (end - start));
+  });
+}
+
+/**
+ * The number of rows of each unit in the sample of the separable scan:
+ * `total` rows shared among the units in proportion to their sizes `sizes`,
+ * by the largest-remainder method. Each unit gets the integer part of its
+ * share `total · size / Σ sizes`, and the rows left go one each to the units
+ * with the largest fractional parts (the first unit on a tie). The counts
+ * add up to `total` exactly when `total` is at most the number of rows, and
+ * a small unit can get 0 or 1 row. With `total` at least the number of
+ * rows, every row.
+ *
+ * Exported for the tests.
+ */
+export function sampleRowCounts(sizes: number[], total: number): number[] {
+  const all = sizes.reduce((n, s) => n + s, 0);
+  if (total >= all) return sizes.slice();
+  const shares = sizes.map((s) => (total * s) / all);
+  const counts = shares.map((s) => Math.floor(s));
+  let left = total - counts.reduce((n, c) => n + c, 0);
+  const byRemainder = shares
+    .map((s, u) => [s - Math.floor(s), u])
+    .sort((x, y) => y[0] - x[0] || x[1] - y[1]);
+  for (const [, u] of byRemainder) {
+    if (left <= 0) break;
+    if (counts[u] < sizes[u]) {
+      counts[u] += 1;
+      left -= 1;
+    }
+  }
+  return counts;
+}
 
 /** Sum of squares of a residual vector, or `Infinity` for a non-finite one. */
 function sumOfSquares(r: number[]): number {
@@ -700,46 +1075,53 @@ function sumOfSquares(r: number[]): number {
 }
 
 /**
- * The grid of scanned-parameter values: `n` points per scanned parameter,
- * endpoints included (a minimizer pressed against a bound of the range is a
- * legitimate answer), as the Cartesian product over one or two parameters.
- * Each point is the list of values in the order of `scans`.
+ * The grid of scanned-parameter values: `counts[k]` points for the scanned
+ * parameter `scans[k]`, endpoints included (a minimizer pressed against a
+ * bound of the range is a legitimate answer), as the Cartesian product over
+ * zero, one or two parameters, row-major (the last parameter varies fastest).
+ * Each point is the list of values in the order of `scans`. With no
+ * parameter the grid is the one empty point.
  */
-function scanGrid(scans: GlobalScan[], n: number): number[][] {
-  const axis = (s: GlobalScan): number[] =>
+function scanGrid(scans: GlobalScan[], counts: number[]): number[][] {
+  const axis = (s: GlobalScan, n: number): number[] =>
     Array.from({ length: n }, (_, i) => s.lo + ((s.hi - s.lo) * i) / (n - 1));
-  if (scans.length === 1) return axis(scans[0]).map((v) => [v]);
+  if (scans.length === 0) return [[]];
+  if (scans.length === 1) return axis(scans[0], counts[0]).map((v) => [v]);
   const grid: number[][] = [];
-  for (const u of axis(scans[0]))
-    for (const v of axis(scans[1])) grid.push([u, v]);
+  const second = axis(scans[1], counts[1]);
+  for (const u of axis(scans[0], counts[0]))
+    for (const v of second) grid.push([u, v]);
   return grid;
 }
 
 /**
  * Indices of the grid points that are local minima of `rss` over the grid: no
  * finite neighbour is lower (one dimension: the two neighbours; two: the eight
- * surrounding cells of the `n × n` grid laid out row-major by `scanGrid`).
- * Non-finite points are never minima.
+ * surrounding cells of the `counts[0] × counts[1]` grid laid out row-major by
+ * `scanGrid`). Non-finite points are never minima. With no dimension, the one
+ * point is a minimum when it is finite.
  */
-function gridLocalMinima(rss: number[], dims: number, n: number): number[] {
+function gridLocalMinima(rss: number[], counts: number[]): number[] {
   const minima: number[] = [];
   const lowerNeighbour = (i: number, offsets: number[]): boolean =>
     offsets.some((o) => rss[o] < rss[i]);
   for (let i = 0; i < rss.length; i++) {
     if (!Number.isFinite(rss[i])) continue;
     const neighbours: number[] = [];
-    if (dims === 1) {
+    if (counts.length === 1) {
       if (i > 0) neighbours.push(i - 1);
-      if (i < n - 1) neighbours.push(i + 1);
-    } else {
-      const row = Math.floor(i / n);
-      const col = i % n;
+      if (i < counts[0] - 1) neighbours.push(i + 1);
+    } else if (counts.length === 2) {
+      const [rows, cols] = counts;
+      const row = Math.floor(i / cols);
+      const col = i % cols;
       for (let dr = -1; dr <= 1; dr++)
         for (let dc = -1; dc <= 1; dc++) {
           if (dr === 0 && dc === 0) continue;
           const r = row + dr;
           const c = col + dc;
-          if (r >= 0 && r < n && c >= 0 && c < n) neighbours.push(r * n + c);
+          if (r >= 0 && r < rows && c >= 0 && c < cols)
+            neighbours.push(r * cols + c);
         }
     }
     if (!lowerNeighbour(i, neighbours)) minima.push(i);
@@ -752,11 +1134,32 @@ interface GlobalSearchOutcome {
   /** The lowest-residual finished solver run, if any. */
   best: LMResult | undefined;
   /** Best point seen before any LM run finished (the fallback of a timeout
-   * during the scan): the vector and its sum of squared residuals. */
+   * during the scan): the vector and its sum of squared residuals over
+   * EVERY row. */
   bestScanned: [number[], number] | undefined;
+  /** The best point of a scan on a sample of the rows, whose residual over
+   * every row was not computed: the answer, with no residual, when the
+   * deadline left nothing better. */
+  bestUnscored: number[] | undefined;
   /** Total over every solver run. */
   iterations: number;
   timedOut: boolean;
+}
+
+/** The shape of the grids of a global search, decided by `solveGlobal`. */
+interface SearchLayout {
+  /** The parameters on the separable grid, in the order of a linear task's
+   * `point`: the scans less the phases that the scan solves linearly. */
+  gridScans: GlobalScan[];
+  /** The number of points of each of `gridScans`. */
+  gridCounts: number[];
+  /** The number of points of each scan (in the order of the scans) for the
+   * multi-start grid. */
+  startCounts: number[];
+  /** The separable scan runs on a sample of the rows: the residuals of its
+   * points then only rank the points; they are not comparable with those of
+   * the refinements, which run on every row. */
+  sampled: boolean;
 }
 
 /**
@@ -770,11 +1173,18 @@ interface GlobalSearchOutcome {
  * different set of tasks before the deadline (a pool) can then report a
  * different best point, which the design accepts
  * (`docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.5).
+ *
+ * When the separable scan runs on a sample of the rows, its residuals only
+ * rank the grid points: the `SAMPLE_RESCORES` best local minima are solved
+ * again on every row, and the `SEPARABLE_REFINEMENTS` best of those are
+ * refined. Only a residual over every row is ever compared with a solver
+ * run's.
  */
 function* globalSearchPlan(
   separable: boolean,
   scans: GlobalScan[],
-  thetaAt: (point: number[]) => number[]
+  thetaAt: (point: number[]) => number[],
+  layout: SearchLayout
 ): Generator<
   FitTask[],
   GlobalSearchOutcome | 'no-finite-value',
@@ -784,9 +1194,11 @@ function* globalSearchPlan(
   let timedOut = false;
   let best: LMResult | undefined;
   let bestScanned: [number[], number] | undefined;
+  let bestUnscored: number[] | undefined;
   const outcome = (): GlobalSearchOutcome => ({
     best,
     bestScanned,
+    bestUnscored,
     iterations,
     timedOut,
   });
@@ -821,69 +1233,126 @@ function* globalSearchPlan(
     if (batch.timedOut) timedOut = true;
   };
 
-  const dims = scans.length;
+  /**
+   * Read a batch of `count` linear tasks by task index. A point that turned
+   * out nonlinear means the structural test was wrong about this model: the
+   * multi-start takes over. The points before it are genuine evaluated
+   * points; the points after it are not read, which is what the serial loop
+   * gave when it stopped there. Returns the solution of each point (`null`
+   * for a point that has none, did not run, or comes at or after the first
+   * nonlinear one) and whether a point was nonlinear.
+   */
+  const readLinear = (
+    batch: FitBatchResult,
+    count: number
+  ): { solved: ([number[], number] | null)[]; nonlinear: boolean } => {
+    let firstNonlinear = Infinity;
+    for (const r of batch.results)
+      if (r.kind === 'linear' && r.solved === 'nonlinear')
+        firstNonlinear = Math.min(firstNonlinear, r.index);
+    const solved: ([number[], number] | null)[] = new Array(count).fill(null);
+    for (const r of batch.results)
+      if (
+        r.kind === 'linear' &&
+        r.index < firstNonlinear &&
+        r.solved !== 'nonlinear'
+      )
+        solved[r.index] = r.solved;
+    return { solved, nonlinear: firstNonlinear !== Infinity };
+  };
+
   if (separable) {
-    const n = SEPARABLE_GRID[dims - 1];
-    const grid = scanGrid(scans, n);
+    const grid = scanGrid(layout.gridScans, layout.gridCounts);
     const tasks: FitTask[] = grid.map((point, index) => ({
       kind: 'linear',
       index,
       point,
     }));
     const batch = yield tasks;
-    // A point that turned out nonlinear means the structural test was wrong
-    // about this model: the multi-start below takes over. The points before
-    // it are genuine evaluated points, so `bestScanned` keeps the best of
-    // them; the points after it are not read, which is what the serial loop
-    // gave when it stopped there.
-    let firstNonlinear = Infinity;
-    for (const r of batch.results)
-      if (r.kind === 'linear' && r.solved === 'nonlinear')
-        firstNonlinear = Math.min(firstNonlinear, r.index);
-    const solved: LinearScanSolution[] = new Array(grid.length).fill(null);
+    const scan = readLinear(batch, grid.length);
     // In task order, so that a tie on the residual goes to the lowest index
-    // whatever order the results arrived in.
-    const byIndex = [...batch.results].sort((a, b) => a.index - b.index);
-    for (const r of byIndex) {
-      if (r.kind !== 'linear' || r.index >= firstNonlinear) continue;
-      solved[r.index] = r.solved;
-      if (r.solved !== null && r.solved !== 'nonlinear')
-        considerScanned(r.solved[0], r.solved[1]);
+    // whatever order the results arrived in. On every row a solved point is
+    // a scanned point; on a sample of the rows its residual only ranks it,
+    // and the best one is kept as a point with no residual.
+    let bestSampleRss = Infinity;
+    for (const s of scan.solved) {
+      if (s === null) continue;
+      if (!layout.sampled) considerScanned(s[0], s[1]);
+      else if (s[1] < bestSampleRss) {
+        bestSampleRss = s[1];
+        bestUnscored = s[0];
+      }
     }
     if (batch.timedOut) {
       // A deadline expiring inside the scan: whatever was found so far is
       // reported, with no refinement. This comes before the nonlinear check
       // on purpose: once the deadline has passed, a multi-start would time
-      // out in its first start, so the scanned points are the answer.
+      // out in its first start, so the scanned points are the answer. The
+      // deadline has passed, so a sampled point cannot be solved again on
+      // every row: it is reported with no residual.
       timedOut = true;
       return outcome();
     }
-    if (firstNonlinear !== Infinity) separable = false;
-    else {
-      if (bestScanned === undefined) return 'no-finite-value';
-      const rss = solved.map((s) =>
-        s !== null && s !== 'nonlinear' ? s[1] : Infinity
+    if (!scan.nonlinear) {
+      if (scan.solved.every((s) => s === null)) return 'no-finite-value';
+      const rss = scan.solved.map((s) => (s !== null ? s[1] : Infinity));
+      const candidates = gridLocalMinima(rss, layout.gridCounts).sort(
+        (i, k) => rss[i] - rss[k]
       );
-      const candidates = gridLocalMinima(rss, dims, n)
-        .sort((i, k) => rss[i] - rss[k])
-        .slice(0, SEPARABLE_REFINEMENTS);
-      const refinements: StartTask[] = candidates.map((i, index) => ({
-        kind: 'start',
-        index,
-        theta0: (solved[i] as [number[], number])[0],
-        checkStart: false,
-      }));
-      takeStarts(refinements, yield refinements);
-      return outcome();
+      // The starts of the refinements, each with its residual over every
+      // row, best first. `undefined` sends the search to the multi-start.
+      let refineFrom: [number[], number][] | undefined;
+      if (!layout.sampled)
+        refineFrom = candidates
+          .slice(0, SEPARABLE_REFINEMENTS)
+          .map((i) => scan.solved[i] as [number[], number]);
+      else {
+        const top = candidates.slice(0, SAMPLE_RESCORES);
+        const rescores: FitTask[] = top.map((i, index) => ({
+          kind: 'linear',
+          index,
+          point: grid[i],
+          allRows: true,
+        }));
+        const rescored = yield rescores;
+        const again = readLinear(rescored, top.length);
+        for (const s of again.solved)
+          if (s !== null) considerScanned(s[0], s[1]);
+        if (rescored.timedOut) {
+          timedOut = true;
+          return outcome();
+        }
+        // A point that is nonlinear on every row, or no point with a finite
+        // residual on every row (a row outside the sample is not finite):
+        // the multi-start takes over.
+        const finite = again.solved.filter(
+          (s): s is [number[], number] => s !== null
+        );
+        if (!again.nonlinear && finite.length > 0)
+          refineFrom = finite
+            .sort((x, y) => x[1] - y[1])
+            .slice(0, SEPARABLE_REFINEMENTS);
+      }
+      if (refineFrom !== undefined) {
+        const refinements: StartTask[] = refineFrom.map(([theta0], index) => ({
+          kind: 'start',
+          index,
+          theta0,
+          checkStart: false,
+        }));
+        takeStarts(refinements, yield refinements);
+        return outcome();
+      }
     }
   }
-  const n = MULTISTART_GRID[dims - 1];
-  const starts: StartTask[] = scanGrid(scans, n).map((point, index) => ({
-    kind: 'start',
-    index,
-    theta0: thetaAt(point),
-    checkStart: true,
-  }));
+  const starts: StartTask[] = scanGrid(scans, layout.startCounts).map(
+    (point, index) => ({
+      kind: 'start',
+      index,
+      theta0: thetaAt(point),
+      checkStart: true,
+    })
+  );
   const batch = yield starts;
   takeStarts(starts, batch);
   // No start had a finite residual, and the deadline did not cut the batch
@@ -891,6 +1360,99 @@ function* globalSearchPlan(
   // when the deadline expired inside a start's evaluation).
   if (bestScanned === undefined && !batch.timedOut) return 'no-finite-value';
   return outcome();
+}
+
+/**
+ * The width of the narrowest basin of the residual in the parameter `param`:
+ * the smallest `(period / 2) / (|rate| · span)` over the phase rates of the
+ * parameter in every unit (`π / (|rate| · span)` for `Sin` and `Cos`, half
+ * that for `Tan` and `Cot`, whose period is π), where `span` is the extent
+ * of the rate's variable over the rows
+ * of the unit (the maximum minus the minimum of its finite values). A zero or
+ * non-finite span gives no width. `undefined` when the parameter has no
+ * phase rate.
+ */
+function basinWidth(units: FitUnit[], param: number): number | undefined {
+  let width: number | undefined;
+  for (const unit of units) {
+    for (const r of unit.periodicRates) {
+      if (r.param !== param) continue;
+      let min = Infinity;
+      let max = -Infinity;
+      for (const row of unit.rows) {
+        const v = row.x[r.variable];
+        if (!Number.isFinite(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const span = max - min;
+      if (!Number.isFinite(span) || span <= 0) continue;
+      const w = r.period / 2 / (Math.abs(r.rate) * span);
+      if (width === undefined || w < width) width = w;
+    }
+  }
+  return width;
+}
+
+/** An amplitude–phase pair that the separable scan solves by least squares
+ * (see `PhaseShape`). `positive`: the amplitude is reported non-negative;
+ * otherwise non-positive. */
+interface LinearPhase extends PhaseShape {
+  positive: boolean;
+}
+
+/**
+ * The scanned phases that the separable scan can solve by least squares
+ * instead of sampling them: for each scanned parameter `c`, an amplitude
+ * `a` that is solved linearly (one of `linearIdx`) such that every unit
+ * either mentions neither `a` nor `c`, or has the pair `(a, c)` with the same
+ * rate as a `PhaseShape`. Two more conditions keep the answer of the linear
+ * solve inside the box constraints: the range of `c` covers a full period
+ * `2π / |rate|` (so some value in it gives every phase), and the bounds of
+ * `a` admit every non-negative value (or every non-positive one), since the
+ * solve gives the amplitude only up to its sign. A scanned parameter with a
+ * caller-given step stays on the grid: the caller asked for a grid over it.
+ */
+function linearPhases(
+  units: FitUnit[],
+  scans: GlobalScan[],
+  linearIdx: number[],
+  lo: number[],
+  hi: number[]
+): LinearPhase[] {
+  const result: LinearPhase[] = [];
+  const linear = new Set(linearIdx);
+  for (const scan of scans) {
+    if (scan.step !== undefined) continue;
+    const c = scan.index;
+    for (const unit of units) {
+      const shape = unit.phaseShapes.find(
+        (s) =>
+          s.phase === c &&
+          linear.has(s.amplitude) &&
+          !result.some((r) => r.amplitude === s.amplitude)
+      );
+      if (shape === undefined) continue;
+      const { amplitude: a, rate } = shape;
+      const consistent = units.every(
+        (u) =>
+          (!u.mentions[a] && !u.mentions[c]) ||
+          u.phaseShapes.some(
+            (s) => s.amplitude === a && s.phase === c && s.rate === rate
+          )
+      );
+      if (!consistent) break;
+      const period = (2 * Math.PI) / Math.abs(rate);
+      if (scan.hi - scan.lo < period * (1 - 1e-12)) break;
+      let positive: boolean;
+      if (hi[a] === Infinity && lo[a] <= 0) positive = true;
+      else if (lo[a] === -Infinity && hi[a] >= 0) positive = false;
+      else break;
+      result.push({ ...shape, positive });
+      break;
+    }
+  }
+  return result;
 }
 
 /**
@@ -919,10 +1481,37 @@ function* globalSearchPlan(
  *    grid point, and the lowest residual wins.
  *
  * In both, a scanned parameter is bounded to its range during the LM
- * refinement, so the answer lies inside the range. The record is the usual
- * one; its `iterations` is the total over every LM run. A deadline that
- * expires during the scan or a refinement returns the best point found so far
- * with `timedOut: True`.
+ * refinement, so the answer lies inside the range. The exception is a phase
+ * that the scan solves by least squares (below): the model is periodic in it,
+ * so its refinement runs unbounded and the refined value is brought back
+ * into the range modulo the period. The record is the usual one; its
+ * `iterations` is the total over every LM run. A deadline that expires
+ * during the scan or a refinement returns the best point found so far with
+ * `timedOut: True`. When that point comes from a scan on a sample of the
+ * rows (below), its residual over every row was never computed, and the
+ * record has `residualNorm: NaN`.
+ *
+ * The grid of the separable scan (`gridCounts`):
+ *
+ * - A parameter that scales the phase of a periodic function of a fit
+ *   variable (`b` in `cos(b x + c)`, see `PeriodicRate`) gets at least one
+ *   point per basin of the residual, `π / (|rate| · span of the variable)`
+ *   apart (half that for `Tan` and `Cot`), so that the scan cannot step over
+ *   the basin of the best fit.
+ * - A step the caller gave (`b: [lo, hi, step]`) sets the count instead.
+ * - Two scanned parameters share a budget of `SEPARABLE_BUDGET` points. Two
+ *   caller-given steps over the budget are an `unexpected-argument` error.
+ * - A scanned phase of an amplitude–phase pair (`c` in `a cos(b x + c)`
+ *   with `a` linear, see `PhaseShape`) with no caller-given step leaves the
+ *   grid: the scan solves it by least squares with the linear parameters,
+ *   which turns the two-parameter search of `b` and `c` into a one-parameter
+ *   search of `b`.
+ *
+ * With more than `SCAN_SAMPLE_ROWS` rows the separable scan runs on a
+ * stratified sample of the rows (`sampleRowIndices`), which bounds its cost.
+ * Its residuals then only rank the grid points: the best local minima are
+ * solved again on every row before the best of them are refined (see
+ * `globalSearchPlan`). The refinements and the multi-start run on every row.
  */
 function solveGlobal(
   ce: IComputeEngine,
@@ -969,6 +1558,71 @@ function solveGlobal(
     return theta;
   };
 
+  // The scanned phases that the separable scan solves by least squares, and
+  // the parameters that stay on its grid.
+  const phases = separable ? linearPhases(units, scans, linearIdx, lo, hi) : [];
+  const phaseIndices = new Set(phases.map((ph) => ph.phase));
+  /** The value of the phase of `ph` brought into its range modulo its period
+   * `2π / |rate|`: `lo + ((value − lo) mod period)`, at most `hi`. The range
+   * is at least one period wide (`linearPhases`), so every phase has a
+   * value in it. */
+  const wrapPhase = (value: number, ph: LinearPhase): number => {
+    const period = (2 * Math.PI) / Math.abs(ph.rate);
+    const phLo = lo[ph.phase];
+    return Math.min(
+      hi[ph.phase],
+      phLo + ((((value - phLo) % period) + period) % period)
+    );
+  };
+  const gridScans = scans.filter((s) => !phaseIndices.has(s.index));
+  const gridAxes = gridScans.map((s) => ({
+    lo: s.lo,
+    hi: s.hi,
+    step: s.step,
+    basin: basinWidth(units, s.index),
+  }));
+  const gridCountList = gridCounts(
+    gridAxes,
+    SEPARABLE_GRID[gridScans.length - 1] ?? 1
+  );
+  // The multi-start keeps its coarse grid whatever the step: each of its
+  // points is a full solver run, which a fine grid cannot afford.
+  const startCountList = scans.map(() => MULTISTART_GRID[scans.length - 1]);
+  // A caller-given step is never reduced to fit the budget of a
+  // two-parameter grid, so two of them over the budget are an error. Only
+  // the separable scan builds this grid.
+  if (gridCountList === 'over-budget' && separable) {
+    const [b, c] = gridScans.map((s) => names[s.index]);
+    return ce.error(
+      'unexpected-argument',
+      `FindFit: the grid steps of "${b}" and "${c}" in the "global" option ask for more than ${SEPARABLE_BUDGET} grid points`
+    );
+  }
+
+  // The separable scan on a sample of the rows when there are many: the
+  // same units with fewer rows, and their own callbacks. The rows are
+  // shared among the units in proportion to their sizes. The refinements,
+  // the re-scoring of the best sampled points and the multi-start use `cb`,
+  // over every row.
+  const totalRows = units.reduce((n, u) => n + u.rows.length, 0);
+  const sampled = separable && totalRows > SCAN_SAMPLE_ROWS;
+  const sampleCounts = sampleRowCounts(
+    units.map((u) => u.rows.length),
+    SCAN_SAMPLE_ROWS
+  );
+  const scanCb = sampled
+    ? makeCallbacks(
+        ce,
+        units.map((u, k) => ({
+          ...u,
+          rows: sampleRowIndices(u.rows.length, sampleCounts[k]).map(
+            (i) => u.rows[i]
+          ),
+        })),
+        specs
+      )
+    : cb;
+
   /** Separable step: with the scanned parameters fixed at `point`, solve the
    * linear parameters by least squares. The model is linear in them, so with
    * them at zero `unit.fn` is the offset and each analytic derivative is the
@@ -982,22 +1636,58 @@ function solveGlobal(
    * structural test did not see), and the answer is `'nonlinear'` so the
    * caller falls back to the multi-start. Returns the full vector and its sum
    * of squared residuals, or `null` when the normal equations cannot be solved
-   * or the point is not finite. */
+   * or the point is not finite.
+   *
+   * `point` gives the values of `gridScans`. Each phase of `phases` is solved
+   * here instead: with the phase at 0, the column of its amplitude is
+   * `g(B)`; with the phase at a quarter turn, `g(B + π/2)`. Both columns go
+   * into the least-squares system with unbounded coefficients `p` and `q`,
+   * and the amplitude and the phase are then `√(p² + q²)` and
+   * `atan2(q, p) / rate`, the phase brought into its range.
+   *
+   * With many rows the scan uses a sample of the rows (`scanCb`); with
+   * `allRows` (the re-scoring of the best sampled points) every row (`cb`). */
   const linearSolveAt = (
-    point: number[]
+    point: number[],
+    allRows: boolean
   ): [number[], number] | null | 'nonlinear' => {
-    const theta = thetaAt(point);
+    const rowsCb = allRows ? cb : scanCb;
+    const theta = specs.map((s, j) => clamp(s.start, lo[j], hi[j]));
+    gridScans.forEach((s, k) => (theta[s.index] = point[k]));
     for (const j of linearIdx) theta[j] = 0;
+    for (const ph of phases) theta[ph.phase] = 0;
     const nl = linearIdx.length;
+    // The unknowns of the system: one per linear parameter, then one per
+    // phase (the coefficient `q` of its quarter-turn column). The amplitude
+    // of a phase and its `q` are unbounded: the bounds of the amplitude were
+    // checked by `linearPhases`.
+    const ns = nl + phases.length;
+    const amplitudeSlots = new Set(
+      phases.map((ph) => linearIdx.indexOf(ph.amplitude))
+    );
+    const slotLo: number[] = [];
+    const slotHi: number[] = [];
+    for (let a = 0; a < ns; a++) {
+      const bounded = a < nl && !amplitudeSlots.has(a);
+      slotLo.push(bounded ? lo[linearIdx[a]] : -Infinity);
+      slotHi.push(bounded ? hi[linearIdx[a]] : Infinity);
+    }
+    const quarterTurns = phases.map((ph) => Math.PI / (2 * ph.rate));
     // Per data row: the offset (the model with the linear parameters at zero)
     // and the basis column values, kept for the active-set loop and the check.
     const offsets: number[] = [];
     const targets: number[] = [];
     const columns: number[][] = [];
     let finite = true;
-    cb.eachRow(theta, (unit, row, rec) => {
+    rowsCb.eachRow(theta, (unit, row, rec) => {
       const offset = unit.fn(rec);
       const phi = linearIdx.map((j) => unit.deriv[j]!(rec));
+      phases.forEach((ph, m) => {
+        const name = rowsCb.pFresh[ph.phase];
+        rec[name] = quarterTurns[m];
+        phi.push(unit.deriv[ph.amplitude]!(rec));
+        rec[name] = 0;
+      });
       if (!Number.isFinite(offset) || phi.some((v) => !Number.isFinite(v))) {
         finite = false;
         return;
@@ -1008,12 +1698,63 @@ function solveGlobal(
     });
     if (!finite) return null;
 
-    // Active-set loop over the linear parameters: `fixed[a]` holds the bound a
-    // parameter is pinned at, or NaN while it is free.
-    const fixed: number[] = new Array(nl).fill(NaN);
-    for (let pass = 0; pass <= nl; pass++) {
+    // Active-set loop over the unknowns: `fixed[a]` holds the value an
+    // unknown is pinned at (a bound it crossed), or NaN while it is free.
+    const values: number[] = new Array(ns).fill(0);
+    const fixed: number[] = new Array(ns).fill(NaN);
+    // An unknown whose column is zero, or nearly a combination of the
+    // columns before it, is pinned at 0 (or the bound nearest 0) first. At
+    // such a point (`b x` a whole number of turns at every row, so the sine
+    // column vanishes and the cosine column is constant) the normal equations
+    // are singular, and solving them anyway gives two huge coefficients that
+    // cancel: the model at those values then loses its precision and fails
+    // the linearity check below. The test is an incremental Cholesky
+    // factorization of the Gram matrix of the columns: a column is dependent
+    // when its squared distance from the span of the kept columns is at most
+    // `1e-12` times its squared norm. The two columns of a phase have the
+    // same scale (the amplitude's coefficient times `g(B)` and `g(B + π/2)`),
+    // so one of them is also dropped when its squared norm is at most
+    // `1e-12` times their sum: rounding leaves such a column at about 1e-14
+    // instead of 0, which is not dependent on the others but carries no
+    // information either.
+    {
+      const gram: number[][] = Array.from({ length: ns }, () =>
+        new Array(ns).fill(0)
+      );
+      for (const phi of columns)
+        for (let u = 0; u < ns; u++)
+          for (let v = 0; v <= u; v++) gram[u][v] += phi[u] * phi[v];
+      phases.forEach((ph, m) => {
+        const u = linearIdx.indexOf(ph.amplitude);
+        const v = nl + m;
+        const total = gram[u][u] + gram[v][v];
+        if (gram[v][v] <= 1e-12 * total) fixed[v] = 0;
+        else if (gram[u][u] <= 1e-12 * total) fixed[u] = 0;
+      });
+      const kept: number[] = [];
+      const factor: number[][] = [];
+      for (let i = 0; i < ns; i++) {
+        if (!Number.isNaN(fixed[i])) continue;
+        const l: number[] = [];
+        for (let t = 0; t < kept.length; t++) {
+          let s = gram[i][kept[t]];
+          for (let u = 0; u < t; u++) s -= l[u] * factor[t][u];
+          l.push(s / factor[t][t]);
+        }
+        let d = gram[i][i];
+        for (const v of l) d -= v * v;
+        if (!(d > 1e-12 * gram[i][i])) {
+          fixed[i] = clamp(0, slotLo[i], slotHi[i]);
+          continue;
+        }
+        l.push(Math.sqrt(d));
+        factor.push(l);
+        kept.push(i);
+      }
+    }
+    for (let pass = 0; pass <= ns; pass++) {
       const free: number[] = [];
-      for (let a = 0; a < nl; a++) if (Number.isNaN(fixed[a])) free.push(a);
+      for (let a = 0; a < ns; a++) if (Number.isNaN(fixed[a])) free.push(a);
       const nf = free.length;
       const A: number[][] = Array.from({ length: nf }, () =>
         new Array(nf).fill(0)
@@ -1022,7 +1763,7 @@ function solveGlobal(
       for (let r = 0; r < columns.length; r++) {
         const phi = columns[r];
         let target = targets[r] - offsets[r];
-        for (let a = 0; a < nl; a++)
+        for (let a = 0; a < ns; a++)
           if (!Number.isNaN(fixed[a])) target -= phi[a] * fixed[a];
         for (let u = 0; u < nf; u++) {
           b[u] += phi[free[u]] * target;
@@ -1033,28 +1774,42 @@ function solveGlobal(
       if (!sol) return null;
       let crossed = false;
       free.forEach((a, u) => {
-        const j = linearIdx[a];
-        if (sol[u] < lo[j]) {
-          fixed[a] = lo[j];
+        if (sol[u] < slotLo[a]) {
+          fixed[a] = slotLo[a];
           crossed = true;
-        } else if (sol[u] > hi[j]) {
-          fixed[a] = hi[j];
+        } else if (sol[u] > slotHi[a]) {
+          fixed[a] = slotHi[a];
           crossed = true;
-        } else theta[j] = sol[u];
+        } else values[a] = sol[u];
       });
       if (!crossed) break;
     }
-    for (let a = 0; a < nl; a++)
-      if (!Number.isNaN(fixed[a])) theta[linearIdx[a]] = fixed[a];
+    for (let a = 0; a < ns; a++)
+      if (!Number.isNaN(fixed[a])) values[a] = fixed[a];
+    for (let a = 0; a < nl; a++) theta[linearIdx[a]] = values[a];
+    phases.forEach((ph, m) => {
+      const p = values[linearIdx.indexOf(ph.amplitude)];
+      const q = values[nl + m];
+      let amplitude = Math.hypot(p, q);
+      let angle = Math.atan2(q, p);
+      // `−A · g(t + π) = A · g(t)` for a sinusoid `g`: a non-positive
+      // amplitude when its bounds ask for one.
+      if (!ph.positive) {
+        amplitude = -amplitude;
+        angle += Math.PI;
+      }
+      theta[ph.amplitude] = amplitude;
+      theta[ph.phase] = wrapPhase(angle / ph.rate, ph);
+    });
 
     // The linear prediction against the model itself at the solved point.
     let predicted = 0;
     for (let r = 0; r < columns.length; r++) {
       let value = offsets[r];
-      for (let a = 0; a < nl; a++) value += columns[r][a] * theta[linearIdx[a]];
+      for (let a = 0; a < ns; a++) value += columns[r][a] * values[a];
       predicted += (value - targets[r]) ** 2;
     }
-    const rss = sumOfSquares(cb.residual(theta));
+    const rss = sumOfSquares(rowsCb.residual(theta));
     if (!Number.isFinite(rss)) return null;
     if (Math.abs(rss - predicted) > 1e-8 * (1 + rss + predicted))
       return 'nonlinear';
@@ -1065,19 +1820,92 @@ function solveGlobal(
   // decides which tasks to run, the executor runs them. Today the executor
   // runs them here, in order; the plan is written so that a worker pool can
   // run the same tasks (design: `docs/plans/2026-10-20-worker-kernel-pool.md`,
-  // section 5.5).
+  // section 5.5). The scan of `linearSolveAt` may run on a sample of the
+  // rows; the solver runs always use every row.
+  const onIteration = () => checkDeadline(ce._deadlineFrame);
+  const boundedLM = (theta0: number[]): LMResult =>
+    levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+      lo,
+      hi,
+      onIteration,
+    });
+  // A phase that the scan solves by least squares is refined UNBOUNDED. The
+  // scan's frequency is off by up to half a basin, so its phase is off by
+  // about that error times the mean of the variable; when the best phase is
+  // across an end of the range from the scan's (one near `lo`, the other
+  // near `hi`), a solver bounded to the range stops at the bound with a
+  // large residual. The model is periodic in the phase (`linearPhases`: it
+  // appears only in `g(B + rate · c)` with `g` a sine or a cosine), so the
+  // refined phase is then brought back into its range modulo the period,
+  // and the amplitude to its sign convention, by `−A · g(t) = A · g(t + π)`.
+  // The residual at the moved point is computed again; if it differs from
+  // the solver's (the model is not periodic in the phase after all), a
+  // bounded run starts from the moved point.
+  const phaseLo = lo.slice();
+  const phaseHi = hi.slice();
+  for (const ph of phases) {
+    phaseLo[ph.phase] = -Infinity;
+    phaseHi[ph.phase] = Infinity;
+  }
+  const lm = (theta0: number[]): LMResult => {
+    if (phases.length === 0) return boundedLM(theta0);
+    const r = levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+      lo: phaseLo,
+      hi: phaseHi,
+      onIteration,
+    });
+    const theta = r.theta.slice();
+    for (const ph of phases) {
+      let amplitude = theta[ph.amplitude];
+      let phase = theta[ph.phase];
+      if (ph.positive ? amplitude < 0 : amplitude > 0) {
+        amplitude = -amplitude;
+        phase += Math.PI / ph.rate;
+      }
+      theta[ph.amplitude] = amplitude;
+      theta[ph.phase] = wrapPhase(phase, ph);
+    }
+    if (theta.every((v, j) => v === r.theta[j])) return r;
+    let norm: number;
+    try {
+      norm = Math.sqrt(sumOfSquares(cb.residual(theta)));
+    } catch (e) {
+      if (!isTimeoutCancellation(e)) throw e;
+      // The deadline left no time to check the moved point: it is reported
+      // with the solver's residual, which the periodicity of the model in
+      // the phase gives up to rounding.
+      return { ...r, theta, converged: false, timedOut: true };
+    }
+    if (Math.abs(norm - r.residualNorm) <= 1e-8 * (1 + r.residualNorm))
+      return { ...r, theta, residualNorm: norm };
+    try {
+      const again = boundedLM(theta);
+      return { ...again, iterations: r.iterations + again.iterations };
+    } catch (e) {
+      if (!isTimeoutCancellation(e)) throw e;
+      return {
+        ...r,
+        theta,
+        residualNorm: norm,
+        converged: false,
+        timedOut: true,
+      };
+    }
+  };
   const kernel: FitKernel = {
     linearSolveAt,
     startRss: (theta0) => sumOfSquares(cb.residual(theta0)),
-    lm: (theta0) =>
-      levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
-        lo,
-        hi,
-        onIteration: () => checkDeadline(ce._deadlineFrame),
-      }),
+    lm,
   };
   const outcome = runFitPlanSync(
-    globalSearchPlan(separable, scans, thetaAt),
+    globalSearchPlan(separable, scans, thetaAt, {
+      gridScans,
+      // Not read by the multi-start, the only strategy left when the
+      // separable grid is over the budget.
+      gridCounts: gridCountList === 'over-budget' ? [] : gridCountList,
+      startCounts: startCountList,
+      sampled,
+    }),
     new InlineFitExecutor(kernel)
   );
   if (outcome === 'no-finite-value')
@@ -1085,7 +1913,7 @@ function solveGlobal(
       'unexpected-argument',
       'FindFit: the model has no finite value in the global range'
     );
-  const { best, bestScanned, iterations, timedOut } = outcome;
+  const { best, bestScanned, bestUnscored, iterations, timedOut } = outcome;
 
   // The best evaluated grid point can beat every finished solver run: in the
   // multi-start a later start is recorded in `bestScanned` before its run,
@@ -1106,10 +1934,12 @@ function solveGlobal(
     });
   }
   if (best === undefined) {
-    // Nothing was evaluated before the budget expired: the lower corner of
-    // the range, with no residual.
+    // Nothing was evaluated on every row before the budget expired: the best
+    // point of a scan on a sample of the rows, or else the lower corner of
+    // the range, with no residual (`NaN`: it was not computed over every
+    // row).
     return buildRecord(ce, names, {
-      theta: thetaAt(scans.map((s) => s.lo)),
+      theta: bestUnscored ?? thetaAt(scans.map((s) => s.lo)),
       converged: false,
       residualNorm: NaN,
       iterations,
@@ -1241,7 +2071,8 @@ function findFitCore(
       varNames,
       varFresh,
       paramNames,
-      paramFresh
+      paramFresh,
+      scans.length > 0
     );
     if (!unit) return undefined; // unresolved symbol → inert
     units.push({ ...unit, paramFresh });

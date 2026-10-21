@@ -95,66 +95,121 @@ export function hullValues(a: unknown, b: unknown): unknown {
 }
 
 /**
+ * True when `a` or `b` is `empty`: a value that is undefined over the WHOLE
+ * cell (`\sqrt{x}` over `[-1, -1]`).
+ *
+ * An ordered comparison or an equality with such an operand is `'false'`,
+ * as the scalar targets answer `NaN > 0` with `false` and as Desmos reads
+ * it (user decision 2026-10-20, Tycho row 411). A `partial` operand, which
+ * is undefined over PART of the cell only, is at most `'maybe'`
+ * (`holds`), and `notEqual` keeps `'maybe'` for an `empty` operand: the
+ * decision does not cover it.
+ *
+ * An `empty` with the `missing` flag is not such a value: it stands for an
+ * ABSENT value (a `Which` with no default arm that selects no clause, a
+ * written `Missing`), whose interpreter value is `Missing`, and a comparison
+ * with `Missing` has no value (Kleene). An absent operand wins over an
+ * undefined one, as in the interpreter, so a comparison with either flagged
+ * operand answers `false` here and the comparison gives `'maybe'`.
+ */
+function hasEmptyOperand(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): boolean {
+  const empty = (x: Interval | IntervalResult): boolean =>
+    'kind' in x && x.kind === 'empty';
+  const missing = (x: Interval | IntervalResult): boolean =>
+    'kind' in x && x.kind === 'empty' && x.missing === true;
+  if (missing(a) || missing(b)) return false;
+  return empty(a) || empty(b);
+}
+
+/**
+ * The verdict of a comparison whose enclosures say it holds: `'true'`, or
+ * `'maybe'` when `a` or `b` is `partial`. A `partial` operand has no value
+ * over part of the cell, and there the comparison is false (user decision
+ * 2026-10-20), so it does not hold over the whole cell. Its enclosure
+ * covers the defined part only, which is all `'true'` could claim.
+ */
+function holds(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): BoolInterval {
+  return ('kind' in a && a.kind === 'partial') ||
+    ('kind' in b && b.kind === 'partial')
+    ? 'maybe'
+    : 'true';
+}
+
+/**
  * Less than comparison for intervals.
  *
  * Returns:
  * - 'true' if a is entirely less than b (a.hi < b.lo)
- * - 'false' if a is entirely greater than or equal to b (a.lo >= b.hi)
+ * - 'false' if a is entirely greater than or equal to b (a.lo >= b.hi), or
+ *   if either operand is `empty` (`hasEmptyOperand`)
  * - 'maybe' if intervals overlap
  */
 export function less(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'false';
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return 'maybe';
   const [aVal, bVal] = unwrapped;
-  if (aVal.hi < bVal.lo) return 'true';
+  if (aVal.hi < bVal.lo) return holds(a, b);
   if (aVal.lo >= bVal.hi) return 'false';
   return 'maybe';
 }
 
 /**
- * Less than or equal comparison for intervals.
+ * Less than or equal comparison for intervals. An `empty` operand gives
+ * `'false'` (`hasEmptyOperand`).
  */
 export function lessEqual(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'false';
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return 'maybe';
   const [aVal, bVal] = unwrapped;
-  if (aVal.hi <= bVal.lo) return 'true';
+  if (aVal.hi <= bVal.lo) return holds(a, b);
   if (aVal.lo > bVal.hi) return 'false';
   return 'maybe';
 }
 
 /**
- * Greater than comparison for intervals.
+ * Greater than comparison for intervals. An `empty` operand gives `'false'`
+ * (`hasEmptyOperand`).
  */
 export function greater(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'false';
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return 'maybe';
   const [aVal, bVal] = unwrapped;
-  if (aVal.lo > bVal.hi) return 'true';
+  if (aVal.lo > bVal.hi) return holds(a, b);
   if (aVal.hi <= bVal.lo) return 'false';
   return 'maybe';
 }
 
 /**
- * Greater than or equal comparison for intervals.
+ * Greater than or equal comparison for intervals. An `empty` operand gives
+ * `'false'` (`hasEmptyOperand`).
  */
 export function greaterEqual(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'false';
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return 'maybe';
   const [aVal, bVal] = unwrapped;
-  if (aVal.lo >= bVal.hi) return 'true';
+  if (aVal.lo >= bVal.hi) return holds(a, b);
   if (aVal.hi < bVal.lo) return 'false';
   return 'maybe';
 }
@@ -164,19 +219,21 @@ export function greaterEqual(
  *
  * Returns:
  * - 'true' only if both are point intervals with same value
- * - 'false' if intervals don't overlap
+ * - 'false' if intervals don't overlap, or if either operand is `empty`
+ *   (`hasEmptyOperand`)
  * - 'maybe' if intervals overlap
  */
 export function equal(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'false';
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return 'maybe';
   const [aVal, bVal] = unwrapped;
   // Equal only if both are point intervals with same value
   if (aVal.lo === aVal.hi && bVal.lo === bVal.hi && aVal.lo === bVal.lo)
-    return 'true';
+    return holds(a, b);
   // Definitely not equal if intervals don't overlap
   if (aVal.hi < bVal.lo || bVal.hi < aVal.lo) return 'false';
   return 'maybe';
@@ -184,11 +241,16 @@ export function equal(
 
 /**
  * Not equal comparison for intervals.
+ *
+ * An `empty` operand gives `'maybe'`, as it did before `equal` began to
+ * answer `'false'` for one: the decision that an undefined operand makes a
+ * comparison false does not cover `NotEqual` (`hasEmptyOperand`).
  */
 export function notEqual(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
+  if (hasEmptyOperand(a, b)) return 'maybe';
   const eq = equal(a, b);
   if (eq === 'true') return 'false';
   if (eq === 'false') return 'true';

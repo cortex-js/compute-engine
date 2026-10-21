@@ -117,8 +117,17 @@ that script prints `READY` on an installed release. The readings below were
 reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 
 - **407 — the grid of the `FindFit` `global` option is too coarse for a wide
-  range (user decision 2026-10-20: proceed with the approach below, together
-  with step 5 of the worker-pool plan; design in progress).** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
+  range. Phase A FIXED 2026-10-20 on the main tree (uncommitted,
+  dual-reviewed, 9 findings applied; design and measurements in
+  `docs/plans/2026-10-20-findfit-global-grid.md`: basin-aware spacing, the
+  phase of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of
+  8,000 points, a stratified 300-row sample with 24 re-scores; the deciding
+  cases pass in 45 to 70 ms, 1,000 rows over `[0.3, 628]` in about 300 ms).
+  Phase B (the scan on the worker pool, step 5) is the next step. Residue,
+  not fixed: a POWER of a periodic function (`a cos(b x + c)²`) records the
+  inner function's period, but `cos²` has period π, so its basin is half as
+  wide as the grid assumes; the fix needs the period of the composed
+  expression.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
   and `c` searched. The separable scan (`SEPARABLE_GRID` in
   `src/compute-engine/nonlinear-fit.ts`, 400 × 40 points, 6 refinements)
   finds the true `b = 2.2` over [0.3, 60] but not over [0.3, 120]; the basin
@@ -191,8 +200,13 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 - **411 — on `interval-js`, an ordered comparison with an operand that is
   undefined over the whole interval answers `maybe` (user decision
   2026-10-20, with row 413: an `empty` operand of `<`, `≤`, `>`, `≥`, `=`
-  gives a definite false; `≠` and `partial` unchanged; fix in progress in the
-  worktree `/tmp/wt-ce-411`).** `0 < \sqrt{x}` at
+  gives a definite false; `≠` and `partial` unchanged). FIXED 2026-10-20 on
+  the main tree with row 413 (uncommitted, dual-reviewed, 7 findings applied;
+  `docs/ERROR-MODEL.md` records the decision). Residues on `interval-js`, not
+  fixed: `integrate.ts` (around line 163) rebuilds `{ kind: v.kind }` and drops
+  the new `missing` flag of a no-selection `empty`, and the interpreter
+  fallback (`toIntervalValue`) writes a plain `empty`; both answer `'false'`
+  where the interpreter says `Missing`.** `0 < \sqrt{x}` at
   the point interval [-1, -1] gives `"maybe"`; the `javascript` target gives
   `false` (`NaN > 0`), and Desmos reads a comparison with an undefined value
   as false. Ask: for `<`, `≤`, `>`, `≥` and `=`, an `empty` operand gives a
@@ -261,7 +275,19 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   condition on the interpreter, the `javascript` and `python` targets and
   `interval-js`, so the else branch is taken; this reverses the ruling of
   2026-09-03 recorded in `docs/ERROR-MODEL.md`; `≠` and `Missing` keep their
-  reading; fix in progress in the worktree `/tmp/wt-ce-411`).** `\{0/0 > 0: 1, 0\}` is
+  reading). FIXED 2026-10-20 on the main tree (uncommitted, dual-reviewed, 7
+  findings applied; `docs/ERROR-MODEL.md` has the new section). Open after it,
+  decision needed: (a) values that are undefined for Desmos but not `NaN` for
+  CE stay unevaluated in a comparison and so in a branch: `0 < ~oo` (from
+  `1/0`), `0 < i` (`\\sqrt{-1}`), `0 < \\ln(-1)`; with `K(n) := 1/n` Tycho's
+  `\\{K(n) > 0: 1, 0\\}` at `n = 0` is still a held `Which`, not `0`. (b) The
+  compiled presence guard of a branch (an unsupplied variable takes no arm)
+  is static: a variable read only by an ARM of a nested `If`/`Which`, or by a
+  later `Which` condition, is not guarded, so with `y` unsupplied
+  `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = 1` is `0`, not `NaN`; a variable in
+  a nested connective that could decide without it is guarded anyway; and a
+  bound name (a `Sum` index) that shares its name with a valued global makes
+  the walk follow the global's value.** `\{0/0 > 0: 1, 0\}` is
   `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and
   the `javascript` target gives `null`; Desmos and JavaScript's own
   `NaN > 0` read the comparison as false and give 0. `N = \sum_{n=0}^{10000}
@@ -647,22 +673,6 @@ The 3 that the uncommitted changes fix are in `batch9-evaluation.test.ts` ("a
 big operator does not keep a function assigned by its term": Sum, Product,
 and a term whose argument changes). Reproduce: `npx jest --config
 ./config/jest.config.cjs -w 4 -- <the files above>`.
-
-### With `Multiply` declared not commutative, a factor of 1 is kept (OPEN, question — found 2026-10-20 by the review of the `Factor` merge fix)
-
-After `ce.declare('Multiply', { commutative: false }, { extend: true })`,
-`ce.box(['Multiply', 'a', 1])` stays `a * 1`, and `Factor(a·b·a)` gives
-`a * 1 * b * 1 * a * 1`. With the default definition the 1 is removed. The
-1 comes from the product that `factor()` builds for each operand,
-`Product.from(together(a)).asExpression()` (`arithmetic-mul-div.ts`), which
-relies on the canonical `Multiply` to remove a coefficient of 1; other
-callers of `Product` rely on it in the same way, so a fix in `factor()` alone
-would not cover them. The number 1 is the identity of a product whether or
-not the product commutes, so removing it would not change the order of the
-operands. Question for the user: should the canonical `Multiply` remove a
-factor of 1 when a host has declared it not commutative? The tests of this
-setting (`test/compute-engine/declare-extend.test.ts`) check only the operand
-order.
 
 ### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
 
@@ -6368,3 +6378,15 @@ avoiding callback work merely to read row counts. Collecting a row with ListFrom
 omits its immediate Nothing entries. Compiler guards refuse omission-capable
 Tabulate/Scan until targets have a distinct representation; Iterate remains
 unsupported. Custom accumulator delivery policies are unchanged.
+
+### Function declaration hoisting across execution routes (decision pending — 2026-10-20)
+
+The sticky unresolved-result decision exposes a route difference: boxing a
+whole Block can install function clauses before evaluation, while executeEpsil
+processes top-level statements in order. Thus let a = g(3); function g(k){k+1};
+a can return4 on whole-block boxing/compilation, while sequential execution
+keeps the already unresolved g(3) symbolic. Assignments remain ordered. Asked
+user whether to preserve declaration hoisting explicitly across routes
+(recommended) or make function declarations execution-ordered too. No policy
+change for declaration hoisting has been applied. The removed conservative
+compiler-order prototype is saved in the producer review artifacts.

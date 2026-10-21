@@ -4426,7 +4426,7 @@ function componentResultTypeD(
         : provenAccessType(element, length, position);
     if (proven !== undefined) return proven;
   }
-  return withMarker(element);
+  return elementReadType(xs, element);
 }
 
 /**
@@ -6675,6 +6675,119 @@ function withMarker(t: Type): Type {
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any') return 'unknown';
   return reduceType({ kind: 'union', types: [t, markerType(t)] });
+}
+
+/**
+ * `T | marker(T)` for an element `T` read from the base `xs` by an accessor
+ * (`At`, `First`, `Last`, …).
+ *
+ * It is `withMarker(T)`, except for an element type `any` that the base
+ * declares. `any` admits the absence markers (`nan <: any`, `missing <:
+ * any`), so no marker is added and the answer is `any`. `withMarker()`
+ * answers `unknown`, which also holds points and lists (it excludes only
+ * `missing`). The difference is in how an arithmetic parent reads the
+ * access: `broadcastableResultTypeOfOperands()` (`library/arithmetic.ts`)
+ * reads an `unknown` operand as a placeholder for a number, while an `any`
+ * or `value` operand contributes itself. With `P: list<any>`, `P: any` or
+ * `P: value`, `P[i]` is `any` and `P[i] - P[j]` is `any`, not
+ * `broadcastable<number>`.
+ *
+ * Two kinds of `any` element are not declared, and they keep `unknown`:
+ *
+ * - The base is a symbol whose type was INFERRED. The validation of `At`
+ *   writes `dictionary<any> | indexed_collection<any>` on an undeclared base
+ *   before its uses are read, and `First` writes `indexed_collection<any>`:
+ *   there `any` means "no element type yet". The `unknown` answer is what
+ *   lets a numeric use refine the base (`P[i] - P[j]` with `P` undeclared
+ *   types `P` as `indexed_collection<number>`).
+ * - The base type gives no element type at all (`unknown`, or a union with
+ *   a scalar option such as `integer | vector<3>`), and the accessor used
+ *   `any` as its fallback.
+ */
+function elementReadType(xs: OperandDescriptor, t: Type): Type {
+  if (t !== 'any') return withMarker(t);
+  if (readsInferredSymbol(xs.structureOf?.())) return withMarker(t);
+  return declaresAnyElement(xs.type) ? 'any' : withMarker(t);
+}
+
+/**
+ * True when the structure `s` is a symbol whose type was inferred, or an
+ * accessor (`At`, `First`, `Second`, `Third`, `Last`) or an operator that
+ * copies the element type of its collection (`Rest`, `Take`, `Sort`, …)
+ * whose collection is such a symbol, at any depth. The element inference of
+ * these accessors forwards a requirement on the access to the collection it
+ * reads, so in `At(At(m, 1), 2) + 1` with `m` undeclared, the inner access
+ * has the type that the validation of `At` wrote on the element of `m`
+ * (`dictionary<any> | indexed_collection<any>`), and its `any` means "no
+ * element type yet" as it does on `m` itself. In the same way the elements
+ * of `Rest(m)` are the elements of `m`.
+ */
+function readsInferredSymbol(
+  s: OperandStructure | undefined,
+  depth = 0
+): boolean {
+  if (s === undefined || depth > 16) return false;
+  if (s.kind === 'symbol') return s.inferred === true;
+  if (s.kind === 'application' && ELEMENT_TYPE_FORWARDING_HEADS.has(s.head))
+    return readsInferredSymbol(s.children[0]?.structureOf?.(), depth + 1);
+  return false;
+}
+
+/**
+ * The operators whose first operand is a collection and whose result is an
+ * element of it (the accessors) or a collection of its elements (a part, a
+ * reordering or a selection of it). `readsInferredSymbol()` follows them
+ * toward the collection they read.
+ */
+const ELEMENT_TYPE_FORWARDING_HEADS: ReadonlySet<string> = new Set([
+  'At',
+  'First',
+  'Second',
+  'Third',
+  'Last',
+  'Rest',
+  'Most',
+  'Reverse',
+  'Take',
+  'Drop',
+  'Slice',
+  'Sort',
+  'Unique',
+  'Filter',
+  'RotateLeft',
+  'RotateRight',
+]);
+
+/**
+ * True when the type `t` is a top that may hold a collection (`any`,
+ * `value`), or a collection whose element type (at some depth) is such a
+ * top: `list<any>`, `collection<any>`, `dictionary<any>`,
+ * `list<list<any>>`, or a union with one of these as an option.
+ */
+function declaresAnyElement(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const r = resolveTypeAlias(t);
+  if (r === 'any' || r === 'value') return true;
+  if (typeof r === 'string') return false;
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((x) => declaresAnyElement(x, depth + 1));
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return declaresAnyElement(r.elements, depth + 1);
+    case 'dictionary':
+      return declaresAnyElement(r.values, depth + 1);
+    case 'tuple':
+      return r.elements.some((x) => declaresAnyElement(x.type, depth + 1));
+    case 'record':
+      return Object.values(r.elements).some((x) =>
+        declaresAnyElement(x, depth + 1)
+      );
+    default:
+      return false;
+  }
 }
 
 /**
@@ -13210,7 +13323,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // A record's key set is fixed: a known-absent field is a static
           // defect, not an out-of-band access.
           if (name !== undefined) return rt.elements[name];
-          return withMarker(widen(...Object.values(rt.elements)) as Type);
+          return elementReadType(
+            ops[0],
+            widen(...Object.values(rt.elements)) as Type
+          );
         }
         if (rt.kind === 'tuple') {
           if (name !== undefined)
@@ -13219,7 +13335,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         // Dictionary: the key set is not part of the type — absence marker
         // (`At` parity).
-        return withMarker(rt.values);
+        return elementReadType(ops[0], rt.values);
       })();
       if (ordinary !== undefined)
         return BoxedType.forResult(ordinary, ce._typeResolver);
@@ -13594,8 +13710,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                   ? (widen(...Object.values(arm.elements)) as Type)
                   : collectionElementType(arm)
           );
-          if (arms.every((arm) => arm !== undefined))
+          if (arms.every((arm) => arm !== undefined)) {
+            // `widen` reads `unknown` as "no type yet" and drops it, so
+            // `list<unknown> | string` (the type of `Rest(P)` with `P`
+            // undeclared) would read as `character`, the element of the
+            // `string` arm only. An arm with `unknown` elements makes the
+            // element of the union `unknown`, or `any` when another arm has
+            // `any` elements (`any` holds every `unknown` value).
+            if (
+              arms.some((arm) => arm === 'unknown') &&
+              !arms.some((arm) => arm === 'any')
+            )
+              return 'unknown';
             return widen(...(arms as Type[])) as Type;
+          }
         }
         // A dictionary/record is a keyed collection whose `At` returns the
         // VALUE, not the iteration pair `tuple<string, T>` that
@@ -13674,7 +13802,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               return markerType(slots); // out-of-range literal → marker(⊔S)
             }
           }
-          return withMarker(slots); // dynamic int → ⊔S | marker(⊔S)
+          return elementReadType(ops[0], slots); // dynamic int → ⊔S | marker(⊔S)
         };
         // A union with tuple arms is read arm by arm, so `At(g, 1)` over
         // `tuple<A, B> | tuple<C, D>` is `A | C`. The union-wide
@@ -13735,7 +13863,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (typeof t === 'string') {
           if (t === 'dictionary' || t === 'record') return withMarker('any');
         } else if (t.kind === 'dictionary') {
-          return withMarker(t.values);
+          return elementReadType(ops[0], t.values);
         } else if (t.kind === 'record') {
           const fields = widen(...Object.values(t.elements)) as Type;
           const name = key === undefined ? undefined : stringLiteralOf(key);
@@ -13744,7 +13872,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (fieldType) return fieldType; // present literal → exact
             return markerType(fields); // absent literal → marker(⊔V)
           }
-          return withMarker(fields); // dynamic string → ⊔V | marker(⊔V)
+          return elementReadType(ops[0], fields); // dynamic string → ⊔V | marker(⊔V)
         } else if (t.kind === 'tuple') {
           return tupleResult(t);
         }
@@ -13768,7 +13896,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (proven !== undefined) return proven;
           }
         }
-        return withMarker(elementType(t));
+        return elementReadType(ops[0], elementType(t));
       };
 
       // A COLLECTION-valued index (an integer gather or a boolean mask)
@@ -13810,7 +13938,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return BoxedType.forResult(
             isMaskIndex(ops[1])
               ? ({ kind: 'list', elements: inner } as ListType)
-              : ({ kind: 'list', elements: withMarker(inner) } as ListType),
+              : ({
+                  kind: 'list',
+                  elements: elementReadType(ops[0], inner),
+                } as ListType),
             context.engine._typeResolver
           );
         }
@@ -13882,10 +14013,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // A gather yields a dimensionless list; the final gather's elements
           // carry the marker, a mask filters (no marker).
           const inner =
-            last && !isMaskIndex(ops[i]) ? withMarker(peeled) : peeled;
+            last && !isMaskIndex(ops[i])
+              ? elementReadType(ops[0], peeled)
+              : peeled;
           current = { kind: 'list', elements: inner } as ListType;
         } else {
-          current = last ? withMarker(peeled) : peeled;
+          current = last ? elementReadType(ops[0], peeled) : peeled;
         }
       }
       return BoxedType.forResult(current, context.engine._typeResolver);
