@@ -257,8 +257,10 @@ export interface FitSlicePool {
  *
  * With `signal`, an abort rejects the batch with a `CancellationError` whose
  * `cause` is the signal's reason, as the other asynchronous evaluations do.
- * A slice that a worker runs when the signal aborts finishes on the worker,
- * and its result is dropped (there is no cancel message).
+ * A slice that a worker runs when the signal aborts is cancelled: the pool
+ * tells the worker to stop at its next grid point (or within 256 rows), and
+ * replaces a worker that does not answer within the pool's grace period
+ * (`cancelGrace`). The worker's answer is dropped.
  * `deadline` is a `Date.now()` time sent to the workers; the kernel's own
  * functions check the deadline (and the signal) on this thread.
  * `iterationLimit` is the engine's iteration limit, sent to the workers.

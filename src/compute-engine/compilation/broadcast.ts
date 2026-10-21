@@ -370,10 +370,17 @@ export interface BroadcastSlice {
   to: number;
   /** `Date.now()` time after which the loop stops; checked every 1024 cells. */
   deadline?: number;
+  /** Returns true when the loop must stop: a kernel worker reads the cancel
+   * flag of its task here. Checked every 64 cells, the first one included. */
+  stop?: () => boolean;
 }
 
 /** Cells between two deadline checks. */
 const DEADLINE_CHECK_EVERY = 1024;
+
+/** Cells between two `stop` checks: a call and a read of shared memory are
+ * cheaper than a read of the clock. */
+const STOP_CHECK_EVERY = 64;
 
 /**
  * Validate `inputs` and return the cell count of the batch, without
@@ -394,7 +401,8 @@ export function broadcastCellCount(
  * The slice form of `broadcastNumbers`: evaluate the cells `[from, to)` of
  * the batch `inputs` describe and write them at the START of `out` (cell
  * `from` at index 0, `outputs` values per cell). Returns the number of cells
- * written: `to - from`, or fewer when `deadline` passed first. This is the
+ * written: `to - from`, or fewer when `deadline` passed or `stop` returned
+ * true first. This is the
  * loop a worker thread runs for one task. A caller that runs several slices
  * of one batch passes its `Float64Array` shared inputs already copied into
  * plain arrays (`plainSharedArray`), so that the copy is made once per batch
@@ -418,7 +426,8 @@ export function broadcastNumbersSlice(
     slice.from,
     slice.to,
     broadcastStride(options, defaultOutputs),
-    slice.deadline
+    slice.deadline,
+    slice.stop
   );
 }
 
@@ -454,7 +463,8 @@ function broadcastNumbersRange(
   from: number,
   to: number,
   stride: number,
-  deadline?: number
+  deadline?: number,
+  stop?: () => boolean
 ): number {
   if (out.length < stride * (to - from))
     throw new TypeError(
@@ -486,6 +496,8 @@ function broadcastNumbersRange(
       (i - from) % DEADLINE_CHECK_EVERY === 0 &&
       Date.now() > deadline
     )
+      return i - from;
+    if (stop !== undefined && (i - from) % STOP_CHECK_EVERY === 0 && stop())
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
       const a = arrays[k];
@@ -652,7 +664,8 @@ export function broadcastIntervalsSlice(
     out,
     slice.from,
     slice.to,
-    slice.deadline
+    slice.deadline,
+    slice.stop
   );
 }
 
@@ -662,7 +675,8 @@ function broadcastIntervalsRange(
   out: Float64Array,
   from: number,
   to: number,
-  deadline?: number
+  deadline?: number,
+  stop?: () => boolean
 ): number {
   if (out.length < 3 * (to - from))
     throw new TypeError(
@@ -684,6 +698,8 @@ function broadcastIntervalsRange(
       (i - from) % DEADLINE_CHECK_EVERY === 0 &&
       Date.now() > deadline
     )
+      return i - from;
+    if (stop !== undefined && (i - from) % STOP_CHECK_EVERY === 0 && stop())
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
       const a = arrays[k];

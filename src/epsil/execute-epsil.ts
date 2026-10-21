@@ -889,11 +889,11 @@ function topLevelRedeclaration(
  *    `let g: (integer) -> integer` before `function g(k)` gives the binding
  *    the declared type, as the block hoist does. The clause itself is
  *    installed with its inferred signature until the `let` statement runs:
- *    the `Declare` handler then drops the early clause and the `function`
- *    statement installs it again under the declared signature
+ *    the `Declare` handler then drops the early clause and, when the `let`
+ *    has no value, installs it again at once under the declared signature
  *    (`CLAUSE_INSTALLED_AHEAD`, `library/core.ts`), so a call between the
- *    `let` and the `function` statement is not resolved early (recorded in
- *    `ROADMAP.md`). The target of an assignment that an enclosing
+ *    `let` and the `function` statement is resolved and checked against the
+ *    declared signature. The target of an assignment that an enclosing
  *    scope declares is not declared: the assignment writes that binding. A
  *    later `let` upgrades the valueless binding in place, as it upgrades an
  *    auto-declared one.

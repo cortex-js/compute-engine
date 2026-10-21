@@ -122,6 +122,11 @@ import { normalizeCount, smallCount } from './collection-count.js';
 import { sequenceReadStopCount } from './sequence-read-stops.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
+  asyncEvaluationOf,
+  beginAsyncEvaluation,
+  copyContextStack,
+} from './evaluation-epoch.js';
+import {
   CYCLE_DETECTED,
   CycleDepthQuery,
   CycleQuery,
@@ -1643,6 +1648,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    options = this._inAsyncEvaluation(options);
     return this.engine.withEvaluationContext(options, () =>
       this._evaluateAsyncValue(options)
     );
@@ -1651,10 +1657,36 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   /** The asynchronous numeric read used by N, which has the same hold
    * semantics as this symbol's N() method rather than evaluate(). */
   _NAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
-    const numeric = { ...options, numericApproximation: true };
+    const numeric = {
+      ...this._inAsyncEvaluation(options),
+      numericApproximation: true,
+    };
     return this.engine.withEvaluationContext(numeric, () =>
       this._evaluateAsyncValue(numeric, true)
     );
+  }
+
+  /**
+   * `options` with the context stack of the asynchronous evaluation that
+   * this read is part of. When `options` carry the stack of no asynchronous
+   * evaluation (a call of the host, or of a handler that gives no options),
+   * the read starts one (`beginAsyncEvaluation`, `evaluation-epoch.ts`), so
+   * that the value it evaluates is a part of it. Without this, the value of
+   * the symbol received a copy of the engine's stack from the read, and its
+   * evaluation was taken as nested: a `Block` that a symbol holds was not a
+   * program on the asynchronous route, where it is one on the synchronous
+   * route.
+   */
+  private _inAsyncEvaluation(
+    options: Partial<EvaluateOptions> | undefined
+  ): Partial<EvaluateOptions> {
+    if (
+      options !== undefined &&
+      asyncEvaluationOf(options._contextStack) !== undefined
+    )
+      return options;
+    const { stack } = beginAsyncEvaluation(this.engine, options?._contextStack);
+    return { ...options, _contextStack: stack };
   }
 
   private async _evaluateAsyncValue(
@@ -1710,7 +1742,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const node: AsyncDereference = { definition: this._def, parent };
     const frame = { ...stack[stack.length - 1] };
     asyncDereferences.set(frame, node);
-    const carried = { ...options, _contextStack: [...stack, frame] };
+    const carried = {
+      ...options,
+      _contextStack: copyContextStack(stack, frame),
+    };
     const result = await evaluateInOwnBindingsAsync(
       this.engine,
       value,

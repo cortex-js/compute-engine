@@ -10,7 +10,9 @@
 // evaluates slices of batches with the same loop the main thread runs
 // (`compilation/broadcast.ts`), so a cell computed here holds the value the
 // main thread would compute. The pool sends one task at a time and ships the
-// engine's iteration limit and the batch deadline with it. The shared inputs
+// engine's iteration limit and the batch deadline with it, and the worker's
+// cancel flag when the host has `SharedArrayBuffer`: the loop stops early
+// when the pool writes the task's job id into the flag. The shared inputs
 // of a batch (arrays the compiled code reads by index) come with the first
 // task of the batch that this worker receives: the worker copies each into a
 // plain array once, keeps it under the batch id, binds it in every later task
@@ -190,6 +192,23 @@ function loadFit(problem: WireFitProblem): FitScanProblem {
 /** Thrown by the deadline check of a `fit-run` loop. */
 const DEADLINE = new Error('deadline');
 
+/**
+ * The cancel check of a task: true once the pool has written the task's job
+ * id into the worker's cancel flag (an `Int32Array` over a
+ * `SharedArrayBuffer`). The id is compared as a 32-bit integer, as
+ * `Atomics.store()` writes it. A flag that names an earlier job does not
+ * stop this one. Without a flag (a host with no `SharedArrayBuffer`), the
+ * task cannot be cancelled: the pool terminates the worker instead.
+ */
+function cancelCheck(
+  flag: Int32Array | undefined,
+  job: number
+): (() => boolean) | undefined {
+  if (flag === undefined) return undefined;
+  const id = job | 0;
+  return () => Atomics.load(flag, 0) === id;
+}
+
 const messageOf = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
@@ -237,20 +256,28 @@ port.on((m) => {
         const count = m.width > 0 ? m.points.length / m.width : 0;
         const out = new Float64Array(stride * count);
         const deadline = m.deadline;
-        // The clock is read before each point and every 256 rows of a pass
-        // over the rows, which bounds the overrun to a few rows' work.
+        const stop = cancelCheck(m.cancel, m.job);
+        // The clock and the cancel flag are read before each point and
+        // every 256 rows of a pass over the rows, which bounds the overrun
+        // to a few rows' work. A cancelled slice ends as at the deadline:
+        // with the points done.
         let ticks = 0;
         const check =
-          deadline === undefined
+          deadline === undefined && stop === undefined
             ? (): void => undefined
             : (): void => {
-                if ((++ticks & 0xff) === 0 && Date.now() >= deadline)
+                if (
+                  (++ticks & 0xff) === 0 &&
+                  ((deadline !== undefined && Date.now() >= deadline) ||
+                    stop?.() === true)
+                )
                   throw DEADLINE;
               };
         let done = 0;
         try {
           for (let i = 0; i < count; i++) {
             if (deadline !== undefined && Date.now() >= deadline) break;
+            if (stop?.() === true) break;
             const s = linearScanSolve(
               problem,
               m.points.subarray(i * m.width, (i + 1) * m.width),
@@ -332,10 +359,22 @@ port.on((m) => {
               ...(shared !== undefined ? { shared: [...shared.keys()] } : {}),
             };
         const out = new Float64Array(perCellOut * (m.to - m.from));
+        // The loop reads `stop` every 64 cells and the clock only every
+        // 1024 cells. `stop` reads the clock too: a heavy kernel then stops
+        // within 64 cells of the deadline and sends the cells it did, before
+        // the pool's grace period after the deadline ends (after which the
+        // pool would replace the worker and drop those cells).
+        const cancelled = cancelCheck(m.cancel, m.job);
+        const deadline = m.deadline;
+        const stop =
+          deadline === undefined
+            ? cancelled
+            : () => Date.now() > deadline || cancelled?.() === true;
         const done = kernel.slice(inputs, options, out, {
           from: m.from,
           to: m.to,
-          deadline: m.deadline,
+          deadline,
+          stop,
         });
         // Only the written prefix travels back, and its buffer is
         // transferred, not copied.

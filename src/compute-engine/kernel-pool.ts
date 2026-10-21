@@ -38,6 +38,14 @@
  * them, or fewer when the `deadline` or the `signal` stopped the batch. The
  * cells after `done` are never written.
  *
+ * An abort of the signal settles the batch's tasks at once. A task that a
+ * worker runs at that time is cancelled through the worker's cancel flag
+ * (shared memory, when the host has `SharedArrayBuffer`), which the worker
+ * reads every 64 cells or at each grid point. A worker that has not answered
+ * within the grace period after an abort, or after the deadline of its task,
+ * is terminated and replaced (`cancelGrace`, default 250 ms); the tasks that
+ * waited for it go to the new worker.
+ *
  * The same queue carries the slices of grid points of a `FindFit` separable
  * scan (`runFitSlice`, used by `PoolFitExecutor` in `fit-executor.ts`): the
  * worker is sent the fit problem once (`fit-load`), then each slice
@@ -166,10 +174,61 @@ interface Slot {
   /** The task the worker runs now, by job id, or none. `settled` is set when
    * the signal aborted the task while it ran: its caller has its answer, and
    * the job stays here until the worker replies, since the worker is busy
-   * until then. */
-  running: { job: number; task: QueuedTask; settled?: boolean } | undefined;
+   * until then. `timer` is the watchdog of the task, set to fire at the
+   * `Date.now()` time `at`: the grace period after an abort, or after the
+   * task's deadline. When it fires and the worker still runs the task, the
+   * pool terminates and replaces the worker (`replace()`). */
+  running:
+    | {
+        job: number;
+        task: QueuedTask;
+        settled?: boolean;
+        timer?: ReturnType<typeof setTimeout>;
+        at?: number;
+      }
+    | undefined;
+  /** The cancel flag of the worker, an `Int32Array` of one element over a
+   * `SharedArrayBuffer`, or none when the host has no `SharedArrayBuffer`.
+   * Each task carries it; the pool cancels a running task by writing its
+   * job id into it, which the worker reads between cells or points. */
+  cancel: Int32Array | undefined;
   /** Set when the worker is gone (failed, exited, disposed). */
   dead: boolean;
+}
+
+/** The default `cancelGrace` of a pool, in milliseconds: a few times the
+ * start-up of a worker (about 40 ms, measured 2026-10-20), so that a worker
+ * that stops at its next check of the cancel flag is never replaced, and
+ * one that does not check it is free again within a quarter of a second. */
+const DEFAULT_CANCEL_GRACE = 250;
+
+/** The longest delay `setTimeout()` takes: a longer one fires at once. */
+const MAX_TIMER_DELAY = 0x7fffffff;
+
+/** Whether the deadline of `task` has passed, with the comparison the
+ * worker makes before its first cell or point: the cell loop stops when
+ * `Date.now()` is after the deadline, the fit loop when it reaches it. */
+function deadlinePassed(task: QueuedTask): boolean {
+  const deadline = task.type === 'fit' ? task.deadline : task.slice.deadline;
+  if (deadline === undefined) return false;
+  return task.type === 'fit' ? Date.now() >= deadline : Date.now() > deadline;
+}
+
+/**
+ * A new cancel flag for a worker, or `undefined` when the host has no
+ * `SharedArrayBuffer`. A browser page that is not cross-origin isolated has
+ * none (or, in older browsers, has one that `postMessage()` refuses to
+ * send): its workers are not cancelled, only terminated after the grace
+ * period.
+ */
+function newCancelFlag(): Int32Array | undefined {
+  const g = globalThis as { crossOriginIsolated?: boolean };
+  if (
+    typeof SharedArrayBuffer !== 'function' ||
+    g.crossOriginIsolated === false
+  )
+    return undefined;
+  return new Int32Array(new SharedArrayBuffer(4));
 }
 
 /**
@@ -216,8 +275,23 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       ? new FinalizationRegistry<number>((id) => this.unloadEverywhere(id))
       : undefined;
 
+  /** The `cancelGrace` option, in milliseconds. */
+  private readonly grace: number;
+
   constructor(private readonly options: KernelPoolOptions) {
     this.size = Math.max(1, Math.floor(options.size ?? defaultPoolSize()));
+    const grace = options.cancelGrace ?? DEFAULT_CANCEL_GRACE;
+    // A finite grace period longer than `setTimeout()` takes would never
+    // arm the watchdog: it is refused rather than read as `Infinity`.
+    if (
+      typeof grace !== 'number' ||
+      !(grace >= 0) ||
+      (Number.isFinite(grace) && grace > MAX_TIMER_DELAY)
+    )
+      throw new TypeError(
+        'createKernelPool: `cancelGrace` must be a number of milliseconds from 0 to 2147483647, or Infinity'
+      );
+    this.grace = grace;
     this.slots = new Array(this.size).fill(undefined);
     if (options.prewarm) {
       const generation = this.generation;
@@ -280,7 +354,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     slot.failReady(error);
     if (slot.running) {
       slot.running.task.reject(error);
-      slot.running = undefined;
+      this.endRunning(slot);
     }
     for (const task of slot.queue) task.reject(error);
     slot.queue.length = 0;
@@ -291,6 +365,87 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     }
     const k = this.slots.indexOf(slot);
     if (k >= 0) this.slots[k] = undefined;
+  }
+
+  /** The slot is no longer running a task: stop the task's watchdog. */
+  private endRunning(slot: Slot): void {
+    const timer = slot.running?.timer;
+    if (timer !== undefined) clearTimeout(timer);
+    slot.running = undefined;
+  }
+
+  /**
+   * Arm the watchdog of the slot's running task to fire at the `Date.now()`
+   * time `at`, unless it is already armed to fire earlier. A time too far
+   * ahead for `setTimeout()` arms nothing: an abort arms it again later.
+   */
+  private arm(slot: Slot, at: number): void {
+    const running = slot.running;
+    if (running === undefined || !Number.isFinite(at)) return;
+    if (running.at !== undefined && running.at <= at) return;
+    const delay = Math.max(0, at - Date.now());
+    if (delay > MAX_TIMER_DELAY) return;
+    if (running.timer !== undefined) clearTimeout(running.timer);
+    running.at = at;
+    running.timer = setTimeout(() => this.overrun(slot, running), delay);
+  }
+
+  /** Cancel the slot's running task: its caller has its answer
+   * (`settled`). The worker reads the cancel flag between cells or points
+   * and answers early; if it has not answered within the grace period, the
+   * watchdog replaces it. */
+  private cancelRunning(slot: Slot): void {
+    const running = slot.running;
+    if (running === undefined) return;
+    running.settled = true;
+    if (slot.cancel !== undefined) Atomics.store(slot.cancel, 0, running.job);
+    this.arm(slot, Date.now() + this.grace);
+  }
+
+  /** The watchdog of `running` fired: if the worker still runs that task,
+   * settle the task with no cells done (its deadline passed and the worker
+   * did not answer), and replace the worker. */
+  private overrun(slot: Slot, running: NonNullable<Slot['running']>): void {
+    if (slot.dead || slot.running !== running) return;
+    if (!running.settled) {
+      running.settled = true;
+      running.task.resolve({ out: new Float64Array(0), done: 0 });
+    }
+    this.replace(slot);
+  }
+
+  /**
+   * Terminate the worker of `slot`, which does not answer, and give the
+   * tasks that wait for it to a new worker from the host's factory, in the
+   * same place of the pool. The new worker holds no kernel, fit problem or
+   * shared input: each is sent again with the first task that needs it, as
+   * for any new worker (`slot.loaded` and `slot.batches` start empty). If
+   * the factory throws, the waiting tasks are rejected, and their callers
+   * finish inline.
+   */
+  private replace(slot: Slot): void {
+    const k = this.slots.indexOf(slot);
+    // A waiting task whose deadline has passed is settled here, so that a
+    // batch whose deadline has passed does not create a new worker.
+    const waiting = slot.queue.splice(0).filter((task) => {
+      if (!deadlinePassed(task)) return true;
+      task.resolve({ out: new Float64Array(0), done: 0 });
+      return false;
+    });
+    // The running task was settled: `fail()` then rejects nothing.
+    this.endRunning(slot);
+    this.fail(slot, new Error('The kernel worker did not stop'));
+    if (k < 0 || waiting.length === 0) return;
+    let fresh: Slot;
+    try {
+      fresh = this.slot(k);
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      for (const task of waiting) task.reject(error);
+      return;
+    }
+    fresh.queue.push(...waiting);
+    void this.pump(fresh);
   }
 
   /** The slot `k`, its worker created on first use. */
@@ -316,6 +471,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       refused: new Map(),
       queue: [],
       running: undefined,
+      cancel: newCancelFlag(),
       dead: false,
     };
     const onMessage = (data: unknown): void => {
@@ -338,7 +494,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         case 'fit-result': {
           const running = slot.running;
           if (!running || running.job !== m.job) return;
-          slot.running = undefined;
+          this.endRunning(slot);
           // A late result of a task the main thread settled on abort is
           // dropped; the worker is free again either way.
           if (!running.settled)
@@ -353,7 +509,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           }
           const running = slot.running;
           if (!running || running.job !== m.job) return;
-          slot.running = undefined;
+          this.endRunning(slot);
           if (!running.settled) running.task.reject(new Error(m.message));
           void this.pump(slot);
           return;
@@ -531,17 +687,27 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // runs on the worker. A queued task leaves the queue. A running task
     // stays the slot's running job until the worker replies (the worker is
     // busy until then), and its late reply is dropped; the reply then sends
-    // the next task of the queue.
+    // the next task of the queue. The worker is told to stop through its
+    // cancel flag, and is replaced if it does not answer within the grace
+    // period (`cancelRunning()`).
     const signal = task.signal;
     if (signal !== undefined) {
       const onAbort = (): void => {
-        const q = slot.queue.indexOf(task);
-        if (q >= 0) slot.queue.splice(q, 1);
-        else if (slot.running?.task === task) slot.running.settled = true;
+        // The task may have moved to another slot since it was queued: a
+        // slot whose worker was replaced gives its queue to the new one.
+        const owner =
+          this.slots.find(
+            (s) =>
+              s !== undefined &&
+              (s.running?.task === task || s.queue.includes(task))
+          ) ?? slot;
+        const q = owner.queue.indexOf(task);
+        if (q >= 0) owner.queue.splice(q, 1);
+        else if (owner.running?.task === task) this.cancelRunning(owner);
         task.resolve({ out: new Float64Array(0), done: 0 });
         // The aborted task may be the one a pending `pump()` waits to send:
         // that call then stops, and this one sends the next task.
-        void this.pump(slot);
+        void this.pump(owner);
       };
       signal.addEventListener('abort', onAbort, { once: true });
       // The listener holds the task, and a fit task holds every row of the
@@ -597,19 +763,66 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     }
     const job = this.nextJob++;
     slot.running = { job, task };
-    slot.worker.postMessage(
-      {
-        type: 'fit-run',
-        job,
-        id,
-        points: task.points,
-        width: task.problem.gridIdx.length,
-        allRows: task.allRows,
-        deadline: task.deadline,
-        iterationLimit: task.iterationLimit,
-      } satisfies MainToWorkerMessage,
-      [task.points.buffer as ArrayBuffer]
-    );
+    this.armDeadline(slot, task.deadline);
+    // A message that cannot be sent gets no reply: the task is settled
+    // here, as on the `run` route of `pump()`, and the caller solves the
+    // points inline.
+    try {
+      this.postTask(
+        slot,
+        {
+          type: 'fit-run',
+          job,
+          id,
+          points: task.points,
+          width: task.problem.gridIdx.length,
+          allRows: task.allRows,
+          deadline: task.deadline,
+          iterationLimit: task.iterationLimit,
+          ...(slot.cancel !== undefined ? { cancel: slot.cancel } : {}),
+        },
+        [task.points.buffer as ArrayBuffer]
+      );
+    } catch (e) {
+      this.endRunning(slot);
+      task.reject(e instanceof Error ? e : new Error(String(e)));
+      void this.pump(slot);
+    }
+  }
+
+  /**
+   * Post a `run` or `fit-run` message to the slot's worker. A host can have
+   * `SharedArrayBuffer` and still fail to clone the cancel flag (a `create()`
+   * adapter that sends the messages across a process boundary, or an older
+   * browser that does not report `crossOriginIsolated`): when the post
+   * throws and the message carries the flag, it is posted again without
+   * it. If that post succeeds, the worker's tasks carry no flag from now on
+   * (they are then stopped only by the termination after the grace period).
+   * If it throws too, the error is not the flag's, and is thrown. A failed
+   * post transfers no buffer, so the second post can transfer them.
+   */
+  private postTask(
+    slot: Slot,
+    message: MainToWorkerMessage & { type: 'run' | 'fit-run' },
+    transfer: ArrayBuffer[]
+  ): void {
+    try {
+      slot.worker.postMessage(message, transfer);
+    } catch (e) {
+      if (message.cancel === undefined) throw e;
+      slot.worker.postMessage({ ...message, cancel: undefined }, transfer);
+      slot.cancel = undefined;
+    }
+  }
+
+  /** A task with a deadline stops on the worker at the deadline: arm its
+   * watchdog to replace a worker that has not answered within the grace
+   * period after it. The period starts no earlier than now, the time the
+   * task is sent, so that the worker always has a full grace period to
+   * receive the task, load what it needs and answer. */
+  private armDeadline(slot: Slot, deadline: number | undefined): void {
+    if (deadline !== undefined)
+      this.arm(slot, Math.max(deadline, Date.now()) + this.grace);
   }
 
   /** Send the slot's next queued task once the worker is ready and idle. */
@@ -624,7 +837,9 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     }
     if (slot.dead || slot.running || slot.queue[0] !== task) return;
     slot.queue.shift();
-    if (task.signal?.aborted) {
+    // An aborted task, or one whose deadline has passed (the worker would
+    // stop before its first cell or point), is settled here and not sent.
+    if (task.signal?.aborted || deadlinePassed(task)) {
       task.resolve({ out: new Float64Array(0), done: 0 });
       void this.pump(slot);
       return;
@@ -731,6 +946,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       return;
     }
     slot.running = { job, task };
+    this.armDeadline(slot, task.slice.deadline);
     // `postMessage()` throws a `DataCloneError` when structured clone cannot
     // copy a value of the message: for example a shared array element that
     // is a function. No worker reply then comes for this task, so the task
@@ -741,7 +957,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // them, so the slot no longer records the batch, and the next task of
     // the batch on this slot sends them again.
     try {
-      slot.worker.postMessage(
+      this.postTask(
+        slot,
         {
           type: 'run',
           job,
@@ -757,11 +974,12 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
             : {}),
           ...(batch !== undefined ? { batch: batch.id } : {}),
           ...(shared !== undefined ? { shared } : {}),
+          ...(slot.cancel !== undefined ? { cancel: slot.cancel } : {}),
         } satisfies MainToWorkerMessage,
         transfer
       );
     } catch (e) {
-      slot.running = undefined;
+      this.endRunning(slot);
       if (shared !== undefined && batch !== undefined)
         slot.batches.delete(batch.id);
       task.reject(e instanceof Error ? e : new Error(String(e)));

@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
 import { LatexSyntax, LATEX_DICTIONARY } from '../../../src/latex-syntax';
+import { _Parser } from '../../../src/compute-engine/latex-syntax/parse';
 
 describe('DOUBLE-QUOTED STRING LITERALS', () => {
   test('parses a double-quoted string', () => {
@@ -441,15 +442,85 @@ describe('A KEYWORD AFTER AN OPERAND', () => {
 
   // A quantifier makes a new terminator at each call, so its results do not
   // occur again. The parser keeps a bounded number of them: before, this
-  // input filled a `Map` until `ce.parse()` threw a `RangeError`. The parse
-  // is still slow (see ROADMAP.md, "A chain of `for all` or `there exists`
-  // clauses parses in exponential time"), so the chain is short.
+  // input filled a `Map` until `ce.parse()` threw a `RangeError`.
   test('a chain of `for all` clauses does not throw', () => {
     const latex = Array.from({ length: 8 }, (_, i) => `x_{${i}}`).join(
       ' \\text{for all} '
     );
     expect(() => ce.parse(latex, { form: 'raw' })).not.toThrow();
   });
+
+  // When the trailing condition of `for all` does not apply, the clause is
+  // read as the prefix quantifier, and `there exists` has only the prefix
+  // form. The quantifier parsed the rest of the input three times: twice
+  // to look for a `(` that starts its body, then once more for its
+  // condition. Each parse reached the next quantifier, so the number of
+  // parses grew about 3 times with each clause: 12 clauses took more than
+  // 10 seconds. Now the quantifier keeps the condition of the first parse
+  // when its own `(` test did not stop it. With a `(` after the chain
+  // (`… + (z > 0)`), each quantifier in the chain inherits the `(` test of
+  // the quantifier before it, so only the first one tries the next split.
+  // The count of `parseExpression()` calls tells polynomial growth from
+  // exponential growth without a wall-clock bound: from 4 to 8 clauses it
+  // grows 2 to 11 times, and it grew 80 to 100 times. A longer chain is not
+  // used: without the fix, the parse of 16 clauses takes hours.
+  test.each([
+    [
+      'for all',
+      (n: number) =>
+        Array.from(
+          { length: n },
+          (_, i) => `x_{${i}} \\text{ for all } y_{${i}}`
+        ).join(' \\; '),
+    ],
+    [
+      'for all (no space command)',
+      (n: number) =>
+        Array.from({ length: n }, (_, i) => `x_{${i}}`).join(
+          ' \\text{for all} '
+        ),
+    ],
+    [
+      'there exists',
+      (n: number) =>
+        Array.from(
+          { length: n },
+          (_, i) => `\\text{ there exists } y_{${i}}`
+        ).join(' '),
+    ],
+    [
+      'for all (then a group)',
+      (n: number) =>
+        Array.from(
+          { length: n },
+          (_, i) => `x_{${i}} \\text{ for all } y_{${i}}`
+        ).join(' \\; ') + ' + (z > 0)',
+    ],
+    [
+      'there exists (then a group)',
+      (n: number) =>
+        Array.from(
+          { length: n },
+          (_, i) => `\\text{ there exists } y_{${i}}`
+        ).join(' ') + ' + (z > 0)',
+    ],
+  ])(
+    'a chain of `%s` clauses parses in polynomial time',
+    (_, chain: (n: number) => string) => {
+      const parses = (n: number): number => {
+        const spy = jest.spyOn(_Parser.prototype, 'parseExpression');
+        try {
+          ce.parse(chain(n), { form: 'raw' });
+          return spy.mock.calls.length;
+        } finally {
+          spy.mockRestore();
+        }
+      };
+      // Twice the clauses, at most 2^4 = 16 times the parses: the growth of
+      // a polynomial of degree 4 or less.
+      expect(parses(8)).toBeLessThan(16 * parses(4));
+    }
+  );
 });
 
 describe('A CUSTOM \\text ENTRY THAT DECLINES', () => {

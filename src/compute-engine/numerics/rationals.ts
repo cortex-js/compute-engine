@@ -334,15 +334,24 @@ export function sqrt(r: Rational): Rational | undefined {
 export function rationalGcd(lhs: Rational, rhs: Rational): Rational {
   if (isMachineRational(lhs) && isMachineRational(rhs)) {
     if (lhs[1] === 1 && rhs[1] === 1) return [gcd(lhs[0], rhs[0]), 1];
-    return [gcd(lhs[0], rhs[0]), lcm(lhs[1], rhs[1])];
+    // The denominator of the gcd is the lcm of the denominators. When it is
+    // past the safe integer range (the content of a long sum of `1/k²`
+    // terms), the machine form is rounded, and past the double range it is
+    // `Infinity`, which a later `lcm` cannot read: use the bigint form.
+    const den = lcm(lhs[1], rhs[1]);
+    if (Number.isSafeInteger(den)) return [gcd(lhs[0], rhs[0]), den];
   }
 
   if (lhs[1] === 1 && rhs[1] === 1)
     return [bigGcd(BigInt(lhs[0]), BigInt(rhs[0])), BigInt(1)];
 
+  // The bigint `lcm` keeps the sign of the product of its operands, and an
+  // unreduced rational may carry a negative denominator; the denominator of
+  // the gcd is non-negative, as the machine `lcm` makes it.
+  const den = bigLcm(BigInt(lhs[1]), BigInt(rhs[1]));
   return [
     bigGcd(BigInt(lhs[0]), BigInt(rhs[0])),
-    bigLcm(BigInt(lhs[1]), BigInt(rhs[1])),
+    den < 0n ? -den : den,
   ] as Rational;
 }
 

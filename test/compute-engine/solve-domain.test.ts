@@ -1885,3 +1885,136 @@ describe('SOLVE OVER A DOMAIN — complete root lists', () => {
     expect(tan[1]).toBeCloseTo((5 * pi) / 4, 12);
   });
 });
+
+describe('SOLVE — the type of the unknown and free parameters', () => {
+  // `1/x` with `x: real` is typed `infinity | nan | real`: it is the pole
+  // `~oo` at `x = 0`. Each finite value of it is real, so it is a real root
+  // of `t·x = 1` for a real `t`. The root was removed, and the equation
+  // stayed unsolved when `t` was declared `real`.
+  test.each([
+    ['t and x declared real', ['t', 'x']],
+    ['t declared real', ['t']],
+    ['nothing declared', []],
+  ])('t·x = 1, %s', (_, declared) => {
+    const ce = new ComputeEngine();
+    for (const name of declared) ce.declare(name, 'real');
+    for (const eq of [
+      ['Equal', ['Multiply', 't', 'x'], 1],
+      ['Equal', ['Multiply', 'x', 't'], 1],
+    ])
+      expect(
+        ce
+          .box(['Solve', eq, 't'] as Expression)
+          .evaluate()
+          .toString()
+      ).toBe('[1 / x]');
+    expect(
+      ce.parse('\\operatorname{Solve}(t\\cdot x=1, t)').evaluate().toString()
+    ).toBe('[1 / x]');
+  });
+
+  // An assignment infers the type of a symbol from the value: `x := 5`
+  // gives `x` the type `integer`. That type does not restrict the values of
+  // `x` as the unknown of an equation: the solver kept the integer roots
+  // only, and `Solve(2x = 1, x)` was `[]`. A declared type still does.
+  test('an unknown with a value has no type from that value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const solve = (eq: Expression) =>
+      ce
+        .box(['Solve', eq, 'x'] as Expression)
+        .evaluate()
+        .toString();
+    expect(solve(['Equal', ['Multiply', 2, 'x'], 1])).toBe('[1/2]');
+    expect(solve(['Equal', ['Power', 'x', 2], 2])).toBe('[sqrt(2),-sqrt(2)]');
+    expect(solve(['Equal', ['Power', 'x', 2], -1])).toBe('[i,-i]');
+    expect(ce.box('x').evaluate().toString()).toBe('5');
+
+    const declared = new ComputeEngine();
+    declared.declare('x', 'integer');
+    declared.assign('x', 5);
+    const solveDeclared = (eq: Expression) =>
+      declared
+        .box(['Solve', eq, 'x'] as Expression)
+        .evaluate()
+        .toString();
+    expect(solveDeclared(['Equal', ['Multiply', 2, 'x'], 1])).toBe('[]');
+    expect(solveDeclared(['Equal', ['Multiply', 2, 'x'], 4])).toBe('[2]');
+  });
+
+  // With `x := 3` and `y := 4`, both are typed `integer` by their values.
+  // The integer (diophantine) solver took the equation and answered `[]`:
+  // `2x + 4y` is even. The unknowns are not integers, and the answer is the
+  // one of an engine with no assignment.
+  test('a system whose unknowns have values is not an integer system', () => {
+    const json = [
+      'Solve',
+      ['Equal', ['Add', ['Multiply', 2, 'x'], ['Multiply', 4, 'y']], 1],
+      ['List', 'x', 'y'],
+    ] as Expression;
+    const fresh = new ComputeEngine().box(json).evaluate().toString();
+    const ce = new ComputeEngine();
+    ce.assign('x', 3);
+    ce.assign('y', 4);
+    const result = ce.box(json).evaluate().toString();
+    expect(result).not.toBe('[]');
+    expect(result).toBe(fresh);
+  });
+
+  // A candidate of a domain whose check still has a free parameter is not
+  // decided: `x − a` at `x = 1` is `1 − a`, which is zero for `a = 1`. Each
+  // candidate was removed, and the answer `[]` stated that there is no
+  // solution.
+  test('a predicate with a free parameter keeps the enumeration unsolved', () => {
+    // `x > a` at `x = 1` is `1 > a`, which holds for `a < 1`.
+    expect(
+      isUnevaluated(
+        ce.box([
+          'Solve',
+          ['Greater', 'x', 'a'],
+          ['Element', 'x', ['Range', 1, 5]],
+        ])
+      )
+    ).toBe(true);
+    expect(
+      solutions(
+        ce.box([
+          'Solve',
+          ['Greater', 'x', 2],
+          ['Element', 'x', ['Range', 1, 5]],
+        ])
+      )
+    ).toEqual([3, 4, 5]);
+  });
+
+  test('a free parameter keeps the enumeration unsolved', () => {
+    expect(
+      isUnevaluated(
+        ce.box([
+          'Solve',
+          ['Equal', ['Subtract', 'x', 'a'], 0],
+          ['Element', 'x', ['Range', 1, 5]],
+        ])
+      )
+    ).toBe(true);
+    expect(
+      isUnevaluated(
+        ce.box([
+          'Solve',
+          ['Equal', ['Add', 'x', 'y'], 'a'],
+          ['Element', 'x', ['Range', 1, 3]],
+          ['Element', 'y', ['Range', 1, 3]],
+        ])
+      )
+    ).toBe(true);
+    expect(
+      solutions(
+        ce.box([
+          'Solve',
+          ['Equal', ['Power', 'x', 2], 4],
+          ['Element', 'x', ['Range', -5, 5]],
+        ])
+      )
+    ).toEqual([-2, 2]);
+  });
+});

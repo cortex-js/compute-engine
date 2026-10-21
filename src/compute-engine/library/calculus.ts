@@ -5291,7 +5291,41 @@ volumes
           return measurementFromParts(ce, re, integrateReal(integrand.im));
         }
 
-        const limitsSequence = ops.slice(1);
+        // A bound can read a symbol that has the name of an integration
+        // variable but another binding: the upper bound of `∫₀ᵏ k dk` is the
+        // `k` of the enclosing scope, since the bounds of a limit are
+        // outside the scope of its variable. The shield below hides the
+        // value of every symbol with the name of a variable, so with
+        // `k := 2` the bound read no value and the integral was `k²/2`
+        // instead of `2`. Such a bound is evaluated here, before the shield.
+        // A bound that reads a variable of this integral (the bound `x` of
+        // `Integrate(f, Limits(y, 0, x), Limits(x, 0, 1))`) is not.
+        const ownBindings =
+          expression !== undefined
+            ? boundVariableBindings(expression)
+            : undefined;
+        const readsOuterNamesake = (b: Expression): boolean =>
+          b.symbols.some((name) => intVarNames.includes(name)) &&
+          rewriteWithBinders(b, (s, shadowed) => {
+            if (!intVarNames.includes(s.symbol) || shadowed?.has(s.symbol))
+              return s;
+            const def = s.valueDefinition;
+            if (
+              def === undefined ||
+              sameBindingDef(def, ownBindings?.get(s.symbol) ?? undefined)
+            )
+              return s;
+            return ce.Nothing;
+          }) !== b;
+        const limitsSequence = ops.slice(1).map((l) => {
+          if (!isFunction(l, 'Limits') || ownBindings === undefined) return l;
+          const bounds = l.ops
+            .slice(1)
+            .map((b) => (readsOuterNamesake(b) ? b.evaluate() : b));
+          return bounds.every((b, i) => b === l.ops[i + 1])
+            ? l
+            : ce.function('Limits', [l.op1, ...bounds]);
+        });
 
         // Indefinite integral?
         if (limitsSequence.length === 0) {

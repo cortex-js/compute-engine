@@ -30,10 +30,7 @@ import type { EffectLabel, Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 import { effectsOf, publicEffects } from './effects-of.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import {
-  beginTopLevelEvaluation,
-  endTopLevelEvaluation,
-} from './evaluation-epoch.js';
+import { beginTopLevelEvaluation } from './evaluation-epoch.js';
 
 /** Keys a `record{…}` type can carry unescaped: what the type lexer reads back
  * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords.
@@ -551,15 +548,10 @@ export class BoxedDictionary
     // a `List` or a `Tuple` is not. An evaluation of the dictionary that is
     // not nested in another one is a new top-level evaluation
     // (`beginTopLevelEvaluation`, `evaluation-epoch.ts`), with the same test
-    // as `BoxedFunction.evaluate`: when an asynchronous evaluation is
-    // pending, its number is given back at the end. The inherited
-    // `evaluateAsync()` runs this method, so the asynchronous route counts
-    // the same way.
-    let outerEpoch: number | undefined;
-    if (ce._evaluationEffects === undefined && ce._evaluationDepth === 0) {
-      const outer = beginTopLevelEvaluation(ce);
-      if (ce._inFlightAsyncEvaluations > 0) outerEpoch = outer;
-    }
+    // as `BoxedFunction.evaluate`. The inherited `evaluateAsync()` runs this
+    // method, so the asynchronous route counts the same way.
+    if (ce._evaluationEffects === undefined && ce._evaluationDepth === 0)
+      beginTopLevelEvaluation(ce);
     ce._evaluationDepth += 1;
     try {
       const pairs = entries.map(([k, v]) =>
@@ -568,7 +560,6 @@ export class BoxedDictionary
       return new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
     } finally {
       ce._evaluationDepth -= 1;
-      if (outerEpoch !== undefined) endTopLevelEvaluation(ce, outerEpoch);
     }
   }
 

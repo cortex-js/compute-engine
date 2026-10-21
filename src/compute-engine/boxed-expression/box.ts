@@ -141,9 +141,18 @@ import {
 } from './type-guards.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
-import { symbolAtSite, replaceAtSite } from './binding-sites.js';
+import {
+  ownIndexClause,
+  symbolAtSite,
+  replaceAtSite,
+  type OwnIndexClause,
+} from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
-import { markBinderVariable, rebindToBindings } from './binders.js';
+import {
+  markBinderVariable,
+  rebindToBindings,
+  rewriteWithBinders,
+} from './binders.js';
 import { namedLiteralSignatureType } from './effects-inference.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
 import {
@@ -4351,15 +4360,86 @@ function bindBindingSites(
     // An operand before the first clause is the body: it is inside every
     // clause, so it sees every binding.
     const limit = m < firstClause ? Number.POSITIVE_INFINITY : m;
-    const rewritten = rebindToBindings(op, scope, bound, {
-      accept: (name) => (visibleFrom.get(name) ?? 0) <= limit,
-    });
+    const accept = (name: string) => (visibleFrom.get(name) ?? 0) <= limit;
+    const own =
+      m >= firstClause ? ownIndexClause(name, op, m, visibleFrom) : undefined;
+    const rewritten =
+      own === undefined
+        ? rebindToBindings(op, scope, bound, { accept })
+        : withOwnBoundsUnbound(ce, op, own, scope, bound, accept);
     if (rewritten !== op) changed = true;
     return rewritten;
   });
   if (!changed) return result;
 
   return ce._fn(name, next, { metadata, scope });
+}
+
+/**
+ * The indexing clause `op` (`Limits` or `Element`) with its index bound to
+ * this binder's binding, and its operands outside the scope of the index
+ * read in the scope that encloses the binder (`ownIndexClause()`).
+ *
+ * The bounds of a `Limits` clause and the collection of an `Element` clause
+ * are outside the scope of their own index: in `∫₀ᵏ k dk`, `∏_{k=1}^{k} k`
+ * and `∑_{k ∈ 1..k} k`, the `k` of the bound or of the collection is the
+ * `k` of the enclosing scope (a global, or the index of an enclosing
+ * `Sum`), not the integration variable or the index. The clause is
+ * canonicalized in the scope of the binder, where the index is already
+ * declared, so an occurrence of the index's name in such an operand is bound
+ * to the index there. Such an occurrence, and one that is not bound yet, is
+ * bound here to the symbol of the enclosing scope. Before, with `k := 2`,
+ * `∫₀ᵏ k dk` was `k²/2` and `∏_{k=1}^{k} k` was `k!`, where `∫₀ᵏ t dt` is
+ * `2`. An occurrence with another binding (a `Function` parameter of the
+ * bound) keeps it. The indexes of the earlier clauses stay visible in these
+ * operands, as `accept` states, and the condition of an `Element` clause
+ * reads the index.
+ */
+function withOwnBoundsUnbound(
+  ce: ComputeEngine,
+  op: Expression,
+  own: OwnIndexClause,
+  scope: Scope,
+  bound: ReadonlyMap<string, Expression>,
+  accept: (name: string) => boolean
+): Expression {
+  if (!isFunction(op)) return op;
+  const name = own.name;
+  const binding = bound.get(name)?.valueDefinition;
+  let enclosing: Expression | undefined;
+  const enclosingSymbol = (): Expression => {
+    if (enclosing !== undefined) return enclosing;
+    // A chain of scopes can end with `undefined` rather than `null`.
+    for (let s = scope.parent; s !== null && s !== undefined; s = s.parent) {
+      if (!s.bindings.has(name)) continue;
+      enclosing = ce._bindingSymbol(name, s);
+      if (enclosing !== undefined) return enclosing;
+      break;
+    }
+    enclosing = ce._inScope(scope.parent ?? undefined, () => ce.symbol(name));
+    return enclosing;
+  };
+  let changed = false;
+  const ops = op.ops.map((b, j) => {
+    if (!own.outside(j)) {
+      const rebound = rebindToBindings(b, scope, bound, { accept });
+      if (rebound !== b) changed = true;
+      return rebound;
+    }
+    const rebound = rebindToBindings(b, scope, bound, {
+      accept: (n) => n !== name && accept(n),
+    });
+    const result = rewriteWithBinders(rebound, (s, shadowed) => {
+      if (s.symbol !== name || shadowed?.has(name)) return s;
+      const def = s.valueDefinition;
+      if (def !== undefined && def !== binding) return s;
+      return enclosingSymbol();
+    });
+    if (result !== b) changed = true;
+    return result;
+  });
+  if (!changed) return op;
+  return ce._fn(op.operator, ops);
 }
 
 function makeNumericFunction(

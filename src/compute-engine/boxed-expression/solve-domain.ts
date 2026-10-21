@@ -13,9 +13,12 @@ import {
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
+  Scope,
 } from '../global-types.js';
 import { isFunction, isNumber, sym } from './type-guards.js';
+import { rewriteWithBinders } from './binders.js';
 import {
+  collectBinderNames,
   defaultUnknown,
   namesReadByCalledFunctions,
   reduceTransformerHead,
@@ -23,7 +26,11 @@ import {
   reduceStructuralIndex,
   withValueShield,
 } from './utils.js';
-import { findUnivariateRoots, withExactIntegerExponents } from './solve.js';
+import {
+  findUnivariateRoots,
+  unknownType,
+  withExactIntegerExponents,
+} from './solve.js';
 import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 import { expand } from './expand.js';
 import { together } from './factor.js';
@@ -322,7 +329,7 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
  * `solve.ts` checks.
  */
 function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
-  const type = ce.symbol(x).type.type;
+  const type = unknownType(ce, x).type;
   if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
     return true;
   for (const [fact, records] of contextAssumptions(ce).entries()) {
@@ -590,23 +597,18 @@ export function evaluateSolve(
   // by its name, so the symbol of the body became the unknown: the equation
   // was `k − k = 1`, and the answer `[]` stated that there is no solution.
   // An unknown never reads a symbol inside a called function
-  // (`docs/SCOPING-MODEL.md`, decision of 2026-09-21), and the unknown is not
-  // renamed here, so the equation stays unsolved. The unknowns are those of
-  // the specs and those of the `Element` items of a bundled first operand
-  // (`Solve(\{g(k) = 1, k ∈ 1..3\})`), which are lifted into the specs only
-  // after the reduction.
-  //
-  // The test is deliberately conservative: it also declines for a call that
-  // the reduction would not inline (a body of several statements, an arity
-  // mismatch, a recursive function), and `namesReadByCalledFunctions()`
-  // counts a name that a `Block` or a `Sum` of the body binds as read. A
-  // rename of the unknown, as `Integrate` and `Limit` do, would solve these
-  // equations: it is recorded in ROADMAP.md (Tycho ledger rows 407 to 413,
-  // the item for row 412).
+  // (`docs/SCOPING-MODEL.md`, decision of 2026-09-21), so the equation with
+  // this unknown renamed is solved instead (`solveWithRenamedUnknowns()`):
+  // `g(k_1) = 1` is `k_1 − k = 1`, and the answer is `[k + 1]`. The unknowns
+  // are those of the specs and those of the `Element` items of a bundled
+  // first operand (`Solve(\{g(k) = 1, k ∈ 1..3\})`), which are lifted into
+  // the specs only after the reduction.
   const unknownNames = solveUnknownNames(eq, specs);
   if (unknownNames.size > 0) {
     const read = namesReadByCalledFunctions(eq.canonical);
-    if ([...unknownNames].some((name) => read.has(name))) return undefined;
+    const captured = [...unknownNames].filter((name) => read.has(name));
+    if (captured.length > 0)
+      return solveWithRenamedUnknowns(ce, ops, captured, read);
   }
 
   // Reduce transformer heads (`Solve(Simplify(eq), x)`) before solving. A
@@ -1006,7 +1008,7 @@ export function evaluateSolve(
     if (
       names.length >= 2 &&
       isFunction(ceq, 'Equal') &&
-      names.every((nm) => ce.symbol(nm).type.matches('integer')) &&
+      names.every((nm) => unknownType(ce, nm).matches('integer')) &&
       // A condition/side-condition would have to filter the (possibly
       // parametric, unbounded) diophantine family, which substitution cannot
       // do — defer to the records path below, which filters concrete tuples.
@@ -1064,6 +1066,113 @@ export function evaluateSolve(
   const tuples = solveOverMultipleDomains(ce, ceq, specs, sideConditions);
   if (tuples === undefined) return undefined; // undecidable → stay inert
   return ce.function('List', tuples);
+}
+
+/**
+ * The value of `Solve(ops)` computed with each unknown of `captured`
+ * renamed to a fresh name in the operands of the `Solve`.
+ *
+ * An unknown is captured when the body of a user function called in the
+ * equation reads a free symbol with the same name (`read`, the result of
+ * `namesReadByCalledFunctions()`). The solver inlines the body of the
+ * called function and selects the unknown by its name, so the symbol of the
+ * body became the unknown. The rename changes the occurrences of the
+ * unknown in the equation and in the specs, never in the body of a called
+ * function, which is not part of these operands: with `g := a ↦ a − k`,
+ * `Solve(g(k) = 1, k)` is solved as `Solve(g(k_1) = 1, k_1)`, which is
+ * `k_1 − k = 1`, and the answer is `[k + 1]` (`[4]` with `k := 3`). An
+ * occurrence that a binder inside the operands binds again (the index of a
+ * `Sum`) keeps its name.
+ *
+ * The fresh name is not a name of the operands, nor a name that a called
+ * function reads, nor a name declared in a visible scope. It is declared in
+ * a new scope whose parent is the current scope, with the type that the
+ * solver reads for the unknown (`unknownType()`): a declared type, or a
+ * type inferred from the uses of a symbol with no value, restricts the
+ * solutions as it does for the unknown itself; a type inferred from the
+ * value of the unknown (`integer` for `k := 3`) does not. The scope does not
+ * receive the declarations that the solver makes when it runs (a parameter
+ * `t` of a family of roots): they go to the current scope, which the result
+ * can reach.
+ *
+ * An assumption about the unknown (`assume(k > 0)`) is a constraint on the
+ * solutions: each assumption in force whose free symbols include the name of
+ * a captured unknown is assumed again for the renamed solve, with the fresh
+ * name in place of that name, in the context of the renamed solve only. The
+ * solver reads assumptions by the name of the unknown, and without this
+ * `assume(k ≠ −1)` did not remove the root `−1`.
+ *
+ * A fresh name that is still in the value (a solution of a system in terms
+ * of another unknown) is renamed back when the value has no other symbol
+ * with the name of the unknown. An inert result (the renamed `Solve` that
+ * stays unevaluated) gives `undefined`, so that the `Solve` stays
+ * unevaluated with its own operands.
+ */
+function solveWithRenamedUnknowns(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  captured: ReadonlyArray<string>,
+  read: ReadonlySet<string>
+): Expression | undefined {
+  const operands = ops.map((op) => op.canonical);
+  const used = new Set<string>(read);
+  for (const op of operands) {
+    for (const name of op.symbols) used.add(name);
+    for (const name of collectBinderNames(op)) used.add(name);
+  }
+  const scope: Scope = {
+    parent: ce.context.lexicalScope,
+    bindings: new Map(),
+    noAutoDeclare: true,
+  };
+  const renamed = new Map<string, string>();
+  const fresh = new Map<string, Expression>();
+  for (const name of captured) {
+    let i = 1;
+    while (
+      used.has(`${name}_${i}`) ||
+      ce.lookupDefinition(`${name}_${i}`) !== undefined
+    )
+      i += 1;
+    const id = `${name}_${i}`;
+    used.add(id);
+    const type = unknownType(ce, name);
+    const def = ce.symbol(name).valueDefinition;
+    ce._inScope(scope, () =>
+      ce.declare(id, {
+        type: type.toString(),
+        inferred: type.isUnknown || def?.inferredType !== false,
+      })
+    );
+    const symbol = ce._bindingSymbol(id, scope);
+    if (symbol === undefined) return undefined;
+    renamed.set(name, id);
+    fresh.set(name, symbol);
+  }
+  const rename = (op: Expression): Expression =>
+    rewriteWithBinders(op, (s, shadowed) =>
+      fresh.has(s.symbol) && !shadowed?.has(s.symbol) ? fresh.get(s.symbol)! : s
+    );
+  const renamedOps = operands.map(rename);
+  const facts: Expression[] = [];
+  for (const [fact, records] of contextAssumptions(ce).entries())
+    if (isFactTrue(records) && fact.unknowns.some((n) => fresh.has(n)))
+      facts.push(rename(fact));
+  let value = ce._inScope(scope, () => {
+    for (const fact of facts) ce.assume(fact);
+    return evaluateSolve(ce, renamedOps);
+  });
+  if (value === undefined || (isFunction(value, 'Solve') && value.isValid))
+    return undefined;
+  for (const [name, id] of renamed) {
+    if (
+      value.has(id) &&
+      !value.has(name) &&
+      !namesReadByCalledFunctions(value).has(name)
+    )
+      value = value.subs({ [id]: ce.symbol(name) });
+  }
+  return value;
 }
 
 /**
@@ -1390,7 +1499,9 @@ export function solveOverDomain(
     // Exact confirmation: every sieve-passing candidate (and every candidate at
     // all, on the interpreted path) is re-checked by exact engine evaluation —
     // floats lie for large integers (`2^53`).
-    if (!confirmExact(predBody, isEquation, { [unknown]: item })) continue;
+    const confirmed = confirmExact(predBody, isEquation, { [unknown]: item });
+    if (confirmed === undefined) return undefined;
+    if (!confirmed) continue;
 
     // Optional condition (3rd `Element` operand): drop only on a definite
     // `False`, mirroring the symbolic membership filter.
@@ -1562,7 +1673,9 @@ export function solveOverMultipleDomains(
       for (let d = 0; d < n; d++) subs[unknowns[d]] = tuple[d];
 
       // Exact confirmation of the whole tuple — floats lie for large integers.
-      if (confirmExact(predBody, isEquation, subs)) {
+      const confirmed = confirmExact(predBody, isEquation, subs);
+      if (confirmed === undefined) return undefined;
+      if (confirmed) {
         // Per-spec conditions (3rd `Element` operand) apply to their OWN
         // variable; drop only on a definite `False`.
         let keep = true;
@@ -1786,7 +1899,7 @@ function periodicRootsComplete(
   unknown: string,
   roots: ReadonlyArray<Expression>
 ): boolean {
-  const type = ce.symbol(unknown).type;
+  const type = unknownType(ce, unknown);
   if (type.matches('complex') && !type.matches('real')) return false;
   if (isFunction(equation, 'Equal') && equation.nops !== 2) return false;
   const { predBody, isEquation } = classifyPredicate(equation);
@@ -3340,7 +3453,7 @@ function rootFamilies(
 
   // A family ranges over the real line: it cannot express a type narrower
   // than `real` or an assumption about the unknown.
-  if (!isSubtype('real', ce.symbol(unknown).type.type)) return undefined;
+  if (!isSubtype('real', unknownType(ce, unknown).type)) return undefined;
   for (const [fact, records] of contextAssumptions(ce).entries())
     if (isFactTrue(records) && fact.unknowns.includes(unknown))
       return undefined;
@@ -4689,15 +4802,38 @@ function keepInDomain(
  * be exactly zero; for a boolean predicate, it must evaluate to `True`. The
  * substitution is a record so the same check serves the univariate path (one
  * unknown) and the multi-variable path (a whole candidate tuple at once).
+ *
+ * Returns `undefined` when the check does not decide because the value
+ * still has a free symbol: a parameter with no value. `x − a = 0` at `x = 1`
+ * is `1 − a`, which is zero for `a = 1` only, and `x > a` at `x = 1` is
+ * `1 > a`. Such a candidate is not a non-root, and the caller stays inert:
+ * before, each candidate was dropped, and `Solve(x − a = 0, x ∈ 1..5)` and
+ * `Solve(x > a, x ∈ 1..5)` were `[]`, which states that there is no
+ * solution.
+ *
+ * A predicate that is neither `True` nor `False` and whose free symbols are
+ * all collections is read as `False`, as before: `n > 17 ∨ sin(P) > 5` over
+ * `1..20`, with `P` an abstract collection, gives `[18, 19, 20]`.
  */
 function confirmExact(
   predBody: Expression,
   isEquation: boolean,
   subs: Record<string, Expression>
-): boolean {
+): boolean | undefined {
   const v = predBody.subs(subs).evaluate();
-  if (isEquation) return v.isIdenticallyEqual(0) === true;
-  return sym(v) === 'True';
+  if (isEquation) {
+    if (v.isIdenticallyEqual(0) === true) return true;
+    return v.unknowns.length > 0 ? undefined : false;
+  }
+  const s = sym(v);
+  if (s === 'True') return true;
+  if (s === 'False') return false;
+  const ce = v.engine;
+  return v.unknowns.some(
+    (name) => !ce.symbol(name).type.matches('collection<any>')
+  )
+    ? undefined
+    : false;
 }
 
 /**

@@ -25,8 +25,9 @@ export interface WorkerLike {
 }
 
 export interface KernelPoolOptions {
-  /** Build one worker running the kernel-worker file. Called lazily, up to
-   * `size` times. */
+  /** Build one worker running the kernel-worker file. Called lazily, once
+   * per worker; called again to replace a worker that failed, did not stop
+   * within `cancelGrace`, or after `dispose()`. */
   create: () => WorkerLike;
   /** The number of workers. Default: one less than the hardware concurrency
    * when known, at most 8, at least 1. */
@@ -34,6 +35,16 @@ export interface KernelPoolOptions {
   /** Create the workers on idle time right after the pool is built, so that
    * the first batch does not pay the start-up (about 40 ms per worker). */
   prewarm?: boolean;
+  /** The time, in milliseconds, that a worker has to answer after the pool
+   * cancels its running task (the task's signal aborted, or its deadline
+   * passed). A worker that has not answered by then is terminated and
+   * replaced by a new one from `create`, and the tasks that waited for it
+   * go to the new worker. `Infinity` never terminates a worker; a finite
+   * value must be at most 2147483647, the longest delay of `setTimeout()`
+   * (a larger one throws a `TypeError`). Default:
+   * 250, a few times the start-up of a worker (about 40 ms), so that a
+   * worker that stops at its next check is never replaced. */
+  cancelGrace?: number;
 }
 
 export interface KernelPool {

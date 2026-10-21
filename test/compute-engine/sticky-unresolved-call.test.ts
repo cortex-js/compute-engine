@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { EvaluateOptions, Expression } from '../../src/compute-engine';
 
 // The result of evaluating a call whose head has no value stays symbolic for
 // the rest of the top-level evaluation that produced it, even when the name
@@ -307,25 +308,150 @@ describe('a block that is a value of a dictionary is not a program', () => {
   });
 });
 
+/** An engine with `Tick()`, an operator that has only an `evaluateAsync`
+ * handler, which waits for a timer: an asynchronous evaluation that reads it
+ * gives control back, and another evaluation runs before it goes on. */
+function engineWithTick(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('Tick', {
+    signature: '() -> number',
+    pure: false,
+    evaluateAsync: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return ce.Zero;
+    },
+  } as never);
+  return ce;
+}
+
 describe('two host asynchronous evaluations of blocks at the same time', () => {
-  // A known limitation. The asynchronous route takes a new top-level
-  // evaluation number for a statement of a program block only while that
-  // block is the only asynchronous evaluation that is pending on the engine
-  // (`evaluateStatementsAsync`, `function-utils.ts`): asynchronous
-  // evaluations that run at the same time share one number
-  // (`evaluation-epoch.ts`). So two blocks that the host evaluates at the
-  // same time run as nested blocks, and the stored call stays unresolved,
-  // where the same two blocks awaited one after the other are programs.
-  // Giving each asynchronous evaluation its own number is a redesign of
-  // `evaluation-epoch.ts`, recorded in ROADMAP.md. This test pins the
-  // current answers.
-  test('at the same time, the stored calls stay unresolved', async () => {
+  // Each asynchronous evaluation has its own top-level evaluation number,
+  // carried by its context stack (`evaluation-epoch.ts`), and each block
+  // that the host evaluates is a program, whatever other evaluations are
+  // pending. Before, asynchronous evaluations that ran at the same time
+  // shared one number, the two blocks ran as nested blocks, and the stored
+  // calls stayed unresolved: `h(k)` and `q(k)`.
+  test('at the same time, each block is a program', async () => {
     const ce = new ComputeEngine();
     const [a, b] = await Promise.all([
       ce.box(storeThenAssign('h') as never).evaluateAsync(),
       ce.box(storeThenAssign('q') as never).evaluateAsync(),
     ]);
-    expect([a.toString(), b.toString()]).toEqual(['h(k)', 'q(k)']);
+    expect([a.toString(), b.toString()]).toEqual(['2k', '2k']);
+  });
+
+  test('at the same time, with statements that wait', async () => {
+    // `Tick()` gives control back after the first statement of each block,
+    // so the statements of the two blocks alternate.
+    const ce = engineWithTick();
+    const waiting = (h: string): unknown[] => [
+      'Block',
+      ['Assign', 'r', [h, 'k']],
+      ['Tick'],
+      ['Assign', h, ['Function', ['Multiply', 2, 'z'], 'z']],
+      'r',
+    ];
+    const [a, b] = await Promise.all([
+      ce.box(waiting('h') as never).evaluateAsync(),
+      ce.box(waiting('q') as never).evaluateAsync(),
+    ]);
+    expect([a.toString(), b.toString()]).toEqual(['2k', '2k']);
+  });
+
+  test('a synchronous evaluation while an asynchronous one is pending', async () => {
+    // Before, a synchronous evaluation of a block that started while an
+    // asynchronous evaluation was pending was not a program: `q(k)`.
+    const ce = engineWithTick();
+    const pending = ce
+      .box([
+        'Block',
+        ['Assign', 'r', ['h', 'k']],
+        ['Tick'],
+        ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']],
+        'r',
+      ] as never)
+      .evaluateAsync();
+    expect(
+      ce
+        .box(storeThenAssign('q') as never)
+        .evaluate()
+        .toString()
+    ).toBe('2k');
+    expect((await pending).toString()).toBe('2k');
+  });
+
+  test('a nested block stays nested while another evaluation is pending', async () => {
+    // The block in a `Tuple` is not a program, on either route, whatever
+    // other evaluation is pending.
+    const ce = engineWithTick();
+    const nested = ['Tuple', storeThenAssign('h'), 1];
+    const [a, b] = await Promise.all([
+      ce.box(nested as never).evaluateAsync(),
+      ce.box(storeThenAssign('q') as never).evaluateAsync(),
+    ]);
+    expect([a.toString(), b.toString()]).toEqual(['(h(k), 1)', '2k']);
+    const pending = ce.box(['Block', ['Tick'], 1] as never).evaluateAsync();
+    expect(
+      ce
+        .box(nested as never)
+        .evaluate()
+        .toString()
+    ).toBe('(h(k), 1)');
+    await pending;
+  });
+
+  test('a loop body keeps its local in each evaluation', async () => {
+    // `t` is assigned only in the body of the loop, so it is a local of the
+    // body block, which keeps its value from one iteration to the next
+    // inside one evaluation. The asynchronous route runs the body of a loop
+    // synchronously, and gives control back between two time slices. Each
+    // iteration waits longer than a time slice (`Slow()`), so the iterations
+    // of the two asynchronous evaluations, and a synchronous evaluation,
+    // alternate. Each evaluation has its own number, and reads only the
+    // local of its own runs. Before, the synchronous evaluation of the same
+    // block between two iterations removed the locals of the asynchronous
+    // evaluations, which then gave `t + 2`.
+    const ce = new ComputeEngine();
+    let started!: () => void;
+    const first = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    ce.declare('Slow', {
+      signature: '() -> number',
+      pure: false,
+      evaluate: () => {
+        started();
+        const end = Date.now() + 25;
+        while (Date.now() < end) {
+          // Wait
+        }
+        return ce.Zero;
+      },
+    });
+    // One expression, so that the runs of the three evaluations are runs of
+    // one block scope.
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'last', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 't', ['Add', 't', 1]],
+          ['Slow'],
+          ['Assign', 'last', 't'],
+        ],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      'last',
+    ] as never);
+    const one = expr.evaluateAsync();
+    const two = expr.evaluateAsync();
+    await first;
+    expect(expr.evaluate().toString()).toBe('t + 3');
+    const values = await Promise.all([one, two]);
+    expect(values.map((v) => v.toString())).toEqual(['t + 3', 't + 3']);
+    expect((await expr.evaluateAsync()).toString()).toBe('t + 3');
   });
 
   test('one after the other, each block is a program', async () => {
@@ -333,5 +459,189 @@ describe('two host asynchronous evaluations of blocks at the same time', () => {
     const a = await ce.box(storeThenAssign('h') as never).evaluateAsync();
     const b = await ce.box(storeThenAssign('q') as never).evaluateAsync();
     expect([a.toString(), b.toString()]).toEqual(['2k', '2k']);
+  });
+});
+
+describe('the evaluation number on the routes that copy the context stack', () => {
+  // An asynchronous evaluation keeps its frames on copies of its context
+  // stack, and each copy must carry the number of the evaluation
+  // (`copyContextStack`, `evaluation-epoch.ts`). Before, the application of
+  // a function literal made a copy that carried no number: the operand after
+  // the first `await` started a new evaluation, and the block in it ran as a
+  // program (`2k`), where the synchronous route keeps it nested (`h(k)`).
+  test('a block in an operand of a function literal', async () => {
+    const pair = ['Function', ['Tuple', 'a', 'b'], 'a', 'b'];
+    const sync = engineWithTick();
+    const async = engineWithTick();
+    const direct = (h: string): unknown[] => [
+      'Apply',
+      pair,
+      ['Tick'],
+      storeThenAssign(h),
+    ];
+    expect(
+      sync
+        .box(direct('h') as never)
+        .evaluate()
+        .toString()
+    ).toBe('(Tick(), h(k))');
+    expect(
+      (await async.box(direct('h') as never).evaluateAsync()).toString()
+    ).toBe('(0, h(k))');
+  });
+
+  test('a block in an operand of a declared function', async () => {
+    const declare = (ce: ComputeEngine): void => {
+      ce.declare('f', '(any, any) -> any');
+      ce.assign('f', ce.box(['Function', ['Tuple', 'a', 'b'], 'a', 'b']));
+    };
+    const sync = engineWithTick();
+    declare(sync);
+    const async = engineWithTick();
+    declare(async);
+    const call = ['f', ['Tick'], storeThenAssign('h')];
+    expect(
+      sync
+        .box(call as never)
+        .evaluate()
+        .toString()
+    ).toBe('(Tick(), h(k))');
+    expect((await async.box(call as never).evaluateAsync()).toString()).toBe(
+      '(0, h(k))'
+    );
+  });
+
+  test('a result read again after an `await` stays sticky', async () => {
+    // `ReadAgain(h(k))` evaluates `h(k)`, evaluates the result again (the
+    // sticky route), assigns `h`, and evaluates that second result. The
+    // three steps are one evaluation, so the call stays unresolved. Before,
+    // the asynchronous route marked the second result after an `await`,
+    // with the number of the engine instead of the number of the
+    // evaluation, and the last step resolved it: `2k`.
+    const make = (): ComputeEngine => {
+      const ce = new ComputeEngine();
+      const double = ce.box(['Function', ['Multiply', 2, 'z'], 'z']);
+      ce.declare('ReadAgain', {
+        signature: '(any) -> any',
+        lazy: true,
+        pure: false,
+        evaluate: ([x]: ReadonlyArray<Expression>) => {
+          const second = x.evaluate().evaluate();
+          ce.assign('h', double);
+          return second.evaluate();
+        },
+        evaluateAsync: async (
+          [x]: ReadonlyArray<Expression>,
+          options: Partial<EvaluateOptions>
+        ) => {
+          const first = await x.evaluateAsync(options);
+          const second = await first.evaluateAsync(options);
+          ce.assign('h', double);
+          return second.evaluateAsync(options);
+        },
+      } as never);
+      return ce;
+    };
+    const expr = ['ReadAgain', ['h', 'k']];
+    expect(
+      make()
+        .box(expr as never)
+        .evaluate()
+        .toString()
+    ).toBe('h(k)');
+    expect(
+      (
+        await make()
+          .box(expr as never)
+          .evaluateAsync()
+      ).toString()
+    ).toBe('h(k)');
+  });
+
+  test('a symbol that holds a program block', async () => {
+    // The read of the symbol starts the asynchronous evaluation, and the
+    // block it holds is the outermost evaluation of it: a program, as on
+    // the synchronous route. Before, the read gave the value a copy of the
+    // engine's stack that carried no evaluation, and the block ran as a
+    // nested block: `q(k)`.
+    const sync = new ComputeEngine();
+    sync.assign('p', sync.box(storeThenAssign('h') as never, { form: 'raw' }));
+    expect(sync.symbol('p').evaluate().toString()).toBe('2k');
+    const async = new ComputeEngine();
+    async.assign(
+      'p',
+      async.box(storeThenAssign('q') as never, { form: 'raw' })
+    );
+    expect((await async.symbol('p').evaluateAsync()).toString()).toBe('2k');
+  });
+
+  test('runs of two evaluations with the same run key alternate', async () => {
+    // The first statement of the program starts an evaluation of `body`
+    // that it does not await (`Spawn()`); the second statement, a new
+    // top-level evaluation, evaluates `body` too. The runs of the loop body
+    // of the two evaluations have the same run key (the frame of the
+    // program block) and alternate, because each iteration waits longer
+    // than a time slice (`Slow()`). Each keeps its own local `t`. Before,
+    // the locals were kept for one evaluation per run key, and each
+    // evaluation lost its local when the other one ran: `(t + 1, t + 1)`.
+    const ce = new ComputeEngine();
+    ce.declare('Slow', {
+      signature: '() -> number',
+      pure: false,
+      evaluate: () => {
+        const end = Date.now() + 25;
+        while (Date.now() < end) {
+          // Wait
+        }
+        return ce.Zero;
+      },
+    });
+    const body = ce.box([
+      'Block',
+      ['Assign', 'last', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 't', ['Add', 't', 1]],
+          ['Slow'],
+          ['Assign', 'last', 't'],
+        ],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      'last',
+    ] as never);
+    let spawned: Promise<Expression> | undefined;
+    ce.declare('Spawn', {
+      signature: '() -> number',
+      pure: false,
+      evaluateAsync: async (
+        _ops: ReadonlyArray<Expression>,
+        options: Partial<EvaluateOptions>
+      ) => {
+        spawned = body.evaluateAsync(options);
+        return ce.Zero;
+      },
+    } as never);
+    ce.declare('RunBody', {
+      signature: '() -> any',
+      pure: false,
+      evaluateAsync: async (
+        _ops: ReadonlyArray<Expression>,
+        options: Partial<EvaluateOptions>
+      ) => body.evaluateAsync(options),
+    } as never);
+    ce.declare('Join', {
+      signature: '() -> any',
+      pure: false,
+      evaluateAsync: async () => spawned ?? ce.Nothing,
+    } as never);
+    const program = ce.box([
+      'Block',
+      ['Spawn'],
+      ['Assign', 'b', ['RunBody']],
+      ['Tuple', ['Join'], 'b'],
+    ] as never);
+    expect((await program.evaluateAsync()).toString()).toBe('(t + 3, t + 3)');
   });
 });

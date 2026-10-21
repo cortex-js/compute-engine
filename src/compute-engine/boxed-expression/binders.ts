@@ -18,8 +18,14 @@ import type {
 import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
-import { declaredBinders, type DeclaredBinders } from './binding-sites.js';
+import {
+  declaredBinders,
+  mapOwnIndexClause,
+  ownIndexClauseAt,
+  type DeclaredBinders,
+} from './binding-sites.js';
 import { isInvalidNonCollection } from './error-value.js';
+import { copyContextStack } from './evaluation-epoch.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -828,16 +834,24 @@ export function rewriteWithBinders(
     };
 
     const ops = expr.ops;
-    const next = ops.map((op, i) =>
-      rewriteWithBinders(
+    const next = ops.map((op, i) => {
+      // The bounds of a `Limits` clause and the collection of an `Element`
+      // clause are outside the scope of the clause's own index
+      // (`ownIndexClause()`, `binding-sites.ts`).
+      const own = ownIndexClauseAt(expr, i, binders);
+      if (own !== undefined)
+        return mapOwnIndexClause(op, own, shadowed, shadowedIn(i), (o, s) =>
+          rewriteWithBinders(o, visit, s, false, memo, visitApplication)
+        );
+      return rewriteWithBinders(
         op,
         visit,
         shadowedIn(i),
         false,
         memo,
         visitApplication
-      )
-    );
+      );
+    });
     const replaced = visitApplication?.(expr, next, shadowed);
     if (replaced !== undefined) result = replaced;
     else if (next.every((op, i) => op === ops[i])) result = expr;
@@ -1188,7 +1202,9 @@ export async function evaluateInOwnBindingsAsync(
   value: Expression,
   options?: Partial<EvaluateOptions>
 ): Promise<Expression> {
-  const contextStack = [...(options?._contextStack ?? ce._evalContextStack)];
+  const contextStack = copyContextStack(
+    options?._contextStack ?? ce._evalContextStack
+  );
   const carried = { ...options, _contextStack: contextStack };
   const inContext = <T>(fn: () => T): T =>
     ce.withEvaluationContext(carried, fn);

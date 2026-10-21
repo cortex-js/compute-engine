@@ -3259,8 +3259,30 @@ function solveSingleLogarithm(
  * both sides, find only some of them.
  */
 function isComplexUnknown(ce: ComputeEngine, x: string): boolean {
-  const type = ce.symbol(x).type;
+  const type = unknownType(ce, x);
   return type.matches('complex') && !type.matches('real');
+}
+
+/**
+ * The type of the unknown `x` that the solver reads: its declared type, or
+ * `unknown` when its type was inferred from the value assigned to it.
+ *
+ * An assignment infers the type of a symbol from the value (`x := 5` gives
+ * `x` the type `integer`). That type states what the value is, not what an
+ * unknown of an equation can be: with the inferred type, the solver kept
+ * the integer roots only, and `Solve(2x = 1, x)` was `[]`, which states that
+ * there is no solution. A type inferred from the uses of a symbol with no
+ * value (`n` in `k(n)`) is kept.
+ */
+export function unknownType(ce: ComputeEngine, x: string): Expression['type'] {
+  const symbol = ce.symbol(x);
+  if (
+    isSymbol(symbol) &&
+    symbol.valueDefinition?.inferredType === true &&
+    symbol.value !== undefined
+  )
+    return ce.type('unknown');
+  return symbol.type;
 }
 
 /**
@@ -3305,7 +3327,8 @@ function isGenericRealParameter(ce: ComputeEngine, name: string): boolean {
  *
  * Each such symbol is replaced by a symbol declared `real` in a new scope,
  * and the result is the extended-real membership of the type of `expr`
- * (`isExtendedReal`).
+ * (`isExtendedReal`), or `true` when each number that `expr` can be is real
+ * (`isRealWhereNumber()`).
  */
 function isRealForSolve(
   expr: Expression,
@@ -3315,7 +3338,7 @@ function isRealForSolve(
   const names = expr.unknowns.filter(
     (name) => name === unknown || isGenericRealParameter(ce, name)
   );
-  if (names.length === 0) return expr.isExtendedReal;
+  if (names.length === 0) return isRealWhereNumber(expr);
   ce.pushScope();
   try {
     const substitution: Record<string, Expression> = {};
@@ -3327,10 +3350,32 @@ function isRealForSolve(
       ce.declare(scratch, 'real');
       substitution[name] = ce.symbol(scratch);
     }
-    return expr.subs(substitution).isExtendedReal;
+    return isRealWhereNumber(expr.subs(substitution));
   } finally {
     ce.popScope();
   }
+}
+
+/**
+ * The extended-real membership of the type of `expr` (`isExtendedReal`),
+ * or `true` when the type admits a real number and no number that is not
+ * real, and its other values are infinite or `NaN`.
+ *
+ * The type of `1/x` for a real `x` is `infinity | nan | real`: at `x = 0`
+ * the quotient is the pole `~oo`, which is not on the extended real line,
+ * so `isExtendedReal` does not decide. But each finite value of `1/x` is
+ * real. A root is a number: where a parametric root is infinite or `NaN`,
+ * the equation has no root of that form, and the substitution of the root
+ * into the equation does not give zero. So `1/x` is a real root of
+ * `t·x = 1` for a real `t`, as `1/x` is when `t` has no declared type.
+ */
+function isRealWhereNumber(expr: Expression): boolean | undefined {
+  const real = expr.isExtendedReal;
+  if (real !== undefined) return real;
+  const type = expr.type;
+  if (type.matches('real | infinity | nan') && !type.matches('infinity | nan'))
+    return true;
+  return undefined;
 }
 
 /**
@@ -4798,7 +4843,7 @@ export function findUnivariateRoots(
   let noRoot = false;
   try {
     // Use the declared type of the variable, if any, otherwise assume 'number'
-    const varType = ce.symbol(x).type.type;
+    const varType = unknownType(ce, x).type;
     ce.declare('_x', typeof varType === 'string' ? varType : 'number');
 
     // Match the root templates against an expression in which the unknown is
@@ -5532,7 +5577,7 @@ function sortRoots(roots: Expression[]): Expression[] {
  * not such an unknown: it gets the complex roots too.
  */
 function isRealUnknown(ce: ComputeEngine, x: string): boolean {
-  const type = ce.symbol(x).type;
+  const type = unknownType(ce, x);
   const vt = type.type;
   if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')
     return false;
@@ -6328,7 +6373,7 @@ function filterRootsByType(
   trace?: RuleSteps,
   stats?: { undecided: boolean }
 ): ReadonlyArray<Expression> {
-  const varTypeObj = ce.symbol(x).type;
+  const varTypeObj = unknownType(ce, x);
   const vt = varTypeObj.type;
   // Only filter for specific numeric subtypes
   if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')

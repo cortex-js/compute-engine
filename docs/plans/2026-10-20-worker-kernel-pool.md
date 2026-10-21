@@ -238,6 +238,15 @@ Arrays are transferred, not copied. A worker holds its loaded kernels for the
 life of the pool and reports a `runtimeVersion` at start-up; the pool refuses
 a worker whose version differs from the engine's.
 
+The `cancel` task is a write into shared memory, not a message: a worker runs
+its task synchronously and cannot read a message before the task ends. Each
+worker has a cancel flag (an `Int32Array` over a `SharedArrayBuffer`) that
+every task carries; the pool writes the task's job id into it, and the worker
+checks it, together with the clock when the task has a deadline, every 64
+cells or at each grid point. Without `SharedArrayBuffer` (a page that is not
+cross-origin isolated) the flag is absent, and only the termination of
+section 5.5 item 4 applies (implemented 2026-10-21).
+
 ### 5.2 The worker bundle
 
 A new entry, `@cortex-js/compute-engine/kernel-worker`, built by
@@ -421,7 +430,16 @@ writes a `lo, hi, kind` triple per cell and its code reads no list.
    states the difference.
 4. Cancellation: the `AbortSignal` of `evaluateAsync` and the deadline of
    `withTimeLimit` send `cancel` to the running tasks; a worker that does not
-   answer within a grace period is terminated and replaced.
+   answer within a grace period is terminated and replaced. Implemented
+   2026-10-21. The grace period is the pool option `cancelGrace`, default
+   250 ms (a few times the start-up of a worker). The watchdog also runs
+   from a task's deadline, and starts no earlier than the time the task is
+   sent: a worker that has not answered within the grace period after it is
+   replaced, and the task settles with no cells done. A task whose deadline
+   has passed before it is sent is settled on the main thread and not sent.
+   The new worker is sent each kernel, fit problem and shared input again
+   with the first task that needs it, and the tasks that waited for the old
+   worker go to the new one.
 
 ### 5.6 Later kernels
 
@@ -553,6 +571,8 @@ field), `neyret/ndqj7hupta` (the slow recursive function), and the fit
 - The engine must not depend on `SharedArrayBuffer` or `Atomics.wait`, which
   are unavailable on a browser main thread without cross-origin isolation.
   Transfer of `Float64Array`s is enough (section 3.2).
+  The cancel flag of section 5.1 uses `SharedArrayBuffer` only when the host
+  has it; the pool works without it.
 - `maxWorkers: 12` and the box lock apply to the Node test of the pool: it
   spawns at most 2 workers.
 

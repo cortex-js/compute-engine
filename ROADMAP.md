@@ -27,11 +27,26 @@ Two conventions follow from that, both worth keeping:
 Option B's bare-family rules are implemented. The broader absence proposal is
 separate; the following items do not block the original tuple/record task:
 
-- Migrate `unknown` to an inference marker, including declaration intent,
-  subtype API behavior and generic-default migration (plan Q2/Q7/Q8). Unbound
-  generic variables also still display as explicit `<unknown>` in diagnostics;
-  choose their display contract alongside that migration rather than silently
-  changing diagnostic-only substitution to `any` here.
+- `unknown` as an inference marker: residues of the 2026-10-21 migration
+  (`docs/plans/2026-10-21-unknown-inference-marker.md`, decisions D1 to D6).
+  (a) `Sort(tu)` with `tu: tuple<unknown, missing> := (1, Missing)` is still
+  typed `list<missing>` for the value `[1, Missing]`: the generic solver drops
+  a nested `unknown` bound when another slot says something (`joinBounds`,
+  `instantiate.ts`); `Filter(tu, p)` is fixed. (b) The literal `[1,
+  Error("x")]` is typed `list<unknown>`, which holds the value but is not the
+  literal's known type `list<error | integer>` (`classifyCellD`,
+  `library/collections.ts`). (c) The Epsil hover shows the refined type of a
+  placeholder declaration (`list<integer>`), not the written contract beside
+  it (rule R6 of the plan). (d) Decision D6 (rewrite the library's `-> unknown`
+  and `(unknown)` slots to `any` where no handler refines them) was not
+  applied: a result slot `-> any` is a contract that stops downstream
+  inference (`f(1) + 1` is `any`, where `-> unknown` gives
+  `broadcastable<number>`), and a parameter `any` narrows an inferable
+  operand to `any`, so the rewrite changes behavior; the inventory is in the
+  plan's section 5 and each site needs its own review. (e) A nested `unknown`
+  position (`tuple<unknown, integer>`, `list<list<unknown>>`,
+  `record{a: unknown}`) is unrestricted and does not refine from an
+  assignment yet (D2 scope).
 - Choose presence-assertion syntax and the default diagnostic/assignment
   policy for possible absence (Q1/Q3).
 - Decide record-field omission, optional-field representation and an explicit
@@ -181,11 +196,18 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   Phase B (the scan on the worker pool, step 5) LANDED 2026-10-21, committed
   `d4767dd06` (dual-reviewed, 11 findings applied): `FindFit.evaluateAsync()` runs the
   grid scan on `ce.workers` when the fit is shippable and separable; 1,000
-  rows over `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. Residue,
-  not fixed: a POWER of a periodic function (`a cos(b x + c)²`) records the
-  inner function's period, but `cos²` has period π, so its basin is half as
-  wide as the grid assumes; the fix needs the period of the composed
-  expression.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
+  rows over `[0.3, 628]` take 65 ms on 8 workers, 233 ms inline. The
+  residue (a POWER of a periodic function, `a cos(b x + c)²`, recorded the
+  inner function's period, so its basin was half as wide as the grid
+  assumed) is FIXED 2026-10-21 (dual-reviewed, 3 findings applied;
+  `composedPeriod()` in `nonlinear-fit.ts` reads the expression around the
+  periodic node as `k · sin(θ)^p · cos(θ)^q`, so a square, an absolute value
+  or a product of periodic functions of one argument get the period π or
+  π/2; CHANGELOG "Bug Fixes"). Still open from it, decision needed: an even
+  function applied on the OUTSIDE (`cos(cos θ)`, `sec(sin θ)`) has the
+  period π but still records 2π, because `Cos` and `Sec` of another
+  expression are not part of that form; should `Cos`, `Sec`, `Cosh` and
+  `Sech` count as ancestors that halve the period? Such models are rare.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
   and `c` searched. The separable scan (`SEPARABLE_GRID` in
   `src/compute-engine/nonlinear-fit.ts`, 400 × 40 points, 6 refinements)
   finds the true `b = 2.2` over [0.3, 60] but not over [0.3, 120]; the basin
@@ -220,9 +242,11 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   by the 0.160.0 bare-type reading, and the right declaration, `list<value>`,
   compiles (measured on the 0.160.0 bundle: `P[i]` is `missing | value`, the
   tuple-parameter call is valid, `Sum(P)`, `Mean(P)` and `P[i] + 1` compile).
-  (b), open, decision needed: with `P`
-  inferred, `Filter(P, x ↦ x > 0)` is typed `list<!nothing>` and
-  `At(Filter(…), 1)` is `!nothing`.)** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
+  (b) `Filter(P, x ↦ x > 0)` typed `list<!nothing>` and `At(Filter(…), 1)`
+  `!nothing` with `P` inferred: NO LONGER REPRODUCES at `932c56ecf`
+  (2026-10-21, after the 0.160.0 bare-type work): with `P` inferred from
+  `P[i] - P[j]` (`indexed_collection<number>`) the filter is `list<number>`
+  and its element `number`; closed.)** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
   `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
   `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type`
   error (`isValid` false). Control: with `P: list<tuple<number, number>>`
@@ -244,15 +268,14 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 - **410: FIXED 2026-10-20, committed `6d5c6d542` (dual-reviewed, 8
   findings applied; CHANGELOG "Bug Fixes"; test
   `test/compute-engine/tycho-row-410-binder-subscript.test.ts`).** Two
-  residues of the same defect stay open, decision needed: (a) a `cases`
-  block (`\\begin{cases} n_{0}\\coloneq 3\\\\ n_{0}+1\\end{cases}`) still reads
-  its first row's target as `At(n, 0)`, because the first row is read before
-  the parser knows it is a local-binding context (the `;` block gets a second
-  reading when the next token is `;`; `buildBlockFromSequence()` would need
-  a stored second reading of each row); (b) a set-builder whose variable
-  appears only in the condition (`\\{2n_{0} \\mid n_{0}\\in\\Z\\}`) still reads
-  `At(n, 0)`; the fix covers a variable named in the body or in a body
-  `x \\in S`. (c) Found 2026-10-21 when the fix was pre-run against the
+  residues of the same defect, (a) the first row of a `cases` block and (b)
+  a set-builder whose variable appears only in the condition, FIXED
+  2026-10-21 (user decision 2026-10-21 to fix both; the same test file; an
+  assignment row of a `cases` environment gets a second reading, the block
+  local, which the block branch of the `cases` parser swaps in, the stored
+  second reading this entry asked for, through the parser's
+  `environmentName()` and `blockRowAlternative()`; a membership of a
+  set-builder condition names the variable when the body reads it). (c) Found 2026-10-21 when the fix was pre-run against the
   published 0.160.0 package with Tycho's instrument: Tycho's own
   `\\operatorname{with}` parselet (a custom infix dictionary entry in
   `~/dev/tycho/src/graph-paper/desmos-import/with-dictionary.ts`, which
@@ -364,20 +387,24 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   Fixes"; test `test/compute-engine/integrate-limit-user-function-capture.test.ts`).
   The derivative capture of row 412 itself is FIXED the same way
   (`derivative.ts`, `renameCapturedIndexes()`, dual-reviewed, 5 findings
-  applied). Found with the evaluation fix, not fixed: (a) `Solve(g(k) = 1, k)` with `g := a ↦ a − k` (the body reads a
-  global named like the unknown) gave `[]` ("no solution"); it now stays
-  unsolved, which is a decline, where the answer is `[3]` with `k := 3`
-  (`[k + 1]` symbolically). A rename of the unknown as `Integrate` now does
-  is needed in `evaluateSolve()` (`boxed-expression/solve-domain.ts`), over
-  its spec, domain and system shapes. (b) Separate: `Solve(t x = 1, t)` stays
-  unevaluated when `t` and `x` are both declared `real` (also as
-  `t \\cdot x`); in a fresh engine with nothing declared it gives `[1/x]`.
-  (c) Separate, no user function involved: with `k := 2`, `\\int_0^k k\\,dk`
-  gives `k²/2` where `\\int_0^k t\\,dt` gives `2`. The canonical form binds the
-  bound of a variable's own limit to the integration variable, and the
-  integration-variable shield then keeps it symbolic; the bound should read
-  the enclosing binding (here the global `k`), as the fixed `Integrate`
-  rename now does for a called function's body.
+  applied). The three items found with the evaluation fix are FIXED
+  2026-10-21 (dual-reviewed, 10 findings applied; CHANGELOG "Bug Fixes"):
+  (a) `Solve` renames a captured unknown (`solveWithRenamedUnknowns()`,
+  `solve-domain.ts`); (b) `Solve(t x = 1, t)` with declared reals
+  (`isRealWhereNumber()`, `solve.ts`); (c) the bounds of a `Limits` clause
+  and the collection of an `Element` clause of `Sum`, `Product`, `Integrate`
+  and `NDSolveFunction` read the enclosing symbol (`box.ts`,
+  `binding-sites.ts`, and every walk that tracks shadowed names). Found by
+  that round, still open: `Solve(t^3 x = 1, t)` with `t, x: real` stays
+  unevaluated because the `Root` type handler (`library/arithmetic.ts`)
+  types `Root(1/x, 3)` as `number`, wider than needed; with `k := 2`,
+  `Sum(j, Element(j, Range(1, k)))` gives `sum(j)` while the same sum over
+  the list `[1, k]` gives `3` (a `Range` with a symbolic bound is not
+  evaluated in the clause; not a capture defect); and four integration
+  helpers (`bindsVariableInOperand` and `evaluateInnerIntegrals` in
+  `calculus.ts`, `binds` in `piecewise-integrate.ts`, `special-integrate.ts`
+  around line 103) still treat a whole clause as bound when they skip an
+  inner binder's operand, which at worst skips an optimization.
 - **413 — a piecewise whose condition compares an undefined value gives no
   value; Desmos takes the else branch (user decision 2026-10-20: an undefined
   numeric operand of `<`, `≤`, `>`, `≥`, `=` decides FALSE inside a branch
@@ -599,34 +626,18 @@ dictionary). These remain, each measured with a fix and reverted:
   stays a tuple (`Sort(m)` is `["Missing", "Missing"]`, `CountIf(m, p)` is
   `0`), so the admission looks possible now; `Scan`, `ArgMax`, `Reduce` and
   `Any` over it must be probed again when it is landed.
-- `collectionElementType(tuple<unknown, missing>)` widens to `missing`, so that
-  tuple is still refused. Making an `unknown` slot read as any value decides the
-  role of `unknown` (question Q8 of the same plan).
-- `Insert`, `ReplaceAt`, `RangeOf`, `ContainsSequence`, `StartsWith` and
-  `EndsWith` are invalid with a bare `tuple` source (`Insert(tb, 1, 5)`).
-  Admitting it gives unsound result types unless the slots become a lower
-  bound of `T`, which the solver drops for `unknown` (Q8).
-
-### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
-
-`x: list` (values only) assigned `[1, Missing]` is accepted, and `x` is then
-typed `list<integer | missing>`, which is not a subtype of the declared `list`;
-`t: tuple := TupleFrom(L)` with an absent slot is accepted the same way. The
-assignment check does not apply the subtype test that the declaration states.
-Either the check must refuse such a value, or the declaration must be read as
-admitting it (see `docs/plans/2026-10-20-bare-tuple-record-any.md`).
+- ~~`collectionElementType(tuple<unknown, missing>)` widens to `missing`~~
+  (reads `missing | unknown` since 2026-10-21, and the tuple is admitted:
+  `Map(x ↦ x + 1, tu)` is `[2, NaN]`).
+- ~~`Insert`, `ReplaceAt`, … are invalid with a bare `tuple` source~~ (a bare
+  `tuple` refines its slots from the assignment since 2026-10-21, so
+  `Insert(tb, 1, 5)` with `tb := ("a", "b")` is `[5, "a", "b"]` typed
+  `list<integer | string>`; a bare `tuple` with no value is still refused).
 
 ### Two more subtype-relation gaps (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
-- `any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`
-  (`broadcastable<any>` is a mutual subtype of both `any` and `unknown`). The
-  same gap exists for negations: `missing <: !integer <: unknown`. A fix
-  measured on 2026-10-20 with no test failure (in the `rhs === 'unknown'`
-  block of `isSubtype`: `broadcastable<T> <: unknown` only when
-  `T <: unknown`, and `!A <: unknown` only when `nothing`, `missing` and
-  `error` are all `<: A`) was not landed: it changes an edge into `unknown`,
-  whose migration to an inference marker belongs to question Q8 of
-  `docs/plans/2026-10-20-bare-tuple-record-any.md`.
+- ~~`any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`~~
+  (every type is a subtype of `unknown` since 2026-10-21, decision D1).
 - (needs a decision) `tuple<integer> <: indexed_collection<integer> <:
   broadcastable<integer>`, but `tuple<integer>` is not
   `<: broadcastable<integer>` (the `matrix<integer>` case was fixed on
@@ -778,12 +789,6 @@ remains the separate design item above.
   variable is not bound before the element-wise call checks its result.
   Found by the review of the `broadcastable<T>` = `T | list<T>` change; it
   is the same before that change.
-- `isSubtype(broadcastable<any>, unknown)` is `true`, while
-  `isSubtype(any, unknown)` and `isSubtype(nothing, unknown)` are `false`, so
-  `nothing <: broadcastable<any> <: unknown` holds but `nothing <: unknown`
-  does not. The general rule for a right side `unknown` in `isSubtype()`
-  (`common/type/subtype.ts`) does not look inside a `broadcastable` left
-  side.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
@@ -793,21 +798,12 @@ remains the separate design item above.
 - `Sqrt(x)` with `x: vector<integer^1> | vector<integer^2>` is typed `number`:
   the broadcast type does not lift over a union of collections. Only `Map`
   works around it.
-- `Append(tb, 5)` with `tb: tuple` holding `("a", "b")` is typed
-  `list<integer>`, but the value is `["a", "b", 5]`: the solver drops the
-  `unknown` element of the source when it solves `T`. `Insert`, `ReplaceAt`,
-  `RangeOf`, `ContainsSequence`, `StartsWith` and `EndsWith` refuse such a
-  `tb` with `incompatible-type`; admitting it gives the same unsound result
-  type, because the slots must be a lower bound of `T`. Waits for the
-  migration of `unknown` to an inference marker (question Q8 of
-  `docs/plans/2026-10-20-bare-tuple-record-any.md`).
 - With `c: list<integer> | string := "aab"`, `Dedup(c)` evaluates to `"ab"`,
   but the display preview of the unevaluated `Dedup(c)` prints `["a","b"]`:
   the preview does not evaluate its source.
-- `Filter(tu, x ↦ x > 0)` and `Sort(tu)` with `tu: tuple<unknown, missing> :=
-  (1, Missing)` are typed `list<missing>`; the values are `[1]` and
-  `[1, Missing]`. The join of the slot types treats `unknown` as no value. Also
-  waits for Q8.
+- ~~`Filter(tu, x ↦ x > 0)` with `tu: tuple<unknown, missing>` is typed
+  `list<missing>`~~ (`list<missing | unknown>` since 2026-10-21); `Sort(tu)`
+  still is, see the `unknown` residues at the top of this file.
 - With `ce.declareType('cyc', 'cyc | list<integer>', { alias: true })` and
   `k: cyc := [1, 2]`, `Map(x ↦ x + 10, k)` is typed `collection<integer>` and
   prints and evaluates as `Set(11, 12)`: the fallback that reads the value of
@@ -887,10 +883,6 @@ values that `simplify()` cannot reduce to the reference (8 of 578 runs on
 - `isEqual(k)` does not read a symbol's bounds when they pin it to `k`: with
   `b ≥ 0` and `b ≤ 0`, `b.isEqual(0)` is `undefined` (`eq()` reads no bounds or
   signs), while `b.isGreaterEqual(0)` and `b.isLessEqual(0)` are `true`.
-- The static type of `ListJoin(fs, [2])` with `fs: list<unknown>` is
-  `list<integer>`, while its value `[Error(…), 2]` is `list<unknown>`:
-  `joinedElementTypeD()` refines an `unknown` element by the other operands. The
-  value type must be a subtype of the static type.
 - In a `match` case, an error is underlined on the whole statement: `Match`
   records no frame for its cases, so `locateError()` has nothing to narrow to.
 - Other loops compare each element with every element:

@@ -60,7 +60,9 @@ import {
   canonicalWithFreshPlaceholders,
   captureNestedLocals,
   exactArgumentSources,
+  isStatementListScope,
 } from '../function-utils.js';
+import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
@@ -161,6 +163,7 @@ import type {
   DictionaryInterface,
   CanonicalForm,
   ProtocolMembersInput,
+  Scope,
   Tri,
 } from '../global-types.js';
 import type { EvaluateHandlerOptions } from '../types-definitions.js';
@@ -228,7 +231,10 @@ import {
   retireBindingRecord,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
-import { RedefinitionError } from '../declaration-origin.js';
+import {
+  RedefinitionError,
+  isSameStatementReRegistration,
+} from '../declaration-origin.js';
 import {
   canonicalProtocolMember,
   declareConformance,
@@ -3176,17 +3182,44 @@ function withStatementRoute<T>(
  * The `Declare` statement may replace such a binding: the definition
  * statement runs after it, and installs its clause again, this time under the
  * declared signature, which it then checks the clause against. A binding whose
- * definition statement has evaluated is not in this set, so a declaration
+ * definition statement has evaluated is not in this map, so a declaration
  * that follows a definition (`f(n) = …` then `let f: …`) is still refused.
+ *
+ * The value is the list of the installs made ahead onto the record, in the
+ * order they were made. When a `Declare` statement with no value replaces
+ * the binding, it makes these installs again at once onto the new binding,
+ * under the signature that it declares (`reinstallClausesAhead()`). Without
+ * this, a call in a statement between the declaration and the definition
+ * found no clause: `let g: (integer) -> integer`, then
+ * `let a = String(g(2))`, then `function g(k) { 2k }` gave `a` the value
+ * `"g(2)"`, not `"4"`.
  *
  * Weakly keyed on the binding record, which an install mutates in place.
  */
-const CLAUSE_INSTALLED_AHEAD = new WeakSet<object>();
+const CLAUSE_INSTALLED_AHEAD = new WeakMap<
+  object,
+  ReadonlyArray<ClauseInstalledAhead>
+>();
 
 /**
- * Add `record` to `CLAUSE_INSTALLED_AHEAD` (`ahead` true) or remove it from
- * the set (`ahead` false), and journal the change for the active checkpoint
- * window.
+ * One install of a clause that the `DefineFunction` canonical handler made
+ * ahead of its statement: the arguments it gave to `defineFunctionClause()`,
+ * and the raw name operand of the statement (`anchor`), which identifies the
+ * statement when the install has no origin stamp.
+ */
+type ClauseInstalledAhead = {
+  readonly anchor: Expression;
+  readonly literal: Expression;
+  readonly origin: DeclarationOrigin | undefined;
+  readonly attributes: ClauseAttributes;
+};
+
+/**
+ * Set the list of the installs made ahead onto `record` to `installs`, or
+ * remove `record` from `CLAUSE_INSTALLED_AHEAD` (`installs` undefined), and
+ * journal the change for the active checkpoint window. The lists are never
+ * changed in place, so the undo of the journal puts back the list that the
+ * record had when the checkpoint was taken.
  *
  * The marker decides whether a `Declare` statement drops the binding, so a
  * restore must put it back as it was when the checkpoint was taken. If not, a
@@ -3198,16 +3231,191 @@ const CLAUSE_INSTALLED_AHEAD = new WeakSet<object>();
 function setClauseInstalledAhead(
   ce: ComputeEngine,
   record: object,
-  ahead: boolean
+  installs: ReadonlyArray<ClauseInstalledAhead> | undefined
 ): void {
-  const was = CLAUSE_INSTALLED_AHEAD.has(record);
-  if (was === ahead) return;
+  const was = CLAUSE_INSTALLED_AHEAD.get(record);
+  if (was === installs) return;
   ce._checkpointWindow?.record(record, 'clause-installed-ahead', () => {
-    if (was) CLAUSE_INSTALLED_AHEAD.add(record);
+    if (was !== undefined) CLAUSE_INSTALLED_AHEAD.set(record, was);
     else CLAUSE_INSTALLED_AHEAD.delete(record);
   });
-  if (ahead) CLAUSE_INSTALLED_AHEAD.add(record);
+  if (installs !== undefined) CLAUSE_INSTALLED_AHEAD.set(record, installs);
   else CLAUSE_INSTALLED_AHEAD.delete(record);
+}
+
+/**
+ * Add `install` to the list of the installs made ahead onto `record`.
+ *
+ * One statement can be canonicalized more than once before it runs (the
+ * static pass of the Epsil runner, then its statement loop). An install of
+ * the same statement replaces the earlier one at its position in the list,
+ * so the list keeps the order of the statements. Two stamped installs are of
+ * the same statement when their origin stamps say so. Two unstamped
+ * installs are of the same statement when they have the same name operand
+ * and the same clause: a host can build two `DefineFunction` statements that
+ * share one boxed name operand, and their clauses must both stay in the
+ * list. An install that is not recognized as the same statement is added at
+ * the end; making it again after an earlier install of the same clause
+ * replaces that install, as it did the first time.
+ *
+ * A stamped install also removes the stamped installs of another Epsil
+ * program (another batch): see `installsOfThisRun()`.
+ */
+function addClauseInstalledAhead(
+  ce: ComputeEngine,
+  record: object,
+  install: ClauseInstalledAhead
+): void {
+  const batch = install.origin?.batch;
+  const was = (CLAUSE_INSTALLED_AHEAD.get(record) ?? []).filter(
+    (x) =>
+      batch === undefined || x.origin === undefined || x.origin.batch === batch
+  );
+  const at = was.findIndex((x) =>
+    x.origin !== undefined && install.origin !== undefined
+      ? isSameStatementReRegistration(x.origin, install.origin)
+      : x.anchor === install.anchor && x.literal.isSame(install.literal)
+  );
+  const installs =
+    at < 0 ? [...was, install] : was.map((x, i) => (i === at ? install : x));
+  setClauseInstalledAhead(ce, record, installs);
+}
+
+/**
+ * The installs of `installs` that a `Declare` statement may make again
+ * now: the unstamped installs (the whole-block route, the host routes), and
+ * the stamped installs of the Epsil program that is running.
+ *
+ * The stamped installs of another program are those of a program that
+ * stopped (its time or step budget ran out) after the `DefineFunction`
+ * canonical handler or the preparation step of the Epsil runner
+ * (`prepareFunctionDeclarations()`, `src/epsil/execute-epsil.ts`) installed
+ * them, and before the `DefineFunction` statement ran. A later program that
+ * declares the same name must not install them again: `let g: (integer) ->
+ * integer` then `g(2)` in that program stays `g(2)`.
+ */
+function installsOfThisRun(
+  ce: ComputeEngine,
+  installs: ReadonlyArray<ClauseInstalledAhead> | undefined
+): ReadonlyArray<ClauseInstalledAhead> | undefined {
+  if (installs === undefined) return undefined;
+  const batch = ce._epsilBatchId;
+  const kept = installs.filter(
+    (x) => x.origin === undefined || x.origin.batch === batch
+  );
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * The installs that `reinstallClausesAhead()` made in the scope of a list of
+ * statements, by name, weakly keyed on the scope. On the asynchronous
+ * route, a run of the list evaluates in an activation of the scope, a copy
+ * with its own bindings (`scopeActivationTemplate()`,
+ * `boxed-expression/ambient-chain.ts`), and the key is the scope that the
+ * activation copies, which is the same for every run.
+ *
+ * A block canonicalizes its statements once, so the `DefineFunction`
+ * canonical handler installs a clause ahead only before the first run of the
+ * block. On a later run (the next iteration of a loop body, a block
+ * evaluated again), the run starts by giving each local of a `Declare`
+ * statement a new binding with no value (`createBlockLocals()`,
+ * `function-utils.ts`), and the clause of that run is installed only when
+ * its `DefineFunction` statement runs. The `Declare` statement of the name
+ * then reads the installs here and makes them again, so a call between the
+ * two statements finds the clause on every run, as on the first one. The
+ * installs are those of the `DefineFunction` statements of the same block,
+ * which run again later in the same run.
+ *
+ * Only the scopes where a list of statements runs (`isStatementListScope()`,
+ * `function-utils.ts`) get an entry. The top level of the Epsil runner does
+ * not: a program that runs again boxes its `function` statements again, and
+ * the `Declare` statement reads those installs on the binding itself.
+ *
+ * A known limit: the body of a function runs its statements in a new scope
+ * for each call, so no entry is found for the next call. There, the
+ * `Declare` statement never finds the binding that holds the clause
+ * installed ahead (that binding is in the scope of the body, and the
+ * statements run in the scope of the call), so it installs nothing, and a
+ * call in the body reads the clause installed ahead, without the declared
+ * signature: in `function h(x) { let g: (integer) -> integer; function g(k)
+ * { 2k }; g(x) }`, `h(1.5)` gives `3`, before and after this change.
+ *
+ * Not journaled for a checkpoint window: an entry is read only on a later
+ * run of the block that recorded it, and that run installs the same clauses
+ * when its `DefineFunction` statements run.
+ */
+const BLOCK_REINSTALLS = new WeakMap<
+  Scope,
+  Map<string, ReadonlyArray<ClauseInstalledAhead>>
+>();
+
+/** The key of the current lexical scope in `BLOCK_REINSTALLS`. */
+function reinstallScopeKey(ce: ComputeEngine): Scope {
+  const scope = ce.context.lexicalScope;
+  return scopeActivationTemplate(scope) ?? scope;
+}
+
+/**
+ * Make again, in order, the `installs` that the `DefineFunction` canonical
+ * handler made ahead of their statements onto a binding of `name` that a
+ * `Declare` statement with no value has just replaced. Each install now runs
+ * under the signature that the declaration gives, which checks the clause.
+ * In the scope of a list of statements, the installs are also recorded for
+ * the next run of the list (`BLOCK_REINSTALLS`).
+ *
+ * The new binding is not marked as holding clauses installed ahead
+ * (`CLAUSE_INSTALLED_AHEAD`): the clauses now have the declared signature,
+ * and no later `Declare` statement of the same run replaces the binding (a
+ * second `let` of the name in a block is a `variable-redeclaration` error).
+ * A mark would also outlive a program that stops before its
+ * `DefineFunction` statement runs.
+ *
+ * An install that the declared signature refuses (a clause with a parameter
+ * type outside the declared one) is skipped, without an error: the
+ * `DefineFunction` statement makes the same install when it runs and reports
+ * the error then, as it does when no install was made ahead. A call between
+ * the declaration and that statement then finds no clause of this install,
+ * as before. These refusals are the errors that the evaluate handler of
+ * `DefineFunction` turns into error values. Any other error (a cancellation
+ * because a time or step budget ran out, an internal error) is thrown again.
+ */
+function reinstallClausesAhead(
+  ce: ComputeEngine,
+  name: string,
+  installs: ReadonlyArray<ClauseInstalledAhead>
+): void {
+  for (const install of installs) {
+    try {
+      withStatementRoute(ce, () =>
+        defineFunctionClause(
+          ce,
+          name,
+          install.literal,
+          install.origin,
+          install.attributes
+        )
+      );
+    } catch (e) {
+      if (!(
+        e instanceof RedefinitionError ||
+        e instanceof ClauseDefinitionError ||
+        isEffectContractError(e) ||
+        isTypeCompatibilityError(e) ||
+        isDependentRebuildError(e)
+      ))
+        throw e;
+      // Reported by the `DefineFunction` statement when it runs.
+    }
+  }
+  if (isStatementListScope(ce.context.lexicalScope)) {
+    const key = reinstallScopeKey(ce);
+    let byName = BLOCK_REINSTALLS.get(key);
+    if (byName === undefined) {
+      byName = new Map();
+      BLOCK_REINSTALLS.set(key, byName);
+    }
+    byName.set(name, installs);
+  }
 }
 
 /**
@@ -5824,21 +6032,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 // identity and cannot collide with themselves. The install runs
                 // INSIDE `withStatementRoute` so that anything the clause body
                 // declares re-entrantly through the box route stays unstamped.
-                withStatementRoute(ce, (route) =>
+                let origin: DeclarationOrigin | undefined;
+                withStatementRoute(ce, (route) => {
+                  origin = statementOrigin(ce, args[0], route);
                   defineFunctionClause(
                     ce,
                     symbolName,
                     canonFn,
-                    statementOrigin(ce, args[0], route),
+                    origin,
                     attributes
-                  )
-                );
+                  );
+                });
                 // The statement has not run yet: a `Declare` statement that
-                // runs before it may replace this binding
-                // (`CLAUSE_INSTALLED_AHEAD`).
+                // runs before it may replace this binding, and then makes
+                // this install again (`CLAUSE_INSTALLED_AHEAD`).
                 const installed = ce.lookupDefinition(symbolName);
                 if (installed !== undefined)
-                  setClauseInstalledAhead(ce, installed, true);
+                  addClauseInstalledAhead(ce, installed, {
+                    anchor: args[0],
+                    literal: canonFn,
+                    origin,
+                    attributes,
+                  });
               } catch (e) {
                 // A malformed or conflicting clause is diagnosed on the
                 // evaluate route, which runs the same installation and turns
@@ -5901,7 +6116,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // not replace it (`CLAUSE_INSTALLED_AHEAD`).
           const installed = ce.lookupDefinition(name);
           if (installed !== undefined)
-            setClauseInstalledAhead(ce, installed, false);
+            setClauseInstalledAhead(ce, installed, undefined);
         } catch (e) {
           if (e instanceof RedefinitionError)
             return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
@@ -6921,11 +7136,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             (existing as { _uninitialized?: boolean })._uninitialized === true
               ? existing
               : undefined;
+          // The installs of clauses that the `DefineFunction` canonical
+          // handler made ahead onto the binding dropped below, if any.
+          let installsAhead: ReadonlyArray<ClauseInstalledAhead> | undefined;
           if (
             existing &&
             (existing as { _declaredByStatement?: boolean })
               ._declaredByStatement === true
           ) {
+            // A program run again on the same engine: the `DefineFunction`
+            // canonical handler installed the clause of a later statement
+            // ahead onto the binding of the previous run. Install it again
+            // under this declaration, as on the first run, unless it comes
+            // from another program (`installsOfThisRun()`). On a later run
+            // of a list of statements, the binding is the new local of the
+            // run (`uninitialized`), and the installs are those that this
+            // statement made on an earlier run (`BLOCK_REINSTALLS`).
+            const aheadOnExisting = CLAUSE_INSTALLED_AHEAD.has(existing);
+            installsAhead = aheadOnExisting
+              ? installsOfThisRun(ce, CLAUSE_INSTALLED_AHEAD.get(existing))
+              : uninitialized !== undefined
+                ? BLOCK_REINSTALLS.get(reinstallScopeKey(ce))?.get(symbolName)
+                : undefined;
             // Checkpoint journal (funnel 4): the statement-redeclare path
             // drops the previous statement-scoped binding by direct map
             // surgery.
@@ -6937,6 +7169,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               'declare'
             );
             currentScope.bindings.delete(symbolName);
+            // The dropped binding holds a clause installed ahead, which an
+            // expression boxed before this declaration holds by identity (a
+            // recursive call in the body of that clause). It is retired as
+            // in the branch below, so that such a call reads the clause
+            // installed under this declaration, and not the clause checked
+            // against the signature that the previous run declared.
+            if (uninitialized === undefined && aheadOnExisting)
+              retireBindingRecord(ce, currentScope, symbolName, existing);
             existing = undefined;
           } else if (
             existing &&
@@ -6945,11 +7185,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ) {
             // The binding holds the clause of a later `DefineFunction`
             // statement of this scope, installed when that statement was
-            // canonicalized, before this declaration ran. That statement
-            // installs its clause again when it runs, under the signature this
-            // declaration gives, so drop the binding and declare the name
-            // fresh. `ce.declare()` alone refuses to replace an operator that
-            // holds a definition (`isReplaceableOperatorShell()`).
+            // canonicalized, before this declaration ran. That clause was
+            // installed without the signature this declaration gives, so drop
+            // the binding and declare the name fresh. `ce.declare()` alone
+            // refuses to replace an operator that holds a definition
+            // (`isReplaceableOperatorShell()`). When the declaration has no
+            // value, the clause is then installed again at once under the
+            // declared signature (`reinstallClausesAhead()`, at the end of
+            // this function), and the `DefineFunction` statement installs it
+            // again when it runs.
             journalCheckpointMapEntry(
               ce,
               currentScope.bindings,
@@ -6977,6 +7221,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // `function g(k) { 2k }`, then `g(1.5)` in one block answered
             // `3`: the call ran the clause of the dropped record, which had
             // no declared parameter type to check `1.5` against.
+            installsAhead = installsOfThisRun(
+              ce,
+              CLAUSE_INSTALLED_AHEAD.get(existing)
+            );
             retireBindingRecord(ce, currentScope, symbolName, existing);
             existing = undefined;
           }
@@ -7115,6 +7363,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               uninitialized,
               declared
             );
+          // Install again, under the signature declared above, the clauses
+          // that were installed ahead onto the dropped binding, so that a
+          // call in a statement between this declaration and the
+          // `DefineFunction` statement finds them: `let g: (integer) ->
+          // integer`, `let a = String(g(2))`, `function g(k) { 2k }` gives
+          // `a` the value `"4"`. Not after a declaration with a value
+          // (`let g = 5`): the name holds that value until the
+          // `DefineFunction` statement runs.
+          if (installsAhead !== undefined && !boundHasValue)
+            reinstallClausesAhead(ce, symbolName, installsAhead);
         };
 
         // Would declaring `symbolName` with `boundValue` be rejected by the
@@ -8414,14 +8672,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with',
         'box constraints), matching `FindFit`. Returns a record',
         '{parameters, converged, stationary, residualNorm, iterations}.',
+        // Each line of a description keeps its code spans whole: the Epsil
+        // reference generator (`scripts/build-library-reference.ts`) refuses
+        // a line with an unmatched backtick.
         '`converged` is true only at a root: every residual is within the',
-        "engine's tolerance scaled by its own equation (`|r_i| ≤ tolerance ·",
-        '(1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the Jacobian and `θ` the',
-        'parameters), so a minimum of the sum of squared residuals that is',
-        'not a root (`a^2 + 1 = 0`) is `converged: False`. `stationary` is',
-        "the solver's own stop test, true at such a minimum too; a stacked",
-        'system of data rows next to an equation reads it as `FindFit`',
-        'reads `converged`. An optional third argument is the options',
+        "engine's tolerance scaled by its own equation,",
+        '`|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the',
+        'Jacobian and `θ` the parameters, so a minimum of the sum of squared',
+        'residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.',
+        "`stationary` is the solver's own stop test, true at such a minimum",
+        'too; a stacked system of data rows next to an equation reads it as',
+        '`FindFit` reads `converged`. An optional third argument is the options',
         'dictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the',
         'named parameters (at most two) over the range for the lowest sum',
         'of squared residuals of the whole system; the constant phase',

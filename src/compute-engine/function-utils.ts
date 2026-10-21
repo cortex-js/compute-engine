@@ -20,7 +20,12 @@ import {
   boundVariableNamesInOperand,
   shadowedKey,
 } from './boxed-expression/binders.js';
-import { declaredBinders } from './boxed-expression/binding-sites.js';
+import {
+  declaredBinders,
+  mapOwnIndexClause,
+  ownIndexClauseAt,
+  someOwnIndexClause,
+} from './boxed-expression/binding-sites.js';
 import { hasAsyncOnlyApplication } from './boxed-expression/async-only-descendants.js';
 import type {
   BoxedDefinition,
@@ -103,7 +108,11 @@ import {
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
-import { beginTopLevelEvaluation } from './boxed-expression/evaluation-epoch.js';
+import {
+  beginAsyncStatement,
+  beginTopLevelEvaluation,
+  copyContextStack,
+} from './boxed-expression/evaluation-epoch.js';
 import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
 import {
   memoDepsStillValid,
@@ -2297,14 +2306,11 @@ export function apply(
  * evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`), so that a
  * result of a call whose head had no value, stored by an earlier statement,
  * resolves its head again when a later statement reads it
- * (`EVALUATED_UNRESOLVED_CALLS`, `boxed-function.ts`). A program block
- * starts with no pending asynchronous evaluation (`runsAsProgram()`,
- * `library/control-structures.ts`), and a new number is taken only while
- * that is still true. A statement can start an `evaluateAsync()` that it
- * does not await; that evaluation runs its later parts after this loop has
- * moved on, and they must keep reading its own number (its block locals,
- * its marks of unresolved calls), so no later statement takes a new number
- * while it is pending.
+ * (`EVALUATED_UNRESOLVED_CALLS`, `boxed-function.ts`). A statement can
+ * start an `evaluateAsync()` that it does not await; that evaluation runs
+ * its later parts after this loop has moved on, and keeps the number it
+ * started with, which its context stack carries (`beginAsyncEvaluation`,
+ * `evaluation-epoch.ts`).
  */
 export function evaluateStatements(
   ce: ComputeEngine,
@@ -2317,8 +2323,7 @@ export function evaluateStatements(
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
     const op = ops[i];
-    if (program && i > 0 && ce._inFlightAsyncEvaluations === 0)
-      beginTopLevelEvaluation(ce);
+    if (program && i > 0) beginTopLevelEvaluation(ce);
     // Debugger pause point (see `common/debug-hook.ts`): only statements
     // that originated from source (carrying `sourceOffsets`) fire — the
     // hook may BLOCK. One comparison per statement when no debugger is
@@ -2367,6 +2372,21 @@ export function evaluateStatements(
   return result;
 }
 
+/** The scopes recorded by `createBlockLocals()`. */
+const STATEMENT_LIST_SCOPES = new WeakSet<Scope>();
+
+/**
+ * True when a list of statements (a `Block`, or the body of a function
+ * application) has run in `scope`, through `evaluateStatements()` or
+ * `evaluateStatementsAsync()`. Each run of such a list starts with
+ * `createBlockLocals()`, which gives each `let` or `const` local of the list
+ * a new binding. The top level of the Epsil runner is not such a scope: its
+ * statement loop does not call these functions.
+ */
+export function isStatementListScope(scope: Scope): boolean {
+  return STATEMENT_LIST_SCOPES.has(scope);
+}
+
 /**
  * When a run of a list of statements starts (a `Block`, `evaluateBlock` in
  * `library/control-structures.ts`, or the body of a function application),
@@ -2398,12 +2418,16 @@ export function evaluateStatements(
  * a `Declare` of a previous run made (`_declaredByStatement`), or none. A
  * binding of another kind (a clause that a later `function` statement
  * installed at canonicalization) is left to the `Declare` handler.
+ *
+ * The scope is recorded as one where a list of statements runs
+ * (`isStatementListScope()`).
  */
 function createBlockLocals(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): void {
   const scope = ce.context.lexicalScope;
+  STATEMENT_LIST_SCOPES.add(scope);
   for (const op of ops) {
     if (!isFunction(op, 'Declare')) continue;
     const target = op.ops[0];
@@ -2564,18 +2588,13 @@ export function declareAssignmentLocals(
  * statement only (see `evaluateStatements`).
  *
  * With `program`, each statement after the first starts a new top-level
- * evaluation, as on the synchronous route, but only while this evaluation
- * is the only asynchronous evaluation that is pending on the engine.
- * Asynchronous evaluations that run at the same time share one number
- * (`evaluation-epoch.ts`), so a new number for a statement of this program
- * would also be a new number for the other evaluation. The count of
- * pending asynchronous evaluations is read when the statements start: a
- * program block can be pending more than once in that count, when the host
- * evaluated a block that is not canonical and its canonical form runs the
- * statements (`runsAsProgram()`, `library/control-structures.ts`), and any
- * count above it is another evaluation that started later. A synchronous
- * evaluation that runs while a statement waits gives back the number it
- * found when it ends, so the number does not need to be given back here.
+ * evaluation, as on the synchronous route: the statement runs on a copy of
+ * `contextStack` that carries a new number (`beginAsyncStatement`,
+ * `evaluation-epoch.ts`). The number of an asynchronous evaluation is
+ * carried by its context stack, so the new number does not change the
+ * number of another asynchronous evaluation that runs at the same time, nor
+ * the number of an evaluation that an earlier statement started and did
+ * not await.
  */
 export async function evaluateStatementsAsync(
   ce: ComputeEngine,
@@ -2590,24 +2609,26 @@ export async function evaluateStatementsAsync(
   // Before the first `await`, so the current lexical scope is still the
   // scope of these statements.
   createBlockLocals(ce, ops);
-  const pendingAtStart = ce._inFlightAsyncEvaluations;
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
     const op = ops[i];
-    if (program && i > 0 && ce._inFlightAsyncEvaluations === pendingAtStart)
-      beginTopLevelEvaluation(ce);
+    const stack =
+      program && i > 0 && contextStack !== undefined
+        ? beginAsyncStatement(contextStack)
+        : contextStack;
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       debugStatementHook(op);
     // `effects` is the host capability registry the enclosing asynchronous
     // evaluation captured, and `contextStack` its evaluation-context stack
     // (which holds the block scope); each statement must run with the same
-    // ones.
+    // ones (for a statement of a program, a copy of the stack with the same
+    // frames and a new number).
     result = await op.evaluateAsync({
       signal,
       numericApproximation: i === last ? numericApproximation : undefined,
       _effects: effects,
-      _contextStack: contextStack,
+      _contextStack: stack,
       _precisionWindow: precisionWindow,
     });
     if (
@@ -3301,6 +3322,14 @@ function bindLazyArgumentLocals(
           here.length > 0
             ? new Set(shadowed ? [...shadowed, ...here] : here)
             : shadowed;
+        // The bounds of a `Limits` clause and the collection of an
+        // `Element` clause are outside the scope of the clause's own index
+        // (`ownIndexClause()`, `binding-sites.ts`).
+        const own = ownIndexClauseAt(e, i, binders);
+        if (own !== undefined)
+          return mapOwnIndexClause(op, own, shadowed, inner, (o, s) =>
+            walk(o, lazy, s)
+          );
         return walk(op, lazy, inner);
       });
       if (!next.every((op, i) => op === ops[i]))
@@ -4111,6 +4140,14 @@ function containsFreeSymbol(
         here.length > 0
           ? new Set(shadowed ? [...shadowed, ...here] : here)
           : shadowed;
+      // The bounds of a `Limits` clause and the collection of an `Element`
+      // clause are outside the scope of the clause's own index
+      // (`ownIndexClause()`, `binding-sites.ts`).
+      const own = ownIndexClauseAt(expr, i, binders);
+      if (own !== undefined)
+        return someOwnIndexClause(op, own, shadowed, inner, (o, s) =>
+          containsFreeSymbol(o, s, memo)
+        );
       return containsFreeSymbol(op, inner, memo);
     });
   }
@@ -5932,7 +5969,7 @@ function makeLambda(
     // (`blockingAsyncApplication()`), and a frame that it pushes must not
     // cover the frame of this one.
     const enclosingStack = ce._evalContextStack;
-    const ownStack = awaiting ? [...enclosingStack] : undefined;
+    const ownStack = awaiting ? copyContextStack(enclosingStack) : undefined;
     if (ownStack !== undefined) ce._evalContextStack = ownStack;
 
     // Push fresh scope and evaluate block contents directly.

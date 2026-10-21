@@ -141,7 +141,14 @@ function isFiniteInterval(x: Interval): boolean {
  *   no longer says that it jumps in `x`. Telling the two apart would need
  *   the jump to record which variable it came from.
  * - `empty`: the integrand is undefined somewhere on the range, so the
- *   integral is undefined.
+ *   integral is undefined. The result is a plain `empty`, without the
+ *   `missing` flag even when the integrand has it (a `Which` with no default
+ *   arm that selects no clause): an integral is an accumulation of its
+ *   integrand, and an accumulation of absent values is a numeric undefined
+ *   value, as `Missing + 1` is `NaN` and `NIntegrate` and `Sum` of an absent
+ *   integrand are `NaN` in the interpreter. So a comparison with the
+ *   integral is `'false'`, as on the `javascript` target and as for a `Sum`
+ *   of the same integrand on this target.
  * - `entire`: the integrand is unbounded on the range.
  */
 function propagatedKind(

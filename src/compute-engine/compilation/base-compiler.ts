@@ -99,7 +99,9 @@ import {
   boundVariableNamesInOperand,
 } from '../boxed-expression/binders.js';
 import {
+  clauseOperandShadow,
   declaredBinders,
+  ownIndexClauseAt,
   scopeForRebuild,
 } from '../boxed-expression/binding-sites.js';
 import { parseType } from '../../common/type/parse.js';
@@ -3097,7 +3099,17 @@ export class BaseCompiler {
       const binders = declaredBinders(node, 'post');
       node.ops.forEach((arg, i) => {
         const names = boundVariableNamesInOperand(node, i, binders);
-        walk(arg, names.length === 0 ? bound : new Set([...bound, ...names]));
+        const inner =
+          names.length === 0 ? bound : new Set([...bound, ...names]);
+        // The bounds of a `Limits` clause and the collection of an
+        // `Element` clause are outside the scope of the clause's own index
+        // (`ownIndexClause()`, `binding-sites.ts`).
+        const own = ownIndexClauseAt(node, i, binders);
+        if (own !== undefined && isFunction(arg))
+          arg.ops.forEach((child, j) =>
+            walk(child, clauseOperandShadow(bound, inner, own, j) ?? inner)
+          );
+        else walk(arg, inner);
       });
     };
     walk(root, new Set());
@@ -6914,11 +6926,21 @@ export class BaseCompiler {
       return expr.ops.some((op) => BaseCompiler.symbolOccursFree(op, name));
     // The clause ordering is read once per node, not once per operand.
     const binders = declaredBinders(expr, 'post');
-    return expr.ops.some(
-      (op, i) =>
+    return expr.ops.some((op, i) => {
+      // The bounds of a `Limits` clause and the collection of an `Element`
+      // clause are outside the scope of the clause's own index
+      // (`ownIndexClause()`, `binding-sites.ts`).
+      const own = ownIndexClauseAt(expr, i, binders);
+      if (own !== undefined && own.name === name && isFunction(op))
+        return op.ops.some(
+          (child, j) =>
+            own.outside(j) && BaseCompiler.symbolOccursFree(child, name)
+        );
+      return (
         !boundVariableNamesInOperand(expr, i, binders).includes(name) &&
         BaseCompiler.symbolOccursFree(op, name)
-    );
+      );
+    });
   }
 
   /**
@@ -25255,6 +25277,15 @@ export class BaseCompiler {
    *
    * A name the target itself binds to a loop index with literal bounds
    * (`isDecidedLoopIndex`) is never absent and is left out.
+   *
+   * A name bound by a node of `expr` itself (a `Sum` index, a comprehension
+   * variable, a `Block` local, a parameter of a function literal) is not
+   * followed to a global of the same name: with `k := 2m` in the engine,
+   * `Sum(k, k, 1, 3)` reads no `m`, so `m` is not tested. The bound names
+   * are those `boundVariableNamesInOperand` reports for each operand
+   * (`binders.ts`); a name that `unknowns` reports free stays an input even
+   * when a scope lists it (a `Block` declares the free symbols of its body
+   * in its own scope, `D` scopes its variable).
    */
   private static operandInputNodes(
     expr: Expression,
@@ -25266,7 +25297,7 @@ export class BaseCompiler {
     const followed = new Set<string>();
     const collect = (root: Expression): void => {
       const names = new Set(root.unknowns);
-      const visit = (e: Expression): void => {
+      const visit = (e: Expression, bound: ReadonlySet<string>): void => {
         if (isSymbol(e)) {
           const s = e.symbol;
           if (names.has(s)) {
@@ -25274,6 +25305,12 @@ export class BaseCompiler {
               found.set(s, e);
             return;
           }
+          // A name that `unknowns` reports free is an input whatever a
+          // scope says (a `Block` auto-declares every free symbol of its
+          // body in its own scope, and `D` scopes its variable, so
+          // `boundVariableNames` lists them too). The bound set decides only
+          // whether a name that is NOT free is followed to a global's value.
+          if (bound.has(s)) return;
           if (followed.has(s)) return;
           followed.add(s);
           const value = engine._getSymbolValue(s);
@@ -25283,12 +25320,26 @@ export class BaseCompiler {
         if (!isFunction(e)) return;
         const h = e.operator;
         if (h === 'Coalesce' || h === 'IsMissing') return;
+        // The operands of a binder see the names it binds, from the operand
+        // where each name comes into scope (a later clause of a
+        // comprehension sees an earlier index; the body sees every index).
+        const binds = boundVariableNames(e);
+        const binders =
+          binds.length === 0 ? undefined : declaredBinders(e, 'post');
+        const boundIn = (i: number): ReadonlySet<string> => {
+          if (binds.length === 0) return bound;
+          const inScope = boundVariableNamesInOperand(e, i, binders);
+          if (inScope.length === 0) return bound;
+          const next = new Set(bound);
+          for (const n of inScope) next.add(n);
+          return next;
+        };
         if (h === 'If' || h === 'Which') {
-          if (e.nops > 0) visit(e.ops[0]);
+          if (e.nops > 0) visit(e.ops[0], boundIn(0));
           return;
         }
         if (h === 'When') {
-          if (e.nops > 1) visit(e.ops[1]);
+          if (e.nops > 1) visit(e.ops[1], boundIn(1));
           return;
         }
         if (!followed.has(h)) {
@@ -25298,9 +25349,9 @@ export class BaseCompiler {
             collect(literal);
           }
         }
-        for (const x of e.ops) visit(x);
+        e.ops.forEach((x, i) => visit(x, boundIn(i)));
       };
-      visit(root);
+      visit(root, new Set());
     };
     collect(expr);
     return [...found.values()];

@@ -112,8 +112,11 @@ interface PeriodicRate {
    * derivative of the argument multiplied by the factor that converts the
    * engine's angular unit to radians. */
   rate: number;
-  /** The period of the function in radians: π for `Tan` and `Cot`, 2π for
-   * the others. */
+  /** The period in radians, in the argument, of the expression that the
+   * function node is part of (`composedPeriod()`): π for `Tan` and `Cot`,
+   * 2π for the others, and less for a node in a product or a power of
+   * periodic functions of the same argument or in an absolute value
+   * (π for `cos(θ)²`, `|cos(θ)|` and `sin(θ) cos(θ)`). */
   period: number;
 }
 
@@ -652,13 +655,143 @@ function occursOnlyUnderZero(expr: Expression, name: string): boolean {
   return expr.ops.every((op) => occursOnlyUnderZero(op, name));
 }
 
-/** Call `visit` on `expr` and on each of its subexpressions. */
+/** Call `visit` on `expr` and on each of its subexpressions, with the
+ * ancestors of the subexpression (the outermost first, its parent last). */
 function walkExpression(
   expr: Expression,
-  visit: (e: Expression) => void
+  visit: (e: Expression, ancestors: readonly Expression[]) => void,
+  ancestors: Expression[] = []
 ): void {
-  visit(expr);
-  if (isFunction(expr)) for (const op of expr.ops) walkExpression(op, visit);
+  visit(expr, ancestors);
+  if (!isFunction(expr)) return;
+  ancestors.push(expr);
+  for (const op of expr.ops) walkExpression(op, visit, ancestors);
+  ancestors.pop();
+}
+
+/** Each periodic function written as `sin(θ)^p · cos(θ)^q`: the pair
+ * `[p, q]`. */
+const SIN_COS_EXPONENTS = new Map<string, [number, number]>([
+  ['Sin', [1, 0]],
+  ['Cos', [0, 1]],
+  ['Tan', [1, -1]],
+  ['Cot', [-1, 1]],
+  ['Sec', [0, -1]],
+  ['Csc', [-1, 0]],
+]);
+
+/** Whether `expr` has a periodic function node whose argument is `arg`. */
+function hasPeriodicOf(expr: Expression, arg: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (
+    PERIODIC_FUNCTIONS.has(expr.operator) &&
+    expr.nops === 1 &&
+    expr.op1.isSame(arg)
+  )
+    return true;
+  return expr.ops.some((op) => hasPeriodicOf(op, arg));
+}
+
+/**
+ * When `expr` is `k · sin(θ)^p · cos(θ)^q` with `θ = arg`, integers `p` and
+ * `q`, and a factor `k` that has no periodic function of `θ`: the pair
+ * `[p, q]`. `[0, 0]` when `expr` has no periodic function of `θ`, and
+ * `undefined` when it has one but is not of that form (`cos(θ) + 1`,
+ * `e^{cos(θ)}`, `√cos(θ)`). The six periodic functions, `Negate`, products,
+ * quotients, integer powers and `Square` keep the form.
+ */
+function sinCosExponents(
+  expr: Expression,
+  arg: Expression
+): [number, number] | undefined {
+  if (!hasPeriodicOf(expr, arg)) return [0, 0];
+  if (!isFunction(expr)) return undefined;
+  const own = SIN_COS_EXPONENTS.get(expr.operator);
+  if (own !== undefined && expr.nops === 1 && expr.op1.isSame(arg)) return own;
+  switch (expr.operator) {
+    case 'Negate':
+      return expr.nops === 1 ? sinCosExponents(expr.op1, arg) : undefined;
+    case 'Multiply':
+    case 'Divide': {
+      // The operands of a quotient after the first are divisors.
+      let p = 0;
+      let q = 0;
+      for (const [i, op] of expr.ops.entries()) {
+        const e = sinCosExponents(op, arg);
+        if (e === undefined) return undefined;
+        const sign = expr.operator === 'Divide' && i > 0 ? -1 : 1;
+        p += sign * e[0];
+        q += sign * e[1];
+      }
+      return [p, q];
+    }
+    case 'Power':
+    case 'Square': {
+      const n = expr.operator === 'Square' ? 2 : realValue(expr.op2);
+      if (!Number.isInteger(n)) return undefined;
+      const e = sinCosExponents(expr.op1, arg);
+      return e === undefined ? undefined : [n * e[0], n * e[1]];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The smallest period in `θ` of `M = k · sin(θ)^p · cos(θ)^q` (of `|M|` when
+ * `absolute`), or `undefined` when `M` does not depend on `θ` (`p = q = 0`).
+ * Moving `θ` by π gives `(−1)^(p+q) · M`, and moving it by π/2 gives
+ * `(−1)^q · k · sin(θ)^q · cos(θ)^p`, which is `±M` only when `p = q`. So:
+ *
+ * - `p = q`: π/2 when `q` is even or for `|M|` (`(sin θ cos θ)²`), π
+ *   otherwise (`sin θ cos θ`);
+ * - `p ≠ q`: π when `p + q` is even or for `|M|` (`cos θ²`, `tan θ`,
+ *   `|cos θ|`), 2π otherwise (`cos θ`, `cos θ³`).
+ */
+function sinCosPeriod(
+  [p, q]: [number, number],
+  absolute: boolean
+): number | undefined {
+  if (p === 0 && q === 0) return undefined;
+  if (p === q) return absolute || q % 2 === 0 ? Math.PI / 2 : Math.PI;
+  return absolute || (p + q) % 2 === 0 ? Math.PI : 2 * Math.PI;
+}
+
+/**
+ * The period, in its argument `θ`, of the expression that a periodic function
+ * node `node` is part of: the smallest period over the node and those of its
+ * ancestors, read from the node up, that have the form
+ * `k · sin(θ)^p · cos(θ)^q` (`sinCosExponents()`, `sinCosPeriod()`), and
+ * over an `Abs` of such an ancestor. The reading stops at the first ancestor
+ * that does not have that form (a sum, an exponential, a non-integer power).
+ *
+ * The node alone gives the period of its function: π for `Tan` and `Cot`, 2π
+ * for the others. An ancestor can have a shorter period: `cos(θ)²`,
+ * `|cos(θ)|`, `sin(θ) cos(θ)`, `sin(θ) / cos(θ)` have the period π and
+ * `(sin(θ) cos(θ))²` has π/2, while `tan(θ)²` keeps π and `cos(θ)³` keeps
+ * 2π. The residual of a fit of `a cos(b x + c)²` has basins in `b` half as
+ * wide as those of `a cos(b x + c)`, and the grid must be twice as fine.
+ */
+function composedPeriod(
+  node: Expression,
+  ancestors: readonly Expression[]
+): number {
+  if (!isFunction(node)) return 2 * Math.PI;
+  const arg = node.op1;
+  let period = Infinity;
+  let expr: Expression = node;
+  for (let i = ancestors.length; ; i--) {
+    const e = sinCosExponents(expr, arg);
+    if (e === undefined) break;
+    period = Math.min(period, sinCosPeriod(e, false) ?? Infinity);
+    if (i === 0) break;
+    const parent = ancestors[i - 1];
+    if (isFunction(parent) && parent.operator === 'Abs') {
+      period = Math.min(period, sinCosPeriod(e, true) ?? Infinity);
+      break;
+    }
+    expr = parent;
+  }
+  return Number.isFinite(period) ? period : 2 * Math.PI;
 }
 
 /** The number of occurrences of the symbol `name` in `expr`. */
@@ -687,7 +820,8 @@ function nonzeroConstant(expr: Expression | undefined): number | undefined {
  *   node with argument `arg`, each fit variable `x_k` and each parameter
  *   `b_j`, the mixed derivative `∂(∂arg/∂x_k)/∂b_j` when it is a nonzero
  *   constant (`cos(b x + c)` gives 1 for `b`; `cos(b² x)` and `cos(b x y)`
- *   give no constant and record nothing), with the period of the function.
+ *   give no constant and record nothing), with the period of the expression
+ *   that the node is part of (`composedPeriod()`: π for `cos(θ)²`).
  * - `phaseShapes`: the pairs `(a, c)` of a product that has the parameter `a`
  *   and a `Sin` or `Cos` node as factors, where `c` appears only in the
  *   node's argument, with a constant nonzero derivative, and neither `a` nor
@@ -715,12 +849,11 @@ export function analyzeGlobalShape(
   const periodicRates: PeriodicRate[] = [];
   const phaseShapes: PhaseShape[] = [];
   const toRadians = realValue(angularChainFactor(renamed.engine));
-  walkExpression(renamed, (e) => {
+  walkExpression(renamed, (e, ancestors) => {
     if (!isFunction(e)) return;
     if (PERIODIC_FUNCTIONS.has(e.operator) && e.nops === 1) {
       const arg = e.op1;
-      const period =
-        e.operator === 'Tan' || e.operator === 'Cot' ? Math.PI : 2 * Math.PI;
+      const period = composedPeriod(e, ancestors);
       // An equation of a `FindRoot` system has no variable: the argument's
       // derivative with respect to a parameter is itself the constant rate
       // (`PeriodicRate.variable` is −1), `3.22` for `cos(3.22 b + c)`. A
@@ -1584,7 +1717,8 @@ function* globalSearchPlan(
  * The width of the narrowest basin of the residual in the parameter `param`:
  * the smallest `(period / 2) / (|rate| · span)` over the phase rates of the
  * parameter in every unit (`π / (|rate| · span)` for `Sin` and `Cos`, half
- * that for `Tan` and `Cot`, whose period is π), where `span` is the extent
+ * that for `Tan` and `Cot`, whose period is π, and for `cos(θ)²` or
+ * `|cos(θ)|`, whose period is π too), where `span` is the extent
  * of the rate's variable over the rows
  * of the unit (the maximum minus the minimum of its finite values). A zero or
  * non-finite span gives no width. `undefined` when the parameter has no
@@ -1737,8 +1871,10 @@ function linearPhases(
  * - A parameter that scales the phase of a periodic function of a fit
  *   variable (`b` in `cos(b x + c)`, see `PeriodicRate`) gets at least one
  *   point per basin of the residual, `π / (|rate| · span of the variable)`
- *   apart (half that for `Tan` and `Cot`), so that the scan cannot step over
- *   the basin of the best fit.
+ *   apart (half that for `Tan` and `Cot`, and for `cos(θ)²`, `|cos(θ)|`,
+ *   `sin(θ) cos(θ)` and the other expressions of period π, see
+ *   `composedPeriod()`), so that the scan cannot step over the basin of the
+ *   best fit.
  * - A step the caller gave (`b: [lo, hi, step]`) sets the count instead.
  * - Two scanned parameters share a budget of `SEPARABLE_BUDGET` points. Two
  *   caller-given steps over the budget are an `unexpected-argument` error.

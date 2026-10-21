@@ -79,9 +79,20 @@ routes share the rule that says which statements are declarations.
 ### A. The sticky rule (`boxed-expression/boxed-function.ts`)
 
 The engine numbers its top-level evaluations
-(`boxed-expression/evaluation-epoch.ts`): `BoxedFunction.evaluate` and
-`evaluateAsync` start a new number for an evaluation that is not nested in
-another one. In `applyFunctionLiteralWith`, the two sites that return an
+(`boxed-expression/evaluation-epoch.ts`). A synchronous evaluation reads the
+number of its engine; `BoxedFunction.evaluate` gives a new one to an
+evaluation that is not nested in another one (`beginTopLevelEvaluation`).
+An asynchronous evaluation has its own number, carried by its
+evaluation-context stack (`EvaluateOptions._contextStack`).
+`evaluateAsync()` with no stack of a pending evaluation starts a new
+asynchronous evaluation on its own copy of the stack
+(`beginAsyncEvaluation`). Each copy that the evaluation makes to push a
+frame keeps the same record (`copyContextStack`). Each synchronous part of
+the evaluation puts the stack in place of the engine's
+(`runWithEvaluationEffects`), so `topLevelEvaluationEpoch()` reads the
+number of the evaluation that runs, whatever else is pending (revised
+2026-10-21, after the first version shared one number between all pending
+asynchronous evaluations). In `applyFunctionLiteralWith`, the two sites that return an
 unresolved call (`evaluatedUnresolvedCall()` and the `_withParseScope`
 rebuild) mark the result with the current number. The mark is a `WeakMap`
 from the result to that number (`EVALUATED_UNRESOLVED_CALLS`), and a result
@@ -110,29 +121,32 @@ and resolves as before.
 
 **Program blocks.** The `Block` evaluate handlers (`evaluateBlock`,
 `evaluateBlockAsync`, `library/control-structures.ts`) treat a block that the
-host evaluates directly as a program (`runsAsProgram()`): on the synchronous
-route, the block is the outermost evaluation and no asynchronous evaluation
-is pending; on the asynchronous route, the depth is 0 and the block is the
-only pending asynchronous evaluation; and no `executeEpsil` run is in
-progress (a top-level `do` statement of an Epsil program is a nested
-block). A block that is not canonical (boxed with `{ form: 'raw' }` or
+host evaluates directly as a program (`runsAsProgram()`):
+
+- On the synchronous route, the block is the outermost evaluation and the
+  engine's own stack is in place (no asynchronous evaluation's stack).
+- On the asynchronous route, no synchronous evaluation runs, and the host
+  started the asynchronous evaluation that the block is part of
+  (`AsyncEvaluation.startedByHost`). The evaluation of the block is also the
+  only pending `evaluateAsync()` call of that evaluation, delegations aside
+  (`pending === 1 + delegated`).
+- In both cases, no `executeEpsil` run is in progress (a top-level `do`
+  statement of an Epsil program is a nested block).
+
+A block that is not canonical (boxed with `{ form: 'raw' }` or
 `{ form: 'structural' }`) is evaluated by its canonical form, one
 evaluation deeper, so the outermost evaluation is not always at depth 1.
-Each such delegation raises a count (`_delegatedEvaluations` while the
-synchronous delegation runs, `_delegatedAsyncEvaluations` until the
-asynchronous one settles; `delegateEvaluation()`,
-`delegateEvaluationAsync()`, `boxed-function.ts`), and the test is that
-the depth (the in-flight count on the asynchronous route) is 1 plus that
-count. The statement runners (`evaluateStatements`,
-`evaluateStatementsAsync`, `function-utils.ts`) take a `program` parameter,
-and start a new top-level evaluation before each statement after the first.
-On the synchronous route the new number is taken only while no
-asynchronous evaluation is pending: a statement can start an
-`evaluateAsync()` that it does not await, and the later parts of that
-evaluation must keep reading its own number. On the asynchronous route the
-new number is taken only while the count of pending asynchronous
-evaluations is the count when the statements started, because asynchronous
-evaluations that run at the same time share one number.
+Each such delegation raises a count: `_delegatedEvaluations` on the
+synchronous route, `AsyncEvaluation.delegated` on the asynchronous route
+(`delegateEvaluation()`, `delegateEvaluationAsync()`, `boxed-function.ts`).
+The statement runners (`evaluateStatements`, `evaluateStatementsAsync`,
+`function-utils.ts`) take a `program` parameter and start a new top-level
+evaluation before each statement after the first. On the synchronous route
+it is a new number of the engine. On the asynchronous route the statement
+runs on a copy of the block's stack with a new number
+(`beginAsyncStatement`). An `evaluateAsync()` that an earlier statement
+started and did not await keeps its own number, because that number is on
+its own stack.
 
 Measured: `Block(r := fn(3), fn := Function(2z, z), (r, fn(3)))` answers
 `(6, 6)`, as before this work, on both routes, and also when the block is
@@ -141,22 +155,24 @@ boxed raw or structural;
 `10 + h(1)`; and `u = h(1)`, `h = (x) => x`, `u` answers `1` through
 `ce.box(parseEpsil(src)[0])` and through `executeEpsil`.
 
-Two cases are not programs although the host could mean one: a host
-synchronous evaluation of a block while an asynchronous evaluation is
-pending on the same engine (it cannot be told apart from a synchronous part
-of that asynchronous evaluation), and two host asynchronous evaluations of
-blocks that run at the same time. Their statements run in one top-level
-evaluation.
-
-**Documented difference.** With `B(h) = Block(r := h(k), h := z ↦ 2z, r)`,
+A synchronous evaluation of a block that the host starts while an
+asynchronous evaluation is pending is a program, and so are two blocks that
+the host evaluates asynchronously at the same time: with
+`B(h) = Block(r := h(k), h := z ↦ 2z, r)`,
 `await Promise.all([B(h).evaluateAsync(), B(q).evaluateAsync()])` gives
-`h(k)` and `q(k)`, while the two awaited one after the other give `2k` and
-`2k`: the value of a block that the host evaluates asynchronously depends
-on other asynchronous evaluations that are pending at the same time. Giving
-each asynchronous evaluation its own number (carried in the evaluation
-options or the context stack) is a redesign of `evaluation-epoch.ts` that
-this work does not do; it is recorded in ROADMAP.md, and
-`test/compute-engine/sticky-unresolved-call.test.ts` pins both answers.
+`2k` and `2k`, as the two awaited one after the other do (the first version
+of this work gave `h(k)` and `q(k)`, because all pending asynchronous
+evaluations shared one number; fixed 2026-10-21). A block that a symbol
+holds is a program when the host reads the symbol
+(`ce.symbol('p').evaluateAsync()` starts the evaluation itself). The
+implicit locals of a block are kept for each run key and each evaluation
+number (`sweepCanonicalizationBindings`, `asyncRunLocals`), so runs of
+evaluations that alternate keep their own locals. A host `evaluateAsync()`
+runs on its own copy of the engine's stack, so a scope the host pushes
+while the call is pending does not reach it. Tests:
+`test/compute-engine/sticky-unresolved-call.test.ts`, "two host
+asynchronous evaluations of blocks at the same time" and "the evaluation
+number on the routes that copy the context stack".
 
 The values of a dictionary are evaluated one level deeper, as the operands
 of a function expression are (`BoxedDictionary.evaluate`), so a `Block`
@@ -527,41 +543,31 @@ the removal of the binding from the scope records no undo step on the
 rollback frame of an inference trial, as for the other binding that the
 handler drops. Test: `test/compute-engine/block-declared-signature-clause.test.ts`.
 
-**Open: a call between a typed valueless `let` of the function name and the
-`function` statement stays unresolved.** Measured on 2026-10-21, on both
-routes: `let g: (integer) -> integer`, `let a = String(g(2))`,
-`function g(k) { 2*k }`, `a` answers `"g(2)"`, where `"4"` is expected. The
-same program with the call before the `let` (`let a = String(g(2))` first)
-answers `"4"`. The cause: the clause is installed ahead of its statement (by
-the preparation step on the Epsil runner, by the block canonicalization on
-the whole-block route), and the `Declare` statement then finds the binding
-marked `CLAUSE_INSTALLED_AHEAD`, drops it and declares the name fresh; the
-call of the next statement finds no clause, and the `function` statement
-installs it again only at its own turn.
-
-A fix that keeps the binding when its type equals the declared type is not
-sound as it stands: the clause installed ahead does not carry the declared
-signature. The binding that the preparation step (or the block hoist)
-declares for `g` is `inferred: true`, and `declaredSignatureOf()`
-(`multi-clause.ts`) reads no declaration from an inferred value definition,
-so `defineFunctionClause()` installs the clause unchecked, with the
-signature inferred from the literal: `(unknown) -> number` for
-`function g(k) { 2*k }`, `(unknown) -> string` for `function g(k) { "s" }`.
-Kept as it is, that binding would answer `3` for `g(1.5)` and accept the
-clause that returns a string. So the claim of step 1 that the earlier `let`
-"gives the clause its declared signature" holds only once the `Declare`
-statement has run and the `function` statement installs its clause again.
-Two directions are possible; neither is implemented:
-
-- In the `CLAUSE_INSTALLED_AHEAD` branch of the `Declare` handler, after the
-  fresh declaration, install again at once the clauses that were installed
-  ahead, under the declared signature (this needs the literal, the origin
-  and the attributes of each install, kept with the marker and journaled
-  with it). A clause that violates the signature is then refused at that
-  point, and its statement reports the error at its turn as today.
-- Keep the binding only when the installed signature is not inferred (each
-  parameter and the result are annotated, `function g(k: integer) -> integer`)
-  and is the declared type. This covers only annotated clauses.
+**Fixed 2026-10-21: a call between a typed valueless `let` of the function
+name and the `function` statement now resolves.** `let g: (integer) ->
+integer`, `let a = String(g(2))`, `function g(k) { 2*k }`, `a` answers
+`"4"` on both routes (it answered `"g(2)"`). The first of the two directions
+below is implemented: `CLAUSE_INSTALLED_AHEAD` (`library/core.ts`) is a
+`WeakMap` from the binding record to the list of the clauses installed ahead
+(the literal, its origin, its attributes and the name operand; two
+unstamped installs are the same statement only when they share the name
+operand and the literal is the same), journaled for the checkpoint window
+as the marker was. The `Declare` handler, after the fresh declaration of a
+valueless `let`, installs those clauses again under the declared signature
+(`reinstallClausesAhead()`); a clause the signature refuses is skipped and
+the `function` statement reports it at its turn. Only the installs of the
+current Epsil batch are re-installed, so a program that stopped before its
+`function` statement does not hand its clause to a later program. A later
+run of the same block (a loop iteration, a block evaluated again with
+`evaluate()` or `evaluateAsync()`) installs the same clauses through
+`BLOCK_REINSTALLS`, keyed on the activation template of the block's scope
+and written only for a scope that `createBlockLocals()` made. A function
+body is not covered: its `Declare` runs in a new scope per call, so
+`function h(x) { let g: (integer) -> integer; function g(k) { 2k }; g(x) }`
+still answers `h(1.5) = 3` (recorded in ROADMAP.md). The other direction
+considered, keeping the early binding only when its installed signature is
+not inferred and equals the declared type, was not taken because it covers
+fully annotated clauses only.
 
 The values on the current tree, to keep with either fix:
 `let g: (integer) -> integer`, `function g(k) { "s" }`, `g(2)` answers

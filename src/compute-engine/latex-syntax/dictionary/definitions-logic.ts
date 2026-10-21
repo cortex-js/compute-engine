@@ -1196,14 +1196,39 @@ export function parseQuantifier(
     // `\forall f(x) > 0 (f(x) < 1)` it opens a predicate application inside
     // the condition. So the candidate split points are tried left to right,
     // each attempt requiring the group to start past the previous one.
+    //
+    // `stoppedAtGroup` is true when the terminator of an attempt stopped at
+    // a `(` where `condTerminator` does not stop. When it is false, the
+    // terminator gave the same answer as `condTerminator` at each token, so
+    // the attempt read the input as the greedy parse below reads it. Then a
+    // next attempt would give the same condition, and the greedy parse would
+    // give it too: the loop stops and the condition is kept. Each of these
+    // parses reads the rest of the input, and a quantifier in the rest of
+    // the input does the same again: in a chain of n `\text{there exists}`
+    // clauses, three parses at each clause took time that grew as 3^n.
+    //
+    // `condTerminator` is tested first. A quantifier in the condition
+    // inherits this terminator: in `\text{there exists} y_0 \text{there
+    // exists} y_1 + (z > 0)`, the attempt of the first quantifier stops at
+    // the `(`, and so does the condition of the second one. The `(` test of
+    // the second quantifier then does not change where its condition stops,
+    // and the second quantifier parses its condition once. Only the
+    // quantifier whose own `(` test stopped the parse tries the next split.
+    let unsplitCondition: MathJsonExpression | null | undefined = undefined;
     let splitFrom = index;
     while (true) {
       const from = splitFrom;
+      let stoppedAtGroup = false;
       const groupTerminator = {
         ...condTerminator,
-        condition: (p: Parser) =>
-          ((p.peek === '(' || p.peek === '\\left') && p.index > from) ||
-          condTerminator.condition(p),
+        condition: (p: Parser) => {
+          if (condTerminator.condition(p)) return true;
+          if ((p.peek === '(' || p.peek === '\\left') && p.index > from) {
+            stoppedAtGroup = true;
+            return true;
+          }
+          return false;
+        },
       };
       parser.index = index;
       // The condition is parsed in quantifier scope, like the body: it is a
@@ -1213,8 +1238,12 @@ export function parseQuantifier(
       const groupCondition = parser.parseExpression(groupTerminator);
       parser.exitQuantifierScope();
       const groupAt = parser.index;
+      // The index after the condition and the white space after it, where
+      // the greedy parse below continues.
+      let afterCondition = groupAt;
       if (groupCondition !== null && operator(groupCondition) !== '') {
         parser.skipSpace();
+        afterCondition = parser.index;
         parser.enterQuantifierScope();
         const groupBody = parser.parseEnclosure();
         parser.exitQuantifierScope();
@@ -1226,19 +1255,30 @@ export function parseQuantifier(
         )
           return bindQuantified(groupCondition, missingIfEmpty(groupBody));
       }
+      if (!stoppedAtGroup) {
+        // Rewind past the tokens that `parseEnclosure()` read. The rewind
+        // removes the diagnostics of that read, as the rewind before the
+        // greedy parse did.
+        parser.index = afterCondition;
+        unsplitCondition = groupCondition;
+        break;
+      }
       // No split here: retry past this candidate. Stop when the attempt made
       // no progress (no further `(` to try).
       if (groupCondition === null || groupAt <= splitFrom) break;
       splitFrom = groupAt;
     }
-    parser.index = index;
 
     // In quantifier scope for the same reason as the 2a split above: the
     // condition is a proposition, and `\forall P(x), P(x)` must read its two
     // occurrences of `P(x)` identically.
-    parser.enterQuantifierScope();
-    const condition = parser.parseExpression(condTerminator);
-    parser.exitQuantifierScope();
+    let condition = unsplitCondition;
+    if (condition === undefined) {
+      parser.index = index;
+      parser.enterQuantifierScope();
+      condition = parser.parseExpression(condTerminator);
+      parser.exitQuantifierScope();
+    }
     if (condition === null) return null;
 
     // Either a separator or a parenthesis

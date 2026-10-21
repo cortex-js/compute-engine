@@ -761,6 +761,159 @@ export function binderBoundAt(
 }
 
 /**
+ * The binders whose indexing clause is read outside the scope of its own
+ * index: the bounds of a `Limits` clause and the collection of an `Element`
+ * clause. In `∫₀ᵏ k dk`, `∏_{k=1}^{k} k` and `∑_{k ∈ 1..k} k`, the `k` of
+ * the bound or of the collection is the `k` of the enclosing scope (a
+ * global, or the index of an enclosing `Sum`), not the index. The
+ * independent variable of `NDSolveFunction` has a `Limits` clause too.
+ *
+ * The `Limits` clause of `CircularIntegrate` holds a contour,
+ * `Limits(z, |z| = 2, Nothing)`, and the contour reads the variable, so
+ * `CircularIntegrate` is not in the set. `D`, `Limit`, `NIntegrate` and
+ * `NDSolve` need no entry: `D` binds plain symbol operands, `Limit` the
+ * parameter of a function literal, `NIntegrate` takes plain bounds, and
+ * `NDSolve` is not a binder (its `Limits` clause binds nothing). The
+ * clauses of `Loop`, `Comprehension` and the quantifiers keep the rule that
+ * their index is in scope in its whole clause.
+ */
+export const OWN_INDEX_OUTSIDE_BINDERS: ReadonlySet<string> = new Set([
+  'Sum',
+  'Product',
+  'Integrate',
+  'NDSolveFunction',
+]);
+
+/** An indexing clause and the operands of it that its index does not see. */
+export type OwnIndexClause = {
+  /** The name of the index of the clause. */
+  readonly name: string;
+  /** Whether operand `j` of the clause is outside the scope of the index:
+   * the bounds of a `Limits` clause (`j ≥ 1`), the collection of an
+   * `Element` clause (`j = 1`; its condition, `j = 2`, reads the index). */
+  readonly outside: (j: number) => boolean;
+};
+
+const LIMITS_BOUNDS = (j: number): boolean => j >= 1;
+const ELEMENT_COLLECTION = (j: number): boolean => j === 1;
+
+/**
+ * When `clause`, operand `operandIndex` of a binder whose operator is
+ * `binder`, is a `Limits` or `Element` clause of a binder of
+ * `OWN_INDEX_OUTSIDE_BINDERS`, and the index of the clause becomes visible
+ * at this clause (`visibleFrom`, the clause ordering of the binder), the
+ * index and the operands of the clause that are outside its scope.
+ * Otherwise `undefined`: the index is in scope in its whole clause.
+ *
+ * The canonical form binds such an operand to the enclosing symbol
+ * (`withOwnBoundsUnbound()`, `box.ts`), and every walk that tracks the names
+ * a binder shadows must read the same scope (`clauseOperandShadow()`).
+ */
+export function ownIndexClause(
+  binder: string,
+  clause: Expression,
+  operandIndex: number,
+  visibleFrom: ReadonlyMap<string, number>
+): OwnIndexClause | undefined {
+  if (!OWN_INDEX_OUTSIDE_BINDERS.has(binder)) return undefined;
+  if (!isFunction(clause) || !isSymbol(clause.op1)) return undefined;
+  const outside =
+    clause.operator === 'Limits'
+      ? LIMITS_BOUNDS
+      : clause.operator === 'Element'
+        ? ELEMENT_COLLECTION
+        : undefined;
+  if (outside === undefined) return undefined;
+  const name = clause.op1.symbol;
+  if (visibleFrom.get(name) !== operandIndex) return undefined;
+  return { name, outside };
+}
+
+/**
+ * `ownIndexClause()` for operand `operandIndex` of the bound binder `expr`,
+ * read from its clause ordering `binders`.
+ */
+export function ownIndexClauseAt(
+  expr: Expression,
+  operandIndex: number,
+  binders: DeclaredBinders | undefined
+): OwnIndexClause | undefined {
+  if (binders === undefined || operandIndex < binders.firstClause)
+    return undefined;
+  if (!isFunction(expr)) return undefined;
+  return ownIndexClause(
+    expr.operator,
+    expr.ops[operandIndex],
+    operandIndex,
+    binders.visibleFrom
+  );
+}
+
+/**
+ * The names shadowed in operand `j` of the clause `own`, when `inner` is the
+ * set shadowed in the whole clause and `outer` the set shadowed outside the
+ * binder: `inner` without the index of the clause for an operand outside
+ * its scope, unless the walk entered the binder with that name already
+ * shadowed by an enclosing binder.
+ */
+export function clauseOperandShadow(
+  outer: ReadonlySet<string> | undefined,
+  inner: ReadonlySet<string> | undefined,
+  own: OwnIndexClause,
+  j: number
+): ReadonlySet<string> | undefined {
+  if (!own.outside(j) || inner === undefined || !inner.has(own.name))
+    return inner;
+  if (outer?.has(own.name)) return inner;
+  const result = new Set(inner);
+  result.delete(own.name);
+  return result;
+}
+
+/**
+ * `clause` with each operand `j` replaced by `f(operand, shadowed)`, where
+ * `shadowed` is the set of `clauseOperandShadow()`. The clause itself when
+ * no operand changed, else a clause of the same form.
+ */
+export function mapOwnIndexClause(
+  clause: Expression,
+  own: OwnIndexClause,
+  outer: ReadonlySet<string> | undefined,
+  inner: ReadonlySet<string> | undefined,
+  f: (op: Expression, shadowed: ReadonlySet<string> | undefined) => Expression
+): Expression {
+  if (!isFunction(clause)) return clause;
+  const ops = clause.ops;
+  const next = ops.map((op, j) =>
+    f(op, clauseOperandShadow(outer, inner, own, j))
+  );
+  if (next.every((op, j) => op === ops[j])) return clause;
+  const ce = clause.engine;
+  return clause.isCanonical
+    ? ce._fn(clause.operator, next)
+    : ce.function(clause.operator, next, {
+        form: clause.isStructural ? 'structural' : 'raw',
+      });
+}
+
+/**
+ * Whether `f(operand, shadowed)` holds for some operand of `clause`, where
+ * `shadowed` is the set of `clauseOperandShadow()`.
+ */
+export function someOwnIndexClause(
+  clause: Expression,
+  own: OwnIndexClause,
+  outer: ReadonlySet<string> | undefined,
+  inner: ReadonlySet<string> | undefined,
+  f: (op: Expression, shadowed: ReadonlySet<string> | undefined) => boolean
+): boolean {
+  if (!isFunction(clause)) return false;
+  return clause.ops.some((op, j) =>
+    f(op, clauseOperandShadow(outer, inner, own, j))
+  );
+}
+
+/**
  * `outer` extended with the names `binders` makes visible at operand
  * `operandIndex` — the shadow set a walk descending into that operand must
  * carry.

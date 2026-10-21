@@ -64,6 +64,7 @@ import {
   type ApplyOptions,
 } from '../function-utils.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
+import { copyContextStack } from './evaluation-epoch.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
 import { isExpression, isFunction } from './type-guards.js';
@@ -2416,9 +2417,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           const engine = this.engine;
           const effects =
             options._effects ?? engine._evaluationEffects ?? engine.effects;
-          const stack = [
-            ...(options._contextStack ?? engine._evalContextStack),
-          ];
+          const stack = copyContextStack(
+            options._contextStack ?? engine._evalContextStack
+          );
           const carried: ApplyOptions = {
             ...options,
             _effects: effects,

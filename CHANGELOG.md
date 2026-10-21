@@ -2,38 +2,37 @@
 
 ### New Features
 
-- **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408).
-  A third argument `{global: {b: [lo, hi]}}` searches the named parameters
-  (at most two) over the range for the lowest sum of squared residuals of the
-  whole system, equations included, as `FindFit` does for a model over data:
-  the separable scan when the system is linear in the other parameters, a
-  multi-start otherwise, with `[lo, hi, step]` for a caller-given grid step.
-  A stacked system of fit rows next to a plain equation
+- **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408). A
+  third argument `{global: {b: [lo, hi]}}` searches the named parameters (at
+  most two) over the range for the lowest sum of squared residuals of the whole
+  system, equations included, as `FindFit` does for a model over data: the
+  separable scan when the system is linear in the other parameters, a
+  multi-start otherwise, with `[lo, hi, step]` for a caller-given grid step. A
+  stacked system of fit rows next to a plain equation
   (`a cos(b x_i + c) + d x_i + e = y_i` for each data point, and `d = 0`) is
   searched for its best frequency; the constant phase coefficients of the
   equations (`3.22` in `cos(3.22 b + c)`) space the grid as the span of a
-  variable does for a fit, so a point falls in every basin of the residual.
-  An equation built from a row at `x = 0` reads `a cos(0 · b + c) + 0 · d`,
-  which canonicalization keeps; such a parameter is no longer read as a step
-  function of the system, which turned the scan into the coarse multi-start.
-  The record is the usual one (see the `stationary` entry below). With a
-  kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid
-  on the workers, as `FindFit` does.
+  variable does for a fit, so a point falls in every basin of the residual. An
+  equation built from a row at `x = 0` reads `a cos(0 · b + c) + 0 · d`, which
+  canonicalization keeps; such a parameter is no longer read as a step function
+  of the system, which turned the scan into the coarse multi-start. The record
+  is the usual one (see the `stationary` entry below). With a kernel pool on the
+  engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers, as
+  `FindFit` does.
 
-- **`Parser.binderSymbol()` and `Parser.rebindSubscripts()` are public**, for
-  a custom LaTeX dictionary entry that binds a name (a `with` clause, a loop
+- **`Parser.binderSymbol()` and `Parser.rebindSubscripts()` are public**, for a
+  custom LaTeX dictionary entry that binds a name (a `with` clause, a loop
   form). Since 0.160.0 a subscripted name in a binder position is a new name
-  also when its base is declared as a list (`n_{0}` with `n: list<number>`
-  is `At(n, 0)` elsewhere); the two parser methods that the built-in binders
-  use for that were internal, so a custom clause could not: with `n` a list,
-  `n_{0} + 1 \operatorname{with} n_{0} = 2` through a custom infix entry
-  that read the binder with `parseSymbol()` was a parse error.
-  `binderSymbol(expr)` gives the name that an expression declares in a binder
-  position (`n_0` for the `At(n, 0)` that the symbol parser made from
-  `n_{0}`; a symbol is its own name; `null` otherwise), and
-  `rebindSubscripts(expr, names)` rewrites those element accesses in a body,
-  including a body parsed before the clause. See "Binding a Name in a Custom
-  Entry" in the LaTeX syntax guide.
+  also when its base is declared as a list (`n_{0}` with `n: list<number>` is
+  `At(n, 0)` elsewhere); the two parser methods that the built-in binders use
+  for that were internal, so a custom clause could not: with `n` a list,
+  `n_{0} + 1 \operatorname{with} n_{0} = 2` through a custom infix entry that
+  read the binder with `parseSymbol()` was a parse error. `binderSymbol(expr)`
+  gives the name that an expression declares in a binder position (`n_0` for the
+  `At(n, 0)` that the symbol parser made from `n_{0}`; a symbol is its own name;
+  `null` otherwise), and `rebindSubscripts(expr, names)` rewrites those element
+  accesses in a body, including a body parsed before the clause. See "Binding a
+  Name in a Custom Entry" in the LaTeX syntax guide.
 
 ### Improvements
 
@@ -45,82 +44,167 @@
 
 ### Behavior Changes
 
+- **`unknown` is an inference marker, not a content type.** Every type is now a
+  subtype of `unknown`, the absence markers, `error` and `any` included:
+  `ce.type("missing").matches("unknown")` and
+  `ce.type("any").matches("unknown")` are `true`, and `list<integer | missing>`
+  matches `list<unknown>`. `unknown` still proves no contract: it matches only
+  `any` and itself. Bare `list`, `list<unknown>` and `list<any>` denote one set
+  of values and differ as declarations: the bare name and the explicit
+  `<unknown>` ask inference to refine the element type from each assignment
+  (`xs: list<unknown> := [1, Missing]` reports `list<integer | missing>`, where
+  it stayed `list<unknown>`), `list<any>` is a contract that never moves. Bare
+  `tuple` and `record` refine their slots and fields the same way
+  (`t: tuple := (1, Missing)` reports `tuple<integer, missing>`), and a
+  transparent alias of a bare name (`type L = list`) carries the instruction. A
+  type derived from a value keeps an unresolved cell: `ListJoin(fs, [2])` with
+  `fs: list<unknown>` is `list<unknown>` (it was `list<integer>` for a value
+  that could hold an error), and `Filter(tu, p)` over
+  `tu: tuple<unknown, missing>` is `list<missing | unknown>` (it was
+  `list<missing>` for the value `[1]`). A union keeps an absence or error arm
+  beside `unknown` (`missing | unknown`) and absorbs a value arm
+  (`integer | unknown` is `unknown`). An `incompatible-type` diagnostic shows a
+  generic parameter whose variable got no bound by the variable's name,
+  `indexed_collection<T>`, instead of `indexed_collection<unknown>`. A lambda
+  whose parameters are not inferred yet, `(unknown) -> number`, still does not
+  satisfy `(any) -> number`. `expression` and `value` are the contracts that
+  exclude the immediate markers. Design and decisions:
+  `docs/plans/2026-10-21-unknown-inference-marker.md`.
 - **`FindRoot` reports `converged` only at a root** (Tycho row 414).
-  `FindRoot(a^2 + 1 = 0, a)` gave `converged: True` with `residualNorm: 1`:
-  the solver's stop test is a stationary point of the sum of squared
-  residuals, which is a minimum of the misfit for a fit but a root only when
-  the residual is zero. `converged` is now true only when every residual
-  is within the engine's tolerance scaled by its own equation,
-  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))` with `J` the
-  Jacobian and `θ` the parameters: an absolute part for a residual that is
-  zero to within the tolerance, a relative part that says the parameters the
-  equation reads are determined to that relative precision (`a^2 = 10^{12}`
-  from `a = 1` is a root; `a^2 + 10^{-7} = 0` is not; a steep equation or a
-  large parameter does not hide another equation's residual). The tolerance
-  is never below 64 machine epsilons, and a non-finite residual or Jacobian
-  is never a root. The solver's stall test is now per component: the system
-  `a^2 = 4, b = 10^{11}` stalled after one step at `a = 2.5`, which was
-  reported as converged, because a step of 1 in `a` was negligible next to
-  the norm of the whole parameter vector. The record gains `stationary`, the solver's own stop test,
-  which is true at such a minimum too: a stacked system of data rows next to
-  an equation, whose misfit is not zero, reads it where it read `converged`.
-  The gradient test alone no longer stops a root solve:
-  `FindRoot(10^{-6} (a^2 - 4) = 0, a)` from `a = 1` stopped at its start
-  point as converged, since the absolute gradient tolerance passes everywhere
-  on a residual scaled small, and now reaches `a = 2`. The `FindFit` record
-  and its convergence test are unchanged.
+  `FindRoot(a^2 + 1 = 0, a)` gave `converged: True` with `residualNorm: 1`: the
+  solver's stop test is a stationary point of the sum of squared residuals,
+  which is a minimum of the misfit for a fit but a root only when the residual
+  is zero. `converged` is now true only when every residual is within the
+  engine's tolerance scaled by its own equation,
+  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))` with `J` the Jacobian
+  and `θ` the parameters: an absolute part for a residual that is zero to within
+  the tolerance, a relative part that says the parameters the equation reads are
+  determined to that relative precision (`a^2 = 10^{12}` from `a = 1` is a root;
+  `a^2 + 10^{-7} = 0` is not; a steep equation or a large parameter does not
+  hide another equation's residual). The tolerance is never below 64 machine
+  epsilons, and a non-finite residual or Jacobian is never a root. The solver's
+  stall test is now per component: the system `a^2 = 4, b = 10^{11}` stalled
+  after one step at `a = 2.5`, which was reported as converged, because a step
+  of 1 in `a` was negligible next to the norm of the whole parameter vector. The
+  record gains `stationary`, the solver's own stop test, which is true at such a
+  minimum too: a stacked system of data rows next to an equation, whose misfit
+  is not zero, reads it where it read `converged`. The gradient test alone no
+  longer stops a root solve: `FindRoot(10^{-6} (a^2 - 4) = 0, a)` from `a = 1`
+  stopped at its start point as converged, since the absolute gradient tolerance
+  passes everywhere on a residual scaled small, and now reaches `a = 2`. The
+  `FindFit` record and its convergence test are unchanged.
 
 - A call between a typed declaration with no value and the definition of the
   function now resolves. With `let g: (integer) -> integer`, then
-  `let a = String(g(2))`, then `function g(k) { 2k }`, `a` was `"g(2)"` on
-  the Epsil runner and on the whole-block route; it is now `"4"`, and the
-  call is checked against the declared signature (`String(g(1.5))` gives the
-  `incompatible-type` error). This also holds on each iteration of a loop
-  body, when a block is evaluated again (with `evaluate()` or
-  `evaluateAsync()`), and when a program runs again on the same engine. A
-  program that stopped (time or step budget) before its definition ran no
-  longer leaves that definition to a later program that declares the same
-  name. Inside a function body the declared signature is still not checked
-  (recorded in `ROADMAP.md`).
+  `let a = String(g(2))`, then `function g(k) { 2k }`, `a` was `"g(2)"` on the
+  Epsil runner and on the whole-block route; it is now `"4"`, and the call is
+  checked against the declared signature (`String(g(1.5))` gives the
+  `incompatible-type` error). This also holds on each iteration of a loop body,
+  when a block is evaluated again (with `evaluate()` or `evaluateAsync()`), and
+  when a program runs again on the same engine. A program that stopped (time or
+  step budget) before its definition ran no longer leaves that definition to a
+  later program that declares the same name. Inside a function body the declared
+  signature is still not checked (recorded in `ROADMAP.md`).
 
-- An `evaluateAsync()` call started by the host, or by a handler that passes
-  no options, now runs on its own copy of the engine's evaluation-context
-  stack, not on the engine's array. A scope that the host pushes or pops
-  while the call is pending no longer reaches it. Example: start
-  `Block(Tick(), w + 1).evaluateAsync()` with `Tick()` an operator that only
-  has an `evaluateAsync` handler, then run `ce.pushScope(); ce.declare('w',
-  'integer'); ce.assign('w', 5)` before awaiting it. The result was `6`; it
-  is now `w + 1`. Pending asynchronous evaluations no longer see each
-  other's scopes or the host's later scopes, as was already the case for
-  scopes that an evaluation pushes itself.
+- An `evaluateAsync()` call started by the host, or by a handler that passes no
+  options, now runs on its own copy of the engine's evaluation-context stack,
+  not on the engine's array. A scope that the host pushes or pops while the call
+  is pending no longer reaches it. Example: start
+  `Block(Tick(), w + 1).evaluateAsync()` with `Tick()` an operator that only has
+  an `evaluateAsync` handler, then run
+  `ce.pushScope(); ce.declare('w', 'integer'); ce.assign('w', 5)` before
+  awaiting it. The result was `6`; it is now `w + 1`. Pending asynchronous
+  evaluations no longer see each other's scopes or the host's later scopes, as
+  was already the case for scopes that an evaluation pushes itself.
 
 ### Bug Fixes
 
+- **A subscripted binder is a new name in a `cases` block and in a
+  set-builder whose variable appears only in the condition** (the two
+  residues of Tycho row 410). With `n` declared a list, the first row of
+  `\begin{cases} n_{0}\coloneq 3\\ n_{0}+1\end{cases}` was read before the
+  parser knew the environment is a block, so the target was the element
+  access `At(n, 0)` and the block declared a function `At`; such a row of a
+  `cases`, `dcases` or `rcases` environment now gets a second reading, the
+  declaration of the local `n_0`, which the block swaps in for its first,
+  middle and last rows alike (a single row, a row with a condition and a
+  matrix keep the top-level reading). `\{2n_{0} \mid n_{0}\in\Z\}` read
+  its variable as `At(n, 0)` because the body names no variable; a
+  membership of the condition (`v \in S`, alone or in a conjunction) whose
+  variable the body reads now names it, while a side condition on another
+  subscript keeps its index. Both parse as with `n` undeclared. The parser's
+  `environmentName()` gives a dictionary entry the innermost environment
+  being read, and `blockRowAlternative()` the second reading of a row.
+
+- `Solve` no longer lets a called user function's global take the place of the
+  unknown. With `h := a ↦ a − k`, `Solve(h(k) = 1, k)` gives `[k + 1]`, and
+  `[3]` with `k := 2`; it stayed unevaluated, and before that it gave `[]`. The
+  unknown is renamed in the equation and in the specs, as `Integrate` and
+  `Limit` already rename their variable. This covers domain specs, a bundled
+  `{h(k) = 1, k ∈ 1..3}`, systems and `NSolve`. An assumption about the unknown
+  (`assume(k ≠ −1)`) and a declared or use-inferred type still restrict the
+  solutions.
+
+- `Solve(t·x = 1, t)` gives `[1/x]` when `t` is declared `real`; it stayed
+  unevaluated. The root `1/x` is the pole `~oo` at `x = 0`, but each of its
+  finite values is real.
+
+- An unknown that has an assigned value is no longer restricted by the type
+  inferred from that value. With `x := 5`, `Solve(2x = 1, x)` gives `[1/2]` and
+  `Solve(x^2 = 2, x)` gives `[√2, −√2]`; both gave `[]`. With `x := 3, y := 4`,
+  `Solve(2x + 4y = 1, [x, y])` is no longer sent to the integer solver, which
+  gave `[]`. A declared type still restricts the roots.
+
+- A `Solve` over a finite domain whose equation or predicate has a free
+  parameter stays unevaluated: `Solve(x − a = 0, x ∈ 1..5)` and
+  `Solve(x > a, x ∈ 1..5)` were `[]`.
+
+- The bounds of a `Limits` clause and the collection of an `Element` clause of
+  `Sum`, `Product`, `Integrate` and `NDSolveFunction` read the enclosing symbol,
+  not the clause's own index. With `k := 2`, `∫₀ᵏ k dk` gives `2` (was `k²/2`),
+  `∏_{k=1}^{k} k` gives `2` (was `k!`), `Σ_{k=1}^{k} k` gives `3` (stayed
+  unevaluated) and `Σ_{k ∈ [1, k]} k` gives `3`. Also
+  `Σ_{k=1}^{3} Σ_{k=1}^{k} k` gives `10` on every route (was `3·Σ_{k=1}^{k} k`),
+  and `∫₀ᵏ k dk` with a free `k` reports `k` as an unknown.
+
+- `FindFit` with the `global` option now spaces the grid of a frequency by the
+  period of the expression its periodic function is part of, not by the period
+  of the function alone. A square, an absolute value or a product of periodic
+  functions of the same argument can have a shorter period: `a cos(b x + c)²`,
+  `a |cos(b x)|`, `a sin(b x) cos(b x)` and `sin(b x) / cos(b x)` have the
+  period π, and `(sin(b x) cos(b x))²` has π/2. Their basins in `b` are half or
+  a quarter as wide as those of `a cos(b x)`. The grid was spaced for the period
+  2π, so the search could return a wrong frequency with a large residual: for
+  example `b` over [0.3, 300] on 200 points over [0, 10], with the true `b`
+  between two grid points. `tan(b x)²` keeps the period π of `tan`, because
+  `tan(θ + π/2) = −cot θ`.
+
 - **`FindRoot` did not move a parameter read through `PointX` of a point**
   (Tycho row 415). On `PointX(PointList(2a, 2)) = 4` the solver stopped after
-  one iteration at the start value: the symbolic derivative of the residual
-  was the generic chain rule's `PointList(2, 0) · Apply(Derivative("PointX",
-  1), …)`, a product of a point and a number that is a type error, which
-  compiled to a Jacobian of NaN. `D` now differentiates an accessor of a
-  literal container through the operand it selects: `PointX`, `PointY` and
-  `PointZ` of a `Tuple` or a `PointList`, and `At` of a `Tuple`, a `PointList`
-  or a `List` with a literal index (`D(PointY((2a, a^2)), a)` is `2a`,
-  `D(At([2a, a^2], -1), a)` is `2a`); over a `PointList` that zips (a
-  component is a collection) the accessor reads the differentiated
-  `PointList`, so `D(At(PointList([a, 2a], 5), 1), a)` is the point `(1, 0)`;
-  and `FindFit`/`FindRoot` take a finite difference for a derivative that
-  is not valid.
+  one iteration at the start value: the symbolic derivative of the residual was
+  the generic chain rule's
+  `PointList(2, 0) · Apply(Derivative("PointX", 1), …)`, a product of a point
+  and a number that is a type error, which compiled to a Jacobian of NaN. `D`
+  now differentiates an accessor of a literal container through the operand it
+  selects: `PointX`, `PointY` and `PointZ` of a `Tuple` or a `PointList`, and
+  `At` of a `Tuple`, a `PointList` or a `List` with a literal index
+  (`D(PointY((2a, a^2)), a)` is `2a`, `D(At([2a, a^2], -1), a)` is `2a`); over a
+  `PointList` that zips (a component is a collection) the accessor reads the
+  differentiated `PointList`, so `D(At(PointList([a, 2a], 5), 1), a)` is the
+  point `(1, 0)`; and `FindFit`/`FindRoot` take a finite difference for a
+  derivative that is not valid.
 
 - Boxing nested folds whose accumulator is read by index no longer takes about
   three times longer for every level of nesting (#462). Since 0.158.0 such an
   accumulator is typed to the fixpoint of its seed and its body's result, which
   canonicalizes the combiner once per fixpoint step, and a fold nested in the
-  body was refined from scratch inside each of those canonicalizations. The
-  fixpoint found for a nested combiner is now kept for the duration of the
-  outermost fold's canonicalization, and a later pass canonicalizes the nested
-  combiner once, at that type. Six nested folds of the shape reported box in 81
-  ms instead of 1.5 s (0.156.0: 47 ms); eight in 156 ms instead of 13 s. Types
-  and values are unchanged.
+  body was refined from scratch inside each of those canonicalizations. Now a
+  nested fold is not refined while the enclosing fold only admits its callback,
+  and the fixpoint found for it in one step of the enclosing fold is the
+  starting point of the next step, where one canonicalization settles it. Six
+  nested folds of the shape reported box in about 100 ms instead of 1.5 s
+  (0.156.0: 47 ms); eight in about 200 ms instead of 13 s. Types and values are
+  unchanged, and a chain of numeric folds costs what it did.
 
 - A comparison with a long exact sum whose coefficients have many distinct
   denominators no longer throws. `0 < \sum_{k=1}^{300} \ln(-k)/k^2` evaluated by
@@ -142,52 +226,51 @@
   named like a valued global. A global that the condition does read (directly,
   or through the body of a called function) is still tested.
 
-- A chain of `\text{for all}` or `\text{there exists}` clauses that have
-  no condition, such as `x_0 \text{ for all } y_0 \; x_1 \text{ for all }
-  y_1 \; …`, parsed in exponential time: 12 clauses took 10 to 30 seconds,
-  and a `(` after the chain (`… + (z > 0)`) made it slow too. A quantifier
-  parsed the rest of the input up to three times, to find a `(` that starts
-  its body and then for its condition, and each parse reached the next
-  quantifier. Now a quantifier parses its condition again only when its own
-  `(` test stopped the parse, so 12 clauses take less than 30 ms, or about
-  100 ms with a `(` after the chain. The parse results are unchanged.
+- A chain of `\text{for all}` or `\text{there exists}` clauses that have no
+  condition, such as
+  `x_0 \text{ for all } y_0 \; x_1 \text{ for all } y_1 \; …`, parsed in
+  exponential time: 12 clauses took 10 to 30 seconds, and a `(` after the chain
+  (`… + (z > 0)`) made it slow too. A quantifier parsed the rest of the input up
+  to three times, to find a `(` that starts its body and then for its condition,
+  and each parse reached the next quantifier. Now a quantifier parses its
+  condition again only when its own `(` test stopped the parse, so 12 clauses
+  take less than 30 ms, or about 100 ms with a `(` after the chain. The parse
+  results are unchanged.
 
-- An aborted `broadcastAsync()` or `FindFit.evaluateAsync()` no longer keeps
-  a worker of the kernel pool busy. Before, a slice that a worker was running
-  when the signal aborted ran to its end, and its result was dropped. Now the
-  pool tells the worker to stop through a cancel flag in shared memory; the
-  worker reads it every 64 cells, or at each grid point of a `FindFit` scan,
-  and is free again at once. A slice also stops within 64 cells of its
-  deadline, so a heavy kernel keeps the cells it computed, and a slice whose
-  deadline has passed before its turn is not sent to a worker. A worker that
-  has not answered within the new `cancelGrace` option of `createKernelPool()`
-  (default 250 ms, at most 2147483647; `Infinity` turns it off) after an
-  abort, or after the deadline of its task, is terminated and replaced by a
-  new one from `create`; the tasks that waited for it run on the new worker.
-  Without `SharedArrayBuffer` (a browser page that is not cross-origin
-  isolated), or on a host that cannot send the flag, only the termination
-  applies.
+- An aborted `broadcastAsync()` or `FindFit.evaluateAsync()` no longer keeps a
+  worker of the kernel pool busy. Before, a slice that a worker was running when
+  the signal aborted ran to its end, and its result was dropped. Now the pool
+  tells the worker to stop through a cancel flag in shared memory; the worker
+  reads it every 64 cells, or at each grid point of a `FindFit` scan, and is
+  free again at once. A slice also stops within 64 cells of its deadline, so a
+  heavy kernel keeps the cells it computed, and a slice whose deadline has
+  passed before its turn is not sent to a worker. A worker that has not answered
+  within the new `cancelGrace` option of `createKernelPool()` (default 250 ms,
+  at most 2147483647; `Infinity` turns it off) after an abort, or after the
+  deadline of its task, is terminated and replaced by a new one from `create`;
+  the tasks that waited for it run on the new worker. Without
+  `SharedArrayBuffer` (a browser page that is not cross-origin isolated), or on
+  a host that cannot send the flag, only the termination applies.
 
 - Each asynchronous evaluation now has its own top-level evaluation number,
   carried by its evaluation-context stack. Before, all pending asynchronous
   evaluations of an engine shared one number. So with
   `B(h) = Block(r := h(k), h := z ↦ 2z, r)`,
-  `Promise.all([B(h).evaluateAsync(), B(q).evaluateAsync()])` gave `h(k)`
-  and `q(k)`, where the same two evaluations awaited one after the other
-  gave `2k` and `2k`. A synchronous evaluation of such a block while an
-  asynchronous one was pending also gave `q(k)`. Both now give `2k`. Related
-  fixes: when a symbol holds such a block (`p`),
-  `ce.symbol('p').evaluateAsync()` now gives `2k`, as `evaluate()` does; a
-  block in an operand of a function application stays a nested block on the
-  asynchronous route, as on the synchronous route (with `f(a, b) = (a, b)`,
-  `f(Tick(), B(h))` gave `(0, 2k)` and now gives `(0, h(k))`); a sticky
-  unresolved call read again after an `await` in one asynchronous evaluation
-  stays unresolved (it could resolve too early); and the locals of a block
-  are kept separately for each evaluation, so a synchronous evaluation of a
-  block between two iterations of a pending asynchronous loop over the same
-  block no longer removes the loop's locals (`t + 2` instead of `t + 3`),
-  and two evaluations whose runs of one block alternate no longer lose each
-  other's locals (`t + 1` instead of `t + 3`).
+  `Promise.all([B(h).evaluateAsync(), B(q).evaluateAsync()])` gave `h(k)` and
+  `q(k)`, where the same two evaluations awaited one after the other gave `2k`
+  and `2k`. A synchronous evaluation of such a block while an asynchronous one
+  was pending also gave `q(k)`. Both now give `2k`. Related fixes: when a symbol
+  holds such a block (`p`), `ce.symbol('p').evaluateAsync()` now gives `2k`, as
+  `evaluate()` does; a block in an operand of a function application stays a
+  nested block on the asynchronous route, as on the synchronous route (with
+  `f(a, b) = (a, b)`, `f(Tick(), B(h))` gave `(0, 2k)` and now gives
+  `(0, h(k))`); a sticky unresolved call read again after an `await` in one
+  asynchronous evaluation stays unresolved (it could resolve too early); and the
+  locals of a block are kept separately for each evaluation, so a synchronous
+  evaluation of a block between two iterations of a pending asynchronous loop
+  over the same block no longer removes the loop's locals (`t + 2` instead of
+  `t + 3`), and two evaluations whose runs of one block alternate no longer lose
+  each other's locals (`t + 1` instead of `t + 3`).
 
 ## 0.160.0 _2026-10-21_
 

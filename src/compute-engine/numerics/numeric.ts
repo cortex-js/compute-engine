@@ -289,11 +289,18 @@ var gcd = function (a, b) {
 */
 
 export function lcm(a: number, b: number): number {
+  // As `gcd`, the least common multiple is defined for integers only. A
+  // non-integer or a non-finite operand (an earlier `lcm` that overflowed the
+  // double range to `Infinity`) gives `NaN` instead of a `RangeError` from
+  // `BigInt(Infinity)`, with a zero operand too.
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return NaN;
   if (a === 0 || b === 0) return 0;
   // The least common multiple is non-negative by convention, regardless of the
   // signs of the operands.
   let res = (BigInt(a) * BigInt(b)) / BigInt(gcd(a, b));
   if (res < 0n) res = -res;
+  // Beyond the double range the result is `Infinity`; a caller that needs
+  // the exact value uses the bigint `lcm` of `numeric-bigint.ts`.
   return Number(res);
 }
 

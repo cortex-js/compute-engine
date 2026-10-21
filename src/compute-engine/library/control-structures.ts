@@ -120,7 +120,10 @@ import {
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import { noteScopeDeclaration } from '../scope-declaration-count.js';
-import { topLevelEvaluationEpoch } from '../boxed-expression/evaluation-epoch.js';
+import {
+  asyncEvaluationOf,
+  topLevelEvaluationEpoch,
+} from '../boxed-expression/evaluation-epoch.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
@@ -2566,23 +2569,36 @@ const recordedBlockScopes = new WeakSet<Scope>();
  * - `epoch`: the top-level evaluation of the last run
  *   (`topLevelEvaluationEpoch`, `boxed-expression/evaluation-epoch.ts`).
  * - `key`: the function call of the last run (`callActivationKey`).
- * - `saved`: for each other function call of this top-level evaluation, the
- *   bindings that the runs of the block made in that call, kept while a run
- *   in another call (a recursive call) uses the block scope. The map is weak:
- *   the entry of a call goes away with the scope of the call, so a sum of
- *   many calls (`Sum(g(k), k, 1, 10^5)`) does not keep an entry for each
- *   call. A call whose runs made no binding has no entry.
+ * - `saved`: for each other run key and each top-level evaluation, the
+ *   bindings that the runs of the block made with that key in that
+ *   evaluation, kept while a run of another key or evaluation (a recursive
+ *   call) uses the block scope. They are put back only for a run of the same
+ *   key and the same evaluation. A run of another evaluation is a new
+ *   top-level evaluation, or an asynchronous evaluation that runs at the
+ *   same time, which has its own number: its runs between two parts of this
+ *   evaluation do not reset the locals of this evaluation. One key can have
+ *   runs of several evaluations that alternate: each statement after the
+ *   first of an asynchronous program block is a new top-level evaluation on
+ *   the same frames (`beginAsyncStatement`, `evaluation-epoch.ts`), and an
+ *   `evaluateAsync()` that an earlier statement started and did not await
+ *   can still run. The outer map is weak: the entry of a call goes away with
+ *   the scope of the call, so a sum of many calls (`Sum(g(k), k, 1, 10^5)`)
+ *   does not keep an entry for each call. A call whose runs made no binding
+ *   has no entry. `TOP_LEVEL_RUN` keeps the entry of one evaluation only.
  */
 type BlockRunState = {
   epoch: number;
   key: object;
-  saved: WeakMap<object, Map<string, BoxedDefinition>>;
+  saved: WeakMap<object, Map<number, Map<string, BoxedDefinition>>>;
 };
 
 /** Keyed by the block scope (the template on the asynchronous route). */
 const blockRunStates = new WeakMap<Scope, BlockRunState>();
 
-/** The key of a run that is not inside a function call. */
+/** The key of a run of a synchronous top-level evaluation that is not inside
+ * a function call. The number of the synchronous top-level evaluation of an
+ * engine only grows, so a run with this key and an older number never comes
+ * again (`sweepCanonicalizationBindings`). */
 const TOP_LEVEL_RUN = {};
 
 /**
@@ -2595,13 +2611,15 @@ const TOP_LEVEL_RUN = {};
  * part of: the outermost activation on the stack (a copy of the scope of a
  * scoped node, made for one asynchronous evaluation of the node,
  * `asyncScopeActivation`, `boxed-expression/boxed-function.ts`), other than
- * the current scope. Asynchronous evaluations that run at the same time
- * share one evaluation number (`topLevelEvaluationEpoch`), so without this
- * key, a run in one of them read the locals of a run in another:
- * `Promise.all` of three `evaluateAsync()` of one `Sum` of a block gave
- * `3t + 6`, `3t + 15` and `3t + 24`.
+ * the current scope. Before each asynchronous evaluation had its own number
+ * (`topLevelEvaluationEpoch`), asynchronous evaluations that ran at the same
+ * time shared one, and without this key, a run in one of them read the
+ * locals of a run in another: `Promise.all` of three `evaluateAsync()` of
+ * one `Sum` of a block gave `3t + 6`, `3t + 15` and `3t + 24`.
  *
- * `TOP_LEVEL_RUN` when there is neither.
+ * When there is neither, the asynchronous evaluation whose context stack is
+ * in place (`asyncEvaluationOf`, `boxed-expression/evaluation-epoch.ts`), or
+ * `TOP_LEVEL_RUN` for a synchronous evaluation.
  */
 function callActivationKey(ce: ComputeEngine): object {
   const stack = ce._evalContextStack;
@@ -2614,7 +2632,7 @@ function callActivationKey(ce: ComputeEngine): object {
       scopeActivationTemplate(frame.lexicalScope) !== undefined
     )
       return frame.lexicalScope;
-  return TOP_LEVEL_RUN;
+  return asyncEvaluationOf(stack) ?? TOP_LEVEL_RUN;
 }
 
 /**
@@ -2636,9 +2654,12 @@ function callActivationKey(ce: ComputeEngine): object {
  *
  *   So, at the start of a run in a new top-level evaluation, the bindings
  *   that the runs of the block made are removed. At the start of a run in
- *   another function call of the same evaluation, they are set aside for
- *   the call that made them, and the bindings of the new call (if a run of
- *   the block in that call made some) are put back. A recursive call that
+ *   another function call, or in another evaluation, they are set aside for
+ *   the call and the evaluation that made them, and the bindings of the new
+ *   call and evaluation (if a run of the block in that call and evaluation
+ *   made some) are put back. A run of another evaluation can come between
+ *   two runs of one evaluation when the two are asynchronous evaluations
+ *   that run at the same time, each with its own number. A recursive call that
  *   runs the block again then does not reset the locals of the calls around
  *   it for their next runs. The block scope is one object for all the
  *   calls. When the block is in the body of a function literal, an
@@ -2710,40 +2731,60 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
       for (const [name, def] of madeByRuns) remove(name, def);
     return;
   }
-  if (state === undefined || state.epoch !== epoch) {
+  if (state === undefined) {
     for (const [name, def] of madeByRuns) remove(name, def);
     blockRunStates.set(template, { epoch, key, saved: new WeakMap() });
     return;
   }
-  if (state.key === key) return;
-  // A run in another function call of the same evaluation
-  if (madeByRuns.size > 0) state.saved.set(state.key, madeByRuns);
+  if (state.key === key && state.epoch === epoch) return;
+  // A run of another key (another function call), or of another top-level
+  // evaluation. The bindings of the last run are set aside for its key and
+  // evaluation. A synchronous top-level evaluation with no call
+  // (`TOP_LEVEL_RUN`) does not come back once a newer one runs, so its
+  // entry replaces the one of an older evaluation, and none is kept when
+  // the new run is of a newer such evaluation.
+  if (
+    madeByRuns.size > 0 &&
+    !(state.key === TOP_LEVEL_RUN && key === TOP_LEVEL_RUN)
+  ) {
+    let byEpoch = state.saved.get(state.key);
+    if (byEpoch === undefined || state.key === TOP_LEVEL_RUN) {
+      byEpoch = new Map();
+      state.saved.set(state.key, byEpoch);
+    }
+    byEpoch.set(state.epoch, madeByRuns);
+  }
   for (const [name, def] of madeByRuns) remove(name, def);
-  const restored = state.saved.get(key);
-  if (restored !== undefined) {
-    state.saved.delete(key);
+  const byEpoch = state.saved.get(key);
+  const restored = byEpoch?.get(epoch);
+  if (key === TOP_LEVEL_RUN) state.saved.delete(key);
+  else byEpoch?.delete(epoch);
+  if (restored !== undefined)
     for (const [name, def] of restored) {
       if (scope.bindings.has(name)) continue;
       journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
       scope.bindings.set(name, def);
       noteScopeDeclaration(scope);
     }
-  }
   state.key = key;
+  state.epoch = epoch;
 }
 
 /**
  * The implicit locals that the asynchronous runs of a block made, keyed by
  * the block scope, then by the run key (`callActivationKey`) of the
- * evaluation and call that the runs are part of. Only the entries of one
- * evaluation number (`topLevelEvaluationEpoch`) are kept: asynchronous
- * evaluations that run at the same time share that number, and are told
- * apart by the run key. The inner map is weak, so the entry of a call or an
- * evaluation goes away with its scope.
+ * evaluation and call that the runs are part of, then by the number of the
+ * evaluation of the runs (`topLevelEvaluationEpoch`). One run key can have
+ * runs of several evaluations that alternate: each statement after the
+ * first of an asynchronous program block is a new top-level evaluation on
+ * the same frames (`beginAsyncStatement`, `evaluation-epoch.ts`), and an
+ * `evaluateAsync()` that an earlier statement started and did not await can
+ * still run. The map of run keys is weak, so the entries of a call or an
+ * evaluation go away with its scope.
  */
 const asyncRunLocals = new WeakMap<
   Scope,
-  { epoch: number; byKey: WeakMap<object, Map<string, BoxedDefinition>> }
+  WeakMap<object, Map<number, Map<string, BoxedDefinition>>>
 >();
 
 /** An asynchronous run of a block, from `beginAsyncRun` to `endAsyncRun`. */
@@ -2809,8 +2850,7 @@ function beginAsyncRun(ce: ComputeEngine): AsyncRun | undefined {
     epoch: topLevelEvaluationEpoch(ce),
     key,
   };
-  const entry = asyncRunLocals.get(template);
-  const stored = entry?.epoch === run.epoch ? entry.byKey.get(key) : undefined;
+  const stored = asyncRunLocals.get(template)?.get(key)?.get(run.epoch);
   if (stored === undefined) return run;
   // Replace the implicit locals that the activation holds (the sweep kept
   // the ones that the synchronous runs of this evaluation and call made)
@@ -2839,15 +2879,20 @@ function beginAsyncRun(ce: ComputeEngine): AsyncRun | undefined {
  */
 function endAsyncRun(run: AsyncRun | undefined): void {
   if (run === undefined) return;
-  let entry = asyncRunLocals.get(run.template);
-  if (entry === undefined || entry.epoch !== run.epoch) {
-    entry = { epoch: run.epoch, byKey: new WeakMap() };
-    asyncRunLocals.set(run.template, entry);
+  let byKey = asyncRunLocals.get(run.template);
+  if (byKey === undefined) {
+    byKey = new WeakMap();
+    asyncRunLocals.set(run.template, byKey);
+  }
+  let byEpoch = byKey.get(run.key);
+  if (byEpoch === undefined) {
+    byEpoch = new Map();
+    byKey.set(run.key, byEpoch);
   }
   const locals = new Map<string, BoxedDefinition>();
   for (const [name, def] of run.activation.bindings)
     if (isImplicitRunLocal(run.template, name, def)) locals.set(name, def);
-  entry.byKey.set(run.key, locals);
+  byEpoch.set(run.epoch, locals);
 }
 
 /**
@@ -2943,25 +2988,29 @@ function evaluateBlock(
  * statements run in the top-level evaluation of the enclosing expression.
  *
  * On the synchronous route, the evaluation of the block is the outermost
- * evaluation and no asynchronous evaluation is pending. A synchronous
- * evaluation that starts while an asynchronous one is pending can be a part
- * of that asynchronous evaluation, which keeps its number, and the two cases
- * are not told apart here, so such a block is not a program. On the
- * asynchronous route, no synchronous evaluation is running and the
- * evaluation of the block is the only asynchronous evaluation that is
- * pending.
+ * evaluation, and it is not a part of an asynchronous evaluation: the
+ * engine's stack is in place, not the context stack of an asynchronous
+ * evaluation (`asyncEvaluationOf`, `boxed-expression/evaluation-epoch.ts`).
+ * A synchronous evaluation that the host starts while an asynchronous one is
+ * pending is a program too. On the asynchronous route, no synchronous
+ * evaluation is running, the host started the asynchronous evaluation that
+ * the block is part of (it is not nested in another evaluation, and it is
+ * not a statement of a program block), and the evaluation of the block is
+ * the only pending `evaluateAsync()` call of that evaluation
+ * (`AsyncEvaluation.pending`). Other asynchronous evaluations that run at
+ * the same time are not counted.
  *
- * The outermost evaluation is not always at depth 1 (in-flight count 1 on
- * the asynchronous route). A `Block` that is not canonical (boxed with
+ * The outermost evaluation is not always at depth 1 (pending count 1 on the
+ * asynchronous route). A `Block` that is not canonical (boxed with
  * `{ form: 'raw' }` or `{ form: 'structural' }`) is evaluated by its
  * canonical form: its own `evaluate()` counts one level, and the
  * `evaluate()` of its canonical form, which runs this handler, counts a
  * second one. Each such delegation raises a count while it runs:
  * `_delegatedEvaluations` on the synchronous route, and
- * `_delegatedAsyncEvaluations` until the delegated evaluation settles on the
+ * `AsyncEvaluation.delegated` until the delegated evaluation settles on the
  * asynchronous route (`delegateEvaluation()`, `delegateEvaluationAsync()`,
  * `boxed-function.ts`). So the test is that every other evaluation that is
- * counted is a delegation: the depth (the in-flight count on the
+ * counted is a delegation: the depth (the pending count on the
  * asynchronous route) is 1 plus the count of delegations. A block nested in
  * another expression has one more evaluation counted, the evaluation of
  * that expression, which is not a delegation.
@@ -2972,14 +3021,17 @@ function evaluateBlock(
  */
 function runsAsProgram(ce: ComputeEngine, async: boolean): boolean {
   if (ce._epsilBatchId !== undefined) return false;
+  const evaluation = asyncEvaluationOf(ce._evalContextStack);
   if (async)
     return (
       ce._evaluationDepth === 0 &&
-      ce._inFlightAsyncEvaluations === 1 + ce._delegatedAsyncEvaluations
+      evaluation !== undefined &&
+      evaluation.startedByHost &&
+      evaluation.pending === 1 + evaluation.delegated
     );
   return (
     ce._evaluationDepth === 1 + ce._delegatedEvaluations &&
-    ce._inFlightAsyncEvaluations === 0
+    evaluation === undefined
   );
 }
 

@@ -17,8 +17,10 @@ import {
   type EagerSourceValues,
 } from './eager-source-values.js';
 import {
+  asyncEvaluationOf,
+  beginAsyncEvaluation,
   beginTopLevelEvaluation,
-  endTopLevelEvaluation,
+  copyContextStack,
   topLevelEvaluationEpoch,
 } from './evaluation-epoch.js';
 import {
@@ -3382,14 +3384,11 @@ export class BoxedFunction
     // An evaluation that is not nested in a synchronous evaluation, and that
     // is not called from a synchronous part of the asynchronous driver (which
     // sets the registry slot around these parts), is a new top-level
-    // evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`). When an
-    // asynchronous evaluation is pending, its number is given back at the
-    // end, so its next parts read the same number as its first part.
-    let outerEpoch: number | undefined;
-    if (capturesEffects && engine._evaluationDepth === 0) {
-      const outer = beginTopLevelEvaluation(engine);
-      if (engine._inFlightAsyncEvaluations > 0) outerEpoch = outer;
-    }
+    // evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`). An
+    // asynchronous evaluation that is pending reads the number that its own
+    // context stack carries, so the new number does not change it.
+    if (capturesEffects && engine._evaluationDepth === 0)
+      beginTopLevelEvaluation(engine);
     engine._evaluationDepth += 1;
     // The numeric request of this evaluation, for the collection handlers
     // it calls, which receive no evaluation options
@@ -3444,7 +3443,6 @@ export class BoxedFunction
       engine._numericRequest = enclosingNumericRequest;
       releaseKeptEagerSourceValues(engine);
       if (capturesEffects) engine._evaluationEffects = undefined;
-      if (outerEpoch !== undefined) endTopLevelEvaluation(engine, outerEpoch);
     }
   }
 
@@ -4037,15 +4035,33 @@ export class BoxedFunction
     //
     // The evaluation-context stack (`EvaluateOptions._contextStack`), which
     // holds the scopes of the scoped operators the evaluation is inside,
-    // travels the same way. A call without one captures the engine's stack
-    // as it is now: for a call from the host, the engine's own array; for a
-    // call from the synchronous part of a handler (`ce.box(…).evaluateAsync()`
-    // with no options), the stack of the enclosing evaluation, which then
-    // holds the scope of its index. Without this capture, the nested
-    // evaluation saw that scope only until its first `await`. The array is
-    // shared, not copied: an evaluation that pushes a frame it holds across
-    // an `await` (a scoped operator, step 4 of the asynchronous driver)
-    // pushes it on a copy of its own.
+    // travels the same way. A call without one captures a copy of the
+    // engine's stack as it is now: for a call from the host, of the engine's
+    // own array; for a call from the synchronous part of a handler
+    // (`ce.box(…).evaluateAsync()` with no options), of the stack of the
+    // enclosing evaluation, which then holds the scope of its index. Without
+    // this capture, the nested evaluation saw that scope only until its
+    // first `await`.
+    //
+    // A call that receives the stack of a pending asynchronous evaluation in
+    // its options is a part of that evaluation, and uses that array. Any
+    // other call starts a new asynchronous evaluation, on its own copy of
+    // the stack (`beginAsyncEvaluation`, `evaluation-epoch.ts`): the copy
+    // carries the number of the evaluation, which the sticky rule of an
+    // unresolved call and the runs of a `Block` read, and the counts that
+    // tell whether a `Block` is a program (`runsAsProgram()`,
+    // `library/control-structures.ts`). So the number of this evaluation
+    // does not depend on other evaluations that run at the same time. An
+    // evaluation that pushes a frame it holds across an `await` (a scoped
+    // operator, step 4 of the asynchronous driver) pushes it on a copy of
+    // its own stack, which carries the same number (`copyContextStack`).
+    let evaluation = asyncEvaluationOf(options?._contextStack);
+    let contextStack = options?._contextStack;
+    if (evaluation === undefined)
+      ({ stack: contextStack, evaluation } = beginAsyncEvaluation(
+        this.engine,
+        contextStack
+      ));
     const effects =
       options?._effects ??
       this.engine._evaluationEffects ??
@@ -4056,7 +4072,7 @@ export class BoxedFunction
     // slices inside that window too (`EvaluateOptions._precisionWindow`).
     if (
       options?._effects === undefined ||
-      options._contextStack === undefined ||
+      options._contextStack !== contextStack ||
       (options._precisionWindow === undefined &&
         (this.engine._atTransientPrecision ||
           this.engine._requestedPrecision !== undefined))
@@ -4064,19 +4080,12 @@ export class BoxedFunction
       options = {
         ...options,
         _effects: effects,
-        _contextStack: options?._contextStack ?? this.engine._evalContextStack,
+        _contextStack: contextStack,
         _precisionWindow:
           options?._precisionWindow ?? capturedPrecisionWindow(this.engine),
       };
-    // As in `evaluate()`: an evaluation that is not nested in another one is
-    // a new top-level evaluation. One that starts while another asynchronous
-    // evaluation is pending shares the number of that evaluation.
-    if (
-      this.engine._evaluationDepth === 0 &&
-      this.engine._inFlightAsyncEvaluations === 0
-    )
-      beginTopLevelEvaluation(this.engine);
     this.engine._inFlightAsyncEvaluations += 1;
+    evaluation.pending += 1;
     let promise: Promise<Expression>;
     try {
       // The driver runs synchronously up to its first `await`, and that
@@ -4095,6 +4104,7 @@ export class BoxedFunction
       );
     } catch (error) {
       this.engine._inFlightAsyncEvaluations -= 1;
+      evaluation.pending -= 1;
       releaseKeptEagerSourceValues(this.engine);
       throw error;
     }
@@ -4107,6 +4117,7 @@ export class BoxedFunction
       })
       .finally(() => {
         this.engine._inFlightAsyncEvaluations -= 1;
+        evaluation.pending -= 1;
         releaseKeptEagerSourceValues(this.engine);
       });
   }
@@ -4125,8 +4136,7 @@ export class BoxedFunction
     // nested evaluation is counted too — the check is "is any async
     // evaluation open", not "how many", and a balanced count is easier to
     // trust than a re-entrancy carve-out.
-    if (canonical)
-      return delegateEvaluationAsync(this.engine, canonical, options);
+    if (canonical) return delegateEvaluationAsync(canonical, options);
     // A kept value of a pure eager source, as in `evaluate()`. The value was
     // computed by a synchronous evaluation, and `evaluate()` cannot run an
     // operator that has only an `evaluateAsync` handler: such an expression
@@ -4203,10 +4213,19 @@ export class BoxedFunction
 
     if (this._lazyValuePending !== undefined) {
       const previous = this._lazyValuePendingOptions;
+      // The context stacks are compared by their frames, not by identity:
+      // each asynchronous evaluation has its own copy of the stack, with its
+      // own top-level evaluation number (`beginAsyncEvaluation`,
+      // `evaluation-epoch.ts`). So a caller of another evaluation joins the
+      // walk, and receives a value computed under the number of the first
+      // caller. This is the same as a hit in the settled memo, which also
+      // gives a value computed by an earlier evaluation: only a walk that
+      // passed the eligibility test of the memo (a pure lazy collection)
+      // gets here, and its value does not depend on the evaluation number.
       if (
         previous?.signal === options?.signal &&
         previous?._effects === options?._effects &&
-        previous?._contextStack === options?._contextStack &&
+        sameContextFrames(previous?._contextStack, options?._contextStack) &&
         previous?._precisionWindow?.working ===
           options?._precisionWindow?.working &&
         previous?._precisionWindow?.requested ===
@@ -8196,7 +8215,7 @@ export class BoxedFunction
       const effects =
         options?._effects ?? engine._evaluationEffects ?? engine.effects;
       const contextStack = isScoped
-        ? [...(options?._contextStack ?? engine._evalContextStack)]
+        ? copyContextStack(options?._contextStack ?? engine._evalContextStack)
         : options?._contextStack;
       if (isScoped) {
         runWithEvaluationEffects(
@@ -11589,9 +11608,9 @@ async function applyFunctionLiteralAsync(
   // as a scoped operator does (step 4 of `evaluateAsync`).
   const effects =
     options?._effects ?? engine._evaluationEffects ?? engine.effects;
-  const contextStack = [
-    ...(options?._contextStack ?? engine._evalContextStack),
-  ];
+  const contextStack = copyContextStack(
+    options?._contextStack ?? engine._evalContextStack
+  );
   const carried = {
     ...options,
     _effects: effects,
@@ -11763,7 +11782,12 @@ function evaluatedUnresolvedCall(
 
 /** The asynchronous twin of the evaluation of a sticky call in
  * `BoxedFunction.evaluate()`: the operands are evaluated with
- * `evaluateAsync`, in order. */
+ * `evaluateAsync`, in order. The result is made after an `await`, so the
+ * context stack of this evaluation, which carries its number
+ * (`topLevelEvaluationEpoch`), is put in place of the engine's stack for
+ * that step. Without it, the result was marked with the number of the
+ * engine, was not sticky for the rest of this evaluation, and a later read
+ * of it after the name of its head was assigned resolved the call. */
 async function evaluatedUnresolvedCallAsync(
   expr: BoxedFunction,
   options: Partial<EvaluateOptions> | undefined
@@ -11771,7 +11795,9 @@ async function evaluatedUnresolvedCallAsync(
   const ops: Expression[] = [];
   for (const x of expr.ops)
     ops.push(await x.evaluateAsync(operandOptions(options)));
-  return evaluatedUnresolvedCall(expr, ops);
+  return expr.engine.withEvaluationContext(options, () =>
+    evaluatedUnresolvedCall(expr, ops)
+  );
 }
 
 /**
@@ -11796,26 +11822,29 @@ function delegateEvaluation<T>(ce: ComputeEngine, evaluate: () => T): T {
 /**
  * The asynchronous twin of `delegateEvaluation`: `canonical.evaluateAsync()`
  * in place of the evaluation of the expression that is not canonical, with
- * `_delegatedAsyncEvaluations` raised until it settles. The `Block` handler
- * of the canonical form runs after a first suspension, when the synchronous
- * part of this call has returned, so the count is kept for as long as the
- * delegating evaluation is counted in `_inFlightAsyncEvaluations`.
+ * the count of delegations of the asynchronous evaluation that `options`
+ * belong to (`AsyncEvaluation.delegated`, `evaluation-epoch.ts`) raised
+ * until it settles. The `Block` handler of the canonical form runs after a
+ * first suspension, when the synchronous part of this call has returned, so
+ * the count is kept for as long as the delegating call is counted in the
+ * pending calls of that evaluation.
  */
 function delegateEvaluationAsync(
-  ce: ComputeEngine,
   canonical: Expression,
   options: Partial<EvaluateOptions> | undefined
 ): Promise<Expression> {
-  ce._delegatedAsyncEvaluations += 1;
+  const evaluation = asyncEvaluationOf(options?._contextStack);
+  if (evaluation === undefined) return canonical.evaluateAsync(options);
+  evaluation.delegated += 1;
   let promise: Promise<Expression>;
   try {
     promise = canonical.evaluateAsync(options);
   } catch (error) {
-    ce._delegatedAsyncEvaluations -= 1;
+    evaluation.delegated -= 1;
     throw error;
   }
   return promise.finally(() => {
-    ce._delegatedAsyncEvaluations -= 1;
+    evaluation.delegated -= 1;
   });
 }
 
@@ -15953,6 +15982,23 @@ function indeterminateAsNaN(result: Expression): Expression {
     return y;
   });
   return changed ? result.engine.function(result.operator, ops) : result;
+}
+
+/**
+ * True when the context stacks `a` and `b` hold the same frames, in the
+ * same order: the two evaluations resolve names in the same scopes. Each
+ * asynchronous evaluation that the host starts has its own copy of the
+ * engine's stack (`beginAsyncEvaluation`, `evaluation-epoch.ts`), so two such
+ * evaluations started at the same point have two arrays with the same
+ * frames.
+ */
+function sameContextFrames(
+  a: ReadonlyArray<object> | undefined,
+  b: ReadonlyArray<object> | undefined
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  return a.every((frame, i) => frame === b[i]);
 }
 
 /**

@@ -11,6 +11,10 @@ import {
 } from '../../src/compute-engine';
 import { createIntervalRuntime } from '../../src/interval';
 import { createJavaScriptRuntime } from '../../src/runtime';
+import { RUNTIME_VERSION } from '../../src/compute-engine/compilation/javascript-runtime';
+import { INTERVAL_RUNTIME_VERSION } from '../../src/compute-engine/interval';
+import { fitSlicePool } from '../../src/compute-engine/kernel-pool';
+import type { WireFitProblem } from '../../src/compute-engine/kernel-protocol';
 
 // The worker pool behind `result.broadcastAsync()` (design:
 // docs/plans/2026-10-20-worker-kernel-pool.md, sections 5.1 and 5.4;
@@ -363,6 +367,382 @@ describe('the kernel pool on worker threads', () => {
     expect(again.done).toBe(30_000);
     expectSame(again.out, r.broadcast!({ x: xs }));
   }, 60_000);
+});
+
+describe('cancelling the task that a worker runs', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // Every pool of this block is disposed after its test, also when an
+  // assertion failed first: a live worker thread keeps jest from exiting.
+  const pools: KernelPool[] = [];
+  const newPool = (
+    options: Parameters<typeof createKernelPool>[0]
+  ): KernelPool => {
+    const pool = createKernelPool(options);
+    pools.push(pool);
+    return pool;
+  };
+  afterEach(() => {
+    for (const pool of pools.splice(0)) pool.dispose();
+  });
+
+  /** Wait until `cond()` holds, polling every 5 ms. */
+  async function until(cond: () => boolean): Promise<void> {
+    while (!cond()) await sleep(5);
+  }
+
+  /** About 20 µs per cell: a slice of 100,000 cells runs for about 2 s. */
+  const HEAVY = '\\sum_{k=1}^{2000}\\sin(kx)';
+
+  /**
+   * A pool of one worker thread, each worker wrapped to count the workers
+   * created and terminated, the `run` tasks sent, and the `result` answers
+   * (with the time each arrived). With `stripCancel`, the cancel flag is
+   * removed from each task: the worker then runs every task to its end, as
+   * a browser worker does on a page with no `SharedArrayBuffer`.
+   */
+  function watchedPool(options: {
+    stripCancel?: boolean;
+    cancelGrace?: number;
+  }) {
+    const log = {
+      created: 0,
+      terminated: 0,
+      runs: 0,
+      results: [] as { job: number; done: number; at: number }[],
+    };
+    const pool = newPool({
+      size: 1,
+      cancelGrace: options.cancelGrace,
+      create: () => {
+        log.created++;
+        const w = new Worker(WORKER_URL, { execArgv: ['--import', 'tsx'] });
+        w.on('message', (m: { type: string; job: number; done: number }) => {
+          if (m.type === 'result')
+            log.results.push({ job: m.job, done: m.done, at: Date.now() });
+        });
+        return {
+          postMessage: (m: unknown, transfer?: ArrayBuffer[]) => {
+            let sent = m as { type: string; cancel?: Int32Array };
+            if (sent.type === 'run') {
+              log.runs++;
+              if (options.stripCancel) {
+                const { cancel: _cancel, ...rest } = sent;
+                sent = rest;
+              }
+            }
+            w.postMessage(sent, transfer ?? []);
+          },
+          terminate: () => {
+            log.terminated++;
+            return w.terminate();
+          },
+          on: (event, handler) => w.on(event as 'message', handler),
+        };
+      },
+    });
+    return { pool, log };
+  }
+
+  test('an abort stops the slice that the worker runs, at its next check of the cancel flag', async () => {
+    // A grace period longer than the slice: the worker is never terminated,
+    // so an early answer can only come from the cancel flag.
+    const { pool, log } = watchedPool({ cancelGrace: 60_000 });
+    const own = new ComputeEngine({ workers: pool });
+    await pool.prewarm();
+    const r = compile(own.parse(HEAVY));
+    const n = 100_000;
+    const ctl = new AbortController();
+    const p = r.broadcastAsync!(
+      { x: samples(n, 0, 1) },
+      { signal: ctl.signal }
+    );
+    await until(() => log.runs === 1);
+    await sleep(50);
+    const t0 = Date.now();
+    ctl.abort();
+    // The caller has its answer at once.
+    expect((await p).done).toBe(0);
+    // The worker answered early, with the cells it did before it read the
+    // flag (the pool drops that answer).
+    await until(() => log.results.length === 1);
+    expect(log.results[0].done).toBeLessThan(n);
+    expect(log.results[0].at - t0).toBeLessThan(1000);
+    expect(log.terminated).toBe(0);
+    expect(log.created).toBe(1);
+    // The same worker takes the next batch.
+    const q = compile(own.parse('x^2'));
+    const xs = samples(30_000);
+    const again = await q.broadcastAsync!({ x: xs });
+    expect(again.done).toBe(30_000);
+    expectSame(again.out, q.broadcast!({ x: xs }));
+    expect(log.runs).toBe(2);
+    expect(log.created).toBe(1);
+    pool.dispose();
+  }, 60_000);
+
+  test('a worker that does not stop is terminated after the grace period, and the task that waited for it runs on a new worker', async () => {
+    const { pool, log } = watchedPool({ stripCancel: true, cancelGrace: 100 });
+    const own = new ComputeEngine({ workers: pool });
+    await pool.prewarm();
+    const heavy = compile(own.parse(HEAVY));
+    const light = compile(own.parse('x^2 + 1'));
+    const ctl = new AbortController();
+    const p = heavy.broadcastAsync!(
+      { x: samples(100_000, 0, 1) },
+      { signal: ctl.signal }
+    );
+    await until(() => log.runs === 1);
+    // A second batch, with no signal, waits behind the first one on the
+    // only worker.
+    const xs = samples(30_000);
+    const q = light.broadcastAsync!({ x: xs });
+    await sleep(20);
+    ctl.abort();
+    expect((await p).done).toBe(0);
+    const { out, done } = await q;
+    expect(done).toBe(30_000);
+    expectSame(out, light.broadcast!({ x: xs }));
+    // The first worker was terminated before it answered, and the second
+    // batch ran on its replacement, which was sent the kernel again.
+    expect(log.terminated).toBe(1);
+    expect(log.created).toBe(2);
+    expect(log.runs).toBe(2);
+    expect(log.results.length).toBe(1);
+    expect(log.results[0].done).toBe(30_000);
+    // A later batch runs on the pool.
+    const again = await heavy.broadcastAsync!({ x: samples(20_000, 0, 1) }, {});
+    expect(again.done).toBe(20_000);
+    expect(log.runs).toBe(3);
+    pool.dispose();
+  }, 60_000);
+
+  test('a worker that does not answer by the deadline is terminated after the grace period', async () => {
+    // A worker that starts and then never answers a task.
+    let created = 0;
+    let terminated = 0;
+    const pool = newPool({
+      size: 1,
+      cancelGrace: 50,
+      create: () => {
+        created++;
+        const handlers: ((m: unknown) => void)[] = [];
+        setTimeout(
+          () =>
+            handlers.forEach((h) =>
+              h({
+                type: 'ready',
+                runtimeVersion: RUNTIME_VERSION,
+                intervalRuntimeVersion: INTERVAL_RUNTIME_VERSION,
+              })
+            ),
+          0
+        );
+        return {
+          postMessage: () => undefined,
+          terminate: () => {
+            terminated++;
+          },
+          on: (event: string, handler: (m: unknown) => void) => {
+            if (event === 'message') handlers.push(handler);
+          },
+        };
+      },
+    });
+    const own = new ComputeEngine({ workers: pool });
+    const r = compile(own.parse('x^2'));
+    const t0 = Date.now();
+    const { done } = await r.broadcastAsync!(
+      { x: samples(30_000) },
+      { deadline: 100 }
+    );
+    // Settled with no cells after the deadline and the grace period.
+    expect(done).toBe(0);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
+    expect(terminated).toBe(1);
+    // No task waited for the worker: the replacement is created on the
+    // next batch only.
+    expect(created).toBe(1);
+    pool.dispose();
+  }, 30_000);
+
+  test('a grace period that is not a number of milliseconds throws', () => {
+    const create = () => {
+      throw new Error('not called');
+    };
+    expect(() => createKernelPool({ create, cancelGrace: -1 })).toThrow(
+      /cancelGrace/
+    );
+    expect(() => createKernelPool({ create, cancelGrace: NaN })).toThrow(
+      /cancelGrace/
+    );
+    // A finite value longer than the longest delay of `setTimeout()`.
+    expect(() => createKernelPool({ create, cancelGrace: 2 ** 31 })).toThrow(
+      /cancelGrace/
+    );
+    expect(() =>
+      createKernelPool({ create, cancelGrace: Infinity }).dispose()
+    ).not.toThrow();
+  });
+
+  /** A worker that reports ready after `readyAfter` ms, with this engine's
+   * versions, and hands each message to `onMessage`. */
+  function fakeWorker(
+    onMessage: (
+      m: { type: string; job?: number; id?: number; cancel?: unknown },
+      post: (m: unknown) => void
+    ) => void,
+    readyAfter = 0
+  ) {
+    const handlers: ((m: unknown) => void)[] = [];
+    const post = (m: unknown) =>
+      setTimeout(() => handlers.forEach((h) => h(m)), 0);
+    setTimeout(
+      () =>
+        post({
+          type: 'ready',
+          runtimeVersion: RUNTIME_VERSION,
+          intervalRuntimeVersion: INTERVAL_RUNTIME_VERSION,
+        }),
+      readyAfter
+    );
+    return {
+      postMessage: (m: unknown) => onMessage(m as never, post),
+      terminate: () => undefined,
+      on: (event: string, handler: (m: unknown) => void) => {
+        if (event === 'message') handlers.push(handler);
+      },
+    };
+  }
+
+  test('the slices of a batch whose deadline passed before they were sent are not sent, and no worker is replaced', async () => {
+    // The worker is ready long after the deadline and the grace period:
+    // each slice is settled on this thread when its turn comes.
+    let created = 0;
+    let runs = 0;
+    const pool = newPool({
+      size: 1,
+      cancelGrace: 20,
+      create: () => {
+        created++;
+        return fakeWorker((m) => {
+          if (m.type === 'run') runs++;
+        }, 200);
+      },
+    });
+    const own = new ComputeEngine({ workers: pool });
+    const r = compile(own.parse('x^2'));
+    const { done } = await r.broadcastAsync!(
+      { x: samples(30_000) },
+      { deadline: 10, chunk: 5000 }
+    );
+    expect(done).toBe(0);
+    expect(runs).toBe(0);
+    expect(created).toBe(1);
+    pool.dispose();
+  }, 30_000);
+
+  test('a heavy kernel stops at its deadline and keeps the cells it did', async () => {
+    // About 1 ms per cell: the cell loop reads the clock every 1024 cells,
+    // about 1 s apart, much later than the deadline and the grace period.
+    // The worker reads it with the cancel check, every 64 cells, and
+    // answers with the cells done before the pool replaces it.
+    const { pool, log } = watchedPool({ cancelGrace: 400 });
+    const own = new ComputeEngine({ workers: pool });
+    await pool.prewarm();
+    const r = compile(own.parse('\\sum_{k=1}^{100000}\\sin(kx)'));
+    const xs = samples(20_000, 0, 1);
+    const { out, done } = await r.broadcastAsync!({ x: xs }, { deadline: 200 });
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThan(20_000);
+    expect(log.terminated).toBe(0);
+    expectSame(
+      out.subarray(0, done),
+      r.broadcast!({ x: xs.subarray(0, done) })
+    );
+    pool.dispose();
+  }, 60_000);
+
+  test('a host that cannot send the cancel flag still runs batches on the worker', async () => {
+    // A `create()` adapter that throws on a message carrying the flag, as
+    // one that sends the messages across a process boundary would.
+    let runs = 0;
+    let refused = 0;
+    const pool = newPool({
+      size: 1,
+      create: () => {
+        const w = new Worker(WORKER_URL, { execArgv: ['--import', 'tsx'] });
+        return {
+          postMessage: (m: unknown, transfer?: ArrayBuffer[]) => {
+            const sent = m as { type: string; cancel?: unknown };
+            if (sent.cancel !== undefined) {
+              refused++;
+              throw new Error('DataCloneError: the flag cannot be cloned');
+            }
+            if (sent.type === 'run') runs++;
+            w.postMessage(m, transfer ?? []);
+          },
+          terminate: () => w.terminate(),
+          on: (event, handler) => w.on(event as 'message', handler),
+        };
+      },
+    });
+    const own = new ComputeEngine({ workers: pool });
+    const r = compile(own.parse('x^2 - x'));
+    const xs = samples(30_000);
+    for (let k = 0; k < 2; k++) {
+      const { out, done } = await r.broadcastAsync!({ x: xs });
+      expect(done).toBe(30_000);
+      expectSame(out, r.broadcast!({ x: xs }));
+    }
+    // The first task was sent again without the flag, and so was the
+    // second one.
+    expect(refused).toBe(1);
+    expect(runs).toBe(2);
+    pool.dispose();
+  }, 60_000);
+
+  test('a fit slice whose message cannot be sent is rejected, not left waiting', async () => {
+    // Every `fit-run` post throws, with or without the flag: the slice is
+    // rejected (its caller then solves it inline), and the worker takes the
+    // next slice.
+    let posts = 0;
+    const pool = newPool({
+      size: 1,
+      create: () =>
+        fakeWorker((m) => {
+          if (m.type === 'fit-run') {
+            posts++;
+            throw new Error('DataCloneError');
+          }
+        }),
+    });
+    const fitPool = fitSlicePool(pool)!;
+    const problem: WireFitProblem = {
+      units: [],
+      paramFresh: [],
+      linearIdx: [],
+      gridIdx: [0],
+      lo: [],
+      hi: [],
+      start: [],
+      phases: [],
+    };
+    const slice = () =>
+      fitPool.runFitSlice(
+        problem,
+        new Float64Array([1, 2]),
+        false,
+        undefined,
+        undefined,
+        undefined
+      );
+    await expect(slice()).rejects.toThrow(/DataCloneError/);
+    await expect(slice()).rejects.toThrow(/DataCloneError/);
+    // Each slice was posted with the flag, then without it.
+    expect(posts).toBe(4);
+    pool.dispose();
+  }, 30_000);
 });
 
 describe('the standalone runtimes rebuild stored results', () => {

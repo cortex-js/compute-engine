@@ -245,10 +245,21 @@ describe('FindFit.evaluateAsync on a kernel pool', () => {
       const { xs, ys } = dense(1000, 2.2);
       const ctl = new AbortController();
       const runsBefore = counting.sent.get('fit-run') ?? 0;
+      const jobsBefore = new Set(counting.runPoints.keys());
+      // The `fit-run` jobs of this fit that had no answer when the signal
+      // aborted.
+      let running: number[] = [];
       counting.onSend = (type) => {
         if (type !== 'fit-run') return;
         counting.onSend = undefined;
-        queueMicrotask(() => ctl.abort(reason));
+        queueMicrotask(() => {
+          ctl.abort(reason);
+          running = [...counting.runPoints.keys()].filter(
+            (job) =>
+              !jobsBefore.has(job) &&
+              !counting.results.some((r) => r.job === job)
+          );
+        });
       };
       const p = pooled
         .box(fitCall(xs, ys, { b: [0.3, 628], c: [0, 2 * Math.PI] }) as any)
@@ -257,6 +268,18 @@ describe('FindFit.evaluateAsync on a kernel pool', () => {
       // evaluation rejects, it does not answer a timeout record.
       await expect(p).rejects.toMatchObject({ name: 'CancellationError' });
       expect(counting.sent.get('fit-run') ?? 0).toBeGreaterThan(runsBefore);
+      // Each slice that ran when the signal aborted was cancelled: its
+      // worker answered at its next grid point, with fewer points than the
+      // slice holds.
+      expect(running.length).toBeGreaterThan(0);
+      while (
+        !running.every((job) => counting.results.some((r) => r.job === job))
+      )
+        await new Promise((r) => setTimeout(r, 5));
+      for (const job of running) {
+        const answer = counting.results.find((r) => r.job === job)!;
+        expect(answer.done).toBeLessThan(counting.runPoints.get(job)!);
+      }
       counting.onSend = undefined;
       // The pool still works after the abort.
       const small = dense(200, 2.2);

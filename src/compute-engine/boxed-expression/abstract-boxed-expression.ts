@@ -66,6 +66,7 @@ import { bindingInContext } from './binders.js';
 import {
   binderBoundAt,
   declaredBinders,
+  ownIndexClauseAt,
   scopeForRebuild,
   type DeclaredBinders,
 } from './binding-sites.js';
@@ -1850,6 +1851,26 @@ function collectReferences(
   const ops = expr.ops;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
+    // The bounds of a `Limits` clause and the collection of an `Element`
+    // clause are outside the scope of the clause's own index
+    // (`ownIndexClause()`, `binding-sites.ts`): with `k` free, `∫₀ᵏ k dk`
+    // reads the free `k` in its upper bound.
+    const own = ownIndexClauseAt(expr, i, sites);
+    if (own !== undefined && isFunction(op)) {
+      op.ops.forEach((child, j) => {
+        const childFree = new Set<string>();
+        const childRef = new Set<string>();
+        getReferences(child, childFree, childRef, memo);
+        const bound = (s: string): boolean =>
+          (indexVars.has(s) &&
+            boundIn(s, i) &&
+            !(own.outside(j) && s === own.name)) ||
+          localVars.has(s);
+        for (const s of childFree) if (!bound(s)) freeVars.add(s);
+        for (const s of childRef) if (!bound(s)) refFns.add(s);
+      });
+      continue;
+    }
     const innerFree = new Set<string>();
     const innerRef = new Set<string>();
     // When this expression has index variables (e.g. an `Integrate`), a

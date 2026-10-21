@@ -326,6 +326,65 @@ describe('FindFit global grid: a phase that is not a factor of the amplitude', (
   });
 });
 
+describe('FindFit global grid: an even power or an absolute value of a cosine', () => {
+  // `a g(b x) + d x + e` with only `b` searched over [0.3, 300]. For
+  // `g = cos`, the basin of `b` is π / span(x) = 0.314 wide and the grid has
+  // 955 points 0.314 apart. `cos²` and `|cos|` have the period π, so their
+  // basins are half as wide: the grid must have twice as many points (1,909,
+  // 0.157 apart). The first three true `b` below are halfway between two
+  // points of the 955-point grid, where that grid did not find them
+  // (residual norm about 9). The last one is halfway between two points of
+  // the 1,909-point grid, the farthest a true `b` can be from the grid now:
+  // one point per basin of the period π is enough. The `x` are
+  // moved off an even spacing, so no other frequency fits the points
+  // exactly (on evenly spaced `x`, `b + π / gap` is an alias of `b`).
+  const n = 200;
+  const xs = Array.from({ length: n }, (_, i) => {
+    const u = i > 0 && i < n - 1 ? 0.45 * Math.sin(i * 12.9898) : 0;
+    return (10 * (i + u)) / (n - 1);
+  });
+  const fit = (g: any, f: (t: number) => number, b: number) =>
+    ce
+      .box([
+        'FindFit',
+        dataOf(
+          xs,
+          xs.map((x) => 2 * f(b * x) + 0.1 * x + Math.E)
+        ),
+        ['Add', ['Multiply', 'a', g], ['Multiply', 'd', 'x'], 'ExponentialE'],
+        ['List', 'a', 'b', 'd'],
+        ['List', 'x'],
+        { dict: { global: { dict: { b: [0.3, 300] } } } },
+      ] as any)
+      .evaluate();
+  const arg = ['Multiply', 'b', 'x'];
+  const B = [3.598585, 31.87217, 220.362736, 0.3 + (21.5 * 299.7) / 1908];
+
+  test('a cos(b x)²', () => {
+    for (const b of B) {
+      const rec = fit(['Power', ['Cos', arg], 2], (t) => Math.cos(t) ** 2, b);
+      expect(residualNorm(rec)).toBeLessThan(1e-8);
+      expect(param(rec, 'b')).toBeCloseTo(b, 9);
+    }
+  });
+
+  test('a |cos(b x)|', () => {
+    for (const b of B) {
+      const rec = fit(['Abs', ['Cos', arg]], (t) => Math.abs(Math.cos(t)), b);
+      expect(residualNorm(rec)).toBeLessThan(1e-8);
+      expect(param(rec, 'b')).toBeCloseTo(b, 9);
+    }
+  });
+
+  test('the 955-point grid of the period 2π finds a cos(b x)³', () => {
+    for (const b of B.slice(0, 3)) {
+      const rec = fit(['Power', ['Cos', arg], 3], (t) => Math.cos(t) ** 3, b);
+      expect(residualNorm(rec)).toBeLessThan(1e-8);
+      expect(param(rec, 'b')).toBeCloseTo(b, 9);
+    }
+  });
+});
+
 describe('FindFit global grid: the caller-given step', () => {
   test('a coarse step overrides the automatic spacing', () => {
     // Five points 30 apart: none falls in the basin of b = 2.2, which the
@@ -638,6 +697,106 @@ describe('FindFit global grid: the phase rate of a parameter', () => {
       expect(s.periodicRates).toEqual([
         { param: 1, variable: 0, rate: 1, period },
       ]);
+    }
+  });
+
+  test('an even power, an absolute value or a product records the period π', () => {
+    // The period is that of the expression the function node is part of:
+    // cos(θ + π)² = cos(θ)², so the basins of `b` are half as wide.
+    const arg = ['Add', ['Multiply', 'b', 'x'], 'c'];
+    const period = (model: any) =>
+      shape(model, ['x'], ['a', 'b', 'c']).periodicRates.map((r) => r.period);
+    // a cos(b x + c)²
+    expect(period(['Multiply', 'a', ['Power', ['Cos', arg], 2]])).toEqual([
+      Math.PI,
+    ]);
+    // a |cos(b x + c)|
+    expect(period(['Multiply', 'a', ['Abs', ['Cos', arg]]])).toEqual([Math.PI]);
+    // |a cos(b x + c)|: the factor `a` does not change when θ moves by π
+    expect(period(['Abs', ['Multiply', 'a', ['Cos', arg]]])).toEqual([Math.PI]);
+    // a sin(b x + c)⁴ and a sec(b x + c)²
+    expect(period(['Multiply', 'a', ['Power', ['Sin', arg], 4]])).toEqual([
+      Math.PI,
+    ]);
+    expect(period(['Multiply', 'a', ['Power', ['Sec', arg], 2]])).toEqual([
+      Math.PI,
+    ]);
+    // a cos(b x + c) cos(b x + c): two copies of the node, one rate each
+    expect(period(['Multiply', 'a', ['Cos', arg], ['Cos', arg]])).toEqual([
+      Math.PI,
+      Math.PI,
+    ]);
+    // (−cos(b x + c)³)²: an odd power and a negation, then an even power
+    expect(
+      period(['Power', ['Negate', ['Power', ['Cos', arg], 3]], 2])
+    ).toEqual([Math.PI]);
+    // a sin θ cos θ = a sin(2θ) / 2
+    expect(period(['Multiply', 'a', ['Sin', arg], ['Cos', arg]])).toEqual([
+      Math.PI,
+      Math.PI,
+    ]);
+    // sin θ / cos θ = tan θ
+    expect(period(['Divide', ['Sin', arg], ['Cos', arg]])).toEqual([
+      Math.PI,
+      Math.PI,
+    ]);
+    // a cos θ · cos(θ)³ = a cos(θ)⁴ (the canonical form keeps two factors)
+    expect(
+      period(['Multiply', 'a', ['Cos', arg], ['Power', ['Cos', arg], 3]])
+    ).toEqual([Math.PI, Math.PI]);
+  });
+
+  test('(sin θ cos θ)² and |sin θ cos θ| record the period π/2', () => {
+    // sin(θ + π/2) cos(θ + π/2) = −cos θ sin θ
+    const f = (t: number) => (Math.sin(t) * Math.cos(t)) ** 2;
+    for (const t of [0.3, 1.1, 2.7])
+      expect(f(t + Math.PI / 2)).toBeCloseTo(f(t), 14);
+    expect(f(0.3 + Math.PI / 4)).not.toBeCloseTo(f(0.3), 2);
+    const arg = ['Add', ['Multiply', 'b', 'x'], 'c'];
+    const sinCos = ['Multiply', ['Sin', arg], ['Cos', arg]];
+    for (const model of [
+      ['Multiply', 'a', ['Power', sinCos, 2]],
+      ['Abs', ['Multiply', 'a', ...sinCos.slice(1)]],
+    ]) {
+      expect(
+        shape(model, ['x'], ['a', 'b', 'c']).periodicRates.map((r) => r.period)
+      ).toEqual([Math.PI / 2, Math.PI / 2]);
+    }
+  });
+
+  test('tan² keeps the period π of tan', () => {
+    // tan(θ + π/2) = −cot(θ), so tan(θ)² does not have the period π/2:
+    // at θ = 0.3, tan² is 0.0957 and tan²(θ + π/2) is 10.45.
+    expect(Math.tan(0.3) ** 2).toBeCloseTo(0.0957, 4);
+    expect(Math.tan(0.3 + Math.PI / 2) ** 2).toBeCloseTo(10.45, 2);
+    const arg = ['Multiply', 'b', 'x'];
+    for (const model of [
+      ['Multiply', 'a', ['Power', ['Tan', arg], 2]],
+      ['Multiply', 'a', ['Abs', ['Cot', arg]]],
+    ]) {
+      expect(shape(model, ['x'], ['a', 'b']).periodicRates).toEqual([
+        { param: 1, variable: 0, rate: 1, period: Math.PI },
+      ]);
+    }
+  });
+
+  test('an odd power, a non-integer power or another function keeps the period of the function', () => {
+    const arg = ['Add', ['Multiply', 'b', 'x'], 'c'];
+    for (const model of [
+      // a cos(b x + c)³: cos(θ + π)³ = −cos(θ)³
+      ['Multiply', 'a', ['Power', ['Cos', arg], 3]],
+      // a / cos(b x + c)
+      ['Divide', 'a', ['Cos', arg]],
+      // a √cos(b x + c)
+      ['Multiply', 'a', ['Sqrt', ['Cos', arg]]],
+      // a e^{cos(b x + c)}
+      ['Multiply', 'a', ['Exp', ['Cos', arg]]],
+      // a sec(b x + c)
+      ['Multiply', 'a', ['Sec', arg]],
+    ]) {
+      const s = shape(model, ['x'], ['a', 'b', 'c']);
+      expect(s.periodicRates.length).toBeGreaterThan(0);
+      for (const r of s.periodicRates) expect(r.period).toBe(2 * Math.PI);
     }
   });
 

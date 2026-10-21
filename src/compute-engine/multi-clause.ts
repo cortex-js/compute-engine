@@ -65,6 +65,7 @@ import {
 } from './boxed-expression/effects-inference.js';
 import { apply, lookup, type ApplyOptions } from './function-utils.js';
 import { runWithEvaluationEffects } from './effects-registry.js';
+import { copyContextStack } from './boxed-expression/evaluation-epoch.js';
 import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
@@ -1606,7 +1607,9 @@ function selectingEvaluate(
   Object.defineProperty(evaluate, 'applyAwaiting', {
     value: (xs: ReadonlyArray<Expression>, options: ApplyOptions) => {
       const effects = options._effects ?? ce._evaluationEffects ?? ce.effects;
-      const stack = [...(options._contextStack ?? ce._evalContextStack)];
+      const stack = copyContextStack(
+        options._contextStack ?? ce._evalContextStack
+      );
       const carried: ApplyOptions = {
         ...options,
         _effects: effects,

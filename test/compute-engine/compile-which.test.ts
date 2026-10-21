@@ -239,5 +239,67 @@ describe('COMPILE Which', () => {
       expect(result.run!({} as any)).toBeNaN();
       expect(result.run!({ r: NaN })).toBe(-1);
     });
+
+    it('a name bound by a Sum or a parameter is not an input, even when a global of that name holds a value', () => {
+      // The operand test lists the variables the condition reads. A `Sum`
+      // index named `k` is not a read of the global `k`, so the inputs of
+      // the global's value (`m`) are not tested: before, the walk followed
+      // the global's value through the bound name, and `m` unsupplied made
+      // the branch take no arm (ROADMAP, Tycho row 413, found 2026-10-21).
+      const engine = new ComputeEngine();
+      engine.declare('m', 'real');
+      engine.assign('k', engine.parse('2m'));
+      const sum = engine.parse(
+        '\\begin{cases} 1 & \\sum_{k=1}^{3} k > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
+      );
+      const compiledSum = compile(sum, { fallback: false })!;
+      expect(compiledSum.code).not.toContain('_.m');
+      expect(compiledSum.run!({} as any)).toBe(1);
+
+      // A parameter of a called function literal named like the global.
+      engine.assign('g', engine.parse('k \\mapsto k + 1'));
+      const call = engine.parse(
+        '\\begin{cases} 1 & g(2) > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
+      );
+      const compiledCall = compile(call, { fallback: false })!;
+      expect(compiledCall.code).not.toContain('_.m');
+      expect(compiledCall.run!({} as any)).toBe(1);
+
+      // A free global read by a called function's body is still an input:
+      // the body's block declares its free symbols in its own scope, which
+      // must not hide them.
+      engine.assign('h', engine.parse('k \\mapsto k + m'));
+      const body = engine.parse(
+        '\\begin{cases} 1 & h(2) > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
+      );
+      const compiledBody = compile(body, { fallback: false })!;
+      expect(compiledBody.code).toContain('_.m !== undefined');
+      expect(compiledBody.run!({} as any)).toBeNaN();
+      expect(compiledBody.run!({ m: 1 })).toBe(1);
+
+      // The variable of `D`, the coefficient of an integral and a free symbol
+      // of a `Limit` body are inputs, although each operator scopes a name.
+      for (const [latex, name] of [
+        ['\\frac{d}{dx} x^2 > 0', 'x'],
+        ['\\int_0^1 a t\\,dt > 0', 'a'],
+        ['\\lim_{t \\to 0} (q + t) > 0', 'q'],
+      ] as const) {
+        const scoped = engine.parse(
+          '\\begin{cases} 1 & ' + latex + ' \\\\ 0 & \\text{otherwise} \\end{cases}'
+        );
+        const compiledScoped = compile(scoped, { fallback: false })!;
+        expect(compiledScoped.code).toContain('_.' + name + ' !== undefined');
+        expect(compiledScoped.run!({} as any)).toBeNaN();
+      }
+
+      // A read of the global itself still tests the input of its value.
+      const read = engine.parse(
+        '\\begin{cases} 1 & k > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
+      );
+      const compiledRead = compile(read, { fallback: false })!;
+      expect(compiledRead.code).toContain('_.m !== undefined');
+      expect(compiledRead.run!({} as any)).toBeNaN();
+      expect(compiledRead.run!({ m: 1 })).toBe(1);
+    });
   });
 });

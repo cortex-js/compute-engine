@@ -8,11 +8,20 @@
  * `docs/plans/2026-10-20-worker-kernel-pool.md`, section 5.1).
  *
  * The pool sends a worker one task at a time and keeps the rest of its queue
- * on the main thread, so there is no cancel message: an aborted task that has
- * not been sent is dropped on the main thread, and a running one finishes on
- * the worker while the main thread has already settled its result. The
- * worker's reply to that task is dropped, and the pool then sends the
- * worker its next task.
+ * on the main thread: an aborted task that has not been sent is dropped on
+ * the main thread. A running task is cancelled through shared memory, not
+ * through a message: a worker runs its task synchronously, and a browser
+ * worker cannot read a message before the task ends. When the host has
+ * `SharedArrayBuffer` (Node, and a cross-origin isolated page), each task
+ * carries the worker's cancel flag, an `Int32Array` of one element over a
+ * `SharedArrayBuffer`. To cancel the task, the pool writes the task's job id
+ * into the flag; the worker's loop reads the flag between cells or grid
+ * points, stops, and answers with the cells or points done, as at a
+ * deadline. The main thread has already settled the task: the answer is
+ * dropped, and the pool then sends the worker its next task. Without
+ * `SharedArrayBuffer`, the task runs to its end. In both cases, a worker
+ * that does not answer within the pool's grace period is terminated and
+ * replaced.
  */
 
 import type { FitScanProblemOf } from './fit-scan.js';
@@ -87,6 +96,9 @@ export type MainToWorkerMessage =
       /** The engine's iteration limit at the time of the call, for the
        * lazy-stream helpers of the compiled-code runtime. */
       iterationLimit?: number;
+      /** The worker's cancel flag: the task stops when the flag holds
+       * `job` (as a 32-bit integer). */
+      cancel?: Int32Array;
     }
   /** Evaluate the cells `[from, to)` of the batch on kernel `id`. */
   | {
@@ -111,6 +123,9 @@ export type MainToWorkerMessage =
       /** The shared inputs of `batch`: sent with the first task of the
        * batch that a worker receives, absent from its later tasks. */
       shared?: WireShared;
+      /** The worker's cancel flag: the task stops when the flag holds
+       * `job` (as a 32-bit integer). */
+      cancel?: Int32Array;
     }
   /** Forget kernel or fit problem `id`: its compilation result was
    * collected, or the fit is over. */

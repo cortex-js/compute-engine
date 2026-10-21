@@ -1341,10 +1341,6 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _delegatedEvaluations = 0;
 
-  /** See `IComputeEngine._delegatedAsyncEvaluations`.
-   * @internal */
-  _delegatedAsyncEvaluations = 0;
-
   /** See `IComputeEngine._evaluationEffects`.
    * @internal */
   _evaluationEffects: EffectHandlers | undefined = undefined;

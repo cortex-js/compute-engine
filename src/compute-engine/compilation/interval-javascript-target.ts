@@ -5238,7 +5238,12 @@ function toIntervalValue(value: unknown): IntervalValue {
   // absent value as `NaN` in a numeric position and as `Missing` elsewhere, and
   // the generic fallback gives `NaN` for both on this target, since it has no
   // object null. Without this the fallback answered `{ lo: NaN, hi: NaN }`, so
-  // a host could tell from the value which route ran.
+  // a host could tell from the value which route ran. The value has no
+  // `missing` flag, also for an interpreter `Missing`: the runner of compiled
+  // code removes the flag from every `empty` it returns (`freshIntervalValue`,
+  // `interval/run-support.ts`), and a comparison in the expression was
+  // already decided by the interpreter, so no code of this target reads the
+  // flag of this value.
   if (value === undefined || (typeof value === 'number' && Number.isNaN(value)))
     return { kind: 'empty' };
   // A present number is the interval result of a point, the value compiled

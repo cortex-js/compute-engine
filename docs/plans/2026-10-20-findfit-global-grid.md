@@ -15,8 +15,13 @@ stratified, not evenly spaced, and the 24 best sampled minima are re-scored on
 every row before the 6 refinements (3.4); sample residuals only rank and a
 timeout during a sampled scan reports `residualNorm: NaN` (3.4); the rates are
 converted to radians with the engine's angular unit, and `Tan`/`Cot` use the
-period π (3.1). Open residue: a power of a periodic function (`cos(b x + c)²`,
-period π) is spaced as the inner function (period 2π). Phase B follows once
+period π (3.1). A power, an absolute value or a product of periodic functions of one
+argument is spaced by the period of the composed expression
+(`composedPeriod()`, implemented 2026-10-21): the expression is read as
+`k · sin(θ)^p · cos(θ)^q`, and its period is π/2 when `p = q` and `q` is even
+(or under an absolute value), π when `p + q` is even, and 2π otherwise,
+taking the smallest period over the node and its ancestors of that form;
+`tan²` keeps π. Phase B follows once
 Tycho has adopted phase A. Phase B (section 4) IMPLEMENTED 2026-10-21 in the
 worktree `ce-407b-pool-scan` (not reviewed yet): the 1,000-row case takes
 62 ms with 8 workers (section 4.2).

@@ -61,7 +61,11 @@ import {
   markShieldDeclaration,
   rewriteWithBinders,
 } from './binders.js';
-import { declaredBinders } from './binding-sites.js';
+import {
+  declaredBinders,
+  mapOwnIndexClause,
+  ownIndexClauseAt,
+} from './binding-sites.js';
 import { sameSyntactic } from './compare.js';
 
 /**
@@ -695,9 +699,17 @@ export function resolveBoundSymbols(
   };
 
   const ops = expr.ops;
-  const resolved = ops.map((op, i) =>
-    resolveBoundSymbols(op, protectIn(i), seen)
-  );
+  const resolved = ops.map((op, i) => {
+    // The bounds of a `Limits` clause and the collection of an `Element`
+    // clause are outside the scope of the clause's own index
+    // (`ownIndexClause()`, `binding-sites.ts`).
+    const own = ownIndexClauseAt(expr, i, binders);
+    if (own !== undefined)
+      return mapOwnIndexClause(op, own, protect, protectIn(i), (o, p) =>
+        resolveBoundSymbols(o, p ?? protect, seen)
+      );
+    return resolveBoundSymbols(op, protectIn(i), seen);
+  });
   if (resolved.every((op, i) => op === ops[i])) return expr;
   return expr.engine.function(expr.operator, resolved);
 }
