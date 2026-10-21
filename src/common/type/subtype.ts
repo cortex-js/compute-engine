@@ -3096,7 +3096,8 @@ function isSubtypeRules(
     if (lhs.kind === 'list')
       return (
         isSubtype(lhs.elements, rhs.elements) ||
-        peeledRowMatches(lhs, rhs.elements)
+        peeledRowMatches(lhs, rhs.elements) ||
+        flattenedListMatches(lhs, rhs)
       );
 
     if (lhs.kind === 'tuple') {
@@ -3113,7 +3114,8 @@ function isSubtypeRules(
     if (lhs.kind === 'list')
       return (
         isSubtype(lhs.elements, rhs.elements) ||
-        peeledRowMatches(lhs, rhs.elements)
+        peeledRowMatches(lhs, rhs.elements) ||
+        flattenedListMatches(lhs, rhs)
       );
 
     if (lhs.kind === 'tuple')
@@ -3171,40 +3173,50 @@ function isSubtypeRules(
     // list IS a list of rank-(n-k) lists, for each k from 1 to n-1 —
     // `matrix<E^2x2>` ⊆ `list<vector<2>>` and `list<E^(1x2x3)>` ⊆
     // `list<list<E>^(1x2)>`: peel the k outer dimensions and compare the
-    // rank-(n-k) sub-tensor with the rhs element. Only needed when the direct
-    // element check fails (`E ⊄ vector<2>`). When the scalar element
-    // matches, the rank of a dimensioned rhs is the number of its
-    // dimensions: a matrix is not a `vector<unknown>`, although its rows are
-    // values. A dimensioned rhs of rank m < n fixes the number of peeled
-    // axes to m, and its dimensions must accept the first m dimensions of
-    // the lhs. An rhs with no dimensions admits any shape, so any k is a
-    // candidate. The rhs element can be any type that admits a list, not
-    // only a list type: the bare `list` is a string representation,
-    // and `collection`
-    // admits a row as well.
-    // The elements of a list with dimensions whose element type is a scalar
-    // top type are scalars (`isScalarTopElement()`), so a list whose
-    // elements can be lists (`list<list^2>`, a list of two rows) is not
-    // such a list, as the flat spelling of the same values
-    // (`list<integer^(2x2)>`) is not, by the rank rule below. Without this,
-    // the relation was not transitive: `list<integer^(2x2x2)>` is a
-    // `list<list^2>`, which was a `vector<unknown>`, but
-    // `list<integer^(2x2x2)>` is not a `vector<unknown>`.
+    // rank-(n-k) sub-tensor with the rhs element. A dimensioned rhs of rank
+    // m < n fixes the number of peeled axes to m, and its dimensions must
+    // accept the first m dimensions of the lhs. An rhs with no dimensions
+    // admits any shape, so any k is a candidate. The rhs element can be any
+    // type that admits a list, not only a list type: the bare `list` is a
+    // string representation, and `collection` admits a row as well.
+    //
+    // The rows are read whether or not the scalar element matches the rhs
+    // element (user decision 2026-10-21): a value is of the rhs type when
+    // one of its readings is, so `matrix<string>` is a `vector<collection>`
+    // (its rows are lists) as `matrix<integer>` is, although a string is
+    // itself a collection, and `matrix<integer>` is a `vector<integer | list>`.
+    // Reading the rows only when the scalar element does not match made the
+    // relation depend on the spelling of the element, and not transitive:
+    // `matrix<integer>` was a `list<unknown^(2x2)>`, which was a
+    // `vector<integer | list>` (its rows were read, `unknown` not being an
+    // `integer | list`), but `matrix<integer>` was not (its scalar matched,
+    // so its rank was read). The peel is tried toward a dimensioned rhs of
+    // lower rank in every case, and toward an rhs with no dimensions only
+    // when the scalar element does not match (when it does, the rhs admits
+    // any shape, so the answer is already yes).
+    //
+    // The one exception is the scalar top: the elements of a list with
+    // dimensions whose element type is a scalar top type are scalars
+    // (`isScalarTopElement()`, user decision 2026-10-21), so a matrix is
+    // not a `vector<unknown>` although its rows are values, and a list
+    // whose elements can be lists (`list<list^2>`, a list of two rows) is
+    // not a `list<unknown^2>` either, as the flat spelling of the same
+    // values (`list<integer^(2x2)>`) is not. Without that, the relation was
+    // not transitive: `list<integer^(2x2x2)>` is a `list<list^2>`, which was
+    // a `vector<unknown>`, but `list<integer^(2x2x2)>` is not a
+    // `vector<unknown>`.
+    // Tested even when the two element types are the same object: the test
+    // also refuses the peel below, and `matrix<unknown>` is not a
+    // `vector<unknown>` although both spell their element `unknown`.
     const rhsHoldsScalars =
-      rhs.dimensions !== undefined &&
-      lhs.elements !== rhs.elements &&
-      isScalarTopElement(rhs.elements);
+      rhs.dimensions !== undefined && isScalarTopElement(rhs.elements);
     // A list with an axis of length 0 has no element, so its element type
     // does not matter: `list<list^0>` is a `list<unknown^0>`.
     const lhsHasElements = !(lhs.dimensions?.includes(0) ?? false);
     const elementsMatch =
       !(rhsHoldsScalars && lhsHasElements && holdsListElements(lhs.elements)) &&
       isSubtype(lhs.elements, rhs.elements);
-    if (
-      !elementsMatch &&
-      lhs.dimensions !== undefined &&
-      lhs.dimensions.length >= 2
-    ) {
+    if (lhs.dimensions !== undefined && lhs.dimensions.length >= 2) {
       const lhsDims = lhs.dimensions;
       const peeled = (k: number): Type => ({
         kind: 'list',
@@ -3212,8 +3224,9 @@ function isSubtypeRules(
         dimensions: lhsDims.slice(k),
       });
       if (rhs.dimensions === undefined) {
-        for (let k = 1; k < lhsDims.length; k++)
-          if (isSubtype(peeled(k), rhs.elements)) return true;
+        if (!elementsMatch)
+          for (let k = 1; k < lhsDims.length; k++)
+            if (isSubtype(peeled(k), rhs.elements)) return true;
       } else if (rhs.dimensions.length < lhsDims.length) {
         const rhsDims = rhs.dimensions;
         if (
@@ -3228,9 +3241,10 @@ function isSubtypeRules(
 
     // The reverse of the bridge above: a list of dimensioned lists IS a
     // dimensioned list of the concatenated shape — `list<vector<E^3>^2>` ⊆
-    // `matrix<E^(2x3)>` and ⊆ `matrix<E>`. A declared type can take the
-    // nested spelling (a literal never does: `staticCollectionDims` flattens
-    // it), and without this a symbol declared that way was admitted at a
+    // `matrix<E^(2x3)>` and ⊆ `matrix<E>`, and ⊆ `list<E>` as the flat
+    // spelling `list<E^(2x3)>` is. A declared type can take the nested
+    // spelling (a literal never does: `staticCollectionDims` flattens it),
+    // and without this a symbol declared that way was admitted at a
     // `matrix` parameter only provisionally. An outer list with no length
     // reads as the length `-1` (any length), which only an rhs dimension of
     // `-1` accepts. Rows with no dimensions are not read this way, and rows
@@ -3241,27 +3255,30 @@ function isSubtypeRules(
     // levels above such rows still merge. `flattenNestedListType` merges
     // every level it can at once, so flattening its result again merges
     // nothing and returns `undefined`: the recursive call below cannot
-    // flatten a second time. Only an rhs with two or more dimensions is a target: an
-    // rhs with no dimensions (`list<integer>`) admits a flat list of any
-    // shape, but code that reads the element type of such a list expects
-    // scalars, and a nested type would give it rows.
+    // flatten a second time.
+    //
+    // The merged spelling is compared with every rhs, not only with an rhs
+    // of two or more dimensions (user decision 2026-10-21): the two
+    // spellings name the same values, so they must give the same answers.
+    // The merge was once refused toward an rhs with no dimensions
+    // (`list<integer>`) because code that reads the element type of such a
+    // list expects scalars; but that rhs admits the flat spelling of the
+    // same values already, and the refusal made the relation not
+    // transitive: `list<vector<integer^1>^2>` was a `matrix`, and a `matrix`
+    // is a `list<number>`, but `list<vector<integer^1>^2>` was not. The
+    // merge is tried when the elements do not match, and also when they do
+    // but the rhs has more dimensions than the lhs: at an rhs whose element
+    // type admits a row (`list<(any | list<any>)^(-1x-1)>`, the admission
+    // skeleton of a generic `matrix<T^(MxN)>`, with `ANY_OR_LIST_ELEMENT`)
+    // a row matches the element, and the shape check below then compares
+    // one axis with two.
     if (
-      rhs.dimensions !== undefined &&
-      rhs.dimensions.length >= 2 &&
-      // Also when the elements match: at an rhs whose element type admits a
-      // row (`list<(any | list<any>)^(-1x-1)>`, the admission skeleton of a
-      // generic `matrix<T^(MxN)>`, with `ANY_OR_LIST_ELEMENT`) a row matches
-      // the element, and the shape check below then compares one axis with
-      // two.
       (!elementsMatch ||
-        (lhs.dimensions?.length ?? 1) < rhs.dimensions.length) &&
-      typeof lhs.elements !== 'string' &&
-      lhs.elements.kind === 'list' &&
-      lhs.elements.dimensions !== undefined
-    ) {
-      const flat = flattenNestedListType(lhs);
-      if (flat !== undefined && isSubtype(flat, rhs)) return true;
-    }
+        (rhs.dimensions !== undefined &&
+          (lhs.dimensions?.length ?? 1) < rhs.dimensions.length)) &&
+      flattenedListMatches(lhs, rhs)
+    )
+      return true;
 
     // Check that the element types match
     if (!elementsMatch) return false;
@@ -3704,14 +3721,46 @@ function fitsBroadcastOrIndexed(
  * Additive only: the caller checks the scalar reading first and consults this
  * one afterwards, so both readings are admitted and no previously-accepted
  * membership is lost.
+ *
+ * Any number of outer axes can be peeled, as the subtype rule for two lists
+ * peels them toward a list with no dimensions (user decision 2026-10-21):
+ * `list<boolean^(2x2x2)>` is a `list<vector<boolean^2>>` (a 2×2 arrangement
+ * of rows of two booleans), and a `list<E>` is a `collection<E>`, so it is a
+ * `collection<vector<boolean^2>>` too. Peeling one axis only here made the
+ * relation not transitive.
  */
 function peeledRowMatches(lhs: ListType, elements: Type): boolean {
   const dims = lhs.dimensions;
   if (!dims || dims.length <= 1) return false;
-  return isSubtype(
-    { kind: 'list', elements: lhs.elements, dimensions: dims.slice(1) },
-    elements
-  );
+  for (let k = 1; k < dims.length; k++)
+    if (
+      isSubtype(
+        { kind: 'list', elements: lhs.elements, dimensions: dims.slice(k) },
+        elements
+      )
+    )
+      return true;
+  return false;
+}
+
+/**
+ * Whether `lhs`, a list whose elements are lists with dimensions (the
+ * nested spelling of a matrix or a tensor, `list<vector<integer^3>^2>`), is
+ * a subtype of `rhs` when read in its flat spelling (`list<integer^(2x3)>`,
+ * `flattenNestedListType()`). The two spellings name the same values, so
+ * every rhs that admits the flat one admits the nested one: a list with
+ * fewer dimensions or none, a `collection`, an `indexed_collection`. `false`
+ * when `lhs` has no nested spelling to merge.
+ */
+function flattenedListMatches(lhs: ListType, rhs: Type): boolean {
+  if (
+    typeof lhs.elements === 'string' ||
+    lhs.elements.kind !== 'list' ||
+    lhs.elements.dimensions === undefined
+  )
+    return false;
+  const flat = flattenNestedListType(lhs);
+  return flat !== undefined && isSubtype(flat, rhs);
 }
 
 /**

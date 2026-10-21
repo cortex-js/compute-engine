@@ -2,6 +2,42 @@
 
 ### Behavior Changes
 
+- A call evaluated while its function had no definition stays symbolic for
+  the rest of the top-level evaluation that produced it, even when the name
+  is assigned later in that evaluation. `Sum(Block(If(k = 2, h := z ↦ 2z),
+  h(k)), k, 1, 3)` is `10 + h(1)`: the `h(1)` computed at `k = 1` is not
+  resolved by the assignment at `k = 2` (the unreleased callable-binding
+  change had made it `12`). A later evaluation resolves the stored call as
+  before: `r =
+  ce.parse('g(3)').evaluate()`, then `ce.assign('g', …)`, then `r.evaluate()`
+  is `9`. A `Block` evaluated directly by the host counts each statement as
+  its own evaluation, as the Epsil runner does, so `Block(r := fn(3), fn :=
+  Function(2z, z), (r, fn(3)))` is still `(6, 6)`, while the same block
+  nested in another expression, or a `do` block in an Epsil statement, keeps
+  `fn(3)`.
+
+- In an Epsil program, a `function` statement is installed before the first
+  statement runs when a statement before it calls the function: `let a =
+  String(g(3))` then `function g(k) { k^2 }` gives `"9"` (it gave `"g(3)"`;
+  `let a = g(3)` gave `9` on both routes already, by resolving the stored
+  call when `a` was read). The installation is skipped, and the program
+  behaves as before, when a `type` statement comes before the function, when
+  an earlier statement gives the name a value, when the body reads an
+  earlier variable whose type cannot be read statically, or when the
+  function is generic. An assignment of a function literal (`g = (k) =>
+  k^2`) takes effect when it runs, as before.
+
+- On the whole-block route, a `let g: (integer) -> integer` statement
+  followed by `function g(k) { 2k }` now checks a call written before the
+  `let`: `g(1.5)` is `incompatible-type` on every route (it was `3` on the
+  block route, which ran the clause installed before the declaration).
+
+- The closure documentation now states what the engine does: a function
+  literal captures the binding of a free variable, and reads the value that
+  binding holds when the function is called; the user guides describe how a
+  call resolves its head lexically and how a call before the definition
+  behaves.
+
 - Bare `list`, `set`, `dictionary`, `collection`, and `indexed_collection`
   now admit arbitrary contents, matching their `<any>` forms. Bare `tuple`
   accepts every arity and slot type, including absent coordinates; `tuple<any>`
@@ -338,6 +374,25 @@
   `'true'`. The constant pole next to a variable is the IEEE `Infinity`:
   `x < \frac{1}{0}` at `x = 1` is `true` on `javascript`, `python` and
   `interval-js`, where the interpreter gives `False`.
+
+- The subtype relation of lists now reads a value in every way it can be
+  read, so the relation is transitive and a union or a meet of list types
+  no longer drops values (user decisions 2026-10-21). Three rules changed.
+  The rows of a list with dimensions are read whether or not its scalar
+  element matches the target's element: `matrix<string>` is a
+  `vector<collection>` as `matrix<integer>` always was (a string is a
+  collection, so only its rank was read before), and `matrix<integer>` is a
+  `vector<integer | list>`; the elements of a `vector<unknown>` or
+  `vector<any>` stay scalars, and `matrix<unknown>` is not a
+  `vector<unknown>`. A list declared in the nested spelling answers as its
+  flat spelling toward every target: `list<vector<integer^1>^2>` is a
+  `list<number>`, a `collection<number>` and an `indexed_collection<real>`,
+  as `list<integer^(2x1)>` is (it was a `matrix` only). `collection<E>` and
+  `indexed_collection<E>` peel any number of outer axes, as `list<E>` does:
+  `list<boolean^(2x2x2)>` is a `collection<vector<boolean^2>>`. The meet
+  follows: `list<string> & vector<collection>` keeps the string matrices
+  (it was `vector<string>`). A random check of 72,000 pairs of list and
+  collection types against concrete values finds no loss (it found 18).
 
 ### Bug Fixes
 

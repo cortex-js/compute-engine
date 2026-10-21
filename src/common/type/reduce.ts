@@ -5,6 +5,7 @@ import {
   assertGroundType,
   couldMatch,
   isEmptyType,
+  isPrimitiveSubtype,
   isSubtype,
   isScalarTopElement,
   holdsListElements,
@@ -1056,10 +1057,10 @@ function elementsCanNest(
   // The elements of a list with dimensions whose element type is a scalar
   // top type are scalars (`isScalarTopElement()`), not rows.
   if (fixedRows && isScalarTopElement(rows)) return false;
-  // When one element type contains the other, the elementwise meet already
-  // holds such a matrix: its cells are in both element types
+  // When the rows are inside the cells, the elementwise meet already holds
+  // such a matrix: its cells are in both element types
   // (`list<unknown> & indexed_collection<boolean>` is `list<boolean>`, and a
-  // boolean matrix is a `list<boolean>`), or its rows are.
+  // boolean matrix is a `list<boolean>`).
   if (isSubtype(rows, cells)) return false;
   // The case `cells` inside `rows` needs a meet that reads cells, a
   // collection with no fixed shape. When `rows` are the elements of a list
@@ -1067,15 +1068,17 @@ function elementsCanNest(
   // dimensions, whose elements are its rows only, and it misses a tensor
   // whose sub-tensors deeper down are values of `cells`:
   // `list<list^3> & list<vector<integer^2>>` shares a 3×2×2 integer tensor,
-  // which `list<vector<integer^2>^3>` does not hold. Such a tensor needs a
-  // `cells` that can be a list, and `rows` that hold lists (a scalar top
-  // type does not, see the first test of this function).
+  // which `list<vector<integer^2>^3>` does not hold, and
+  // `vector<collection> & list<string>` shares a string matrix (its rows
+  // are lists, so it is a `vector<collection>`, and its cells are strings),
+  // which `vector<string>` does not hold. Such a tensor needs `rows` that
+  // hold lists of `cells` (a scalar top type does not, see the first test
+  // of this function). The cells need not be lists themselves: since the
+  // subtype rule for lists reads the rows of a value whether or not its
+  // scalar element matches (user decision 2026-10-21), a matrix of scalar
+  // cells is such a tensor too.
   if (isSubtype(cells, rows))
-    return (
-      fixedRows &&
-      couldMatch(cells, LIST_ANY_TYPE) &&
-      rowsCanHoldCells(rows, cells, forMeet, fixedRows)
-    );
+    return fixedRows && rowsCanHoldCells(rows, cells, forMeet, fixedRows);
   // When `rows` holds every element of its own collections (`json` in
   // `type alias json = list<json> | integer`), a cell of such a matrix,
   // which is an element of a row at some depth, is in `rows` too, and in
@@ -1288,14 +1291,16 @@ function rowsCanHoldCellsUncached(
     holdsThrough(e) ||
     (fixedRows && elementMatches({ kind: 'list', elements: e }));
   // A named type holds a non-empty list of any cells when it is a top type
-  // or a bare collection name (the unrestricted `<any>` form).
+  // or a name that `list` is below: a bare collection name (the
+  // unrestricted `<any>` form), `value`, `expression`. The subtype rule for
+  // lists reads the rows of a matrix toward such an element
+  // (`matrix<integer>` is a `vector<value>`), so the meet must hold the
+  // matrix too (`vector<value> & list<integer>` is not `vector<integer>`).
   if (typeof rows !== 'object')
     return (
       rows === 'any' ||
       rows === 'unknown' ||
-      rows === 'list' ||
-      rows === 'indexed_collection' ||
-      rows === 'collection'
+      isPrimitiveSubtype('list', rows as PrimitiveType)
     );
   switch (rows.kind) {
     case 'union':

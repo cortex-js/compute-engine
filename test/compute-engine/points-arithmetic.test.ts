@@ -2003,17 +2003,28 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
   // no reciprocal — the value is a list of `no-division-by-point` errors, so
   // the quotient must not claim the numerator's tuple shape. A matrix divisor
   // is excluded for a different reason: the broadcast pairs each point with a
-  // row of the matrix, so the quotient is a list of lists of points.
+  // row of the matrix, so the quotient is a list of lists of points
+  // (`list<list<tuple<number, number>^2>>`). That type IS a
+  // `list<tuple<number, number>>`, as a matrix of points is (a list with no
+  // dimensions admits any shape of its element, and the nested spelling
+  // answers as the flat one since 2026-10-21), so the claim it must not make
+  // is the one-axis shape of the numerator, `vector<tuple<number, number>>`.
   test.each([
     'list<tuple<number, number>>',
     'indexed_collection<tuple<number, number>>',
     'broadcastable<tuple<number, number>>',
-    'matrix<2x2>',
   ])('a %s denominator does NOT keep the tuple shape', (den) => {
     const ce = pointListEngine(den);
     expect(
       ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>')
     ).toBe(false);
+  });
+
+  test('a matrix<2x2> denominator gives rows of points, not a vector of points', () => {
+    const ce = pointListEngine('matrix<2x2>');
+    const quotient = ce.box(['Divide', 'p', 'q']).type;
+    expect(quotient.toString()).toBe('list<list<tuple<number, number>^2>>');
+    expect(quotient.matches('vector<tuple<number, number>>')).toBe(false);
   });
 
   test('dividing two point lists errors per element', () => {

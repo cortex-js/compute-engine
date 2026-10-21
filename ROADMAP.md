@@ -388,29 +388,6 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   `_SYS.atNumeric` reads per cell are acceptable. A direct typed-array read
   for a provably in-range index is a later optimization of the same kernels.
 
-### The 3 `batch9-evaluation.test.ts` failures: an evaluated unresolved call is re-resolved by a later assignment in the same evaluation (OPEN since `c43a44d41`, 2026-10-20; bisected 2026-10-21; the fix is the "sticky" rule of "Function declaration hoisting across execution routes" below)
-
-`Sum(Block(If(k = 2, h := z ↦ 2z), h(k)), k, 1, 3)` must give `10 + h(1)`: an
-implicit local of a block starts with no value at each top-level evaluation and
-keeps its value from one loop iteration to the next (user decision
-2026-10-18), so `h` is unset at `k = 1`, set at `k = 2`, still set at `k = 3`.
-At HEAD it gives `12`: the call `h(1)`, evaluated while `h` had no value, is
-resolved again once the loop has assigned `h`. The same for `Product` and for
-"a term whose argument changes when it is read again" (the three tests of the
-block "a big operator does not keep a function assigned by its term").
-Bisected 2026-10-21 with the suite alone in a clean worktree per commit: passes
-at `6d5c6d542` and `8fc104df4`, fails from `c43a44d41` ("refactor: enhance
-callable binding resolution and forward call handling", the callable-binding
-work) and at every later commit. The owning session confirmed 2026-10-21 that
-the failures are known and that their fix is the "sticky evaluated unresolved
-call" of the PLANNED entry "Function declaration hoisting across execution
-routes": once a call has evaluated as unresolved, it stays symbolic in that
-evaluation even when the name is bound later, while the original unevaluated
-call remains a forward reference. That rule cannot land alone, because the
-sequential Epsil runner today relies on the later resolution where whole-block
-boxing and the compiler hoist the function declaration; it lands with the
-declaration-preparation step of that entry.
-
 ### `isLess` on a long exact sum of logarithms throws a `RangeError` from `lcm` (OPEN, small — found 2026-10-21 by the review of the non-real comparison change)
 
 `ce.parse('0 < \\sum_{k=1}^{3000} \\frac{\\ln(-k)}{k^2}').evaluate()` throws
@@ -730,21 +707,31 @@ remains the separate design item above.
   does not. The general rule for a right side `unknown` in `isSubtype()`
   (`common/type/subtype.ts`) does not look inside a `broadcastable` left
   side.
-- The subtype relation of lists (`isSubtype()`, the `list` case in
-  `common/type/subtype.ts`) is not transitive, so a union that drops an arm
-  because the arm is a subtype of another arm can drop values. One known
-  cause: a list of rows with fixed dimensions is merged into one list with
-  more dimensions only toward a target with two or more dimensions (on
-  purpose, according to its comment). So
-  `list<list<integer^2>^3> <: list<real^(3x-1)> <: list<real>`, but
-  `list<list<integer^2>^3>` is not a `list<real>`. A value literal always
-  has the flat spelling (`staticCollectionDims`), so this matters for
-  declared types only. A random test of the meet (72,000 pairs of list and
-  collection types against concrete list values) finds 18 such losses, all
-  in the union reduction and none in the meet of two arms; not every one of
-  them has been traced to this rule. (The other known cause, a list of rows
-  being a `vector<unknown>`, was removed on 2026-10-21 by the user decision
-  that `vector<unknown>` is a list of scalars.) Found 2026-10-21.
+- An outer list with no dimensions is merged into its flat spelling as
+  exactly one axis (`list<vector<integer^3>>` is a `matrix<integer>`,
+  `flattenNestedListType()` reads the missing length as `-1`, and
+  `dimension-variables.test.ts` pins it: `cols(nu)` is `3` for
+  `nu: list<vector<integer^3>>`), while the row reading of a list with no
+  dimensions peels any number of axes, so the same type holds a rank-3
+  value (`list<integer^(2x2x3)>` is a `list<vector<integer^3>>`, a 2×2
+  arrangement of rows, pinned by `broadcastable-list-meaning.test.ts`). The
+  two readings disagree, so the relation is not transitive:
+  `list<list<integer>^(1x1x2)> <: list<list<list^2>> <: list<value^(?x2)>`,
+  but the first is not a `list<value^(?x2)>` (rank 3 against rank 2), and
+  a union that drops the middle arm drops the value. Reachable with any
+  element type that admits a list (`value`, `expression`, `collection`); a
+  random check whose element types include `value` finds one losing pair
+  in 36,000. **Needs a user decision.** Option (a), the value reading: the
+  merge of an outer list with no dimensions applies toward a list with no
+  dimensions and toward `collection`/`indexed_collection` only, not toward
+  a list with dimensions; `list<vector<integer^3>>` is no longer a
+  `matrix<integer>`, `cols(nu)` no longer pins `3`, and 3 tests of
+  `dimension-variables.test.ts` change; the random check is then clean
+  (measured 2026-10-21 with a toggle: 0 losses in 36,000 pairs, the 572
+  related test files green). Option (b), keep the one-axis merge and
+  accept the loss. Option (c), one axis everywhere (the row reading of a
+  list with no dimensions peels one axis only) was declined on 2026-10-21
+  (decision 3). Found 2026-10-21 by the review of the transitivity fix.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is
@@ -794,50 +781,6 @@ remains the separate design item above.
   `ce.assign('rm', {a: Missing})` with `rm: record` is accepted although the
   value does not match the declaration (see "A declared collection accepts an
   assigned value that is not of its type").
-
-### Nine tests of scopes and closures fail at commit `c43a44d41` (OPEN — found 2026-10-20 by the full suite run for the `Factor` merge fix)
-
-The full suite at `c43a44d41` ("enhance callable binding resolution and
-forward call handling") fails 9 tests in 6 files. The commit's handoff note
-(`docs/scratch/2026-10-20-callable-evaluation-handoff.md`) records a run of
-431 test files, not the full suite. With the uncommitted peer changes in the
-main tree at 2026-10-20 23:10, 6 of the 9 still fail:
-
-- `undeclare.test.ts`: "a call reads a new definition made in the same
-  scope", "a call reads the definition of an enclosing scope".
-- `tycho-item-330-loop-var-recursion.test.ts`: "recursive factory: each level
-  keeps its own local".
-- `resolve-symbol-facts.test.ts`: "ordinary free-variable inference stays in
-  the caller scope".
-- `named-arguments-record-field.test.ts`: "a field symbol bound to a value is
-  not rewritten to an inner operator".
-- `block-locals-per-run.test.ts`: "an assignment that changes the kind of the
-  local is visible to the closure".
-
-The 3 that the uncommitted changes fix are in `batch9-evaluation.test.ts` ("a
-big operator does not keep a function assigned by its term": Sum, Product,
-and a term whose argument changes). Reproduce: `npx jest --config
-./config/jest.config.cjs -w 4 -- <the files above>`.
-
-Status 2026-10-21: the full suite at `b8ee30edc` still failed all 9. The 6
-listed above are fixed by commit `c0ee6d784` (`binders.ts`,
-`forward-call-reference.ts`, `function-utils.ts`, `index.ts`,
-`engine-declarations.ts`, with tests). The causes were these:
-
-- A closure scope made by `captureNestedLocals()` did not record the block
-  scope that it copies. A call in the closure then did not find a local whose
-  binding changed from a value to a function (`let k = i; k = (x) => i * x`).
-- A call bound to a record that `ce.undeclare()` emptied, or to a
-  `resolveSymbol` fact of `ce.parse()`, kept the empty binding. Now such a
-  call reads the definition in the scope the binding came from, or in a scope
-  that encloses it.
-- The `Field` test expected the old lookup by name. It now expects the
-  binding of the stored symbol, as `docs/SCOPING-MODEL.md` ("Callable
-  resolution") states.
-
-The 3 `batch9-evaluation.test.ts` failures remain. Their fix is the "sticky"
-evaluated unresolved call of "Function declaration hoisting across execution
-routes" (below), which must land together with the hoisting rule.
 
 ### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
 
@@ -6535,18 +6478,56 @@ omits its immediate Nothing entries. Compiler guards refuse omission-capable
 Tabulate/Scan until targets have a distinct representation; Iterate remains
 unsupported. Custom accumulator delivery policies are unchanged.
 
-### Function declaration hoisting across execution routes (PLANNED)
+### Function declaration hoisting: follow-ups (OPEN — found 2026-10-21 while implementing the evaluation-scoped unresolved call and the Epsil declaration preparation; design and measurements in `docs/plans/2026-10-21-function-declaration-hoisting.md`)
 
-Function declarations should remain available throughout their scope;
-assignments take effect only when they execute. An evaluated unresolved call
-should stay symbolic after a later assignment, while the original unevaluated
-call remains a forward reference. Implement these rules together: making
-unresolved results sticky on its own changes sequential Epsil execution,
-which currently relies on later resolution where whole-block boxing and
-compilation hoist the function declaration.
+The rules landed 2026-10-21: a call evaluated while its head had no value
+stays symbolic for the rest of the top-level evaluation that produced it, and
+a later evaluation resolves it again; a `Block` evaluated directly by the
+host counts each statement as its own evaluation; the Epsil runner installs
+a `function` statement before the first statement when a statement before it
+can call it and the installation is safe (four conditions in
+`prepareFunctionDeclarations`, `src/epsil/execute-epsil.ts`). What remains:
 
-The sequential runner needs declaration preparation that preserves earlier
-variable bindings, declared parameter signatures, and smart constructors.
-Preboxing function statements alone changes those meanings. Keep that repair
-out of the raw-producer slice. Use a shared declaration-preparation step
-rather than independently moving function boxing ahead of other declarations.
+- **A declared parameter type is not checked at run time when the argument's
+  static type was unknown.** With `h` declared `(integer) -> integer` and
+  defined `h(k) = 2k`, the host block
+  `Block(r := g(h(m)), m := 1.5, r)` nested in a tuple gives `g(3)`: `h(m)`
+  was canonicalized while `m` had type `unknown`, so no static check ran,
+  and the application of `1.5` to the integer parameter is not checked at
+  run time either. `h(1.5)` written directly, and `h(x)` with `x` known to
+  be `real`, give `incompatible-type`. Same at `8fc104df4`. Question for
+  the user: should a value-definition function with a declared signature
+  check its arguments at run time when their static type did not decide
+  (a check per call), or is the static check the contract?
+- **A prepared `function` statement stays defined when the program is
+  cancelled before its statement runs** (time or step budget). The clause
+  is installed in the program scope at preparation; the loop breaks, and
+  a later program on the same engine sees the function. The whole-block
+  route has the same early install, in the block scope, which dies with the
+  block. Removing the binding is not faithful either (the clause may have
+  been accumulated onto a function of an earlier program). Documented in
+  the plan; decision wanted.
+- **Two concurrent asynchronous host programs lose the per-statement
+  numbering, so a block's value depends on unrelated concurrent work.** With
+  `B(h) = Block(r := h(k), h := z ↦ 2z, r)`,
+  `await Promise.all([B(h).evaluateAsync(), B(q).evaluateAsync()])` gives
+  `h(k)` and `q(k)`, while the same two awaited one after the other give
+  `2k` and `2k`: the asynchronous route takes a new top-level evaluation
+  number for a statement only while the block is the only pending
+  asynchronous evaluation, because all pending asynchronous evaluations
+  share one number per engine (`evaluation-epoch.ts`). The same holds for
+  a synchronous host evaluation of a block while an asynchronous one is
+  pending. The fix is to give each asynchronous evaluation its own number,
+  carried in its options or its context stack, which is a redesign of the
+  epoch module; pinned by a test in
+  `test/compute-engine/sticky-unresolved-call.test.ts`.
+- **Divergences between the Epsil runner and the block route that remain**
+  (measured 2026-10-21): a call before the `let` of a variable the body
+  reads (`let a = String(g())`, `let c = 2`, `function g() { c^2 }`) gives
+  `"c^2"` on the runner (the top level has no "declared, not yet
+  initialized" state) and `read-before-declaration` on the block route; a
+  `function` statement the runner does not prepare (after a `type`
+  statement, a body that reads an earlier value with no static type, a
+  generic function) resolves a call before it when the stored result is
+  read again, so the value agrees with the block route, but a value
+  computed from the call in the same statement (`String(g(3))`) does not.

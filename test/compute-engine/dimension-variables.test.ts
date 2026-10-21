@@ -155,7 +155,9 @@ describe('DIMENSION VARIABLES — declaration diagnostics', () => {
       const t = parseType(signature) as any;
       const kinds = t.types.map((arm: any) => arm.typeParams[0].kind);
       expect(kinds.sort()).toEqual(['value', undefined]);
-      const typeArm = t.types.find((arm: any) => arm.typeParams[0].kind !== 'value');
+      const typeArm = t.types.find(
+        (arm: any) => arm.typeParams[0].kind !== 'value'
+      );
       expect(typeArm.result).toEqual({ kind: 'variable', name: 'N' });
       expect(() => declare(fresh(), 'f', signature)).not.toThrow();
     }
@@ -269,14 +271,24 @@ describe('DIMENSION VARIABLES — shapes and substitution into the result', () =
     expect(ce.box(['first', L('[1,2,3]')]).type.toString()).toBe('integer');
   });
 
-  test('a rank-2 actual at a rank-1 pattern behaves as it does at the ground `vector<T>`', () => {
-    // `list<T^N>` is rank 1, like `vector<T>`; a matrix is not a vector. Parity
-    // with the ground signature is what is pinned, not a particular verdict.
+  test('a rank-2 actual at a rank-1 pattern is read as a list of its rows', () => {
+    // `list<T^N>` admits a list of rows (`T` can be a list), so a matrix is
+    // a list of `N` rows and `T` is the row type, in the flat spelling
+    // `list<integer^(2x2)>` as in the nested one `list<vector<integer^2>^2>`
+    // (the two spellings name the same values and answer alike, user
+    // decision 2026-10-21; before it, the flat spelling was admitted with no
+    // solution for `T`). The ground `vector<unknown>` is different: its
+    // elements are scalars, so a matrix is not one of its values and the
+    // call is admitted only provisionally, with the result type `unknown`.
     declare(ce, 'gu', '(x: vector<unknown>) -> unknown');
-    const generic = ce.box(['first', L('[[1,2],[3,4]]')]);
+    ce.declare('nl2', 'list<vector<integer^2>^2>');
+    const flat = ce.box(['first', L('[[1,2],[3,4]]')]);
+    const nested = ce.box(['first', 'nl2']);
+    expect(flat.isValid).toBe(true);
+    expect(flat.type.toString()).toBe('vector<integer^2>');
+    expect(nested.type.toString()).toBe('vector<integer^2>');
     const ground = ce.box(['gu', L('[[1,2],[3,4]]')]);
-    expect(generic.isValid).toBe(ground.isValid);
-    expect(generic.type.toString()).toBe(ground.type.toString());
+    expect(ground.type.toString()).toBe('unknown');
   });
 });
 
@@ -674,7 +686,11 @@ describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape
     // rows merge.
     ['list<vector<integer>^2>', 'matrix<integer>', false],
     ['list<vector<integer>>', 'matrix<integer>', false],
-    ['list<vector<vector<integer>^3>^2>', 'matrix<vector<integer>^(2x3)>', true],
+    [
+      'list<vector<vector<integer>^3>^2>',
+      'matrix<vector<integer>^(2x3)>',
+      true,
+    ],
     ['list<vector<vector<integer>^3>^2>', 'list<integer^(2x3x-1)>', false],
     ['list<vector<string^3>^2>', 'matrix<integer>', false],
     // The bridge in the other direction, unchanged.
