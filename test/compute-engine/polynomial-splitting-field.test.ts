@@ -70,5 +70,9 @@ describe('Bounded certified splitting fields over the rationals', () => {
       )
     ).toThrow('explicit embedding');
     expect(Object.isFrozen(field.one.coefficients[0])).toBe(true);
+    expect(Object.isFrozen(field)).toBe(true);
+    expect(() =>
+      Reflect.construct(RationalNumberField, [poly([-1, 0, 1]), 0])
+    ).toThrow('certify');
   });
 });

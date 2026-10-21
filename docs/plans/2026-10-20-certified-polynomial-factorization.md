@@ -103,6 +103,13 @@ hybrid median times were essentially equal (1.43 and 1.44 ms). The first-party
 WASM file is 11,203 bytes; initialization took about 2 ms in the earlier pilot.
 No backend has been selected automatically; the default remains TypeScript.
 
+The full run and independent audit now cover 1,200 polynomials, three trials
+and four backends: 14,400 verified results. A separate 42-case stress run
+completed 36 cases in each first-party backend and all 42 in each external CAS;
+six explicit resource-limit results are not counted as successes. See the
+[benchmark report](../../benchmarks/factorization/README.md) for fingerprints,
+methodology, detailed outcomes and caveats.
+
 Build the optional kernel with `node scripts/build-polynomial-wasm.mjs` after
 installing the compiler as described in that script. Run the comparison with
 `node --import tsx benchmarks/factorization/run.ts --output <new-directory>
@@ -202,9 +209,13 @@ callers needing a hard time/memory boundary should run in a worker process.
 
 The optional `createPolynomialWasmBackend(bytes)` accepts caller-provided bytes;
 it performs no network requests or automatic initialization. The build script
-compiles only first-party AssemblyScript. The kernel remains optional because
+compiles the first-party algorithm with AssemblyScript runtime support and
+copies the runtime's license and attribution alongside the binary. The kernel
+remains optional because
 its speed benefit depends on the workload; TS handles all bigint operations.
 External CAS code and generated benchmark files are excluded from commits.
+The existing Node 22/26 CI matrix builds the optional kernel before testing so
+its comparison tests do not silently skip in CI.
 
 Remaining performance work includes faster Hensel lifting, LLL/van Hoeij
 recombination, sparse multivariate lifting and modular number-field arithmetic.

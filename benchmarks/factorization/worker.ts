@@ -66,7 +66,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       const raw = gp(source);
       const solveMs = performance.now() - solveStart;
       const payload = raw.trim().replace(/^%\d+ = /, '');
-      if (!/^[\d\s,\[\]\/\-]+$/.test(payload))
+      if (!/^[\d\s,[\]/-]+$/.test(payload))
         throw new Error(`Unexpected PARI output: ${raw}`);
       const parsed = JSON.parse(
         payload.replace(/-?\d+(?:\/\d+)?/g, (s) => JSON.stringify(s))

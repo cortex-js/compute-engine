@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { rationalPolynomialCoefficients } from '../../src/compute-engine/polynomial/boxed-factor';
+import {
+  factorRationalExpression,
+  rationalPolynomialCoefficients,
+} from '../../src/compute-engine/polynomial/boxed-factor';
 
 describe('Factor with certified rational polynomial fallback', () => {
   const ce = new ComputeEngine();
@@ -35,5 +38,12 @@ describe('Factor with certified rational polynomial fallback', () => {
     engine.assign('x', 5);
     const result = engine.box(['Factor', f, 'x']).evaluate();
     expect(result.has('x')).toBe(true);
+  });
+  test('a recognized rational input stays unchanged on resource exhaustion', () => {
+    const input = ce.function('Add', [
+      ce.function('Power', [ce.symbol('x'), ce.number(3)]),
+      ce.number(1n << 5000n),
+    ]);
+    expect(factorRationalExpression(input, 'x')).toBe(input);
   });
 });

@@ -92,7 +92,9 @@ export function factorRationalExpression(
   const result = factorRationalPolynomial(input, {
     check: () => checkDeadline(expr.engine._deadlineFrame),
   });
-  if (result.status === 'incomplete') return null;
+  // A bounded rational attempt must not restart unbounded root enumeration.
+  // Null is reserved for expressions outside this coefficient domain.
+  if (result.status === 'incomplete') return expr;
   const ce = expr.engine;
   if (result.status === 'zero') return ce.Zero;
   const scalar = ce

@@ -37,6 +37,10 @@ wasmSuite(
           verifyModularFactors(f, got, p);
         }
       }
+      const boundary = [0n, 65520n, 1n];
+      const factors = backend(boundary, 65521, new PolynomialWork());
+      expect(signature(factors)).toEqual(['0,1', '65520,1']);
+      verifyModularFactors(boundary, factors, 65521);
     });
     test('hybrid rational factorization agrees and a cancelled call does not poison the next', async () => {
       const backend = await createPolynomialWasmBackend(

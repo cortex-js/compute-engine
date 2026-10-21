@@ -634,7 +634,8 @@ function extractContent(expr: Expression, variable: string): Expression | null {
  * 2. Perfect square trinomials
  * 3. Difference of squares
  * 4. Quadratic factoring (for rational roots)
- * 5. Rational root factoring (degree 3+)
+ * 5. Certified modular factoring over Q, with bounded recombination
+ * 6. Rational root factoring for remaining expression forms
  *
  * Falls back to the existing factor() function if polynomial factoring doesn't apply.
  *
@@ -656,9 +657,8 @@ export function factorPolynomial(
 
   // A pre-factored product or power must be fully factored factor-by-factor
   // and merged into prime-power form — e.g. x·(x²+x) → x²·(x+1), and (x²+1)²
-  // stays (x²+1)². Expanding it first would lose already-given irreducible
-  // factors (a product of irreducible quadratics can't be re-derived by the
-  // strategies below), so recurse into the structure instead.
+  // stays (x²+1)². Recursing into the given factors avoids the expansion and
+  // recombination cost of rediscovering their product's factorization.
   if (isFunction(expr, 'Multiply') || isFunction(expr, 'Power'))
     return refactorProductFactors(expr, variable);
 

@@ -17,6 +17,8 @@ export interface NumberFieldElement {
   readonly coefficients: readonly RationalCoefficient[];
 }
 
+const certifiedField = Symbol('certified-number-field');
+
 /** An abstract exact field Q[a]/(m), without an assumed real/complex embedding. */
 export class RationalNumberField implements ExactField<NumberFieldElement> {
   private readonly elements = new WeakSet<NumberFieldElement>();
@@ -27,8 +29,13 @@ export class RationalNumberField implements ExactField<NumberFieldElement> {
   private readonly arithmetic: ExactField<NumberFieldElement>;
   private constructor(
     readonly definingPolynomial: readonly RationalCoefficient[],
-    readonly certificationOperations: number
+    readonly certificationOperations: number,
+    certification: symbol
   ) {
+    if (certification !== certifiedField)
+      throw new RangeError(
+        'Use RationalNumberField.create to certify the defining polynomial'
+      );
     this.degree = definingPolynomial.length - 1;
     this.zero = Object.freeze({ field: this, coefficients: Object.freeze([]) });
     this.one = Object.freeze({
@@ -41,6 +48,7 @@ export class RationalNumberField implements ExactField<NumberFieldElement> {
       new PolynomialWork(Number.MAX_SAFE_INTEGER)
     );
     this.generator = this.element([Q.zero, Q.one]);
+    Object.freeze(this);
   }
   static create(
     polynomial: readonly RationalCoefficient[],
@@ -62,7 +70,8 @@ export class RationalNumberField implements ExactField<NumberFieldElement> {
       );
     return new RationalNumberField(
       Object.freeze(normalized.map((c) => Object.freeze(c))),
-      proof.statistics.operations
+      proof.statistics.operations,
+      certifiedField
     );
   }
   element(

@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { factoringCorpus, type FactoringCase } from './corpus.js';
+import { stressCorpus } from './stress-corpus.js';
 
 const { values } = parseArgs({
   options: {
@@ -20,13 +21,19 @@ const { values } = parseArgs({
     backends: { type: 'string', default: 'typescript,wasm,sympy' },
     timeout: { type: 'string', default: '30' },
     repeats: { type: 'string', default: '3' },
+    corpus: { type: 'string', default: 'regular' },
   },
 });
 if (!values.output) throw new Error('--output must name a new run directory');
 const output = resolve(values.output);
 if (existsSync(output))
   throw new Error('Refusing to overwrite an existing run');
-const corpus = factoringCorpus(Number(values.count));
+if (!['regular', 'stress'].includes(values.corpus!))
+  throw new Error('Unknown corpus');
+const corpus =
+  values.corpus === 'stress'
+    ? stressCorpus()
+    : factoringCorpus(Number(values.count));
 const serialized = JSON.stringify(corpus);
 const hash = createHash('sha256').update(serialized).digest('hex');
 mkdirSync(output, { recursive: true });
@@ -50,6 +57,9 @@ for (const f of [
   'benchmarks/factorization/worker.ts',
   'benchmarks/factorization/sympy_worker.py',
   'benchmarks/factorization/run.ts',
+  'benchmarks/factorization/stress-corpus.ts',
+  'wasm/polynomial/assembly/index.ts',
+  'scripts/build-polynomial-wasm.mjs',
 ])
   sourceHash.update(readFileSync(f));
 writeFileSync(
@@ -58,6 +68,7 @@ writeFileSync(
     {
       createdAt: new Date().toISOString(),
       corpusHash: hash,
+      corpus: values.corpus,
       sourceHash: sourceHash.digest('hex'),
       count: corpus.length,
       repeats,
@@ -238,4 +249,13 @@ for (const backend of values.backends!.split(',')) {
   );
 }
 console.log(JSON.stringify(summaries, null, 2));
-if (summaries.some((r) => r.counts?.mismatch)) process.exitCode = 1;
+writeFileSync(
+  resolve(output, 'summary.json'),
+  JSON.stringify(summaries, null, 2)
+);
+if (
+  summaries.some(
+    (r) => r.counts?.mismatch || r.counts?.error || r.status === 'unavailable'
+  )
+)
+  process.exitCode = 1;
