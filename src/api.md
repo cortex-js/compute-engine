@@ -1662,6 +1662,8 @@ assign(ids): IComputeEngine
 
 ####### ids
 
+\{\}
+
 ###### assign(id, value)
 
 ```ts
@@ -1757,6 +1759,8 @@ declare(symbols): IComputeEngine
 ```
 
 ####### symbols
+
+\{\}
 
 ###### declare(id, type, scope)
 
@@ -3390,7 +3394,7 @@ Controls how expressions are created.
 type Metadata = {
   latex: string;
   wikidata: string;
-  sourceOffsets: [number, number];
+  sourceOffsets: [start: number, end: number];
 };
 ```
 
@@ -3727,7 +3731,7 @@ The `options` argument passed to an `evaluate` / `evaluateAsync` handler.
 #### EvaluateHandlerOptions.expression?
 
 ```ts
-optional expression?: Expression;
+expression?: Expression;
 ```
 
 The canonical expression node being evaluated.
@@ -3766,7 +3770,7 @@ invoked outside the evaluation driver may not receive one).
 #### EvaluateHandlerOptions.precision?
 
 ```ts
-optional precision?: number;
+precision?: number;
 ```
 
 The number of significant digits the caller asked for, when
@@ -3878,7 +3882,7 @@ value:
 #### ValueDefinition.subscriptEvaluate?
 
 ```ts
-optional subscriptEvaluate?: (subscript, options) => Expression | undefined;
+subscriptEvaluate?: (subscript, options) => Expression | undefined;
 ```
 
 Custom evaluation handler for subscripted expressions of this symbol.
@@ -3926,7 +3930,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 ##### SequenceDefinition.variable? {#variable}
 
 ```ts
-optional variable?: string;
+variable?: string;
 ```
 
 Index variable name for single-index sequences, default 'n'.
@@ -3939,7 +3943,7 @@ For multi-index sequences, use `variables` instead.
 ##### SequenceDefinition.variables? {#variables}
 
 ```ts
-optional variables?: string[];
+variables?: string[];
 ```
 
 Index variable names for multi-index sequences.
@@ -3995,7 +3999,7 @@ Recurrence relation as LaTeX string or Expression
 ##### SequenceDefinition.memoize? {#memoize}
 
 ```ts
-optional memoize?: boolean;
+memoize?: boolean;
 ```
 
 Whether to memoize computed values (default: true)
@@ -4007,7 +4011,7 @@ Whether to memoize computed values (default: true)
 ##### SequenceDefinition.domain? {#domain-1}
 
 ```ts
-optional domain?: 
+domain?: 
   | {
   min: number;
   max: number;
@@ -4037,7 +4041,7 @@ domain: { n: { min: 0 }, k: { min: 0 } }
 ##### SequenceDefinition.constraints? {#constraints}
 
 ```ts
-optional constraints?: string | Expression;
+constraints?: string | Expression;
 ```
 
 Constraint expression for multi-index sequences.
@@ -4110,7 +4114,7 @@ For multi-index: string keys including patterns (e.g., ['0,0', 'n,0', 'n,n'])
 ##### SequenceStatus.variable? {#variable-1}
 
 ```ts
-optional variable?: string;
+variable?: string;
 ```
 
 Index variable name if recurrence is defined (single-index)
@@ -4122,7 +4126,7 @@ Index variable name if recurrence is defined (single-index)
 ##### SequenceStatus.variables? {#variables-1}
 
 ```ts
-optional variables?: string[];
+variables?: string[];
 ```
 
 Index variable names if recurrence is defined (multi-index)
@@ -4150,7 +4154,7 @@ The sequence name
 ##### SequenceInfo.variable? {#variable-2}
 
 ```ts
-optional variable?: string;
+variable?: string;
 ```
 
 Index variable name for single-index sequences (e.g., `"n"`)
@@ -4162,7 +4166,7 @@ Index variable name for single-index sequences (e.g., `"n"`)
 ##### SequenceInfo.variables? {#variables-2}
 
 ```ts
-optional variables?: string[];
+variables?: string[];
 ```
 
 Index variable names for multi-index sequences (e.g., `["n", "k"]`)
@@ -4297,6 +4301,7 @@ type OperandStructure =
   | {
   kind: "symbol";
   name: string;
+  lookupByName: false;
   system: boolean;
   inferred: boolean;
   local: boolean;
@@ -4314,6 +4319,7 @@ type OperandStructure =
   | {
   kind: "application";
   head: string;
+  callee: OperandDescriptor;
   children: ReadonlyArray<OperandDescriptor>;
  }
   | {
@@ -4348,15 +4354,27 @@ holding an expression.
 \{
   `kind`: `"symbol"`;
   `name`: `string`;
+  `lookupByName`: `false`;
   `system`: `boolean`;
   `inferred`: `boolean`;
   `local`: `boolean`;
  \}
 
+#### OperandStructure.lookupByName?
+
+```ts
+lookupByName?: false;
+```
+
+False when resolving this name in the current engine context would
+select a different binding, or when this is a synthetic bound symbol.
+Type handlers must then use the descriptor's own type rather than
+derive a call or read a declaration by name.
+
 #### OperandStructure.system?
 
 ```ts
-optional system?: boolean;
+system?: boolean;
 ```
 
 Present (`true`) when the symbol resolves to the definition the
@@ -4368,7 +4386,7 @@ quotient-ring adjunction only for the library `Integers`.
 #### OperandStructure.inferred?
 
 ```ts
-optional inferred?: boolean;
+inferred?: boolean;
 ```
 
 Present (`true`) when the symbol's recorded type was INFERRED
@@ -4380,7 +4398,7 @@ to trust an operand's type. Lives on the structure node, not in
 #### OperandStructure.local?
 
 ```ts
-optional local?: boolean;
+local?: boolean;
 ```
 
 Present (`true`) when the symbol is a block-local binding a `Block`
@@ -4421,7 +4439,7 @@ builds the literal type only to widen it away. Read off the value
 #### OperandStructure.rational?
 
 ```ts
-optional rational?: readonly [bigint, bigint];
+rational?: readonly [bigint, bigint];
 ```
 
 The literal's exact value as a REDUCED fraction, when it is a
@@ -4436,8 +4454,19 @@ non-finite literal.
 \{
   `kind`: `"application"`;
   `head`: `string`;
+  `callee`: [`OperandDescriptor`](#operanddescriptor);
   `children`: `ReadonlyArray`\<[`OperandDescriptor`](#operanddescriptor)\>;
  \}
+
+#### OperandStructure.callee?
+
+```ts
+callee?: OperandDescriptor;
+```
+
+The callable's own contract when ambient lookup would select a
+different binding. A held literal may also supply its body structure.
+Derive this call through Apply rather than resolving head by name.
 
 \{
   `kind`: `"function-literal"`;
@@ -4781,7 +4810,7 @@ May contain Markdown.
 ##### BaseDefinition.keywords? {#keywords}
 
 ```ts
-optional keywords?: string[];
+keywords?: string[];
 ```
 
 Search keywords (synonyms, alternate names) used by
@@ -4840,7 +4869,7 @@ for the `Pi` constant.
 ##### BaseDefinition.isConstant? {#isconstant}
 
 ```ts
-readonly optional isConstant?: boolean;
+readonly isConstant?: boolean;
 ```
 
 If true, the value or type of the definition cannot be changed
@@ -4949,7 +4978,7 @@ Library identifier
 ##### LibraryDefinition.requires? {#requires}
 
 ```ts
-optional requires?: string[];
+requires?: string[];
 ```
 
 Libraries that must be loaded before this one
@@ -4961,7 +4990,7 @@ Libraries that must be loaded before this one
 ##### LibraryDefinition.definitions? {#definitions}
 
 ```ts
-optional definitions?: Readonly<{}> | Readonly<{}>[];
+definitions?: Readonly<{}> | Readonly<{}>[];
 ```
 
 Symbol and operator definitions
@@ -5021,7 +5050,7 @@ count: `expr.count` always converts a count that is a safe integer to a
 ##### BaseCollectionHandlers.isEmpty? {#isempty}
 
 ```ts
-optional isEmpty?: (collection) => boolean | undefined;
+isEmpty?: (collection) => boolean | undefined;
 ```
 
 Optional flag to quickly check if the collection is empty, without having to count exactly how may elements it has (useful for lazy evaluation).
@@ -5033,7 +5062,7 @@ Optional flag to quickly check if the collection is empty, without having to cou
 ##### BaseCollectionHandlers.isFinite? {#isfinite}
 
 ```ts
-optional isFinite?: (collection) => boolean | undefined;
+isFinite?: (collection) => boolean | undefined;
 ```
 
 Optional flag to quickly check if the collection is finite, without having to count exactly how many elements it has (useful for lazy evaluation).
@@ -5045,7 +5074,7 @@ Optional flag to quickly check if the collection is finite, without having to co
 ##### BaseCollectionHandlers.isEnumerable? {#isenumerable}
 
 ```ts
-optional isEnumerable?: (collection) => boolean | undefined;
+isEnumerable?: (collection) => boolean | undefined;
 ```
 
 Optional predicate answering whether `iterator()` will actually produce
@@ -5076,7 +5105,7 @@ cheaply" and does not fall back to the default.
 ##### BaseCollectionHandlers.isCollection? {#iscollection}
 
 ```ts
-optional isCollection?: (collection) => boolean;
+isCollection?: (collection) => boolean;
 ```
 
 Optional predicate for operators whose collection-ness depends on their
@@ -5095,7 +5124,7 @@ Default: `true` (an operator with a `collection` block is a collection).
 ##### BaseCollectionHandlers.isLazy? {#islazy}
 
 ```ts
-optional isLazy?: (collection) => boolean;
+isLazy?: (collection) => boolean;
 ```
 
 Return `true` if the collection is lazy, `false` otherwise.
@@ -5115,7 +5144,7 @@ this handler to opt in.
 ##### BaseCollectionHandlers.elementMemo? {#elementmemo}
 
 ```ts
-optional elementMemo?: boolean;
+elementMemo?: boolean;
 ```
 
 Opt this operator's instances into per-instance element memoization: a
@@ -5137,7 +5166,7 @@ Default: `false`
 ##### BaseCollectionHandlers.contains? {#contains}
 
 ```ts
-optional contains?: (collection, target) => boolean | undefined;
+contains?: (collection, target) => boolean | undefined;
 ```
 
 Return `true` if the target expression is in the collection,
@@ -5152,7 +5181,7 @@ Return `undefined` if the membership cannot be determined.
 ##### BaseCollectionHandlers.countOf? {#countof}
 
 ```ts
-optional countOf?: (collection, target) => number | bigint | undefined;
+countOf?: (collection, target) => number | bigint | undefined;
 ```
 
 Return the number of elements of the collection that are structurally
@@ -5175,7 +5204,7 @@ The answer must be the one a walk that compares each element with
 ##### BaseCollectionHandlers.subsetOf? {#subsetof}
 
 ```ts
-optional subsetOf?: (collection, other, strict) => boolean | undefined;
+subsetOf?: (collection, other, strict) => boolean | undefined;
 ```
 
 Return `true` if all the elements of `collection` are in `other` — that
@@ -5197,7 +5226,7 @@ that cannot see far enough to answer must return `undefined` rather than
 ##### BaseCollectionHandlers.eltsgn? {#eltsgn}
 
 ```ts
-optional eltsgn?: (collection) => Sign | undefined;
+eltsgn?: (collection) => Sign | undefined;
 ```
 
 Return the sign of all the elements of the collection.
@@ -5209,7 +5238,7 @@ Return the sign of all the elements of the collection.
 ##### BaseCollectionHandlers.elttype? {#elttype}
 
 ```ts
-optional elttype?: (collection) => Type | undefined;
+elttype?: (collection) => Type | undefined;
 ```
 
 Return the widest type of all the elements in the collection
@@ -5266,7 +5295,7 @@ If no element matches the predicate, return `undefined`.
 ##### IndexedCollectionHandlers.atBigint? {#atbigint}
 
 ```ts
-optional atBigint?: (collection, index) => Expression | undefined;
+atBigint?: (collection, index) => Expression | undefined;
 ```
 
 Return the element at a 1-based position given as a `bigint`.
@@ -5289,7 +5318,7 @@ If the position is outside the collection, return `undefined`.
 ##### IndexedCollectionHandlers.indexOf? {#indexof}
 
 ```ts
-optional indexOf?: (collection, target) => number | bigint | undefined;
+indexOf?: (collection, target) => number | bigint | undefined;
 ```
 
 Return the 1-based position of the first element that is structurally
@@ -5411,7 +5440,7 @@ Design: `docs/TYPE-SYSTEM.md`, phase 1.
 ##### BoxedBaseDefinition.examples? {#examples-1}
 
 ```ts
-optional examples?: string[];
+examples?: string[];
 ```
 
 The usage examples of the definition. A definition may give a single
@@ -5424,7 +5453,7 @@ string; the boxed definition always stores a list.
 ##### BoxedBaseDefinition.collection? {#collection-1}
 
 ```ts
-optional collection?: CollectionHandlers;
+collection?: CollectionHandlers;
 ```
 
 If this is the definition of a collection, the set of primitive operations
@@ -5505,7 +5534,7 @@ overflowing the stack. Computed once when the value is assigned.
 ##### BoxedValueDefinition.eq? {#eq-1}
 
 ```ts
-optional eq?: (a) => boolean | undefined;
+eq?: (a) => boolean | undefined;
 ```
 
 </MemberCard>
@@ -5515,7 +5544,7 @@ optional eq?: (a) => boolean | undefined;
 ##### BoxedValueDefinition.neq? {#neq}
 
 ```ts
-optional neq?: (a) => boolean | undefined;
+neq?: (a) => boolean | undefined;
 ```
 
 </MemberCard>
@@ -5525,7 +5554,7 @@ optional neq?: (a) => boolean | undefined;
 ##### BoxedValueDefinition.cmp? {#cmp}
 
 ```ts
-optional cmp?: (a) => "<" | ">" | "=" | undefined;
+cmp?: (a) => "<" | ">" | "=" | undefined;
 ```
 
 </MemberCard>
@@ -5584,7 +5613,7 @@ event, so cached results that read this type are computed again.
 ##### BoxedValueDefinition.subscriptEvaluate? {#subscriptevaluate-1}
 
 ```ts
-optional subscriptEvaluate?: (subscript, options) => Expression | undefined;
+subscriptEvaluate?: (subscript, options) => Expression | undefined;
 ```
 
 Custom evaluation handler for subscripted expressions of this symbol.
@@ -5743,7 +5772,8 @@ operator.
 
 #### Extends
 
-- [`BoxedBaseDefinition`](#boxedbasedefinition).[`OperatorDefinitionFlags`](#operatordefinitionflags)
+- [`BoxedBaseDefinition`](#boxedbasedefinition)
+- [`OperatorDefinitionFlags`](#operatordefinitionflags)
 
 <MemberCard>
 
@@ -5764,7 +5794,7 @@ binding-site selector.
 ##### BoxedOperatorDefinition.bindingSites? {#bindingsites}
 
 ```ts
-optional bindingSites?: BindingSiteSelector;
+bindingSites?: BindingSiteSelector;
 ```
 
 The binding-site selector of the declaration's `scoped` flag, when one
@@ -5910,7 +5940,7 @@ re-parsing or textually inlining its source.
 ##### BoxedOperatorDefinition.type? {#type-8}
 
 ```ts
-optional type?: OperatorTypeHandlerOnTypes;
+type?: OperatorTypeHandlerOnTypes;
 ```
 
 If present, this handler determines the result type more precisely
@@ -5924,7 +5954,7 @@ structure — never the operand expressions).
 ##### BoxedOperatorDefinition.sgn? {#sgn-2}
 
 ```ts
-optional sgn?: (ops, options) => Sign | undefined;
+sgn?: (ops, options) => Sign | undefined;
 ```
 
 If present, this handler can be used to determine the sign of the
@@ -5953,7 +5983,7 @@ derivation is filling. Audit record: open item O7 of
 ##### BoxedOperatorDefinition.eq? {#eq-2}
 
 ```ts
-optional eq?: (a, b, prover?) => boolean | undefined;
+eq?: (a, b, prover?) => boolean | undefined;
 ```
 
 See `OperatorDefinition.eq` for the meaning of `prover`.
@@ -5965,7 +5995,7 @@ See `OperatorDefinition.eq` for the meaning of `prover`.
 ##### BoxedOperatorDefinition.neq? {#neq-1}
 
 ```ts
-optional neq?: (a, b) => boolean | undefined;
+neq?: (a, b) => boolean | undefined;
 ```
 
 </MemberCard>
@@ -5975,7 +6005,7 @@ optional neq?: (a, b) => boolean | undefined;
 ##### BoxedOperatorDefinition.canEnumerate? {#canenumerate}
 
 ```ts
-optional canEnumerate?: (expr) => boolean | undefined;
+canEnumerate?: (expr) => boolean | undefined;
 ```
 
 The eager producer's enumerability precondition — see the
@@ -5988,7 +6018,7 @@ The eager producer's enumerability precondition — see the
 ##### BoxedOperatorDefinition.elementCount? {#elementcount}
 
 ```ts
-optional elementCount?: (expr) => number | undefined;
+elementCount?: (expr) => number | undefined;
 ```
 
 The eager producer's element count — see the `elementCount` contract on
@@ -6001,7 +6031,7 @@ The eager producer's element count — see the `elementCount` contract on
 ##### BoxedOperatorDefinition.inferOperandTypes? {#inferoperandtypes}
 
 ```ts
-optional inferOperandTypes?: (ops, requirement) => 
+inferOperandTypes?: (ops, requirement) => 
   | readonly (
   | Type
   | {
@@ -6021,7 +6051,7 @@ Use-driven element inference — see the `inferOperandTypes` contract on
 ##### BoxedOperatorDefinition.canonical? {#canonical}
 
 ```ts
-optional canonical?: (ops, options) => Expression | null;
+canonical?: (ops, options) => Expression | null;
 ```
 
 </MemberCard>
@@ -6031,7 +6061,7 @@ optional canonical?: (ops, options) => Expression | null;
 ##### BoxedOperatorDefinition.evaluate? {#evaluate}
 
 ```ts
-optional evaluate?: (ops, options) => Expression | undefined;
+evaluate?: (ops, options) => Expression | undefined;
 ```
 
 </MemberCard>
@@ -6041,7 +6071,7 @@ optional evaluate?: (ops, options) => Expression | undefined;
 ##### BoxedOperatorDefinition.evaluateAsync? {#evaluateasync}
 
 ```ts
-optional evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
+evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
 ```
 
 </MemberCard>
@@ -6051,7 +6081,7 @@ optional evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
 ##### BoxedOperatorDefinition.evalDimension? {#evaldimension}
 
 ```ts
-optional evalDimension?: (ops, options) => Expression;
+evalDimension?: (ops, options) => Expression;
 ```
 
 </MemberCard>
@@ -6061,7 +6091,7 @@ optional evalDimension?: (ops, options) => Expression;
 ##### BoxedOperatorDefinition.derivative? {#derivative}
 
 ```ts
-optional derivative?: OperatorDerivative;
+derivative?: OperatorDerivative;
 ```
 
 The partial derivatives of the operator, as given by the `derivative`
@@ -6074,7 +6104,7 @@ key of its definition. See [OperatorDerivative](#operatorderivative).
 ##### BoxedOperatorDefinition.compile? {#compile}
 
 ```ts
-optional compile?: OperatorCompileHandler;
+compile?: OperatorCompileHandler;
 ```
 
 </MemberCard>
@@ -6490,12 +6520,12 @@ type Delimiter =
   | ">"
   | "|"
   | "||"
-  | "\lceil"
-  | "\rceil"
-  | "\lfloor"
-  | "\rfloor"
-  | "\llbracket"
-  | "\rrbracket";
+  | "\\lceil"
+  | "\\rceil"
+  | "\\lfloor"
+  | "\\rfloor"
+  | "\\llbracket"
+  | "\\rrbracket";
 ```
 
 Open and close delimiters that can be used with [`MatchfixEntry`](#matchfixentry)
@@ -6868,7 +6898,7 @@ properties are required.
 #### MatchfixEntry.parse?
 
 ```ts
-optional parse?: MatchfixParseHandler;
+parse?: MatchfixParseHandler;
 ```
 
 When invoked, the parser is pointing after the close delimiter.
@@ -6903,7 +6933,7 @@ Example: `+`, `\times`.
 #### InfixEntry.associativity?
 
 ```ts
-optional associativity?: "right" | "left" | "none" | "any";
+associativity?: "right" | "left" | "none" | "any";
 ```
 
 - **`none`**: a ? b ? c -> syntax error
@@ -6997,7 +7027,7 @@ type SymbolEntry = BaseEntry & Trigger & {
 #### SymbolEntry.precedence?
 
 ```ts
-optional precedence?: Precedence;
+precedence?: Precedence;
 ```
 
 Used for appropriate wrapping (i.e. when to surround it with parens)
@@ -7028,7 +7058,7 @@ entry of kind `expression`.
 #### FunctionEntry.arguments?
 
 ```ts
-optional arguments?: "enclosure" | "implicit";
+arguments?: "enclosure" | "implicit";
 ```
 
 How arguments are parsed:
@@ -7169,7 +7199,7 @@ it will be parsed as a decimal number even if this setting is `"rational"`.
 #### ParseLatexOptions.resolveSymbol?
 
 ```ts
-optional resolveSymbol?: (symbol) => SymbolResolution | undefined;
+resolveSymbol?: (symbol) => SymbolResolution | undefined;
 ```
 
 The symbol oracle: invoked when the parser needs to know what the
@@ -7197,7 +7227,7 @@ The `symbol` argument is a [valid symbol](#symbols).
 #### ParseLatexOptions.resolveApplication?
 
 ```ts
-optional resolveApplication?: (context) => "apply" | "multiply" | undefined;
+resolveApplication?: (context) => "apply" | "multiply" | undefined;
 ```
 
 Interpret an unresolved symbol followed by parentheses.
@@ -7250,7 +7280,7 @@ commands replaced, for example `\egroup` and `\bgroup`.
 #### ParseLatexOptions.diagnostics?
 
 ```ts
-optional diagnostics?: boolean;
+diagnostics?: boolean;
 ```
 
 If true, collect opt-in parse-time diagnostics (see [ParseDiagnostic](#parsediagnostic))
@@ -7278,7 +7308,7 @@ This is purely additive: enabling it never changes the parse output.
 #### ParseLatexOptions.onAmbiguity?
 
 ```ts
-optional onAmbiguity?: "report" | "error";
+onAmbiguity?: "report" | "error";
 ```
 
 What the lenient grammar (`strict: false`) does with a reading that has
@@ -7631,7 +7661,7 @@ was expected.
 ##### Parser.sourceOffsets() {#sourceoffsets-1}
 
 ```ts
-sourceOffsets(startToken, endToken?): [number, number]
+sourceOffsets(startToken, endToken?): [start: number, end: number]
 ```
 
 Return source offsets for a token range, as zero-based, end-exclusive
@@ -8221,7 +8251,7 @@ Controls the materialization of the lazy collections.
 #### SerializeLatexOptions.exponentialE?
 
 ```ts
-optional exponentialE?: LatexString;
+exponentialE?: LatexString;
 ```
 
 LaTeX used to render the constant `ExponentialE`, the counterpart of
@@ -8361,7 +8391,7 @@ via `expr.toLatex({ dotNotation: true })`.
 #### SerializeLatexOptions.dmsFormat?
 
 ```ts
-optional dmsFormat?: boolean;
+dmsFormat?: boolean;
 ```
 
 When true, serialize angle quantities in degrees-minutes-seconds format.
@@ -8393,7 +8423,7 @@ ce.expr(['Quantity', 9.504166, 'deg'])
 #### SerializeLatexOptions.angleNormalization?
 
 ```ts
-optional angleNormalization?: "none" | "0...360" | "-180...180";
+angleNormalization?: "none" | "0...360" | "-180...180";
 ```
 
 Normalize angles to a specific range during serialization.
@@ -9675,7 +9705,7 @@ First several terms of the sequence
 ##### OEISSequenceInfo.formula? {#formula}
 
 ```ts
-optional formula?: string;
+formula?: string;
 ```
 
 Formula or recurrence (if available) — the first formula line
@@ -9687,7 +9717,7 @@ Formula or recurrence (if available) — the first formula line
 ##### OEISSequenceInfo.formulas? {#formulas}
 
 ```ts
-optional formulas?: string[];
+formulas?: string[];
 ```
 
 All free-text formula lines, as returned by OEIS (if available)
@@ -9699,7 +9729,7 @@ All free-text formula lines, as returned by OEIS (if available)
 ##### OEISSequenceInfo.comments? {#comments}
 
 ```ts
-optional comments?: string[];
+comments?: string[];
 ```
 
 Comments about the sequence
@@ -9727,7 +9757,7 @@ Options for OEIS operations.
 ##### OEISOptions.timeout? {#timeout}
 
 ```ts
-optional timeout?: number;
+timeout?: number;
 ```
 
 Request timeout in milliseconds (default: 10000)
@@ -9739,7 +9769,7 @@ Request timeout in milliseconds (default: 10000)
 ##### OEISOptions.maxResults? {#maxresults}
 
 ```ts
-optional maxResults?: number;
+maxResults?: number;
 ```
 
 Maximum number of results to return for lookups (default: 5)
@@ -10343,7 +10373,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
 #### OperatorDefinition.type?
 
 ```ts
-optional type?: OperatorTypeHandlerOnTypes;
+type?: OperatorTypeHandlerOnTypes;
 ```
 
 The type of the result (return type) as a function of the operand
@@ -10357,7 +10387,7 @@ never `complex`.
 #### OperatorDefinition.signature?
 
 ```ts
-optional signature?: 
+signature?: 
   | Type
   | TypeString
   | BoxedType;
@@ -10372,7 +10402,7 @@ be a subtype of the return type in the signature.
 #### OperatorDefinition.inferredSignature?
 
 ```ts
-optional inferredSignature?: boolean;
+inferredSignature?: boolean;
 ```
 
 If `true`, the `signature` is a starting point to be refined, not a
@@ -10399,7 +10429,7 @@ A declaration that omits `signature` entirely behaves the same way.
 #### OperatorDefinition.sgn?
 
 ```ts
-optional sgn?: (ops, options) => Sign | undefined;
+sgn?: (ops, options) => Sign | undefined;
 ```
 
 Return the sign of the function expression.
@@ -10421,7 +10451,7 @@ contract on `OperatorDefinition.sgn`.
 #### OperatorDefinition.isPositive?
 
 ```ts
-readonly optional isPositive?: boolean;
+readonly isPositive?: boolean;
 ```
 
 The value of this expression is > 0, same as `isGreater(0)`
@@ -10429,7 +10459,7 @@ The value of this expression is > 0, same as `isGreater(0)`
 #### OperatorDefinition.isNonNegative?
 
 ```ts
-readonly optional isNonNegative?: boolean;
+readonly isNonNegative?: boolean;
 ```
 
 The value of this expression is >= 0, same as `isGreaterEqual(0)`
@@ -10437,7 +10467,7 @@ The value of this expression is >= 0, same as `isGreaterEqual(0)`
 #### OperatorDefinition.isNegative?
 
 ```ts
-readonly optional isNegative?: boolean;
+readonly isNegative?: boolean;
 ```
 
 The value of this expression is &lt; 0, same as `isLess(0)`
@@ -10445,7 +10475,7 @@ The value of this expression is &lt; 0, same as `isLess(0)`
 #### OperatorDefinition.isNonPositive?
 
 ```ts
-readonly optional isNonPositive?: boolean;
+readonly isNonPositive?: boolean;
 ```
 
 The  value of this expression is &lt;= 0, same as `isLessEqual(0)`
@@ -10453,7 +10483,7 @@ The  value of this expression is &lt;= 0, same as `isLessEqual(0)`
 #### OperatorDefinition.even?
 
 ```ts
-optional even?: (ops, options) => boolean | undefined;
+even?: (ops, options) => boolean | undefined;
 ```
 
 Return `true` if the function expression is even, `false` if it is odd
@@ -10463,7 +10493,7 @@ or if it is a complex number).
 #### OperatorDefinition.complexity?
 
 ```ts
-optional complexity?: number;
+complexity?: number;
 ```
 
 A number used to order arguments.
@@ -10488,7 +10518,7 @@ lower complexity when ordered canonically in commutative functions.
 #### OperatorDefinition.canonical?
 
 ```ts
-optional canonical?: (ops, options) => Expression | null;
+canonical?: (ops, options) => Expression | null;
 ```
 
 Return the canonical form of the expression with the arguments `args`.
@@ -10530,7 +10560,7 @@ canonical form, the handler should return `null`.
 #### OperatorDefinition.evaluate?
 
 ```ts
-optional evaluate?: 
+evaluate?: 
   | ((ops, options) => Expression | undefined)
   | Expression;
 ```
@@ -10554,7 +10584,7 @@ an `["Error"]` expression.
 #### OperatorDefinition.evaluateAsync?
 
 ```ts
-optional evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
+evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
 ```
 
 An asynchronous version of `evaluate`.
@@ -10571,7 +10601,7 @@ evaluates its operand starts that evaluation outside the window.
 #### OperatorDefinition.evalDimension?
 
 ```ts
-optional evalDimension?: (args, options) => Expression;
+evalDimension?: (args, options) => Expression;
 ```
 
 **`Experimental`**
@@ -10581,7 +10611,7 @@ Dimensional analysis
 #### OperatorDefinition.derivative?
 
 ```ts
-optional derivative?: OperatorDerivative;
+derivative?: OperatorDerivative;
 ```
 
 The partial derivatives of this operator, used by `D`, `Derivative`
@@ -10615,7 +10645,7 @@ key is used.
 #### OperatorDefinition.compile?
 
 ```ts
-optional compile?: OperatorCompileHandler;
+compile?: OperatorCompileHandler;
 ```
 
 A custom compilation handler for this operator: emit target-language
@@ -10707,7 +10737,7 @@ tolerated and treated the same). See [OperatorCompileHandler](#operatorcompileha
 #### OperatorDefinition.eq?
 
 ```ts
-optional eq?: (a, b, prover?) => boolean | undefined;
+eq?: (a, b, prover?) => boolean | undefined;
 ```
 
 Custom equality handler.
@@ -10723,7 +10753,7 @@ free variables) must decline — return `undefined` — when
 #### OperatorDefinition.canEnumerate?
 
 ```ts
-optional canEnumerate?: (expr) => boolean | undefined;
+canEnumerate?: (expr) => boolean | undefined;
 ```
 
 For an operator that RETURNS a collection but has no `collection`
@@ -10757,7 +10787,7 @@ handlers — those own enumerability via `collection.isEnumerable`.
 #### OperatorDefinition.elementCount?
 
 ```ts
-optional elementCount?: (expr) => number | undefined;
+elementCount?: (expr) => number | undefined;
 ```
 
 For an operator that RETURNS a collection but has no `collection`
@@ -10789,7 +10819,7 @@ a declared `count` owns the answer, including its `undefined`.
 #### OperatorDefinition.inferOperandTypes?
 
 ```ts
-optional inferOperandTypes?: (ops, requirement) => 
+inferOperandTypes?: (ops, requirement) => 
   | ReadonlyArray<
   | Type
   | {
@@ -10855,7 +10885,7 @@ Minimal interface for a LaTeX parser/serializer.
 ##### ILatexSyntax.dictionary? {#dictionary-2}
 
 ```ts
-readonly optional dictionary?: readonly Partial<OnlyFirst<
+readonly dictionary?: readonly Partial<OnlyFirst<
   | ExpressionEntry
   | MatchfixEntry
   | InfixEntry
@@ -10864,7 +10894,7 @@ readonly optional dictionary?: readonly Partial<OnlyFirst<
   | SymbolEntry
   | FunctionEntry
   | EnvironmentEntry
-  | DefaultEntry, {} & 
+  | DefaultEntry, {} & (
   | ExpressionEntry
   | MatchfixEntry
   | InfixEntry
@@ -10873,7 +10903,7 @@ readonly optional dictionary?: readonly Partial<OnlyFirst<
   | SymbolEntry
   | FunctionEntry
   | EnvironmentEntry
-  | DefaultEntry>>[];
+  | DefaultEntry)>>[];
 ```
 
 The dictionary entries, including the entries added with
@@ -10926,7 +10956,7 @@ serialize(expr, options?): string
 ##### ILatexSyntax.getNamedTriggers()? {#getnamedtriggers}
 
 ```ts
-optional getNamedTriggers(): readonly {
+getNamedTriggers(): readonly {
   name: string;
   triggers: string[];
  }[]
@@ -10943,7 +10973,7 @@ Named dictionary entries with their LaTeX trigger strings, for reverse
 ##### ILatexSyntax.addEntries()? {#addentries}
 
 ```ts
-optional addEntries(entries): void
+addEntries(entries): void
 ```
 
 Add LaTeX dictionary entries. The next parse or serialization uses
@@ -10962,7 +10992,7 @@ readonly `Partial`\<`OnlyFirst`\<
   \| [`SymbolEntry`](#symbolentry)
   \| [`FunctionEntry`](#functionentry)
   \| [`EnvironmentEntry`](#environmententry)
-  \| [`DefaultEntry`](#defaultentry), \{\} & 
+  \| [`DefaultEntry`](#defaultentry), \{\} & (
   \| [`ExpressionEntry`](#expressionentry)
   \| [`MatchfixEntry`](#matchfixentry)
   \| [`InfixEntry`](#infixentry)
@@ -10971,7 +11001,7 @@ readonly `Partial`\<`OnlyFirst`\<
   \| [`SymbolEntry`](#symbolentry)
   \| [`FunctionEntry`](#functionentry)
   \| [`EnvironmentEntry`](#environmententry)
-  \| [`DefaultEntry`](#defaultentry)\>\>[]
+  \| [`DefaultEntry`](#defaultentry))\>\>[]
 
 </MemberCard>
 
@@ -12853,6 +12883,8 @@ assign(ids): IComputeEngine
 
 ####### ids
 
+\{\}
+
 ###### assign(id, value)
 
 ```ts
@@ -12948,6 +12980,8 @@ declare(symbols): IComputeEngine
 ```
 
 ####### symbols
+
+\{\}
 
 ###### declare(id, type, scope)
 
@@ -14071,7 +14105,7 @@ collapse to `"Number"`.
 ##### Expression.parseDiagnostics? {#parsediagnostics}
 
 ```ts
-optional parseDiagnostics?: readonly ParseDiagnostic[];
+parseDiagnostics?: readonly ParseDiagnostic[];
 ```
 
 Parse-time diagnostics collected when the expression was produced by
@@ -14533,7 +14567,7 @@ Note that lazy collections are eagerly evaluated when printed.
 ##### Expression.verbatimLatex? {#verbatimlatex}
 
 ```ts
-optional verbatimLatex?: string;
+verbatimLatex?: string;
 ```
 
 If the expression was constructed from a LaTeX string, the verbatim LaTeX
@@ -14546,7 +14580,7 @@ If the expression was constructed from a LaTeX string, the verbatim LaTeX
 ##### Expression.sourceOffsets? {#sourceoffsets-2}
 
 ```ts
-optional sourceOffsets?: [number, number];
+sourceOffsets?: [start: number, end: number];
 ```
 
 Source offsets in the original source string, when available.
@@ -17088,14 +17122,16 @@ type NumberSerializationFormat = NumberFormat & {
   digits: DisplayDigits;
   fractionalDigits: "auto" | "max" | number;
   notation: "auto" | "engineering" | "scientific" | "adaptiveScientific";
-  avoidExponentsInRange: undefined | null | [number, number];
+  avoidExponentsInRange:   | undefined
+     | null
+     | [negativeExponent: number, positiveExponent: number];
 };
 ```
 
 #### NumberSerializationFormat.digits?
 
 ```ts
-optional digits?: DisplayDigits;
+digits?: DisplayDigits;
 ```
 
 Controls how many digits a number is displayed with. See
@@ -17251,7 +17287,7 @@ shape: number[];
 ##### TensorData.rank? {#rank}
 
 ```ts
-optional rank?: number;
+rank?: number;
 ```
 
 </MemberCard>
@@ -17271,7 +17307,7 @@ data: DataTypeMap[DT][];
 ##### TensorData.holdsFloat? {#holdsfloat}
 
 ```ts
-optional holdsFloat?: boolean;
+holdsFloat?: boolean;
 ```
 
 Is the tensor a float tensor? `true` when an entry of the matrix the
@@ -18976,7 +19012,7 @@ type MathJsonAttributes = {
   openmathCd: string;
   sourceUrl: string;
   sourceContent: string;
-  sourceOffsets: [number, number];
+  sourceOffsets: [start: number, end: number];
 };
 ```
 
@@ -19699,12 +19735,13 @@ type BroadcastableType = {
 };
 ```
 
-A `broadcastable<T>` is either a `T`, or an indexed collection of `T`
+A `broadcastable<T>` is either a `T`, or a list of `T`
 applied element-wise (runtime broadcasting). It is the static type of an
 arithmetic result whose operand's collection-ness is not statically visible.
 
 A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
-any indexed collection whose elements are subtypes of `T`. It is *not* a
+any list whose elements are subtypes of `T` (a tuple, a string and an
+abstract `indexed_collection<T>` are not lists). It is *not* a
 subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
 scalar). See `subtype.ts` for the full relation.
 
@@ -19761,7 +19798,7 @@ Nominal typing
 type DeclarationOrigin = {
   batch: number;
   statementId: unknown;
-  firstRange: [number, number];
+  firstRange: [start: number, end: number];
 };
 ```
 

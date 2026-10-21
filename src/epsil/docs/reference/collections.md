@@ -395,7 +395,7 @@ chunk([1, 2, 3, 4, 5, 6], 3)
 
 ### chunkBy
 
-MathJSON `ChunkBy` · `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)`
+MathJSON `ChunkBy` · `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)`
 
 Split the collection into maximal runs of consecutive elements over which the key function yields the same value.
 
@@ -517,7 +517,7 @@ dedup([1, 1, 2, 2, 1])
 
 ### deleteAt
 
-MathJSON `DeleteAt` · `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)`
+MathJSON `DeleteAt` · `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)`
 
 Return a copy of the indexed collection with the element at the 1-based `index` removed.
 
@@ -565,7 +565,7 @@ differences([1, 4, 9, 16])
 
 ### drop
 
-MathJSON `Drop` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)`
+MathJSON `Drop` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)`
 
 Return the indexed collection without its first `n` elements.
 
@@ -729,7 +729,7 @@ filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 
 ### find
 
-MathJSON `Find` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T`
+MathJSON `Find` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any`
 
 Return the first element of the collection satisfying the predicate, or Nothing if none found.
 
@@ -817,7 +817,7 @@ indexWhere([1, 4, 9, 16], x => x > 5)
 
 ### insert
 
-MathJSON `Insert` · `(indexed_collection<T>, integer, T) -> list<T> where T`
+MathJSON `Insert` · `(indexed_collection<T>, integer, T) -> list<T> where T: any`
 
 Return a copy of the indexed collection with `value` inserted before the 1-based `index`.
 
@@ -1069,7 +1069,7 @@ minBy(["pear", "fig", "apple"], length)
 
 ### most
 
-MathJSON `Most` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)`
+MathJSON `Most` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)`
 
 Return the collection without the last element.
 
@@ -1214,7 +1214,7 @@ Open(x): the endpoint x of an Interval, marked as excluded. A marker with no val
 
 ### ordering
 
-MathJSON `Ordering` · `(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<integer> where T`
+MathJSON `Ordering` · `(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<integer> where T: any`
 
 Return the indexes that would sort the collection.
 
@@ -1236,7 +1236,7 @@ Pair(1, 2)
 
 ### partition
 
-MathJSON `Partition` · `(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T`
+MathJSON `Partition` · `(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any`
 
 Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.
 
@@ -1309,7 +1309,7 @@ pointZ((3, 4, 5))
 
 ### position
 
-MathJSON `Position` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T`
+MathJSON `Position` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any`
 
 Return a list of indexes of elements in the collection satisfying the predicate.
 
@@ -1370,7 +1370,7 @@ quotientRing(integers, 5)
 
 ### randomShuffle
 
-MathJSON `RandomShuffle` · `((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)`
+MathJSON `RandomShuffle` · `((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)`
 
 Randomize the order of the elements in the collection. Shuffling a string yields a string. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.
 
@@ -1455,7 +1455,7 @@ repeat(0, 3)
 
 ### replaceAt
 
-MathJSON `ReplaceAt` · `(indexed_collection<T>, integer, T) -> list<T> where T`
+MathJSON `ReplaceAt` · `(indexed_collection<T>, integer, T) -> list<T> where T: any`
 
 Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.
 
@@ -1497,7 +1497,7 @@ residueClass(5, 7) + residueClass(4, 7)
 
 ### rest
 
-MathJSON `Rest` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)`
+MathJSON `Rest` · `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)`
 
 Return the collection without the first element.
 
@@ -1510,7 +1510,7 @@ rest([7, 8, 9])
 
 ### reverse
 
-MathJSON `Reverse` · `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)`
+MathJSON `Reverse` · `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)`
 
 Reverse the order of the elements of an indexed collection.
 
@@ -1521,7 +1521,7 @@ reverse([1, 2, 3])
 
 ### rotateLeft
 
-MathJSON `RotateLeft` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)`
+MathJSON `RotateLeft` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)`
 
 Rotate the elements of the collection to the left by n positions.
 
@@ -1532,7 +1532,7 @@ rotateLeft([1, 2, 3, 4])
 
 ### rotateRight
 
-MathJSON `RotateRight` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)`
+MathJSON `RotateRight` · `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)`
 
 Rotate the elements of the collection to the right by n positions.
 
@@ -1609,7 +1609,7 @@ Single(5)
 
 ### slice
 
-MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)`
+MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)`
 
 Return a contiguous run of elements from an indexed collection.
 
@@ -1624,7 +1624,7 @@ slice([10, 20, 30, 40, 50], 2, 4)
 
 ### sort
 
-MathJSON `Sort` · `((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T)`
+MathJSON `Sort` · `((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)`
 
 Return the elements of the collection sorted according to the given comparison function.
 
@@ -1736,7 +1736,7 @@ tabulate((i, j) => i * j, 2, 3)
 
 ### take
 
-MathJSON `Take` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)`
+MathJSON `Take` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)`
 
 Return the first `n` elements of an indexed collection.
 
@@ -1833,7 +1833,7 @@ union({1, 2}, {2, 3})
 
 ### unique
 
-MathJSON `Unique` · `((T) -> T where T: string) & ((collection<T>) -> list<T> where T)`
+MathJSON `Unique` · `((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)`
 
 Return a list of the unique elements of the collection.
 
