@@ -761,17 +761,6 @@ describe('A parameter with no declared type called with a list of points maps ov
       test(`${label}: ${route} respects the compiled omission contract`, () => {
         const interpreted = plain(build(untypedEngine(signature, true)).N());
         expect(interpreted).toEqual(expected);
-        if (signature === '(unknown) -> number') {
-          // This profile still produces an omission-capable Map type. A numeric
-          // point annotation gives the compiler a source contract it can prove.
-          expect(() =>
-            compile(build(untypedEngine(signature, false)), {
-              to: 'javascript',
-              fallback: false,
-            } as any)
-          ).toThrow(/Nothing/);
-          return;
-        }
         const r = compile(build(untypedEngine(signature, false)), {
           to: 'javascript',
           fallback: false,

@@ -989,7 +989,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(gpuCode(['Root', 'x', 3])).toBe(
       '(sign(x) * pow(abs(x), 0.33333334))'
     );
-    expect(gpuCode(['Variance', 'x', 'y'])).toBe(
+    // Pin scalar emission with scalar contracts; unconstrained aggregate
+    // inputs may contain Nothing and are deliberately refused.
+    ce.declare('varianceX', 'real');
+    ce.declare('varianceY', 'real');
+    expect(gpuCode(['Variance', 'varianceX', 'varianceY']).replace(/varianceX/g, 'x').replace(/varianceY/g, 'y')).toBe(
       '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
         '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
     );

@@ -484,8 +484,9 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     'function h(x) { mean(x, 1) }',
     [L123],
     '[1,3/2,2]',
-    [1, 1.5, 2],
+    'decline',
   ],
+  ['explicit numeric map of mean over a list', 'function h(x: list<real>) { map((v: real) => mean(v, 1), x) }', [L123], '[1,3/2,2]', [1, 1.5, 2]],
   ['mean(x, 1) over a scalar', 'function h(x) { mean(x, 1) }', [A5], '3', 3],
   // `Norm` is excluded: one norm per point.
   [

@@ -462,8 +462,8 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     [['DictionaryFrom', 'Q'], 'dictionary<any>'],
     // An element typed `any` can be a list, nested to any depth, which
     // `Sqrt` maps over: the element of the result is a number or a list.
-    [['Map', 'Sqrt', 'B'], 'list<indexed_collection<any> | number>'],
-    [['Map', 'g', 'B'], 'list<number>'],
+    [['Map', 'Sqrt', 'B'], 'list<indexed_collection<any> | nothing | number>'],
+    [['Map', 'g', 'B'], 'list<nothing | number>'],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);
     expect(expr.type.toString()).toBe(type);

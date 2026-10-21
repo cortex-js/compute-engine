@@ -213,7 +213,7 @@ describe('THE PRINTED VALUE OF A LAZY VIEW KEEPS A NOTHING RESULT', () => {
 
   test('Map: every view has two elements', () => {
     const map = ce.box(MAP);
-    expect(map.type.toString()).toBe('vector<integer^2>');
+    expect(map.type.toString()).toBe('list<integer | nothing^2>');
     expect(map.count).toBe(2);
     expect(symbolOf(map.at(2))).toBe('Nothing');
     expect([...map.each()].map((x) => x.toString())).toEqual([

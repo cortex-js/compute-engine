@@ -1412,7 +1412,14 @@ export interface CompileTarget<Expr = unknown> {
    * (`BaseCompiler.reboundLocalNames`), on the same targets as
    * {@link localFunctions}.
    */
-  reboundFunctions?: ReadonlyMap<string, { readonly decline?: string }>;
+  reboundFunctions?: ReadonlyMap<
+    string,
+    {
+      readonly decline?: string;
+      /** Every literal this binding can hold, for return-path safety proofs. */
+      readonly literals?: ReadonlyArray<Expr>;
+    }
+  >;
 
   /**
    * The identifier this target binds its VARS OBJECT to, when it reads free

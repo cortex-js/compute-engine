@@ -63,8 +63,18 @@ function operandTypesOf(expr: Expression, head: string): string[] {
 }
 
 describe('Tycho 332: whole Epsil programs compile to JavaScript', () => {
-  test('a: user functions', () => {
-    expect(runCompiled(fixture('a-user-functions.epsil'))).toEqual([
+  test('a: an unconstrained predicate source refuses omission-capable compilation', () => {
+    expect(() => runCompiled(fixture('a-user-functions.epsil'))).toThrow(
+      /Count.*Nothing/
+    );
+  });
+
+  test('a: a numeric circle source compiles the user functions', () => {
+    const source = fixture('a-user-functions.epsil').replace(
+      'function seen(acc, c)',
+      'function seen(acc: list<tuple<number, number, number, number>>, c)'
+    );
+    expect(runCompiled(source)).toEqual([
       224,
       [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
     ]);
@@ -220,10 +230,13 @@ describe('list operators over a parameter of a user function', () => {
   });
 
   test('Count and Length read a parameter that is a list at run time', () => {
+    const source =
+      'function seen(acc, c) { count(acc, e => abs(e[1] - c[1]) < 1e-6) > 0 }\n' +
+      'seen([(1, 2), (3, 4)], (3, 9))';
+    expect(() => runCompiled(source)).toThrow(/Count.*Nothing/);
     expect(
       runCompiled(
-        'function seen(acc, c) { count(acc, e => abs(e[1] - c[1]) < 1e-6) > 0 }\n' +
-          'seen([(1, 2), (3, 4)], (3, 9))'
+        source.replace('seen(acc, c)', 'seen(acc: list<tuple<real, real>>, c)')
       )
     ).toBe(true);
     expect(runCompiled('function f(xs) { length(xs) }\nf([1, 2, 3])')).toBe(3);

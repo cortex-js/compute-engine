@@ -6242,7 +6242,8 @@ function compileGPUSumProduct(
       // the shader would shift.
       for (let k = lowerNum; k <= upperNum; k++) {
         const kStr = formatGPUNumber(k);
-        const termBoundVars = BaseCompiler.withBoundNames(target, [index]);
+        const termScope = BaseCompiler.withBoundScope(target, [index]);
+        const termBoundVars = termScope.boundVars;
         const termSink = {
           stmts: [] as string[],
           boundVars: termBoundVars,
@@ -6251,7 +6252,7 @@ function compileGPUSumProduct(
         const innerTarget: CompileTarget<Expression> = {
           ...target,
           var: (id) => (id === index ? kStr : target.var(id)),
-          boundVars: termBoundVars,
+          ...termScope,
           hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
         };
         if (canProveCounter)
@@ -6314,7 +6315,8 @@ function compileGPUSumProduct(
 
   // The body binds `index`, so it gets its OWN sink: a statement it hoists
   // belongs inside this loop (a nested Sum), not ahead of it.
-  const bodyBoundVars = BaseCompiler.withBoundNames(target, [index]);
+  const bodyScope = BaseCompiler.withBoundScope(target, [index]);
+  const bodyBoundVars = bodyScope.boundVars;
   const bodySink = {
     stmts: [] as string[],
     boundVars: bodyBoundVars,
@@ -6328,7 +6330,7 @@ function compileGPUSumProduct(
           ? `f32(${index})`
           : `float(${index})`
         : target.var(id),
-    boundVars: bodyBoundVars,
+    ...bodyScope,
     hoist: bodySink,
   };
   if (canProveCounter && bothConstant)
@@ -8606,7 +8608,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       var: (id) => (id === index ? indexAsFloat : target.var(id)),
       // The counter shadows any same-named engine symbol (an index named `i`
       // must not resolve to the imaginary unit in the operand analysis).
-      boundVars: BaseCompiler.withBoundNames(target, [index]),
+      ...BaseCompiler.withBoundScope(target, [index]),
     });
 
     const indexDecl = isWGSL
@@ -15874,7 +15876,7 @@ function gpuDeclaredBodyTarget(
   return {
     ...target,
     var: (id) => refs.get(id) ?? target.var(id),
-    boundVars: BaseCompiler.withBoundNames(target, [...refs.keys()]),
+    ...BaseCompiler.withBoundScope(target, [...refs.keys()]),
   };
 }
 

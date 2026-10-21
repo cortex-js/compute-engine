@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- Corrected Map inference to retain possible nested collections and missing
+  data when it excludes `Nothing` from callback inputs. Opaque `any` callback
+  results remain `any`; they no longer copy the source element type.
+  Positional callbacks over strings report character data. Compilation again
+  accepts tuple mappings whose callback bodies prove they cannot return
+  `Nothing`. Omission-capable sources remain refused; numeric collection
+  annotations restore compilation for affected aggregate and predicate code.
+  Explicit numeric callback contracts also compile for mutable local functions
+  and callback parameters; opaque runtime callbacks remain refused.
+
 - Data tuples preserve `Nothing` coordinates: `(1, Nothing, 3)` has three
   positions. A tuple whose coordinates are all missing remains a tuple.
   `Zip` preserves these coordinates and all-missing rows, so source positions

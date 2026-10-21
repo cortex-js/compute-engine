@@ -3118,7 +3118,8 @@ function mappingSourceElementTypeD(x: OperandDescriptor): Type | undefined {
 function resultMayBeNothing(
   fn: OperandDescriptor,
   engine: PureEngineView,
-  callback = false
+  callback = false,
+  inferredResult?: Type
 ): boolean {
   // Literal data cannot return an omission. Keep the numeric tuple fast path
   // free of subtype walks for every coordinate in large point lists.
@@ -3185,7 +3186,9 @@ function resultMayBeNothing(
   return (
     isSubtype(
       'nothing',
-      callback ? (callbackResultTypeD(fn, engine) ?? 'unknown') : fn.type
+      callback
+        ? (inferredResult ?? callbackResultTypeD(fn, engine) ?? 'unknown')
+        : fn.type
     ) ||
     result(
       !callback
@@ -3205,21 +3208,46 @@ function withMapOmission(
   return (ops, context) => {
     const bypass = ops.slice(1).some((d) => {
       const t = d.facts.elementType ?? collectionElementType(d.type);
-      return t !== undefined && isSubtype('nothing', t);
+      return d.type === 'any' || (t !== undefined && isSubtype('nothing', t));
     });
+    // Excluding omission from any still leaves arbitrary depth and missing
+    // data. Keep that inference envelope instead of turning it into a
+    // negation type that scalar callback derivation mistakes for a scalar.
+    const callbackElement = (t: Type): Type =>
+      t === 'any' ? t : withoutNothing(t);
     const supplied = bypass
       ? ops.map((d, i) =>
           i === 0
             ? d
             : {
                 ...d,
-                type: mapImmediateElements(d.type, withoutNothing),
+                type: mapImmediateElements(d.type, callbackElement),
                 facts: {
-                  ...d.facts,
-                  elementType:
-                    d.facts.elementType === undefined
-                      ? undefined
-                      : withoutNothing(d.facts.elementType),
+                  get finite() {
+                    return d.facts.finite;
+                  },
+                  get sgn() {
+                    return d.facts.sgn;
+                  },
+                  get closed() {
+                    return d.facts.closed;
+                  },
+                  get collection() {
+                    return d.facts.collection;
+                  },
+                  get finiteCollection() {
+                    return d.facts.finiteCollection;
+                  },
+                  get indexed() {
+                    return d.facts.indexed;
+                  },
+                  get shape() {
+                    return d.facts.shape;
+                  },
+                  get elementType() {
+                    const t = d.facts.elementType;
+                    return t === undefined ? undefined : callbackElement(t);
+                  },
                 },
               }
         )
@@ -3229,7 +3257,12 @@ function withMapOmission(
       answer === undefined ||
       (!bypass &&
         (ops[0] === undefined ||
-          !resultMayBeNothing(ops[0], context.engine, true)))
+          !resultMayBeNothing(
+            ops[0],
+            context.engine,
+            true,
+            collectionElementType(answer.type)
+          )))
     )
       return answer;
     return BoxedType.forResult(
@@ -3589,10 +3622,11 @@ function declaredOrCallElementTypeD(
  * call of `f` on one element of each source (`derive`), or `undefined`
  * when that type is not known either.
  *
- * A library operator is excluded: its type handler can read the STRUCTURE
- * of its operand, and the element stands here for a synthetic bound symbol.
+ * Most library operators are excluded: their handlers can read operand
+ * STRUCTURE, while an element here is a synthetic bound symbol. Positional
+ * accessors are safe exceptions: their component types follow operand types.
  * `Hold` would answer `symbol` for `Map(Hold, [1, 2])`, whose elements are
- * `Hold(1)` and `Hold(2)`. A library operator keeps its declared result.
+ * `Hold(1)` and `Hold(2)`. Other library operators keep their declared result.
  *
  * A user function with no declared result has the result type that the
  * engine inferred from its body with each parameter `unknown`. When a
@@ -3610,7 +3644,19 @@ function callbackCallElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const s = fn.structureOf?.();
-  if (s?.kind !== 'symbol' || !isUserFunctionName(engine, s.name))
+  if (
+    s?.kind !== 'symbol' ||
+    (!isUserFunctionName(engine, s.name) &&
+      ![
+        'First',
+        'Second',
+        'Third',
+        'Last',
+        'PointX',
+        'PointY',
+        'PointZ',
+      ].includes(s.name))
+  )
     return undefined;
   const elementTypes: Type[] = [];
   for (const source of sources) {
@@ -5159,6 +5205,8 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // typed from its point: the `missing` arm is stripped before this handler
   // runs.)
   if (t === 'missing') return 'number';
+  // Strings are indexed character data, not lists of numeric points.
+  if (isSubtype(t, 'string')) return withMarker('character');
   // The bare `tuple` (a point of unknown arity: what a callback declared
   // `-> tuple` answers) is ONE point, so its coordinate is one value, whose
   // component type the bare spelling does not state: `number`, which is how
@@ -10648,7 +10696,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           bareOperatorElementTypeD(ops[0], [ops[1]], engine, derive) ??
           broadcastingCallbackElementTypeD(ops[0], [ops[1]], engine, derive) ??
           declaredOrCallElementTypeD(ops[0], [ops[1]], engine, derive);
-        if (!resultType || resultType === 'unknown' || resultType === 'any') {
+        // A known callable with an unconstrained result does not return the
+        // source's element type. Preserve any unless a call derivation above
+        // proved a more precise result.
+        if (resultType === 'any')
+          return BoxedType.forResult(
+            mapOperatorResultType(sourceType(0), 'any'),
+            engine._typeResolver
+          );
+        if (!resultType || resultType === 'unknown') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `NumericApproximation`, whose
           // lazy result types `unknown` — without this the whole Map would

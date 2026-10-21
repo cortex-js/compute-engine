@@ -683,6 +683,22 @@ classify every multi-input operation as a paired statistic.
 input follows the operation's empty-input rule. This does not reopen the
 decided denominator rule for `Mean`.
 
+#### Implemented compiler compatibility rule
+
+Keep the omission safety rule while restoring cases the compiler can prove
+safe. Source elements that may be `Nothing` remain refused. A broad inferred
+callback result may compile when inspection of its body proves that all return
+paths exclude `Nothing`; this does not require evaluating the callback or its
+source. A possible omitted branch, an early unit return, or an unknown call
+cannot establish that proof.
+
+Where no proof is available, provide an accurate content annotation such as
+`list<real>` or a list of numeric circle tuples. The affected unannotated
+Tycho predicate programs remain refused, and annotated counterparts retain
+compilation coverage and the same results. This is the selected temporary
+compatibility policy, not an implementation of a distinct compiled omission
+representation or the global `unknown` migration.
+
 #### Repeated reads and captured state (Q11)
 
 **Open.** R and the ban on implicit compaction do not determine the number

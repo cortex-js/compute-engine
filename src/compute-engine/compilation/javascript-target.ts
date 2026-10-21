@@ -4749,7 +4749,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args[0],
       `(${elementsArg('Rest', args[0], compile)}).slice(1)`
     ),
-  Take: (args, compile) => {
+  Take: (args, compile, target) => {
     if (args[1] == null)
       throw new Error('Could not compile `Take`: missing count');
     // A statically infinite operand (`Take(Map(f, 1..∞), n)`) compiles as a
@@ -4775,7 +4775,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Take\`: a negative count (\`${args[1].toString()}\`) counts from ` +
             `the end, and an infinite collection has no end.`
         );
-      return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compileRealOperand(args[1], compile)})`;
+      return `_SYS.takeIter(${emitLazyStream(args[0]!, compile, target)}, ${compileRealOperand(args[1], compile)})`;
     }
     const coll = elementsArg('Take', args[0], compile);
     return joinIfString(args[0], takeDropSlice('Take', coll, args[1], compile));
@@ -6020,7 +6020,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // an upstream body that assigns a variable of the enclosing scope would
     // leave the predicate reading a binding cached before that assignment.
     if (isLazyStream(args[0]))
-      return `_SYS.takeWhileIter(${emitLazyStream(args[0]!, compile)}, ${fnArg('TakeWhile', args[1], args[0], compile)})`;
+      return `_SYS.takeWhileIter(${emitLazyStream(args[0]!, compile, target)}, ${fnArg('TakeWhile', args[1], args[0], compile)})`;
     const coll = elementsArg('TakeWhile', args[0], compile);
     return joinIfString(
       args[0],
@@ -10197,10 +10197,15 @@ function compileToTarget(
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
+    const lambdaScope = BaseCompiler.withBoundScope(target, params);
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
-      boundVars: BaseCompiler.withBoundNames(target, params),
+      ...lambdaScope,
+      declaredVarTypes: {
+        ...lambdaScope.declaredVarTypes,
+        ...BaseCompiler.literalDeclaredParamTypes(expr),
+      },
     };
     // The emitted definitions land inside the lambda body (below), where the
     // parameters are in scope: a folded symbol value that mentions one is
@@ -10876,7 +10881,8 @@ function isLazyStream(expr: Expression | undefined): boolean {
  */
 function emitLazyStream(
   expr: Expression,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
   if (!isFunction(expr))
     throw new Error(
@@ -10884,7 +10890,7 @@ function emitLazyStream(
     );
   const op = expr.operator;
   // Stream stages bypass compileExpr, so enforce the same omission contract here.
-  BaseCompiler.assertCollectionOmissionSupported(op, expr.ops, expr);
+  BaseCompiler.assertCollectionOmissionSupported(op, expr.ops, expr, target);
   if (op === 'Range') {
     const step = infiniteRangeStep(expr);
     if (step === undefined)
@@ -10897,15 +10903,15 @@ function emitLazyStream(
   // keeps its source at operand 0.
   if (op === 'Map') {
     const mapSource = expr.ops[1];
-    return `_SYS.mapIter(${emitLazyStream(mapSource, compile)}, ${fnArg('Map', expr.ops[0], mapSource, compile)})`;
+    return `_SYS.mapIter(${emitLazyStream(mapSource, compile, target)}, ${fnArg('Map', expr.ops[0], mapSource, compile)})`;
   }
   const source = expr.ops[0];
   if (op === 'Filter')
-    return `_SYS.filterIter(${emitLazyStream(source, compile)}, ${fnArg('Filter', expr.ops[1], source, compile)})`;
+    return `_SYS.filterIter(${emitLazyStream(source, compile, target)}, ${fnArg('Filter', expr.ops[1], source, compile)})`;
   if (op === 'Drop')
-    return `_SYS.dropIter(${emitLazyStream(source, compile)}, ${compileRealOperand(expr.ops[1], compile)})`;
+    return `_SYS.dropIter(${emitLazyStream(source, compile, target)}, ${compileRealOperand(expr.ops[1], compile)})`;
   if (op === 'Rest')
-    return `_SYS.dropIter(${emitLazyStream(source, compile)}, 1)`;
+    return `_SYS.dropIter(${emitLazyStream(source, compile, target)}, 1)`;
   throw new Error(
     `Could not compile \`${op}\`: not a lazily-compilable infinite collection`
   );
@@ -13634,7 +13640,7 @@ function emitSumProduct(
           const innerTarget: CompileTarget<Expression> = {
             ...target,
             var: (id) => (id === index ? String(k) : target.var(id)),
-            boundVars: BaseCompiler.withBoundNames(target, [index]),
+            ...BaseCompiler.withBoundScope(target, [index]),
           };
           recordIntegerRange(innerTarget, index, k, k);
           const term = useIndexValues
@@ -13813,7 +13819,7 @@ function emitSumProduct(
   const innerTarget: CompileTarget<Expression> = {
     ...target,
     var: (id) => (id === index ? index : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, [index]),
+    ...BaseCompiler.withBoundScope(target, [index]),
   };
 
   // The counter stays numeric unless the body writes it. Declining on any
@@ -14149,7 +14155,7 @@ function compileIntegrate(
   const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...sized,
     var: (id) => (names.includes(id) ? id : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, names),
+    ...BaseCompiler.withBoundScope(target, names),
   });
 
   // The integrand runs once per quadrature sample, so a subexpression of it

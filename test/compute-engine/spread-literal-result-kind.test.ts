@@ -611,8 +611,9 @@ describe('Compilation of a consumer of a join over an inferred collection', () =
     for (const inner of INNER) {
       test(`${name} of ${inner[0]}, top level`, () => {
         const ce = new ComputeEngine();
+        if (name === 'Sum') ce.declare('a', 'list<real>');
         const e = ce.box(make(inner));
-        expect(ce.symbol('a').type.toString()).toBe('collection<any>');
+        expect(ce.symbol('a').type.toString()).toBe(name === 'Sum' ? 'list<real>' : 'collection<any>');
         const result = compile(e, { to: 'javascript', fallback: false } as any);
         expect(result.success).toBe(true);
         expect(result.run!({ a: [4, 5] } as any)).toEqual(expected);
@@ -626,7 +627,7 @@ describe('Compilation of a consumer of a join over an inferred collection', () =
 
   const PROGRAMS: [string, string][] = [
     ['Length', 'function f(a) { length(join(a, [0])) }\nf([4, 5])'],
-    ['Sum', 'function f(a) { sum(join(a, [0])) }\nf([4, 5])'],
+    ['Sum', 'function f(a: list<real>) { sum(join(a, [0])) }\nf([4, 5])'],
     ['a spread', 'function f(a) { [...join(a, [1]), 2] }\nf([4, 5])'],
     [
       'the result of a call',

@@ -1692,7 +1692,7 @@ function tryIntervalBroadcast(
     ...target,
     cse: undefined,
     var: (name) => (names.includes(name) ? name : target.var(name)),
-    boundVars: BaseCompiler.withBoundNames(target, names),
+    ...BaseCompiler.withBoundScope(target, names),
   };
   const body = handler(
     args.map((a, i) => (literal[i] ? a : engine.expr(params[i]!))),
@@ -2365,7 +2365,7 @@ function compileNarrowedIntervalArm(
     inner = {
       ...inner,
       var: (id) => (id === name ? t : outerVar(id)),
-      boundVars: BaseCompiler.withBoundNames(inner, [t]),
+      ...BaseCompiler.withBoundScope(inner, [t]),
     };
   }
   if (params.length === 0) return undefined;
@@ -3826,7 +3826,7 @@ function compileIntervalDynamicRangeReduce(
     ...target,
     cse: undefined,
     var: (id) => (id === index ? index : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, [index]),
+    ...BaseCompiler.withBoundScope(target, [index]),
   };
   const term = shape.term(ce.expr(index));
   const termCode = BaseCompiler.compileValueOperand(term, inner);
@@ -3924,7 +3924,7 @@ function compileIntervalSumProduct(
           const innerTarget: CompileTarget<Expression> = {
             ...target,
             var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
-            boundVars: BaseCompiler.withBoundNames(target, [index]),
+            ...BaseCompiler.withBoundScope(target, [index]),
           };
           terms.push(compileTerm(innerTarget));
         }
@@ -3961,7 +3961,7 @@ function compileIntervalSumProduct(
       compileTerm({
         ...target,
         var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
-        boundVars: BaseCompiler.withBoundNames(target, [index]),
+        ...BaseCompiler.withBoundScope(target, [index]),
       })
   );
   // With SYMBOLIC bounds the bindings follow an EMPTY-RANGE exit: a range
@@ -4215,7 +4215,7 @@ function compileIntervalIntegrate(
   const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...sized,
     var: (id) => (names.includes(id) ? id : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, names),
+    ...BaseCompiler.withBoundScope(target, names),
   });
 
   // A subexpression of the integrand that mentions no integration variable

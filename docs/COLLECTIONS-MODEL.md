@@ -63,6 +63,41 @@ Compilation refuses tuple construction with possible `Nothing` coordinates and
 it from missing data. JavaScript and Python preserve explicitly constructed
 all-missing tuples in their existing tuple representations.
 
+## Map types and compilation of omission
+
+Removing `Nothing` from the callback input does not make an arbitrary datum
+numeric or scalar. A source declared `list<any>` can still supply nested
+collections and missing data. Its mapped result keeps those possibilities and
+adds `nothing` for bypassed positions. A source declared `any` keeps the same
+possibilities when its value is a collection.
+
+A callback's output type describes its results. For example, an opaque
+callback declared `(integer) -> any` over a list of integers yields
+`list<any>`; the input's integer type cannot stand in for an unknown result.
+Positional accessors can derive their result from the input's component type:
+`Map(First, strings)` produces character data, with a missing arm where an
+empty string is possible.
+
+The compiler must prove that omission cannot occur at an unsupported boundary.
+It still refuses omission-capable sources such as `list<any>`, even for a
+constant callback. A broad callback result type alone need not cause refusal
+when the callback body proves that every return path excludes `Nothing`.
+Unknown calls, a possible omitted branch, and an early unit return do not
+supply that proof. The proof never runs the callback or enumerates its source.
+A runtime callback parameter or a mutable local callback can instead declare
+its result, for example `h: (real) -> real`. This contract excludes omission;
+an unannotated callback cannot borrow the type of a global with the same name.
+For a mutable local whose possible functions are visible in the source, all
+of their return paths must exclude omission; an annotation cannot hide a
+visible omitted return.
+
+Use a real content contract when the compiler needs one: `list<real>` says
+that each immediate datum is numeric and cannot be `Nothing`. It allows
+numeric aggregation and predicate counting to compile. `collection<any>`
+keeps accepting arbitrary elements, so those omission-sensitive operations
+remain refused until the target can represent omission distinctly. Narrowing
+an annotation is a promise about the data, not an unchecked override.
+
 ## Lazy collections
 
 Laziness is a depth property, not permission to skip operand evaluation.

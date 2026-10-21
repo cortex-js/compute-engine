@@ -737,7 +737,7 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
     // element by element — so a collection element must reach its kernel
     // intact.
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<list<real>>');
     const r = build(ce, ['Map', 'First', 'xs']);
     expect(r.code).toContain('(_fn_First)');
     expect(r.code).not.toContain('_fn_First$b');

@@ -38,8 +38,10 @@ export function mapImmediateElements(
       t === 'set' ||
       t === 'collection' ||
       t === 'indexed_collection'
-    )
-      return { kind: t, elements: transform('unknown') };
+    ) {
+      const elements = transform('unknown');
+      return elements === 'unknown' ? t : { kind: t, elements };
+    }
     return t;
   }
   switch (t.kind) {

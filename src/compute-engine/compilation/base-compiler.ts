@@ -2424,7 +2424,14 @@ function hasBroadcastableCoordinate(t: Type): boolean {
  *   statement assigns, at its top level or inside it.
  */
 type ReboundFunctionLocals = {
-  rebound: Map<string, { literal?: Expression; decline?: string }>;
+  rebound: Map<
+    string,
+    {
+      literal?: Expression;
+      literals?: ReadonlyArray<Expression>;
+      decline?: string;
+    }
+  >;
   writes: Map<Expression, Set<string>>;
 };
 
@@ -4490,7 +4497,7 @@ export class BaseCompiler {
     const inner: CompileTarget<Expression> = {
       ...target,
       var: (id) => (names.includes(id) ? id : target.var(id)),
-      boundVars: BaseCompiler.withBoundNames(target, names),
+      ...BaseCompiler.withBoundScope(target, names),
     };
     const body = BaseCompiler.compile(engine._fn(h, presentArgs), inner);
     const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
@@ -10385,11 +10392,127 @@ export class BaseCompiler {
       'InterquartileRange',
     ]);
 
+  /** Prove a callback cannot return omission when legacy inference says any.
+   * This inspects return paths only; it never evaluates a callback or input. */
+  private static callbackExcludesNothing(
+    fn: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
+    // Without the target's local-function table a name could resolve to a
+    // global definition even though the compiled stream uses a local shadow.
+    if (target === undefined) return false;
+    const active = new Set<Expression>();
+    const shields: ReadonlySet<string>[] = [];
+    const isBound = (name: string) =>
+      target.varsKeys?.has(name) === true ||
+      target.foldExcludedOps?.has(name) === true ||
+      shields.some((scope) => scope.has(name));
+    const returnsSafe = (x: Expression): boolean => {
+      if (!isFunction(x) || x.operator === 'Function') return true;
+      if (x.operator === 'Return')
+        return x.nops > 0 && result(x.op1) && returnsSafe(x.op1);
+      return x.ops.every(returnsSafe);
+    };
+    const body = (literal: Expression): boolean => {
+      if (!isFunction(literal, 'Function') || active.has(literal)) return false;
+      active.add(literal);
+      const bound = new Set(functionLiteralBoundNames(literal.ops.slice(1)));
+      const collect = (x: Expression): void => {
+        if (!isFunction(x) || x.operator === 'Function') return;
+        // Shield descendants too: this proof does not enter their compilation
+        // scopes, so their locals cannot be resolved through a global name.
+        for (const name of boundVariableNames(x)) bound.add(name);
+        x.ops.forEach(collect);
+      };
+      collect(literal.op1);
+      shields.push(bound);
+      try {
+        return returnsSafe(literal.op1) && result(literal.op1);
+      } finally {
+        active.delete(literal);
+        shields.pop();
+      }
+    };
+    const declaredResultSafe = (name: string): boolean => {
+      const t = functionResult(target.declaredVarTypes?.[name] ?? 'unknown');
+      return t !== undefined && t !== 'unknown' && !isSubtype('nothing', t);
+    };
+    const callable = (x: Expression): boolean => {
+      if (isFunction(x, 'Function')) return body(x);
+      if (!isSymbol(x) || isBound(x.symbol)) return false;
+      const local = target
+        ? BaseCompiler.blockLocalFunction(x.symbol, target)
+        : undefined;
+      if (local !== undefined) {
+        if (local !== null) return body(local);
+        const rebound = target.reboundFunctions?.get(x.symbol);
+        if (rebound !== undefined)
+          return (
+            rebound.decline === undefined &&
+            rebound.literals?.every(body) === true
+          );
+        return declaredResultSafe(x.symbol);
+      }
+      // A known local literal is inspectable; other enclosing bindings must
+      // never fall through to a global function with the same spelling.
+      if (BaseCompiler.isCompileBoundName(x.symbol))
+        return declaredResultSafe(x.symbol);
+      const literal = BaseCompiler.userFunctionLiteral(x.engine, x.symbol);
+      if (literal) return body(literal);
+      const declared = x.engine.lookupDefinition(x.symbol);
+      const t =
+        declared && isOperatorDef(declared)
+          ? declared.operator.inferredSignature
+            ? undefined
+            : functionResult(declared.operator.signature.type)
+          : x.valueDefinition?.inferredType === true
+            ? undefined
+            : functionResult(x.type.type);
+      return t !== undefined && t !== 'unknown' && !isSubtype('nothing', t);
+    };
+    const result = (x: Expression): boolean => {
+      if (isFunction(x)) {
+        if (x.operator === 'Function') return true;
+        if (x.operator === 'If') return x.ops.slice(1).every(result);
+        if (x.operator === 'Which')
+          return x.ops.filter((_, i) => i % 2 === 1).every(result);
+        if (x.operator === 'Block')
+          return x.nops > 0 && result(x.ops[x.nops - 1]);
+        if (x.operator === 'Return') return x.nops > 0 && result(x.op1);
+        if (x.operator === 'Apply') return callable(x.op1);
+        if (['N', 'NumericApproximation', 'When'].includes(x.operator))
+          return x.nops > 0 && result(x.op1);
+        if (isBound(x.operator)) return false;
+        const local = target
+          ? BaseCompiler.blockLocalFunction(x.operator, target)
+          : undefined;
+        if (local !== undefined) return local !== null && body(local);
+        if (BaseCompiler.isCompileBoundName(x.operator)) return false;
+        const literal = BaseCompiler.userFunctionLiteral(x.engine, x.operator);
+        if (literal) return body(literal);
+        if (x.operatorDefinition?.inferredSignature) return false;
+        const declared =
+          x.operatorDefinition &&
+          functionResult(x.operatorDefinition.signature.type);
+        if (
+          declared !== undefined &&
+          declared !== 'unknown' &&
+          !isSubtype('nothing', declared)
+        )
+          return true;
+      }
+      const t = compilationType(x);
+      return t !== 'unknown' && !isSubtype('nothing', t);
+    };
+    return callable(fn);
+  }
+
   /** Reject omission-sensitive collections until targets can preserve Nothing. */
   static assertCollectionOmissionSupported(
     h: string,
     args: ReadonlyArray<Expression>,
-    node?: Expression
+    node?: Expression,
+    target?: CompileTarget<Expression>
   ): void {
     const tupleType = h === 'Tuple' && node ? compilationType(node) : undefined;
     if (
@@ -10470,11 +10593,27 @@ export class BaseCompiler {
       const hasOmission = sources.some((source) =>
         collectionMayOmit(compilationType(source), paired && args.length === 1)
       );
+      const callbackResult =
+        h === 'Map' && isSymbol(args[0])
+          ? functionResult(
+              target?.declaredVarTypes?.[args[0].symbol] ??
+                compilationType(args[0])
+            )
+          : undefined;
       if (
         hasOmission ||
         (h === 'Map' &&
           node !== undefined &&
-          collectionMayOmit(compilationType(node), false))
+          (collectionMayOmit(compilationType(node), false) ||
+            // A runtime callable's own contract takes precedence over any
+            // result inference that looked up a global with the same name.
+            (isSymbol(args[0]) &&
+              BaseCompiler.isCompileBoundName(args[0].symbol) &&
+              (target?.reboundFunctions?.has(args[0].symbol) === true ||
+                callbackResult === undefined ||
+                callbackResult === 'unknown' ||
+                isSubtype('nothing', callbackResult)))) &&
+          !BaseCompiler.callbackExcludesNothing(args[0], target))
       )
         throw new Error(
           `Could not compile \`${h}\`: possible 'Nothing' elements require a distinct omission representation.`
@@ -10498,7 +10637,7 @@ export class BaseCompiler {
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
-    BaseCompiler.assertCollectionOmissionSupported(h, args, node);
+    BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
 
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
@@ -10587,7 +10726,7 @@ export class BaseCompiler {
           inner = {
             ...target,
             var: (id) => (names.includes(id) ? id : target.var(id)),
-            boundVars: BaseCompiler.withBoundNames(target, names),
+            ...BaseCompiler.withBoundScope(target, names),
           };
         }
       }
@@ -12000,16 +12139,29 @@ export class BaseCompiler {
       // generated name (see `lambdaParamBinding`); `boundVars` keeps the
       // literal's OWN parameter names, which are what the expression binds.
       const binding = BaseCompiler.lambdaParamBinding(params, ops[0], target);
+      // Preserve captured contracts, but an untyped parameter shadows an
+      // enclosing declaration of the same name just as a typed one does.
+      const declaredVarTypes = { ...target.declaredVarTypes };
+      for (const name of params) delete declaredVarTypes[name];
+      if (isFunction(literal, 'Function'))
+        Object.assign(
+          declaredVarTypes,
+          BaseCompiler.literalDeclaredParamTypes(literal)
+        );
+      // A callback runs later, so sibling functions come from the whole
+      // enclosing statement list. Its parameters still shadow those siblings.
+      const lambdaScope = BaseCompiler.withBoundScope(
+        {
+          ...target,
+          localFunctions: target.lexicalFunctions ?? target.localFunctions,
+        },
+        params
+      );
       const lambdaTarget: CompileTarget<Expression> = {
         ...target,
         var: binding.varOf,
-        boundVars: BaseCompiler.withBoundNames(target, params),
-        // The body runs at CALL time, not here, so it resolves a block-local
-        // function against the WHOLE enclosing statement list rather than the
-        // part emitted so far — that is what lets `isEven`/`isOdd` reference
-        // each other, and a lambda call a sibling declared after it. See
-        // `CompileTarget.lexicalFunctions`.
-        localFunctions: target.lexicalFunctions ?? target.localFunctions,
+        ...lambdaScope,
+        declaredVarTypes,
       };
       // Which parameters are declared a NON-REAL NUMBER type, and so make the
       // body compute in the `{ re, im }` complex lane? A parameter's own
@@ -15436,7 +15588,7 @@ export class BaseCompiler {
           const i = params.indexOf(id);
           return i >= 0 ? sources[i] : target.var(id);
         },
-        boundVars: BaseCompiler.withBoundNames(target, params),
+        ...BaseCompiler.withBoundScope(target, params),
       };
       BaseCompiler._pushLocalComplex(complexFrame);
       if (radicalFrame !== undefined)
@@ -15980,7 +16132,7 @@ export class BaseCompiler {
       const innerTarget: CompileTarget<Expression> = {
         ...target,
         var: (id: string) => (id === v ? code : target.var(id)),
-        boundVars: BaseCompiler.withBoundNames(target, [v]),
+        ...BaseCompiler.withBoundScope(target, [v]),
       };
       return fn(
         [engine.expr(v)],
@@ -16108,7 +16260,7 @@ export class BaseCompiler {
       const innerTarget: CompileTarget<Expression> = {
         ...target,
         var: (id: string) => (id === v ? code : target.var(id)),
-        boundVars: BaseCompiler.withBoundNames(target, [v]),
+        ...BaseCompiler.withBoundScope(target, [v]),
       };
       // The loop variable stands for ONE element, so it is not
       // collection-typed and the Python guard above does not fire again.
@@ -19155,7 +19307,7 @@ export class BaseCompiler {
           if (locals.includes(id)) return spellLocal(id);
           return target.var(id);
         },
-        boundVars: BaseCompiler.withBoundNames(target, locals),
+        ...BaseCompiler.withBoundScope(target, locals),
         declaredVarTypes,
         localFunctions,
         lexicalFunctions,
@@ -19641,7 +19793,7 @@ export class BaseCompiler {
               ? target.number(0).replace('0', index)
               : index
             : target.var(id),
-        boundVars: BaseCompiler.withBoundNames(target, [index]),
+        ...BaseCompiler.withBoundScope(target, [index]),
       };
 
       const bodyStmts = inBody(bodyTarget, () =>
@@ -20076,7 +20228,7 @@ export class BaseCompiler {
             ? target.number(0).replace('0', id)
             : id
           : target.var(id),
-      boundVars: BaseCompiler.withBoundNames(target, [...loopVarSet]),
+      ...BaseCompiler.withBoundScope(target, [...loopVarSet]),
     };
 
     if (target.language === 'javascript') {
@@ -20231,7 +20383,7 @@ export class BaseCompiler {
         const guardTarget: CompileTarget<Expression> = {
           ...target,
           var: (id: string) => (visible.has(id) ? id : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, [...visible]),
+          ...BaseCompiler.withBoundScope(target, [...visible]),
         };
         inner = `if (${BaseCompiler.compileGuardTest(guard, guardTarget)}) { ${inner} }`;
       }
@@ -20827,7 +20979,7 @@ export class BaseCompiler {
     return {
       ...target,
       var: (id) => (temps.includes(id) ? id : target.var(id)),
-      boundVars: BaseCompiler.withBoundNames(target, temps),
+      ...BaseCompiler.withBoundScope(target, temps),
       declaredVarTypes: BaseCompiler.statementListDeclaredVarTypes(
         stmts,
         target.declaredVarTypes
@@ -20966,15 +21118,15 @@ export class BaseCompiler {
    *
    * A name this list writes but does NOT declare is a binding of an enclosing
    * list. That list saw every write of this list as a nested write, so its
-   * entry already accounts for all of the literals the name can hold. Its
-   * decline is therefore kept: this list sees only some of those literals,
-   * and their agreement proves nothing about the others.
+   * entry already accounts for all of the literals the name can hold. Keep
+   * that complete entry: this list sees only some of those literals, and
+   * their signatures and return paths prove nothing about the others.
    */
   private static reboundFunctionScope(
     stmts: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     rebound: ReboundFunctionLocals
-  ): ReadonlyMap<string, { readonly decline?: string }> | undefined {
+  ): CompileTarget<Expression>['reboundFunctions'] {
     if (target.declare !== undefined) return undefined;
     const inherited = target.reboundFunctions;
     if (rebound.rebound.size === 0 && (inherited?.size ?? 0) === 0)
@@ -20987,11 +21139,12 @@ export class BaseCompiler {
         scope.delete(stmt.ops[0].symbol);
       }
     for (const [name, info] of rebound.rebound) {
-      if (!declared.has(name) && inherited?.get(name)?.decline !== undefined)
-        continue;
+      if (!declared.has(name) && inherited?.has(name)) continue;
       scope.set(
         name,
-        info.decline === undefined ? {} : { decline: info.decline }
+        info.decline === undefined
+          ? { literals: info.literals }
+          : { decline: info.decline }
       );
     }
     return scope;
@@ -21134,7 +21287,7 @@ export class BaseCompiler {
           `or a different number of parameters).`;
       result.rebound.set(
         name,
-        decline === undefined ? { literal: literals[0] } : { decline }
+        decline === undefined ? { literal: literals[0], literals } : { decline }
       );
       for (const stmt of writers.get(name) ?? [])
         result.writes.set(
@@ -21347,7 +21500,7 @@ export class BaseCompiler {
         if (id === index) return index;
         return target.var(id);
       },
-      boundVars: BaseCompiler.withBoundNames(target, [index]),
+      ...BaseCompiler.withBoundScope(target, [index]),
     };
     const fn = BaseCompiler.compileOp(node, 0, bodyTarget, 0, args[0]);
 
@@ -25673,7 +25826,7 @@ export class BaseCompiler {
     return {
       ...target,
       var: (id) => accessors.get(id) ?? target.var(id),
-      boundVars: BaseCompiler.withBoundNames(target, [...accessors.keys()]),
+      ...BaseCompiler.withBoundScope(target, [...accessors.keys()]),
       sequenceVars,
     };
   }
@@ -34599,7 +34752,7 @@ export class BaseCompiler {
       var: binding.varOf,
       // The literal's OWN parameter names — what the body expression binds,
       // whatever they are emitted as.
-      boundVars: BaseCompiler.withBoundNames(root, declared),
+      ...BaseCompiler.withBoundScope(root, declared),
       // The parameters' DECLARED types, for the lowerings that read a raw
       // (never-bound) symbol — the bare-`Field` protocol property GET tier,
       // whose receiver types `unknown` in the canonical body because nothing
@@ -34680,7 +34833,7 @@ export class BaseCompiler {
    * definition compile (`prepareUserFunctionBody`) and the reference
    * analysis, so the two agree on what a raw body symbol's static type is.
    */
-  private static literalDeclaredParamTypes(
+  static literalDeclaredParamTypes(
     literal: Expression & FunctionInterface
   ): Record<string, Type> {
     const out: Record<string, Type> = {};
@@ -37315,6 +37468,41 @@ export class BaseCompiler {
       ...refs,
       ...fallbackTypes(),
     } as CompilationResult<T>;
+  }
+
+  /** Bind names while removing contracts belonging to their outer bindings. */
+  static withBoundScope(
+    target: CompileTarget<Expression>,
+    names: ReadonlyArray<string>
+  ): Pick<
+    CompileTarget<Expression>,
+    | 'boundVars'
+    | 'declaredVarTypes'
+    | 'localFunctions'
+    | 'lexicalFunctions'
+    | 'reboundFunctions'
+  > {
+    // A binder replaces the binding, its contract, and its callable provenance.
+    // Keep captured names; callers can then install their new local facts.
+    const without = <T>(entries: ReadonlyMap<string, T> | undefined) => {
+      if (entries === undefined || !names.some((name) => entries.has(name)))
+        return entries;
+      const kept = new Map(entries);
+      for (const name of names) kept.delete(name);
+      return kept;
+    };
+    const declaredVarTypes = target.declaredVarTypes && {
+      ...target.declaredVarTypes,
+    };
+    if (declaredVarTypes)
+      for (const name of names) delete declaredVarTypes[name];
+    return {
+      boundVars: BaseCompiler.withBoundNames(target, names),
+      declaredVarTypes,
+      localFunctions: without(target.localFunctions),
+      lexicalFunctions: without(target.lexicalFunctions),
+      reboundFunctions: without(target.reboundFunctions),
+    };
   }
 
   /**

@@ -170,22 +170,22 @@ for gap in [(outer, A, C), (outer, B, C), (A, B, C), (outer, A, D), (outer, B, D
 let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
 (length(circles), counts)`;
 
-  test('the JavaScript target computes the 224 circles', () => {
+  test('an unannotated predicate source refuses omission-capable compilation', () => {
     const { expr } = box(PROGRAM);
-    expect(compiled(expr)).toEqual([
-      224,
-      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
-    ]);
+    expect(() => compiled(expr)).toThrow(/Count.*Nothing/);
   });
 
   // The accumulator annotated: before 2026-09-30 one annotation made the
   // whole derived signature a contract, and the inferred slot `r` refused
   // `gap[3]`, typed `missing | tuple<…>` from `first(filter(…))`. Only the
   // annotated slot is enforced now.
-  test('the variant with an annotated accumulator compiles too', () => {
+  test('numeric accumulator and predicate source contracts compile the 224 circles', () => {
     const annotated = PROGRAM.replace(
       'function fill(p, q, r, depth, acc) {',
       'function fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>) {'
+    ).replace(
+      'function seen(acc, c)',
+      'function seen(acc: list<tuple<number, number, number, number>>, c)'
     );
     expect(annotated).not.toBe(PROGRAM);
     const { expr } = box(annotated);

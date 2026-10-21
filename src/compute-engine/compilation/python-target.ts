@@ -1082,7 +1082,7 @@ function compilePythonSumProductClauses(
     idxTarget = {
       ...prev,
       var: (id) => (id === name ? index : prev.var(id)),
-      boundVars: BaseCompiler.withBoundNames(prev, [name]),
+      ...BaseCompiler.withBoundScope(prev, [name]),
     };
   }
 
@@ -1468,7 +1468,7 @@ function pythonElementHeaders(
     scope = {
       ...prev,
       var: (id) => (bound.has(id) ? id : prev.var(id)),
-      boundVars: BaseCompiler.withBoundNames(prev, b.names),
+      ...BaseCompiler.withBoundScope(prev, b.names),
     };
     // A GUARDED clause, `Element(x, xs, cond)`, is the `if` of a Python
     // comprehension clause, `for x in xs if cond`. The guard reads the
@@ -5635,7 +5635,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const bodyCode = BaseCompiler.compile(body.canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
-      boundVars: BaseCompiler.withBoundNames(target, params),
+      ...BaseCompiler.withBoundScope(target, params),
     });
     return `(lambda ${params.join(', ')}: ${bodyCode})`;
   },

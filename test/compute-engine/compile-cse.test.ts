@@ -1678,8 +1678,8 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
  * ruling, a CALL whose head is a bound parameter has no lowering at all — the
  * compiler declines and the interpreter evaluates it — so for those shapes the
  * decline supersedes the merge question, and each test pins the decline. The
- * shapes where the shadowed name is an OPERAND rather than a head still
- * compile, and still pin that CSE leaves them unmerged.
+ * shapes where the shadowed name is an OPERAND compile when the callback
+ * contract excludes omission, and pin that CSE leaves them unmerged.
  */
 describe('COMPILE CSE — shadowed names are never admitted', () => {
   it('refuses a call whose HEAD is a lambda parameter', () => {
@@ -1717,11 +1717,17 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     expect(fallbackResult.code).not.toContain('_fn_f');
   });
 
-  it('refuses a named-callback OPERAND that is a lambda parameter', () => {
+  it('keeps a typed callback parameter opaque to CSE', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
     const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
-    const expr = engine.box(['Function', ['Add', mapped, mapped], 'f'] as any);
+    const untyped = engine.box(['Function', ['Add', mapped, mapped], 'f'] as any);
+    expect(() => compile(untyped, { fallback: false })).toThrow(/Nothing/);
+    const expr = engine.box([
+      'Function',
+      ['Add', mapped, mapped],
+      ['Typed', 'f', '(real) -> real'],
+    ] as any);
     const result = compile(expr, { fallback: false });
 
     // Both traversals survive: the callback `f` is the PARAMETER, and the

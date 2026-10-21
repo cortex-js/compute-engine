@@ -141,8 +141,7 @@ describe('BoxedType.isDisjointFrom', () => {
   // A tuple value has exactly as many components as its type, and no empty
   // value inhabits two tuple types of different lengths, so tuples are
   // separated by length and by a pair of disjoint components. A component
-  // that admits `nothing` makes the length of the values open (a `Nothing`
-  // written into a slot removes the slot), so no conclusion is drawn then.
+  // that admits `nothing` still occupies its tuple position.
   it('separates tuple types by length and by component', () => {
     expect(
       ce.type('tuple<boolean>').isDisjointFrom('tuple<number, number>')
@@ -163,7 +162,7 @@ describe('BoxedType.isDisjointFrom', () => {
       ce
         .type('tuple<integer, integer | nothing>')
         .isDisjointFrom('tuple<integer>')
-    ).toBe(false);
+    ).toBe(true);
   });
 
   // Characterization, not a guarantee: the predicate errs toward "may

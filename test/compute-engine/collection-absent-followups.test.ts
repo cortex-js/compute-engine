@@ -236,13 +236,13 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('a source typed `any`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'U']),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     ));
 
   test('a source typed `list<any>`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'La']),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     ));
 
   test('a source whose element type has a list arm', () =>
@@ -251,7 +251,7 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('another broadcastable operator', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Negate', 'U']),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
     expect(v.toString()).toBe('[[-1,-2],[-3]]');
   });
@@ -265,11 +265,11 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('parse route', () => {
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, U)'),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, \\mathrm{La})'),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
   });
 });
@@ -288,7 +288,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('an element nested two levels deep', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Sqrt', 'Ld']),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
     expect(v.toString()).toBe('[2,[[3]]]');
   });
@@ -296,7 +296,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('several sources whose elements may be lists', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Power', 'Nn', 'Nn']),
-      'list<indexed_collection<any> | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
     expect(v.toString()).toBe('[[1,4],27]');
   });
@@ -304,7 +304,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('a boolean result over an absent cell of a `list<any>`', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Not', 'Lbs']),
-      'list<boolean | indexed_collection<any> | missing>'
+      'list<boolean | indexed_collection<any> | missing | nothing>'
     );
     expect(v.toString()).toBe('["False","Missing"]');
   });
@@ -339,7 +339,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('PointX over strings is not typed as lists of numbers', () => {
     expect(
       engine.box(['Map', 'PointX', ['List', "'a'", "'b'"]]).type.toString()
-    ).toBe('list<string^2>');
+    ).toBe('list<character | missing^2>');
   });
 });
 

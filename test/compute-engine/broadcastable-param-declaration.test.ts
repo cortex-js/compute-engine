@@ -901,7 +901,8 @@ describe('DECLARED broadcastable<T> — `Nothing` rows (finding 7)', () => {
       .box(['pairUp', nothings(['Range', 1, 200]) as any])
       .evaluate();
     expect(eager.nops).toBe(3);
-    expect(eager.op1.toString()).toBe('()');
-    expect(lazy.at(1)?.toString()).toBe('()');
+    expect(eager.op1.json).toEqual(['Tuple', 'Nothing', 'Nothing']);
+    // The lazy broadcast is a Map: an immediate Nothing bypasses pairUp.
+    expect(lazy.at(1)?.json).toBe('Nothing');
   });
 });

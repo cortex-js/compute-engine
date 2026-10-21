@@ -121,7 +121,11 @@ without an absence test.
 
 `Map`, `Filter`, predicate-form `Count`, `Covariance`, `PopulationCovariance`,
 and `Correlation` also refuse compilation when source element types admit `Nothing`; single-source paired
-statistics inspect tuple coordinates, and maps also check their result type.
+statistics inspect tuple coordinates. Maps also check their result type,
+but a broad result can compile when inspection of the callback body proves
+that every return path excludes omission. This restores safe tuple mappings
+without weakening source checks or adding a compiled omission representation.
+An opaque callback result stays `any`; an input type cannot stand in for it.
 Numeric aggregates also refuse omission-capable sources, including the seeded
 `Multiply` fold used to represent `Product(collection)`. Tuple slots and union
 alternatives are checked before their element types can absorb omission.
@@ -145,6 +149,17 @@ Cover interpreter/compiled parity and side-effect counts. Coordinate with raw
 view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
+
+### A shadowed Map callback can borrow a global function's inferred result (OPEN — 2026-10-20)
+
+With global `h := u ↦ 7`, the function `(h: (real) -> any) ↦ Map(h, [1, 2])`
+is typed with an integer-list result instead of `list<any>`. Without that global,
+the callback's own `any` result is preserved. Descriptor call derivation resolves
+user functions by name rather than the callback symbol's lexical binding.
+Compilation now checks the bound callback's own contract and refuses this
+omission-capable case even when the inferred Map result is too narrow. Correcting
+the inferred type requires preserving binding identity through descriptor-based
+call derivation; the compiler check must remain until that is done.
 
 ### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 

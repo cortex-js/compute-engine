@@ -1555,6 +1555,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       ['PopulationStandardDeviation', 0],
     ])('%s(x) is %p, as the interpreter answers', (h, expected) => {
       const engine = new ComputeEngine();
+      engine.declare('x', 'real');
       const r = compile(engine.box([h, 'x'] as any), { constantFold: false });
       expect(r.success).toBe(true);
       expect(r.run!(AT_4 as any)).toBe(expected);
@@ -1569,6 +1570,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       ['Skewness'],
     ])('%s(x) is NaN, as the interpreter answers', (h) => {
       const engine = new ComputeEngine();
+      engine.declare('x', 'real');
       const r = compile(engine.box([h, 'x'] as any), { constantFold: false });
       expect(r.success).toBe(true);
       expect(r.run!(AT_4 as any)).toBeNaN();
@@ -1582,6 +1584,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     // the two empty halves the Moore–McCabe split leaves for one datum.
     it('InterquartileRange(x) is 0, as the interpreter answers', () => {
       const engine = new ComputeEngine();
+      engine.declare('x', 'real');
       const r = compile(engine.box(['InterquartileRange', 'x'] as any), {
         constantFold: false,
       });
@@ -1591,6 +1594,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
 
     it('Quartiles(x) is (4, 4, 4)', () => {
       const engine = new ComputeEngine();
+      engine.declare('x', 'real');
       const r = compile(engine.box(['Quartiles', 'x'] as any), {
         constantFold: false,
       });
@@ -1599,9 +1603,10 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     });
 
     it('a COLLECTION operand is unaffected — the wrap is runtime-shaped', () => {
-      // The static type cannot decide this: a bare symbol may be bound to a
-      // number or to an array at call time, so the coercion tests the value.
+      // Both scalar and collection arms exclude omission; coercion still
+      // chooses the shape at run time.
       const engine = new ComputeEngine();
+      engine.declare('x', 'real | list<real>');
       const r = compile(engine.box(['Mean', 'x'] as any), {
         constantFold: false,
       });
@@ -4597,8 +4602,8 @@ describe('COMPILE built-in operator name as a callback', () => {
     const e = new ComputeEngine();
     // `Random` reaches the emission gate over a list of LISTS (its declared
     // parameter is `collection<any> | set<real>?`, so the Design E gate
-    // statically rejects it over integer elements) and pins the specific
-    // refusal message.
+    // statically rejects it over integer elements). The omission guard may
+    // refuse the broad callback result before the emission gate is reached.
     expect(() =>
       compile(
         e.box(['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]),
@@ -4606,7 +4611,7 @@ describe('COMPILE built-in operator name as a callback', () => {
           fallback: false,
         }
       )
-    ).toThrow(/Could not compile `Random` as a first-class function/);
+    ).toThrow(/Could not compile `(?:Random|Map)`/);
     // `Less`/`NotLess` require at least TWO arguments while `Map` supplies
     // one, so since the static callback-arity check (2026-08-15) the call is
     // already invalid when the compiler sees it. The compiler refuses it with
