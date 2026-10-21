@@ -244,9 +244,11 @@ describe('constant receiver: the call becomes the direct call', () => {
     // `g` holds a function value; an operator `g` declared in an inner scope
     // has the same name. The call keeps its `Field` callee: the rewrite is
     // made only when the stored symbol and the name in scope denote the same
-    // operator. (Evaluation applies a stored symbol by NAME, in the scope
-    // where the call is evaluated, as `apply()` does for every symbol callee,
-    // so the call then reaches the inner `g`, exactly as `g(3)` there does.)
+    // operator. Evaluation applies the stored symbol with the binding it got
+    // when `ns` was declared, the outer `g`: a callable name keeps its
+    // lexical binding, and a declaration of the same name in an inner scope
+    // does not redirect it (`docs/SCOPING-MODEL.md`, "Callable resolution").
+    // So the call gives `7 · 3`, while `g(3)` in the inner scope gives -1.
     const ce = engine();
     ce.declare('g', {
       type: 'function',
@@ -267,7 +269,8 @@ describe('constant receiver: the call becomes the direct call', () => {
       });
       const e = ce.box(['Apply', ['Field', 'ns', "'S'"], 3] as any);
       expect(e.toString()).toContain('Field("ns", "S")');
-      expect(e.evaluate().re).toBe(ce.box(['g', 3]).evaluate().re);
+      expect(e.evaluate().re).toBe(21);
+      expect(ce.box(['g', 3]).evaluate().re).toBe(-1);
     } finally {
       ce.popScope();
     }

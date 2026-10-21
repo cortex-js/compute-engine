@@ -87,6 +87,7 @@ import type {
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import { isInferredDefinition } from './boxed-expression/definition-guards.js';
+import { markExternalFact } from './boxed-expression/forward-call-reference.js';
 import {
   recordTypeProvenance,
   currentBoxingEpoch,
@@ -4149,6 +4150,13 @@ export class ComputeEngine implements IComputeEngine {
                 }
               : {}),
           });
+        // A call of a fact reads the definition that the scope of this
+        // `parse()` call holds (`markExternalFact`). An occurrence binding of
+        // a superseded guess (above) is not a fact.
+        for (const id of facts.keys()) {
+          const def = parseScope!.bindings.get(id);
+          if (def !== undefined) markExternalFact(def, parseScope!);
+        }
         return box(
           this,
           result,

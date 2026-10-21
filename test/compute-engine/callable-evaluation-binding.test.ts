@@ -119,6 +119,19 @@ describe('callable evaluation follows lexical binding', () => {
     ce.popScope();
   });
 
+  test('a bare callback symbol never borrows an unrelated definition', () => {
+    // `h` is declared with no value in a scope that is then popped. The
+    // symbol keeps that binding, so a later global `h` is another binding
+    // and does not run.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('h', 'function');
+    const callback = ce.symbol('h');
+    ce.popScope();
+    ce.assign('h', ce.box(['Function', ['Multiply', 'u', 100], 'u']));
+    expect(apply(callback, [ce.number(1)]).json).toEqual(['h', 1]);
+  });
+
   test('a closure keeps its callback from the creating invocation', async () => {
     const ce = new ComputeEngine();
     ce.assign(

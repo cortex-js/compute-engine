@@ -110,6 +110,7 @@ import {
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
 import { binderBindingOf } from './boxed-expression/binders.js';
+import { markRetiredBinding } from './boxed-expression/forward-call-reference.js';
 import { _removePendingSequence } from './sequence.js';
 import { latestDeclaredEffectsSite } from './boxed-expression/effects-provenance.js';
 import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
@@ -2751,6 +2752,12 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   // definition is a constant, `updateDef` also makes it stop listening to
   // configuration changes.
   updateDef(ce, name, binding, { type: 'unknown', inferred: true }, scope);
+  // A call of such an expression reads the definition of the name from this
+  // scope and the scopes that enclose it, and not from an unrelated scope
+  // where it is evaluated (`callableBindingInContext`, `binders.ts`). A
+  // checkpoint restore puts the removed definition back in the record, and
+  // the mark stays on the empty definition, which is then discarded.
+  markRetiredBinding(binding, scope);
 
   // The name resolves to another binding, or to none, from this scope and
   // the scopes under it. The memo of a derived signature counts the

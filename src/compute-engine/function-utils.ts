@@ -4545,6 +4545,14 @@ export function captureNestedLocals(
       captured.bindings.set(name, binding);
     }
     CLOSURE_LOCALS_SCOPES.add(captured);
+    // A call in the closure keeps the binding of its callee by lexical
+    // identity (`callableBindingInContext`, `binders.ts`). When an
+    // assignment replaced the value of a local with a function (`let k = i;
+    // k = (x) => i * x`), the binding holds an operator definition that is
+    // not the value definition the call was bound to, so the call finds its
+    // callee by the scope that holds it. That scope is the block scope
+    // `source`, which this scope stands for.
+    markCallableFrame(captured, source);
     parent = captured;
   }
   return captureClosures(ce, fn, parent!);
@@ -4565,6 +4573,9 @@ function rerootCapturedLocals(
     bindings: scope.bindings,
   };
   CLOSURE_LOCALS_SCOPES.add(copy);
+  // The copy stands for the same block scope as `scope` (see
+  // `captureNestedLocals`).
+  markCallableFrame(copy, scope);
   return copy;
 }
 

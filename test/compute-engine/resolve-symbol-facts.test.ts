@@ -183,6 +183,48 @@ describe('external symbol facts', () => {
     expect(parsed.canonical.evaluate().json).toBe(6);
   });
 
+  test('a call of a fact reads the scope of the parse, not an inner declaration', () => {
+    // The fact states the type of `f`; the call of `f` reads the definition
+    // that the scope of the `parse()` call holds. A declaration of `f` in a
+    // scope pushed later is another binding, and does not change the call.
+    const ce = new ComputeEngine();
+    const parsed = ce.parse('f(2)', {
+      form: 'raw',
+      resolveSymbol: (name) =>
+        name === 'f' ? { type: '(real) -> real' } : undefined,
+    });
+    const call = parsed.canonical;
+    ce.assign('f', ['Function', ['Add', 'x', 1], 'x']);
+    ce.pushScope();
+    try {
+      ce.declare('f', 'function');
+      ce.assign('f', ['Function', ['Multiply', 'x', 100], 'x']);
+      expect(call.evaluate().json).toBe(3);
+    } finally {
+      ce.popScope();
+    }
+    expect(call.evaluate().json).toBe(3);
+  });
+
+  test('an inferred binding of the name made before the parse does not replace the fact', () => {
+    // `ce.parse('f')` declares `f` with no value in the global scope. That
+    // binding does not define `f`, so the call keeps the type of the fact
+    // until `f` is assigned.
+    const ce = new ComputeEngine();
+    ce.parse('f').evaluate();
+    expect(ce.lookupDefinition('f')).toBeDefined();
+    const call = ce.parse('f(2)', {
+      form: 'raw',
+      resolveSymbol: (name) =>
+        name === 'f' ? { type: '(real) -> real' } : undefined,
+    }).canonical;
+    expect(call.type.toString()).toBe('real');
+    expect(call.evaluate().json).toEqual(['f', 2]);
+    expect(call.evaluate().type.toString()).toBe('real');
+    ce.assign('f', ['Function', ['Add', 'x', 1], 'x']);
+    expect(call.evaluate().json).toBe(3);
+  });
+
   test('callable facts survive rebuilding a bound function body', () => {
     const ce = new ComputeEngine();
     const parsed = ce.parse('x\\mapsto f(x)', {

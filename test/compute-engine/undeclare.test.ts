@@ -334,6 +334,28 @@ describe('undeclare: an expression boxed before the call', () => {
     expect(json(g.evaluate())).toBe('11');
   });
 
+  test('a call does not read a declaration in an unrelated scope', () => {
+    // The call reads the definition of `f` from the scope that `f` was
+    // removed from, and from the scopes that enclose it. A scope pushed after
+    // that scope was popped is not one of them.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('f', { evaluate: ce.parse('n \\mapsto n + 20') });
+    const g = ce.parse('f(1)');
+    expect(json(g.evaluate())).toBe('21');
+    ce.undeclare('f');
+    ce.popScope();
+
+    ce.pushScope();
+    ce.declare('f', { evaluate: ce.parse('n \\mapsto n + 30') });
+    expect(json(g.evaluate())).toBe('["f",1]');
+    ce.popScope();
+
+    // The global scope encloses the scope that `f` was removed from.
+    ce.assign('f', ['Function', ['Add', 'n', 40], 'n']);
+    expect(json(g.evaluate())).toBe('41');
+  });
+
   test('a symbol no longer reads the removed value', () => {
     const ce = new ComputeEngine();
     ce.pushScope();

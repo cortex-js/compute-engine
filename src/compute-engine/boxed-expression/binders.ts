@@ -1,7 +1,9 @@
 import { scopeActivationTemplate } from './ambient-chain.js';
 import {
+  externalFactScope,
   forwardCallScope,
   isForwardCallReference,
+  retiredBindingScope,
 } from './forward-call-reference.js';
 import type {
   BoxedBaseDefinition,
@@ -172,6 +174,28 @@ export function markCallableFrame(frame: Scope, template: Scope): void {
   callableFrames.set(frame, template);
 }
 
+/**
+ * Whether `scope` is `home`, or a runtime copy of it: a call frame of a
+ * function body (`markCallableFrame`), an activation of a scoped node
+ * (`registerScopeActivation`), or a scope that a closure captured in place
+ * of a nested block scope (`captureNestedLocals`, `function-utils.ts`).
+ * A copy can stand for another copy (a closure captures the call frame of
+ * the function that creates it, and a closure returned again is re-rooted on
+ * a copy of its captured scopes), so the links are followed to their end.
+ * Each link goes from a new scope to a scope that exists already, so they
+ * do not make a cycle; the set of visited scopes is a guard only.
+ */
+function scopeStandsFor(scope: Scope, home: Scope): boolean {
+  const visited = new Set<Scope>();
+  let current: Scope | undefined = scope;
+  while (current !== undefined && !visited.has(current)) {
+    if (current === home) return true;
+    visited.add(current);
+    current = callableFrames.get(current) ?? scopeActivationTemplate(current);
+  }
+  return false;
+}
+
 /** Preserve a callable's binding while canonicalizing rewritten operands. */
 export function withCallableBinding<T>(expr: Expression, build: () => T): T {
   if (!isFunction(expr)) return build();
@@ -221,10 +245,7 @@ export function callableBindingInContext(
     if (
       candidate === half ||
       (!isActivation && sameBindingDef(candidate, half)) ||
-      (home !== undefined &&
-        (scope === home ||
-          callableFrames.get(scope) === home ||
-          scopeActivationTemplate(scope) === home))
+      (home !== undefined && scopeStandsFor(scope, home))
     ) {
       if (!('value' in found) || !isForwardCallReference(found.value))
         return found;
@@ -245,6 +266,46 @@ export function callableBindingInContext(
         !('value' in found && isForwardCallReference(found.value))
       )
         return found;
+    }
+    // A fact that a `resolveSymbol` callback of `ce.parse()` gave (`f` of
+    // type `(real) -> real`) states a type, and does not define the name.
+    // Its scope belongs to the parsed expression, and is not on the chain
+    // when the expression is evaluated (when it is, the search above found
+    // the fact). The call reads the definition that the scope of the
+    // `parse()` call, or a scope that encloses it, holds when it is
+    // evaluated: after `ce.assign('f', …)` in that scope, `f(5)` is
+    // evaluated with the assigned function. A binding there that does not
+    // define the name (an inferred placeholder with no value) does not
+    // replace the fact. The search starts above the fact scope, so a
+    // declaration of the same name in an unrelated scope does not change
+    // the call.
+    const factScope = externalFactScope(own.value);
+    if (factScope !== undefined) {
+      for (let scope = factScope.parent; scope; scope = scope.parent) {
+        const found = scope.bindings.get(name);
+        if (found === undefined) continue;
+        if ('value' in found && found.value.value === undefined) continue;
+        return found;
+      }
+      return own;
+    }
+    // The record of a binding that `ce.undeclare()` removed holds an empty
+    // definition of type `unknown`. A call boxed before the removal reads
+    // the definition that the scope it was removed from, or a scope that
+    // encloses it, holds when the call is evaluated: `f(2)` reads a later
+    // declaration of `f` in that scope, or the declaration of `f` in an
+    // enclosing scope, and stays unevaluated when there is none. A
+    // declaration of `f` in an unrelated scope does not change the call.
+    const retiredScope = retiredBindingScope(own.value);
+    if (retiredScope !== undefined) {
+      for (let scope: Scope | null = retiredScope; scope; scope = scope.parent) {
+        const found = scope.bindings.get(name);
+        if (
+          found !== undefined &&
+          !('value' in found && isForwardCallReference(found.value))
+        )
+          return found;
+      }
     }
   }
   return own;
