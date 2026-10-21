@@ -1106,7 +1106,7 @@ export interface Parser {
    * from the `_` token at `underscore` to the token `end` into the name of
    * the symbol `base`, because `base` is an indexed collection and the
    * joined name `name` is not declared. The subscript is then read as an
-   * index (`At`), and {@link _binderSymbol} gives `name` for that `At`. */
+   * index (`At`), and {@link binderSymbol} gives `name` for that `At`. */
   _recordDeclinedSubscriptJoin?(
     base: string,
     name: string,
@@ -1117,7 +1117,7 @@ export interface Parser {
   /** @internal Record that `at` is the element access that the subscript
    * from the `_` token at `underscore` to the token `end` gives on the
    * indexed collection `base`. When {@link _recordDeclinedSubscriptJoin}
-   * recorded the same subscript, {@link _binderSymbol} gives the joined name
+   * recorded the same subscript, {@link binderSymbol} gives the joined name
    * for `at`. */
   _recordSubscriptAt?(
     at: MathJsonExpression,
@@ -1133,20 +1133,37 @@ export interface Parser {
    * the index unchanged. */
   _takeDeclinedSubscriptJoin?(base: string): string | null;
 
-  /** @internal The symbol that `expr` names when it is read in a binder
-   * position (a sum or product index, a comprehension variable, a function
-   * parameter, a local variable): a symbol is its own name, and an element
-   * access spelled as a subscript on an indexed collection (`n_{0}` when `n`
-   * is a list, read as `At(n, 0)`) is the joined name (`n_0`). Otherwise,
-   * `null`. */
-  _binderSymbol?(expr: MathJsonExpression | null | undefined): string | null;
+  /**
+   * The name that `expr` declares when it is read in a binder position: the
+   * index of a sum or a product, the variable of a comprehension, a function
+   * parameter, a local variable of a `where` clause. A symbol is its own
+   * name. An element access that the symbol parser made from a subscript on
+   * a symbol declared as an indexed collection (`n_{0}` when `n` is a list
+   * is read as `At(n, 0)` everywhere else) is the joined name, `n_0`: a
+   * binder is a new name, whatever its base is declared as. Any other
+   * expression gives `null`.
+   *
+   * A custom dictionary entry that binds a name (a `with` clause, a loop
+   * form) reads the binder with this method, not with `parseSymbol()`,
+   * which cannot read `n_{0}` as a new name when `n` is a list. Pass the
+   * expression that `parseExpression()` returned for the binding, or its
+   * left-hand side, and then rewrite the body with
+   * {@link rebindSubscripts}.
+   */
+  binderSymbol(expr: MathJsonExpression | null | undefined): string | null;
 
-  /** @internal Replace, in `expr`, each element access spelled as a
-   * subscript on an indexed collection whose joined name is one of `names`
-   * with that name (see {@link _binderSymbol}). A binder uses it for the
-   * occurrences of its name in its body. The other parts of `expr` are not
-   * changed. */
-  _rebindSubscripts?(
+  /**
+   * Replace, in `expr`, each element access that the symbol parser made from
+   * a subscript on an indexed collection (`At(n, 0)` from `n_{0}`) whose
+   * joined name is one of `names` with that name. A binder calls it on its
+   * body, and on the bindings that follow the declaration, so that the
+   * occurrences of the new name are the name and not an element of the base.
+   * The other parts of `expr` are not changed. The parse of a body that
+   * precedes the clause (`n_{0} + 1 \operatorname{with} n_{0} = 2`, an infix
+   * entry) is rewritten the same way, so a custom clause can bind a name
+   * after its body was read.
+   */
+  rebindSubscripts(
     expr: MathJsonExpression,
     names: ReadonlySet<string>
   ): MathJsonExpression;

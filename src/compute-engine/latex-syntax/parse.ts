@@ -4127,7 +4127,7 @@ export class _Parser implements Parser {
     return declined.name;
   }
 
-  _binderSymbol(expr: MathJsonExpression | null | undefined): string | null {
+  binderSymbol(expr: MathJsonExpression | null | undefined): string | null {
     if (expr === null || expr === undefined) return null;
     const id = symbol(expr);
     if (id !== null) return id;
@@ -4135,7 +4135,7 @@ export class _Parser implements Parser {
     return fn === null ? null : (this._subscriptAtNames.get(fn) ?? null);
   }
 
-  _rebindSubscripts(
+  rebindSubscripts(
     expr: MathJsonExpression,
     names: ReadonlySet<string>
   ): MathJsonExpression {

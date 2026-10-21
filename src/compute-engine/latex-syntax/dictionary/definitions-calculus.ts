@@ -93,7 +93,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // are its occurrences in the integrand (see `parseIndexes()`)
     const binderName = binderNameFor(parser);
     const rebind = (e: MathJsonExpression) =>
-      parser._rebindSubscripts?.(e, new Set(indexes)) ?? e;
+      parser.rebindSubscripts(e, new Set(indexes)) ?? e;
 
     if (fn && indexes.length === 0) {
       if (operator(fn) === 'Add' || operator(fn) === 'Subtract') {
@@ -268,11 +268,11 @@ function parseIntegralBody(
 /** The name of the variable that an expression read in a binder position
  * names: a symbol, or the joined name of a subscript on an indexed
  * collection (`At(n, 0)` from `n_{0}` names `n_0`, see
- * `Parser._binderSymbol()`). */
+ * `Parser.binderSymbol()`). */
 function binderNameFor(
   parser: Parser
 ): (expr: MathJsonExpression | null | undefined) => string | null {
-  return (expr) => parser._binderSymbol?.(expr) ?? symbol(expr);
+  return (expr) => parser.binderSymbol(expr) ?? symbol(expr);
 }
 
 /** Assuming we are at a differential operator, parse one

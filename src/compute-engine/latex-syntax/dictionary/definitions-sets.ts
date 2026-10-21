@@ -495,7 +495,7 @@ const COMPARISON_HEADS = new Set<string>([
  * left operand of a body `x \in S`. A variable spelled as a subscript on an
  * indexed collection (`n_{0}` when `n` is a list, read as `At(n, 0)`) is the
  * new name `n_0`, in the body and in the condition, as when `n` is not
- * declared (see `Parser._binderSymbol()`).
+ * declared (see `Parser.binderSymbol()`).
  */
 function setBuilder(
   parser: Parser,
@@ -507,11 +507,11 @@ function setBuilder(
     body,
     operator(body) === 'Element' ? operand(body, 1) : null,
   ]) {
-    const name = parser._binderSymbol?.(v) ?? null;
+    const name = parser.binderSymbol(v) ?? null;
     if (name !== null) names.add(name);
   }
   const rebind = (e: MathJsonExpression) =>
-    parser._rebindSubscripts?.(e, names) ?? e;
+    parser.rebindSubscripts(e, names) ?? e;
   return ['Set', rebind(body), ['Condition', rebind(condition)]];
 }
 

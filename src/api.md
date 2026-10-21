@@ -7468,6 +7468,66 @@ Return the next token, without advancing the index
 
 <MemberCard>
 
+##### Parser.binderSymbol() {#bindersymbol}
+
+```ts
+binderSymbol(expr): string | null
+```
+
+The name that `expr` declares when it is read in a binder position: the
+index of a sum or a product, the variable of a comprehension, a function
+parameter, a local variable of a `where` clause. A symbol is its own
+name. An element access that the symbol parser made from a subscript on
+a symbol declared as an indexed collection (`n_{0}` when `n` is a list
+is read as `At(n, 0)` everywhere else) is the joined name, `n_0`: a
+binder is a new name, whatever its base is declared as. Any other
+expression gives `null`.
+
+A custom dictionary entry that binds a name (a `with` clause, a loop
+form) reads the binder with this method, not with `parseSymbol()`,
+which cannot read `n_{0}` as a new name when `n` is a list. Pass the
+expression that `parseExpression()` returned for the binding, or its
+left-hand side, and then rewrite the body with
+[rebindSubscripts](#rebindsubscripts).
+
+####### expr
+
+  \| [`MathJsonExpression`](#mathjsonexpression)
+  \| `null`
+  \| `undefined`
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.rebindSubscripts() {#rebindsubscripts}
+
+```ts
+rebindSubscripts(expr, names): MathJsonExpression
+```
+
+Replace, in `expr`, each element access that the symbol parser made from
+a subscript on an indexed collection (`At(n, 0)` from `n_{0}`) whose
+joined name is one of `names` with that name. A binder calls it on its
+body, and on the bindings that follow the declaration, so that the
+occurrences of the new name are the name and not an element of the base.
+The other parts of `expr` are not changed. The parse of a body that
+precedes the clause (`n_{0} + 1 \operatorname{with} n_{0} = 2`, an infix
+entry) is rewritten the same way, so a custom clause can bind a name
+after its body was read.
+
+####### expr
+
+[`MathJsonExpression`](#mathjsonexpression)
+
+####### names
+
+`ReadonlySet`\<`string`\>
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Parser.resolveSymbol() {#resolvesymbol}
 
 ```ts

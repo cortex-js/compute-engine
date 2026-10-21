@@ -1834,7 +1834,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `n_0`. Its occurrences in the body read as that name, because the
       // body is read with the parameters declared.
       const binderName = (e: MathJsonExpression | null) =>
-        parser._binderSymbol?.(e) ?? symbol(e);
+        parser.binderSymbol(e) ?? symbol(e);
       const addParam = (x: MathJsonExpression): boolean => {
         const typed = operator(x) === 'Typed';
         const name = binderName(typed ? operand(x, 1) : x);
@@ -2883,7 +2883,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
         const at: MathJsonExpression = ['At', lhs, rhs];
         // In a binder position, this subscript is the joined name (`n_0`
-        // from `n_{0}`), not an element access (see `_binderSymbol()`).
+        // from `n_{0}`), not an element access (see `binderSymbol()`).
         if (sym)
           parser._recordSubscriptAt?.(at, sym, scriptStart - 1, parser.index);
         return at;
@@ -6124,7 +6124,7 @@ function parseAssignStatement(
   // target `At(n, 0)` reads as the definition of a function `At`, with the
   // error `expected-a-symbol` for its parameter `0`, which the user sees.
   const binderTarget =
-    symbol(lhs) === null ? (parser._binderSymbol?.(lhs) ?? null) : null;
+    symbol(lhs) === null ? (parser.binderSymbol(lhs) ?? null) : null;
   if (binderTarget !== null) {
     if (isLocalBindingContext) lhs = binderTarget;
     else {
@@ -6191,7 +6191,7 @@ function parseAssignStatement(
     // when `n` is a list) is the new name `n_0`: the body is read with it
     // declared.
     args = args.map((arg) =>
-      symbol(arg) === null ? (parser._binderSymbol?.(arg) ?? arg) : arg
+      symbol(arg) === null ? (parser.binderSymbol(arg) ?? arg) : arg
     );
 
     const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
@@ -6263,7 +6263,7 @@ function parseAssignStatement(
     // A parameter spelled as a subscript on an indexed collection is the
     // joined name, as in the `f(x,y) := ...` form above.
     const args = operands(lhs).map((arg) =>
-      symbol(arg) === null ? (parser._binderSymbol?.(arg) ?? arg) : arg
+      symbol(arg) === null ? (parser.binderSymbol(arg) ?? arg) : arg
     );
     const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
     if (rhs === null) return null;
@@ -6686,7 +6686,7 @@ function parseForExpression(
   // An index spelled as a subscript on an indexed collection (`n_{0}` when
   // `n` is a list) is the new name `n_0`, also in the body.
   const index = indexExpr
-    ? (parser._binderSymbol?.(indexExpr) ?? symbol(indexExpr))
+    ? (parser.binderSymbol(indexExpr) ?? symbol(indexExpr))
     : null;
   if (!index) return null;
 
@@ -6715,7 +6715,7 @@ function parseForExpression(
 
   // Parse body — use outer terminator
   let body = parser.parseExpression(until) ?? 'Nothing';
-  body = parser._rebindSubscripts?.(body, new Set([index])) ?? body;
+  body = parser.rebindSubscripts(body, new Set([index])) ?? body;
 
   return [
     'Loop',
@@ -6790,12 +6790,12 @@ function parseForComprehension(
     const op = operator(binding);
     if (op !== 'Equal' && op !== 'Assign') return null;
 
-    binding = parser._rebindSubscripts?.(binding, names) ?? binding;
+    binding = parser.rebindSubscripts(binding, names) ?? binding;
     let name = operand(binding, 1);
     const list = operand(binding, 2);
     if (!name || !list) return null;
     if (symbol(name) === null) {
-      const joined = parser._binderSymbol?.(name) ?? null;
+      const joined = parser.binderSymbol(name) ?? null;
       if (joined !== null) {
         name = joined;
         names.add(joined);
@@ -6807,7 +6807,7 @@ function parseForComprehension(
   } while (parser.match(','));
 
   if (elements.length === 0) return null;
-  lhs = parser._rebindSubscripts?.(lhs, names) ?? lhs;
+  lhs = parser.rebindSubscripts(lhs, names) ?? lhs;
   return ['Comprehension', lhs, ...elements] as MathJsonExpression;
 }
 
@@ -6916,7 +6916,7 @@ function parseWhereExpression(
   const locals = new Set<string>();
   for (const b of bindings) {
     for (let statement of bindingStatements(b)) {
-      statement = parser._rebindSubscripts?.(statement, locals) ?? statement;
+      statement = parser.rebindSubscripts(statement, locals) ?? statement;
       const local =
         operator(statement) === 'Declare'
           ? symbol(operand(statement, 1))
@@ -6925,7 +6925,7 @@ function parseWhereExpression(
       statements.push(statement);
     }
   }
-  lhs = parser._rebindSubscripts?.(lhs, locals) ?? lhs;
+  lhs = parser.rebindSubscripts(lhs, locals) ?? lhs;
 
   // Lookahead for trailing \operatorname{for}. If present, consume the
   // for-clause and wrap the resulting Loop in the Block carrying the
@@ -6940,7 +6940,7 @@ function parseWhereExpression(
       return [
         'Block',
         ...statements,
-        parser._rebindSubscripts?.(loop, locals) ?? loop,
+        parser.rebindSubscripts(loop, locals) ?? loop,
       ] as MathJsonExpression;
     }
     // parseForComprehension failed mid-stream. Restore index and fall
@@ -6986,7 +6986,7 @@ function buildBlockFromSequence(
   // first as the element `At(n, 0)`.
   const declared = new Set<string>();
   const rebind = (e: MathJsonExpression) =>
-    parser._rebindSubscripts?.(e, declared) ?? e;
+    parser.rebindSubscripts(e, declared) ?? e;
   for (const s of seq) {
     if (isLetStatement(s)) {
       for (const statement of operands(undecorated(s))) {

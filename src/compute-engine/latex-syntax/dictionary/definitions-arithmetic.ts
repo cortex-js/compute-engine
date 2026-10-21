@@ -1726,11 +1726,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // as the element access (`At(n, 0)` from `∂n_{0}` when `n` is a list),
     // because a marker in the numerator gives the differentiand. In the
     // denominator, the term is a variable: the new name `n_0` (see
-    // `Parser._binderSymbol()`), in an order pair (`["Set", v, n]`, see
+    // `Parser.binderSymbol()`), in an order pair (`["Set", v, n]`, see
     // `derivativeOrder()`) too.
     const variable = (v: MathJsonExpression): MathJsonExpression => {
-      if (operator(v) !== 'Set') return parser._binderSymbol?.(v) ?? v;
-      const name = parser._binderSymbol?.(operand(v, 1)) ?? null;
+      if (operator(v) !== 'Set') return parser.binderSymbol(v) ?? v;
+      const name = parser.binderSymbol(operand(v, 1)) ?? null;
       return name === null || name === symbol(operand(v, 1))
         ? v
         : (['Set', name, ...operands(v).slice(1)] as MathJsonExpression);
@@ -1791,7 +1791,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         const name = symbol(operator(v) === 'Set' ? operand(v, 1) : v);
         if (name !== null) names.add(name);
       }
-      fn = parser._rebindSubscripts?.(fn, names) ?? fn;
+      fn = parser.rebindSubscripts(fn, names) ?? fn;
       return ['D', fn, ...vars] as MathJsonExpression;
     }
   }
@@ -1877,7 +1877,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       }
       // A variable spelled as a subscript on an indexed collection (`n_{0}`
       // when `n` is a list, read as `At(n, 0)`) is the new name `n_0`
-      const name = parser._binderSymbol?.(expr) ?? null;
+      const name = parser.binderSymbol(expr) ?? null;
       if (name !== null) {
         vars.push(name);
         return;
@@ -1895,7 +1895,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         if (base && !isDiffSym(symbol(base)))
           vars.push(
             symbol(base) === null
-              ? (parser._binderSymbol?.(base) ?? base)
+              ? (parser.binderSymbol(base) ?? base)
               : base
           );
       }
@@ -1950,7 +1950,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         const name = symbol(operator(v) === 'Set' ? operand(v, 1) : v);
         if (name !== null) names.add(name);
       }
-      fn = parser._rebindSubscripts?.(fn, names) ?? fn;
+      fn = parser.rebindSubscripts(fn, names) ?? fn;
       // Build the nested `D` form, e.g. `D(D(f, x), x)` for a second
       // derivative. This matches the Lagrange (`f''(x)`) parse and the `D`
       // serializer, which recovers the order by counting nested `D`s (a flat
@@ -3939,7 +3939,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // A variable spelled as a subscript on an indexed collection (`n_{0}`
       // when `n` is a list) is the new name `n_0`, also in the body.
       const limitVar =
-        parser._binderSymbol?.(operand(base, 1)) ?? symbol(operand(base, 1));
+        parser.binderSymbol(operand(base, 1)) ?? symbol(operand(base, 1));
       // Prune the limit variable in the `_{x \to …}` clause (its declaration)
       // and the body; a same-named free reference elsewhere would stay flagged.
       if (limitVar)
@@ -3965,7 +3965,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         limitVar !== null && symbol(operand(base, 1)) === null
           ? [
               'Function',
-              parser._rebindSubscripts?.(expr, new Set([limitVar])) ?? expr,
+              parser.rebindSubscripts(expr, new Set([limitVar])) ?? expr,
               limitVar,
             ]
           : ['Function', expr, operand(base, 1)]
@@ -4664,7 +4664,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
  * ['Equal', index, ['Range', lower, upper]]
  *
  * `binderName` gives the name of the index from the expression read in the
- * index position (see `Parser._binderSymbol()`).
+ * index position (see `Parser.binderSymbol()`).
  */
 function getIndexAssignment(
   expr: MathJsonExpression | null,
@@ -4950,13 +4950,13 @@ function parseBigOp(name: string, minPrec: number) {
     const indexes = getIndexes(
       sub,
       sup,
-      (expr) => parser._binderSymbol?.(expr) ?? symbol(expr)
+      (expr) => parser.binderSymbol(expr) ?? symbol(expr)
     );
     const indexNames = boundVariableNames(indexes);
     for (const indexingSet of indexes)
       if (indexingSet.element)
         indexingSet.element =
-          parser._rebindSubscripts?.(
+          parser.rebindSubscripts(
             indexingSet.element,
             new Set([indexingSet.index])
           ) ?? indexingSet.element;
@@ -4968,7 +4968,7 @@ function parseBigOp(name: string, minPrec: number) {
 
     const bodyStartToken = parser.index;
     let fn = parser.parseExpression(body);
-    if (fn !== null) fn = parser._rebindSubscripts?.(fn, indexNames) ?? fn;
+    if (fn !== null) fn = parser.rebindSubscripts(fn, indexNames) ?? fn;
 
     parser.popSymbolTable();
 

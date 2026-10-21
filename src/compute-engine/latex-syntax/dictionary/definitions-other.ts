@@ -284,13 +284,13 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       // when `n` is a list) in a subscript (`∂_{n_{0}}`) is the new name
       // `n_0`, not the element `At(n, 0)`, also in the operand.
       const binderName = (v: MathJsonExpression) =>
-        parser._binderSymbol?.(v) ?? v;
+        parser.binderSymbol(v) ?? v;
       // The term after a bare `∂`. With `n` a list, the symbol parser reads
       // only the `n` of `∂n_{0}`: the subscript is then read as an index, as
       // elsewhere, and the marker keeps the element access `At(n, 0)`. A
       // marker in a numerator gives the differentiand, which is that element.
       // `parseFraction()` reads a marker in a denominator as a variable, and
-      // gives it the joined name `n_0` (see `Parser._binderSymbol()`).
+      // gives it the joined name `n_0` (see `Parser.binderSymbol()`).
       const parseVariable = (): MathJsonExpression | null => {
         const group = parser.parseGroup();
         if (group !== null) return group;
@@ -328,7 +328,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         const names = new Set(
           vars.filter((v): v is string => typeof v === 'string')
         );
-        rhs = parser._rebindSubscripts?.(rhs, names) ?? rhs;
+        rhs = parser.rebindSubscripts(rhs, names) ?? rhs;
         // A superscript is the order of a single variable: ∂_x^2 f is
         // D(f, x, x), and ∂_x^n f is D(f, {x, n}) (see `derivativeOrder()`).
         const expanded: MathJsonExpression[] =

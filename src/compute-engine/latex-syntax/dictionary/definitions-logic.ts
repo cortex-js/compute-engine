@@ -1175,13 +1175,13 @@ export function parseQuantifier(
     ): MathJsonExpression => {
       const names = new Set<string>();
       for (const e of [condition, operand(condition, 1)]) {
-        const name = parser._binderSymbol?.(e);
+        const name = parser.binderSymbol(e);
         if (name) names.add(name);
       }
       return [
         kind,
-        parser._rebindSubscripts?.(condition, names) ?? condition,
-        parser._rebindSubscripts?.(body, names) ?? body,
+        parser.rebindSubscripts(condition, names) ?? condition,
+        parser.rebindSubscripts(body, names) ?? body,
       ] as MathJsonExpression;
     };
     // 2a. `<condition> ( <body> )` with no separator, e.g.
