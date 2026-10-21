@@ -745,9 +745,37 @@ describe('A READ OF A LOCAL BEFORE ITS FIRST ASSIGNMENT', () => {
   });
 
   test('a call at the top level is not changed', () => {
+    // `h` has no value when `u = h(1)` runs, so `u` holds the evaluated,
+    // unresolved call `h(1)`. The assignment of a function literal to `h`
+    // takes effect when it executes. Each top-level statement is its own
+    // top-level evaluation, so the read of `u` in the last statement
+    // resolves `h(1)` again and gives `1`.
+    {
+      const { value, diagnostics } = run('u = h(1)\nh = (x) => x\nu');
+      expect(diagnostics).toEqual([]);
+      expect(value).toBe(1);
+    }
+    // Inside a `do` block, the statements run in the top-level evaluation of
+    // the statement that holds the block, and a call evaluated while its
+    // head had no value stays unresolved for the rest of that evaluation
+    // (the sticky rule of `docs/SCOPING-MODEL.md`, "Callable resolution"):
+    // the read of `u` in the block gives `h(1)`. When the value of the block
+    // is stored (`r = do { … }`), the read of `r` in the next statement is a
+    // later top-level evaluation, and resolves it.
+    for (const [source, expected] of [
+      ['do { u = h(1); h = (x) => x; u }', ['h', 1]],
+      ['r = String(do { u = h(1); h = (x) => x; u })\nr', "'h(1)'"],
+      ['r = do { u = h(1); h = (x) => x; u }\nr', 1],
+    ] as const) {
+      const { value, diagnostics } = run(source);
+      expect(diagnostics).toEqual([]);
+      expect(value).toEqual(expected);
+    }
+    // A `function h(x) { x }` statement, which is a declaration, is
+    // available throughout its statement list and gives `1`.
     for (const source of [
-      'u = h(1)\nh = (x) => x\nu',
-      'r = do { u = h(1); h = (x) => x; u }\nr',
+      'u = h(1)\nfunction h(x) { x }\nu',
+      'r = do { u = h(1); function h(x) { x }; u }\nr',
     ]) {
       const { value, diagnostics } = run(source);
       expect(diagnostics).toEqual([]);

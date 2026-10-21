@@ -28,6 +28,24 @@ caller's environment. Adopting that declaration as a parameter makes it a
 lexical parameter binding instead. Type inference and evaluation use the same
 resolution rule, without assigning a target as a side effect of reading a type.
 
+The result of evaluating a call whose head has no value stays symbolic for the
+rest of the top-level evaluation that produced it. Evaluating that result again
+in the same top-level evaluation evaluates its operands but does not resolve
+its head, even when the name was assigned after the result was made: in
+`Sum(Block(If(k = 2, h := z ↦ 2z), h(k)), k, 1, 3)`, the term `h(1)` keeps its
+value when the final fold reads it after the assignment at `k = 2`, and the
+sum is `10 + h(1)`. A later top-level evaluation resolves the head again, as
+for any call: with `r = g(3).evaluate()`, then `ce.assign('g', k ↦ k²)`,
+`r.evaluate()` is `9`. Each statement of an Epsil program, and each statement
+of a `Block` that the host evaluates directly, is its own top-level
+evaluation, so a statement that reads a value stored by an earlier statement
+resolves it; the statements of a nested block (a `do` block in an assignment,
+a function body, a `Sum` term) run in the evaluation of the enclosing
+statement. The original, unevaluated call is never sticky, and an expression
+rebuilt from a result (`subs()`) is a new call; both resolve their head as
+before (`EVALUATED_UNRESOLVED_CALLS`, `boxed-expression/boxed-function.ts`;
+decided in `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1).
+
 Ordinary data-symbol lookup keeps the compatibility behavior below. This
 callable rule changes function application, not every symbol read.
 

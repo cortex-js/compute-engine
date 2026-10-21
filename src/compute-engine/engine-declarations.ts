@@ -2724,7 +2724,6 @@ function assertUndeclarable(
  * binding record. */
 function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   const binding = scope.bindings.get(name)!;
-  const callableBefore = defIsCallableShaped(binding);
 
   // Checkpoint journal (scope-map writes): a restore puts the record back in
   // the scope. The rollback frame of an inference trial does the same.
@@ -2741,6 +2740,23 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   const restorePending = _removePendingSequence(ce, name, scope);
   if (restorePending !== undefined)
     activeRollbackFrame(ce)?.record({ undo: restorePending });
+
+  retireBindingRecord(ce, scope, name, binding);
+}
+
+/**
+ * Retire `binding`, the binding record of `name` that the caller removed
+ * from the bindings of `scope`: `removeBinding` (`ce.undeclare()`), and the
+ * `Declare` handler (`library/core.ts`) when it drops a binding that holds a
+ * clause installed before the declaration ran.
+ */
+export function retireBindingRecord(
+  ce: IComputeEngine,
+  scope: Scope,
+  name: string,
+  binding: BoxedDefinition
+): void {
+  const callableBefore = defIsCallableShaped(binding);
 
   // An expression boxed before this call holds the record by identity. The
   // record gets an empty value definition of type `unknown` in place of its

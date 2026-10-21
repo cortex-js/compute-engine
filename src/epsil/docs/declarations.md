@@ -329,6 +329,30 @@ introduced by `if`/`else`/`while`/`for`, or a function body, pushes its own
 lexical scope, so a `let`/`const` inside a block does not leak into the
 enclosing scope.
 
+A `function` statement defines its name for the **whole** program or block
+it is written in, including the statements before it: a call written before
+the definition runs the function.
+
+```epsil
+let a = g(3)
+function g(k) { k^2 }
+a
+// ➔ 9
+```
+
+An assignment of a function literal (`g = (k) => k^2`, `let g = (k) => k^2`)
+takes effect when it runs. A call before it stays the symbolic `g(3)`. A
+value that holds such a call is resolved again when a later statement reads
+it, so the same program with `g = (k) => k^2` in place of the `function`
+statement also answers `9`. Within one statement, the result is not resolved
+again: `do { u = h(1); h = (x) => x; u }` answers `h(1)`, because the
+assignment of `h` runs in the same evaluation as the call.
+
+A call reads the function that its name denotes **where the call is
+written**. A function of the same name defined in another scope does not
+change which function the call runs; assigning another function to that same
+name does.
+
 A name is declared **once per scope**. A `let`/`const` of a name that the same
 scope already declares — an earlier `let`/`const` of the same block or
 program, a parameter of the function whose body this is, or the index of the

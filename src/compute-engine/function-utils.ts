@@ -103,6 +103,7 @@ import {
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
+import { beginTopLevelEvaluation } from './boxed-expression/evaluation-epoch.js';
 import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
 import {
   memoDepsStillValid,
@@ -2288,17 +2289,36 @@ export function apply(
  *   value. If body.evaluate() were called, Block would push its _localScope
  *   as the eval context, and lookup() would find those stale bindings
  *   before reaching the freshScope where actual param values live.)
+ *
+ * With `program`, the statements are the statements of a program: a `Block`
+ * that the host evaluates directly (`evaluateBlock`), the counterpart of a
+ * run of `executeEpsil`, where each statement is its own top-level
+ * evaluation. Each statement after the first then starts a new top-level
+ * evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`), so that a
+ * result of a call whose head had no value, stored by an earlier statement,
+ * resolves its head again when a later statement reads it
+ * (`EVALUATED_UNRESOLVED_CALLS`, `boxed-function.ts`). A program block
+ * starts with no pending asynchronous evaluation (`runsAsProgram()`,
+ * `library/control-structures.ts`), and a new number is taken only while
+ * that is still true. A statement can start an `evaluateAsync()` that it
+ * does not await; that evaluation runs its later parts after this loop has
+ * moved on, and they must keep reading its own number (its block locals,
+ * its marks of unresolved calls), so no later statement takes a new number
+ * while it is pending.
  */
 export function evaluateStatements(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  lastStatementOptions?: { numericApproximation: true }
+  lastStatementOptions?: { numericApproximation: true },
+  program = false
 ): Expression {
   createBlockLocals(ce, ops);
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
     const op = ops[i];
+    if (program && i > 0 && ce._inFlightAsyncEvaluations === 0)
+      beginTopLevelEvaluation(ce);
     // Debugger pause point (see `common/debug-hook.ts`): only statements
     // that originated from source (carrying `sourceOffsets`) fire — the
     // hook may BLOCK. One comparison per statement when no debugger is
@@ -2542,6 +2562,20 @@ export function declareAssignmentLocals(
  * request reaches a statement on this route exactly when it reaches it on
  * the synchronous route: `numericApproximation` applies to the last
  * statement only (see `evaluateStatements`).
+ *
+ * With `program`, each statement after the first starts a new top-level
+ * evaluation, as on the synchronous route, but only while this evaluation
+ * is the only asynchronous evaluation that is pending on the engine.
+ * Asynchronous evaluations that run at the same time share one number
+ * (`evaluation-epoch.ts`), so a new number for a statement of this program
+ * would also be a new number for the other evaluation. The count of
+ * pending asynchronous evaluations is read when the statements start: a
+ * program block can be pending more than once in that count, when the host
+ * evaluated a block that is not canonical and its canonical form runs the
+ * statements (`runsAsProgram()`, `library/control-structures.ts`), and any
+ * count above it is another evaluation that started later. A synchronous
+ * evaluation that runs while a statement waits gives back the number it
+ * found when it ends, so the number does not need to be given back here.
  */
 export async function evaluateStatementsAsync(
   ce: ComputeEngine,
@@ -2550,15 +2584,19 @@ export async function evaluateStatementsAsync(
   effects?: EffectHandlers,
   contextStack?: EvaluateOptions['_contextStack'],
   numericApproximation?: true,
-  precisionWindow?: EvaluateOptions['_precisionWindow']
+  precisionWindow?: EvaluateOptions['_precisionWindow'],
+  program = false
 ): Promise<Expression> {
   // Before the first `await`, so the current lexical scope is still the
   // scope of these statements.
   createBlockLocals(ce, ops);
+  const pendingAtStart = ce._inFlightAsyncEvaluations;
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
     const op = ops[i];
+    if (program && i > 0 && ce._inFlightAsyncEvaluations === pendingAtStart)
+      beginTopLevelEvaluation(ce);
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       debugStatementHook(op);
     // `effects` is the host capability registry the enclosing asynchronous

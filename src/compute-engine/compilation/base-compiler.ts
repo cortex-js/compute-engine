@@ -127,6 +127,7 @@ import {
   withDefaultBigOpBounds,
 } from '../library/utils.js';
 import { machineRangeCountDiffers } from '../library/range-closed-form.js';
+import { isFunctionDeclarationStatement } from '../library/control-structures.js';
 import {
   isSymbol,
   isNumber,
@@ -17984,11 +17985,20 @@ export class BaseCompiler {
     }
 
     const last = stmts.length - 1;
+    // A definition is moved only when it is a function declaration of the
+    // statement list (`isFunctionDeclarationStatement()`): a
+    // `DefineFunction` of a `Function` literal, whose name is not an absence
+    // marker and not the constructor of a declared nominal type. A
+    // constructor definition takes effect when it runs, so it is not
+    // rewritten to a `Declare` of a local function. A generic definition is
+    // moved too, although the interpreter installs it only when its
+    // statement runs: the compiled code needs the declaration before the
+    // first statement.
     const rewritable = (s: Expression, i: number): boolean => {
       if (!isFunction(s, 'DefineFunction') || !isSymbol(s.ops[0])) return false;
       if (valueUsed && i === last) return false;
       if ((definitionCount.get(s.ops[0].symbol) ?? 0) > 1) return false;
-      return isFunction(s.ops[1], 'Function');
+      return isFunctionDeclarationStatement(s.engine, s);
     };
     const asDeclare = (
       s: Expression & FunctionInterface,

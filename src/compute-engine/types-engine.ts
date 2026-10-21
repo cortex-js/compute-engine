@@ -689,6 +689,30 @@ export interface IComputeEngine {
    * @internal */
   _evaluationDepth: number;
 
+  /** How many of the synchronous evaluations counted by `_evaluationDepth`
+   * are delegations: the `evaluate()` of an expression that is not
+   * canonical evaluates its canonical form in its place, and the count is
+   * raised while it does. So a synchronous evaluation is the outermost
+   * evaluation of the host when `_evaluationDepth` is
+   * `1 + _delegatedEvaluations`: every evaluation below it on the stack
+   * only hands its expression over to its canonical form. The `Block`
+   * evaluate handler reads it to tell whether the host evaluates the block
+   * directly (`runsAsProgram()`, `library/control-structures.ts`).
+   * @internal */
+  _delegatedEvaluations: number;
+
+  /** The asynchronous twin of `_delegatedEvaluations`: how many of the
+   * evaluations counted by `_inFlightAsyncEvaluations` are delegations of
+   * an expression that is not canonical to its canonical form. The count is
+   * raised when the `evaluateAsync()` of such an expression delegates, and
+   * lowered when the delegated evaluation settles, since an asynchronous
+   * evaluation stays counted in `_inFlightAsyncEvaluations` while it is
+   * suspended. An asynchronous evaluation is the only one that the host
+   * started when `_inFlightAsyncEvaluations` is
+   * `1 + _delegatedAsyncEvaluations`.
+   * @internal */
+  _delegatedAsyncEvaluations: number;
+
   /** The `ce.effects` registry captured by the synchronous evaluation that is
    * running now, or `undefined` when none is running. It is set when a
    * top-level `evaluate()` starts and cleared when it returns, so every

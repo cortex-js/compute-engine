@@ -59,7 +59,10 @@ import {
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
-import { paramAt } from '../../common/type/instantiate.js';
+import { isPolymorphicType, paramAt } from '../../common/type/instantiate.js';
+import { functionLiteralDeclaredSignature } from '../boxed-expression/function-literal.js';
+import { isGenericTarget } from '../multi-clause.js';
+import { canonInstallSkipped } from '../clause-identity.js';
 import {
   CancellationError,
   run,
@@ -2913,13 +2916,70 @@ function evaluateBlock(
   // to the float of the argument, and only a jump evaluated with the
   // request reads the exact argument again (`exactRealValueOf`,
   // `constraint-subject.ts`).
+  //
+  // A block that the host evaluates directly is a program: each of its
+  // statements is its own top-level evaluation (`runsAsProgram`).
   return resolveEscapingLambda(
     ce,
     evaluateStatements(
       ce,
       ops,
-      numericApproximation ? { numericApproximation: true } : undefined
+      numericApproximation ? { numericApproximation: true } : undefined,
+      runsAsProgram(ce, false)
     )
+  );
+}
+
+/**
+ * True when the `Block` whose evaluate handler runs now is a program: a
+ * block that the host evaluates directly, the counterpart of a run of
+ * `executeEpsil`, where each statement is its own top-level evaluation. Its
+ * statements are then run with `program` set (`evaluateStatements`,
+ * `evaluateStatementsAsync`, `function-utils.ts`), so that a statement that
+ * reads a result of an earlier statement (`r ≔ fn(3)` before
+ * `fn ≔ z ↦ 2z`, then `r`) resolves it as the next Epsil statement does.
+ * A block in a statement or an operand of another expression (a `Sum` term,
+ * a function body, a `do` block in an assignment) is not a program: its
+ * statements run in the top-level evaluation of the enclosing expression.
+ *
+ * On the synchronous route, the evaluation of the block is the outermost
+ * evaluation and no asynchronous evaluation is pending. A synchronous
+ * evaluation that starts while an asynchronous one is pending can be a part
+ * of that asynchronous evaluation, which keeps its number, and the two cases
+ * are not told apart here, so such a block is not a program. On the
+ * asynchronous route, no synchronous evaluation is running and the
+ * evaluation of the block is the only asynchronous evaluation that is
+ * pending.
+ *
+ * The outermost evaluation is not always at depth 1 (in-flight count 1 on
+ * the asynchronous route). A `Block` that is not canonical (boxed with
+ * `{ form: 'raw' }` or `{ form: 'structural' }`) is evaluated by its
+ * canonical form: its own `evaluate()` counts one level, and the
+ * `evaluate()` of its canonical form, which runs this handler, counts a
+ * second one. Each such delegation raises a count while it runs:
+ * `_delegatedEvaluations` on the synchronous route, and
+ * `_delegatedAsyncEvaluations` until the delegated evaluation settles on the
+ * asynchronous route (`delegateEvaluation()`, `delegateEvaluationAsync()`,
+ * `boxed-function.ts`). So the test is that every other evaluation that is
+ * counted is a delegation: the depth (the in-flight count on the
+ * asynchronous route) is 1 plus the count of delegations. A block nested in
+ * another expression has one more evaluation counted, the evaluation of
+ * that expression, which is not a delegation.
+ *
+ * A block that is a statement of a run of `executeEpsil` (a top-level `do`
+ * block) is not a program: it is a nested block of the program that the
+ * runner executes, as for `isProgramBlock()` at canonicalization.
+ */
+function runsAsProgram(ce: ComputeEngine, async: boolean): boolean {
+  if (ce._epsilBatchId !== undefined) return false;
+  if (async)
+    return (
+      ce._evaluationDepth === 0 &&
+      ce._inFlightAsyncEvaluations === 1 + ce._delegatedAsyncEvaluations
+    );
+  return (
+    ce._evaluationDepth === 1 + ce._delegatedEvaluations &&
+    ce._inFlightAsyncEvaluations === 0
   );
 }
 
@@ -2940,6 +3000,9 @@ async function evaluateBlockAsync(
   // current lexical scope.
   const run = beginAsyncRun(ce);
   declareRunAssignmentLocals(ce);
+  // Read before the first `await`: the counts of running evaluations that
+  // the test reads change while the statements run.
+  const program = runsAsProgram(ce, true);
   let result: Expression;
   try {
     result = await evaluateStatementsAsync(
@@ -2951,7 +3014,8 @@ async function evaluateBlockAsync(
       // The numeric request reaches the last statement only, as in
       // `evaluateBlock`.
       options.numericApproximation ? true : undefined,
-      options._precisionWindow
+      options._precisionWindow,
+      program
     );
   } finally {
     endAsyncRun(run);
@@ -2985,9 +3049,11 @@ async function evaluateBlockAsync(
  * `List`/`Tuple` whose operands are closed literals — read by canonicalizing
  * it, which is side-effect free for such an expression (no symbol to bind,
  * no scope to write). `undefined` for anything else. Used by `canonicalBlock`
- * to hoist the static type of a `let` with a literal initial value.
+ * to hoist the static type of a `let` with a literal initial value, and by
+ * the Epsil runner to tell whether an assignment gives its target a value
+ * of static type (`prepareFunctionDeclarations()`, `execute-epsil.ts`).
  */
-function closedLiteralType(
+export function closedLiteralType(
   ce: ComputeEngine,
   value: Expression
 ): Type | undefined {
@@ -3006,30 +3072,39 @@ function closedLiteralType(
   return t.isUnknown ? undefined : widenAssignedType(ce, t.type);
 }
 
-function canonicalBlock(
-  ops: ReadonlyArray<Expression>,
-  options: { engine: ComputeEngine; scope: Scope | undefined }
-): Expression | null {
-  const { engine: ce, scope } = options;
-  // An empty block is canonical as it is: its type handler answers `nothing`
-  // and its evaluate handler answers `Nothing`. Declining here (`null`) left
-  // the node non-canonical and unbound, so neither handler ever ran and
-  // `If(True, Block())` evaluated to the inert `Block()` itself, printed
-  // `{}`, where the language documents `Nothing` as an empty block's value.
-  if (ops.length === 0) return ce._fn('Block', [], { scope });
-
-  // A `Declare(name, …)` introduces a block-local `name` that shadows any
-  // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push
-  // those names onto the engine's shadowed-parameter stack — the same
-  // mechanism used for function-literal parameters — so that e.g.
-  // `Add(i, 1)` after `Declare(i, …)` keeps `i` as an ordinary variable
-  // instead of folding to the imaginary unit `1 + i`. The shadow is scoped to
-  // this block: it is popped once the statements are canonicalized, so an `i`
-  // outside the block is the imaginary unit again.
+/**
+ * The names that the `Declare` statements of the statement list `ops`
+ * introduce, read without canonicalizing the statements, with the type of
+ * each one when the statement states it.
+ *
+ * - `declaredNames`: the target of each `Declare`, and each leaf of a
+ *   destructuring pattern (`let (a, b) = v`), in statement order. A name
+ *   declared twice is listed twice.
+ * - `declaredTypes`: the static type of a target, read from a positional
+ *   type operand, from the literal `type` entry of an attributes dictionary,
+ *   or from an initial value that is a closed literal (`closedLiteralType()`).
+ * - `explicitlyDeclared`: the names of `declaredTypes` whose type the
+ *   statement declares, not read from an initial value.
+ *
+ * `ops` may be non-canonical (the held operands of a `Block`, or the raw
+ * statements of an Epsil program boxed with `{ canonical: false }`).
+ * `canonicalBlock()` hoists these names into the block scope, and the Epsil
+ * runner (`executeEpsil()`) declares the names of the statements before a
+ * `function` statement before it installs the function.
+ */
+export function staticDeclarations(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): {
+  declaredNames: string[];
+  declaredTypes: Map<string, Type>;
+  explicitlyDeclared: Set<string>;
+} {
   const declaredNames: string[] = [];
   // The statically-readable declared type of each `Declare(name, "type")`
-  // statement, keyed by name. The hoisted binding (below) carries this type
-  // from the CANONICAL pass on: `Declare` only registers its type at
+  // statement, keyed by name. The binding that `canonicalBlock()` hoists
+  // carries this type from the CANONICAL pass on: `Declare` only registers
+  // its type at
   // evaluation time, so without it a read of the local later in the block —
   // `Length(d)` after `Declare(d, "list<number>")` — types against a bare
   // `unknown` binding, and a compilation of the block (which never evaluates
@@ -3133,6 +3208,31 @@ function canonicalBlock(
       }
     }
   }
+  return { declaredNames, declaredTypes, explicitlyDeclared };
+}
+
+function canonicalBlock(
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; scope: Scope | undefined }
+): Expression | null {
+  const { engine: ce, scope } = options;
+  // An empty block is canonical as it is: its type handler answers `nothing`
+  // and its evaluate handler answers `Nothing`. Declining here (`null`) left
+  // the node non-canonical and unbound, so neither handler ever ran and
+  // `If(True, Block())` evaluated to the inert `Block()` itself, printed
+  // `{}`, where the language documents `Nothing` as an empty block's value.
+  if (ops.length === 0) return ce._fn('Block', [], { scope });
+
+  // A `Declare(name, …)` introduces a block-local `name` that shadows any
+  // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push
+  // those names onto the engine's shadowed-parameter stack — the same
+  // mechanism used for function-literal parameters — so that e.g.
+  // `Add(i, 1)` after `Declare(i, …)` keeps `i` as an ordinary variable
+  // instead of folding to the imaginary unit `1 + i`. The shadow is scoped to
+  // this block: it is popped once the statements are canonicalized, so an `i`
+  // outside the block is the imaginary unit again.
+  const { declaredNames, declaredTypes, explicitlyDeclared } =
+    staticDeclarations(ce, ops);
 
   // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05): a `Declare` may not
   // re-declare a name this scope already binds — an earlier `Declare` of this
@@ -3362,9 +3462,19 @@ function canonicalBlock(
     // it later in the block resolves to this binding as an applicable
     // operator instead of deferring past it to the outer definition
     // (`lookupApplicable`, boxed-expression/lookup.ts).
+    //
+    // The type-registry check below is wider than the constructor test of
+    // `isFunctionDeclarationStatement()`: it also leaves out a same-name
+    // function of an ALIAS type. Such a definition is not made block-local,
+    // so its clause still reaches the binding that the alias declaration
+    // made.
     for (const statement of ops) {
       const op = typedStatement(statement);
-      if (!isFunction(op, 'DefineFunction')) continue;
+      if (
+        !isFunction(op, 'DefineFunction') ||
+        !isFunctionDeclarationStatement(ce, op)
+      )
+        continue;
       const name = sym(op.ops[0]);
       if (!name || name === 'Nothing') continue;
       if (scope.bindings.has(name)) continue;
@@ -3629,8 +3739,52 @@ function isFunctionParameterType(t: Type | undefined): boolean {
  * A block that is not the top-level block of a program (a function body, a
  * `do` block) declares its names when it starts, as documented in
  * `src/epsil/docs/declarations.md`.
+ *
+ * The Epsil runner uses the same set for its program scope
+ * (`markLaterDeclarations()`, `laterDeclarationReached()`): before it
+ * installs a `function` statement ahead of its turn, it declares the names
+ * of the statements before that statement, and these names are later
+ * declarations for the statements before them.
  */
-const LATER_DECLARATIONS = new WeakMap<Scope, ReadonlySet<string>>();
+const LATER_DECLARATIONS = new WeakMap<Scope, Set<string>>();
+
+/**
+ * Add `names` to the later declarations of `scope` (`LATER_DECLARATIONS`):
+ * bindings of `scope` that a function body canonicalized from now on does
+ * not count as declared, so an assignment to one of these names in the body
+ * makes a local of the body. A read of the name still finds the binding.
+ *
+ * Used by the Epsil runner (`prepareFunctionDeclarations()`,
+ * `execute-epsil.ts`) for the names that it declares in the program scope
+ * before the statement that declares them runs. The runner removes each
+ * name with `laterDeclarationReached()` before it boxes that statement.
+ */
+export function markLaterDeclarations(
+  scope: Scope,
+  names: Iterable<string>
+): void {
+  let later = LATER_DECLARATIONS.get(scope);
+  for (const name of names) {
+    if (later === undefined) {
+      later = new Set();
+      LATER_DECLARATIONS.set(scope, later);
+    }
+    later.add(name);
+  }
+}
+
+/**
+ * Remove `name` from the later declarations of `scope`
+ * (`markLaterDeclarations()`): the statement that declares it is reached,
+ * and from now on the binding counts as declared. The entry of `scope` is
+ * removed when no name is left.
+ */
+export function laterDeclarationReached(scope: Scope, name: string): void {
+  const later = LATER_DECLARATIONS.get(scope);
+  if (later === undefined) return;
+  later.delete(name);
+  if (later.size === 0) LATER_DECLARATIONS.delete(scope);
+}
 
 /**
  * True when the standard library defines `name` as a constant (`i`, `e`,
@@ -3676,10 +3830,121 @@ function firstDeclarationIndex(
   return result;
 }
 
+/**
+ * The names that cannot be bound: a definition of one of them installs
+ * nothing and evaluates to the `absence-marker-binding` error. The same set
+ * as `ABSENCE_MARKERS` in `library/core.ts`, which imports this file and so
+ * cannot be imported here.
+ */
+const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
+  'Nothing',
+  'Missing',
+  'Undefined',
+]);
+
+/**
+ * True when the statement `statement` is a function declaration of its
+ * statement list: a `DefineFunction(name, Function(…))` (the Epsil
+ * `function g(k) { … }` and `g(k) = …`), where
+ *
+ * - `name` is a symbol and is not an absence marker (`Nothing`, `Missing`,
+ *   `Undefined`), whose definition installs nothing;
+ * - the second operand is a `Function` literal, the only clause that the
+ *   `DefineFunction` canonical handler installs;
+ * - `name` is not the constructor of a declared nominal type: such a
+ *   definition is a smart-constructor definition, an assignment to the
+ *   constructor of the type (`defineFunctionClause()`, `multi-clause.ts`),
+ *   and takes effect when it runs. The same-name function of an ALIAS type
+ *   is an ordinary function and is accepted.
+ *
+ * An assignment of a function literal (`g = (k) => …`) is not a function
+ * declaration: it takes effect when it runs.
+ *
+ * A generic definition is a function declaration in this sense. The
+ * compiler moves it to the front of the statement list as it moves the
+ * others (`withDefineFunctionDeclares()`, `base-compiler.ts`), and the hoist
+ * of function names in `canonicalBlock()` makes its name a local of the
+ * block. But the interpreter installs it only when its statement runs
+ * (`isHoistedFunctionDefinition()`).
+ *
+ * The statement is read structurally, so it may be non-canonical (the held
+ * operands of a `Block`, a raw Epsil statement boxed with
+ * `{ canonical: false }`).
+ */
+export function isFunctionDeclarationStatement(
+  ce: ComputeEngine,
+  statement: Expression
+): boolean {
+  if (!isFunction(statement, 'DefineFunction')) return false;
+  const name = sym(statement.ops[0]);
+  if (name === undefined || UNBINDABLE_NAMES.has(name)) return false;
+  if (!isFunction(statement.ops[1], 'Function')) return false;
+  const type = ce._typeRegistry[name];
+  return type?.def === undefined || type.alias === true;
+}
+
+/**
+ * True when the statement `statement` is a function declaration
+ * (`isFunctionDeclarationStatement()`) that the interpreter makes available
+ * in its whole statement list, before the first statement runs: the
+ * `DefineFunction` canonical handler (`library/core.ts`) installs its clause
+ * when the statement is canonicalized.
+ *
+ * A generic definition is not (`isGenericDefinition`). The canonical
+ * handler installs no generic clause at canonicalization, and installs no
+ * clause onto a name whose definition is generic already: rule G2 of the
+ * generic functions (a generic function has one clause, and
+ * `defineFunctionClause()` refuses any clause onto a generic definition)
+ * would make the evaluation of the statement refuse its own clause if it
+ * were installed ahead. So a generic definition takes effect when its
+ * statement runs, and a call before it stays unresolved, on the whole-block
+ * route and on the Epsil runner alike.
+ *
+ * Used by the Epsil runner to install a function before the first statement
+ * of the program runs (`prepareFunctionDeclarations()`, `execute-epsil.ts`).
+ */
+export function isHoistedFunctionDefinition(
+  ce: ComputeEngine,
+  statement: Expression
+): boolean {
+  return (
+    isFunctionDeclarationStatement(ce, statement) &&
+    isFunction(statement, 'DefineFunction') &&
+    !isGenericDefinition(ce, sym(statement.ops[0])!, statement.ops[1])
+  );
+}
+
+/**
+ * True when the definition of `name` by the `Function` literal `literal`
+ * is one that the `DefineFunction` canonical handler (`library/core.ts`)
+ * does not install at canonicalization, for the same three reasons, read
+ * here without canonicalizing the literal:
+ *
+ * - the literal states its own generic signature (a return marker whose
+ *   signature has a `where` clause, `function f<T>(x: T) -> T { x }`), which
+ *   the handler reads as `isGenericClauseLiteral()` on the canonical
+ *   literal;
+ * - the definition that `name` resolves to is generic, or declares a generic
+ *   signature (`isGenericTarget()`, `multi-clause.ts`);
+ * - the handler skipped an earlier clause of that definition
+ *   (`canonInstallSkipped()`, `clause-identity.ts`), and so skips the other
+ *   clauses too.
+ */
+function isGenericDefinition(
+  ce: ComputeEngine,
+  name: string,
+  literal: Expression
+): boolean {
+  const declared = functionLiteralDeclaredSignature(literal);
+  if (declared !== undefined && isPolymorphicType(declared)) return true;
+  const target = ce.lookupDefinition(name);
+  return isGenericTarget(target) || canonInstallSkipped(target);
+}
+
 /** The names that the block statement `op` declares: the target of a
  * `Declare` or an `Assign` (each leaf of a destructuring pattern), or the
  * name of a `DefineFunction`. */
-function statementDeclaredNames(op: Expression): string[] {
+export function statementDeclaredNames(op: Expression): string[] {
   const statement = typedStatement(op);
   if (isFunction(statement, 'DefineFunction')) {
     const name = sym(statement.ops[0]);

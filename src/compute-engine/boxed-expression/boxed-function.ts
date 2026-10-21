@@ -19,6 +19,7 @@ import {
 import {
   beginTopLevelEvaluation,
   endTopLevelEvaluation,
+  topLevelEvaluationEpoch,
 } from './evaluation-epoch.js';
 import {
   awaitAsyncOnlyDescendants,
@@ -3401,13 +3402,30 @@ export class BoxedFunction
       // A deadline is armed only by an enclosing `withTimeLimit` span; work
       // outside a span runs unbounded. Evaluation checkpoints the ambient
       // deadline (`engine._deadlineFrame`) if one is in effect.
-      const canonical = this._canonicalToEvaluate();
-      const result = canonical
-        ? canonical.evaluate(options)
-        : this._isMemoizableLazyCollection(options, true) ||
-            this._isMemoizableInertEvaluation(options)
-          ? this._memoizedLazyCollectionValue(options)
-          : this._computeValue(options)();
+      //
+      // A result of evaluating a call whose head had no value, made in this
+      // top-level evaluation, evaluates its operands only
+      // (`EVALUATED_UNRESOLVED_CALLS`). The test comes before
+      // `_canonicalToEvaluate()`, which can box the call again against a
+      // definition that the name received after the result was made, and
+      // before the kind of the binding is read, because `ce.assign()` of a
+      // function literal changes the shared binding record from a value
+      // definition to an operator definition. It comes after the start of a
+      // new top-level evaluation above, so that a result of an earlier
+      // top-level evaluation resolves its head again.
+      const sticky = isStickyUnresolvedCall(this);
+      const canonical = sticky ? undefined : this._canonicalToEvaluate();
+      const result = sticky
+        ? evaluatedUnresolvedCall(
+            this,
+            this.ops.map((x) => x.evaluate(operandOptions(options)))
+          )
+        : canonical
+          ? delegateEvaluation(engine, () => canonical.evaluate(options))
+          : this._isMemoizableLazyCollection(options, true) ||
+              this._isMemoizableInertEvaluation(options)
+            ? this._memoizedLazyCollectionValue(options)
+            : this._computeValue(options)();
       // An evaluation whose result is a value takes back the incomplete
       // walks that it recorded: a read in it that met an inner collection
       // that it cannot walk stayed unevaluated, which is a correct result,
@@ -3460,16 +3478,36 @@ export class BoxedFunction
    * chain: `h(1)` made by a run of a block, read again by the `Sum` that
    * holds the block, would declare `h` in the scope of the `Sum`, and an
    * assignment to `h` in the next evaluation of the block would write that
-   * binding and keep the value. @internal
+   * binding and keep the value.
+   *
+   * With `copy`, the result is a new node even when `ops` are the operands
+   * of this node. @internal
    */
-  _withSameBinding(ops: ReadonlyArray<Expression>): Expression {
-    if (
-      ops.length === this.ops.length &&
-      ops.every((x, i) => x === this.ops[i])
-    )
-      return this;
-    const result = new BoxedFunction(this.engine, this._operator, ops);
+  _withSameBinding(ops: ReadonlyArray<Expression>, copy = false): Expression {
+    const sameOps =
+      ops.length === this.ops.length && ops.every((x, i) => x === this.ops[i]);
+    if (!copy && sameOps) return this;
+    // A copy over the same operands stands for this node: it keeps the
+    // verbatim LaTeX and the source offsets of this node, and the scope
+    // captured by its parse (`_parseScope`), which decides how its
+    // application is rebuilt when it is evaluated again
+    // (`applyFunctionLiteralWith`). A node over other operands is another
+    // expression, and the source text of this node does not describe it.
+    const result = new BoxedFunction(
+      this.engine,
+      this._operator,
+      ops,
+      sameOps
+        ? {
+            metadata: {
+              latex: this.verbatimLatex,
+              sourceOffsets: this.sourceOffsets,
+            },
+          }
+        : undefined
+    );
     result._def = this._def;
+    if (sameOps) result._parseScope = this._parseScope;
     return result;
   }
 
@@ -4077,12 +4115,19 @@ export class BoxedFunction
   private _evaluateAsyncUncounted(
     options?: Partial<EvaluateOptions>
   ): Promise<Expression> {
+    // As in `evaluate()`: a result of evaluating a call whose head had no
+    // value, made in this top-level evaluation, evaluates its operands only
+    // (`EVALUATED_UNRESOLVED_CALLS`), before `_canonicalToEvaluate()` can box
+    // it again against a later definition of the name.
+    if (isStickyUnresolvedCall(this))
+      return evaluatedUnresolvedCallAsync(this, options);
     const canonical = this._canonicalToEvaluate();
     // The recursive delegations below re-enter the PUBLIC entry point, so a
     // nested evaluation is counted too — the check is "is any async
     // evaluation open", not "how many", and a balanced count is easier to
     // trust than a re-entrancy carve-out.
-    if (canonical) return canonical.evaluateAsync(options);
+    if (canonical)
+      return delegateEvaluationAsync(this.engine, canonical, options);
     // A kept value of a pure eager source, as in `evaluate()`. The value was
     // computed by a synchronous evaluation, and `evaluate()` cannot run an
     // operator that has only an `evaluateAsync` handler: such an expression
@@ -11620,6 +11665,161 @@ function calleeValue(
     : undefined;
 }
 
+/**
+ * The results of evaluating a call whose head had no value (the call over
+ * its evaluated operands, which `applyFunctionLiteralWith` returns
+ * unresolved), each with the number of the top-level evaluation that made
+ * it (`topLevelEvaluationEpoch`, `evaluation-epoch.ts`).
+ *
+ * Such a result is sticky for the rest of the top-level evaluation that
+ * made it: when it is evaluated again in that evaluation, its operands are
+ * evaluated, but its head is not resolved, even when the name was assigned
+ * after the result was made. So a `Sum` whose term assigns `h` at `k = 2`
+ * keeps the `h(1)` that it computed at `k = 1`, and a later statement of a
+ * nested block that reads a stored `g(3)` after `g := k ↦ k²` reads `g(3)`.
+ * A later top-level evaluation (the next statement of an Epsil program, the
+ * next statement of a `Block` that the host evaluates, a host call of
+ * `r.evaluate()`) resolves the head of the result again, as it resolves any
+ * other call: with `r = g(3).evaluate()`, then `ce.assign('g', k ↦ k²)`,
+ * `r.evaluate()` is `9`.
+ *
+ * The original, unevaluated call is never marked: it keeps its
+ * forward-reference behavior, and evaluating it after the name is defined
+ * applies the definition, in the same top-level evaluation too. The `h(k)`
+ * in the body of a `Sum` is one node that is evaluated at each value of
+ * `k`, so it must resolve at `k = 2`, after the assignment of `h` at
+ * `k = 2`. That is why the result of an evaluation of the original is a
+ * copy of it (`evaluatedUnresolvedCall`). An expression rebuilt from a
+ * marked one (`subs()`, the canonical rebuild of a parent) is a new object,
+ * is not marked, and resolves its head as before.
+ *
+ * Decided in `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1
+ * ("A sticky unresolved call").
+ */
+const EVALUATED_UNRESOLVED_CALLS = new WeakMap<Expression, number>();
+
+/**
+ * For an original call (a call that is not sticky now), the last result of
+ * evaluating it that `evaluatedUnresolvedCall` made: the top-level evaluation
+ * of that result, the operands it was made over, and the result. When the
+ * original is evaluated again in the same top-level evaluation and its
+ * operands evaluate to the same objects, that result is returned again. A
+ * parent that compares the identity of its operands then does not rebuild
+ * itself at each evaluation. A result of an earlier top-level evaluation is
+ * not reused: a stored value can hold it, and it must keep its own number.
+ */
+const UNRESOLVED_CALL_RESULTS = new WeakMap<
+  Expression,
+  { epoch: number; ops: ReadonlyArray<Expression>; result: Expression }
+>();
+
+/** True when `expr` is a result of evaluating a call whose head had no
+ * value, made in the current top-level evaluation of its engine
+ * (`EVALUATED_UNRESOLVED_CALLS`). */
+function isStickyUnresolvedCall(expr: Expression): boolean {
+  const epoch = EVALUATED_UNRESOLVED_CALLS.get(expr);
+  return epoch !== undefined && epoch === topLevelEvaluationEpoch(expr.engine);
+}
+
+/** Mark `expr` as a result of evaluating a call whose head had no value, in
+ * the current top-level evaluation (`EVALUATED_UNRESOLVED_CALLS`). */
+function markUnresolvedCall(expr: Expression): void {
+  EVALUATED_UNRESOLVED_CALLS.set(expr, topLevelEvaluationEpoch(expr.engine));
+}
+
+/**
+ * The unresolved call `expr` over `ops`, with the binding of `expr`, marked
+ * for the current top-level evaluation (`EVALUATED_UNRESOLVED_CALLS`).
+ *
+ * When `expr` is sticky now, the result is `expr` itself if `ops` are its
+ * operands. Otherwise `expr` is an original call, which is never marked, so
+ * the result is a copy of it, even when `ops` are its own operands. The copy
+ * made by the last evaluation of `expr` in this top-level evaluation is
+ * returned again when `ops` are the same objects
+ * (`UNRESOLVED_CALL_RESULTS`).
+ */
+function evaluatedUnresolvedCall(
+  expr: BoxedFunction,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const epoch = topLevelEvaluationEpoch(expr.engine);
+  if (EVALUATED_UNRESOLVED_CALLS.get(expr) === epoch) {
+    const result = expr._withSameBinding(ops);
+    markUnresolvedCall(result);
+    return result;
+  }
+  const last = UNRESOLVED_CALL_RESULTS.get(expr);
+  if (
+    last !== undefined &&
+    last.epoch === epoch &&
+    last.ops.length === ops.length &&
+    last.ops.every((x, i) => x === ops[i])
+  )
+    return last.result;
+  const result = expr._withSameBinding(ops, true);
+  markUnresolvedCall(result);
+  UNRESOLVED_CALL_RESULTS.set(expr, { epoch, ops: [...ops], result });
+  return result;
+}
+
+/** The asynchronous twin of the evaluation of a sticky call in
+ * `BoxedFunction.evaluate()`: the operands are evaluated with
+ * `evaluateAsync`, in order. */
+async function evaluatedUnresolvedCallAsync(
+  expr: BoxedFunction,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  const ops: Expression[] = [];
+  for (const x of expr.ops)
+    ops.push(await x.evaluateAsync(operandOptions(options)));
+  return evaluatedUnresolvedCall(expr, ops);
+}
+
+/**
+ * Run `evaluate`, the evaluation of the canonical form of an expression that
+ * is not canonical, in place of the evaluation of that expression, with
+ * `_delegatedEvaluations` raised. The evaluation that delegates and the
+ * evaluation of the canonical form are one evaluation for the host: a raw
+ * or structural `Block` that the host evaluates directly is evaluated by its
+ * canonical form one level deeper, and its evaluate handler must still see
+ * that it is the outermost evaluation (`runsAsProgram()`,
+ * `library/control-structures.ts`).
+ */
+function delegateEvaluation<T>(ce: ComputeEngine, evaluate: () => T): T {
+  ce._delegatedEvaluations += 1;
+  try {
+    return evaluate();
+  } finally {
+    ce._delegatedEvaluations -= 1;
+  }
+}
+
+/**
+ * The asynchronous twin of `delegateEvaluation`: `canonical.evaluateAsync()`
+ * in place of the evaluation of the expression that is not canonical, with
+ * `_delegatedAsyncEvaluations` raised until it settles. The `Block` handler
+ * of the canonical form runs after a first suspension, when the synchronous
+ * part of this call has returned, so the count is kept for as long as the
+ * delegating evaluation is counted in `_inFlightAsyncEvaluations`.
+ */
+function delegateEvaluationAsync(
+  ce: ComputeEngine,
+  canonical: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  ce._delegatedAsyncEvaluations += 1;
+  let promise: Promise<Expression>;
+  try {
+    promise = canonical.evaluateAsync(options);
+  } catch (error) {
+    ce._delegatedAsyncEvaluations -= 1;
+    throw error;
+  }
+  return promise.finally(() => {
+    ce._delegatedAsyncEvaluations -= 1;
+  });
+}
+
 function applyFunctionLiteral(
   expr: BoxedFunction,
   def: BoxedValueDefinition,
@@ -11719,14 +11919,24 @@ function applyFunctionLiteralWith(
     // `ce.function()` would declare the name in the current scope, and a
     // later assignment would write that binding (`_withSameBinding`). The
     // application keeps the binding it has.
+    //
+    // Evaluating the result again in the same top-level evaluation does not
+    // resolve its head (`EVALUATED_UNRESOLVED_CALLS`).
     if (
       isForwardCallReference(def) ||
       (opDef === undefined && expr._parseScope === undefined)
     )
-      return expr._withSameBinding(evaluated);
-    return expr._withParseScope(() =>
+      return evaluatedUnresolvedCall(expr, evaluated);
+    const rebuilt = expr._withParseScope(() =>
       expr.engine.function(expr.operator, evaluated)
     );
+    if (
+      rebuilt !== expr &&
+      isFunction(rebuilt) &&
+      rebuilt.operator === expr.operator
+    )
+      markUnresolvedCall(rebuilt);
+    return rebuilt;
   }
 
   // The arguments are operands: evaluated without `materialization`

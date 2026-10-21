@@ -85,12 +85,18 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
   });
 
   test('a block that assigns a function gives the same result on each run', () => {
-    // `fn` has no value when `r ≔ fn(3)` runs, so `r` holds the unevaluated
-    // `fn(3)`. The function is not installed before its `Assign` runs. The
-    // read of `r` in the last statement evaluates the stored value again,
-    // when `fn` has a value, so it gives `6`: a stored value reads the
-    // symbols that were assigned after it was stored (see
-    // `symbol-value-scoping.test.ts`).
+    // `fn` has no value when `r ≔ fn(3)` runs, so `r` holds the evaluated,
+    // unresolved call `fn(3)`. The function is not installed before its
+    // `Assign` runs: an assignment takes effect when it executes. The host
+    // evaluates the block directly, so the block is a program, and each of
+    // its statements is its own top-level evaluation, as each statement of
+    // an Epsil program is. The read of `r` in the last statement is then a
+    // later top-level evaluation than the one that stored `fn(3)`, and it
+    // resolves `fn` (the sticky rule of `docs/SCOPING-MODEL.md`, "Callable
+    // resolution", holds inside one top-level evaluation only). So the block
+    // gives `(6, 6)` on each run. A `DefineFunction` statement, which is a
+    // declaration, is installed before the first statement runs and gives
+    // `(6, 6)` too (second block).
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
@@ -100,6 +106,14 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
     ]);
     expect(block.evaluate().toString()).toBe('(6, 6)');
     expect(block.evaluate().toString()).toBe('(6, 6)');
+    const declared = box(ce, [
+      'Block',
+      ['Assign', 'r', ['fd', 3]],
+      ['DefineFunction', 'fd', ['Function', ['Multiply', 'z', 2], 'z']],
+      ['Tuple', 'r', ['fd', 3]],
+    ]);
+    expect(declared.evaluate().toString()).toBe('(6, 6)');
+    expect(declared.evaluate().toString()).toBe('(6, 6)');
   });
 });
 

@@ -225,6 +225,7 @@ import {
   // stamp is a STATEMENT-route concern and is deliberately absent from the
   // host API's options, which is what keeps host declarations unstamped.
   declareType,
+  retireBindingRecord,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
 import { RedefinitionError } from '../declaration-origin.js';
@@ -6957,6 +6958,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               'declare'
             );
             currentScope.bindings.delete(symbolName);
+            // An expression canonicalized before this declaration ran holds
+            // the dropped record by identity: the call `g(1.5)` of a later
+            // statement of the same block. The record is retired as
+            // `ce.undeclare()` retires a removed record
+            // (`retireBindingRecord()`, `engine-declarations.ts`): it gets an
+            // empty value definition in place of the clause and is marked as
+            // retired to this scope, the scope counts a declaration, and the
+            // state events advance the versions that the type and effect
+            // caches of existing expressions key on. So such an expression
+            // reads the definition the scope holds when it is evaluated,
+            // which is the clause installed again under this declaration,
+            // and not the clause that was installed without it. Unlike
+            // `ce.undeclare()`, the removal of the binding from the scope
+            // records no undo step on a rollback frame of an inference
+            // trial, as for the statement-scoped binding dropped above.
+            // Without this, `let g: (integer) -> integer`, then
+            // `function g(k) { 2k }`, then `g(1.5)` in one block answered
+            // `3`: the call ran the clause of the dropped record, which had
+            // no declared parameter type to check `1.5` against.
+            retireBindingRecord(ce, currentScope, symbolName, existing);
             existing = undefined;
           }
           const existingValueDef =
