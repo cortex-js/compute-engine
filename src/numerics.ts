@@ -5,6 +5,18 @@
 
 export const version = '{{SDK_VERSION}}';
 
+export {
+  factorRationalPolynomial,
+  reconstructsRationalFactorization,
+} from './compute-engine/polynomial/factor-rational.js';
+export type {
+  RationalFactorOptions,
+  RationalFactorization,
+  RationalPolynomialFactor,
+} from './compute-engine/polynomial/factor-rational.js';
+export { rationalCoefficient } from './compute-engine/polynomial/exact-field.js';
+export type { RationalCoefficient } from './compute-engine/polynomial/exact-field.js';
+
 //
 // Types (numerics)
 //

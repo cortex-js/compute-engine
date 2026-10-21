@@ -18,6 +18,7 @@ import { expand } from './expand.js';
 import { hasVolatileDigest } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
+import { factorRationalExpression } from '../polynomial/boxed-factor.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -691,6 +692,11 @@ export function factorPolynomial(
     // Try quadratic factoring
     const quadratic = factorQuadratic(expr, variable);
     if (quadratic !== null) return quadratic;
+
+    // Exact modular factoring also finds nonlinear irreducible factors with
+    // no rational roots. Symbolic coefficients retain the expression methods.
+    const rationalFactors = factorRationalExpression(expr, variable);
+    if (rationalFactors !== null) return rationalFactors;
 
     // Try rational root factoring (degree 3+)
     const rationalRoot = factorByRationalRoots(expr, variable);

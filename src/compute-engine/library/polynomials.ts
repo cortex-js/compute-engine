@@ -116,7 +116,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Factor: {
       description:
         'Factor a polynomial expression into a product of irreducible factors. ' +
-        'Supports perfect square trinomials, difference of squares, and quadratic factoring with rational roots. ' +
+        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. ' +
         'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
       inspectsErrors: true, // see `Expand`

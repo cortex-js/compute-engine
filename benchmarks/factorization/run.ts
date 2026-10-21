@@ -1,0 +1,241 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  writeFileSync,
+  appendFileSync,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
+import { createInterface } from 'node:readline';
+import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { factoringCorpus, type FactoringCase } from './corpus.js';
+
+const { values } = parseArgs({
+  options: {
+    output: { type: 'string' },
+    count: { type: 'string', default: '1200' },
+    python: { type: 'string' },
+    backends: { type: 'string', default: 'typescript,wasm,sympy' },
+    timeout: { type: 'string', default: '30' },
+    repeats: { type: 'string', default: '3' },
+  },
+});
+if (!values.output) throw new Error('--output must name a new run directory');
+const output = resolve(values.output);
+if (existsSync(output))
+  throw new Error('Refusing to overwrite an existing run');
+const corpus = factoringCorpus(Number(values.count));
+const serialized = JSON.stringify(corpus);
+const hash = createHash('sha256').update(serialized).digest('hex');
+mkdirSync(output, { recursive: true });
+writeFileSync(resolve(output, 'corpus.json'), serialized);
+const repeats = Number(values.repeats),
+  timeout = Number(values.timeout) * 1000;
+if (
+  !Number.isInteger(repeats) ||
+  repeats < 1 ||
+  !Number.isFinite(timeout) ||
+  timeout <= 0
+)
+  throw new Error('Invalid run options');
+const sourceHash = createHash('sha256');
+for (const f of [
+  'src/compute-engine/polynomial/exact-field.ts',
+  'src/compute-engine/polynomial/finite-field.ts',
+  'src/compute-engine/polynomial/factor-rational.ts',
+  'src/compute-engine/polynomial/wasm-backend.ts',
+  'benchmarks/factorization/corpus.ts',
+  'benchmarks/factorization/worker.ts',
+  'benchmarks/factorization/sympy_worker.py',
+  'benchmarks/factorization/run.ts',
+])
+  sourceHash.update(readFileSync(f));
+writeFileSync(
+  resolve(output, 'manifest.json'),
+  JSON.stringify(
+    {
+      createdAt: new Date().toISOString(),
+      corpusHash: hash,
+      sourceHash: sourceHash.digest('hex'),
+      count: corpus.length,
+      repeats,
+      timeout,
+      backends: values.backends,
+      wasmHash: existsSync('build/polynomial-wasm/factor.wasm')
+        ? createHash('sha256')
+            .update(readFileSync('build/polynomial-wasm/factor.wasm'))
+            .digest('hex')
+        : null,
+      runtime: process.version,
+    },
+    null,
+    2
+  )
+);
+
+type Message = Record<string, any>;
+class Runner {
+  child?: ChildProcessWithoutNullStreams;
+  pending?: {
+    resolve: (v: Message) => void;
+    timer: ReturnType<typeof setTimeout>;
+  };
+  constructor(readonly backend: string) {}
+  async start(): Promise<Message> {
+    const args =
+      this.backend === 'sympy'
+        ? ['-u', 'benchmarks/factorization/sympy_worker.py']
+        : [
+            '--import',
+            'tsx',
+            'benchmarks/factorization/worker.ts',
+            this.backend,
+          ];
+    if (this.backend === 'sympy' && !values.python)
+      throw new Error('--python is required for SymPy');
+    const child = spawn(
+      this.backend === 'sympy' ? values.python! : process.execPath,
+      args,
+      { windowsHide: true }
+    );
+    this.child = child;
+    child.stderr.on('data', (s) =>
+      appendFileSync(resolve(output, `${this.backend}.stderr.log`), s)
+    );
+    createInterface({ input: child.stdout }).on('line', (line) => {
+      try {
+        const message = JSON.parse(line);
+        if (this.child === child) this.finish(message);
+      } catch {
+        appendFileSync(
+          resolve(output, `${this.backend}.stdout.log`),
+          `${line}\n`
+        );
+      }
+    });
+    child.on('error', (e) => {
+      if (this.child === child) this.finish({ error: String(e) });
+    });
+    child.on('exit', (code) => {
+      if (this.child === child) {
+        this.finish({ error: `worker exit ${code}` });
+        this.child = undefined;
+      }
+    });
+    return this.wait(120_000);
+  }
+  finish(message: Message): void {
+    if (!this.pending) return;
+    clearTimeout(this.pending.timer);
+    this.pending.resolve(message);
+    this.pending = undefined;
+  }
+  wait(ms: number): Promise<Message> {
+    return new Promise((resolveMessage) => {
+      this.pending = {
+        resolve: resolveMessage,
+        timer: setTimeout(() => {
+          const c = this.child;
+          this.child = undefined;
+          c?.kill();
+          this.finish({ timeout: true });
+        }, ms),
+      };
+    });
+  }
+  async run(c: FactoringCase): Promise<Message> {
+    if (!this.child) {
+      const ready = await this.start();
+      appendFileSync(
+        resolve(output, 'initializations.jsonl'),
+        JSON.stringify({ backend: this.backend, ...ready }) + '\n'
+      );
+      if (!ready.ready) return { error: 'backend unavailable', setup: ready };
+    }
+    const result = this.wait(timeout);
+    this.child!.stdin.write(JSON.stringify(c) + '\n');
+    return result;
+  }
+}
+const signature = (fs: { coefficients: string[]; multiplicity: number }[]) =>
+  fs
+    .map((f) => `${f.coefficients.join(',')}^${f.multiplicity}`)
+    .sort()
+    .join(';');
+const summaries: Message[] = [];
+for (const backend of values.backends!.split(',')) {
+  if (!['typescript', 'wasm', 'sympy', 'pari'].includes(backend))
+    throw new Error('Unknown backend');
+  const runner = new Runner(backend),
+    rows: Message[] = [];
+  const setup = await runner.start();
+  appendFileSync(
+    resolve(output, 'initializations.jsonl'),
+    JSON.stringify({ backend, ...setup }) + '\n'
+  );
+  if (!setup.ready) {
+    summaries.push({ backend, status: 'unavailable', setup });
+    runner.child?.kill();
+    continue;
+  }
+  // Warm up outside reported trials; all measured backends see identical inputs.
+  for (const c of corpus.slice(0, 6)) await runner.run(c);
+  for (let repeat = 0; repeat < repeats; repeat++)
+    for (let i = 0; i < corpus.length; i++) {
+      const c = corpus[i],
+        r = await runner.run(c);
+      let status = r.timeout
+        ? 'timeout'
+        : r.error
+          ? 'error'
+          : (r.result?.status ?? 'unverified');
+      if (status === 'complete') {
+        const got = r.result;
+        status =
+          got.coefficient.numerator === c.expected.coefficient[0] &&
+          got.coefficient.denominator === c.expected.coefficient[1] &&
+          signature(got.factors) === signature(c.expected.factors)
+            ? 'verified'
+            : 'mismatch';
+      }
+      const record = {
+        ...r,
+        id: c.id,
+        family: c.family,
+        backend,
+        repeat,
+        status,
+      };
+      appendFileSync(
+        resolve(output, 'results.jsonl'),
+        JSON.stringify(record) + '\n'
+      );
+      rows.push(record);
+      if ((i + 1) % 100 === 0)
+        console.log(
+          `${backend} trial ${repeat + 1}: ${i + 1}/${corpus.length}`
+        );
+    }
+  runner.child?.kill();
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  const timings = rows
+    .filter((r) => r.status === 'verified')
+    .map((r) => Number(r.solveMs))
+    .sort((a, b) => a - b);
+  summaries.push({
+    backend,
+    counts,
+    medianVerifiedMs: timings[Math.floor(timings.length / 2)],
+    p95VerifiedMs: timings[Math.floor(timings.length * 0.95)],
+    totalSolveMs: rows.reduce((s, r) => s + Number(r.solveMs ?? 0), 0),
+  });
+  writeFileSync(
+    resolve(output, 'summary.json'),
+    JSON.stringify(summaries, null, 2)
+  );
+}
+console.log(JSON.stringify(summaries, null, 2));
+if (summaries.some((r) => r.counts?.mismatch)) process.exitCode = 1;
