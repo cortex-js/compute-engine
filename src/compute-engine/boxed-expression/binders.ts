@@ -1,3 +1,8 @@
+import { scopeActivationTemplate } from './ambient-chain.js';
+import {
+  forwardCallScope,
+  isForwardCallReference,
+} from './forward-call-reference.js';
 import type {
   BoxedBaseDefinition,
   BoxedDefinition,
@@ -150,6 +155,99 @@ export function sameBindingDef(
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
   return staticBindingOf(a) === staticBindingOf(b);
+}
+
+// Static block locals can change representation from a value placeholder to
+// an operator at runtime. Their lexical home still identifies the same slot.
+const callableHomes = new WeakMap<BoxedBaseDefinition, Scope>();
+const callableFrames = new WeakMap<Scope, Scope>();
+export function hasCallableHome(def: BoxedDefinition): boolean {
+  return callableHomes.has('value' in def ? def.value : def.operator);
+}
+export function markCallableHome(def: BoxedDefinition, scope: Scope): void {
+  const half = 'value' in def ? def.value : def.operator;
+  if (!callableHomes.has(half)) callableHomes.set(half, scope);
+}
+export function markCallableFrame(frame: Scope, template: Scope): void {
+  callableFrames.set(frame, template);
+}
+
+/** Preserve a callable's binding while canonicalizing rewritten operands. */
+export function withCallableBinding<T>(expr: Expression, build: () => T): T {
+  if (!isFunction(expr)) return build();
+  const own =
+    expr.valueDefinition !== undefined
+      ? { value: expr.valueDefinition }
+      : expr.operatorDefinition !== undefined
+        ? { operator: expr.operatorDefinition }
+        : undefined;
+  const ce = expr.engine;
+  const binding = callableBindingInContext(ce, expr.operator, own);
+  if (binding === undefined || ce.lookupDefinition(expr.operator) === binding)
+    return build();
+  const bindings = new Map([[expr.operator, binding]]);
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings });
+  try {
+    return build();
+  } finally {
+    // The scope borrows definitions; popping it must not dispose their facts.
+    bindings.clear();
+    ce.popScope();
+  }
+}
+
+/** Callable positions use lexical identity. Runtime activations of that
+ * identity supply parameters and block locals; an unrelated shadow cannot. */
+export function callableBindingInContext(
+  ce: ComputeEngine,
+  name: string,
+  own: BoxedDefinition | undefined
+): BoxedDefinition | undefined {
+  if (own === undefined) return ce.lookupDefinition(name);
+  const half = 'value' in own ? own.value : own.operator;
+  const activated = half as Activated;
+  const isActivation =
+    activated._activationOf !== undefined ||
+    activated._scopeActivationOf !== undefined;
+  const home = isActivation ? undefined : callableHomes.get(half);
+  for (
+    let scope: Scope | null = ce.context.lexicalScope;
+    scope;
+    scope = scope.parent
+  ) {
+    const found = scope.bindings.get(name);
+    if (found === undefined) continue;
+    const candidate = 'value' in found ? found.value : found.operator;
+    if (
+      candidate === half ||
+      (!isActivation && sameBindingDef(candidate, half)) ||
+      (home !== undefined &&
+        (scope === home ||
+          callableFrames.get(scope) === home ||
+          scopeActivationTemplate(scope) === home))
+    ) {
+      if (!('value' in found) || !isForwardCallReference(found.value))
+        return found;
+      break;
+    }
+  }
+  // Forward calls wait for a definition in their original lexical chain.
+  // A type/evaluation read never binds them to an unrelated caller's scope.
+  if ('value' in own) {
+    for (
+      let scope = forwardCallScope(own.value);
+      scope;
+      scope = scope.parent ?? undefined
+    ) {
+      const found = scope.bindings.get(name);
+      if (
+        found !== undefined &&
+        !('value' in found && isForwardCallReference(found.value))
+      )
+        return found;
+    }
+  }
+  return own;
 }
 
 /**
@@ -711,10 +809,12 @@ export function rewriteWithBinders(
           : expr.isStructural
             ? 'structural'
             : 'raw';
-        result = ce.function(expr.operator, next, {
-          form,
-          scope: expr.localScope,
-        });
+        result = withCallableBinding(expr, () =>
+          ce.function(expr.operator, next, {
+            form,
+            scope: expr.localScope,
+          })
+        );
       }
     }
   }

@@ -59,8 +59,21 @@ export function deriveCalleeType(
   context: TypeHandlerContext
 ): Type | undefined {
   const op = operators.get(fn);
-  if (op !== undefined)
+  if (op !== undefined) {
+    if (
+      fn.structureOf?.()?.kind === 'function-literal' &&
+      args.some((d) => d.facts.indexed === true)
+    )
+      return (
+        deriveAnonymous?.(fn, args, context) ??
+        deriveOperator?.(op.engine, op.head, args, op.definition)
+      );
     return deriveOperator?.(op.engine, op.head, args, op.definition);
+  }
   if (args.some((d) => d.type === 'never')) return 'never';
   return deriveAnonymous?.(fn, args, context);
+}
+
+export function isOperatorCallee(descriptor: OperandDescriptor): boolean {
+  return operators.has(descriptor);
 }

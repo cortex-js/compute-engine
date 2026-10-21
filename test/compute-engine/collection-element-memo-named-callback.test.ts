@@ -8,20 +8,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  * `Filter(xs, isEven)` with `isEven(n) = …`, `Map(f, xs)` with `f` a user
  * function or a variable holding a function literal.
  *
- * The canonical form keeps such a callback as a raw symbol, resolved by name
- * at each application. The dependency snapshot of the element memo
- * (`snapshotDeps`, `boxed-expression/collection-element-memo.ts`) declared
- * every such instance ineligible ("unbound symbol"), so a result walked for
- * its display and then enumerated by the host walked the pipeline twice, as
- * did two consumers of one `let`: the application memo answered the body of
- * a pure predicate, but each element paid the boxing of its application
- * again. A count of the runs of `tick` alone cannot tell the two memos apart
- * (the application memo also spares the body on a second walk), so each
- * repeated-walk test reads the element memo's state through
- * `validElementMemo` as well. The snapshot now
- * records the resolution of the name: an operator dependency for a user
- * function (plus the dependencies of its body), a chain-resolved value
- * dependency for a variable holding a literal.
+ * Canonical callbacks keep their lexical binding. The element memo records
+ * the operator and the variables its body reads, or the variable that holds
+ * the function literal. Writes to those dependencies invalidate the cache;
+ * a same-named declaration cannot change which callback runs.
  */
 
 let ce: ComputeEngine;
@@ -123,7 +113,7 @@ describe('a user function named as the callback', () => {
     expect(validElementMemo(f)).toBeUndefined();
   });
 
-  test('Filter: a scope that declares its own callback refills', () => {
+  test('Filter: a scope that declares another callback cannot redirect the captured callback', () => {
     ce.assign('isMultiple', [
       'Function',
       ['Equal', ['Mod', ['tick', 'n'], 2], 0],
@@ -144,8 +134,8 @@ describe('a user function named as the callback', () => {
       });
       expect(validElementMemo(f)).toBeUndefined();
       const [v, c] = counting(() => walk(f));
-      expect(v).toEqual([10, 20]);
-      expect(c).toBe(20);
+      expect(v).toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+      expect(c).toBe(0);
     } finally {
       ce.popScope();
     }

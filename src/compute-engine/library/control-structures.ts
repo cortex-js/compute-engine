@@ -1,3 +1,4 @@
+import { markCallableHome } from '../boxed-expression/binders.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   declareAssignmentLocals,
@@ -3226,7 +3227,12 @@ function canonicalBlock(
   // in the block, and the compiler's operand type gates, see the type the
   // program declared.
   const hoistDeclared = (scope: Scope, name: string): void => {
-    if (name === 'Nothing' || scope.bindings.has(name)) return;
+    if (name === 'Nothing') return;
+    const existing = scope.bindings.get(name);
+    if (existing !== undefined) {
+      markCallableHome(existing, scope);
+      return;
+    }
     const hoisted = ce._declareSymbolValue(
       name,
       { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
@@ -3235,6 +3241,7 @@ function canonicalBlock(
     // A block local, not a free symbol: see `_blockLocal`.
     if (isValueDef(hoisted)) {
       hoisted.value._blockLocal = true;
+      markCallableHome(hoisted, scope);
       if (explicitlyDeclared.has(name)) markDeclaredLocal(hoisted.value);
     }
   };
@@ -3300,7 +3307,10 @@ function canonicalBlock(
           scope
         );
         // A block local introduced by assignment: see `_blockLocal`.
-        if (isValueDef(hoisted)) hoisted.value._blockLocal = true;
+        if (isValueDef(hoisted)) {
+          hoisted.value._blockLocal = true;
+          markCallableHome(hoisted, scope);
+        }
         noteHoisted(name);
       }
     }

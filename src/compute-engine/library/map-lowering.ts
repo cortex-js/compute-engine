@@ -1,3 +1,4 @@
+import { withCallableBinding } from '../boxed-expression/binders.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -350,11 +351,24 @@ export function makeSpineRunner(
             if (closureParent) {
               ce.pushScope({ parent: closureParent, bindings: new Map() });
               try {
-                v = ce._fn(level.op!, args).evaluate(opts);
+                v = (
+                  level.application === undefined
+                    ? ce._fn(level.op!, args)
+                    : withCallableBinding(level.application, () =>
+                        ce._fn(level.op!, args)
+                      )
+                ).evaluate(opts);
               } finally {
                 ce.popScope();
               }
-            } else v = ce._fn(level.op!, args).evaluate(opts);
+            } else
+              v = (
+                level.application === undefined
+                  ? ce._fn(level.op!, args)
+                  : withCallableBinding(level.application, () =>
+                      ce._fn(level.op!, args)
+                    )
+              ).evaluate(opts);
             if (level.inexact === true && v !== undefined) v = inexact(ce, v);
           }
         }

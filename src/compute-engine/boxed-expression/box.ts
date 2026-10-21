@@ -2593,7 +2593,7 @@ function makeCanonicalFunctionCore(
       ce.declare(name, { type: 'function', inferred: true }, autoScope);
       const declared = autoScope.bindings.get(name);
       if (declared !== undefined && !ce._isShadowedParameter(name))
-        markForwardCallReference(declared);
+        markForwardCallReference(declared, autoScope);
       if (declared !== undefined && ce._isShadowedParameter(name))
         ce._setShadowedParameterDef(name, declared);
     }

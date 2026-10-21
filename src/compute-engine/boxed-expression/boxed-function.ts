@@ -1,3 +1,10 @@
+import { isForwardCallReference } from './forward-call-reference.js';
+import {
+  callableBindingInContext,
+  markCallableHome,
+  hasCallableHome,
+  withCallableBinding,
+} from './binders.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import {
   detachEagerSourceValues,
@@ -330,6 +337,7 @@ import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import {
   apply,
+  callableApplication,
   exactArgumentSources,
   lookupApplicable,
 } from '../function-utils.js';
@@ -750,9 +758,8 @@ export class BoxedFunction
   _recheckedCall(): Expression | undefined {
     const ops = this._refusedOps;
     if (ops === undefined) return undefined;
-    const call = this.engine.function(
-      this._operator,
-      this._writtenOperands(ops)
+    const call = withCallableBinding(this, () =>
+      this.engine.function(this._operator, this._writtenOperands(ops))
     );
     return call.isSame(this) ? undefined : call;
   }
@@ -895,25 +902,21 @@ export class BoxedFunction
       memo.version === half._writeVersion
     )
       return memo.call;
-    // The name must resolve to the binding of this call in the current
-    // scope before the call is boxed again: boxing an application whose name
-    // has no definition declares that name in the current scope. The type of
-    // a call to the index of a binder (`k(1)` in `[k(1) for k in [a ↦ 0]]`)
-    // is read after the binder has left its scope, and the index value
-    // changed during the walk, so boxing it there declared `k` in the global
-    // scope. A name with another binding gives a call that is not used (see
-    // the test of `_def` below), so nothing is lost.
+    // Recheck updates to this binding even when a different declaration
+    // shadows its spelling. An activation is checked in its own call frame.
     if (
-      lookupApplicable(
+      callableBindingInContext(
+        this.engine,
         this._operator,
-        this.engine.context.lexicalScope,
-        this.engine
+        this._def ?? undefined
       ) !== this._def
     )
       return undefined;
-    const fresh = this.engine.function(
-      this._operator,
-      this._writtenOperands(stamp.ops ?? this._ops)
+    const fresh = withCallableBinding(this, () =>
+      this.engine.function(
+        this._operator,
+        this._writtenOperands(stamp.ops ?? this._ops)
+      )
     );
     // The counter is read after the new call was boxed: boxing it can
     // write the signature of the definition (an inference).
@@ -1545,6 +1548,21 @@ export class BoxedFunction
       this._localScope ?? this.engine.context.lexicalScope,
       this.engine
     );
+    // Forward and statement-declared function slots may acquire an operator
+    // definition when their declaration runs. Keep the slot's lexical home.
+    if (this._def !== undefined && !hasCallableHome(this._def)) {
+      for (
+        let scope: Scope | null =
+          this._localScope ?? this.engine.context.lexicalScope;
+        scope;
+        scope = scope.parent
+      ) {
+        if (scope.bindings.get(this._operator) === this._def) {
+          markCallableHome(this._def, scope);
+          break;
+        }
+      }
+    }
   }
 
   _reset(): void {
@@ -5419,9 +5437,7 @@ export class BoxedFunction
       // a(err)`), this is not an application at all: let the handler run so
       // the CALLEE problem is reported (`applyFunctionLiteral`'s `typeError`
       // path) rather than the argument's error.
-      const value = def.value.isConstant
-        ? def.value.value
-        : this.engine._getSymbolValue(this._operator);
+      const value = calleeValue(this, def.value);
       if (!value?.type.matches('function')) return undefined;
       const d = this._operandErrorDisposition();
       if (d === 'evaluate') return undefined;
@@ -5950,7 +5966,7 @@ export class BoxedFunction
         // it does for a set that is an operand as written.
         const unindexed = unindexedOperandBroadcast(def, bops);
         if (unindexed === 'veto')
-          return this.engine._fn(this.operator, bops).evaluate(options);
+          return this._withSameBinding(bops).evaluate(options);
 
         // Under `.N()`, a lazy `Map` operand is read through its numeric
         // callback (`lazyMapNumericApproximation`), as `Map(f, xs).N()`
@@ -5972,12 +5988,14 @@ export class BoxedFunction
               )
             : bops;
 
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          cellOps,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            cellOps,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -5989,7 +6007,7 @@ export class BoxedFunction
         while (true) {
           const { done, value } = items.next();
           if (done) break;
-          results.push(this.engine._fn(this.operator, value).evaluate(options));
+          results.push(this._withSameBinding(value).evaluate(options));
         }
 
         // Always wrap in a `List` — even a single-element broadcast — so the
@@ -6084,12 +6102,14 @@ export class BoxedFunction
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          bops,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            bops,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -6103,9 +6123,7 @@ export class BoxedFunction
             while (true) {
               const { done, value } = items.next();
               if (done) break;
-              results.push(
-                this.engine._fn(this.operator, value).evaluate(options)
-              );
+              results.push(this._withSameBinding(value).evaluate(options));
             }
           } catch (e) {
             throw withBroadcastThrowContext(
@@ -6671,13 +6689,15 @@ export class BoxedFunction
 
         // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
         // exact sources (`exactJumpLazyBroadcastOperands()`).
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
-            tail,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
+              tail,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -6705,9 +6725,7 @@ export class BoxedFunction
             while (true) {
               const { done, value } = items.next();
               if (done) break;
-              results.push(
-                this.engine._fn(this.operator, value).evaluate(options)
-              );
+              results.push(this._withSameBinding(value).evaluate(options));
             }
           } catch (e) {
             if (!lambdaBroadcast) throw e;
@@ -6765,7 +6783,7 @@ export class BoxedFunction
         return this.engine._fn(
           'Tuple',
           tupleCells.map((cell) =>
-            this.engine._fn(this.operator, cell).evaluate(options)
+            this._withSameBinding(cell).evaluate(options)
           )
         );
       }
@@ -6792,7 +6810,7 @@ export class BoxedFunction
               listedBroadcastCells(
                 this.engine,
                 userCells.map((cell) =>
-                  this.engine._fn(this.operator, cell).evaluate(options)
+                  this._withSameBinding(cell).evaluate(options)
                 ),
                 numericApproximation
               )
@@ -7214,7 +7232,7 @@ export class BoxedFunction
         // path).
         const unindexed = unindexedOperandBroadcast(def, bops);
         if (unindexed === 'veto')
-          return this.engine._fn(this.operator, bops).evaluateAsync(options);
+          return this._withSameBinding(bops).evaluateAsync(options);
 
         // A lazy `Map` operand is read through its numeric callback under
         // `.N()`, except by a jump operator (mirrors the sync path).
@@ -7228,12 +7246,14 @@ export class BoxedFunction
               )
             : bops;
 
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          cellOps,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            cellOps,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -7246,9 +7266,7 @@ export class BoxedFunction
           const { done, value } = items.next();
           if (done) break;
 
-          results.push(
-            this.engine._fn(this.operator, value).evaluateAsync(options)
-          );
+          results.push(this._withSameBinding(value).evaluateAsync(options));
         }
 
         // Always wrap in a `List` — even a single-element broadcast — so the
@@ -7332,12 +7350,14 @@ export class BoxedFunction
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          bops,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            bops,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -7851,13 +7871,15 @@ export class BoxedFunction
 
         // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
         // exact sources (`exactJumpLazyBroadcastOperands()`).
-        const lazy = lazyBroadcastMapIfNeeded(
-          this.engine,
-          this.operator,
-          exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
-            tail,
-          isBroadcastableCollection,
-          numericApproximation
+        const lazy = withCallableBinding(this, () =>
+          lazyBroadcastMapIfNeeded(
+            this.engine,
+            this.operator,
+            exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
+              tail,
+            isBroadcastableCollection,
+            numericApproximation
+          )
         );
         if (lazy) return lazy;
 
@@ -7957,7 +7979,7 @@ export class BoxedFunction
           if (!Array.isArray(tupleCells)) return tupleCells;
           const resolved = await Promise.all(
             tupleCells.map((cell) =>
-              this.engine._fn(this.operator, cell).evaluateAsync(options)
+              this._withSameBinding(cell).evaluateAsync(options)
             )
           );
           return this.engine._fn('Tuple', resolved);
@@ -7977,7 +7999,7 @@ export class BoxedFunction
           if (!Array.isArray(userCells)) return userCells;
           const resolved = await Promise.all(
             userCells.map((cell) =>
-              this.engine._fn(this.operator, cell).evaluateAsync(options)
+              this._withSameBinding(cell).evaluateAsync(options)
             )
           );
           // The listing of the cells evaluates synchronously after the
@@ -11569,11 +11591,19 @@ async function applyFunctionLiteralAsync(
 function operatorCallee(
   ce: ComputeEngine,
   value: Expression
-): string | undefined {
+): { name: string; binding: BoxedDefinition } | undefined {
   if (!isSymbol(value)) return undefined;
   const name = value.symbol;
-  const def = ce.lookupDefinition(name);
-  return def !== undefined && isOperatorDef(def) ? name : undefined;
+  const own =
+    value.valueDefinition !== undefined
+      ? { value: value.valueDefinition }
+      : value.operatorDefinition !== undefined
+        ? { operator: value.operatorDefinition }
+        : undefined;
+  const binding = callableBindingInContext(ce, name, own);
+  return binding !== undefined && isOperatorDef(binding)
+    ? { name, binding }
+    : undefined;
 }
 
 /** The function literal that an application of `expr` applies: the value
@@ -11582,9 +11612,12 @@ function calleeValue(
   expr: BoxedFunction,
   def: BoxedValueDefinition
 ): Expression | undefined {
-  return def.isConstant
-    ? def.value
-    : expr.engine._getSymbolValue(expr.operator);
+  const binding = callableBindingInContext(expr.engine, expr.operator, {
+    value: def,
+  });
+  return binding !== undefined && 'value' in binding
+    ? binding.value.value
+    : undefined;
 }
 
 function applyFunctionLiteral(
@@ -11631,7 +11664,12 @@ function applyFunctionLiteralWith(
   const operatorName =
     value === undefined ? undefined : operatorCallee(expr.engine, value);
   if (operatorName !== undefined) {
-    const call = expr.engine.function(operatorName, expr.ops);
+    const call = callableApplication(
+      expr.engine,
+      operatorName.name,
+      expr.ops,
+      operatorName.binding
+    );
     return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
   }
 
@@ -11648,9 +11686,16 @@ function applyFunctionLiteralWith(
     // approximated operands lost it: `Block(h := x ↦ Floor(x), h((25! −
     // 1)/24!)).N()` was 25, where the correct value is 24. Otherwise stay
     // symbolic over the evaluated operands.
-    const opDef = expr.engine.lookupDefinition(expr.operator);
+    const opDef = callableBindingInContext(expr.engine, expr.operator, {
+      value: def,
+    });
     if (opDef && isOperatorDef(opDef)) {
-      const call = expr.engine.function(expr.operator, expr.ops);
+      const call = callableApplication(
+        expr.engine,
+        expr.operator,
+        expr.ops,
+        opDef
+      );
       return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
     }
     // A call of a local of a block that has no value yet in this run (a
@@ -11674,7 +11719,10 @@ function applyFunctionLiteralWith(
     // `ce.function()` would declare the name in the current scope, and a
     // later assignment would write that binding (`_withSameBinding`). The
     // application keeps the binding it has.
-    if (opDef === undefined && expr._parseScope === undefined)
+    if (
+      isForwardCallReference(def) ||
+      (opDef === undefined && expr._parseScope === undefined)
+    )
       return expr._withSameBinding(evaluated);
     return expr._withParseScope(() =>
       expr.engine.function(expr.operator, evaluated)
@@ -11814,12 +11862,14 @@ function applyFunctionLiteralWith(
     // unknown size — return the lazy `Map` form instead of materializing.
     // The `Map` body references the function by NAME (`g(_1)`), so each
     // element re-dispatches through this path on a scalar at drain time.
-    const lazy = lazyBroadcastMapIfNeeded(
-      expr.engine,
-      expr.operator,
-      ops,
-      isBroadcastableCollection,
-      options?.numericApproximation ?? false
+    const lazy = withCallableBinding(expr, () =>
+      lazyBroadcastMapIfNeeded(
+        expr.engine,
+        expr.operator,
+        ops,
+        isBroadcastableCollection,
+        options?.numericApproximation ?? false
+      )
     );
     if (lazy) return lazy;
 

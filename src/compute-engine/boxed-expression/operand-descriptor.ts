@@ -1,3 +1,4 @@
+import { callableBindingInContext } from './binders.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
   deriveCalleeType,
@@ -55,17 +56,33 @@ export function describeCallee(
     return { ...describeType(type), structureOf: body.structureOf };
   };
   const ambient = op.engine.lookupDefinition(op.operator);
-  const value = op.valueDefinition;
+  const originalValue = op.valueDefinition;
+  const resolved =
+    originalValue !== undefined && isForwardCallReference(originalValue)
+      ? callableBindingInContext(op.engine, op.operator, {
+          value: originalValue,
+        })
+      : undefined;
+  const value =
+    resolved !== undefined && 'value' in resolved
+      ? resolved.value
+      : resolved !== undefined
+        ? undefined
+        : originalValue;
   if (value !== undefined) {
     if (ambient !== undefined && 'value' in ambient && ambient.value === value)
       return undefined;
     const held = value.value;
-    if (isForwardCallReference(value)) return undefined;
+    if (isForwardCallReference(value))
+      return ambient === undefined ? undefined : describeType('function');
     return held !== undefined && isFunction(held, 'Function')
       ? literal(held, value.type.type)
       : describeType(value.type.type);
   }
-  const own = op.operatorDefinition;
+  const own =
+    resolved !== undefined && 'operator' in resolved
+      ? resolved.operator
+      : op.operatorDefinition;
   if (own === undefined) return undefined;
   if (
     ambient !== undefined &&
@@ -75,7 +92,12 @@ export function describeCallee(
     return undefined;
   const held = (own as { _lambdaLiteral?: Expression })._lambdaLiteral;
   return held !== undefined
-    ? literal(held, own.signature.type)
+    ? retainOperatorCallee(
+        literal(held, own.signature.type),
+        op.engine,
+        op.operator,
+        own
+      )
     : retainOperatorCallee(
         describeBoundSymbol(own.signature.type, op.operator),
         op.engine,
@@ -216,6 +238,16 @@ function structureOfExpression(
     // binding-identity test `isRingConstant` makes on an expression); an
     // unbound symbol resolves to nothing and is never system-bound.
     const node: OperandStructure = { kind: 'symbol', name: op.symbol };
+    const operator = op.operatorDefinition;
+    if (operator !== undefined) {
+      const ambient = op.engine.lookupDefinition(op.symbol);
+      if (
+        ambient === undefined ||
+        !('operator' in ambient) ||
+        ambient.operator !== operator
+      )
+        node.lookupByName = false;
+    }
     const def = op.valueDefinition;
     if (def !== undefined) {
       const ambient = op.engine.lookupDefinition(op.symbol);
@@ -613,6 +645,8 @@ class ExpressionOperandDescriptor implements OperandDescriptor {
   ) {
     this.#op = op;
     this.#walk = walk;
+    if (isSymbol(op) && op.operatorDefinition !== undefined)
+      retainOperatorCallee(this, op.engine, op.symbol, op.operatorDefinition);
     // A number literal's type is read on demand (see `type` below). Every
     // other operand's type is read here, up front: a compound's type
     // derivation may write state (an inferred symbol type), and that

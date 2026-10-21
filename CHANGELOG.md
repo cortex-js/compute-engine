@@ -2,6 +2,14 @@
 
 ### Behavior Changes
 
+- A literal empty list at a required or optional point parameter is accepted
+  and maps to `[]` without invoking the function, matching evaluation.
+
+- Interpreted calls and collection callbacks now use their captured lexical
+  binding, including lazy and asynchronous evaluation. Updating that binding
+  remains visible; an unrelated declaration with the same name cannot redirect
+  the call. Forward calls resolve in their original lexical environment.
+
 - The coordinates of a point divided by a number that may be zero are typed
   `real | infinity | nan`, as a scalar quotient has been since 0.121.0: with
   `p: tuple<integer, integer>` and `x: integer`, `p / x` was typed

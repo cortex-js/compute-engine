@@ -1,3 +1,4 @@
+import { callableBindingInContext } from './binders.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import type {
   Expression,
@@ -137,7 +138,7 @@ export function callResultType(
   )
     return undefined;
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
-    binding = undefined;
+    binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
   const literal = userFunctionLiteral(binding);
   if (

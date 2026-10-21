@@ -718,36 +718,16 @@ function snapshotDepsUnderChain(
             visitAcrossDefinitionBoundary(read, undefined);
           }
         }
-      } else if (
-        e.operatorDefinition === undefined &&
-        e.isCanonical === false
-      ) {
-        // A callback operand written as a bare NAME — `Filter(xs, isEven)`
-        // with `isEven(n) = …`, or `Map(f, xs)` with `let f = n => …` — is
-        // kept as a raw symbol by the canonical form, and each application
-        // resolves the name through the scope chain in force at walk time
-        // (`makeLambda`, `function-utils.ts`). That resolution is the
-        // dependency. A name resolving to a user function is an operator
-        // dependency (validated by the identity of the operator definition
-        // the chain resolves the name to), and the function's body is
-        // visited for its own dependencies, as the body of a user function
-        // applied by name inside a lambda is. A name resolving to a variable
-        // holding a function literal is a chain-resolved value dependency
-        // (the `shadow` form), validated by re-resolving the name and by the
-        // definition's write version. A name the chain cannot resolve keeps
-        // the instance ineligible: it resolves dynamically at each walk.
-        //
-        // Only a DIRECT operand of the instance, and only for the element
-        // memo (`rawOperands`): a raw symbol deeper in the tree, or in an
-        // expression another memo snapshots, is not resolved by the walk this
-        // way, and stays ineligible as before.
-        //
-        // Before this, every lazy `Filter`/`Map`/`Any` over a named user
-        // function was ineligible, so a result printed once (a walk) and
-        // then enumerated by the host (a second walk) walked its pipeline
-        // again, as did two consumers of one `let`: the application memo
-        // answered the body of a pure predicate, but each element paid the
-        // boxing of its application once more.
+      } else if (e.operatorDefinition !== undefined) {
+        visitLambdaBody(e, e.symbol, e.operatorDefinition, true);
+      } else if (e.isCanonical === false) {
+        // Declared callbacks are canonical and tracked through their binding
+        // above. An unresolved raw callback name can acquire a declaration
+        // later, so its current resolution is a dependency too. Track a
+        // resolved operator and its body, or the variable holding a literal;
+        // an unresolved name keeps the instance ineligible for caching.
+        // Only direct operands of the element memo use this compatibility
+        // path. Raw symbols nested in other expressions stay ineligible.
         const resolved =
           rawOperands && isFunction(expr) && expr.ops.includes(e)
             ? resolveDepBinding(ce, depScope, e.symbol)

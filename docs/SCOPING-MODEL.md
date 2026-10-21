@@ -9,17 +9,32 @@ substitution, free-symbol analysis, closure capture, and dereference must use
 the binding selected by the scope chain. Raw-name fallback is a compatibility
 escape hatch, not the identity model.
 
-Call-head placeholders created before a function is defined are forward
-references: type inference resolves their names when the definition becomes
-available. A declaration adopted as a function parameter is a lexical binding,
-so its contract takes precedence over an unrelated function with the same name.
+## Callable resolution
 
-Compilation refuses a captured callable whose held function body differs from
-the currently applicable definition, or whose definition is no longer in scope.
-This check runs before folding and inlining. It preserves evaluation's current
-compatibility reading rather than silently emitting a captured body that
-`evaluate()` would not call. Changing evaluation to call captured definitions
-is a separate decision; this refusal does not make that change.
+A callable name denotes the binding selected where the call or callback was
+created. It does not denote whichever unrelated declaration has that spelling
+when evaluation eventually runs. This rule is the same for a direct call,
+a bare callback, a function literal, and a callback in a lazy collection.
+
+Capturing a binding does not freeze its value. Assigning a different function
+to that original binding changes later calls, including reads from an existing
+lazy view. Declaring another binding with the same name does not redirect them.
+Parameters, block locals and iterator variables read the activation belonging
+to their invocation; an unrelated invocation cannot intercept the call.
+
+A call created before its function is defined is a forward reference. It
+waits for a definition in its original lexical environment, not an unrelated
+caller's environment. Adopting that declaration as a parameter makes it a
+lexical parameter binding instead. Type inference and evaluation use the same
+resolution rule, without assigning a target as a side effect of reading a type.
+
+Ordinary data-symbol lookup keeps the compatibility behavior below. This
+callable rule changes function application, not every symbol read.
+
+Compilation currently refuses captured held-function bindings that differ from
+the ambient definition, or are no longer in scope. This remains a lowering
+limitation: the interpreter now calls the captured binding, but the compiler's
+name-based paths have not all been proven to preserve it.
 
 A stored symbol value is evaluated in the environment denoted by its own free
 symbols. Copying that value into the caller's scope and resolving it there can

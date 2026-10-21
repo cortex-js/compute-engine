@@ -178,7 +178,7 @@ describe('call-head inference follows lexical bindings', () => {
       ce.popScope();
       ce.assign('h', ce.box(['Function', 9, 'u']));
       const result = compile(map);
-      expect(ce.box(['ListFrom', map]).evaluate().json).toEqual(['List', 9, 9]);
+      expect(ce.box(['ListFrom', map]).evaluate().json).toEqual(['List', 7, 7]);
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/different binding/);
     }
@@ -348,8 +348,8 @@ describe('call-head inference follows lexical bindings', () => {
         const interpreted = mapped
           ? ce.box(['ListFrom', call]).evaluate().json
           : call.evaluate().json;
-        expect(interpreted).toEqual(mapped ? ['List', 9, 9] : 7);
-        expect(result.run!({})).toEqual(mapped ? [9, 9] : 7);
+        expect(interpreted).toEqual(mapped ? ['List', 7, 7] : 7);
+        expect(result.run!({})).toEqual(mapped ? [7, 7] : 7);
       } else expect(result.error).toMatch(/different binding/);
     }
   );

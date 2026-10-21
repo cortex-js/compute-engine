@@ -2,6 +2,7 @@ import {
   couldBeUnkeyedCollectionOperand,
   isFiniteIndexedCollection,
   isPointListArgumentType,
+  isPointParameterType,
   isTupleWithListCoordinate,
   typeCouldBeCollection,
   typeCouldBeNumericCollection,
@@ -3438,6 +3439,9 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
+        (isPointParameterType(param) &&
+          isFunction(op, 'List') &&
+          op.nops === 0) ||
         isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);
@@ -3788,6 +3792,9 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
+        (isPointParameterType(param) &&
+          isFunction(op, 'List') &&
+          op.nops === 0) ||
         isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);

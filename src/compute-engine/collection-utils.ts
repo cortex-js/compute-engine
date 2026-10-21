@@ -5326,7 +5326,9 @@ export function isPointParameterType(param: Type): boolean {
  * application maps over the points, and each point is bound whole to the
  * parameter (user decision 2026-09-25). A list whose elements are not known
  * to be points (`list<real>`, `list<unknown>`) does not conform, and neither
- * does an empty list typed `list<never>`: those are bound whole, as before.
+ * does a type alone of `list<never>`: those are bound whole. A literal
+ * empty `List` is recognized separately by argument validation and evaluation;
+ * it maps to an empty result without invoking the function.
  *
  * A `missing` arm is removed from `arg` and from its element type first, as
  * the broadcast typing does: a restricted list of points (`(A, B)\{0 < t\}`,

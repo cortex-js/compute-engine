@@ -39,6 +39,8 @@ import {
 export type Slot = Expression | number;
 
 export interface LoweredLevel {
+  /** Original call carries the lexical head binding through fusion. */
+  application?: Expression;
   /** The level's own `Map` instance — the key `mapAutoCompileRunner` and the
    * compile caches are keyed on. */
   expr: Expression;
@@ -368,6 +370,7 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
     expr,
     identity: false,
     op: body.operator,
+    application: body,
     slots,
     napprox,
     inexact,

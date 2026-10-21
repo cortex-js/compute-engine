@@ -1,3 +1,4 @@
+import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   mapImmediateElements,
@@ -2392,7 +2393,7 @@ function canonicalCallbackOperand(
     // Bind an existing declaration while its lexical scope is active. Lazy
     // callbacks otherwise keep a raw symbol and later type reads resolve its
     // name in whichever scope happens to be current.
-    return accept(def !== undefined && 'value' in def ? fn.canonical : fn);
+    return accept(def !== undefined ? fn.canonical : fn);
   }
   // `["Function", body, ...params]`: a lift with no parameter is a constant.
   if (isFunction(fn, 'Function') && fn.nops < 2) return reject();
@@ -3601,6 +3602,19 @@ function bareOperatorElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const s = fn.structureOf?.();
+  if (
+    s?.kind === 'symbol' &&
+    s.lookupByName === false &&
+    isOperatorCallee(fn)
+  ) {
+    const elements = sources.map(mappingSourceElementTypeD);
+    if (elements.some((t) => t === undefined)) return undefined;
+    return deriveApplicationOf(
+      { head: s.name, callee: fn },
+      elements.map((t, i) => describeBoundElement(t!, i)),
+      { engine, derive }
+    );
+  }
   if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
   const def = engine.lookupDefinition(s.name)?.operator;
   if (def === undefined || !def.broadcastExemptions.includes('tuples'))
@@ -5053,6 +5067,20 @@ function callbackHasUnknownResult(
   if (op === undefined) return false;
   const known = (t: Type | undefined) => t === 'function' || t === 'error';
   if (known(op.type)) return true;
+  const literal = op.structureOf?.();
+  const hasOpaqueCall = (shape: OperandStructure): boolean =>
+    shape.kind === 'application' &&
+    (shape.callee?.type === 'function' ||
+      shape.children.some((d) => {
+        const child = d.structureOf?.();
+        return child !== undefined && hasOpaqueCall(child);
+      }));
+  if (
+    functionResult(op.type) === 'unknown' &&
+    literal?.kind === 'function-literal' &&
+    hasOpaqueCall(literal.body)
+  )
+    return true;
   const s = op.structureOf?.();
   if (s?.kind !== 'symbol' || s.lookupByName === false) return false;
   return known(engine.lookupDefinition(s.name)?.value?.type?.type);

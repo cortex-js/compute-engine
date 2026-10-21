@@ -8,8 +8,11 @@ import { isThenable } from '../common/interruptible.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   bindingInContext,
+  callableBindingInContext,
   evaluateInOwnBindings,
   markActivation,
+  markCallableFrame,
+  markCallableHome,
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
@@ -2524,6 +2527,7 @@ export function declareAssignmentLocals(
       value: half,
     };
     if (readIsError) local._assignmentLocal = true;
+    markCallableHome(local, run);
     run.bindings.set(name, local);
     noteScopeDeclaration(run);
   }
@@ -4634,9 +4638,19 @@ function makeLambda(
   // If the expression is a symbol, interpret it as an operator
   if (isSymbol(expr)) {
     const sym = expr.symbol;
-    return (args, options) =>
-      applyNamedLiteral(ce, sym, args, options) ??
-      ce.function(sym, args).evaluate(options);
+    return (args, options) => {
+      const own =
+        expr.valueDefinition !== undefined
+          ? { value: expr.valueDefinition }
+          : expr.operatorDefinition !== undefined
+            ? { operator: expr.operatorDefinition }
+            : undefined;
+      const binding = callableBindingInContext(ce, sym, own);
+      return (
+        applyNamedLiteral(ce, sym, args, options, binding) ??
+        callableApplication(ce, sym, args, binding).evaluate(options)
+      );
+    };
   }
 
   const canonicalExpr = canonicalFunctionLiteral(expr);
@@ -4718,6 +4732,7 @@ function makeLambda(
       // condition then reads the valueless binding forever and never
       // terminates.
       const hiddenBindings = hideBodyScopeParams(bodyScope, []);
+      markCallableFrame(freshScope, bodyScope);
       // Each assignment local of the body is a new binding of this call.
       declareAssignmentLocals(ce, bodyScope, freshScope);
       // The scopes nested in the body (loops, big-ops, inner blocks) are
@@ -5571,6 +5586,7 @@ function makeLambda(
       enterAppliedBodyScope(bodyScope, savedParent);
       const curryParamNames = boundPrefix.leaves.map((l) => l.name);
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
+      markCallableFrame(freshScope, bodyScope);
       // Each assignment local of the body is a new binding of this call.
       declareAssignmentLocals(ce, bodyScope, freshScope);
       // The scopes nested in the body (loops, big-ops, inner blocks) are
@@ -5834,6 +5850,7 @@ function makeLambda(
     bodyScope.parent = freshScope;
     enterAppliedBodyScope(bodyScope, savedParent);
     const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
+    markCallableFrame(freshScope, bodyScope);
     // Each assignment local of the body is a new binding of this call.
     declareAssignmentLocals(ce, bodyScope, freshScope);
     // The scopes nested in the body (loops, big-ops, inner blocks) are
@@ -6360,11 +6377,32 @@ function bodyResultValue(result: Expression): Expression {
  * application again and gives its own answer, with its own error frames.
  * The body is pure, so its second run has no visible effect.
  */
+/** Box a call against the chosen lexical callable without changing the
+ * environment in which its written arguments will later evaluate. */
+export function callableApplication(
+  ce: ComputeEngine,
+  name: string,
+  args: ReadonlyArray<Expression>,
+  binding: BoxedDefinition | undefined
+): Expression {
+  if (binding === undefined || ce.lookupDefinition(name) === binding)
+    return ce.function(name, args);
+  const bindings = new Map([[name, binding]]);
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings });
+  try {
+    return ce.function(name, args);
+  } finally {
+    bindings.clear();
+    ce.popScope();
+  }
+}
+
 function applyNamedLiteral(
   ce: ComputeEngine,
   name: string,
   args: ReadonlyArray<Expression>,
-  options: ApplyOptions | undefined
+  options: ApplyOptions | undefined,
+  binding: BoxedDefinition | undefined
 ): Expression | undefined {
   if (
     options !== undefined &&
@@ -6374,7 +6412,6 @@ function applyNamedLiteral(
     )
   )
     return undefined;
-  const binding = ce.lookupDefinition(name);
   if (binding === undefined || !isOperatorDef(binding)) return undefined;
   const def = binding.operator as BoxedOperatorDefinition & {
     _isLambda?: boolean;
