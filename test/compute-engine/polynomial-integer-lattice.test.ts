@@ -1,6 +1,8 @@
 import {
   reduceIntegerLattice,
   isReducedIntegerLattice,
+  integerRowBasis,
+  integerGramSchmidt,
 } from '../../src/compute-engine/polynomial/integer-lattice';
 import {
   PolynomialWork,
@@ -8,6 +10,65 @@ import {
   rationalCoefficient as q,
   type RationalCoefficient,
 } from '../../src/compute-engine/polynomial/exact-field';
+
+test('integer projection removes dependencies without saturating the row lattice', () => {
+  const input = [
+    [6n, 0n, 6n],
+    [4n, 0n, 4n],
+    [0n, 3n, 3n],
+    [2n, 3n, 5n],
+    [0n, 0n, 0n],
+  ];
+  expect(integerRowBasis(input, new PolynomialWork())).toEqual([
+    [2n, 0n, 2n],
+    [0n, 3n, 3n],
+  ]);
+  expect(
+    integerRowBasis(
+      [
+        [2n, 0n],
+        [0n, 2n],
+        [2n, 2n],
+      ],
+      new PolynomialWork()
+    )
+  ).toEqual([
+    [2n, 0n],
+    [0n, 2n],
+  ]);
+  expect(integerRowBasis([[0n, 0n]], new PolynomialWork())).toEqual([]);
+  expect(() => integerRowBasis(input, new PolynomialWork(0))).toThrow(
+    'operation-limit'
+  );
+});
+
+test('truncated knapsack reduction retains exact transformations and certified norms', () => {
+  const input = Array.from({ length: 7 }, (_, i) =>
+    Array.from({ length: 7 }, (_, j) =>
+      j === 6
+        ? i === 6
+          ? 2n ** 32n
+          : BigInt(7919 * (i + 1))
+        : i === j
+          ? 1n
+          : 0n
+    )
+  );
+  const result = reduceIntegerLattice(input, new PolynomialWork());
+  expect(
+    result.transformation.map((row) =>
+      input[0].map((_, j) =>
+        row.reduce((sum, c, i) => sum + c * input[i][j], 0n)
+      )
+    )
+  ).toEqual(result.basis);
+  expect(result.squaredNorms).toEqual(
+    integerGramSchmidt(result.basis, new PolynomialWork()).norms
+  );
+  expect(() => reduceIntegerLattice(input, new PolynomialWork(0))).toThrow(
+    'operation-limit'
+  );
+});
 
 // Independent determinant expansion is deliberately limited to small tests.
 const determinant = (a: bigint[][]): bigint =>

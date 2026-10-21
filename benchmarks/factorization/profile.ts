@@ -1,5 +1,7 @@
 import { factoringCorpus } from './corpus.js';
 import { stressCorpus } from './stress-corpus.js';
+import { challengeCorpus } from './challenge-corpus.js';
+import { recombinationCorpus } from './recombination-corpus.js';
 import { parseArgs } from 'node:util';
 import { factorRationalPolynomial } from '../../src/compute-engine/polynomial/factor-rational.js';
 import { rationalCoefficient as q } from '../../src/compute-engine/polynomial/exact-field.js';
@@ -13,14 +15,22 @@ const { values } = parseArgs({
     operations: { type: 'string', default: '2000000' },
   },
 });
-if (!['regular', 'stress'].includes(values.corpus!))
+if (
+  !['regular', 'stress', 'challenge', 'recombination'].includes(values.corpus!)
+)
   throw new Error('Unknown corpus');
 const cases = (
-  values.corpus === 'stress' ? stressCorpus() : factoringCorpus(120)
+  values.corpus === 'stress'
+    ? stressCorpus()
+    : values.corpus === 'challenge'
+      ? challengeCorpus()
+      : values.corpus === 'recombination'
+        ? recombinationCorpus()
+        : factoringCorpus(120)
 ).filter((c) =>
   values.id
     ? c.id === values.id
-    : values.corpus === 'stress' || c.family === 'eisenstein-products'
+    : values.corpus !== 'regular' || c.family === 'eisenstein-products'
 );
 if (!cases.length) throw new Error('No matching cases');
 const repeats = Number(values.repeats),

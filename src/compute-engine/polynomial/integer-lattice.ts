@@ -6,7 +6,6 @@ import {
 } from './exact-field.js';
 
 const sub = (a: Rational, b: Rational) => Q.add(a, Q.neg(b));
-const divide = (a: Rational, b: Rational) => Q.mul(a, Q.inv(b));
 const less = (a: Rational, b: Rational) =>
   a.numerator * b.denominator < b.numerator * a.denominator;
 const nearest = (a: Rational) => {
@@ -15,8 +14,43 @@ const nearest = (a: Rational) => {
   return n < 0n ? -((-2n * n + d) / (2n * d)) : (2n * n + d) / (2n * d);
 };
 
+/** Independent integer row generators, preserving the entire row lattice. */
+export function integerRowBasis(
+  input: readonly (readonly bigint[])[],
+  work: PolynomialWork
+): bigint[][] {
+  const rows = input.map((row) => [...row]);
+  const width = rows[0]?.length ?? 0;
+  if (rows.some((row) => row.length !== width))
+    throw new RangeError('Expected rectangular rows');
+  let rank = 0;
+  for (let column = 0; column < width && rank < rows.length; column++) {
+    const pivot = rows.findIndex((row, i) => i >= rank && row[column] !== 0n);
+    if (pivot < 0) continue;
+    [rows[rank], rows[pivot]] = [rows[pivot], rows[rank]];
+    for (let i = rank + 1; i < rows.length; i++) {
+      while (rows[i][column] !== 0n) {
+        work.tick(width);
+        const quotient = rows[rank][column] / rows[i][column];
+        rows[rank] = rows[rank].map((c, j) => c - quotient * rows[i][j]);
+        [rows[rank], rows[i]] = [rows[i], rows[rank]];
+      }
+    }
+    if (rows[rank][column] < 0n) rows[rank] = rows[rank].map((c) => -c);
+    for (let i = 0; i < rank; i++) {
+      const quotient = nearest(q(rows[i][column], rows[rank][column]));
+      if (quotient) {
+        work.tick(width);
+        rows[i] = rows[i].map((c, j) => c - quotient * rows[rank][j]);
+      }
+    }
+    rank++;
+  }
+  return rows.slice(0, rank);
+}
+
 /** Exact Gram-Schmidt data without constructing rational orthogonal vectors. */
-export function integerGramSchmidt(
+function fractionFreeGramSchmidt(
   basis: readonly (readonly bigint[])[],
   work: PolynomialWork
 ) {
@@ -27,30 +61,42 @@ export function integerGramSchmidt(
       'Expected a nonempty rectangular independent row basis'
     );
   work.tick(n * n);
-  const mu = Array.from({ length: n }, () => Array<Rational>(n).fill(Q.zero));
-  const norms: Rational[] = [];
+  const lambda = Array.from({ length: n }, () => Array<bigint>(n).fill(0n));
+  const determinants = [1n];
   const dot = (a: readonly bigint[], b: readonly bigint[]) => {
     work.tick(width);
-    return q(a.reduce((s, x, i) => s + x * b[i], 0n));
+    return a.reduce((s, x, i) => s + x * b[i], 0n);
   };
   for (let i = 0; i < n; i++) {
-    for (let j = 0; j < i; j++) {
+    for (let j = 0; j <= i; j++) {
       let value = dot(basis[i], basis[j]);
       for (let k = 0; k < j; k++) {
         work.tick();
-        value = sub(value, Q.mul(Q.mul(mu[i][k], mu[j][k]), norms[k]));
+        // Fraction-free elimination of the Gram matrix: all divisions are
+        // exact, avoiding a rational normalization for every cubic update.
+        value =
+          (determinants[k + 1] * value - lambda[i][k] * lambda[j][k]) /
+          determinants[k];
       }
-      mu[i][j] = divide(value, norms[j]);
+      if (j === i) {
+        if (value <= 0n)
+          throw new RangeError('Linearly dependent lattice basis');
+        determinants.push(value);
+      } else lambda[i][j] = value;
     }
-    let norm = dot(basis[i], basis[i]);
-    for (let j = 0; j < i; j++) {
-      work.tick();
-      norm = sub(norm, Q.mul(Q.mul(mu[i][j], mu[i][j]), norms[j]));
-    }
-    if (norm.numerator <= 0n)
-      throw new RangeError('Linearly dependent lattice basis');
-    norms.push(norm);
   }
+  return { lambda, determinants };
+}
+
+export function integerGramSchmidt(
+  basis: readonly (readonly bigint[])[],
+  work: PolynomialWork
+) {
+  const { lambda, determinants } = fractionFreeGramSchmidt(basis, work);
+  const mu = lambda.map((row, i) =>
+    row.map((x, j) => (j < i ? q(x, determinants[j + 1]) : Q.zero))
+  );
+  const norms = determinants.slice(1).map((d, i) => q(d, determinants[i]));
   return { mu, norms };
 }
 
@@ -74,31 +120,25 @@ function preconditionLattice(
 ): void {
   const n = basis.length,
     width = basis[0].length;
-  if (n < 6) return;
   const mu = Array.from({ length: n }, () => Array<number>(n).fill(0));
-  const norms: number[] = [],
-    orthogonal: number[][] = [];
-  let bits = 0;
-  for (const row of basis)
-    for (const c of row)
-      bits = Math.max(bits, (c < 0n ? -c : c).toString(2).length);
-  const shift = BigInt(Math.max(0, bits - 450));
+  const norms: number[] = [];
+  const exact = integerGramSchmidt(basis, work);
+  const ratio = (a: Rational) => {
+    const negative = a.numerator < 0n;
+    const numerator = negative ? -a.numerator : a.numerator;
+    const nb = Math.max(0, numerator.toString(2).length - 52);
+    const db = Math.max(0, a.denominator.toString(2).length - 52);
+    return (
+      (negative ? -1 : 1) *
+      (Number(numerator >> BigInt(nb)) / Number(a.denominator >> BigInt(db))) *
+      2 ** (nb - db)
+    );
+  };
   for (let i = 0; i < n; i++) {
-    const v = basis[i].map((c) => Number(c >> shift));
-    for (let j = 0; j < i; j++) {
-      work.tick(2 * width);
-      const projection =
-        v.reduce((s, c, k) => s + c * orthogonal[j][k], 0) / norms[j];
-      if (!Number.isFinite(projection)) return;
-      mu[i][j] = projection;
-      for (let k = 0; k < width; k++) v[k] -= projection * orthogonal[j][k];
-    }
-    work.tick(width);
-    const norm = v.reduce((s, c) => s + c * c, 0);
-    if (!(norm > 0) || !Number.isFinite(norm)) return;
-    orthogonal.push(v);
-    norms.push(norm);
+    norms.push(ratio(exact.norms[i]));
+    for (let j = 0; j < i; j++) mu[i][j] = ratio(exact.mu[i][j]);
   }
+  if (norms.some((x) => !(x > 0) || !Number.isFinite(x))) return;
   for (
     let k = 1, iterations = 0;
     k < n && iterations < 4 * n * n;
@@ -168,26 +208,27 @@ export function reduceIntegerLattice(
     Array.from({ length: n }, (_, j) => (i === j ? 1n : 0n))
   );
   preconditionLattice(basis, transformation, work);
-  const { mu, norms } = integerGramSchmidt(basis, work);
+  const { lambda, determinants: d } = fractionFreeGramSchmidt(basis, work);
   for (let k = 1; k < n;) {
     work.tick();
     for (let j = k - 1; j >= 0; j--) {
-      const c = nearest(mu[k][j]);
+      const numerator = lambda[k][j],
+        denominator = d[j + 1];
+      const c =
+        numerator < 0n
+          ? -((-2n * numerator + denominator) / (2n * denominator))
+          : (2n * numerator + denominator) / (2n * denominator);
       if (c === 0n) continue;
       work.tick(basis[k].length + n + j);
       basis[k] = basis[k].map((x, i) => x - c * basis[j][i]);
       transformation[k] = transformation[k].map(
         (x, i) => x - c * transformation[j][i]
       );
-      for (let i = 0; i < j; i++)
-        mu[k][i] = sub(mu[k][i], Q.mul(q(c), mu[j][i]));
-      mu[k][j] = sub(mu[k][j], q(c));
+      for (let i = 0; i < j; i++) lambda[k][i] -= c * lambda[j][i];
+      lambda[k][j] -= c * d[j + 1];
     }
-    const required = Q.mul(
-      sub(q(3n, 4n), Q.mul(mu[k][k - 1], mu[k][k - 1])),
-      norms[k - 1]
-    );
-    if (!less(norms[k], required)) {
+    const l = lambda[k][k - 1];
+    if (4n * d[k + 1] * d[k - 1] >= 3n * d[k] * d[k] - 4n * l * l) {
       k++;
       continue;
     }
@@ -196,26 +237,28 @@ export function reduceIntegerLattice(
       transformation[k - 1],
       transformation[k],
     ];
-    // Adjacent swapping changes only two orthogonal lengths and their
-    // projections. Exact updates avoid cubic Gram-Schmidt recomputation.
+    // With d[j] the jth Gram determinant, lambda[i][j]/d[j+1]
+    // is mu[i][j]. Fraction-free adjacent swaps use exact integer divisions
+    // and avoid rational gcd normalization at every projection update.
     work.tick(2 * n);
-    const oldMu = mu[k][k - 1],
-      oldNorm = norms[k - 1];
-    const combined = Q.add(norms[k], Q.mul(Q.mul(oldMu, oldMu), oldNorm));
-    const newMu = divide(Q.mul(oldMu, oldNorm), combined);
-    norms[k] = divide(Q.mul(oldNorm, norms[k]), combined);
-    norms[k - 1] = combined;
+    const current = d[k],
+      next = d[k + 1];
+    const replacement = (d[k - 1] * next + l * l) / current;
     for (let j = 0; j < k - 1; j++)
-      [mu[k][j], mu[k - 1][j]] = [mu[k - 1][j], mu[k][j]];
-    mu[k][k - 1] = newMu;
+      [lambda[k][j], lambda[k - 1][j]] = [lambda[k - 1][j], lambda[k][j]];
     for (let i = k + 1; i < n; i++) {
-      const old = mu[i][k];
-      mu[i][k] = sub(mu[i][k - 1], Q.mul(oldMu, old));
-      mu[i][k - 1] = Q.add(old, Q.mul(newMu, mu[i][k]));
+      const old = lambda[i][k];
+      lambda[i][k] = (next * lambda[i][k - 1] - l * old) / current;
+      lambda[i][k - 1] = (replacement * old + l * lambda[i][k]) / next;
     }
+    d[k] = replacement;
     k = Math.max(1, k - 1);
   }
-  return { basis, transformation, squaredNorms: norms };
+  return {
+    basis,
+    transformation,
+    squaredNorms: d.slice(1).map((value, i) => q(value, d[i])),
+  };
 }
 
 /** Read-only check of the exact size-reduction and Lovasz inequalities. */

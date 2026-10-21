@@ -68,10 +68,10 @@ test('insufficient precision and probe limits are inconclusive, while cancellati
     { work, base, tree } = lifted(f);
   expect(latticeFactorPartition(f, base, 5n, work)).toBeNull();
   expect(
-    latticeFactorPartition(f, tree.factors(), tree.modulus, work, 2, 100_000, 2)
+    latticeFactorPartition(f, tree.factors(), tree.modulus, work, 100_000, 2)
   ).toBeNull();
   expect(
-    latticeFactorPartition(f, tree.factors(), tree.modulus, work, 2, 0)
+    latticeFactorPartition(f, tree.factors(), tree.modulus, work, 0)
   ).toBeNull();
   expect(() =>
     latticeFactorPartition(

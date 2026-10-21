@@ -13,6 +13,7 @@ import { parseArgs } from 'node:util';
 import { factoringCorpus, type FactoringCase } from './corpus.js';
 import { stressCorpus } from './stress-corpus.js';
 import { challengeCorpus } from './challenge-corpus.js';
+import { recombinationCorpus } from './recombination-corpus.js';
 
 const { values } = parseArgs({
   options: {
@@ -34,14 +35,18 @@ if (!values.output) throw new Error('--output must name a new run directory');
 const output = resolve(values.output);
 if (existsSync(output))
   throw new Error('Refusing to overwrite an existing run');
-if (!['regular', 'stress', 'challenge'].includes(values.corpus!))
+if (
+  !['regular', 'stress', 'challenge', 'recombination'].includes(values.corpus!)
+)
   throw new Error('Unknown corpus');
 const corpus =
   values.corpus === 'stress'
     ? stressCorpus()
     : values.corpus === 'challenge'
       ? challengeCorpus()
-      : factoringCorpus(Number(values.count));
+      : values.corpus === 'recombination'
+        ? recombinationCorpus()
+        : factoringCorpus(Number(values.count));
 const serialized = JSON.stringify(corpus);
 const hash = createHash('sha256').update(serialized).digest('hex');
 mkdirSync(output, { recursive: true });
@@ -103,6 +108,7 @@ for (const f of [
   'benchmarks/factorization/run.ts',
   'benchmarks/factorization/stress-corpus.ts',
   'benchmarks/factorization/challenge-corpus.ts',
+  'benchmarks/factorization/recombination-corpus.ts',
 ])
   sourceHash.update(readFileSync(f));
 writeFileSync(

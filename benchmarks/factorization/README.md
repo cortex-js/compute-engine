@@ -1,5 +1,11 @@
 # First-party exact factoring benchmarks
 
+The latest follow-up is the
+[gradual recombination report](../../docs/plans/2026-10-21-gradual-recombination.md).
+It adds fraction-free lattice reduction, incremental truncated constraints and a
+separate 24-input `--corpus recombination` family corpus. Older measurements
+below and in the five-stage report remain historical snapshots.
+
 The subsequent TypeScript lifting/lattice work is documented in the
 [five-stage performance report](../../docs/plans/2026-10-20-factoring-lifting-lattices.md).
 It adds opt-in exclusive phase profiling, quadratic Hensel trees, certified

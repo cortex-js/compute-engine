@@ -1,5 +1,9 @@
 # TypeScript factoring performance stages
 
+The subsequent [gradual recombination implementation](2026-10-21-gradual-recombination.md)
+supersedes this report's lattice policy and degree-64 limitation. The measurements
+below are retained for the five-stage revision, not presented as current results.
+
 Improve the existing certified rational factorizer without external runtime
 dependencies or WebAssembly. Preserve exact certification, early recovery,
 cancellation and explicit incomplete results. Benchmark timings stay outside

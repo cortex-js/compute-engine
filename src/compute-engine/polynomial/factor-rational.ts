@@ -14,7 +14,10 @@ import {
 import { SmallPrimePolynomials } from './small-prime.js';
 import { FactorWork, type FactorProfile } from './factor-work.js';
 import { HenselTree } from './hensel.js';
-import { latticeFactorPartition } from './lattice-recombination.js';
+import {
+  latticeFactorPartition,
+  minimumLatticeModulus,
+} from './lattice-recombination.js';
 
 export interface RationalFactorOptions {
   maxOperations?: number;
@@ -227,7 +230,7 @@ function factorMonicImpl(
     // Center a large root cluster before modular work. Translation preserves
     // irreducibility and can dramatically reduce the required lifting height.
     const shift = -f[f.length - 2] / BigInt(f.length - 1);
-    if (abs(shift) > 1n) {
+    if (shift !== 0n) {
       const centered = translate(f, shift, work);
       const norm = (g: readonly bigint[]) => g.reduce((s, c) => s + abs(c), 0n);
       if (4n * norm(centered) < norm(f))
@@ -282,6 +285,15 @@ function factorMonicImpl(
     // With at most four modular factors, exhaustive recombination is small;
     // another full Berlekamp decomposition usually costs more than it saves.
     if (factors.length <= 4) break;
+    // Once a good prime has no more than n/2 pieces, gradual recombination
+    // can be cheaper than two further full modular decompositions. Retain
+    // multi-prime selection for the exhaustive diagnostic strategy.
+    if (
+      work.recombination !== 'subsets' &&
+      factors.length >= 8 &&
+      2 * factors.length <= f.length - 1
+    )
+      break;
   }
   if (!base) throw new PolynomialBudgetExceeded('no-good-prime');
   work.phase('lifting');
@@ -337,57 +349,52 @@ function factorMonicImpl(
   // symmetric reconstruction unique for every possible rational factor.
   const coefficientBound = () => (1n << BigInt(f.length - 1)) * norm(f);
   const latticeRecovery = (): bigint[][] | null => {
-    // Exact-rational LLL is costly for large local-factor sets. The automatic
-    // policy uses it for higher-degree inputs with a small projected lattice;
-    // the explicit lattice strategy allows broader diagnostics under budgets.
+    // Small local-factor sets have cheap exhaustive recombination. Gradual
+    // constraints target the combinatorial search when many pieces remain.
     if (
       work.recombination === 'subsets' ||
-      (work.recombination === 'auto' &&
-        (lifted.length < 2 || lifted.length > 4 || f.length < 33))
+      (work.recombination === 'auto' && lifted.length < 8)
     )
       return null;
-    for (const columns of [1, 2, 4]) {
-      stats.latticeAttempts = (stats.latticeAttempts ?? 0) + 1;
-      const groups = latticeFactorPartition(
-        f,
-        lifted,
-        modulus,
-        work,
-        columns,
-        work.recombination === 'auto' ? 12_000 : 100_000
+    stats.latticeAttempts = (stats.latticeAttempts ?? 0) + 1;
+    const groups = latticeFactorPartition(f, lifted, modulus, work);
+    if (!groups) return null;
+    const recovered: bigint[][] = [];
+    let remainder = f;
+    for (const indices of groups) {
+      const candidate = symmetric(
+        indices.reduce(
+          (a, i) => multiply(a, lifted[i], work).map((c) => mod(c, modulus)),
+          [1n]
+        )
       );
-      if (!groups) continue;
-      const recovered: bigint[][] = [];
-      let remainder = f;
-      for (const indices of groups) {
-        const candidate = symmetric(
-          indices.reduce(
-            (a, i) => multiply(a, lifted[i], work).map((c) => mod(c, modulus)),
-            [1n]
-          )
-        );
-        const quotient = integerQuotient(remainder, candidate, work);
-        if (!quotient) break;
-        recovered.push(candidate);
-        remainder = quotient;
-      }
-      // Inseparability plus exact recovery proves each block irreducible.
-      // A partially recovered partition is never returned as a factorization.
-      if (
-        recovered.length === groups.length &&
-        remainder.length === 1 &&
-        remainder[0] === 1n
-      ) {
-        stats.latticeCompletions = (stats.latticeCompletions ?? 0) + 1;
-        return recovered;
-      }
+      const quotient = integerQuotient(remainder, candidate, work);
+      if (!quotient) break;
+      recovered.push(candidate);
+      remainder = quotient;
+    }
+    // Inseparability plus exact recovery proves each block irreducible.
+    // A partially recovered partition is never returned as a factorization.
+    if (
+      recovered.length === groups.length &&
+      remainder.length === 1 &&
+      remainder[0] === 1n
+    ) {
+      stats.latticeCompletions = (stats.latticeCompletions ?? 0) + 1;
+      return recovered;
     }
     return null;
   };
   let bound = coefficientBound(),
     exponent = 1,
     nextRecovery = 1;
-  while (modulus <= 2n * bound) {
+  while (
+    modulus <= 2n * bound ||
+    (work.recombination !== 'subsets' &&
+      lifted.length >= (work.recombination === 'auto' ? 8 : 2) &&
+      lifted.length <= 64 &&
+      modulus < minimumLatticeModulus(f, lifted.length))
+  ) {
     work.phase('recombination');
     work.tick();
     if (exponent >= nextRecovery) {
