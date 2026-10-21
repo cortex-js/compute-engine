@@ -32,7 +32,8 @@ argument stays symbolic —
 ln(2)
 ```
 
-evaluates to the symbolic `ln(2)` (`ln(2)`), not a decimal approximation.
+evaluates to the symbolic `ln(2)` (the MathJSON `["Ln", 2]`), not a decimal
+approximation.
 
 **Numeric approximation is explicit**, via `N(expr)` — it is a function
 call, not a language mode:
@@ -370,7 +371,7 @@ Hello, Arno
 ```
 
 `print` and `input` are the lowercase spellings of the `Print` and `Input`
-operators, like `sin` for `sin` — not keywords — so a local declaration of
+operators, like `sin` for `Sin` — not keywords — so a local declaration of
 `print` shadows the command like any other library name. See
 [Naming](/epsil/naming/).
 

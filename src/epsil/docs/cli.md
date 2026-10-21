@@ -313,6 +313,7 @@ from a non-local origin.
 | `doc`       | Look up a library symbol, or search the library by keywords    |
 | `parse`     | Convert Epsil source to MathJSON                              |
 | `serialize` | Convert MathJSON to Epsil source                              |
+| `compile`   | Compile a program to a target's source code without running it; a decline is reported, not replaced by an interpreter fallback |
 
 The server also exposes the agent-facing language card
 (`/epsil/for-agents/`) as the resource `epsil://docs/for-agents`.

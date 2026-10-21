@@ -21,6 +21,25 @@ separate Epsil interpreter, no Epsil-specific declaration logic, and no
 Epsil-side type checker — each language form maps onto a primitive the engine
 already has.
 
+```mermaid
+flowchart TD
+  src["Epsil source"] --> parse["parseEpsil()"]
+  latex["$…$ LaTeX islands"] -. "parseLatex" .-> parse
+  pragmas["pragma values"] -. "computed at parse time" .-> parse
+  parse --> diag1["diagnostics"]
+  parse --> json["MathJSON<br/>(spellings as written: sin, pi)"]
+  json --> resolve["resolveLibraryNames()"]
+  resolve --> bound["MathJSON<br/>(library names: Sin, Pi)"]
+  bound --> ce["Compute Engine<br/>evaluates each statement"]
+  ce --> value["value of the last statement"]
+  ce --> diag2["runtime diagnostics"]
+  bound -. "serializeEpsil()" .-> out["Epsil source, regenerated"]
+```
+
+`executeEpsil()` runs the whole chain. `parseEpsil()`, `resolveLibraryNames()`
+and `serializeEpsil()` expose the individual stages to a host that boxes or
+evaluates the tree itself.
+
 ## The JavaScript API
 
 The public language entry point exposes the three stages directly:

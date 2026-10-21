@@ -19,8 +19,10 @@ Epsil is a programming language for scientific computing built on the Compute
 Engine. It is **symbolic and exact by default**: `1/3` is the rational one
 third, not `0.333…`, and `ln(2)` or `sqrt(2)` stay symbolic. Ask for a decimal
 explicitly with `N(expr)`. A program is a sequence of statements (separated by
-newlines or `;`); its result is the **value of the last statement**. There is
-no `print` — produce the value you want as the final statement. Runtime
+newlines or `;`); its result is the **value of the last statement**, so
+produce the value you want as the final statement. `print(…)` writes to the
+host console (the `evaluate` MCP tool returns those lines as `output`), and
+evaluates to `nothing`. Runtime
 problems (a `const` reassignment, a type mismatch) become ordinary
 `Error(...)` **values**, not thrown exceptions; malformed source produces
 **diagnostics** with source locations.
@@ -36,7 +38,7 @@ diagnostics. Embed via `executeEpsil(ce, source)` from
 
 **Naming convention**: library operators are written in lowercase (`sin`,
 `map`, `simplify`, `pi`) and also answer to their MathJSON names (`Sin`,
-`map`, `simplify`, `pi`). Your variables and functions are lowercase too and
+`Map`, `Simplify`, `Pi`). Your variables and functions are lowercase too and
 shadow a library name by scope (`let sum = 0` makes `sum` a variable).
 Operators with their own syntax have no lowercase spelling (`Add` is `+`,
 `If` is `if`, `List` is `[…]`). Calling an unknown function is not an

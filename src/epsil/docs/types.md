@@ -853,6 +853,21 @@ language adds unions
 element types (`list<integer>`, `set<string>`), tuples and records, and
 function signatures with effect labels.
 
+```mermaid
+flowchart BT
+  never --> integer
+  never -.-> infinity
+  never -.-> nan
+  integer --> rational --> real --> complex --> number
+  infinity --> number
+  nan --> number
+```
+
+Each arrow points from a subtype to its supertype: every type from `integer`
+up to `complex` holds finite numbers only, and `infinity` and `nan` meet them
+at `number`. `never` has no values and is below every type, including the
+ones not drawn here.
+
 Any two types have a **join** (the narrowest type that covers both — the
 join of `integer` and `real` is `real`) and a **meet** (the widest type
 inside both). Joins and meets are the workhorses of the whole system: the
