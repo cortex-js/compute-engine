@@ -41,9 +41,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const a = ce.box(A).evaluate();
     // `(k/n)·(1, 0)` has rational components: the literal's integer
     // components are scaled by a `number`, so the tuple type must say so.
-    expect(a.type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
+    expect(a.type.toString()).toBe('list<tuple<number, number>>');
   });
 
   test.each([
@@ -55,24 +53,28 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const ce = engine();
     const v = ce.box(expr).evaluate();
     expect(v.operator).toBe('Map');
-    expect(v.type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
+    expect(v.type.toString()).toBe('list<tuple<number, number>>');
   });
 
   test('the pulled values are the tuples the type promises', () => {
     const ce = engine();
     ce.assign('n', 3);
-    expect(ce.box(['ListFrom', ['Subtract', A, B]]).evaluate().toString()).toBe(
-      '[(0, 0),(1/3, -1/3),(2/3, -2/3),(1, -1)]'
-    );
+    expect(
+      ce
+        .box(['ListFrom', ['Subtract', A, B]])
+        .evaluate()
+        .toString()
+    ).toBe('[(0, 0),(1/3, -1/3),(2/3, -2/3),(1, -1)]');
   });
 
   test('PointY over the zip view with the length bound is the coordinate list, not a scalar marker', () => {
     const ce = engine();
     ce.assign('n', 3);
     expect(
-      ce.box(['ListFrom', ['PointY', ['Subtract', A, B]]]).evaluate().toString()
+      ce
+        .box(['ListFrom', ['PointY', ['Subtract', A, B]]])
+        .evaluate()
+        .toString()
     ).toBe('[0,-1/3,-2/3,-1]');
   });
 
@@ -96,7 +98,9 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
       .evaluate();
     // At least a collection of 2-tuples: the tuple-ness is the guard; the
     // component tier may refine.
-    expectTypeBetween(v, { atMost: 'indexed_collection<tuple<number, number>>' });
+    expectTypeBetween(v, {
+      atMost: 'indexed_collection<tuple<number, number>>',
+    });
   });
 
   test('an annotated parameter is the contract and is NOT overridden by the derivation', () => {
@@ -114,9 +118,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
         B,
       ])
       .evaluate();
-    expect(v.type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
+    expect(v.type.toString()).toBe('list<tuple<number, number>>');
   });
 
   test('the derivation leaves no stand-in declaration behind', () => {
@@ -130,13 +132,13 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
     ce.declare('k', 'integer');
-    expect(
-      ce.box(['Multiply', 'x', ['Tuple', 1, 0]]).type.toString()
-    ).toBe('tuple<number, number>');
+    expect(ce.box(['Multiply', 'x', ['Tuple', 1, 0]]).type.toString()).toBe(
+      'tuple<number, number>'
+    );
     // An integer scalar leaves integer components alone.
-    expect(
-      ce.box(['Multiply', 'k', ['Tuple', 1, 0]]).type.toString()
-    ).toBe('tuple<integer, integer>');
+    expect(ce.box(['Multiply', 'k', ['Tuple', 1, 0]]).type.toString()).toBe(
+      'tuple<integer, integer>'
+    );
   });
 });
 
@@ -166,9 +168,7 @@ describe('the `.N()` route keeps a point view a view of points (found under item
     for (const expr of [A, ['Subtract', A, B], ['Multiply', 2, A]]) {
       const v = ce.box(expr).N();
       expect(v.operator).toBe('Map');
-      expect(v.type.toString()).toBe(
-        'list<tuple<number, number>>'
-      );
+      expect(v.type.toString()).toBe('list<tuple<number, number>>');
     }
   });
 
@@ -180,7 +180,10 @@ describe('the `.N()` route keeps a point view a view of points (found under item
       '[(0, 0),(0.3333333333333333, 0),(0.6666666666666666, 0),(1, 0)]'
     );
     expect(
-      ce.box(['PointY', ['N', ['Subtract', A, B]]]).evaluate().toString()
+      ce
+        .box(['PointY', ['N', ['Subtract', A, B]]])
+        .evaluate()
+        .toString()
     ).toBe('[0,-0.3333333333333333,-0.6666666666666666,-1]');
   });
 });
@@ -246,7 +249,9 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
       .evaluate();
     // At least a collection of 2-tuples: the tuple-ness is the guard; the
     // component tier may refine.
-    expectTypeBetween(v, { atMost: 'indexed_collection<tuple<number, number>>' });
+    expectTypeBetween(v, {
+      atMost: 'indexed_collection<tuple<number, number>>',
+    });
   });
 
   test('a referenced parameter without a source element type declines the derivation', () => {
@@ -254,15 +259,22 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
     ce.declare('n', 'number');
     ce.declare('u', 'indexed_collection');
     const v = ce
-      .box(['Map', ['Function', ['Multiply', '_1', '_2'], '_1', '_2'], ['Range', 1, 'n'], 'u'])
+      .box([
+        'Map',
+        ['Function', ['Multiply', '_1', '_2'], '_1', '_2'],
+        ['Range', 1, 'n'],
+        'u',
+      ])
       .evaluate();
     // Not `number`: the unknown-element source may be supplying tuples.
-    expect(v.type.toString()).toBe('list<number>');
+    expect(v.type.toString()).toBe('list<nothing | number>');
   });
 
   test('the symbolic coordinate list substitutes to the numeric one', () => {
     const ce = engine();
-    const v = ce.box(['PointY', ['List', 'P', ['Multiply', 2, 'P']]]).evaluate();
+    const v = ce
+      .box(['PointY', ['List', 'P', ['Multiply', 2, 'P']]])
+      .evaluate();
     ce.assign('P', ['Tuple', 1, 5]);
     expect(v.evaluate().toString()).toBe('[5,10]');
   });

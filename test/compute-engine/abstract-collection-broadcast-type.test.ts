@@ -84,19 +84,17 @@ const VALUELESS: Record<Decl, Record<string, string>> = {
     Power: 'any',
     g: 'any',
   },
-  // The elements of a bare `collection` are values of an unknown type: a
-  // numeric application over a cell is typed `value`, not from the literal
-  // alone.
+  // A bare collection has the same unrestricted contents as collection<any>.
   'collection': {
-    Sin: 'value',
-    Add: 'value',
-    Multiply: 'value',
+    Sin: 'any',
+    Add: 'any',
+    Multiply: 'any',
     Greater: 'broadcastable<boolean>',
     Not: 'broadcastable<boolean>',
     And: 'broadcastable<boolean>',
-    Abs: 'value',
-    Power: 'value',
-    g: 'value',
+    Abs: 'any',
+    Power: 'any',
+    g: 'any',
   },
 };
 

@@ -139,9 +139,10 @@ export class TypeBuilder implements ASTVisitor<Type> {
       const param: TypeParameter = { name: p.name };
       if (p.bound !== undefined) {
         const bound = this.buildType(p.bound);
-        // An explicit `: unknown` bound IS the identity bound (`where T`
-        // means "some value type" since the bare-synonym ruling,
-        // 2026-08-17), so it normalizes to NO bound — one representation.
+        // The current generic solver treats `: unknown` as its implicit
+        // bound, so it normalizes to NO bound — one representation.
+        // Migrating this legacy inference default is separate from bare
+        // collection-family semantics (see ROADMAP.md).
         // Without this, the serializer's shorthand elision produced a
         // string that re-parsed with `bound: undefined` while the original
         // carried `bound: 'unknown'`, and the two behave differently in
@@ -283,17 +284,10 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitListType(node: ListTypeNode): Type {
     const elements = this.buildType(node.elementType);
-
-    // Bare `list` is a SYNONYM for `list<unknown>` (user ruling 2026-08-17),
-    // so the explicit spelling normalizes to the bare canonical form — but
-    // only when no dimensions constrain the rank, which the bare form cannot
-    // express. An explicit `<any>` is a different, wider type (it admits
-    // absence elements) and always survives.
-    if (node.dimensions === undefined) {
-      if (this.isUnknownType(elements)) return 'list';
+    // Keep explicit element arguments, including any and unknown. Their
+    // representation must not silently become an omitted annotation.
+    if (node.dimensions === undefined)
       return { kind: 'list', elements, dimensions: undefined };
-    }
-
     return { kind: 'list', elements, ...this.buildDimensions(node.dimensions) };
   }
 
@@ -334,13 +328,6 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitTensorType(node: TensorTypeNode): Type {
     const elements = this.buildType(node.elementType);
-
-    // The tensor spelling does not survive as its own kind — it normalizes
-    // to the `list` family. Since bare `list` means `list<unknown>` (user
-    // ruling 2026-08-17), it is `tensor<unknown>` that collapses to the bare
-    // name; `tensor<any>` keeps its element type (`list<any>` is the wider,
-    // absence-admitting contract and must not silently narrow).
-    if (this.isUnknownType(elements)) return 'list';
 
     return { kind: 'list', elements };
   }
@@ -386,21 +373,11 @@ export class TypeBuilder implements ASTVisitor<Type> {
   visitDictionaryType(node: DictionaryTypeNode): Type {
     const values = this.buildType(node.valueType);
 
-    // Bare `dictionary` = `dictionary<unknown>` (user ruling 2026-08-17), so
-    // that spelling collapses; an explicit `<any>` is the wider,
-    // absence-admitting contract and survives (it used to collapse here,
-    // which under the synonym reading would silently narrow it).
-    if (this.isUnknownType(values)) return 'dictionary';
-
     return { kind: 'dictionary', values };
   }
 
   visitSetType(node: SetTypeNode): Type {
     const elements = this.buildType(node.elementType);
-
-    // Bare `set` = `set<unknown>` (user ruling 2026-08-17); see
-    // `visitDictionaryType` above.
-    if (this.isUnknownType(elements)) return 'set';
 
     return { kind: 'set', elements };
   }
@@ -415,19 +392,8 @@ export class TypeBuilder implements ASTVisitor<Type> {
   visitCollectionType(node: CollectionTypeNode): Type {
     const elements = this.buildType(node.elementType);
 
-    // Bare `collection`/`indexed_collection` = their `<unknown>` forms (user
-    // ruling 2026-08-17), so those spellings collapse; an explicit `<any>`
-    // is the wider, absence-admitting contract and survives (it used to
-    // collapse here, which under the synonym reading would silently narrow).
     if (node.indexed) {
-      if (this.isUnknownType(elements)) {
-        return 'indexed_collection';
-      }
       return { kind: 'indexed_collection', elements };
-    }
-
-    if (this.isUnknownType(elements)) {
-      return 'collection';
     }
 
     return { kind: 'collection', elements };
@@ -721,21 +687,6 @@ export class TypeBuilder implements ASTVisitor<Type> {
         (type as any).kind === 'primitive' &&
         'name' in type &&
         (type as any).name === 'any')
-    );
-  }
-
-  /** An explicit `unknown` element argument spells the same type as the bare
-   * constructor (user ruling 2026-08-17: bare `list` IS `list<unknown>`), so
-   * the collection visitors collapse it to the bare canonical form. Mirrors
-   * `isAnyType` above for the two shapes an element argument arrives in. */
-  private isUnknownType(type: Type): boolean {
-    return (
-      type === 'unknown' ||
-      (typeof type === 'object' &&
-        'kind' in type &&
-        (type as any).kind === 'primitive' &&
-        'name' in type &&
-        (type as any).name === 'unknown')
     );
   }
 }

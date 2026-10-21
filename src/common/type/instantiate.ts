@@ -1750,12 +1750,8 @@ export function readTypeVariablesAsBounds(t: Type): Type {
     return { ...t, types: t.types.map(readTypeVariablesAsBounds) };
   if (t.kind !== 'signature') return t;
   const bindings: TypeBindings = Object.create(null);
-  // An unbounded variable reads as `unknown` — "some value type", the same
-  // reading the solver's S3 rule gives it — NOT as `any`: `any` is the
-  // absence-admitting top, and reading `list<T> where T` as `list<any>`
-  // would take a constructor result OUT of its own collection family (bare
-  // `collection` is the values-only `collection<unknown>` synonym, user
-  // ruling 2026-08-17, and `list<any> ⊄ collection`).
+  // Preserve the current unbounded-variable fallback. Widening collection
+  // family names does not migrate generic defaults or inference markers.
   for (const p of t.typeParams ?? [])
     bindings[p.name] =
       p.kind === 'value' ? lengthBoundOf(p.bound) : (p.bound ?? 'unknown');
@@ -2132,30 +2128,25 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
 function elementTypeOf(type: Type): Type | undefined {
   if (typeof type === 'string') {
     // An index span's element type is KNOWN (finite positive integers), so it
-    // does not belong with the unparameterized types below, which report the
-    // values-only `unknown`. This mirrors `collectionElementType`
+    // does not belong with the unparameterized types below, which report
+    // unrestricted `any`. This mirrors `collectionElementType`
     // (`common/type/utils.ts`), which this function's contract promises to
     // match exactly.
     if (type === 'range') return 'integer';
     // A string's element type is likewise KNOWN: one index into a string
     // yields one grapheme cluster, i.e. a `character`.
     if (type === 'string') return 'character';
-    // Bare constructors are their `<unknown>` synonyms (user ruling
-    // 2026-08-17): their elements are VALUES — `unknown`, never the
-    // absence-admitting `any`. `collectionElementType` was updated in that
-    // round; this mirror had drifted and kept answering `any`, which leaked
-    // into type-variable bindings (`Unique(bare collection)` typed
-    // `list<any>`, taking the result out of the values-only family).
+    // A bare family constrains kind only, so its element contract is any.
     if (
       type === 'collection' ||
       type === 'indexed_collection' ||
       type === 'list' ||
       type === 'set' ||
-      type === 'tuple' ||
-      type === 'dictionary' ||
-      type === 'record'
+      type === 'tuple'
     )
-      return 'unknown';
+      return 'any';
+    if (type === 'dictionary' || type === 'record')
+      return { kind: 'tuple', elements: [{ type: 'string' }, { type: 'any' }] };
     return undefined;
   }
   if (type.kind === 'collection' || type.kind === 'indexed_collection')
@@ -2236,13 +2227,8 @@ function liftedElementTypeOf(actual: Type): Type {
     return algebra().widen(...actual.types.map((t) => liftedElementTypeOf(t)));
   }
 
-  // A bare `list`/`indexed_collection` carries no element information;
-  // peeling it to its element reading still gets the RANK right (the
-  // wrapper re-adds one level), where contributing it whole would nest
-  // (`list<list>`). The element reading is `unknown`, not `any`: bare
-  // constructors are their `<unknown>` synonyms (user ruling 2026-08-17)
-  // and their elements are values.
-  if (actual === 'list' || actual === 'indexed_collection') return 'unknown';
+  // Peeling an unconstrained bare list still removes one collection level.
+  if (actual === 'list' || actual === 'indexed_collection') return 'any';
   // An index span peels to its KNOWN element type rather than to `any`: its
   // members are finite positive integers.
   if (actual === 'range') return 'integer';
@@ -2264,7 +2250,7 @@ function liftedElementTypeOf(actual: Type): Type {
 /** Whether an actual is one of the kinds a broadcast MAPS over — the union
  * members `liftedElementTypeOf` may distribute the peel across. The bare
  * `list`/`indexed_collection` spellings carry no element type but ARE mapped
- * (they peel to the values-only `unknown`). */
+ * (they peel to unrestricted `any`). */
 function isMappedActual(t: Type): boolean {
   if (t === 'list' || t === 'indexed_collection' || t === 'range') return true;
   return typeof t === 'object' && MAPPED_KINDS.has(t.kind);
@@ -2511,12 +2497,7 @@ function walkPattern(
       // `f(bic)` with `f: (broadcastable<T>) -> list<T>` as
       // `list<list<indexed_collection>>`, which the value `[[1], [2]]` for
       // `bic = [1, 2]` is not.
-      // A BARE `list`/`indexed_collection` actual binds `T` to its element
-      // reading, `unknown` — bare constructors are `<unknown>` synonyms
-      // (user ruling 2026-08-17) and their elements are values, so `any`
-      // here leaked the absence-admitting top into the binding, the same
-      // drift `elementTypeOf` had. Routed through `elementTypeOf` so the
-      // two can no longer diverge.
+      // Read bare and explicit collections through the same element rule.
       const inner =
         typeof actual === 'object' &&
         (actual.kind === 'broadcastable' ||

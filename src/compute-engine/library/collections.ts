@@ -1483,7 +1483,7 @@ const JOIN_SIGNATURE = parseType('(collection<any>*) -> collection');
 // handler reads the signature of the live definition
 // (`validateAgainstDeclaration`), which also follows a host redeclaration.
 const SLICE_SIGNATURE_TEXT =
-  '((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)';
+  '((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)';
 
 /**
  * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf`, `Count(xs, v)`, `Element`
@@ -6769,7 +6769,16 @@ function declaresAnyElement(t: Type, depth = 0): boolean {
   if (depth > 8) return false;
   const r = resolveTypeAlias(t);
   if (r === 'any' || r === 'value') return true;
-  if (typeof r === 'string') return false;
+  if (typeof r === 'string')
+    return [
+      'list',
+      'set',
+      'tuple',
+      'record',
+      'dictionary',
+      'collection',
+      'indexed_collection',
+    ].includes(r);
   switch (r.kind) {
     case 'union':
       return r.types.some((x) => declaresAnyElement(x, depth + 1));
@@ -14495,7 +14504,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)',
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
@@ -14654,7 +14663,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       // A symbolic count walks nothing, and that empty walk does not mean an
       // empty result, so the answer is `false`: answering the source's
@@ -15017,7 +15026,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
+      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -15101,7 +15110,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
+      '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       // The walk below reads the source by position up to its count, so it
       // yields nothing for a finite source with no count (see
@@ -15434,7 +15443,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
+      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -15544,7 +15553,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the result.
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
+    signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       const refused = unindexedCollectionOperandError(ce, 'Insert', xs);
       if (refused) return refused;
@@ -15698,7 +15707,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: [0, 1],
     missingStrip: [0],
     signature:
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)',
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)',
     evaluate: ([xs, idx], { engine: ce }) => {
       const refused = unindexedCollectionOperandError(ce, 'DeleteAt', xs);
       if (refused) return refused;
@@ -15835,7 +15844,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the result.
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
+    signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       const refused = unindexedCollectionOperandError(ce, 'ReplaceAt', xs);
       if (refused) return refused;
@@ -15970,7 +15979,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
+      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -16087,7 +16096,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
+      '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)',
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
@@ -16490,7 +16499,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // first). A literal set is refused when the call is boxed, a set held by
     // a symbol of a wider declared type by `evaluate`.
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -16616,7 +16625,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // evaluation threw.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -16673,7 +16682,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T',
+      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T: any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -16747,7 +16756,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T)',
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T: any)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -17015,7 +17024,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)',
+      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)',
     // Provable declines only, answered from the SOURCE's facets alone — an
     // IMPURE producer must never claim `true` (the `at()` materialize
     // fallback is pure-only, so a `true` would promise a walk the indexed
@@ -17377,7 +17386,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature:
-      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)',
+      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)',
     // Provable declines only (finite, walkable source required); success is
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
@@ -17654,7 +17663,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `[[3, 1], [5]]`. A literal set is refused when the call is boxed, a set
     // held by a symbol of a wider declared type by `evaluate`.
     signature:
-      '(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T',
+      '(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T: any',
     // The string rule, and it covers BOTH forms: a chunk, a window and a
     // predicate group are each made of the source's own characters, so each is
     // itself a string and `Partition("abcd", 2)` is `["ab","cd"]` (ruling
@@ -17980,7 +17989,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the runs held the restricted cells of the list.
     threadsConditionals: true,
     signature:
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)',
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -18487,7 +18496,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Every element is the repeated value, so the result is `list<T>` where
     // `T` is the type of the value, widened as a list literal widens its
     // elements (`Repeat(1, 3)` is `list<integer>`, like `[1, 1, 1]`). A
-    // value of unknown type leaves the bare `list` of the signature.
+    // value of unknown type retains that explicit element uncertainty.
     //
     // The infinite form `Repeat(v)` gets the same type. The `list` kind does
     // not claim that the collection is finite: an unbounded `Range` is also
@@ -18502,7 +18511,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           ? 'unknown'
           : literalElementType([storedComponentTypeD(ops[0])]);
       return BoxedType.forResult(
-        elements === 'unknown' ? 'list' : { kind: 'list', elements },
+        { kind: 'list', elements },
         context.engine._typeResolver
       );
     },

@@ -93,17 +93,11 @@ describe('a user-function result is a scalar by construction', () => {
     ).toBe('14');
   });
 
-  test('a reducing body (Sum over a bare parameter) compiles', () => {
+  test('an unconstrained reducing body cannot prove omission-free input', () => {
     const ce = engineWithF();
     ce.assign('k', ce.box(['Function', ['Sum', 'L'], 'L']));
     const r = build(ce, ['f', ['k', 'u']]);
-    // `Sum` over a bare parameter infers `L: collection`. Adding the elements
-    // needs no positions or order, so the definition compiles with a run-time
-    // read of the operand (`_SYS.elts`, issue #385). That read takes a
-    // single number as a collection of one element, as the interpreter's
-    // `Sum(4) = 4` does.
-    expect(r.success).toBe(true);
-    expect(r.run({ u: 4 })).toBe(5);
+    expect(r.success).toBe(false);
     expect(
       ce
         .box(['f', ['k', 4]])
@@ -501,7 +495,7 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
 
     // The source is a caller input, so its element shape is unknown to the
     // emission — the run-time test in the wrapper is what decides.
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'f', 'xs']);
     expect(r.code).toContain('_fn_f$b');
     expect(r.preamble).toContain(
@@ -559,7 +553,7 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     // A caller-supplied source has no static element shape, so the broadcast
     // is spelled at run time: the value reference tests each element and takes
     // `_SYS.bcastFn` for one that is an array.
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'f', 'xs']);
     expect(r.code).toContain('_fn_f$b');
     expect(r.preamble).toContain(
@@ -624,7 +618,7 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
   test('an EMPTY element zips to an empty list, as applying the function does', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'f', 'xs']);
     expect(r.run({ xs: [[], [1, 2]] })).toEqual([[], [2, 4]]);
     expect(
@@ -689,7 +683,7 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 
   test('an element that is a collection is broadcast, not coerced', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
     expect(r.code).toContain('_fn_Sin$b');
     expect(r.preamble).toContain(
@@ -711,7 +705,7 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 
   test('an EMPTY element answers the empty list, as the empty operator position does', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
     expect(r.run({ xs: [[]] })).toEqual([[]]);
     expect(
@@ -724,7 +718,7 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
 
   test('a SCALAR element is unchanged', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', 'Sin', 'xs']);
     const out = r.run({ xs: [1, 2, 3] }) as number[];
     expect(out[0]).toBeCloseTo(Math.sin(1), 12);
@@ -763,7 +757,7 @@ describe('an INLINE function literal in value position broadcasts', () => {
 
   test('an element that is a collection is broadcast, not coerced', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
     expect(r.code).toContain('_SYS.bcastFn');
     expect(r.run({ xs: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
@@ -777,14 +771,14 @@ describe('an INLINE function literal in value position broadcasts', () => {
 
   test('the arrow is bound ONCE, not rebuilt per element', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
     expect(r.code.split('2 * x').length - 1).toBe(1);
   });
 
   test('a SCALAR element is unchanged', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const r = build(ce, ['Map', DOUBLE, 'xs']);
     expect(r.run({ xs: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(
@@ -797,7 +791,7 @@ describe('an INLINE function literal in value position broadcasts', () => {
 
   test('a COLLECTION-parameter literal keeps the bare arrow', () => {
     const ce = new ComputeEngine();
-    ce.declare('xs', 'list');
+    ce.declare('xs', 'list<expression>');
     const literal = [
       'Function',
       ['Sum', 'L'],

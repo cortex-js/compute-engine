@@ -1041,8 +1041,8 @@ describe('the meet of two collections of the same kind', () => {
     );
   });
 
-  it('reads a bare collection name as its <unknown> form', () => {
-    expect(meet('list<any^3>', 'list')).toBe('list<unknown^3>');
+  it('reads a bare collection name as its unrestricted form', () => {
+    expect(meet('list<any^3>', 'list')).toBe('list<any^3>');
     expect(overlap('list<any^3>', 'list')).toBe(true);
   });
 });

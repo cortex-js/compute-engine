@@ -36,38 +36,25 @@ describe('isSubtype with an intersection on the right', () => {
     expect(ce.type('number').matches('number & number')).toBe(true);
   });
 
-  test('bare constructors are `<unknown>` synonyms; explicit `any` survives', () => {
-    // User ruling 2026-08-17: a bare collection constructor is a SYNONYM for
-    // its `<unknown>` parameterization ("some list of values, element type
-    // not stated"), so the explicit `<unknown>` spelling normalizes to the
-    // bare canonical form. An explicit `<any>` is a different, strictly
-    // wider contract — it additionally admits absence elements — and
-    // survives normalization; it is NOT a subtype of the bare name.
+  test('bare constructors accept the same contents as their any forms', () => {
     const ce = new ComputeEngine();
-    for (const kind of ['list', 'set']) {
+    for (const kind of [
+      'list',
+      'set',
+      'collection',
+      'indexed_collection',
+      'dictionary',
+    ]) {
       expect(parseType(kind)).toBe(kind);
-      expect(reduceType(parseType(kind))).toBe(kind);
-
-      // `<unknown>` collapses to the bare synonym, in both directions.
-      expect(parseType(`${kind}<unknown>`)).toBe(kind);
-      expect(ce.type(`${kind}<unknown>`).toString()).toBe(kind);
-      expect(ce.type(kind).matches(`${kind}<unknown>`)).toBe(true);
-
-      // `<any>` survives and sits strictly ABOVE the bare name.
+      expect(typeToString(parseType(`${kind}<unknown>`))).toBe(
+        `${kind}<unknown>`
+      );
+      expect(ce.type(kind).matches(`${kind}<unknown>`)).toBe(false);
       const source = `${kind}<any>`;
       expect(typeToString(parseType(source))).toBe(source);
-      expect(typeToString(reduceType(parseType(source)))).toBe(source);
-      expect(ce.type(source).toString()).toBe(source);
-      expect(ce.type(source).matches(`${source} & ${source}`)).toBe(true);
       expect(ce.type(kind).matches(source)).toBe(true);
-      expect(ce.type(source).matches(`${kind} & ${kind}`)).toBe(false);
-    }
-
-    // Absence elements are excluded from the values-only bare form (= its
-    // `<unknown>` synonym) and admitted by the explicit `<any>` contract.
-    for (const kind of ['list', 'set']) {
-      expect(isSubtype(`${kind}<nothing>`, kind)).toBe(false);
-      expect(isSubtype(`${kind}<nothing>`, `${kind}<any>`)).toBe(true);
+      expect(ce.type(source).matches(kind)).toBe(true);
+      expect(isSubtype(`${kind}<nothing>`, kind)).toBe(true);
     }
   });
 
@@ -128,7 +115,10 @@ describe('isSubtype with an intersection on the right', () => {
     // `list` family. Bare `list` means `list<unknown>` (user ruling
     // 2026-08-17), so it is `tensor<unknown>` that collapses to the bare
     // primitive; `tensor<any>` keeps its wider, absence-admitting element.
-    expect(parseType('tensor<unknown>')).toBe('list');
+    expect(parseType('tensor<unknown>')).toEqual({
+      kind: 'list',
+      elements: 'unknown',
+    });
     expect(parseType('tensor<any>')).toEqual({ kind: 'list', elements: 'any' });
   });
 
@@ -210,18 +200,18 @@ describe('`any` / `unknown` lattice (repaired 2026-08-17)', () => {
     // out of the values-only bare `list`.
     expect(isSubtype('integer | missing', 'unknown')).toBe(false);
     expect(isSubtype('integer | string', 'unknown')).toBe(true);
-    expect(isSubtype('list<integer | missing>', 'list')).toBe(false);
+    expect(isSubtype('list<integer | missing>', 'list')).toBe(true);
     expect(isSubtype('list<integer | missing>', 'list<any>')).toBe(true);
   });
 
-  test('bare constructors relate as their `<unknown>` synonyms', () => {
+  test('bare constructors relate as unrestricted family contracts', () => {
     expect(isSubtype('list', 'list<any>')).toBe(true);
-    expect(isSubtype('list<any>', 'list')).toBe(false);
-    expect(isSubtype('list', 'collection<unknown>')).toBe(true);
+    expect(isSubtype('list<any>', 'list')).toBe(true);
+    expect(isSubtype('list', 'collection<unknown>')).toBe(false);
     expect(isSubtype('list', 'list<integer>')).toBe(false);
-    expect(isSubtype('record', 'dictionary<unknown>')).toBe(true);
+    expect(isSubtype('record', 'dictionary<unknown>')).toBe(false);
     expect(isSubtype('tuple', 'indexed_collection')).toBe(true);
-    expect(isSubtype('tuple<integer, missing>', 'tuple')).toBe(false);
+    expect(isSubtype('tuple<integer, missing>', 'tuple')).toBe(true);
   });
 
   test('couldMatch sees overlap for a bare collection subject (Tycho F3)', () => {

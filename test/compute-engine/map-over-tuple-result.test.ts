@@ -48,9 +48,9 @@ describe('Map over a tuple yields an ordered list', () => {
     // Parse route (lazy, held operands).
     const ce1 = new ComputeEngine();
     ce1.assign('g', ce1.parse('x \\mapsto x + 10'));
-    expect(
-      ce1.parse('\\mathrm{Map}(g, (1, 2, 3))').evaluate().toString()
-    ).toBe('[11,12,13]');
+    expect(ce1.parse('\\mathrm{Map}(g, (1, 2, 3))').evaluate().toString()).toBe(
+      '[11,12,13]'
+    );
 
     // Pre-boxed route (`ce.function` with bound operands).
     const ce2 = new ComputeEngine();
@@ -68,10 +68,7 @@ describe('Map over a tuple yields an ordered list', () => {
     // A constant callback maps two distinct elements onto one value. A set
     // rebuild would collapse them to `Set(0)`; a list keeps both.
     const r = ce
-      .function('Map', [
-        ce.parse('x \\mapsto 0'),
-        ce.function('Tuple', [1, 2]),
-      ])
+      .function('Map', [ce.parse('x \\mapsto 0'), ce.function('Tuple', [1, 2])])
       .evaluate();
     expect(r.toString()).toBe('[0,0]');
     expect(r.type.toString()).toBe('list<number>');
@@ -115,7 +112,7 @@ describe('Map over a tuple yields an ordered list', () => {
     ce1.declare('t', 'tuple');
     expect(
       ce1.box(['Map', ['Function', ['Add', 'x', 10], 'x'], 't']).type.toString()
-    ).toBe('list<number>');
+    ).toBe('list<indexed_collection<any> | nothing | number>');
 
     // Assigned-symbol callback: its inferred signature `(unknown) -> number`
     // gives the element type, and the bare `tuple` source is demoted to a
@@ -123,7 +120,9 @@ describe('Map over a tuple yields an ordered list', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('t', 'tuple');
     ce2.assign('g', ce2.parse('x \\mapsto x + 10'));
-    expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe('list<number>');
+    expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe(
+      'list<nothing | number>'
+    );
   });
 
   test('a list source is unchanged — still a vector/list, both lambda forms', () => {
@@ -135,7 +134,10 @@ describe('Map over a tuple yields an ordered list', () => {
     // source's `integer`: the source type is copied only when the callback
     // is unknown (user decision 2026-09-27).
     expect(
-      ce.parse('\\mathrm{Map}(g, \\lbrack 1, 2, 3 \\rbrack)').evaluate().type.toString()
+      ce
+        .parse('\\mathrm{Map}(g, \\lbrack 1, 2, 3 \\rbrack)')
+        .evaluate()
+        .type.toString()
     ).toBe('vector<3>');
   });
 });

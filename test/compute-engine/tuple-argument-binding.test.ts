@@ -257,25 +257,26 @@ describe('THE LIMITS OF THE ADMISSION', () => {
   });
 
   test.each([
-    // Every slot absent: refused, as it was.
-    ['tuple<missing, missing>'],
-    // A slot that can hold `any`: the admission does not read it.
-    ['tuple<any, missing>'],
-    ['tuple<any, integer>'],
-    ['tuple<integer, any | missing>'],
-    ['tuple<any | integer, missing>'],
-    // A type that the same tuple with no absent slot is refused: the absent
-    // slot must not make it admitted.
-    ['tuple<integer, missing> | boolean'],
-    ['tuple<integer, integer> | boolean'],
-    ['tuple<integer, missing> | nothing'],
-    ['tuple<error, missing>'],
-  ])('%s stays refused', (type) => {
+    'tuple<missing, missing>',
+    'tuple<any, missing>',
+    'tuple<any, integer>',
+    'tuple<integer, any | missing>',
+    'tuple<any | integer, missing>',
+    'tuple<error, missing>',
+  ])('%s belongs to the collection family', (type) => {
     const engine = new ComputeEngine();
     engine.declare('v', type);
-    const map = engine.box(['Map', ADD_10, 'v']);
-    expect(map.isValid).toBe(false);
-    expect(map.toString()).toContain('incompatible-type');
+    expect(engine.box(['Map', ADD_10, 'v']).isValid).toBe(true);
+  });
+
+  test.each([
+    'tuple<integer, missing> | boolean',
+    'tuple<integer, integer> | boolean',
+    'tuple<integer, missing> | nothing',
+  ])('%s still admits a non-collection whole value', (type) => {
+    const engine = new ComputeEngine();
+    engine.declare('v', type);
+    expect(engine.box(['Map', ADD_10, 'v']).isValid).toBe(false);
   });
 
   test('an alias of the tuple, in a union that is refused', () => {
@@ -496,7 +497,7 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
       {
         Dedup: 'list<character> | list<integer> | string',
         Filter: 'list<character> | list<integer> | string',
-        Map: 'list',
+        Map: 'list<nothing | unknown>',
       },
     ],
     [
@@ -504,7 +505,7 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
       {
         Dedup: 'list<character> | list<integer> | string',
         Filter: 'list<character> | list<integer> | string',
-        Map: 'list',
+        Map: 'list<nothing | unknown>',
       },
     ],
   ];
@@ -540,7 +541,7 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
   test.each([
     ['dedup(c)', 'string', '"ab"'],
     ['filter(c, x => true)', 'string', '"aab"'],
-    ['map(x => x, c)', 'list', '["a","a","b"]'],
+    ['map(x => x, c)', 'list<nothing | unknown>', '["a","a","b"]'],
   ])('the Epsil route: %s', (call, type, value) => {
     const engine = new ComputeEngine();
     const parseLatex = (latex: string): MathJsonExpression =>
@@ -597,7 +598,7 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
       'tuple<integer, integer> | dictionary<integer>',
       ['Tuple', 1, 2],
       ['Map', ['Function', 'x', 'x'], 'v'],
-      'collection<unknown>',
+      'collection<unknown> | list',
       '[1,2]',
     ],
     [
@@ -628,13 +629,13 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
     }
   );
 
-  test('a tuple whose slots cannot be absent gives a bare list', () => {
+  test('an unconstrained mapping preserves its explicit result uncertainty', () => {
     // The absent cell is inside a slot, not a slot: no element is `Missing`.
     const engine = new ComputeEngine();
     engine.declare('n', 'tuple<tuple<integer, missing>, integer>');
     expect(
       engine.box(['Map', ['Function', 'x', 'x'], 'n']).type.toString()
-    ).toBe('list');
+    ).toBe('list<nothing | unknown>');
   });
 });
 

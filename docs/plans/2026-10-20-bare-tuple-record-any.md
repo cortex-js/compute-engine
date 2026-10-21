@@ -50,11 +50,22 @@ the end. A developer should be able to predict what a declaration promises,
 what an absent argument does, and whether an operation changes positions
 without knowing how the engine stores types or evaluates a particular view.
 
+## Completion boundary
+
+Option B is implemented independently of the broader absence proposal:
+all bare collection families admit unrestricted contents, explicit content
+constraints and tuple arity remain intact, and library/compiler consumers
+have been migrated. Numeric vector/matrix defaults remain unchanged. Global unknown migration,
+assertion syntax, stricter absence diagnostics, record-field omission, ordinary
+value capture, callable hoisting repairs and a compiled Nothing representation
+are deferred in ROADMAP.md. Existing open-record extra-field constraints remain
+a separate compatibility issue; this change does not claim to solve them.
+
 ## Why these decisions belong together
 
 The original problem is a missing type: `tuple<any>` describes exactly one
 slot, so it cannot describe every tuple, including arbitrary lengths and
-absent coordinates. Bare `tuple` currently excludes absent coordinates.
+absent coordinates. Before Option B, bare `tuple` excluded absent coordinates.
 Consequently, `TupleFrom(L)` for `L: list<integer | missing>` can claim a type
 that excludes the tuple it produces. Records have a related problem.
 
@@ -860,7 +871,7 @@ fusion at an explicit omission boundary; otherwise reject compilation.
 | Q4. What does a lazy collection expose? | Decided: R, raw callback results; `ListFrom` materializes and omits `Nothing` | Implement honest element and length information; remaining consumer and conversion policies are Q5 |
 | Q5. Where does `Nothing` erase? | Decided: aggregates skip it, no implicit view compaction, data tuples/ordinary arguments preserve slots | Record fields, boundary inventory, custom folds, ordering operations, serialization, and whether a distinct unit value is needed remain open; callback and paired-consumer policies are Q9–Q10 |
 | Q6. What do unspecified record fields promise? | Decided: retain current open records and width subtyping | Make enumeration and dictionary relationships respect unconstrained extra fields; no closed-record syntax required for this work |
-| Q7. How should unbound generic variables behave? | Keep the current fallback initially; bind from actual arguments normally | Test local explicit `where T: any` bounds and overload inference before considering a global fallback change |
+| Q7. How should unbound generic variables behave? | Keep the current fallback initially; bind from actual arguments normally | Local explicit `where T: any` bounds are implemented for structural collection operators; global fallback migration remains separate |
 | Q8. How should the agreed inference-marker role of `unknown` be implemented? | The role is decided: it is a placeholder, not a concrete content type | Decide unresolved-type representation, subtype API behavior, bounds, and migration from the current lattice; inventory library signatures and classify inference requests versus explicit content contracts or named generics; coordinate with Q7 |
 | Q9. How do strict parameters and chained callbacks handle `Nothing`? | Decided: bypass callbacks for `Nothing`; `Map` preserves the raw position | `Map` preserves omitted positions; `Filter` drops them; callback bypass and immediate omission typing implemented for both; ordinary strict parameter contracts remain separate |
 | Q10. How do paired reductions handle an omitted coordinate? | Decided: skip the whole observation for paired statistics; preserve alignment and use one shared set of observations | Paired statistics implemented; decide `Dot` and custom `Fold`/`Reduce` separately |

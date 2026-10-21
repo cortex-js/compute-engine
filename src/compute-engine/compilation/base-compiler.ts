@@ -10593,14 +10593,9 @@ export class BaseCompiler {
    * `any` elements. The reads are `At(xs, i)` with one index, `First`,
    * `Second`, `Third` and `Last`.
    *
-   * `nothing <: any` is true, so the type `any` alone says that the read may
-   * be `Nothing`. But a list, a set or an abstract collection never holds
-   * `Nothing` (a list literal drops it: `List(1, Nothing, 3)` is `[1, 3]`),
-   * and a string holds characters. So with `P: list<any>`,
-   * `P: collection<any> | tuple` or `P: any`, the read `At(P, 1)` is a value
-   * or an absence marker (`NaN`, `Missing`), never `Nothing`. A tuple base
-   * is accepted only when no slot type admits `nothing`: a tuple slot may
-   * hold `Nothing`, and a slot typed `any` may be one.
+   * A bare family or explicit any element can hold a raw omitted position.
+   * An element contract excluding Nothing proves that its read cannot be
+   * omission; constructor syntax alone cannot prove that for compiled inputs.
    */
   static isElementReadWithoutNothing(x: Expression): boolean {
     if (!isFunction(x)) return false;
@@ -10613,30 +10608,18 @@ export class BaseCompiler {
       if (depth > 8) return false;
       const t = resolveTypeForCompilation(type);
       if (typeof t === 'string')
-        return [
-          'any',
-          'value',
-          'missing',
-          'string',
-          'list',
-          'set',
-          'collection',
-          'indexed_collection',
-          'tuple',
-        ].includes(t);
-      switch (t.kind) {
-        case 'union':
-          return t.types.every((arm) => baseExcludesNothing(arm, depth + 1));
-        case 'list':
-        case 'set':
-        case 'collection':
-        case 'indexed_collection':
-          return true;
-        case 'tuple':
-          return t.elements.every((slot) => !isSubtype('nothing', slot.type));
-        default:
-          return false;
-      }
+        return t === 'string' || t === 'range' || t === 'missing';
+      if (t.kind === 'union')
+        return t.types.every((arm) => baseExcludesNothing(arm, depth + 1));
+      if (t.kind === 'tuple')
+        return t.elements.every((slot) => !isSubtype('nothing', slot.type));
+      // Keyed iteration yields entry tuples, but At reads the field value.
+      // Neither an unrestricted dictionary nor an open record proves that
+      // every readable value excludes Nothing.
+      if (t.kind === 'dictionary') return !isSubtype('nothing', t.values);
+      if (t.kind === 'record') return false;
+      const element = collectionElementType(t);
+      return element !== undefined && !isSubtype('nothing', element);
     };
     return (
       x.op1 !== undefined && baseExcludesNothing(compilationType(x.op1), 0)
@@ -10696,8 +10679,13 @@ export class BaseCompiler {
       selects ||
       paired
     ) {
-      const sources =
-        h === 'Tabulate'
+      // Limits/Element clauses are binding syntax, not collection operands.
+      // This audit checks the body; it does not inspect an Element domain
+      // for raw Nothing positions (see the deferred compiler audit in ROADMAP).
+      const iteratorFold = (h === 'Sum' || h === 'Product') && args.length > 1;
+      const sources = iteratorFold
+        ? args.slice(0, 1)
+        : h === 'Tabulate'
           ? []
           : h === 'Map'
             ? args.slice(1)

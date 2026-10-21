@@ -420,7 +420,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   const CONVERTED: ReadonlyArray<[string, string]> = [
     [
       'Find',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
     ],
     [
       'IndexWhere',
@@ -428,7 +428,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     ],
     [
       'Position',
-      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any',
     ],
     [
       'Any',
@@ -1052,7 +1052,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   // arrow's result would swallow the `| integer` and the slot would parse as
   // `(T) any -> (boolean | integer)`.
   const DECLARED =
-    '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T';
+    '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any';
 
   it('declares the union slot, displays it honestly, and drops the metadata', () => {
     const ce = new ComputeEngine();
@@ -1632,7 +1632,7 @@ describe('runtime signature display is the HONEST declared polytype', () => {
     // string-preserving arm with Strings Phase 1 (a reordering of a string's
     // characters is a string); both arms still display their `where` clause.
     expect(ce.box('Sort').type.toString()).toBe(
-      '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T)'
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)'
     );
   });
 

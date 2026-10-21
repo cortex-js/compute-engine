@@ -181,7 +181,9 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     const canonicalJson = (build: (ce: ComputeEngine) => any) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, POINTS);
-      return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
+      return JSON.stringify(
+        build(ce).toMathJson({ inferredAnnotations: true })
+      );
     };
     const viaBox = canonicalJson((ce) =>
       ce.box(filterPoints(['Tuple', 0, 0]) as any)
@@ -267,11 +269,11 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       executeEpsil(ce, 'let pred = n => n > 1');
-      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson({ inferredAnnotations: true })).toEqual([
-        op,
-        'cs',
-        'pred',
-      ]);
+      expect(
+        ce
+          .box([op, 'cs', 'pred'] as any)
+          .toMathJson({ inferredAnnotations: true })
+      ).toEqual([op, 'cs', 'pred']);
     }
   );
 
@@ -467,12 +469,11 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
     executeEpsil(ce, 'let pair = (n, s) => (n, s)');
-    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson({ inferredAnnotations: true })).toEqual([
-      'Map',
-      'pair',
-      'cs',
-      'ss',
-    ]);
+    expect(
+      ce
+        .box(['Map', 'pair', 'cs', 'ss'])
+        .toMathJson({ inferredAnnotations: true })
+    ).toEqual(['Map', 'pair', 'cs', 'ss']);
   });
 });
 
@@ -670,7 +671,11 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     const expr = ce.box(['Partition', 'cs', 2]);
-    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual(['Partition', 'cs', 2]);
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
+      'Partition',
+      'cs',
+      2,
+    ]);
     expect(expr.evaluate().toString()).toBe('[[1,2],[3,1]]');
   });
 
@@ -701,11 +706,11 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       executeEpsil(ce, `let pred = ${callback}`);
-      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson({ inferredAnnotations: true })).toEqual([
-        op,
-        'cs',
-        'pred',
-      ]);
+      expect(
+        ce
+          .box([op, 'cs', 'pred'] as any)
+          .toMathJson({ inferredAnnotations: true })
+      ).toEqual([op, 'cs', 'pred']);
     }
   );
 });
@@ -807,7 +812,11 @@ describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
     // `f`'s literal is byte-identical: one application site must not retype
     // the literal for every other.
     expect(
-      JSON.stringify((ce.lookupDefinition('f') as any).value.value.toMathJson({ inferredAnnotations: true }))
+      JSON.stringify(
+        (ce.lookupDefinition('f') as any).value.value.toMathJson({
+          inferredAnnotations: true,
+        })
+      )
     ).toBe(literalBefore);
   });
 });
@@ -1021,9 +1030,9 @@ describe('positive evidence only', () => {
     ]);
   });
 
-  test('the codegen of an unknown-element Filter is unchanged', () => {
+  test('the codegen of an Filter over explicitly non-omitted elements is unchanged', () => {
     const ce = new ComputeEngine();
-    ce.declare('us', 'list');
+    ce.declare('us', 'list<expression>');
     const r = compile(
       ce.box(['Filter', 'us', ['Function', ['Greater', 'x', 1], 'x']]),
       { fallback: false }
@@ -1209,7 +1218,9 @@ describe('annotation-as-contract', () => {
 describe('a wrong-arity literal takes no partial stamp', () => {
   /** The `Typed` wrappers a stamp leaves on the literal at operand 0. */
   function stampedParams(e: Expression): string {
-    return JSON.stringify((e.toMathJson({ inferredAnnotations: true }) as any[])[1]);
+    return JSON.stringify(
+      (e.toMathJson({ inferredAnnotations: true }) as any[])[1]
+    );
   }
 
   test('a matching arity still stamps', () => {

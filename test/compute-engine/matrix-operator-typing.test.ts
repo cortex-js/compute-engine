@@ -170,8 +170,7 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
  * uses a fresh engine: the repair retypes symbols for the engine's lifetime.
  */
 describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
-  const sym = (ce: ComputeEngine, name: string) =>
-    ce.box(name).type.toString();
+  const sym = (ce: ComputeEngine, name: string) => ce.box(name).type.toString();
 
   test('P1: Det(A+B), both fresh → valid, both matrix', () => {
     const ce = new ComputeEngine();
@@ -189,9 +188,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
 
   test('P3: Det(a·A), both fresh → ambiguous product never guessed', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Determinant', ['Multiply', 'a', 'A']]).isValid).toBe(
-      false
-    );
+    expect(ce.box(['Determinant', ['Multiply', 'a', 'A']]).isValid).toBe(false);
     expect(sym(ce, 'a')).toBe('number');
     expect(sym(ce, 'A')).toBe('number');
   });
@@ -252,18 +249,14 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
   test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix');
-    expect(ce.box(['Determinant', ['Multiply', 'A', 'M']]).isValid).toBe(
-      true
-    );
+    expect(ce.box(['Determinant', ['Multiply', 'A', 'M']]).isValid).toBe(true);
     expect(sym(ce, 'A')).toBe('number');
   });
 
   test('P9: Det(A·v) with declared v: vector — failed repair rolls A back to number', () => {
     const ce = new ComputeEngine();
     ce.declare('v', 'vector');
-    expect(ce.box(['Determinant', ['Multiply', 'A', 'v']]).isValid).toBe(
-      false
-    );
+    expect(ce.box(['Determinant', ['Multiply', 'A', 'v']]).isValid).toBe(false);
     expect(sym(ce, 'A')).toBe('number');
   });
 
@@ -290,9 +283,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
   test('union parameter (matrix|vector) still repairs (LinearSolve)', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix');
-    expect(ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(
-      true
-    );
+    expect(ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(true);
     expect(sym(ce, 'A')).toBe('matrix');
   });
 
@@ -322,7 +313,9 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
       'xs',
     ]);
     expect(first.isValid).toBe(true);
-    expect(first.type.toString()).toBe('(xs: collection) -> unknown');
+    expect(first.type.toString()).toBe(
+      '(xs: indexed_collection<any>) -> unknown'
+    );
 
     const rest = ce.box([
       'Function',
@@ -333,7 +326,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     // `ys` is a collection, which can be a string: `Rest` of a string is a
     // string, so the result type joins the string and list arms.
     expect(rest.type.toString()).toBe(
-      '(ys: indexed_collection<unknown>) -> list<unknown> | string'
+      '(ys: indexed_collection<any>) -> list<any> | string'
     );
 
     const filter = ce.box([
@@ -346,7 +339,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
       'zs',
     ]);
     expect(filter.isValid).toBe(true);
-    expect(filter.type.toString()).toBe('(zs: collection) -> collection');
+    expect(filter.type.toString()).toBe('(zs: indexed_collection<any>) -> list<!nothing>');
     expect(
       ce
         .box(['Apply', filter, ['List', 3, 1, 2]])
@@ -384,9 +377,11 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
 
 describe('Fresh-matrix repair — phase 2a slot restore (docs/TYPE-SYSTEM.md)', () => {
   const historyOf = (ce: ComputeEngine, name: string) =>
-    (ce.lookupDefinition(name) as any).value._typeProvenance?.map(
-      (e: any) => [e.kind, e.type.toString(), e.cause?.toString()]
-    ) ?? [];
+    (ce.lookupDefinition(name) as any).value._typeProvenance?.map((e: any) => [
+      e.kind,
+      e.type.toString(),
+      e.cause?.toString(),
+    ]) ?? [];
 
   test('success leg: the repair write records provenance with the operand as cause', () => {
     const ce = new ComputeEngine();

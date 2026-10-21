@@ -311,11 +311,11 @@ describe('A threaded operand whose present result type is unknown', () => {
   // The absent case of a `handle` operator is added to the result type.
   // When the present result is `unknown`, the result must stay `unknown`:
   // `missing` alone would claim the application is always absent.
-  test('At of a possibly absent collection of unknown elements is unknown', () => {
+  test('At of a possibly absent unrestricted collection is any', () => {
     const ce = new ComputeEngine();
-    // A bare `list` is `list<unknown>`.
+    // A bare list has unrestricted contents, just like list<any>.
     ce.declare('q', 'list | missing');
-    expect(ce.box(['At', 'q', 2]).type.toString()).toBe('unknown');
+    expect(ce.box(['At', 'q', 2]).type.toString()).toBe('any');
     // DECLARED `any` elements give `any`, not `unknown`. `any` admits the
     // absence markers, so no marker is added. `unknown` also holds points
     // and lists, but an arithmetic parent reads an `unknown` operand as a
@@ -373,12 +373,7 @@ describe('The stored value of Insert and ReplaceAt is not threaded', () => {
   // element, so the other elements are kept once the condition fails, as
   // when the restricted value is evaluated first.
   test.each([
-    [
-      ['Insert', ['List', 1], 1, W(2)],
-      '[2 {0 < t},1]',
-      '[2,1]',
-      '[NaN,1]',
-    ],
+    [['Insert', ['List', 1], 1, W(2)], '[2 {0 < t},1]', '[2,1]', '[NaN,1]'],
     [
       ['ReplaceAt', ['List', 1, 5], 1, W(2)],
       '[2 {0 < t},5]',
@@ -414,11 +409,26 @@ describe('A search for a restricted value', () => {
   const L = ['List', 1, 2, 2];
   const LN = ['List', 1, 'NaN'];
   test.each([
-    [['Contains', L, W(2)], 'Contains([1,2,2], 2 {0 < t})', '"True"', '"False"'],
+    [
+      ['Contains', L, W(2)],
+      'Contains([1,2,2], 2 {0 < t})',
+      '"True"',
+      '"False"',
+    ],
     [['IndexOf', L, W(2)], 'IndexOf([1,2,2], 2 {0 < t})', '2', '0'],
     [['Count', L, W(2)], 'Count([1,2,2], 2 {0 < t})', '2', '0'],
-    [['Contains', LN, W(1)], 'Contains([1,NaN], 1 {0 < t})', '"True"', '"True"'],
-    [['Contains', LN, W(2)], 'Contains([1,NaN], 2 {0 < t})', '"False"', '"True"'],
+    [
+      ['Contains', LN, W(1)],
+      'Contains([1,NaN], 1 {0 < t})',
+      '"True"',
+      '"True"',
+    ],
+    [
+      ['Contains', LN, W(2)],
+      'Contains([1,NaN], 2 {0 < t})',
+      '"False"',
+      '"True"',
+    ],
     [['IndexOf', LN, W(2)], 'IndexOf([1,NaN], 2 {0 < t})', '0', '2'],
     [['Count', LN, W(2)], 'Count([1,NaN], 2 {0 < t})', '0', '1'],
     // A `Which` with no selected branch is `Missing`, not `NaN`: the two

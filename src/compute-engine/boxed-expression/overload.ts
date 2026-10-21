@@ -1653,10 +1653,10 @@ function displayParamAt(
   if (solution === undefined || solution.unbound.size === 0) return ground;
   const pattern = paramAt(declared, index);
   if (pattern === undefined) return ground;
-  // An unbound variable DISPLAYS as `unknown`, the identity bound
-  // (bare-synonym ruling 2026-08-17): `reduceType` below collapses
-  // `indexed_collection<unknown>` to the bare name, so the diagnostic says
-  // "expected indexed_collection", not the wider `indexed_collection<any>`.
+  // Display-only substitution retains the generic solver's current
+  // `unknown` default. Explicit content arguments no longer collapse to bare
+  // family names; diagnostic presentation follows the deferred generic-default
+  // migration in ROADMAP.md.
   const displayBindings: Record<string, Type> = {
     ...solution.bindings,
     ...Object.fromEntries(

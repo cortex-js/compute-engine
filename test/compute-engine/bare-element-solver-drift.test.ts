@@ -1,22 +1,14 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
-// Bare collection constructors are their `<unknown>` synonyms (user ruling
-// 2026-08-17): their elements are VALUES. `collectionElementType`
-// (`common/type/utils.ts`) was updated in that round, but its documented
-// mirror `elementTypeOf` in `common/type/instantiate.ts` — duplicated only
-// to break an import cycle — had drifted and kept answering `any`. The
-// drift leaked into type-variable bindings: `Unique` over a bare-typed
-// operand instantiated `(collection<T>) -> list<T>` with `T := any`,
-// producing `list<any>` — an absence-admitting type OUTSIDE the values-only
-// collection family the operand came from (`list<any> ⊄ collection`).
-
+// Bare family names admit arbitrary contents. Element inference must agree
+// with explicit <any> contracts, including keyed collection entry tuples.
 let ce: ComputeEngine;
 beforeAll(() => {
   ce = new ComputeEngine();
 });
 
 describe('type-variable binding over bare collection operands', () => {
-  test('Unique over each bare constructor stays in the values-only family', () => {
+  test('Unique over each bare constructor stays in the collection family', () => {
     for (const t of [
       'collection',
       'indexed_collection',
@@ -38,7 +30,11 @@ describe('type-variable binding over bare collection operands', () => {
         true
       );
       expect(result.toString()).toBe(
-        admitsString ? 'list<unknown> | string' : 'list<unknown>'
+        admitsString
+          ? 'list<any> | string'
+          : t === 'dictionary' || t === 'record'
+            ? 'list<tuple<string, any>>'
+            : 'list<any>'
       );
     }
   });
@@ -48,7 +44,7 @@ describe('type-variable binding over bare collection operands', () => {
     expect(ce.box(['Unique', 'U']).type.toString()).toBe('list<integer>');
   });
 
-  test('a bare actual at a broadcastable<T> pattern binds T to unknown', () => {
+  test('a bare actual at a broadcastable<T> pattern binds T to any', () => {
     // The third drift site (`walkPattern`'s broadcastable case, dual-review
     // catch): a bare `list` actual bound `T := any`. The broadcast lift
     // wraps the per-element result (`list<T>`) in one collection level, so
@@ -58,8 +54,8 @@ describe('type-variable binding over bare collection operands', () => {
     ce.declare('pl', 'list<integer>');
     expect(ce.box(['f', 'pl']).type.toString()).toBe('list<list<integer>>');
     ce.declare('bl', 'list');
-    expect(ce.box(['f', 'bl']).type.toString()).toBe('list<list<unknown>>');
+    expect(ce.box(['f', 'bl']).type.toString()).toBe('list<list<any>>');
     ce.declare('bic', 'indexed_collection');
-    expect(ce.box(['f', 'bic']).type.toString()).toBe('list<list<unknown>>');
+    expect(ce.box(['f', 'bic']).type.toString()).toBe('list<list<any>>');
   });
 });

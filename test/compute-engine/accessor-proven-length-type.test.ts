@@ -308,7 +308,7 @@ describe('an element read over a base that declares any elements', () => {
     // Controls
     ['list<number>', 'number'],
     ['list<integer>', 'integer | nan'],
-    ['list', 'unknown'],
+    ['list', 'any'],
   ])('P: %s, P[i] is %s on the parse and box routes', (t, expected) => {
     const ce = declared(t);
     expect(ce.parse('P[i]').type.toString()).toBe(expected);
@@ -423,44 +423,57 @@ describe('an element read over a base that declares any elements', () => {
   );
 });
 
-// A read of an element of a list, a set or an abstract collection is never
-// `Nothing` (a list literal drops it), so its type `any` does not make a
-// tuple of such reads refuse to compile as a tuple with omitted coordinates
-// (`BaseCompiler.isElementReadWithoutNothing()`).
-describe('a tuple of reads of a collection with any elements compiles', () => {
+// A raw collection can retain Nothing, including one declared with a bare
+// family or explicit any content type. Such reads cannot prove tuple slots
+// omission-free. A concrete numeric contract remains compilable.
+describe('compiling tuple coordinates requires omission-free reads', () => {
   const POINT = ['Tuple', ['At', 'P', 1], ['At', 'P', 2]];
 
-  test.each([['list<any>'], ['collection<any> | tuple']])(
-    'P: %s, on javascript',
-    (t) => {
+  test.each(['list', 'list<any>', 'collection<any> | tuple', 'list<any^2>'])(
+    'P: %s cannot exclude omitted coordinates',
+    (type) => {
       const ce = new ComputeEngine();
-      ce.declare('P', t);
+      ce.declare('P', type);
       const result = compile(ce.box(POINT as any), { to: 'javascript' });
-      expect(result.success).toBe(true);
-      if (result.success)
-        expect(result.run({ P: [5, 6] } as never)).toEqual([5, 6]);
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
     }
   );
 
-  test('P: list<any^2>, on glsl', () => {
+  test('a literal of unrestricted runtime operands is not an omission proof', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'list<any^2>');
+    ce.declare('a', 'any');
+    ce.declare('b', 'any');
+    ce.declare('i', 'integer');
+    const result = compile(
+      ce.box(['Tuple', ['At', ['List', 'a', 'b'], 'i'], 1]),
+      { to: 'javascript' }
+    );
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+  });
+
+  test.each(['dictionary<any>', 'record{a: any}'])(
+    'D: %s cannot prove a keyed read excludes Nothing',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.declare('D', type);
+      const result = compile(
+        ce.box(['Tuple', ['At', 'D', { str: 'a' }], 1]),
+        { to: 'javascript' }
+      );
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+    }
+  );
+
+  test('P: vector<number^2> compiles on glsl', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'vector<number^2>');
     const result = compile(ce.box(POINT as any), { to: 'glsl' });
     expect(result.success).toBe(true);
     expect(result.code).toBe('vec2(P.x, P.y)');
   });
-
-  // GLSL still refuses a base with no known length, but not for an omission.
-  test.each([['list<any>'], ['collection<any> | tuple']])(
-    'P: %s, on glsl, the refusal is not about Nothing',
-    (t) => {
-      const ce = new ComputeEngine();
-      ce.declare('P', t);
-      const result = compile(ce.box(POINT as any), { to: 'glsl' });
-      expect(result.success).toBe(false);
-      expect(result.diagnostic?.message ?? '').not.toMatch(/Nothing/);
-    }
-  );
 
   // A tuple slot may hold `Nothing`: a read of a slot typed `any` still
   // refuses.

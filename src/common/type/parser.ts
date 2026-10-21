@@ -1475,13 +1475,10 @@ export class Parser {
   }
 
   private parseListTypeImpl(): ListTypeNode {
-    // A `list` spelling with no explicit element type (e.g. a dimensioned
-    // `list<2x3>`) defaults to `unknown` — bare `list` is the `list<unknown>`
-    // synonym (user ruling 2026-08-17). Not `any`: that is the wider,
-    // absence-admitting contract and must stay explicit.
+    // An omitted list element annotation does not restrict contents.
     let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(
       'primitive',
-      { name: 'unknown' }
+      { name: 'any' }
     );
     let dimensions: DimensionNode[] | undefined;
 
@@ -2136,17 +2133,13 @@ export class Parser {
       this.current.type === 'IDENTIFIER' &&
       this.current.value === 'dictionary'
     ) {
+      if (this.lexer.peekToken().type !== '<') return undefined;
       this.advance();
 
-      // A bare `dictionary` defaults its value type to `unknown`, which the
-      // type builder collapses back to the bare primitive (they are synonyms
-      // — user ruling 2026-08-17). It must not default to `any`: that is the
-      // wider, absence-admitting contract, and the old `any` default made
-      // the bare spelling in a union (`indexed_collection | dictionary`)
-      // surface as `dictionary<any>`.
+      // Omitted contents admit every element type.
       let valueType: TypeNode = this.createNode<PrimitiveTypeNode>(
         'primitive',
-        { name: 'unknown' }
+        { name: 'any' }
       );
 
       if (this.match('<')) {
@@ -2172,12 +2165,10 @@ export class Parser {
 
       this.advance();
 
-      // Defensive default only — the bare-constructor check above routes
-      // `set` without `<` to the primitive parser. `unknown` (not `any`) for
-      // the same reason as `parseDictionaryType` above.
+      // Defensive default: bare set has unrestricted contents.
       let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(
         'primitive',
-        { name: 'unknown' }
+        { name: 'any' }
       );
 
       if (this.match('<')) {
@@ -2247,16 +2238,13 @@ export class Parser {
       const isGeneric = this.current.value === 'collection';
 
       if (isIndexed || isGeneric) {
+        if (this.lexer.peekToken().type !== '<') return undefined;
         this.advance();
 
-        // The default element of a BARE `collection`/`indexed_collection` is
-        // `unknown`, which the type builder collapses back to the bare
-        // primitive (they are synonyms — user ruling 2026-08-17). It must
-        // not be `any`: that is the strictly wider, absence-admitting
-        // contract, and defaulting to it silently widened the bare spelling.
+        // Bare collection kinds have unrestricted contents.
         let elementType: TypeNode = this.createNode<PrimitiveTypeNode>(
           'primitive',
-          { name: 'unknown' }
+          { name: 'any' }
         );
 
         if (this.match('<')) {

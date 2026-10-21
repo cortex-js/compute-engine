@@ -113,13 +113,11 @@ describe('the deferral authority covers tuple parameters', () => {
     expect(defer('tuple<number>', 'tuple<x: number>')).toBe(true);
   });
 
-  // The bare `tuple` states no arity, but it is not unconstrained: its slots
-  // hold VALUES. An absence marker or an empty type shares no inhabitant with
-  // it, so the unknown-arity arm must not wave those through.
-  test('the bare tuple still constrains its slots to values', () => {
-    expect(defer('tuple<missing>', 'tuple')).toBe(false);
-    expect(defer('tuple', 'tuple<missing>')).toBe(false);
-    expect(defer('tuple<nothing>', 'tuple')).toBe(false);
+  // A bare tuple constrains kind only: any arity and any slot contents.
+  test('the bare tuple admits absence-bearing slots', () => {
+    expect(defer('tuple<missing>', 'tuple')).toBe(true);
+    expect(defer('tuple', 'tuple<missing>')).toBe(true);
+    expect(defer('tuple<nothing>', 'tuple')).toBe(true);
     expect(defer('tuple<number>', 'tuple')).toBe(true);
   });
 

@@ -240,7 +240,7 @@ export function isPrimitiveSubtype(
   // while `list<nothing> <: list<unknown>` did not.) `error` is excluded for
   // the same reason: it is not a value, and it is a subtype only of itself
   // and `any` (the rule above says so) — letting it ride the blanket rule
-  // put `list<error>` inside the values-only bare `list`.
+  // put `list<error>` inside `list<unknown>`.
   if (rhs === 'unknown') return lhs !== 'any' && lhs !== 'error';
   if (lhs === 'unknown') return false;
 
@@ -1152,9 +1152,8 @@ function dimensionsCouldMatch(
  * `list<tuple<number, number>>`. `couldMatch` is decisive for the composite
  * shapes it models and falls back to assignability elsewhere.
  */
-/** The `<unknown>` structural synonym of each bare collection constructor
- * (user ruling 2026-08-17), used by `couldMatch` to give a bare name its
- * element reading before the structural overlap probes. */
+/** The unrestricted structural expansion of each bare collection family,
+ * used by `couldMatch` before the structural overlap probes. */
 // Null-prototype, matching the module convention for string-keyed lookups
 // (`Object.create(null)` — see `readTypeVariablesAsBounds`'s bindings): the
 // keys reaching it are parser-produced primitive names today, but an `in`
@@ -1385,33 +1384,30 @@ function inhabitationWalk(
 
 /**
  * `couldMatch` for a bare `tuple` or bare `record` (`bare`) against a
- * composite `other` of the same family. Bare `tuple` is a tuple of any arity
- * whose slots hold values (`unknown`), and bare `record` is a record whose
- * fields hold values, so each overlaps a composite whose slots could hold a
- * value. `false` means "not shown here", and the caller goes on with its
- * other probes.
+ * composite `other` of the same family. Bare names accept every slot or
+ * field type. `false` means the general overlap probes should continue.
  */
 function bareTupleOrRecordCouldMatch(bare: Type, other: Type): boolean {
   if (typeof other !== 'object') return false;
   if (bare === 'tuple') {
     if (other.kind === 'tuple')
-      return other.elements.every((x) => couldMatchWithin('unknown', x.type));
+      return other.elements.every((x) => couldMatchWithin('any', x.type));
     if (other.kind === 'indexed_collection' || other.kind === 'collection')
-      return couldMatchWithin('unknown', other.elements);
+      return couldMatchWithin('any', other.elements);
     return false;
   }
   if (bare === 'record') {
     if (other.kind === 'record')
       return Object.values(other.elements).every((t) =>
-        couldMatchWithin('unknown', t)
+        couldMatchWithin('any', t)
       );
     if (other.kind === 'dictionary')
-      return couldMatchWithin('unknown', other.values);
+      return couldMatchWithin('any', other.values);
     if (other.kind === 'collection')
       return couldMatchWithin(
         {
           kind: 'tuple',
-          elements: [{ type: 'string' }, { type: 'unknown' }],
+          elements: [{ type: 'string' }, { type: 'any' }],
         },
         other.elements
       );
@@ -1597,8 +1593,8 @@ function couldMatchStructure(a: Type, b: Type): boolean {
   // its distribution.
   if (inhabitation(a) === 'empty' || inhabitation(b) === 'empty') return false;
 
-  // The bare collection constructors are their `<unknown>` synonyms (user
-  // ruling 2026-08-17); expand them so the structural overlap probes below
+  // Bare collection constructors have unrestricted contents; expand them
+  // so the structural overlap probes below
   // see the element type. Without this, a bare subject fell straight to the
   // containment fallback, which answered `indexed_collection` vs
   // `collection<number>` with `false` even though the two overlap in
@@ -1610,10 +1606,8 @@ function couldMatchStructure(a: Type, b: Type): boolean {
   if (typeof b === 'string' && b in BARE_COLLECTION_EXPANSIONS)
     b = BARE_COLLECTION_EXPANSIONS[b]!;
 
-  // Bare `tuple` and bare `record` have no `<unknown>` synonym (a tuple type
-  // fixes an arity, a record type a field list), so they are read here: bare
-  // `tuple` is "a tuple of values, of any arity", bare `record` is "a record
-  // whose fields hold values". Like the probe below, this only adds answers.
+  // No fixed tuple arity or record field list spells the whole family.
+  // Check their overlap with parameterized collections separately.
   if (bareTupleOrRecordCouldMatch(a, b) || bareTupleOrRecordCouldMatch(b, a))
     return true;
 
@@ -1962,8 +1956,8 @@ function sharesDimensionedListSubtype(a: Type, b: Type): boolean {
   )
     return false;
 
-  // A bare collection name is its `<unknown>` synonym (`list` is
-  // `list<unknown>`), so that its element and its axis are read.
+  // Expand bare collection names so their unconstrained contents and axes
+  // participate in the same overlap calculation as explicit contracts.
   const expand = (t: Type): Type =>
     typeof t === 'string' && t in BARE_COLLECTION_EXPANSIONS
       ? BARE_COLLECTION_EXPANSIONS[t]!
@@ -2448,8 +2442,7 @@ function isSubtypeRules(
     if (lhs === 'error') return false;
     // A union fits `unknown` only when every arm does: an absence arm must
     // not ride under the blanket rule (`integer | missing ⊄ unknown`, which
-    // is what keeps a `list<integer|missing>` out of the values-only bare
-    // `list`). The absence PRIMITIVES themselves (`nothing`, `missing`)
+    // is what keeps a `list<integer|missing>` out of `list<unknown>`). The absence PRIMITIVES themselves (`nothing`, `missing`)
     // returned false above, before this rule.
     if (typeof lhs !== 'string' && lhs.kind === 'union')
       return lhs.types.every(
@@ -2576,50 +2569,16 @@ function isSubtypeRules(
 
     if (rhs === 'value') return isValue(lhs);
 
-    // The bare collection constructors are synonyms for their `<unknown>`
-    // parameterization (user ruling 2026-08-17): `list` IS `list<unknown>` —
-    // "a list of values, element type not stated" — and likewise `set`,
-    // `dictionary`, `collection` and `indexed_collection`. So a composite
-    // lhs matches the bare name only when its element type fits `unknown`,
-    // i.e. contains no absence markers: `list<integer> <: list` but
-    // `list<any> ⊄ list` and `list<nothing> ⊄ list`. The explicit `<any>`
-    // forms are the strictly wider, absence-admitting contracts.
+    // Bare collection names constrain kind only; absence-bearing contents
+    // are accepted exactly as for explicit <any> parameterizations.
     if (rhs === 'indexed_collection')
       return isSubtype(lhs, BARE_INDEXED_COLLECTION_STRUCTURAL_TYPE);
-
     if (rhs === 'collection')
       return isSubtype(lhs, BARE_COLLECTION_STRUCTURAL_TYPE);
-
-    // A tuple is a subtype of `tuple` when its slots hold values. The
-    // values-only reading extends to every bare collection-family name, not
-    // just the five `<unknown>` synonyms: bare `tuple` sits below bare
-    // `indexed_collection` in the primitive closure, and that one IS
-    // `indexed_collection<unknown>`, so an absence-slotted tuple
-    // (`tuple<integer, missing>`) matching bare `tuple` would recreate the
-    // intransitivity the synonym ruling removed.
-    if (rhs === 'tuple')
-      return (
-        lhs.kind === 'tuple' &&
-        lhs.elements.every((e) => isSubtype(e.type, 'unknown'))
-      );
-
-    // A list is a subtype of `list` = `list<unknown>` when its elements are
-    // values (see the synonym note above); its dimensions are unconstrained.
-    if (rhs === 'list')
-      return lhs.kind === 'list' && isSubtype(lhs.elements, 'unknown');
-
-    // A set is a subtype of `set` = `set<unknown>` (synonym note above)
-    if (rhs === 'set')
-      return lhs.kind === 'set' && isSubtype(lhs.elements, 'unknown');
-
-    // A record is a subtype of `record` when its fields hold values — the
-    // same values-only reading as bare `tuple` above (bare `record` sits
-    // below bare `dictionary` = `dictionary<unknown>` in the closure).
-    if (rhs === 'record')
-      return (
-        lhs.kind === 'record' &&
-        Object.values(lhs.elements).every((t) => isSubtype(t, 'unknown'))
-      );
+    if (rhs === 'tuple') return lhs.kind === 'tuple';
+    if (rhs === 'list') return lhs.kind === 'list';
+    if (rhs === 'set') return lhs.kind === 'set';
+    if (rhs === 'record') return lhs.kind === 'record';
 
     // Bare `object` means "any object", and it is the ONE common bound every
     // declared object type has. Relating each of them to it does not
@@ -2628,10 +2587,7 @@ function isSubtypeRules(
     // B, ruling B6).
     if (rhs === 'object') return isObjectType(lhs);
 
-    // A dictionary is a subtype of `dictionary` = `dictionary<unknown>` when
-    // its values are values (synonym note above). So is a record: a record
-    // is a dictionary with statically known keys; the record-to-dictionary
-    // rule below checks every field the same way.
+    // The bare dictionary family has unrestricted values.
     if (rhs === 'dictionary')
       return isSubtype(lhs, BARE_DICTIONARY_STRUCTURAL_TYPE);
 
@@ -2856,13 +2812,8 @@ function isSubtypeRules(
   // characters while joining lists never merges elements).
   if (lhs === 'string') return isSubtype(STRING_STRUCTURAL_TYPE, rhs);
 
-  // The bare collection constructors are synonyms for their `<unknown>`
-  // parameterization (user ruling 2026-08-17), so against a composite rhs
-  // they expand and recurse exactly like `range` and `string` above. This is
-  // what gives the bare spelling its element reading on the LEFT:
-  // `list <: list<any>` (unknown ⊑ any), `list ⊄ list<integer>`,
-  // `list <: collection<unknown>`. The expansion carries no dimensions — the
-  // bare form's rank is unconstrained, so a dimensioned rhs still rejects.
+  // Expand a bare kind to its unrestricted structural contract. No rank is
+  // supplied, so a dimensioned target still needs separate shape evidence.
   if (lhs === 'list') return isSubtype(BARE_LIST_STRUCTURAL_TYPE, rhs);
   if (lhs === 'set') return isSubtype(BARE_SET_STRUCTURAL_TYPE, rhs);
   if (lhs === 'dictionary')
@@ -2871,22 +2822,11 @@ function isSubtypeRules(
     return isSubtype(BARE_COLLECTION_STRUCTURAL_TYPE, rhs);
   if (lhs === 'indexed_collection')
     return isSubtype(BARE_INDEXED_COLLECTION_STRUCTURAL_TYPE, rhs);
-  if (lhs === 'record') {
-    // Bare `record` is "some record, field types not stated" — the same
-    // `<unknown>` reading as the constructors above, expressed against the
-    // dictionary family it belongs to (a record is a dictionary with
-    // statically-known keys): it fits any rhs that `dictionary<unknown>`
-    // fits. It has no field list to compare, so a rhs with a specific field
-    // layout still rejects.
-    return isSubtype(BARE_DICTIONARY_STRUCTURAL_TYPE, rhs);
-  }
-  if (lhs === 'tuple') {
-    // Bare `tuple` is "some tuple of values, arity not stated". Its arity is
-    // unknown, so it can never match a composite tuple rhs (which fixes an
-    // arity) — but element-wise it is an indexed collection of values, so it
-    // fits any rhs that `indexed_collection<unknown>` fits.
+  if (lhs === 'record') return isSubtype(BARE_DICTIONARY_STRUCTURAL_TYPE, rhs);
+  // No fixed-arity tuple spells the whole family. Its elements nevertheless
+  // satisfy the unrestricted indexed-collection contract.
+  if (lhs === 'tuple')
     return isSubtype(BARE_INDEXED_COLLECTION_STRUCTURAL_TYPE, rhs);
-  }
 
   // A primitive type is not a subtype of a composite type (except a union)
   if (typeof lhs === 'string') return false;
@@ -3173,8 +3113,8 @@ function isSubtypeRules(
     // axes to m, and its dimensions must accept the first m dimensions of
     // the lhs. An rhs with no dimensions admits any shape, so any k is a
     // candidate. The rhs element can be any type that admits a list, not
-    // only a list type: the bare `list` (the `<unknown>` synonym,
-    // `list<list>` ≡ `list<list<unknown>>`) is a string, and `collection`
+    // only a list type: the bare `list` is a string representation,
+    // and `collection`
     // admits a row as well.
     const elementsMatch = isSubtype(lhs.elements, rhs.elements);
     if (
@@ -3544,9 +3484,8 @@ function isIndexedCollection(type: Type): boolean {
  */
 function broadcastableCollectionElementType(type: Type): Type | undefined {
   if (typeof type === 'string') {
-    // A bare `list` is the `<unknown>` synonym (user ruling 2026-08-17), so
-    // its broadcast element is `unknown`, not `any`.
-    if (type === 'list') return 'unknown';
+    // A bare list admits every element type, just like list<any>.
+    if (type === 'list') return 'any';
     // An index span carries a known element type (finite positive integers),
     // so it broadcasts as `integer`, not as an opaque `unknown`.
     if (type === 'range') return 'integer';
@@ -3616,7 +3555,7 @@ function fitsBroadcastOrIndexed(
       ? fitsBroadcastOrIndexed(t, elements.elements, active)
       : isSubtype(t, elements);
   if (isSubtype(lhs, { kind: 'broadcastable', elements })) return true;
-  if (lhs === 'indexed_collection') return fits('unknown');
+  if (lhs === 'indexed_collection') return fits('any');
   if (typeof lhs === 'string') return fits(lhs);
   switch (lhs.kind) {
     case 'reference': {

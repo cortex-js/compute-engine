@@ -110,13 +110,13 @@ describe('overload resolution: result join on an undecided operand', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'unknown');
     expect(ce.box(['Slice', 'u', 1, 2]).type.toString()).toBe(
-      'list<unknown> | string'
+      'list<any> | string'
     );
     // An undeclared symbol is narrowed by the call (a string is an indexed
     // collection, so to `indexed_collection<unknown>`), but the call keeps
     // the resolution it was validated against.
     expect(ce.box(['Slice', 'v', 1, 2]).type.toString()).toBe(
-      'list<unknown> | string'
+      'list<any> | string'
     );
     // A concrete operand selects one arm.
     expect(ce.box(['Slice', { str: 'abc' }, 1, 2]).type.toString()).toBe(
@@ -161,11 +161,9 @@ describe('overload resolution: result join on an overlapping operand', () => {
     ce.declare('ic', 'indexed_collection');
     for (const s of ['c', 'ic']) {
       expect(ce.box(['Slice', s, 1, 2]).type.toString()).toBe(
-        'list<unknown> | string'
+        'list<any> | string'
       );
-      expect(ce.box(['Take', s, 2]).type.toString()).toBe(
-        'list<unknown> | string'
-      );
+      expect(ce.box(['Take', s, 2]).type.toString()).toBe('list<any> | string');
       expect(ce.box(['Reverse', s]).type.toString()).toBe('list | string');
     }
   });
@@ -532,7 +530,9 @@ describe('overload resolution: effects break ties, and only ties', () => {
   it('INCOMPARABLE effect sets fall through to declaration order', () => {
     // `{random}` and `{scope}` are pairwise incomparable singletons: no
     // comparison is made, and the first arm wins as it does today.
-    const ce = engine('((number) random -> rational) & ((number) scope -> integer)');
+    const ce = engine(
+      '((number) random -> rational) & ((number) scope -> integer)'
+    );
     expect(ce.box(['Rnd', 5]).type.toString()).toBe('rational');
   });
 

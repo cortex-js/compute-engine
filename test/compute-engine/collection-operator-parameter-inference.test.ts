@@ -117,11 +117,11 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     '(indexed_collection<any>) -> list',
     [LIST],
   ],
-  // Operators that were typed correctly before the fix: they must not change.
+  // These operators also constrain the source to its collection family.
   [
     'Find',
     'find(xs, x => x > 1)',
-    '(indexed_collection<unknown>) -> nothing | unknown',
+    '(indexed_collection<any>) -> any',
     [LIST],
   ],
   [
@@ -148,7 +148,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // An untyped `xs` is only known to be an indexed collection, which can be
     // a string, and sorting a string gives a string: the result type is the
     // join of the list and the string results.
-    '(indexed_collection<unknown>) -> list<unknown> | string',
+    '(indexed_collection<any>) -> list<any> | string',
     [LIST],
   ],
   [
@@ -160,13 +160,13 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Partition',
     'partition(xs, x => x > 1)',
-    '(indexed_collection<unknown>) -> list<list<unknown>>',
+    '(indexed_collection<any>) -> list<list<any>>',
     [LIST],
   ],
   [
     'Position',
     'position(xs, x => x > 1)',
-    '(indexed_collection<unknown>) -> list<integer>',
+    '(indexed_collection<any>) -> list<integer>',
     [LIST],
   ],
   [
@@ -188,7 +188,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     'Unique',
     'unique(xs)',
     // The join of the list and the string results, as for `Sort` above.
-    '(collection<unknown>) -> list<unknown> | string',
+    '(collection<any>) -> list<any> | string',
     [LIST],
   ],
   ['Sum', 'sum(xs)', '(collection) -> number', [LIST, SET]],
@@ -266,10 +266,10 @@ const BOX_CASES: [string, MathJsonExpression, string][] = [
   ['ArgMin', ['ArgMin', 'xs', NEG], 'indexed_collection<unknown>'],
   ['Dedup', ['Dedup', 'xs'], 'collection<any>'],
   ['Differences', ['Differences', 'xs'], 'indexed_collection<any>'],
-  ['Find', ['Find', 'xs', GT1], 'indexed_collection<unknown>'],
+  ['Find', ['Find', 'xs', GT1], 'indexed_collection<any>'],
   ['CountIf', ['CountIf', 'xs', GT1], 'collection<unknown>'],
   ['Count', ['Count', 'xs'], 'collection<any>'],
-  ['Sort', ['Sort', 'xs'], 'indexed_collection<unknown>'],
+  ['Sort', ['Sort', 'xs'], 'indexed_collection<any>'],
   ['Tally', ['Tally', 'xs'], 'collection<unknown>'],
   ['Contains', ['Contains', 'xs', 2], 'collection<any>'],
   ['First', ['First', 'xs'], 'indexed_collection<any>'],

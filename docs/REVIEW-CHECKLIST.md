@@ -64,9 +64,10 @@ there.
   polynomial functions that rules call): it causes infinite recursion.
 - **Expression forms.** A `form: 'raw'` expression is not bound and must not
   reach `.mul()`, `.add()` or other arithmetic; use `form: 'structural'`.
-- **Collection shape tests** use `collection<any>` or the `*_SHAPE_TYPE`
-  constants, never a bare `list`/`collection` (`list<any>` does not match bare
-  `list`).
+- **Collection shape tests** use a bare family name, an explicit `<any>`
+  content type, or the `*_SHAPE_TYPE` constants. These constrain kind only;
+  use an explicit content type when contents matter. `tuple<any>` is one
+  slot, whereas bare `tuple` admits every arity.
 - **A lazy operator** (`lazy: true`) gets its operands unbound: the handler
   must call `.canonical` on each operand it uses. Its tests must include the
   `ce.box(...)` and `ce.parse(...)` routes, not only `ce.function(...)`.

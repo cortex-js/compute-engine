@@ -53,18 +53,33 @@ const BODIES: [string, unknown, unknown][] = [
 ];
 
 describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', () => {
+  test.each(['collection', 'collection<any>'])(
+    '%s cannot prove omission-free numeric reduction',
+    (type) => {
+      expect(() =>
+        compile(lambda(new ComputeEngine(), ['Sum', 'w'], type), {
+          fallback: false,
+        })
+      ).toThrow(/Nothing/);
+    }
+  );
+
   test('the example of the issue', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'list<integer>');
     const expr = ce.box([
       'Apply',
-      ['Function', ['Max', 'w'], ['Typed', 'w', "'collection'"]],
+      ['Function', ['Max', 'w'], ['Typed', 'w', "'collection<expression>'"]],
       'x',
     ] as any);
     expect(compile(expr, { fallback: false }).run!({ x: [3, 1, 2] })).toBe(3);
   });
 
-  for (const type of ['collection', 'collection<integer>', 'set<integer>'])
+  for (const type of [
+    'collection<expression>',
+    'collection<integer>',
+    'set<integer>',
+  ])
     for (const [label, body, expected] of BODIES) {
       test(`${label} with w: ${type}, over an array and a set`, () => {
         const fn = compiled(new ComputeEngine(), body, type);
@@ -91,45 +106,48 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     // `incompatible-type`; the compiled code throws.
     for (const [, body] of BODIES) {
       const ce = new ComputeEngine();
-      expect(() => compiled(ce, body, 'collection')(4)).toThrow(
+      expect(() => compiled(ce, body, 'collection<expression>')(4)).toThrow(
         /not a list or a set at run time/
       );
       expect(
         ce
-          .box(['Apply', ['Function', body, ['Typed', 'w', "'collection'"]], 4])
+          .box([
+            'Apply',
+            ['Function', body, ['Typed', 'w', "'collection<expression>'"]],
+            4,
+          ])
           .evaluate()
           .toString()
       ).toContain('incompatible-type');
     }
   });
 
-  test('a number at a parameter INFERRED collection is one element', () => {
-    // `k(L) := Sum(L)` infers `L: collection`, and the interpreter answers
-    // `k(4) = 4`: its `Sum` and `Product` accept a single number.
-    for (const op of ['Sum', 'Product']) {
-      const ce = new ComputeEngine();
-      ce.assign('k', ce.box(['Function', [op, 'L'], 'L']));
-      expect(ce.box('k').type.toString()).toMatch(/^\(collection\) ->/);
-      const fn = compile(ce.box('k'), { fallback: false }).run!({}) as (
-        a: unknown
-      ) => unknown;
-      expect(fn(4)).toBe(4);
-      expect(ce.box(['k', 4]).evaluate().re).toBe(4);
-      expect(fn([3, 1, 2])).toBe(6);
-    }
+  test('an unconstrained reducing parameter requires an omission-free contract', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Function', ['Sum', 'w'], 'w']);
+    expect(() => compile(expr, { fallback: false })).toThrow(/Nothing/);
+    expect(ce.box(['Sum', 4]).evaluate().re).toBe(4);
   });
 
   test('Sum and Product of complex elements', () => {
     // Before, the element-wise fold added a complex element `{re, im}` with
     // `+`, and the sum became a string.
-    const fn = compiled(new ComputeEngine(), ['Sum', 'w'], 'collection');
+    const fn = compiled(
+      new ComputeEngine(),
+      ['Sum', 'w'],
+      'collection<expression>'
+    );
     expect(
       fn([
         { re: 1, im: 2 },
         { re: 3, im: 4 },
       ])
     ).toEqual({ re: 4, im: 6 });
-    const prod = compiled(new ComputeEngine(), ['Product', 'w'], 'collection');
+    const prod = compiled(
+      new ComputeEngine(),
+      ['Product', 'w'],
+      'collection<expression>'
+    );
     expect(prod([{ re: 0, im: 1 }, 2])).toEqual({ re: 0, im: 2 });
   });
 
@@ -192,7 +210,11 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     // A complex value has no order: the interpreter keeps `Max` symbolic.
     // `Math.max` would read the object as `NaN`.
     for (const op of ['Max', 'Min']) {
-      const fn = compiled(new ComputeEngine(), [op, 'w'], 'collection');
+      const fn = compiled(
+        new ComputeEngine(),
+        [op, 'w'],
+        'collection<expression>'
+      );
       expect(() =>
         fn([
           { re: 1, im: 2 },
@@ -236,7 +258,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       const value = ce
         .box([
           'Apply',
-          ['Function', body, ['Typed', 'w', "'collection'"]],
+          ['Function', body, ['Typed', 'w', "'collection<expression>'"]],
           'x',
         ] as any)
         .evaluate();
@@ -253,7 +275,11 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
 
   test('an indexed parameter type compiles as before', () => {
     const ce = new ComputeEngine();
-    for (const type of ['list<integer>', 'indexed_collection', 'list'])
+    for (const type of [
+      'list<integer>',
+      'indexed_collection<expression>',
+      'list<expression>',
+    ])
       for (const [, body, expected] of BODIES)
         expect(compiled(ce, body, type)([3, 1, 2])).toEqual(expected);
   });
@@ -273,7 +299,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       ['Reverse', 'w'],
     ])
       expect(() =>
-        compile(lambda(new ComputeEngine(), body, 'collection'), {
+        compile(lambda(new ComputeEngine(), body, 'collection<expression>'), {
           fallback: false,
         })
       ).toThrow(/is not an indexed collection/);

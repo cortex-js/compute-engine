@@ -558,22 +558,8 @@ export function isPointElementType(
   return false;
 }
 
-// An UNPARAMETERIZED collection type states nothing about its elements, so
-// its element type is the PLACEHOLDER `unknown`, not the contract `any`.
-//
-// The two are not synonyms (ruling of 2026-08-15, `unknown` as placeholder):
-// `any` is something the author SAID — "anything may go here", the promise
-// `(any) -> any` makes — while `unknown` is the absence of a statement, open
-// to refinement as evidence arrives. Someone who writes `collection` has not
-// written `collection<any>`; they have said nothing about the members.
-//
-// These used to answer `any` while the operators that actually extract an
-// element answered `unknown` (`At(C, 1)`, `First(D)` on a bare-typed `C`/`D`),
-// so the two spellings of the same question disagreed and a caller's behavior
-// turned on which one it consulted. `unknown` is the reading that matches what
-// a reader of `At(C, 1)` can actually conclude, so the operators are right and
-// the helper now agrees with them. Both spellings are pinned together in
-// `test/common/types.test.ts` so they cannot drift apart again.
+// Bare family names place no constraint on their contents. Entry iteration
+// of a dictionary or an open record still exposes a key/value tuple.
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // A transparent alias of a collection IS that collection, so its elements
   // are the body's elements: `At(L, 1)` for `L: myints` (an alias of
@@ -582,9 +568,9 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // not unfolded (it is deliberately not a subtype of its definition) and
   // answers `undefined`, as it did before.
   type = resolveTypeAlias(type);
-  if (type === 'collection') return 'unknown';
-  if (type === 'indexed_collection') return 'unknown';
-  if (type === 'list') return 'unknown';
+  if (type === 'collection') return 'any';
+  if (type === 'indexed_collection') return 'any';
+  if (type === 'list') return 'any';
   // An index span is the ONE unparameterized case whose element type is
   // genuinely known: its members are finite positive integers. That is a fact
   // about `range`, not an absence of one, so it stays concrete. (`unknown`
@@ -595,10 +581,10 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // element type is genuinely KNOWN rather than absent. See
   // `STRING_STRUCTURAL_TYPE` (`primitive.ts`).
   if (type === 'string') return 'character';
-  if (type === 'set') return 'unknown';
-  if (type === 'tuple') return 'unknown';
-  if (type === 'dictionary') return 'unknown';
-  if (type === 'record') return 'unknown';
+  if (type === 'set') return 'any';
+  if (type === 'tuple') return 'any';
+  if (type === 'dictionary' || type === 'record')
+    return { kind: 'tuple', elements: [{ type: 'string' }, { type: 'any' }] };
   if (typeof type === 'string') return undefined;
 
   if (type.kind === 'collection' || type.kind === 'indexed_collection')
@@ -644,12 +630,14 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'dictionary')
     return parseType(`tuple<string, ${typeToString(type.values)}>`);
 
-  if (type.kind === 'record') {
-    return parseType(
-      `tuple<string, ${typeToString(widen(...Object.values(type.elements)))}>`
-    );
-  }
-
+  if (type.kind === 'record')
+    return {
+      kind: 'tuple',
+      elements: [
+        { type: 'string' },
+        { type: widen(...Object.values(type.elements)) },
+      ],
+    };
   return undefined;
 }
 
@@ -1054,9 +1042,8 @@ export function typeContainsMissing(
  * nesting level: `t` has a `missing` arm ({@link typeContainsMissing}), or
  * `any` at some position, because `any` admits the absence markers. A value
  * typed `any` or `list<any>` can be `Missing` or hold a `Missing` cell. The
- * bare collection names and `unknown` do not admit absence (`list` is
- * `list<unknown>`, values only), and neither does `value`: `missing` is a
- * subtype of only `any` and `missing` among the primitive types.
+ * bare collection names also permit absent contents; `unknown` and `value`
+ * still exclude the named absence markers in the current type relation.
  *
  * Use it where a result type is built from what an operand can hold, so
  * that the result admits an absent element whenever the operand can carry
@@ -1067,7 +1054,22 @@ export function typeCouldHoldMissing(
   t: Readonly<Type>,
   seen?: AliasDescent
 ): boolean {
-  return containsPrimitive(t, (p) => p === 'missing' || p === 'any', seen);
+  return containsPrimitive(
+    t,
+    (p) =>
+      p === 'missing' ||
+      p === 'any' ||
+      [
+        'list',
+        'set',
+        'dictionary',
+        'record',
+        'tuple',
+        'collection',
+        'indexed_collection',
+      ].includes(p),
+    seen
+  );
 }
 
 /** Whether `t` has, at some nesting level, a primitive type that `leaf`
@@ -2303,18 +2305,6 @@ function tupleSlots(
   return t.elements;
 }
 
-/**
- * Can a slot of the BARE `tuple` hold a value of this type?
- *
- * Bare `tuple` states no arity, but it is not unconstrained: its slots hold
- * VALUES, so an absence marker or an empty type is not a possible inhabitant.
- * Without this test the unknown-arity arm admitted `tuple<missing>` at a
- * `tuple` parameter, two types with no common inhabitant at all.
- */
-function bareTupleAdmitsSlot(t: Readonly<Type>): boolean {
-  return isSubtype(t, 'value');
-}
-
 /** Whether a tuple slot's type is itself a tuple or a list, collection or
  * indexed collection: the kinds `overlapsForDeferredValidation` compares
  * structurally. */
@@ -2408,19 +2398,9 @@ function overlapsDeferred(
   if (paramTupleSlots !== 'not-a-tuple' || opTupleSlots !== 'not-a-tuple') {
     if (paramTupleSlots === 'not-a-tuple' || opTupleSlots === 'not-a-tuple')
       return false;
-    // A bare `tuple` on either side states no arity, so no slot PAIRS up and
-    // arity refutes nothing. The other side's slots are still checked against
-    // what a bare tuple can hold: its slots are values, so an explicit
-    // `missing` or `nothing` slot has no common inhabitant with it.
-    if (
-      paramTupleSlots === 'unknown-arity' ||
-      opTupleSlots === 'unknown-arity'
-    ) {
-      const explicit =
-        paramTupleSlots === 'unknown-arity' ? opTupleSlots : paramTupleSlots;
-      if (explicit === 'unknown-arity') return true;
-      return explicit.every((e) => bareTupleAdmitsSlot(e.type));
-    }
+    // A bare tuple constrains neither arity nor slot contents.
+    if (paramTupleSlots === 'unknown-arity' || opTupleSlots === 'unknown-arity')
+      return true;
     // Arity refutation: a 2-tuple can never be a 3-tuple. This is the tuple
     // counterpart of the rank refutation the list arm performs below.
     if (paramTupleSlots.length !== opTupleSlots.length) return false;

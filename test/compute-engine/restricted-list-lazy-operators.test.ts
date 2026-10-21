@@ -295,7 +295,7 @@ describe('Partition over an absent collection', () => {
   ])('the %s form answers Missing', (_form, json) => {
     const e = engine().box(json as never);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('list<list<unknown>> | missing');
+    expect(e.type.toString()).toBe('list<list<any>> | missing');
     expect(e.evaluate().toString()).toBe('"Missing"');
   });
 

@@ -63,7 +63,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // operand (which refutes no arm) does not win it — see the unknown/any
     // deltas test below.
     expect(sig(ce, 'Reverse')).toBe(
-      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)'
+      '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)'
     );
   });
 
@@ -72,10 +72,10 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // `Take`/`Drop` gained a leading string-preserving arm with Strings
     // Phase 1: a prefix (or suffix) of a string's characters is a string.
     expect(sig(ce, 'Take')).toBe(
-      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)'
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)'
     );
     expect(sig(ce, 'Drop')).toBe(
-      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)'
+      '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)'
     );
     // `Slice` is an overload set since the `range` arm landed (Phase 0c of
     // `docs/STRING_ROADMAP.md`); every arm carries the `where` clause. Strings
@@ -87,22 +87,22 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // the string-preservation step needs the node's type to MATCH `string`,
     // which `string | nothing` would not.
     expect(sig(ce, 'Slice')).toBe(
-      '((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)'
+      '((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)'
     );
     // Strings Phase 2 promoted `DeleteAt` to the string-preservation rule:
     // what is left after removing one of a string's own characters is a
     // string, so it gained a leading string-preserving arm.
     expect(sig(ce, 'DeleteAt')).toBe(
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)'
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)'
     );
     // UNBOUNDED (the D4 audit's spelling). A bound on `T` would also
     // constrain the SOURCE collection's elements, since the same variable
     // stands for both — see the `list<function>` source pin below.
     expect(sig(ce, 'Insert')).toBe(
-      '(indexed_collection<T>, integer, T) -> list<T> where T'
+      '(indexed_collection<T>, integer, T) -> list<T> where T: any'
     );
     expect(sig(ce, 'ReplaceAt')).toBe(
-      '(indexed_collection<T>, integer, T) -> list<T> where T'
+      '(indexed_collection<T>, integer, T) -> list<T> where T: any'
     );
     // The `order`/`key` slots stay the PRIMITIVE `function`, not an arrow: a
     // function-typed SYMBOL operand must still be admitted there. `Sort` and
@@ -114,16 +114,16 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // union (the comparator arm grounded to `(any, any)` — at most one union
     // arm may carry a type variable).
     expect(sig(ce, 'Sort')).toBe(
-      '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T)'
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T: any)'
     );
     expect(sig(ce, 'Unique')).toBe(
-      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)'
+      '((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)'
     );
     // Promoted with `DeleteAt` in Strings Phase 2: a permutation of a
     // string's own characters is a string. The `random` effect label sits on
     // each arm.
     expect(sig(ce, 'RandomShuffle')).toBe(
-      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)'
+      '((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)'
     );
     expect(sig(ce, 'Tally')).toBe(
       '(collection<T>) -> tuple<list<T>, list<integer>> where T'
@@ -144,12 +144,12 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: the predicate arm is an honest arrow (reduce order puts
     // the arrow arm first).
     expect(sig(ce, 'Partition')).toBe(
-      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
+      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any'
     );
     // …and the DISPLAYED type is the same honest polytype (the R-D5
     // grounding projection retired with the constructor).
     expect(ce.box('Partition').type.toString()).toBe(
-      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
+      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T: any'
     );
     // `ChunkBy`'s `key` slot is the PRIMITIVE `function`, not a contextual
     // callback, so it takes the leading string arm: a maximal run of a
@@ -160,7 +160,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: both arms carry honest key arrows (the string arm's
     // element type is `character`, a ground type).
     expect(sig(ce, 'ChunkBy')).toBe(
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)'
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)'
     );
   });
 });
@@ -193,9 +193,7 @@ describe('TYPE VARIABLES / KeyValuePair — `(key: string, value: T) -> tuple<st
       'tuple<string, integer>'
     );
     expect(
-      ce
-        .parse('\\operatorname{KeyValuePair}(\\text{k}, 2)')
-        .type.toString()
+      ce.parse('\\operatorname{KeyValuePair}(\\text{k}, 2)').type.toString()
     ).toBe('tuple<string, integer>');
   });
 
@@ -234,9 +232,7 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
     const t = (v: any) =>
       ce.function('Single', [v], { structural: true }).type.toString();
     expect(t(ce.number(2))).toBe('tuple<integer>');
-    expect(t(ce.box(['List', 1, 2, 3]))).toBe(
-      'tuple<vector<integer^3>>'
-    );
+    expect(t(ce.box(['List', 1, 2, 3]))).toBe('tuple<vector<integer^3>>');
     ce.declare('sgU', 'unknown');
     expect(t(ce.box('sgU'))).toBe('tuple<unknown>');
     // Canonical + box + parse.
@@ -259,9 +255,9 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
     expect(ce.box(['Pair', 2, { str: 'a' }]).type.toString()).toBe(
       'tuple<integer, string>'
     );
-    expect(
-      ce.parse('\\operatorname{Pair}(2, 3.5)').type.toString()
-    ).toBe('tuple<integer, real>');
+    expect(ce.parse('\\operatorname{Pair}(2, 3.5)').type.toString()).toBe(
+      'tuple<integer, real>'
+    );
   });
 
   test('Triple keeps its three positions independent (three variables)', () => {
@@ -276,9 +272,9 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
     expect(ce.box(['Triple', 2, { str: 'a' }, 'True']).type.toString()).toBe(
       'tuple<integer, string, boolean>'
     );
-    expect(
-      ce.parse('\\operatorname{Triple}(2, 3.5, 4)').type.toString()
-    ).toBe('tuple<integer, real, integer>');
+    expect(ce.parse('\\operatorname{Triple}(2, 3.5, 4)').type.toString()).toBe(
+      'tuple<integer, real, integer>'
+    );
   });
 
   test('a dimensioned operand echoes verbatim in a BARE-variable position', () => {
@@ -288,7 +284,9 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
     const ce = engine();
     ce.declare('tmM', 'matrix<integer^(2x3)>');
     expect(
-      ce.function('Single', [ce.box('tmM')], { structural: true }).type.toString()
+      ce
+        .function('Single', [ce.box('tmM')], { structural: true })
+        .type.toString()
     ).toBe('tuple<matrix<integer^(2x3)>>');
   });
 
@@ -329,9 +327,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     ).toBe('vector<integer^3>');
     expect(
       ce
-        .function('Reverse', [
-          ce.box(['List', { str: 'a' }, { str: 'b' }]),
-        ])
+        .function('Reverse', [ce.box(['List', { str: 'a' }, { str: 'b' }])])
         .type.toString()
     ).toBe('list<string^2>');
     // An empty list keeps `never`.
@@ -351,7 +347,9 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
       'list<integer | string>'
     );
     expect(
-      ce.function('Reverse', [ce.box(['Tuple', 1, { str: 'a' }])]).type.toString()
+      ce
+        .function('Reverse', [ce.box(['Tuple', 1, { str: 'a' }])])
+        .type.toString()
     ).toBe('list<integer | string>');
     // A span reversed is descending, which the `range` type excludes.
     expect(
@@ -396,9 +394,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     const ce = engine();
     const xs = ce.box(['List', 1, 2, 3]);
     expect(
-      ce
-        .function('Reverse', [ce.function('Reverse', [xs])])
-        .type.toString()
+      ce.function('Reverse', [ce.function('Reverse', [xs])]).type.toString()
     ).toBe('vector<integer^3>');
   });
 
@@ -428,9 +424,12 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     const ce = engine();
     // `Reverse` is a LAZY collection: `.json` keeps the unmaterialized form,
     // so the value pin reads through `.toString()`.
-    expect(ce.box(['Reverse', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
-      '[3,2,1]'
-    );
+    expect(
+      ce
+        .box(['Reverse', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[3,2,1]');
     expect(
       ce
         .parse('\\operatorname{Reverse}(\\lbrack 1,2,3\\rbrack)')
@@ -523,9 +522,9 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
     expect(t(ce, 'Filter', 'pkR', p)).toBe('list<integer>');
     expect(t(ce, 'Filter', 'pkI', p)).toBe('list<boolean>');
     // A matrix filters ROWS: the element type is the row type.
-    expect(
-      t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], p)
-    ).toBe('list<vector<integer^2>>');
+    expect(t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], p)).toBe(
+      'list<vector<integer^2>>'
+    );
     // A non-indexed source keeps its type: no arity or shape to lie about.
     ce.declare('pkS', 'set<integer>');
     expect(t(ce, 'Filter', 'pkS', p)).toBe('set<integer>');
@@ -538,7 +537,10 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
       [['Reverse', ['Range', 1, 4]], 'list<integer>'],
       [['Rest', ['Range', 1, 4]], 'list<integer>'],
       [['RotateLeft', ['Range', 1, 4]], 'list<integer>'],
-      [['Filter', ['Range', 1, 4], ['Function', ['Greater', '_', 2], '_']], 'list<integer>'],
+      [
+        ['Filter', ['Range', 1, 4], ['Function', ['Greater', '_', 2], '_']],
+        'list<integer>',
+      ],
     ];
     for (const [expr, claimed] of cases) {
       const e = ce.box(expr);
@@ -584,9 +586,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     expect(ce.box(['Take', m, 1]).type.toString()).toBe(
       'list<vector<integer^3>>'
     );
-    expect(ce.box(['Sort', m]).type.toString()).toBe(
-      'list<vector<integer^3>>'
-    );
+    expect(ce.box(['Sort', m]).type.toString()).toBe('list<vector<integer^3>>');
     expect(ce.box(['Unique', m]).type.toString()).toBe(
       'list<vector<integer^3>>'
     );
@@ -609,9 +609,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     expect(ce.box(['ReplaceAt', xs, 1, { str: 'a' }]).type.toString()).toBe(
       'list<integer | string>'
     );
-    expect(ce.box(['Insert', xs, 1, 4]).type.toString()).toBe(
-      'list<integer>'
-    );
+    expect(ce.box(['Insert', xs, 1, 4]).type.toString()).toBe('list<integer>');
   });
 
   test('`Sort`/`Unique`/`RandomShuffle` are plain, NOT identity echoes', () => {
@@ -643,9 +641,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     const ce = engine();
     const e = ce.box(['Tally', { str: 'hello' }]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe(
-      'tuple<list<character>, list<integer>>'
-    );
+    expect(e.type.toString()).toBe('tuple<list<character>, list<integer>>');
     // `hello`: h, e, l (twice), o.
     expect(e.evaluate().toString()).toBe('(["h","e","l","o"], [1,1,2,1])');
   });

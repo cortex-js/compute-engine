@@ -534,7 +534,7 @@ first three in `_invalidValue()`,
   is still **invalid** — `isValid` is `false` for any tree containing an
   `Error` node, container or not (`error-value.ts`). Its type is still a
   collection type: a failed cell makes the element type `unknown`, so
-  `[1, err, 3]` is typed `list` (`list<unknown>`), not `error`, and
+  `[1, err, 3]` retains a collection type, not the whole-value type `error`, and
   `ListJoin` splices it as it splices any list. A variable declared `list`
   accepts it; one declared `list<number>` does not, because `error` is not
   a subtype of `number`. Giving containers a validity notion distinct from
@@ -1082,15 +1082,13 @@ type of the operand, not where the type came from.
 The subtype relation keeps the written element constraint:
 `list<missing | string>` is not a subtype of `collection<string>`, and
 the admission is made by argument validation alone
-(`absentElementsMatchParam`, `boxed-expression/validate.ts`). Bare `list`,
-`set`, `dictionary`, `collection`, and `indexed_collection` currently expand
-to `<unknown>`, which excludes immediate `missing`, `nothing`, and `error`
-types in the implemented subtype relation, but includes numeric `nan`.
-This is not a rule that all
-element-typed collections exclude absence: `list<string | missing>` and
-`list<any>` explicitly permit it. Option B in the collection design note
-(distinct from the signature Contract B below) and the agreed
-inference-marker role of `unknown` require separate migration work.
+(`absentElementsMatchParam`, `boxed-expression/validate.ts`). Bare `list`, `set`,
+`dictionary`, `collection`, and `indexed_collection`
+now admit unrestricted contents, just like their explicit `<any>` forms.
+Bare tuple and record likewise cover their entire families. Explicit content
+contracts such as `list<string>` or `list<expression>` retain their restrictions;
+a missing whole list is still different from a list containing missing cells.
+The agreed inference-marker role of `unknown` requires separate migration work.
 The current `NaN`-to-`Missing` repair in `boxed-expression/validate.ts`
 applies only within nested `List` expressions, not to record/dictionary
 values.

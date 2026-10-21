@@ -1294,9 +1294,8 @@ function pipeStageArityError(stage: Expression): Expression | undefined {
   ]);
 }
 
-/** The absence-admitting collection family top, the shape gate the implicit
- * `Map` of a pipe stage asks against: bare `collection` is the values-only
- * `collection<unknown>` synonym. */
+/** The unrestricted collection family, used as a shape gate for the implicit
+ * `Map` of a pipe stage. */
 const PIPE_COLLECTION_SHAPE_TYPE = parseType('collection<any>')!;
 
 /**
@@ -2498,10 +2497,9 @@ function unionMembers(type: Type): Type[] {
   return [type];
 }
 
-/** The absence-admitting dictionary family top, the gate `isDictionary`
- * (`boxed-expression/utils.ts`) asks against: bare `dictionary` is the
- * values-only `dictionary<unknown>` synonym, and an attributes bag whose
- * entry values carry an absence arm is still a dictionary. */
+/** The unrestricted dictionary family, matching the shape gate used by
+ * `isDictionary` (`boxed-expression/utils.ts`). Absence-bearing entry values
+ * still belong to the dictionary family. */
 const DICTIONARY_SHAPE_TYPE = parseType('dictionary<any>')!;
 
 /**
@@ -6640,9 +6638,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `scope` label (see `Assign`).
       // The attributes bag's entry VALUES are arbitrary expressions — a
       // `value` entry can be typed `range | nothing`, say — so the parameter
-      // is the absence-admitting `dictionary<any>`, not the values-only bare
-      // `dictionary` (= `dictionary<unknown>` since the bare-synonym ruling,
-      // 2026-08-17, which went inert on exactly that `let`).
+      // uses unrestricted `dictionary<any>`, equivalent to bare `dictionary`.
       signature:
         '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary<any>?) scope -> any',
       examples: ['let x: integer = 5\nx + 1'],

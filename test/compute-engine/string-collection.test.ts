@@ -568,14 +568,14 @@ describe('string-preserving operators', () => {
   test('an UNKNOWN-typed source gets the join of the string and list arms', () => {
     // An `unknown` operand refutes no arm, so the call can take the string
     // arm or a list arm at run time. Its result type is the join of their
-    // results, not `string` alone and not `list<unknown>` alone. The string
+    // results, not `string` alone and not `list<any>` alone. The string
     // arm's `T where T: string` reads as its bound, `string`.
     ce.declare('untypedSrc', 'unknown');
     expect(ce.box(['Reverse', 'untypedSrc']).type.toString()).toBe(
       'list | string'
     );
     expect(ce.box(['Take', 'untypedSrc', 2]).type.toString()).toBe(
-      'list<unknown> | string'
+      'list<any> | string'
     );
   });
 

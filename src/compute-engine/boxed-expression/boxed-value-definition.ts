@@ -200,8 +200,8 @@ export class _BoxedValueDefinition
 
   /** The declared PLACEHOLDER SKELETON, when the declaration's type was a
    * bare collection constructor (`list`, `set`, `dictionary`, `collection`,
-   * `indexed_collection` — each the `<unknown>` synonym: "some X of values,
-   * elements to be determined"). The skeleton is the CONTRACT and never
+   * `indexed_collection` — each constrains collection kind without restricting
+   * contents). The skeleton is the CONTRACT and never
    * moves; `_type` then carries the current element REFINEMENT, recomputed
    * from each assignment (`docs/INFERENCE_ROADMAP.md`, Phase 1 — ruled
    * 2026-08-18: re-refine on re-assignment; element only; `typeof` shows
@@ -1371,10 +1371,9 @@ function isSelfReferentialValue(
   return !!value && value.symbols.includes(name);
 }
 
-/** Is this declared type a bare collection constructor — the `<unknown>`
- * synonym, whose ELEMENT slot is a refinable placeholder? (The synonym
- * normalization collapses `list<unknown>` to the bare name, so the bare
- * strings are the complete trigger set.) */
+/** Is this declared type a bare collection family whose element refinement
+ * is tracked separately from its unrestricted declared contract? Explicit
+ * content arguments, including `<unknown>`, do not trigger this behavior. */
 export function isConstructorPlaceholderType(t: Type): boolean {
   return (
     t === 'list' ||

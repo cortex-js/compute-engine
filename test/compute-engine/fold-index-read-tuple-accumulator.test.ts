@@ -100,7 +100,7 @@ describe('issue #454: a selection on a possibly element-wise condition', () => {
   it('If keeps an arm whose elements are unknown', () => {
     const ce = selectionEngine();
     const expr = ce.box(['If', COND, 'p', 'u'] as any);
-    expect(expr.type.toString()).toEqual('broadcastable<tuple<integer>> | list');
+    expect(expr.type.toString()).toEqual('broadcastable<any>');
     ce.assign('u', ce.box(['List', 1, 0, 3]));
     const value = expr.evaluate();
     expect(value.json).toEqual(['List', 1, 0, 3]);
@@ -110,7 +110,7 @@ describe('issue #454: a selection on a possibly element-wise condition', () => {
   it('Which keeps an arm whose elements are unknown', () => {
     const ce = selectionEngine();
     const expr = ce.box(['Which', COND, 5, 'True', 'u'] as any);
-    expect(expr.type.toString()).toEqual('broadcastable<integer> | list');
+    expect(expr.type.toString()).toEqual('broadcastable<any>');
   });
 
   it('an arm the broadcastable type admits adds nothing (unchanged)', () => {
@@ -152,7 +152,8 @@ describe('issue #454: a seeded fold over a collection that may be empty', () => 
     }
     // Range(1, 0) counts down: [1, 0], so the fold runs.
     ce.assign('n', 0);
-    expect(ce.box(['Fold', STEP, 0, ['Range', 1, 'n']] as any).evaluate().json)
-      .toEqual("'x'");
+    expect(
+      ce.box(['Fold', STEP, 0, ['Range', 1, 'n']] as any).evaluate().json
+    ).toEqual("'x'");
   });
 });

@@ -676,11 +676,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // Three named arms would be needed to say less, so the base type says
       // it in one token.
       //
-      // The operand carrier stays `collection<any>` — the ABSENCE-admitting
-      // top — because the §3.C rule requires `[1, Missing, 3]` to REACH this
-      // handler: the bare spelling `collection` is the values-only
-      // `collection<unknown>`, which `list<integer|missing>` does not match,
-      // so it would refuse the very input the rule is about.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       // Data on the extended real line has a mean on it too, or NaN: typed
@@ -781,10 +778,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       description:
@@ -880,10 +875,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `real | infinity | nan`); its VALUE is non-negative for every legal
       // parameter, which is what the declaration describes.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -974,10 +967,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1076,10 +1067,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // while its VALUE is non-negative for every legal parameter — which is
       // what the declaration describes.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1175,10 +1164,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1261,10 +1248,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1314,10 +1299,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1366,10 +1349,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1423,10 +1404,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // wrong component and `Quartiles([1,2,3,4]).mid` read the LOWER
       // quartile.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       signature:
         '((collection<any>|number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
       nanBehavior: 'handle',
@@ -1505,10 +1484,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `inert`, which would leave unsaid that this head ANSWERS `NaN` for
       // absent data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
 
@@ -1706,10 +1683,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>
@@ -1740,10 +1715,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>
@@ -1780,10 +1753,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The operand carrier stays `collection<any>` — the absence-admitting
-      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
-      // the bare spelling `collection` is the values-only
-      // `collection<unknown>` and would not match it.
+      // The unrestricted collection carrier admits Missing data so the
+      // handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>

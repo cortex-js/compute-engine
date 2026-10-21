@@ -248,15 +248,14 @@ describe('Collection Type Parser', () => {
   });
 
   it('should parse a list expression with dimensions and no type', () => {
-    // The omitted element type is `unknown`, the bare-`list` synonym reading
-    // (user ruling 2026-08-17) — not the wider, absence-admitting `any`.
+    // An omitted element annotation permits any content type.
     expect(parseType('list<2x3>')).toMatchInlineSnapshot(`
       {
         "dimensions": [
           2,
           3,
         ],
-        "elements": "unknown",
+        "elements": "any",
         "kind": "list",
       }
     `);
@@ -1897,14 +1896,9 @@ describe('reduceType Tests', () => {
     );
   });
 
-  it('should handle collections of anything', () => {
-    // `collection<any>` is the absence-admitting contract and survives; it
-    // is the `<unknown>` spelling that is the synonym of the bare name and
-    // collapses (user ruling 2026-08-17).
-    expect(reduce('collection<any>')).toMatchInlineSnapshot(
-      `"collection<any>"`
-    );
-    expect(reduce('collection<unknown>')).toMatchInlineSnapshot(`"collection"`);
+  it('preserves explicit collection content contracts', () => {
+    expect(reduce('collection<any>')).toBe('collection<any>');
+    expect(reduce('collection<unknown>')).toBe('collection<unknown>');
   });
 
   // Test Cases for Function Signatures
@@ -2628,17 +2622,7 @@ describe('the retired `callback<…>` spelling on the Epsil annotation route', (
 });
 
 describe('the element type of an UNPARAMETERIZED collection type', () => {
-  // `collection` is not `collection<any>`. Someone who writes the bare form has
-  // said nothing about the members, so their type is the PLACEHOLDER `unknown`
-  // — open to refinement — rather than the CONTRACT `any`, which is a promise
-  // the author would have had to make (ruling of 2026-08-15, `unknown` as
-  // placeholder; `(any) -> any` is the identity function's signature).
-  //
-  // This used to disagree with itself: the helper answered `any` while the
-  // operators that actually extract an element answered `unknown`, so the same
-  // question had two answers and a caller's behavior turned on which it asked.
-  // BOTH SPELLINGS ARE PINNED HERE TOGETHER, which is the point of this
-  // block — a fix to one side that forgets the other fails here.
+  // Bare names constrain kind only. Keyed collections expose entry tuples.
   const BARE = [
     'collection',
     'indexed_collection',
@@ -2649,9 +2633,15 @@ describe('the element type of an UNPARAMETERIZED collection type', () => {
     'record',
   ] as const;
 
-  test.each(BARE)('collectionElementType(%s) is `unknown`', (type) => {
-    expect(collectionElementType(parseType(type))).toBe('unknown');
-  });
+  test.each(BARE)(
+    'collectionElementType(%s) has unrestricted contents',
+    (type) => {
+      const element = collectionElementType(parseType(type));
+      if (type === 'dictionary' || type === 'record')
+        expect(typeToString(element!)).toBe('tuple<string, any>');
+      else expect(element).toBe('any');
+    }
+  );
 
   // `range` is the one unparameterized case whose elements ARE known — finite
   // positive integers — so it is concrete by fact, not by contract, and must
@@ -2680,9 +2670,9 @@ describe('the element type of an UNPARAMETERIZED collection type', () => {
     const ce = new ComputeEngine();
     ce.declare('anIndexed', 'indexed_collection');
     ce.declare('aCollection', 'collection');
-    expect(ce.box(['At', 'anIndexed', 1]).type.toString()).toBe('unknown');
-    expect(ce.box(['First', 'aCollection']).type.toString()).toBe('unknown');
-    expect(ce.box(['Last', 'anIndexed']).type.toString()).toBe('unknown');
+    expect(ce.box(['At', 'anIndexed', 1]).type.toString()).toBe('any');
+    expect(ce.box(['First', 'aCollection']).type.toString()).toBe('any');
+    expect(ce.box(['Last', 'anIndexed']).type.toString()).toBe('any');
   });
 });
 

@@ -291,12 +291,9 @@ describe('2. THE PREVIEW OF A VIEW OVER A SOURCE THAT CAN BE ABSENT', () => {
   });
 });
 
-describe('3. A TUPLE WHOSE EVERY SLOT IS ABSENT STAYS REFUSED AT A LAZY SOURCE', () => {
-  // Not fixed: such a tuple evaluates to `Missing` (an open question of
-  // `docs/plans/2026-10-20-bare-tuple-record-any.md`), so no type of the
-  // tuple holds its value, and admitting it at a lazy source gave types
-  // that do not hold the values (`Scan(m, Add)` typed `list<number>`
-  // evaluates to `Missing`).
+describe('3. ALL-ABSENT TUPLES BELONG TO THE COLLECTION FAMILY', () => {
+  // Tuple construction retains the positions; a bare collection contract
+  // does not exclude them merely because all coordinates are absent.
   test.each([['Map'], ['Scan'], ['Reduce'], ['Any'], ['ArgMax']])(
     '%s',
     (op) => {
@@ -313,7 +310,7 @@ describe('3. A TUPLE WHOSE EVERY SLOT IS ABSENT STAYS REFUSED AT A LAZY SOURCE',
               : op === 'Any'
                 ? ['Any', 'm', POSITIVE]
                 : ['ArgMax', 'm'];
-      expect(engine.box(json).isValid).toBe(false);
+      expect(engine.box(json).isValid).toBe(true);
     }
   );
 });
@@ -389,7 +386,7 @@ describe('6. THE RESULT KIND OVER A STRING HELD BY A SYMBOL OF A WIDER TYPE', ()
       expectTypeHoldsValue(
         engine,
         engine.box(['Map', ['Function', 'x', 'x'], 'c']),
-        'list'
+        'list<nothing | unknown>'
       )
     ).toBe('["a","a","b"]');
   });

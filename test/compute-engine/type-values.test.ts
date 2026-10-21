@@ -157,12 +157,15 @@ describe('identity and equality tiers (R8)', () => {
 
   test('a type value never equals a string or a number', () => {
     expect(
-      ev(['Equal', ['TypeFrom', { str: 'integer' }], { str: 'integer' }])
-        .toString()
+      ev([
+        'Equal',
+        ['TypeFrom', { str: 'integer' }],
+        { str: 'integer' },
+      ]).toString()
     ).toBe('"False"');
-    expect(
-      ev(['Equal', ['TypeFrom', { str: 'integer' }], 5]).toString()
-    ).toBe('"False"');
+    expect(ev(['Equal', ['TypeFrom', { str: 'integer' }], 5]).toString()).toBe(
+      '"False"'
+    );
   });
 
   test('== is False against ANY operand that cannot be a type value', () => {
@@ -192,25 +195,31 @@ describe('identity and equality tiers (R8)', () => {
 
 describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
   test('direction, reflexivity', () => {
-    expect(ev(['Subtype', { str: 'integer' }, { str: 'number' }]).toString())
-      .toBe('"True"');
-    expect(ev(['Subtype', { str: 'number' }, { str: 'integer' }]).toString())
-      .toBe('"False"');
-    expect(ev(['Subtype', { str: 'integer' }, { str: 'integer' }]).toString())
-      .toBe('"True"');
+    expect(
+      ev(['Subtype', { str: 'integer' }, { str: 'number' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['Subtype', { str: 'number' }, { str: 'integer' }]).toString()
+    ).toBe('"False"');
+    expect(
+      ev(['Subtype', { str: 'integer' }, { str: 'integer' }]).toString()
+    ).toBe('"True"');
   });
 
   test('the relation is the one annotations use (2026-08-17 rulings)', () => {
-    // `any <: unknown` is FALSE, and bare `list` ≡ `list<unknown>` is
-    // narrower than `list<any>` — exposing `matches()` exposes these.
-    expect(ev(['Subtype', { str: 'any' }, { str: 'unknown' }]).toString())
-      .toBe('"False"');
-    expect(ev(['Subtype', { str: 'list' }, { str: 'list<any>' }]).toString())
-      .toBe('"True"');
-    expect(ev(['Subtype', { str: 'list<any>' }, { str: 'list' }]).toString())
-      .toBe('"False"');
-    expect(ev(['Subtype', { str: 'never' }, { str: 'integer' }]).toString())
-      .toBe('"True"');
+    // The unknown relation is unchanged; bare list and list<any> agree.
+    expect(ev(['Subtype', { str: 'any' }, { str: 'unknown' }]).toString()).toBe(
+      '"False"'
+    );
+    expect(
+      ev(['Subtype', { str: 'list' }, { str: 'list<any>' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['Subtype', { str: 'list<any>' }, { str: 'list' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['Subtype', { str: 'never' }, { str: 'integer' }]).toString()
+    ).toBe('"True"');
   });
 
   test('type-value operands and mixed string/value operands', () => {
@@ -228,7 +237,11 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
     eng.declareType('pt2', 'tuple<x: integer, y: integer>');
     expect(
       eng
-        .box(['Subtype', { str: 'pt2' }, { str: 'tuple<x: integer, y: integer>' }])
+        .box([
+          'Subtype',
+          { str: 'pt2' },
+          { str: 'tuple<x: integer, y: integer>' },
+        ])
         .evaluate()
         .toString()
     ).toBe('"False"');
@@ -256,8 +269,9 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
     expect(
       isPolytype(parseType('((T) -> T where T: number) & ((string) -> string)'))
     ).toBe(true);
-    expect(isPolytype(parseType('((integer) -> integer) & ((string) -> string)')))
-      .toBe(false);
+    expect(
+      isPolytype(parseType('((integer) -> integer) & ((string) -> string)'))
+    ).toBe(false);
   });
 
   test('an overload set settles, and a generic arm in one is rejected', () => {
@@ -292,7 +306,10 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
     const eng = new ComputeEngine();
     eng.box(['Assign', 'tA', { str: 'integer' }]).evaluate();
     expect(
-      eng.box(['Subtype', 'tA', { str: 'number' }]).evaluate().toString()
+      eng
+        .box(['Subtype', 'tA', { str: 'number' }])
+        .evaluate()
+        .toString()
     ).toBe('"True"');
   });
 });
@@ -355,15 +372,22 @@ describe('compile fail-closed (plan §3.3)', () => {
 
 describe('MatchesType: the R9 decision regime (phase 2)', () => {
   test('a value form is decided BOTH ways', () => {
-    expect(ev(['MatchesType', ['List', 1, 2], { str: 'list<integer>' }]).toString())
-      .toBe('"True"');
+    expect(
+      ev(['MatchesType', ['List', 1, 2], { str: 'list<integer>' }]).toString()
+    ).toBe('"True"');
     // `["a"]`'s static type overlaps `list<integer>` (the empty list inhabits
     // both), but the VALUE is concrete, so the answer is a definitive False —
     // the asymmetry of the old Element arm must not return.
-    expect(ev(['MatchesType', ['List', { str: 'a' }], { str: 'list<integer>' }]).toString())
-      .toBe('"False"');
-    expect(ev(['MatchesType', ['List'], { str: 'list<integer>' }]).toString())
-      .toBe('"True"');
+    expect(
+      ev([
+        'MatchesType',
+        ['List', { str: 'a' }],
+        { str: 'list<integer>' },
+      ]).toString()
+    ).toBe('"False"');
+    expect(
+      ev(['MatchesType', ['List'], { str: 'list<integer>' }]).toString()
+    ).toBe('"True"');
   });
 
   test('the TYPE operand is EVALUATED, like the subject', () => {
@@ -399,8 +423,11 @@ describe('MatchesType: the R9 decision regime (phase 2)', () => {
     // matches nor provably disjoint) — only classifying `Missing` as a value
     // form makes the answer definitive.
     expect(
-      ev(['MatchesType', ['List', 'Missing'], { str: 'list<integer>' }])
-        .toString()
+      ev([
+        'MatchesType',
+        ['List', 'Missing'],
+        { str: 'list<integer>' },
+      ]).toString()
     ).toBe('"False"');
   });
 
@@ -427,8 +454,9 @@ describe('MatchesType: the R9 decision regime (phase 2)', () => {
     // `Ln(2)` is exact and stays symbolic; its type (`real`) overlaps
     // `integer` without deciding it, and the node is NOT a value form — the
     // type route cannot prove irrationality, so the test must not guess.
-    expect(ev(['MatchesType', ['Ln', 2], { str: 'integer' }]).toString())
-      .toContain('MatchesType');
+    expect(
+      ev(['MatchesType', ['Ln', 2], { str: 'integer' }]).toString()
+    ).toContain('MatchesType');
   });
 
   test('a valueless symbol is three-way on its declared type', () => {
@@ -447,22 +475,42 @@ describe('MatchesType: the R9 decision regime (phase 2)', () => {
 
   test('the subject is never unwrapped (the trio)', () => {
     expect(
-      ev(['MatchesType', ['TypeFrom', { str: 'integer' }], { str: 'number' }]).toString()
+      ev([
+        'MatchesType',
+        ['TypeFrom', { str: 'integer' }],
+        { str: 'number' },
+      ]).toString()
     ).toBe('"False"');
     expect(
-      ev(['MatchesType', ['TypeFrom', { str: 'integer' }], { str: 'type' }]).toString()
+      ev([
+        'MatchesType',
+        ['TypeFrom', { str: 'integer' }],
+        { str: 'type' },
+      ]).toString()
     ).toBe('"True"');
     expect(
-      ev(['Subtype', ['TypeFrom', { str: 'integer' }], { str: 'number' }]).toString()
+      ev([
+        'Subtype',
+        ['TypeFrom', { str: 'integer' }],
+        { str: 'number' },
+      ]).toString()
     ).toBe('"True"');
   });
 
   test('an Error subject is inspected, not propagated', () => {
     expect(
-      ev(['MatchesType', ['Divide', { str: 'a' }, 0], { str: 'error' }]).toString()
+      ev([
+        'MatchesType',
+        ['Divide', { str: 'a' }, 0],
+        { str: 'error' },
+      ]).toString()
     ).toBe('"True"');
     expect(
-      ev(['MatchesType', ['Divide', { str: 'a' }, 0], { str: '!error' }]).toString()
+      ev([
+        'MatchesType',
+        ['Divide', { str: 'a' }, 0],
+        { str: '!error' },
+      ]).toString()
     ).toBe('"False"');
   });
 
@@ -485,7 +533,8 @@ describe('MatchesType: the R9 decision regime (phase 2)', () => {
     const eng = new ComputeEngine();
     const fn = eng.box(['Function', ['Add', 'x', 1], 'x']);
     expect(
-      eng.box(['MatchesType', fn.json, { str: '(integer) -> integer' }])
+      eng
+        .box(['MatchesType', fn.json, { str: '(integer) -> integer' }])
         .evaluate()
         .toString()
     ).toContain('MatchesType');
@@ -502,8 +551,9 @@ describe('Conforms: the outcome matrix (phase 2)', () => {
     const evx = (e: any) => eng.box(e).evaluate().toString();
     expect(evx(['Conforms', ['pt', 1, 2], { str: 'Marker' }])).toBe('"True"');
     expect(evx(['Conforms', 3, { str: 'Marker' }])).toBe('"False"');
-    expect(evx(['Conforms', ['TypeFrom', { str: 'pt' }], { str: 'Marker' }]))
-      .toBe('"True"');
+    expect(
+      evx(['Conforms', ['TypeFrom', { str: 'pt' }], { str: 'Marker' }])
+    ).toBe('"True"');
     // Variadic conjunction: one missing conformance decides it.
     executeEpsil(eng, 'protocol Marker2 { }');
     expect(
@@ -540,7 +590,10 @@ describe('Conforms: the outcome matrix (phase 2)', () => {
     executeEpsil(eng, 'protocol Marker { }');
     eng.declare('vq', 'integer');
     expect(
-      eng.box(['Conforms', 'vq', { str: 'Marker' }]).evaluate().toString()
+      eng
+        .box(['Conforms', 'vq', { str: 'Marker' }])
+        .evaluate()
+        .toString()
     ).toContain('Conforms');
     expect(
       eng
@@ -588,7 +641,6 @@ describe('compile fail-closed: the phase-2 operators', () => {
   });
 });
 
-
 describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
   test('Type preserves arity errors instead of observing their type', () => {
     const missing = ce.box(['Type']).evaluate().toString();
@@ -600,8 +652,12 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     expect(extra).not.toContain('TypeFrom');
 
     // A real Error operand remains observable: only malformed arity is gated.
-    expect(ce.box(['Type', ['Error', { str: 'boom' }]]).evaluate().toString())
-      .toBe('TypeFrom("error")');
+    expect(
+      ce
+        .box(['Type', ['Error', { str: 'boom' }]])
+        .evaluate()
+        .toString()
+    ).toBe('TypeFrom("error")');
   });
 
   test('the arity report wins over an Error the operand carries itself', () => {
@@ -621,11 +677,17 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
   test('a Sequence operand is counted by its effective arity', () => {
     // A `Sequence` contributes its operands to the argument list, so a
     // single `Sequence` operand can still be a malformed call.
-    const two = ce.box(['Type', ['Sequence', 1, 2]]).evaluate().toString();
+    const two = ce
+      .box(['Type', ['Sequence', 1, 2]])
+      .evaluate()
+      .toString();
     expect(two).toContain('unexpected-argument');
     expect(two).not.toContain('TypeFrom');
 
-    const none = ce.box(['Type', ['Sequence']]).evaluate().toString();
+    const none = ce
+      .box(['Type', ['Sequence']])
+      .evaluate()
+      .toString();
     expect(none).toContain('missing');
     expect(none).not.toContain('TypeFrom');
 
@@ -646,7 +708,10 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     ).toBe('"real"');
     expect(
       ce
-        .box(['TypeFrom', ['StringFrom', ['TypeFrom', { str: 'list<integer>' }]]])
+        .box([
+          'TypeFrom',
+          ['StringFrom', ['TypeFrom', { str: 'list<integer>' }]],
+        ])
         .evaluate()
         .isSame(ev(['TypeFrom', { str: 'list<integer>' }]))
     ).toBe(true);
@@ -663,9 +728,9 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     // `StringFrom` itself has no JS lowering (pre-existing — nothing to do
     // with type values), so the through-the-value spelling also fails
     // closed, with the ordinary no-entry rejection rather than the gate's.
-    expect(() =>
-      target.compile(ce.box(['StringFrom', ['Type', 3]]))
-    ).toThrow(/could not compile/i);
+    expect(() => target.compile(ce.box(['StringFrom', ['Type', 3]]))).toThrow(
+      /could not compile/i
+    );
   });
 });
 

@@ -2769,12 +2769,8 @@ export function isCollectionShaped(x: Expression): boolean {
  * Is this type a TUPLE, structurally — the bare `tuple` primitive or any
  * composite tuple, regardless of its slot types?
  *
- * Shape exclusions must use this rather than `matches('tuple')`: since the
- * bare-synonym ruling (2026-08-17) bare `tuple` is values-only, so an
- * absence-slotted tuple (`tuple<integer, missing>`) does NOT match it — and
- * there is no `tuple<any>` family-top spelling (a `tuple<any>` is a 1-tuple
- * whose slot is `any`). A gate that means "tuples are atomic, never mapped
- * over" must therefore recognize the KIND, not the values-only subtype.
+ * This checks tuple kind directly, including transparent aliases. Bare
+ * `tuple` admits every arity and slot type; `tuple<any>` is a one-slot tuple.
  */
 export function isTupleShapedType(t: Type): boolean {
   // A transparent alias of a tuple IS a tuple (see

@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- Bare `list`, `set`, `dictionary`, `collection`, and `indexed_collection`
+  now admit arbitrary contents, matching their `<any>` forms. Bare `tuple`
+  accepts every arity and slot type, including absent coordinates; `tuple<any>`
+  still has one slot. Bare `record` covers records with absent fields.
+  Explicit element constraints remain restrictive, and explicit `<unknown>`
+  no longer collapses to the broader bare name. Numeric vector/matrix defaults
+  are unchanged. Compiled omission-sensitive operations require evidence that
+  raw Nothing positions cannot occur; use an explicit content constraint when
+  the broader bare family no longer provides that evidence.
+
 - Raw `Tabulate` / `Table`, `Scan`, and `Iterate` results retain possible
   `Nothing` in their element types. A two-dimensional tabulation returns lazy
   rows: accessing a row or its count does not evaluate its cells or erase

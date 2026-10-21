@@ -36,18 +36,18 @@ describe('ZIP ELEMENT TYPE', () => {
     ).toBe('boolean | missing');
   });
 
-  test('a declared bare `list` source gives an `unknown` component', () => {
+  test('a declared bare `list` source gives an `any` component', () => {
     expect(ce.box(['Zip', 'ys', ['Range', 1, 3]]).type.toString()).toBe(
-      'list<tuple<unknown, integer>>'
+      'list<tuple<any, integer>>'
     );
     expect(ce.box(['Zip', 'ys', 'xs']).type.toString()).toBe(
-      'list<tuple<unknown, boolean>>'
+      'list<tuple<any, boolean>>'
     );
     expect(
       ce
         .box(['At', ['At', ['Zip', 'ys', ['Range', 1, 3]], 1], 1])
         .type.toString()
-    ).toBe('unknown');
+    ).toBe('any');
     expect(
       ce
         .box(['At', ['At', ['Zip', 'ys', ['Range', 1, 3]], 1], 2])
@@ -114,8 +114,8 @@ describe('REPEAT ELEMENT TYPE', () => {
   });
 
   test('a value of unknown type gives the bare `list`', () => {
-    expect(ce.box(['Repeat', 'u']).type.toString()).toBe('list');
-    expect(ce.box(['Repeat', 'u', 3]).type.toString()).toBe('list');
+    expect(ce.box(['Repeat', 'u']).type.toString()).toBe('list<unknown>');
+    expect(ce.box(['Repeat', 'u', 3]).type.toString()).toBe('list<unknown>');
   });
 
   test('the infinite form has the same element type', () => {

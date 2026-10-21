@@ -207,7 +207,7 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
     expect(ce.type('R').matches('integer')).toBe(false);
     // An absence marker in the body, at the top level or in a cell, is seen.
     expect(ce.type('J').matches('unknown')).toBe(false);
-    expect(ce.type('M').matches('list')).toBe(false);
+    expect(ce.type('M').matches('list')).toBe(true);
     expect(ce.type('M').matches('list<any>')).toBe(true);
   });
 

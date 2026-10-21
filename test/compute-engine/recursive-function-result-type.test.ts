@@ -72,7 +72,7 @@ describe('a list-building self-recursion is typed list<T> (Tycho row 338)', () =
 
   test('a set-building base clause refutes the hypothesis', () => {
     const ce = declareAndAssign(recursion('Join', 'Set'));
-    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set');
+    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set<any>');
     expect(ce.box(['F', 0, 3]).evaluate().toString()).toBe('Set(0, 1, 2)');
   });
 
@@ -168,7 +168,7 @@ describe('mutual recursion is not covered by the hypothesis (pinned)', () => {
 
   test('a set base clause derives set', () => {
     const ce = mutual('Set');
-    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set');
-    expect(ce.box('G').type.toString()).toBe('(unknown, unknown) -> set');
+    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set<any>');
+    expect(ce.box('G').type.toString()).toBe('(unknown, unknown) -> set<any>');
   });
 });

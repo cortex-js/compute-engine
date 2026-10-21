@@ -44,7 +44,10 @@ const LN_ERROR = 'incompatible-type number string';
 /** Assign to `name` a function literal with one parameter `a: <type>` and
  * the body `a`. */
 function defineIdentity(name: string, type: string): void {
-  ce.assign(name, ce.box(['Function', ['Block', 'a'], ['Typed', 'a', `'${type}'`]]));
+  ce.assign(
+    name,
+    ce.box(['Function', ['Block', 'a'], ['Typed', 'a', `'${type}'`]])
+  );
 }
 
 describe('AN ERROR ARGUMENT PASSES THROUGH A TYPED PARAMETER', () => {
@@ -78,7 +81,10 @@ describe('AN ERROR ARGUMENT PASSES THROUGH A TYPED PARAMETER', () => {
   }
 
   test('the body does not read the parameter: the call is still the error of the argument', () => {
-    ce.assign('op', ce.box(['Function', ['Block', 5], ['Typed', 'a', "'list'"]]));
+    ce.assign(
+      'op',
+      ce.box(['Function', ['Block', 5], ['Typed', 'a', "'list'"]])
+    );
     const v = ce.box(['op', 'w']).evaluate();
     expect(errorCode(v)).toBe(LN_ERROR);
   });
@@ -593,7 +599,7 @@ describe('AN ERROR ARGUMENT AT THE CALLBACK PARAMETER OF A COLLECTION OPERATOR',
       'list<unknown^2>'
     );
     expect(ce.box(['Map', 'fd', ['Range', 1, 3]]).type.toString()).toBe(
-      'list'
+      'list<nothing | unknown>'
     );
   });
 
@@ -689,7 +695,9 @@ describe('A SYMBOL HOLDING AN ERROR AT A PARAMETER THAT IS NOT A CALLBACK OF A C
 describe('A SYMBOL DECLARED `error` WITH NO VALUE AT AN OVERLOADED FUNCTION WITH A GENERIC ARM', () => {
   test('the verdict is the verdict of the same overload with ground arms', () => {
     ce.declare('e', 'error');
-    ce.declare('ovg', { type: '((string) -> string) & ((T) -> T where T: number)' });
+    ce.declare('ovg', {
+      type: '((string) -> string) & ((T) -> T where T: number)',
+    });
     ce.declare('ov', { type: '((string) -> string) & ((number) -> number)' });
     expect(ce.box(['ov', 'e']).isValid).toBe(true);
     const call = ce.box(['ovg', 'e']);

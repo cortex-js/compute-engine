@@ -594,10 +594,8 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
     if (an && bn) return meetNumericRanges(an, bn);
   }
 
-  // A bare collection name is read as its `<unknown>` form by the two rules
-  // below: `list<any^3> & list` is `list<unknown^3>`, not `never` (`any` is
-  // not a subtype of `unknown`, so the subtype tests above do not decide
-  // this pair).
+  // A bare collection name is unrestricted. Read its `<any>` form when
+  // the structural meet rules below need an explicit element contract.
   const nodeA = bareCollectionAsNode(a);
   const nodeB = bareCollectionAsNode(b);
 
@@ -1284,7 +1282,7 @@ function rowsCanHoldCellsUncached(
     holdsThrough(e) ||
     (fixedRows && elementMatches({ kind: 'list', elements: e }));
   // A named type holds a non-empty list of any cells when it is a top type
-  // or a bare collection name (the `<unknown>` form).
+  // or a bare collection name (the unrestricted `<any>` form).
   if (typeof rows !== 'object')
     return (
       rows === 'any' ||
@@ -1526,14 +1524,14 @@ function meetShapedLists(a: ListType, b: ListType): Type | 'keep' {
 }
 
 /** A bare `list`, `indexed_collection`, `collection` or `set` as its
- * `<unknown>` form (`list<unknown>`), which it means; any other type
+ * `<any>` form (`list<any>`), which it means; any other type
  * unchanged. */
 function bareCollectionAsNode(t: Type): Type {
   return t === 'list' ||
     t === 'indexed_collection' ||
     t === 'collection' ||
     t === 'set'
-    ? ({ kind: t, elements: 'unknown' } as Type)
+    ? ({ kind: t, elements: 'any' } as Type)
     : t;
 }
 
@@ -1542,7 +1540,7 @@ function bareCollectionAsNode(t: Type): Type {
  * and one kind is inside the other, and `undefined` otherwise. A list and a
  * tuple are indexed collections, an indexed collection and a set are
  * collections. A bare `list`, `indexed_collection` or `collection` is read
- * as its `<unknown>` form.
+ * as its `<any>` form.
  */
 function collectionKindPair(
   a: Type,
@@ -2109,12 +2107,7 @@ function reduceCollectionType(
   // A collection of `nothing` is an empty collection
   if (reducedType === 'nothing') return decorate({ kind, elements: 'nothing' });
 
-  // The bare constructor is the canonical spelling of the `<unknown>` form
-  // (user ruling 2026-08-17: bare `collection` IS `collection<unknown>`). An
-  // explicit `<any>` is the strictly wider, absence-admitting contract and
-  // survives — collapsing it here (as this function once did) would silently
-  // narrow it to the values-only bare reading.
-  if (reducedType === 'unknown') return kind;
+  // Preserve explicit contents; bare names have unrestricted contents.
 
   return decorate({
     ...type,
@@ -2140,10 +2133,7 @@ function reduceListType(type: ListType): Type {
   const dimensions = type.dimensions;
   const dimensionVariables = type.dimensionVariables;
 
-  // Bare `list` is the canonical spelling of `list<unknown>` (user ruling
-  // 2026-08-17) — but only when no dimensions constrain the rank, which the
-  // bare form cannot express.
-  if (reducedType === 'unknown' && dimensions === undefined) return 'list';
+  // Preserve explicit contents; bare names have unrestricted contents.
 
   const reduced: ListType = {
     ...type,
@@ -2164,9 +2154,7 @@ function reduceSetType(type: SetType): Type {
   if (reducedType === 'nothing')
     return decorate({ kind: 'set', elements: 'nothing' });
 
-  // Bare `set` is the canonical spelling of `set<unknown>` (user ruling
-  // 2026-08-17); an explicit `<any>` is wider and survives.
-  if (reducedType === 'unknown') return 'set';
+  // Preserve explicit contents; bare names have unrestricted contents.
 
   return decorate({
     ...type,
@@ -2276,15 +2264,7 @@ function reduceDictionaryType(type: DictionaryType): Type {
   if (reducedValues === 'nothing')
     return decorate({ kind: 'dictionary', values: 'nothing' });
 
-  // Bare `dictionary` is the canonical spelling of `dictionary<unknown>`
-  // (user ruling 2026-08-17). Collapsing to the bare NAME is safe where the
-  // historical collapse to the top type `any` was not: that one made a
-  // `dictionary<unknown>` accept — and be accepted by — every other type,
-  // and poisoned any union containing one (`number | dictionary<unknown>`
-  // reduced to `any`, after which `string` was a subtype of it). An explicit
-  // `<any>` value type is the wider, absence-admitting contract and is
-  // preserved exactly as `list<any>` and `set<any>` preserve theirs.
-  if (reducedValues === 'unknown') return 'dictionary';
+  // Preserve explicit contents; bare names have unrestricted contents.
 
   return decorate({ kind: 'dictionary', values: reducedValues });
 }

@@ -22,18 +22,16 @@ Two conventions follow from that, both worth keeping:
   bullet needs it to make sense; say so in the surviving bullet rather than
   relying on the reader to look upward, since the landed one will go.
 
-## Collection family types: bounded completion scope
+## Collection and absence follow-ups
 
-Implement the Option B rules in
-`docs/plans/2026-10-20-bare-tuple-record-any.md`: bare collection names constrain
-kind without restricting contents; explicit element contracts remain restrictive;
-`tuple<any>` still means exactly one slot; retain numeric vector/matrix defaults.
-Complete the compatibility migration and validation before closing this task.
-
-The following work is deferred, rather than a prerequisite for Option B:
+Option B's bare-family rules are implemented. The broader absence proposal is
+separate; the following items do not block the original tuple/record task:
 
 - Migrate `unknown` to an inference marker, including declaration intent,
-  subtype API behavior and generic-default migration (plan Q2/Q7/Q8).
+  subtype API behavior and generic-default migration (plan Q2/Q7/Q8). Unbound
+  generic variables also still display as explicit `<unknown>` in diagnostics;
+  choose their display contract alongside that migration rather than silently
+  changing diagnostic-only substitution to `any` here.
 - Choose presence-assertion syntax and the default diagnostic/assignment
   policy for possible absence (Q1/Q3).
 - Decide record-field omission, optional-field representation and an explicit
@@ -45,10 +43,39 @@ The following work is deferred, rather than a prerequisite for Option B:
   declaration hoisting across the sequential runner, whole-block interpreter
   and compiler. Preserve earlier bindings, declared signatures and constructors.
 - Add a distinct compiled representation of Nothing. Keep sound compiler
-  refusals where omission cannot currently be represented.
+  refusals where omission cannot currently be represented. Audit iterator
+  domains too: `Sum(f(x), Element(x, xs))` does not inspect `xs` for raw Nothing
+  positions in its current omission check. This gap also predates Option B;
+  the clause itself is binding syntax, not a collection operand.
 
-Independent defects found while validating this change should be recorded here
-with reproductions; they do not reopen the broader design in this task.
+- The existing open-record relation still constrains only listed fields when
+  comparing `record{a: integer}` with `dictionary<integer>`, although width
+  subtyping permits additional fields with other value types. Enumeration also
+  reports only listed-field types. Correct this together with exact literal
+  dictionary validation; changing the relation alone rejects valid dictionary
+  literals and assignments. This independent pre-existing gap is deferred.
+
+- `Scan([Missing, Missing], Add)` retains its initial Missing entry but
+  reports a numeric vector type. The list control reproduces this before and
+  after Option B; the newly admitted all-absent tuple route exposes the same
+  gap. Include the uncombined seed in result typing in a separate absence fix.
+- An assigned inferred callback can understate broadcast results at an opaque
+  tuple source: define `g = x -> x + 10`, declare `t: tuple`, form `Map(g,t)`,
+  then assign `t = ([1,2],3)`. The value is `[[11,12],13]`, but baseline typing
+  is `list<number>` and Option B typing is `list<nothing | number>`. A numeric
+  scalar-slot control works. Callback result derivation must preserve the
+  possible nested broadcast result; this pre-existing gap is deferred rather
+  than reopening callable inference in the bare-family migration.
+
+- Finish the mechanical audit of legacy comments that still describe bare
+  families as values-only `<unknown>` synonyms. The central type guide, error
+  model, review checklist and type helpers are corrected. Remaining sites:
+  `library/collections.ts`, `library/sets.ts`, `library/linear-algebra.ts`,
+  `library/control-structures.ts`, `library/core.ts` (About),
+  `collection-utils.ts`, `boxed-expression/utils.ts`,
+  `boxed-expression/broadcast-lift-type.ts`, `compilation/javascript-target.ts`,
+  `serialize.ts` and `types-definitions.ts`. Verify the local mechanism before
+  replacing wording; do not change inference behavior as a comment cleanup.
 
 ## Current state
 

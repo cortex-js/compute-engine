@@ -3326,23 +3326,14 @@ export function validateArguments(
     });
   }
 
-  // §8 DISPLAY ONLY. A variable that got no call-site bound and carries no
-  // declared bound falls to S3's `unknown`, so the instantiated parameter
-  // reads `indexed_collection<unknown>` in an `incompatible-type` message — an
-  // impossible-looking requirement for what is really "any indexed
-  // collection". The message shows such a variable at its GROUND SKELETON
-  // (`any`, which `reduceType` normalizes back to the bare constructor,
-  // restoring the ground signature's wording). Nothing that TYPES the call
-  // uses these: `params`/`optParams`/`varParam` keep the solved bindings.
+  // §8 DISPLAY ONLY. Retain the solver's current `unknown` default for
+  // unbound variables. Explicit content arguments no longer collapse to bare
+  // family names; presentation follows the deferred generic-default migration
+  // in ROADMAP.md. These bindings never type the call itself.
   const displayBindings =
     solved && solved.unbound.size > 0
       ? {
           ...solved.bindings,
-          // An unbound variable DISPLAYS as `unknown`, the identity bound
-          // (bare-synonym ruling 2026-08-17): `reduceType` below then
-          // collapses `indexed_collection<unknown>` to the bare name, so an
-          // error message says "expected indexed_collection" rather than
-          // leaking the wider `indexed_collection<any>`.
           ...Object.fromEntries(
             [...solved.unbound].map((v) => [v, 'unknown' as Type])
           ),

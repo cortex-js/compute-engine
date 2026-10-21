@@ -62,6 +62,33 @@ from the current relation remain open. See the
 [collection and inference design note](plans/2026-10-20-bare-tuple-record-any.md).
 Code must not assume the implemented subtype rules have already changed.
 
+## Collection family contracts
+
+A bare collection name constrains kind, not contents. `list`, `set`,
+`dictionary`, `collection` and `indexed_collection` accept exactly the same
+values as their explicit `<any>` forms. Bare `tuple` accepts every tuple,
+regardless of arity or slot types; `tuple<any>` has exactly one slot. Bare
+`record` accepts every record. This does not make a missing whole collection
+an instance of that family.
+
+Use `list<integer>` for integer elements, `list<expression>` to exclude
+immediate `missing`, `nothing` and `error`, or `list<value>` to exclude
+immediate functions and symbols as well. These restrictions are immediate:
+a nested collection is itself a value. Numeric `NaN` and `Indeterminate`
+remain numeric outcomes, even where named absence markers are excluded.
+
+Explicit element arguments remain explicit through parsing, reduction and
+serialization. In particular, `<unknown>` no longer collapses into a bare
+family name. Its implemented subtype and generic-default behavior is unchanged;
+the agreed migration to an inference marker is separate work. The numeric
+defaults and rank constraints of vector, matrix and tensor spellings remain.
+
+Compiler shape checks cannot use a bare kind as proof that its elements
+exclude Nothing. A raw lazy collection can retain omitted positions. Until
+compiled targets have a distinct omission representation, operations that
+need that distinction require an explicit omission-free content contract,
+a structural proof, or a compilation refusal.
+
 ## Number literal types
 
 The public `.type` of a number literal is its literal type: the most precise

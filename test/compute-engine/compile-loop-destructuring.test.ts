@@ -134,7 +134,7 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
     // Unknown element type.
     expect(() =>
       js(epsil('let s = 0\nfor (i, j) in xs { s = s + i }\ns'))
-    ).toThrow(/type `unknown`, not a tuple/);
+    ).toThrow(/type `any`, not a tuple/);
     // A nested pattern over a component that is not itself a tuple.
     expect(() =>
       js(epsil('let s = 0\nfor ((a, b), c) in [(1, 2)] { s = s + a }\ns'))
