@@ -375,19 +375,14 @@ int(sin(x) dx) + 1 == 2
 `;
 
 exports[`INDEFINITE INTEGRAL No index 1`] = `
-\\int\\!0+\\sin(x)+1=2
-int(0) + sin(x) + 1 == 2
+\\int\\!\\sin(x)+1=2
+int(sin(x) + 1 dx) == 2
 [
   "Equal",
   [
-    "Add",
-    [
-      "Integrate",
-      ["Function", 0],
-      ["Limits", "Nothing", "Nothing", "Nothing"]
-    ],
-    ["Sin", "x"],
-    1
+    "Integrate",
+    ["Function", ["Add", ["Sin", "x"], 1], "x"],
+    ["Limits", "Nothing", "Nothing", "Nothing"]
   ],
   2
 ]

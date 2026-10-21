@@ -102,9 +102,12 @@ describe('INDEFINITE INTEGRATION', () => {
       `-x + x * ln(x)`
     ));
 
+  // `h` and `g` are never assigned in this file: the shared engine assigns
+  // `f := x ↦ x³` in an earlier test, and since a declared function is
+  // inlined, an integral of `f(x)` is computed, not kept symbolic.
   test('sum', () =>
-    expect(evaluate('\\int f(x) + g(x) dx')).toMatchInlineSnapshot(
-      `int(g(x) dx) + int(f(x) dx)`
+    expect(evaluate('\\int h(x) + g(x) dx')).toMatchInlineSnapshot(
+      `int(h(x) dx) + int(g(x) dx)`
     ));
 
   test('product', () =>
@@ -113,8 +116,8 @@ describe('INDEFINITE INTEGRATION', () => {
     ));
 
   test('product with constants', () =>
-    expect(evaluate('\\int 2\\pi f(x) dx')).toMatchInlineSnapshot(
-      `2pi * int(f(x) dx)`
+    expect(evaluate('\\int 2\\pi h(x) dx')).toMatchInlineSnapshot(
+      `2pi * int(h(x) dx)`
     ));
 
   // Additional edge cases
@@ -1093,8 +1096,10 @@ describe('DEFINITE INTEGRATION', () => {
       `-1/2 * a^2 + 1/2 * b^2`
     ));
 
+  // `h` is never assigned in this file (`f` is, in an earlier test, and a
+  // declared function is inlined, so its integral would be computed).
   test('unknown integrand with symbolic bounds stays symbolic', () =>
-    expect(engine.parse('\\int_a^b f(x)\\mathrm{d}x').evaluate().json)
+    expect(engine.parse('\\int_a^b h(x)\\mathrm{d}x').evaluate().json)
       .toMatchInlineSnapshot(`
       [
         Integrate,
@@ -1103,7 +1108,7 @@ describe('DEFINITE INTEGRATION', () => {
           [
             Block,
             [
-              f,
+              h,
               x,
             ],
           ],
@@ -3145,15 +3150,20 @@ describe('INTEGRATE: a user function with the name of a library function', () =>
     expect(integral.N().re).toBeCloseTo(1.5, 12);
   });
 
-  // The body reads a free `x`. The integral binds `x`, so the body cannot
-  // replace the call of `Sin(x)` in an integral over `x`.
-  test('a body with a free symbol named like the variable stays unevaluated', () => {
+  // The body reads a free `x`, the global. The integral binds its own `x`,
+  // and the body's `x` keeps its own binding (a defined value keeps the
+  // binding it was written against, user decision 2026-09-21): the integral
+  // renames its variable before it inlines the body, so the result is the
+  // same as for the variable `y`. Before 2026-10-20 this shape was declined
+  // (left as `Integrate`) to avoid the capture.
+  test('a body with a free symbol named like the variable keeps the global', () => {
     const ce = shadowing(['Sin'], 't \\mapsto t+x');
     expect(
       ce
         .expr(['Integrate', ['Sin', 'x'], ['Limits', 'x', 0, 1]])
-        .evaluate().operator
-    ).toBe('Integrate');
+        .evaluate()
+        .toString()
+    ).toBe('x + 1/2');
     expect(
       ce
         .expr(['Integrate', ['Sin', 'y'], ['Limits', 'y', 0, 1]])

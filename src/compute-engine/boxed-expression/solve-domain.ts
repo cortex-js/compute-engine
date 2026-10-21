@@ -17,6 +17,7 @@ import type {
 import { isFunction, isNumber, sym } from './type-guards.js';
 import {
   defaultUnknown,
+  namesReadByCalledFunctions,
   reduceTransformerHead,
   resolveBoundSymbols,
   reduceStructuralIndex,
@@ -583,6 +584,31 @@ export function evaluateSolve(
   let specs = parseSolveSpecs(ops.slice(1));
   if (specs === undefined) return undefined; // invalid spec → stay inert
 
+  // A user function called in the equation reads a symbol with the name of
+  // an unknown: `Solve(g(k) = 1, k)` with `g := a ↦ a − k`. The reduction
+  // below inlines the body of `g`, and the solver then selects the unknown
+  // by its name, so the symbol of the body became the unknown: the equation
+  // was `k − k = 1`, and the answer `[]` stated that there is no solution.
+  // An unknown never reads a symbol inside a called function
+  // (`docs/SCOPING-MODEL.md`, decision of 2026-09-21), and the unknown is not
+  // renamed here, so the equation stays unsolved. The unknowns are those of
+  // the specs and those of the `Element` items of a bundled first operand
+  // (`Solve(\{g(k) = 1, k ∈ 1..3\})`), which are lifted into the specs only
+  // after the reduction.
+  //
+  // The test is deliberately conservative: it also declines for a call that
+  // the reduction would not inline (a body of several statements, an arity
+  // mismatch, a recursive function), and `namesReadByCalledFunctions()`
+  // counts a name that a `Block` or a `Sum` of the body binds as read. A
+  // rename of the unknown, as `Integrate` and `Limit` do, would solve these
+  // equations: it is recorded in ROADMAP.md (Tycho ledger rows 407 to 413,
+  // the item for row 412).
+  const unknownNames = solveUnknownNames(eq, specs);
+  if (unknownNames.size > 0) {
+    const read = namesReadByCalledFunctions(eq.canonical);
+    if ([...unknownNames].some((name) => read.has(name))) return undefined;
+  }
+
   // Reduce transformer heads (`Solve(Simplify(eq), x)`) before solving. A
   // nested transformer resolves the value-bound symbols in its operand, which
   // would substitute an unknown that also carries a global value (`x := 5`),
@@ -1063,15 +1089,28 @@ function reduceWithUnknownsShielded(
   eq: Expression,
   specs: ReadonlyArray<SolveSpec>
 ): Expression {
+  const names = solveUnknownNames(eq, specs);
+  return withValueShield(ce, names, () => reduceTransformerHead(eq.canonical));
+}
+
+/**
+ * The names of the unknowns of a `Solve`: those of `specs`, and those of the
+ * `Element` items of a bundled first operand.
+ */
+function solveUnknownNames(
+  eq: Expression,
+  specs: ReadonlyArray<SolveSpec>
+): Set<string> {
   const names = new Set(specs.map((spec) => spec.unknown));
 
   // §D: an arity-1 bundled solve carries its unknowns inside a collection-shaped
   // first argument as `Element(symbol, …)` items — visible on the canonical
   // equation here, but not yet lifted into `specs` (that happens later, AFTER
-  // this reduction). Discover them now so a value-bound bundled unknown is
-  // shielded too. Without this, `Solve(\{Simplify(9 - w²) = 8, w ∈ -3..3\})`
-  // with `w := 9` reduced `Simplify(9 - w²)` to `-72` before learning `w` was
-  // the solve target, and returned `[]`.
+  // the reduction of `reduceWithUnknownsShielded()`). Discover them now so a
+  // value-bound bundled unknown is shielded too. Without this,
+  // `Solve(\{Simplify(9 - w²) = 8, w ∈ -3..3\})` with `w := 9` reduced
+  // `Simplify(9 - w²)` to `-72` before learning `w` was the solve target, and
+  // returned `[]`.
   const canonEq = eq.canonical;
   if (
     isFunction(canonEq, 'Set') ||
@@ -1086,8 +1125,7 @@ function reduceWithUnknownsShielded(
       }
     }
   }
-
-  return withValueShield(ce, names, () => reduceTransformerHead(eq.canonical));
+  return names;
 }
 
 function isExpression(x: unknown): x is Expression {

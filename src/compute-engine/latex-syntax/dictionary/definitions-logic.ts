@@ -1166,6 +1166,24 @@ export function parseQuantifier(
         p.peek === '\\colon' ||
         (terminator?.condition?.(p) ?? false),
     };
+    // A quantified variable spelled as a subscript on an indexed collection
+    // (`n_{0}` when `n` is a list, read as `At(n, 0)`) is the new name
+    // `n_0`, in the condition (`\forall n_{0} \in S`) and in the body.
+    const bindQuantified = (
+      condition: MathJsonExpression,
+      body: MathJsonExpression
+    ): MathJsonExpression => {
+      const names = new Set<string>();
+      for (const e of [condition, operand(condition, 1)]) {
+        const name = parser._binderSymbol?.(e);
+        if (name) names.add(name);
+      }
+      return [
+        kind,
+        parser._rebindSubscripts?.(condition, names) ?? condition,
+        parser._rebindSubscripts?.(body, names) ?? body,
+      ] as MathJsonExpression;
+    };
     // 2a. `<condition> ( <body> )` with no separator, e.g.
     // `\forall x > 0 (x^2 > 0)`. Parsing the condition greedily would absorb
     // the group as an implicit product, so first try with the group as a
@@ -1206,11 +1224,7 @@ export function parseQuantifier(
           (parser.atTerminator(terminator) ||
             tightBindingCondition(parser, terminator))
         )
-          return [
-            kind,
-            groupCondition,
-            missingIfEmpty(groupBody),
-          ] as MathJsonExpression;
+          return bindQuantified(groupCondition, missingIfEmpty(groupBody));
       }
       // No split here: retry past this candidate. Stop when the attempt made
       // no progress (no further `(` to try).
@@ -1241,7 +1255,7 @@ export function parseQuantifier(
       parser.enterQuantifierScope();
       const body = parser.parseExpression(bodyTerminator);
       parser.exitQuantifierScope();
-      return [kind, condition, missingIfEmpty(body)] as MathJsonExpression;
+      return bindQuantified(condition, missingIfEmpty(body));
     }
     if (parser.match('(')) {
       // Parenthesized body - parse normally within the parens
@@ -1250,7 +1264,7 @@ export function parseQuantifier(
       const body = parser.parseExpression(terminator);
       parser.exitQuantifierScope();
       if (!parser.match(')')) return null;
-      return [kind, condition, missingIfEmpty(body)] as MathJsonExpression;
+      return bindQuantified(condition, missingIfEmpty(body));
     }
 
     // No body separator or parenthesis followed. A standalone quantified
@@ -1261,8 +1275,7 @@ export function parseQuantifier(
     // bare `\forall x`, with no condition and no body, remains incomplete and
     // still errors, as before. This path previously returned an Error, so no
     // valid parse changes meaning.
-    if (operator(condition) !== '')
-      return [kind, condition, 'True'] as MathJsonExpression;
+    if (operator(condition) !== '') return bindQuantified(condition, 'True');
 
     return null;
   };

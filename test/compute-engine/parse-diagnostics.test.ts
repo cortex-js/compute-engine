@@ -227,6 +227,18 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(undeclaredNames('\\int_a^b x \\, dx').sort()).toEqual(['a', 'b']);
   });
 
+  test('integral differential inside a term of a sum is bound in the integrand only', () => {
+    // `dx` is in the first term, so `+ 1` and `+ x` are added to the
+    // integral. The `x` of the integrand is bound; the `x` of the term after
+    // it is free and fires. (`d` fires for every differential inside a
+    // fraction, `\int\frac{dx}{x}` too.)
+    const bound = (latex: string) =>
+      undeclaredNames(latex).filter((name) => name !== 'd');
+    expect(bound('\\int\\frac{dx}{x}+1')).toEqual([]);
+    expect(bound('\\int\\frac{dx}{x}+x')).toEqual(['x']);
+    expect(bound('\\int x - \\frac{x\\,dx}{2} - x')).toEqual(['x']);
+  });
+
   test('mapsto parameter is bound in both operands', () => {
     expect(undeclaredNames('x \\mapsto x^2')).toEqual([]);
     expect(undeclaredNames('(x, y) \\mapsto x + y')).toEqual([]);

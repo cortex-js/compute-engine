@@ -250,3 +250,186 @@ describe('a free symbol of the body that is not the variable', () => {
     );
   });
 });
+
+// The derivative of a `Sum` is the sum of the derivatives of its terms. The
+// derivative of a term that calls a user function is the derivative of the
+// body of that function, and that body can read a global symbol with the
+// name of the index: with `k := 2` and `g := a ↦ a·k·x`,
+// `Σ_{k=1}^{5} g(k)` is `Σ 2kx = 30x`. The derivative in `x` was
+// `Σ k² = 55`, because the sum of the derivatives `k·k` read the global `k`
+// as the index. The index is now renamed when this occurs (Tycho ledger row
+// 412).
+describe('a sum index with the name of a symbol that a called function reads', () => {
+  function sliderEngine(
+    valued: boolean,
+    declareFunction = true
+  ): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('k', 'real');
+    if (valued) ce.assign('k', 2);
+    ce.declare('x', 'real');
+    ce.declare('n', 'integer');
+    if (declareFunction) ce.declare('g', 'function');
+    ce.assign('g', ce.parse('a\\mapsto akx'));
+    return ce;
+  }
+
+  function at(
+    ce: ComputeEngine,
+    latex: string,
+    values: Record<string, number>
+  ): number {
+    return ce.parse(latex).evaluate().subs(values).N().re;
+  }
+
+  describe.each([
+    ['g declared as a function', true],
+    ['g assigned only', false],
+  ])('%s', (_, declareFunction) => {
+    test('the sum itself reads the slider k', () => {
+      const ce = sliderEngine(true, declareFunction);
+      expect(at(ce, '\\sum_{k=1}^{5}g(k)', { x: 0.3 })).toBeCloseTo(9, 12);
+    });
+
+    test('its derivative in x, k := 2', () => {
+      const ce = sliderEngine(true, declareFunction);
+      expect(
+        ce.parse('\\frac{d}{dx}\\sum_{k=1}^{5}g(k)').evaluate().toString()
+      ).toBe('30');
+    });
+
+    test('the control: the same sum with the index j', () => {
+      const ce = sliderEngine(true, declareFunction);
+      expect(
+        ce.parse('\\frac{d}{dx}\\sum_{j=1}^{5}g(j)').evaluate().toString()
+      ).toBe('30');
+    });
+
+    test('its derivative in x, k with no value, then k = 2', () => {
+      const ce = sliderEngine(false, declareFunction);
+      const latex = '\\frac{d}{dx}\\sum_{k=1}^{5}g(k)';
+      expect(ce.parse(latex).evaluate().toString()).toBe('15k');
+      expect(at(ce, latex, { k: 2, x: 0.3 })).toBeCloseTo(30, 12);
+      expect(
+        ce.parse('\\frac{d}{dx}\\sum_{j=1}^{5}g(j)').evaluate().toString()
+      ).toBe('15k');
+    });
+
+    test('a product, k := 2 and k with no value', () => {
+      // ∏_{k=1}^{3} 2kx = 48x³, and ∏_{k=1}^{3} k·k·x with k free in the
+      // body of g is 6k³x³.
+      for (const index of ['k', 'j']) {
+        const latex = `\\frac{d}{dx}\\prod_{${index}=1}^{3}g(${index})`;
+        expect(
+          sliderEngine(true, declareFunction).parse(latex).evaluate().toString()
+        ).toBe('144x^2');
+        expect(
+          at(sliderEngine(false, declareFunction), latex, { k: 2, x: 0.3 })
+        ).toBeCloseTo(144 * 0.09, 12);
+      }
+    });
+  });
+
+  test('the index next to the call, and nested sums', () => {
+    const ce = sliderEngine(true);
+    // Σ_{k=1}^{5} k·2kx = 110x
+    expect(
+      ce.parse('\\frac{d}{dx}\\sum_{k=1}^{5}k\\,g(k)').evaluate().toString()
+    ).toBe('110');
+    // Σ_{k=1}^{3} Σ_{j=1}^{k} 2jx = 20x
+    expect(
+      ce
+        .parse('\\frac{d}{dx}\\sum_{k=1}^{3}\\sum_{j=1}^{k}g(j)')
+        .evaluate()
+        .toString()
+    ).toBe('20');
+    // Σ_{k=1}^{3} k·Σ_{m=1}^{k} 2mx = 50x
+    expect(
+      ce
+        .parse('\\frac{d}{dx}\\sum_{k=1}^{3}k\\sum_{m=1}^{k}g(m)')
+        .evaluate()
+        .toString()
+    ).toBe('50');
+    // A set of values: Σ_{k ∈ {1, 2, 3}} 2kx = 12x
+    expect(
+      ce
+        .box([
+          'D',
+          ['Sum', ['g', 'k'], ['Element', 'k', ['List', 1, 2, 3]]],
+          'x',
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('12');
+  });
+
+  // The renamed inner sum keeps the binding of each other symbol: an
+  // occurrence of the index of the enclosing sum stays bound to it. When the
+  // inner sum was boxed again from MathJSON, that occurrence became a global
+  // (the outer sum then saw a capture of its own index and renamed it, again
+  // and again, until the depth limit) or, for `i`, the imaginary unit.
+  test.each([
+    // Σ_{j=1}^{3} Σ_{k=1}^{j} 2kx = 20x
+    ['\\sum_{j=1}^{3}\\sum_{k=1}^{j}g(k)', '20'],
+    // Σ_{j=1}^{2} j·Σ_{k=1}^{3} 2kx = 36x
+    ['\\sum_{j=1}^{2}\\sum_{k=1}^{3}j\\,g(k)', '36'],
+    // Σ_{i=1}^{3} i·Σ_{k=1}^{5} 2kx = 180x
+    ['\\sum_{i=1}^{3}\\sum_{k=1}^{5}i\\,g(k)', '180'],
+  ])('an inner sum that is renamed: %s', (latex, expected) => {
+    const ce = sliderEngine(true);
+    const spy = jest.spyOn(console, 'assert').mockImplementation(() => {});
+    try {
+      const explanation = ce.box(['D', ce.parse(latex).json, 'x']).explain('D');
+      expect(explanation.result.toString()).toBe(expected);
+      expect(
+        explanation.steps.filter((s) => s.id === 'derivative.rewrite').length
+      ).toBe(1);
+      expect(ce.parse(`\\frac{d}{dx}${latex}`).evaluate().toString()).toBe(
+        expected
+      );
+      expect(spy.mock.calls.filter(([ok]) => !ok)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // The differentiation variable `k_1` is only in the body of `g`, and the
+  // derivative of the term removes it: it must not be the fresh index.
+  // Σ_{k=1}^{5} k·2 = 30 (the control with the index `j` also gives 30).
+  test('the fresh index is not the differentiation variable', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', 'real');
+    ce.assign('k', 2);
+    ce.declare('k_1', 'real');
+    ce.declare('g', 'function');
+    ce.assign('g', ce.parse('a\\mapsto a k k_1'));
+    for (const index of ['k', 'j'])
+      expect(
+        ce
+          .box(['D', ['Sum', ['g', index], ['Limits', index, 1, 5]], 'k_1'])
+          .evaluate()
+          .toString()
+      ).toBe('30');
+  });
+
+  test('a symbolic bound: the index is renamed', () => {
+    const ce = sliderEngine(true);
+    const result = ce.parse('\\frac{d}{dx}\\sum_{k=1}^{n}g(k)').evaluate();
+    expect(JSON.stringify(result.json)).toBe(
+      '["Sum",["Multiply","k","k_1"],["Limits","k_1",1,"n"]]'
+    );
+    expect(result.subs({ n: 5 }).evaluate().toString()).toBe('30');
+  });
+
+  test('the box and function routes', () => {
+    const ce = sliderEngine(true);
+    const sum = ['Sum', ['g', 'k'], ['Limits', 'k', 1, 5]] as const;
+    expect(ce.box(['D', sum, 'x']).evaluate().toString()).toBe('30');
+    expect(
+      ce
+        .function('D', [ce.box(sum), ce.symbol('x')])
+        .evaluate()
+        .toString()
+    ).toBe('30');
+  });
+});

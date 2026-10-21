@@ -5,6 +5,7 @@ import type {
   Expression,
   ExpressionInput,
   FunctionInterface,
+  Scope,
 } from '../global-types.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import {
@@ -25,7 +26,10 @@ import {
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import {
+  boundVariableBindings,
+  boundVariableNamesInOperand,
   rewriteWithBinders,
+  sameBindingDef,
   valueDefinitionInContext,
 } from '../boxed-expression/binders.js';
 import {
@@ -2544,6 +2548,7 @@ function differentiateBigOp(
     // The template keeps the scope of the original sum, so the index in
     // `D(body, v)` is the same binding as in `body`: `explainD()` finds the
     // later steps' nodes in it with `isSame()`, which compares bindings.
+    const mark = trace?.length ?? 0;
     recordD(trace, expr, v, 'derivative.term-by-term', () =>
       ce._fn('Sum', [dPlaceholder(body, v), ...sets], {
         scope: expr.localScope,
@@ -2551,6 +2556,28 @@ function differentiateBigOp(
     );
     const dBody = differentiate(body, v, depth + 1, trace);
     if (dBody === undefined || !dBody.isValid) return undefined;
+    // The derivative of a call of a user function is the derivative of the
+    // body of that function, and that body can read a symbol with the name
+    // of an index: with `k := 2` and `g := a ↦ a·k·x`, the derivative of
+    // the term `g(k)` is `k·k`, where the first `k` is the index and the
+    // second is the global `k`. A sum built on this term binds both by name,
+    // and gave `Σ k² = 55` instead of `Σ 2k = 30`. When this occurs, the
+    // index is renamed to a fresh name and the renamed sum is
+    // differentiated. The steps recorded for the first attempt are removed.
+    const renamed = renameCapturedIndexes(expr, dBody, indexes, v);
+    if (renamed !== undefined) {
+      if (trace) trace.length = mark;
+      if (renamed === null) return undefined;
+      recordD(trace, expr, v, 'derivative.rewrite', () =>
+        dPlaceholder(renamed, v)
+      );
+      const d = differentiate(renamed, v, depth + 1, trace);
+      if (d === undefined || !d.isValid) {
+        if (trace) trace.length = mark;
+        return undefined;
+      }
+      return d;
+    }
     // The index in `dBody` and in `sets` is bound in the scope of the
     // original sum, so the new sum is built on that scope. A new scope would
     // have a different parent, and an index named like a library constant
@@ -2630,6 +2657,130 @@ function differentiateBigOp(
   );
   return differentiate(expanded, v, depth + 1, trace);
 }
+
+/**
+ * The sum `expr` with each index that `dBody` captures renamed to a fresh
+ * name, or `undefined` when `dBody` captures no index.
+ *
+ * `dBody` is the derivative of the body of `expr`. It captures the index `k`
+ * when it holds a free symbol `k` that is not bound to the index: a symbol
+ * of the body of a called user function, such as the global `k` in
+ * `g := a ↦ a·k·x`. A sum built on `dBody` binds such a symbol to the index
+ * by name. In the renamed sum, `Σ_{k_1=1}^{5} g(k_1)`, the body of `g` has
+ * the global `k` and the index `k_1`, which are different names.
+ *
+ * The fresh name is not a name of `expr` or of `dBody`, and it is not the
+ * differentiation variable `v`, so the derivative of the renamed sum does not
+ * capture it. `v` is reserved separately: it can occur only in the body of a
+ * called function and be removed by the differentiation, and an index named
+ * `v` makes the derivative 0. Another name of a called body that is not in
+ * `dBody` is a term that does not depend on `v`: it is removed again from
+ * the derivative of the renamed sum, so it cannot be captured.
+ *
+ * Only the occurrences of the index are renamed, on the boxed operands, and
+ * the renamed sum is built from them: every other symbol keeps its binding.
+ * A symbol with the name of the index of an enclosing sum stays bound to
+ * that index (a sum boxed again from MathJSON bound it by name in the
+ * ambient scope, as a global or, for `i`, as the imaginary unit).
+ *
+ * Returns `null` when `dBody` captures an index that this function made: the
+ * renamed sum is not renamed a second time, and the derivative stays
+ * unevaluated.
+ */
+function renameCapturedIndexes(
+  expr: Expression & FunctionInterface,
+  dBody: Expression,
+  indexes: ReadonlyArray<string>,
+  v: string
+): Expression | null | undefined {
+  const ce = expr.engine;
+  const bindings = boundVariableBindings(expr);
+  if (bindings === undefined) return undefined;
+  const captured = new Set<string>();
+  rewriteWithBinders(dBody, (s, shadowed) => {
+    if (!indexes.includes(s.symbol) || shadowed?.has(s.symbol)) return s;
+    // An occurrence with no definition is the index: the parser leaves the
+    // symbols of a binder unbound until it is canonicalized.
+    const index = bindings.get(s.symbol);
+    const def = s.valueDefinition;
+    if (index && def !== undefined && !sameBindingDef(def, index))
+      captured.add(s.symbol);
+    return s;
+  });
+  if (captured.size === 0) return undefined;
+  const madeHere = expr.localScope && RENAMED_INDEXES.get(expr.localScope);
+  if (madeHere && [...captured].some((name) => madeHere.has(name))) return null;
+
+  const used = new Set<string>([
+    v,
+    ...expr.symbols,
+    ...dBody.symbols,
+    ...collectBinderNames(expr),
+    ...collectBinderNames(dBody),
+  ]);
+  // The scope of the renamed sum has the parent of the scope of `expr`, so
+  // the names that `expr` reads from enclosing binders resolve as they did.
+  // Each fresh index is declared in it with the type of the index it
+  // replaces, before the occurrences are renamed: the new occurrences are
+  // the bindings of this scope, and the sum built on it keeps them.
+  const scope: Scope = {
+    parent: expr.localScope?.parent ?? ce.context.lexicalScope,
+    bindings: new Map(),
+  };
+  const fresh = new Map<string, Expression>();
+  const freshNames = new Set<string>();
+  for (const name of captured) {
+    let i = 1;
+    while (used.has(`${name}_${i}`)) i += 1;
+    const id = `${name}_${i}`;
+    used.add(id);
+    freshNames.add(id);
+    const index = bindings.get(name);
+    ce._inScope(scope, () =>
+      ce.declare(id, {
+        type: index?.type ?? 'unknown',
+        inferred: index?.inferredType ?? true,
+      })
+    );
+    const symbol = ce._bindingSymbol(id, scope);
+    if (symbol === undefined) return null;
+    fresh.set(name, symbol);
+  }
+  RENAMED_INDEXES.set(scope, freshNames);
+  // Rename the occurrences of the indexes that are in scope in the operand
+  // `i` of the sum: in the body, every index; in an indexing set, its own
+  // index and the indexes of the sets before it. A nested binder with the
+  // same name keeps its own variable, and a symbol with the name of an index
+  // but another binding (the global `k`) keeps its name.
+  const rename = (e: Expression, i: number): Expression => {
+    const inScope = new Set(
+      boundVariableNamesInOperand(expr, i).filter((n) => fresh.has(n))
+    );
+    if (inScope.size === 0) return e;
+    return rewriteWithBinders(e, (s, shadowed) => {
+      if (!inScope.has(s.symbol) || shadowed?.has(s.symbol)) return s;
+      const def = s.valueDefinition;
+      if (
+        def !== undefined &&
+        !sameBindingDef(def, bindings.get(s.symbol) ?? undefined)
+      )
+        return s;
+      return fresh.get(s.symbol)!;
+    });
+  };
+  return ce.function(
+    expr.operator,
+    expr.ops.map((op, i) => rename(op, i)),
+    { scope }
+  );
+}
+
+/**
+ * The scopes of the sums that `renameCapturedIndexes()` made, with the fresh
+ * names of their indexes. A capture of one of these names is not repaired a
+ * second time.
+ */
+const RENAMED_INDEXES = new WeakMap<Scope, ReadonlySet<string>>();
 
 /**
  * The derivative of an application of an operator with no entry in the

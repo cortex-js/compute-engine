@@ -1102,6 +1102,55 @@ export interface Parser {
     subscriptStart: number
   ): void;
 
+  /** @internal Record that `absorbSubscripts()` did not take the subscript
+   * from the `_` token at `underscore` to the token `end` into the name of
+   * the symbol `base`, because `base` is an indexed collection and the
+   * joined name `name` is not declared. The subscript is then read as an
+   * index (`At`), and {@link _binderSymbol} gives `name` for that `At`. */
+  _recordDeclinedSubscriptJoin?(
+    base: string,
+    name: string,
+    underscore: number,
+    end: number
+  ): void;
+
+  /** @internal Record that `at` is the element access that the subscript
+   * from the `_` token at `underscore` to the token `end` gives on the
+   * indexed collection `base`. When {@link _recordDeclinedSubscriptJoin}
+   * recorded the same subscript, {@link _binderSymbol} gives the joined name
+   * for `at`. */
+  _recordSubscriptAt?(
+    at: MathJsonExpression,
+    base: string,
+    underscore: number,
+    end: number
+  ): void;
+
+  /** @internal After the symbol parser read the indexed collection `base`
+   * and did not join the subscript at the index to its name (see
+   * {@link _recordDeclinedSubscriptJoin}), read that subscript and return
+   * the joined name, for a binder position. Otherwise, return `null` with
+   * the index unchanged. */
+  _takeDeclinedSubscriptJoin?(base: string): string | null;
+
+  /** @internal The symbol that `expr` names when it is read in a binder
+   * position (a sum or product index, a comprehension variable, a function
+   * parameter, a local variable): a symbol is its own name, and an element
+   * access spelled as a subscript on an indexed collection (`n_{0}` when `n`
+   * is a list, read as `At(n, 0)`) is the joined name (`n_0`). Otherwise,
+   * `null`. */
+  _binderSymbol?(expr: MathJsonExpression | null | undefined): string | null;
+
+  /** @internal Replace, in `expr`, each element access spelled as a
+   * subscript on an indexed collection whose joined name is one of `names`
+   * with that name (see {@link _binderSymbol}). A binder uses it for the
+   * occurrences of its name in its body. The other parts of `expr` are not
+   * changed. */
+  _rebindSubscripts?(
+    expr: MathJsonExpression,
+    names: ReadonlySet<string>
+  ): MathJsonExpression;
+
   /** @internal In non-strict mode, with diagnostics on, record a diagnostic
    * whose code starts with `ambiguous-` for the tokens
    * `[startToken, endToken)`: the text has a second common reading. A

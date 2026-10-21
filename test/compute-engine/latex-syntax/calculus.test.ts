@@ -35,6 +35,262 @@ describe('INDEFINITE INTEGRAL', () => {
   test('Index in addition', () =>
     expect(parse('\\int3x+kxdx = 2')).toMatchSnapshot());
 
+  // A sum integrand with no differential anywhere parsed to
+  // `Add(Integrate(Add(), Nothing), Sin(x), 1)`: the `Add` branch of
+  // `parseIntegral()` tested the `indexes` array for truth instead of for its
+  // length, so every term was moved out of the integral (found 2026-10-20).
+  test('Sum integrand with no differential keeps every term', () => {
+    // An integral with no differential carries `Nothing` as its variable.
+    expect(ce.parse('\\int\\sin x + 1', { form: 'raw' }).json).toEqual([
+      'Integrate',
+      ['Add', ['Sin', 'x'], 1],
+      'Nothing',
+    ]);
+    expect(ce.parse('\\int x^2 + 1', { form: 'raw' }).json).toEqual([
+      'Integrate',
+      ['Add', ['Power', 'x', 2], 1],
+      'Nothing',
+    ]);
+  });
+
+  // The term that holds `dx` and the terms before it are the integrand; the
+  // terms after it are added to or subtracted from the integral, with their
+  // sign. A term that is only the differential (`(dx)`) is removed. Each
+  // input has its differential inside a term (a fraction or parentheses), so
+  // the body does not stop at a top-level differential and the sum is split
+  // by `splitSumAtDifferential()`. Each row is: the LaTeX, the raw MathJSON,
+  // the canonical MathJSON.
+  const integrandSplit: [string, unknown, unknown][] = [
+    [
+      '\\int 3x + \\frac{x\\,dx}{2} + 1',
+      [
+        'Add',
+        [
+          'Integrate',
+          [
+            'Add',
+            ['InvisibleOperator', 3, 'x'],
+            ['Divide', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]], 2],
+          ],
+          'x',
+        ],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          [
+            'Function',
+            [
+              'Block',
+              [
+                'Add',
+                ['Multiply', 3, 'x'],
+                ['Multiply', ['Rational', 1, 2], 'x'],
+              ],
+            ],
+            'x',
+          ],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        1,
+      ],
+    ],
+    [
+      '\\int \\frac{x\\,dx}{2} - 1',
+      [
+        'Subtract',
+        [
+          'Integrate',
+          ['Divide', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]], 2],
+          'x',
+        ],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Multiply', ['Rational', 1, 2], 'x']], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        -1,
+      ],
+    ],
+    [
+      '\\int\\frac{dx}{x}-1',
+      ['Subtract', ['Integrate', ['Divide', 1, 'x'], 'x'], 1],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Divide', 1, 'x']], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        -1,
+      ],
+    ],
+    [
+      '\\int x - \\frac{x\\,dx}{2}',
+      [
+        'Integrate',
+        [
+          'Subtract',
+          'x',
+          ['Divide', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]], 2],
+        ],
+        'x',
+      ],
+      [
+        'Integrate',
+        [
+          'Function',
+          ['Block', ['Add', 'x', ['Multiply', ['Rational', -1, 2], 'x']]],
+          'x',
+        ],
+        ['Limits', 'x', 'Nothing', 'Nothing'],
+      ],
+    ],
+    [
+      '\\int 1-\\frac{dx}{x}',
+      ['Integrate', ['Subtract', 1, ['Divide', 1, 'x']], 'x'],
+      [
+        'Integrate',
+        ['Function', ['Block', ['Add', ['Divide', -1, 'x'], 1]], 'x'],
+        ['Limits', 'x', 'Nothing', 'Nothing'],
+      ],
+    ],
+    [
+      '\\int a - \\frac{dx}{x} - 1',
+      [
+        'Subtract',
+        ['Integrate', ['Subtract', 'a', ['Divide', 1, 'x']], 'x'],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Add', 'a', ['Divide', -1, 'x']]], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        -1,
+      ],
+    ],
+    [
+      '\\int\\frac{dx}{x}+1',
+      ['Add', ['Integrate', ['Divide', 1, 'x'], 'x'], 1],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Divide', 1, 'x']], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        1,
+      ],
+    ],
+    [
+      '\\int (\\sin x\\,dx) + 1',
+      [
+        'Add',
+        [
+          'Integrate',
+          [
+            'Delimiter',
+            ['Sin', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]]],
+          ],
+          'x',
+        ],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Sin', 'x']], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        1,
+      ],
+    ],
+    [
+      '\\int (x dx) - 1',
+      [
+        'Subtract',
+        ['Integrate', ['Delimiter', ['InvisibleOperator', 'x']], 'x'],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', 'x'], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        -1,
+      ],
+    ],
+    [
+      '\\int (a+b) + \\frac{x\\,dx}{2} + 1',
+      [
+        'Add',
+        [
+          'Integrate',
+          [
+            'Add',
+            ['Delimiter', ['Add', 'a', 'b']],
+            ['Divide', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]], 2],
+          ],
+          'x',
+        ],
+        1,
+      ],
+      [
+        'Add',
+        [
+          'Integrate',
+          [
+            'Function',
+            ['Block', ['Add', 'a', 'b', ['Multiply', ['Rational', 1, 2], 'x']]],
+            'x',
+          ],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        1,
+      ],
+    ],
+    [
+      '\\int 3x + (dx) + 1',
+      ['Add', ['Integrate', ['InvisibleOperator', 3, 'x'], 'x'], 1],
+      [
+        'Add',
+        [
+          'Integrate',
+          ['Function', ['Block', ['Multiply', 3, 'x']], 'x'],
+          ['Limits', 'x', 'Nothing', 'Nothing'],
+        ],
+        1,
+      ],
+    ],
+    [
+      '\\int x + (dx)',
+      ['Integrate', 'x', 'x'],
+      ['Integrate', 'x', ['Limits', 'x', 'Nothing', 'Nothing']],
+    ],
+  ];
+
+  test.each(integrandSplit)(
+    'A differential inside a term of a sum ends the integrand there: %s',
+    (latex, raw, canonical) => {
+      expect(ce.parse(latex, { form: 'raw' }).json).toEqual(raw);
+      const json = ce.parse(latex).json;
+      expect(json).toEqual(canonical);
+      expect(JSON.stringify(json)).not.toMatch(/"(Error|Tuple)"/);
+    }
+  );
+
   test('Index in negate', () =>
     expect(parse('\\int-xdx = 2')).toMatchSnapshot());
 

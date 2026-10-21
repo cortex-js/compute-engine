@@ -145,6 +145,82 @@
   union with a dictionary or record arm types that arm as a collection of
   entries.
 
+- The derivative of a `Sum` no longer reads a global symbol as the index of
+  the sum when a function called in the sum reads a symbol with the name of
+  the index. With `k := 2` and `g := a ↦ a·k·x`, `Σ_{k=1}^{5} g(k)` is `30x`,
+  but its derivative in `x` was `55` (the sum of `k²`, the global `k` read as
+  the index): it is now `30`, as it is for the same sum with the index `j`.
+  When `k` has no value, the derivative was `55` too: it is now `15k`. When
+  this occurs, the derivative renames the index to a fresh name, such as
+  `k_1`: the derivative of `Σ_{k=1}^{n} g(k)` is `Σ_{k_1=1}^{n} k·k_1`.
+
+- `\int \sin x + 1` parsed to `Integrate(0) + sin(x) + 1`: the integrand was
+  lost. It now parses to `Integrate(sin(x) + 1)`. A differential inside one
+  term of a sum or a difference now ends the integrand at that term, and the
+  terms after it keep their sign: `\int \frac{x\,dx}{2} - 1` parses to
+  `Integrate(x/2, x) - 1` (it was `Integrate(x/2, x) + 1`), and
+  `\int 1 - \frac{dx}{x}` to `Integrate(1 - 1/x, x)` (the `dx` stayed in the
+  integrand). A parenthesized term in such a sum (`\int (\sin x\,dx) + 1`)
+  no longer becomes a tuple, and with `diagnostics: true` the variable of the
+  integration is no longer reported as undeclared in the integrand of such a
+  sum.
+
+- **A subscripted name in a binder position is a new name, also when its base
+  is a list.** With `n` declared as `list<number>`, a subscript on `n` is an
+  index: `n_{0}` is `At(n, 0)`. The parser read a binder spelled that way the
+  same way, so `\sum_{n_{0}=1}^{3}n_{0}` was
+  `["Sum", ["At", "n", 0], ["Tuple", "Nothing", 1, 3]]` (a sum with no index)
+  and it evaluated to `3·At(n, 0)`. It is now
+  `["Sum", "n_0", ["Tuple", "n_0", 1, 3]]` and evaluates to `6`, as when `n`
+  is not declared. The same applies to a product index, a comprehension
+  variable (`[n_{0}^2 \operatorname{for} n_{0} = [1,2,3]]`), a local of a
+  `where` clause or of a `;` block (`n_{0} \coloneq 3; n_{0}+1` is `4`, not an
+  assignment to a function named `At`), a function parameter
+  (`n_{0} \mapsto n_{0}^2`, `f(n_{0}) \coloneq n_{0}^2`, which were a parse
+  error and an invalid function), a `for … from … to … do` index, a limit
+  variable, a quantified variable, the variable of a set-builder
+  (`\{n_{0} \mid n_{0}>0\}`), an integration variable (`dn_{0}`) and a
+  differentiation variable (`\frac{d}{dn_{0}}`, `\partial n_{0}` in a
+  denominator). The occurrences of the binder in its scope are the new name
+  too. Elsewhere, a subscript on a list is still an index: in
+  `\sum_{k=1}^{3}n_{k}`, the body is `At(n, k)`, and in
+  `\frac{\partial n_{0}}{\partial x}`, the differentiand is `At(n, 0)`. A
+  top-level assignment `n_{0} \coloneq 3` is not a binder: it is still the
+  error `expected-a-symbol`, as before.
+
+- **The variable of `Integrate` and `Limit` no longer reads a symbol of the
+  same name inside a called user function.** With `k := 2` and
+  `g := a ↦ a·k·x`, `\int_0^1 g(k)\,dk` was `x/3` and is now `x`, the value of
+  `\int_0^1 g(t)\,dt`; `\lim_{k\to 1} g(k)` was `x` and is now `2x`;
+  `\int g(k)\,dk` was `-x k^3/6 + k x k^2/2` and is now `x k^2`. When `k` has
+  no value, `\lim_{k\to 1} g(k)` is now `k x` (it was `x`) and
+  `\int_0^1 g(k)\,dk` is `k x/2` (it was `x/3`). These operators inline the
+  body of `g` and select the variable by its name, so the `k` of the body
+  became the variable. The variable is now renamed to a fresh name first. The
+  fresh name is not a name of the expression and not the name of a declared
+  symbol, with or without a value. The bounds of the integral and the point of
+  the limit keep their symbols: `\sum_{k=1}^{2} \int_0^k g(k)\,dk` is `5x`
+  (the bound is the index of the sum), and `\int_0^{k_1} g(k)\,dk` is
+  `x k_1^2`. An indefinite integral whose result also holds the global `k`
+  keeps the fresh name, and the printed result shows it: `\int g(k)\,dk` is
+  `\frac{1}{2}k x k_1^2` when `k` has no value (`k_2` when `k_1` is declared).
+  That result is correct: the `k` of `g` and the variable of the
+  antiderivative are different symbols. `Sum` and `Product` already gave
+  these answers. `Solve(g(k) = 1, k)` and `Solve(\{g(k) = 1, k \in 1..3\})`
+  had the same capture and answered `[]` (no solution); they now stay
+  unsolved.
+- **`Integrate` and `Solve` inline a function that is declared with a function
+  type and then assigned** (`g: (real) -> real`, then `g := a ↦ a·x`), as they
+  do for a function that is only assigned. `\int_0^1 g(t)\,dt` stayed
+  unevaluated and is now `x/2`. With `g := a ↦ 2a + x`, `Solve(g(t) = 1, t)`
+  stayed unevaluated and is now `[(1 − x)/2]`.
+- **A recursive user function is no longer inlined by `Integrate`, `Limit` and
+  `Solve`.** With `r(x) := r(x − 1) + 1`, `\int_0^1 x^2 + r(3)\,dx` ran for
+  about 11 seconds and ended with a stack overflow (`RangeError`). The call now
+  stays as it is, and its evaluation stops at the recursion limit with a
+  `CancellationError` at once, as it already did for a function declared with
+  a function type.
+
 ## 0.159.0 _2026-10-20_
 
 ### Behavior Changes

@@ -88,36 +88,61 @@ function parseIntegral(command: string, nIntegrals = 1) {
 
     // eslint-disable-next-line prefer-const
     let [fn, indexes] = parseIntegralBody(parser, nIntegrals);
+    // An integration variable spelled as a subscript on an indexed
+    // collection (`dn_{0}` when `n` is a list) is the new name `n_0`, and so
+    // are its occurrences in the integrand (see `parseIndexes()`)
+    const binderName = binderNameFor(parser);
+    const rebind = (e: MathJsonExpression) =>
+      parser._rebindSubscripts?.(e, new Set(indexes)) ?? e;
 
     if (fn && indexes.length === 0) {
       if (operator(fn) === 'Add' || operator(fn) === 'Subtract') {
-        // If the function is an addition, it could appear in any of the terms,
-        // e.g. `\int \sin xdx + 1`
-        const newOp: MathJsonExpression[] = [];
-        const rest: MathJsonExpression[] = [];
-        for (const op of operands(fn)) {
-          if (indexes) rest.push(op);
-          else {
-            let op2: MathJsonExpression | null;
-            [op2, indexes] = parseSubintegrand(op);
-            newOp.push(op2 ?? op);
-          }
-        }
-        if (indexes !== null && rest.length > 0) {
-          return [
-            'Add',
-            makeIntegral(command, ['Add', ...newOp], {
+        // If the function is a sum or a difference, the differential could be
+        // inside one of the terms, e.g. `\int \frac{x\,dx}{2} - 1`: the terms
+        // up to and including the one that holds it are the integrand, and
+        // the terms after it are added to or subtracted from the integral,
+        // with their sign. With no differential in any term, the whole sum is
+        // the integrand (`\int \sin x + 1`).
+        const [body, rest, termIndexes] = splitSumAtDifferential(
+          fn,
+          binderName
+        );
+        if (termIndexes.length > 0) {
+          indexes = termIndexes;
+          // The bound variable is bound only in the integrand: a same-named
+          // reference in a term after it is free and stays flagged. The
+          // integrand span is given as a declaration span. The body start
+          // given is the current index: no reference collected so far starts
+          // at or after it, so no other reference is pruned.
+          parser._pruneUndeclared(indexes, diagCp, parser.index, [
+            [
+              bodyStartToken,
+              integrandEndToken(parser, bodyStartToken, parser.index),
+            ],
+          ]);
+          // A body that is only the differential (`\int (dx) + 1`) is the
+          // integral of 1, as `\frac{dx}{x}` is the integral of `1/x`.
+          let result: MathJsonExpression =
+            makeIntegral(command, body === null ? 1 : rebind(body), {
               indexes,
               subs,
               sups,
-            }) ?? 'Nothing',
-            ...rest,
-          ];
+            }) ?? 'Nothing';
+          for (const [term, negative] of rest) {
+            if (negative) result = ['Subtract', result, term];
+            else if (operator(result) === 'Add')
+              result = ['Add', ...operands(result), term];
+            else result = ['Add', result, term];
+          }
+          return result;
         }
       } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
         let altNumerator: MathJsonExpression | null;
-        [altNumerator, indexes] = parseSubintegrand(operand(fn, 1)!);
+        [altNumerator, indexes] = parseSubintegrand(
+          operand(fn, 1)!,
+          binderName
+        );
         if (altNumerator !== null && indexes !== null) {
           fn = ['Divide', altNumerator, operand(fn, 2)!];
         }
@@ -128,6 +153,8 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // within the integrand/differential span only (leaving same-named limits).
     if (indexes.length > 0)
       parser._pruneUndeclared(indexes, diagCp, bodyStartToken);
+
+    if (fn !== null && indexes.length > 0) fn = rebind(fn);
 
     //
     // 3/ Put together the limits, the function and the indexes
@@ -232,9 +259,20 @@ function parseIntegralBody(
 
   // If we didn't get a `\operatorname{d}x` or `dx` at the same level as the
   // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}` or `3xdx`
-  if (fn !== null && !found) return parseSubintegrand(fn);
+  if (fn !== null && !found)
+    return parseSubintegrand(fn, binderNameFor(parser));
 
   return [fn, parseIndexes(parser, maxIndexes)];
+}
+
+/** The name of the variable that an expression read in a binder position
+ * names: a symbol, or the joined name of a subscript on an indexed
+ * collection (`At(n, 0)` from `n_{0}` names `n_0`, see
+ * `Parser._binderSymbol()`). */
+function binderNameFor(
+  parser: Parser
+): (expr: MathJsonExpression | null | undefined) => string | null {
+  return (expr) => parser._binderSymbol?.(expr) ?? symbol(expr);
 }
 
 /** Assuming we are at a differential operator, parse one
@@ -250,7 +288,9 @@ function parseIndexes(parser: Parser, maxIndexes: number): string[] {
     parser.skipVisualSpace();
     const index = symbol(parser.parseSymbol());
     if (index === null) return indexes;
-    indexes.push(index);
+    // A variable spelled as a subscript on an indexed collection (`dn_{0}`
+    // when `n` is a list) is the new name `n_0`
+    indexes.push(parser._takeDeclinedSubscriptJoin?.(index) ?? index);
   }
 
   return indexes;
@@ -258,7 +298,8 @@ function parseIndexes(parser: Parser, maxIndexes: number): string[] {
 
 /** Parse a sub expression that may contain indexes, for example `2xdx` */
 function parseSubintegrand(
-  expr: MathJsonExpression
+  expr: MathJsonExpression,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): [body: MathJsonExpression | null, indexes: string[]] {
   const h = operator(expr);
   const op1 = operand(expr, 1);
@@ -266,7 +307,7 @@ function parseSubintegrand(
   // legitimate subintegrand (`\int 0\,dx`) and must not be treated as absent.
   if (op1 === null) return [expr, []];
 
-  if (h === 'Sequence' && nops(expr) === 1) return parseSubintegrand(op1);
+  if (h === 'Sequence' && nops(expr) === 1) return parseSubintegrand(op1, binderName);
 
   if (h === 'Multiply' || h === 'InvisibleOperator') {
     // Handle the case `3xdx` where the `dx` is the last term of a
@@ -276,13 +317,13 @@ function parseSubintegrand(
     const args = operands(expr);
 
     if (args) {
-      const [rest, indexes] = parseFinalDiffOperators(args);
+      const [rest, indexes] = parseFinalDiffOperators(args, binderName);
       if (rest.length > 0) return [[h, ...rest], indexes];
       return [null, indexes];
     }
   } else if (h === 'Delimiter') {
-    const [fn2, indexes] = parseSubintegrand(op1);
-    if (indexes) {
+    const [fn2, indexes] = parseSubintegrand(op1, binderName);
+    if (indexes.length > 0) {
       // `null`, not falsiness: a literal `0` is a body, and reading it as an
       // absent one would drop a parenthesized zero integrand.
       if (fn2 === null) {
@@ -290,27 +331,29 @@ function parseSubintegrand(
         return [null, indexes];
       }
       // A subexpression and the indexes were in parens:
-      // `\int (3x + 2 dx)`
-      return [
-        ['Delimiter', ['Sequence', fn2], ...operands(expr).slice(1)],
-        indexes,
-      ];
+      // `\int (3x + 2 dx)`. The body is the first operand of the
+      // `Delimiter`, as the parser writes `(a+b)`: `Delimiter(Add(a, b))`.
+      // A `Sequence` there would canonicalize to a `Tuple`.
+      return [['Delimiter', fn2, ...operands(expr).slice(1)], indexes];
     }
   } else if (h === 'Add') {
     const args = operands(expr);
     if (args.length > 0) {
-      const [fn2, indexes] = parseSubintegrand(args[args.length - 1]);
+      const [fn2, indexes] = parseSubintegrand(
+        args[args.length - 1],
+        binderName
+      );
       if (indexes.length > 0) {
         if (fn2) return [['Add', ...args.slice(0, -1), fn2], indexes];
         if (args.length > 2) return [['Add', ...args.slice(0, -1)], indexes];
-        if (args.length > 2) return [args[0], indexes];
+        if (args.length === 2) return [args[0], indexes];
       }
     }
   } else if (h === 'Negate') {
-    const [fn2, indexes] = parseSubintegrand(op1);
+    const [fn2, indexes] = parseSubintegrand(op1, binderName);
     if (indexes.length > 0) return [fn2 ? ['Negate', fn2] : null, indexes];
   } else if (h === 'Divide') {
-    const [fn2, indexes] = parseSubintegrand(op1);
+    const [fn2, indexes] = parseSubintegrand(op1, binderName);
     if (indexes.length > 0)
       return [['Divide', fn2 ?? 1, operand(expr, 2)!], indexes];
   } else {
@@ -319,13 +362,122 @@ function parseSubintegrand(
     if (args.length === 1) {
       //If it has a single argument, we'll check if it includes an index
       // e.g. \sin 2xdx
-      const [arg2, indexes] = parseSubintegrand(args[0]);
+      const [arg2, indexes] = parseSubintegrand(args[0], binderName);
       if (indexes.length > 0)
         return [[operator(expr), arg2] as MathJsonExpression, indexes];
     }
   }
 
   return [expr, []];
+}
+
+/**
+ * Split a sum or a difference at the term that holds a differential, for
+ * example `\int 3x + \frac{x\,dx}{2} - 1`.
+ *
+ * Return the integrand (the terms before that term and that term, with the
+ * differential removed), the terms after it with their sign (`true` when the
+ * term is subtracted), and the indexes of the differential. The integrand is
+ * `null` when it has no term: `(dx) + 1`. When no term holds a differential,
+ * the indexes are empty and the integrand is `expr`.
+ *
+ * The parser nests a difference in a sum and in a difference (`a - b + c` is
+ * `Add(Subtract(a, b), c)`), so each operand that is a sum or a difference is
+ * split recursively. A term that is only a differential (`(dx)`) is removed.
+ */
+function splitSumAtDifferential(
+  expr: MathJsonExpression,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
+): [
+  body: MathJsonExpression | null,
+  rest: [term: MathJsonExpression, negative: boolean][],
+  indexes: string[],
+] {
+  const h = operator(expr);
+  if (h === 'Subtract' && nops(expr) === 2) {
+    const lhs = operand(expr, 1)!;
+    const rhs = operand(expr, 2)!;
+    const [body, rest, indexes] = splitSumAtDifferential(lhs, binderName);
+    if (indexes.length > 0) return [body, [...rest, [rhs, true]], indexes];
+
+    // The differential is in the subtracted operand: `a - (B + R)` is
+    // `(a - B) - R`, so the sign of each term after it changes.
+    const [rhsBody, rhsRest, rhsIndexes] = splitSumAtDifferential(
+      rhs,
+      binderName
+    );
+    if (rhsIndexes.length > 0) {
+      return [
+        rhsBody === null ? lhs : ['Subtract', lhs, rhsBody],
+        rhsRest.map(([term, negative]) => [term, !negative]),
+        rhsIndexes,
+      ];
+    }
+    return [expr, [], []];
+  }
+
+  if (h === 'Add') {
+    const terms = operands(expr);
+    for (let i = 0; i < terms.length; i++) {
+      const [body, rest, indexes] = splitSumAtDifferential(
+        terms[i],
+        binderName
+      );
+      if (indexes.length === 0) continue;
+      const bodyTerms = [...terms.slice(0, i)];
+      if (body !== null) bodyTerms.push(body);
+      return [
+        bodyTerms.length === 0
+          ? null
+          : bodyTerms.length === 1
+            ? bodyTerms[0]
+            : ['Add', ...bodyTerms],
+        [
+          ...rest,
+          ...terms
+            .slice(i + 1)
+            .map((term): [MathJsonExpression, boolean] => [term, false]),
+        ],
+        indexes,
+      ];
+    }
+    return [expr, [], []];
+  }
+
+  const [body, indexes] = parseSubintegrand(expr, binderName);
+  return [body, [], indexes];
+}
+
+/**
+ * The token index where the integrand ends, when the differential is inside
+ * one term of a sum or a difference (`\int \frac{dx}{x} + 1`).
+ *
+ * This is the first `+` or `-` at the top level of the body (outside braces,
+ * parentheses and brackets) after the first differential operator token (`d`
+ * or `\differentialD`) at or after `start`. When no `+` or `-` follows it, the
+ * integrand ends at `end`. When no differential operator token is found,
+ * return `start`: the span is empty.
+ *
+ * The tokens are read with `parser.latex()`, and `parser.index` does not
+ * change: moving the index back would discard the diagnostics of the body.
+ * The result is used only for diagnostics, never for the parse output.
+ */
+function integrandEndToken(parser: Parser, start: number, end: number): number {
+  let depth = 0;
+  let afterDifferential = false;
+  for (let i = start; i < end; i++) {
+    const token = parser.latex(i, i + 1).trim();
+    if (token === 'd' || token === '\\differentialD') afterDifferential = true;
+    else if (token === '{' || token === '(' || token === '[') depth += 1;
+    else if (token === '}' || token === ')' || token === ']') depth -= 1;
+    else if (
+      afterDifferential &&
+      depth === 0 &&
+      (token === '+' || token === '-')
+    )
+      return i;
+  }
+  return afterDifferential ? end : start;
 }
 
 function serializeIntegral(command: string) {
@@ -656,14 +808,15 @@ function matchDifferentialOperator(parser: Parser): boolean {
 }
 
 function parseFinalDiffOperators(
-  xs: ReadonlyArray<MathJsonExpression>
+  xs: ReadonlyArray<MathJsonExpression>,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): [rest: ReadonlyArray<MathJsonExpression>, indexes: string[]] {
   let rest: ReadonlyArray<MathJsonExpression> = [...xs];
   const indexes: string[] = [];
 
   while (rest.length > 0) {
     let index: string;
-    [rest, index] = parseFinalDiffOperator(rest);
+    [rest, index] = parseFinalDiffOperator(rest, binderName);
     if (!index) break;
     indexes.push(index);
   }
@@ -672,7 +825,8 @@ function parseFinalDiffOperators(
 }
 
 function parseFinalDiffOperator(
-  expr: ReadonlyArray<MathJsonExpression>
+  expr: ReadonlyArray<MathJsonExpression>,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): [rest: ReadonlyArray<MathJsonExpression>, index: string] {
   // If the second to last term is a differential operator, we capture the last term as the index
 
@@ -681,7 +835,7 @@ function parseFinalDiffOperator(
   const op = expr[expr.length - 2];
 
   if (op === 'd' || op === 'd_upright') {
-    const index = symbol(expr[expr.length - 1]);
+    const index = binderName(expr[expr.length - 1]);
     if (index) return [expr.slice(0, -2), index];
   }
   return [expr, ''];

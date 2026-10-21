@@ -1,6 +1,7 @@
 import type {
   MathJsonExpression,
   ExpressionObject,
+  MathJsonFunctionObject,
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import {
@@ -4073,6 +4074,112 @@ export class _Parser implements Parser {
     };
   }
 
+  // The joined names that `absorbSubscripts()` did not make because the base
+  // is an indexed collection and the joined name is not declared (`n_0`
+  // when `n` is a list), by the token index of the `_`. The subscript is
+  // then read as an index (`At(n, 0)`), by `parseSupsub()` or by the
+  // postfix `_` entry of the dictionary, which take the joined name from
+  // here into `_subscriptAtNames` (see `_recordSubscriptAt()`).
+  private _declinedSubscriptJoins = new Map<
+    number,
+    { base: string; name: string; end: number }
+  >();
+
+  // The `At` expressions made from a subscript on an indexed collection,
+  // with the name that the subscript would have joined
+  // into (`At(n, 0)` from `n_{0}` has the name `n_0`). In a binder position,
+  // the parser reads such an `At` as this name: `\sum_{n_{0}=1}^{3}n_{0}` is
+  // a sum over the new index `n_0`, also when `n` is a list.
+  private _subscriptAtNames = new WeakMap<object, string>();
+
+  _recordDeclinedSubscriptJoin(
+    base: string,
+    name: string,
+    underscore: number,
+    end: number
+  ): void {
+    this._declinedSubscriptJoins.set(underscore, { base, name, end });
+  }
+
+  _recordSubscriptAt(
+    at: MathJsonExpression,
+    base: string,
+    underscore: number,
+    end: number
+  ): void {
+    // The subscript must be the tokens that the symbol parser did not join
+    // to the name `base`: the same `_` and the same end.
+    const declined = this._declinedSubscriptJoins.get(underscore);
+    if (
+      typeof at === 'object' &&
+      at !== null &&
+      declined !== undefined &&
+      declined.base === base &&
+      declined.end === end
+    )
+      this._subscriptAtNames.set(at, declined.name);
+  }
+
+  _takeDeclinedSubscriptJoin(base: string): string | null {
+    const declined = this._declinedSubscriptJoins.get(this.index);
+    if (declined === undefined || declined.base !== base) return null;
+    this.index = declined.end;
+    return declined.name;
+  }
+
+  _binderSymbol(expr: MathJsonExpression | null | undefined): string | null {
+    if (expr === null || expr === undefined) return null;
+    const id = symbol(expr);
+    if (id !== null) return id;
+    const fn = functionElements(expr);
+    return fn === null ? null : (this._subscriptAtNames.get(fn) ?? null);
+  }
+
+  _rebindSubscripts(
+    expr: MathJsonExpression,
+    names: ReadonlySet<string>
+  ): MathJsonExpression {
+    if (names.size === 0) return expr;
+    const visit = (e: MathJsonExpression): MathJsonExpression => {
+      const fn = functionElements(e);
+      if (fn === null) return e;
+      const decorated = Array.isArray(e) ? null : (e as MathJsonFunctionObject);
+      const name = this._subscriptAtNames.get(fn);
+      if (name !== undefined && names.has(name))
+        return decorated?.latex !== undefined
+          ? { latex: decorated.latex, sym: name }
+          : name;
+      let changed = false;
+      const ops = fn.map((x) => {
+        const y = visit(x);
+        if (y !== x) changed = true;
+        return y;
+      });
+      if (!changed) return e;
+      // The bookkeeping of the parser is keyed by the identity of the
+      // expressions: copy it to the new expression. An application
+      // candidate (`a(x)` with a `resolveApplication` hook) is keyed by the
+      // object `{ fn: [...] }`, not by its array: copy it from `e` to `out`,
+      // or the hook is not called for the copy. A rebuilt element access
+      // keeps its joined name, so that an outer binder can still rebind it
+      // (`m_{n_{0}}` is `At(m, n_0)` once the inner index `n_0` is rebound,
+      // and it is still the name `m_n_0`).
+      const copy = ops as [MathJsonSymbol, ...MathJsonExpression[]];
+      const out: MathJsonExpression =
+        decorated === null ? copy : { ...decorated, fn: copy };
+      this._applicationCopied(e as object, out);
+      const atName = this._subscriptAtNames.get(fn);
+      if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+      if (continuationRanges.has(fn)) continuationRanges.add(copy);
+      if (continuationRanges.has(e as object))
+        continuationRanges.add(out as object);
+      const span = this._exprSpans?.get(fn);
+      if (span !== undefined) this._exprSpans!.set(copy, span);
+      return out;
+    };
+    return visit(expr);
+  }
+
   /**
    * The symbol spelled by the tokens `base` was read, then a superscript,
    * and the index is at a `_`. When a symbol or expression entry of the
@@ -5461,6 +5568,8 @@ export class _Parser implements Parser {
     let subIndex = index;
     // True when a subscript run was joined to the base symbol name (`lhs`)
     let joinedBase = false;
+    // The token span of the first subscript, from its `_` to its end
+    let firstSubscriptSpan: [number, number] | null = null;
     while (this.peek === '_' || this.peek === '^' || this.atDoubleStar()) {
       // A subscript after a superscript on a symbol base has the reading
       // that the symbol parser gives to a subscript before the superscript,
@@ -5609,6 +5718,8 @@ export class _Parser implements Parser {
           }
           this._emitScriptLetterRunSplit(subIndex, sub);
 
+          if (subscripts.length === 0)
+            firstSubscriptSpan = [subIndex - 1, this.index];
           subscripts.push(sub);
         }
       } else if (this.match('^') || this.matchDoubleStar()) {
@@ -5687,6 +5798,17 @@ export class _Parser implements Parser {
         operator(at) === 'Sequence'
           ? ['At', result, ...operands(at)]
           : ['At', result, at];
+      if (
+        baseSymbol !== null &&
+        firstSubscriptSpan !== null &&
+        subscripts.length === 1
+      )
+        this._recordSubscriptAt(
+          result,
+          baseSymbol,
+          firstSubscriptSpan[0],
+          firstSubscriptSpan[1]
+        );
     } else if (nonEmptySubscripts.length > 0) {
       // The `infixByTrigger` index buckets are in priority order
       // (later definitions first), same as filtering `getDefs('infix')`

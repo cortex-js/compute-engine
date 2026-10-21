@@ -1829,12 +1829,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // annotation included, become the `Function`'s operands.
       const params: MathJsonExpression[] = [];
       const names: string[] = [];
+      // A parameter spelled as a subscript on an indexed collection
+      // (`n_{0}` when `n` is a list, read as `At(n, 0)`) is the new name
+      // `n_0`. Its occurrences in the body read as that name, because the
+      // body is read with the parameters declared.
+      const binderName = (e: MathJsonExpression | null) =>
+        parser._binderSymbol?.(e) ?? symbol(e);
       const addParam = (x: MathJsonExpression): boolean => {
-        const name =
-          operator(x) === 'Typed' ? symbol(operand(x, 1)) : symbol(x);
+        const typed = operator(x) === 'Typed';
+        const name = binderName(typed ? operand(x, 1) : x);
         if (!name) return false;
         names.push(name);
-        params.push(operator(x) === 'Typed' ? x : name);
+        params.push(
+          !typed
+            ? name
+            : symbol(operand(x, 1)) !== null
+              ? x
+              : (['Typed', name, ...operands(x).slice(1)] as MathJsonExpression)
+        );
         return true;
       };
       // An empty parameter list, `() \mapsto …`, declares NO parameter: the
@@ -2869,7 +2881,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
         // Multi-index: unpack Sequence into separate At arguments
         if (operator(rhs) === 'Sequence') return ['At', lhs, ...operands(rhs)];
-        return ['At', lhs, rhs];
+        const at: MathJsonExpression = ['At', lhs, rhs];
+        // In a binder position, this subscript is the joined name (`n_0`
+        // from `n_{0}`), not an element access (see `_binderSymbol()`).
+        if (sym)
+          parser._recordSubscriptAt?.(at, sym, scriptStart - 1, parser.index);
+        return at;
       }
 
       // Base-subscript numeral: `10111_2`, `2748_{16}` → BaseForm(value, base).
@@ -3143,7 +3160,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       // If any element is an Assign or a `let` statement, produce a Block
       if (seq.some((e) => operator(e) === 'Assign' || isLetStatement(e)))
-        return buildBlockFromSequence(seq);
+        return buildBlockFromSequence(seq, parser);
 
       // A lone statement followed by the trailing-`;` marker is the spelling
       // of a SINGLE-STATEMENT block (`(x+1;)`) — the dual of the `Block`
@@ -3155,7 +3172,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // trailing `Nothing` that is now dropped — but the two are canonically
       // equivalent, so the value is unchanged.
       if (trailingMarker && seq.length === 1)
-        return buildBlockFromSequence(seq);
+        return buildBlockFromSequence(seq, parser);
 
       return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
     },
@@ -6094,6 +6111,34 @@ function parseAssignStatement(
   // simple subscripted names as compound symbols (e.g. `r_1`).
   const isLocalBindingContext = (until?.minPrec ?? 0) >= 19;
 
+  // A target spelled as a subscript on an indexed collection (`n_{0}` when
+  // `n` is a list, read as `At(n, 0)`) is the joined name `n_0` of a new
+  // local when the assignment is a statement of a block: in a local-binding
+  // context (a `where` binding, a statement after a `;`), or when a `;`
+  // follows the assignment (the first statement of a `;` block, which is
+  // read before the `;`). `buildBlockFromSequence()` makes the local
+  // `n_0` from the `Subscript(n, 0)` target that step 0 below gives.
+  // Otherwise the target is not converted: at the top level,
+  // `Assign(Subscript(n, 0), 3)` is a term of a sequence definition on the
+  // list `n`, which evaluates to `Nothing` and does not change `n`. The
+  // target `At(n, 0)` reads as the definition of a function `At`, with the
+  // error `expected-a-symbol` for its parameter `0`, which the user sees.
+  const binderTarget =
+    symbol(lhs) === null ? (parser._binderSymbol?.(lhs) ?? null) : null;
+  if (binderTarget !== null) {
+    if (isLocalBindingContext) lhs = binderTarget;
+    else {
+      const start = parser.index;
+      const local = parseAssignStatement(parser, binderTarget, until);
+      const end = parser.index;
+      parser.skipSpace();
+      const firstOfBlock = parser.peek === ';';
+      parser.index = end;
+      if (local !== null && firstOfBlock) return local;
+      parser.index = start;
+    }
+  }
+
   //
   // 0/ Compound symbols: "r_1" or "a_n"
   // If the base is a known indexed collection, decompose back to Subscript
@@ -6142,6 +6187,12 @@ function parseAssignStatement(
     let args: MathJsonExpression[] = [];
     if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
+    // A parameter spelled as a subscript on an indexed collection (`n_{0}`
+    // when `n` is a list) is the new name `n_0`: the body is read with it
+    // declared.
+    args = args.map((arg) =>
+      symbol(arg) === null ? (parser._binderSymbol?.(arg) ?? arg) : arg
+    );
 
     const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
     if (rhs === null) return null;
@@ -6209,7 +6260,11 @@ function parseAssignStatement(
     if (fn === 'Subscript' || fn === 'Superscript') {
       // We have f_n := or f^n := ...
     }
-    const args = operands(lhs);
+    // A parameter spelled as a subscript on an indexed collection is the
+    // joined name, as in the `f(x,y) := ...` form above.
+    const args = operands(lhs).map((arg) =>
+      symbol(arg) === null ? (parser._binderSymbol?.(arg) ?? arg) : arg
+    );
     const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
     if (rhs === null) return null;
 
@@ -6275,7 +6330,10 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
   // `\coloneq` row declares a local and a `let` row is spliced in (see
   // `buildBlockFromSequence()`).
   if (rows.length >= 2 && rows.every((row) => row.length === 1))
-    return buildBlockFromSequence(rows.map((row) => row[0]));
+    return buildBlockFromSequence(
+      rows.map((row) => row[0]),
+      parser
+    );
 
   //
   // 3/ It's a "Which" expression
@@ -6625,7 +6683,11 @@ function parseForExpression(
     minPrec: 0,
     condition: STOP_AT_FROM,
   });
-  const index = indexExpr ? symbol(indexExpr) : null;
+  // An index spelled as a subscript on an indexed collection (`n_{0}` when
+  // `n` is a list) is the new name `n_0`, also in the body.
+  const index = indexExpr
+    ? (parser._binderSymbol?.(indexExpr) ?? symbol(indexExpr))
+    : null;
   if (!index) return null;
 
   // Consume "from"
@@ -6652,7 +6714,8 @@ function parseForExpression(
   if (!matchKeyword(parser, 'do')) return null;
 
   // Parse body — use outer terminator
-  const body = parser.parseExpression(until) ?? 'Nothing';
+  let body = parser.parseExpression(until) ?? 'Nothing';
+  body = parser._rebindSubscripts?.(body, new Set([index])) ?? body;
 
   return [
     'Loop',
@@ -6714,24 +6777,37 @@ function parseForComprehension(
   };
 
   const elements: MathJsonExpression[] = [];
+  // The variables that are spelled as a subscript on an indexed collection
+  // (`n_{0}` when `n` is a list): each is a new name (`n_0`), in its
+  // binding, in the bindings after it and in the body.
+  const names = new Set<string>();
   do {
     parser.skipVisualSpace();
-    const binding = parser.parseExpression(bindingTerminator);
+    let binding = parser.parseExpression(bindingTerminator);
     if (binding === null) break;
 
     // Binding must be `Equal(name, expr)` or `Assign(name, expr)`.
     const op = operator(binding);
     if (op !== 'Equal' && op !== 'Assign') return null;
 
-    const name = operand(binding, 1);
+    binding = parser._rebindSubscripts?.(binding, names) ?? binding;
+    let name = operand(binding, 1);
     const list = operand(binding, 2);
     if (!name || !list) return null;
+    if (symbol(name) === null) {
+      const joined = parser._binderSymbol?.(name) ?? null;
+      if (joined !== null) {
+        name = joined;
+        names.add(joined);
+      }
+    }
 
     elements.push(['Element', name, list] as MathJsonExpression);
     parser.skipVisualSpace();
   } while (parser.match(','));
 
   if (elements.length === 0) return null;
+  lhs = parser._rebindSubscripts?.(lhs, names) ?? lhs;
   return ['Comprehension', lhs, ...elements] as MathJsonExpression;
 }
 
@@ -6832,6 +6908,25 @@ function parseWhereExpression(
 
   if (bindings.length === 0) return null;
 
+  // The Declare+Assign statements of the bindings. A local spelled as a
+  // subscript on an indexed collection (`n_{0}` when `n` is a list) is a new
+  // name (`n_0`): its occurrences after its `Declare`, in the bindings and
+  // in the body, are that name, not the element `At(n, 0)`.
+  const statements: MathJsonExpression[] = [];
+  const locals = new Set<string>();
+  for (const b of bindings) {
+    for (let statement of bindingStatements(b)) {
+      statement = parser._rebindSubscripts?.(statement, locals) ?? statement;
+      const local =
+        operator(statement) === 'Declare'
+          ? symbol(operand(statement, 1))
+          : null;
+      if (local !== null) locals.add(local);
+      statements.push(statement);
+    }
+  }
+  lhs = parser._rebindSubscripts?.(lhs, locals) ?? lhs;
+
   // Lookahead for trailing \operatorname{for}. If present, consume the
   // for-clause and wrap the resulting Loop in the Block carrying the
   // where-clause bindings. This produces the canonical Block-outermost
@@ -6842,10 +6937,11 @@ function parseWhereExpression(
     const loop = parseForComprehension(parser, lhs, until);
     if (loop) {
       // Build Block: Declare+Assign for each binding, Loop last as body.
-      const block: MathJsonExpression[] = [];
-      for (const b of bindings) block.push(...bindingStatements(b));
-      block.push(loop);
-      return ['Block', ...block] as MathJsonExpression;
+      return [
+        'Block',
+        ...statements,
+        parser._rebindSubscripts?.(loop, locals) ?? loop,
+      ] as MathJsonExpression;
     }
     // parseForComprehension failed mid-stream. Restore index and fall
     // through to the plain Block path.
@@ -6853,10 +6949,7 @@ function parseWhereExpression(
   }
 
   // Build Block: Declare+Assign for each binding, body (lhs) last
-  const block: MathJsonExpression[] = [];
-  for (const b of bindings) block.push(...bindingStatements(b));
-  block.push(lhs); // body is last in Block
-  return ['Block', ...block] as MathJsonExpression;
+  return ['Block', ...statements, lhs] as MathJsonExpression;
 }
 
 /**
@@ -6880,12 +6973,20 @@ function bindingStatements(b: MathJsonExpression): MathJsonExpression[] {
  * outside the block when there is one (the `Block` serializer writes a bare
  * `Assign` that way).
  */
-function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
+function buildBlockFromSequence(
+  seq: MathJsonExpression[],
+  parser: Parser
+): MathJsonExpression {
   const block: MathJsonExpression[] = [];
   // The names this block has declared: a later `\coloneq` of one of them
   // assigns the local (`let s; s \coloneq 2`, `x \coloneq 1; x \coloneq
-  // x+1`), it does not declare it a second time.
+  // x+1`), it does not declare it a second time. A local spelled as a
+  // subscript on an indexed collection (`n_{0}` when `n` is a list) is a
+  // new name (`n_0`), also in the statements after it, where it is read
+  // first as the element `At(n, 0)`.
   const declared = new Set<string>();
+  const rebind = (e: MathJsonExpression) =>
+    parser._rebindSubscripts?.(e, declared) ?? e;
   for (const s of seq) {
     if (isLetStatement(s)) {
       for (const statement of operands(undecorated(s))) {
@@ -6894,7 +6995,7 @@ function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
             ? symbol(operand(statement, 1))
             : null;
         if (name !== null) declared.add(name);
-        block.push(statement);
+        block.push(rebind(statement));
       }
       continue;
     }
@@ -6912,7 +7013,7 @@ function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
       block.push(['Declare', name]);
       declared.add(name);
     }
-    block.push(normalized);
+    block.push(rebind(normalized));
   }
   return ['Block', ...block] as MathJsonExpression;
 }

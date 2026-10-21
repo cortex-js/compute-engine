@@ -160,6 +160,18 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   position (comprehension variable, `Sum`/`Product` index, `with` local)
   keep a subscripted name whole, whatever its base is declared as. Tycho
   renames such binders before the parse as a workaround (`art/lrfx01y3cv`).
+- **410: FIXED 2026-10-20 on the main tree (uncommitted, dual-reviewed, 8
+  findings applied; CHANGELOG "Bug Fixes"; test
+  `test/compute-engine/tycho-row-410-binder-subscript.test.ts`).** Two
+  residues of the same defect stay open, decision needed: (a) a `cases`
+  block (`\\begin{cases} n_{0}\\coloneq 3\\\\ n_{0}+1\\end{cases}`) still reads
+  its first row's target as `At(n, 0)`, because the first row is read before
+  the parser knows it is a local-binding context (the `;` block gets a second
+  reading when the next token is `;`; `buildBlockFromSequence()` would need
+  a stored second reading of each row); (b) a set-builder whose variable
+  appears only in the condition (`\\{2n_{0} \\mid n_{0}\\in\\Z\\}`) still reads
+  `At(n, 0)`; the fix covers a variable named in the body or in a body
+  `x \\in S`.
 - **411 — on `interval-js`, an ordered comparison with an operand that is
   undefined over the whole interval answers `maybe`.** `0 < \sqrt{x}` at
   the point interval [-1, -1] gives `"maybe"`; the `javascript` target gives
@@ -180,6 +192,50 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   (rename the index, or substitute the argument before the body is
   inlined). The fix of 2026-10-20 (`928a5c29c`, `D` follows its variable's
   name into a called body) is where the capture happens.
+- **412, found while fixing it (2026-10-20): the EVALUATION of `Integrate`
+  and `Limit` captures the same way.** With `k: real` assigned 2 and `g := a
+  ↦ a k x`: `\\int_0^1 g(k)\\,dk` evaluates to `x/3` (the body's slider `k`
+  read as the integration variable; with the variable `t` it is `x`), the
+  indefinite `\\int g(k)\\,dk` mixes the two (`-x k³/6 + k x k²/2`), and
+  `\\lim_{k \\to 1} g(k)` is `x` (expected `2x`; `k x` when `k` has no
+  value). The 2026-09-21 decision says an index never reads a global inside
+  a called function. `Sum` and `Product` do not capture (they call `g`
+  instead of expanding its body). Also seen: with `g` DECLARED as a function
+  first, `\\int_0^1 g(t)\\,dt` stays unevaluated for every variable name.
+- **Found 2026-10-20 while fixing row 410 (not a Tycho row): an integral
+  with no differential whose integrand is a sum parses to garbage.**
+  `\\int \\sin x + 1` and `\\int x^2 + 1` parse to
+  `Add(Integrate(Add(), Nothing), Sin(x), 1)`: in `parseIntegral()`
+  (`latex-syntax/dictionary/definitions-calculus.ts`, the `Add` branch) the
+  test `if (indexes) rest.push(op)` checks an array, which is always true, so
+  every term goes to `rest` and `parseSubintegrand()` never runs. FIXED
+  2026-10-20 on the main tree (uncommitted, dual-reviewed, 8 findings
+  applied; CHANGELOG "Bug Fixes"). Two pre-existing parser items found by the
+  fix, not fixed, need a decision: (a) `\\int dx` and `\\int (dx)` parse to an
+  `unexpected-command` error instead of `Integrate(1, x)`; (b) with
+  `diagnostics: true`, the `d` of a differential inside a fraction
+  (`\\int \\frac{dx}{x}`) is reported as an undeclared symbol `d`, because the
+  pruning of the dummy variable does not know the `d` token; pruning every
+  `d` in the integrand span would hide a real free variable named `d`.
+- **412, the `Integrate`/`Limit` evaluation capture: FIXED 2026-10-20 on the
+  main tree (uncommitted, dual-reviewed, 8 findings applied; CHANGELOG "Bug
+  Fixes"; test `test/compute-engine/integrate-limit-user-function-capture.test.ts`).
+  The derivative capture of row 412 itself is FIXED the same way
+  (`derivative.ts`, `renameCapturedIndexes()`, dual-reviewed, 5 findings
+  applied). Found with the evaluation fix, not fixed: (a) `Solve(g(k) = 1, k)` with `g := a ↦ a − k` (the body reads a
+  global named like the unknown) gave `[]` ("no solution"); it now stays
+  unsolved, which is a decline, where the answer is `[3]` with `k := 3`
+  (`[k + 1]` symbolically). A rename of the unknown as `Integrate` now does
+  is needed in `evaluateSolve()` (`boxed-expression/solve-domain.ts`), over
+  its spec, domain and system shapes. (b) Separate: `Solve(t x = 1, t)` stays
+  unevaluated when `t` and `x` are both declared `real` (also as
+  `t \\cdot x`); in a fresh engine with nothing declared it gives `[1/x]`.
+  (c) Separate, no user function involved: with `k := 2`, `\\int_0^k k\\,dk`
+  gives `k²/2` where `\\int_0^k t\\,dt` gives `2`. The canonical form binds the
+  bound of a variable's own limit to the integration variable, and the
+  integration-variable shield then keeps it symbolic; the bound should read
+  the enclosing binding (here the global `k`), as the fixed `Integrate`
+  rename now does for a called function's body.
 - **413 — a piecewise whose condition compares an undefined value gives no
   value; Desmos takes the else branch.** `\{0/0 > 0: 1, 0\}` is
   `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and

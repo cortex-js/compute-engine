@@ -488,6 +488,34 @@ const COMPARISON_HEADS = new Set<string>([
 ]);
 
 /**
+ * The set-builder `["Set", body, ["Condition", condition]]` of
+ * `{body \mid condition}` or `{body : condition}`.
+ *
+ * The variable of the set-builder is the body (`{x \mid x > 0}`), or the
+ * left operand of a body `x \in S`. A variable spelled as a subscript on an
+ * indexed collection (`n_{0}` when `n` is a list, read as `At(n, 0)`) is the
+ * new name `n_0`, in the body and in the condition, as when `n` is not
+ * declared (see `Parser._binderSymbol()`).
+ */
+function setBuilder(
+  parser: Parser,
+  body: MathJsonExpression,
+  condition: MathJsonExpression
+): MathJsonExpression {
+  const names = new Set<string>();
+  for (const v of [
+    body,
+    operator(body) === 'Element' ? operand(body, 1) : null,
+  ]) {
+    const name = parser._binderSymbol?.(v) ?? null;
+    if (name !== null) names.add(name);
+  }
+  const rebind = (e: MathJsonExpression) =>
+    parser._rebindSubscripts?.(e, names) ?? e;
+  return ['Set', rebind(body), ['Condition', rebind(condition)]];
+}
+
+/**
  * Is `expr` one of the blackboard-bold ring constants (`Integers`,
  * `RationalNumbers`, ...)?
  *
@@ -1207,7 +1235,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         const expr = operand(body, 1);
         const condition = operand(body, 2);
         if (expr !== null && condition !== null)
-          return ['Set', expr, ['Condition', condition]];
+          return setBuilder(parser, expr, condition);
       }
 
       // A single Colon at top level could be:
@@ -1224,7 +1252,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
             return ['Which', lhs, rhs];
           }
           // Set-builder form: {x : cond}
-          return ['Set', lhs, ['Condition', rhs]];
+          return setBuilder(parser, lhs, rhs);
         }
       }
 
@@ -1299,16 +1327,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
             !(builderBodyOp !== null && COMPARISON_HEADS.has(builderBodyOp))
           ) {
             const conditions = [cond, ...elements.slice(1)];
-            return [
-              'Set',
+            return setBuilder(
+              parser,
               builderBody,
-              [
-                'Condition',
-                conditions.length === 1
-                  ? conditions[0]
-                  : ['And', ...conditions],
-              ],
-            ];
+              conditions.length === 1 ? conditions[0] : ['And', ...conditions]
+            );
           }
         }
         // An ellipsis element sequence (`{1, \dots, 9}`, `{0, 2, \dots, 10}`)

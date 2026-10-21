@@ -371,16 +371,16 @@ function reduceTransformerHeads(expr: Expression): Expression {
 function betaReduceLambda(call: Expression): Expression | undefined {
   if (!isFunction(call)) return undefined;
 
-  const def = call.operatorDefinition as
-    | (BoxedOperatorDefinition & {
-        _isLambda?: boolean;
-        _lambdaLiteral?: Expression;
-      })
-    | undefined;
-  if (!def?._isLambda) return undefined;
-
-  const literal = def._lambdaLiteral;
+  const literal = userFunctionLiteral(call);
   if (!literal || !isFunction(literal, 'Function')) return undefined;
+
+  // A recursive definition (`r(x) := r(x − 1) + 1`) is not inlined: each
+  // inlined body holds a new call, and the inlined expression grows until
+  // the budget of `inlineLambdaApplications()` is spent (an integral of
+  // `r(3)` ran for 11 s and ended with a stack overflow). The call stays
+  // opaque, and the algorithm that holds it evaluates it, which stops at the
+  // recursion limit with an error.
+  if (callsFunction(literal.op1, call.operator)) return undefined;
 
   // `Function(body, param₁, …)`. Decline on an arity mismatch: that is the
   // broadcast/partial-application path, which has its own semantics.
@@ -404,6 +404,11 @@ function betaReduceLambda(call: Expression): Expression | undefined {
     if (body.nops !== 1) return undefined;
     body = body.op1;
   }
+  // A declared result type (`g: (real) -> real`) wraps the value of the body
+  // in `Typed(value, type)`. The algorithms that inline the body have no rule
+  // for `Typed`: the value is used, as `D` does (`partialFromFunctionLiteral()`
+  // in `symbolic/derivative.ts`).
+  if (isFunction(body, 'Typed')) body = body.op1;
 
   // `subs` is NOT binder-aware (unlike `resolveBoundSymbols` below): it rewrites
   // through inner `Function`/`Block`/`Sum`/… binders blindly. Inlining is only
@@ -421,6 +426,107 @@ function betaReduceLambda(call: Expression): Expression | undefined {
   }
 
   return body.subs(substitution);
+}
+
+/**
+ * The `Function` literal that `call` applies when `call` is a call of a user
+ * function defined by a function literal, or `undefined` otherwise.
+ *
+ * Two definition shapes hold such a literal, and a call evaluates the same
+ * way for both. A name assigned a function literal with no declaration
+ * before (`g := a ↦ a·x`) has an operator definition that keeps the literal
+ * (`_lambdaLiteral`). A name declared with a function type and then
+ * assigned (`g: (real) -> real`, then `g := a ↦ a·x`) has a value
+ * definition whose value is the literal. The value is read as the
+ * evaluation of the call reads it (`calleeValue()` in `boxed-function.ts`):
+ * the stored value of a constant, the current value of a variable.
+ */
+function userFunctionLiteral(call: Expression): Expression | undefined {
+  if (!isFunction(call)) return undefined;
+  const def = call.operatorDefinition as
+    | (BoxedOperatorDefinition & {
+        _isLambda?: boolean;
+        _lambdaLiteral?: Expression;
+      })
+    | undefined;
+  if (def !== undefined) return def._isLambda ? def._lambdaLiteral : undefined;
+  const valueDef = call.valueDefinition;
+  if (valueDef === undefined) return undefined;
+  const value = valueDef.isConstant
+    ? valueDef.value
+    : call.engine._getSymbolValue(call.operator);
+  return isFunction(value, 'Function') ? value : undefined;
+}
+
+/**
+ * Whether `expr` can call the function `name`: it has a call of `name` or
+ * the symbol `name` (a function passed as an argument), or it calls a user
+ * function whose body can call `name`, at any depth (`f` calls `g`, which
+ * calls `f`). The body of each user function is walked once.
+ */
+function callsFunction(expr: Expression, name: string): boolean {
+  const seen = new Set<Expression>();
+  const pending: Expression[] = [expr];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (isSymbol(e)) {
+      if (e.symbol === name) return true;
+      continue;
+    }
+    if (!isFunction(e) || seen.has(e)) continue;
+    seen.add(e);
+    if (e.operator === name) return true;
+    // A store-backed list holds numbers only, and reading its `ops` would box
+    // every element.
+    if (e._numericStore === undefined) pending.push(...e.ops);
+    const literal = userFunctionLiteral(e);
+    if (literal !== undefined && isFunction(literal)) pending.push(literal.op1);
+  }
+  return false;
+}
+
+/**
+ * The names that the bodies of the user functions called in `expr` read as
+ * free symbols, with the names read by the user functions that these bodies
+ * call, at any depth. These are the user functions that
+ * `reduceTransformerHead()` inlines (`userFunctionLiteral()`).
+ *
+ * A free symbol of a body denotes the binding that the body was written
+ * against, usually a global. When an operator that binds a variable (the
+ * variable of `Integrate` or `Limit`) inlines the body of a called function,
+ * a free symbol of the body with the name of the variable becomes the
+ * variable, because the algorithms of these operators select the variable
+ * by its name. With `k := 2` and `g := a ↦ a·k·x`, the inlined body of
+ * `g(k)` is `k·k·x`, and `∫₀¹ g(k) dk` was `x/3` instead of `x`. A caller
+ * that finds the name of its variable in this set renames its variable
+ * before it inlines a body.
+ *
+ * The names are found by `freeSymbolNames()`, which counts a name that a
+ * `Block` or a `Sum` in the body binds as free: the set can hold a name that
+ * the body does not read, never the reverse.
+ */
+export function namesReadByCalledFunctions(expr: Expression): Set<string> {
+  const names = new Set<string>();
+  const seen = new Set<Expression>();
+  // A subtree reached through several operands (a shared node) is walked
+  // once: without this, the walk is exponential in the depth of such
+  // sharing, and it runs on every evaluation of `Integrate`, `Limit` and
+  // `Solve`.
+  const visited = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (!isFunction(node) || visited.has(node)) return;
+    visited.add(node);
+    const literal = userFunctionLiteral(node);
+    if (literal !== undefined && !seen.has(literal)) {
+      seen.add(literal);
+      freeSymbolNames(literal, names);
+      if (isFunction(literal)) visit(literal.op1);
+    }
+    // A store-backed list holds numbers only, so it calls no function.
+    if (node._numericStore === undefined) for (const op of node.ops) visit(op);
+  };
+  visit(expr);
+  return names;
 }
 
 /**

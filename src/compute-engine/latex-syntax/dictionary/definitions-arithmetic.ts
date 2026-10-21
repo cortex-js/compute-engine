@@ -1721,6 +1721,20 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // the marker of `x^2`): the exponent is the order of the variable.
     const denomTerms: ReadonlyArray<MathJsonExpression> =
       operator(denom) === 'PartialDerivative' ? [denom!] : operands(denom);
+    //
+    // A marker keeps a term spelled as a subscript on an indexed collection
+    // as the element access (`At(n, 0)` from `∂n_{0}` when `n` is a list),
+    // because a marker in the numerator gives the differentiand. In the
+    // denominator, the term is a variable: the new name `n_0` (see
+    // `Parser._binderSymbol()`), in an order pair (`["Set", v, n]`, see
+    // `derivativeOrder()`) too.
+    const variable = (v: MathJsonExpression): MathJsonExpression => {
+      if (operator(v) !== 'Set') return parser._binderSymbol?.(v) ?? v;
+      const name = parser._binderSymbol?.(operand(v, 1)) ?? null;
+      return name === null || name === symbol(operand(v, 1))
+        ? v
+        : (['Set', name, ...operands(v).slice(1)] as MathJsonExpression);
+    };
     const vars: MathJsonExpression[] = [];
     for (let i = 0; i < denomTerms.length; i++) {
       const p = denomTerms[i];
@@ -1735,17 +1749,19 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
           order !== null &&
           order !== 'Nothing'
         ) {
-          vars.push(...derivativeOrder(next, order));
+          vars.push(...derivativeOrder(variable(next), order));
           i += 1;
         }
         continue;
       }
       if (operator(arg) === 'Power') {
-        vars.push(...derivativeOrder(operand(arg, 1)!, operand(arg, 2)!));
+        vars.push(
+          ...derivativeOrder(variable(operand(arg, 1)!), operand(arg, 2)!)
+        );
         continue;
       }
       const list = operator(arg) === 'List' ? operands(arg) : [arg];
-      for (const v of list) if (v && v !== 'Nothing') vars.push(v);
+      for (const v of list) if (v && v !== 'Nothing') vars.push(variable(v));
     }
 
     // The denominator decides which variables are differentiated and how many
@@ -1766,7 +1782,18 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     )
       vars.splice(0, 1, ...derivativeOrder(vars[0], markerOrder));
 
-    if (vars.length > 0) return ['D', fn, ...vars] as MathJsonExpression;
+    if (vars.length > 0) {
+      // A variable spelled as a subscript on an indexed collection (`∂n_{0}`
+      // when `n` is a list) is the new name `n_0` (see `variable()` above),
+      // also in the operand
+      const names = new Set<string>();
+      for (const v of vars) {
+        const name = symbol(operator(v) === 'Set' ? operand(v, 1) : v);
+        if (name !== null) names.add(name);
+      }
+      fn = parser._rebindSubscripts?.(fn, names) ?? fn;
+      return ['D', fn, ...vars] as MathJsonExpression;
+    }
   }
 
   // Handle ordinary (Leibniz) derivative notation:
@@ -1848,6 +1875,13 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         vars.push(expr);
         return;
       }
+      // A variable spelled as a subscript on an indexed collection (`n_{0}`
+      // when `n` is a list, read as `At(n, 0)`) is the new name `n_0`
+      const name = parser._binderSymbol?.(expr) ?? null;
+      if (name !== null) {
+        vars.push(name);
+        return;
+      }
       // If it's a sequence or a juxtaposition, inspect the operands. An
       // explicit product (`\mathrm{d}\cdot x`, `Multiply`) is not a
       // differential (see the numerator above).
@@ -1858,7 +1892,12 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         // `dx^n`: the differentiation variable is the base of the power; the
         // exponent restates the degree already carried by the numerator.
         const base = operand(expr, 1);
-        if (base && !isDiffSym(symbol(base))) vars.push(base);
+        if (base && !isDiffSym(symbol(base)))
+          vars.push(
+            symbol(base) === null
+              ? (parser._binderSymbol?.(base) ?? base)
+              : base
+          );
       }
     };
 
@@ -1903,7 +1942,15 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     if (vars.length > 0) {
       // The function being differentiated is either folded into the numerator
       // (`\frac{d^n f}{dx^n}`) or follows the fraction (`\frac{d^n}{dx^n} f`).
-      const fn = numerFn ?? parseDerivativeOperand(parser);
+      let fn = numerFn ?? parseDerivativeOperand(parser);
+      // The occurrences of a variable spelled as a subscript on an indexed
+      // collection are that variable (see `collectVars()` above)
+      const names = new Set<string>();
+      for (const v of vars) {
+        const name = symbol(operator(v) === 'Set' ? operand(v, 1) : v);
+        if (name !== null) names.add(name);
+      }
+      fn = parser._rebindSubscripts?.(fn, names) ?? fn;
       // Build the nested `D` form, e.g. `D(D(f, x), x)` for a second
       // derivative. This matches the Lagrange (`f''(x)`) parse and the `D`
       // serializer, which recovers the order by counting nested `D`s (a flat
@@ -3889,7 +3936,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         condition: (p) => endsTabularCell(p.peek),
       });
       if (!expr) return null;
-      const limitVar = symbol(operand(base, 1));
+      // A variable spelled as a subscript on an indexed collection (`n_{0}`
+      // when `n` is a list) is the new name `n_0`, also in the body.
+      const limitVar =
+        parser._binderSymbol?.(operand(base, 1)) ?? symbol(operand(base, 1));
       // Prune the limit variable in the `_{x \to …}` clause (its declaration)
       // and the body; a same-named free reference elsewhere would stay flagged.
       if (limitVar)
@@ -3911,7 +3961,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // the marker of the last term onto the whole point. Only the limit point
       // is read this way: elsewhere, `1^+` keeps its meaning.
       const [point, direction] = liftDirectionMarker(operand(base, 2));
-      const fn = ['Function', expr, operand(base, 1)] as MathJsonExpression;
+      const fn = (
+        limitVar !== null && symbol(operand(base, 1)) === null
+          ? [
+              'Function',
+              parser._rebindSubscripts?.(expr, new Set([limitVar])) ?? expr,
+              limitVar,
+            ]
+          : ['Function', expr, operand(base, 1)]
+      ) as MathJsonExpression;
       if (direction === undefined)
         return ['Limit', fn, point] as MathJsonExpression;
       return ['Limit', fn, point, direction] as MathJsonExpression;
@@ -4605,10 +4663,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
  * Expect an expression of the form ['Equal', index, lower] or
  * ['Equal', index, ['Range', lower, upper]]
  *
+ * `binderName` gives the name of the index from the expression read in the
+ * index position (see `Parser._binderSymbol()`).
  */
 function getIndexAssignment(
   expr: MathJsonExpression | null,
-  upper?: MathJsonExpression | undefined
+  upper: MathJsonExpression | undefined,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ):
   | {
       index: string;
@@ -4619,7 +4680,7 @@ function getIndexAssignment(
   | undefined {
   if (expr === null) return undefined;
   // We only have a symbol, e.g. `i`
-  if (symbol(expr)) return { index: symbol(expr) ?? 'Nothing', upper };
+  if (binderName(expr)) return { index: binderName(expr) ?? 'Nothing', upper };
 
   // A bare numeric subscript, e.g. `\sum_1^9`: a bounds pair with no index
   // symbol. Preserve it (`Limits(Nothing, 1, 9)`) rather than silently
@@ -4628,7 +4689,7 @@ function getIndexAssignment(
 
   // We have `i>=1` in the subscript
   if (operator(expr) === 'GreaterEqual') {
-    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    const index = binderName(operand(expr, 1)) ?? 'Nothing';
     const lower = operand(expr, 2) ?? 1;
     return { index, lower, upper };
   }
@@ -4643,22 +4704,22 @@ function getIndexAssignment(
     const ops = operands(expr) ?? [];
     if (ops.length === 3) {
       // lower \le index \le upper
-      const index = symbol(ops[1]) ?? 'Nothing';
+      const index = binderName(ops[1]) ?? 'Nothing';
       return { index, lower: ops[0], upper: ops[2] };
     }
     if (ops.length === 2) {
       // `index \le upper` (symbol on the left) or `lower \le index`
       // `i \le upper` implies a lower bound of 1.
-      if (symbol(ops[0]))
-        return { index: symbol(ops[0])!, lower: 1, upper: ops[1] };
-      if (symbol(ops[1]))
-        return { index: symbol(ops[1])!, lower: ops[0], upper };
+      if (binderName(ops[0]))
+        return { index: binderName(ops[0])!, lower: 1, upper: ops[1] };
+      if (binderName(ops[1]))
+        return { index: binderName(ops[1])!, lower: ops[0], upper };
     }
   }
 
   // We have `i=1` or `i=1..10` in the subscript
   if (operator(expr) === 'Equal') {
-    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    const index = binderName(operand(expr, 1)) ?? 'Nothing';
     // We have i=1..10
     const rhs = operand(expr, 2);
     if (operator(rhs) === 'Range') {
@@ -4676,7 +4737,7 @@ function getIndexAssignment(
   // Handle Element expressions: ["Element", "n", "N"]
   // e.g., `n \in N` in the subscript
   if (operator(expr) === 'Element') {
-    const index = symbol(operand(expr, 1)) ?? 'Nothing';
+    const index = binderName(operand(expr, 1)) ?? 'Nothing';
     return { index, element: expr };
   }
 
@@ -4731,7 +4792,10 @@ function getSequenceOrTuple(
 
 function getIndexes(
   sub: MathJsonExpression | null,
-  sup: MathJsonExpression | null
+  sup: MathJsonExpression | null,
+  binderName: (
+    expr: MathJsonExpression | null | undefined
+  ) => string | null = symbol
 ): {
   index: string;
   lower?: MathJsonExpression;
@@ -4763,7 +4827,7 @@ function getIndexes(
   let i = 0;
   while (i < subs.length) {
     const subExpr = subs[i];
-    const assignment = getIndexAssignment(subExpr, sups[i]);
+    const assignment = getIndexAssignment(subExpr, sups[i], binderName);
 
     if (assignment) {
       // EL-3: Check if this is an Element expression and the next item is a condition
@@ -4879,7 +4943,23 @@ function parseBigOp(name: string, minPrec: number) {
       return null;
     }
 
-    const indexes = getIndexes(sub, sup);
+    // An index is a new name, also when it is spelled as a subscript on an
+    // indexed collection: with `n` a list, `\sum_{n_{0}=1}^{3}n_{0}` is a
+    // sum over the index `n_0`, and the `n_{0}` of the body is that index,
+    // not the element `At(n, 0)`.
+    const indexes = getIndexes(
+      sub,
+      sup,
+      (expr) => parser._binderSymbol?.(expr) ?? symbol(expr)
+    );
+    const indexNames = boundVariableNames(indexes);
+    for (const indexingSet of indexes)
+      if (indexingSet.element)
+        indexingSet.element =
+          parser._rebindSubscripts?.(
+            indexingSet.element,
+            new Set([indexingSet.index])
+          ) ?? indexingSet.element;
 
     //
     // Parse the body of the function
@@ -4887,7 +4967,8 @@ function parseBigOp(name: string, minPrec: number) {
     //
 
     const bodyStartToken = parser.index;
-    const fn = parser.parseExpression(body);
+    let fn = parser.parseExpression(body);
+    if (fn !== null) fn = parser._rebindSubscripts?.(fn, indexNames) ?? fn;
 
     parser.popSymbolTable();
 

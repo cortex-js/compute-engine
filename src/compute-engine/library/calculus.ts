@@ -1,10 +1,12 @@
 import { deriveApplicationOf } from '../boxed-expression/operand-descriptor.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
+  BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
   PureEngineView,
+  Scope,
   SymbolDefinitions,
   TypeHandlerContext,
 } from '../global-types.js';
@@ -22,6 +24,7 @@ import {
   hasSymbolicTranscendental,
   resolveToList,
   collectBinderNames,
+  namesReadByCalledFunctions,
   withValueShield,
   isOperatorDef,
   isValueDef,
@@ -42,7 +45,12 @@ import {
   limitsIndexSites,
 } from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
-import { boundVariableNamesInOperand } from '../boxed-expression/binders.js';
+import {
+  boundVariableBindings,
+  boundVariableNamesInOperand,
+  rewriteWithBinders,
+  sameBindingDef,
+} from '../boxed-expression/binders.js';
 
 import {
   applicable,
@@ -2356,6 +2364,102 @@ function transitiveUnknowns(
 const NO_BOUND_NAMES: ReadonlySet<string> = new Set<string>();
 
 /**
+ * `body` with each of the `variables` that a called user function captures
+ * renamed to a fresh name, or `undefined` when no variable is captured.
+ *
+ * `body` is the integrand of an `Integrate` or the body of a `Limit`, lifted
+ * out of its function literal (`liftIntegrand()`), and `variables` are the
+ * names that the operator binds. A variable is captured when the body of a
+ * user function called in `body` reads a free symbol with the same name
+ * (`namesReadByCalledFunctions()`). These operators inline the body of the
+ * called function and then select the variable by its name, so the symbol
+ * of the body became the variable. With `k := 2` and `g := a ↦ a·k·x`,
+ * `∫₀¹ g(k) dk` was `x/3` and `lim_{k→1} g(k)` was `x`. A variable never
+ * reads a symbol inside a called function, whether or not the symbol has a
+ * value (`docs/SCOPING-MODEL.md`, decision of 2026-09-21), so the answers
+ * are those of `∫₀¹ g(t) dt` and `lim_{t→1} g(t)`: `x` and `2x`. In the
+ * renamed body, `g(k_1)`, the variable and the symbol of `g` have different
+ * names.
+ *
+ * The fresh name is not a name of `body` or of `operands` (all the operands
+ * of the operator: the bounds of the integral, the point and the direction
+ * of the limit), nor a name that a called function reads, so the renamed
+ * body captures nothing and a bound that names a symbol `k_1` keeps that
+ * symbol. It is also not a name that is declared in a scope that is visible
+ * here, with or without a value: a fresh name that is the name of a symbol
+ * of the user would merge the variable with that symbol in a result that
+ * keeps the fresh name. An occurrence of a variable that a binder inside
+ * `body` binds again keeps its name.
+ *
+ * Each fresh variable is declared in `scope`, with the type of the variable
+ * that it replaces (read from `bindings`, the bindings of the operator or of
+ * its function literal), and the renamed occurrences are the binding
+ * symbols of this scope. The caller builds the renamed operator on `scope`,
+ * from boxed operands, so that every other symbol keeps its binding.
+ */
+function renameCapturedVariables(
+  ce: ComputeEngine,
+  body: Expression,
+  variables: ReadonlyArray<string>,
+  operands: ReadonlyArray<Expression>,
+  bindings: ReadonlyMap<string, BoxedValueDefinition | null> | undefined,
+  scope: Scope
+):
+  | {
+      body: Expression;
+      renamed: ReadonlyMap<string, string>;
+      fresh: ReadonlyMap<string, Expression>;
+    }
+  | undefined {
+  // A body that `liftIntegrand()` could not lift is still a function literal,
+  // which binds the variables itself: its occurrences cannot be renamed here.
+  if (isFunction(body, 'Function')) return undefined;
+  const read = namesReadByCalledFunctions(body);
+  const captured = variables.filter((v) => read.has(v));
+  if (captured.length === 0) return undefined;
+  const used = new Set<string>([
+    ...read,
+    ...variables,
+    ...body.symbols,
+    ...collectBinderNames(body),
+  ]);
+  for (const op of operands) {
+    for (const name of op.symbols) used.add(name);
+    for (const name of collectBinderNames(op)) used.add(name);
+  }
+  const renamed = new Map<string, string>();
+  const fresh = new Map<string, Expression>();
+  for (const name of captured) {
+    let i = 1;
+    while (
+      used.has(`${name}_${i}`) ||
+      ce.lookupDefinition(`${name}_${i}`) !== undefined
+    )
+      i += 1;
+    const id = `${name}_${i}`;
+    used.add(id);
+    const binding = bindings?.get(name) ?? undefined;
+    ce._inScope(scope, () =>
+      ce.declare(id, {
+        type: binding?.type ?? 'unknown',
+        inferred: binding?.inferredType ?? true,
+      })
+    );
+    const symbol = ce._bindingSymbol(id, scope);
+    if (symbol === undefined) return undefined;
+    renamed.set(name, id);
+    fresh.set(name, symbol);
+  }
+  return {
+    body: rewriteWithBinders(body, (s, shadowed) =>
+      fresh.has(s.symbol) && !shadowed?.has(s.symbol) ? fresh.get(s.symbol)! : s
+    ),
+    renamed,
+    fresh,
+  };
+}
+
+/**
  * Find the calls in `expr` of a user function that has the name of a library
  * function (`Sin`, `Exp`, `Ln`, …). `names` holds the library names that a
  * user definition in the current scope chain shadows
@@ -4574,7 +4678,7 @@ volumes
         return ce._fn('Integrate', [f, ...limits]);
       },
 
-      evaluate: (ops, { engine: ce, numericApproximation }) => {
+      evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
         // A limit with only one bound (`\int^2 f\,dy`, `\int_0 f\,dy`,
         // `Limits(y, Nothing, 2)`): the integral is neither indefinite nor
         // definite, and no default is chosen for the missing bound. The
@@ -4585,6 +4689,151 @@ volumes
           if (!isFunction(l, 'Limits')) continue;
           if ((sym(l.op2) === 'Nothing') !== (sym(l.op3) === 'Nothing'))
             return undefined;
+        }
+
+        // A user function called in the integrand reads a symbol with the
+        // name of an integration variable: `∫₀¹ g(k) dk` with
+        // `g := a ↦ a·k·x`. The integral of the integrand with this variable
+        // renamed is computed instead (see `renameCapturedVariables`). The
+        // bounds of the limit of a variable, and of the limits before it, are
+        // outside the scope of the variable and keep their symbols:
+        // `Σ_{k=1}^{2} ∫₀^k g(k) dk` integrates up to the index of the sum.
+        // The bounds of a later limit are in the scope of the variable
+        // (`Integrate(f, Limits(k, 0, 1), Limits(y, 0, k))`), and the
+        // variable is renamed in them too.
+        //
+        // An indefinite integral gives a function of the fresh name, which is
+        // renamed back when the result has no other symbol with the name of
+        // the variable: with `k := 2`, `∫ g(k) dk` is `x·k²`. When the result
+        // has such a symbol (`k` with no value: `½·k·x·k_1²`), the fresh name
+        // stays. That result is correct: the `k` of `g` and the variable are
+        // different symbols, and with one name they could not be told apart.
+        // The variable of a definite integral is not in its value, and is
+        // never renamed back.
+        {
+          const variables = [
+            ...new Set(
+              ops.slice(1).flatMap((l) => {
+                const v = isFunction(l) ? sym(l.op1) : undefined;
+                return v !== undefined && v !== 'Nothing' ? [v] : [];
+              })
+            ),
+          ];
+          // The canonical integrand is a function literal whose parameters
+          // are the integration variables. A literal with other parameters
+          // binds names of its own and is not renamed.
+          const params = isFunction(ops[0], 'Function')
+            ? ops[0].ops.slice(1).map((p) => sym(p))
+            : undefined;
+          // The renamed integral is built on a new scope whose parent is the
+          // parent of the scope of this integral, so that the names that it
+          // reads from an enclosing binder resolve as they did.
+          const bindings =
+            expression !== undefined
+              ? boundVariableBindings(expression)
+              : undefined;
+          const scope: Scope = {
+            parent: expression?.localScope?.parent ?? ce.context.lexicalScope,
+            bindings: new Map(),
+          };
+          const r =
+            params === undefined ||
+            (params.length === variables.length &&
+              params.every((p, i) => p === variables[i]))
+              ? renameCapturedVariables(
+                  ce,
+                  liftIntegrand(ops[0]),
+                  variables,
+                  ops.slice(1),
+                  bindings,
+                  scope
+                )
+              : undefined;
+          if (r !== undefined) {
+            // The symbol that `name` denotes in the scope that encloses the
+            // integral: the binding of an enclosing binder (the index of a
+            // `Sum`, the parameter of a function), or a global.
+            const enclosing = (name: string): Expression => {
+              for (let s = scope.parent; s !== null; s = s.parent) {
+                if (!s.bindings.has(name)) continue;
+                const symbol = ce._bindingSymbol(name, s);
+                if (symbol !== undefined) return symbol;
+                break;
+              }
+              return ce._inScope(scope.parent ?? undefined, () =>
+                ce.symbol(name)
+              );
+            };
+            // The variables of the limits before limit `j` are in scope in
+            // the bounds of limit `j`: their occurrences are renamed. The
+            // canonical form binds an occurrence of the variable of limit `j`
+            // or of a later limit in these bounds to that variable too, but
+            // it denotes the symbol of the enclosing scope
+            // (`Σ_{k=1}^{2} ∫₀^k g(k) dk`), and it is bound to that symbol.
+            // Only an occurrence bound to the variable (or not bound yet) is
+            // changed; a symbol with the same name and another binding keeps
+            // its binding.
+            const renameIn = (
+              e: Expression,
+              outer: ReadonlySet<string>
+            ): Expression =>
+              rewriteWithBinders(e, (s, shadowed) => {
+                if (!r.fresh.has(s.symbol) || shadowed?.has(s.symbol)) return s;
+                const def = s.valueDefinition;
+                if (
+                  def !== undefined &&
+                  !sameBindingDef(def, bindings?.get(s.symbol) ?? undefined)
+                )
+                  return s;
+                return outer.has(s.symbol)
+                  ? r.fresh.get(s.symbol)!
+                  : enclosing(s.symbol);
+              });
+            const outer = new Set<string>();
+            const limits = ops.slice(1).map((l) => {
+              if (!isFunction(l)) return l;
+              const v = sym(l.op1);
+              const variable = v !== undefined ? r.fresh.get(v) : undefined;
+              const bounds = l.ops.slice(1).map((b) => renameIn(b, outer));
+              if (variable !== undefined) outer.add(v!);
+              if (
+                variable === undefined &&
+                bounds.every((b, i) => b === l.ops[i + 1])
+              )
+                return l;
+              return ce.function(l.operator, [variable ?? l.op1, ...bounds]);
+            });
+            const integral = ce.function('Integrate', [r.body, ...limits], {
+              scope,
+            });
+            let value = numericApproximation
+              ? integral.N()
+              : integral.evaluate();
+            if (isFunction(value, 'Integrate')) return undefined;
+            // Only the variable of an indefinite limit (no bounds) can be in
+            // the value. It is renamed back unless the value also reads the
+            // name of the variable, directly or through a call that is not
+            // inlined (`m(k_1)` where the body of `m` reads `k`).
+            for (const [name, fresh] of r.renamed) {
+              const indefinite = ops
+                .slice(1)
+                .some(
+                  (l) =>
+                    isFunction(l) &&
+                    sym(l.op1) === name &&
+                    sym(l.op2) === 'Nothing' &&
+                    sym(l.op3) === 'Nothing'
+                );
+              if (
+                indefinite &&
+                value.has(fresh) &&
+                !value.has(name) &&
+                !namesReadByCalledFunctions(value).has(name)
+              )
+                value = value.subs({ [fresh]: ce.symbol(name) });
+            }
+            return value;
+          }
         }
 
         // An integrand that is the `NaN` or `Indeterminate` literal: the
@@ -6090,6 +6339,44 @@ volumes
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
       },
       evaluate: ([f, x, dir], { engine, numericApproximation }) => {
+        // A user function called in the body reads a symbol with the name of
+        // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
+        // limit of the body with this variable renamed is computed instead
+        // (see `renameCapturedVariables`). The limit point and the direction
+        // are outside the scope of the variable and keep their symbols. The
+        // renamed function literal is built from the boxed body: its
+        // parameter is declared in a scope that is discarded, and the
+        // literal binds it in the scope of its own body.
+        if (isFunction(f, 'Function') && f.nops === 2) {
+          const varName = sym(f.op2);
+          const scope: Scope = {
+            parent: engine.context.lexicalScope,
+            bindings: new Map(),
+          };
+          const r =
+            varName !== undefined
+              ? renameCapturedVariables(
+                  engine,
+                  liftIntegrand(f),
+                  [varName],
+                  dir !== undefined ? [x, dir] : [x],
+                  boundVariableBindings(f.op1),
+                  scope
+                )
+              : undefined;
+          const fresh =
+            varName !== undefined ? r?.fresh.get(varName) : undefined;
+          if (r !== undefined && fresh !== undefined) {
+            const fn = engine.function('Function', [r.body, fresh]);
+            const limit = engine.function(
+              'Limit',
+              dir !== undefined ? [fn, x, dir] : [fn, x]
+            );
+            const value = numericApproximation ? limit.N() : limit.evaluate();
+            return isFunction(value, 'Limit') ? undefined : value;
+          }
+        }
+
         // Symbolic path first: it produces an exact closed form (`sin x/x → 1`,
         // `(3ˣ+5ˣ)^{1/x} → 5`) and is the only path under a non-numeric
         // `evaluate()`. It returns `undefined` when it can't determine the

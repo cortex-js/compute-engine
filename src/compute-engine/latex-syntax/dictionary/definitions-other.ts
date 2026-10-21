@@ -280,11 +280,37 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       }
       if (sub === null || sup === null) return null;
 
+      // A variable spelled as a subscript on an indexed collection (`n_{0}`
+      // when `n` is a list) in a subscript (`∂_{n_{0}}`) is the new name
+      // `n_0`, not the element `At(n, 0)`, also in the operand.
+      const binderName = (v: MathJsonExpression) =>
+        parser._binderSymbol?.(v) ?? v;
+      // The term after a bare `∂`. With `n` a list, the symbol parser reads
+      // only the `n` of `∂n_{0}`: the subscript is then read as an index, as
+      // elsewhere, and the marker keeps the element access `At(n, 0)`. A
+      // marker in a numerator gives the differentiand, which is that element.
+      // `parseFraction()` reads a marker in a denominator as a variable, and
+      // gives it the joined name `n_0` (see `Parser._binderSymbol()`).
+      const parseVariable = (): MathJsonExpression | null => {
+        const group = parser.parseGroup();
+        if (group !== null) return group;
+        const id = parser.parseSymbol();
+        if (typeof id !== 'string') return id;
+        const start = parser.index;
+        if ((parser._takeDeclinedSubscriptJoin?.(id) ?? null) === null)
+          return id;
+        parser.index = start;
+        const at = parser.parsePostfixOperator(id);
+        if (at !== null) return at;
+        parser.index = start;
+        return id;
+      };
+
       // Euler notation with an explicit subscript variable, e.g. `∂_x f(x)`,
       // `∂_{x,y} f`, or `∂_x^2 f` — a complete derivative → `D`.
       if (sub !== 'Nothing') {
         const seq = getSequence(sub);
-        const vars = seq ?? [sub];
+        const vars = (seq ?? [sub]).map(binderName);
         parser.skipSpace();
         // A braced operand is the operand (`∂_x {x^2}`, `∂_x {f}(x)`). Any
         // other operand has the extent of the operand of a Leibniz
@@ -299,6 +325,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
           }
         } else if (parser.atTerminator({ minPrec: 0 })) rhs = 'Nothing';
         else rhs = parseDerivativeOperand(parser);
+        const names = new Set(
+          vars.filter((v): v is string => typeof v === 'string')
+        );
+        rhs = parser._rebindSubscripts?.(rhs, names) ?? rhs;
         // A superscript is the order of a single variable: ∂_x^2 f is
         // D(f, x, x), and ∂_x^n f is D(f, {x, n}) (see `derivativeOrder()`).
         const expanded: MathJsonExpression[] =
@@ -336,8 +366,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
           order = parser.parseGroup() ?? parser.parseToken();
           parser.skipSpace();
         }
-        let v: MathJsonExpression =
-          parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
+        let v: MathJsonExpression = parseVariable() ?? 'Nothing';
         let written = v;
         if (order === null) {
           if (operator(v) === 'Power') {
@@ -389,7 +418,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       if (sup !== 'Nothing') {
         const start = parser.index;
         parser.skipSpace();
-        const first = parser.parseGroup() ?? parser.parseSymbol();
+        const first = parseVariable();
         if (first === null || !matchNextTerm()) {
           parser.index = start;
           return ['PartialDerivative', 'Nothing', sup] as MathJsonExpression;

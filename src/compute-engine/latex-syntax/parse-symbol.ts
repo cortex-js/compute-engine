@@ -418,6 +418,15 @@ export function absorbSubscripts(
       if (suffix === null) return false;
       const candidate = id + '_' + suffix;
       if (requireResolution && parser.resolveSymbol(candidate) === undefined) {
+        // Keep the name that the join would have made: a binder (a sum
+        // index, a comprehension variable, a parameter) that is spelled
+        // with this subscript is the joined name, not an element access.
+        parser._recordDeclinedSubscriptJoin?.(
+          id,
+          candidate,
+          underscoreIndex,
+          parser.index
+        );
         parser.index = underscoreIndex;
         return false;
       }
