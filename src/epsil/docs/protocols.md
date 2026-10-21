@@ -186,6 +186,22 @@ implementation produces the `protocol-implementation-missing` error value;
 a call whose receiver's type cannot be decided yet simply stays symbolic
 until it can.
 
+In full, a call of a protocol member resolves as follows (the shadowing and
+ambiguity cases are described in the next two sections):
+
+```mermaid
+flowchart TD
+  call["f(v) or v.f()"] --> shadow{"f(v), and a definition of f<br/>is lexically visible?"}
+  shadow -- yes --> own["calls your f<br/>(v.f() still reaches the protocol)"]
+  shadow -- no --> many{"more than one protocol of v's type<br/>declares f?"}
+  many -- yes --> amb["protocol-call-ambiguous: qualify,<br/>Shape.f(v) or v.(Shape.f)()"]
+  many -- no --> known{"runtime type of v<br/>decided yet?"}
+  known -- no --> sym["the call stays symbolic"]
+  known -- yes --> impl{"a conformance applies<br/>(v's type, or a supertype of it)?"}
+  impl -- yes --> best["the most specific conformance wins"]
+  impl -- no --> missing["protocol-implementation-missing<br/>error value"]
+```
+
 ### When the bare name is taken, qualify
 
 Two situations take the bare name away. A lexically visible definition of

@@ -226,6 +226,23 @@ tool, and reports the result — exact fractions, radicals, and symbolic
 constants included, with none of the rounding or slips of doing arithmetic
 token by token.
 
+```mermaid
+sequenceDiagram
+  actor User
+  participant A as Assistant
+  participant S as epsil mcp
+  User->>A: "Compute the exact sum of 1/k^2 for k = 1..100"
+  opt first use
+    A->>S: read resource epsil://docs/for-agents
+    S-->>A: the language card
+  end
+  A->>S: evaluate { source: "sum(1/k^2, k = 1..100)" }
+  Note over S: fresh session<br/>deadline: 10 s by default
+  S-->>A: value (display, Epsil, LaTeX, MathJSON),<br/>output lines, diagnostics
+  A->>User: the exact fraction
+  Note over A,S: the next evaluate call starts<br/>from a fresh session again
+```
+
 ## Good to Know
 
 - **Each `evaluate` call is independent.** A call runs a complete program in

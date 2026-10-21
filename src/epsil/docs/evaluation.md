@@ -257,6 +257,17 @@ that is not assigned (an argument, an operand) still reads program state
 **at materialization time**, like a generator in Python. An unbounded one
 that captures a variable reflects the later value of that variable.
 
+```mermaid
+flowchart TD
+  rhs["let xs = … or xs = …"] --> lit{"right-hand side<br/>is a literal?"}
+  lit -- yes --> snap["stored as its elements: a snapshot"]
+  lit -- "no: a lazy collection" --> fin{"has a last element?"}
+  fin -- "no, as filter(1..oo, p)" --> lazy["stays lazy: enumerated when materialized,<br/>reading variables as they are then"]
+  fin -- yes --> reads{"reads a variable, as written?<br/>(an inline function counts;<br/>a named function is not inspected)"}
+  reads -- "no, as map(f, 1..1000000)" --> lazy
+  reads -- yes --> snap2["stored as the list of its elements,<br/>computed with the values at this statement"]
+```
+
 The test "reads a variable" looks at the expression as written, and does not
 look inside a named user function. An inline function that reads a variable
 makes the `map` read it, so the assignment stores the elements. A named

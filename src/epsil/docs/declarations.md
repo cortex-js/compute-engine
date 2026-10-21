@@ -181,6 +181,23 @@ x = 5
 Assigning to a name that was never declared does establish it, but `let` is
 the explicit and idiomatic way to introduce a mutable binding.
 
+What an assignment writes depends on where it is written, and on what is
+declared when the function around it is defined:
+
+```mermaid
+flowchart TD
+  a["x = v"] --> top{"at the top level, or in a block<br/>outside every function?"}
+  top -- yes --> topw["writes x, establishing it if needed<br/>(a top-level block owns the names<br/>its own statements assign)"]
+  top -- "no: in a function body" --> decl{"an enclosing scope declares x<br/>when the function is defined?<br/>(a top-level let or assignment before the function,<br/>a parameter, a local of an enclosing function)"}
+  decl -- no --> local["x is a local of the function body, as with let:<br/>each call starts with no value for it"]
+  local --> read{"read before its first<br/>assignment in this call?"}
+  read -- yes --> rerr["read-before-declaration error value"]
+  read -- no --> ok["the local's value"]
+  decl -- yes --> isconst{"declared const?"}
+  isconst -- yes --> cerr["constant-assignment error value<br/>(epsil check reports it before the run)"]
+  isconst -- no --> outer["writes that binding: the scope effect,<br/>which the function must declare"]
+```
+
 In a function body, an assignment to a name that no enclosing scope
 declares makes a local of the function body, as a `let` does. This is also
 true when the assignment is in a nested block of the body — a branch of an
