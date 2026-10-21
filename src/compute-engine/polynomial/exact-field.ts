@@ -56,6 +56,9 @@ export class PolynomialBudgetExceeded extends Error {
   }
 }
 
+/** A failed internal certificate, not invalid caller input or cancellation. */
+export class PolynomialInvariantError extends Error {}
+
 /** A per-computation budget, shared by nested algorithms and never global. */
 export class PolynomialWork {
   operations = 0;
@@ -137,7 +140,8 @@ export class FieldPolynomials<T> {
   }
   exactDivide(a: readonly T[], b: readonly T[]): T[] {
     const [q, r] = this.divrem(a, b);
-    if (r.length) throw new Error('Non-exact polynomial division');
+    if (r.length)
+      throw new PolynomialInvariantError('Non-exact polynomial division');
     return q;
   }
   monic(a: readonly T[]): T[] {

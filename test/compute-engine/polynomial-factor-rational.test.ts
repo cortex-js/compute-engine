@@ -1,6 +1,7 @@
 import {
   FieldPolynomials,
   PolynomialWork,
+  PolynomialInvariantError,
   rationalCoefficient as q,
   rationalField as Q,
 } from '../../src/compute-engine/polynomial/exact-field';
@@ -84,9 +85,44 @@ describe('Certified rational polynomial factorization', () => {
     ).toThrow('cancelled');
   });
   test('untrusted modular backend cannot label a reducible polynomial irreducible', () => {
+    const f = poly([2, 0, 3, 0, 1]);
+    expect(factor(f, { modularBackend: (f) => [[...f]] })).toMatchObject({
+      status: 'incomplete',
+      reason: 'verification-failed',
+      factors: [],
+      remainder: f,
+    });
+  });
+  test.each([
+    'Invalid Hensel congruence',
+    'Incomplete Berlekamp decomposition',
+    'Rational factor reconstruction failed',
+  ])('reports a failed certificate: %s', (message) => {
+    const f = poly([2, 0, 3, 0, 1]);
+    expect(
+      factor(f, {
+        modularBackend: () => {
+          throw new PolynomialInvariantError(message);
+        },
+      })
+    ).toMatchObject({
+      status: 'incomplete',
+      reason: 'verification-failed',
+      factors: [],
+      remainder: f,
+    });
+  });
+  test('does not swallow invalid input or arbitrary callback exceptions', () => {
+    expect(() => factor([{ numerator: 1n, denominator: 0n }])).toThrow(
+      RangeError
+    );
     expect(() =>
-      factor(poly([2, 0, 3, 0, 1]), { modularBackend: (f) => [[...f]] })
-    ).toThrow('Reducible modular factor');
+      factor(poly([2, 0, 3, 0, 1]), {
+        modularBackend: () => {
+          throw new Error('backend unavailable');
+        },
+      })
+    ).toThrow('backend unavailable');
   });
   test('reconstruction alone does not imply irreducibility', () => {
     const f = poly([2, 0, 3, 0, 1]),

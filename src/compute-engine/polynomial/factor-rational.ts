@@ -2,6 +2,7 @@ import {
   FieldPolynomials,
   integerGcd,
   PolynomialBudgetExceeded,
+  PolynomialInvariantError,
   PolynomialWork,
   rationalCoefficient as rational,
   rationalField as Q,
@@ -20,10 +21,15 @@ import {
 } from './lattice-recombination.js';
 
 export interface RationalFactorOptions {
+  /** Nonnegative safe-integer arithmetic-step limit; default 2,000,000. */
   maxOperations?: number;
+  /** Nonnegative safe-integer input degree limit; default 128. */
   maxDegree?: number;
+  /** Positive safe-integer bit limit for each input numerator/denominator; default 4096. */
   maxCoefficientBits?: number;
+  /** Called on counted work; thrown exceptions propagate to the caller. */
   check?: () => void;
+  /** Optional modular implementation; its factorization is independently verified. */
   modularBackend?: ModularFactorBackend;
   /** Opt-in exclusive phase diagnostics; disabled on the normal Factor path. */
   profile?: boolean;
@@ -479,7 +485,8 @@ function factorMonicImpl(
     const product = lifted.reduce((a, b) => multiply(a, b, work), [1n]);
     const error = f.map((c, i) => {
       const e = c - (product[i] ?? 0n);
-      if (e % modulus !== 0n) throw new Error('Invalid Hensel congruence');
+      if (e % modulus !== 0n)
+        throw new PolynomialInvariantError('Invalid Hensel congruence');
       return K.fromInteger(e / modulus);
     });
     lifted = lifted.map((b, i) => {
@@ -543,7 +550,7 @@ export function verifyModularFactors(
       factor[factor.length - 1] !== 1n ||
       factor.some((c) => c < 0n || c >= BigInt(prime))
     )
-      throw new Error('Invalid modular factor');
+      throw new PolynomialInvariantError('Invalid modular factor');
     const g = factor.map(Number),
       n = g.length - 1;
     if (n === 1) {
@@ -565,13 +572,16 @@ export function verifyModularFactors(
     for (let i = 1; i <= n; i++) {
       h = P.powmod(h, BigInt(prime), g);
       if (checks.has(i) && P.gcd(g, P.sub(h, x)).length !== 1)
-        throw new Error('Reducible modular factor');
+        throw new PolynomialInvariantError('Reducible modular factor');
     }
-    if (P.sub(h, x).length) throw new Error('Invalid Frobenius identity');
+    if (P.sub(h, x).length)
+      throw new PolynomialInvariantError('Invalid Frobenius identity');
     product = P.mul(product, g);
   }
   if (P.sub(product, P.fromIntegers(f)).length)
-    throw new Error('Modular factors do not reconstruct input');
+    throw new PolynomialInvariantError(
+      'Modular factors do not reconstruct input'
+    );
 }
 
 /**
@@ -669,11 +679,18 @@ export function factorRationalPolynomial(
         reconstructsRationalFactorization(coefficients, result, work)
       )
     )
-      throw new Error('Rational factor reconstruction failed');
+      throw new PolynomialInvariantError(
+        'Rational factor reconstruction failed'
+      );
   } catch (e) {
-    if (!(e instanceof PolynomialBudgetExceeded)) throw e;
+    if (
+      !(e instanceof PolynomialBudgetExceeded) &&
+      !(e instanceof PolynomialInvariantError)
+    )
+      throw e;
     result.status = 'incomplete';
-    result.reason = e.reason;
+    result.reason =
+      e instanceof PolynomialBudgetExceeded ? e.reason : 'verification-failed';
     result.coefficient = rational(1n);
     result.factors = [];
     result.remainder = coefficients;

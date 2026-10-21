@@ -1,6 +1,11 @@
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  checkDeadlineEvery,
+} from '../../common/interruptible.js';
 import type { Expression } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import { asRational } from '../boxed-expression/numerics.js';
+import { bigint } from '../numerics/bigint.js';
 import {
   FieldPolynomials,
   PolynomialBudgetExceeded,
@@ -17,8 +22,9 @@ export function rationalPolynomialCoefficients(
   variable: string,
   maxDegree = 128
 ): RationalCoefficient[] | null {
+  checkDeadline(expr.engine._deadlineFrame);
   const work = new PolynomialWork(100_000, () =>
-    checkDeadline(expr.engine._deadlineFrame)
+    checkDeadlineEvery(expr.engine._deadlineFrame, 0x3ff)
   );
   const P = new FieldPolynomials(Q, work);
   const read = (e: Expression, depth: number): RationalCoefficient[] | null => {
@@ -26,9 +32,14 @@ export function rationalPolynomialCoefficients(
     if (depth > 128) return null;
     if (isNumber(e)) {
       if (!e.isExact || !e.isRational) return null;
-      return P.trim([
-        q(BigInt(e.numerator.toString()), BigInt(e.denominator.toString())),
-      ]);
+      // Read exact coefficients, not their scientific-notation rendering or
+      // working-precision decimal projection.
+      const rational = asRational(e);
+      if (!rational) return null;
+      const numerator = bigint(rational[0]),
+        denominator = bigint(rational[1]);
+      if (numerator === null || denominator === null) return null;
+      return P.trim([q(numerator, denominator)]);
     }
     if (sym(e) === variable) return [Q.zero, Q.one];
     if (!isFunction(e)) return null;
@@ -61,6 +72,12 @@ export function rationalPolynomialCoefficients(
         exponent > maxDegree
       )
         return null;
+      // Expanded polynomials contain many x^n terms. Construct each monomial
+      // directly instead of repeatedly convolving dense arrays of zeros.
+      if (sym(e.op1) === variable) {
+        work.tick(exponent + 1);
+        return [...Array<RationalCoefficient>(exponent).fill(Q.zero), Q.one];
+      }
       const a = read(e.op1, depth + 1);
       if (!a || (a.length - 1) * exponent > maxDegree) return null;
       let r = [Q.one],
@@ -90,11 +107,11 @@ export function factorRationalExpression(
   const input = rationalPolynomialCoefficients(expr, variable);
   if (!input) return null;
   const result = factorRationalPolynomial(input, {
-    check: () => checkDeadline(expr.engine._deadlineFrame),
+    check: () => checkDeadlineEvery(expr.engine._deadlineFrame, 0x3ff),
   });
-  // A bounded rational attempt must not restart unbounded root enumeration.
-  // Null is reserved for expressions outside this coefficient domain.
-  if (result.status === 'incomplete') return expr;
+  // An unfinished certificate does not rule out useful factors from the
+  // existing rational-root fallback in factorPolynomial().
+  if (result.status === 'incomplete') return null;
   const ce = expr.engine;
   if (result.status === 'zero') return ce.Zero;
   const scalar = ce

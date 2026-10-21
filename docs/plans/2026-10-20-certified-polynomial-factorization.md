@@ -1,268 +1,130 @@
-# Certified polynomial factorization
+# Certified univariate rational polynomial factorization
 
-The objective is general exact factorization over the rationals, followed by
-multivariate factorization, number fields and splitting fields. Each stage is
-independently committed after its tests. An unchanged expression is not an
-irreducibility certificate. Resource exhaustion must remain distinguishable
-from a complete factorization.
+## Delivered scope
 
-Current delivery decision: ship TypeScript only. The experimental first-party
-WASM kernel, public factory, compiler script, CI step and tests have been
-removed at the user's request. The staged progress and four-backend timings
-below record the earlier experiment; they do not describe a currently shipped
-WASM API. External SymPy/PARI remain optional comparison tools only.
-
-## Stages
-
-1. Exact coefficient domains and engine-independent polynomial arithmetic.
-   Ascending dense univariate coefficients, rational normalization, division,
-   GCD, square-free decomposition and per-computation cancellation/work budgets.
-2. Certified rational factorization. Modular factorization, Hensel lifting,
-   exhaustive bounded recombination, multiplicities and exact reconstruction.
-   Integrate through the existing Factor operator without expanding symbolic
-   coefficients or silently approximating.
-3. Multivariate factoring. Reuse the sparse integer kernel; evaluation/lifting
-   must preserve content and leading coefficients and verify reconstruction.
-4. Algebraic number fields. Irreducible defining polynomials, exact quotient
-   arithmetic, extension-field factorization and explicit embeddings.
-5. Splitting fields. Repeated certified extensions, root representations and
-   base-field maps with explicit degree/work limits.
-
-The original integration work remains paused. This branch starts at main
-63b8ffe3b and must not replay the squashed integration PR.
-
-## Algorithms and certification
-
-Arithmetic has an explicit coefficient-field interface rather than assuming
-all coefficients are expressions or JavaScript numbers. The zero polynomial is
-an empty coefficient array. Rational coefficients use normalized bigint pairs.
-Field elements are immutable. Square-free decomposition initially requires
-characteristic zero; finite-field factorization must handle its characteristic
-separately.
-
-The rational factorizer must distinguish input rejection, exhausted budgets,
-zero, and complete output. Reconstruction is necessary but not sufficient:
-completion also needs an irreducibility argument for every factor. Modular
-irreducibility or exhaustive recombination after a valid coefficient bound can
-supply that argument. Numerical root screening cannot certify these decisions.
-
-## Backend comparison
-
-The original experiment compared native TypeScript with an independently
-written finite-field WASM kernel using the same exact orchestration. Only
-TypeScript is retained for delivery. The user requested first-party code to
-avoid bundling third-party CAS libraries. The modular factor interface remains
-replaceable and independently verifies supplied results. SymPy and a separately
-installed PARI WebAssembly package are external
-comparators only. The optional @sagemath/pari
-1.0.5 package reports GPL-3.0-or-later and 29,058,600 unpacked bytes. It is an
-isolated experiment, not a CE runtime dependency or a redistribution decision.
-Keep its source/license attribution and pinned package metadata with the
-benchmark. A mature WASM CAS versus a new TypeScript algorithm is a comparison
-of implementations, not proof that the language alone causes a speed difference.
-
-Report cold initialization, conversion, warm factorization, verification,
-bundle size and memory separately. Include dense and sparse inputs, rational
-and large coefficients, repeated factors, irreducibles, nonmonic inputs,
-cyclotomic-like inputs and adversarial recombination. Generated ground truth
-must have proved irreducible constituent factors; random products alone do not
-certify complete factorization. Keep timeouts and incomplete outputs in the
-denominator. No benchmark run may silently substitute numerical factoring.
-
-## Progress
-
-All five stages have bounded implementations and separate commits. Stage 1 has
-six passing arithmetic/contract tests on Node 22.14.0, including
-large exact coefficients, zero/division errors, multiplicities, modular inverse
-and cancellation. This does not claim unrestricted or best-in-class performance.
-Corpus performance measurements belong to the factorizer stages,
-not to isolated coefficient arithmetic.
-
-Stage 2 originally included a native modular factorizer and an experimental
-first-party AssemblyScript WASM Berlekamp kernel. The latter only accelerated
-finite-field factorization; rational preprocessing, lifting, recombination and
-independent modular-output verification remain in TypeScript. It introduces no
-CAS runtime dependency. The compiler is installed into ignored build storage.
-
-Initial validation: 141 tests pass across the exact arithmetic, factorization,
-public Factor and existing factoring/assigned-variable suites; two optional
-WASM tests pass, including repeated calls and recovery after budget exhaustion.
-The first 120-case pilot has 120 verified factorizations for each of native TS,
-hybrid WASM and SymPy 1.14.0, with no mismatches. Single-run medians were 1.15 ms,
-2.06 ms and 1.12 ms respectively; p95 values were 335 ms, 594 ms and 9.48 ms.
-These are exploratory sequential timings under uncontrolled machine load, not
-a backend selection or a large-corpus performance claim. Subsequent profiling
-and the full generated corpus are reported below.
-
-The first CPU profile attributed 12,949 of 14,139 samples (91.6%) to integer
-GCD during rational square-free preprocessing. A degree-preserving modular
-square-free certificate now skips that calculation when possible, with a
-primitive integer pseudo-remainder sequence for repeated factors. On the same
-60-case profiling script GCD fell to 3 of 363 samples; wall time including
-startup fell from 23.4 s to 0.64 s. This is a local before/after diagnostic,
-not a portable speedup claim.
-
-The unchanged 120-case corpus then verified all cases against all four
-implementations: TS, hybrid WASM, SymPy 1.14.0 and external PARI WASM. Their
-single-run p95 solve times were 8.69, 6.84, 10.28 and 2.51 ms. Native and
-hybrid median times were essentially equal (1.43 and 1.44 ms). The first-party
-WASM file is 11,203 bytes; initialization took about 2 ms in the earlier pilot.
-No backend has been selected automatically; the default remains TypeScript.
-
-The original full run and independent audit cover 1,200 polynomials, three trials
-and four backends: 14,400 verified results. A separate 42-case stress run
-completed 36 cases in each first-party backend and all 42 in each external CAS;
-six explicit resource-limit results are not counted as successes. See the
-[benchmark report](../../benchmarks/factorization/README.md) for fingerprints,
-methodology, detailed outcomes and caveats.
-
-The optimized TypeScript path retains exact small-prime residues as JavaScript
-integers, with bigint coefficients for rational/integer arithmetic. It uses
-Rabin verification, direct Eisenstein certification, exact root-cluster
-translation, adaptive prime selection, certified early factor recovery and
-trace/constant-coefficient subset filters. Recovered composite groups are
-recursively certified; reconstruction alone never proves irreducibility.
-
-The final interleaved run verifies all 14,400 regular-corpus records. TS is
-faster than SymPy in aggregate but remains slower than PARI on the hard tail;
-Mathematica is excluded because no installation is available. Default stress
-coverage improves from 36/42 to 39/42 with unchanged limits. Explicitly allowing
-degree 256 and 16384-bit coefficients completes all 42 at the original operation
-budget. Both stress runs have three trials and four backends; together with
-the regular run, 15,408 records pass the independent coverage/reconstruction
-audit. Timings, fingerprints, limiting cases and remaining optimization targets
-are in the benchmark report rather than asserted in unit tests.
-
-Run the current TypeScript comparison with
-`node --import tsx benchmarks/factorization/run.ts --output <new-directory>
---python <python-with-sympy> --backends typescript,sympy,pari`.
-The optional PARI comparator requires its separately installed package under
-`build/factoring-backends`; it is not required by CE or its native tests.
-
-## Multivariate baseline
-
-Stage 3 uses a bounded general Kronecker substitution algorithm as the initial
-certified implementation, rather than claiming a production sparse Hensel
-implementation. Mixed-radix encoding is injective on the input's degree box.
-Every true factor maps to a product of irreducible factors of that encoding;
-enumerating their multisets and verifying exact sparse division rejects
-spurious factors introduced by the substitution. Exhaustion proves
-irreducibility; hitting a budget reports incomplete. The encoded degree is
-checked before allocating a dense array. This method is exponential in the
-worst case and is not the Fateman-scale performance solution.
-
-`factorSparseRationalPolynomial` accepts explicit variable names and exact
-sparse rational terms. It is a structured API rather than a change to Factor's
-single-variable signature. Tests cover spurious univariate factors, genuine
-multivariate factors, rational content, repeated factors, monomials, constants,
-zero and degree/work limits. Sparse evaluation/lifting remains a performance
-upgrade, not a prerequisite for the bounded algorithm's correctness.
-
-## Exact number fields
-
-Stage 4 constructs abstract fields Q[a]/(m) only after certifying that m is
-irreducible. Elements retain their owning field; combining elements from
-different fields requires an explicit embedding, even if the defining
-polynomials happen to match. Arithmetic reduces in the power basis, and
-extended polynomial Euclid supplies inverses.
-
-Factoring over the field uses Trager's method: shift a square-free polynomial,
-compute its norm by a fraction-free determinant of the multiplication matrix,
-factor the square-free norm over Q, recover factors by field-polynomial GCD,
-and undo the shift. Exact reconstruction checks both factors and multiplicities.
-Norm degree, shift search and operation limits are explicit. Seven tests cover
-relations/inverses, field identity, reducible modulus rejection, real and
-imaginary quadratic fields, algebraic coefficients, multiplicities and limits.
-
-These are abstract number fields, not a general algebraic-number package with
-certified real/complex root isolation. No embedding into C is guessed. The
-abstract representation suffices for exact factoring and constructing splitting
-fields; numerical embeddings, primitive-element presentation optimization and
-fast modular number-field arithmetic remain separate follow-ups.
-
-## Splitting fields
-
-Stage 5 repeatedly adjoins a root of a certified irreducible factor, using a
-primitive element whose norm is certified irreducible over Q. A linear GCD
-recovers the old generator in the new field. Each map is checked against the
-source defining polynomial, and each adjoined root against its polynomial.
-Completion requires exact evaluation of every root and reconstruction of the
-original polynomial with its scalar and multiplicities.
-
-The default field-degree cap is 24; operation and primitive-element shift
-budgets also apply. Incomplete output retains the last certified field but
-does not claim it splits the input. The returned maps form a chain; use
-`embedNumberFieldElement` to transport elements along it. No numerical root
-ordering or preferred embedding into C is implied. Tests include quadratic
-fields, x^3-2 (degree-six splitting field), x^3-1, a biquadratic compositum,
-repeated roots, constants, zero rejection, invalid maps, forged elements and
-resource exhaustion. The combined number/splitting-field suites pass 15 tests.
-
-## Public API and first-party ownership
-
-The algorithms live in `src/compute-engine/polynomial` and are available from
-CE's existing `@cortex-js/compute-engine/numerics` package entry point. They are
-first-party source under the repository's MIT license, not wrappers around a
-third-party CAS. A separate npm package has not been published. Univariate
-`Factor` uses the exact rational engine; multivariate and extension operations
-use explicit structured APIs rather than ambiguous new MathJSON syntax.
+Compute Engine factors exact univariate polynomials over Q using first-party
+TypeScript. The existing `Factor` operator uses the implementation when its
+coefficients can be read exactly. The structured API is
+`factorRationalPolynomial`, exported with its input/output types from
+`@cortex-js/compute-engine/numerics`. No external CAS, WASM kernel or additional
+build tool is required at runtime.
 
 ```ts
-import {
-  rationalCoefficient as q,
-  factorRationalPolynomial,
-  RationalNumberField,
-  factorNumberFieldPolynomial,
-  splittingField,
-} from '@cortex-js/compute-engine/numerics';
+import { factorRationalPolynomial } from '@cortex-js/compute-engine/numerics';
 
-// Coefficients are ascending: x^4 + 5*x^2 + 6.
-const factors = factorRationalPolynomial([q(6n), q(0n), q(5n), q(0n), q(1n)]);
-const K = RationalNumberField.create([q(-2n), q(0n), q(1n)]);
-const overK = factorNumberFieldPolynomial(K, [K.fromInteger(-2n), K.zero, K.one]);
-const splitting = splittingField([q(-2n), q(0n), q(0n), q(1n)]);
+// Ascending coefficients: x^4 + 5*x^2 + 6.
+const result = factorRationalPolynomial(
+  [6n, 0n, 5n, 0n, 1n].map((numerator) => ({ numerator, denominator: 1n }))
+);
+if (result.status === 'complete') {
+  // Primitive integer factors x^2+2 and x^2+3, each with multiplicity one.
+  console.log(result.coefficient, result.factors);
+}
 ```
 
-Always inspect `status`; `complete` certifies irreducibility by the algorithms,
-whereas `reconstructsRationalFactorization` checks reconstruction only. These
-are algorithmically certified results, not portable serialized proof objects.
-Budgets count arithmetic work, not elapsed time or bigint bit operations;
-callers needing a hard time/memory boundary should run in a worker process.
+Rational inputs are normalized bigint numerator/denominator pairs. Dense
+coefficient arrays are ascending; an empty array represents zero. Output
+factors have positive leading coefficients and primitive integer coefficients;
+a rational scalar and positive multiplicities reconstruct the original input.
 
-All shipped arithmetic is TypeScript. There is no WASM factory, binary or
-AssemblyScript build requirement. The modular-factor callback remains available
-for explicitly supplied implementations and correctness-rejection tests.
-External CAS code and generated benchmark files are excluded from commits.
-The existing Node 22/26 CI matrix requires no extra kernel build step.
+## Certification and algorithms
 
-Remaining performance work includes faster Hensel lifting, LLL/van Hoeij
-recombination, sparse multivariate lifting and modular number-field arithmetic.
-Certified real/complex embeddings and compact defining-polynomial selection
-are additional capabilities, not claims made by this implementation.
+The implementation removes rational content, performs square-free decomposition,
+and maps nonmonic factors to monic integer polynomials. A modular square-free
+certificate avoids expensive rational GCDs where possible; repeated factors
+use a primitive integer pseudo-remainder sequence. Exact translation and
+Eisenstein tests provide inexpensive certifications when applicable.
 
-## PR review checklist
+Finite-field Berlekamp factorization supplies modular factors. Independent
+Rabin irreducibility tests and exact reconstruction validate their output,
+including output from an explicitly supplied modular backend. Degree-balanced
+quadratic Hensel lifting raises precision; a linear lifting strategy remains
+available for diagnostic comparisons.
 
-- Preserve the distinction between exact reconstruction and certified complete
-  factorization. Resource limits return explicit incomplete results; increasing
-  a configured size limit is not an algorithmic coverage improvement.
-- Keep benchmark scores and timing thresholds out of unit tests. After removing
-  the two WASM tests, Node 22.14.0 and Node 26.12.0 each pass 237 polynomial
-  regression tests across 13 suites. Arithmetic tests include bigint cross-checks,
-  malicious modular output, large translated inputs and cancellation.
-- Source lint, PR-file formatting, source/added-code type checks, public
-  declarations, production build and ESM/CommonJS export smoke checks pass.
-- The full repository test run was stopped with unrelated Windows/sandbox
-  failures documented in the benchmark report. Do not present this as a green
-  full-suite or CI run, and do not alter unrelated expectations to conceal it.
-- Keep external SymPy/PARI installations, generated corpora and raw reports in
-  ignored build storage. No external CAS code or dependency is shipped by CE.
-- Native TypeScript is the only shipped implementation. Larger number fields, sparse
-  multivariate performance, lattice recombination and numerical embeddings
-  remain explicitly separate follow-up work.
+Recombination uses either bounded exhaustive subset search with necessary
+coefficient filters, or a gradual logarithmic-derivative lattice. Fraction-free
+exact LLL and certified short-vector removal retain every true factor indicator.
+Equal-column blocks are accepted only after exact division. The detailed
+containment argument and limitations are in
+[gradual recombination](2026-10-21-gradual-recombination.md).
 
-## References
+A completed result certifies both reconstruction and irreducibility. Checking
+reconstruction alone is insufficient: returning the input as one factor always
+reconstructs it, but does not prove it irreducible. These are algorithmic
+certificates, not portable serialized proof objects or numerical root tests.
 
-- [SymPy polynomial algorithms](https://docs.sympy.org/latest/modules/polys/internals.html)
-- [FLINT integer polynomial factoring](https://flintlib.org/doc/fmpz_poly_factor.html)
-- [PARI WASM package](https://github.com/sagemathinc/wasm-pari)
-- [Sage splitting fields](https://doc.sagemath.org/html/en/reference/number_fields/sage/rings/number_field/splitting_field.html)
+## Results, budgets and engine integration
+
+`status` is `complete`, `zero`, or `incomplete`. An incomplete result includes
+the original rational remainder and a reason, with no claimed factors. Reasons
+include operation/degree/coefficient limits, inability to find a suitable prime,
+and `verification-failed` for an internal certificate failure. Invalid caller
+options and zero rational denominators throw. Cancellation and arbitrary
+callback exceptions propagate rather than being mistaken for a certificate.
+
+Default limits are degree 128, 4096 bits per input coefficient, and 2,000,000
+counted operations. Normalized/transformed coefficients have additional size
+checks. These counts bound arithmetic steps, not bigint bit complexity or wall
+time. Applications requiring a hard time or memory boundary should use a worker
+process. The `check` callback supports application cancellation; optional
+profiling records exclusive phases. Strategy overrides support reproducible
+comparisons and are not separate correctness modes.
+
+The boxed reader accepts exact rational arithmetic, reads coefficients from
+their exact numeric representation, and constructs variable powers directly.
+It does not expand arbitrary symbolic expressions, guess a number field, or
+round coefficients through display strings or working precision. Its independent
+100,000-step reading budget protects general expression traversal.
+
+`Factor` retains existing behavior for symbolic or irrational coefficients.
+An incomplete certified attempt returns control to the existing rational-root
+fallback, which can still extract useful factors. CE deadline checks are
+strided at this integration boundary; generic polynomial callbacks retain their
+original semantics. Partial-fraction decomposition shares this factoring path.
+
+## Testing and reproducible comparison
+
+Unit tests assert mathematical behavior, not benchmark rankings or timing
+thresholds. Coverage includes rational content, nonmonic and repeated factors,
+irreducibles, nonlinear factors, large exact integers and denominators,
+translation, modular-output rejection, budgets, cancellation, exact lattice
+invariants, lifted-factor reconstruction and boxed `Factor`/partial fractions.
+Regression cases cover scientific-notation integers, expanded `(x+1)^100`,
+and rational roots recovered after an incomplete high-degree attempt.
+
+The [factorization harness](../../benchmarks/factorization/README.md) compares
+TypeScript strategies with separately installed SymPy and PARI. It records
+source/corpus fingerprints, interleaves seeded trials, separates warm solving
+from startup and conversion, and independently audits result counts and exact
+factor reconstruction. Generated corpora cover regular, stress, challenge and
+multiquadratic recombination families. Incomplete results and timeouts remain
+in coverage denominators; timing comparisons identify their matched subset.
+Mathematica is not measured because no licensed installation is available.
+
+External CAS installations and raw generated journals remain in ignored build
+storage. PARI's optional external WASM distribution is a comparator, not a CE
+dependency. Benchmark measurements do not imply a language-level speed claim.
+
+## Internal experiments and follow-up requirements
+
+Multivariate Kronecker factorization, abstract number-field arithmetic and
+splitting-field construction remain internal experiments, with no exports from
+the public numerics entry point. They are not included in the delivered public
+API contract. Before a separate API proposal, they need:
+
+- Operand-size-aware budgets or modular GCDs: rational coefficient growth in
+  extension arithmetic can make a few counted operations very expensive.
+  Maintainer probes include degree-12 splitting fields taking over 90 seconds
+  and `x^4+x+1` taking over ten minutes; the current counters do not prevent this.
+- Consistent result fields and zero-input semantics across domains, and a
+  documented failure contract for field construction and exhausted budgets.
+- Public signatures independent of internal `PolynomialWork`/`ExactField`
+  implementation details, plus validated finite integer option values.
+- Clear degree-limit semantics: Kronecker encoded degree is not total degree;
+  norm degree and field degree are different limits.
+- More efficient polynomial division/reduction without repeated full remainder
+  copying, and realistic default budgets backed by large-field profiling.
+
+Sparse multivariate lifting, modular number-field arithmetic, compact defining
+polynomials, and certified real/complex embeddings are future capabilities.
+The present univariate API does not imply any numerical embedding or root order.

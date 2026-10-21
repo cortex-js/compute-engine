@@ -1,3 +1,13 @@
+## Unreleased
+
+### Improvements
+
+- `Factor` uses certified univariate factorization over the rationals, including
+  nonlinear factors such as `Factor(x^4+4) = (x^2-2x+2)(x^2+2x+2)`.
+  The `numerics` entry point exposes `factorRationalPolynomial` and its types
+  for structured exact factors, multiplicities and explicit incomplete results
+  when resource limits or certificate checks prevent completion.
+
 ## 0.159.0 _2026-10-20_
 
 ### Behavior Changes

@@ -5,41 +5,13 @@
 
 export const version = '{{SDK_VERSION}}';
 
-export {
-  factorRationalPolynomial,
-  reconstructsRationalFactorization,
-} from './compute-engine/polynomial/factor-rational.js';
+export { factorRationalPolynomial } from './compute-engine/polynomial/factor-rational.js';
 export type {
   RationalFactorOptions,
   RationalFactorization,
   RationalPolynomialFactor,
 } from './compute-engine/polynomial/factor-rational.js';
-export { rationalCoefficient } from './compute-engine/polynomial/exact-field.js';
 export type { RationalCoefficient } from './compute-engine/polynomial/exact-field.js';
-export { factorSparseRationalPolynomial } from './compute-engine/polynomial/factor-multivariate.js';
-export type {
-  SparseRationalPolynomial,
-  SparseRationalFactorization,
-} from './compute-engine/polynomial/factor-multivariate.js';
-export {
-  RationalNumberField,
-  factorNumberFieldPolynomial,
-} from './compute-engine/polynomial/number-field.js';
-export type {
-  NumberFieldElement,
-  NumberFieldFactorOptions,
-  NumberFieldFactorization,
-} from './compute-engine/polynomial/number-field.js';
-export {
-  splittingField,
-  embedNumberFieldElement,
-} from './compute-engine/polynomial/splitting-field.js';
-export type {
-  SplittingFieldOptions,
-  SplittingFieldResult,
-  NumberFieldEmbedding,
-} from './compute-engine/polynomial/splitting-field.js';
-export type { ModularFactorBackend } from './compute-engine/polynomial/finite-field.js';
 
 //
 // Types (numerics)

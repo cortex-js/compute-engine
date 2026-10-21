@@ -1,4 +1,8 @@
-import { PolynomialWork, type ExactField } from './exact-field.js';
+import {
+  PolynomialInvariantError,
+  PolynomialWork,
+  type ExactField,
+} from './exact-field.js';
 import { checkSmallPrime, SmallPrimePolynomials } from './small-prime.js';
 
 export function primeField(prime: number): ExactField<bigint> {
@@ -102,6 +106,6 @@ export const factorFiniteField: ModularFactorBackend = (input, prime, work) => {
     }
   }
   if (factors.length !== basis.length)
-    throw new Error('Incomplete Berlekamp decomposition');
+    throw new PolynomialInvariantError('Incomplete Berlekamp decomposition');
   return factors.map((g) => g.map(BigInt));
 };

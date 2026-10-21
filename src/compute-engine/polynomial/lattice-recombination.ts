@@ -1,4 +1,4 @@
-import { PolynomialWork } from './exact-field.js';
+import { PolynomialInvariantError, PolynomialWork } from './exact-field.js';
 import { ModularPolynomials } from './hensel.js';
 import { integerRowBasis, reduceIntegerLattice } from './integer-lattice.js';
 
@@ -68,7 +68,8 @@ export function gradualLatticePartition(
   let choose = 1n;
   const logarithms = factors.map((g) => {
     const [quotient, remainder] = R.divrem(f, g);
-    if (remainder.length) throw new Error('Invalid lifted divisor');
+    if (remainder.length)
+      throw new PolynomialInvariantError('Invalid lifted divisor');
     return R.mul(
       quotient,
       g.slice(1).map((c, j) => BigInt(j + 1) * c)
@@ -118,7 +119,10 @@ export function gradualLatticePartition(
           squaredBound * reduced.squaredNorms[keep - 1].denominator
       )
         keep--;
-      if (!keep) throw new Error('Lattice lost the full-polynomial indicator');
+      if (!keep)
+        throw new PolynomialInvariantError(
+          'Lattice lost the full-polynomial indicator'
+        );
       rows = reduced.basis.slice(0, keep);
       previousScale = scale;
       previous = coefficients;
@@ -220,10 +224,10 @@ export function latticeFactorPartition(
     if (modulus < minimumLatticeModulus(f, r)) return null;
     const R = new ModularPolynomials(modulus, work);
     if (factors.some((g) => g.length < 2 || g[g.length - 1] !== 1n))
-      throw new Error('Invalid lifted factors');
+      throw new PolynomialInvariantError('Invalid lifted factors');
     const product = factors.reduce((a, b) => R.mul(a, b), [1n]);
     if (R.sub(product, f).length)
-      throw new Error('Lifted factors do not reconstruct');
+      throw new PolynomialInvariantError('Lifted factors do not reconstruct');
     return gradualLatticePartition(f, factors, modulus, work);
   } catch (e) {
     if (e instanceof ProbeLimit) return null;

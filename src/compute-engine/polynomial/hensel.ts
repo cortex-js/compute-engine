@@ -1,4 +1,4 @@
-import { PolynomialWork } from './exact-field.js';
+import { PolynomialInvariantError, PolynomialWork } from './exact-field.js';
 import { SmallPrimePolynomials } from './small-prime.js';
 
 /** Z/mZ polynomial arithmetic. Division requires a monic divisor, not a field. */
@@ -148,17 +148,21 @@ export class HenselTree {
         f[f.length - 1] !== 1n ||
         R.sub(f, node.polynomial).length
       )
-        throw new Error('Invalid Hensel target congruence');
+        throw new PolynomialInvariantError('Invalid Hensel target congruence');
       if (!node.left) return { polynomial: f };
       const g = node.left.polynomial,
         h = node.right!.polynomial;
       const error = S.sub(f, S.mul(g, h)).map((c) => {
-        if (c % m) throw new Error('Invalid Hensel product congruence');
+        if (c % m)
+          throw new PolynomialInvariantError(
+            'Invalid Hensel product congruence'
+          );
         return c / m;
       });
       const dg = R.divrem(R.mul(error, node.inverse!), g)[1];
       const [dh, remainder] = R.divrem(R.sub(error, R.mul(dg, h)), g);
-      if (remainder.length) throw new Error('Invalid Hensel correction');
+      if (remainder.length)
+        throw new PolynomialInvariantError('Invalid Hensel correction');
       const G = g.map((c, i) => c + m * (dg[i] ?? 0n));
       const H = h.map((c, i) => c + m * (dh[i] ?? 0n));
       // Newton inversion doubles accuracy even though the polynomial modulus
