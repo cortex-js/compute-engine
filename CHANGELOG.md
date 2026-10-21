@@ -5,15 +5,10 @@
 - Raw `Tabulate` / `Table`, `Scan`, and `Iterate` results retain possible
   `Nothing` in their element types. A two-dimensional tabulation returns lazy
   rows: accessing a row or its count does not evaluate its cells or erase
-  omitted positions. `ListFrom(row)` explicitly collects and omits those
+  omitted positions. `Shape` preserves raw extents, including omitted cells
+  and empty axes. `ListFrom(row)` explicitly collects and omits those
   entries. Compilation refuses omission-capable tabulations and scans until
   targets can represent omission distinctly.
-
-- An already evaluated unresolved call remains symbolic after a later
-  assignment. For example, an early `h(1)` in a loop does not run again when
-  a later iteration defines `h`. The original forward-call expression can
-  still resolve on a later evaluation. Compilation refuses the frozen
-  symbolic result rather than substituting a subsequently defined function.
 
 - The type `broadcastable<T>` is now `T | list<T>`. It was `T` or an indexed
   collection of `T` other than a tuple or a string, so the subtype relation

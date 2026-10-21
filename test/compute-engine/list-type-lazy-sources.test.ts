@@ -84,7 +84,7 @@ describe('Range, Linspace, Comprehension and Tabulate are lists', () => {
     );
     expect(
       typeOf(['Tabulate', ['Function', ['Multiply', 'i', 'j'], 'i', 'j'], 2, 3])
-    ).toBe('list<list>');
+    ).toBe('list<list<number>>');
   });
 });
 

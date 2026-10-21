@@ -10681,6 +10681,8 @@ export class BaseCompiler {
       h === 'Filter' ||
       (h === 'Count' && args.length === 2 && args[1].isFunction === true);
     // Product(collection) canonicalizes to a built-in multiplication fold.
+    const rawProducer = h === 'Tabulate' || h === 'Scan';
+    const callbackIndex = h === 'Scan' ? 1 : 0;
     const numericFold = h === 'Reduce' && isSymbol(args[1], 'Multiply');
     const aggregate = BaseCompiler.OMITTING_NUMERIC_AGGREGATES.has(h);
     const paired =
@@ -10689,16 +10691,19 @@ export class BaseCompiler {
       aggregate ||
       numericFold ||
       h === 'Map' ||
+      rawProducer ||
       h === 'Zip' ||
       selects ||
       paired
     ) {
       const sources =
-        h === 'Map'
-          ? args.slice(1)
-          : selects || numericFold
-            ? args.slice(0, 1)
-            : args;
+        h === 'Tabulate'
+          ? []
+          : h === 'Map'
+            ? args.slice(1)
+            : selects || numericFold || h === 'Scan'
+              ? args.slice(0, 1)
+              : args;
       const pairMayOmit = (
         type: Type,
         seen: ReadonlySet<Type> = new Set()
@@ -10737,33 +10742,37 @@ export class BaseCompiler {
         const element = collectionElementType(t);
         return (
           element !== undefined &&
-          (isSubtype('nothing', element) || (paired && pairMayOmit(element)))
+          (isSubtype('nothing', element) ||
+            (paired && pairMayOmit(element)) ||
+            (h === 'Tabulate' &&
+              collectionMayOmit(element, false, new Set(seen).add(t))))
         );
       };
       const hasOmission = sources.some((source) =>
         collectionMayOmit(compilationType(source), paired && args.length === 1)
       );
       const callbackResult =
-        h === 'Map' && isSymbol(args[0])
+        (h === 'Map' || rawProducer) && isSymbol(args[callbackIndex])
           ? functionResult(
-              target?.declaredVarTypes?.[args[0].symbol] ??
-                compilationType(args[0])
+              target?.declaredVarTypes?.[args[callbackIndex].symbol] ??
+                compilationType(args[callbackIndex])
             )
           : undefined;
       if (
         hasOmission ||
-        (h === 'Map' &&
+        ((h === 'Map' || rawProducer) &&
           node !== undefined &&
           (collectionMayOmit(compilationType(node), false) ||
             // A runtime callable's own contract takes precedence over any
             // result inference that looked up a global with the same name.
-            (isSymbol(args[0]) &&
-              BaseCompiler.isCompileBoundName(args[0].symbol) &&
-              (target?.reboundFunctions?.has(args[0].symbol) === true ||
+            (isSymbol(args[callbackIndex]) &&
+              BaseCompiler.isCompileBoundName(args[callbackIndex].symbol) &&
+              (target?.reboundFunctions?.has(args[callbackIndex].symbol) ===
+                true ||
                 callbackResult === undefined ||
                 callbackResult === 'unknown' ||
                 isSubtype('nothing', callbackResult)))) &&
-          !BaseCompiler.callbackExcludesNothing(args[0], target))
+          !BaseCompiler.callbackExcludesNothing(args[callbackIndex], target))
       )
         throw new Error(
           `Could not compile \`${h}\`: possible 'Nothing' elements require a distinct omission representation.`

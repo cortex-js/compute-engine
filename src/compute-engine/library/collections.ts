@@ -1,3 +1,4 @@
+import { callableBindingInContext } from '../boxed-expression/binders.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -204,11 +205,11 @@ import type {
   EvaluateHandlerOptions,
   EvaluateOptions,
   Expression,
+  ExpressionInput,
   FunctionInterface,
   OperandDescriptor,
   OperandStructure,
   OperatorDefinition,
-  ExpressionInput,
   PureEngineView,
   SymbolDefinitions,
   TypeHandlerContext,
@@ -12076,13 +12077,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // is refused.
     type: (ops, { engine }) => {
       const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine);
-      if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return BoxedType.forResult(
-          orderedScanType(ops[0].type, undefined),
-          engine._typeResolver
-        );
+      const known =
+        resultType && resultType !== 'unknown' && resultType !== 'any'
+          ? resultType
+          : undefined;
+      const result = orderedScanType(ops[0].type, known);
       return BoxedType.forResult(
-        orderedScanType(ops[0].type, resultType),
+        ops[1] !== undefined &&
+          resultMayBeNothing(ops[1], engine, true, resultType)
+          ? mapImmediateElements(result, withNothing)
+          : result,
         engine._typeResolver
       );
     },
@@ -17114,22 +17118,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `[…]`, not a set `{…}`: for a 1-D tabulation the element is the
     // function's result; for higher rank each element is itself a (nested)
     // list.
-    type: (ops, context) => {
-      if (ops.length <= 1)
-        return BoxedType.forResult(
-          parseType('list'),
-          context.engine._typeResolver
+    type: (ops, { engine, derive }) => {
+      const dimensions = ops.length - 1;
+      let elements = callbackResultTypeD(ops[0], engine) ?? 'any';
+      if (ops[0] !== undefined && dimensions > 0) {
+        const shape = ops[0].structureOf?.();
+        const sources = Array.from({ length: dimensions }, (_, i) =>
+          describeBoundSymbol(
+            { kind: 'list', elements: 'integer' },
+            `__tabulateSource${i}`
+          )
         );
-      if (ops.length === 2) {
-        const elt = functionResult(ops[0].type) ?? 'any';
-        return BoxedType.forResult(
-          { kind: 'list', elements: elt },
-          context.engine._typeResolver
-        );
+        const inferred =
+          bareMappingElementTypeD(ops[0], sources, engine, derive) ??
+          deriveApplicationOf(
+            {
+              head: shape?.kind === 'symbol' ? shape.name : 'Apply',
+              callee: ops[0],
+            },
+            Array.from({ length: dimensions }, (_, i) =>
+              describeBoundElement('integer', i)
+            ),
+            { engine, derive }
+          );
+        if (
+          (elements === 'unknown' || elements === 'any') &&
+          inferred !== undefined &&
+          inferred !== 'unknown'
+        )
+          elements = inferred;
+        if (resultMayBeNothing(ops[0], engine, true, elements))
+          elements = withNothing(elements);
       }
+      // Omission belongs at the leaf, not at the row: indexing a 2-D
+      // tabulation returns a lazy row whose own positions remain intact.
+      for (let i = 1; i < dimensions; i++)
+        elements = { kind: 'list', elements };
       return BoxedType.forResult(
-        parseType('list<list>'),
-        context.engine._typeResolver
+        { kind: 'list', elements },
+        engine._typeResolver
       );
     },
     canonical: (ops, { engine }) => {
@@ -18386,8 +18413,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         result === undefined ||
         result === 'unknown' ||
         typeCouldHoldMissing(result);
+      const type: Type = mayBeAbsent
+        ? { kind: 'list', elements: 'any' }
+        : 'list';
       return BoxedType.forResult(
-        mayBeAbsent ? { kind: 'list', elements: 'any' } : 'list',
+        ops[0] !== undefined && resultMayBeNothing(ops[0], engine, true, result)
+          ? mapImmediateElements(type, withNothing)
+          : type,
         engine._typeResolver
       );
     },
@@ -23056,28 +23088,50 @@ function tabulateCount(expr: Expression): number | undefined {
  * tabulation this is `fn(outerIndex)`; for higher rank it is the nested sub-
  * array over the remaining dimensions (built on demand). */
 function tabulateElement(
-  ce: ComputeEngine,
+  expr: Expression,
   fn: (args: Expression[]) => Expression | undefined | null,
   dims: number[],
   outerIndex: number
 ): Expression {
-  // A tabulating function that produced no value is a computation failure:
-  // keep the position with the `Missing` marker rather than erase it.
+  const ce = expr.engine;
+  // No callback result (null/undefined) keeps the position as Missing;
+  // an explicit Nothing result keeps the omission marker itself.
   if (dims.length === 1) return fn([ce.number(outerIndex)]) ?? ce.Missing;
-
-  const fillArray = (index: number[], level: number): ExpressionInput => {
-    if (level === dims.length)
-      return fn(index.map((v) => ce.number(v))) ?? ce.Missing;
-    const arr: ['List', ...ExpressionInput[]] = ['List'];
-    for (let j = 1; j <= dims[level]; j++) {
-      index[level] = j;
-      arr.push(fillArray(index, level + 1));
-    }
-    return arr;
-  };
-  const index = Array(dims.length).fill(0);
-  index[0] = outerIndex;
-  return ce.expr(fillArray(index, 1));
+  if (!isFunction(expr)) return ce.Missing;
+  // Keep the row lazy. Building a List here erased Nothing coordinates
+  // and evaluated every column merely to access the row.
+  // A named callback keeps its captured callable binding. Applying it as a
+  // data-symbol operand would re-read an unrelated declaration by name.
+  const generator = expr.op1;
+  const named = isSymbol(generator);
+  const own =
+    generator.valueDefinition !== undefined
+      ? { value: generator.valueDefinition }
+      : generator.operatorDefinition !== undefined
+        ? { operator: generator.operatorDefinition }
+        : undefined;
+  const binding = named
+    ? callableBindingInContext(ce, generator.symbol, own)
+    : ce._libraryProvenance.get('Apply')?.binding;
+  const name = named ? generator.symbol : 'Apply';
+  if (!named && binding === undefined)
+    return ce.error('unknown-operator', name);
+  let parameter = '_tabulateIndex';
+  const used = new Set(generator.symbols);
+  while (parameter === name || used.has(parameter)) parameter += '_';
+  const bindings =
+    binding === undefined ? new Map() : new Map([[name, binding]]);
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings });
+  try {
+    const body: ExpressionInput = named
+      ? [name, outerIndex, parameter]
+      : ['Apply', generator, outerIndex, parameter];
+    const row = ce.box(['Function', body, ['Typed', parameter, "'integer'"]]);
+    return ce.function('Tabulate', [row, ce.number(dims[1])]);
+  } finally {
+    bindings.clear();
+    ce.popScope();
+  }
 }
 
 function tabulateAt(
@@ -23094,7 +23148,7 @@ function tabulateAt(
   let i = index;
   if (i < 0) i = dims[0] + i + 1;
   if (i < 1 || i > dims[0]) return undefined;
-  return tabulateElement(expr.engine, fn, dims, i);
+  return tabulateElement(expr, fn, dims, i);
 }
 
 function* tabulateIterator(
@@ -23105,8 +23159,7 @@ function* tabulateIterator(
   if (dims === null || dims.length === 0) return;
   const fn = applicable(expr.op1);
   if (!fn) return;
-  const ce = expr.engine;
-  for (let i = 1; i <= dims[0]; i++) yield tabulateElement(ce, fn, dims, i);
+  for (let i = 1; i <= dims[0]; i++) yield tabulateElement(expr, fn, dims, i);
 }
 
 // The length of an element-wise combination of collections (Zip, and the

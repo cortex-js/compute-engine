@@ -6392,15 +6392,6 @@ Compiler support remains conservative: captured held functions with a different
 ambient binding still refuse compilation. Remove each refusal only when that
 lowering preserves binding identity and has interpreter/compiler parity tests.
 
-### Previously evaluated unresolved calls in loop terms (RESOLVED — 2026-10-20)
-
-User decision: a completed unresolved call stays symbolic after later assignment;
-the original call remains a live forward reference. A private unset binding
-preserves the completed result, so Sum/Product no longer retroactively run an
-early h(1) when h is defined by a later term. Compilation refuses the completed
-symbolic result rather than substituting the new definition. The existing
-batch9-evaluation regressions and a direct forward-call/result test cover it.
-
 ### Raw lazy producer omission (RESOLVED — 2026-10-20)
 
 Tabulate/Table, Scan and Iterate retain possible Nothing in element types.
@@ -6410,14 +6401,18 @@ omits its immediate Nothing entries. Compiler guards refuse omission-capable
 Tabulate/Scan until targets have a distinct representation; Iterate remains
 unsupported. Custom accumulator delivery policies are unchanged.
 
-### Function declaration hoisting across execution routes (decision pending — 2026-10-20)
+### Function declaration hoisting across execution routes (PLANNED)
 
-The sticky unresolved-result decision exposes a route difference: boxing a
-whole Block can install function clauses before evaluation, while executeEpsil
-processes top-level statements in order. Thus let a = g(3); function g(k){k+1};
-a can return4 on whole-block boxing/compilation, while sequential execution
-keeps the already unresolved g(3) symbolic. Assignments remain ordered. Asked
-user whether to preserve declaration hoisting explicitly across routes
-(recommended) or make function declarations execution-ordered too. No policy
-change for declaration hoisting has been applied. The removed conservative
-compiler-order prototype is saved in the producer review artifacts.
+Function declarations should remain available throughout their scope;
+assignments take effect only when they execute. An evaluated unresolved call
+should stay symbolic after a later assignment, while the original unevaluated
+call remains a forward reference. Implement these rules together: making
+unresolved results sticky on its own changes sequential Epsil execution,
+which currently relies on later resolution where whole-block boxing and
+compilation hoist the function declaration.
+
+The sequential runner needs declaration preparation that preserves earlier
+variable bindings, declared parameter signatures, and smart constructors.
+Preboxing function statements alone changes those meanings. Keep that repair
+out of the raw-producer slice. Use a shared declaration-preparation step
+rather than independently moving function boxing ahead of other declarations.

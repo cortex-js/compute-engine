@@ -124,6 +124,7 @@ const MAX_LAZY_NORM_ELEMENTS = 100_000;
  *  of a lazy collection whose elements are not scalar numbers. Beyond it the
  *  operators stay symbolic rather than box an unbounded number of elements. */
 const MAX_LAZY_SHAPE_ELEMENTS = 100_000;
+const NUMERIC_OR_OMITTED_TYPE = parseType('number | nothing');
 
 /**
  * The shape of the evaluated operand `xs` of `Shape` and `Rank`, or
@@ -164,8 +165,11 @@ const MAX_LAZY_SHAPE_ELEMENTS = 100_000;
  */
 function shapeOfOperand(
   ce: ComputeEngine,
-  xs: Expression
+  xs: Expression,
+  seen: ReadonlySet<Expression> = new Set()
 ): number[] | undefined {
+  if (seen.has(xs)) return undefined;
+  const next = new Set(seen).add(xs);
   const shape = xs.shape;
   if (
     shape.length === 0 &&
@@ -188,12 +192,41 @@ function shapeOfOperand(
   if (xs.isFiniteCollection !== true) return undefined;
   const count = smallCount(xs);
   if (count === undefined || !Number.isFinite(count)) return undefined;
+  if (count === 0) return [0];
   const elementType = collectionElementType(xs.type.type);
-  if (elementType !== undefined && isSubtype(elementType, 'number'))
+  if (
+    elementType !== undefined &&
+    isSubtype(elementType, NUMERIC_OR_OMITTED_TYPE)
+  )
     return [count];
   if (count > MAX_LAZY_SHAPE_ELEMENTS) return undefined;
   if (!isFiniteIndexedCollection(xs)) return undefined;
-  return ce.function('List', [...xs.each()]).shape;
+  const rows = [...xs.each()];
+  // Nothing occupies a raw position. Building a List would erase it before
+  // measuring the extent; a mixture of omitted scalars and rows has no
+  // rectangular shape.
+  if (rows.some((row) => isSymbol(row, 'Nothing')))
+    return rows.every(
+      (row) => row.isCollection !== true || isTupleShapedType(row.type.type)
+    )
+      ? [count]
+      : undefined;
+  if (rows.some((row) => row.isLazyCollection)) {
+    const shapes = rows.map((row) => shapeOfOperand(ce, row, next));
+    const first = shapes[0];
+    if (
+      first === undefined ||
+      shapes.some(
+        (s) =>
+          s === undefined ||
+          s.length !== first.length ||
+          s.some((n, i) => n !== first[i])
+      )
+    )
+      return undefined;
+    return [count, ...first];
+  }
+  return ce.function('List', rows).shape;
 }
 
 /**
