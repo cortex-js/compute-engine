@@ -463,6 +463,7 @@ import { expand } from '../boxed-expression/expand.js';
 import {
   typeCouldBeNumericTuple,
   typeCouldBeNumericTupleCollection,
+  typeCouldBeNestedNumericTupleCollection,
   broadcastSiblingType,
   isTextAtom,
   isTuple,
@@ -6266,8 +6267,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               context.engine._typeResolver
             );
         }
+        // A list of rows of points (`list<list<tuple<…>>>`) divides each
+        // point the same way.
         if (
-          typeCouldBeNumericTupleCollection(num.type) &&
+          typeCouldBeNestedNumericTupleCollection(num.type) &&
           divisorKeepsNumeratorShape(den)
         )
           return BoxedType.forResult(
@@ -11245,8 +11248,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1350,
       broadcastable: true,
       // Numeric tuples subtract component-wise, never fanned into a List by
-      // the generic broadcast machinery.
-      broadcastExemptions: ['tuples'],
+      // the generic broadcast machinery. The type handler is the `Add`
+      // handler over the negated terms, which computes the collection type
+      // of the result itself (`list<list<integer>> - 1` is
+      // `list<list<integer>>`), so the generic result-type lift must not wrap
+      // that answer in one more list, as for `Add`.
+      broadcastExemptions: ['tuples', 'collection-result'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
       signature: '(number+) -> number',

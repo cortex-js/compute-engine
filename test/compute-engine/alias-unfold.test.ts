@@ -130,7 +130,7 @@ describe('alias LHS-unfold: recursion is bounded', () => {
     expect(ce.type('integer').matches('json')).toBe(true);
   });
 
-  test('MUTUALLY recursive aliases terminate (conservative cutoff)', () => {
+  test('MUTUALLY recursive aliases terminate', () => {
     // Not reachable through `ce.declareType` (a forward reference to an
     // undeclared name throws), so the references are built by hand — this is
     // the shape the depth cutoff exists for: no same-name short-circuit ever
@@ -150,8 +150,12 @@ describe('alias LHS-unfold: recursion is bounded', () => {
     a.def = { kind: 'list', elements: b } as Type;
     b.def = { kind: 'list', elements: a } as Type;
 
-    // Answers `false` (not provably a subtype) instead of looping.
-    expect(isSubtype(a, b)).toBe(false);
+    // Terminates instead of looping. The answer is `true`: when the same
+    // question (`a <: b`) comes up again inside its own unfold, it is taken
+    // to hold (the coinductive rule of `isSubtype`), and both aliases
+    // describe the same values, lists of lists nested to any depth.
+    expect(isSubtype(a, b)).toBe(true);
+    expect(isSubtype(b, a)).toBe(true);
     // …and reflexivity still short-circuits.
     expect(isSubtype(a, a)).toBe(true);
     // The unfold set is restored: an ordinary question still answers.

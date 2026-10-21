@@ -2302,6 +2302,21 @@ const MAPPED_KINDS: ReadonlySet<string> = new Set([
  * walk that meets no alias allocates nothing. */
 let unfoldingPatterns: Set<TypeReference> | null = null;
 
+/**
+ * The (alias record, pattern) pairs whose ACTUAL-side unfold is in progress
+ * in {@link walkPattern} — the cycle cutoff of that unfold. A pair is added
+ * before the walk of the alias definition and removed in a `finally`, so the
+ * map holds exactly the frames on the stack. The cutoff must be keyed on the
+ * pattern too, and must outlive one call: the definition of
+ * `cyc = cyc | list<integer>` distributes over its union, and its `cyc` arm
+ * meets the SAME pattern again without descending into it, so a guard local
+ * to one call unfolded it until the stack overflowed. The same alias met at a
+ * deeper pattern (`json = list<json> | integer` against `list<list<T>>`) is a
+ * different pair and unfolds again; the pattern is finite, so that ends.
+ * Allocated lazily and released at depth zero.
+ */
+let unfoldingActuals: Map<TypeReference, Set<Type>> | null = null;
+
 function walkPattern(
   s: SolverState,
   pattern: Type,
@@ -2359,6 +2374,40 @@ function walkPattern(
     return covariant
       ? algebra().isSubtype(actual, pattern)
       : algebra().isSubtype(pattern, actual);
+  }
+
+  // A STRUCTURAL alias actual is its definition, so a composite pattern must
+  // see that structure: with `L` an alias of `list<integer | missing>` and
+  // `a: L`, `Sort(a)` binds `T` from the list's elements instead of leaving
+  // `T` unbound. A bare variable pattern (handled above) keeps the alias
+  // name, so an echoed result still prints as `L`. An alias met again against
+  // the same pattern while its unfold is in progress (`a = b`, `b = a`, or
+  // the `cyc` arm of `cyc = cyc | list<integer>`) contributes nothing: the
+  // other arms of the definition give the bounds (`unfoldingActuals`). A
+  // nominal reference is opaque and is not unfolded.
+  if (
+    typeof actual === 'object' &&
+    actual.kind === 'reference' &&
+    actual.alias === true &&
+    actual.def !== undefined
+  ) {
+    const record = declarationOf(actual);
+    const active = unfoldingActuals?.get(record);
+    if (active?.has(pattern)) return true;
+    const def = aliasDefinitionAt(actual);
+    if (def !== undefined) {
+      unfoldingActuals ??= new Map();
+      const patterns = active ?? new Set<Type>();
+      patterns.add(pattern);
+      unfoldingActuals.set(record, patterns);
+      try {
+        return walkPattern(s, pattern, def, index, phase, covariant, topLevel);
+      } finally {
+        patterns.delete(pattern);
+        if (patterns.size === 0) unfoldingActuals.delete(record);
+        if (unfoldingActuals.size === 0) unfoldingActuals = null;
+      }
+    }
   }
 
   // A UNION actual distributes: every arm must match the pattern, and each

@@ -521,11 +521,13 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
         expect(value.type.matches(expr.type)).toBe(true);
       });
 
-  test('both results occur for the same declared type', () => {
+  // The result is a string however the symbol holds its string. Before, a
+  // string literal gave the list `["a","b"]`.
+  test('the result kind does not depend on how the string is held', () => {
     const literal = new ComputeEngine();
     literal.declare('c', 'list<integer> | string');
     literal.assign('c', literal.box("'aab'"));
-    expect(literal.box(['Dedup', 'c']).evaluate().toString()).toBe('["a","b"]');
+    expect(literal.box(['Dedup', 'c']).evaluate().toString()).toBe('"ab"');
     const application = new ComputeEngine();
     application.declare('c', 'list<integer> | string');
     application.assign(
@@ -536,12 +538,8 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
   });
 
   test.each([
-    ['dedup(c)', 'list<character> | list<integer> | string', '["a","b"]'],
-    [
-      'filter(c, x => true)',
-      'list<character> | list<integer> | string',
-      '["a","a","b"]',
-    ],
+    ['dedup(c)', 'string', '"ab"'],
+    ['filter(c, x => true)', 'string', '"aab"'],
     ['map(x => x, c)', 'list', '["a","a","b"]'],
   ])('the Epsil route: %s', (call, type, value) => {
     const engine = new ComputeEngine();
@@ -585,7 +583,7 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
       'tuple<integer, missing> | dictionary<integer>',
       ['Tuple', 1, 'Missing'],
       ['Map', ['Function', 'x', 'x'], 'v'],
-      'dictionary<integer> | list<missing | unknown>',
+      'collection<unknown> | list<missing | unknown>',
       '[1,"Missing"]',
     ],
     [
@@ -599,7 +597,7 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
       'tuple<integer, integer> | dictionary<integer>',
       ['Tuple', 1, 2],
       ['Map', ['Function', 'x', 'x'], 'v'],
-      'dictionary<integer> | list',
+      'collection<unknown>',
       '[1,2]',
     ],
     [
@@ -659,7 +657,9 @@ describe('AN ALIAS SOURCE WITH ABSENT CELLS', () => {
   test.each([
     [['Dedup', 'a'], 'L'],
     [['ArgMax', 'a'], 'integer'],
-    [['Map', ['Function', ['Add', 'x', 1], 'x'], 'a'], 'collection<number>'],
+    // The alias is read as its definition (`list<number>`, not the abstract
+    // `collection<number>`).
+    [['Map', ['Function', ['Add', 'x', 1], 'x'], 'a'], 'list<number>'],
     [['Dedup', 'b'], 'list<integer | missing> | missing'],
     [['ArgMax', 'b'], 'number'],
     [

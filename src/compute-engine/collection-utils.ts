@@ -1634,6 +1634,41 @@ export function typeCouldBeNumericTupleCollection(
 }
 
 /**
+ * {@link typeCouldBeNumericTupleCollection}, read through the rows of a
+ * nested collection too: a list of rows of points
+ * (`list<list<tuple<number, number>>>`) qualifies, at any depth up to a
+ * bound. The `Divide` type handler reads it: a quotient of such a list by a
+ * scalar divides each point, so its cells stay points.
+ */
+export function typeCouldBeNestedNumericTupleCollection(
+  type: Type,
+  seen?: AliasDescent,
+  depth = 0
+): boolean {
+  if (typeCouldBeNumericTupleCollection(type, seen)) return true;
+  if (depth >= 8) return false;
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  const t = unfolded.type;
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union')
+    return t.types.some((m) =>
+      typeCouldBeNestedNumericTupleCollection(m, unfolded.seen, depth + 1)
+    );
+  if (
+    t.kind === 'list' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'collection'
+  )
+    return typeCouldBeNestedNumericTupleCollection(
+      t.elements,
+      descendIntoConstructor(unfolded.seen),
+      depth + 1
+    );
+  return false;
+}
+
+/**
  * True when `expr`'s TYPE is a matrix/vector/list-style collection (a `list`,
  * `collection`, or `indexed_collection` kind) — i.e. the kind of collection
  * that participates in linear-algebra arithmetic (`Add`/`Multiply`). Numeric
@@ -3272,11 +3307,37 @@ export function pointListCarrierArity(expr: Expression): number | undefined {
 /**
  * When `t`, without its absence arm, is a list whose every non-absent
  * element is a tuple, the element type. Otherwise `undefined`.
+ *
+ * A list whose every non-absent element is itself such a list (a list of
+ * rows of points, `list<list<tuple<…>>>`, or rows of different types,
+ * `list<list<tuple<…>^1> | list<tuple<…>^2>>`) counts too, and the result
+ * is then the type of the points: arithmetic maps over the rows to each
+ * point, so a sum of such a list and a number is a sum of a point and a
+ * number for each point, as for a flat list of points. A dimensioned list
+ * of points (`matrix<tuple<…>>`) already has tuple elements. `depth` bounds
+ * the walk, which also stops a self-referential alias.
  */
-function pointListElementType(t: Type): Type | undefined {
+function pointListElementType(t: Type, depth = 0): Type | undefined {
   const s = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(t)));
   if (typeof s === 'string' || s.kind !== 'list') return undefined;
-  return tupleCarrierType(s.elements) ? s.elements : undefined;
+  if (tupleCarrierType(s.elements)) return s.elements;
+  if (depth >= 8) return undefined;
+  const rows = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(s.elements))
+  );
+  if (typeof rows === 'string') return undefined;
+  if (rows.kind === 'list') return pointListElementType(rows, depth + 1);
+  if (rows.kind !== 'union' || rows.types.length === 0) return undefined;
+  const points: Type[] = [];
+  for (const arm of rows.types) {
+    const p = pointListElementType(arm, depth + 1);
+    if (p === undefined) return undefined;
+    points.push(p);
+  }
+  // Rows of one point type (`list<tuple<…>^1> | list<tuple<…>^2>`) give that
+  // point type once, so a reader of a single tuple (`pointListCarrierArity`)
+  // finds its arity.
+  return reduceType({ kind: 'union', types: points });
 }
 
 /**
@@ -4832,8 +4893,16 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         if (store.length === 1) return expr.engine.number(store[0]).type.type;
         return widenAll(numericStoreTiers(store));
       }
-      if (expr.nops === 1) return expr.ops[0].type.type;
-      return widenAll(expr.ops.map((op) => op.type.type));
+      // The `Undefined` symbol is an absent element, as `Missing` is
+      // (`isAbsentSymbol`), but it is declared `unknown`, which the widening
+      // drops: `[1, Undefined]` answered `integer`, and `Zip` of two such
+      // lists was typed `list<tuple<integer, integer>>` although its second
+      // element is `Missing`. It is a `missing` element here, as in the type
+      // of the literal (`classifyCellD`, `library/collections.ts`).
+      const elementType = (op: Expression): Type =>
+        isSymbol(op, 'Undefined') ? 'missing' : op.type.type;
+      if (expr.nops === 1) return elementType(expr.ops[0]);
+      return widenAll(expr.ops.map(elementType));
     },
   };
 }

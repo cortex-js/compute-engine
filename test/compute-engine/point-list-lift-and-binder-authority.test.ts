@@ -92,8 +92,10 @@ describe('a scalar function over a list of points keeps the point shape in its t
     expect(ce.box(['Sqrt', 'F'] as never).type.toString()).toBe(
       'list<tuple<number, number>^3>'
     );
+    // A list of rows does not promise rows of one length, so the result is a
+    // list of rows of points, not a matrix of points.
     expect(ce.box(['Sqrt', 'M'] as never).type.toString()).toBe(
-      'matrix<tuple<number, number>>'
+      'list<list<tuple<number, number>>>'
     );
     const ce2 = new ComputeEngine();
     ce2.assign(

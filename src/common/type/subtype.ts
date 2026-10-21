@@ -27,13 +27,17 @@ import type {
   DictionaryType,
   FunctionSignature,
   ListType,
+  NamedElement,
   NumericPrimitiveType,
   NumericType,
   ObjectType,
   PrimitiveType,
+  RecordType,
   SetType,
+  TupleType,
   Type,
   TypeCompatibility,
+  TypeParameter,
   TypeReference,
   TypeString,
 } from './types.js';
@@ -362,6 +366,239 @@ function endUnfold(ref: TypeReference): void {
  * 2026-10-19).
  */
 let lhsUnfoldTargets: Map<TypeReference, Set<unknown>> | null = null;
+
+/**
+ * The right-hand types, by structural key, each structural alias on the LEFT
+ * is being unfolded against: the pairs of the coinductive cycle rule of the
+ * lhs unfold in `isSubtype`. One key per live frame; a frame adds its key and
+ * removes it in a `finally`, so the map holds exactly the frames on the
+ * stack. Allocated lazily and released at depth zero.
+ */
+let lhsUnfoldKeys: Map<TypeReference, Set<string>> | null = null;
+
+/** The most pairs one alias may have on the lhs unfold stack at once. The
+ * pairs are finite by construction; this bound only stops a rule that would
+ * build an ever larger rhs. */
+const MAX_LHS_UNFOLD_PAIRS = 32;
+
+/** A number for each object met by {@link cyclePairKey} that it names by
+ * identity: a reference DECLARATION record, so that a key names a reference
+ * by its declaration and not by its name, and the object payload of a value
+ * type. */
+const cycleKeyObjectIds = new WeakMap<object, number>();
+let nextCycleKeyObjectId = 0;
+
+function cycleKeyObjectId(o: object): number {
+  let id = cycleKeyObjectIds.get(o);
+  if (id === undefined) {
+    id = nextCycleKeyObjectId++;
+    cycleKeyObjectIds.set(o, id);
+  }
+  return id;
+}
+
+/**
+ * The key of a right-hand type in the pairs of the lhs unfold's cycle rule.
+ * Two types with the same key are taken as the same question, and a repeated
+ * question is assumed to hold, so the key must not merge two types that
+ * differ. The de-dup key (`typeToDedupKey`) is not exact enough for that: it
+ * prints a reference by its name, so two aliases of the same name declared in
+ * nested scopes share it, and it drops the stated purity of a signature.
+ *
+ * The key is built by a walk that follows the structure of each type node,
+ * so a field map (the fields of a record or an object type) is read as a
+ * map, never as a node: a record with a field named `kind` is not mistaken
+ * for another node. Every field is kept:
+ * - a reference is named by the identity of its declaration record, with
+ *   the keys of its arguments, and its definition is not entered (a
+ *   recursive type reaches itself through it);
+ * - the payload of a value type is written by its JavaScript kind: a number
+ *   (`±Infinity` and `NaN` included), a big integer, a string or a boolean
+ *   by its value, and an object or a function by its identity. An object
+ *   payload can be any run-time value, a circular one included, and the
+ *   value-subtype rule tells two objects apart by identity, so two
+ *   equal-looking objects get two keys.
+ *
+ * Exported for the tests of the key (`type-relation-gaps.test.ts`); it has
+ * no other use outside this module.
+ */
+export function cyclePairKey(t: Type | TypeString): string {
+  if (typeof t === 'string') return t;
+  return cycleTypeKey(t);
+}
+
+/**
+ * The interning table of {@link cyclePairKey}: each composite node gets a
+ * number, the same number for two nodes of the same structure. A node's
+ * structure is written with the numbers of its children, so every key is
+ * short, and a node shared between several places (`Uₙ = Uₙ₋₁ | Uₙ₋₁`) is
+ * keyed once, through the identity cache, instead of once per path.
+ *
+ * The keys are compared only while an lhs-unfold frame of `isSubtype` or an
+ * `inhabitation()` walk runs, so the table is dropped when the last of them
+ * ends (`cycleKeyTableUsers`), and a new one starts with the next question.
+ */
+let cycleKeyTable: {
+  byStructure: Map<string, number>;
+  byNode: WeakMap<object, number>;
+  /** A number for each `Symbol` payload of a value type, by identity. A
+   * symbol is not a valid `WeakMap` key on every platform, so it is held
+   * here, for the life of the table only. */
+  bySymbol: Map<symbol, number>;
+  /** The answer of `inhabitation()` for each node already asked, so that
+   * the recursive probes of one `couldMatch` question walk each node once.
+   * The answer of a walk from a node does not depend on where the node was
+   * met, and no type changes during one question. */
+  inhabitation: WeakMap<object, 'empty' | 'inhabited' | 'unknown'>;
+} | null = null;
+
+/** The interning table, created when it is first needed. */
+function cycleKeys(): NonNullable<typeof cycleKeyTable> {
+  cycleKeyTable ??= {
+    byStructure: new Map(),
+    byNode: new WeakMap(),
+    bySymbol: new Map(),
+    inhabitation: new WeakMap(),
+  };
+  return cycleKeyTable;
+}
+
+/** The number of computations that hold {@link cycleKeyTable}: each live
+ * lhs-unfold frame of `isSubtype` and each `inhabitation()` walk. Their
+ * keys stay comparable only while the table lives, and a walk can call
+ * `isSubtype` (and the reverse), so the table is dropped only when the
+ * count returns to zero, and always from a `finally` block. */
+let cycleKeyTableUsers = 0;
+
+function enterCycleKeys(): void {
+  cycleKeyTableUsers += 1;
+}
+
+function leaveCycleKeys(): void {
+  cycleKeyTableUsers -= 1;
+  if (cycleKeyTableUsers === 0) cycleKeyTable = null;
+}
+
+/** The key of the type `t` as a child of another node: a primitive by its
+ * name, a composite node by its interned number. */
+function cycleTypeKey(t: Type): string {
+  if (typeof t === 'string') return `p:${t}`;
+  const table = cycleKeys();
+  const cached = table.byNode.get(t);
+  if (cached !== undefined) return `#${cached}`;
+  const structure = cycleNodeStructure(t);
+  let id = table.byStructure.get(structure);
+  if (id === undefined) {
+    id = table.byStructure.size;
+    table.byStructure.set(structure, id);
+  }
+  table.byNode.set(t, id);
+  return `#${id}`;
+}
+
+/** The structure of the composite type node `t`, with each child written by
+ * {@link cycleTypeKey}. */
+function cycleNodeStructure(t: Exclude<Type, string>): string {
+  const types = (ts: ReadonlyArray<Type> | undefined) =>
+    ts === undefined ? '-' : `[${ts.map(cycleTypeKey).join(',')}]`;
+  const named = (e: NamedElement) =>
+    `${JSON.stringify(e.name ?? null)}:${cycleTypeKey(e.type)}`;
+  const namedList = (es: ReadonlyArray<NamedElement> | undefined) =>
+    es === undefined ? '-' : `[${es.map(named).join(',')}]`;
+  const fieldMap = (m: Readonly<Record<string, Type>>) => {
+    const fields = Object.keys(m)
+      .sort()
+      .map((k) => JSON.stringify(k) + ':' + cycleTypeKey(m[k]));
+    return `{${fields.join(',')}}`;
+  };
+  const typeParam = (p: TypeParameter) =>
+    [
+      JSON.stringify(p.name),
+      cycleDataKey(p.kind),
+      cycleDataKey(p.variance),
+      p.bound === undefined ? '-' : cycleTypeKey(p.bound),
+    ].join(':');
+  switch (t.kind) {
+    case 'reference': {
+      const id = cycleKeyObjectId(declarationOf(t));
+      return `ref#${id}${types(t.args)}`;
+    }
+    case 'value': {
+      const p: unknown = t.value;
+      if (typeof p === 'symbol') {
+        // Two symbols are two values, told apart by identity, as objects are.
+        const symbols = cycleKeyTable!.bySymbol;
+        let id = symbols.get(p);
+        if (id === undefined) {
+          id = symbols.size;
+          symbols.set(p, id);
+        }
+        return `value${id}`;
+      }
+      return (typeof p === 'object' && p !== null) || typeof p === 'function'
+        ? `value#${cycleKeyObjectId(p as object)}`
+        : `value(${cycleDataKey(p)})`;
+    }
+    case 'record':
+    case 'object':
+      return `${t.kind}${fieldMap(t.elements)}`;
+    case 'tuple':
+      return `tuple${namedList(t.elements)}`;
+    case 'signature':
+      return [
+        'signature',
+        namedList(t.args),
+        namedList(t.optArgs),
+        t.variadicArg === undefined ? '-' : named(t.variadicArg),
+        cycleDataKey(t.variadicMin),
+        cycleDataKey(t.effects),
+        t.typeParams === undefined
+          ? '-'
+          : `[${t.typeParams.map(typeParam).join(',')}]`,
+        cycleTypeKey(t.result),
+      ].join(';');
+    case 'union':
+    case 'intersection':
+      return `${t.kind}${types(t.types)}`;
+    case 'negation':
+      return `negation(${cycleTypeKey(t.type)})`;
+    case 'dictionary':
+      return `dictionary(${cycleTypeKey(t.values)})`;
+    case 'list':
+      return `list(${cycleTypeKey(t.elements)};${cycleDataKey(t.dimensions)};${cycleDataKey(t.dimensionVariables)})`;
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return `${t.kind}(${cycleTypeKey(t.elements)})`;
+    default:
+      // `numeric`, `symbol`, `expression` and `variable` nodes hold data
+      // only (bounds, names), no nested type.
+      return `${t.kind}${cycleDataKey({ ...t, kind: undefined })}`;
+  }
+}
+
+/** The key of a piece of data inside a type node: a number, a string, a
+ * boolean, a big integer, `null`, `undefined`, or an array or a plain
+ * object of those (its fields sorted, `undefined` fields left out). */
+function cycleDataKey(v: unknown): string {
+  if (v === null) return 'null';
+  if (v === undefined) return 'undefined';
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (typeof v === 'number') return `n:${String(v)}`;
+  if (typeof v === 'boolean') return `b:${String(v)}`;
+  if (typeof v === 'bigint') return `i:${v}`;
+  if (Array.isArray(v)) return `[${v.map(cycleDataKey).join(',')}]`;
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const fields = Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => JSON.stringify(k) + ':' + cycleDataKey(o[k]));
+    return `{${fields.join(',')}}`;
+  }
+  return `#${typeof v}`;
+}
 
 /** Whether the union arm `arm` is a structural alias already being unfolded
  * against `rhs` further up the stack: see `lhsUnfoldTargets`. */
@@ -813,16 +1050,278 @@ const BARE_COLLECTION_EXPANSIONS: Partial<Record<string, Type>> = Object.assign(
   }
 );
 
+/** Whether every field that the record type `r` requires is shown to hold a
+ * value. A record type with a field of the empty type (`record{a: never}`)
+ * has no value, so it overlaps nothing; a field whose answer is unknown
+ * proves no overlap either, and the record probes of `couldMatch` then add
+ * no answer. */
+function recordFieldsInhabited(r: RecordType): boolean {
+  return Object.values(r.elements).every(
+    (t) => inhabitation(t) === 'inhabited'
+  );
+}
+
+/** The deepest level of structural nesting that {@link inhabitation}
+ * reads. Alias hops do not count: an acyclic alias chain is followed to its
+ * end. */
+const MAX_INHABITATION_DEPTH = 8;
+
+/** The most nodes that {@link inhabitation} visits in one question. */
+const MAX_INHABITATION_STEPS = 512;
+
+/**
+ * Whether the type `t` has a value, as far as its structure shows:
+ * `'empty'` (no value: `never`, an alias of an empty type, a record with a
+ * required field of an empty type, a tuple with an empty slot, a list with
+ * fixed positive lengths and empty cells, a union of empty arms),
+ * `'inhabited'` (a value is shown to exist), or `'unknown'` (the walk cannot
+ * decide: a cycle of aliases, a negation, an intersection, a type variable,
+ * a structure deeper than {@link MAX_INHABITATION_DEPTH}).
+ *
+ * An `'unknown'` answer must never be read as either of the other two: a
+ * caller that needs a proof of a value, or of no value, does not get one.
+ */
+function inhabitation(t: Type): 'empty' | 'inhabited' | 'unknown' {
+  // The walk keys references with the interning table of `cyclePairKey`,
+  // so it holds the table while it runs (`enterCycleKeys`).
+  if (typeof t === 'string') return t === 'never' ? 'empty' : 'inhabited';
+  enterCycleKeys();
+  try {
+    const memo = cycleKeys().inhabitation;
+    const known = memo.get(t);
+    if (known !== undefined) return known;
+    const answer = inhabitationWalk(t, 0, undefined, undefined, {
+      left: MAX_INHABITATION_STEPS,
+    });
+    memo.set(t, answer);
+    return answer;
+  } finally {
+    leaveCycleKeys();
+  }
+}
+
+/** The walk of {@link inhabitation}. `steps.left` is the number of nodes it
+ * may still visit in this question: a node shared by several fields or
+ * arms (`record{a: R, b: R, …}` at each of 8 levels) is visited at each
+ * place, and without the budget the walk could take exponentially many
+ * steps. When it runs out, the answer is `'unknown'`. */
+function inhabitationWalk(
+  t: Type,
+  depth: number,
+  seen: ReadonlySet<string> | undefined,
+  unguarded: ReadonlySet<string> | undefined,
+  steps: { left: number }
+): 'empty' | 'inhabited' | 'unknown' {
+  if (typeof t === 'string') return t === 'never' ? 'empty' : 'inhabited';
+  if (depth > MAX_INHABITATION_DEPTH || --steps.left < 0) return 'unknown';
+  const walk = inhabitationWalk;
+  // The answer for a type that holds a value of EACH of `parts` (a record,
+  // a tuple): empty when one part is, inhabited when all parts are.
+  const all = (parts: Type[]): 'empty' | 'inhabited' | 'unknown' => {
+    let result: 'inhabited' | 'unknown' = 'inhabited';
+    for (const part of parts) {
+      const r = walk(part, depth + 1, seen, undefined, steps);
+      if (r === 'empty') return 'empty';
+      if (r === 'unknown') result = 'unknown';
+    }
+    return result;
+  };
+  switch (t.kind) {
+    case 'reference': {
+      // An alias IS its definition, and the values of a nominal type are
+      // values of its definition. A chain of references is followed with no
+      // depth cost; a reference met again on the same path is a cycle.
+      //
+      // `unguarded` holds the references entered since the last
+      // constructor (a record, a tuple, a list) on the path. A reference met
+      // again before any constructor is an UNPRODUCTIVE cycle (`R = R`,
+      // `R = S` with `S = R`, the arm `R` of `R = R | S`): no value is built
+      // through it, so it adds none, and that path is `'empty'`. A cycle
+      // through a constructor (`R = list<R>`) can build values, and the
+      // walk does not decide it (`'unknown'`).
+      //
+      // A reference is identified by its declaration AND its arguments
+      // (`cycleTypeKey`): two applications of one generic type
+      // (`Wrap<Wrap<integer>>` reaches `Wrap<integer>`) are different types,
+      // not a cycle.
+      if (t.def === undefined) return 'unknown';
+      const key = cycleTypeKey(t);
+      if (unguarded?.has(key)) return 'empty';
+      if (seen?.has(key)) return 'unknown';
+      const def = aliasDefinitionAt(t);
+      if (def === undefined) return 'unknown';
+      return walk(
+        def,
+        depth,
+        new Set(seen).add(key),
+        new Set(unguarded).add(key),
+        steps
+      );
+    }
+    case 'record':
+      return all(Object.values(t.elements));
+    case 'tuple':
+      return all(t.elements.map((e) => e.type));
+    case 'list':
+      // A list holds at least one cell only when every axis has a fixed,
+      // positive length (`list<never^1>`); a list with no dimensions, or
+      // with an open (`-1`) or zero-length axis, holds the empty list
+      // (`list<never>` is the type of `[]`).
+      if (
+        t.dimensions !== undefined &&
+        t.dimensions.length > 0 &&
+        t.dimensions.every((d) => d > 0)
+      )
+        return walk(t.elements, depth + 1, seen, undefined, steps);
+      return 'inhabited';
+    case 'union': {
+      let result: 'empty' | 'unknown' = 'empty';
+      for (const arm of t.types) {
+        const r = walk(arm, depth + 1, seen, unguarded, steps);
+        if (r === 'inhabited') return 'inhabited';
+        if (r === 'unknown') result = 'unknown';
+      }
+      return result;
+    }
+    case 'numeric': {
+      const lower = t.lower ?? -Infinity;
+      const upper = t.upper ?? Infinity;
+      if (lower > upper) return 'empty';
+      // Every tier but `number` and `infinity` holds finite numbers only, so
+      // a range whose lower bound is `+∞` or whose upper bound is `−∞`
+      // (`integer<oo..>`) holds none.
+      if (
+        t.type !== 'number' &&
+        t.type !== 'infinity' &&
+        (lower === Infinity || upper === -Infinity)
+      )
+        return 'empty';
+      if (t.type === 'integer') {
+        const first =
+          Math.ceil(lower) + (t.lowerOpen && Number.isInteger(lower) ? 1 : 0);
+        const last =
+          Math.floor(upper) - (t.upperOpen && Number.isInteger(upper) ? 1 : 0);
+        return first <= last ? 'inhabited' : 'empty';
+      }
+      if (lower < upper) return 'inhabited';
+      if (t.lowerOpen || t.upperOpen) return 'empty';
+      // A closed range with equal finite endpoints holds its endpoint
+      // (`real<0..0>` holds 0), on every tier that holds a finite real.
+      return Number.isFinite(lower) &&
+        (t.type === 'real' ||
+          t.type === 'rational' ||
+          t.type === 'complex' ||
+          t.type === 'number')
+        ? 'inhabited'
+        : 'unknown';
+    }
+    case 'intersection': {
+      // An intersection has no value when one member has none, or when two
+      // members are provably disjoint (`integer & string`).
+      const members = t.types;
+      if (
+        members.some(
+          (m) => walk(m, depth + 1, seen, unguarded, steps) === 'empty'
+        )
+      )
+        return 'empty';
+      // Each pair is charged to the budget, with the size of its two members
+      // (`typeTreeSize`, which counts a shared node at each place): the
+      // disjointness test follows every path of its operands, and a small
+      // intersection whose members share one node (`Iₙ = Iₙ₋₁ & Iₙ₋₁`) has
+      // exponentially many. A pair the budget cannot cover proves nothing.
+      for (let i = 0; i < members.length; i++)
+        for (let j = i + 1; j < members.length; j++) {
+          steps.left -= 1;
+          if (steps.left < 0) return 'unknown';
+          const size =
+            typeTreeSize(members[i], steps.left) +
+            typeTreeSize(members[j], steps.left);
+          if (size > steps.left) return 'unknown';
+          steps.left -= size;
+          if (provablyDisjoint(members[i], members[j])) return 'empty';
+        }
+      return 'unknown';
+    }
+    case 'negation':
+      // `!any` holds nothing: `any` holds every value.
+      return t.type === 'any' ? 'empty' : 'unknown';
+    case 'value':
+    case 'symbol':
+    case 'expression':
+    case 'signature':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'dictionary':
+    case 'broadcastable':
+      // Each holds a value: the literal, a symbol, an expression, a function,
+      // the empty collection.
+      return 'inhabited';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * `couldMatch` for a bare `tuple` or bare `record` (`bare`) against a
+ * composite `other` of the same family. Bare `tuple` is a tuple of any arity
+ * whose slots hold values (`unknown`), and bare `record` is a record whose
+ * fields hold values, so each overlaps a composite whose slots could hold a
+ * value. `false` means "not shown here", and the caller goes on with its
+ * other probes.
+ */
+function bareTupleOrRecordCouldMatch(bare: Type, other: Type): boolean {
+  if (typeof other !== 'object') return false;
+  if (bare === 'tuple') {
+    if (other.kind === 'tuple')
+      return other.elements.every((x) => couldMatchWithin('unknown', x.type));
+    if (other.kind === 'indexed_collection' || other.kind === 'collection')
+      return couldMatchWithin('unknown', other.elements);
+    return false;
+  }
+  if (bare === 'record') {
+    if (other.kind === 'record')
+      return Object.values(other.elements).every((t) =>
+        couldMatchWithin('unknown', t)
+      );
+    if (other.kind === 'dictionary')
+      return couldMatchWithin('unknown', other.values);
+    if (other.kind === 'collection')
+      return couldMatchWithin(
+        {
+          kind: 'tuple',
+          elements: [{ type: 'string' }, { type: 'unknown' }],
+        },
+        other.elements
+      );
+  }
+  return false;
+}
+
 export function couldMatch(a: Type, b: Type): boolean {
+  // The question holds the interning table, and with it the memo of
+  // `inhabitation()`, for all its recursive probes: the emptiness test
+  // below runs at each of them, and each node is walked once.
+  enterCycleKeys();
+  try {
+    return couldMatchWithin(a, b);
+  } finally {
+    leaveCycleKeys();
+  }
+}
+
+/** The body of {@link couldMatch}, run while the question holds the
+ * interning table. */
+function couldMatchWithin(a: Type, b: Type): boolean {
   // `never` is uninhabited: no value is one.
   if (a === 'never' || b === 'never') return false;
-
   // Distribute over unions, at any depth. This is the whole point of the
   // predicate.
   if (typeof a === 'object' && a.kind === 'union')
-    return a.types.some((t) => couldMatch(t, b));
+    return a.types.some((t) => couldMatchWithin(t, b));
   if (typeof b === 'object' && b.kind === 'union')
-    return b.types.some((t) => couldMatch(a, t));
+    return b.types.some((t) => couldMatchWithin(a, t));
 
   // `broadcastable<T>` is the union `T | indexed_collection<T>` (the same
   // expansion `isSubtype` and `provablyDisjoint` use), so it distributes
@@ -833,14 +1332,24 @@ export function couldMatch(a: Type, b: Type): boolean {
   // and the recursion is on strictly smaller types, so it terminates.
   if (typeof a === 'object' && a.kind === 'broadcastable')
     return (
-      couldMatch(a.elements, b) ||
-      couldMatch({ kind: 'indexed_collection', elements: a.elements }, b)
+      couldMatchWithin(a.elements, b) ||
+      couldMatchWithin({ kind: 'indexed_collection', elements: a.elements }, b)
     );
   if (typeof b === 'object' && b.kind === 'broadcastable')
     return (
-      couldMatch(a, b.elements) ||
-      couldMatch(a, { kind: 'indexed_collection', elements: b.elements })
+      couldMatchWithin(a, b.elements) ||
+      couldMatchWithin(a, { kind: 'indexed_collection', elements: b.elements })
     );
+
+  // Neither is any other type shown to have no value (`record{a: never}`,
+  // `tuple<never>`, an alias of `never`). Without this test, the
+  // assignability fallback below answered `true` for such a type, since an
+  // empty type is a subtype of many others. An `'unknown'` answer of the
+  // walk proves nothing, and the other tests decide. It runs after the
+  // distribution over union arms: an empty union is met at its arms, and a
+  // union shared by its own arms (`Uₙ = Uₙ₋₁ | Uₙ₋₁`) costs no more than
+  // its distribution.
+  if (inhabitation(a) === 'empty' || inhabitation(b) === 'empty') return false;
 
   // The bare collection constructors are their `<unknown>` synonyms (user
   // ruling 2026-08-17); expand them so the structural overlap probes below
@@ -855,6 +1364,13 @@ export function couldMatch(a: Type, b: Type): boolean {
   if (typeof b === 'string' && b in BARE_COLLECTION_EXPANSIONS)
     b = BARE_COLLECTION_EXPANSIONS[b]!;
 
+  // Bare `tuple` and bare `record` have no `<unknown>` synonym (a tuple type
+  // fixes an arity, a record type a field list), so they are read here: bare
+  // `tuple` is "a tuple of values, of any arity", bare `record` is "a record
+  // whose fields hold values". Like the probe below, this only adds answers.
+  if (bareTupleOrRecordCouldMatch(a, b) || bareTupleOrRecordCouldMatch(b, a))
+    return true;
+
   // Structural probe over same-kind composites. This only ever ADDS answers:
   // any shape it does not model falls through to the assignability check
   // below, so the result is never narrower than `matches()` in either
@@ -864,7 +1380,7 @@ export function couldMatch(a: Type, b: Type): boolean {
     if (a.kind === 'list' && b.kind === 'list') {
       if (
         dimensionsCouldMatch(a.dimensions, b.dimensions) &&
-        couldMatch(a.elements, b.elements)
+        couldMatchWithin(a.elements, b.elements)
       )
         return true;
     } else if (a.kind === 'tuple' && b.kind === 'tuple') {
@@ -878,7 +1394,7 @@ export function couldMatch(a: Type, b: Type): boolean {
           // names cannot.
           if (x.name !== undefined && y.name !== undefined && x.name !== y.name)
             return false;
-          return couldMatch(x.type, y.type);
+          return couldMatchWithin(x.type, y.type);
         })
       )
         return true;
@@ -891,7 +1407,24 @@ export function couldMatch(a: Type, b: Type): boolean {
         a.kind === 'indexed_collection')
     ) {
       const elements = (b as SetType | CollectionType).elements;
-      if (couldMatch(a.elements, elements)) return true;
+      if (couldMatchWithin(a.elements, elements)) return true;
+    } else if (a.kind === 'dictionary' && b.kind === 'dictionary') {
+      if (couldMatchWithin(a.values, b.values)) return true;
+    } else if (a.kind === 'record' && b.kind === 'record') {
+      // Width subtyping: a record with the fields of BOTH sides is below
+      // both, so the fields they share must agree, and every other required
+      // field must be able to hold a value (`record{a: never}` has no value).
+      const bElements = b.elements;
+      if (
+        recordFieldsInhabited(a) &&
+        recordFieldsInhabited(b) &&
+        Object.keys(a.elements).every(
+          (key) =>
+            !Object.prototype.hasOwnProperty.call(bElements, key) ||
+            couldMatchWithin(a.elements[key], bElements[key])
+        )
+      )
+        return true;
     } else if (a.kind !== b.kind) {
       // CROSS-KIND overlap within the collection families: a generic
       // `collection<A>` is inhabited by every specific collection kind, so
@@ -916,7 +1449,7 @@ export function couldMatch(a: Type, b: Type): boolean {
       if (genericPlusSpecific || indexedPlusList) {
         const ea = (a as CollectionType | SetType | ListType).elements;
         const eb = (b as CollectionType | SetType | ListType).elements;
-        if (couldMatch(ea, eb)) return true;
+        if (couldMatchWithin(ea, eb)) return true;
       } else if (kinds.includes('collection') && kinds.includes('dictionary')) {
         const dict = (a.kind === 'dictionary' ? a : b) as DictionaryType;
         const coll = (a.kind === 'collection' ? a : b) as CollectionType;
@@ -924,14 +1457,369 @@ export function couldMatch(a: Type, b: Type): boolean {
           kind: 'tuple',
           elements: [{ type: 'string' }, { type: dict.values }],
         };
-        if (couldMatch(entry, coll.elements)) return true;
+        if (couldMatchWithin(entry, coll.elements)) return true;
+      } else if (
+        kinds.includes('tuple') &&
+        (kinds.includes('indexed_collection') || kinds.includes('collection'))
+      ) {
+        // A tuple is an indexed collection of its slots: it overlaps
+        // `indexed_collection<E>` / `collection<E>` when every slot could
+        // hold an `E` (`tuple<integer, any>` and `indexed_collection<integer>`
+        // share `tuple<integer, integer>`).
+        const tuple = (a.kind === 'tuple' ? a : b) as TupleType;
+        const coll = (a.kind === 'tuple' ? b : a) as CollectionType;
+        if (
+          tuple.elements.every((x) => couldMatchWithin(x.type, coll.elements))
+        )
+          return true;
+      } else if (kinds.includes('record') && kinds.includes('dictionary')) {
+        // A record is a dictionary with known keys: it overlaps
+        // `dictionary<V>` when every field could hold a `V`.
+        const rec = (a.kind === 'record' ? a : b) as RecordType;
+        const dict = (a.kind === 'record' ? b : a) as DictionaryType;
+        if (
+          recordFieldsInhabited(rec) &&
+          Object.values(rec.elements).every((t) =>
+            couldMatchWithin(t, dict.values)
+          )
+        )
+          return true;
+      } else if (kinds.includes('record') && kinds.includes('collection')) {
+        // A record iterates as key–value entry tuples, as a dictionary does.
+        // Each entry the record type requires is probed with its own key, the
+        // string literal type of the field name: `record{a: integer}` and
+        // `collection<tuple<"b", integer>>` share no value, since the entry
+        // `("a", …)` is not a `tuple<"b", integer>`. Records are open, but a
+        // value with only the required fields exists, so the other fields
+        // add no constraint here.
+        const rec = (a.kind === 'record' ? a : b) as RecordType;
+        const coll = (a.kind === 'record' ? b : a) as CollectionType;
+        if (
+          recordFieldsInhabited(rec) &&
+          Object.entries(rec.elements).every(([key, t]) =>
+            couldMatchWithin(
+              {
+                kind: 'tuple',
+                elements: [
+                  { type: { kind: 'value', value: key } },
+                  { type: t },
+                ],
+              },
+              coll.elements
+            )
+          )
+        )
+          return true;
       }
     }
   }
 
+  // A negation `!B` holds every value outside `B`, so it overlaps `a` when
+  // some part of `a` is provably outside `B` (`value` and `!integer` share
+  // `string`). The assignability fallback below cannot see this: neither side
+  // is a subtype of the other. The overlap needs a positive witness
+  // (`hasPartOutside`): `a ⊄ B` is not enough, because the subtype test is
+  // conservative and can answer `false` for a containment it cannot prove
+  // (`number` is covered by `complex | infinity | nan`, arm by arm). Without
+  // a witness, the fallback answers.
+  if (
+    typeof b === 'object' &&
+    b.kind === 'negation' &&
+    hasPartOutside(a, b.type)
+  )
+    return true;
+  if (
+    typeof a === 'object' &&
+    a.kind === 'negation' &&
+    hasPartOutside(b, a.type)
+  )
+    return true;
+
   // Fall back to assignability in either direction: `a` could be a `b` if
-  // every `a` is a `b`, or if some `b`s are `a`s.
-  return isSubtype(a, b) || isSubtype(b, a);
+  // every `a` is a `b`, or if some `b`s are `a`s. For a type whose
+  // inhabitation is unknown (`inhabitation()`), this keeps the answer
+  // `couldMatch` gave before the empty-type test above existed.
+  if (isSubtype(a, b) || isSubtype(b, a)) return true;
+
+  // A list type can also share a dimensioned list (a matrix, a tensor) with
+  // a type that reads it another way: `matrix<integer>` is a `list<integer>`
+  // (its scalar cells) and a `list<list<integer>>` (its rows), so those two
+  // types overlap although their element types do not.
+  return sharesDimensionedListSubtype(a, b);
+}
+
+/**
+ * Whether some value of `a` is provably not a `b`: `a` itself, or a primitive
+ * type below `a`, is inhabited and provably disjoint from `b`. This is the
+ * witness `couldMatch` needs to answer that `a` overlaps the negation `!b`.
+ * `provablyDisjoint` answers `true` only for a proven disjointness, so a
+ * witness found here is real; `false` means "not shown" (`number` against
+ * `complex | infinity | nan`, which covers it, has no witness).
+ */
+function hasPartOutside(a: Type, b: Type): boolean {
+  // The probes below follow every path of their operands, and a small type
+  // can have exponentially many (`Iₙ = Iₙ₋₁ & Iₙ₋₁` with shared nodes).
+  // Past this size bound, no witness is looked for, and `couldMatch` gives
+  // the answer of its fallback.
+  if (
+    typeTreeSize(a, MAX_WITNESS_CANDIDATES) +
+      typeTreeSize(b, MAX_WITNESS_CANDIDATES) >
+    MAX_WITNESS_CANDIDATES
+  )
+    return false;
+  if (inhabitation(a) === 'inhabited' && provablyDisjoint(a, b)) return true;
+  return PRIMITIVE_TYPES.some(
+    (p) =>
+      p !== a && !isEmptyType(p) && isSubtype(p, a) && provablyDisjoint(p, b)
+  );
+}
+
+/**
+ * The number of nodes of the type tree of `t`, where a node shared between
+ * several places is counted at each place, as a walk that follows every
+ * path meets it. The count stops once it exceeds `limit` (the answer is then
+ * `limit + 1`), so a small type with exponentially many paths costs no more
+ * than `limit` steps. A reference counts with its arguments and with its
+ * definition (an alias or a nominal type), once per declaration on a path.
+ */
+function typeTreeSize(t: Type, limit: number): number {
+  let count = 0;
+  // The aliases being unfolded on the current path of the walk.
+  const onPath = new Set<TypeReference>();
+  const visit = (u: Type): boolean => {
+    if (++count > limit) return false;
+    if (typeof u === 'string') return true;
+    switch (u.kind) {
+      case 'list':
+      case 'set':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+        return visit(u.elements);
+      case 'dictionary':
+        return visit(u.values);
+      case 'union':
+      case 'intersection':
+        return u.types.every(visit);
+      case 'negation':
+        return visit(u.type);
+      case 'tuple':
+        return u.elements.every((e) => visit(e.type));
+      case 'record':
+      case 'object':
+        return Object.values(u.elements).every(visit);
+      case 'signature':
+        return (
+          [...(u.args ?? []), ...(u.optArgs ?? [])].every((e) =>
+            visit(e.type)
+          ) &&
+          (u.variadicArg === undefined || visit(u.variadicArg.type)) &&
+          visit(u.result)
+        );
+      case 'reference': {
+        if (!(u.args ?? []).every(visit)) return false;
+        // The operations that read this size unfold a reference: `narrow`
+        // and the subtype tests unfold a structural alias, and
+        // `provablyDisjoint` unfolds a nominal type too. So the definition
+        // counts, once per declaration on a path.
+        if (u.def === undefined) return true;
+        const record = declarationOf(u);
+        if (onPath.has(record)) return true;
+        const def = aliasDefinitionAt(u);
+        if (def === undefined) return true;
+        onPath.add(record);
+        try {
+          return visit(def);
+        } finally {
+          onPath.delete(record);
+        }
+      }
+      default:
+        return true;
+    }
+  };
+  visit(t);
+  return Math.min(count, limit + 1);
+}
+
+/** The deepest rank of a dimensioned list that
+ * {@link sharesDimensionedListSubtype} tries. */
+const MAX_WITNESS_RANK = 4;
+
+/** The most candidate lists that {@link sharesDimensionedListSubtype} tests
+ * in one call. */
+const MAX_WITNESS_CANDIDATES = 256;
+
+/** `list<any>`: a type disjoint from it cannot hold a list. */
+const LIST_OF_ANY_TYPE: Type = Object.freeze({ kind: 'list', elements: 'any' });
+
+/**
+ * Whether a dimensioned list type of rank 2 or more — a matrix or a tensor
+ * whose element type is inhabited — is a subtype of both `a` and `b`, where
+ * at least one of the two is a list type.
+ *
+ * The subtype rule for lists (the encoding bridge of the `list` case of
+ * `isSubtype`) reads a rank-n list `list<E^(d₁x…xdₙ)>` in two ways: by its
+ * scalar element `E` (a list type with no dimensions admits any shape, and
+ * one with m dimensions admits rank m), and as a list of its rank-(n−k)
+ * sub-lists, peeling the k outer axes. Two list types that each read such a
+ * value in a different way overlap at it, and the element-wise probe of
+ * `couldMatch` does not see that.
+ *
+ * The candidate values are built from the two types and each is tested with
+ * `isSubtype`, so this answers as the subtype rule does:
+ * - the element: each non-list leaf type of `a` and of `b` (the element type
+ *   below every list level, each arm of a union), and the meet of each pair
+ *   of leaves, when it is not empty;
+ * - the rank: 2 up to the number of list levels of the deeper side;
+ * - each axis: any length (`-1`), or a length that either side fixes on that
+ *   axis (a list type with fixed lengths admits only those lengths).
+ */
+function sharesDimensionedListSubtype(a: Type, b: Type): boolean {
+  // Tested inline, before any helper function is built: this runs at the
+  // end of every `couldMatch` question that the earlier probes leave open.
+  if (
+    !(typeof a === 'object' && a.kind === 'list') &&
+    !(typeof b === 'object' && b.kind === 'list')
+  )
+    return false;
+  // The witness is a list, so both sides must be able to hold one
+  // (`boolean` cannot, whatever the other side is). A primitive side is
+  // tested first, in constant time, since a union distributes its leaves
+  // here one by one.
+  if (
+    (typeof a === 'string' &&
+      !isPrimitiveSubtype('list', a as PrimitiveType)) ||
+    (typeof b === 'string' && !isPrimitiveSubtype('list', b as PrimitiveType))
+  )
+    return false;
+  if (
+    provablyDisjoint(a, LIST_OF_ANY_TYPE) ||
+    provablyDisjoint(b, LIST_OF_ANY_TYPE)
+  )
+    return false;
+
+  // A bare collection name is its `<unknown>` synonym (`list` is
+  // `list<unknown>`), so that its element and its axis are read.
+  const expand = (t: Type): Type =>
+    typeof t === 'string' && t in BARE_COLLECTION_EXPANSIONS
+      ? BARE_COLLECTION_EXPANSIONS[t]!
+      : t;
+  const isLevel = (t: Type): t is ListType | CollectionType =>
+    typeof t === 'object' &&
+    (t.kind === 'list' ||
+      t.kind === 'collection' ||
+      t.kind === 'indexed_collection');
+
+  // One budget bounds the whole search: the size of the two types, the
+  // meets of the leaf pairs, the comparisons that remove a repeated
+  // element, and the candidate lists. When it runs out, the search stops
+  // with no witness, which is the answer `couldMatch` gave before this
+  // search. The size counts a node shared between union arms each time it
+  // is reached (`typeTreeSize`): `Uₙ = Uₙ₋₁ | Uₙ₋₁` is small in memory but
+  // has exponentially many paths, and the walks below and the subtype tests
+  // of the candidates follow every path. Two unions of many crossing ranges
+  // would otherwise give a number of meets, and of comparisons between
+  // them, that grows with a high power of their size.
+  let budget = MAX_WITNESS_CANDIDATES;
+  budget -= typeTreeSize(a, budget);
+  if (budget < 0) return false;
+  budget -= typeTreeSize(b, budget);
+  if (budget < 0) return false;
+
+  // The leaf types of `t`: the types below every list or abstract collection
+  // level, with each union arm taken on its own. The size test above bounds
+  // this walk.
+  const leaves = (t0: Type, depth: number, out: Type[]): Type[] => {
+    const t = expand(t0);
+    if (depth > MAX_WITNESS_RANK + 2) return out;
+    if (isLevel(t)) return leaves(t.elements, depth + 1, out);
+    if (typeof t === 'object' && t.kind === 'union') {
+      for (const arm of t.types) leaves(arm, depth, out);
+      return out;
+    }
+    out.push(t);
+    return out;
+  };
+  // Each path of axes along the list levels of `t`, outermost first: the
+  // length of each axis (`-1` when it has no fixed length). A union gives
+  // one path per arm. The size test above bounds this walk.
+  const axisPaths = (t0: Type, prefix: number[], out: number[][]): void => {
+    const t = expand(t0);
+    if (prefix.length <= MAX_WITNESS_RANK) {
+      if (isLevel(t)) {
+        const own = t.kind === 'list' ? (t.dimensions ?? [-1]) : [-1];
+        axisPaths(t.elements, [...prefix, ...own], out);
+        return;
+      }
+      if (typeof t === 'object' && t.kind === 'union') {
+        for (const arm of t.types) axisPaths(arm, prefix, out);
+        return;
+      }
+    }
+    out.push(prefix);
+  };
+
+  const leavesA = leaves(a, 0, []);
+  const leavesB = leaves(b, 0, []);
+  const pairs = leavesA.length * leavesB.length;
+  if (pairs + leavesA.length + leavesB.length > budget) return false;
+  budget -= pairs;
+  // The cell of a witness must be shown to hold a value: a matrix of an
+  // empty cell type holds only empty matrices, which `couldMatch` does not
+  // count as a shared value.
+  const elements: Type[] = [];
+  const addElement = (t: Type): boolean => {
+    if (inhabitation(t) !== 'inhabited') return true;
+    budget -= elements.length + 1;
+    if (budget < 0) return false;
+    if (elements.some((e) => isSubtype(e, t) && isSubtype(t, e))) return true;
+    elements.push(t);
+    return true;
+  };
+  for (const x of leavesA)
+    for (const y of leavesB) if (!addElement(narrow(x, y))) return false;
+  for (const x of [...leavesA, ...leavesB]) if (!addElement(x)) return false;
+  if (elements.length === 0) return false;
+
+  const paths: number[][] = [];
+  axisPaths(a, [], paths);
+  axisPaths(b, [], paths);
+  const maxRank = Math.min(
+    MAX_WITNESS_RANK,
+    Math.max(...paths.map((p) => p.length))
+  );
+  for (let rank = 2; rank <= maxRank; rank++) {
+    // The candidate lengths of each axis.
+    const choices: number[][] = [];
+    for (let i = 0; i < rank; i++) {
+      const lengths = [-1];
+      for (const path of paths) {
+        const d = path[i];
+        // A length of 0 is left out: an axis of length 0 holds only empty
+        // lists, which are not a shared value.
+        if (d !== undefined && d > 0 && !lengths.includes(d)) lengths.push(d);
+      }
+      choices.push(lengths);
+    }
+    // Every combination of the candidate lengths, one per axis. Past the
+    // budget the search stops with no witness, which is the answer
+    // `couldMatch` gave before this search: a union of many fixed shapes
+    // would otherwise give a product of thousands of candidates.
+    const count =
+      choices.reduce((n, lengths) => n * lengths.length, 1) * elements.length;
+    if (count > budget) return false;
+    budget -= count;
+    let shapes: number[][] = [[]];
+    for (const lengths of choices)
+      shapes = shapes.flatMap((s) => lengths.map((d) => [...s, d]));
+    for (const dimensions of shapes)
+      for (const e of elements) {
+        const witness: Type = { kind: 'list', elements: e, dimensions };
+        if (isSubtype(witness, a) && isSubtype(witness, b)) return true;
+      }
+  }
+  return false;
 }
 
 /**
@@ -1104,30 +1992,73 @@ export function isSubtype(
     lhs.kind === 'reference' &&
     lhs.alias === true &&
     lhs.def !== undefined &&
+    // `any` is the top type, so no unfold is needed.
+    rhs !== 'any' &&
     !(
       typeof rhs !== 'string' &&
       rhs.kind === 'reference' &&
       rhs.name === lhs.name
     )
   ) {
-    // Conservative cycle cutoff. MUTUALLY recursive aliases (`a = list<b>`,
-    // `b = list<a>`) alternate lhs and rhs unfolds forever, and no same-name
-    // short-circuit ever fires. Re-entering a reference record already on the
-    // unfold stack is exactly that situation; we answer `false` ("not provably
-    // a subtype") instead of looping. This is a cycle guard, not a coinductive
-    // decision procedure, so a subtype relation that only holds *coinductively*
-    // (through the cycle) is under-reported — but an acyclic alias chain of any
-    // length is answered exactly.
-    if (!beginUnfold(lhs)) return false;
-    lhsUnfoldTargets ??= new Map();
-    lhsUnfoldTargets.set(lhs, new Set([rhs]));
+    // Coinductive cycle rule, keyed on the PAIR (alias, rhs). A recursive
+    // alias reaches itself again through its body: `R = list<R>` asks
+    // `R <: unknown` while answering `R <: list<unknown>`, and mutually
+    // recursive aliases (`a = list<b>`, `b = list<a>`) alternate lhs and rhs
+    // unfolds. When the SAME pair is met again further down, the question
+    // is already being answered, and it is assumed to hold: a relation that
+    // fails fails at some finite depth, in a branch that does not cycle. A
+    // pair with a different rhs is a new question and unfolds the alias
+    // again (`R <: unknown` is decided by the body `list<R>`). The rhs is
+    // compared by structure, because the rules build fresh rhs objects, with
+    // each reference in it identified by its declaration (`cyclePairKey`). With
+    // `A = B` and `B = list<A> | missing`, `A <: list<unknown> | missing`
+    // then reaches `A <: unknown`, a new pair, which the `missing` arm of `B`
+    // refutes. An alias whose definition names itself as a bare union arm
+    // (`cyc = cyc | tuple<number, number>`) is a subtype of what its other
+    // arms are subtypes of (user decision 2026-10-19), which this rule
+    // gives too.
+    //
+    // The rhs types met are parts of the original rhs and of the alias
+    // definitions, so the set of pairs is finite. The bound below is a
+    // safety net only: past it the answer is the conservative `false`.
+    // The pairs are keyed with the interning table of `cyclePairKey`, held
+    // while this frame runs (`enterCycleKeys`).
+    enterCycleKeys();
     try {
-      const def = aliasDefinitionAt(lhs);
-      return def === undefined ? false : isSubtype(def, rhs);
+      const rhsKey = cyclePairKey(rhs);
+      const activeKeys = lhsUnfoldKeys?.get(lhs);
+      if (activeKeys?.has(rhsKey)) return true;
+      if (activeKeys !== undefined && activeKeys.size >= MAX_LHS_UNFOLD_PAIRS)
+        return false;
+      // The record is also entered in the record-keyed set that
+      // `provablyDisjoint` reads, when it is not there yet.
+      const entered = beginUnfold(lhs);
+      const keys = activeKeys ?? new Set<string>();
+      keys.add(rhsKey);
+      lhsUnfoldKeys ??= new Map();
+      lhsUnfoldKeys.set(lhs, keys);
+      lhsUnfoldTargets ??= new Map();
+      let targets = lhsUnfoldTargets.get(lhs);
+      if (targets === undefined) {
+        targets = new Set();
+        lhsUnfoldTargets.set(lhs, targets);
+      }
+      const addedTarget = !targets.has(rhs);
+      if (addedTarget) targets.add(rhs);
+      try {
+        const def = aliasDefinitionAt(lhs);
+        return def === undefined ? false : isSubtype(def, rhs);
+      } finally {
+        if (addedTarget) targets.delete(rhs);
+        if (targets.size === 0) lhsUnfoldTargets!.delete(lhs);
+        if (lhsUnfoldTargets!.size === 0) lhsUnfoldTargets = null;
+        keys.delete(rhsKey);
+        if (keys.size === 0) lhsUnfoldKeys!.delete(lhs);
+        if (lhsUnfoldKeys!.size === 0) lhsUnfoldKeys = null;
+        if (entered) endUnfold(lhs);
+      }
     } finally {
-      lhsUnfoldTargets.delete(lhs);
-      if (lhsUnfoldTargets.size === 0) lhsUnfoldTargets = null;
-      endUnfold(lhs);
+      leaveCycleKeys();
     }
   }
 
@@ -1461,7 +2392,22 @@ export function isSubtype(
     // are excluded (a runtime broadcast binds points atomically) and sets are
     // not indexed, so both — and every non-collection — fail here.
     const elem = broadcastableCollectionElementType(lhs as Type);
-    if (elem !== undefined) return isSubtype(elem, rhs.elements);
+    if (elem !== undefined) {
+      if (isSubtype(elem, rhs.elements)) return true;
+      // A rank-n list (n ≥ 2) also has the flat scalar reading: a
+      // `matrix<integer>` is a `list<integer>` and an
+      // `indexed_collection<integer>`, and an element-wise operator applied
+      // to it reaches its integer cells (`2·[[1, 2], [3, 4]]` is
+      // `[[2, 4], [6, 8]]`). Without this reading, `matrix<integer> <:
+      // list<integer> <: broadcastable<integer>` held while
+      // `matrix<integer> <: broadcastable<integer>` did not. For a
+      // one-dimensional list, `elem` is already its element type.
+      return (
+        typeof lhs !== 'string' &&
+        lhs.kind === 'list' &&
+        isSubtype(lhs.elements, rhs.elements)
+      );
+    }
 
     return false;
   }

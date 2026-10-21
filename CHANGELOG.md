@@ -2,6 +2,14 @@
 
 ### Behavior Changes
 
+- Calls through callback parameters retain their lexical contracts, including
+  inside nested lambdas such as `Map(x ↦ h(x), xs)`. A same-named global no
+  longer supplies the call's result type or introduces `Nothing`. A parameter
+  first used as a call head now keeps its annotation and validates arguments
+  against it. Ordinary calls and captured operators follow the same binding
+  rule during body-based type inference. Compilation refuses a known captured
+  function body when lowering it would substitute a different ambient binding.
+
 - Bare Map callbacks such as `Map(h, xs)` follow the callback's lexical
   binding. A parameter named after a global function or library operator now
   uses its own declared result type and argument contract. An opaque callback
@@ -55,6 +63,87 @@
   lengths must still match; all terms use the same retained observations.
   Compilation refuses these statistics and maps whose inputs or map results may
   contain `Nothing` until targets can preserve its distinct representation.
+- `Dedup`, `Filter` and `TakeWhile` of a string held by a symbol of a wider
+  type give a string, as they do for a string literal: with
+  `c: list<integer> | string := "aab"`, `Dedup(c)` was `["a", "b"]` and is now
+  `"ab"`; `Dedup(Filter(c, p))` is a string too.
+- `Filter` and `Dedup` over a dictionary give a `Dictionary` (also when the
+  dictionary is an arm of a union type, through nested `Filter`/`Dedup` views,
+  and for a bare `record`); they gave a `Set` of entry tuples
+  (`Set(("a", 1))`). `Filter` over a record is typed `dictionary<any>`.
+- `Map` of a user function with scalar parameters over a list of lists is
+  typed with lists as elements (`Map(f, pr)` with `f: (number) -> number` is
+  `list<list<number>>`, was `list<number>`), as the call broadcasts over each
+  row; a polymorphic callback with one parameter (`(T) -> T where T`) is
+  typed the same way (`list<list<integer>>`). `Map` of a function literal
+  written in place whose parameter is annotated as a scalar
+  (`(x: integer) ↦ x + 1`) over a list of lists is refused when it is boxed;
+  it was admitted and gave an error for each row. Over a source that can hold
+  `Missing`, such a literal is typed with the `NaN` it gives for an absent
+  cell: `Map((x: integer) ↦ x + 1, [1, Missing])` is `list<number>` (was
+  `list<integer>`, value `[2, NaN]`). A `Missing` that the body returns for a
+  present cell stays in the type, also for several sources of an abstract
+  collection type.
+- A view whose source can be absent (`Map(x ↦ x + 10, c)` with
+  `c: missing | list<integer>`) previews as a list; it previewed as a `Set`.
+  The preview, and a bounded materialization, of `Dedup`, `Filter`, `Join` or
+  `Append` over more than five dictionary entries show the expression as
+  written (`Dedup(d)`); they showed an `incompatible-type` error.
+- Two mutually recursive aliases that describe the same values are subtypes of
+  each other: with `a = list<b>` and `b = list<a>`, `a <: b` is now `true`
+  (it was `false`, a conservative cutoff). A self-referential alias such as
+  `R = list<R>` is a subtype of `list`, `list<unknown>`,
+  `list<list<unknown>>` and `value`; `J = list<J> | missing` is still not a
+  subtype of `unknown`.
+- `Dedup`, `Filter` and `Map` accept a source typed `missing | string`
+  (typed `missing | string` or `list<character> | missing`); it was an
+  `incompatible-type` error. `Map` of a broadcastable operator over ragged
+  rows (`Map(Sqrt, [[1, 4], [9]])`) gives `list<vector<1> | vector<2>>`; it
+  was an `incompatible-type` error.
+
+### Bug Fixes
+
+- Result types of broadcast arithmetic over nested lists hold their values.
+  Rows of different lengths are no longer typed `matrix`: `Sin(L)` with
+  `L: list<list<integer>> := [[1, 2], [3]]`, and `Sin([[1, 2], [3]])`, are
+  `list<list<number>>` (they were `matrix` and `list<number>`). A nested list of
+  points plus a number (`L + 0.5` with `L: list<list<tuple<integer, integer>>>`)
+  is refused as an `error`, as a flat list of points is. Rows of points beside
+  numbers keep point cells for `Divide`, `Power`, `Mod`, `Root`, `Log`,
+  `Round`, `Remainder` and `Arctan2`, with the rank of the deepest operand
+  (`Power(NQ, V)` is `list<list<tuple<number, number>>>`, was `list<number>`),
+  also when the numbers can be absent; a divisor cell that may be zero gives
+  `number` coordinates. On the derive route, `Subtract` of a nested list is no
+  longer one level too deep, and `Divide` of a nested list of points keeps its
+  points.
+- Subtype relation: `matrix<T>` is a subtype of `broadcastable<T>`, and
+  `couldMatch` no longer answers `false` for pairs that share a subtype (tuples
+  with an `any` slot against `indexed_collection`, `tuple` against
+  `tuple<any>`, `record{a: any}` against `dictionary<integer>`, a flat list
+  against a nested list such as `list<integer>` against
+  `list<list<integer>>`, which a matrix matches both, and others).
+  An operand typed with an alias is unfolded before the type variables are
+  solved: `Sort(a)` with `a: L`, `L` an alias of `list<integer | missing>`, is
+  `list<integer | missing>`; it was `list<unknown>`. A self-referential alias
+  (`cyc = cyc | list<integer>`) no longer overflows the stack.
+- `Total` no longer builds the union `any | unknown`. `Zip([1, Undefined],
+  [2, Undefined])` is typed with `missing` elements, as with `Missing`.
+- Collection operator types: `FlatMap` over a source with absent cells keeps
+  the absent cell (`FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>`
+  is `list<integer | missing>`, was `list<number>`; with an annotated
+  parameter, the `NaN` of an absent cell is in the type; a callback that can
+  answer a list or `Missing` is spliced arm by arm, so
+  `FlatMap([[1, 2], Missing], x ↦ Reverse(x))` is `list<integer | missing>`).
+  `couldMatch` of a record against a collection of entries compares each
+  required field with its own key (`record{a: integer}` cannot match
+  `collection<tuple<"b", integer>>`). `Map` over an alias
+  is a `list` (was `collection<number>`). `Map` of an operator whose declared
+  result is `any` (`Map(PointX, ["a", "b"])`) is `list<any^2>`, not a copy of
+  the source type. `Map` of a function literal over `any` elements whose body
+  can return a collection (`x ↦ Sqrt(x)`) allows a collection element. `Map`
+  over mixed non-numeric elements no longer states a length. A `Map` over a
+  union with a dictionary or record arm types that arm as a collection of
+  entries.
 
 ## 0.159.0 _2026-10-20_
 

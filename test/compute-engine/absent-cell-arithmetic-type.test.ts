@@ -51,7 +51,6 @@ type Family = {
 
 const ROWS = 'list<list<number> | nan>';
 const NESTED_ROWS = 'list<list<list<number>> | nan>';
-const NESTED_MATRICES = 'list<matrix | nan>';
 const POINTS = 'list<missing | tuple<number, number>>';
 const MIXED = 'list<list<number> | number>';
 const POINT_ROWS = 'list<list<missing | tuple<number, number>> | missing>';
@@ -76,8 +75,10 @@ const FAMILIES: Family[] = [
       'Ln(L)': ROWS,
     },
   },
-  // A list of matrices with an absent matrix. The square of a matrix is its
-  // matrix power, so the value holds a square matrix.
+  // A list of lists of rows with an absent cell. A list of rows does not
+  // promise rows of one length, so each cell of the result is a list of
+  // rows, not a matrix. The square of a square matrix is its matrix power,
+  // which is a list of rows too.
   {
     decl: 'list<list<list<integer>> | missing>',
     value: ['List', ['List', ['List', 1, 2], ['List', 3, 4]], 'Missing'],
@@ -88,12 +89,12 @@ const FAMILIES: Family[] = [
       '0.5 L': NESTED_ROWS,
       'L / 2': NESTED_ROWS,
       '-L': NESTED_ROWS,
-      'L^2': NESTED_MATRICES,
-      'Sqrt(L)': NESTED_MATRICES,
-      'Abs(L)': NESTED_MATRICES,
-      'Sin(L)': NESTED_MATRICES,
-      'Exp(L)': NESTED_MATRICES,
-      'Ln(L)': NESTED_MATRICES,
+      'L^2': NESTED_ROWS,
+      'Sqrt(L)': NESTED_ROWS,
+      'Abs(L)': NESTED_ROWS,
+      'Sin(L)': NESTED_ROWS,
+      'Exp(L)': NESTED_ROWS,
+      'Ln(L)': NESTED_ROWS,
     },
   },
   // A list of points with an absent point. A point plus a number is a type
@@ -180,12 +181,12 @@ const FAMILIES: Family[] = [
   {
     decl: 'list<list<integer>>',
     value: ['List', ['List', 1, 2], ['List', 3, 4]],
-    types: { 'L + 1': 'list<list<integer>>', 'Sin(L)': 'matrix' },
+    types: { 'L + 1': 'list<list<integer>>', 'Sin(L)': 'list<list<number>>' },
   },
   {
     decl: 'list<list<integer | missing>>',
     value: ['List', ['List', 1, 'Missing']],
-    types: { 'L + 1': 'list<list<number>>', 'Sin(L)': 'matrix' },
+    types: { 'L + 1': 'list<list<number>>', 'Sin(L)': 'list<list<number>>' },
   },
 ];
 
@@ -243,20 +244,11 @@ describe('AN ABSENT ROW OF POINTS STAYS MISSING', () => {
 //
 // The descriptor route (`context.derive`, which a `type` handler calls to
 // type a body over its operands) gives a type that holds the value too. It
-// does not always spell it as the box route does (`L / 2` over a list of
-// matrices is `list<matrix | nan>`). Left out: `Subtract`, which the box and
-// parse routes rewrite as a sum and the derive route keeps, and the rows of
-// points, whose quotient the derive route types as a matrix of numbers; both
-// fail on the derive route without an absent cell too.
+// does not always spell it as the box route does. `Subtract`, which the box
+// and parse routes rewrite as a sum, is kept as `Subtract` on this route.
 //
 describe('AN ABSENT CELL OF A LIST HAS AN ARM IN THE RESULT TYPE (derive)', () => {
-  test.each(
-    CASES.filter(
-      ([, family, op]) =>
-        (op.expr as unknown[])[0] !== 'Subtract' &&
-        family.decl !== 'list<list<tuple<integer, integer>> | missing>'
-    )
-  )('%s', (_, family, op) => {
+  test.each(CASES)('%s', (_, family, op) => {
     const ce = new ComputeEngine();
     const ctx = typeHandlerContext(ce as any);
     const [operator, ...args] = op.expr as [string, ...unknown[]];

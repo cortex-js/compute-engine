@@ -557,6 +557,7 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
   'Complement',
   'SymmetricDifference',
   'Map',
+  'FlatMap',
   'Find',
   'MaxBy',
   'MinBy',
@@ -1399,11 +1400,15 @@ function pointLeafArity(
       const r = resolveTypeAlias(arm);
       if (r === 'missing') continue;
       // A tuple arm of a list CELL (`rank > 0`) is a point leaf, as a
-      // tuple element is below.
+      // tuple element is below. A number arm of a list cell is a number
+      // leaf, as a number element is below: the cells of
+      // `list<integer | missing>` are numbers or absent.
       const a =
         rank > 0 && typeof r !== 'string' && r.kind === 'tuple'
           ? tupleLeafArity(r, rank)
-          : pointLeafArity(arm, rank, seen);
+          : rank > 0 && r !== 'never' && isSubtype(r, 'number')
+            ? { arity: undefined, rank }
+            : pointLeafArity(arm, rank, seen);
       if (a === null) return null;
       if (result === null) result = a;
       else if (result.arity !== a.arity || result.rank !== a.rank) return null;
@@ -1448,29 +1453,85 @@ function tupleLeafArity(
   return { arity: t.elements.length, rank };
 }
 
+/** The tuple type at the bottom of a (nested) list type whose every level
+ * has one element type (`list<list<tuple<integer, integer>>>` gives
+ * `tuple<integer, integer>`), or `undefined` when `t` is not such a list. An
+ * absent cell (a `missing` arm of an element) is not read: it has no point.
+ * A union of other arms at any level gives `undefined`. The walk is bounded,
+ * which also stops a self-referential alias. */
+function pointLeafType(t: Type): TupleType | undefined {
+  let x = resolveTypeAlias(t);
+  for (let depth = 0; depth < 8; depth++) {
+    if (typeof x === 'string') return undefined;
+    if (x.kind !== 'list' && x.kind !== 'indexed_collection') return undefined;
+    const element = resolveTypeAlias(
+      stripMissingFromType(resolveTypeAlias(x.elements))
+    );
+    if (typeof element !== 'string' && element.kind === 'tuple')
+      return element.elements.length === 0 ? undefined : element;
+    x = element;
+  }
+  return undefined;
+}
+
 /** The common tuple arity of the point lists among the broadcasting operand
- * types, or `undefined` when they are not all point lists of one arity (a
- * scalar-leaf sibling is admitted at rank 1 only). */
+ * types, or `undefined` when they are not all point lists of one arity. A
+ * scalar-leaf sibling (a collection of numbers) is admitted when its rank is
+ * not higher than the rank of every point list: the broadcast then pairs
+ * each point, or each row of points, with one number (`[[(1, 2)]]^[[2]]` is
+ * `[[(1, 4)]]`, `[[(1, 2)]]^[2]` is `[[(1, 4)]]`), so each cell of the result
+ * is a point. A collection of numbers deeper than a point list pairs a point
+ * with a row of numbers (`pointsBesideDeeperNumbers`). */
 export function pointListArityOfTypes(
   types: ReadonlyArray<Type>
 ): number | undefined {
   let arity: number | undefined = undefined;
-  let scalarSibling = false;
-  let maxRank = 0;
+  let pointRank = Infinity;
+  let scalarRank = 0;
   for (const t of types) {
     const leaf = pointLeafArity(t, 0);
     if (leaf === null) return undefined;
-    maxRank = Math.max(maxRank, leaf.rank);
     if (leaf.arity === undefined) {
-      scalarSibling = true;
+      scalarRank = Math.max(scalarRank, leaf.rank);
       continue;
     }
+    pointRank = Math.min(pointRank, leaf.rank);
     if (arity !== undefined && arity !== leaf.arity) return undefined;
     arity = leaf.arity;
   }
   if (arity === undefined) return undefined;
-  if (scalarSibling && maxRank > 1) return undefined;
+  if (scalarRank > pointRank) return undefined;
   return arity;
+}
+
+/** Whether, among the broadcasting operand types, a collection of numbers
+ * is deeper than a list of points. The broadcast then pairs a point with a
+ * row of numbers, and a head that maps over the components of a point maps
+ * each component over that row: `[(1, 2)]^[[1, 2]]` is `[[1, 4]]`. The cells
+ * of the result are numbers, at the rank of the deepest operand. */
+function pointsBesideDeeperNumbers(types: ReadonlyArray<Type>): boolean {
+  let pointRank = Infinity;
+  let scalarRank = 0;
+  for (const t of types) {
+    const leaf = pointLeafArity(t, 0);
+    if (leaf === null) return false;
+    if (leaf.arity === undefined) scalarRank = Math.max(scalarRank, leaf.rank);
+    else pointRank = Math.min(pointRank, leaf.rank);
+  }
+  return pointRank !== Infinity && scalarRank > pointRank;
+}
+
+/** Whether every operand type has the same list rank down to its point or
+ * number leaves (`pointLeafArity`). */
+function sameLeafRank(types: ReadonlyArray<Type>): boolean {
+  let rank: number | undefined;
+  for (const t of types) {
+    const leaf = pointLeafArity(t, 0);
+    if (leaf === null) return false;
+    if (rank !== undefined && leaf.rank !== rank) return false;
+    rank = leaf.rank;
+  }
+  return true;
 }
 
 /** Whether a type is a tuple, or a union with a tuple branch (an alias is
@@ -1628,8 +1689,13 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     isTrigger: (v: BroadcastOperandView, i: number) => boolean
   ): Type | undefined => {
     if (deferToHandler) return undefined;
-    if (broadcastElementType(sigResult) === sigResult) return undefined;
-    if (input.sigResultIsPerElement === true)
+    const points = pointCellTypes(isTrigger);
+    // A handler can answer a scalar for a list of points that it does not
+    // type (`Divide` of a list of rows of points by a matrix), while its
+    // answer for the point cells is a point. So the cells are asked even then.
+    const scalarResult = broadcastElementType(sigResult) === sigResult;
+    if (scalarResult && points === undefined) return undefined;
+    if (!scalarResult && input.sigResultIsPerElement === true)
       return resolveTypeAlias(sigResult);
     // An operand that is not retyped but MAY be a collection (an
     // application typed `unknown`, a `broadcastable<E>` operand) can make
@@ -1644,15 +1710,93 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       )
     )
       return undefined;
-    const answer = input.abstractCellResult?.(
-      views.map((v, i) =>
-        isTrigger(v, i) ? broadcastCellType(v.type) : undefined
-      )
+    let answer = input.abstractCellResult?.(
+      points?.cells ??
+        views.map((v, i) =>
+          isTrigger(v, i) ? broadcastCellType(v.type) : undefined
+        )
     );
+    // A cell of a collection of numbers beside the points may be zero, and
+    // the answer for such a cell is part of the cell type: a point divided
+    // by a zero cell of `[[0]]` is `(~oo, ~oo)`. The answer for an `integer`
+    // cell does not hold it: a point divided by a scalar `integer` claims
+    // rational coordinates (the possibly-zero convention of the `Divide`
+    // handler for a scalar divisor), and a cell type cannot tell the handler
+    // that the cell is `0`. So the handler is also asked with each such cell
+    // typed `number`, which admits every quotient, `~oo` and `NaN` included.
+    if (answer !== undefined && points?.zeroCells !== undefined) {
+      const zero = input.abstractCellResult?.(points.zeroCells);
+      if (zero !== undefined && zero !== 'error' && zero !== 'never')
+        answer = reduceType({ kind: 'union', types: [answer, zero] });
+    }
     if (answer === undefined || broadcastElementType(answer) === answer)
+      return undefined;
+    // After a scalar answer for the whole operand, only a point answer for
+    // the point cells is read: a collection answer there comes from the
+    // structure of the operand, which the cells carry, not from one cell.
+    if (scalarResult && !isTupleShapedType(resolveTypeAlias(answer)))
       return undefined;
     return resolveTypeAlias(answer);
   };
+
+  // The cells of the triggers when a list of points is one of them, under a
+  // head that does not broadcast over the components of a point: such a
+  // head types a point whole (`Divide` scales it), so the cell of a list of
+  // points, at any depth, is the point and not one of its components, and
+  // the handler answers a point for it: `[[(1, 2)]] / 2` is `[[(1/2, 1)]]`,
+  // a list of lists of points. A trigger that is a collection of numbers of
+  // the same rank is paired cell by cell with the points, and its cell is a
+  // number: each point of `[[(1, 2), (3, 4)]] / [[1, 2]]` is divided by one
+  // number, and the cells of the result are points. `undefined` when no
+  // trigger is a list of points, when a trigger is neither, or when the
+  // ranks differ (a list of points beside a matrix pairs each point with a
+  // row; the handler types that pairing itself).
+  //
+  // `zeroCells` are the same cells with each number cell that may be zero
+  // replaced by `number`, or `undefined` when no number cell may be zero.
+  function pointCellTypes(
+    isTrigger: (v: BroadcastOperandView, i: number) => boolean
+  ):
+    | {
+        cells: (Type | undefined)[];
+        zeroCells: (Type | undefined)[] | undefined;
+      }
+    | undefined {
+    if (input.broadcastsOverTuples) return undefined;
+    let rank: number | undefined;
+    let point = false;
+    let mayBeZero = false;
+    const cells: (Type | undefined)[] = [];
+    const zeroCells: (Type | undefined)[] = [];
+    for (let i = 0; i < views.length; i++) {
+      const v = views[i];
+      if (!isTrigger(v, i)) {
+        cells.push(undefined);
+        zeroCells.push(undefined);
+        continue;
+      }
+      const leaf = pointLeafArity(v.type, 0);
+      if (leaf === null || (rank !== undefined && leaf.rank !== rank))
+        return undefined;
+      rank = leaf.rank;
+      if (leaf.arity === undefined) {
+        const cell = broadcastCellType(v.type);
+        cells.push(cell);
+        if (isSubtype({ kind: 'value', value: 0 }, cell)) {
+          mayBeZero = true;
+          zeroCells.push('number');
+        } else zeroCells.push(cell);
+        continue;
+      }
+      const p = pointLeafType(v.type);
+      if (p === undefined) return undefined;
+      point = true;
+      cells.push(p);
+      zeroCells.push(p);
+    }
+    if (!point) return undefined;
+    return { cells, zeroCells: mayBeZero ? zeroCells : undefined };
+  }
 
   // Arm 0 (tuple): the typing twin of the component-wise tuple broadcast.
   // The value is a `Tuple` of one per-component result, so the type is a
@@ -1710,6 +1854,19 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
         ? v.type
         : ({ kind: 'list', elements: nested } as Type);
     });
+    // A head that maps over the components of a point, over a list of
+    // points beside a deeper collection of numbers: each point is paired
+    // with a row of numbers, and each component with one number of the row,
+    // so the cells of the result are numbers at the rank of the deepest
+    // operand (`pointsBesideDeeperNumbers`). The one-cell and arm-by-arm
+    // typings below read the cells as points.
+    if (
+      input.broadcastsOverTuples &&
+      !hasTupleBranch(cellResult) &&
+      !isSubtype(cellResult, COLLECTION_SHAPE_TYPE) &&
+      pointsBesideDeeperNumbers(types)
+    )
+      return nestedBroadcastResultType(types, cellResult);
     // A point-or-point-list operand (a symbol declared
     // `tuple<number, number> | list<tuple<number, number>>` and left
     // valueless) is a lone scalar-or-collection union whose scalar branch is
@@ -1888,17 +2045,21 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
           !isSubtype(cellResult, COLLECTION_SHAPE_TYPE)))
     ) {
       const arity = pointListArityOfTypes(types);
-      if (arity !== undefined)
-        return broadcastShapedResultType(
-          shapeTypes,
-          {
-            kind: 'tuple',
-            elements: Array.from({ length: arity }, () => ({
-              type: perComponent,
-            })),
-          },
-          absentCell
-        );
+      if (arity !== undefined) {
+        const point: Type = {
+          kind: 'tuple',
+          elements: Array.from({ length: arity }, () => ({
+            type: perComponent,
+          })),
+        };
+        // Operands of different ranks (rows of points beside a list of
+        // numbers): the result has the rank of the deepest operand, which
+        // the shaped form, one list level for a rank mismatch, does not
+        // give.
+        return sameLeafRank(shapeTypes)
+          ? broadcastShapedResultType(shapeTypes, point, absentCell)
+          : nestedBroadcastResultType(shapeTypes, point);
+      }
     }
 
     return broadcastShapedResultType(shapeTypes, perComponent, absentCell);

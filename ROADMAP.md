@@ -109,6 +109,94 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Tycho ledger rows 407 to 413 (OPEN — filed by Tycho 2026-10-20 at its 0.158.0 and 0.159.0 adoptions; read from `~/dev/tycho/docs/COMPUTE_ENGINE.md` and all reproduced on the main tree 2026-10-20)
+
+Each row is an ask of Tycho's Compute Engine ledger; its instrument is a
+script in Tycho's `scripts/repros/` named in the row, and the row closes when
+that script prints `READY` on an installed release. The readings below were
+reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
+
+- **407 — the grid of the `FindFit` `global` option is too coarse for a wide
+  range.** Model `a cos(bx + c) + dx + e`, 200 exact points on [0, 10], `b`
+  and `c` searched. The separable scan (`SEPARABLE_GRID` in
+  `src/compute-engine/nonlinear-fit.ts`, 400 × 40 points, 6 refinements)
+  finds the true `b = 2.2` over [0.3, 60] but not over [0.3, 120]; the basin
+  of the true minimum in `b` is about π/(span of x) = 0.3 wide, so a fixed
+  number of grid points over a wide range lands in it only by chance. Cost:
+  about 360 ms on 1,000 rows, over Tycho's 250 ms backstop, so Tycho scans a
+  sample of 500 rows and then fits locally on every row. Ask: space the grid
+  of a searched parameter by the basin width (for a parameter that
+  multiplies a variable inside a periodic function, a step of at most about
+  π/(span of that variable), or a refinement around the best cells), or an
+  option for the step or the number of grid points; and keep the cost
+  bounded on many rows (a scan on a sample, then a refinement on every row)
+  so Tycho can remove its sampling. This is the natural first use of step 5
+  of the worker-pool plan (`docs/plans/2026-10-20-worker-kernel-pool.md`,
+  section 5.5): the scan batches are the work the pool would spread.
+- **408 (low priority, Tycho owner decision) — `FindRoot` has no `global`
+  option.** `FindRoot(x^2 - 2, x, {global: {x: [0.1, 6]}})` gives
+  `unexpected-argument`. Ask: the same option as on `FindFit` (at most two
+  parameters over closed ranges, the lowest sum of squared residuals of the
+  whole system, equations included; the result record unchanged). Tycho
+  solves a group of `~` rows that mixes fits with an equation row as one
+  stacked `FindRoot` system, which gets no global search today.
+- **409 — the difference of two index reads of an `unknown` symbol is typed
+  `number`.** With `P: unknown`, `i, j: integer`, `P[i]` types `unknown` but
+  `P[i] - P[j]` types `number`, so `d(P[i] - P[j])` with
+  `d: (tuple<number, number>) -> unknown` boxes to an `incompatible-type`
+  error (`isValid` false). Control: with `P: list<tuple<number, number>>`
+  the difference types `missing | tuple<number, number>` and the call is
+  valid; `Q - P_0` with `Q: unknown` and `P_0` a tuple already types
+  `number | tuple<number, number>`. Ask: arithmetic over two `unknown`
+  operands stays `unknown` (or a union over the shapes arithmetic admits) so
+  that a point-valued result is admitted by a tuple parameter. The Desmos
+  importer declares every value head `unknown` before the rows are
+  normalized, so `neyret/uussbs3e0g` error-paused.
+- **410 — with `n` declared a list, a subscripted BINDER `n_0` is read as
+  `At(n, 0)`.** `\sum_{n_0=1}^{3} n_0` with `n: list<number>` parses to
+  `Sum(At(n, 0), Limits(Nothing, 1, 3))` and evaluates to `3 n[0]`; the
+  binder of `[n_0^2 for n_0 = [1,2,3]]`, a product index and a `with` local
+  fold the same way; with `n` undeclared each keeps `n_0`. Ask: in a binder
+  position (comprehension variable, `Sum`/`Product` index, `with` local)
+  keep a subscripted name whole, whatever its base is declared as. Tycho
+  renames such binders before the parse as a workaround (`art/lrfx01y3cv`).
+- **411 — on `interval-js`, an ordered comparison with an operand that is
+  undefined over the whole interval answers `maybe`.** `0 < \sqrt{x}` at
+  the point interval [-1, -1] gives `"maybe"`; the `javascript` target gives
+  `false` (`NaN > 0`), and Desmos reads a comparison with an undefined value
+  as false. Ask: for `<`, `≤`, `>`, `≥` and `=`, an `empty` operand gives a
+  definite false (`≠` is not part of the ask). Tycho's restriction masks
+  read such a comparison as false as a workaround (`neyret/3qkygakl9m`).
+- **412 — the derivative rule for `Sum` reads a declared symbol as the index
+  when a called function's body names it.** With `k: real` assigned 2, `x:
+  real`, `g := a ↦ a k x`: `\sum_{k=1}^{5} g(k)` evaluates to `30x`
+  (correct), but `d/dx` of it evaluates to `55` (Σ k²: the body of `g`,
+  inlined under the binder, reads the slider `k` as the index); with the
+  index `j` it is `30`. The "valueless" case (`k` declared without a value,
+  2 substituted after the derivative) captures too. Found when Tycho tried
+  to remove its term-by-term step after row 405 shipped in 0.159.0. Ask:
+  the derivative of a call under a binder keeps the binder's index distinct
+  from a declared symbol of the same name that the callee's body reads
+  (rename the index, or substitute the argument before the body is
+  inlined). The fix of 2026-10-20 (`928a5c29c`, `D` follows its variable's
+  name into a called body) is where the capture happens.
+- **413 — a piecewise whose condition compares an undefined value gives no
+  value; Desmos takes the else branch.** `\{0/0 > 0: 1, 0\}` is
+  `Which(Less(0, Indeterminate), 1, True, 0)`, evaluates to `Missing`, and
+  the `javascript` target gives `null`; Desmos and JavaScript's own
+  `NaN > 0` read the comparison as false and give 0. `N = \sum_{n=0}^{10000}
+  M_x(n)` with `M_x(n) = \{K_x(n) > 0: 1, 0\}` and `K_x(0)` undefined is
+  `NaN`, so a bar in `neyret/3qkygakl9m` draws nothing. Ask: in `Which`/`If`,
+  an ordered comparison or `=` with an undefined operand decides as false on
+  every route (interpreter, `javascript`, `glsl`), so the next branch is
+  taken. Row 411 asks the same for `interval-js`. Discovered while
+  reproducing (not in Tycho's row, decision needed): with `x: real` and no
+  value, `\{x/0 > 0: 1, 0\}` canonicalizes `x/0` to `ComplexInfinity`, so
+  the compiled code is `(0 < Infinity) ? 1 : 0` and gives 1 at every `x`,
+  including `x = 0` where the value is `0/0`. A quotient by a literal zero
+  with a symbolic numerator is a pole only when the numerator is not zero;
+  whether the fold should wait for the value is a canonical-form decision.
+
 ### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
 
 `IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
@@ -149,21 +237,6 @@ Cover interpreter/compiled parity and side-effect counts. Coordinate with raw
 view representation and serialization in
 `docs/plans/2026-10-20-bare-tuple-record-any.md`; this is pending compiler
 capability, not a change to the omission policy.
-
-### Calls to callback parameters can borrow a global function's inferred result (OPEN — 2026-10-20)
-
-Bare callback operands such as `Map(h, xs)` retain their lexical contract, but
-calls inside a lambda body still lose the callee's binding in descriptor-based
-inference. With global `h := u ↦ 7`, the function
-`(h: (real) -> real) ↦ Map(x ↦ h(x), [1, 2])` reports an integer-list result
-instead of a real-list result. With global `h := u ↦ Nothing`, it can also
-add an unrelated `nothing` arm. The application descriptor carries a head name,
-so body derivation and omission inspection look up the ambient definition.
-Preserve the callee's lexical binding when describing and deriving application
-heads, including ordinary calls outside Map. Cover nested lambdas, compatible
-and incompatible global signatures, and omission-returning globals. Keep the
-compiler's independent callback-contract checks; do not relax omission refusals
-based on these inferred results.
 
 ### Worker threads for parallel numeric kernels (IN PROGRESS — steps 1 to 4 landed 2026-10-20; step 5 waits for Tycho, design `docs/plans/2026-10-20-worker-kernel-pool.md`)
 
@@ -233,37 +306,31 @@ it, as a list literal does, or treat it as an error)?
 
 ### Defects found by the tuple-source fix (OPEN, small — found 2026-10-20; the tuple-source fix itself landed the same day)
 
-Each also occurs on the list route:
+Each also occurs on the list route. The other items of this entry were fixed
+on 2026-10-20 (FlatMap absent cells, the `Set` preview, the string result
+kind, `missing | string` sources, `Map` over an alias, `Filter`/`Dedup` over a
+dictionary). These remain, each measured with a fix and reverted:
 
 - `Any`/`All` are typed `boolean`, but `Any([1, Missing], x ↦ x > 2)` is
   `Missing` (Kleene logic, locked in `collections-absent.test.ts`); typing the
   result `boolean | missing` touches Epsil conditions and the compile targets.
-- `FlatMap(l, x ↦ [x, x])` with `l: list<integer | missing>` is typed
-  `list<number>`, but its value is `[1, 1, Missing, Missing]`.
-- `Map(F, c)` and `Filter(c, …)` with `c: missing | list<integer>` print as
-  `Set(11, 12)`, although typed `list<integer> | missing` and evaluating to
-  `[11, 12]`.
+  Measured 2026-10-20: a type handler and the absent-cell pass-through make 6
+  rows of `tuple-argument-binding.test.ts` fail (those that assert `boolean`);
+  no compile or Epsil test fails.
 - At a lazy source, `list<missing>` is accepted (`Map` gives `[NaN]`) but
-  `tuple<missing, missing>` is refused.
+  `tuple<missing, missing>` is refused. A fix was reverted on 2026-10-20
+  because a tuple whose slots are all absent evaluated to `Missing` (`Scan(m,
+  Add)` typed `list<number>`, value `Missing`). Since `2081e5469` such a tuple
+  stays a tuple (`Sort(m)` is `["Missing", "Missing"]`, `CountIf(m, p)` is
+  `0`), so the admission looks possible now; `Scan`, `ArgMax`, `Reduce` and
+  `Any` over it must be probed again when it is landed.
 - `collectionElementType(tuple<unknown, missing>)` widens to `missing`, so that
-  tuple is still refused.
+  tuple is still refused. Making an `unknown` slot read as any value decides the
+  role of `unknown` (question Q8 of the same plan).
 - `Insert`, `ReplaceAt`, `RangeOf`, `ContainsSequence`, `StartsWith` and
   `EndsWith` are invalid with a bare `tuple` source (`Insert(tb, 1, 5)`).
-- The kind of result of `Dedup`/`Filter` over a source declared `… | string`
-  depends on how the symbol holds its string: a string literal gives a list of
-  characters, an application that evaluates to a string gives a string. The type
-  covers both (`list<character> | string`), but the result kind should not
-  depend on how the value is held.
-- A source typed `missing | string` is an `incompatible-type` error at `Dedup`,
-  `Filter` and `Map`, on the box and Epsil routes, while `missing | list<…>` is
-  admitted.
-- `Map(x ↦ x + 10, q)` with `q: P` (an alias of `tuple<integer, missing>`) is
-  typed `collection<number>`, where the written-out tuple gives `list<number>`:
-  `Map`'s tuple check does not resolve the alias.
-- `Filter` and `Dedup` over a dictionary (alone or as a union arm) are typed
-  `dictionary<integer>`, but the value is a view that prints as `Set(("a", 1))`
-  and lists as `list<tuple<string, integer>>`, which the dictionary type does
-  not hold.
+  Admitting it gives unsound result types unless the slots become a lower
+  bound of `T`, which the solver drops for `unknown` (Q8).
 
 ### A declared collection accepts an assigned value that is not of its type (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
@@ -277,37 +344,52 @@ admitting it (see `docs/plans/2026-10-20-bare-tuple-record-any.md`).
 ### Two more subtype-relation gaps (OPEN, small — found 2026-10-20 by the bare-type prototypes)
 
 - `any <: broadcastable<any> <: unknown`, but `any` is not `<: unknown`
-  (`broadcastable<any>` is a mutual subtype of both `any` and `unknown`).
-- `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`, but
-  `tuple<integer>` is not `<: broadcastable<integer>`; the same for
-  `matrix<integer>`.
-
-### The type-variable solver binds nothing for an operand typed with an alias (OPEN, small — found 2026-10-20 by the review of the tuple-source fix)
-
-With `ce.declareType('L', 'list<integer | missing>', { alias: true })` and
-`a: L := [3, Missing]`, `Sort(a)` is typed `list<unknown>`; the value
-`[3, Missing]` is `list<integer | missing>`, which that type excludes. Also with
-no absent element: `Q = list<integer>` (alias), `b: Q`, `Sort(b)` is
-`list<unknown>` (sound, but the element type is lost). The written-out type
-gives `list<integer | missing>`. An alias operand should be unfolded before the
-polytype solve.
-
-### `Total` builds an unreduced `any | unknown` element type (OPEN, small — found 2026-10-20 by the same review)
-
-`Total(b)` with `b: list<missing | unknown>` (and `Total(Map(x ↦ x, t))` with
-`t: tuple<integer, missing>`) is typed `list<any | unknown>`: a union that is
-not reduced to `any`. The union is built in the `Total` handler or in the
-absorption, not by the element type itself.
+  (`broadcastable<any>` is a mutual subtype of both `any` and `unknown`). The
+  same gap exists for negations: `missing <: !integer <: unknown`. A fix
+  measured on 2026-10-20 with no test failure (in the `rhs === 'unknown'`
+  block of `isSubtype`: `broadcastable<T> <: unknown` only when
+  `T <: unknown`, and `!A <: unknown` only when `nothing`, `missing` and
+  `error` are all `<: A`) was not landed: it changes an edge into `unknown`,
+  whose migration to an inference marker belongs to question Q8 of
+  `docs/plans/2026-10-20-bare-tuple-record-any.md`.
+- (needs a decision) `tuple<integer> <: indexed_collection<integer> <:
+  broadcastable<integer>`, but `tuple<integer>` is not
+  `<: broadcastable<integer>` (the `matrix<integer>` case was fixed on
+  2026-10-20). A rule excludes tuples and strings from `broadcastable<T>`, and
+  `broadcastable-type.test.ts` ("a tuple is excluded from the collection
+  branch") and the type guide lock it. Option A, accept tuples and strings in
+  `broadcastable<T>`: 8 tests fail in 6 suites, including the locked test and
+  the Dot-of-tuple-of-tuples compile tests. Option B, remove
+  `indexed_collection<T> <: broadcastable<T>`: 14 tests fail in 8 suites,
+  including Tycho item 332 compiled-program parity and the point-list compile
+  tests.
 
 ### Two subtype-relation gaps found by the transitivity check (OPEN, small — found 2026-10-20 by the same prototype)
 
 - Five transitivity violations through a record with an extra field of type
   `any`: `record{a: integer, b: any} <: record{a: integer} <: dictionary`, but
   the first is not `<: dictionary` (record-to-record allows extra fields,
-  record-to-dictionary checks every field).
-- Fifteen `couldMatch` answers are `false` although the two types share a
-  subtype: tuples with an `any` slot against `indexed_collection` and similar
-  (`indexed_collection` vs `tuple<any>`).
+  record-to-dictionary checks every field). The plan's decision Q6 keeps open
+  records with width subtyping, so a record is not a dictionary of its known
+  field types; that rule for explicit value types (`record{a: integer}` no
+  longer `<: dictionary<integer>`) makes 44 tests fail in 4 suites
+  (`types`, `collections`, `compile-extremum-collection-operand`,
+  `named-arguments-record-field`), and the bare-name cases also involve
+  `unknown`. This belongs with the plan's implementation.
+- (found 2026-10-20 by the `couldMatch` fix) `couldMatch('any', '!any')` is
+  `true`, although `!any` is empty: the last step of `couldMatch` accepts the
+  pair because `!any <: any` holds, and it does not see that a negation is
+  empty. The same step makes `record{a: never}` match `dictionary<integer>`
+  and `collection<tuple<string, integer>>`, although no value has a field of
+  type `never` (a record with an empty field type is a subtype of those
+  types). Changing that step changes the answers of the general subtype
+  fallback, so it needs its own measurement.
+- (found 2026-10-20) `isSubtype` takes time exponential in the depth of a
+  union whose two arms are the same node: with `U0 = string` and
+  `Un = Un-1 | Un-1` built with shared nodes, `isSubtype('integer', U30)`
+  walks 2^30 paths before it answers `false`. The union rule visits each arm
+  without remembering a node it has already answered for. Such a type is
+  built by hand, not by the parser, which reduces a union.
 
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
@@ -315,8 +397,6 @@ The fix that keeps the `missing` arm in the result type of `Join`, `ListJoin`
 and 26 other collection operators found these related defects. Each was measured
 on 2026-10-19:
 
-- `Map(PointX, ["a", "b"])` is typed `list<string^2>` (it copies the source
-  type), but its value is `list<character^2>`.
 - `Iterate(idf, 1)` with `idf` declared `function` (arity unknown) types the
   call with two arguments, gets no answer, and falls back to `list<any>`: sound
   but imprecise.
@@ -341,50 +421,102 @@ on 2026-10-19:
   so Epsil reports `sol[1][1]` as a static error (`programs.test.ts`). The
   question is how a `missing` arm on an access result should flow through
   inference.
-- `Map(x ↦ Sqrt(x), U)` with `U: any` holding lists is typed `list<number>` (the
-  value is a list of lists): the function literal's own type
-  `(unknown) -> number` assumes a scalar parameter.
-- `Map(First, [[1, 2], [3]])` is typed
-  `list<vector<integer^1> | vector<integer^2>>`, but the value is `[1, 3]`: a
-  library callback whose result is `any` falls back to copying the source type.
-- `Map(Sqrt, Uu)` with `Uu: unknown` (or a bare `list`) holding `[[1, 2], [3]]`
-  is an `incompatible-type` error at canonicalization, while `U: any` is
-  accepted.
-- A list literal types an `Undefined` element as its other elements:
-  `[1, Undefined]` is `list<integer>`, so `Zip([1, Undefined], [2, Undefined])`
-  is typed `list<tuple<integer, integer>>` while its second element is a present tuple of absent coordinates
-  (`isAbsentSymbol` treats `Undefined` as absent). A propagating operator
-  already types an `Undefined` operand as `missing` (`deriveApplicationType`);
-  the list literal does not.
-- The several-source `Map((a, b) ↦ If(a == 1, "x", b), [1, 2], [5, 6])`: the
-  value `["x", 6]` is typed `list<integer | string>` (a list literal with mixed
-  elements records no length), so it does not match the static `list<…^2>`.
 
-### Broadcast result types of nested lists that do not hold their values (OPEN, small — found 2026-10-19 by the absent-cell arithmetic fix)
+### Map and aggregate omission compatibility (RESOLVED — 2026-10-20)
 
-None of these involves an absent cell. Each was measured on 2026-10-19:
+The failures introduced by omission handling combined inference defects with
+outdated expectations. Map now preserves the nested-collection and missing-data
+possibilities of `any`, retains lazy descriptor facts, and does not substitute
+its input type for an opaque callback result. The compiler can accept a broad
+Map result when the callback body proves every return path excludes `Nothing`.
 
-- A declared `list<list<integer>>` holding uneven rows `[[1, 2], [3]]`: `Sin(L)`
-  and `Sqrt(L)` are typed `matrix`, but the value is
-  `list<vector<real^1> | vector<real^2>>`. `staticCollectionDims`
-  (`common/type/utils.ts`) reads declared rows as rectangular.
-- `L^2` with `L: list<list<integer>> := [[1, 2]]` is typed `matrix`, but the
-  value is `Error("expected-square-matrix")`. Over `list<list<list<integer>>>`
-  the type is `list<number^(?x?x?)>` and the value is `[Error(…)]`.
-- `Abs` over `list<integer>`: the static type
-  `list<real<0..> | signed_infinity>` is correct, but the evaluated value is
-  typed `vector<integer^2>`, which is not a subtype of it.
-- A valueless `L: list<list<tuple<integer, integer>>>`: `L + 0.5` is typed
-  `list<list<tuple<real, real>>>`, but the value is an `incompatible-type`
-  error. A flat list of points plus a number is already typed `error`.
-- On the derive route, `derive('Subtract', [list<list<integer>>, 1])` gives
-  `matrix<list<integer>>`, one level too deep (the value `[[0, 1]]` is not a
-  member), and `derive('Divide', [list<list<tuple<integer, integer>>>, 2])`
-  gives `matrix`, but the value holds tuples. The box route rewrites `Subtract`
-  as a sum and does not have the first problem.
-- `Map` over `list<list<tuple<…>> | missing>` was not checked: its marker for an
-  absent cell (`absentCellMarker()` in `library/collections.ts`) does not read
-  through an absent row.
+User decision: keep refusing omission-capable sources. The unannotated Tycho
+332 and recursive gasket programs therefore remain refused; their numeric
+collection annotations compile and produce the same 224 circles. Tests cover
+both refusals and annotated counterparts. Tuple disjointness follows the
+position-preserving tuple rule. A full-suite measurement passed all 4,273
+snapshots and left three outdated expectations; the two affected suites pass
+after those expectations were corrected. Distinct compiled omission support
+remains the separate design item above.
+
+### Two defects found by the nested-list broadcast fix (OPEN, small — found 2026-10-20)
+
+- `Map(x ↦ x + 1, [[(1, 2)], Missing])` evaluates to `[NaN, NaN]`; the first
+  cell should be an `incompatible-type` error, as it is without the `Missing`.
+  The type `list<number>` holds the value, so the defect is in the value: a
+  failed level probably gets the absence marker of its level in
+  `makeSpineRunner()` (`library/collections.ts`).
+- `ce.declare('L', 'list<list<integer>^2>')` then assigning
+  `[[1, 2], [3]]` throws a type-compatibility error. The value is 2 rows of
+  integers, but its own type, `list<vector<integer^1> | vector<integer^2>>`,
+  has no outer length, so the check against the declared length fails.
+- With `Q: list<list<tuple<integer, integer>>> := [[(1,2),(3,4)],[(5,6)]]` and
+  `M: list<list<integer>> := [[1,2],[3]]`, `Q · M` is typed
+  `list<list<list<integer> | list<tuple<integer, integer>>>>`, but its value
+  `[[(1, 2),(6, 8)],[(15, 18)]]` is not a member. The cause is in the
+  `Multiply` type handler; the `Divide` case was fixed on 2026-10-20.
+- With the same `Q` and `M`, `Q + M` is typed `error`, but the value is a
+  nested list of `incompatible-type` errors, not one error:
+  `isProvablyNumberList()` does not read a list of rows of numbers, so the sum
+  is not refused when it is boxed, as it is beside a flat `list<integer>` or a
+  `matrix`. Both outcomes are errors (`docs/ERROR-MODEL.md` §4); only the
+  shape of the error differs.
+- (needs a decision) A point divided by a scalar that may be zero is typed with
+  rational coordinates: `Q / x` with `Q: list<tuple<integer, integer>>` and
+  `x: integer`, and `(1, 2) / x`, but `x := 0` gives `(~oo, ~oo)`. The scalar
+  quotient `1/x` is already typed `infinity | nan | real`, so the scalar and
+  point rules disagree. The rule is stated in the comment of
+  `quotientComponentType()` and required by `derive-application-type`,
+  `tycho-item-188-broadcastable-vector-divide` and `map-bare-operator-points`
+  (changing it fails those 3 tests; changing collection cells too fails 18).
+  The flat `Q / L` with `L: list<integer> := [0]` has the same fault. The
+  nested cases beside a collection divisor were fixed on 2026-10-20.
+
+### Defects found by the fix of the collection operator types (OPEN, small — found 2026-10-20)
+
+- `Sqrt(x)` with `x: vector<integer^1> | vector<integer^2>` is typed `number`:
+  the broadcast type does not lift over a union of collections. Only `Map`
+  works around it.
+- `Append(tb, 5)` with `tb: tuple` holding `("a", "b")` is typed
+  `list<integer>`, but the value is `["a", "b", 5]`: the solver drops the
+  `unknown` element of the source when it solves `T`. `Insert`, `ReplaceAt`,
+  `RangeOf`, `ContainsSequence`, `StartsWith` and `EndsWith` refuse such a
+  `tb` with `incompatible-type`; admitting it gives the same unsound result
+  type, because the slots must be a lower bound of `T`. Waits for the
+  migration of `unknown` to an inference marker (question Q8 of
+  `docs/plans/2026-10-20-bare-tuple-record-any.md`).
+- With `c: list<integer> | string := "aab"`, `Dedup(c)` evaluates to `"ab"`,
+  but the display preview of the unevaluated `Dedup(c)` prints `["a","b"]`:
+  the preview does not evaluate its source.
+- `Filter(tu, x ↦ x > 0)` and `Sort(tu)` with `tu: tuple<unknown, missing> :=
+  (1, Missing)` are typed `list<missing>`; the values are `[1]` and
+  `[1, Missing]`. The join of the slot types treats `unknown` as no value. Also
+  waits for Q8.
+- With `ce.declareType('cyc', 'cyc | list<integer>', { alias: true })` and
+  `k: cyc := [1, 2]`, `Map(x ↦ x + 10, k)` is typed `collection<integer>` and
+  prints and evaluates as `Set(11, 12)`: the fallback that reads the value of
+  the source does not see through the alias.
+- `Map(h, s)` with `h: (T) -> T where T: number` and `s: list<string>` (or
+  rows of strings) is admitted when it is boxed, and each element evaluates to
+  an `incompatible-type` error, but the direct call `h("a")` is refused when it
+  is boxed: the callback admission of `Map` does not check the bound of a
+  type variable against the element type.
+- `Map(h, fs)` with `h: ((integer) -> T) -> T where T` and `fs := [[x ↦ x + 1]]`
+  is typed `list<(unknown) -> number^(1x1)>` for the value `[[2]]`: the source
+  type is copied. The broadcast reading of a polymorphic callback over rows
+  binds a type variable only when it is the parameter itself (`(T) -> T`), so
+  this shape falls back to that copy.
+- A declared `record{a: integer}` is open, so `{a: 1, b: Missing}` matches
+  it, but the entry type read from it is `tuple<string, integer>`, which
+  leaves out the undeclared fields. With `ra: record{a: integer}` holding that
+  value, `Map(x ↦ At(x, 2), Dedup(ra))` is typed `collection<integer>` and
+  evaluates to `Set(1, Missing)`, and `FlatMap(ra, x ↦ [At(x, 2)])` is an
+  `incompatible-type` error for the entry `("b", Missing)`. An open record's
+  entry type should be `tuple<string, any>` wherever its elements are read
+  (`collectionElementType` and the `elttype` handlers). Also,
+  `ce.assign('rm', {a: Missing})` with `rm: record` is accepted although the
+  value does not match the declaration (see "A declared collection accepts an
+  assigned value that is not of its type").
 
 ### Exact definite integrals that `simplify()` does not reduce (OPEN, small — found 2026-10-19 by `benchmarks/audit/integration-families.ts`)
 

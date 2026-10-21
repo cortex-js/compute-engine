@@ -489,6 +489,13 @@ export function checkCollectionOperand(
   if (isSymbol(x) && x.valueDefinition?.inferredType) return x;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
   if (absentTupleSlotsMatchSource(x, type)) return x;
+  // An operand that can be absent as a whole is admitted when its other arms
+  // are: every collection operator answers `Missing` for an absent source.
+  // `missing | list<integer>` is admitted by the overlap deferral in
+  // `checkType` (it reads the arms of a union one by one), but that deferral
+  // reads no `string` arm, so before, `Dedup(s)`, `Filter(s, p)` and
+  // `Map(f, s)` with `s: missing | string` were `incompatible-type` errors.
+  if (presentArmsMatch(t, type)) return x;
   // A structural alias, at the top or as an arm of a union, is read as its
   // definition, so that `a: L`, with `L` an alias of
   // `list<integer | missing>`, is admitted as `list<integer | missing>` is.
@@ -499,6 +506,20 @@ export function checkCollectionOperand(
   const unfolded = aliasArmsUnfolded(t);
   if (unfolded !== t && overlapsForDeferredValidation(unfolded, type)) return x;
   return checkType(engine, x, type);
+}
+
+/**
+ * True when `t` is a union with a top-level `missing` arm, and each of its
+ * other arms is a subtype of the source slot `type`. A structural alias, at
+ * the top or as an arm, is read as its definition.
+ */
+function presentArmsMatch(t: Type, type: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  const arms = r.types.map((a) => resolveTypeAlias(a));
+  const present = arms.filter((a) => a !== 'missing');
+  if (present.length === arms.length || present.length === 0) return false;
+  return present.every((a) => isSubtype(a, type));
 }
 
 /**

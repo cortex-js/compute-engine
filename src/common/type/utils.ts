@@ -1794,6 +1794,81 @@ export function staticCollectionDims(
 }
 
 /**
+ * The dimensions of the list type `t` as a broadcast over it reads them, and
+ * whether the rows at each depth provably have the same length (`uniform`),
+ * or `null` when the rank is not known. This is `staticCollectionDims`, with
+ * two differences:
+ *
+ * - An element that is a union of lists of one rank (the type of the literal
+ *   `[[1, 2], [3]]`, `list<vector<integer^1> | vector<integer^2>>`) has that
+ *   rank. `staticCollectionDims` reads it as rank 1.
+ * - The dimensions of one list type (`list<integer^(?x?)>`, a matrix)
+ *   describe a rectangular value, an open length included. A list type
+ *   nested in the element of another (`list<list<integer>>`, `list<vector>`)
+ *   says only that each row is a list: its length is the same in every row
+ *   only when its dimensions are all fixed (`list<vector<3>>`), and the rows
+ *   of a union of lists are uniform only when every arm has the same fixed
+ *   dimensions.
+ */
+function broadcastOperandShape(
+  t: Readonly<Type>,
+  seen?: AliasDescent,
+  depth = 0
+): { dims: number[]; uniform: boolean } | null {
+  if (depth > MAX_CELL_DEPTH) return null;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return null;
+  const outer = unfolded.type;
+  if (typeof outer === 'string' || outer.kind !== 'list') return null;
+  const dims = outer.dimensions ? [...outer.dimensions] : [-1];
+  const row = broadcastRowShape(outer.elements, unfolded.seen, depth);
+  if (row === null) return null;
+  if (row === 'leaf') return { dims, uniform: true };
+  return { dims: [...dims, ...row.dims], uniform: row.uniform };
+}
+
+/** The shape of the rows of a list whose element type is `t`, for
+ * `broadcastOperandShape`: `'leaf'` when an element is not a list, the
+ * dimensions of a row and whether every row has them otherwise, `null` when
+ * the rank is not known (an element of unknown shape, or a union of a list
+ * and a scalar, or of lists of different ranks). */
+function broadcastRowShape(
+  t: Readonly<Type>,
+  seen: AliasDescent | undefined,
+  depth: number
+): 'leaf' | { dims: number[]; uniform: boolean } | null {
+  const element = unfoldAliasOnDescent(t, seen);
+  if (element === undefined) return null;
+  const el = element.type;
+  if (el === 'unknown' || el === 'any' || el === 'list' || el === 'collection')
+    return null;
+  if (typeof el === 'string') return 'leaf';
+  if (el.kind === 'list') {
+    const s = broadcastOperandShape(el, element.seen, depth + 1);
+    if (s === null) return null;
+    return { dims: s.dims, uniform: s.uniform && s.dims.every((n) => n >= 0) };
+  }
+  if (el.kind !== 'union') return 'leaf';
+  let shape: 'leaf' | { dims: number[]; uniform: boolean } | undefined;
+  for (const arm of el.types) {
+    const s = broadcastRowShape(arm, element.seen, depth);
+    if (s === null) return null;
+    if (shape === undefined) shape = s;
+    else if (shape === 'leaf' || s === 'leaf') {
+      if (shape !== s) return null;
+    } else if (shape.dims.length !== s.dims.length) return null;
+    else {
+      const same = shape.dims.every((n, i) => n === s.dims[i]);
+      shape = {
+        dims: shape.dims.map((n, i) => (n === s.dims[i] ? n : -1)),
+        uniform: shape.uniform && s.uniform && same,
+      };
+    }
+  }
+  return shape ?? 'leaf';
+}
+
+/**
  * Rank/shape-aware broadcast result type (§D6.1 of
  * `docs/COLLECTIONS-MODEL.md`): mirror the
  * shape-bearing operands' statically-provable structure onto the broadcast
@@ -1823,9 +1898,12 @@ export function broadcastShapedResultType(
   );
   if (ragged !== undefined) return ragged;
   let dims: number[] | null = null;
+  let uniform = true;
   for (const t of operandTypes) {
-    const d = staticCollectionDims(t);
-    if (d === null) return broadcastResultType(elementType); // rank unknown
+    const shape = broadcastOperandShape(t);
+    if (shape === null) return broadcastResultType(elementType); // rank unknown
+    const d = shape.dims;
+    if (!shape.uniform) uniform = false;
     if (dims === null) {
       dims = d;
     } else if (dims.length !== d.length) {
@@ -1839,6 +1917,16 @@ export function broadcastShapedResultType(
   // Rank-1 fully-open adds no information over the plain form.
   if (dims.length === 1 && dims[0] === -1)
     return broadcastResultType(elementType);
+  // The dimensioned form says that all the rows at one depth have the same
+  // length. A list of lists does not promise this (`list<list<integer>>`
+  // holds `[[1, 2], [3]]`), so the result is then a plain list for each rank:
+  // `Sin` of `[[1, 2], [3]]` is `[[Sin(1), Sin(2)], [Sin(3)]]`, which is a
+  // `list<list<real>>`, not a matrix.
+  if (dims.length > 1 && !uniform) {
+    let nested = elementType as Type;
+    for (let k = 0; k < dims.length; k++) nested = broadcastResultType(nested);
+    return nested;
+  }
   const result: ListType = {
     kind: 'list',
     elements: elementType as Type,
@@ -2030,6 +2118,20 @@ function raggedBroadcastResultType(
       types.push(arm);
     };
     for (const arm of arms) add(arm);
+    // Beside an `any` arm, an arm that states no shape (`unknown`, `value`,
+    // `expression`) adds nothing, since `any` holds it, and it is dropped. A
+    // shaped arm is kept (`any | list<number>`): it records the mirrored
+    // structure of a list cell. An absent arm beside a shape-open arm gives
+    // the dropped case: for an `unknown` per-element result,
+    // `list<missing | unknown>` mirrors `missing` to `unknown` and `unknown`
+    // to `any`, and the cell was the unreduced `unknown | any`.
+    if (types.includes('any')) {
+      const shaped = types.filter(
+        (t) => t !== 'unknown' && t !== 'value' && t !== 'expression'
+      );
+      types.length = 0;
+      types.push(...shaped);
+    }
     if (types.length === 1) return types[0];
     const result: Type = { kind: 'union', types };
     built.add(result);
