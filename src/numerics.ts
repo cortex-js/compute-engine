@@ -30,6 +30,17 @@ export type {
   NumberFieldFactorOptions,
   NumberFieldFactorization,
 } from './compute-engine/polynomial/number-field.js';
+export {
+  splittingField,
+  embedNumberFieldElement,
+} from './compute-engine/polynomial/splitting-field.js';
+export type {
+  SplittingFieldOptions,
+  SplittingFieldResult,
+  NumberFieldEmbedding,
+} from './compute-engine/polynomial/splitting-field.js';
+export { createPolynomialWasmBackend } from './compute-engine/polynomial/wasm-backend.js';
+export type { ModularFactorBackend } from './compute-engine/polynomial/finite-field.js';
 
 //
 // Types (numerics)

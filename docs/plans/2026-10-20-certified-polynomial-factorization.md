@@ -65,10 +65,11 @@ denominator. No benchmark run may silently substitute numerical factoring.
 
 ## Progress
 
-Stage 1 has six passing arithmetic/contract tests on Node 22.14.0, including
+All five stages have bounded implementations and separate commits. Stage 1 has
+six passing arithmetic/contract tests on Node 22.14.0, including
 large exact coefficients, zero/division errors, multiplicities, modular inverse
-and cancellation. Later stages are pending; this document does not claim their
-completion. Corpus performance measurements belong to the factorizer stages,
+and cancellation. This does not claim unrestricted or best-in-class performance.
+Corpus performance measurements belong to the factorizer stages,
 not to isolated coefficient arithmetic.
 
 The stage 2 implementation now includes a native modular factorizer and a
@@ -84,8 +85,8 @@ The first 120-case pilot has 120 verified factorizations for each of native TS,
 hybrid WASM and SymPy 1.14.0, with no mismatches. Single-run medians were 1.15 ms,
 2.06 ms and 1.12 ms respectively; p95 values were 335 ms, 594 ms and 9.48 ms.
 These are exploratory sequential timings under uncontrolled machine load, not
-a backend selection or a large-corpus performance claim. Profiling and the
-full generated corpus are still required.
+a backend selection or a large-corpus performance claim. Subsequent profiling
+and the full generated corpus are reported below.
 
 The first CPU profile attributed 12,949 of 14,139 samples (91.6%) to integer
 GCD during rational square-free preprocessing. A degree-preserving modular
@@ -149,6 +150,66 @@ certified real/complex root isolation. No embedding into C is guessed. The
 abstract representation suffices for exact factoring and constructing splitting
 fields; numerical embeddings, primitive-element presentation optimization and
 fast modular number-field arithmetic remain separate follow-ups.
+
+## Splitting fields
+
+Stage 5 repeatedly adjoins a root of a certified irreducible factor, using a
+primitive element whose norm is certified irreducible over Q. A linear GCD
+recovers the old generator in the new field. Each map is checked against the
+source defining polynomial, and each adjoined root against its polynomial.
+Completion requires exact evaluation of every root and reconstruction of the
+original polynomial with its scalar and multiplicities.
+
+The default field-degree cap is 24; operation and primitive-element shift
+budgets also apply. Incomplete output retains the last certified field but
+does not claim it splits the input. The returned maps form a chain; use
+`embedNumberFieldElement` to transport elements along it. No numerical root
+ordering or preferred embedding into C is implied. Tests include quadratic
+fields, x^3-2 (degree-six splitting field), x^3-1, a biquadratic compositum,
+repeated roots, constants, zero rejection, invalid maps, forged elements and
+resource exhaustion. The combined number/splitting-field suites pass 15 tests.
+
+## Public API and first-party ownership
+
+The algorithms live in `src/compute-engine/polynomial` and are available from
+CE's existing `@cortex-js/compute-engine/numerics` package entry point. They are
+first-party source under the repository's MIT license, not wrappers around a
+third-party CAS. A separate npm package has not been published. Univariate
+`Factor` uses the exact rational engine; multivariate and extension operations
+use explicit structured APIs rather than ambiguous new MathJSON syntax.
+
+```ts
+import {
+  rationalCoefficient as q,
+  factorRationalPolynomial,
+  RationalNumberField,
+  factorNumberFieldPolynomial,
+  splittingField,
+} from '@cortex-js/compute-engine/numerics';
+
+// Coefficients are ascending: x^4 + 5*x^2 + 6.
+const factors = factorRationalPolynomial([q(6n), q(0n), q(5n), q(0n), q(1n)]);
+const K = RationalNumberField.create([q(-2n), q(0n), q(1n)]);
+const overK = factorNumberFieldPolynomial(K, [K.fromInteger(-2n), K.zero, K.one]);
+const splitting = splittingField([q(-2n), q(0n), q(0n), q(1n)]);
+```
+
+Always inspect `status`; `complete` certifies irreducibility by the algorithms,
+whereas `reconstructsRationalFactorization` checks reconstruction only. These
+are algorithmically certified results, not portable serialized proof objects.
+Budgets count arithmetic work, not elapsed time or bigint bit operations;
+callers needing a hard time/memory boundary should run in a worker process.
+
+The optional `createPolynomialWasmBackend(bytes)` accepts caller-provided bytes;
+it performs no network requests or automatic initialization. The build script
+compiles only first-party AssemblyScript. The kernel remains optional because
+its speed benefit depends on the workload; TS handles all bigint operations.
+External CAS code and generated benchmark files are excluded from commits.
+
+Remaining performance work includes faster Hensel lifting, LLL/van Hoeij
+recombination, sparse multivariate lifting and modular number-field arithmetic.
+Certified real/complex embeddings and compact defining-polynomial selection
+are additional capabilities, not claims made by this implementation.
 
 ## References
 

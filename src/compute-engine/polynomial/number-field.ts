@@ -19,20 +19,24 @@ export interface NumberFieldElement {
 
 /** An abstract exact field Q[a]/(m), without an assumed real/complex embedding. */
 export class RationalNumberField implements ExactField<NumberFieldElement> {
+  private readonly elements = new WeakSet<NumberFieldElement>();
   readonly degree: number;
   readonly zero: NumberFieldElement;
   readonly one: NumberFieldElement;
   readonly generator: NumberFieldElement;
   private readonly arithmetic: ExactField<NumberFieldElement>;
   private constructor(
-    readonly definingPolynomial: readonly RationalCoefficient[]
+    readonly definingPolynomial: readonly RationalCoefficient[],
+    readonly certificationOperations: number
   ) {
     this.degree = definingPolynomial.length - 1;
     this.zero = Object.freeze({ field: this, coefficients: Object.freeze([]) });
     this.one = Object.freeze({
       field: this,
-      coefficients: Object.freeze([Q.one]),
+      coefficients: Object.freeze([Object.freeze(q(1n))]),
     });
+    this.elements.add(this.zero);
+    this.elements.add(this.one);
     this.arithmetic = this.withWork(
       new PolynomialWork(Number.MAX_SAFE_INTEGER)
     );
@@ -57,35 +61,44 @@ export class RationalNumberField implements ExactField<NumberFieldElement> {
         'Number field defining polynomial must be irreducible'
       );
     return new RationalNumberField(
-      Object.freeze(normalized.map((c) => Object.freeze(c)))
+      Object.freeze(normalized.map((c) => Object.freeze(c))),
+      proof.statistics.operations
     );
   }
-  element(coefficients: readonly RationalCoefficient[]): NumberFieldElement {
-    const p = new FieldPolynomials(Q).divrem(
+  element(
+    coefficients: readonly RationalCoefficient[],
+    work = new PolynomialWork()
+  ): NumberFieldElement {
+    const p = new FieldPolynomials(Q, work).divrem(
       coefficients.map((c) => q(c.numerator, c.denominator)),
       this.definingPolynomial
     )[1];
-    return Object.freeze({
+    const result = Object.freeze({
       field: this,
       coefficients: Object.freeze(p.map((c) => Object.freeze(c))),
     });
+    this.elements.add(result);
+    return result;
   }
   /** Share a computation's budget through all coefficient-field arithmetic. */
   withWork(work: PolynomialWork): ExactField<NumberFieldElement> {
     const P = new FieldPolynomials(Q, work);
     const check = (a: NumberFieldElement): void => {
-      if (a.field !== this)
+      if (a.field !== this || !this.elements.has(a))
         throw new RangeError(
           'Number field elements require an explicit embedding'
         );
     };
-    const make = (a: readonly RationalCoefficient[]): NumberFieldElement =>
-      Object.freeze({
+    const make = (a: readonly RationalCoefficient[]): NumberFieldElement => {
+      const result = Object.freeze({
         field: this,
         coefficients: Object.freeze(
           P.divrem(a, this.definingPolynomial)[1].map((c) => Object.freeze(c))
         ),
       });
+      this.elements.add(result);
+      return result;
+    };
     return {
       zero: this.zero,
       one: this.one,
