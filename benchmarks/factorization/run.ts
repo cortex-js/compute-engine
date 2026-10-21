@@ -21,6 +21,7 @@ const { values } = parseArgs({
     'backends': { type: 'string', default: 'typescript' },
     'profile': { type: 'boolean', default: false },
     'lifting': { type: 'string', default: 'auto' },
+    'recombination': { type: 'string', default: 'auto' },
     'timeout': { type: 'string', default: '30' },
     'repeats': { type: 'string', default: '3' },
     'corpus': { type: 'string', default: 'regular' },
@@ -47,6 +48,8 @@ const repeats = Number(values.repeats),
   maxDegree = Number(values['max-degree']),
   maxCoefficientBits = Number(values['max-coefficient-bits']);
 const backends = values.backends!.split(',');
+if (!['auto', 'subsets', 'lattice'].includes(values.recombination!))
+  throw new Error('Unknown recombination strategy');
 if (!['auto', 'linear', 'quadratic'].includes(values.lifting!))
   throw new Error('Unknown lifting strategy');
 if (
@@ -73,6 +76,8 @@ for (const f of [
   'src/compute-engine/polynomial/factor-rational.ts',
   'src/compute-engine/polynomial/factor-work.ts',
   'src/compute-engine/polynomial/hensel.ts',
+  'src/compute-engine/polynomial/integer-lattice.ts',
+  'src/compute-engine/polynomial/lattice-recombination.ts',
   'benchmarks/factorization/corpus.ts',
   'benchmarks/factorization/worker.ts',
   'benchmarks/factorization/sympy_worker.py',
@@ -101,6 +106,7 @@ writeFileSync(
         maxOperations: 2_000_000,
         profile: values.profile,
         lifting: values.lifting,
+        recombination: values.recombination,
       },
       runtime: process.version,
     },
@@ -196,6 +202,7 @@ class Runner {
         maxCoefficientBits,
         profile: values.profile,
         lifting: values.lifting,
+        recombination: values.recombination,
       }) + '\n'
     );
     return result;

@@ -18,7 +18,8 @@ export class FactorWork extends PolynomialWork {
     limit: number,
     check?: () => void,
     profile = false,
-    readonly lifting: 'linear' | 'quadratic' | 'auto' = 'auto'
+    readonly lifting: 'linear' | 'quadratic' | 'auto' = 'auto',
+    readonly recombination: 'subsets' | 'lattice' | 'auto' = 'auto'
   ) {
     super(limit, check);
     if (profile) {

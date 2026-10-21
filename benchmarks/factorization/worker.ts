@@ -111,6 +111,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         maxCoefficientBits: message.maxCoefficientBits ?? 4096,
         profile: message.profile ?? false,
         lifting: message.lifting ?? 'auto',
+        recombination: message.recombination ?? 'auto',
       });
       console.log(
         JSON.stringify(

@@ -14,6 +14,7 @@ import {
 import { SmallPrimePolynomials } from './small-prime.js';
 import { FactorWork, type FactorProfile } from './factor-work.js';
 import { HenselTree } from './hensel.js';
+import { latticeFactorPartition } from './lattice-recombination.js';
 
 export interface RationalFactorOptions {
   maxOperations?: number;
@@ -25,6 +26,7 @@ export interface RationalFactorOptions {
   profile?: boolean;
   /** Force a strategy for reproducible diagnostics; auto selects the default. */
   lifting?: 'linear' | 'quadratic' | 'auto';
+  recombination?: 'subsets' | 'lattice' | 'auto';
 }
 export interface RationalPolynomialFactor {
   /** Primitive integer coefficients, ascending in degree, positive leading coefficient. */
@@ -45,6 +47,8 @@ export interface RationalFactorization {
     lifts: number;
     subsets: number;
     phases?: FactorProfile;
+    latticeAttempts?: number;
+    latticeCompletions?: number;
   };
 }
 
@@ -327,6 +331,44 @@ function factorMonicImpl(
   // The L1 norm is a conservative integer upper bound; M > 2B makes
   // symmetric reconstruction unique for every possible rational factor.
   const coefficientBound = () => (1n << BigInt(f.length - 1)) * norm(f);
+  const latticeRecovery = (): bigint[][] | null => {
+    if (
+      work.recombination === 'subsets' ||
+      (work.recombination === 'auto' &&
+        (lifted.length < 6 || lifted.length > 16))
+    )
+      return null;
+    for (const columns of [1, 2, 4]) {
+      stats.latticeAttempts = (stats.latticeAttempts ?? 0) + 1;
+      const groups = latticeFactorPartition(f, lifted, modulus, work, columns);
+      if (!groups) continue;
+      const recovered: bigint[][] = [];
+      let remainder = f;
+      for (const indices of groups) {
+        const candidate = symmetric(
+          indices.reduce(
+            (a, i) => multiply(a, lifted[i], work).map((c) => mod(c, modulus)),
+            [1n]
+          )
+        );
+        const quotient = integerQuotient(remainder, candidate, work);
+        if (!quotient) break;
+        recovered.push(candidate);
+        remainder = quotient;
+      }
+      // Inseparability plus exact recovery proves each block irreducible.
+      // A partially recovered partition is never returned as a factorization.
+      if (
+        recovered.length === groups.length &&
+        remainder.length === 1 &&
+        remainder[0] === 1n
+      ) {
+        stats.latticeCompletions = (stats.latticeCompletions ?? 0) + 1;
+        return recovered;
+      }
+    }
+    return null;
+  };
   let bound = coefficientBound(),
     exponent = 1,
     nextRecovery = 1;
@@ -362,6 +404,8 @@ function factorMonicImpl(
           }),
         ];
       // A small early subset search discovers exact splits, not certificates.
+      const latticeFactors = latticeRecovery();
+      if (latticeFactors) return [...factors, ...latticeFactors];
       // Re-factor both proper divisors to prove irreducibility. This cannot
       // return a reducible factor merely because reconstruction succeeded.
       let attempts = 0;
@@ -433,6 +477,8 @@ function factorMonicImpl(
     exponent++;
   }
   work.phase('recombination');
+  const latticeFactors = latticeRecovery();
+  if (latticeFactors) return [...factors, ...latticeFactors];
   let remaining = f,
     pool = lifted,
     remainingHeight = norm(f);
@@ -524,7 +570,8 @@ export function factorRationalPolynomial(
     options.maxOperations ?? 2_000_000,
     options.check,
     options.profile,
-    options.lifting
+    options.lifting,
+    options.recombination
   );
   const P = new FieldPolynomials(Q, work);
   const coefficients = P.trim(

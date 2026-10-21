@@ -80,3 +80,30 @@ unimodular shears, exact reduction inequalities, determinant +/-1, transformatio
 reconstruction, input immutability, invalid/dependent bases and work/cancellation
 limits. This stage does not yet change polynomial factoring performance; the
 kernel is connected to recombination in stage 4.
+
+## Stage 4 Certified lattice recombination
+
+For each lifted modular factor f_i, form selected coefficients of
+f*f_i'/f_i modulo the lifting modulus. A true rational factor g selects a 0/1
+subset, and the corresponding combination is the integer polynomial f*g'/g.
+Its coefficient at k is bounded by n*binomial(n-1,k)*||f||_1: expanding over
+roots gives at most deg(g)*binomial(n-1,k) products, each bounded by M(f),
+and M(f) <= ||f||_1. The lattice embeds scaled indicator coordinates and these
+coefficient congruences. An exact bound covers every true indicator vector.
+
+Trailing Gram-Schmidt directions longer than that bound cannot occur in any
+true indicator. Removing them leaves a span containing every rational factor's
+indicator. Equal projected columns in that span are inseparable. Only when
+every resulting block reconstructs and exactly divides the input are those
+blocks returned as certified irreducible factors. LLL short rows themselves
+are not assumed to be factor indicators. Inconclusive reductions retain the
+existing exhaustive fallback. Probe work is charged to the parent budget;
+local probe exhaustion returns inconclusive, while cancellation propagates.
+
+Six recombination tests check irreducible cyclotomic grouping, exact recovery,
+known-factor containment, insufficient precision, resource limits, cancellation
+and agreement with exhaustive recombination under both lifting strategies.
+Independent orthogonal-vector tests also verify the LLL squared norms used by
+the proof. A 120-case pilot verifies every result. The initial automatic stress
+pilot regresses x^96-1 to the operation limit because repeated lattice probes
+consume too much work. Stage 5 must fix this before enabling the policy.

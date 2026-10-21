@@ -2,7 +2,12 @@ import {
   reduceIntegerLattice,
   isReducedIntegerLattice,
 } from '../../src/compute-engine/polynomial/integer-lattice';
-import { PolynomialWork } from '../../src/compute-engine/polynomial/exact-field';
+import {
+  PolynomialWork,
+  rationalField as Q,
+  rationalCoefficient as q,
+  type RationalCoefficient,
+} from '../../src/compute-engine/polynomial/exact-field';
 
 // Independent determinant expansion is deliberately limited to small tests.
 const determinant = (a: bigint[][]): bigint =>
@@ -47,6 +52,21 @@ test.each([
     expect(reconstructed).toEqual(result.basis);
     expect([1n, -1n]).toContain(determinant(result.transformation));
     expect(isReducedIntegerLattice(result.basis)).toBe(true);
+    // Independent orthogonal-vector construction checks the norms used by
+    // recombination's short-vector containment proof, not just LLL inequalities.
+    const orthogonal: RationalCoefficient[][] = [];
+    const dot = (a: RationalCoefficient[], b: RationalCoefficient[]) =>
+      a.reduce((s, c, i) => Q.add(s, Q.mul(c, b[i])), Q.zero);
+    const norms = result.basis.map((row) => {
+      let v = row.map((c) => q(c));
+      for (const u of orthogonal) {
+        const mu = Q.mul(dot(v, u), Q.inv(dot(u, u)));
+        v = v.map((c, i) => Q.add(c, Q.neg(Q.mul(mu, u[i]))));
+      }
+      orthogonal.push(v);
+      return dot(v, v);
+    });
+    expect(result.squaredNorms).toEqual(norms);
     expect(input).toEqual(copy);
   }
 );
