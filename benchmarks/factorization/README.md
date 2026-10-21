@@ -115,6 +115,13 @@ timeouts. First-party limits were identical:
 - Degree limit: (3x+1)^48 (5x^2+x+1)^48, degree 144.
 - Coefficient limit: products containing 2^4096 or 2^8192 (4097 or 8193 bits).
 
+The operation-limit records give more specific optimization evidence: x^96-1
+records 28 lifting steps and 653 subset candidates; x^128-1 records 36 lifting
+steps and no subset candidates; x^128+2 records two good primes and no lifting
+steps. The first has reached recombination, the second has not reached it, and
+the third has not finished modular factor selection. All three exhaust
+approximately two million counted operations.
+
 Verified-only median/p95 solve times (ms): TS 5.18/158.35, hybrid 4.39/167.96,
 SymPy 2.86/95.66, PARI 2.37/9.23. Different completion subsets prevent a direct
 speedup comparison.
@@ -165,3 +172,19 @@ typecheck of old polynomial tests finds existing typing errors in
 The Node 22/26 CI matrix now compiles the optional WASM kernel before running
 tests. Node 26 has not been executed locally. Benchmarks and tests use portable
 Node/Python scripts; no PowerShell-dependent code is added to the package.
+
+The existing async-scope isolation test in `functions.test.ts` hit its 30-second
+limit during the loaded full-suite run, then passed in isolation (15.864 s test
+duration). No timeout threshold was changed. Existing Epsil `#env("HOME")` tests
+in `execute.test.ts` and `epsil-parse.test.ts` expect an undefined host value on
+this Windows environment but receive an empty string; the execution case
+reproduces in isolation. Their source and implementation are unchanged. Two
+unchanged `effects-registry.test.ts` coupling-audit assertions also differ only
+in Windows separators (`library\\core.ts` versus `library/core.ts`).
+
+The broad Jest run is still active at handoff (2026-10-21 03:53 UTC); it has
+reported the five failures above, but no final totals are claimed. It writes
+`build/factoring-regression-jest.json` when finished. This is not a passing
+full-suite/CI claim. The independent polynomial corpus runs and focused tests
+reported above are complete. Python-dependent cases in the broad run are skipped
+because its environment has no configured Python interpreter.
