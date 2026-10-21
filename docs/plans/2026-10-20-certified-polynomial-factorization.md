@@ -128,6 +128,28 @@ multivariate factors, rational content, repeated factors, monomials, constants,
 zero and degree/work limits. Sparse evaluation/lifting remains a performance
 upgrade, not a prerequisite for the bounded algorithm's correctness.
 
+## Exact number fields
+
+Stage 4 constructs abstract fields Q[a]/(m) only after certifying that m is
+irreducible. Elements retain their owning field; combining elements from
+different fields requires an explicit embedding, even if the defining
+polynomials happen to match. Arithmetic reduces in the power basis, and
+extended polynomial Euclid supplies inverses.
+
+Factoring over the field uses Trager's method: shift a square-free polynomial,
+compute its norm by a fraction-free determinant of the multiplication matrix,
+factor the square-free norm over Q, recover factors by field-polynomial GCD,
+and undo the shift. Exact reconstruction checks both factors and multiplicities.
+Norm degree, shift search and operation limits are explicit. Seven tests cover
+relations/inverses, field identity, reducible modulus rejection, real and
+imaginary quadratic fields, algebraic coefficients, multiplicities and limits.
+
+These are abstract number fields, not a general algebraic-number package with
+certified real/complex root isolation. No embedding into C is guessed. The
+abstract representation suffices for exact factoring and constructing splitting
+fields; numerical embeddings, primitive-element presentation optimization and
+fast modular number-field arithmetic remain separate follow-ups.
+
 ## References
 
 - [SymPy polynomial algorithms](https://docs.sympy.org/latest/modules/polys/internals.html)

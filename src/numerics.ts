@@ -21,6 +21,15 @@ export type {
   SparseRationalPolynomial,
   SparseRationalFactorization,
 } from './compute-engine/polynomial/factor-multivariate.js';
+export {
+  RationalNumberField,
+  factorNumberFieldPolynomial,
+} from './compute-engine/polynomial/number-field.js';
+export type {
+  NumberFieldElement,
+  NumberFieldFactorOptions,
+  NumberFieldFactorization,
+} from './compute-engine/polynomial/number-field.js';
 
 //
 // Types (numerics)
