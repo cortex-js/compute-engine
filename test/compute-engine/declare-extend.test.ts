@@ -539,6 +539,42 @@ describe('declare extend: a standard-library operator stays a library operator',
     }
   );
 
+  // The number 1 is the identity of a product whether or not the product
+  // commutes, so a Multiply declared not commutative still removes it.
+  // Removing it moves no other operand.
+  test('Multiply extended with commutative: false removes the factors 1', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Multiply', { commutative: false }, { extend: true });
+    expect(ce.box(['Multiply', 'b', 1, 'a']).json).toEqual([
+      'Multiply',
+      'b',
+      'a',
+    ]);
+    expect(ce.box(['Multiply', 'a', 1]).json).toBe('a');
+    expect(ce.box(['Multiply', 1, 1]).json).toBe(1);
+    expect(
+      ce.box(['Factor', ['Multiply', 'a', 'b', 'a']]).evaluate().json
+    ).toEqual(['Multiply', 'a', 'b', 'a']);
+  });
+
+  // A `Multiply` declared with its own `evaluate` handler is another
+  // operation: its factors 1 are operands like any other.
+  test('a Multiply with its own evaluate handler keeps the factors 1', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Multiply', {
+      signature: '(number, number) -> number',
+      evaluate: (_ops, { engine }) => engine.number(42),
+    });
+    expect(ce.box(['Multiply', 1, 2]).json).toEqual(['Multiply', 1, 2]);
+    expect(ce.box(['Multiply', 1, 2]).evaluate().json).toBe(42);
+  });
+
+  test('a user function named Multiply keeps the argument 1', () => {
+    const ce = new ComputeEngine();
+    ce.assign('Multiply', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
+    expect(ce.box(['Multiply', 3, 1]).evaluate().json).toBe(4);
+  });
+
   test('the operand order follows the visible definition of Add and Multiply', () => {
     // `sortOperands()` looks up the definition only in an engine where a
     // non-commutative `Add` or `Multiply` was declared. The lookup must

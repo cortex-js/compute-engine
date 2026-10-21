@@ -4054,19 +4054,72 @@ function applyOperatorDefinition(
   }
 
   //
+  // 4b/ Remove the factors 1 of a `Multiply` that has no canonical handler
+  //
+  // The library `Multiply` has a canonical handler, which removes the
+  // factors 1 among its other steps. A host that changes a flag of
+  // `Multiply` (`ce.declare('Multiply', { commutative: false },
+  // { extend: true })`) loses that handler, and its products are
+  // canonicalized here, as a user operator is. The number 1 is the identity
+  // of a product whether or not the product commutes, so it is removed here
+  // too: `a·1·b` is `a·b`. Removing it does not move any other operand. An
+  // inexact 1 (`1.0`) is kept, because it makes the product numeric.
+  // User decision 2026-10-20.
+  //
+  // Only a definition that still multiplies, with the `evaluate` handler of
+  // the library `Multiply`, is changed. A host that declares its own
+  // `Multiply` with another `evaluate` handler defines another operation,
+  // and its operands are kept as written.
+  let removedOperands = false;
+  if (name === 'Multiply' && keepsLibraryProduct(ce, opDef)) {
+    const isExactOne = (x: Expression) =>
+      isNumber(x) && x.isExact && x.isSame(1);
+    if (args.some(isExactOne)) {
+      args = args.filter((x) => !isExactOne(x));
+      removedOperands = true;
+      if (args.length === 0) return ce.One;
+      if (args.length === 1) return args[0];
+    }
+  }
+
+  //
   // 5/ Sort the operands
   //
   // The attached resolution is index-INSENSITIVE for its consumer: result
   // typing reads `selected`, `selectedInstance` and `undecidedResults` only,
   // none of which is indexed by operand position, so a commutative sort of
-  // the operands does not invalidate it.
+  // the operands does not invalidate it. Removing operands (step 4b) can: the
+  // overload was chosen for the original number of operands. Then no
+  // resolution is attached, and the type is derived from the operands that
+  // remain.
   const fn = new BoxedFunction(ce, name, sortOperands(name, args), {
     metadata,
     canonical: true,
     scope,
   });
-  fn._resolvedOverload = resolutionOut.resolution;
+  if (!removedOperands) fn._resolvedOverload = resolutionOut.resolution;
   return fn;
+}
+
+/**
+ * True when `opDef`, a definition of `Multiply`, has the `evaluate` handler
+ * of the library `Multiply` (the same function object), so it computes a
+ * product. The library definition is the one in the system scope, the first
+ * scope of the context stack. A `Multiply` from a caller-supplied library
+ * (the constructor's `libraries` option) is never the library product.
+ */
+function keepsLibraryProduct(
+  ce: ComputeEngine,
+  opDef: { readonly evaluate?: unknown }
+): boolean {
+  if (ce._customLibraryOperators.has('Multiply')) return false;
+  const library = ce.contextStack[0]?.lexicalScope.bindings.get('Multiply');
+  const libraryOperator = (library as { operator?: { evaluate?: unknown } })
+    ?.operator;
+  return (
+    libraryOperator?.evaluate !== undefined &&
+    opDef.evaluate === libraryOperator.evaluate
+  );
 }
 
 /**
