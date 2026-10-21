@@ -6,7 +6,7 @@ The degree-64 Swinnerton-Dyer input now completes with CE's unchanged default
 two-million-operation limit. The implementation targets general modular-factor
 recombination; it does not recognize Swinnerton-Dyer formulas, square-root sums,
 or named benchmark polynomials. No runtime dependency or WebAssembly code is
-added, and these follow-up commits remain local pending review.
+added. The follow-up is part of PR #461 and remains subject to review.
 
 ## Algorithms and justification
 
@@ -295,4 +295,4 @@ Changed-code type checks, source Oxlint, code formatting, production build,
 declaration emission and ESM/CommonJS public-export smoke checks pass. This
 does not claim a completed full-suite or green CI run. The maintainer identified
 the existing Node 26 timing-test failures as also failing on main; they are
-unchanged here. Follow-up commits are local, not pushed.
+unchanged here. These results do not imply maintainer approval or a green CI run.
