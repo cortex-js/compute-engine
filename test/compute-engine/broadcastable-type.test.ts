@@ -50,12 +50,15 @@ describe('broadcastable<T> — subsumption (positive)', () => {
     expect(isSubtype('integer', 'broadcastable<number>')).toBe(true);
   });
 
-  it('indexed collections of S with S <: T are broadcastable', () => {
+  it('lists of S with S <: T are broadcastable', () => {
     expect(isSubtype('list<number>', 'broadcastable<number>')).toBe(true);
     expect(isSubtype('list<integer>', 'broadcastable<number>')).toBe(true);
     expect(isSubtype('vector<3>', 'broadcastable<number>')).toBe(true);
+    // `broadcastable<T>` is `T | list<T>`. A value typed only
+    // `indexed_collection<T>` may be a tuple, which broadcast binds whole, so
+    // it is not in the type.
     expect(isSubtype('indexed_collection<integer>', 'broadcastable<number>')).toBe(
-      true
+      false
     );
   });
 
@@ -75,8 +78,8 @@ describe('broadcastable<T> — subsumption (positive)', () => {
     expect(isSubtype('broadcastable<number>', 'any')).toBe(true);
   });
 
-  it('broadcastable<T> <: R when both T <: R and indexed_collection<T> <: R', () => {
-    // `value` covers both a scalar `number` and an indexed collection of numbers
+  it('broadcastable<T> <: R when both T <: R and list<T> <: R', () => {
+    // `value` covers both a scalar `number` and a list of numbers
     expect(isSubtype('broadcastable<number>', 'value')).toBe(true);
     expect(isSubtype('broadcastable<number>', 'collection')).toBe(false);
   });
@@ -86,9 +89,9 @@ describe('broadcastable<T> — subsumption (positive)', () => {
   });
 
   it('fits its own defining union (branches covered by different members)', () => {
-    // `broadcastable<T>` = `T | indexed_collection<T>`; the union rhs covers
-    // the scalar and collection branches with *different* members, which the
-    // member-wise union probe alone would reject.
+    // `broadcastable<T>` = `T | list<T>`, and `list<T> <: indexed_collection<T>`;
+    // the union rhs covers the scalar and collection branches with *different*
+    // members, which the member-wise union probe alone would reject.
     expect(
       isSubtype('broadcastable<number>', 'number | indexed_collection<number>')
     ).toBe(true);
@@ -105,10 +108,10 @@ describe('broadcastable<T> — subsumption (positive)', () => {
         'integer | indexed_collection<integer> | string'
       )
     ).toBe(true);
-    // A `list<T>` member does NOT cover the collection branch: broadcastable
-    // spans ALL indexed collections (Range, …), not just lists.
+    // `broadcastable<T>` is `T | list<T>`, so a `list<T>` member covers its
+    // collection branch.
     expect(isSubtype('broadcastable<number>', 'number | list<number>')).toBe(
-      false
+      true
     );
   });
 });

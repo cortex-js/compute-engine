@@ -1797,11 +1797,11 @@ describe('reduceType Tests', () => {
     });
 
     it('reduces two disjoint element types to the empty collection', () => {
-      // Both scalar arms and both cross terms are empty, leaving only
-      // `indexed_collection<never>` — the empty collection, which does inhabit
-      // both, so the pair must not refute.
+      // `broadcastable<T>` is `T | list<T>`. Both scalar arms and both cross
+      // terms are empty, leaving only `list<never>` — the empty list, which
+      // does inhabit both, so the pair must not refute.
       const m = meetOf('broadcastable<integer>', 'broadcastable<string>');
-      expect(typeToString(m)).toBe('indexed_collection<never>');
+      expect(typeToString(m)).toBe('list<never>');
       expect(isSubtype(parseType('list<never>'), m)).toBe(true);
     });
 

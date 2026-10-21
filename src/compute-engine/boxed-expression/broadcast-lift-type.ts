@@ -2076,7 +2076,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // admits a list or a range, over which the operator maps (the value is a
   // list), and a set, over which it does not map. So neither the scalar
   // result nor a list type is true for every value the declaration admits,
-  // and `broadcastable<E>` (the scalar `E` or an indexed collection of `E`)
+  // and `broadcastable<E>` (the scalar `E` or a list of `E`)
   // is. An operand that holds a list or a range NOW is a
   // `finiteBroadcastParticipant`, and arm 1 above has already typed the
   // application as a list from that value, as it does for any symbol. An
@@ -2319,7 +2319,7 @@ export function topTypeOfTriggers(
 
 /**
  * `broadcastable<T>` for a per-element result `T`, or `T` itself when it is
- * a top type: `broadcastable<any>` is `any | indexed_collection<any>`, which
+ * a top type: `broadcastable<any>` is `any | list<any>`, which
  * is `any`, and `broadcastable<value>` is `value`. A top-typed element comes
  * from a top-typed operand (a symbol declared `any`, a call typed `any`),
  * whose value may be a point or a matrix as well as a list, and the bare top

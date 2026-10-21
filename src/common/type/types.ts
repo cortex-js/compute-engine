@@ -561,12 +561,13 @@ export type SetType = {
 };
 
 /**
- * A `broadcastable<T>` is either a `T`, or an indexed collection of `T`
+ * A `broadcastable<T>` is either a `T`, or a list of `T`
  * applied element-wise (runtime broadcasting). It is the static type of an
  * arithmetic result whose operand's collection-ness is not statically visible.
  *
  * A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
- * any indexed collection whose elements are subtypes of `T`. It is *not* a
+ * any list whose elements are subtypes of `T` (a tuple, a string and an
+ * abstract `indexed_collection<T>` are not lists). It is *not* a
  * subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
  * scalar). See `subtype.ts` for the full relation.
  */

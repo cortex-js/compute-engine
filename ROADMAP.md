@@ -117,8 +117,8 @@ that script prints `READY` on an installed release. The readings below were
 reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 
 - **407 — the grid of the `FindFit` `global` option is too coarse for a wide
-  range. Phase A FIXED 2026-10-20 on the main tree (uncommitted,
-  dual-reviewed, 9 findings applied; design and measurements in
+  range. Phase A FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 9
+  findings applied; design and measurements in
   `docs/plans/2026-10-20-findfit-global-grid.md`: basin-aware spacing, the
   phase of a sinusoid solved by least squares, `[lo, hi, step]`, a budget of
   8,000 points, a stratified 300-row sample with 24 re-scores; the deciding
@@ -155,8 +155,8 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   is an inference seed that each use narrows, and the type that means "a
   number, a point or a list" is `any`; Tycho was told 2026-10-20 to declare
   such heads `any`. The small item found with it, `P[i]` over `P: list<any>`
-  or `P: any` typed `unknown` instead of `any`, is FIXED 2026-10-20 on the
-  main tree (uncommitted, dual-reviewed, 7 findings applied: also `Sum`/`Product`
+  or `P: any` typed `unknown` instead of `any`, is FIXED 2026-10-20, committed
+  `c240193f0` (dual-reviewed, 7 findings applied: also `Sum`/`Product`
   of `any` terms, reads of `Rest`/`Take`/… of an inferred base, and a tuple of
   such reads compiling again). Found with it, not fixed, decision needed: (a)
   `Sum(P)` and `Mean(P)` with `P: list<any>` refuse to compile ("possible
@@ -200,8 +200,8 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
 - **411 — on `interval-js`, an ordered comparison with an operand that is
   undefined over the whole interval answers `maybe` (user decision
   2026-10-20, with row 413: an `empty` operand of `<`, `≤`, `>`, `≥`, `=`
-  gives a definite false; `≠` and `partial` unchanged). FIXED 2026-10-20 on
-  the main tree with row 413 (uncommitted, dual-reviewed, 7 findings applied;
+  gives a definite false; `≠` and `partial` unchanged). FIXED 2026-10-20 with row 413, committed
+  `c240193f0` (dual-reviewed, 7 findings applied;
   `docs/ERROR-MODEL.md` records the decision). Residues on `interval-js`, not
   fixed: `integrate.ts` (around line 163) rebuilds `{ kind: v.kind }` and drops
   the new `missing` flag of a no-selection `empty`, and the interpreter
@@ -275,7 +275,7 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   condition on the interpreter, the `javascript` and `python` targets and
   `interval-js`, so the else branch is taken; this reverses the ruling of
   2026-09-03 recorded in `docs/ERROR-MODEL.md`; `≠` and `Missing` keep their
-  reading). FIXED 2026-10-20 on the main tree (uncommitted, dual-reviewed, 7
+  reading). FIXED 2026-10-20, committed `c240193f0` (dual-reviewed, 7
   findings applied; `docs/ERROR-MODEL.md` has the new section). Open after it,
   decision needed: (a) values that are undefined for Desmos but not `NaN` for
   CE stay unevaluated in a comparison and so in a branch: `0 < ~oo` (from
@@ -600,6 +600,37 @@ remains the separate design item above.
   does not. The general rule for a right side `unknown` in `isSubtype()`
   (`common/type/subtype.ts`) does not look inside a `broadcastable` left
   side.
+- With `type alias json = list<json> | integer`, `couldMatch(number, json)` is
+  `false`, although the two share every integer: `couldMatch()` does not
+  unfold the recursive alias to reach its `integer` arm. (The meet unfolds a
+  transparent alias since the `broadcastable<T>` change, so `number & json`
+  is `integer`; HEAD gave `never`.) Found 2026-10-21.
+- Two recursive aliases are kept as written by the meet unless
+  `provablyDisjoint()` refutes them, and `provablyDisjoint()` does not
+  resolve such a cycle. So with `type alias A = tuple<A> | integer` and
+  `type alias B = tuple<B> | string`, which share no finite value,
+  `typesOverlap(A, B)` is `true`, through the kept `tuple<A & B>`. The answer
+  is on the safe side for argument admission, but a protocol check can see a
+  collision that does not exist. Deciding it needs an inhabitation test for
+  recursive pairs (a pair memo and a witness). Found 2026-10-21.
+- `provablyDisjoint()` and `couldMatch()` (`common/type/subtype.ts`) do work
+  that grows exponentially along a chain of aliases with two branches at
+  each level: with `A0 = integer`, `B0 = string`, and
+  `Aₙ = list<Aₙ₋₁^2> | list<Aₙ₋₁^3>` (and the same for `B`),
+  `typesOverlap(A20, B20)` takes about 3 s at HEAD and 5 s after the
+  `broadcastable<T>` change. `typesOverlap()` and the row search of
+  `reduce.ts` cache their answers for one question; these two do not.
+  Found 2026-10-21.
+- The meet of two lists of the same kind (`meetCollections()`,
+  `common/type/reduce.ts`) is elementwise, and loses values in two cases:
+  `list<number> & list<list<integer>>` is `list<never>`, although an integer
+  matrix is in both (its cells are numbers, its rows lists of integers); and
+  two fixed shapes that spell the same shape differently are refuted:
+  `list<number^(2x2)> & list<list<integer>^2>` is `never`, although
+  `list<integer^(2x2)>` is in both. The meet of collections of different
+  kinds keeps such a pair as written (`elementsAtMixedDepth()`); the same
+  rule could apply here. Found 2026-10-21 by the review of the
+  `broadcastable<T>` change; HEAD gives the same answers.
 - Reported by the same review and not yet reproduced: GLSL compiles
   `Dot((icR, a), (1, 2))` with `icR: indexed_collection<real>` to
   `dot(vec2(icR, a), …)`, although the same call with `icR: list<real>` is

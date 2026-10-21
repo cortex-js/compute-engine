@@ -1939,7 +1939,7 @@ function comparisonType(
  * answer is only fixed once that operand evaluates: a scalar makes the result
  * an element-wise `list<boolean>` mask, a collection makes it a scalar
  * `boolean`. `broadcastable<boolean>` is exactly the type that admits both
- * (it is the union `boolean | indexed_collection<boolean>`), and it is the
+ * (it is the union `boolean | list<boolean>`), and it is the
  * spelling the engine already gives every other possibly-broadcast result.
  *
  * Answering the scalar `boolean` there was a type/value disagreement rather

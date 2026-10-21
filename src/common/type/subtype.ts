@@ -769,7 +769,7 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.every((t) => provablyDisjoint(a, t));
 
-  // `broadcastable<T>` is the union `T | indexed_collection<T>` (the same
+  // `broadcastable<T>` is the union `T | list<T>` (the same
   // expansion `isSubtype` uses on both sides), so it distributes exactly like
   // a union: disjoint from it iff disjoint from BOTH arms. Without this the
   // category test below finds no bucket for the `broadcastable` kind — it
@@ -783,12 +783,12 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'broadcastable')
     return (
       provablyDisjoint(a, b.elements) &&
-      provablyDisjoint(a, { kind: 'indexed_collection', elements: b.elements })
+      provablyDisjoint(a, { kind: 'list', elements: b.elements })
     );
   if (typeof a === 'object' && a.kind === 'broadcastable')
     return (
       provablyDisjoint(a.elements, b) &&
-      provablyDisjoint({ kind: 'indexed_collection', elements: a.elements }, b)
+      provablyDisjoint({ kind: 'list', elements: a.elements }, b)
     );
 
   // An intersection is disjoint from `other` as soon as ANY member is: the
@@ -962,7 +962,7 @@ function typeCategory(t: Type): PrimitiveType | undefined {
       return t.type;
     default:
       // `union` and `value` are handled by the caller. A `broadcastable<T>` is
-      // `T | indexed_collection<T>` — it spans two buckets. A `negation` or
+      // `T | list<T>` — it spans two buckets. A `negation` or
       // `intersection` is not a bucket at all, and a `reference`'s meaning is
       // resolver-dependent (`declareType` patches `.def` after construction).
       return undefined;
@@ -1323,7 +1323,7 @@ function couldMatchWithin(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.some((t) => couldMatchWithin(a, t));
 
-  // `broadcastable<T>` is the union `T | indexed_collection<T>` (the same
+  // `broadcastable<T>` is the union `T | list<T>` (the same
   // expansion `isSubtype` and `provablyDisjoint` use), so it distributes
   // like one: it could match iff EITHER arm could. Without this a
   // broadcastable subject fell to the containment fallback, which answered
@@ -1333,12 +1333,12 @@ function couldMatchWithin(a: Type, b: Type): boolean {
   if (typeof a === 'object' && a.kind === 'broadcastable')
     return (
       couldMatchWithin(a.elements, b) ||
-      couldMatchWithin({ kind: 'indexed_collection', elements: a.elements }, b)
+      couldMatchWithin({ kind: 'list', elements: a.elements }, b)
     );
   if (typeof b === 'object' && b.kind === 'broadcastable')
     return (
       couldMatchWithin(a, b.elements) ||
-      couldMatchWithin(a, { kind: 'indexed_collection', elements: b.elements })
+      couldMatchWithin(a, { kind: 'list', elements: b.elements })
     );
 
   // Neither is any other type shown to have no value (`record{a: never}`,
@@ -1370,6 +1370,23 @@ function couldMatchWithin(a: Type, b: Type): boolean {
   // whose fields hold values". Like the probe below, this only adds answers.
   if (bareTupleOrRecordCouldMatch(a, b) || bareTupleOrRecordCouldMatch(b, a))
     return true;
+
+  // Two numeric ranges that overlap share a value although neither contains
+  // the other: `integer<1..10>` and `integer<5..20>` share `5`. The
+  // containment check below misses that, so a range pair is decided by its
+  // meet (`meetNumericRangeMembers()`): it can share a value when a range of
+  // the meet can hold one. A meet range with no value (`integer` between
+  // `0.5` and `0.7`, or `real<0..<1>` met with `real<1..2>`) does not count.
+  {
+    const an = asNumericRange(a);
+    const bn = asNumericRange(b);
+    if (
+      an !== null &&
+      bn !== null &&
+      meetNumericRangeMembers(an, bn).some((m) => inhabitation(m) !== 'empty')
+    )
+      return true;
+  }
 
   // Structural probe over same-kind composites. This only ever ADDS answers:
   // any shape it does not model falls through to the assignability check
@@ -2146,12 +2163,12 @@ export function isSubtype(
       return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
 
     // `broadcastable<T> <: R` (R a primitive) iff `T <: R` and
-    // `indexed_collection<T> <: R` (it may be a scalar *or* an indexed
-    // collection, so it is a subtype of `R` only when both branches are).
+    // `list<T> <: R`: the value may be a scalar or a list, so it is a
+    // subtype of `R` only when both branches are.
     if (lhs.kind === 'broadcastable') {
       return (
         isSubtype(lhs.elements, rhs) &&
-        isSubtype({ kind: 'indexed_collection', elements: lhs.elements }, rhs)
+        isSubtype({ kind: 'list', elements: lhs.elements }, rhs)
       );
     }
 
@@ -2305,14 +2322,14 @@ export function isSubtype(
   // members had to be augmented first.)
   if (rhs.kind === 'union') {
     const rhsMembers = rhs.types;
-    // A broadcastable lhs is the union `T | indexed_collection<T>`, so it fits
+    // A broadcastable lhs is the union `T | list<T>`, so it fits
     // a union rhs iff BOTH branches are covered — possibly by *different*
-    // members (`broadcastable<number> <: number | indexed_collection<number>`).
+    // members (`broadcastable<number> <: number | list<number>`).
     // The member-wise probe below would require a single member to cover the
     // whole broadcastable and wrongly reject exactly that case.
     const broadcastableFitsUnion = (b: BroadcastableType) =>
       isSubtype(b.elements, rhs) &&
-      isSubtype({ kind: 'indexed_collection', elements: b.elements }, rhs);
+      isSubtype({ kind: 'list', elements: b.elements }, rhs);
     if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
       return broadcastableFitsUnion(lhs);
     if (typeof lhs !== 'string' && lhs.kind === 'union') {
@@ -2367,8 +2384,8 @@ export function isSubtype(
   }
 
   //
-  // Handle broadcastable on the rhs: `broadcastable<T>` = a `T`, or an indexed
-  // collection of `T` applied element-wise. This must precede the
+  // Handle broadcastable on the rhs: `broadcastable<T>` = a `T`, or a list
+  // of `T` applied element-wise. This must precede the
   // `typeof lhs === 'string'` fall-through below (a string `lhs` such as
   // `integer` would otherwise short-circuit to `false`).
   //
@@ -2388,19 +2405,18 @@ export function isSubtype(
     // Scalar branch: `S <: T ⟹ S <: broadcastable<T>`.
     if (isSubtype(lhs, rhs.elements)) return true;
 
-    // Collection branch: an indexed collection of `S` with `S <: T`. Tuples
-    // are excluded (a runtime broadcast binds points atomically) and sets are
-    // not indexed, so both — and every non-collection — fail here.
+    // Collection branch: `broadcastable<T>` is `T | list<T>`, so every
+    // subtype of `list<T>` is in it. Tuples, strings and the abstract
+    // `indexed_collection<T>` are not lists, so they fail here (a runtime
+    // broadcast binds a point atomically), and sets are not indexed.
+    if (isSubtype(lhs, { kind: 'list', elements: rhs.elements })) return true;
     const elem = broadcastableCollectionElementType(lhs as Type);
     if (elem !== undefined) {
       if (isSubtype(elem, rhs.elements)) return true;
       // A rank-n list (n ≥ 2) also has the flat scalar reading: a
-      // `matrix<integer>` is a `list<integer>` and an
-      // `indexed_collection<integer>`, and an element-wise operator applied
-      // to it reaches its integer cells (`2·[[1, 2], [3, 4]]` is
-      // `[[2, 4], [6, 8]]`). Without this reading, `matrix<integer> <:
-      // list<integer> <: broadcastable<integer>` held while
-      // `matrix<integer> <: broadcastable<integer>` did not. For a
+      // `matrix<integer>` is a `list<integer>`, and an element-wise
+      // operator applied to it reaches its integer cells
+      // (`2·[[1, 2], [3, 4]]` is `[[2, 4], [6, 8]]`). For a
       // one-dimensional list, `elem` is already its element type.
       return (
         typeof lhs !== 'string' &&
@@ -2414,12 +2430,12 @@ export function isSubtype(
 
   //
   // Handle broadcastable on the lhs (rhs is a non-broadcastable object):
-  // `broadcastable<T> <: R ⟺ T <: R and indexed_collection<T> <: R`.
+  // `broadcastable<T> <: R ⟺ T <: R and list<T> <: R`.
   //
   if (typeof lhs !== 'string' && lhs.kind === 'broadcastable') {
     return (
       isSubtype(lhs.elements, rhs) &&
-      isSubtype({ kind: 'indexed_collection', elements: lhs.elements }, rhs)
+      isSubtype({ kind: 'list', elements: lhs.elements }, rhs)
     );
   }
 
@@ -3186,24 +3202,24 @@ function isIndexedCollection(type: Type): boolean {
 }
 
 /**
- * The element type of an indexed collection eligible for broadcasting (a
- * `list` or an `indexed_collection`), or `undefined` for anything else. Tuples
- * are deliberately excluded (a runtime broadcast binds points atomically) and
- * sets are not indexed. Mirrors `collectionElementType` (utils.ts) for the
- * list/indexed-collection cases without importing it (which would reintroduce
- * the subtype ↔ utils cycle).
+ * The element type of a collection eligible for broadcasting (a `list` or a
+ * `range`), or `undefined` for anything else. A tuple is excluded, because a
+ * broadcast passes a point whole. The abstract `indexed_collection<T>` is
+ * excluded, because its value can be a tuple. A set is excluded, because it
+ * is not indexed. For a list it gives what `collectionElementType()`
+ * (`utils.ts`) gives; it does not import that function, because the import
+ * would make a circular dependency between the two files.
  */
 function broadcastableCollectionElementType(type: Type): Type | undefined {
   if (typeof type === 'string') {
-    // A bare `indexed_collection`/`list` is the `<unknown>` synonym (user
-    // ruling 2026-08-17), so its broadcast element is `unknown`, not `any`.
-    if (type === 'indexed_collection' || type === 'list') return 'unknown';
+    // A bare `list` is the `<unknown>` synonym (user ruling 2026-08-17), so
+    // its broadcast element is `unknown`, not `any`.
+    if (type === 'list') return 'unknown';
     // An index span carries a known element type (finite positive integers),
     // so it broadcasts as `integer`, not as an opaque `unknown`.
     if (type === 'range') return 'integer';
     return undefined;
   }
-  if (type.kind === 'indexed_collection') return type.elements;
   if (type.kind === 'list') {
     const dims = type.dimensions;
     // A multi-dimensional list indexed by one index yields a sub-tensor with
@@ -3217,6 +3233,103 @@ function broadcastableCollectionElementType(type: Type): Type | undefined {
     return type.elements;
   }
   return undefined;
+}
+
+/**
+ * Whether `lhs` is a `T` (`T` is `elements`), or a list or an ABSTRACT
+ * `indexed_collection` whose elements fit the same test. When `elements` is
+ * itself a `broadcastable<U>`, the elements are tested with this function
+ * again, one level down, so each level of a nested spelling also admits an
+ * abstract indexed collection.
+ *
+ * This is the relation that `isSubtype(lhs, broadcastable<T>)` gave when
+ * `broadcastable<T>` meant `T | indexed_collection<T>`. Now that it means
+ * `T | list<T>`, a value typed only `indexed_collection<T>` is no longer in
+ * it, because such a value can be a tuple. Some engine checks ask the older
+ * question on purpose: "is this operand a number, or a collection of numbers
+ * that broadcast reaches", where an operand whose type does not say whether
+ * it is a list or a tuple must still pass. Those checks call this function.
+ *
+ * A tuple and a string are refused here, as they were before: the type of
+ * such an operand says that it is not a list.
+ */
+export function isSubtypeOfBroadcastOrIndexed(
+  lhs: Type,
+  elements: Type
+): boolean {
+  // The alias keys of the walk (`cycleTypeKey()`) must stay comparable
+  // until it ends, so the walk holds the key table: an inner `isSubtype()`
+  // that also uses the table does not drop it then.
+  enterCycleKeys();
+  try {
+    return fitsBroadcastOrIndexed(lhs, elements, new Map());
+  } finally {
+    leaveCycleKeys();
+  }
+}
+
+/**
+ * `active` holds, for each alias being unfolded on the current descent, the
+ * element types it is being tested against. An alias is keyed by
+ * `cycleTypeKey()`, not by identity: the reference inside the definition of
+ * a recursive alias can be another object for the same alias.
+ */
+function fitsBroadcastOrIndexed(
+  lhs: Type,
+  elements: Type,
+  active: Map<string, Set<Type>>
+): boolean {
+  const fits = (t: Type): boolean =>
+    typeof elements !== 'string' && elements.kind === 'broadcastable'
+      ? fitsBroadcastOrIndexed(t, elements.elements, active)
+      : isSubtype(t, elements);
+  if (isSubtype(lhs, { kind: 'broadcastable', elements })) return true;
+  if (lhs === 'indexed_collection') return fits('unknown');
+  if (typeof lhs === 'string') return fits(lhs);
+  switch (lhs.kind) {
+    case 'reference': {
+      // A structural alias is its definition. `aliasDefinitionAt()` gives
+      // it with the type arguments of an applied generic alias substituted
+      // (`Seq<integer>` with `type alias Seq<T> = indexed_collection<T>`).
+      if (lhs.alias !== true) return fits(lhs);
+      // The same alias against the same element type again, on the current
+      // descent: the question is already being answered, so it is assumed
+      // true (the coinductive rule that `isSubtype` applies to a recursive
+      // alias). The other arms decide: `type alias C = C | list<number>`
+      // fits `number` because its `list<number>` arm does. The entry is
+      // removed when its descent returns, so the next arm of a union can
+      // unfold the same alias (`list<Colors^2> | list<Colors^3>`).
+      const key = cycleTypeKey(lhs);
+      const targets = active.get(key);
+      if (targets?.has(elements)) return true;
+      const def = aliasDefinitionAt(lhs);
+      if (def === undefined) return fits(lhs);
+      const set = targets ?? new Set<Type>();
+      set.add(elements);
+      active.set(key, set);
+      try {
+        return fitsBroadcastOrIndexed(def, elements, active);
+      } finally {
+        set.delete(elements);
+        if (set.size === 0) active.delete(key);
+      }
+    }
+    case 'union':
+      return lhs.types.every((t) =>
+        fitsBroadcastOrIndexed(t, elements, active)
+      );
+    case 'broadcastable':
+    case 'indexed_collection':
+      return fits(lhs.elements);
+    case 'list': {
+      // The peeled reading (a row of a matrix) and the flat reading (a cell
+      // of a matrix), as in the `broadcastable` rule of `isSubtype`.
+      const elem = broadcastableCollectionElementType(lhs);
+      return (elem !== undefined && fits(elem)) || fits(lhs.elements);
+    }
+    default:
+      return fits(lhs);
+  }
 }
 
 /**

@@ -28,10 +28,34 @@
   symbol declared `broadcastable<T>` is refused, as it is for a symbol
   declared `list<T>`; and `Map(f, [(1, 2), (3, 4)])` with
   `f: (broadcastable<number>) -> number` is one `incompatible-type` error
-  instead of a list of errors, one for each point. Also, the meet of a list
-  with an `indexed_collection` or a `collection` is the list of the meet of
-  the elements: `list<number> & indexed_collection<integer>` is
-  `list<integer>`, not `never`.
+  instead of a list of errors, one for each point.
+
+- The meet (intersection) of two collection types of different kinds is the
+  narrower kind with the meet of the elements, not `never`:
+  `list<number> & indexed_collection<integer>` is `list<integer>`,
+  `set<number> & collection<integer>` is `set<integer>`, and
+  `tuple<number, number> & indexed_collection<integer>` is
+  `tuple<integer, integer>`. So is the meet of a list with dimensions and a
+  list with none: `list<number^2> & list<integer>` is `list<integer^2>`. A
+  pair that can share a matrix by different readings
+  (`list<number> & collection<list<integer>>`, which an integer matrix
+  inhabits), and a pair with two transparent aliases, are kept as written
+  unless they are provably disjoint; a single transparent alias is met
+  through its definition. One effect: with
+  `type alias json = list<json> | integer`, `Norm(j)` for `j: json` is valid
+  (it was refused when boxed), and with `j = 5` it evaluates to `5`.
+
+- The overlap test of types (`typesOverlap()`), used to admit arguments and
+  to detect protocol conformances that collide, compares the arms of a union
+  one by one, and two collections that share only the empty collection do
+  not overlap at any level, as for a parameter that is not a union. So a
+  call is refused when the argument type and a union parameter share only
+  empty collections: `f: (list<string> | string) -> integer` refuses an
+  argument typed `list<integer> | integer`, as
+  `f: (list<string>) -> integer` refuses an argument typed `list<integer>`.
+  Two collections whose elements are at different depths now overlap when a
+  tensor can be in both: `list<list<list<real>>>` and `list<number>` share a
+  rank-3 tensor of reals.
 
 - A literal empty list at a required or optional point parameter is accepted
   and maps to `[]` without invoking the function, matching evaluation.

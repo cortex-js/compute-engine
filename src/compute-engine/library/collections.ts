@@ -3663,7 +3663,7 @@ function bareOperatorElementTypeD(
  *   collection nested to any depth. The answer is
  *   `R | indexed_collection<any>`, with `R` the declared result of the
  *   operator: `Map(Sqrt, La)` with `La` holding `[4, [[9]]]` is
- *   `[2, [[3]]]`. (`broadcastable<R>` is `R | indexed_collection<R>`, one
+ *   `[2, [[3]]]`. (`broadcastable<R>` is `R | list<R>`, one
  *   level only, so it does not hold this value.) With no declared result,
  *   the answer is `unknown`, and the caller uses its rule for a callback
  *   with an unknown result.
@@ -5628,7 +5628,7 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // for a `list<tuple>`). Read as a collection, the bare `tuple` typed the
   // coordinate `list<number>`, a list no single point answers.
   if (t === 'tuple') return 'number';
-  // A `broadcastable<E>` operand is the point `E` or an indexed collection of
+  // A `broadcastable<E>` operand is the point `E` or a list of
   // such points, so its coordinate is the coordinate of `E` or the list of
   // it: the coordinate of `E` under the same contract. A top or an error
   // answer for the point is the answer whole: `broadcastable<unknown>` says

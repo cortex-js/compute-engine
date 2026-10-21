@@ -89,6 +89,7 @@ import {
 import {
   couldMatch,
   isSubtype,
+  isSubtypeOfBroadcastOrIndexed,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -14476,8 +14477,12 @@ export class BaseCompiler {
     const n = left.elements.length;
     if (n === 0 || right.elements.length !== n) return undefined;
     const components = [...left.elements, ...right.elements];
+    // A component may be a number, a list of numbers, or a collection whose
+    // type does not say whether it is a list (`indexed_collection<number>`).
     if (
-      !components.every((c) => isSubtype(c.type, 'broadcastable<number>')) ||
+      !components.every((c) =>
+        isSubtypeOfBroadcastOrIndexed(c.type, 'number')
+      ) ||
       components.every((c) => isSubtype(c.type, 'number'))
     )
       return undefined;

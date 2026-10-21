@@ -1143,7 +1143,9 @@ export class Product {
       const error = this.terms.find((t) => t.term.operator === 'Error');
       if (error !== undefined) return error.term;
       const nonNumeric = this.terms.find((t) =>
-        t.term.type.isDisjointFrom('broadcastable<number> | missing | nothing')
+        t.term.type.isDisjointFrom(
+          'number | indexed_collection<number> | missing | nothing'
+        )
       );
       if (nonNumeric !== undefined)
         return ce.typeError('number', nonNumeric.term.type, nonNumeric.term);
@@ -3139,7 +3141,9 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     !xs.some(
       (x) =>
         x.operator === 'Error' ||
-        x.type.isDisjointFrom('broadcastable<number> | missing | nothing')
+        x.type.isDisjointFrom(
+          'number | indexed_collection<number> | missing | nothing'
+        )
     )
   ) {
     const held = xs.filter((x) => !isNumber(x) && hasAssignedVariable(x));

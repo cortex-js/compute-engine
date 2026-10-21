@@ -3,6 +3,8 @@ import { isFunction, isString } from '../boxed-expression/type-guards.js';
 import { functionLiteralBody } from '../boxed-expression/function-literal.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
 import type { CompiledColorSpace } from './types.js';
+import { isSubtypeOfBroadcastOrIndexed } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 
 /**
  * The color space of the CHANNELS the compiled value of `expr` holds, when the
@@ -172,17 +174,28 @@ function colorValuePositions(expr: Expression): ReadonlyArray<Expression> {
  * The question is answered by the TYPE, not by the head: every expression
  * whose type is a color, at every nesting depth, has the color representation
  * whatever operator built it, and an expression typed otherwise does not.
- * `broadcastable<T>` admits a scalar `T` and a list of `T`, and each wrapper
- * only ADDS shapes, so one test at the deepest spelling answers every
- * shallower one. The sibling constant `NESTED_COLOR_BROADCAST_TYPE`
- * (`javascript-target.ts`) has the same shape for the same reason — it gates
- * the OPERAND of a conversion, this gates the VALUE of an expression.
+ * The test admits a color, and a list or an abstract indexed collection of
+ * what it admits one level down, to four levels. Each level only ADDS shapes,
+ * so one test at the deepest level answers every shallower one. An abstract
+ * `indexed_collection<color>` is admitted because its type does not say
+ * whether it is a list; a tuple of colors is not. The JavaScript target also
+ * uses this test to gate the OPERAND of a color conversion
+ * (`javascript-target.ts`), where it must prove that every leaf of an operand
+ * that may be a list is a color.
  */
 export function isColorValued(expr: Expression): boolean {
-  return expr.type.matches(
-    'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>'
-  );
+  return isSubtypeOfBroadcastOrIndexed(expr.type.type, NESTED_COLOR_ELEMENT);
 }
+
+/** The element of the four-level color test of `isColorValued`: three more
+ * levels below the first one. */
+const NESTED_COLOR_ELEMENT: Type = {
+  kind: 'broadcastable',
+  elements: {
+    kind: 'broadcastable',
+    elements: { kind: 'broadcastable', elements: 'color' },
+  },
+};
 
 /** The heads whose compiled value is a color in the canonical OKLCh space. */
 const OKLCH_VALUED_HEADS: ReadonlySet<string> = new Set([

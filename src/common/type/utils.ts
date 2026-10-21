@@ -2640,7 +2640,7 @@ export function broadcastCellType(type: Readonly<Type>): Type {
 
 /**
  * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
- * is the meaning of the lift (`S`, or an indexed collection of `S` that
+ * is the meaning of the lift (`S`, or a list of `S` that
  * broadcasts). When the scalar base matches the parameter type, admit the
  * operand instead of baking a type error: before the lift the same expression
  * typed plain `S` and was admitted by the `matches(param)` check, so this

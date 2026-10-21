@@ -6,6 +6,7 @@ import {
   isSubtype,
 } from '../../src/common/type/subtype';
 import type { Type, TypeReference } from '../../src/common/type/types';
+import { parseType } from '../../src/common/type/parse';
 
 /**
  * Consistency of the subtype relation (`matches`) and of the overlap
@@ -991,5 +992,31 @@ describe('AN `Undefined` ELEMENT OF A LIST LITERAL', () => {
     const u = ce.box(['Zip', ['List', 1, 'Undefined'], ['List', 2, 3]]);
     const m = ce.box(['Zip', ['List', 1, 'Missing'], ['List', 2, 3]]);
     expect(u.type.toString()).toBe(m.type.toString());
+  });
+});
+
+describe('couldMatch of two numeric ranges', () => {
+  // Two ranges share a value when their meet holds one, even when neither
+  // contains the other.
+  const both = (a: string, b: string) =>
+    couldMatch(parseType(a)!, parseType(b)!) &&
+    couldMatch(parseType(b)!, parseType(a)!);
+  const either = (a: string, b: string) =>
+    couldMatch(parseType(a)!, parseType(b)!) ||
+    couldMatch(parseType(b)!, parseType(a)!);
+  test.each([
+    ['integer<1..10>', 'integer<5..20>'],
+    ['real<0..1>', 'real<0.5..2>'],
+    ['integer<1..10>', 'real<5..20>'],
+    ['real<0..1>', 'real<1..2>'],
+  ])('%s and %s can share a value', (a, b) => {
+    expect(both(a, b)).toBe(true);
+  });
+  test.each([
+    ['integer<1..10>', 'integer<20..30>'],
+    ['integer', 'real<0.5..0.7>'],
+    ['real<0..<1>', 'real<1..2>'],
+  ])('%s and %s share no value', (a, b) => {
+    expect(either(a, b)).toBe(false);
   });
 });

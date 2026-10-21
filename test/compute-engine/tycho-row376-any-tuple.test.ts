@@ -142,7 +142,12 @@ describe('A STRUCTURAL ALIAS of a tuple of any or of unknown', () => {
 // reads each `any` cell as `unknown` counts the unfolds of each alias on its
 // path, so it stops. Before that count, these operands overflowed the stack
 // at boxing. None of these aliases has a point type, so `Dot` with each of
-// them is an `incompatible-type` error, and so is `Norm` of `j` and of `n`.
+// them is an `incompatible-type` error.
+//
+// `json` and `nest` include `integer`, and `Norm` accepts a number, so
+// `Norm(j)` and `Norm(n)` are valid: with `j = 5`, `Norm(j)` is `5`. (Before
+// the meet of a transparent alias kept the intersection as written, the
+// meet refuted these calls.)
 //
 // `cyc = cyc | 0` names itself only as a bare union arm, so its values are
 // those of `0`, and it is a subtype of what `0` is a subtype of. `Norm`
@@ -163,7 +168,7 @@ describe('A SELF-REFERENTIAL ALIAS at a stripped position', () => {
       [`Dot with ${s}`, ['Dot', ['Tuple', 1, 2], s]] as const,
       [`Norm of ${s}`, ['Norm', s]] as const,
     ])
-    .filter(([label]) => label !== 'Norm of c');
+    .filter(([label]) => !label.startsWith('Norm'));
 
   test.each(CYCLIC_CALLS)('%s', (_, input) => {
     const ce = cyclicEngine();
@@ -186,6 +191,17 @@ describe('A SELF-REFERENTIAL ALIAS at a stripped position', () => {
     expect(e!.isValid).toBe(true);
     expect(e!.type.toString()).toBe('+oo | nan | real');
     expect(e!.evaluate().json).toEqual(['Abs', 'c']);
+  });
+
+  test.each(['j', 'n'])('Norm of %s', (s) => {
+    const ce = cyclicEngine();
+    let e: Expression | undefined;
+    expect(() => {
+      e = ce.box(['Norm', s]);
+    }).not.toThrow();
+    expect(e!.isValid).toBe(true);
+    ce.assign(s, 5);
+    expect(ce.box(['Norm', s]).evaluate().toString()).toBe('5');
   });
 
   // An alias nested inside a constructor, and an alias of that alias, are

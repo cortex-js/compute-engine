@@ -4,7 +4,10 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  isSubtypeOfBroadcastOrIndexed,
+} from '../../common/type/subtype.js';
 import { closeImaginaryUnderArithmetic } from '../../common/type/reduce.js';
 import {
   broadcastCellType,
@@ -1383,14 +1386,24 @@ function isNumericTupleOperand(d: OperandDescriptor): boolean {
 }
 
 /**
- * `broadcastable<number>`: a number, or an indexed collection of numbers
- * applied element-wise. Frozen and shared, so a gate that asks the question
- * repeatedly does not re-parse the spelling on every read.
+ * `broadcastable<number>`: a number, or a list of numbers applied
+ * element-wise. It is the type this file gives to a result that can be
+ * either. Frozen and shared, so it is not built again on every read.
  */
 const BROADCASTABLE_NUMBER_TYPE: Type = Object.freeze({
   kind: 'broadcastable',
   elements: 'number',
 }) as Type;
+
+/**
+ * Whether a type is a number, or a list or an abstract indexed collection of
+ * numbers (a tuple is refused). The gates of this file accept an operand
+ * whose type does not say whether it is a list, so they use this test and not
+ * `isSubtype(t, BROADCASTABLE_NUMBER_TYPE)`, which accepts only a list.
+ */
+function isNumberOrNumericCollection(t: Type): boolean {
+  return isSubtypeOfBroadcastOrIndexed(t, 'number');
+}
 
 /**
  * Is this operand a tuple whose every component is a number or a list-nesting
@@ -1407,9 +1420,7 @@ const BROADCASTABLE_NUMBER_TYPE: Type = Object.freeze({
 function isBroadcastableTupleOperand(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
   if (typeof t === 'string' || t.kind !== 'tuple') return false;
-  return t.elements.every((el) =>
-    isSubtype(el.type, BROADCASTABLE_NUMBER_TYPE)
-  );
+  return t.elements.every((el) => isNumberOrNumericCollection(el.type));
 }
 
 /**
@@ -1465,7 +1476,7 @@ function broadcastableInnerProductType(
     'Add',
     products.map((t) => describeType(t))
   );
-  if (sum === undefined || !isSubtype(sum, BROADCASTABLE_NUMBER_TYPE))
+  if (sum === undefined || !isNumberOrNumericCollection(sum))
     return BROADCASTABLE_NUMBER_TYPE;
   return sum;
 }
@@ -1520,7 +1531,7 @@ function pointListInnerProductPairs(
   let collectionCount = 0;
   for (const c of [...as, ...bs]) {
     if (isNumber(c)) continue;
-    if (c.isCollection && isSubtype(c.type.type, BROADCASTABLE_NUMBER_TYPE)) {
+    if (c.isCollection && isNumberOrNumericCollection(c.type.type)) {
       collectionCount += 1;
       continue;
     }
@@ -3157,7 +3168,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!isFunction(expr)) return undefined;
         const t = expr.type.type;
         if (isSubtype(t, 'number')) return false;
-        if (isSubtype(t, BROADCASTABLE_NUMBER_TYPE)) return undefined;
+        if (isNumberOrNumericCollection(t)) return undefined;
         return canEnumerateTensorOperands(expr);
       },
       // The claim is made at one of three strengths, from the operand types

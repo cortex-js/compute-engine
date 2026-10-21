@@ -1488,7 +1488,7 @@ export function typeCouldBeNumericCollection(
   //
   // Decided by the SAME element predicate the collection kinds above use, for
   // the same reason: the base `S` is whatever the un-lifted expression typed,
-  // and `broadcastable<S>` means "an `S`, or an indexed collection of `S`", so
+  // and `broadcastable<S>` means "an `S`, or a list of `S`", so
   // such an operand broadcasts elementwise exactly as a collection of `S`
   // does. This arm used to hand-roll a weaker copy of `couldBeNumericElement`
   // that tested only for a numeric SCALAR base, which had two consequences: a
@@ -1934,8 +1934,8 @@ function rewrapCollectionBranch(branch: Type, elements: Type): Type {
  * (a big op folding its body) must ask `unionMayHoldACollection` instead.
  *
  * A `broadcastable<T>` branch is both halves at once — the operand may be the
- * scalar `T` or an indexed collection of `T` — so it contributes an
- * `indexed_collection<T>` collection branch AND the scalar side. Keeping only
+ * scalar `T` or a list of `T` — so it contributes a
+ * `list<T>` collection branch AND the scalar side. Keeping only
  * the scalar reading would let `list<T> | broadcastable<T>` type as a definite
  * list although it may hold a bare `T`.
  *
@@ -1958,7 +1958,7 @@ export function scalarOrCollectionUnionBranches(
     if (dimensionlessIndexedElement(b, undefined, scalarSibling) !== undefined)
       collections.push(b);
     else if (typeof b !== 'string' && b.kind === 'broadcastable') {
-      collections.push({ kind: 'indexed_collection', elements: b.elements });
+      collections.push({ kind: 'list', elements: b.elements });
       hasScalarBranch = true;
     } else if (isTupleShapedType(b) || b === 'string') hasScalarBranch = true;
     else if (isSubtype(b, COLLECTION_SHAPE_TYPE)) return undefined;
@@ -1974,7 +1974,7 @@ export function scalarOrCollectionUnionBranches(
  * (including the fixed shapes and the non-indexed `set`, which never
  * broadcast but do sum), a `tuple` branch, a `string` branch (a string
  * enumerates as its characters), or a `broadcastable<T>` branch, whose
- * collection half is an indexed collection of `T`.
+ * collection half is a list of `T`.
  *
  * Such a union answers a confident `false` to `matches('collection<any>')` —
  * the scalar branch defeats the match — so a gate that reads only that match
@@ -2160,7 +2160,7 @@ export function isScalarUnionWithTupleArm(t: Readonly<Type>): boolean {
  * `armwiseUnionBroadcastResultType`; `undefined` when the type is not armed.
  * A scalar-or-collection union is classified as
  * `scalarOrCollectionUnionBranches` classifies it, and a `broadcastable<T>`
- * arm of it is two arms, the scalar `T` and an indexed collection of `T`. A
+ * arm of it is two arms, the scalar `T` and a list of `T`. A
  * union of scalar arms with a tuple arm (`isScalarUnionWithTupleArm`) is one
  * arm per branch. A type that is not a union is one arm: a tuple (the
  * element of `broadcastable<tuple<number, number>>`) or a scalar (`number`,
@@ -2200,7 +2200,7 @@ function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
       arms.push({ cell: b.elements, rewrap: undefined });
       arms.push({
         cell: b.elements,
-        rewrap: (e) => ({ kind: 'indexed_collection', elements: e }),
+        rewrap: (e) => ({ kind: 'list', elements: e }),
       });
     } else arms.push({ cell: b, rewrap: undefined });
   }

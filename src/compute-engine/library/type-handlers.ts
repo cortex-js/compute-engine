@@ -157,7 +157,7 @@ export function operandSgn(d: OperandDescriptor): Sign | undefined {
  * type cannot spin here.
  *
  * A `broadcastable<T>` operand is unwrapped as well. Its `collection` fact is
- * `undefined` — the type abbreviates the union `T | indexed_collection<T>`,
+ * `undefined` — the type abbreviates the union `T | list<T>`,
  * so whether the operand IS a collection is exactly what is not yet known —
  * but either way the handler still describes one element, and the call site
  * still re-wraps.
@@ -2004,7 +2004,7 @@ export function bigOpResultType(
     return body.type;
   // A body that is only POSSIBLY a collection carries its `broadcastable<T>`
   // type through for the same reason: `broadcastable<T>` abbreviates the union
-  // `T | indexed_collection<T>`, so it covers both the scalar accumulation and
+  // `T | list<T>`, so it covers both the scalar accumulation and
   // the element-wise one, and the big-op cannot decide between them until the
   // body evaluates. A `Which` whose condition is a comparison the engine
   // cannot statically prove will broadcast (`comparisonResultType` in

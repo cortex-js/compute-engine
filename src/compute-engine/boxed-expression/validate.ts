@@ -1148,7 +1148,7 @@ export function checkNumericArgs(
 // Parsed once: the guard runs for every operand of every numeric
 // evaluation, so it must not re-resolve the type string per call.
 const NON_NUMERIC_EXEMPT_TYPE: Type = parseType(
-  'broadcastable<number> | missing | nothing | function | error'
+  'number | indexed_collection<number> | missing | nothing | function | error'
 );
 export function nonNumericOperandError(
   ce: ComputeEngine,

@@ -6378,7 +6378,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // on the same operand keep it. Preserve the base's structure with the
         // same component widening as the tuple branch. The denominator may be
         // a scalar or a broadcast-lifted scalar (`broadcastable<number>` — a
-        // scalar, or an indexed collection of scalars that divides
+        // scalar, or a list of scalars that divides
         // elementwise; the numerator's shape survives either way), but a
         // shaped or possibly-shaped denominator disqualifies the claim and
         // falls through to the scalar widening below.

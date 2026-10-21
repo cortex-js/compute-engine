@@ -1666,7 +1666,7 @@ function bcastFn(
  * A list of plain NUMBERS at a color position is a list of errors in the
  * interpreter, and each element reaches `f` here and throws the color-shape
  * `TypeError`. The static gates refuse such an operand first
- * (`NESTED_COLOR_BROADCAST_TYPE`, `refuseColorList`); the throw is the
+ * (`isColorValued`, `refuseColorList`); the throw is the
  * run-time backstop for a value that arrives through `vars`.
  */
 function bcastColor(f: (c: unknown) => unknown, v: unknown): unknown {

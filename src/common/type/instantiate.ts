@@ -2501,8 +2501,16 @@ function walkPattern(
     }
 
     case 'broadcastable': {
-      // §4.4 three-shape decomposition: a scalar actual, an indexed collection
-      // of `S`, or a `broadcastable<S>` all bind `T ≥ S`.
+      // §4.4 three-shape decomposition: a scalar actual, a list of `S`, or a
+      // `broadcastable<S>` all bind `T ≥ S`. An actual typed only
+      // `indexed_collection<S>` binds `T ≥ S` too, although it is not a
+      // subtype of `broadcastable<T>` (`T | list<T>`): its value can be a
+      // list, and the broadcast lift maps the call over it then, so each
+      // element, of type `S`, is what the parameter receives. Binding `T` to
+      // the whole collection, with the lift adding a list level, typed
+      // `f(bic)` with `f: (broadcastable<T>) -> list<T>` as
+      // `list<list<indexed_collection>>`, which the value `[[1], [2]]` for
+      // `bic = [1, 2]` is not.
       // A BARE `list`/`indexed_collection` actual binds `T` to its element
       // reading, `unknown` — bare constructors are `<unknown>` synonyms
       // (user ruling 2026-08-17) and their elements are values, so `any`

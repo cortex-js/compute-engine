@@ -2196,7 +2196,7 @@ function noMatchCell(ce: ComputeEngine, arms: ReadonlyArray<Type>): Expression {
 
 /**
  * True when a condition is only POSSIBLY a boolean collection: its type is
- * `broadcastable<boolean>`, the union `boolean | indexed_collection<boolean>`
+ * `broadcastable<boolean>`, the union `boolean | list<boolean>`
  * the engine gives a comparison whose broadcast outcome it cannot settle
  * statically — `C = U_1` with `C` declared `indexed_collection` and `U_1`
  * top-typed is `[True,False,True]` when `U_1` turns out to be a scalar and the

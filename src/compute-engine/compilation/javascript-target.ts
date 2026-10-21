@@ -3046,7 +3046,7 @@ function compileJSPointList(
       // 43 point lists ending in such a run-time role dispatch.)
       bindings.push(`const ${name} = ${compile(a)};`);
     } else if (containsBroadcastableType(t)) {
-      // A `broadcastable<T>` component is a `T` OR an indexed collection of
+      // A `broadcastable<T>` component is a `T` OR a list of
       // `T`, and — unlike an opaque slot — the type says exactly that, so the
       // role is decided at run time: an array is a zip SOURCE, anything else
       // a scalar slot. `2·PointX(v)` inside a function literal has this type
@@ -3608,28 +3608,16 @@ function compileColorEntryOperand(
  * collection-shaped at all is one color by its type.
  *
  * An operand that MAY be a list at run time must prove that every leaf it
- * holds is a color, and the proof is the type matching
- * `NESTED_COLOR_BROADCAST_TYPE`. Without that proof the shape fails closed
+ * holds is a color, and the proof is its type passing `isColorValued`
+ * (`color-space-fact.ts`): a color, or a list or an abstract indexed
+ * collection of colors, nested up to four levels. The interpreter broadcasts
+ * to any depth, and `_SYS.bcastColor` recurses to any depth, but the test has
+ * a fixed depth; a declared color collection nested deeper is refused rather
+ * than guessed at. Without that proof the shape fails closed
  * (D6): a list of plain numbers is what the run-time dispatch cannot tell
  * from one color, and the interpreter answers an `incompatible-type` error
  * for it rather than a color.
  */
-/**
- * The type an operand of a color conversion must match for the color-aware
- * broadcast to be sound.
- *
- * `broadcastable<T>` admits a scalar `T` and a LIST of `T`, but not a list of
- * lists of `T`: the nesting has to be spelled out one wrapper per level. The
- * interpreter broadcasts to any depth, and `_SYS.bcastColor` recurses to any
- * depth, so the type is written with several wrappers. Each wrapper only ADDS
- * shapes — `broadcastable<broadcastable<color>>` still admits a bare `color`
- * — so one test at the deepest spelling answers every shallower one. The
- * depth is finite because the spelling must be; a declared color collection
- * nested deeper than this is refused rather than guessed at.
- */
-const NESTED_COLOR_BROADCAST_TYPE =
-  'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>';
-
 /**
  * Throw when the function literal `literal` does not take exactly `count`
  * arguments. The interpreter curries an application with too few arguments
@@ -3700,7 +3688,7 @@ function tryCompileColorBroadcast(
     color.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(color);
   if (!mayBeList) return undefined;
-  if (!color.type.matches(NESTED_COLOR_BROADCAST_TYPE)) {
+  if (!isColorValued(color)) {
     if (isFunction(color, 'List')) refuseColorList();
     throw new Error(
       `Could not compile \`${head}\`: a color conversion over an operand that may ` +
