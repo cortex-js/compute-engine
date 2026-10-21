@@ -47,7 +47,12 @@ separate; the following items do not block the original tuple/record task:
   `record{a: unknown}`) is unrestricted and does not refine from an assignment
   yet (D2 scope).
 - Choose presence-assertion syntax and the default diagnostic/assignment policy
-  for possible absence (Q1/Q3).
+  for possible absence (Q1/Q3). Analysis, measured behavior and the decisions
+  P1 to P5 (declared contract, element contract, library default for an absent
+  argument, static report policy, `?!` / `AssertPresent` / `expected-present`,
+  compiled assertion on targets without a raise):
+  `docs/plans/2026-10-21-presence-contracts-and-assertion.md` (2026-10-21,
+  decisions pending).
 - Decide record-field omission, optional-field representation and an explicit
   key-removal operation; classify outstanding custom folds, Dot, ordering and
   structural conversions (Q5/Q10).
