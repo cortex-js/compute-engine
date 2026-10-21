@@ -36,16 +36,15 @@ for (let repeat = 0; repeat < repeats; repeat++)
   for (const c of cases) {
     const result = factorRationalPolynomial(
       c.coefficients.map(([n, d]) => q(BigInt(n), BigInt(d))),
-      { maxOperations: operations }
+      { maxOperations: operations, profile: true }
     );
-    if (values.corpus === 'stress' || values.id)
-      console.log(
-        JSON.stringify({
-          id: c.id,
-          status: result.status,
-          reason: result.reason,
-          statistics: result.statistics,
-        })
-      );
+    console.log(
+      JSON.stringify({
+        id: c.id,
+        status: result.status,
+        reason: result.reason,
+        statistics: result.statistics,
+      })
+    );
   }
 console.log(`Profiled ${cases.length * repeats} factorizations`);

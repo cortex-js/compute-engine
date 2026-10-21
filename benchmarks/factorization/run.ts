@@ -19,6 +19,7 @@ const { values } = parseArgs({
     'count': { type: 'string', default: '1200' },
     'python': { type: 'string' },
     'backends': { type: 'string', default: 'typescript' },
+    'profile': { type: 'boolean', default: false },
     'timeout': { type: 'string', default: '30' },
     'repeats': { type: 'string', default: '3' },
     'corpus': { type: 'string', default: 'regular' },
@@ -67,6 +68,7 @@ for (const f of [
   'src/compute-engine/polynomial/finite-field.ts',
   'src/compute-engine/polynomial/small-prime.ts',
   'src/compute-engine/polynomial/factor-rational.ts',
+  'src/compute-engine/polynomial/factor-work.ts',
   'benchmarks/factorization/corpus.ts',
   'benchmarks/factorization/worker.ts',
   'benchmarks/factorization/sympy_worker.py',
@@ -93,6 +95,7 @@ writeFileSync(
         maxDegree,
         maxCoefficientBits,
         maxOperations: 2_000_000,
+        profile: values.profile,
       },
       runtime: process.version,
     },
@@ -182,7 +185,12 @@ class Runner {
     }
     const result = this.wait(timeout);
     this.child!.stdin.write(
-      JSON.stringify({ ...c, maxDegree, maxCoefficientBits }) + '\n'
+      JSON.stringify({
+        ...c,
+        maxDegree,
+        maxCoefficientBits,
+        profile: values.profile,
+      }) + '\n'
     );
     return result;
   }

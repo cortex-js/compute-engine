@@ -12,6 +12,7 @@ import {
   type ModularFactorBackend,
 } from './finite-field.js';
 import { SmallPrimePolynomials } from './small-prime.js';
+import { FactorWork, type FactorProfile } from './factor-work.js';
 
 export interface RationalFactorOptions {
   maxOperations?: number;
@@ -19,6 +20,8 @@ export interface RationalFactorOptions {
   maxCoefficientBits?: number;
   check?: () => void;
   modularBackend?: ModularFactorBackend;
+  /** Opt-in exclusive phase diagnostics; disabled on the normal Factor path. */
+  profile?: boolean;
 }
 export interface RationalPolynomialFactor {
   /** Primitive integer coefficients, ascending in degree, positive leading coefficient. */
@@ -38,6 +41,7 @@ export interface RationalFactorization {
     primes: number;
     lifts: number;
     subsets: number;
+    phases?: FactorProfile;
   };
 }
 
@@ -194,7 +198,19 @@ function* subsets(
 
 function factorMonic(
   f: bigint[],
-  work: PolynomialWork,
+  work: FactorWork,
+  backend: ModularFactorBackend,
+  stats: RationalFactorization['statistics'],
+  seed?: { prime: number; factors: bigint[][] }
+): bigint[][] {
+  return work.scope('preprocessing', () =>
+    factorMonicImpl(f, work, backend, stats, seed)
+  );
+}
+
+function factorMonicImpl(
+  f: bigint[],
+  work: FactorWork,
   backend: ModularFactorBackend,
   stats: RationalFactorization['statistics'],
   seed?: { prime: number; factors: bigint[][] }
@@ -231,6 +247,7 @@ function factorMonic(
     base: bigint[][] | undefined = seed?.factors;
   // Several good primes avoid unnecessary recombination when a small prime
   // splits a rationally irreducible factor into many pieces.
+  work.phase('modular');
   for (let candidate = 2; candidate <= 251 && chosen < 3; candidate++) {
     let isPrime = true;
     for (let d = 2; d * d <= candidate; d++)
@@ -247,7 +264,9 @@ function factorMonic(
     const factors = backend(reduced.map(BigInt), candidate, work);
     // A backend is an accelerator, not a trusted proof source: replay the
     // Frobenius irreducibility criterion and reconstruct before lifting.
-    verifyModularFactors(reduced.map(BigInt), factors, candidate, work);
+    work.scope('verification', () =>
+      verifyModularFactors(reduced.map(BigInt), factors, candidate, work)
+    );
     if (!base || factors.length < base.length) {
       prime = candidate;
       base = factors;
@@ -258,6 +277,7 @@ function factorMonic(
     if (factors.length <= 4) break;
   }
   if (!base) throw new PolynomialBudgetExceeded('no-good-prime');
+  work.phase('lifting');
   const p = BigInt(prime),
     P = new SmallPrimePolynomials(prime, work),
     K = P.field;
@@ -306,6 +326,7 @@ function factorMonic(
     exponent = 1,
     nextRecovery = 1;
   while (modulus <= 2n * bound) {
+    work.phase('recombination');
     work.tick();
     if (exponent >= nextRecovery) {
       nextRecovery *= 2;
@@ -372,6 +393,7 @@ function factorMonic(
         bound = coefficientBound();
       }
     }
+    work.phase('lifting');
     stats.lifts++;
     const product = lifted.reduce((a, b) => multiply(a, b, work), [1n]);
     const error = f.map((c, i) => {
@@ -390,6 +412,7 @@ function factorMonic(
     modulus *= p;
     exponent++;
   }
+  work.phase('recombination');
   let remaining = f,
     pool = lifted,
     remainingHeight = norm(f);
@@ -477,15 +500,22 @@ export function factorRationalPolynomial(
   input: readonly RationalCoefficient[],
   options: RationalFactorOptions = {}
 ): RationalFactorization {
-  const work = new PolynomialWork(
+  const work = new FactorWork(
     options.maxOperations ?? 2_000_000,
-    options.check
+    options.check,
+    options.profile
   );
   const P = new FieldPolynomials(Q, work);
   const coefficients = P.trim(
     input.map((c) => rational(c.numerator, c.denominator))
   );
-  const stats = { operations: 0, primes: 0, lifts: 0, subsets: 0 };
+  const stats: RationalFactorization['statistics'] = {
+    operations: 0,
+    primes: 0,
+    lifts: 0,
+    subsets: 0,
+  };
+  if (work.profile) stats.phases = work.profile;
   const result: RationalFactorization = {
     domain: 'QQ',
     status: 'complete',
@@ -493,8 +523,10 @@ export function factorRationalPolynomial(
     factors: [],
     statistics: stats,
   };
-  if (!coefficients.length)
+  if (!coefficients.length) {
+    work.phase('preprocessing');
     return { ...result, status: 'zero', coefficient: rational(0n) };
+  }
   try {
     const maxDegree = options.maxDegree ?? 128,
       maxBits = options.maxCoefficientBits ?? 4096;
@@ -547,7 +579,11 @@ export function factorRationalPolynomial(
         );
       }
     }
-    if (!reconstructsRationalFactorization(coefficients, result, work))
+    if (
+      !work.scope('verification', () =>
+        reconstructsRationalFactorization(coefficients, result, work)
+      )
+    )
       throw new Error('Rational factor reconstruction failed');
   } catch (e) {
     if (!(e instanceof PolynomialBudgetExceeded)) throw e;
@@ -558,6 +594,7 @@ export function factorRationalPolynomial(
     result.remainder = coefficients;
   }
   stats.operations = work.operations;
+  work.phase('preprocessing');
   return result;
 }
 
