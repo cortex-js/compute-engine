@@ -6,6 +6,12 @@ independently committed after its tests. An unchanged expression is not an
 irreducibility certificate. Resource exhaustion must remain distinguishable
 from a complete factorization.
 
+Current delivery decision: ship TypeScript only. The experimental first-party
+WASM kernel, public factory, compiler script, CI step and tests have been
+removed at the user's request. The staged progress and four-backend timings
+below record the earlier experiment; they do not describe a currently shipped
+WASM API. External SymPy/PARI remain optional comparison tools only.
+
 ## Stages
 
 1. Exact coefficient domains and engine-independent polynomial arithmetic.
@@ -42,12 +48,12 @@ supply that argument. Numerical root screening cannot certify these decisions.
 
 ## Backend comparison
 
-Compare native TypeScript with an independently written finite-field WASM
-kernel using the same exact orchestration. The user requested first-party
-implementation to avoid bundling copyleft CAS libraries. Report this as a
-hybrid TS/WASM implementation, not a full bigint WASM factorizer. Keep the
-kernel interface replaceable so profiling can justify moving other arithmetic
-later. SymPy and a separately installed PARI WebAssembly package are external
+The original experiment compared native TypeScript with an independently
+written finite-field WASM kernel using the same exact orchestration. Only
+TypeScript is retained for delivery. The user requested first-party code to
+avoid bundling third-party CAS libraries. The modular factor interface remains
+replaceable and independently verifies supplied results. SymPy and a separately
+installed PARI WebAssembly package are external
 comparators only. The optional @sagemath/pari
 1.0.5 package reports GPL-3.0-or-later and 29,058,600 unpacked bytes. It is an
 isolated experiment, not a CE runtime dependency or a redistribution decision.
@@ -72,8 +78,8 @@ and cancellation. This does not claim unrestricted or best-in-class performance.
 Corpus performance measurements belong to the factorizer stages,
 not to isolated coefficient arithmetic.
 
-The stage 2 implementation now includes a native modular factorizer and a
-first-party AssemblyScript WASM Berlekamp kernel. The latter only accelerates
+Stage 2 originally included a native modular factorizer and an experimental
+first-party AssemblyScript WASM Berlekamp kernel. The latter only accelerated
 finite-field factorization; rational preprocessing, lifting, recombination and
 independent modular-output verification remain in TypeScript. It introduces no
 CAS runtime dependency. The compiler is installed into ignored build storage.
@@ -127,10 +133,9 @@ the regular run, 15,408 records pass the independent coverage/reconstruction
 audit. Timings, fingerprints, limiting cases and remaining optimization targets
 are in the benchmark report rather than asserted in unit tests.
 
-Build the optional kernel with `node scripts/build-polynomial-wasm.mjs` after
-installing the compiler as described in that script. Run the comparison with
+Run the current TypeScript comparison with
 `node --import tsx benchmarks/factorization/run.ts --output <new-directory>
---python <python-with-sympy> --backends typescript,wasm,sympy,pari`.
+--python <python-with-sympy> --backends typescript,sympy,pari`.
 The optional PARI comparator requires its separately installed package under
 `build/factoring-backends`; it is not required by CE or its native tests.
 
@@ -224,15 +229,11 @@ are algorithmically certified results, not portable serialized proof objects.
 Budgets count arithmetic work, not elapsed time or bigint bit operations;
 callers needing a hard time/memory boundary should run in a worker process.
 
-The optional `createPolynomialWasmBackend(bytes)` accepts caller-provided bytes;
-it performs no network requests or automatic initialization. The build script
-compiles the first-party algorithm with AssemblyScript runtime support and
-copies the runtime's license and attribution alongside the binary. The kernel
-remains optional because
-its speed benefit depends on the workload; TS handles all bigint operations.
+All shipped arithmetic is TypeScript. There is no WASM factory, binary or
+AssemblyScript build requirement. The modular-factor callback remains available
+for explicitly supplied implementations and correctness-rejection tests.
 External CAS code and generated benchmark files are excluded from commits.
-The existing Node 22/26 CI matrix builds the optional kernel before testing so
-its comparison tests do not silently skip in CI.
+The existing Node 22/26 CI matrix requires no extra kernel build step.
 
 Remaining performance work includes faster Hensel lifting, LLL/van Hoeij
 recombination, sparse multivariate lifting and modular number-field arithmetic.
@@ -244,19 +245,18 @@ are additional capabilities, not claims made by this implementation.
 - Preserve the distinction between exact reconstruction and certified complete
   factorization. Resource limits return explicit incomplete results; increasing
   a configured size limit is not an algorithmic coverage improvement.
-- Keep benchmark scores and timing thresholds out of unit tests. Node 22 passes
-  239 polynomial regression tests across 14 suites; Node 26.12.0 passes the 191
-  focused tests across 12 suites. Arithmetic tests include bigint cross-checks,
+- Keep benchmark scores and timing thresholds out of unit tests. After removing
+  the two WASM tests, Node 22.14.0 and Node 26.12.0 each pass 237 polynomial
+  regression tests across 13 suites. Arithmetic tests include bigint cross-checks,
   malicious modular output, large translated inputs and cancellation.
 - Source lint, PR-file formatting, source/added-code type checks, public
   declarations, production build and ESM/CommonJS export smoke checks pass.
-  The optional WASM build reproduces its original binary hash after formatting.
 - The full repository test run was stopped with unrelated Windows/sandbox
   failures documented in the benchmark report. Do not present this as a green
   full-suite or CI run, and do not alter unrelated expectations to conceal it.
 - Keep external SymPy/PARI installations, generated corpora and raw reports in
   ignored build storage. No external CAS code or dependency is shipped by CE.
-- Native TypeScript remains the default. Larger number fields, sparse
+- Native TypeScript is the only shipped implementation. Larger number fields, sparse
   multivariate performance, lattice recombination and numerical embeddings
   remain explicitly separate follow-up work.
 

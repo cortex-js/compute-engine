@@ -39,7 +39,6 @@ export type {
   SplittingFieldResult,
   NumberFieldEmbedding,
 } from './compute-engine/polynomial/splitting-field.js';
-export { createPolynomialWasmBackend } from './compute-engine/polynomial/wasm-backend.js';
 export type { ModularFactorBackend } from './compute-engine/polynomial/finite-field.js';
 
 //

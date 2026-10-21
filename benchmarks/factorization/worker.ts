@@ -9,17 +9,11 @@ import {
   rationalCoefficient as q,
   rationalField as Q,
 } from '../../src/compute-engine/polynomial/exact-field.js';
-import { createPolynomialWasmBackend } from '../../src/compute-engine/polynomial/wasm-backend.js';
 
 const backend = process.argv[2],
   start = performance.now();
-const modularBackend =
-  backend === 'wasm'
-    ? await createPolynomialWasmBackend(
-        Uint8Array.from(readFileSync('build/polynomial-wasm/factor.wasm'))
-          .buffer
-      )
-    : undefined;
+if (!['typescript', 'pari'].includes(backend))
+  throw new Error('Unknown worker backend');
 let gp: ((s: string) => string) | undefined;
 if (backend === 'pari') {
   const require = createRequire(import.meta.url);
@@ -115,7 +109,6 @@ for await (const line of createInterface({ input: process.stdin })) {
         maxOperations: message.maxOperations ?? 2_000_000,
         maxDegree: message.maxDegree ?? 128,
         maxCoefficientBits: message.maxCoefficientBits ?? 4096,
-        modularBackend,
       });
       console.log(
         JSON.stringify(

@@ -18,7 +18,7 @@ const { values } = parseArgs({
     'output': { type: 'string' },
     'count': { type: 'string', default: '1200' },
     'python': { type: 'string' },
-    'backends': { type: 'string', default: 'typescript,wasm,sympy' },
+    'backends': { type: 'string', default: 'typescript' },
     'timeout': { type: 'string', default: '30' },
     'repeats': { type: 'string', default: '3' },
     'corpus': { type: 'string', default: 'regular' },
@@ -47,7 +47,7 @@ const repeats = Number(values.repeats),
 const backends = values.backends!.split(',');
 if (
   new Set(backends).size !== backends.length ||
-  backends.some((b) => !['typescript', 'wasm', 'sympy', 'pari'].includes(b))
+  backends.some((b) => !['typescript', 'sympy', 'pari'].includes(b))
 )
   throw new Error('Unknown or duplicate backend');
 if (
@@ -67,14 +67,11 @@ for (const f of [
   'src/compute-engine/polynomial/finite-field.ts',
   'src/compute-engine/polynomial/small-prime.ts',
   'src/compute-engine/polynomial/factor-rational.ts',
-  'src/compute-engine/polynomial/wasm-backend.ts',
   'benchmarks/factorization/corpus.ts',
   'benchmarks/factorization/worker.ts',
   'benchmarks/factorization/sympy_worker.py',
   'benchmarks/factorization/run.ts',
   'benchmarks/factorization/stress-corpus.ts',
-  'wasm/polynomial/assembly/index.ts',
-  'scripts/build-polynomial-wasm.mjs',
 ])
   sourceHash.update(readFileSync(f));
 writeFileSync(
@@ -97,11 +94,6 @@ writeFileSync(
         maxCoefficientBits,
         maxOperations: 2_000_000,
       },
-      wasmHash: existsSync('build/polynomial-wasm/factor.wasm')
-        ? createHash('sha256')
-            .update(readFileSync('build/polynomial-wasm/factor.wasm'))
-            .digest('hex')
-        : null,
       runtime: process.version,
     },
     null,

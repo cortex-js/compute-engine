@@ -1,9 +1,14 @@
 # First-party exact factoring benchmarks
 
-The native algorithms and optional WASM finite-field kernel are first-party MIT
-source. No external CAS is a runtime dependency. The AssemblyScript runtime has
-its own notices, copied beside the optional binary by the build. A standalone
-npm package is not published here.
+The shipped algorithms are first-party MIT TypeScript source. No external CAS or
+WebAssembly kernel is a runtime dependency. The experimental first-party WASM
+implementation, export, build script and tests have been removed at the user's
+request. A standalone npm package is not published here.
+
+The four-backend measurements below predate that removal and retain the hybrid
+rows for provenance, not as a supported implementation. Removing the optional
+backend does not change the TypeScript arithmetic. PARI remains an optional
+external benchmark comparator, not shipped CE code.
 
 Latest results: all 1,200 regular inputs verified on three trials; TypeScript
 takes 9.652 s versus SymPy's 22.348 s and PARI WASM's 5.235 s. Default stress
@@ -16,11 +21,9 @@ runs are retained below as baselines.
 From the repository root with CE's development dependencies:
 
 ```sh
-npm install --prefix build/factoring-toolchain --ignore-scripts --no-audit --no-fund assemblyscript@0.28.9
-node scripts/build-polynomial-wasm.mjs
-node --import tsx benchmarks/factorization/run.ts --output build/factoring-run --backends typescript,wasm --count 1200 --repeats 3
+node --import tsx benchmarks/factorization/run.ts --output build/factoring-run --backends typescript --count 1200 --repeats 3
 node --import tsx benchmarks/factorization/audit.ts build/factoring-run
-node --import tsx benchmarks/factorization/run.ts --output build/factoring-stress --corpus stress --backends typescript,wasm --repeats 1
+node --import tsx benchmarks/factorization/run.ts --output build/factoring-stress --corpus stress --backends typescript --repeats 1
 node --import tsx benchmarks/factorization/audit.ts build/factoring-stress
 ```
 
@@ -151,11 +154,11 @@ This is local diagnostic evidence, not a portable speedup claim.
 
 ## Conclusions
 
-Keep native TS as default. The small optional WASM kernel can help but does not
-replace bigint TS lifting/recombination and is not uniformly faster. Faster
-lifting and lattice-based recombination remain justified next steps; merely
-increasing limits is not an optimization. Small-prime arithmetic and modular
-irreducibility checks now have the improvements described below.
+Ship TypeScript only. The removed WASM experiment did not replace bigint TS
+lifting/recombination and was not uniformly faster. Faster lifting and
+lattice-based recombination remain justified next steps; merely increasing
+limits is not an optimization. Small-prime arithmetic and modular irreducibility
+checks now have the improvements described below.
 
 Multivariate Kronecker, Trager number-field factoring and splitting fields have
 exact family tests but are not in these cross-CAS timing tables. They need
@@ -164,14 +167,15 @@ separate performance corpora before competitive scaling claims. See the
 
 ## Verification
 
-Local Node 22.14.0 verification passes 239 tests across 14 polynomial regression
-suites, including existing factoring, assigned symbols and partial fractions. A
-focused run passes 191 tests across 12 suites. Generated family assertions
-include 50 irreducible-quadratic products, 25 expanded bivariate products and 20
-algebraic-coefficient products across four quadratic fields. The field suites
-were rerun after the final constructor/immutability guards (23 tests), and the
-WASM suite after its largest-prime boundary check (2 tests). Neither guard
-changes the timed rational kernel.
+After WASM removal, Node 22.14.0 and Node 26.12.0 each pass 237 tests across 13
+polynomial regression suites, including existing factoring, assigned symbols and
+partial fractions. The previous 239-test result included two removed WASM tests.
+Generated family assertions include 50 irreducible-quadratic products, 25
+expanded bivariate products and 20 algebraic-coefficient products across four
+quadratic fields. The field suites were rerun after the final
+constructor/immutability guards (23 tests), and the WASM suite after its
+largest-prime boundary check (2 tests). Neither guard changes the timed rational
+kernel.
 
 Source and added-code typechecks, public declaration checks, changed-code
 Oxlint/Prettier checks, the production build, ESM/CommonJS package-export smoke
@@ -180,10 +184,9 @@ typecheck of old polynomial tests finds existing typing errors in
 `polynomial-coefficients`, `polynomial-gcd-inexact` and
 `polynomial-operators-assigned-symbols`; those files are unchanged.
 
-The Node 22/26 CI matrix compiles the optional WASM kernel before running tests.
-The same 191 focused tests pass locally on Node 26.12.0. Benchmarks and tests
-use portable Node/Python scripts; no PowerShell-dependent code is added to the
-package.
+The Node 22/26 CI matrix needs no additional compiler or WASM build step.
+Benchmarks and tests use portable Node/Python scripts; no PowerShell-dependent
+code is added to the package.
 
 The existing async-scope isolation test in `functions.test.ts` hit its 30-second
 limit during the loaded full-suite run, then passed in isolation (15.864 s test
@@ -307,6 +310,23 @@ s, SymPy 4.879 s and PARI 0.884 s in aggregate. This demonstrates that the last
 three cases are size-policy refusals; it does not change the default contract.
 Both stress runs use the unchanged stress corpus hash and the optimized source
 hash above. The three final runs total 15,408 audited records.
+
+### TypeScript-only delivery verification
+
+After removing the optional backend, all three corpora were rerun using the
+current runner's TypeScript-only default, with three trials and independent
+audits. `build/factoring-typescript-only-regular` verifies 3,600/3,600 records;
+`build/factoring-typescript-only-stress` verifies 117/126 with the same nine
+size-limit refusals (three distinct inputs); and
+`build/factoring-typescript-only-expanded` verifies 126/126 using degree 256 and
+16,384-bit limits with the unchanged operation budget. All 3,852 records are
+accounted for; there are no incorrect answers, errors or timeouts.
+
+The corpus hashes above are unchanged. Current measured source hash:
+`db442d92654584ed6fe1b14c8d76b55e6cac76f6e1b864b70aee8c5ad2fb7c1f`. These are
+delivery-verification runs, not a new cross-CAS comparison: the runner and
+schedule no longer include the removed experimental backend. Do not combine
+their timings with the older SymPy/PARI timings.
 
 ### Remaining performance priorities
 
