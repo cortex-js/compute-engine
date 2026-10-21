@@ -124,3 +124,40 @@ test('rejects malformed/dependent bases and obeys caller work/cancellation limit
     ])
   ).toBe(false);
 });
+
+test('preconditioning remains exactly certified on larger and ill-conditioned bases', () => {
+  for (const bits of [12n, 120n, 1100n]) {
+    const n = 7;
+    const input = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n + 1 }, (_, j) =>
+        j === i ? 1n : j === n ? (1n << bits) + BigInt(i * i + 1) : 0n
+      )
+    );
+    const result = reduceIntegerLattice(input, new PolynomialWork(2_000_000));
+    expect(isReducedIntegerLattice(result.basis)).toBe(true);
+    expect(
+      result.transformation.map((row) =>
+        input[0].map((_, j) => row.reduce((s, c, i) => s + c * input[i][j], 0n))
+      )
+    ).toEqual(result.basis);
+    // Bareiss determinant checks unimodularity without a factorial expansion.
+    const a = result.transformation.map((r) => [...r]);
+    let previous = 1n,
+      sign = 1n;
+    for (let k = 0; k < n - 1; k++) {
+      const pivotRow = a.findIndex((r, i) => i >= k && r[k] !== 0n);
+      expect(pivotRow).toBeGreaterThanOrEqual(k);
+      if (pivotRow !== k) {
+        [a[k], a[pivotRow]] = [a[pivotRow], a[k]];
+        sign = -sign;
+      }
+      const pivot = a[k][k];
+      for (let i = k + 1; i < n; i++)
+        for (let j = k + 1; j < n; j++)
+          a[i][j] = (a[i][j] * pivot - a[i][k] * a[k][j]) / previous;
+      for (let i = k + 1; i < n; i++) a[i][k] = 0n;
+      previous = pivot;
+    }
+    expect([1n, -1n]).toContain(sign * a[n - 1][n - 1]);
+  }
+});

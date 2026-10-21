@@ -12,7 +12,15 @@ import {
 
 const backend = process.argv[2],
   start = performance.now();
-if (!['typescript', 'pari'].includes(backend))
+if (
+  ![
+    'typescript',
+    'typescript-linear',
+    'typescript-quadratic',
+    'typescript-lattice',
+    'pari',
+  ].includes(backend)
+)
   throw new Error('Unknown worker backend');
 let gp: ((s: string) => string) | undefined;
 if (backend === 'pari') {

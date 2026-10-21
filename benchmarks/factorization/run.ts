@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { factoringCorpus, type FactoringCase } from './corpus.js';
 import { stressCorpus } from './stress-corpus.js';
+import { challengeCorpus } from './challenge-corpus.js';
 
 const { values } = parseArgs({
   options: {
@@ -33,12 +34,14 @@ if (!values.output) throw new Error('--output must name a new run directory');
 const output = resolve(values.output);
 if (existsSync(output))
   throw new Error('Refusing to overwrite an existing run');
-if (!['regular', 'stress'].includes(values.corpus!))
+if (!['regular', 'stress', 'challenge'].includes(values.corpus!))
   throw new Error('Unknown corpus');
 const corpus =
   values.corpus === 'stress'
     ? stressCorpus()
-    : factoringCorpus(Number(values.count));
+    : values.corpus === 'challenge'
+      ? challengeCorpus()
+      : factoringCorpus(Number(values.count));
 const serialized = JSON.stringify(corpus);
 const hash = createHash('sha256').update(serialized).digest('hex');
 mkdirSync(output, { recursive: true });
@@ -48,13 +51,29 @@ const repeats = Number(values.repeats),
   maxDegree = Number(values['max-degree']),
   maxCoefficientBits = Number(values['max-coefficient-bits']);
 const backends = values.backends!.split(',');
+const strategyOverrides: Record<
+  string,
+  { lifting: string; recombination: string }
+> = {
+  'typescript-linear': { lifting: 'linear', recombination: 'subsets' },
+  'typescript-quadratic': { lifting: 'quadratic', recombination: 'subsets' },
+  'typescript-lattice': { lifting: 'quadratic', recombination: 'lattice' },
+};
 if (!['auto', 'subsets', 'lattice'].includes(values.recombination!))
   throw new Error('Unknown recombination strategy');
 if (!['auto', 'linear', 'quadratic'].includes(values.lifting!))
   throw new Error('Unknown lifting strategy');
 if (
   new Set(backends).size !== backends.length ||
-  backends.some((b) => !['typescript', 'sympy', 'pari'].includes(b))
+  backends.some(
+    (b) =>
+      ![
+        'typescript',
+        ...Object.keys(strategyOverrides),
+        'sympy',
+        'pari',
+      ].includes(b)
+  )
 )
   throw new Error('Unknown or duplicate backend');
 if (
@@ -83,6 +102,7 @@ for (const f of [
   'benchmarks/factorization/sympy_worker.py',
   'benchmarks/factorization/run.ts',
   'benchmarks/factorization/stress-corpus.ts',
+  'benchmarks/factorization/challenge-corpus.ts',
 ])
   sourceHash.update(readFileSync(f));
 writeFileSync(
@@ -109,6 +129,7 @@ writeFileSync(
         recombination: values.recombination,
       },
       runtime: process.version,
+      strategyOverrides,
     },
     null,
     2
@@ -201,8 +222,10 @@ class Runner {
         maxDegree,
         maxCoefficientBits,
         profile: values.profile,
-        lifting: values.lifting,
-        recombination: values.recombination,
+        ...(strategyOverrides[this.backend] ?? {
+          lifting: values.lifting,
+          recombination: values.recombination,
+        }),
       }) + '\n'
     );
     return result;

@@ -69,10 +69,21 @@ export class HenselTree {
   constructor(
     factors: readonly (readonly bigint[])[],
     prime: number,
-    readonly work: PolynomialWork
+    readonly work: PolynomialWork,
+    initialModulus = BigInt(prime)
   ) {
     const P = new SmallPrimePolynomials(prime, work);
-    this.modulus = BigInt(prime);
+    this.modulus = initialModulus;
+    let power = initialModulus;
+    while (power > 1n && power % BigInt(prime) === 0n) {
+      work.tick();
+      power /= BigInt(prime);
+    }
+    if (power !== 1n || initialModulus < BigInt(prime))
+      throw new RangeError(
+        'Initial modulus must be a positive power of the prime'
+      );
+    const R = new ModularPolynomials(initialModulus, work);
     if (
       !factors.length ||
       factors.some(
@@ -92,13 +103,29 @@ export class HenselTree {
         sum += fs[split++].length - 1;
       const left = build(fs.slice(0, split)),
         right = build(fs.slice(split));
-      const g = left.polynomial.map(Number),
-        h = right.polynomial.map(Number);
+      const g = left.polynomial.map((c) => Number(c % BigInt(prime))),
+        h = right.polynomial.map((c) => Number(c % BigInt(prime)));
+      let inverse = P.inverseMod(P.divrem(h, g)[1], g).map(BigInt);
+      let precision = BigInt(prime);
+      while (precision < initialModulus) {
+        precision =
+          precision * precision < initialModulus
+            ? precision * precision
+            : initialModulus;
+        const S = new ModularPolynomials(precision, work);
+        inverse = S.divrem(
+          S.mul(inverse, S.sub([2n], S.mul(right.polynomial, inverse))),
+          S.normalize(left.polynomial)
+        )[1];
+      }
       return {
         left,
         right,
-        polynomial: P.mul(g, h).map(BigInt),
-        inverse: P.inverseMod(P.divrem(h, g)[1], g).map(BigInt),
+        polynomial:
+          initialModulus === BigInt(prime)
+            ? P.mul(g, h).map(BigInt)
+            : R.mul(left.polynomial, right.polynomial),
+        inverse,
       };
     };
     this.root = build(factors);

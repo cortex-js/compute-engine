@@ -44,6 +44,21 @@ test('prime-power division does not assume nonzero coefficients are invertible',
   expect(() => R.divrem(product, [1n, 2n])).toThrow('monic');
 });
 
+test('rebuilding a tree after exact recovery retains the current precision', () => {
+  const work = new PolynomialWork();
+  const f = [102n, 103n, 1n],
+    base = factorFiniteField([2n, 3n, 1n], 5, work);
+  const tree = new HenselTree(base, 5, work);
+  tree.lift(f);
+  tree.lift(f);
+  const rebuilt = new HenselTree(tree.factors(), 5, work, tree.modulus);
+  tree.lift(f);
+  rebuilt.lift(f);
+  expect(rebuilt.factors()).toEqual(tree.factors());
+  expect(rebuilt.modulus).toBe(tree.modulus);
+  expect(() => new HenselTree(base, 5, work, 15n)).toThrow('power');
+});
+
 test('invalid targets and cancelled lifts do not commit partial tree state', () => {
   let cancel = false;
   const work = new PolynomialWork(100_000, () => {

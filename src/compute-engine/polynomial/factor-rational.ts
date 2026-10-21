@@ -295,8 +295,13 @@ function factorMonicImpl(
       P.inverseMod(P.divrem(P.exactDivide(reduced, b), b)[1], b)
     );
   };
-  const tree =
-    work.lifting === 'linear' ? undefined : new HenselTree(base, prime, work);
+  // Tree/inverse setup costs dominate short low-height lifts. Keep linear
+  // lifting there; benchmark overrides expose both paths without changing math.
+  const useQuadratic =
+    work.lifting === 'quadratic' ||
+    (work.lifting === 'auto' &&
+      (f.length > 32 || f.some((c) => abs(c).toString(2).length >= 128)));
+  let tree = useQuadratic ? new HenselTree(base, prime, work) : undefined;
   let inverses = tree ? [] : makeInverses();
   let lifted = base.map((b) => [...b]),
     modulus = p;
@@ -332,15 +337,25 @@ function factorMonicImpl(
   // symmetric reconstruction unique for every possible rational factor.
   const coefficientBound = () => (1n << BigInt(f.length - 1)) * norm(f);
   const latticeRecovery = (): bigint[][] | null => {
+    // Exact-rational LLL is costly for large local-factor sets. The automatic
+    // policy uses it for higher-degree inputs with a small projected lattice;
+    // the explicit lattice strategy allows broader diagnostics under budgets.
     if (
       work.recombination === 'subsets' ||
       (work.recombination === 'auto' &&
-        (lifted.length < 6 || lifted.length > 16))
+        (lifted.length < 2 || lifted.length > 4 || f.length < 33))
     )
       return null;
     for (const columns of [1, 2, 4]) {
       stats.latticeAttempts = (stats.latticeAttempts ?? 0) + 1;
-      const groups = latticeFactorPartition(f, lifted, modulus, work, columns);
+      const groups = latticeFactorPartition(
+        f,
+        lifted,
+        modulus,
+        work,
+        columns,
+        work.recombination === 'auto' ? 12_000 : 100_000
+      );
       if (!groups) continue;
       const recovered: bigint[][] = [];
       let remainder = f;
@@ -395,17 +410,7 @@ function factorMonicImpl(
         if (f.length > 1) factors.push(f);
         return factors;
       }
-      if (removed && tree)
-        return [
-          ...factors,
-          ...factorMonic(f, work, backend, stats, {
-            prime,
-            factors: modular.map((g) => g.map(BigInt)),
-          }),
-        ];
       // A small early subset search discovers exact splits, not certificates.
-      const latticeFactors = latticeRecovery();
-      if (latticeFactors) return [...factors, ...latticeFactors];
       // Re-factor both proper divisors to prove irreducibility. This cannot
       // return a reducible factor merely because reconstruction succeeded.
       let attempts = 0;
@@ -445,8 +450,13 @@ function factorMonicImpl(
             ];
         }
       }
+      const latticeFactors = latticeRecovery();
+      if (latticeFactors) return [...factors, ...latticeFactors];
       if (removed) {
-        inverses = makeInverses();
+        work.scope('lifting', () => {
+          if (tree) tree = new HenselTree(lifted, prime, work, modulus);
+          else inverses = makeInverses();
+        });
         bound = coefficientBound();
       }
     }
@@ -559,8 +569,8 @@ export function verifyModularFactors(
 
 /**
  * Factor a univariate rational polynomial into primitive irreducible integer
- * factors. Completion uses modular irreducibility or exhaustive bounded
- * Zassenhaus recombination, not numerical roots or reconstruction alone.
+ * factors. Completion uses modular irreducibility, certified lattice blocks,
+ * or exhaustive bounded recombination, never reconstruction alone.
  */
 export function factorRationalPolynomial(
   input: readonly RationalCoefficient[],

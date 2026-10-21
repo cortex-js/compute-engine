@@ -30,3 +30,11 @@ test('phase accounting retains work on resource exhaustion and zero input', () =
     ).toBe(result.statistics.operations);
   }
 });
+
+test('invalid runtime strategy values are rejected rather than silently selecting an algorithm', () => {
+  const input = [2n, 0n, 3n, 0n, 1n].map((n) => q(n));
+  for (const option of ['lifting', 'recombination'])
+    expect(() =>
+      factorRationalPolynomial(input, JSON.parse(`{"${option}":"unknown"}`))
+    ).toThrow('strategy');
+});

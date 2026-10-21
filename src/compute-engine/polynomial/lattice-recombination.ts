@@ -37,13 +37,16 @@ export function latticeFactorPartition(
   modulus: bigint,
   parent: PolynomialWork,
   columns = 2,
-  maxProbeOperations = 100_000
+  maxProbeOperations = 100_000,
+  maxDimension = 12
 ): number[][] | null {
   if (
     !Number.isSafeInteger(columns) ||
     columns < 1 ||
     !Number.isSafeInteger(maxProbeOperations) ||
-    maxProbeOperations < 0
+    maxProbeOperations < 0 ||
+    !Number.isSafeInteger(maxDimension) ||
+    maxDimension < 1
   )
     throw new RangeError('Invalid lattice probe limits');
   const work = new ProbeWork(
@@ -58,6 +61,10 @@ export function latticeFactorPartition(
       r = factors.length,
       s = Math.min(columns, n - 1);
     if (n < 2 || r < 2 || f[n] !== 1n) return null;
+    // Exact rational projection data grows rapidly with dimension. Refusing a
+    // probe preserves the exhaustive fallback; callers can explicitly enlarge
+    // this diagnostic limit without silently spending the whole parent budget.
+    if (r + s > maxDimension) return null;
     const norm = f.reduce((sum, c) => sum + (c < 0n ? -c : c), 0n);
     let choose = 1n,
       bound = 0n;

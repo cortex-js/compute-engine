@@ -36,6 +36,7 @@ const summaries: Record<
     medianMs?: number;
     p95Ms?: number;
     maxRssBytes?: number;
+    phases?: Record<string, { milliseconds: number; operations: number }>;
   }
 > = {};
 for (const row of rows) {
@@ -101,6 +102,26 @@ for (const row of rows) {
     reasons: {},
   });
   s.count++;
+  if (row.result?.statistics?.phases) {
+    s.phases ??= {};
+    let counted = 0;
+    for (const [phase, value] of Object.entries(row.result.statistics.phases)) {
+      const v = value as { milliseconds: number; operations: number };
+      if (
+        !Number.isFinite(v.milliseconds) ||
+        v.milliseconds < 0 ||
+        !Number.isSafeInteger(v.operations) ||
+        v.operations < 0
+      )
+        throw new Error('Invalid phase accounting');
+      const total = (s.phases[phase] ??= { milliseconds: 0, operations: 0 });
+      total.milliseconds += v.milliseconds;
+      total.operations += v.operations;
+      counted += v.operations;
+    }
+    if (counted !== row.result.statistics.operations)
+      throw new Error('Phase work does not sum to total work');
+  }
   s.statuses[row.status] = (s.statuses[row.status] ?? 0) + 1;
   const family = (s.families[c.family] ??= {});
   family[row.status] = (family[row.status] ?? 0) + 1;

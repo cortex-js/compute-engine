@@ -1,5 +1,11 @@
 # First-party exact factoring benchmarks
 
+The subsequent TypeScript lifting/lattice work is documented in the
+[five-stage performance report](../../docs/plans/2026-10-20-factoring-lifting-lattices.md).
+It adds opt-in exclusive phase profiling, quadratic Hensel trees, certified
+lattice recombination and matched strategy comparisons. The historical tables
+below remain evidence for the original PR, not measurements of the follow-up.
+
 The shipped algorithms are first-party MIT TypeScript source. No external CAS or
 WebAssembly kernel is a runtime dependency. The experimental first-party WASM
 implementation, export, build script and tests have been removed at the user's
@@ -26,6 +32,16 @@ node --import tsx benchmarks/factorization/audit.ts build/factoring-run
 node --import tsx benchmarks/factorization/run.ts --output build/factoring-stress --corpus stress --backends typescript --repeats 1
 node --import tsx benchmarks/factorization/audit.ts build/factoring-stress
 ```
+
+For the follow-up, pass
+`--backends typescript-linear,typescript-quadratic,typescript-lattice,typescript,sympy,pari`
+and the SymPy interpreter below to compare all strategies in one rotating run.
+Repeat with `--corpus stress` and `--corpus challenge`. The explicit strategy
+labels are overrides recorded in the manifest, not additional shipped backends.
+Use a separate `--profile` run to collect exclusive phase time/work; the audit
+checks that phase work adds to total work. Keep profile-clock overhead out of
+the main comparison. The challenge corpus has 42 theorem-certified inputs,
+including four Swinnerton-Dyer irreducibles; incomplete results stay visible.
 
 Use a new output directory each time. Journals are append-only; interrupted runs
 are not full scores. The read-only audit rejects missing/duplicate cases,

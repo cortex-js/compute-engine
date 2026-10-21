@@ -61,17 +61,114 @@ export interface IntegerLatticeReduction {
   squaredNorms: Rational[];
 }
 
+/**
+ * Floating projections propose integer row operations only. They never certify
+ * reduction or discard vectors: every operation is applied to bigint rows and
+ * the transformation, then exact LLL below checks/finishes the result. Poor
+ * conditioning, overflow or an iteration cap merely ends this preconditioner.
+ */
+function preconditionLattice(
+  basis: bigint[][],
+  transformation: bigint[][],
+  work: PolynomialWork
+): void {
+  const n = basis.length,
+    width = basis[0].length;
+  if (n < 6) return;
+  const mu = Array.from({ length: n }, () => Array<number>(n).fill(0));
+  const norms: number[] = [],
+    orthogonal: number[][] = [];
+  let bits = 0;
+  for (const row of basis)
+    for (const c of row)
+      bits = Math.max(bits, (c < 0n ? -c : c).toString(2).length);
+  const shift = BigInt(Math.max(0, bits - 450));
+  for (let i = 0; i < n; i++) {
+    const v = basis[i].map((c) => Number(c >> shift));
+    for (let j = 0; j < i; j++) {
+      work.tick(2 * width);
+      const projection =
+        v.reduce((s, c, k) => s + c * orthogonal[j][k], 0) / norms[j];
+      if (!Number.isFinite(projection)) return;
+      mu[i][j] = projection;
+      for (let k = 0; k < width; k++) v[k] -= projection * orthogonal[j][k];
+    }
+    work.tick(width);
+    const norm = v.reduce((s, c) => s + c * c, 0);
+    if (!(norm > 0) || !Number.isFinite(norm)) return;
+    orthogonal.push(v);
+    norms.push(norm);
+  }
+  for (
+    let k = 1, iterations = 0;
+    k < n && iterations < 4 * n * n;
+    iterations++
+  ) {
+    work.tick();
+    for (let j = k - 1; j >= 0; j--) {
+      const c = Math.round(mu[k][j]);
+      if (!Number.isSafeInteger(c)) return;
+      if (c === 0) continue;
+      work.tick(width + n + j);
+      const integer = BigInt(c);
+      basis[k] = basis[k].map((x, i) => x - integer * basis[j][i]);
+      transformation[k] = transformation[k].map(
+        (x, i) => x - integer * transformation[j][i]
+      );
+      for (let i = 0; i < j; i++) mu[k][i] -= c * mu[j][i];
+      mu[k][j] -= c;
+    }
+    const oldMu = mu[k][k - 1],
+      oldNorm = norms[k - 1];
+    if (norms[k] >= (0.75 - oldMu * oldMu) * oldNorm) {
+      k++;
+      continue;
+    }
+    const combined = norms[k] + oldMu * oldMu * oldNorm;
+    if (!(combined > 0) || !Number.isFinite(combined)) return;
+    work.tick(2 * n);
+    [basis[k], basis[k - 1]] = [basis[k - 1], basis[k]];
+    [transformation[k], transformation[k - 1]] = [
+      transformation[k - 1],
+      transformation[k],
+    ];
+    const newMu = (oldMu * oldNorm) / combined;
+    norms[k] *= oldNorm / combined;
+    norms[k - 1] = combined;
+    for (let j = 0; j < k - 1; j++)
+      [mu[k][j], mu[k - 1][j]] = [mu[k - 1][j], mu[k][j]];
+    mu[k][k - 1] = newMu;
+    for (let i = k + 1; i < n; i++) {
+      const old = mu[i][k];
+      mu[i][k] = mu[i][k - 1] - oldMu * old;
+      mu[i][k - 1] = old + newMu * mu[i][k];
+    }
+    k = Math.max(1, k - 1);
+  }
+}
+
 /** Exact delta=3/4 LLL; size reductions and swaps preserve the integer lattice. */
 export function reduceIntegerLattice(
   input: readonly (readonly bigint[])[],
   work = new PolynomialWork()
 ): IntegerLatticeReduction {
-  let { mu, norms } = integerGramSchmidt(input, work);
+  const width = input[0]?.length ?? 0;
+  if (
+    !input.length ||
+    input.length > width ||
+    input.some((r) => r.length !== width)
+  )
+    throw new RangeError(
+      'Expected a nonempty rectangular independent row basis'
+    );
+  work.tick(input.length * width);
   const basis = input.map((r) => [...r]),
     n = basis.length;
   const transformation: bigint[][] = Array.from({ length: n }, (_, i) =>
     Array.from({ length: n }, (_, j) => (i === j ? 1n : 0n))
   );
+  preconditionLattice(basis, transformation, work);
+  const { mu, norms } = integerGramSchmidt(basis, work);
   for (let k = 1; k < n;) {
     work.tick();
     for (let j = k - 1; j >= 0; j--) {
@@ -99,7 +196,23 @@ export function reduceIntegerLattice(
       transformation[k - 1],
       transformation[k],
     ];
-    ({ mu, norms } = integerGramSchmidt(basis, work));
+    // Adjacent swapping changes only two orthogonal lengths and their
+    // projections. Exact updates avoid cubic Gram-Schmidt recomputation.
+    work.tick(2 * n);
+    const oldMu = mu[k][k - 1],
+      oldNorm = norms[k - 1];
+    const combined = Q.add(norms[k], Q.mul(Q.mul(oldMu, oldMu), oldNorm));
+    const newMu = divide(Q.mul(oldMu, oldNorm), combined);
+    norms[k] = divide(Q.mul(oldNorm, norms[k]), combined);
+    norms[k - 1] = combined;
+    for (let j = 0; j < k - 1; j++)
+      [mu[k][j], mu[k - 1][j]] = [mu[k - 1][j], mu[k][j]];
+    mu[k][k - 1] = newMu;
+    for (let i = k + 1; i < n; i++) {
+      const old = mu[i][k];
+      mu[i][k] = sub(mu[i][k - 1], Q.mul(oldMu, old));
+      mu[i][k - 1] = Q.add(old, Q.mul(newMu, mu[i][k]));
+    }
     k = Math.max(1, k - 1);
   }
   return { basis, transformation, squaredNorms: norms };

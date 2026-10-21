@@ -22,6 +22,11 @@ export class FactorWork extends PolynomialWork {
     readonly recombination: 'subsets' | 'lattice' | 'auto' = 'auto'
   ) {
     super(limit, check);
+    if (
+      !['linear', 'quadratic', 'auto'].includes(lifting) ||
+      !['subsets', 'lattice', 'auto'].includes(recombination)
+    )
+      throw new RangeError('Invalid factorization strategy');
     if (profile) {
       this.profile = Object.fromEntries(
         [
@@ -32,13 +37,13 @@ export class FactorWork extends PolynomialWork {
           'verification',
         ].map((p) => [p, { milliseconds: 0, operations: 0 }])
       ) as FactorProfile;
-      this.time = performance.now();
+      this.time = globalThis.performance.now();
     }
   }
 
   phase(next: FactorPhase): void {
     if (this.profile) {
-      const now = performance.now();
+      const now = globalThis.performance.now();
       this.profile[this.current].milliseconds += now - this.time;
       this.profile[this.current].operations += this.operations - this.counted;
       this.time = now;
