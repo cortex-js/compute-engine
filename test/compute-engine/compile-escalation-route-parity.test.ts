@@ -222,13 +222,14 @@ describe('the Python target route behaves like the JavaScript one', () => {
       1.0723649429247001,
       12
     );
-    // …and a genuinely complex one as a `{re, im}`: lnΓ(3 + 4i) + 3 + 4i.
+    // …and a genuinely complex one as a `{re, im}`: lnΓ(3 + 4i) + 3 + 4i,
+    // with lnΓ the principal log (Im in (−π, π]).
     const c = r.run!({ z: { re: 3, im: 4 } as never }) as {
       re: number;
       im: number;
     };
     expect(typeof c).toBe('object');
     expect(c.re).toBeCloseTo(1.2433732153962191, 12);
-    expect(c.im).toBeCloseTo(8.74266443803466, 12);
+    expect(c.im).toBeCloseTo(2.4594791308550716, 12);
   });
 });

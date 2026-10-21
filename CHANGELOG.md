@@ -47,6 +47,26 @@
   operand no longer runs a type match on a number literal (#465, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+- **`GammaLn` of a complex argument is the principal logarithm of Γ(z) in every
+  region,** as documented, and `LogGamma` stays the continuous branch (#463,
+  contributed by [enumeratio](https://github.com/enumeratio)).
+  `GammaLn(0.5 - 11i)` was `-16.3598 - 15.3806i`, the continuous value (the
+  principal log is `-16.3598 - 2.8143i`), while `GammaLn(-2.5 + 0.1i)` was
+  already principal, `-0.1031 - 3.0313i`. The imaginary part is now reduced to
+  `(-π, π]`, so `GammaLn(-7.3 + 2i)` is `-13.3277 - 1.5238i` (it was
+  `-13.3277 - 20.3734i`), and `GammaLn(25.5 - 40i)` is `31.7745 - 1.2258i` (it
+  was `31.7745 - 139.4559i`). Real arguments are unchanged: `GammaLn(-2.5)` is
+  still `ln|Γ(-2.5)|`.
+
+- **Compiled `GammaLn` of a negative real is `ln|Γ(x)|` on JavaScript and the
+  shader targets,** as the interpreter gives (#463, contributed by
+  [enumeratio](https://github.com/enumeratio)). `GammaLn(-2.5)` compiled to
+  JavaScript gave `NaN`; it is now `-0.0562`, and `GammaLn(-7.3)` is `-7.7791`.
+  A pole (`0`, `-1`, `-4`) is `+Infinity`. The GLSL and WGSL `_gpu_gammaln` used
+  the Stirling series, which is meaningless for x < 0; it now reflects
+  (`ln π - ln|sin πx| - ln Γ(1 - x)`) and answers `+Infinity` at a pole, as
+  `_gpu_gamma` does.
+
 ### Behavior Changes
 
 - **`unknown` is an inference marker, not a content type.** Every type is now a
@@ -122,21 +142,20 @@
   evaluations no longer see each other's scopes or the host's later scopes, as
   was already the case for scopes that an evaluation pushes itself.
 
-### Bug Fixes
+### Resolved Issues
 
-- **On the `interval-js` target, `0^x` over an exponent interval has the
-  value 0** (Tycho row 417). `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
-  answered `empty` for every exponent interval, as did a declared base
-  holding 0, so a plot that reads a row through the interval leg drew nothing
-  for a slider at 0. The interval-exponent power read a base whose upper end
-  is exactly 0 as a negative base. A base whose only point in the domain is 0
-  now answers `[0, 0]` for a positive exponent interval, `[0, 1]` for one that
+- **On the `interval-js` target, `0^x` over an exponent interval has the value
+  0** (Tycho row 417). `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
+  answered `empty` for every exponent interval, as did a declared base holding
+  0, so a plot that reads a row through the interval leg drew nothing for a
+  slider at 0. The interval-exponent power read a base whose upper end is
+  exactly 0 as a negative base. A base whose only point in the domain is 0 now
+  answers `[0, 0]` for a positive exponent interval, `[0, 1]` for one that
   reaches 0 (`x^0` is 1 in the interval library), a clipped enclosure for one
-  that reaches below 0, and `empty` for a wholly negative one, where no point
-  of the box is defined; the scalar-exponent power answered a clipped
-  enclosure `[+∞, +∞]` there and now also answers `empty`. The literal bounds
-  0 and 1 are certified exact, so the export does not move them one ulp
-  outward.
+  that reaches below 0, and `empty` for a wholly negative one, where no point of
+  the box is defined; the scalar-exponent power answered a clipped enclosure
+  `[+∞, +∞]` there and now also answers `empty`. The literal bounds 0 and 1 are
+  certified exact, so the export does not move them one ulp outward.
 
 - **A subscripted binder is a new name in a `cases` block and in a set-builder
   whose variable appears only in the condition** (the two residues of Tycho row
@@ -221,9 +240,9 @@
   nested fold is not refined while the enclosing fold only admits its callback,
   and the fixpoint found for it in one step of the enclosing fold is the
   starting point of the next step, where one canonicalization settles it. Six
-  nested folds of the shape reported box in 66 ms instead of 1.4 s (0.156.0:
-  47 ms); eight in 121 ms instead of 13 s. Types and values are unchanged, and
-  a chain of numeric folds costs what it did.
+  nested folds of the shape reported box in 66 ms instead of 1.4 s (0.156.0: 47
+  ms); eight in 121 ms instead of 13 s. Types and values are unchanged, and a
+  chain of numeric folds costs what it did.
 
 - A comparison with a long exact sum whose coefficients have many distinct
   denominators no longer throws. `0 < \sum_{k=1}^{300} \ln(-k)/k^2` evaluated by
@@ -682,22 +701,23 @@
   parameter it pins no length (it pinned `N`). A random check of 72,000 pairs of
   list and collection types against concrete values finds no loss (it found 18).
 
-### Bug Fixes
+### Resolved Issues
 
 - `Factor` merges equal factors into a power and finds every copy of a repeated
   root:
-  - `Factor((x^2-1)(x+1))` is `(x-1)(x+1)^2`; it was `(x-1)(x+1)(x+1)`.
-  - `Factor(x^3+3x^2+3x+1)` is `(x+1)^3`; it was `(x+1)(x+1)(x+1)`.
-  - `Factor(x^5-x^4-2x^3+2x^2+x-1)` is `(x-1)^3(x+1)^2`; it was
-    `(x^3-x^2-x+1)(x-1)(x+1)`.
-  - `Factor(x^4-2x^2+1)` is `(x-1)^2(x+1)^2`; it was `(x^2-1)^2`.
-  - A rational root is used in lowest terms, so `Factor(4x^4+12x^3+x^2-12x+4)`
-    is `(2x-1)^2(x+2)^2`; it was `(x+2)(x-\frac{1}{2})(2x-1)(2x+4)`.
 
-  With `A` and `B` matrices, `Factor(A·B·A)` keeps the product as written:
-  matrix factors are not merged. `PartialFraction` now decomposes these
-  denominators when they are given expanded, also with a negative leading
-  coefficient (`1/(-x^3+3x-2)`). Before, it returned them unchanged.
+- `Factor((x^2-1)(x+1))` is `(x-1)(x+1)^2`; it was `(x-1)(x+1)(x+1)`.
+- `Factor(x^3+3x^2+3x+1)` is `(x+1)^3`; it was `(x+1)(x+1)(x+1)`.
+- `Factor(x^5-x^4-2x^3+2x^2+x-1)` is `(x-1)^3(x+1)^2`; it was
+  `(x^3-x^2-x+1)(x-1)(x+1)`.
+- `Factor(x^4-2x^2+1)` is `(x-1)^2(x+1)^2`; it was `(x^2-1)^2`.
+- A rational root is used in lowest terms, so `Factor(4x^4+12x^3+x^2-12x+4)` is
+  `(2x-1)^2(x+2)^2`; it was `(x+2)(x-\frac{1}{2})(2x-1)(2x+4)`.
+
+With `A` and `B` matrices, `Factor(A·B·A)` keeps the product as written: matrix
+factors are not merged. `PartialFraction` now decomposes these denominators when
+they are given expanded, also with a negative leading coefficient
+(`1/(-x^3+3x-2)`). Before, it returned them unchanged.
 
 - A `Multiply` declared not commutative
   (`ce.declare('Multiply', { commutative: false }, { extend: true })`) removes
@@ -1002,7 +1022,7 @@
   `And(x)` and the error was lost. The same applies to `or`, `iff`,
   `if and only if` and `such that`.
 
-### Bug Fixes
+### Resolved Issues
 
 - **Compiled `GammaRegularized(a, z)` is correct for a non-positive order `a`**,
   as `.N()` is ([#457](https://github.com/cortex-js/compute-engine/issues/457),
@@ -1560,7 +1580,7 @@
   `isEqual(0)` is `true` (it was `true`); an exact value is still ordered
   exactly (`10^{-30} > 0`).
 
-### Bug Fixes
+### Resolved Issues
 
 - A `Table` whose term assigns a variable gives its list in a function body too:
   `Apply(Function(Block(Table(Block(Assign(a, k), a), (k, 1, 3)))))` gave an
