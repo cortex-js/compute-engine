@@ -50,7 +50,7 @@ import type { ColorGamut } from '../numerics/color-conversion.js';
 import {
   binomial,
   gamma,
-  gammaln,
+  lnAbsGamma,
   erf,
   erfc,
   erfInv,
@@ -4984,7 +4984,7 @@ export const SYS_HELPERS = {
   // integer range, or infinite, throws (`integerOperand`).
   lcm: (a: number, b: number): number =>
     lcm(integerOperand('LCM', a), integerOperand('LCM', b)),
-  lngamma: gammaln,
+  lngamma: lnAbsGamma,
   limit: (f: (x: number) => number, x: number, dir?: number): number =>
     limit(realFn(f), x, dir),
   mean: oneDatumOk(mean),

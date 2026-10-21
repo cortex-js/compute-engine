@@ -412,6 +412,26 @@
 
 ### Bug Fixes
 
+- **`GammaLn` of a complex argument is the principal logarithm of Γ(z) in every
+  region,** as documented, and `LogGamma` stays the continuous branch
+  (#463, contributed by [enumeratio](https://github.com/enumeratio)).
+  `GammaLn(0.5 - 11i)` was `-16.3598 - 15.3806i`, the continuous value (the
+  principal log is `-16.3598 - 2.8143i`), while `GammaLn(-2.5 + 0.1i)` was
+  already principal, `-0.1031 - 3.0313i`. The imaginary part is now reduced to
+  `(-π, π]`, so `GammaLn(-7.3 + 2i)` is `-13.3277 - 1.5238i` (it was
+  `-13.3277 - 20.3734i`), and `GammaLn(25.5 - 40i)` is `31.7745 - 1.2258i` (it
+  was `31.7745 - 139.4559i`). Real arguments are unchanged: `GammaLn(-2.5)` is
+  still `ln|Γ(-2.5)|`.
+
+- **Compiled `GammaLn` of a negative real is `ln|Γ(x)|` on JavaScript and the
+  shader targets,** as the interpreter gives (#463, contributed by
+  [enumeratio](https://github.com/enumeratio)). `GammaLn(-2.5)` compiled to
+  JavaScript gave `NaN`; it is now `-0.0562`, and `GammaLn(-7.3)` is `-7.7791`.
+  A pole (`0`, `-1`, `-4`) is `+Infinity`. The GLSL and WGSL `_gpu_gammaln`
+  used the Stirling series, which is meaningless for x < 0; it now reflects
+  (`ln π - ln|sin πx| - ln Γ(1 - x)`) and answers `+Infinity` at a pole, as
+  `_gpu_gamma` does.
+
 - `Factor` merges equal factors into a power and finds every copy of a
   repeated root:
   - `Factor((x^2-1)(x+1))` is `(x-1)(x+1)^2`; it was `(x-1)(x+1)(x+1)`.

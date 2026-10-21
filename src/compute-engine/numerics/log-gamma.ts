@@ -122,3 +122,18 @@ export function logGammaComplex(z: Complex): Complex {
     return Math.abs(z.im) <= LANCZOS_IM_LIMIT ? gammaln(z) : shiftedStirling(z);
   return reflect(z);
 }
+
+/**
+ * Log Γ(z) with its imaginary part reduced to (−π, π]: the principal
+ * logarithm of Γ(z), which `GammaLn` returns. It differs from
+ * `logGammaComplex` by a multiple of 2πi: at 0.5 − 11i the continuation is
+ * −16.3598 − 15.3806i and the principal log is −16.3598 − 2.8143i. The
+ * reduction is absolute, so Im ln Γ(z) is good to about ε·|Im ln Γ(z)|.
+ */
+export function logGammaPrincipal(z: Complex): Complex {
+  const l = logGammaComplex(z);
+  if (!Number.isFinite(l.re) || !Number.isFinite(l.im)) return l;
+  // ceil(t − ½) maps (k − ½, k + ½] to k, so Im = π stays π and −π becomes π.
+  const im = l.im - 2 * Math.PI * Math.ceil(l.im / (2 * Math.PI) - 0.5);
+  return new Complex(l.re, im);
+}

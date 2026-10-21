@@ -461,6 +461,19 @@ function lnGammaSigned(x: number): [number, number] {
 }
 
 /**
+ * `ln|Γ(x)|` for a real `x`: `GammaLn` on the real axis. `gammaln` alone
+ * is NaN for x < 0; a negative x reflects (`lnGammaSigned`), and a
+ * non-positive integer is a pole, where ln|Γ| is `+∞`. NaN stays NaN.
+ */
+export function lnAbsGamma(x: number): number {
+  if (x === 0) return Infinity;
+  if (x > 0 || Number.isNaN(x)) return gammaln(x);
+  if (x === -Infinity) return NaN;
+  if (x === Math.floor(x)) return Infinity;
+  return lnGammaSigned(x)[0];
+}
+
+/**
  * `ln|Γ(a)| − ln|Γ(a − d)|` for `a > 0`, where the result's sign factor
  * `sign(Γ(a − d))` is applied by the caller (`gammaSign()`).
  *
