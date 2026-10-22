@@ -45,8 +45,10 @@ import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   assertAccumulatorFitsStep,
+  elementsMayBeCollections,
   inPlaceUpdateChains,
   isDefinitelyCollectionType,
+  mayBeCollectionType,
 } from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -80,12 +82,16 @@ import {
   functionResult,
   containsBroadcastableType,
   finitePartOfType,
+  broadcastableIndexElementTypeOf,
+  indexElementType,
   isNonRealNumber,
   isPointElementType,
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import {
   broadcastCollectionArm,
@@ -2543,7 +2549,22 @@ function compileNthElement(
     );
   const read = absentRead(arg);
   const collT = stripMissingFromType(jsType(arg));
-  const eltT = collectionElementType(collT);
+  // What an index returns (`indexElementType`). An element type with a
+  // number arm beside other arms (`number | vector<2>`, the elements of
+  // `g(x)` for `g(t) = [t, 2t]` and `x: any`; `number | boolean`) does not
+  // decide the absence marker: it is picked from the value, as the
+  // interpreter picks it, and as the `At` lowering does. The helper answers
+  // `undefined` for an absent operand, as `?.` does.
+  const eltT = indexElementType(withoutNumberArms(collT, arg));
+  if (
+    (hasNumberArm(eltT) &&
+      !isSubtype(
+        stripMissingFromType(resolveTypeForCompilation(eltT!)),
+        'number'
+      )) ||
+    (eltT === undefined && isUnionWithCollectionOrAbsentArm(jsType(arg)))
+  )
+    return `_SYS.atWithValueMarker(${compile(arg)}, ${idx + 1})`;
   const present =
     eltT === undefined
       ? undefined
@@ -2619,13 +2640,16 @@ function compilePointComponent(
   arg: Expression,
   idx: number,
   compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  operand?: string
 ): string {
   const t = jsType(arg);
   // The operand's own code, compiled at most once and only on a route that
   // needs it: the constructor shortcut emits one component instead and must
   // not pay for building the point that component is read back out of.
-  let operandCode: string | undefined;
+  // `operand`, when given, is the name of a variable that already holds the
+  // operand's value (the string dispatch below).
+  let operandCode: string | undefined = operand;
   const compiled = (): string => (operandCode ??= compile(arg));
   // A single point (tuple): index the coordinate directly.
   if (typeof t !== 'string' && t.kind === 'tuple') {
@@ -2727,6 +2751,25 @@ function compilePointComponent(
   // `PointX(v) + 1` over a two-point list answered `[2, 3, 4]` where the
   // interpreter answers `[2, 5]`, and a `PointList` body threw at run time
   // (Tycho item 238).
+  // A type with a string arm (`list<string> | string`, an index into a
+  // `broadcastable<list<string>>`) is not a list of points: the interpreter
+  // reads a string by its character at the position (`PointX("ab")` is
+  // `"a"`, a grapheme cluster, which `_SYS.chars` segments), and a list of
+  // strings by its element there. A position past the end is `Missing`
+  // (`undefined`), the marker of text. The run-time dispatch read the
+  // string as no point and answered `NaN`.
+  // The dispatch is on the value at run time: a string takes the read by
+  // character, and every other value takes the readings below, applied to
+  // the same value (`_v`), as for a type with no string arm. Only when every
+  // other arm is `missing` or a list of strings, the unions the `PointX`
+  // type handler types with a character: beside a list of numbers or of
+  // points (`string | list<real>`) the coordinate is typed a number or a
+  // list, and a character read would flow into arithmetic (`"b" + 1` is
+  // `"b1"`), so such a union keeps the readings below for every value.
+  // An absent value (`undefined`) has no coordinate: `Missing`, the marker
+  // of text, as the interpreter answers for such a union.
+  if (operand === undefined && stringOrStringListArmsOnly(t))
+    return `((_v) => typeof _v === 'string' ? _SYS.chars(_v)[${idx}] : _v === undefined ? undefined : ${compilePointComponent(arg, idx, compile, target, '_v')})(${compiled()})`;
   if (mayBePointList(t)) {
     // The helper sees a tuple and a list as the same array, so it cannot
     // tell a list of lists of points (which the interpreter maps down to its
@@ -4697,9 +4740,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // A string base read as a string (`stringBase`) yields characters even
     // when its static type is the union `string | character`, which has no
     // element type of its own.
+    // What an index returns (`indexElementType`): for a `broadcastable<T>`
+    // whose `T` can hold a list, the elements of `T` too. A number arm of
+    // the base (`missing | number | vector<2>`, the base of `g(x)[1][2]`)
+    // is skipped, as the `At` type handler skips it: an index into a number
+    // is an error.
     const eltT = stringBase
       ? 'character'
-      : collectionElementType(stripMissingFromType(jsType(coll)));
+      : indexElementType(
+          withoutNumberArms(stripMissingFromType(jsType(coll)), coll)
+        );
     const scalarIndex =
       !isIndexedCollectionOperand(index) &&
       !index.type.matches('collection<any>');
@@ -4714,6 +4764,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       eltT !== 'unknown' &&
       eltT !== 'any' &&
       !numericElement;
+    // An element type with number arms AND other arms (the index into a
+    // `broadcastable<vector<2>>`, whose elements are `number | vector<2>`)
+    // does not decide the domain: the interpreter picks the marker from the
+    // type of the value (`absenceMarker`, `library/collections.ts`), `NaN`
+    // for a list of numbers and `Missing` for another list, the empty list
+    // included. `_SYS.atWithValueMarker` decides the same way at run time,
+    // and only for an index out of range: an element in range is returned
+    // as it is, a `NaN` element included.
+    // The helper reads a gather index (an index typed `list<integer>`) as
+    // well, with the same marker for each entry out of range.
+    if (objectDomain && !stringBase && hasNumberArm(eltT))
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
+    // A union base whose element type is not known (`indexElementType`
+    // answers nothing for it) but that may be a collection or absent: the
+    // marker is picked from the value too, and an absent base is absent.
+    if (
+      eltT === undefined &&
+      scalarIndex &&
+      !stringBase &&
+      isUnionWithCollectionOrAbsentArm(jsType(coll))
+    )
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
     // A NUMERIC element type is trusted by every consumer of this read: the
@@ -4959,6 +5031,36 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = args[0];
     if (coll != null && isGatedIndexedCollection(coll))
       return compile(coll.engine._fn('At', [coll, coll.engine.number(-1)]));
+    // `_SYS.at` answers `NaN` for the last element of an empty list, the
+    // marker of a numeric list. When the elements are not numbers, or may
+    // be numbers or lists (`indexElementType`), the interpreter answers
+    // `Missing` for an empty list of non-numbers, and picks the marker from
+    // the value otherwise: `_SYS.atWithValueMarker` does the same.
+    // A union base whose element type is not known but that may be a
+    // collection or absent (`isUnionWithCollectionOrAbsentArm`) reads the
+    // same way, as the `At` lowering does.
+    const eltT =
+      coll == null || isProvablyStringOperand(coll)
+        ? undefined
+        : indexElementType(
+            withoutNumberArms(stripMissingFromType(jsType(coll)), coll)
+          );
+    const present =
+      eltT === undefined
+        ? undefined
+        : stripMissingFromType(resolveTypeForCompilation(eltT));
+    if (
+      (present !== undefined &&
+        present !== 'unknown' &&
+        present !== 'any' &&
+        present !== 'never' &&
+        !isSubtype(present, 'number')) ||
+      (coll != null &&
+        eltT === undefined &&
+        !isProvablyStringOperand(coll) &&
+        isUnionWithCollectionOrAbsentArm(jsType(coll)))
+    )
+      return `_SYS.atWithValueMarker(${elementsArg('Last', coll, compile)}, -1)`;
     return `_SYS.at(${elementsArg('Last', coll, compile)}, -1)`;
   },
   // All-but-first / all-but-first-n / first-n. A negative `Take`/`Drop` count
@@ -5833,7 +5935,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Repeat\`: a non-integer count (${nConst}) is a type error in the ` +
           `interpreter.`
       );
-    return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compileRealOperand(args[1]!, compile)})`;
+    // A count whose type is not provably an integer (`missing | number |
+    // vector<2>`, an index into `g(x)` for `g(t) = [t, 2t]` and `x: any`;
+    // `number`) may be a list, the absent value, `NaN`, an infinity or a
+    // fraction at run time. The interpreter then answers an error
+    // (`incompatible-type`, or `unexpected-argument` for `NaN`), and
+    // `Math.round` of such a value gave `[]` or a rounded count: the emitted
+    // code throws instead. An integer count needs no check.
+    const check = isSubtype(args[1]!.type.type, 'integer')
+      ? ''
+      : `if (typeof _n !== 'number' || !Number.isInteger(_n)) throw new TypeError('Repeat: the count is not an integer at run time'); `;
+    return `((_v, _n) => { ${check}_n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compileRealOperand(args[1]!, compile)})`;
   },
   // Add one or more elements at the end. `Append` is variadic
   // (`docs/COLLECTIONS-MODEL.md`, Change 2):
@@ -11063,7 +11175,11 @@ function compileSumProduct(
     );
     if (elements !== undefined) {
       requireShapedFold(kind, args[0]);
-      const reduce = `(${elements}).reduce(${elementwiseFoldCombiner(kind, foldLane(args[0]))}, ${kind === 'Sum' ? '0' : '1'})`;
+      const reduce = `(${elements}).reduce(${elementwiseFoldCombiner(
+        kind,
+        mixedFoldLane(args[0]),
+        elementsMayDifferInShape(args[0])
+      )}, ${kind === 'Sum' ? '0' : '1'})`;
       // A parent reads the fold as a complex value `{re, im}` when
       // `isComplexValued` says so (`collection<complex>`), but the fold
       // answers the plain number of its identity for an empty collection, and
@@ -12436,8 +12552,96 @@ function nestedElementCombiner(
 ): string | undefined {
   if (!isSymbol(op)) return undefined;
   const elt = BaseCompiler.collectionElementTypeOf(coll);
-  if (elt === undefined || !isDefinitelyCollectionType(elt)) return undefined;
+  if (elt === undefined) return undefined;
+  const r = resolveTypeForCompilation(elt);
+  const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+  // An arm of a union element type that the element-wise combiner folds: a
+  // number, a tensor of a known rank (its rows are uniform), or a list of
+  // numbers. A list of lists with no dimensions may be ragged
+  // (`[[2], [2, 2]]`, the rows of `nest(x)` for `nest(t) = [[t], [t, t]]`),
+  // which the combiner would read as a matrix: such an arm is declined.
+  const foldable = (arm: Type): boolean => {
+    const a = resolveTypeForCompilation(arm);
+    if (isSubtype(a, 'number')) return true;
+    if (typeof a === 'string' || a.kind !== 'list') return false;
+    // A dimension list, or `null` for a tensor of unknown rank: either way
+    // the rows are uniform.
+    if (a.dimensions !== undefined) return true;
+    const e = collectionElementType(a);
+    return e !== undefined && isSubtype(e, 'number');
+  };
+  // Elements of several list shapes (`matrix<2x2> | vector<2>`) do not
+  // combine: the interpreter answers an `incompatible-dimensions` error.
+  // An `Add` fold checks the shapes when it runs (`checkShapes` of
+  // `elementwiseFoldCombiner`); another fold declines.
+  const severalShapes = hasSeveralListArms(elt);
+  if (severalShapes && op.symbol !== 'Add')
+    throw new Error(
+      `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+        `\`${typeToString(elt)}\`, lists of several shapes, has no compiled form. ` +
+        `The interpreter evaluates it instead.`
+    );
+  // Elements that may differ in shape (`elementsMayDifferInShape`): the
+  // fold checks the shapes when it runs.
+  const checkShapes = elementsMayDifferInShape(coll);
+  // Elements that may be numbers or lists (`number | vector<2>`): every
+  // element is a number, or every element is a list, so an `Add` or
+  // `Multiply` fold combines with the dispatching element-wise combiner,
+  // which adds two numbers as numbers and two lists element by element.
+  // Another fold has no compiled form for them. Elements whose cells are
+  // complex (`complex | matrix<complex>`) take the complex helpers, which
+  // multiply two matrices with complex entries; the dispatching form reads
+  // them as real.
+  // A complex seed (`Reduce(p, Multiply, ImaginaryUnit)`) makes the
+  // accumulator complex from the first step, so it also takes the complex
+  // helpers, as for the definite collections below.
+  if (mayBeCollectionType(elt)) {
+    if (
+      (op.symbol === 'Add' || op.symbol === 'Multiply') &&
+      arms.every(foldable)
+    ) {
+      const seedLane =
+        init !== undefined && init !== null
+          ? BaseCompiler.linearAlgebraOperandLane(init)
+          : 'real';
+      return elementwiseFoldCombiner(
+        op.symbol === 'Add' ? 'Sum' : 'Product',
+        foldLane(coll) === 'complex' || seedLane === 'complex'
+          ? 'complex'
+          : 'wide',
+        checkShapes
+      );
+    }
+    // The message names the arm that has no compiled fold (`missing` in
+    // `missing | vector<2>`, a list of lists that may be ragged), or the
+    // operator when every arm can be folded.
+    const other = arms.find((arm) => !foldable(arm));
+    throw new Error(
+      `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+        `\`${typeToString(elt)}\` has no compiled form` +
+        (other !== undefined
+          ? `: the arm \`${typeToString(other)}\` is not a number, a tensor or a list of numbers. `
+          : ` with \`${op.symbol}\`. `) +
+        `The interpreter evaluates it instead.`
+    );
+  }
+  if (!isDefinitelyCollectionType(elt)) return undefined;
   if (!['Add', 'Multiply', 'Min', 'Max'].includes(op.symbol)) return undefined;
+  // A union of collections with an arm that may be ragged (the elements of
+  // `Rest(nest(x))`, `list<list<vector<1> | vector<2>>> | vector<1> |
+  // vector<2>`) has no compiled fold.
+  if (
+    arms.length > 1 &&
+    arms.some((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      return typeof a !== 'string' && a.kind === 'list' && !foldable(arm);
+    })
+  )
+    throw new Error(
+      `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+        `\`${typeToString(elt)}\`, whose rows may have different lengths, has no compiled form. ` +
+        `The interpreter evaluates it instead.`
+    );
   // Only list rows are combined element-wise. A point (a tuple) is not:
   // the compiled array would be read as a list by an enclosing operator, so
   // `Reduce(pts, Add) + 1` broadcast the 1 where the interpreter answers an
@@ -12449,9 +12653,10 @@ function nestedElementCombiner(
       const seedLane = BaseCompiler.linearAlgebraOperandLane(init);
       if (seedLane !== 'real') lane = seedLane;
     }
-    if (op.symbol === 'Add') return elementwiseFoldCombiner('Sum', lane);
+    if (op.symbol === 'Add')
+      return elementwiseFoldCombiner('Sum', lane, checkShapes);
     if (op.symbol === 'Multiply')
-      return elementwiseFoldCombiner('Product', lane);
+      return elementwiseFoldCombiner('Product', lane, checkShapes);
   }
   throw new Error(
     `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
@@ -12627,6 +12832,125 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
 }
 
 /**
+ * True when `t` is a union with a string arm whose every other arm is
+ * `missing` or a list of strings with no dimensions (`list<string> | string`,
+ * an index into a `broadcastable<list<string>>`).
+ */
+function stringOrStringListArmsOnly(t: Type): boolean {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  if (!r.types.some((arm) => isSubtype(arm, 'string'))) return false;
+  return r.types.every((arm) => {
+    if (isSubtype(arm, 'string')) return true;
+    const a = resolveTypeForCompilation(arm);
+    return (
+      a === 'missing' ||
+      (typeof a !== 'string' &&
+        a.kind === 'list' &&
+        a.dimensions === undefined &&
+        isSubtype(a.elements, 'string'))
+    );
+  });
+}
+
+/**
+ * True when `t` is a union with an arm that is an indexed collection (not
+ * text) or the absent value `missing`: a base whose element read picks its
+ * absence marker from the value (`_SYS.atWithValueMarker`).
+ */
+function isUnionWithCollectionOrAbsentArm(t: Type): boolean {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return r.types.some((arm) => {
+    const a = resolveTypeForCompilation(arm);
+    return (
+      a === 'missing' ||
+      (a !== 'never' &&
+        !isSubtype(a, 'string') &&
+        isSubtype(a, INDEXED_COLLECTION_SHAPE_TYPE))
+    );
+  });
+}
+
+/**
+ * `t`, the type of the collection `coll`, without its number arms, when `t`
+ * is a union of number arms and other arms (`number | vector<2>`) and
+ * `coll` is an element read of a `broadcastable<T>` (`g(x)[1]` for
+ * `g(t) = [t, 2t]`): the `At` type handler skips such a number arm, because
+ * an index into a number is an error. For every other collection (a
+ * declared `number | list<number>`), `t` is kept, as the type handler keeps
+ * it.
+ */
+function withoutNumberArms(t: Type, coll: Expression): Type {
+  if (!readsBroadcastableElement(coll)) return t;
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string' || r.kind !== 'union') return t;
+  const others = r.types.filter(
+    (arm) => !isSubtype(resolveTypeForCompilation(arm), 'number')
+  );
+  if (others.length === 0 || others.length === r.types.length) return t;
+  return others.length === 1 ? others[0] : { kind: 'union', types: others };
+}
+
+/**
+ * True when `e` reads an element of a `broadcastable<T>` (`At`, `First`,
+ * `Second`, `Third` or `Last` of it, or of a `Take`, `Drop`, `Rest`, `Most`
+ * or `Slice` of it), whose `T` can hold a list. The broadcastable may be
+ * absent as a whole (`broadcastable<vector<2>> | missing`). The same test
+ * as `readsBroadcastableElement()` in `library/collections.ts`, on an
+ * expression.
+ */
+function readsBroadcastableElement(e: Expression): boolean {
+  if (
+    !isFunction(e) ||
+    !['At', 'First', 'Second', 'Third', 'Last'].includes(e.operator)
+  )
+    return false;
+  const isBroadcastable = (t: Type): boolean => {
+    const r = resolveTypeForCompilation(t);
+    const present =
+      typeof r !== 'string' && r.kind === 'union'
+        ? r.types.filter((m) => resolveTypeForCompilation(m) !== 'missing')
+        : [r];
+    return (
+      present.length === 1 &&
+      broadcastableIndexElementTypeOf(present[0]) !== undefined
+    );
+  };
+  const base = e.op1;
+  if (base === undefined) return false;
+  if (isBroadcastable(base.type.type)) return true;
+  return (
+    isFunction(base) &&
+    ['Take', 'Drop', 'Rest', 'Most', 'Slice'].includes(base.operator) &&
+    base.op1 !== undefined &&
+    isBroadcastable(base.op1.type.type)
+  );
+}
+
+/**
+ * True when the element type `t` is a union with an arm that may hold a
+ * number (after the `missing` arm is removed): a number arm
+ * (`number | vector<2>`), or an `unknown` or `any` arm
+ * (`list<unknown> | unknown`, an index into `broadcastable<list<unknown>>`).
+ * Such a type does not decide the absence marker of an access, and the
+ * `At`, `First` and `Last` lowerings pick it at run time
+ * (`_SYS.atWithValueMarker`), as the interpreter picks it from the value.
+ */
+function hasNumberArm(t: Type | undefined): boolean {
+  if (t === undefined) return false;
+  const r = resolveTypeForCompilation(stripMissingFromType(t));
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'union' &&
+    r.types.some((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      return a === 'unknown' || a === 'any' || isSubtype(a, 'number');
+    })
+  );
+}
+
+/**
  * Fail closed when the data of a statistics operator (`Mean`, `Median`,
  * `Variance`, `Max`, `Min`, …) is a list of lists: one operand whose
  * elements are collections, or several operands of which one is a
@@ -12676,9 +13000,14 @@ function refuseNestedData(
     if (r.kind === 'union') return r.types.some(isTensorOfUnknownRank);
     return isTensorOfUnknownRank(r);
   };
+  // An element that is or may be a collection (`number | vector<2>`, read
+  // without the `missing` arm of the operand: `elementsMayBeCollections`)
+  // is refused: the compiled `Max` of `[[2, 4], [3, 6]]` was `NaN`. A
+  // tensor of unknown rank and a `broadcastable<T>` operand are read by the
+  // rule above.
   const hasCollectionElements = (a: Expression | undefined): boolean =>
     a !== undefined &&
-    (isCollection(collectionElementType(a.type.type)) ||
+    (elementsMayBeCollections(a.type.type) ||
       mayBeTensorOfUnknownRank(a.type.type));
   // With one operand, the data is its elements. With several, a lowering
   // that spreads each list operand into the data (`compileExtremum`, so
@@ -13685,7 +14014,27 @@ function emitCollectionReduce(
   // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
   // `Sum(scalar) = scalar`).
   const identity = kind === 'Sum' ? '0' : '1';
-  const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind, foldLane(coll))}, ${identity}) : _c)(${code})`;
+  // An operand that may be absent as a whole (`list<number | vector<2>> |
+  // missing`) is `undefined` when absent, and the interpreter's sum or
+  // product of the absent value is `NaN`.
+  const otherwise = typeContainsMissing(coll.type.type)
+    ? `(_c === undefined ? NaN : _c)`
+    : '_c';
+  // Elements of several list shapes: a sum checks the shapes when it runs,
+  // and a product declines (`requireShapedFold`).
+  const severalShapes = hasSeveralListArms(
+    BaseCompiler.collectionElementTypeOf(coll)
+  );
+  if (severalShapes && kind === 'Product')
+    throw new Error(
+      'Could not compile `Product`: the elements are lists of several ' +
+        'shapes, which the interpreter does not combine.'
+    );
+  const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(
+    kind,
+    mixedFoldLane(coll),
+    elementsMayDifferInShape(coll)
+  )}, ${identity}) : ${otherwise})(${code})`;
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
   // of real elements, or the identity of an empty list, is a plain number.
@@ -13709,12 +14058,80 @@ function emitCollectionReduce(
  */
 function requireShapedFold(kind: 'Sum' | 'Product', coll: Expression): void {
   if (!BaseCompiler.foldsCollectionElements(coll)) return;
+  // Elements of several list shapes (`matrix<2x2> | vector<2>`,
+  // `vector<1> | vector<2>`): two of different shapes do not combine (the
+  // interpreter answers an `incompatible-dimensions` error). A sum checks
+  // the shapes when it runs (`elementwiseFoldCombiner`, `checkShapes`); the
+  // product of a matrix and a row has no element-wise form, and declines.
+  if (
+    kind === 'Product' &&
+    hasSeveralListArms(BaseCompiler.collectionElementTypeOf(coll))
+  )
+    throw new Error(
+      `Could not compile \`${kind}\`: the elements are lists of several ` +
+        `shapes, which the interpreter does not combine.`
+    );
   const type = coll.engine.function(kind, [coll]).type;
   if (type.matches('number'))
     throw new Error(
       `Could not compile \`${kind}\`: the elements are collections, but the ` +
         `shape of the result is not known.`
     );
+}
+
+/**
+ * True when two elements of the collection `coll` may be lists of
+ * different shapes, which `Add` and `Multiply` do not combine element-wise
+ * (the interpreter answers `incompatible-dimensions`): its element type has
+ * two or more list arms, or a union with a list arm whose shape the type
+ * does not fix (a list with no dimensions; a tensor of unknown rank beside
+ * a number, in a `list<real | tensor<real>>`). The rows of a matrix or of a
+ * `list<vector<3>>` have one shape, and so have the elements of one tensor
+ * (a `tensor<number>`, a `broadcastable<number>`): they are not checked.
+ */
+function elementsMayDifferInShape(coll: Expression): boolean {
+  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  if (elt === undefined) return false;
+  if (hasSeveralListArms(elt)) return true;
+  const own = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  if (
+    typeof own !== 'string' &&
+    (own.kind === 'broadcastable' ||
+      (own.kind === 'list' && own.dimensions !== undefined))
+  )
+    return false;
+  // One list type (`list<list<real>>` of rows of unequal length) is the
+  // divergence every compiled broadcast over unequal lengths has: the
+  // element-wise combiner answers `NaN` (pinned in
+  // `compile-absent-collection-operand.test.ts`). Only a union, whose arms
+  // can also differ in rank (a row beside a matrix, which the combiner
+  // broadcasts into a wrong value), is checked.
+  const r = resolveTypeForCompilation(elt);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return r.types.some((arm) => {
+    const a = resolveTypeForCompilation(arm);
+    return (
+      typeof a !== 'string' &&
+      a.kind === 'list' &&
+      (a.dimensions === undefined || a.dimensions === null)
+    );
+  });
+}
+
+/**
+ * True when the element type `elt` is a union with two or more different
+ * list arms (`matrix<2x2> | vector<2>`): elements of different shapes,
+ * which `Add` and `Multiply` do not combine.
+ */
+function hasSeveralListArms(elt: Type | undefined): boolean {
+  if (elt === undefined) return false;
+  const r = resolveTypeForCompilation(elt);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  const lists = r.types.filter((arm) => {
+    const a = resolveTypeForCompilation(arm);
+    return typeof a !== 'string' && a.kind === 'list';
+  });
+  return lists.length > 1;
 }
 
 /**
@@ -13729,6 +14146,50 @@ function requireShapedFold(kind: 'Sum' | 'Product', coll: Expression): void {
  * collection), the fold is the dispatching form `wide`, whose entries are
  * numbers or `{re, im}` as the run-time values are.
  */
+function mixedFoldLane(coll: Expression): 'real' | 'complex' | 'wide' {
+  // Elements that may be numbers or lists (`number | tensor<number>`, the
+  // elements of `Rest(p)` for a tensor of unknown rank) whose cells are not
+  // provably real: the dispatching form (`_SYS.addAny`), which adds a
+  // complex cell `{re, im}` as complex. The real-only `_SYS.add` read it as
+  // a string (`[0[object Object]3, 6]`). A collection that the complex lane
+  // folds (`list<complex | matrix<complex>>`) keeps it: the complex helpers
+  // (`_SYS.cmul`) take a scalar beside a matrix, and multiply two matrices
+  // with complex entries, which the dispatching form reads as real.
+  const lane = foldLane(coll);
+  if (lane === 'complex') return lane;
+  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  const r = elt === undefined ? undefined : resolveTypeForCompilation(elt);
+  if (
+    r !== undefined &&
+    typeof r !== 'string' &&
+    r.kind === 'union' &&
+    r.types.some((arm) =>
+      isSubtype(resolveTypeForCompilation(arm), 'number')
+    ) &&
+    !r.types.every((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      const cells = leafCellType(a);
+      return cells !== undefined && isSubtype(cells, 'real');
+    })
+  )
+    return 'wide';
+  return lane;
+}
+
+/** The cell type of `t`: `t` for a number, the cells of a tensor or of a
+ * list of numbers; `undefined` otherwise. A recursive alias
+ * (`type alias R = list<R>`) is unfolded under the descent guard
+ * (`unfoldAliasOnDescent`): when it reaches itself again, the answer is
+ * `undefined`, and the walk does not overflow the stack. */
+function leafCellType(t: Type, seen?: AliasDescent): Type | undefined {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const r = resolveTypeForCompilation(unfolded.type);
+  if (isSubtype(r, 'number')) return r;
+  if (typeof r === 'string' || r.kind !== 'list') return undefined;
+  return leafCellType(r.elements, unfolded.seen);
+}
+
 function foldLane(coll: Expression): 'real' | 'complex' | 'wide' {
   if (!BaseCompiler.foldsCollectionElements(coll)) return 'wide';
   return BaseCompiler.linearAlgebraLane([coll]) === 'complex'
@@ -13754,14 +14215,21 @@ function elementwiseFoldCombiner(
   // The dispatching form is the default: it is correct for any entries, and
   // a caller that knows the operand passes `foldLane(coll)` for the faster
   // real-only form.
-  lane: 'real' | 'complex' | 'wide' = 'wide'
+  lane: 'real' | 'complex' | 'wide' = 'wide',
+  // The elements may be lists of several shapes (`matrix<2x2> | vector<2>`,
+  // `hasSeveralListArms`): two lists of different shapes are an
+  // `incompatible-dimensions` error in the interpreter, so the combiner
+  // throws for them (`_SYS.requireSameShape`) instead of broadcasting one
+  // over the other.
+  checkShapes = false
 ): string {
   const tensor =
     kind === 'Sum'
       ? { real: '_SYS.add', complex: '_SYS.cadd', wide: '_SYS.addAny' }[lane]
       : { real: '_SYS.mul', complex: '_SYS.cmul', wide: '_SYS.mulAny' }[lane];
   const scalar = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
-  return `(_a, _b) => Array.isArray(_a) || Array.isArray(_b) ? ${tensor}(_a, _b) : ${scalar}(_a, _b)`;
+  const operands = checkShapes ? '(_SYS.requireSameShape(_a, _b), _b)' : '_b';
+  return `(_a, _b) => Array.isArray(_a) || Array.isArray(_b) ? ${tensor}(_a, ${operands}) : ${scalar}(_a, _b)`;
 }
 
 /**

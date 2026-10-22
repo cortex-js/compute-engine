@@ -7,6 +7,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   resolveTypeForCompilation,
+  stripMissingFromType,
 } from '../../common/type/utils.js';
 
 // Analyses of a compiled fold (`Reduce`/`Scan`, which `Fold` becomes) that
@@ -185,4 +186,69 @@ export function isDefinitelyCollectionType(t: Type | undefined): boolean {
   // list of rows given through a type name is recognized too.
   const resolved = resolveTypeForCompilation(t);
   return resolved !== 'never' && isSubtype(resolved, 'collection<any>');
+}
+
+/**
+ * True when `t` is a union that is not definitely a collection
+ * (`isDefinitelyCollectionType`) but has an arm that is: `number | vector<2>`,
+ * the elements of `Rest(g(x))` for `g(t) = [t, 2t]` and `x: any`. A value of
+ * such an element type may be a collection, so a fold or a statistic that
+ * reads each element as a number is wrong for it: the compiled `+` of two
+ * arrays concatenates them as strings.
+ */
+export function mayBeCollectionType(t: Type | undefined): boolean {
+  if (t === undefined || isDefinitelyCollectionType(t)) return false;
+  const resolved = resolveTypeForCompilation(t);
+  return (
+    typeof resolved !== 'string' &&
+    resolved.kind === 'union' &&
+    resolved.types.some((arm) => isDefinitelyCollectionType(arm))
+  );
+}
+
+/**
+ * True when an element of a collection operand of type `t` is, or may be,
+ * a collection, so that a fold or a statistic that reads each element as a
+ * number does not apply. The operand is read without its `missing` arm (a
+ * restricted list of vectors, `list<vector<2>> | missing`, is a list of
+ * vectors when present). The elements are a collection
+ * (`isDefinitelyCollectionType`), or a union with a collection arm
+ * (`mayBeCollectionType`). An operand that is a union
+ * (`matrix<2x2> | vector<2>`, an index into a `broadcastable<matrix<2x2>>`)
+ * is read arm by arm: its elements may be collections when those of one
+ * arm may be.
+ *
+ * When `tensorsReadByOwnRule` is true (the JavaScript target), an operand
+ * that is a tensor of unknown rank or a `broadcastable<T>`, whose elements
+ * are `T | tensor<T>`, is not counted: each JavaScript lowering reads such
+ * an operand by its own rule. The Python target has no such rule, and
+ * passes `false`.
+ */
+export function elementsMayBeCollections(
+  t: Type,
+  tensorsReadByOwnRule = true,
+  depth = 0
+): boolean {
+  // The depth bound stops the walk through a self-referential alias
+  // (`type alias cyc = cyc | list<integer>`).
+  if (depth > 8) return false;
+  const present = resolveTypeForCompilation(stripMissingFromType(t));
+  if (typeof present !== 'string' && present.kind === 'union')
+    return present.types.some((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      return (
+        a !== 'missing' &&
+        a !== 'nothing' &&
+        elementsMayBeCollections(arm, tensorsReadByOwnRule, depth + 1)
+      );
+    });
+  const elt = collectionElementType(present);
+  if (isDefinitelyCollectionType(elt)) return true;
+  if (!mayBeCollectionType(elt)) return false;
+  if (!tensorsReadByOwnRule) return true;
+  return !(
+    typeof present !== 'string' &&
+    (present.kind === 'broadcastable' ||
+      (present.kind === 'list' && present.dimensions === null))
+  );
 }

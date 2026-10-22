@@ -622,7 +622,9 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // A `broadcastable<T>` is a `T` or its collection arm
   // (`broadcastCollectionArm`). The elements of the arm are `T` for a
   // plain `list<T>`, and `T | tensor<T>` for the `tensor<T>` of a numeric
-  // `T`; the scalar reading adds nothing to either.
+  // `T`; the scalar reading adds nothing to either. (What an INDEX returns
+  // also includes the elements of a `T` that can hold a list: that reading
+  // is `indexElementType`, which only the element readers use.)
   if (type.kind === 'broadcastable')
     return listElementType(broadcastCollectionArm(type.elements));
 
@@ -661,6 +663,163 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
       ],
     };
   return undefined;
+}
+
+/**
+ * What one index into a value of the type `t` returns: the type of the
+ * element readers (`At` with a scalar index, the elements of the list that
+ * `At` with a gather index returns, `First`, `Second`, `Third`, `Last`, and
+ * the elements of the list that `Take`, `Drop`, `Rest`, `Most` and `Slice`
+ * return). It is
+ * {@link collectionElementType}, except for a `broadcastable<T>` whose `T`
+ * can hold a list.
+ *
+ * A `broadcastable<T>` is a `T` or a list of `T`. When `T` can hold a list
+ * (`vector<2>`), a value of the `T` arm is itself a list, and one index into
+ * it returns an element of `T`. So an index into `broadcastable<vector<2>>`
+ * (the type of `g(x)` for `g(t) = [t, 2t]` and an `x` that can be a number
+ * or a list) returns `number | vector<2>`: a number when the value is one
+ * vector, a vector when it is a list of vectors.
+ *
+ * This is not the element type that the other readers use
+ * (`collectionElementType`): a compile gate or an aggregate (`Sum`, `Max`,
+ * `Reduce`) that reads the elements of `broadcastable<vector<2>>` as
+ * vectors maps over the collection arm, and reading them as
+ * `number | vector<2>` made it combine a vector and a number.
+ */
+export function indexElementType(t: Readonly<Type>): Type | undefined {
+  return indexElementTypeOnDescent(t as Type, undefined);
+}
+
+/**
+ * {@link indexElementType} under the alias descent guard `seen`. A union
+ * (`matrix<2x2> | missing | vector<2>`, an index into a
+ * `broadcastable<matrix<2x2>>`) is read arm by arm: a `missing` or
+ * `nothing` arm is an absent value, which has no element, and is skipped;
+ * the element types of the other arms are joined. When an arm has no
+ * element type (a number), the union has none either (`undefined`), as
+ * `collectionElementType` answers for a union.
+ */
+function indexElementTypeOnDescent(
+  t: Type,
+  seen: AliasDescent
+): Type | undefined {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const r = unfolded.type;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    const present = r.types.filter((arm) => {
+      const a = resolveTypeAlias(arm);
+      return a !== 'missing' && a !== 'nothing';
+    });
+    if (present.length === 0) return undefined;
+    let result: Type | undefined;
+    for (const arm of present) {
+      const e = indexElementTypeOnDescent(arm, unfolded.seen);
+      if (e === undefined) return undefined;
+      result = result === undefined ? e : joinIndexElementTypes(result, e);
+    }
+    return result;
+  }
+  return broadcastableIndexElementTypeOf(r) ?? collectionElementType(r);
+}
+
+/**
+ * {@link indexElementType} when it differs from `collectionElementType`:
+ * for a `broadcastable<T>` (or a transparent alias of one) whose `T` can
+ * hold a list. `undefined` for every other type. A reader that has a more
+ * precise element type from another source (the `elttype` handler of the
+ * operand) uses that source only when this function answers `undefined`.
+ */
+export function broadcastableIndexElementTypeOf(
+  t: Readonly<Type>
+): Type | undefined {
+  const unfolded = unfoldAliasOnDescent(t, undefined);
+  if (unfolded === undefined) return undefined;
+  const r = unfolded.type;
+  if (
+    typeof r === 'string' ||
+    r.kind !== 'broadcastable' ||
+    cannotHoldAList(r.elements)
+  )
+    return undefined;
+  return broadcastableIndexElementType(r.elements, unfolded.seen);
+}
+
+/**
+ * What one index into a value of `broadcastable<cells>` returns (see
+ * {@link indexElementType}): the elements of the collection arm, joined
+ * with the elements of a value of the `cells` arm when `cells` can hold a
+ * list (`ownElementsOfBroadcastCell`). When `cells` cannot hold a list (a
+ * number, a tuple, a string), it is a cell and adds nothing. `seen` is the
+ * alias descent of the walk (`unfoldAliasOnDescent`).
+ */
+function broadcastableIndexElementType(cells: Type, seen: AliasDescent): Type {
+  const armElements = listElementType(broadcastCollectionArm(cells));
+  if (cannotHoldAList(cells)) return armElements;
+  const own = ownElementsOfBroadcastCell(cells, seen);
+  return own === undefined
+    ? armElements
+    : joinIndexElementTypes(own, armElements);
+}
+
+/**
+ * What one index into a value of the type `t` returns, when `t` is the cell
+ * type of a `broadcastable<t>` that can hold a list, or `undefined` when a
+ * value of `t` adds no element that the collection arm does not give.
+ *
+ * - A transparent alias is unfolded under the descent guard: a recursive
+ *   alias (`type alias R = broadcastable<R>`) is cut at its third unfold on
+ *   one path, and the cut answers the alias itself.
+ * - A union is read arm by arm. An arm that cannot hold a list (`missing`,
+ *   a number, a tuple, a string) is a cell and adds nothing, as for a `T`
+ *   that cannot hold a list. The elements of the other arms are joined:
+ *   for `vector<2> | missing` (the cells of `h(x)` for
+ *   `h(t) = When([t, 2t], t > 0)`), the elements are `number`.
+ * - A nested `broadcastable<U>` adds what an index into it returns.
+ * - Another type adds its element type (`collectionElementType`). A type
+ *   with no element type (`any`, a type variable) adds nothing.
+ */
+function ownElementsOfBroadcastCell(
+  t: Type,
+  seen: AliasDescent
+): Type | undefined {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  // At the cut the alias answers itself: a value of
+  // `type alias R = broadcastable<R>` is an `R` or a list of `R`, so its
+  // elements are `R`s.
+  if (unfolded === undefined) return t;
+  const r = unfolded.type;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    let result: Type | undefined;
+    for (const arm of r.types) {
+      if (cannotHoldAList(arm)) continue;
+      const own = ownElementsOfBroadcastCell(arm, unfolded.seen);
+      if (own === undefined) continue;
+      result = result === undefined ? own : joinIndexElementTypes(result, own);
+    }
+    return result;
+  }
+  if (typeof r !== 'string' && r.kind === 'broadcastable')
+    return broadcastableIndexElementType(r.elements, unfolded.seen);
+  return collectionElementType(r);
+}
+
+/**
+ * The join of the element types `a` and `b` of two readings of one value.
+ * When one holds the other, it is kept. An `unknown` or `any` element type
+ * does not absorb the other one: the two are kept as a union
+ * (`list<unknown> | unknown` for an index into `broadcastable<list<unknown>>`),
+ * so that a reader still sees the list arm and adds its absence marker
+ * (`widen` would also drop an `unknown` arm).
+ */
+function joinIndexElementTypes(a: Type, b: Type): Type {
+  if (a === b) return a;
+  if (a === 'unknown' || a === 'any' || b === 'unknown' || b === 'any')
+    return { kind: 'union', types: [b, a] };
+  if (isSubtype(b, a)) return a;
+  if (isSubtype(a, b)) return b;
+  return widen(a, b);
 }
 
 /**

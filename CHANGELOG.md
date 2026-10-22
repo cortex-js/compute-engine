@@ -314,6 +314,45 @@
 
 ### Behavior Changes
 
+- **An index into a `broadcastable<T>` value is typed by what it can return**
+  (Tycho row 425). With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
+  `broadcastable<vector<2>>`: a number `x` gives a vector, a list `x` a list of
+  vectors. `g(x)[1]` is now typed `missing | number | vector<2>` (it was
+  `missing | vector<2>`, which does not hold the number that `g(3)[1]` gives),
+  so `Repeat(0, g(x)[1])` is valid. The same reading applies to `First`,
+  `Second`, `Third`, `Last` and `At` with a list of indices, and to the
+  elements of `Take`, `Drop`, `Rest`, `Most` and `Slice` of such a value.
+  Other changes that follow:
+  - `Sum`, `Product`, and `Reduce` with `Add` and 0 or `Multiply` and 1, over
+    elements that may be numbers or rows are typed as a number or a row
+    (`Sum(Rest(m(x)))` with `m(t) = [[t, 2t], [3t, 4t]]` is
+    `integer | matrix<2x2> | vector<2>`; it was `number`), with `nan` when the
+    operand may be absent.
+  - Arithmetic on a union of lists with dimensions maps over the list:
+    `2·vv` for `vv: vector<2> | vector<3>` is `list<number>` (it was `number`).
+  - `Product`, `Reduce` and `Fold` with `Multiply` over elements that are
+    matrices or vectors are accepted (they were `incompatible-type`).
+  - `PointX`/`PointY` and `Dot` of a union of numbers and vectors are typed
+    from the vector arms; `PointX` of `string | list<string>` reads the
+    character or element at the position.
+  - Compiled JavaScript `At`, `First`, `Second`, `Third` and `Last` over
+    elements that may be numbers or lists choose the out-of-range value from
+    the value read, as the interpreter does: `NaN` for a list of numbers,
+    `Missing` otherwise. `Last([])` of a list that is not of numbers (a matrix
+    included) is now `Missing` (it was `NaN`).
+  - Compiled `Sum` and `Reduce` with `Add` over elements that may differ in
+    shape throw when two elements have different shapes, as the interpreter
+    answers `incompatible-dimensions`; compiled `Product` over such elements
+    declines.
+  - Compiled `Repeat` throws when its count is not an integer when the code
+    runs (it rounded the count, or returned `[]`).
+  - Compiled JavaScript `Max`, `Min`, `Mean`, `Median` and `Variance` over
+    elements that may be numbers or lists, or over an operand that may be
+    absent and holds lists, decline (they gave `NaN`). Python `Mean`,
+    `Median` and `Variance` of a `tensor` or `broadcastable` operand check the
+    rank when the code runs and raise for a matrix; Python folds over a
+    `tensor<number>` decline.
+
 - **Element-wise `If` and `Which` over a mask of any rank.** A condition that is
   a nested list of `True`/`False`/`Missing` now selects at every level. It
   stayed unevaluated before. With `M := [[1, 2], [3, 4]]`:
@@ -472,6 +511,17 @@
   engine tolerance makes more fits exact.
 
 ### Resolved Issues
+
+- **Compiled folds and reads over elements that mix numbers and lists gave
+  wrong values.** For a list whose elements may be numbers or vectors
+  (`list<number | vector<2>>`, a `tensor`, or the selectors of a
+  `broadcastable<vector<2>>`), compiled `Sum`, and `Reduce` with `Add` or
+  `Multiply`, joined the rows as strings (`"01,22,43,6"`) or gave `NaN`; they
+  now combine element by element, as the interpreter does. Compiled `Max`,
+  `Mean` and `Reduce(…, Max)` over such elements gave `NaN` or compared rows
+  as strings; they now decline. Python `Max`/`Min` of an operand that may be
+  absent or a list returned the operand itself; they now reduce it, and give
+  `NaN` for an absent or empty operand.
 
 - **`HadamardProduct`, and the element-wise sum, difference, quotient and power
   of two tensors, gave `undefined` cells when the two tensors had different data

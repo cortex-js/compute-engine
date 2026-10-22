@@ -160,8 +160,10 @@ import {
 } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
+  broadcastableIndexElementTypeOf,
   collectionElementType,
   containsBroadcastableType,
+  indexElementType,
   functionResult,
   functionArity,
   isAtomicValueType,
@@ -271,6 +273,7 @@ import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
   adjoinType as adjoinTypeD,
+  bigOpResultType,
   isUndefinedSymbolD,
   operandLiteralValue as descriptorLiteralValue,
   storedComponentTypeD,
@@ -4704,6 +4707,10 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
   // `unknown` for no element, which would make the access `missing |
   // unknown`.
   if (collectionElementType(t) === 'never') return 'never';
+  // An index into a `broadcastable<T>` whose `T` can hold a list also
+  // returns an element of `T` (`indexElementType`).
+  const indexed = broadcastableIndexElementTypeOf(t);
+  if (indexed !== undefined) return indexed;
   if (elt !== undefined) return elt;
   return collectionElementType(t) ?? 'any';
 }
@@ -5467,8 +5474,80 @@ function sliceResultTypeD(
   const valueType = ops[0].type;
   const base: Type = isSubtype(valueType, 'string')
     ? 'string'
-    : { kind: 'list', elements: collectionElementType(valueType) ?? 'any' };
+    : { kind: 'list', elements: indexElementType(valueType) ?? 'any' };
   return reduceType({ kind: 'union', types: [base, 'nothing'] });
+}
+
+/**
+ * The type of the list that a selector (`Take`, `Drop`, `Rest`, `Most`,
+ * `Slice`) returns from the collection `xs`, when `xs` is a
+ * `broadcastable<T>` whose `T` can hold a list; `undefined` for every other
+ * operand, which keeps the type that the signature gives (`list<T>` for an
+ * `indexed_collection<T>`).
+ *
+ * The signature binds `T` to the cells of the broadcastable, but a value of
+ * the `T` arm is itself a list, and the selector returns its elements:
+ * `Take(g(x), 1)` for `g(t) = [t, 2t]` and `x: any` is `[3]` when `x` is
+ * `3`, and `[[1, 2]]` when `x` is `[1, 2, 3]`. So the elements are what an
+ * index returns (`indexElementType`), `number | vector<2>`. This is a type
+ * handler of each selector, not a change of the signature solver, which
+ * also types the aggregates (`Sum`, `Max`, `Mean`): they read the elements
+ * of the collection arm.
+ */
+function selectorResultTypeD(
+  xs: OperandDescriptor | undefined
+): Type | undefined {
+  // A structural application with no operand (`Rest()`) keeps the
+  // signature's type.
+  if (xs === undefined) return undefined;
+  // An operand that may be a string (`broadcastable<any>`,
+  // `broadcastable<string | list<string>>`) keeps the signature's type: its
+  // string arm (`T where T: string`) types a string result, which the
+  // value is for `p = "abc"` (`Take(p, 1)` is `"a"`).
+  if (!provablyDisjoint(xs.type, 'string')) return undefined;
+  const indexed = broadcastableIndexElementTypeOf(xs.type);
+  return indexed === undefined
+    ? undefined
+    : { kind: 'list', elements: indexed };
+}
+
+/**
+ * Whether the operand `d` is an element read (`At`, `First`, `Second`,
+ * `Third`, `Last`) of a `broadcastable<T>` whose `T` can hold a list
+ * (`broadcastableIndexElementTypeOf`): `g(x)[1]` for `g(t) = [t, 2t]` and
+ * `x: any`. The number arm of the type of such a read comes from the
+ * scalar arm of the broadcastable.
+ */
+function readsBroadcastableElement(d: OperandDescriptor | undefined): boolean {
+  const s = d?.structureOf?.();
+  if (s?.kind !== 'application') return false;
+  if (!['At', 'First', 'Second', 'Third', 'Last'].includes(s.head))
+    return false;
+  // The broadcastable may be absent as a whole
+  // (`broadcastable<vector<2>> | missing`): its `missing` arm is skipped.
+  const isBroadcastable = (t: Type): boolean => {
+    const r = resolveTypeAlias(t);
+    const present =
+      typeof r !== 'string' && r.kind === 'union'
+        ? r.types.filter((m) => resolveTypeAlias(m) !== 'missing')
+        : [r];
+    return (
+      present.length === 1 &&
+      broadcastableIndexElementTypeOf(present[0]) !== undefined
+    );
+  };
+  const base = s.children[0];
+  if (base === undefined) return false;
+  if (isBroadcastable(base.type)) return true;
+  // A selector of such a broadcastable (`Rest(g(x))`, whose elements are
+  // `number | vector<2>`) reads its elements too.
+  const bs = base.structureOf?.();
+  return (
+    bs?.kind === 'application' &&
+    ['Take', 'Drop', 'Rest', 'Most', 'Slice'].includes(bs.head) &&
+    bs.children[0] !== undefined &&
+    isBroadcastable(bs.children[0].type)
+  );
 }
 
 /** Descriptor twin of {@link callbackResultType}. The declaration lookup is
@@ -5660,12 +5739,44 @@ function withMissingElements(t: Type): Type {
   };
 }
 
-/** Descriptor twin of {@link foldResultType}. */
+/**
+ * True when the elements of a collection of type `t` (read without its
+ * top-level `missing` arm, `indexElementType`) are a union of number arms
+ * and arms that are tensors (a list with dimensions or of unknown rank) or
+ * lists of numbers (`number | vector<2>`, `number | matrix<2x2>`,
+ * `number | tensor<number>`), with no tuple arm. Elements that are all
+ * lists (the rows of a matrix) have no number arm, and are not read so.
+ */
+function elementsMayBeNumbersOrRows(t: Type): boolean {
+  const elt = indexElementType(t);
+  if (elt === undefined) return false;
+  const r = resolveTypeAlias(elt);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  const arms = r.types
+    .map((m) => resolveTypeAlias(m))
+    .filter((m) => m !== 'missing');
+  const isNumber = (m: Type) => isSubtype(m, 'number') || m === 'nan';
+  const isRow = (m: Type) =>
+    typeof m !== 'string' &&
+    m.kind === 'list' &&
+    (m.dimensions === null ||
+      Array.isArray(m.dimensions) ||
+      (m.dimensions === undefined && isSubtype(m.elements, 'number')));
+  return (
+    arms.some(isNumber) &&
+    arms.some(isRow) &&
+    arms.every((m) => isNumber(m) || isRow(m))
+  );
+}
+
+/** Descriptor twin of {@link foldResultType}. `scan` is true for the
+ * element type of `Scan`, whose values are running values. */
 function foldResultTypeD(
   coll: OperandDescriptor | undefined,
   op: OperandDescriptor | undefined,
   init: OperandDescriptor | undefined,
-  engine: PureEngineView
+  engine: PureEngineView,
+  scan = false
 ): Type | undefined {
   if (op === undefined) return undefined;
   // The collection operand is given with the `missing` arm of its cells
@@ -5704,6 +5815,33 @@ function foldResultTypeD(
       elt !== undefined
         ? withoutNothing(elt)
         : elt;
+    // A seeded `Add` or `Multiply` fold, with the identity as its seed
+    // (`Reduce(p, Add, 0)`, and `Reduce(p, Multiply, 1)`, the form of
+    // `Product(p)`), over elements that may be numbers or rows
+    // (`list<number | vector<2>> | missing`, a tensor of unknown rank) is
+    // the sum or the product of the collection: it is typed as `Sum` or
+    // `Product` types it (`bigOpResultType`), a number or a row. Typed
+    // `unknown`, the fold was read as a number by an arithmetic parent:
+    // `Reduce(p, Add, 0) + 1` compiled to the string `"4,61"` for
+    // `p = [[1, 2], [3, 4]]`. The rule is narrow on purpose: elements that
+    // are all rows (a matrix) keep their typing, a tuple arm (the sum of
+    // two points is an error) keeps it too, another seed would be added to
+    // each cell, and a `Scan` (`scan`) yields running values, not the sum
+    // of a possibly empty collection.
+    if (
+      !scan &&
+      coll !== undefined &&
+      init !== undefined &&
+      descriptorLiteralValue(init) === (s.name === 'Add' ? 0 : 1) &&
+      (s.name === 'Add' || s.name === 'Multiply') &&
+      elementsMayBeNumbersOrRows(coll.type)
+    ) {
+      const shaped = bigOpResultType(
+        [coll],
+        s.name === 'Add' ? 'Sum' : 'Product'
+      );
+      if (shaped !== 'number' && isSubtype(shaped, 'any')) return shaped;
+    }
     if (supplied === undefined || !isSubtype(supplied, 'number'))
       return undefined;
     if (init === undefined) return withFirst(absorb(supplied));
@@ -6025,6 +6163,91 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
       e.types.some((b) => isPointElementType(b))
     )
       return 'unknown';
+  }
+  // A union with a string arm beside other arms (`list<string> | string`,
+  // an index into a `broadcastable<list<string>>`): each arm is read as it
+  // is, and the answers are joined. Read as one collection, the union lost
+  // the string elements of its list arm (`PointX` of `["a"]` is `"a"`).
+  // Only when every other arm is `missing` or a list of strings: beside a
+  // list of numbers or of points (`string | list<real>`), the union keeps
+  // the readings below, whose list type makes arithmetic on the coordinate
+  // decline at compile time (the coordinate of a string is a character, on
+  // which arithmetic is an error).
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'union' &&
+    t.types.length > 1 &&
+    t.types.some((b) => isSubtype(b, 'string')) &&
+    t.types.every((b) => {
+      if (isSubtype(b, 'string')) return true;
+      const r = resolveTypeAlias(b);
+      if (r === 'missing') return true;
+      return (
+        typeof r !== 'string' &&
+        r.kind === 'list' &&
+        r.dimensions === undefined &&
+        isSubtype(r.elements, 'string')
+      );
+    })
+  ) {
+    const answers = t.types.map((b) =>
+      pointComponentTypeD(
+        { type: b, facts: xs.facts, structureOf: undefined },
+        position
+      )
+    );
+    const present = answers.filter((a) => resolveTypeAlias(a) !== 'error');
+    if (present.length > 0)
+      return reduceType({ kind: 'union', types: present });
+  }
+  // A union of NUMBER arms and arms that are points or collections — the
+  // index into a `broadcastable<vector<2>>`, typed
+  // `missing | number | vector<2>`. The accessor of a number is an
+  // `incompatible-type` error (`PointX(3)`), a value no type admits, so the
+  // number arms contribute nothing, as an arm that answers an error
+  // contributes nothing to the union of points below. The other arms are
+  // read together: `PointX` of that index is a `number`, the value for
+  // `[1, 2]`. A union of number arms and `missing` alone keeps the readings
+  // below.
+  if (typeof t !== 'string' && t.kind === 'union') {
+    // Only beside a point or a list with dimensions, or for an element read
+    // of a broadcastable (`readsBroadcastableElement`): beside a list of no
+    // dimensions (`number | list<number>`, declared) the union keeps the
+    // readings below.
+    const others = t.types.filter((b) => !isSubtype(b, 'number'));
+    const fromBroadcastable = readsBroadcastableElement(xs);
+    if (
+      others.length > 0 &&
+      others.length < t.types.length &&
+      others.some((b) => {
+        const r = resolveTypeAlias(b);
+        return (
+          typeof r !== 'string' &&
+          ((fromBroadcastable && r.kind === 'tuple') ||
+            (r.kind === 'list' && (fromBroadcastable || !!r.dimensions)))
+        );
+      }) &&
+      (fromBroadcastable ||
+        !others.some((b) => {
+          const r = resolveTypeAlias(b);
+          return (
+            typeof r !== 'string' &&
+            (r.kind === 'tuple' ||
+              (r.kind === 'list' && r.dimensions === undefined))
+          );
+        }))
+    )
+      return pointComponentTypeD(
+        {
+          type:
+            others.length === 1
+              ? others[0]
+              : (reduceType({ kind: 'union', types: others }) ?? 'any'),
+          facts: xs.facts,
+          structureOf: undefined,
+        },
+        position
+      );
   }
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const ct = componentTypeD(xs, position);
@@ -12871,7 +13094,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // which can also hold a list) gives an indexed collection: a set source
     // is refused.
     type: (ops, { engine }) => {
-      const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine);
+      const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine, true);
       const known =
         resultType && resultType !== 'unknown' && resultType !== 'any'
           ? resultType
@@ -14430,6 +14653,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // record case below — the widen of its field types — because
         // `collectionElementType` reports a record's ITERATION pair
         // `tuple<string, T>`, which is not what an access returns.
+        // The base is an element read from a `broadcastable<T>` whose `T`
+        // can hold a list (`g(x)[1]`, typed `missing | number | vector<2>`,
+        // for `g(t) = [t, 2t]` and `x: any`): its number arm is skipped. An
+        // index into a number is an `incompatible-type` error, a value no
+        // type holds, so `g(x)[1][2]` is the `number` of the vector arm.
+        // Only for such a base: for another union with a number arm (the
+        // accumulator of a fold under refinement, `integer | list<never>`)
+        // the fallback below keeps the type open, which the refinement
+        // reads.
+        const indexable =
+          typeof t !== 'string' &&
+          t.kind === 'union' &&
+          readsBroadcastableElement(ops[0])
+            ? t.types.filter((arm) => !isSubtype(arm, 'number'))
+            : [];
+        if (
+          typeof t !== 'string' &&
+          t.kind === 'union' &&
+          indexable.length > 0 &&
+          indexable.length < t.types.length
+        )
+          t =
+            indexable.length === 1
+              ? indexable[0]
+              : { kind: 'union', types: indexable };
         if (typeof t !== 'string' && t.kind === 'union') {
           const arms = t.types.map((arm) =>
             typeof arm === 'string'
@@ -14438,7 +14686,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 ? arm.values
                 : arm.kind === 'record'
                   ? (widen(...Object.values(arm.elements)) as Type)
-                  : collectionElementType(arm)
+                  : indexElementType(arm)
           );
           if (arms.every((arm) => arm !== undefined)) {
             // `widen` reads `unknown` as "no type yet" and drops it, so
@@ -14497,6 +14745,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An empty collection (`list<never>`, the type of `[]`) has no
         // element, as in `componentTypeD`: `At([], 2)` is `Missing`. The
         // `elttype` handler of a literal answers `unknown` for no element.
+        //
+        // An index into a `broadcastable<T>` whose `T` can hold a list also
+        // returns an element of `T` (`indexElementType`): `g(x)[1]` for
+        // `g(t) = [t, 2t]` and `x: any` is a number when `x` is a number.
+        const indexed = broadcastableIndexElementTypeOf(t);
+        if (indexed !== undefined) return indexed;
         const declared = collectionElementType(t);
         if (declared === 'never') return 'never';
         return xs.facts.elementType ?? declared ?? 'any';
@@ -15222,6 +15476,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)',
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        selectorResultTypeD(xs),
+        context.engine._typeResolver
+      ),
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
@@ -15381,6 +15640,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)',
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        selectorResultTypeD(xs),
+        context.engine._typeResolver
+      ),
     collection: refusingUnindexedSource({
       // A symbolic count walks nothing, and that empty walk does not mean an
       // empty result, so the answer is `false`: answering the source's
@@ -15747,6 +16011,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        selectorResultTypeD(xs),
+        context.engine._typeResolver
+      ),
     collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -15831,6 +16100,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)',
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        selectorResultTypeD(xs),
+        context.engine._typeResolver
+      ),
     collection: refusingUnindexedSource({
       // The walk below reads the source by position up to its count, so it
       // yields nothing for a finite source with no count (see
@@ -16002,8 +16276,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // span makes the result possibly-`Nothing`. Returning `undefined` leaves
     // the resolver's arm in place, which is the whole mechanism for keeping
     // `Slice("abc", 2..3)` typed exactly `string`.
-    type: (ops, context) =>
-      BoxedType.forResult(sliceResultTypeD(ops), context.engine._typeResolver),
+    type: (ops, context) => {
+      const sliced = sliceResultTypeD(ops);
+      if (sliced !== undefined)
+        return BoxedType.forResult(sliced, context.engine._typeResolver);
+      const selected =
+        ops[0] === undefined ? undefined : selectorResultTypeD(ops[0]);
+      // The span form keeps the `nothing` arm that the signature's span
+      // overload (`range | nothing`) gives its result.
+      return BoxedType.forResult(
+        selected !== undefined && ops.length === 2
+          ? reduceType({ kind: 'union', types: [selected, 'nothing'] })
+          : selected,
+        context.engine._typeResolver
+      );
+    },
     // `Slice(xs, Nothing)` folds to `Nothing`, which is why this handler
     // exists at all: the framework's DEFAULT canonicalization runs `flatten`
     // first, and `flatten` DROPS a `Nothing` operand outright — it is the

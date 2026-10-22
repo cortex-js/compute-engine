@@ -42,6 +42,7 @@ import {
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
   assertAccumulatorFitsStep,
+  elementsMayBeCollections,
   inPlaceUpdateChains,
   isDefinitelyCollectionType,
 } from './in-place-update.js';
@@ -71,6 +72,8 @@ import {
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
+  containsBroadcastableType,
+  indexElementType,
   functionResult,
   isPointElementType,
   resolveTypeForCompilation,
@@ -3376,10 +3379,31 @@ function compilePythonExtremum(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression> | undefined
 ): string {
-  const parts = args.map((a) =>
-    isPyCollectionOperand(a) ? `${reduce}(${compile(a)})` : compile(a)
-  );
+  // An operand that is not provably a collection but may be one
+  // (`broadcastable<number>`, `matrix | missing`, `list<vector<2>> | missing`)
+  // is reduced too: NumPy reduces a number to itself and a list to its
+  // extremum. Read as a scalar, the whole list was the answer. An absent
+  // value (`None`) gives `NaN`, as the interpreter's extremum of an absent
+  // collection does. An empty list (`np.max([])` raises) gives `NaN` alone,
+  // as `Max([])` does. Beside other operands, an empty list is skipped
+  // (`None`), as `Max([], 5)` ignores it (`5`), and the answer is `NaN`
+  // when every operand is skipped (`Max([], [])`), as in the interpreter.
+  const empty = args.length === 1 ? "float('nan')" : 'None';
+  let mayBeEmpty = false;
+  const parts = args.map((a) => {
+    if (isPyCollectionOperand(a)) return `${reduce}(${compile(a)})`;
+    if (
+      pyCouldBeIndexedCollectionOperand(a) ||
+      containsBroadcastableType(a.type.type)
+    ) {
+      mayBeEmpty = true;
+      return `(lambda _v: float('nan') if _v is None else (${empty} if np.size(_v) == 0 else ${reduce}(_v)))(${compile(a)})`;
+    }
+    return compile(a);
+  });
   if (parts.length === 0) return reduce === 'np.max' ? '-np.inf' : 'np.inf';
+  if (parts.length > 1 && mayBeEmpty)
+    return `(lambda _ys: float('nan') if len(_ys) == 0 else ${reduce}(_ys))([_y for _y in (${parts.join(', ')}) if _y is not None])`;
   // ONE scalar operand emits no call at all — the lowering is the operand's
   // own code — so it is parenthesized on the identity-passthrough rule (see
   // `pyIdentityPassthrough`): `2·max(x + 1)` emitted `2 * x + 1`, which is
@@ -3441,9 +3465,15 @@ function pyRefuseBuiltinFoldOverCollections(
   operator: string,
   coll: Expression | undefined
 ): void {
+  // Elements that may be numbers or collections (`number | vector<2>`), and
+  // the elements of an operand with a `missing` arm, are read by
+  // `elementsMayBeCollections`. This target has no rule of its own for a
+  // tensor of unknown rank or a `broadcastable<T>` (whose elements may be
+  // rows), so such an operand is refused too (`false`).
   if (
     coll !== undefined &&
-    isDefinitelyCollectionType(BaseCompiler.collectionElementTypeOf(coll))
+    (isDefinitelyCollectionType(BaseCompiler.collectionElementTypeOf(coll)) ||
+      elementsMayBeCollections(coll.type.type, false))
   )
     throw new Error(
       `Could not compile \`${operator}\`: a built-in fold over elements that are collections. ` +
@@ -3468,16 +3498,39 @@ function compilePythonSample(
 ): string {
   if (args.length === 0 || args[0] == null)
     throw new Error(`Could not compile \`${fn}\`: no argument`);
+  // One operand that is a tensor of unknown rank or a `broadcastable<T>`
+  // (refused only by the `false` reading below): a number or a list of
+  // numbers is a sample NumPy reads as the interpreter does, and a matrix is
+  // an `incompatible-type` error in the interpreter. The emitted code checks
+  // the rank when it runs.
+  const single = args.length === 1 ? args[0] : undefined;
+  if (
+    single !== undefined &&
+    !isDefinitelyCollectionType(
+      collectionElementType(resolveTypeForCompilation(single.type.type))
+    ) &&
+    !elementsMayBeCollections(single.type.type, true) &&
+    elementsMayBeCollections(single.type.type, false)
+  ) {
+    const name = PY_SAMPLE_OPERATOR[fn] ?? fn;
+    return `(lambda _d: ${fn}(_d${kwargs}) if np.ndim(_d) <= 1 else (_ for _ in ()).throw(TypeError('${name}: an element of the data is a list at run time')))(${compile(single)})`;
+  }
   // A list operand whose elements are collections (a list of lists): NumPy
   // computes over every number in it, while the interpreter answers an
   // `incompatible-type` error (`Mean([[1, 2], [3, 5]])`). Refusing lets the
   // interpreter answer. Several list operands are flattened one level below,
   // as the interpreter does.
+  // Elements that may be numbers or collections (`number | vector<2>`), and
+  // the elements of an operand with a `missing` arm, are read by
+  // `elementsMayBeCollections`: `np.mean` of `[[3, 4], [5, 6]]` is 4.5. A
+  // tensor of unknown rank and a `broadcastable<T>` are refused too
+  // (`false`): this target has no rule of its own for them.
   if (
-    args.some((a) =>
-      isDefinitelyCollectionType(
-        collectionElementType(resolveTypeForCompilation(a.type.type))
-      )
+    args.some(
+      (a) =>
+        isDefinitelyCollectionType(
+          collectionElementType(resolveTypeForCompilation(a.type.type))
+        ) || elementsMayBeCollections(a.type.type, false)
     )
   )
     throw new Error(
@@ -3673,19 +3726,41 @@ function pyCollArg(
  */
 function pyAbsenceMarker(coll: Expression): string {
   const collT = stripMissingFromType(resolveTypeForCompilation(coll.type.type));
-  const eltT = collectionElementType(collT);
+  // What an index returns (`indexElementType`): for a `broadcastable<T>`
+  // whose `T` can hold a list, the elements of `T` too.
+  const eltT = indexElementType(collT);
   const present =
     eltT === undefined
       ? undefined
       : stripMissingFromType(resolveTypeForCompilation(eltT));
+  // An element type with an arm that may be a number beside other arms
+  // (`number | vector<2>`, `list<unknown> | unknown`) does not decide the
+  // marker: the run-time reading below picks it from the value, as the
+  // interpreter does.
+  const mixed =
+    present !== undefined &&
+    typeof present !== 'string' &&
+    present.kind === 'union' &&
+    !isSubtype(present, 'number') &&
+    present.types.some((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      return a === 'unknown' || a === 'any' || isSubtype(a, 'number');
+    });
   if (
     present !== undefined &&
+    !mixed &&
     present !== 'unknown' &&
     present !== 'any' &&
     present !== 'never'
   )
     return isSubtype(present, 'number') ? "float('nan')" : 'None';
-  return "((lambda _c: float('nan') if len(_c) > 0 and all(isinstance(_x, (int, float, complex, np.number)) and not isinstance(_x, (bool, np.bool_)) for _x in _c) else None)([_x for _x in list(_l)[:10] if _x is not None]) if isinstance(_l, (list, tuple, np.ndarray)) else None)";
+  // An element type that is not known reads the first 10 elements, as the
+  // interpreter's probe does (`MAX_ABSENCE_MARKER_PROBE`). A mixed element
+  // type reads every element: the interpreter then picks the marker from
+  // the type of the whole value, so a list of 10 numbers and one list is
+  // read as a list of lists.
+  const probe = mixed ? 'list(_l)' : 'list(_l)[:10]';
+  return `((lambda _c: float('nan') if len(_c) > 0 and all(isinstance(_x, (int, float, complex, np.number)) and not isinstance(_x, (bool, np.bool_)) for _x in _c) else None)([_x for _x in ${probe} if _x is not None]) if isinstance(_l, (list, tuple, np.ndarray)) else None)`;
 }
 
 /**

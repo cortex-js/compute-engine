@@ -1445,6 +1445,41 @@ function innerProductType(
 }
 
 /**
+ * The operand `d` read without the number arms of its type, when its type
+ * is a union of number arms and other arms (`number | vector<2>`); `d`
+ * otherwise. `Dot` of a number is an `incompatible-type` error, a value no
+ * type holds, so the number arms add nothing to the type of the product.
+ * The structural view is dropped: it describes the whole operand.
+ */
+function withoutNumberArms(d: OperandDescriptor): OperandDescriptor {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'union') return d;
+  const others = t.types.filter((arm) => !isSubtype(arm, 'number'));
+  if (others.length === 0 || others.length === t.types.length) return d;
+  // Only beside lists with dimensions (`number | vector<2>`): beside a
+  // list with no dimensions (`list<number> | number`, declared) the product
+  // of an empty list stays unevaluated, a value `number` does not hold.
+  if (
+    !others.every((arm) => {
+      const r = resolveTypeAlias(arm);
+      return (
+        r === 'missing' ||
+        (typeof r !== 'string' && r.kind === 'list' && !!r.dimensions)
+      );
+    })
+  )
+    return d;
+  return {
+    type:
+      others.length === 1
+        ? others[0]
+        : reduceType({ kind: 'union', types: others }),
+    facts: d.facts,
+    structureOf: undefined,
+  };
+}
+
+/**
  * Is this operand a PROVABLY numeric tuple — a point in ℝⁿ? The
  * descriptor-shape reading of `isNumericTuple` (`collection-utils.ts`),
  * which is a question about the operand's type alone. Strict on purpose: a
@@ -3596,8 +3631,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       //    prove numeric. An undeclared symbol could be a string or a nested
       //    tuple, and claiming a number on such retractable evidence is how
       //    `Multiply` once mistyped a point list (Tycho item 158).
-      type: ([a, b], { derive, engine }) => {
-        if (!a || !b) return BoxedType.forResult('value', engine._typeResolver);
+      type: ([a0, b0], { derive, engine }) => {
+        if (!a0 || !b0)
+          return BoxedType.forResult('value', engine._typeResolver);
+        // An operand that may be a number or a vector (`number | vector<2>`,
+        // an index into `g(x)` for `g(t) = [t, 2t]` and `x: any`) is read by
+        // its other arms: the product of a number is an `incompatible-type`
+        // error, a value no type holds.
+        const a = withoutNumberArms(a0);
+        const b = withoutNumberArms(b0);
         if (
           [a, b].every(
             (x) =>

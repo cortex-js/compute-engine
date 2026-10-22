@@ -5,7 +5,11 @@ import {
   NUMERIC_TYPES_SET,
 } from '../../common/type/primitive.js';
 import type { OperandDescriptor, Sign } from '../global-types.js';
-import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
+import type {
+  ListType,
+  NumericPrimitiveType,
+  Type,
+} from '../../common/type/types.js';
 import { isSubtype, tensorOf } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
 import {
@@ -1810,6 +1814,10 @@ function bigOpOverDomainType(
  */
 const NUMBER_OR_NAN_TYPE = parseType('number | nan');
 
+/** A number or a list of any depth: the sum or the product of elements
+ * that are numbers or lists whose cells the type does not state. */
+const NUMBER_OR_LIST_OF_ANY_TYPE = parseType('number | list<any>');
+
 /**
  * The collection type of the operand of `Sum`/`Product`, when it is a list
  * or an abstract collection (`collection`, `indexed_collection`, `set`) of
@@ -1893,6 +1901,64 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
     return dims === undefined || dims[0] <= 0
       ? reduceType({ kind: 'union', types: [sum, 'integer'] })
       : sum;
+  }
+  // An element type that is a union of lists of numbers and numbers
+  // (`number | vector<2>`, the elements of `Rest(g(x))` for
+  // `g(t) = [t, 2t]` and `x: any`; `matrix<2x2> | vector<2>`, the elements
+  // of `Rest(m(x))` for `m(t) = [[t, 2t], [3t, 4t]]`), with or without a
+  // `missing` arm. The elements of one list may come from different arms
+  // (`[0.5, [1, 2]]` for `list<real | vector<integer>>`), and a number
+  // added to a list is added to each cell (the sum is `[1.5, 2.5]`). So a
+  // list arm sums to a list of the same shape whose cells are the sum of
+  // its cells and of every number arm, and the number arms alone sum to a
+  // number. An absent element (`missing`) adds `NaN` to every cell
+  // (`Sum([Missing, [1, 2]])` is `[NaN, NaN]`), and a list of absent
+  // elements only sums to `NaN` (`Sum([Missing])`). An arm that is not
+  // readable (a list of lists of no shape) makes the whole type
+  // `undefined`.
+  if (el.kind === 'union') {
+    const all = el.types.map((m) => resolveTypeAlias(m));
+    const absent = all.some((m) => m === 'missing');
+    const members = all.filter((m) => m !== 'missing');
+    const isList = (m: Type): m is ListType =>
+      typeof m === 'object' && m.kind === 'list';
+    if (
+      members.some(isList) &&
+      members.every((m) => isList(m) || isSubtype(m, NUMBER_OR_NAN_TYPE))
+    ) {
+      const scalars = members.filter((m) => !isList(m));
+      const withOthers = (c: Type): Type =>
+        reduceType({
+          kind: 'union',
+          types: [c, ...scalars, ...(absent ? (['nan'] as Type[]) : [])],
+        });
+      const parts: Type[] = [];
+      for (const m of members) {
+        if (!isList(m)) continue;
+        if (m.dimensions && m.dimensions.some((n) => n === 0)) return undefined;
+        const sum = componentSum(withOthers(m.elements));
+        // A list arm whose cells are not numbers (the cells `N` of
+        // `type alias N = list<N> | number`, a list of lists of any depth)
+        // sums to a number or a list of any depth: the type says so, and
+        // not `number`, which a list sum is not.
+        if (sum === undefined) return NUMBER_OR_LIST_OF_ANY_TYPE;
+        parts.push({ ...m, elements: sum });
+      }
+      if (scalars.length > 0 || absent) {
+        const sum = componentSum(
+          reduceType({
+            kind: 'union',
+            types: [...scalars, ...(absent ? (['nan'] as Type[]) : [])],
+          })
+        );
+        if (sum === undefined) return undefined;
+        parts.push(sum);
+      }
+      const sum = reduceType({ kind: 'union', types: parts });
+      return dims === undefined || dims[0] <= 0
+        ? reduceType({ kind: 'union', types: [sum, 'integer'] })
+        : sum;
+    }
   }
   // A list literal of points whose components differ in type has a union
   // of tuple types as its element type (`[(1, NaN), (2, 3)]` has the
@@ -2002,6 +2068,21 @@ function bigOpTopType(
 }
 
 /**
+ * The type `t` without its top-level `missing` arm, when `t` is a union
+ * with such an arm and at least one other arm; `undefined` otherwise.
+ */
+function stripTopLevelMissing(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  const present = r.types.filter((m) => resolveTypeAlias(m) !== 'missing');
+  if (present.length === 0 || present.length === r.types.length)
+    return undefined;
+  return present.length === 1
+    ? present[0]
+    : reduceType({ kind: 'union', types: present });
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
@@ -2027,6 +2108,24 @@ export function bigOpResultType(
     const shaped =
       operator === 'Sum' ? shapedSumType(ops[0]) : shapedProductType(ops[0]);
     if (shaped !== undefined) return shaped;
+    // An operand that may be absent as a whole
+    // (`list<number | vector<2>> | missing`): the sum or the product of its
+    // present value has the shaped type, and the absent value gives `NaN`
+    // (`Sum(Missing)` is `NaN`). Read with its `missing` arm, the operand
+    // was no collection, and the type was `number`, which a row does not
+    // hold.
+    const present = stripTopLevelMissing(ops[0].type);
+    if (present !== undefined) {
+      const d: OperandDescriptor = {
+        type: present,
+        facts: ops[0].facts,
+        structureOf: ops[0].structureOf,
+      };
+      const shapedPresent =
+        operator === 'Sum' ? shapedSumType(d) : shapedProductType(d);
+      if (shapedPresent !== undefined)
+        return reduceType({ kind: 'union', types: [shapedPresent, 'nan'] });
+    }
   }
   const body = ops[0];
   if (ops.length > 1 && operator !== undefined && body !== undefined) {
@@ -2126,6 +2225,62 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
     const elements = entryProduct(el.elements);
     if (elements === undefined) return undefined;
     const product: Type = { kind: 'broadcastable', elements };
+    return dims === undefined || dims[0] <= 0
+      ? reduceType({ kind: 'union', types: [product, 'integer'] })
+      : product;
+  }
+  // An element type that is a union of lists of numbers and numbers
+  // (`number | vector<2>`, `number | tensor<number>`), with or without a
+  // `missing` arm: as for `shapedSumType`, a list arm multiplies to a list
+  // of the same shape (a row element-wise, a square matrix as a matrix, a
+  // tensor of unknown rank as a tensor) whose entries are products of its
+  // entries and of every number arm, and the number arms alone multiply to
+  // a number. An absent element adds `NaN`. A matrix known not to be square
+  // has no product, and the type is not read.
+  if (el.kind === 'union') {
+    const all = el.types.map((m) => resolveTypeAlias(m));
+    const absent = all.some((m) => m === 'missing');
+    const members = all.filter((m) => m !== 'missing');
+    const isRow = (m: Type): m is ListType =>
+      typeof m === 'object' &&
+      m.kind === 'list' &&
+      (m.dimensions === undefined ||
+        m.dimensions === null ||
+        m.dimensions.length === 1 ||
+        (m.dimensions.length === 2 &&
+          (m.dimensions[0] < 0 ||
+            m.dimensions[1] < 0 ||
+            m.dimensions[0] === m.dimensions[1])));
+    if (
+      !members.some(isRow) ||
+      !members.every((m) => isRow(m) || isSubtype(m, NUMBER_OR_NAN_TYPE))
+    )
+      return undefined;
+    const scalars = members.filter((m) => !isRow(m));
+    const absentArm: Type[] = absent ? ['nan'] : [];
+    const parts: Type[] = [];
+    for (const m of members) {
+      if (!isRow(m)) continue;
+      if (m.dimensions && m.dimensions.some((n) => n === 0)) return undefined;
+      const product = entryProduct(
+        reduceType({
+          kind: 'union',
+          types: [m.elements, ...scalars, ...absentArm],
+        })
+      );
+      // Cells that are not numbers: a number or a list of any depth, as
+      // for `shapedSumType`.
+      if (product === undefined) return NUMBER_OR_LIST_OF_ANY_TYPE;
+      parts.push({ ...m, elements: product });
+    }
+    if (scalars.length > 0 || absent) {
+      const product = entryProduct(
+        reduceType({ kind: 'union', types: [...scalars, ...absentArm] })
+      );
+      if (product === undefined) return undefined;
+      parts.push(product);
+    }
+    const product = reduceType({ kind: 'union', types: parts });
     return dims === undefined || dims[0] <= 0
       ? reduceType({ kind: 'union', types: [product, 'integer'] })
       : product;

@@ -617,6 +617,13 @@ With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
   tensor of `boolean | missing`. When `p` is `Missing`, the value is
   `Missing`, which that type does not hold: the broadcast keeps the absence of
   the cells, not of the whole operand.
+  The comparison lift never sees the top-level `missing` arm: its caller in
+  `boxed-function.ts` removes it first. Since the fix of row 425, the union
+  `vector<2> | vector<3> | missing` has the same gap: `Equal(p, 1)` is typed
+  `list<boolean | missing>`, which holds the list a present vector gives but
+  not `Missing` (on `cc468eb4f` it was `boolean | missing`, which held
+  `Missing` but not the list). Fix: keep the operand's top-level `missing` arm
+  in the lifted result (`list<boolean | missing> | missing`).
 - **An unseeded `Reduce` over an empty list gives `Nothing` in the interpreter
   and `NaN` when compiled** (`Reduce([], Multiply)`, every list type, on
   `cc468eb4f` too).
@@ -643,17 +650,24 @@ With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
 - **A `When`-restricted function compiles to `Missing` where the interpreter
   gives the restricted values**: `r(t) = When([t, 2t], c > 0)` with `c: real`
   (on `cc468eb4f` too).
-- **Compiled broadcast arithmetic reads `number` cells as real.** For
-  `p: tensor<number>` holding `[0, 1+i, 2]`, compiled `Add(p, 1)` gives the
-  string `"[object Object]1"` (on `cc468eb4f` too): the broadcast lowering of
-  an operand typed `number | tensor` uses plain `+`/`*` inside `_SYS.bcast`.
-  Since the fix of row 425, `Add(Sum(Rest(p)), 1)` also takes that lowering
-  (its type is now `number | tensor`, which holds a matrix sum); on
-  `cc468eb4f` it was typed `number` and compiled on the complex lane, which
-  was right for a one-level `p` only. The folds themselves now use the
-  complex-aware add. Decision owed: whether a compiled `number` cell may hold
-  a complex value (then `bcast` needs the complex-aware combiner, at a cost
-  per element) or not (then such a value is outside the compiled contract).
+- **The `complex` compile mode does not reach the cells of a list input.**
+  With `mode: 'complex'`, a scalar input declared `number` compiles on the
+  complex lane (`Add(p, 1)` gives `{re: 2, im: 1}` for `p = 1+i`), but a list
+  or tensor input declared `list<number>` or `tensor<number>` compiles
+  `Add(p, 1)` to `_SYS.bcast((a, b) => a + b, _.p, 1)`, so a cell `1+i` gives
+  the string `"[object Object]1"` (measured on `cc468eb4f` and with the fix of
+  row 425). `docs/COMPILATION-MODEL.md` ("Complex modes") says the `complex`
+  mode compiles wide numeric bindings through complex kernels. Fix: in the
+  `complex` mode, the broadcast lowering of `Add`/`Multiply` (and the other
+  cell functions) uses the complex-aware combiner (`_SYS.sadd`, as it already
+  does for `list<complex>`) when the cell type admits a complex value. Not a
+  defect in the `strict` and `auto` modes: there a complex value at an entry of
+  a list read on the real lane computes as plain JavaScript, as documented. A
+  symbol with an assigned value is not affected: its value is embedded in the
+  compiled code and its type read from the value (`vector<complex^3>`), so the
+  complex lane is chosen. Since the fix of row 425, `Add(Sum(Rest(p)), 1)` for
+  `p: tensor<number>` also goes through this lowering (its type is now
+  `number | tensor`).
 - **`Dot(p, p)` for `p: list<number>` at `p = []`**: the interpreter leaves
   `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0` (on
   `cc468eb4f` too).
@@ -956,29 +970,6 @@ dictionary). These remain, each measured with a fix and reverted:
 
 ### User decisions owed by the change that reads a list type by its elements (OPEN, decisions — found 2026-10-22 by the same change)
 
-- **The cell rule of a list with dimensions.** The implementation lets a list
-  with dimensions have any cells that are not lists: `list<boolean^2>`,
-  `list<string^2>` and `list<tuple<number, number>^3>` are valid, and
-  `[True, False]` is typed `list<boolean^2>`. The rule the user decided first
-  (decision D3 of `docs/plans/2026-10-21-list-element-tensor-cell.md`) allows
-  numeric cells only, so `[True, False]` would be `list<boolean>` and
-  `list<boolean^2>` a parse error. That rule was measured on 2026-10-21 and not
-  applied: a bound list of points loses its length, so the GPU target refuses a
-  minimum-distance field over a list of points (four tests, `tycho-item-231` and
-  `pointlist-compile-zip`), and about 70 expected types lose a length. To apply
-  it, change `cellTypeMayCarryDimensions()` (`common/type/primitive.ts`) to
-  `return cellTypeCanHoldANumber(t);` and update those tests. If the user does
-  not decide, the implemented rule stays.
-- **`tensor<U>` takes any cell type that cannot hold a list, not only numbers.**
-  `tensor<boolean>` and `tensor<tuple<number, number>>` are valid types, and
-  `broadcastable<T>` is `T | tensor<T>` for every `T` that cannot hold a list.
-  The rule was chosen during the code review of 2026-10-22, because it is the
-  sound reading of `broadcastable<boolean>`: a comparison over a matrix gives a
-  matrix of booleans, which `boolean | list<boolean>` does not hold. Only
-  `vector<U>` and `matrix<U>` keep the numeric cell rule (`vector<string>` and
-  `matrix<boolean>` are parse errors). The user confirms it, or asks for numeric
-  cells in `tensor<U>` too, which makes `broadcastable<boolean>` a type with no
-  correct spelling for a matrix of booleans.
 - **`Mean` and the statistics functions accept a matrix when the expression is
   boxed, and refuse it when it is evaluated.** Probe, from the repository root:
   `npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); const m = ce.box(['Mean', ['List', ['List', 1, 2], ['List', 3, 4]]]); console.log(m.isValid, m.type.toString(), m.evaluate().toString())"`
@@ -1132,7 +1123,7 @@ dictionary). These remain, each measured with a fix and reverted:
   does not add `missing`.
 - **Compiled `When`, `If` and `Which` disagree with the interpreter in three
   cases (found 2026-10-22).** (1) `When(v, C)` with `C` a mask of rank 2
-  (`C: list<boolean^(2x2)>`, or `B < 0` with `B` holding a matrix): the
+  (`C: matrix<boolean^(2x2)>`, or `B < 0` with `B` holding a matrix): the
   compiled JavaScript (`_SYS.restrict`) reads each row as one condition that
   is not `True` and gives `[NaN, NaN]`, while the interpreter keeps the `When`
   unevaluated. `If` and `Which` select at every level of a mask; whether
@@ -1159,6 +1150,22 @@ dictionary). These remain, each measured with a fix and reverted:
   `tuple<>`, if the parser accepts it, or a new spelling), printed by the
   serializer. Reproduction: the `base-defects.mts` probe of the list-shape
   measurement (`docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`).
+- **`Declare` throws instead of returning an error when its type string does
+  not parse (found 2026-10-22).** `ce.box(["Declare", "r", {str:
+  "integer<<"}]).evaluate()` throws from the `Declare` handler
+  (`library/core.ts`, the `parseType` call has no catch), for any type string
+  that does not parse. A host that evaluates user input gets an exception,
+  where other invalid operands give an `Error` expression. Expected: an
+  `Error` expression with the parser's message (an `invalid-type` code or the
+  existing type-error code).
+- **The Epsil route shows only the first line of a type error from the
+  parser (found 2026-10-22).** An annotation whose type the parser refuses
+  reports the first line of the formatted message only, so the hint lines are
+  lost: `let v: vector<integer^(2x3)>` does not show "write `matrix<…>` for two
+  dimensions, `tensor<…>` for more". The refusals thrown by the type builder
+  (a list with two or more axes, a cell type that is a list) are one line and
+  reach every route in full. Expected: the Epsil diagnostic carries the whole
+  message, or the hint.
 - **A meet builds a list with dimensions whose cells are lists (found
   2026-10-22).** The meet of `list<unknown^2>` and `list<list<any^2>>` is
   `{kind: "list", elements: {kind: "list", elements: "any", dimensions: [2]},
@@ -1351,7 +1358,9 @@ item above.
   boxed: the callback admission of `Map` does not check the bound of a type
   variable against the element type.
 - `Map(h, fs)` with `h: ((integer) -> T) -> T where T` and `fs := [[x ↦ x + 1]]`
-  is typed `list<(unknown) -> number^(1x1)>` for the value `[[2]]`: the source
+  is typed a 1×1 array of `(unknown) -> number` (spelled
+  `list<(unknown) -> number^(1x1)>` before option U, now a `matrix`) for the
+  value `[[2]]`: the source
   type is copied. The broadcast reading of a polymorphic callback over rows
   binds a type variable only when it is the parameter itself (`(T) -> T`), so
   this shape falls back to that copy.

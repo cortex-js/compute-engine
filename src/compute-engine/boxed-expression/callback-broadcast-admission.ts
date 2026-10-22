@@ -20,7 +20,10 @@
 
 import { isSubtype, widen } from '../../common/type/subtype.js';
 import { callbackIncompatibility } from '../../common/type/compatibility.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { ListType, Type } from '../../common/type/types.js';
 import { isTupleShapedType } from '../collection-utils.js';
@@ -321,6 +324,69 @@ export function broadcastAdmitsCollectionElement(
 ): boolean {
   if (typeof supply === 'string' || supply.kind !== 'signature') return false;
   if (!signatureParamsAreScalar(opType)) return false;
+  if (admitsWholeSupply(supply, opType, elementPositions)) return true;
+  // An element position whose type is a union (`matrix<integer> |
+  // vector<integer>`, the elements of `Rest(p)` for
+  // `p: broadcastable<matrix<integer>>`) holds a value of one arm: the
+  // callback is admitted when it is admitted for each arm, directly or by
+  // the broadcast. Read as one union, the leaf of the union was not found,
+  // and `Product(Rest(p))` was an `incompatible-type` error for `Multiply`.
+  // A union of tensors with a dimension list and numbers is read arm by
+  // arm: each arm has a known rank. A union with plain list arms of
+  // different depths (`list<integer> | list<list<integer>>`, the elements
+  // of `Rest(p)` for `p: broadcastable<list<list<integer>>>`) is read arm
+  // by arm only for a fold, a callback with a position that is not an
+  // element (the accumulator of `Reduce` or `Fold`): the fold's result is
+  // the accumulator, whose type the callback's lifted result does not
+  // decide. A `Map` over such elements is still declined: its result type
+  // would have no single depth.
+  const isFold =
+    elementPositions !== undefined && elementPositions.some((e) => e !== true);
+  const isTensorOrNumber = (arm: Type): boolean => {
+    const a = resolveTypeAlias(arm);
+    if (typeof a !== 'string' && a.kind === 'list')
+      return isFold || !!a.dimensions;
+    return isSubtype(a, 'number');
+  };
+  const unionAt = (supply.args ?? []).findIndex((arg, position) => {
+    if (elementPositions !== undefined && elementPositions[position] !== true)
+      return false;
+    const t = resolveTypeAlias(arg.type);
+    return (
+      typeof t !== 'string' &&
+      t.kind === 'union' &&
+      t.types.every(isTensorOrNumber)
+    );
+  });
+  if (unionAt !== -1) {
+    const arms = (
+      resolveTypeAlias(supply.args![unionAt].type) as { types: Type[] }
+    ).types;
+    return arms.every((arm) => {
+      const args = supply.args!.map((arg, i) =>
+        i === unionAt ? { ...arg, type: arm } : arg
+      );
+      const armSupply = { ...supply, args };
+      return (
+        callbackIncompatibility(armSupply, opType) === undefined ||
+        broadcastAdmitsCollectionElement(armSupply, opType, elementPositions)
+      );
+    });
+  }
+  return false;
+}
+
+/**
+ * The admission of {@link broadcastAdmitsCollectionElement} for the supply
+ * read as it is: each element position is descended to its leaf, and the
+ * callback, with its result lifted by the ranks descended, is compared with
+ * the supply.
+ */
+function admitsWholeSupply(
+  supply: Extract<Type, { kind: 'signature' }>,
+  opType: Type,
+  elementPositions?: ReadonlyArray<boolean>
+): boolean {
   let rank = 0;
   const peel = <T extends { type: Type }>(arg: T, position: number): T => {
     if (elementPositions !== undefined && elementPositions[position] !== true)

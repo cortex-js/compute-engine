@@ -1400,6 +1400,124 @@ function indexValue(v: unknown): number {
 }
 
 /**
+ * The element of the array `arr` at the index `i`, for a read whose
+ * element type does not decide the absence marker (elements that may be
+ * numbers or lists, `number | vector<2>`). An index in range (1-based, a
+ * negative index counts from the end, a complex index is read by its real
+ * part, as `_SYS.at` reads it) returns the element as it is, `NaN`
+ * included. An index out of range, zero or not an integer returns the
+ * marker that the interpreter picks from the type of the value
+ * (`valueMarker`). An absent base (`undefined`, a restricted list whose
+ * condition is false) is absent: the read is `undefined`, the
+ * interpreter's `Missing`. Another value that is not an array throws, as
+ * the interpreter answers an error. An index that is an array at run time
+ * (an index typed `integer | list<integer>`) is a gather, read position by
+ * position with the same marker, or, when every entry is a boolean, a mask,
+ * read by `_SYS.at`.
+ */
+function atWithValueMarker(arr: unknown, i: unknown): unknown {
+  // An absent base (`undefined`, or `NaN`, the absent value of a numeric
+  // slot) has no element: `Missing`, as the interpreter answers.
+  if (
+    arr === undefined ||
+    arr === null ||
+    (typeof arr === 'number' && Number.isNaN(arr))
+  )
+    return undefined;
+  // A string is read by its characters (grapheme clusters), as the
+  // interpreter reads it: `Last("abc")` is `"c"`, and a position past the
+  // end is `Missing`, the marker of text.
+  if (typeof arr === 'string') arr = SYS_HELPERS.chars(arr);
+  // A base that is present but is not a list (a number: `First(p)` for
+  // `p: broadcastable<number>` holding `3`) is an `incompatible-type` error
+  // in the interpreter: the read throws.
+  if (!Array.isArray(arr))
+    throw new TypeError('At: the collection is not a list at run time');
+  // A boolean mask is read by `_SYS.at`: it filters, and has no marker.
+  if (
+    Array.isArray(i) &&
+    i.length > 0 &&
+    i.every((m) => typeof m === 'boolean')
+  )
+    return SYS_HELPERS.at(arr, i);
+  const read = (m: unknown): { found: boolean; value: unknown } => {
+    const iv = indexValue(m);
+    if (Number.isInteger(iv) && iv !== 0) {
+      const idx = iv > 0 ? iv - 1 : arr.length + iv;
+      if (idx >= 0 && idx < arr.length) return { found: true, value: arr[idx] };
+    }
+    return { found: false, value: undefined };
+  };
+  // A gather keeps each position, and an entry that selects no element
+  // gives the marker, as for a scalar index. An entry with no numeric value
+  // (a string) makes the whole read `NaN`, as for `_SYS.at`.
+  if (Array.isArray(i)) {
+    const hasNumericValue = (m: unknown): boolean =>
+      typeof m === 'number' ||
+      m === undefined ||
+      (typeof m === 'object' &&
+        m !== null &&
+        typeof (m as { re?: unknown }).re === 'number');
+    if (!i.every(hasNumericValue)) return NaN;
+    const marker = valueMarker(arr);
+    return i.map((m) => {
+      const r = read(m);
+      return r.found ? r.value : marker;
+    });
+  }
+  const r = read(i);
+  if (r.found) return r.value;
+  return valueMarker(arr);
+}
+
+/**
+ * Throw when `a` and `b` are both arrays of different shapes: one is longer,
+ * or an entry is an array in one and not in the other. The interpreter's
+ * `Add` of two lists of different shapes (a matrix and a row) is an
+ * `incompatible-dimensions` error; the element-wise helpers would broadcast
+ * the row over the matrix. A number beside an array is not checked: it
+ * broadcasts in the interpreter too.
+ */
+function requireSameShape(a: unknown, b: unknown): void {
+  const same = (x: unknown, y: unknown): boolean => {
+    const xa = Array.isArray(x);
+    const ya = Array.isArray(y);
+    if (!xa || !ya) return xa === ya;
+    const xs = x as unknown[];
+    const ys = y as unknown[];
+    return xs.length === ys.length && xs.every((e, i) => same(e, ys[i]));
+  };
+  if (Array.isArray(a) && Array.isArray(b) && !same(a, b))
+    throw new RangeError('the elements have incompatible dimensions');
+}
+
+/**
+ * The absence marker of a read outside the array `arr`, picked from the
+ * value as the interpreter picks it from the type of the value
+ * (`absenceMarker()`, `library/collections.ts`): an absent element
+ * (`undefined`) is skipped, `undefined` when an element is not a number,
+ * `NaN` when every present element is a number (a real number or a complex
+ * value `{re, im}`), and `undefined` when no element is present.
+ */
+function valueMarker(arr: unknown[]): unknown {
+  let sawNumber = false;
+  for (let k = 0; k < arr.length; k++) {
+    const el: unknown = arr[k];
+    if (el === undefined) continue;
+    const isNumeric =
+      typeof el === 'number' ||
+      (typeof el === 'object' &&
+        el !== null &&
+        !Array.isArray(el) &&
+        're' in el &&
+        'im' in el);
+    if (!isNumeric) return undefined;
+    sawNumber = true;
+  }
+  return sawNumber ? NaN : undefined;
+}
+
+/**
  * A new array with the elements of `x`: a copy of an array, or the characters
  * (grapheme clusters) of a string, as `_SYS.chars` segments it.
  */
@@ -3656,6 +3774,12 @@ export const SYS_HELPERS = {
   bcastAbsent,
   bcastFn,
   bcastColor,
+  // `At` with a scalar index over elements that may be numbers or lists: the
+  // absence marker is picked from the value (`atWithValueMarker`).
+  atWithValueMarker,
+  // A `Sum` fold over lists of several shapes: two lists of different
+  // shapes do not add (`requireSameShape`).
+  requireSameShape,
   // Establish the representation used by the fused numeric selection loop.
   // Scan every cell: a declaration alone cannot exclude nested or absent cells.
   numericSelectionInputs: (...arrays: unknown[]): boolean => {

@@ -180,7 +180,21 @@ export function isBroadcastCollectionTypeOf(t: Type): boolean {
  * broadcasts like an abstract collection. */
 export function isFixedShapeCollectionTypeOf(t: Type): boolean {
   const r = resolveTypeAlias(t);
-  return typeof r !== 'string' && r.kind === 'list' && !!r.dimensions;
+  if (typeof r !== 'string' && r.kind === 'list') return !!r.dimensions;
+  // A union of such lists (`matrix<2x2> | vector<2>`, an index into a
+  // `broadcastable<matrix<2x2>>`; `vector<2> | vector<3>`), with or without
+  // a `missing` arm, is mapped as each of its lists is. Read as no
+  // collection, the application was typed as one cell: `Sqrt` of it was
+  // `number`, which the value, a list, is not.
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  const present = r.types.filter((arm) => resolveTypeAlias(arm) !== 'missing');
+  return (
+    present.length > 0 &&
+    present.every((arm) => {
+      const a = resolveTypeAlias(arm);
+      return typeof a !== 'string' && a.kind === 'list' && !!a.dimensions;
+    })
+  );
 }
 
 /**

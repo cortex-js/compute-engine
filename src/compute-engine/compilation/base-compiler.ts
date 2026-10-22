@@ -234,6 +234,7 @@ import type {
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import { isColorValued } from './color-space-fact.js';
+import { mayBeCollectionType } from './in-place-update.js';
 import {
   candidateAt,
   descendantRegionAt,
@@ -1749,6 +1750,37 @@ function gatedCollectionArmsOfType(raw: Type): Type[] | undefined {
 }
 
 /**
+ * The collection arms of a union of `missing`, number arms and at least one
+ * indexed collection arm (`missing | number | vector<2>`, the type of an
+ * index into a `broadcastable<vector<2>>`), or `undefined` for another
+ * type. A value of such a type is a number, a collection, or the absent
+ * object. An absent number is the numeric marker `NaN`, so `undefined` at
+ * run time is always the absent collection, which the interpreter answers
+ * as `Missing`: the value can hold an absent object at level 0, as a gated
+ * indexed collection can (`gatedCollectionArmsOfType`). A number arm is
+ * read by `bcastAbsent` as by `bcast`.
+ */
+function numberOrGatedCollectionArms(raw: Type): Type[] | undefined {
+  if (BaseCompiler.isNominalAtomicType(raw)) return undefined;
+  const r = resolveTypeForCompilation(raw);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  const present: Type[] = [];
+  let absent = false;
+  let numeric = false;
+  for (const branch of r.types) {
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'missing') absent = true;
+    else if (isSubtype(b, 'number')) numeric = true;
+    else present.push(branch);
+  }
+  if (!absent || !numeric || present.length === 0) return undefined;
+  return gatedCollectionArmsOfType({
+    kind: 'union',
+    types: ['missing', ...present],
+  });
+}
+
+/**
  * The array levels at which a value of type `raw` can hold an ABSENT OBJECT
  * (a point, a list, or another indexed collection that may be `undefined`
  * at run time), as a bit set: bit `k` is set when level `k` can hold one.
@@ -1775,7 +1807,8 @@ function gatedCollectionArmsOfType(raw: Type): Type[] | undefined {
  */
 function objectAbsenceLevels(raw: Type, depth = 0): number {
   if (depth > 4 || BaseCompiler.isNominalAtomicType(raw)) return 0;
-  const arms = gatedCollectionArmsOfType(raw);
+  const arms =
+    gatedCollectionArmsOfType(raw) ?? numberOrGatedCollectionArms(raw);
   if (arms !== undefined) {
     // Level 0, and the levels a present arm can hold.
     let levels = 1;
@@ -4692,8 +4725,12 @@ export class BaseCompiler {
       present === 'never'
         ? (functionResult(operator.signature.type) ?? 'unknown')
         : present;
+    // The sum or the product of an absent collection is `NaN` in the
+    // interpreter (the evaluate handler answers it), whatever the type: a
+    // collection whose elements may be rows sums to a row
+    // (`number | vector<2>`), and its absent value still sums to `NaN`.
     const marker =
-      codomain !== 'never' && isSubtype(codomain, 'number')
+      reduction || (codomain !== 'never' && isSubtype(codomain, 'number'))
         ? absence.numeric.make()
         : absence.object.nullLiteral;
 
@@ -17294,6 +17331,9 @@ export class BaseCompiler {
       isSubtype(elt, 'collection<any>')
     )
       return false;
+    // An element that may be a number or a collection (`number | vector<2>`)
+    // is not folded raw either.
+    if (mayBeCollectionType(elt)) return false;
     // COMPLEX discipline: a wide element (`list<number>`) may hold a
     // `{re, im}` at run time; only a real-only element type folds raw.
     if (BaseCompiler.complexDiscipline)
@@ -17539,6 +17579,27 @@ export class BaseCompiler {
     const elt = BaseCompiler.collectionElementTypeOf(coll);
     if (elt === undefined) return false;
     const element = resolveTypeForCompilation(elt);
+    // Elements that may be numbers or collections (`number | vector<2>`,
+    // the elements of `Rest(g(x))` for `g(t) = [t, 2t]` and `x: any`) are,
+    // like the elements of a tensor of unknown rank, folded by the guarded
+    // element-wise fold, which dispatches on each element. The scalar fold
+    // read a row as one number (`+` of two arrays concatenated them). A
+    // `broadcastable<T>` operand, whose elements are `T | tensor<T>`, keeps
+    // the dispatching fold of its own (`foldLane` reads it as `wide`).
+    if (
+      !(typeof t !== 'string' && t.kind === 'broadcastable') &&
+      typeof element !== 'string' &&
+      element.kind === 'union' &&
+      element.types.some((arm) => {
+        const r = resolveTypeForCompilation(arm);
+        return (
+          r !== 'never' &&
+          !isSubtype(r, 'string') &&
+          isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)
+        );
+      })
+    )
+      return true;
     return (
       element !== 'never' &&
       !isSubtype(element, 'string') &&
