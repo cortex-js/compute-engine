@@ -283,12 +283,78 @@ export function pointComponent(
   coll: unknown,
   k: number,
   emptyBroadcasts = true,
-  rows?: boolean
+  rows?: boolean,
+  nested = false,
+  undecidedNesting = false
 ): unknown {
   if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
   if (coll.length === 0) return emptyBroadcasts ? [] : absent();
-  const first: unknown = coll[0];
+  // The element that decides the reading is the first one that is not an
+  // empty array, as in the interpreter (`firstDecidingElement` in
+  // `library/collections.ts`): an empty row passes the row test, and when it
+  // decided, `[[], [(1, 2), (3, 4)]]` was read as a list of points where the
+  // interpreter maps down to the points, `[[], [1, 3]]`. An absent element
+  // (a hole, `null`, or the `missing` empty result this target spells
+  // `Missing` with) does not decide either, as in the interpreter
+  // (`firstPresentElement`): when it decided, `[Missing, (1, 2), (3, 4)]`
+  // was element-indexed.
+  const isAbsent = (e: unknown): boolean =>
+    e === undefined ||
+    e === null ||
+    (typeof e === 'object' &&
+      'kind' in e &&
+      e.kind === 'empty' &&
+      'missing' in e &&
+      e.missing === true);
+  const deciding = (a: unknown[]): unknown =>
+    a.find((e) => !isAbsent(e) && !(Array.isArray(e) && e.length === 0)) ??
+    a.find((e) => !isAbsent(e)) ??
+    a[0];
+  const first: unknown = deciding(coll);
+  // Every element is absent: no element decides the reading, and the
+  // caller's reading of an empty array (`emptyBroadcasts`, read from the
+  // declared element type) decides, as in the interpreter. A broadcast gives
+  // the absence marker for each element.
+  if (isAbsent(first))
+    return emptyBroadcasts ? coll.map(() => absent()) : absent();
+  // Every element is an empty array, and the caller states that the static
+  // type is a collection of points at more than one level (`nested`): each
+  // empty row is the empty list of coordinates, as the interpreter answers.
+  if (nested && Array.isArray(first) && first.length === 0)
+    return coll.map(() => []);
   rows ??= Array.isArray(first) && first.every(isCoordinateCell);
+  // A list whose first element is itself a list of points (a tensor of
+  // points of rank 2 or more) is mapped element by element down to its
+  // points, as the interpreter's `pointComponentAt` maps it. Only the first
+  // element of each level that is not empty is read. A point found this way
+  // is not empty: the interpreter maps down only to a point that is a tuple.
+  // The arity of the first point decides the third coordinate for the whole
+  // application.
+  if (!rows) {
+    let p: unknown = first;
+    while (Array.isArray(p) && p.length > 0) {
+      const head = deciding(p);
+      if (!Array.isArray(head)) break;
+      if (head.length > 0 && head.every(isCoordinateCell)) {
+        // An array of this shape is a list of lists of points or a numeric
+        // array of rank 3 or more, and the interpreter reads the two
+        // differently (it element-indexes the numeric array). When the
+        // caller states that the static type admits both
+        // (`undecidedNesting`), no answer is given.
+        if (undecidedNesting)
+          throw new RangeError(
+            'Point coordinate access: the operand is a list of lists of ' +
+              'points or a numeric array of rank 3 or more, which compiled ' +
+              'code cannot tell apart'
+          );
+        if (k === 2 && head.length < 3) return absent();
+        return coll.map((e: unknown) =>
+          pointComponent(e, k, emptyBroadcasts, undefined, nested)
+        );
+      }
+      p = head;
+    }
+  }
   const arity = rows && Array.isArray(first) ? first.length : coll.length;
   if (k === 2 && arity < 3) return absent();
   if (rows)

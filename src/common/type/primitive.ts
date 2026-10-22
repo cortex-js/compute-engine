@@ -69,7 +69,8 @@ export const RANGE_STRUCTURAL_TYPE: Type = Object.freeze({
  * element-type readers) has to expand it — hence ONE shared constant rather
  * than a literal repeated at each site. The BROADCAST admission sites are the
  * deliberate exception: strings are broadcast-atomic, so they must not expand
- * there (see `broadcastableCollectionElementType` in `subtype.ts`).
+ * there (a string is not a list, so it is not in the collection arm of a
+ * `broadcastable`; see the `broadcastable` rules of `subtype.ts`).
  *
  * Frozen for the same reason `RANGE_STRUCTURAL_TYPE` is: it is shared by
  * reference across every `string` subtype and pattern-match call in the
@@ -370,4 +371,155 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'variable' ||
     t.kind === 'reference'
   );
+}
+
+/**
+ * The primitive names of the list families: a value of one of these is, or
+ * can be, a list. A list whose cells could be lists does not carry
+ * dimensions (`cellTypeMayCarryDimensions`): its shape is spelled in one
+ * place, on the outer list.
+ */
+const LIST_FAMILY_NAMES: ReadonlySet<string> = new Set([
+  'list',
+  'collection',
+  'indexed_collection',
+  // An index span is a list of integers.
+  'range',
+]);
+
+/**
+ * Whether a list whose cells have the type `t` may carry dimensions, that
+ * is, be spelled `list<t^dims>` or `tensor<t>` by the type builder, or be
+ * typed with a shape by the engine's literal typing.
+ *
+ * The rule in force (user decision of 2026-10-21, after the measurement
+ * recorded in `docs/plans/2026-10-21-list-element-tensor-cell.md`): the
+ * cells of a list with dimensions cannot themselves be lists. A shape is
+ * spelled in one place, on the outer list (`list<T^(2x3)>`), never nested
+ * (`list<list<T^3>^2>`), so that one value has one spelling. Accepted: every
+ * primitive name that is not a list family name (the numeric names,
+ * `boolean`, `string`, `symbol`, `color`, `missing`, `nothing`, `error`,
+ * `never`, `value`, `expression`, `scalar`), the tops `any` and `unknown`
+ * (which stand for a cell), tuples, records, objects, dictionaries, sets,
+ * signatures, symbol and expression types, numeric literals and ranges,
+ * type variables, references to declared types, negations, a string that
+ * is not a primitive type name (a type variable that a resolver returned
+ * by name, as `cellTypeCanHoldANumber` explains), and a union or
+ * intersection whose arms are all accepted. Refused: a list of any form (a
+ * plain list, a tensor), `collection`, `indexed_collection`,
+ * `broadcastable`, the bare names of those families (`list`, `collection`,
+ * `indexed_collection`, `range`), and a union or intersection with such an
+ * arm. The test is syntactic, on the type tree, and does not consult the
+ * subtype relation (this module is a leaf that the type builder can
+ * import).
+ *
+ * A tensor of unknown rank, `tensor<U>`, accepts the same cell types
+ * (`tensor<boolean>`, `tensor<tuple<number, number>>`; not
+ * `tensor<list<integer>>`). The named heads `vector<U>` and `matrix<U>` ask
+ * a second, stricter question of their cells: that they can hold a number
+ * (`cellTypeCanHoldANumber`), so `vector<string>` is a parse error while
+ * `list<string^2>` is a list of two strings.
+ *
+ * The subtype relation asks the semantic form of this question,
+ * `cannotHoldAList` in `subtype.ts`: `value` and `any` pass the syntactic
+ * test here, but some of their values are lists.
+ *
+ * The alternative rule the plan measured first, "the cells must be able to
+ * hold a number" (under which `[True, False]` types `list<boolean>`), is a
+ * one-line change here: `return cellTypeCanHoldANumber(t);`. Every site
+ * asks this question through this function.
+ */
+export function cellTypeMayCarryDimensions(t: Type): boolean {
+  if (typeof t === 'string') return !LIST_FAMILY_NAMES.has(t);
+  switch (t.kind) {
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return false;
+    case 'union':
+    case 'intersection':
+      return t.types.every(cellTypeMayCarryDimensions);
+    default:
+      // A tuple, record, object, dictionary, set, signature, symbol,
+      // expression, numeric range, literal, type variable, reference or
+      // negation holds no list.
+      return true;
+  }
+}
+
+/**
+ * The primitive names, other than the numeric names, whose values include
+ * numbers: the tops, the bottom, and the names that `number` is below in the
+ * primitive lattice. A cell type spelled with one of these could still be
+ * numeric, so a vector or a matrix of it is accepted
+ * (`cellTypeCanHoldANumber`).
+ */
+const PRIMITIVES_THAT_CAN_HOLD_A_NUMBER: ReadonlySet<string> = new Set([
+  'any',
+  'unknown',
+  'never',
+  'value',
+  'scalar',
+  'expression',
+]);
+
+/**
+ * Whether the cell type `t` could hold a number: the rule the named tensor
+ * heads `vector<U>` and `matrix<U>` apply to their cells (user decision D3
+ * of 2026-10-21, `docs/plans/2026-10-21-list-element-tensor-cell.md`; the
+ * cells of a vector or a matrix are numbers, which is what the runtime
+ * tensor fields hold). `tensor<U>` applies the weaker rule of
+ * `cellTypeMayCarryDimensions`. It answers `false` only for a type that
+ * provably holds no number: a non-numeric primitive name (`string`,
+ * `boolean`, `symbol`, a collection name), a string or boolean literal
+ * type, a composite that is not a number (a list, a tuple, a record, a
+ * dictionary, a set, a signature, an object), a union of such types, or an
+ * intersection with such an arm. A numeric name, a range, a numeric
+ * literal, a top (`any`, `unknown`), `never`, `value`, `scalar`,
+ * `expression` (an expression can stand for a number), `expression<Op>`, a
+ * type variable, a reference to a declared type, a negation, and a
+ * `broadcastable<T>` with an accepted `T` are accepted. The test is
+ * syntactic, on the type tree.
+ *
+ * A string that is not a primitive type name is accepted too. It is a name
+ * that a type resolver returned as the name itself, not as a type node: the
+ * Epsil parser's resolver does this for a type variable that the `where`
+ * clause of a definition binds, because it checks the parameter annotations
+ * (`a: matrix<T^(MxN)>` in
+ * `function mm(a: matrix<T^(MxN)>, …) -> … where T, M, N, P`) before the
+ * clause is parsed. Such a name says nothing about the cells, as a
+ * `variable` node does not, so `matrix<T>` is accepted on that route as it
+ * is by `parseType` with the clause.
+ */
+export function cellTypeCanHoldANumber(t: Type): boolean {
+  if (typeof t === 'string')
+    return (
+      NUMERIC_TYPES_SET.has(t as NumericPrimitiveType) ||
+      PRIMITIVES_THAT_CAN_HOLD_A_NUMBER.has(t) ||
+      !PRIMITIVE_TYPES_SET.has(t as PrimitiveType)
+    );
+  switch (t.kind) {
+    case 'numeric':
+      return true;
+    case 'value':
+      // A number, or one of the sentinel values (`~oo`, `Indeterminate`);
+      // not a string or a boolean literal.
+      return typeof t.value !== 'string' && typeof t.value !== 'boolean';
+    case 'union':
+      return t.types.some(cellTypeCanHoldANumber);
+    case 'intersection':
+      return t.types.every(cellTypeCanHoldANumber);
+    case 'broadcastable':
+      return cellTypeCanHoldANumber(t.elements);
+    case 'negation':
+    case 'variable':
+    case 'reference':
+    case 'expression':
+      return true;
+    default:
+      // A list, tuple, record, object, dictionary, set, collection, symbol
+      // or function signature holds no number.
+      return false;
+  }
 }

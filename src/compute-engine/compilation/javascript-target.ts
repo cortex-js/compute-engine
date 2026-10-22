@@ -87,8 +87,17 @@ import {
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { couldMatch, isSubtype } from '../../common/type/subtype.js';
-import { isTupleOrTupleUnionShapedType } from '../collection-utils.js';
+import {
+  broadcastCollectionArm,
+  couldMatch,
+  isSubtype,
+} from '../../common/type/subtype.js';
+import {
+  isBroadcastablePointType,
+  isNestedPointCollectionType,
+  isTupleOrTupleUnionShapedType,
+  pointCollectionElementType,
+} from '../collection-utils.js';
 import type { Type, TupleType } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -150,7 +159,8 @@ function isUnwrittenPointWithCollectionComponent(expr: Expression): boolean {
  */
 function isPointListOperandType(expr: Expression): boolean {
   if (isPointOperandType(expr)) return false;
-  const elt = collectionElementType(jsType(expr));
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt = pointCollectionElementType(jsType(expr));
   if (elt === undefined) return false;
   const r = resolveTypeForCompilation(elt);
   return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
@@ -213,7 +223,9 @@ function isPointOperandType(expr: Expression): boolean {
  */
 function pointOperandCoordinateTypes(expr: Expression): Type[] | undefined {
   const t = jsType(expr);
-  const point = isPointListOperandType(expr) ? collectionElementType(t) : t;
+  const point = isPointListOperandType(expr)
+    ? pointCollectionElementType(t)
+    : t;
   if (point === undefined) return undefined;
   const arms = pointTypeAlternatives(point);
   if (arms === undefined) return undefined;
@@ -487,6 +499,8 @@ import {
   isProvablyStringOperand,
   isProvablyNonTupleCollectionParticipant,
   isProvablyTupleParticipant,
+  everyPointCoordinateIsNumeric,
+  mayHoldNumericArrayOfRank,
   installUnrolledBigOpLane,
   stringEvidenceSource,
   pointHasBroadcastComponent,
@@ -2479,6 +2493,35 @@ function absentRead(arg: Expression): string {
 }
 
 /**
+ * Whether the compiled value of `e` may be the absent value `NaN` where its
+ * static type says a list: an application of a broadcasting arithmetic head
+ * (`P + Q`, `2 · P`, with `P` and `Q` lists of points) is an array at run
+ * time only when the lengths of its operands agree (`_SYS.bcast` answers
+ * `NaN` for a length mismatch, which the interpreter reports as an
+ * `incompatible-dimensions` error), and a point accessor over such a value
+ * passes the absence on (`_SYS.pointComponent`). A consumer compiled from
+ * the type alone (a `.map`, a `.reduce`) would throw on that value, so it
+ * takes the run-time dispatch instead. Before lists of points carried no
+ * length in their type, two point lists of different declared lengths typed
+ * a union, which took the dispatch route by itself.
+ */
+function mayAnswerAbsenceAtRunTime(e: Expression): boolean {
+  return (
+    isFunction(e) &&
+    [
+      'Add',
+      'Subtract',
+      'Multiply',
+      'Divide',
+      'Negate',
+      'PointX',
+      'PointY',
+      'PointZ',
+    ].includes(e.operator)
+  );
+}
+
+/**
  * Compile a point-coordinate accessor (`.x`/`.y`/`.z` → PointX/PointY/PointZ),
  * `idx` is the 0-based coordinate. On a single point (a tuple, compiled to a JS
  * array) it indexes the coordinate; on a list of points it broadcasts, mapping
@@ -2517,12 +2560,49 @@ function compilePointComponent(
     if (direct !== undefined) return direct;
     return `(${compiled()}[${idx}]${pointComponentAbsence(tupleElementType(t, idx))})`;
   }
+  // A `broadcastable<P>` of points is one point or a tensor of points of any
+  // rank, and the static type does not say which: the run-time dispatch
+  // decides at the value (`_SYS.pointComponent`), as the interpreter's
+  // `pointComponentAt` does. The per-point map below read one point as a
+  // list of points: `PointX(P)` with `P = (3, 4)` gave `[NaN, NaN]` where
+  // the interpreter answers `3`. A point of `P` has two components or more,
+  // so the empty array is the empty list, which the helper's default
+  // reading gives.
+  //
+  // A collection of points at more than one level (a `tensor<tuple<…>>`, a
+  // `list<list<tuple<…>>>`, `isNestedPointCollectionType`) takes the same
+  // dispatch: the helper maps down to the points at every level, as the
+  // interpreter does. An empty value is the empty list there. An empty row
+  // does not decide the reading when a later row is not empty: the helper
+  // reads the first row that is not empty, as the interpreter does. When
+  // every row is empty, the value does not decide, and the static type is
+  // carried into the helper (its fourth argument): a collection of points at
+  // more than one level, or a `broadcastable<P>` of points, answers an empty
+  // list for each row, as the interpreter does. An empty array cannot be a
+  // point here: the test below admits only points with one coordinate or
+  // more.
+  //
+  // The helper sees a point as an array, and reads an array as a point only
+  // when every cell of it is a number. A point with a coordinate that is not
+  // provably a number (`broadcastable<tuple<string, number>>`) would be read
+  // as some other list, and the answer would be wrong, so the compile is
+  // refused and the interpreter answers.
+  if (isBroadcastablePointType(t) || isNestedPointCollectionType(t)) {
+    if (!everyPointCoordinateIsNumeric(t))
+      throw new Error(
+        `Could not compile point coordinate access: a coordinate of a point ` +
+          `of the operand (type \`${arg.type.toString()}\`) is not ` +
+          `provably a number, and the run-time dispatch reads such a point ` +
+          `as a list.`
+      );
+    return `_SYS.pointComponent(${compiled()}, ${idx}, true, true)`;
+  }
   // A list of points broadcasts the coordinate — but only when the operand is
   // confirmably a list of points, matching the interpreter's `pointComponentAt`
   // (which inspects concrete elements rather than trusting the declared element
   // type). Any other collection is element-indexing, like First/Second/Third,
   // which is the same `[idx]` access as the single-point case.
-  const eltType = collectionElementType(t);
+  const eltType = pointCollectionElementType(t);
   if (
     isPointListOperand(arg) ||
     isCoordinateRowListOperand(arg) ||
@@ -2543,7 +2623,19 @@ function compilePointComponent(
     // A point of the list may be absent (the `undefined` of a restricted
     // point whose condition is false, `[(1, 2), P {c}]`): its coordinate is
     // absent too, not a `TypeError` thrown by reading `undefined[idx]`.
-    return `(${compiled()}).map((_pt) => _pt${absentRead(arg)}[${idx}]${pointComponentAbsence(coord)})`;
+    const map = `.map((_pt) => _pt${absentRead(arg)}[${idx}]${pointComponentAbsence(coord)})`;
+    // A list of points COMPUTED by a broadcast (`mayAnswerAbsenceAtRunTime`)
+    // is an array at run time only when the lengths of the operands agree,
+    // and is the absent value `NaN` otherwise, on which `.map` would throw:
+    // the map is guarded, and the coordinate of an absent list is absent.
+    // The run-time dispatch (`_SYS.pointComponent`) is not used for such a
+    // list: it reads an array whose points are all absent (`[NaN, NaN]`,
+    // the sum of points of different arities) as one point, and answers
+    // one `NaN` where the interpreter answers one absent coordinate per
+    // point.
+    if (mayAnswerAbsenceAtRunTime(arg))
+      return `((_pts) => (Array.isArray(_pts) ? _pts${map} : NaN))(${compiled()})`;
+    return `(${compiled()})${map}`;
   }
   // The static type settles NEITHER reading: an `unknown`-typed operand, or a
   // type that admits a list of points beside a single point — the parameter
@@ -2557,16 +2649,32 @@ function compilePointComponent(
   // interpreter answers `[2, 5]`, and a `PointList` body threw at run time
   // (Tycho item 238).
   if (mayBePointList(t)) {
+    // The helper sees a tuple and a list as the same array, so it cannot
+    // tell a list of lists of points (which the interpreter maps down to its
+    // points) from a numeric array of rank 3 or more (which the interpreter
+    // element-indexes): it read `[[[1, 2], [3, 4]]]` as a list of lists of
+    // points and answered `[[1, 3]]`, where the interpreter answers
+    // `[[1, 2], [3, 4]]`. When the static type admits such numeric data, the
+    // helper is told so (its fifth argument), and it throws a `RangeError`
+    // for a value of that shape instead of answering. Every other value (one
+    // point, a list of points, a list of numbers) has one reading and is
+    // answered. Refusing the compile for such a type refused every operand
+    // whose type is not known (`unknown`, the `collection<any> | tuple` a
+    // function literal infers from a `PointX(v)` use).
+    const undecidedNesting = mayHoldNumericArrayOfRank(t, 3);
     // Both readings see the same `[]`, so an EMPTY value at run time is the one
     // question the dispatch cannot answer from the value. The declared element
     // type answers it — the same evidence the interpreter uses when there is no
     // element to look at (`elementTypeBroadcastsWhenEmpty`) — so it is carried
     // into the helper. The broadcast reading is the helper's default, and is
     // left unspoken to keep the emitted call short.
-    const emptyReading = elementTypeBroadcastsWhenEmpty(eltType)
-      ? ''
-      : ', false';
-    return `_SYS.pointComponent(${compiled()}, ${idx}${emptyReading})`;
+    const emptyBroadcasts = elementTypeBroadcastsWhenEmpty(eltType);
+    const options = undecidedNesting
+      ? `, ${emptyBroadcasts}, false, true`
+      : emptyBroadcasts
+        ? ''
+        : ', false';
+    return `_SYS.pointComponent(${compiled()}, ${idx}${options})`;
   }
   const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
   if (direct !== undefined) return direct;
@@ -2677,6 +2785,32 @@ export function mayBePointList(t: Type): boolean {
       isSubtype(inner, NON_COORDINATE_TYPE)
     )
       return false;
+    // A row whose cells are themselves numeric rows, at one level or more
+    // (the collection is a numeric tensor of rank 3 or more,
+    // `list<integer^(2x2x2)>`, `list<list<list<number>>>`), holds no point
+    // at any level: the interpreter element-indexes it
+    // (`isPointCollectionLike` in `library/collections.ts` maps down only to
+    // tuple points). The run-time dispatch cannot tell a numeric row from a
+    // point, and would map down to the rows.
+    let row: Type | undefined = inner;
+    let depth = 0;
+    while (
+      row !== undefined &&
+      row !== 'never' &&
+      depth < 16 &&
+      !isPointElementType(row) &&
+      isSubtype(row, INDEXED_COLLECTION_SHAPE_TYPE)
+    ) {
+      row = collectionElementType(row);
+      depth += 1;
+    }
+    if (
+      depth >= 1 &&
+      row !== undefined &&
+      row !== 'never' &&
+      isSubtype(row, 'number')
+    )
+      return false;
   }
   return true;
 }
@@ -2713,7 +2847,8 @@ function pointComponentAbsence(coord: Type | undefined): string {
  * module-init reordering hazard noted on `isIndexedCollectionOperand`.
  */
 export function isPointListOperand(e: Expression): boolean {
-  const elt = collectionElementType(jsType(e));
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt = pointCollectionElementType(jsType(e));
   // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
   // `{ kind: 'tuple' }` node — and it is what a `list<tuple>` DECLARATION
   // reports (the `PointList` type handler itself answers the parameterized
@@ -2779,7 +2914,7 @@ function isAbsentablePointListOperand(e: Expression): boolean {
 export function isEmptyCollectionOperand(e: Expression): boolean {
   if (e.isFiniteCollection !== true || e.count !== 0) return false;
   if (e.type.matches('string')) return false;
-  return elementTypeBroadcastsWhenEmpty(collectionElementType(jsType(e)));
+  return elementTypeBroadcastsWhenEmpty(pointCollectionElementType(jsType(e)));
 }
 
 /**
@@ -2815,6 +2950,18 @@ export function isEmptyCollectionOperand(e: Expression): boolean {
 export function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
+  // An absent element (`missing`) does not decide the reading, and its arm
+  // does not decide here either, as in the interpreter's twin of this
+  // function: a `list<tuple<…> | missing>` reads as a `list<tuple<…>>`, and
+  // a `list<missing>` reads as the bottom `never` does.
+  if (elt === 'missing') return true;
+  if (typeof elt !== 'string' && elt.kind === 'union') {
+    const present = elt.types.filter((arm) => arm !== 'missing');
+    if (present.length < elt.types.length)
+      return elementTypeBroadcastsWhenEmpty(
+        present.length === 1 ? present[0] : { kind: 'union', types: present }
+      );
+  }
   // Both tuple spellings, and a union of them, are point elements; see
   // `isPointElementType`.
   if (isPointElementType(elt)) return true;
@@ -2835,9 +2982,15 @@ export function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
 export function isCoordinateRowListOperand(e: Expression): boolean {
   const t = jsType(e);
   // A rank ≥ 2 numeric tensor (`matrix<number^(3x2)>`) is a list of rows: its
-  // `elements` is the SCALAR type, so the dimensions carry the shape.
+  // `elements` is the SCALAR type, so the dimensions carry the shape. Only a
+  // tensor of rank 2 with numeric cells is one: the rows of a rank-3 tensor
+  // are matrices, and a row of strings is not a point, so the interpreter
+  // element-indexes both (`isPointLike`, `isPointCollectionLike` in
+  // `library/collections.ts`).
   if (typeof t !== 'string' && t.kind === 'list') {
-    if ((t.dimensions?.length ?? 0) > 1) return true;
+    const dims = t.dimensions;
+    if (dims !== undefined && dims !== null && dims.length > 1)
+      return dims.length === 2 && isSubtype(t.elements, 'number');
     const elt = t.elements;
     if (
       typeof elt !== 'string' &&
@@ -6260,6 +6413,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Dot: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Dot`: missing argument');
+    // A collection of points at more than one level (a `tensor<tuple<…>>`, a
+    // `list<tuple<…>^(2x2)>`): its cells are points, not numbers, so the
+    // matrix product below is not the interpreter's answer, and the
+    // point-list product reads a list of points of rank 1 only. The
+    // compilation declines.
+    if (args.some((a) => isNestedPointCollectionType(jsType(a))))
+      throw new Error(
+        'Could not compile `Dot`: an operand is a collection of points ' +
+          'whose rank the type does not fix at 1, and the compiled product ' +
+          'cannot follow the interpreter at every rank.'
+      );
     const broadcast = BaseCompiler.compileBroadcastInnerProduct(args, target);
     if (broadcast !== undefined) return broadcast;
     // A LIST OF POINTS against a point, or against another list of points:
@@ -6328,6 +6492,37 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // is indistinguishable from a single point, and `Dot(P, q)` with
       // `P = []` answered NaN where the interpreter answers `[]`.
       const listFlags = args.map(isPointListOperandType);
+      // A `broadcastable<P>` of points is one point or a tensor of points,
+      // and its type does not say which, so its flag is read from the value:
+      // an array whose first element is an array (or the empty array) is a
+      // list of points, an array of numbers is one point. The coordinates
+      // were proved numbers above, so a point never starts with an array.
+      // A tensor of points of rank 2 or more answers `NaN`: the interpreter
+      // refuses that `Dot` (`incompatible-type`). Reading such an operand as
+      // a list of points answered `[NaN, NaN]` for `Dot(P, Q)` with `P` and
+      // `Q` single points, where the interpreter answers their inner
+      // product.
+      const runtimeFlags = args.map((a) => isBroadcastablePointType(jsType(a)));
+      if (runtimeFlags[0] || runtimeFlags[1]) {
+        const names = ['_dotA', '_dotB'];
+        const flag = (i: number) =>
+          runtimeFlags[i]
+            ? `(${names[i]}.length === 0 || Array.isArray(${names[i]}[0]))`
+            : `${listFlags[i]}`;
+        const deep = names
+          .filter((_, i) => runtimeFlags[i])
+          .map((n) => `!Array.isArray(${n}) || Array.isArray(${n}[0]?.[0])`)
+          .join(' || ');
+        const value = (arg: Expression, i: number) =>
+          listFlags[i] && !runtimeFlags[i]
+            ? collArg('Dot', arg, compile, i + 1)
+            : compile(arg);
+        return (
+          `((${names.join(', ')}) => (${deep}) ? NaN : ` +
+          `${helper}(${names[0]}, ${names[1]}, ${flag(0)}, ${flag(1)}))` +
+          `(${value(args[0], 0)}, ${value(args[1], 1)})`
+        );
+      }
       const operand = (arg: Expression, position: number) =>
         listFlags[position - 1]
           ? collArg('Dot', arg, compile, position)
@@ -6393,6 +6588,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // compiles as the symbol `PositiveInfinity` in every branch below.
     if (args[1] != null && isString(args[1]) && args[1].string === 'Infinity')
       args = [args[0], args[0].engine.PositiveInfinity, ...args.slice(2)];
+    // A collection of points at more than one level (a `tensor<tuple<…>>`, a
+    // `list<tuple<…>^(2x2)>`): the interpreter answers one norm per point
+    // for a list of points and refuses a deeper value, while every lowering
+    // below reads the array as one point, as a list of points or as a
+    // matrix of numbers. None of them is that answer for every rank, so the
+    // compilation declines.
+    if (isNestedPointCollectionType(jsType(args[0])))
+      throw new Error(
+        'Could not compile `Norm`: the operand is a collection of points ' +
+          'whose rank the type does not fix at 1, and the compiled norm ' +
+          'cannot follow the interpreter at every rank.'
+      );
     // A point with a broadcasting (non-tuple collection) component is one
     // point per element in the interpreter — `([1, 2], 3)` is `(1, 3)` and
     // `(2, 3)` — so its norm is one number per element, and the application
@@ -6520,6 +6727,43 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `_SYS.norm(undefined)` is `NaN`, the interpreter's answer for it.
     // Read as a matrix, such a list had its Frobenius norm taken: one wrong
     // scalar where the interpreter answers one norm per point.
+    //
+    // A `broadcastable<P>` of points is one point or a tensor of points, and
+    // the static type does not say which, so the shape is read at run time:
+    // an array whose first element is a number is one point (its norm), an
+    // array of points is a list of points (one norm per point), and the
+    // empty array is the empty list. A point of `P` has numeric components
+    // (`pointOperandCoordinateTypes`), so its first element is never an
+    // array. A tensor of points of rank 2 or more answers `NaN`: the
+    // interpreter's `Norm` refuses it (`incompatible-type`), and `NaN` is
+    // this target's spelling of that failure.
+    const runtimeShape = isBroadcastablePointType(jsType(args[0]));
+    if (
+      runtimeShape &&
+      !(pointOperandCoordinateTypes(args[0]) ?? []).every(isNumberCoordinateType)
+    )
+      throw new Error(
+        'Could not compile `Norm`: the operand is a point or a list of ' +
+          'points, and a coordinate is not a number, so the shape of the ' +
+          'value cannot be read at run time.'
+      );
+    if (runtimeShape) {
+      let ord = '';
+      if (args[1] != null) {
+        if (isString(args[1])) {
+          if (args[1].string !== 'Frobenius')
+            throw new Error(
+              `Could not compile \`Norm\`: the "${args[1].string}" norm has no compiled form.`
+            );
+        } else ord = `, ${compile(args[1])}`;
+      }
+      return (
+        `((_v) => !Array.isArray(_v) ? NaN : _v.length === 0 ? [] : ` +
+        `!Array.isArray(_v[0]) ? _SYS.norm(_v${ord}) : ` +
+        `Array.isArray(_v[0][0]) ? NaN : ` +
+        `_v.map((_pt) => _SYS.norm(_pt${ord})))(${compile(args[0])})`
+      );
+    }
     if (isPointListOperand(args[0]) || isAbsentablePointListOperand(args[0])) {
       let ord = '';
       if (args[1] != null) {
@@ -12300,7 +12544,8 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
  * (`Max([[1, 2], [3, 5]])` is 5).
  * Refusing lets the interpreter answer. Only a type that is definitely a
  * collection is refused, so a wide or unknown element type compiles as
- * before.
+ * before. A tensor of unknown rank (`tensor<U>`) is refused too, because
+ * its value may be a matrix.
  */
 function refuseNestedData(
   operator: string,
@@ -12308,8 +12553,39 @@ function refuseNestedData(
   spreadsListOperands = false
 ): void {
   const isCollection = isDefinitelyCollectionType;
+  // A tensor of unknown rank (`tensor<integer>`, whose `dimensions` is
+  // `null`) has the element type `integer | tensor<integer>`, which is not
+  // definitely a collection, but its value may be a matrix: the compiled
+  // `Max` of `[[1, 2], [3, 4]]` was `NaN` where the interpreter gives 4. It
+  // is refused as a matrix is, and so is a union with such an arm. A
+  // `broadcastable<T>` is `T` or its collection arm, which is `tensor<T>`
+  // when no value of `T` is a list (`broadcastCollectionArm`), so a
+  // `broadcastable<number>` may hold a matrix too. It is the type that a
+  // numeric function gives over a scalar or a list operand, and a program
+  // usually holds a flat list in it. The compiled `Max` and `Min` (the
+  // lowering that spreads its list operands) throw at run time when an
+  // element of the data is not a real number, so they do not give a wrong
+  // number for a matrix, and a `broadcastable` operand is compiled for them.
+  // The other statistics read each row of a matrix as a number and answer
+  // `null` or a wrong list, so it is refused for them.
+  const isTensorOfUnknownRank = (m: Type): boolean => {
+    const x = resolveTypeAlias(m);
+    if (typeof x === 'string') return false;
+    if (x.kind === 'list') return x.dimensions === null;
+    if (x.kind === 'broadcastable' && !spreadsListOperands)
+      return broadcastCollectionArm(x.elements).dimensions === null;
+    return false;
+  };
+  const mayBeTensorOfUnknownRank = (t: Type): boolean => {
+    const r = resolveTypeAlias(t);
+    if (typeof r === 'string') return false;
+    if (r.kind === 'union') return r.types.some(isTensorOfUnknownRank);
+    return isTensorOfUnknownRank(r);
+  };
   const hasCollectionElements = (a: Expression | undefined): boolean =>
-    a !== undefined && isCollection(collectionElementType(a.type.type));
+    a !== undefined &&
+    (isCollection(collectionElementType(a.type.type)) ||
+      mayBeTensorOfUnknownRank(a.type.type));
   // With one operand, the data is its elements. With several, a lowering
   // that spreads each list operand into the data (`compileExtremum`, so
   // `Max(w, 5)` over a list `w` compiles) is refused only for an operand
@@ -12411,7 +12687,12 @@ function compileExtremum(
   // for an array and for a string.
   for (const a of args)
     if (couldBeStringOperand(a)) refuseNonNumericScalarProjection(kind, a);
-  if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
+  if (
+    args.length === 1 &&
+    args[0] &&
+    isIndexedCollectionOperand(args[0]) &&
+    !mayAnswerAbsenceAtRunTime(args[0])
+  ) {
     // A positional gather walks its positions with a counted loop rather
     // than building the slice. A gather the loop takes always holds at least
     // one position, because `rangeGatherSource` declines a gather with no
@@ -12460,10 +12741,15 @@ function compileExtremum(
   // project on the RUNTIME shape instead — the house idiom (see `_SYS.at`) —
   // which matches the interpreter both ways. The operand is bound once, so an
   // impure operand is still evaluated exactly once.
+  // A list operand whose value may be the absent `NaN` of a run-time length
+  // mismatch (`mayAnswerAbsenceAtRunTime`) is projected on the run-time
+  // shape too: the extremum of the absent value is `NaN`.
   if (
     args.length === 1 &&
     args[0] &&
-    couldBeIndexedCollectionOperand(args[0])
+    (couldBeIndexedCollectionOperand(args[0]) ||
+      (isIndexedCollectionOperand(args[0]) &&
+        mayAnswerAbsenceAtRunTime(args[0])))
   ) {
     refuseNonNumericScalarProjection(kind, args[0]);
     return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v')} : ${fn}(_v))(${compile(args[0])})`;

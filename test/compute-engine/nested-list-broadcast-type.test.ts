@@ -630,3 +630,105 @@ describe('MAP OVER ROWS OF POINTS WITH AN ABSENT ROW', () => {
     expect(r.sound).toBe(true);
   });
 });
+
+//
+// A product of rows of points and numbers. The broadcast pairs each row of
+// points with one number of a list (`Q·M`), or each point with one cell of a
+// matrix whose rank is not higher than the rank of the points (`R·M2`), and
+// the number scales the point. So the cells of the product are points, and
+// the type is a list of lists of points. The type of a product with a list
+// of numbers was the join of the operand types inside one more list,
+// `list<list<integer | list<tuple<integer, integer>>>>`, a type that does not
+// hold the value.
+//
+describe('PRODUCT OF ROWS OF POINTS AND NUMBERS', () => {
+  function checkProduct(
+    expr: unknown
+  ): { staticType: string; value: string; sound: boolean } {
+    const ce = new ComputeEngine();
+    ce.declare('Q', 'list<list<tuple<integer, integer>>>');
+    ce.declare('R', 'list<list<tuple<integer, integer>>>');
+    ce.declare('P', 'list<tuple<integer, integer>>');
+    ce.declare('M', 'list<integer>');
+    ce.declare('M2', 'matrix<integer>');
+    const staticType = ce.box(expr as any).type;
+    ce.assign(
+      'Q',
+      ce.box([
+        'List',
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ['List', ['Tuple', 5, 6]],
+      ])
+    );
+    ce.assign(
+      'R',
+      ce.box([
+        'List',
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ['List', ['Tuple', 5, 6], ['Tuple', 7, 8]],
+      ])
+    );
+    ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    ce.assign('M', ce.box(['List', 2, 3]));
+    ce.assign('M2', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    const v = ce.box(expr as any).evaluate();
+    return {
+      staticType: staticType.toString(),
+      value: v.toString(),
+      sound: v.type.matches(staticType),
+    };
+  }
+
+  test.each<[unknown, string, string]>([
+    [
+      ['Multiply', 'Q', 'M'],
+      'list<list<tuple<integer, integer>>>',
+      '[[(2, 4),(6, 8)],[(15, 18)]]',
+    ],
+    [
+      ['Multiply', 'M', 'Q'],
+      'list<list<tuple<integer, integer>>>',
+      '[[(2, 4),(6, 8)],[(15, 18)]]',
+    ],
+    [
+      ['Multiply', 'Q', 'M', 3],
+      'list<list<tuple<integer, integer>>>',
+      '[[(6, 12),(18, 24)],[(45, 54)]]',
+    ],
+    [
+      ['Multiply', 'Q', 2],
+      'list<list<tuple<integer, integer>>>',
+      '[[(2, 4),(6, 8)],[(10, 12)]]',
+    ],
+    [
+      ['Multiply', 'Q', ['Rational', 1, 2]],
+      'list<list<tuple<rational, rational>>>',
+      '[[(1/2, 1),(3/2, 2)],[(5/2, 3)]]',
+    ],
+    [
+      ['Multiply', 'P', 'M'],
+      'list<tuple<integer, integer>>',
+      '[(2, 4),(9, 12)]',
+    ],
+    [
+      ['Multiply', 'R', 'M2'],
+      'list<list<tuple<integer, integer>>>',
+      '[[(1, 2),(6, 8)],[(15, 18),(28, 32)]]',
+    ],
+    [
+      ['Multiply', 'M2', 'R'],
+      'list<list<tuple<integer, integer>>>',
+      '[[(1, 2),(6, 8)],[(15, 18),(28, 32)]]',
+    ],
+    [
+      ['Multiply', 'P', 'M2'],
+      'list<tuple<integer, integer>^(?x?)>',
+      '[[(1, 2),(2, 4)],[(9, 12),(12, 16)]]',
+    ],
+  ])('%j', (expr, type, evaluated) => {
+    const r = checkProduct(expr);
+    expect(r.staticType).toBe(type);
+    expect(r.value).toBe(evaluated);
+    expect(r.sound).toBe(true);
+  });
+});

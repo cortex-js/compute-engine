@@ -2023,8 +2023,9 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
   test('a matrix<2x2> denominator gives rows of points, not a vector of points', () => {
     const ce = pointListEngine('matrix<2x2>');
     const quotient = ce.box(['Divide', 'p', 'q']).type;
-    expect(quotient.toString()).toBe('list<list<tuple<number, number>^2>>');
-    expect(quotient.matches('vector<tuple<number, number>>')).toBe(false);
+    // A tuple cell may carry dimensions, so the quotient has the matrix's shape.
+    expect(quotient.toString()).toBe('list<tuple<number, number>^(2x2)>');
+    expect(quotient.matches('list<tuple<number, number>^?>')).toBe(false);
   });
 
   test('dividing two point lists errors per element', () => {
@@ -2939,5 +2940,32 @@ describe('a list of numbers plus a point is typed error', () => {
     expect(ce.parse('L + [1, 1, 1, 1]').type.toString()).toBe(
       'vector<integer^4>'
     );
+  });
+});
+
+describe('POINT/TUPLE ARITHMETIC — rows of points times a nested list', () => {
+  // `N` is a plain nested list of numbers that is not a matrix: its rows
+  // have different lengths. The broadcast pairs each row of points of `M`
+  // with one row of `N`, and each point with one number of that row, so
+  // the cells of the product are points. The type must say so, as it does
+  // for the quotient `M / N`.
+  test('the product is typed as rows of points and the value matches', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'list<list<tuple<integer, integer>>>');
+    ce.assign(
+      'M',
+      ce.box([
+        'List',
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ['List', ['Tuple', 5, 6]],
+      ])
+    );
+    ce.declare('N', 'list<list<integer>>');
+    ce.assign('N', ce.box(['List', ['List', 1, 2], ['List', 3]]));
+    const expr = ce.box(['Multiply', 'M', 'N']);
+    expect(expr.type.toString()).toBe('list<list<tuple<integer, integer>>>');
+    const value = expr.evaluate();
+    expect(value.toString()).toBe('[[(1, 2),(6, 8)],[(15, 18)]]');
+    expect(value.type.matches(expr.type)).toBe(true);
   });
 });

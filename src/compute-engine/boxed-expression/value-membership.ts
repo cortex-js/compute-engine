@@ -386,12 +386,36 @@ function accepts(
     // conservative — they fall through to synthesized subtyping.
     case 'list': {
       if (!isFunction(v, 'List')) return isSubtype(v.type.type, t);
-      // A declared first dimension must match the element count; deeper
-      // dimensions are the nested lists' own membership problem.
-      if (t.dimensions !== undefined && t.dimensions.length > 0) {
+      // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is
+      // `null`) holds a rectangular value of rank 1 or more whose cells are
+      // `U`. The shape of the value is read first: a value whose rows
+      // differ in length or depth (`[[1], [2, 3]]`, `[1, [2]]`) is not a
+      // tensor, whatever the cell type (`tensor<any>` included). Then every
+      // cell is checked against `U`, so that a literal cell type admits
+      // its values at any rank (`[[0, 0], [0, 0]]` is a `tensor<0>`). The
+      // immediate elements are not cells: the rows of a matrix are lists.
+      if (t.dimensions === null) {
+        const cells: Expression[] = [];
+        if (concreteTensorShape(v, cells) === undefined) return false;
+        return cells.every((cell) => accepts(cell, t.elements, seen));
+      }
+      // A tensor of rank 2 or more (`matrix<0^(2x2)>`) is read the same
+      // way: the shape of the value must have the same rank, and each fixed
+      // axis must have its length; then every cell is checked against the
+      // cell type.
+      if (t.dimensions && t.dimensions.length > 1) {
+        const dims = t.dimensions;
+        const cells: Expression[] = [];
+        const shape = concreteTensorShape(v, cells);
+        if (shape === undefined || shape.length !== dims.length) return false;
+        if (dims.some((d, i) => Number.isFinite(d) && d >= 0 && shape[i] !== d))
+          return false;
+        return cells.every((cell) => accepts(cell, t.elements, seen));
+      }
+      // A declared length of a rank-1 list must match the element count.
+      if (t.dimensions && t.dimensions.length > 0) {
         const d0 = t.dimensions[0];
         if (Number.isFinite(d0) && d0 >= 0 && v.ops.length !== d0) return false;
-        if (t.dimensions.length > 1) return isSubtype(v.type.type, t);
       }
       return v.ops.every((op) => {
         const el = concreteValueOf(op);
@@ -410,6 +434,41 @@ function accepts(
     default:
       return isSubtype(v.type.type, t);
   }
+}
+
+/** The shape of the concrete `List` value `v` read as a tensor, with its
+ * cells pushed to `cells` in order: `[2, 3]` for a 2×3 matrix, `[3]` for a
+ * list of three values that are not lists, `[0]` for the empty list. Every
+ * element that is a `List` is one more level; any other element (a number,
+ * a string, a boolean, a `Tuple`) is a cell. `undefined` when the value is
+ * not rectangular (its rows differ in length, or some elements are lists
+ * and others are not) or an element is not a concrete value. */
+function concreteTensorShape(
+  v: Expression,
+  cells: Expression[]
+): number[] | undefined {
+  if (!isFunction(v, 'List')) return undefined;
+  let inner: number[] | undefined = undefined;
+  for (const op of v.ops) {
+    const el = concreteValueOf(op);
+    if (el === undefined) return undefined;
+    let shape: number[];
+    if (isFunction(el, 'List')) {
+      const sub = concreteTensorShape(el, cells);
+      if (sub === undefined) return undefined;
+      shape = sub;
+    } else {
+      cells.push(el);
+      shape = [];
+    }
+    if (inner === undefined) inner = shape;
+    else if (
+      inner.length !== shape.length ||
+      inner.some((d, i) => d !== shape[i])
+    )
+      return undefined;
+  }
+  return [v.ops.length, ...(inner ?? [])];
 }
 
 /** Membership in a literal value type (`0`, `"red"`, `true`): the engine's

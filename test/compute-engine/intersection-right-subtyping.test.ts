@@ -114,16 +114,19 @@ describe('isSubtype with an intersection on the right', () => {
       dimensions: [3],
     });
 
-    // A `tensor` carries NO dimensions — its rank is unknown — so there is
-    // no shape to preserve and the tensor spelling normalizes into the
-    // `list` family. Bare `list` means `list<unknown>` (user ruling
-    // 2026-08-17), so it is `tensor<unknown>` that collapses to the bare
-    // primitive; `tensor<any>` keeps its wider, absence-admitting element.
+    // A `tensor` has an unknown rank, which its list node records as
+    // `dimensions: null`: a tensor of any rank whose cells are `U`, not a
+    // plain list of `U` elements.
     expect(parseType('tensor<unknown>')).toEqual({
       kind: 'list',
       elements: 'unknown',
+      dimensions: null,
     });
-    expect(parseType('tensor<any>')).toEqual({ kind: 'list', elements: 'any' });
+    expect(parseType('tensor<any>')).toEqual({
+      kind: 'list',
+      elements: 'any',
+      dimensions: null,
+    });
   });
 
   test('round-trips every open-rank list spelling through the serializer', () => {

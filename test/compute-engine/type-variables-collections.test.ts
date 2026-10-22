@@ -23,11 +23,12 @@ import { typeToString } from '../../src/common/type/serialize';
  *
  * The twelve constructor-pattern conversions were once blocked by a
  * dimensioned-actual sub-rule: the solver's element extraction follows
- * `collectionElementType` (which PEELS one dimension — a matrix's element is
- * its ROW) while `isSubtype` read a dimensioned list as a collection of its
- * SCALAR dtype only, so instantiating `indexed_collection<T>` at a `matrix`
- * actual produced a parameter the actual did not satisfy. `isSubtype` now
- * admits BOTH readings (`subtype.ts`, `peeledRowMatches`); the last `describe`
+ * `collectionElementType` (a matrix's element is its ROW) while `isSubtype`
+ * read a dimensioned list as a collection of its SCALAR dtype only, so
+ * instantiating `indexed_collection<T>` at a `matrix` actual produced a
+ * parameter the actual did not satisfy. Since 2026-10-21 `isSubtype` reads
+ * the elements of a matrix as its rows too, and only as its rows
+ * (`docs/plans/2026-10-21-list-element-tensor-cell.md`); the last `describe`
  * block below pins the agreement.
  *
  * Every converted operator is probed on all three routes (`ce.function`,
@@ -556,18 +557,18 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
 //
 
 describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
-  test('`collectionElementType` PEELS a dimension; `isSubtype` accepts that reading', () => {
-    // The audit's §4.3 sub-rule, measured. These two are the element-extraction
-    // rule the solver mirrors and the admission rule it re-checks against; they
-    // now agree at rank >= 2, which is what lets `indexed_collection<T>`
-    // instantiate at a matrix actual.
+  test('`collectionElementType` reads the rows of a matrix; `isSubtype` reads the same', () => {
+    // These two are the element-extraction rule the solver mirrors and the
+    // admission rule it re-checks against; they agree at every rank, which
+    // is what lets `indexed_collection<T>` instantiate at a matrix actual.
     const m = parseType('matrix<integer^(2x3)>');
     expect(typeToString(collectionElementType(m)!)).toBe('vector<integer^3>');
     expect(
       isSubtype(m, parseType('indexed_collection<vector<integer^3>>'))
     ).toBe(true);
-    // The SCALAR-dtype reading is additive, not replaced.
-    expect(isSubtype(m, parseType('indexed_collection<integer>'))).toBe(true);
+    // The elements of a matrix are its rows, not its cells: a matrix is not
+    // an indexed collection of integers.
+    expect(isSubtype(m, parseType('indexed_collection<integer>'))).toBe(false);
     // Rank 1 is unchanged (there is no dimension to peel).
     const v = parseType('list<string^2>');
     expect(typeToString(collectionElementType(v)!)).toBe('string');

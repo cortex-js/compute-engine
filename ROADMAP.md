@@ -540,6 +540,19 @@ the expectations or the typing must change; the session that owns that plan
 decides. Reproduce:
 `npx jest --config ./config/jest.config.cjs -w 4 -- test/compute-engine/collection-absent-followups.test.ts test/compute-engine/collection-type-followups.test.ts test/compute-engine/map-over-tuple-result.test.ts test/compute-engine/tuple-argument-binding.test.ts`.
 
+Measured again 2026-10-22, with the change that reads a list type by its
+elements: `collection-absent-followups` passes now, and the other three suites
+still fail 59 tests (`collection-type-followups` 52, `tuple-argument-binding`
+6, `map-over-tuple-result` 1). Its last failure was
+`Map(PointX, ["a", "b"])`, typed `list<character | missing^2>` where the test
+expected `list<character | missing>`; a list value that mixes `Missing` with
+characters now carries its length (`[Missing, "b"]` is typed
+`list<character | missing^2>`), so the test now checks that static type
+against both values. `apply-literal-maps`, which failed on `f69ba0128` (an
+`incompatible-type` error when `(x) => (x, x)` is assigned to a symbol declared
+`(broadcastable<unknown>) -> tuple<unknown, unknown>`), passes with the same
+change.
+
 ### Compiled absence checks need a distinct representation for `Nothing` (OPEN, design — 2026-10-20)
 
 `IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
@@ -742,21 +755,201 @@ dictionary). These remain, each measured with a fix and reverted:
   three-argument form back; the `\sum`/`\prod` shorthand for
   `Reduce(xs, Add)`/`Reduce(xs, Multiply)` applies only when there is no seed.
 
-### A list of one-element vectors is a subtype of a list of scalars (OPEN, small — found 2026-10-21 by the review of the nested-fold refinement cost fix, issue #462)
+### `narrow()` answers `never` for some pairs of collection types that share values (OPEN, small — found 2026-10-21 by the change that reads a list type by its elements)
 
-- `list<vector<integer^1>>` matches `list<integer>` (and
-  `list<list<vector<integer^1>>^2>` matches `list<list<integer>^2>`), while
-  `vector<integer^1>` does not match `integer`. The list rule accepts an element
-  type that is a one-element vector of the other list's element type, so the
-  relation is not consistent with its element rule. The join of the two then
-  keeps the narrower type:
-  `[Map(p ↦ Fold((a, j) ↦ Join(a, [p]), [], 1..2), [1, 2]), Map(same, [[1], [2]])]`
-  is typed `list<list<list<integer>^2>>` while its second element is
-  `[[[1], [1]], [[2], [2]]]`, a list of lists of one-element lists. Probe:
-  `ce.type('list<vector<integer^1>>').matches('list<integer>')` on the main tree
-  at `23db30a67`. The list subtype rules changed on 2026-10-21 (user decisions,
-  commits `5c08b87cc` and `900d4f059`), so the fix belongs with that work and
-  was not attempted here.
+- `narrow()` in `common/type/subtype.ts` is the meet that the engine uses when
+  it narrows a symbol's type or a read type: in `boxed-symbol.ts`,
+  `index-read-tuple.ts` and `boxed-function.ts` (`boxed-expression/`), and in
+  `library/collections.ts`. The type reducer
+  (`reduceType()`, `common/type/reduce.ts`) is the meet of the type grammar.
+  The two agree on two list types, but not on some pairs of different kinds
+  that share values. `matrix<number> & collection<vector<integer>>` is
+  `matrix<integer>` in the reducer and `never` in `narrow()`.
+  `matrix<number> & list<vector<integer>>` is kept as written in the reducer
+  and is `never` in `narrow()`, although every `matrix<integer>` is in both.
+  An answer of `never` says that no value is in both types, so a narrowing
+  through `narrow()` can reject a value that the declared types admit. Probe,
+  from the repository root:
+  `npx tsx -e "import {parseType} from './src/common/type/parse'; import {narrow} from './src/common/type/subtype'; import {reduceType} from './src/common/type/reduce'; import {typeToString} from './src/common/type/serialize'; const a = parseType('matrix<number>'), b = parseType('collection<vector<integer>>'); console.log(typeToString(narrow(a, b)), typeToString(reduceType(parseType('matrix<number> & collection<vector<integer>>'))))"`
+  prints `never matrix<integer>`. A fix makes `narrow()` answer the reducer's
+  result for a pair of collection types of different kinds, or keep the
+  intersection when it cannot decide, instead of `never`. Measure the tests
+  that pin a `never` before landing it.
+
+### User decisions owed by the change that reads a list type by its elements (OPEN, decisions — found 2026-10-22 by the same change)
+
+- **The cell rule of a list with dimensions.** The implementation lets a list
+  with dimensions have any cells that are not lists: `list<boolean^2>`,
+  `list<string^2>` and `list<tuple<number, number>^3>` are valid, and
+  `[True, False]` is typed `list<boolean^2>`. The rule the user decided first
+  (decision D3 of `docs/plans/2026-10-21-list-element-tensor-cell.md`) allows
+  numeric cells only, so `[True, False]` would be `list<boolean>` and
+  `list<boolean^2>` a parse error. That rule was measured on 2026-10-21 and not
+  applied: a bound list of points loses its length, so the GPU target refuses a
+  minimum-distance field over a list of points (four tests, `tycho-item-231` and
+  `pointlist-compile-zip`), and about 70 expected types lose a length. To apply
+  it, change `cellTypeMayCarryDimensions()` (`common/type/primitive.ts`) to
+  `return cellTypeCanHoldANumber(t);` and update those tests. If the user does
+  not decide, the implemented rule stays.
+- **`tensor<U>` takes any cell type that cannot hold a list, not only numbers.**
+  `tensor<boolean>` and `tensor<tuple<number, number>>` are valid types, and
+  `broadcastable<T>` is `T | tensor<T>` for every `T` that cannot hold a list.
+  The rule was chosen during the code review of 2026-10-22, because it is the
+  sound reading of `broadcastable<boolean>`: a comparison over a matrix gives a
+  matrix of booleans, which `boolean | list<boolean>` does not hold. Only
+  `vector<U>` and `matrix<U>` keep the numeric cell rule (`vector<string>` and
+  `matrix<boolean>` are parse errors). The user confirms it, or asks for numeric
+  cells in `tensor<U>` too, which makes `broadcastable<boolean>` a type with no
+  correct spelling for a matrix of booleans.
+- **`Mean` and the statistics functions accept a matrix when the expression is
+  boxed, and refuse it when it is evaluated.** Probe, from the repository root:
+  `npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); const m = ce.box(['Mean', ['List', ['List', 1, 2], ['List', 3, 4]]]); console.log(m.isValid, m.type.toString(), m.evaluate().toString())"`
+  prints
+  `true number Error(ErrorCode("incompatible-type", "number", "vector<integer^2>"), "Mean: [1,2]")`.
+  The signatures in `library/statistics.ts` spell the data parameter
+  `collection<any>`, and `collectData()` refuses a row at run time. Option A:
+  spell the data parameter so that a matrix does not match it (for example
+  `collection<number>`, or a union with `distribution`), and measure the tests
+  that pass a list of data whose elements are not typed `number`. Option B: keep
+  the signature and add a check to the canonical handler, so the expression is
+  invalid when it is boxed. With no decision, a matrix is refused at evaluation
+  only, as on 0.161.0.
+- **A cell pattern `vector<T>` or `list<T^N>` refuses a matrix.** With
+  `first: (x: list<T^N>) -> T where T, N`, `first([[1, 2], [3, 4]])` is now an
+  `incompatible-type` error; on 0.161.0 it was typed `vector<integer^2>`, with
+  `T` bound to the rows. The `T` of these patterns is now the type of the cells
+  of a tensor of rank 1, and a matrix has rank 2; the plain pattern `list<T>`
+  still binds `T` to the rows. The test
+  (`test/compute-engine/dimension-variables.test.ts`, "a rank-2 actual at a
+  rank-1 pattern is read as a list of its rows") cited a user decision of
+  2026-10-21 that bound `T` to the rows; the reading of a list type by its
+  elements replaces it. Files: `common/type/instantiate.ts` (`walkPattern()`),
+  `common/type/conditional-conformance.ts` (`subjectFitsTensorPattern()`). The
+  user confirms the new behavior, or asks that a rank-1 cell pattern bind `T` to
+  the rows of a tensor of a higher rank.
+
+### Residues of the change that reads a list type by its elements (OPEN, small — found 2026-10-22 by the same change)
+
+- **A vector times a list of rows has an arm that no value takes.** With
+  `L: list<list<integer>>`, `[2, 3] * L` is typed
+  `list<integer | list<integer>>` (on 0.161.0,
+  `list<list<integer>> | vector<integer^2>`). The type is sound, but the
+  `integer` arm is not possible: each element of the product is a row. The cell
+  join in the `Add` and `Multiply` type handlers (`library/arithmetic.ts`) does
+  not read the rank of the operands. With `L: list<list<integer> | missing>`,
+  the type is `list<list<number> | number>`, where 0.161.0 gave
+  `list<list<number> | nan> | vector<2>`. Probe:
+  `ce.declare('L', 'list<list<integer>>'); ce.box(['Multiply', ['List', 2, 3], 'L']).type.toString()`.
+- **A function literal over a list typed `list<any>` wraps one level only.**
+  With `A: list<any>` holding `[[1, 2], 3]` and `g` the literal
+  `(x: T) -> tuple<T, T> where T` with the body `(x, x)`, `g(A)` is typed
+  `list<tuple<any, any>>`, and its value `[[(1, 1), (2, 2)], (3, 3)]` is not a
+  value of that type, because the run time maps the literal over the first
+  element, which is a list. The same with the literal with no signature
+  (`(x) => (x, x)`): `list<tuple<unknown, unknown>>`. 0.161.0 gave the same
+  types, which held the value under the reading that a list type with no
+  dimensions admitted any shape. Files: the broadcast typing of a function
+  literal, `boxed-expression/broadcast-lift-type.ts` and
+  `boxed-expression/boxed-function.ts`. A sound answer for an element typed
+  `any` is a union with a nested list (`list<tuple<any, any> | list<…>>`), or
+  the type `list<any>`.
+- **The reducer can build a list with dimensions whose cells are lists.**
+  `reduceType(parseType('list<any^3> & list<list>'))` is `list<list^3>`. The
+  type is sound (the cells of a list with dimensions are read as cells, and no
+  value of rank 1 has list cells), but the parser refuses the spelling
+  `list<list^3>`, so the type does not round-trip through `typeToString()` and
+  `parseType()`. The meet of a list with dimensions and a plain list is in
+  `meetListTypes()` (`common/type/subtype.ts`) and in `reduce.ts`. A fix answers
+  `never` when the cell meet is a list type.
+- **`list<list<string>>` and `list<list<integer>>` cannot both be protocol
+  conformance targets.** In Epsil,
+  `protocol Sizer { function sizeOf(self: Self) -> string }` with
+  `type list<list<string>> is Sizer { … }` and
+  `type list<list<integer>> is Sizer { … }` gives the error
+  `protocol-conformance-overlap` ("meet `list<list<never>>`") for the second
+  conformance, while `list<string>` and `list<integer>` can both be targets
+  (they share only the empty list, which dispatches as ambiguous). The two
+  nested types share `[[]]`, which is not empty, so the overlap is real: the
+  conformance check (`engine-protocols.ts`) is correct under its rule. The
+  question is whether a value whose only shared elements are empty lists should
+  count like the empty list. Probe: run the Epsil source above with
+  `executeEpsil()` (`src/epsil/execute-epsil.ts`) and print the `value` of the
+  result.
+- **The static type of `Abs([1, 2])` does not match the type of its value.**
+  `ce.box(['Abs', ['List', 1, 2]]).type` is
+  `list<real<0..> | signed_infinity^2>`, and the value `[1, 2]` has the type
+  `vector<integer^2>`, which is a subtype. So the static type is sound, but the
+  value type is not built from it: `.type.matches()` of the value against the
+  static type is `true` only through the subtype relation, and the
+  `signed_infinity` arm comes from the `Abs` type handler
+  (`library/arithmetic.ts`, the `Abs` definition). The same on 0.161.0.
+- **A declared function applied to a `broadcastable` point is typed as a list
+  only (soundness).** With `g: (tuple<real, real>) -> real` and
+  `P: broadcastable<tuple<real, real>>`, `g(P)` is typed `list<real>`. A
+  `broadcastable` point can be one point, and then `g(P)` is one number (`7`
+  for `g(p) = p_1 + p_2` and `P := (3, 4)`), which `list<real>` does not hold.
+  The sound type is `broadcastable<real>`. The same on 0.161.0. The cause is
+  the call typing of a declared function symbol over a broadcast trigger
+  (`boxed-expression/broadcast-lift-type.ts`, `boxed-expression/boxed-function.ts`).
+  A test pins the current type: `test/compute-engine/point-accessor-union-type.test.ts`,
+  block "compiled point readers over a broadcastable point". Probe:
+  `ce.declare('g', '(tuple<real, real>) -> real'); ce.declare('P', 'broadcastable<tuple<real, real>>'); ce.box(['g', 'P']).type.toString()`.
+- **A comparison over `broadcastable<string>` no longer compiles.** With
+  `S: broadcastable<string>`, `Less(S, "b")`, `Equal(S, "a")` and
+  `NotEqual(S, "a")` compiled on 0.161.0 and gave the right answers for one
+  string and for a list of strings. Now the JavaScript target refuses them
+  ("an element-wise ordering that mixes string evidence with a participant
+  that is not provably a string"). The refusal follows the admission rule of
+  `isFlatAllStringComparisonParticipant()` (`compilation/base-compiler.ts`):
+  only a string or a list of strings one level deep is known to compile to the
+  answer of the interpreter, and a `broadcastable<string>` is now
+  `string | tensor<string>`, which can be a matrix of strings. To compile it
+  again, verify the nested comparison against the interpreter (a matrix of
+  strings compared with a string) and widen the rule to a tensor of strings.
+- **Three behaviors found during the change, not changed by it.** Each is the
+  same on 0.161.0. (1) `Dot` of two empty `broadcastable` point lists stays
+  unevaluated (`MatrixMultiply([], [])`), while the compiled code gives `[]`.
+  (2) `If(M < 3, M, 0)` with `M` a matrix stays unevaluated: the element-wise
+  `If` does not read a mask of rank 2. (3) A generic function literal applied
+  directly (`[["Function", …], "v"]`) binds `v` whole, while the same literal
+  called through a symbol (`g(v)`) maps over the elements of `v`.
+- **The inferred signature of a function literal reads an `unknown` parameter
+  as a number (soundness; needs a decision).** `g := x ↦ [x]` gets the
+  signature `(unknown) -> vector<1>`, which says the element is a number. With
+  `s: set<integer>` and `s := Set(1, 2)`, `g(s)` evaluates to `[Set(1, 2)]`
+  (type `list<set<integer>^1>`), which `vector<1>` does not hold. The same on
+  0.161.0. The cause is the fold of a generic symbol in `classifyCellD`
+  (`library/collections.ts`): a bare symbol typed `unknown`, and a parameter of
+  a function literal is one, counts as a number cell. `callResultType`
+  (`boxed-expression/call-result-type.ts`) then keeps the inferred result,
+  because it drops a type derived from the body when that type is not a
+  subtype of the inferred one. A fix that stops the fold for parameters gives
+  `(unknown) -> list<unknown>` and fixes `g(s)`, but measured on 2026-10-22 it
+  makes five compile tests fail: `compile-linear-algebra-lanes` "A USER
+  FUNCTION THAT RETURNS A MATRIX" (`t ↦ [[t, 1], [2, 3]]` under a declared
+  `(real)`, complex mode, parse and box routes) and `gpu-point-complex-component`
+  "Sum(1 + v(x)[2]…)" (`v := s ↦ [s, k]` called with a free `x`; JavaScript
+  strict, JavaScript auto, GLSL), where `At` refuses a base with no known
+  length. The compiler relies on the fold. The decision: (a) the signature
+  inference stops the fold while the types of the body's expressions keep it,
+  or (b) `callResultType` reads an argument that is a free symbol as a generic
+  number. Three other expectations change to sound answers with the fix:
+  `placeholder-signature-refinement` (two `vector<2>` → `list<unknown>`) and
+  the `FlatMap` case of `collection-operator-parameter-inference`
+  (`list<number>` → `list<unknown>`). Probe:
+  `ce.assign('g', ce.box(['Function', ['List', 'x'], 'x'])); ce.box('g').type.toString()`.
+
+### The `CHANGELOG.md` section "Unreleased" holds the content of 0.161.0 (OPEN, release task — found 2026-10-22)
+
+- The release commit of 0.161.0 (`d649e7ea4`) changed only `package.json`,
+  `package-lock.json` and their `vscode-epsil/` copies: it added no `## 0.161.0`
+  heading to `CHANGELOG.md`. So the section "## Unreleased" holds the entries
+  released in 0.161.0 and the entries made after it (for example the presence
+  contracts of commit `41240b5e9` and the change that reads a list type by its
+  elements). Probe: `git show --stat d649e7ea4`, and
+  `grep -n '^## ' CHANGELOG.md | head -3` (it shows `## Unreleased`, then
+  `## 0.160.0`). At the next release, the user separates the entries of 0.161.0
+  under their own heading, from the entries of the new release.
 
 ### Collection results that can hold an absent element, after the `Join` fix (OPEN, small; one question — found 2026-10-19 by the `Join`/`ListJoin` absent-element fix)
 
@@ -813,10 +1006,6 @@ item above.
   The type `list<number>` holds the value, so the defect is in the value: a
   failed level probably gets the absence marker of its level in
   `makeSpineRunner()` (`library/collections.ts`).
-- `ce.declare('L', 'list<list<integer>^2>')` then assigning `[[1, 2], [3]]`
-  throws a type-compatibility error. The value is 2 rows of integers, but its
-  own type, `list<vector<integer^1> | vector<integer^2>>`, has no outer length,
-  so the check against the declared length fails.
 - With `Q: list<list<tuple<integer, integer>>> := [[(1,2),(3,4)],[(5,6)]]` and
   `M: list<list<integer>> := [[1,2],[3]]`, `Q · M` is typed
   `list<list<list<integer> | list<tuple<integer, integer>>>>`, but its value
@@ -2336,23 +2525,6 @@ of a number by a matrix is element-wise, while `B^{-1}` parsed after the
 assignment is `Inverse(B)`. The user decided 2026-10-15 to keep the rewrite (see
 the comment on `squareMatrixPower()`).
 
-### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
-
-Since 2026-10-01 a list of dimensioned lists is read as the flat shape it spells
-at a target with two or more dimensions: `list<vector<integer^3>^2>` is a
-subtype of `matrix<integer^(2x3)>` and of `matrix<integer>`, and the dimension
-solver pins `cols(nl)` to `3` (`flattenNestedListType`,
-`common/type/instantiate.ts`). A target with no dimensions is left out:
-`matrix<integer^(2x3)>` is a subtype of `list<integer>` (a list type with no
-dimensions accepts any shape) and of `tensor<integer>`, which parses to the same
-type, but `list<vector<integer^3>^2>` is not. Code that reads the element type
-of a `list<integer>` operand expects scalars, and a nested type would give it
-rows, so extending the conversion needs a check of those readers first. Also not
-accepted: a nesting of three levels at a target whose elements are still rows
-(`list<vector<vector<integer^2>^3>^4>` at `list<vector<integer^2>^(4x3)>`),
-because every level is merged at once; a fix would merge only as many levels as
-the target has dimensions.
-
 ### Registering a chain of `-> unknown` functions reads the declared signatures a number of times that grows faster than the depth (OPEN, low — narrowed 2026-10-01)
 
 With `W_k` declared `(unknown) -> unknown` and each body calling `W_{k+1}`
@@ -3313,9 +3485,12 @@ compiles when its point list `C_c` is declared
    - **`PointList` refuses a component typed `list<number> | number`.**
      `compileJSPointList` (`compilation/javascript-target.ts`) has a run-time
      role test (`Array.isArray`) for a `broadcastable<number>` component, and
-     throws "neither a scalar slot nor a list source" for the union that means
-     the same thing — the type a coordinate read has when its point may be one
-     point or a list of points. Trial fix: admit a union whose every member is a
+     throws "neither a scalar slot nor a list source" for the union
+     `list<number> | number` — the type a coordinate read has when its point
+     may be one point or a list of points. (Since 2026-10-22
+     `broadcastable<number>` is `number | tensor`, which also holds a matrix,
+     so the two types no longer have the same values; for a coordinate read
+     the run-time test is the same.) Trial fix: admit a union whose every member is a
      scalar number type or an indexed collection of scalar numbers, with no
      tuple member, to the same run-time test.
    - **An ordering over `|1/Conjugate(…)|` is refused as complex-valued.** Not

@@ -1459,13 +1459,15 @@ export class Parser {
             this.advance();
             return this.parseTensorType();
           }
-          // Handle bare 'tensor' as default list of numbers
+          // Bare `tensor` is a tensor of numbers of unknown rank, 1 or more.
+          // It is a tensor node, not a plain list: a plain list of numbers
+          // (`list<number>`) is a different type, whose elements are numbers,
+          // while the elements of a tensor of rank 2 or more are its rows.
           this.advance();
-          return this.createNode<ListTypeNode>('list', {
+          return this.createNode<TensorTypeNode>('tensor', {
             elementType: this.createNode<PrimitiveTypeNode>('primitive', {
               name: 'number',
             }),
-            dimensions: undefined,
           });
         default:
           return undefined;
@@ -1492,7 +1494,9 @@ export class Parser {
         if (type) {
           elementType = type;
 
-          // Dimensions after the element type (e.g. `list<integer^2x3>`)
+          // Dimensions after the element type (e.g. `list<integer^2x3>`).
+          // The type builder refuses a cell type that can hold a list
+          // (`checkTensorCells`, `type-builder.ts`).
           if (this.match('^')) {
             dimensions = this.parseCaretDimensions();
           }

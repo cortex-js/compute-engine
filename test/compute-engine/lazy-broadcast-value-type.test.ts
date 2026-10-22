@@ -152,7 +152,11 @@ describe('the type of Map', () => {
       M,
     ] as any);
     expect(zipRows.evaluate().toString()).toBe('[[2,4],[6,8]]');
-    expect(zipRows.type.toString()).toBe('list<vector<integer^2>^2>');
+    // The cells of a list with dimensions cannot be lists, so the outer
+    // length and the fixed length of each row are spelled in one place: two
+    // rows of two integers are a `matrix<integer^(2x2)>`.
+    expect(zipRows.type.toString()).toBe('matrix<integer^(2x2)>');
+    expect(zipRows.evaluate().type.matches(zipRows.type)).toBe(true);
   });
 
   test('a zip Map with a set source is an indexed collection', () => {

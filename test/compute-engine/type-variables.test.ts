@@ -425,13 +425,14 @@ describe('NO BEHAVIOR CHANGE FOR EXISTING TYPE STRINGS', () => {
   });
 });
 
-describe('DIMENSIONED ACTUALS — the two collection readings (subtype.ts)', () => {
-  // A dimensioned rank-n list (n >= 2) has two consistent readings as a
-  // collection, and `isSubtype` must admit BOTH: the flat scalar-dtype reading,
-  // and the PEELED reading the runtime uses (`collectionElementType`: "the
-  // first element of a matrix is its first row"). Admitting only the first is
-  // what made `(indexed_collection<T>, …) where T` reject the very matrix
-  // operand whose element type pinned `T`.
+describe('DIMENSIONED ACTUALS — the row reading of a matrix (subtype.ts)', () => {
+  // A dimensioned rank-n list (n >= 2) is a collection of its rows, the
+  // reading the runtime uses (`collectionElementType`: "the first element of
+  // a matrix is its first row"), and `isSubtype` reads it the same way. The
+  // older flat scalar-dtype reading (a matrix as a collection of its cells)
+  // is gone since 2026-10-21 (`docs/plans/2026-10-21-list-element-tensor-cell.md`);
+  // admitting only that reading is what made `(indexed_collection<T>, …)
+  // where T` reject the very matrix operand whose element type pinned `T`.
   test('the peeled row reading is admitted', () => {
     const m = parseType('matrix<integer^(2x3)>');
     expect(typeToString(collectionElementType(m)!)).toBe('vector<integer^3>');
@@ -441,10 +442,10 @@ describe('DIMENSIONED ACTUALS — the two collection readings (subtype.ts)', () 
     expect(isSubtype(m, parseType('collection<vector<integer^3>>'))).toBe(true);
   });
 
-  test('the scalar-dtype reading is unchanged (additive, not replaced)', () => {
+  test('the scalar-dtype reading is gone: a matrix is not a collection of its cells', () => {
     const m = parseType('matrix<integer^(2x3)>');
-    expect(isSubtype(m, parseType('indexed_collection<integer>'))).toBe(true);
-    expect(isSubtype(m, parseType('collection<integer>'))).toBe(true);
+    expect(isSubtype(m, parseType('indexed_collection<integer>'))).toBe(false);
+    expect(isSubtype(m, parseType('collection<integer>'))).toBe(false);
   });
 
   test('a 1-D list is unaffected — there is no dimension to peel', () => {
@@ -1185,7 +1186,10 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('vList', '(T) -> list<T> where T');
     const xs = ['List', 1, 2, 3] as any;
     expect(ce.box(['vEcho', xs]).type.toString()).toBe('vector<integer^3>');
-    expect(ce.box(['vTuple', xs]).type.toString()).toBe('list<tuple<integer>>');
+    // A tuple cell may carry dimensions, so the wrap keeps the operand's length.
+    expect(ce.box(['vTuple', xs]).type.toString()).toBe(
+      'list<tuple<integer>^3>'
+    );
     expect(ce.box(['vList', xs]).type.toString()).toBe('list<list<integer>>');
     // A BOUNDED echo is still an echo.
     ce.declare('vBounded', '(T) -> T where T: indexed_collection');

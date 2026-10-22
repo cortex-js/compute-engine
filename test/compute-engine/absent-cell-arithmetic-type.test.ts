@@ -386,8 +386,12 @@ const REVIEW_CASES: ReviewCase[] = [
     decl: 'list<list<tuple<integer, integer>> | missing>',
     value: ['List', ['List', ['Tuple', 1, 2]], 'Missing'],
     expr: ['Multiply', ['List', 2, 3], 'L'],
-    type: 'list<list<missing | tuple<number, number>> | nan> | vector<2>',
-    evaluated: '[[(2, 4)],NaN]',
+    // Each number of `[2, 3]` scales one row of points of `L`, so the cells
+    // of the product are points, as for `L·2`. The absent row stays absent:
+    // the type of the product says that a row may be `Missing`, and the
+    // evaluation marks the absent row so (`markAbsentPointCells()`).
+    type: 'list<list<missing | tuple<number, number>> | missing>',
+    evaluated: '[[(2, 4)],"Missing"]',
   },
   {
     label: 'an any arm',

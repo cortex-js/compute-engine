@@ -107,11 +107,13 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
   describe('concrete `list<number>` element type (regression guard)', () => {
     // `U_1` types `number` here — definitely a scalar — so the comparison
     // definitely broadcasts and the whole chain is a definite `list<…>`. This
-    // path already worked; it must keep working.
+    // path already worked; it must keep working. `C` is a bare
+    // `indexed_collection`, which may hold lists, so the mask is a list whose
+    // elements are booleans or lists.
     test('relation, Which and Sum all type list and evaluate to lists', () => {
       const { rows, assign } = witness('list<number>');
 
-      expect(rows.relation.type.toString()).toBe('list<boolean>');
+      expect(rows.relation.type.toString()).toBe('list<boolean | list<any>>');
       expect(rows.which.type.toString()).toBe('list<integer>');
       expect(rows.sum.type.toString()).toBe('list<integer>');
 
@@ -186,20 +188,22 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
     // `Less`/`Greater`/… broadcast element-wise in EVERY collection case (a
     // collection-vs-collection ordering is the element-wise zip, not a whole
     // compare), so they never have an undecidable outcome and already typed
-    // the definite `list<boolean>`. Pinned so the `Equal` change does not
-    // silently drag them to `broadcastable`.
+    // a definite list. Pinned so the `Equal` change does not silently drag
+    // them to `broadcastable`. A bare `indexed_collection` may hold lists,
+    // which the comparison maps at their leaves, so the mask is a list whose
+    // elements are booleans or lists.
     test.each(['Less', 'Greater', 'LessEqual', 'GreaterEqual'])(
-      '%s over a collection stays list<boolean>',
+      '%s over a collection stays a list mask',
       (operator) => {
         const ce = new ComputeEngine();
         ce.declare('C', 'indexed_collection');
         ce.declare('U', 'indexed_collection');
         ce.declare('n', 'number');
         expect(ce.box([operator, 'C', 'n']).type.toString()).toBe(
-          'list<boolean>'
+          'list<boolean | list<any>>'
         );
         expect(ce.box([operator, 'C', ['At', 'U', 1]]).type.toString()).toBe(
-          'list<boolean>'
+          'list<boolean | list<any>>'
         );
       }
     );

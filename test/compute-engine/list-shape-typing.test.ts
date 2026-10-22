@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { expectTypeBetween } from '../utils';
+import { shapedOrPlainListType } from '../../src/compute-engine/collection-utils';
+import { parseType } from '../../src/common/type/parse';
+import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Phase A of the tensor-unification design: honest, shape-derived typing of
@@ -174,9 +177,11 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     expect(boxed.type.matches('matrix<2x0>')).toBe(true);
     expect(boxed.type.matches('matrix<integer^(2x0)>')).toBe(true);
     expect(boxed.type.toString()).toBe('list<never^(2x0)>');
-    // A ragged literal with an empty row claims no shape.
+    // A ragged literal with an empty row claims no shape: the join of the
+    // empty row (`list<never>`) and the 1-vector is a plain list of the
+    // joined elements.
     expect(ce.box(['List', ['List'], ['List', 1]]).type.toString()).toBe(
-      'list<list<never> | vector<integer^1>>'
+      'list<list<integer>>'
     );
   });
 });
@@ -222,6 +227,39 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expectTypeBetween(ce.box(['Negate', 5]), { atMost: 'integer' });
   });
 
+  test('a RAGGED literal keeps the list of its rows', () => {
+    // The rows of `[[1], [2, 3]]` differ in length, so the literal is a
+    // plain list whose element type is a union of two vectors. The handler's
+    // answer states that shape, and is not wrapped again: a second list
+    // level (`list<list<vector<integer^1> | vector<integer^2>>>`) does not
+    // hold the value, whose elements are the rows.
+    const e = ce.box(['Negate', ['List', ['List', 1], ['List', 2, 3]]]);
+    expect(e.type.toString()).toBe(
+      'list<vector<integer^1> | vector<integer^2>>'
+    );
+    const value = e.evaluate();
+    expect(value.toString()).toBe('[[-1],[-2,-3]]');
+    expect(value.type.toString()).toBe(
+      'list<vector<integer^1> | vector<integer^2>>'
+    );
+    expect(value.type.matches(e.type)).toBe(true);
+  });
+
+  test('a UNION cell with a list arm keeps its rank', () => {
+    // `L` holds a list or an integer in each element. The `Add` and `Negate`
+    // handlers type each arm of the element, and their answer is the
+    // result: `[[1, 2], 3] + 0.5` is `[[1.5, 2.5], 3.5]`.
+    const eng = new ComputeEngine();
+    eng.declare('L', 'list<list<integer> | integer>');
+    const sum = eng.box(['Add', 'L', 0.5]);
+    const neg = eng.box(['Negate', 'L']);
+    expect(sum.type.toString()).toBe('list<list<real> | real>');
+    expect(neg.type.toString()).toBe('list<integer | list<integer>>');
+    eng.assign('L', eng.box(['List', ['List', 1, 2], 3]));
+    for (const e of [eng.box(['Add', 'L', 0.5]), eng.box(['Negate', 'L'])])
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+  });
+
   test('a SHAPELESS handler result still goes through the wrapper', () => {
     // `Range(1,5)` is `indexed_collection<integer>` — no statically-provable
     // dimensions — so the wrapper's upgrade to the definite `list<integer>` is
@@ -256,12 +294,11 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
   test('a polytype broadcastable takes the WRAPPER answer on mixed ranks', () => {
     // D10 RE-RULED (2026-08-04): the echo short-circuit that used to hand the
     // dominant operand's type back verbatim is retired — a lift-admitted
-    // operand now binds its ELEMENT, so the wrapper builds every answer. With
-    // operands of DIFFERENT ranks the wrapper declines to invent a shape and
-    // answers the plain `list<E>`, which is exactly what the GROUND
-    // broadcastable answers for the same call (§4.5 parity). Less precise
-    // than the retired short-circuit, still sound: both orders pin
-    // evaluated ⊆ declared.
+    // operand now binds its ELEMENT, so the wrapper builds every answer. A
+    // broadcast over operands of DIFFERENT ranks is a numeric array of any
+    // rank, `tensor<E>`, which is exactly what the GROUND broadcastable
+    // answers for the same call (§4.5 parity). Less precise than the retired
+    // short-circuit, still sound: both orders pin evaluated ⊆ declared.
     const eng = new ComputeEngine();
     eng.declare('pg57', {
       signature: '(T, U) -> T where T: number, U: number',
@@ -269,10 +306,10 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       evaluate: (ops) => ops[0],
     } as any);
     const low = eng.box(['pg57', ['List', 10, 20], M22]);
-    expect(low.type.toString()).toBe('list<integer>');
+    expect(low.type.toString()).toBe('tensor<integer>');
     expect(low.evaluate().type.matches(low.type.toString())).toBe(true);
     const dom = eng.box(['pg57', M22, ['List', 10, 20]]);
-    expect(dom.type.toString()).toBe('list<integer>');
+    expect(dom.type.toString()).toBe('tensor<integer>');
     expect(dom.evaluate().type.matches(dom.type.toString())).toBe(true);
     // The ground counterpart, for the parity claim above.
     eng.declare('gg57', {
@@ -281,15 +318,16 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       evaluate: (ops) => ops[0],
     } as any);
     expect(eng.box(['gg57', M22, ['List', 10, 20]]).type.toString()).toBe(
-      'list<number>'
+      'tensor'
     );
   });
 
   test('a UNION-typed operand also takes the wrapper answer', () => {
     // Same re-ruling: a declared `list<integer> | matrix<integer>` operand at
     // `(T) -> T where T` binds `T` to the union's ELEMENT (`integer` on
-    // both arms), and the wrapper — unable to prove a rank across the arms —
-    // answers `list<integer>`. Again the ground reading, and again sound.
+    // both arms), and a broadcast over arms of different ranks is a numeric
+    // array of any rank, `tensor<integer>`. Again the ground reading, and
+    // again sound.
     const eng = new ComputeEngine();
     eng.declare('lu57', 'list<integer> | matrix<integer>');
     eng.declare('echoU57', {
@@ -298,7 +336,7 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       evaluate: (ops) => ops[0],
     } as any);
     const e = eng.box(['echoU57', 'lu57']);
-    expect(e.type.toString()).toBe('list<integer>');
+    expect(e.type.toString()).toBe('tensor<integer>');
     expect(e.evaluate().type.matches(e.type.toString())).toBe(true);
     // `Remainder(M, 7)` no longer widens to a union at all: element-binding
     // joins the matrix LEAF with the scalar, so the wrapper gives the clean
@@ -306,5 +344,64 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expect(ce.box(['Remainder', M22, 7]).type.toString()).toBe(
       'matrix<integer^(2x2)>'
     );
+  });
+});
+
+describe('a scalar-or-list union whose list branch holds lists', () => {
+  // A broadcast over `u: integer | list<list<integer>>` maps every leaf of
+  // the list branch, so the list arm of the result has the structure of
+  // the branch. One list level around the cell result
+  // (`boolean | list<boolean>` for `u < 3`) does not hold the value
+  // `[[True, True], [False]]`, whose elements are lists.
+  const cases: [any, string][] = [
+    [['Sin', 'u'], 'list<list<number>> | number'],
+    [['Less', 'u', 3], 'boolean | list<list<boolean>>'],
+    [
+      ['Floor', 'u'],
+      'integer | list<list<integer | nan | signed_infinity>> | nan | signed_infinity',
+    ],
+    [['Multiply', 2, 'u'], 'list<list<number>> | number'],
+  ];
+
+  for (const [decl, value] of [
+    ['integer | list<list<integer>>', ['List', ['List', 1, 2], ['List', 3]]],
+    [
+      'integer | list<vector<integer^1> | vector<integer^2>>',
+      ['List', ['List', 1, 1], ['List', 2]],
+    ],
+  ] as [string, any][]) {
+    for (const [expr, expected] of cases) {
+      test(`${JSON.stringify(expr)} with u: ${decl}`, () => {
+        const ce = new ComputeEngine();
+        ce.declare('u', decl);
+        expect(ce.box(expr).type.toString()).toBe(expected);
+        ce.assign('u', ce.box(value));
+        const e = ce.box(expr);
+        const v = e.evaluate();
+        expect(v.type.matches(e.type)).toBe(true);
+      });
+    }
+  }
+});
+
+describe('a shaped list of unknown rank whose cells may be lists', () => {
+  // `shapedOrPlainListType(cell, null)` is the type of a tensor of unknown
+  // rank. When the cell may be a list it cannot carry dimensions, and an
+  // element of a value is a cell (rank 1) or a list (rank 2 or more). The
+  // answer was `list<cell>`, the rank-1 reading, which a value of rank 2
+  // does not match.
+  test('the type holds a value of rank 2', () => {
+    const ce = new ComputeEngine();
+    const t = shapedOrPlainListType(parseType('list<integer>'), null);
+    expect(typeToString(t)).toBe('list<list<any>>');
+    // A 2 by 2 arrangement of `list<integer>` cells.
+    const rank2 = ce.box([
+      'List',
+      ['List', ['List', 1], ['List', 2]],
+      ['List', ['List', 3], ['List', 4]],
+    ]);
+    expect(rank2.type.matches(ce.type(typeToString(t)))).toBe(true);
+    // A cell that cannot be a list keeps the tensor of unknown rank.
+    expect(typeToString(shapedOrPlainListType('integer', null))).toBe('tensor<integer>');
   });
 });

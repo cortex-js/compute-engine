@@ -947,7 +947,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     });
     expect(r.success).toBe(true);
     expect(r.preamble).toContain(
-      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(v, 1))'
+      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(v, 1, true, undefined, false, true))'
     );
     expect(bands(r.run!({ PL: POINTS }))).toEqual([
       [3, 3],

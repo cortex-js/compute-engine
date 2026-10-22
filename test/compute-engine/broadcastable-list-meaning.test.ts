@@ -10,15 +10,24 @@ import { reduceType, typesOverlap } from '../../src/common/type/reduce';
 import { typeToString } from '../../src/common/type/serialize';
 
 /**
- * `broadcastable<T>` is the union `T | list<T>`: a scalar `T`, or a list of
- * `T` that an element-wise operator maps over. It used to be
- * `T | indexed_collection<T>`, with a rule that refused tuples and strings.
- * Because `tuple<T> <: indexed_collection<T>`, that relation was not
- * transitive: `tuple<integer> <: indexed_collection<integer> <:
- * broadcastable<integer>`, but `tuple<integer>` was not a subtype of
- * `broadcastable<integer>`. With the list meaning, every subtype of
- * `list<T>` is a subtype of `broadcastable<T>`, and a tuple, which is not a
- * list, is outside both.
+ * `broadcastable<T>` is the union `T | tensor<T>` for a numeric `T` (a
+ * scalar, or a tensor of any rank whose cells are `T`) and `T | list<T>`
+ * otherwise (a scalar, or a list of `T`): the collection an element-wise
+ * operator maps over. It used to be `T | indexed_collection<T>`, with a
+ * rule that refused tuples and strings. Because
+ * `tuple<T> <: indexed_collection<T>`, that relation was not transitive:
+ * `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`,
+ * but `tuple<integer>` was not a subtype of `broadcastable<integer>`. With
+ * the tensor meaning, every list of numbers and every matrix is a subtype of
+ * `broadcastable<number>`, and a tuple, which is not a list, is outside both.
+ *
+ * A list with no dimensions is read by its elements (user decision of
+ * 2026-10-21, `docs/plans/2026-10-21-list-element-tensor-cell.md`): a
+ * matrix of integers is a `list<vector<integer>>`, never a `list<integer>`,
+ * and two plain lists always share the empty list, so their meet is the
+ * list of the meet of the elements (`list<never>` when the elements share
+ * nothing) and they overlap. The tests below pin the meets and the overlaps
+ * that follow.
  *
  * Evaluation is unchanged where the old relation is what a check needs. The
  * engine checks that ask "is this operand a number, or a collection that
@@ -32,7 +41,7 @@ import { typeToString } from '../../src/common/type/serialize';
 
 const sub = (a: string, b: string) => isSubtype(parseType(a), parseType(b));
 
-describe('broadcastable<T> is T | list<T>', () => {
+describe('broadcastable<T> is T | tensor<T> for a numeric T', () => {
   const lists = [
     'list<integer>',
     'vector<integer>',
@@ -69,11 +78,16 @@ describe('broadcastable<T> is T | list<T>', () => {
     expect(sub('tuple<integer>', 'list<integer>')).toBe(false);
   });
 
-  it('is a subtype of both T | list<T> and T | indexed_collection<T>', () => {
-    expect(sub('broadcastable<integer>', 'integer | list<integer>')).toBe(true);
-    expect(
-      sub('broadcastable<integer>', 'integer | indexed_collection<integer>')
-    ).toBe(true);
+  it('is a subtype of T | tensor<T>, and of neither arm alone', () => {
+    expect(sub('broadcastable<integer>', 'integer | tensor<integer>')).toBe(
+      true
+    );
+    // A `broadcastable<integer>` holds matrices, which a list of integers
+    // (read by its elements) does not.
+    expect(sub('broadcastable<integer>', 'integer | list<integer>')).toBe(
+      false
+    );
+    expect(sub('broadcastable<integer>', 'tensor<integer>')).toBe(false);
     expect(sub('broadcastable<integer>', 'list<integer>')).toBe(false);
     expect(sub('broadcastable<integer>', 'integer')).toBe(false);
   });
@@ -238,20 +252,27 @@ describe('a list meets an indexed collection or a collection', () => {
     expect(meet('list<number>', 'indexed_collection<integer>')).toBe(
       'list<integer>'
     );
+    // The tensor arm of a `broadcastable<number>` meets an indexed
+    // collection of integers at rank 1 only: the rows of a matrix are not
+    // integers.
     expect(meet('broadcastable<number>', 'indexed_collection<integer>')).toBe(
-      'list<integer>'
+      'vector<integer>'
     );
     expect(meet('indexed_collection<real>', 'collection<integer>')).toBe(
       'indexed_collection<integer>'
     );
   });
 
-  it('overlaps when the elements overlap, as for two lists', () => {
+  it('overlaps when the elements overlap, or when both can be empty', () => {
     expect(
       overlap('broadcastable<number>', 'indexed_collection<integer>')
     ).toBe(true);
-    expect(overlap('list<integer>', 'collection<string>')).toBe(false);
-    expect(overlap('list<integer>', 'list<string>')).toBe(false);
+    // Two lists with no dimensions always share the empty list.
+    expect(overlap('list<integer>', 'collection<string>')).toBe(true);
+    expect(overlap('list<integer>', 'list<string>')).toBe(true);
+    // A list with a fixed length is never empty, so its elements decide.
+    expect(overlap('list<integer^3>', 'collection<string>')).toBe(false);
+    expect(overlap('list<integer^3>', 'list<string>')).toBe(false);
   });
 
   it('admits an indexed collection at a union parameter with broadcastable', () => {
@@ -284,29 +305,32 @@ describe('results that follow from the list meaning', () => {
     expect(e.isValid).toBe(false);
   });
 
-  it('types a union of a list and a broadcastable as a list', () => {
+  it('types a union of a list and a broadcastable as a scalar or a tensor', () => {
+    // `broadcastable<integer>` is `integer | tensor<integer>`, and a list
+    // of integers is a tensor of integers, so the union is that union.
     const ce = new ComputeEngine();
     ce.declare('u', 'list<integer> | broadcastable<integer>');
     expect(ce.box(['Add', 'u', 1]).type.toString()).toBe(
-      'integer | list<integer>'
+      'integer | tensor<integer>'
     );
     expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
-      'integer | list<integer>'
+      'integer | tensor<integer>'
     );
   });
 });
 
 describe('a matrix beside a wider collection', () => {
-  // An element of `collection<E>` is a cell or a row of the matrix.
+  // The elements of a matrix are its rows: an element of `collection<E>`
+  // must be a row of the matrix, never a cell.
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b));
-  it('overlaps when a cell or a row can be an element', () => {
-    expect(overlap('list<integer^(2x3)>', 'collection<integer>')).toBe(true);
+  it('overlaps when a row can be an element', () => {
     expect(overlap('list<integer^(2x3)>', 'collection<list<integer>>')).toBe(
       true
     );
   });
-  it('does not overlap when neither can be one', () => {
+  it('does not overlap when no row can be one', () => {
+    expect(overlap('list<integer^(2x3)>', 'collection<integer>')).toBe(false);
     expect(overlap('list<integer^(2x3)>', 'collection<string>')).toBe(false);
   });
 });
@@ -335,10 +359,14 @@ describe('the meet of a matrix with a wider collection', () => {
   it('is empty when no cell and no row can be an element', () => {
     expect(meet('list<integer^(2x3)>', 'collection<string>')).toBe('never');
   });
-  it('is kept when cells can be empty collections of both types', () => {
-    // A 2×3 grid of empty sets is in both types.
+  it('is empty when the rows of a grid cannot be elements', () => {
+    // The elements of a 2×3 grid of sets are its rows, which are not sets.
     expect(meet('list<set<integer>^(2x3)>', 'collection<set<string>>')).toBe(
-      'list<set<integer>^(2x3)> & collection<set<string>>'
+      'never'
+    );
+    // A list with no dimensions of empty sets is in both types.
+    expect(meet('list<set<integer>>', 'collection<set<string>>')).toBe(
+      'list<set<never>>'
     );
   });
 });
@@ -370,9 +398,9 @@ describe('the meet of a fixed-length list with a wider collection', () => {
   });
 });
 
-describe('a matrix can be in two collection types', () => {
-  // A matrix of integers is a `list<number>` (its cells are numbers) and a
-  // `list<list<integer>>` (its rows are lists of integers).
+describe('a matrix is in a collection of its rows, not of its cells', () => {
+  // A matrix of integers is a `list<vector<integer>>` and a
+  // `list<list<integer>>`; it is not a `list<number>`.
   const meet = (a: string, b: string) =>
     typeToString(
       reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] })
@@ -380,19 +408,44 @@ describe('a matrix can be in two collection types', () => {
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b)) &&
     typesOverlap(parseType(b), parseType(a));
-  it.each([
-    // Two lists (`list<number>` and `list<list<integer>>`) still meet
-    // elementwise, as before the change: see ROADMAP.md.
-    ['list<number>', 'collection<list<integer>>'],
-    ['indexed_collection<number>', 'collection<list<integer>>'],
-  ])('%s and %s overlap, and their meet is kept', (a, b) => {
-    expect(overlap(a, b)).toBe(true);
-    expect(meet(a, b)).toBe(`${a} & ${b}`);
+  it('a matrix of numbers and a collection of integer rows overlap, and their meet is kept', () => {
+    expect(overlap('matrix<number>', 'collection<list<integer>>')).toBe(true);
+    expect(meet('matrix<number>', 'collection<list<integer>>')).not.toBe(
+      'never'
+    );
+    expect(
+      isSubtype(
+        parseType('matrix<integer^(2x2)>'),
+        reduceType({
+          kind: 'intersection',
+          types: [
+            parseType('matrix<number>'),
+            parseType('collection<list<integer>>'),
+          ],
+        })
+      )
+    ).toBe(true);
+  });
+  it('a list of numbers and a collection of rows share the empty list only', () => {
+    expect(overlap('list<number>', 'collection<list<integer>>')).toBe(true);
+    expect(meet('list<number>', 'collection<list<integer>>')).toBe(
+      'list<never>'
+    );
   });
   it.each([
+    // Two lists with no dimensions share the empty list.
     ['list<integer>', 'list<string>'],
     ['list<integer>', 'list<list<string>>'],
     ['list<integer>', 'collection<string>'],
+  ])('%s and %s overlap, through the empty list', (a, b) => {
+    expect(overlap(a, b)).toBe(true);
+    expect(meet(a, b)).toBe('list<never>');
+  });
+  it.each([
+    // A list with a fixed length is never empty.
+    ['list<integer^3>', 'list<string>'],
+    ['list<integer^3>', 'list<list<string>>'],
+    ['vector<integer^3>', 'collection<string>'],
   ])('%s and %s do not overlap', (a, b) => {
     expect(overlap(a, b)).toBe(false);
   });
@@ -406,20 +459,32 @@ describe('more meets of a list with a wider collection', () => {
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b)) &&
     typesOverlap(parseType(b), parseType(a));
-  it('keeps the intersection when a matrix is in both', () => {
-    // An integer matrix: its cells are numbers, its rows lists of integers.
+  it('meets the elements: a list of empty lists is in both', () => {
+    // The elements `number | list<string>` and `boolean | list<integer>`
+    // share the empty list, so the lists of empty lists are in both types.
     expect(
       meet('list<number | list<string>>', 'collection<boolean | list<integer>>')
-    ).toBe('list<list<string> | number> & collection<boolean | list<integer>>');
+    ).toBe('list<list<never>>');
+    // A list of integer vectors or strings beside a collection of booleans
+    // or integer rows: the lists of integer rows are in both.
+    expect(
+      meet(
+        'list<vector<number> | list<string>>',
+        'collection<boolean | list<integer>>'
+      )
+    ).toBe('list<list<integer>>');
   });
-  it('applies the empty-collection rule at every level, for every kind', () => {
-    // Two collections that share only the empty collection do not overlap
-    // (the protocol rule of `typesOverlap()`), and the rule is applied to
-    // the elements too: `list<set<never>>` and `list<set<integer>>` do not
-    // overlap, so `list<set<never>>` and `collection<set<integer>>` do not
-    // either.
-    expect(overlap('list<set<never>>', 'list<set<integer>>')).toBe(false);
-    expect(overlap('list<set<never>>', 'collection<set<integer>>')).toBe(false);
+  it('two lists with no dimensions overlap whatever their elements', () => {
+    // Both hold the empty list, and `list<set<never>>` (lists of empty
+    // sets) is a subtype of `list<set<integer>>` besides.
+    expect(overlap('list<set<never>>', 'list<set<integer>>')).toBe(true);
+    expect(overlap('list<set<never>>', 'collection<set<integer>>')).toBe(true);
+    // A list with a fixed length of empty sets is never empty, and the
+    // empty set is the only value its cells share with `set<integer>`,
+    // which the protocol rule of `typesOverlap()` does not count.
+    expect(overlap('list<set<never>^2>', 'collection<set<integer>>')).toBe(
+      false
+    );
   });
 });
 
@@ -427,34 +492,57 @@ describe('no false overlap through nested lists', () => {
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b)) ||
     typesOverlap(parseType(b), parseType(a));
-  it('reads a fixed-length list of nothing as empty', () => {
-    expect(
-      overlap('list<list<integer^2>^3>', 'collection<list<string^2>>')
-    ).toBe(false);
-  });
-  it('does not take the empty list as a matrix row', () => {
-    expect(overlap('list<integer>', 'list<boolean | list<string>>')).toBe(
+  it('reads the rows of a matrix as its elements', () => {
+    // The rows of a 3×2 integer matrix are integer 2-vectors, not lists of
+    // two strings.
+    expect(overlap('matrix<integer^(3x2)>', 'collection<list<string^2>>')).toBe(
       false
     );
   });
+  it('does not take the empty list as a matrix row', () => {
+    // A 2-vector of integers holds no boolean and no list of strings; the
+    // lists with no dimensions would share the empty list.
+    expect(overlap('list<integer^2>', 'list<boolean | list<string>>')).toBe(
+      false
+    );
+    expect(overlap('list<integer>', 'list<boolean | list<string>>')).toBe(true);
+  });
 });
 
-describe('a list of nothing is not a matrix row', () => {
-  it('list<never> and list<any> share only the empty list', () => {
+describe('the empty list is a value of every list with no dimensions', () => {
+  it('list<never> and list<any> overlap, and their meet is list<never>', () => {
     const p = (s: string) => parseType(s);
-    expect(typesOverlap(p('list<never>'), p('list<any>'))).toBe(false);
-    expect(typesOverlap(p('list<any>'), p('list<never>'))).toBe(false);
+    expect(typesOverlap(p('list<never>'), p('list<any>'))).toBe(true);
+    expect(typesOverlap(p('list<any>'), p('list<never>'))).toBe(true);
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [p('list<never>'), p('list<any>')],
+        })
+      )
+    ).toBe('list<never>');
   });
 });
 
 describe('a matrix in a fixed-length list of rows', () => {
-  it('keeps the meet of a list of 3 rows with a collection of numbers', () => {
-    // An integer 3×2 matrix: 3 rows on the left, integer cells on the right.
-    const a = parseType('list<list<integer>^3>');
-    const b = parseType('collection<number>');
+  it('meets a matrix of 3 rows with a collection of its rows, not of its cells', () => {
+    // The elements of a 3-row integer matrix are its rows: a collection of
+    // numbers holds none of them, a collection of number vectors all.
+    const a = parseType('matrix<integer^(3x?)>');
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [a, parseType('collection<number>')],
+        })
+      )
+    ).toBe('never');
+    expect(typesOverlap(a, parseType('collection<number>'))).toBe(false);
+    const b = parseType('collection<vector<number>>');
     expect(
       typeToString(reduceType({ kind: 'intersection', types: [a, b] }))
-    ).toBe('list<list<integer>^3> & collection<number>');
+    ).toBe('matrix<integer^(3x?)>');
     expect(typesOverlap(a, b)).toBe(true);
   });
 
@@ -462,8 +550,15 @@ describe('a matrix in a fixed-length list of rows', () => {
     const ce = new ComputeEngine();
     ce.declareType('Empty', 'list<never>', { alias: true });
     const T = (s: string) => ce.type(s).type;
-    expect(typesOverlap(T('list<integer>'), T('list<Empty>'))).toBe(false);
-    expect(typesOverlap(T('list<integer>'), T('list<list<never>>'))).toBe(
+    // A list of integers and a list of empty lists share the empty list,
+    // through the alias as through its definition; a 2-vector of integers
+    // shares nothing with either.
+    const meet = (a: string, b: string) =>
+      typeToString(reduceType({ kind: 'intersection', types: [T(a), T(b)] }));
+    expect(meet('list<integer>', 'list<Empty>')).toBe('list<never>');
+    expect(meet('list<integer>', 'list<list<never>>')).toBe('list<never>');
+    expect(typesOverlap(T('vector<integer^2>'), T('list<Empty>'))).toBe(false);
+    expect(typesOverlap(T('vector<integer^2>'), T('list<list<never>>'))).toBe(
       false
     );
   });
@@ -482,15 +577,12 @@ describe('a matrix witness and a fixed-length list', () => {
     expect(overlap('list<integer^3>', 'collection<list<integer>>')).toBe(false);
     expect(meet('list<integer^3>', 'collection<list<integer>>')).toBe('never');
   });
-  it('keeps the meet when the elements can be rows of a common matrix', () => {
+  it('meets the elements when they can be empty lists', () => {
+    // `boolean | list<integer>` and `number | list<string>` share the
+    // empty list, so the lists of empty lists are in both types.
     expect(
-      meet(
-        'list<(boolean | list<integer>)^3>',
-        'collection<number | list<string>>'
-      )
-    ).toBe(
-      'list<(boolean | list<integer>)^3> & collection<list<string> | number>'
-    );
+      meet('list<boolean | list<integer>>', 'collection<number | list<string>>')
+    ).toBe('list<list<never>>');
   });
 });
 
@@ -502,9 +594,11 @@ describe('empty collections in the meet and in the overlap test', () => {
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b)) ||
     typesOverlap(parseType(b), parseType(a));
-  it('keeps the meet when a matrix of empty sets is in both', () => {
+  it('meets a list of sets and a collection of rows as the empty list', () => {
+    // A set is not a row: the elements share nothing, and the empty list is
+    // the one value in both.
     expect(meet('list<set<integer>>', 'collection<list<set<string>>>')).toBe(
-      'list<set<integer>> & collection<list<set<string>>>'
+      'list<never>'
     );
   });
   it('does not count a list of length 0 as an overlap', () => {
@@ -522,25 +616,41 @@ describe('more spellings of empty lists', () => {
       true
     );
   });
-  it('reads broadcastable<never> as never | list<never>', () => {
-    expect(overlap('list<integer>', 'list<broadcastable<never>>')).toBe(false);
+  it('reads broadcastable<never> as never | tensor<never>', () => {
+    // No integer is a `broadcastable<never>`, so the two lists share the
+    // empty list only.
+    expect(overlap('list<integer>', 'list<broadcastable<never>>')).toBe(true);
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [
+            parseType('list<integer>'),
+            parseType('list<broadcastable<never>>'),
+          ],
+        })
+      )
+    ).toBe('list<never>');
   });
 });
 
 describe('a kept intersection inside a larger type', () => {
   it('is not refuted when met again', () => {
-    expect(
-      typeToString(
-        reduceType(
-          parseType(
-            '((list<number> & collection<list<integer>>) | boolean) & list<integer>'
-          )
-        )
+    // `list<vector<integer>> & matrix<real>` is kept as written (an integer
+    // matrix is in both); met again with `list<list<integer>>` it still
+    // holds that matrix.
+    const m = reduceType(
+      parseType(
+        '((list<vector<integer>> & matrix<real>) | boolean) & list<list<integer>>'
       )
-    ).toBe('list<number> & collection<list<integer>> & list<integer>');
+    );
+    expect(typeToString(m)).not.toBe('never');
+    expect(isSubtype(parseType('matrix<integer^(2x2)>'), m)).toBe(true);
   });
   it('reads an intersection of rows member by member', () => {
-    const a = parseType('list<integer>');
+    // The cells of a 2-vector of integers are not lists, whatever the
+    // members of the intersection say.
+    const a = parseType('vector<integer^2>');
     const b = parseType('list<list<never> & list<any>>');
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
   });
@@ -560,28 +670,46 @@ describe('a kept intersection beside a disjoint type', () => {
 
 describe('tensors of higher rank and long alias chains', () => {
   it('finds a rank-3 tensor in both types', () => {
-    // A 2×2×2 integer tensor: number cells, 2×2 rows.
-    const a = parseType('list<number>');
+    // A 2×2×2 integer tensor is a list of number matrices, and a collection
+    // of lists of integer rows.
+    const a = parseType('list<matrix<number>>');
     const b = parseType('collection<list<list<integer>>>');
     expect(typesOverlap(a, b) && typesOverlap(b, a)).toBe(true);
+    const m = reduceType({ kind: 'intersection', types: [a, b] });
+    expect(typeToString(m)).not.toBe('never');
+    expect(isSubtype(parseType('list<integer^(2x2x2)>'), m)).toBe(true);
+    // A list of numbers holds no matrix: the two share the empty list only.
     expect(
-      typeToString(reduceType({ kind: 'intersection', types: [a, b] }))
-    ).toBe('list<number> & collection<list<list<integer>>>');
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [parseType('list<number>'), b],
+        })
+      )
+    ).toBe('list<never>');
   });
-  it('claims no overlap past the search limit', () => {
+  it('follows a chain of aliases to the empty list', () => {
     const ce = new ComputeEngine();
     ce.declareType('A0', 'list<never>', { alias: true });
     for (let k = 1; k <= 9; k++)
       ce.declareType(`A${k}`, `A${k - 1}`, { alias: true });
-    const a = ce.type('list<number>').type;
+    // The cells of a 2-vector of integers are not lists.
+    const a = ce.type('vector<integer^2>').type;
     const b = ce.type('list<A9>').type;
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
+    // A list of numbers and a list of empty lists share the empty list.
+    const c = ce.type('list<number>').type;
+    expect(typesOverlap(c, b) && typesOverlap(b, c)).toBe(true);
+    expect(
+      typeToString(reduceType({ kind: 'intersection', types: [c, b] }))
+    ).toBe('list<never>');
   });
 });
 
 describe('an intersection of rows with no common row', () => {
   it('holds no row, so it gives no overlap', () => {
-    const a = parseType('list<integer>');
+    // A 2-vector of integers is never empty, and its cells are not rows.
+    const a = parseType('list<integer^2>');
     const b = parseType('list<list<integer^2> & list<integer^3>>');
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
   });
@@ -600,38 +728,44 @@ describe('the search budget and tensors through dimensioned lists', () => {
       })
     ).not.toThrow();
   });
-  it('keeps a rank-3 tensor of a dimensioned list of rows', () => {
-    // A 2×3×2 integer tensor is in both.
-    const a = parseType('list<list<integer^2>^(2x3)>');
-    const b = parseType('collection<number>');
+  it('keeps a rank-3 tensor in a collection of its matrices', () => {
+    // The elements of a 2×3×2 integer tensor are 3×2 integer matrices,
+    // which are matrices of numbers.
+    const a = parseType('list<integer^(2x3x2)>');
+    const b = parseType('collection<matrix<number>>');
     expect(typesOverlap(a, b)).toBe(true);
     expect(
       typeToString(reduceType({ kind: 'intersection', types: [a, b] }))
-    ).not.toBe('never');
+    ).toBe('list<integer^(2x3x2)>');
   });
 });
 
 describe('an intersection that does not reduce', () => {
   it('is not a proof of overlap', () => {
-    // Each member holds a row, but no row is in both members.
+    // Each member holds a row, but no row is in both members, and the
+    // cells of a fixed-length list of booleans or strings are not rows.
     const ce = new ComputeEngine();
     ce.declareType(
       'R',
       'list<integer | list<string>> & list<boolean | list<integer>>',
       { alias: true }
     );
-    const a = ce.type('list<boolean | string>').type;
+    const a = ce.type('list<(boolean | string)^2>').type;
     const b = ce.type('list<R>').type;
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
   });
 });
 
 describe('a cell type with no value', () => {
-  it('gives no matrix witness', () => {
-    // `tuple<list<never^1>>` has no value, although it is not `never`.
-    const a = parseType('list<tuple<list<never^1>>>');
+  it('gives no overlap for a fixed-length list of it', () => {
+    // `tuple<list<never^1>>` has no value, although it is not `never`, so
+    // a list of two of them has none; the list with no dimensions holds
+    // the empty list, which is in both.
+    const a = parseType('list<tuple<list<never^1>>^2>');
     const b = parseType('list<list<any>>');
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
+    const c = parseType('list<tuple<list<never^1>>>');
+    expect(typesOverlap(c, b) && typesOverlap(b, c)).toBe(true);
   });
 });
 
@@ -642,8 +776,10 @@ describe('a list with dimensions and a list with none', () => {
     );
   it('meets with the shape of the dimensioned list', () => {
     expect(meet('list<number^2>', 'list<integer>')).toBe('vector<integer^2>');
-    expect(meet('list<list<number^2>^3>', 'collection<list<integer>>')).toBe(
-      'list<vector<integer^2>^3>'
+    // A list of number 2-vectors beside a collection of integer lists: the
+    // rows keep their length and take the integer cells.
+    expect(meet('list<vector<number^2>>', 'collection<list<integer>>')).toBe(
+      'list<vector<integer^2>>'
     );
   });
   it('keeps the intersection when a matrix can be in both', () => {
@@ -677,18 +813,31 @@ describe('a matrix through rows when the element meet is not empty', () => {
 });
 
 describe('rows of every rank and lists of length 0', () => {
-  it('finds a tensor through rows two levels down', () => {
-    // A 2×2×2 integer tensor: number cells, rows of rows are integer
-    // vectors.
+  it('reads the rows of a rank-3 tensor as matrices', () => {
+    // The rows of a 2×2×2 tensor are 2×2 matrices: a list of strings or
+    // integer 2-vectors holds none, a list of strings or 2×2 integer
+    // matrices holds a 2×2×2 integer tensor.
     const a = parseType('list<(number | string)^(2x2x2)>');
-    const b = parseType('list<string | list<integer^2>>');
-    const m = reduceType({ kind: 'intersection', types: [a, b] });
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [a, parseType('list<string | list<integer^2>>')],
+        })
+      )
+    ).toBe('never');
+    const m = reduceType({
+      kind: 'intersection',
+      types: [a, parseType('list<string | matrix<integer^(2x2)>>')],
+    });
     expect(typeof m === 'object' && m.kind === 'intersection').toBe(true);
+    expect(isSubtype(parseType('list<integer^(2x2x2)>'), m)).toBe(true);
   });
-  it('does not count a list of length 0 as an overlap', () => {
+  it('a list of length 0 is the empty list, which every plain list holds', () => {
     const a = parseType('list<string>');
-    const b = parseType('list<integer^0>');
-    expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
+    expect(typesOverlap(a, parseType('list<integer^0>'))).toBe(true);
+    // A list of length 3 is never empty.
+    expect(typesOverlap(a, parseType('list<integer^3>'))).toBe(false);
   });
 });
 
@@ -761,14 +910,30 @@ describe('cells of nested rows, and two broadcastables', () => {
   const overlap = (a: string, b: string) =>
     typesOverlap(parseType(a), parseType(b)) ||
     typesOverlap(parseType(b), parseType(a));
-  it('needs cells that can match, not only rows that are lists', () => {
-    // Every cell of `list<list<string^2>^3>` is a string.
-    expect(overlap('list<list<string^2>^3>', 'collection<number>')).toBe(false);
+  it('needs rows that can match, not only cells that are strings', () => {
+    // The rows of a 3×2 grid of strings are string 2-lists, not numbers.
+    expect(overlap('list<string^(3x2)>', 'collection<number>')).toBe(false);
   });
-  it('does not count two broadcastables that share the empty list only', () => {
+  it('two broadcastables share the empty list', () => {
+    // `broadcastable<integer>` is `integer | tensor<integer>` and
+    // `broadcastable<string>` is `string | tensor<string>` (a string
+    // cannot hold a list): the meet is a tensor whose cells are `never`,
+    // which holds the empty list (it was `list<never>` while the string arm
+    // was `list<string>`).
     expect(overlap('broadcastable<integer>', 'broadcastable<string>')).toBe(
-      false
+      true
     );
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [
+            parseType('broadcastable<integer>'),
+            parseType('broadcastable<string>'),
+          ],
+        })
+      )
+    ).toBe('tensor<never>');
   });
 });
 
@@ -777,8 +942,12 @@ describe('cases of the second review', () => {
     const ce = new ComputeEngine();
     ce.declareType('A', 'list<integer>', { alias: true });
     const T = (s: string) => ce.type(s).type;
-    // As `list<list<integer>>` and `list<list<string>>`, which do not overlap.
-    expect(typesOverlap(T('list<A>'), T('list<list<string>>'))).toBe(false);
+    const meet = (a: string, b: string) =>
+      typeToString(reduceType({ kind: 'intersection', types: [T(a), T(b)] }));
+    // As `list<list<integer>>`: its meet with `list<list<string>>` is the
+    // lists of empty lists, and `list<list<integer>>` is kept whole.
+    expect(meet('list<A>', 'list<list<string>>')).toBe('list<list<never>>');
+    expect(meet('list<A>', 'list<list<integer>>')).toBe('list<A>');
     expect(typesOverlap(T('list<A>'), T('list<list<integer>>'))).toBe(true);
     ce.declareType('U', 'integer | string', { alias: true });
     expect(
@@ -801,10 +970,12 @@ describe('cases of the second review', () => {
   });
 
   it('compares a union arm by arm', () => {
-    // `list<integer> | integer` and `collection<string>` share only `[]`.
-    const a = parseType('list<integer> | integer');
+    // Neither arm of `vector<integer^2> | integer` shares a value with
+    // `collection<string>`; the arm `list<integer>` would, through `[]`.
+    const a = parseType('vector<integer^2> | integer');
     const b = parseType('collection<string>');
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
+    expect(typesOverlap(parseType('list<integer> | integer'), b)).toBe(true);
   });
 });
 
@@ -864,12 +1035,23 @@ describe('a cut alias and rows with an empty axis', () => {
     expect(typesOverlap(T('A'), T('tuple<string>'))).toBe(false);
     expect(typesOverlap(T('A'), T('tuple<integer>'))).toBe(true);
   });
-  it('does not take an empty inner axis as cells', () => {
-    // Each `2×0` row holds two empty rows and no cell.
-    const a = parseType('list<list<integer^(2x0)>>');
-    const b = parseType('list<number>');
-    expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
-    expect(typesOverlap(parseType('list<list<integer^(2x3)>>'), b)).toBe(true);
+  it('does not take the cells of a matrix element as the elements', () => {
+    // The elements of a list of matrices are matrices, never numbers,
+    // whether the matrices have cells (2×3) or not (2×0): the meet with a
+    // list of numbers is the empty list in both cases.
+    const meet = (a: string, b: string) =>
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [parseType(a), parseType(b)],
+        })
+      );
+    expect(meet('list<matrix<integer^(2x0)>>', 'list<number>')).toBe(
+      'list<never>'
+    );
+    expect(meet('list<matrix<integer^(2x3)>>', 'list<number>')).toBe(
+      'list<never>'
+    );
   });
 });
 
@@ -888,10 +1070,20 @@ describe('two simple aliases and deep tensors', () => {
     ).toBe('never');
     expect(typesOverlap(T('record{v: AA}'), T('record{v: BB}'))).toBe(false);
   });
-  it('finds a rank-6 tensor', () => {
+  it('a list nested six deep shares the empty list with a list of numbers', () => {
+    // Its elements are lists, not numbers, so the empty list is the one
+    // value in both.
     let l6 = 'integer';
     for (let i = 0; i < 6; i++) l6 = `list<${l6}>`;
     expect(typesOverlap(parseType(l6), parseType('list<number>'))).toBe(true);
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [parseType(l6), parseType('list<number>')],
+        })
+      )
+    ).toBe('list<never>');
   });
 });
 
@@ -923,7 +1115,9 @@ describe('chains of aliases of nominal types', () => {
 
 describe('the protocol rule for nested cells', () => {
   it('does not count cells that share empty collections only', () => {
-    const a = parseType('list<list<set<never>>>');
+    // A fixed-length list of empty sets is never empty, and the empty set
+    // is the only value `set<never>` shares with `set<integer>`.
+    const a = parseType('list<set<never>^2>');
     const b = parseType('collection<set<integer>>');
     expect(typesOverlap(a, b) || typesOverlap(b, a)).toBe(false);
   });
@@ -939,7 +1133,9 @@ describe('a branching chain of row aliases', () => {
       });
     const T = (s: string) => ce.type(s).type;
     const start = Date.now();
-    expect(typesOverlap(T('list<R20>'), T('collection<number>'))).toBe(false);
+    // Every arm of `R20` is a fixed-length list of lists: never empty, and
+    // its elements are not numbers.
+    expect(typesOverlap(T('R20'), T('collection<number>'))).toBe(false);
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
@@ -960,51 +1156,70 @@ describe('the meet of two collections of the same kind', () => {
     expect(overlap(a, b)).toBe(true);
   };
 
-  it('keeps two lists whose elements are at different depths', () => {
-    // An integer matrix: its cells are numbers, its rows lists of integers.
-    holds('list<number>', 'list<list<integer>>', 'list<integer^(2x2)>');
+  it('keeps two lists whose elements are rows', () => {
+    // An integer matrix is a list of number vectors and a list of integer
+    // lists; the meet is the list of integer vectors.
+    holds(
+      'list<vector<number>>',
+      'list<list<integer>>',
+      'matrix<integer^(2x2)>'
+    );
+    // `vector<number> & list<integer>` is spelled `list<integer>`: a list
+    // of integers and an open-length vector of integers are the same values.
+    expect(meet('list<vector<number>>', 'list<list<integer>>')).toBe(
+      'list<list<integer>>'
+    );
+    // Two lists whose elements share nothing share the empty list.
     expect(meet('list<integer>', 'list<string>')).toBe('list<never>');
+    expect(meet('list<number>', 'list<list<integer>>')).toBe('list<never>');
   });
 
-  it('keeps two collections whose elements are at different depths', () => {
+  it('keeps two collections whose elements are rows', () => {
     holds(
       'collection<indexed_collection<integer>>',
-      'collection<integer>',
-      'list<integer^(2x2)>'
+      'collection<vector<number>>',
+      'matrix<integer^(2x2)>'
     );
+    // The rows of a 2×2×2 boolean grid are 2×2 boolean grids, which are
+    // lists of boolean 2-lists.
     holds(
       'indexed_collection<list<list<boolean>>>',
-      'indexed_collection<list<number> | boolean>',
+      'indexed_collection<list<list<boolean^2>> | boolean>',
       'list<boolean^(2x2x2)>'
     );
   });
 
-  it('meets two fixed shapes row by row', () => {
-    expect(meet('list<number^(2x2)>', 'list<list<integer>^2>')).toBe(
+  it('meets two fixed shapes axis by axis', () => {
+    // An open axis meets a fixed one as the fixed one; the cells are met.
+    expect(meet('list<number^(2x2)>', 'matrix<integer^(2x?)>')).toBe(
       'matrix<integer^(2x2)>'
     );
-    expect(meet('list<list<integer>^2>', 'list<number^(2x3)>')).toBe(
+    expect(meet('matrix<integer^(2x?)>', 'list<number^(2x3)>')).toBe(
       'matrix<integer^(2x3)>'
     );
-    expect(meet('list<number^(-1x2)>', 'list<list<integer>^3>')).toBe(
+    expect(meet('list<number^(-1x2)>', 'matrix<integer^(3x?)>')).toBe(
       'matrix<integer^(3x2)>'
     );
     expect(meet('list<number^2>', 'list<integer^-1>')).toBe(
       'vector<integer^2>'
     );
-    expect(overlap('list<number^(2x2)>', 'list<list<integer>^2>')).toBe(true);
+    expect(overlap('list<number^(2x2)>', 'matrix<integer^(2x?)>')).toBe(true);
   });
 
   it('refutes two fixed shapes with no common value', () => {
+    // Two different fixed lengths, two different ranks, or two cell types
+    // with no common value.
     expect(meet('list<number^(2x2)>', 'list<number^(2x3)>')).toBe('never');
     expect(meet('list<number^(2x2)>', 'list<number^2>')).toBe('never');
-    expect(meet('list<number^2>', 'list<list<integer>^2>')).toBe('never');
+    expect(meet('list<number^2>', 'matrix<integer^(2x?)>')).toBe('never');
     expect(meet('list<number^2>', 'list<string^2>')).toBe('never');
   });
 
-  it('applies the protocol rule to the rows of two fixed shapes', () => {
-    // They share the empty list only.
-    expect(overlap('list<integer^(-1x2)>', 'vector<list<string>>')).toBe(false);
+  it('reads the rows of a matrix with an open first axis', () => {
+    // The rows of a `matrix<integer^(?x2)>` are integer 2-vectors, never
+    // lists of strings; a list of length 0 and a matrix with a first axis
+    // of length 0 differ in rank.
+    expect(overlap('list<integer^(-1x2)>', 'list<list<string>>')).toBe(false);
     expect(overlap('list<integer^0>', 'list<integer^(0x2)>')).toBe(false);
   });
 
@@ -1020,23 +1235,28 @@ describe('the meet of two collections of the same kind', () => {
     );
   });
 
-  it('keeps a fixed shape whose rows can hold deeper cells', () => {
-    holds('list<list^3>', 'list<vector<integer^2>>', 'list<integer^(3x2x2)>');
-    // A matrix with cells in `unknown` is not a `list<unknown^3>`.
+  it('keeps a list of matrices in a bare list of lists', () => {
+    // A 3×2×2 integer tensor is a list of three 2×2 matrices, and a list
+    // of lists.
+    holds('list<list>', 'list<matrix<integer^(2x2)>>', 'list<integer^(3x2x2)>');
+    expect(meet('list<list>', 'list<matrix<integer^(2x2)>>')).toBe(
+      'list<matrix<integer^(2x2)>>'
+    );
+    // A list of integers of length 3 is a `list<unknown^3>`.
     expect(meet('list<unknown^3>', 'list<integer>')).toBe('vector<integer^3>');
   });
 
-  it('reads a row of a list with no dimensions as a list too', () => {
-    // A value of `list<integer>` can be an integer matrix, whose rows are
-    // `vector<integer^2>`.
+  it('reads the rows of a rank-3 tensor as matrices, two levels down', () => {
+    // The rows of a 2×2×2 integer tensor are 2×2 matrices, which are lists
+    // of integer lists and lists of number vectors.
     holds(
-      'list<list<integer>^-1>',
-      'list<list<number^-1>>',
+      'list<list<list<integer>>>',
+      'list<list<vector<number>>>',
       'list<integer^(2x2x2)>'
     );
     holds(
-      'list<list<boolean>^2>',
-      'list<list<unknown | number^-1>>',
+      'list<list<list<boolean>>>',
+      'list<list<list<boolean^2>>>',
       'list<boolean^(2x2x2)>'
     );
   });
@@ -1052,14 +1272,14 @@ describe('the meet of two collections of the same kind: precision', () => {
     reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] });
   const meet = (a: string, b: string) => typeToString(meetOf(a, b));
 
-  it('does not merge rows whose cells can be lists', () => {
+  it('does not merge a list of 2-lists into a 2×2 grid', () => {
     const a = 'list<unknown^2>';
-    const b = 'list<list<any^2>^-1>';
+    const b = 'list<list<any^2>>';
     expect(meet(a, b)).not.toBe('list<any^(2x2)>');
-    // The elements of a list with dimensions and a top element type are
-    // scalars, so a list of rows is in neither type.
-    expect(sub('list<list<list<number^2>^2>^2>', a)).toBe(false);
-    expect(sub('list<list<list<number^2>^2>^2>', b)).toBe(false);
+    // A rank-3 tensor is in neither type: it has rank 3, not 1, and its
+    // rows are matrices, not 2-lists.
+    expect(sub('list<integer^(2x2x2)>', a)).toBe(false);
+    expect(sub('list<integer^(2x2x2)>', b)).toBe(false);
   });
 
   it('meets two lists with no dimensions elementwise when that holds every value', () => {
@@ -1262,24 +1482,26 @@ describe('cases of the third review', () => {
       });
       expect(isSubtype(w, m)).toBe(true);
     };
+    // The elements of a 2×2 grid are its rows: each operand must admit the
+    // rows, and the meet is read row by row.
     holds(
       'list<list<tuple<number & !integer>>>',
-      'collection<tuple<real>>',
+      'collection<list<tuple<real>>>',
       'list<tuple<real & !integer>^(2x2)>'
     );
     holds(
       'list<list<record{a: (integer) -> integer}>>',
-      'collection<record{a: (number) -> number}>',
+      'collection<list<record{a: (number) -> number}>>',
       'list<record{a: (number) -> integer}^(2x2)>'
     );
     holds(
-      'list<list<(integer) -> integer>^2>',
-      'list<(number) -> number>',
+      'list<list<(integer) -> integer>>',
+      'list<list<(number) -> number>>',
       'list<((number) -> integer)^(2x2)>'
     );
     holds(
       'list<list<(integer) -> integer>>',
-      'collection<(number) -> number>',
+      'collection<list<(number) -> number>>',
       'list<((number) -> integer)^(2x2)>'
     );
   });
@@ -1288,9 +1510,11 @@ describe('cases of the third review', () => {
     const ce = new ComputeEngine();
     ce.declareType('Id', 'T', { alias: true, typeParams: ['T'] });
     const T = (s: string) => ce.type(s).type;
-    const a = T('list<Id<Id<list<integer>>>^2>');
-    const b = T('collection<number>');
-    const w = T('list<integer^(2x2)>');
+    // An integer matrix is a list of integer lists (through the alias) and
+    // a collection of number lists.
+    const a = T('list<Id<Id<list<integer>>>>');
+    const b = T('collection<list<number>>');
+    const w = T('matrix<integer^(2x2)>');
     expect(isSubtype(w, a) && isSubtype(w, b)).toBe(true);
     expect(
       isSubtype(w, reduceType({ kind: 'intersection', types: [a, b] }))
@@ -1334,27 +1558,32 @@ describe('cases of the third review', () => {
         })
       )
     ).toBe('list<never>');
-    expect(typesOverlap(T('list<V32>'), T('list<list<string>>'))).toBe(false);
+    // Two lists with no dimensions share the empty list.
+    expect(typesOverlap(T('list<V32>'), T('list<list<string>>'))).toBe(true);
     isSubtype(T('R22'), T('S22'));
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
 
-describe('a list with dimensions and a top element type holds scalars', () => {
-  // User decision 2026-10-21: `vector<unknown>` is a list of scalars.
+describe('a list with dimensions holds no list as a cell', () => {
+  // A list with dimensions is read by its cells and its rank: a matrix is
+  // not a vector of anything, and a plain list of vectors has no fixed
+  // length.
   it('does not hold a list of rows', () => {
-    expect(sub('list<list^2>', 'vector<unknown>')).toBe(false);
-    expect(sub('list<list<integer>^2>', 'list<any^2>')).toBe(false);
-    expect(sub('list<(integer | list<integer>)^3>', 'list<unknown^3>')).toBe(
-      false
-    );
+    expect(sub('matrix<integer>', 'vector<unknown>')).toBe(false);
+    expect(sub('list<matrix<integer^(2x2)>>', 'vector<unknown>')).toBe(false);
+    expect(sub('list<integer^(2x2x2)>', 'list<any^2>')).toBe(false);
+    expect(sub('list<vector<integer^2>>', 'list<unknown^3>')).toBe(false);
   });
 
   it('is transitive with the rank rule', () => {
-    // `list<integer^(2x2x2)>` is a `list<list^2>` (two rows), and it is not
-    // a `vector<unknown>`; nor is `list<list^2>`.
-    expect(sub('list<integer^(2x2x2)>', 'list<list^2>')).toBe(true);
+    // `list<integer^(2x2x2)>` is a list of two 2×2 matrices, and neither
+    // it nor that list is a `vector<unknown>`.
+    expect(sub('list<integer^(2x2x2)>', 'list<matrix<integer^(2x2)>>')).toBe(
+      true
+    );
     expect(sub('list<integer^(2x2x2)>', 'vector<unknown>')).toBe(false);
+    expect(sub('list<matrix<integer^(2x2)>>', 'vector<unknown>')).toBe(false);
   });
 
   it('holds scalars, tuples and sets', () => {
@@ -1366,68 +1595,66 @@ describe('a list with dimensions and a top element type holds scalars', () => {
   });
 
   it('leaves a list with no dimensions unchanged', () => {
-    expect(sub('list<list^2>', 'list<unknown>')).toBe(true);
-    expect(sub('list<list<integer>^3>', 'list<list^3>')).toBe(true);
+    // A plain list of lists is a plain list of anything, and a plain list
+    // of 3-vectors is a plain list of lists.
+    expect(sub('list<list>', 'list<unknown>')).toBe(true);
+    expect(sub('list<vector<integer^3>>', 'list<list>')).toBe(true);
   });
 });
 
-describe('the meet of a list whose elements are scalars', () => {
+describe('the meet of a list with dimensions', () => {
   const meet = (a: string, b: string) =>
     typeToString(
       reduceType({ kind: 'intersection', types: [parseType(a), parseType(b)] })
     );
-  const overlap = (a: string, b: string) =>
-    typesOverlap(parseType(a), parseType(b)) ||
-    typesOverlap(parseType(b), parseType(a));
-  it('has no list element', () => {
-    expect(meet('list<any^3>', 'list<list^3>')).toBe('never');
-    expect(overlap('list<any^3>', 'list<list^3>')).toBe(false);
-    expect(meet('list<any^3>', 'indexed_collection<list>')).toBe('never');
-    expect(meet('list<any^3>', 'list<list<integer>^-1>')).toBe('never');
-    expect(meet('vector<unknown>', 'list<list<integer>>')).toBe(
-      'vector<never>'
-    );
-  });
-  it('keeps the scalar elements of the other type', () => {
+  it('keeps the cells of the other type under its shape', () => {
+    // A list of three integers is a `list<any^3>` and a `list<integer>`.
     expect(meet('list<any^3>', 'list<integer>')).toBe('vector<integer^3>');
+    expect(meet('list<unknown^3>', 'list<integer>')).toBe('vector<integer^3>');
     // A bare `list` admits any contents, as `list<any>` does.
     expect(meet('list<any^3>', 'list')).toBe('list<any^3>');
-    // `integer | list<integer>` has no spelling without its lists.
-    expect(
-      meet('list<unknown^3>', 'list<(integer | list<integer>)^3>')
-    ).not.toBe('never');
+  });
+  it('is empty when the shapes exclude each other', () => {
+    // A 2-vector of integers is not a list of strings, and a vector is not
+    // a matrix.
+    expect(meet('list<string>', 'list<integer^2>')).toBe('never');
+    expect(meet('vector<integer>', 'matrix<integer>')).toBe('never');
+    expect(meet('list<any^(3x2)>', 'vector<any>')).toBe('never');
   });
 });
 
 describe('cases of the review of the scalar elements of a vector', () => {
-  const overlap = (a: string, b: string) =>
-    typesOverlap(parseType(a), parseType(b)) ||
-    typesOverlap(parseType(b), parseType(a));
-
-  it('solves a generic list parameter from a list of lists', () => {
-    // `T` can stand for a list, so the loosest reading of `list<T^N>`
-    // admits a list of rows.
+  it('solves a generic list parameter from the cells and the length', () => {
+    // `list<T^N>` binds `T` to the cells and `N` to the length of a
+    // dimensioned list; a plain list of rows has no length, so `N` stays
+    // unsolved (its type is a non-negative integer) and `T` is unknown.
     const ce = new ComputeEngine();
-    ce.declare('vv', 'list<list<integer>^2>');
-    ce.declare('mm', 'list<list<integer>^(2x2)>');
+    ce.declare('v2', 'list<integer^2>');
+    ce.declare('vv', 'list<list<integer>>');
+    ce.declare('mm', 'matrix<integer^(2x2)>');
     ce.declare('g', '(list<T^N>) -> T where T, N');
     ce.declare('k', '(list<T^N>) -> N where T, N');
     ce.declare('gv', '(vector<T^N>) -> T where T, N');
     ce.declare('m', '(matrix<T^(M x N)>) -> T where T, M, N');
     const call = (f: string, x: string) =>
       ce.function(f, [ce.symbol(x)]).type.toString();
-    expect(call('g', 'vv')).toBe('list<integer>');
-    expect(call('k', 'vv')).toBe('2');
-    expect(call('gv', 'vv')).toBe('list<integer>');
-    expect(call('m', 'mm')).toBe('list<integer>');
+    expect(call('g', 'v2')).toBe('integer');
+    expect(call('k', 'v2')).toBe('2');
+    expect(call('gv', 'v2')).toBe('integer');
+    expect(call('m', 'mm')).toBe('integer');
+    expect(call('g', 'vv')).toBe('unknown');
+    expect(call('k', 'vv')).toBe('integer<0..>');
   });
 
-  it('does not overlap scalars with lists on every route', () => {
-    expect(overlap('list<any^3>', 'list<list^3>')).toBe(false);
-    expect(overlap('vector<unknown^3>', 'list<list>')).toBe(false);
-    expect(overlap('list<any^3>', 'list<list<number>>')).toBe(false);
-    expect(overlap('list<any^3>', 'indexed_collection<list>')).toBe(false);
-    expect(overlap('list<list<integer>^3>', 'list<unknown>')).toBe(true);
+  it('a plain list of vectors is a plain list of anything', () => {
+    expect(
+      typesOverlap(
+        parseType('list<vector<integer^3>>'),
+        parseType('list<unknown>')
+      )
+    ).toBe(true);
+    expect(sub('list<vector<integer^3>>', 'list<unknown>')).toBe(true);
+    expect(sub('list<vector<integer^3>>', 'list<unknown^3>')).toBe(false);
   });
 
   it('keeps the shape of a generic parameter in its loosest reading', () => {
@@ -1462,12 +1689,136 @@ describe('cases of the review of the scalar elements of a vector', () => {
     expect(ce.box(['vthree', 4]).evaluate().toString()).toBe('vthree(4)');
   });
 
-  it('reads a range as a list', () => {
-    expect(sub('list<range^2>', 'list<unknown^2>')).toBe(false);
+  it('a range is a list, so it cannot be the cell of a list with dimensions', () => {
+    expect(() => parseType('list<range^2>')).toThrow(
+      /cells of a list with dimensions cannot be lists/
+    );
+    expect(sub('list<range>', 'list<unknown>')).toBe(true);
   });
 
   it('reads no element in a list with an axis of length 0', () => {
-    expect(sub('list<list^0>', 'list<unknown^0>')).toBe(true);
-    expect(sub('list<list^(2x0)>', 'list<unknown^(2x0)>')).toBe(true);
+    expect(sub('list<never^0>', 'list<unknown^0>')).toBe(true);
+    expect(sub('list<never^(2x0)>', 'list<unknown^(2x0)>')).toBe(true);
+  });
+});
+
+/**
+ * A broadcast over an operand whose rank is not known maps a value of the
+ * operand at its leaves, at whatever depth they are. The result type must
+ * hold every value the call can evaluate to. Before 2026-10-22 three
+ * readings gave one list level (`list<R>`), a type that does not hold the
+ * value when the operand holds a matrix:
+ *
+ * - an operand declared `broadcastable<T>`, `any` or `list<any>`
+ *   (`broadcastShapedResultType`, `common/type/utils.ts`);
+ * - a `broadcastable<T>` trigger of the arm-by-arm typing of tuple cells,
+ *   read as a rank-1 `list<T>` (`broadcastLiftType`);
+ * - the call of a generic function literal over such an operand, or over an
+ *   `indexed_collection` of lists (`genericLiftLevels`, `boxed-function.ts`,
+ *   and `liftedElementTypeOf`, `common/type/instantiate.ts`).
+ */
+describe('a broadcast over an operand of unknown rank holds the value', () => {
+  const MATRIX = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const RAGGED = ['List', ['List', 1, 2], ['List', 3]];
+
+  /** The static type of `expr` with `name` declared `decl` and assigned
+   * `value`, after a check that the evaluated value is in it. */
+  const typed = (
+    decl: string,
+    value: any,
+    expr: any,
+    setup?: (ce: ComputeEngine) => void
+  ): string => {
+    const ce = new ComputeEngine();
+    setup?.(ce);
+    ce.declare('b', decl);
+    ce.assign('b', ce.box(value));
+    const e = ce.box(expr);
+    const evaluated = e.evaluate();
+    expect(evaluated.type.matches(e.type)).toBe(true);
+    expect(isSubtype(evaluated.type.type, e.type.type)).toBe(true);
+    return e.type.toString();
+  };
+
+  it('a broadcastable of numbers that holds a matrix gives a tensor', () => {
+    const d = 'broadcastable<number>';
+    expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('tensor');
+    expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('tensor');
+    expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('tensor');
+    expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe('tensor<boolean>');
+  });
+
+  it('an operand of any depth gives a list of cells or lists', () => {
+    for (const d of ['any', 'list<any>']) {
+      expect(typed(d, MATRIX, ['Negate', 'b'])).toBe('list<any>');
+      expect(typed(d, MATRIX, ['Sin', 'b'])).toBe('list<list<any> | number>');
+      expect(typed(d, MATRIX, ['Add', 'b', 1])).toBe('list<any>');
+      expect(typed(d, MATRIX, ['Less', 'b', 2])).toBe(
+        'list<boolean | list<any>>'
+      );
+    }
+  });
+
+  it('a broadcastable of points that holds rows of points gives a tensor', () => {
+    const d = 'broadcastable<tuple<number, number>>';
+    const rows = ['List', ['List', ['Tuple', 3, 4]], ['List', ['Tuple', 6, 8]]];
+    const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
+    for (const value of [rows, points]) {
+      expect(typed(d, value, ['Negate', 'b'])).toBe(
+        'tensor<tuple<number, number>>'
+      );
+      expect(typed(d, value, ['Multiply', 2, 'b'])).toBe(
+        'tensor<tuple<number, number>>'
+      );
+      expect(typed(d, value, ['Add', 'b', 'b'])).toBe(
+        'tensor<tuple<number, number>>'
+      );
+      expect(typed(d, value, ['Sin', 'b'])).toBe(
+        'tensor<tuple<number, number>>'
+      );
+    }
+    // The norm of each point. The value `[[5], [10]]` is typed with
+    // `integer` cells, which do not state the sign, so the check is on a
+    // type that states it.
+    const ce = new ComputeEngine();
+    ce.declare('b', d);
+    ce.assign('b', ce.box(rows as any));
+    const abs = ce.box(['Abs', 'b']);
+    expect(abs.type.toString()).toBe('tensor<real<0..> | signed_infinity>');
+    expect(abs.evaluate().toString()).toBe('[[5],[10]]');
+    expect(
+      isSubtype(parseType('matrix<integer<0..>^(2x1)>'), abs.type.type)
+    ).toBe(true);
+  });
+
+  const generic = (ce: ComputeEngine) => {
+    ce.declare('g', '(x: T) -> tuple<T, T> where T');
+    ce.assign('g', ce.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+  };
+
+  it('a generic call over a broadcastable or an operand of any depth', () => {
+    expect(typed('broadcastable<integer>', MATRIX, ['g', 'b'], generic)).toBe(
+      'tensor<tuple<integer, integer>>'
+    );
+    expect(
+      typed('broadcastable<integer>', ['List', 1, 2], ['g', 'b'], generic)
+    ).toBe('tensor<tuple<integer, integer>>');
+    for (const d of ['any', 'list<any>'])
+      for (const value of [MATRIX, RAGGED, ['List', 1, 2]])
+        expect(typed(d, value, ['g', 'b'], generic)).toBe(
+          'list<list<any> | tuple<any, any>>'
+        );
+    // A broadcastable whose element is a list holds a list of rank 1 or 2.
+    for (const value of [MATRIX, ['List', 1, 2]])
+      expect(
+        typed('broadcastable<list<integer^2>>', value, ['g', 'b'], generic)
+      ).toBe('list<list<any> | tuple<integer, integer>>');
+  });
+
+  it('a generic call over an indexed collection of lists maps the leaves', () => {
+    for (const value of [MATRIX, RAGGED])
+      expect(
+        typed('indexed_collection<list<integer>>', value, ['g', 'b'], generic)
+      ).toBe('list<list<tuple<integer, integer>>>');
   });
 });

@@ -49,6 +49,7 @@ import {
   typeCouldBeUnkeyedCollection,
   isCollectionShaped,
   isWalkableFiniteCollection,
+  mayCarryDimensions,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -2077,7 +2078,14 @@ function elementwiseConditionShape(
   let found = false;
   let length: number | undefined;
   for (const t of conds) {
-    if (t === undefined || !isSubtype(t, BOOLEAN_COLLECTION_TYPE)) continue;
+    if (t === undefined) continue;
+    if (!isSubtype(t, BOOLEAN_COLLECTION_TYPE)) {
+      if (isPossiblyNestedBooleanMask(t)) {
+        found = true;
+        length = undefined;
+      }
+      continue;
+    }
     // A tuple is a subtype of `indexed_collection`, but runtime lifts tuples
     // whole (tuple-atomic): a tuple-typed condition never activates the
     // element-wise path, so it must not flip the static shape either.
@@ -2089,6 +2097,53 @@ function elementwiseConditionShape(
     else if (length !== t.dimensions[0]) return { length: undefined };
   }
   return found ? { length } : undefined;
+}
+
+/**
+ * True when `t` is a list whose leaves are conditions (`boolean` or
+ * `missing`), at any depth, with lists of unknown contents allowed beside
+ * them: `list<boolean | list<any>>`, or `list<list<boolean^2> | list<boolean^1>>`.
+ * A comparison over a collection whose elements may be lists (a bare
+ * `indexed_collection`) is typed `list<boolean | list<any>>`, because the
+ * comparison maps a nested element at its leaves.
+ *
+ * Such a mask selects element-wise when its value is flat. When an element of
+ * the value is a list, the selection does not evaluate and the expression
+ * stays as it is. Its condition is then a nested list of booleans, which this
+ * test also accepts, so the expression that did not evaluate is typed
+ * element-wise too, and the static type holds every value.
+ */
+function isPossiblyNestedBooleanMask(t: Readonly<Type>): boolean {
+  if (typeof t === 'string' || t.kind !== 'list') return false;
+  return maskLeaves(t.elements, 0) === 'condition';
+}
+
+/**
+ * What the leaves of a mask element are: `'condition'` when some leaf is a
+ * condition and every other leaf is a list of unknown contents, `'list'` when
+ * every leaf is a list of unknown contents, `'other'` otherwise. The depth cap
+ * stops a walk through a self-referential alias.
+ */
+function maskLeaves(
+  t: Readonly<Type>,
+  depth: number
+): 'condition' | 'list' | 'other' {
+  if (depth > 8) return 'other';
+  if (isSubtype(t, CONDITION_CELL_TYPE)) return 'condition';
+  if (t === 'list') return 'list';
+  if (typeof t === 'string') return 'other';
+  if (t.kind === 'union') {
+    let result: 'condition' | 'list' = 'list';
+    for (const arm of t.types) {
+      const leaves = maskLeaves(arm, depth + 1);
+      if (leaves === 'other') return 'other';
+      if (leaves === 'condition') result = 'condition';
+    }
+    return result;
+  }
+  if (t.kind !== 'list') return 'other';
+  if (t.elements === 'any' || t.elements === 'unknown') return 'list';
+  return maskLeaves(t.elements, depth + 1);
 }
 
 /**
@@ -2114,8 +2169,14 @@ function armElementType(t: Readonly<Type>): Type {
       : t;
   if (t.kind === 'union')
     return widen(...t.types.map((x) => armElementType(x)));
+  // The selection indexes a list arm position by position, so a position
+  // holds an ELEMENT of the arm: a row of a matrix, `U | tensor<U>` for a
+  // tensor of unknown rank (`collectionElementType`). The broadcast cell
+  // (`broadcastElementType`) is a leaf of a tensor, not its element:
+  // `If([True, False, True], [[1], [2], [3]], 0)` is `[[1], 0, [3]]`, and
+  // read by its cells the arm typed the result `vector<integer^3>`.
   if (t.kind === 'list' || t.kind === 'indexed_collection')
-    return broadcastElementType(t);
+    return collectionElementType(t) ?? broadcastElementType(t);
   return t as Type;
 }
 
@@ -2250,10 +2311,15 @@ function elementwiseResultType(
   // dimension here for a union element type would promise a shape no
   // evaluated value can ever carry, breaking the value-vs-declared
   // assignability invariant (`evaluated.type.matches(declared)`) for the
-  // no-default mixed case, whose no-match cell joins in `number`.
+  // no-default mixed case, whose no-match cell joins in `number`. A length
+  // is written only for a cell that may carry a dimension
+  // (`mayCarryDimensions`: a cell that cannot be a list), so a selection of
+  // numbers, booleans or points keeps its length; a selection of lists is
+  // a plain list.
   const shaped =
     length !== undefined &&
-    (typeof elements === 'string' || elements.kind !== 'union');
+    (typeof elements === 'string' || elements.kind !== 'union') &&
+    mayCarryDimensions(elements);
   return shaped
     ? { kind: 'list', elements, dimensions: [length!] }
     : { kind: 'list', elements };

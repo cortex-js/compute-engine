@@ -225,11 +225,12 @@ describe('issue #462: nested folds with an index-read accumulator', () => {
       ['List', ['List'], ['List']],
       R(1),
     ] as any);
-    // The outer type is the join the engine gives today (ROADMAP: a list of
-    // one-element vectors is a subtype of a list of scalars); what this test
-    // locks in is that the two `a` accumulators differ.
+    // A plain list is read by its elements, so a list of one-element
+    // vectors is not a list of integers and the outer type keeps both
+    // element types; what this test locks in is that the two `a`
+    // accumulators differ.
     expect(accumulators(expr)).toEqual([
-      'q: list<list<list<integer>^2>>',
+      'q: list<list<list<integer>> | list<list<vector<integer^1>>>>',
       'a: list<integer>',
       'a: list<vector<integer^1>>',
     ]);

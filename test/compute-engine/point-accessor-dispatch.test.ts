@@ -223,7 +223,9 @@ describe('compiled point accessor — the dispatch carries the empty reading', (
       ce.declare(name, type as any);
       const r = js.compile(ce.box(['PointX', name]));
       expect(r.success).toBe(true);
-      expect(r.code).toContain(`_SYS.pointComponent(_.${name}, 0, false)`);
+      // `list<list<any>>` may also be a numeric array of rank 3, which the
+      // call states after the empty reading (`, false, true`).
+      expect(r.code).toContain(`_SYS.pointComponent(_.${name}, 0, false`);
       expect((r.run as (s: any) => unknown)({ [name]: [] })).toBeNaN();
       expect(interpreted(name, type, ['List'])).toBe('"Missing"');
     }
@@ -249,7 +251,9 @@ describe('compiled point accessor — the dispatch carries the empty reading', (
   test('an element type that broadcasts when empty answers the empty list', () => {
     // A tuple element type, an unknown one, and an operand whose type states no
     // element type at all: the empty coordinate list, on both routes. The
-    // broadcast reading is the dispatch default and is left unspoken.
+    // broadcast reading is the dispatch default and is left unspoken, unless
+    // the operand may also be a numeric array of rank 3 (`list`, `unknown`):
+    // the call then states it, `true`, before that fact.
     const t =
       'indexed_collection<tuple<number,number>> | list<tuple<number,number>> | tuple<number,number>';
     for (const [name, type] of [
@@ -261,7 +265,9 @@ describe('compiled point accessor — the dispatch carries the empty reading', (
       ce.declare(name, type as any);
       const r = js.compile(ce.box(['PointX', name]));
       expect(r.success).toBe(true);
-      expect(r.code).toContain(`_SYS.pointComponent(_.${name}, 0)`);
+      expect(r.code).toMatch(
+        new RegExp(`_SYS\\.pointComponent\\(_\\.${name}, 0(\\)|, true, )`)
+      );
       expect((r.run as (s: any) => unknown)({ [name]: [] })).toEqual([]);
       expect(interpreted(name, type, ['List'])).toBe('[]');
     }

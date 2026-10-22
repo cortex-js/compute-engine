@@ -13,8 +13,11 @@ import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
+  broadcastCollectionArm,
+  cannotHoldAList,
   isSubtype,
   joinUnresolvedArm,
+  listElementType,
   provablyAdmits,
   provablyDisjoint,
   widen,
@@ -22,6 +25,17 @@ import {
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
+
+// Whether a list whose cells have a given type may carry dimensions (be a
+// tensor). Defined in `primitive.ts`, a leaf module, so that the type
+// builder can ask the same question as the engine's literal typing without
+// a circular import; consumers in the engine import it from here. The
+// second predicate is the extra rule of the named heads `vector<U>` and
+// `matrix<U>`: their cells can hold a number.
+export {
+  cellTypeCanHoldANumber,
+  cellTypeMayCarryDimensions,
+} from './primitive.js';
 
 // Re-export widen/narrow from subtype (moved there to break the
 // subtype ↔ utils cycle; they depend on isSubtype)
@@ -596,24 +610,21 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'collection' || type.kind === 'indexed_collection')
     return type.elements;
 
-  if (type.kind === 'list') {
-    // A multi-dimensional list (tensor) indexed by a single index yields a
-    // sub-tensor with one fewer dimension, not its scalar element. E.g. a
-    // single index into a `matrix<2x2>` (a row) is a `vector<2>`. Only a 1D
-    // list (or one without declared dimensions) yields the scalar element.
-    const dims = type.dimensions;
-    if (dims && dims.length > 1)
-      return {
-        kind: 'list',
-        elements: type.elements,
-        dimensions: dims.slice(1),
-      };
-    return type.elements;
-  }
+  // A plain list `list<E>` yields `E`. A tensor with a dimension list
+  // yields its cells at rank 1 and its rows (a tensor with one axis fewer)
+  // at rank 2 or more: one index into a `matrix<2x2>` is a `vector<2>`. A
+  // tensor of unknown rank `tensor<U>` yields a cell or a tensor,
+  // `U | tensor<U>`. (`listElementType`, `subtype.ts`.)
+  if (type.kind === 'list') return listElementType(type);
 
   if (type.kind === 'set') return type.elements;
 
-  if (type.kind === 'broadcastable') return type.elements;
+  // A `broadcastable<T>` is a `T` or its collection arm
+  // (`broadcastCollectionArm`). The elements of the arm are `T` for a
+  // plain `list<T>`, and `T | tensor<T>` for the `tensor<T>` of a numeric
+  // `T`; the scalar reading adds nothing to either.
+  if (type.kind === 'broadcastable')
+    return listElementType(broadcastCollectionArm(type.elements));
 
   if (type.kind === 'tuple') {
     const slots = type.elements.map((x) => x.type);
@@ -1730,27 +1741,48 @@ export function nestedBroadcastResultType(
   // the deepest member for a union of collections (`list<integer^2> |
   // list<integer^3>`, a ragged row). `undefined` for a union that mixes a
   // scalar and a collection, which each cell descends to a different depth.
-  const ranks = (t0: Type, d: number): number | undefined => {
+  // A transparent alias is unfolded under the descent guard
+  // (`unfoldAliasOnDescent`). The rank bound alone does not stop an alias
+  // that names itself as an arm of its own union (`type alias lcyc = lcyc |
+  // list<integer>`): the walk of a union arm does not go deeper, and it
+  // overflowed the stack. Such an arm adds no value, and it is skipped
+  // (`isBareCutOnDescent`). An alias that the guard cuts inside a list
+  // element nests to a depth the type does not bound, and the answer is
+  // `undefined`.
+  const ranks = (
+    t0: Type,
+    d: number,
+    seen: AliasDescent
+  ): number | undefined => {
     if (d >= MAX_RANK) return 0;
-    const t = resolveTypeAlias(t0);
+    const unfolded = unfoldAliasOnDescent(t0, seen);
+    if (unfolded === undefined) return undefined;
+    const t = unfolded.type;
     if (typeof t === 'object' && t.kind === 'tuple') return 0;
     if (isSubtype(t, 'string')) return 0;
     if (typeof t === 'object' && t.kind === 'union') {
-      const members = t.types.map((m) => ranks(m, d));
+      const members = t.types
+        .filter((m) => !isBareCutOnDescent(m, unfolded.seen))
+        .map((m) => ranks(m, d, unfolded.seen));
+      if (members.length === 0) return 0;
       if (members.some((m) => m === undefined)) return undefined;
       const depths = members as number[];
       const deepest = Math.max(...depths);
       return depths.every((m) => m === deepest) ? deepest : undefined;
     }
     if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return 0;
+    // A `broadcastable<T>` that is a collection type (its `T` is a list
+    // type) holds a `T` or a list of `T`: the two arms have different
+    // depths, so no single nesting describes it.
+    if (typeof t === 'object' && t.kind === 'broadcastable') return undefined;
     const e = collectionElementType(t);
     if (e === undefined) return 1;
-    const inner = ranks(e, d + 1);
+    const inner = ranks(e, d + 1, descendIntoConstructor(unfolded.seen));
     return inner === undefined ? undefined : 1 + inner;
   };
   let depth = 1;
   for (const t of operandTypes) {
-    const d = ranks(t as Type, 0);
+    const d = ranks(t as Type, 0, undefined);
     // A ragged element is mapped to a different depth in each cell, which no
     // single nesting describes: the cell type is then `any`.
     if (d === undefined) return broadcastResultType('any');
@@ -1766,12 +1798,21 @@ export function nestedBroadcastResultType(
  * when the rank itself is not statically known. Open (unknown) lengths are
  * `-1` — the same wildcard convention `matrix`/`vector` parse to.
  *
- * - `list<T^2x3>` → `[2, 3]`
- * - `matrix` (= `list<number^(-1)x(-1)>`) → `[-1, -1]`
- * - `list<number>` → `[-1]` (rank 1, open length)
- * - `list<list<number>>` → `[-1, -1]` (nesting implies rank)
- * - bare `list` / `collection` / `indexed_collection` (no element info) →
- *   `null` (rank unknown — a bare `list` could be a list of lists)
+ * A tensor type states its rank: its dimension list is the answer, whatever
+ * its cell type (`list<T^2x3>` → `[2, 3]`; `matrix`, which is
+ * `list<number^(?x?)>`, → `[-1, -1]`). A tensor of unknown rank
+ * (`tensor<U>`, `dimensions` `null`) → `null`.
+ *
+ * A plain list `list<E>` is not a tensor type, and its rank is not read
+ * from the nesting of its element type: `list<list<number>>` → `null`,
+ * because its rows may differ in length, and `list<vector<3>>` → `null`
+ * too, because the type is a list of vectors, not a matrix (the broadcast
+ * result typing, `broadcastOperandShape`, reads such rows for its own
+ * purpose). A plain list whose elements cannot be lists (`list<number>`,
+ * `list<string>`, `list<tuple<number, number>>`) is read at rank 1 with an
+ * open length, `[-1]`: every such list is a rank-1 arrangement of its
+ * elements. A plain list whose elements could be lists (`list<any>`, a bare
+ * `list`, `list<value>`, `list<integer | list<integer>>`) → `null`.
  */
 export function staticCollectionDims(
   t: Readonly<Type>,
@@ -1780,96 +1821,257 @@ export function staticCollectionDims(
   // A transparent alias of a shaped list carries that list's dimensions:
   // `Sin(v)` for `v: vec2` (an alias of `vector<2>`) mirrors the shape onto
   // the lifted result exactly as `Sin(w)` for `w: vector<2>` does. The
-  // element is unfolded too, so a list of an aliased row type keeps its
-  // rank. Both unfolds run under the descent guard: a self-referential
-  // alias (`type alias nest = list<nest>`) stops at its first repeat with
-  // rank unknown (`unfoldAliasOnDescent`).
+  // unfold runs under the descent guard: a self-referential alias
+  // (`type alias nest = list<nest>`) stops at its first repeat with rank
+  // unknown (`unfoldAliasOnDescent`).
   const unfolded = unfoldAliasOnDescent(t, seen);
   if (unfolded === undefined) return null;
   t = unfolded.type;
   if (typeof t === 'string') return null;
   if (t.kind !== 'list') return null;
-  // Rank comes from BOTH the explicit dimensions (if any) and the element
-  // nesting: `list<list<number>^2>` (2 rows, each an open-length numeric
-  // list) is rank 2 — `[2, -1]` — not rank 1. An `unknown`/`any`/bare-
-  // collection element could itself be a list → rank unknown.
+  if (t.dimensions === null) return null;
+  if (t.dimensions !== undefined) return [...t.dimensions];
   const element = unfoldAliasOnDescent(t.elements, unfolded.seen);
   if (element === undefined) return null;
-  const el = element.type;
-  const outer: number[] = t.dimensions ? [...t.dimensions] : [-1];
-  if (el === 'unknown' || el === 'any' || el === 'list' || el === 'collection')
-    return null;
-  if (typeof el !== 'string' && el.kind === 'list') {
-    const inner = staticCollectionDims(el, element.seen);
-    return inner === null ? null : [...outer, ...inner];
-  }
-  return outer;
+  return elementCanBeList(element.type) ? null : [-1];
 }
+
+/**
+ * Whether a value of the element type `el` of a plain list could itself be
+ * a list: a top type, a bare collection name, a name that `list` is below
+ * (`value`, `expression`), a list or abstract collection type, a
+ * broadcastable, or a union, intersection, negation or reference that is
+ * not provably disjoint from `list<any>`.
+ */
+function elementCanBeList(el: Readonly<Type>): boolean {
+  if (typeof el === 'string')
+    return (
+      el === 'unknown' ||
+      el === 'any' ||
+      el === 'list' ||
+      el === 'collection' ||
+      el === 'indexed_collection' ||
+      el === 'value' ||
+      el === 'expression'
+    );
+  switch (el.kind) {
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return true;
+    case 'union':
+    case 'intersection':
+    case 'negation':
+    case 'reference':
+      return !provablyDisjoint(el as Type, LIST_OF_ANY);
+    default:
+      return false;
+  }
+}
+
+/** `list<any>`, built as a literal node (the type parser is not yet
+ * initialized when this module loads under jest) and frozen, because it is
+ * shared. */
+const LIST_OF_ANY: Type = Object.freeze({ kind: 'list', elements: 'any' });
 
 /**
  * The dimensions of the list type `t` as a broadcast over it reads them, and
  * whether the rows at each depth provably have the same length (`uniform`),
- * or `null` when the rank is not known. This is `staticCollectionDims`, with
- * two differences:
+ * or `null` when the rank is not known.
  *
- * - An element that is a union of lists of one rank (the type of the literal
- *   `[[1, 2], [3]]`, `list<vector<integer^1> | vector<integer^2>>`) has that
- *   rank. `staticCollectionDims` reads it as rank 1.
- * - The dimensions of one list type (`list<integer^(?x?)>`, a matrix)
- *   describe a rectangular value, an open length included. A list type
- *   nested in the element of another (`list<list<integer>>`, `list<vector>`)
- *   says only that each row is a list: its length is the same in every row
- *   only when its dimensions are all fixed (`list<vector<3>>`), and the rows
- *   of a union of lists are uniform only when every arm has the same fixed
- *   dimensions.
+ * A tensor with a dimension list has that shape, and its rows are uniform:
+ * the dimensions describe a rectangular value, an open length included. A
+ * tensor of unknown rank (`dimensions` `null`) has an unknown shape. A
+ * plain list is read at rank 1 with an open length, and the shape of its
+ * rows is appended when its elements are lists: a list type nested in the
+ * element of another (`list<list<integer>>`, `list<vector>`) says only that
+ * each row is a list, so its length is the same in every row only when its
+ * dimensions are all fixed (`list<vector<3>>`), and the rows of a union of
+ * lists (the type of the literal `[[1, 2], [3]]`,
+ * `list<vector<integer^1> | vector<integer^2>>`) are uniform only when every
+ * arm has the same fixed dimensions. The broadcast result typing
+ * (`broadcastShapedResultType`) spells a non-uniform shape as nested plain
+ * lists, so this nested reading never claims a tensor that the value is not.
+ *
+ * `'mixed rank'` is the answer when a value of `t` can be a nested list of
+ * one of several depths whose rows can differ in length (a union of lists
+ * of different ranks whose rows are not all uniform,
+ * `list<integer> | list<list<integer>>`), or when a row has that property:
+ * neither one depth nor a tensor describes it (`unionOperandShape`).
  */
 function broadcastOperandShape(
   t: Readonly<Type>,
   seen?: AliasDescent,
   depth = 0
-): { dims: number[]; uniform: boolean } | null {
+): { dims: number[]; uniform: boolean } | 'unknown rank' | 'mixed rank' | null {
   if (depth > MAX_CELL_DEPTH) return null;
   const unfolded = unfoldAliasOnDescent(t, seen);
   if (unfolded === undefined) return null;
   const outer = unfolded.type;
+  if (typeof outer !== 'string' && outer.kind === 'union')
+    return unionOperandShape(outer.types, unfolded.seen, depth);
   if (typeof outer === 'string' || outer.kind !== 'list') return null;
-  const dims = outer.dimensions ? [...outer.dimensions] : [-1];
+  // A tensor of unknown rank: the operand itself states that its rank is
+  // not known, which the result reports as a tensor of unknown rank too.
+  if (outer.dimensions === null) return 'unknown rank';
+  if (outer.dimensions !== undefined)
+    return { dims: [...outer.dimensions], uniform: true };
   const row = broadcastRowShape(outer.elements, unfolded.seen, depth);
-  if (row === null) return null;
-  if (row === 'leaf') return { dims, uniform: true };
-  return { dims: [...dims, ...row.dims], uniform: row.uniform };
+  if (row === null || row === 'unknown rank' || row === 'mixed rank')
+    return row;
+  if (row === 'leaf') return { dims: [-1], uniform: true };
+  return { dims: [-1, ...row.dims], uniform: row.uniform };
+}
+
+/**
+ * The shape of an operand whose type is the union of the types `arms`, for
+ * `broadcastOperandShape`. A value of the union is a value of one arm, so
+ * the shape is read from every arm:
+ *
+ * - When an arm is not a list type (a scalar arm, `integer | list<integer>`),
+ *   or its shape is not known for another reason: `null`.
+ * - When an arm is a tensor of unknown rank (`list<integer> | tensor<integer>`):
+ *   `'unknown rank'`.
+ * - When every arm has the same rank: that rank, with the length of an axis
+ *   kept where every arm states the same length and open (`-1`) otherwise
+ *   (`vector<integer^2> | vector<integer^3>` reads as `[-1]`). The rows are
+ *   uniform when they are uniform in every arm, since one value is in one
+ *   arm.
+ * - When the arms have different ranks (`list<integer> | matrix<integer>`):
+ *   `'unknown rank'` when the rows of every arm are uniform, because each
+ *   value is then a tensor of the rank of its arm; `'mixed rank'`
+ *   otherwise, because a value with rows of different lengths is not a
+ *   tensor, and the values of different arms have different depths.
+ */
+function unionOperandShape(
+  arms: ReadonlyArray<Readonly<Type>>,
+  seen: AliasDescent | undefined,
+  depth: number
+): { dims: number[]; uniform: boolean } | 'unknown rank' | 'mixed rank' | null {
+  let shape: { dims: number[]; uniform: boolean } | undefined;
+  let mixedRanks = false;
+  for (const arm of arms) {
+    const s = broadcastOperandShape(arm, seen, depth + 1);
+    if (s === null || s === 'unknown rank' || s === 'mixed rank') return s;
+    if (shape === undefined) shape = { dims: [...s.dims], uniform: s.uniform };
+    else if (shape.dims.length !== s.dims.length) {
+      mixedRanks = true;
+      shape.uniform = shape.uniform && s.uniform;
+    } else
+      shape = {
+        dims: shape.dims.map((n, i) => (n === s.dims[i] ? n : -1)),
+        uniform: shape.uniform && s.uniform,
+      };
+  }
+  if (shape === undefined) return null;
+  if (mixedRanks) return shape.uniform ? 'unknown rank' : 'mixed rank';
+  return shape;
+}
+
+/**
+ * The depth of the values of a broadcast operand of type `t` whose shape
+ * `broadcastOperandShape` does not know (it answers `null`), for
+ * `broadcastShapedResultType`:
+ *
+ * - `'tensor'`: a value of `t` that is a collection is a tensor of a rank
+ *   that is not known, whose rows have one length at each depth. This is
+ *   the case of a `broadcastable<T>` whose `T` cannot hold a list
+ *   (`cannotHoldAList`): its collection arm is `tensor<T>`, so a
+ *   `broadcastable<number>` can hold a matrix.
+ * - `'any depth'`: a value of `t` can be a nested list of any depth whose
+ *   rows differ in length. This is the case of a top type or a bare
+ *   collection name (`any`, `list`), of a list or an abstract indexed
+ *   collection whose elements can be lists (`list<any>`,
+ *   `indexed_collection<list<integer>>`), and of a `broadcastable<T>` whose
+ *   `T` can hold a list. The broadcast maps such a value at its leaves, so
+ *   the value of the result has the depth of the operand.
+ * - `undefined`: a value of `t` is a scalar or a list of rank 1 (a `range`,
+ *   an `indexed_collection<number>`, a `set`, a tuple).
+ *
+ * A union is read arm by arm, and the deepest answer of an arm is the
+ * answer.
+ */
+function unknownShapeOperandDepth(
+  t: Readonly<Type>,
+  seen?: AliasDescent,
+  depth = 0
+): 'tensor' | 'any depth' | undefined {
+  if (depth > MAX_CELL_DEPTH) return 'any depth';
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return 'any depth';
+  const r = unfolded.type;
+  if (typeof r === 'string')
+    return elementCanBeList(r) ? 'any depth' : undefined;
+  if (r.kind === 'broadcastable')
+    return cannotHoldAList(r.elements) ? 'tensor' : 'any depth';
+  if (r.kind === 'list' || r.kind === 'indexed_collection') {
+    // A tensor of unknown rank, or a list whose rows have a known shape,
+    // is read by `broadcastOperandShape`; this function sees it as a union
+    // arm only.
+    const shape = broadcastOperandShape(r, unfolded.seen, depth + 1);
+    if (shape === 'unknown rank') return 'tensor';
+    if (shape === 'mixed rank') return 'any depth';
+    if (shape !== null) {
+      if (!shape.uniform) return 'any depth';
+      return shape.dims.length > 1 ? 'tensor' : undefined;
+    }
+    const element = unfoldAliasOnDescent(
+      r.elements,
+      descendIntoConstructor(unfolded.seen)
+    );
+    if (element === undefined || elementCanBeList(element.type))
+      return 'any depth';
+    return undefined;
+  }
+  if (r.kind === 'union') {
+    let answer: 'tensor' | 'any depth' | undefined = undefined;
+    for (const arm of r.types) {
+      const a = unknownShapeOperandDepth(arm, unfolded.seen, depth + 1);
+      if (a === 'any depth') return a;
+      if (a === 'tensor') answer = a;
+    }
+    return answer;
+  }
+  return undefined;
 }
 
 /** The shape of the rows of a list whose element type is `t`, for
  * `broadcastOperandShape`: `'leaf'` when an element is not a list, the
- * dimensions of a row and whether every row has them otherwise, `null` when
- * the rank is not known (an element of unknown shape, or a union of a list
- * and a scalar, or of lists of different ranks). */
+ * dimensions of a row and whether every row has them otherwise,
+ * `'unknown rank'` when a row is a tensor of unknown rank, `'mixed rank'`
+ * when the rows can have different depths (a union of a list and a scalar,
+ * or of lists of different ranks, or a row that is `'mixed rank'` itself),
+ * `null` when the rank is not known for another reason (an element of
+ * unknown shape). */
 function broadcastRowShape(
   t: Readonly<Type>,
   seen: AliasDescent | undefined,
   depth: number
-): 'leaf' | { dims: number[]; uniform: boolean } | null {
+):
+  | 'leaf'
+  | 'unknown rank'
+  | 'mixed rank'
+  | { dims: number[]; uniform: boolean }
+  | null {
   const element = unfoldAliasOnDescent(t, seen);
   if (element === undefined) return null;
   const el = element.type;
-  if (el === 'unknown' || el === 'any' || el === 'list' || el === 'collection')
-    return null;
-  if (typeof el === 'string') return 'leaf';
+  if (typeof el === 'string') return elementCanBeList(el) ? null : 'leaf';
   if (el.kind === 'list') {
     const s = broadcastOperandShape(el, element.seen, depth + 1);
-    if (s === null) return null;
+    if (s === null || s === 'unknown rank' || s === 'mixed rank') return s;
     return { dims: s.dims, uniform: s.uniform && s.dims.every((n) => n >= 0) };
   }
-  if (el.kind !== 'union') return 'leaf';
+  if (el.kind !== 'union') return elementCanBeList(el) ? null : 'leaf';
   let shape: 'leaf' | { dims: number[]; uniform: boolean } | undefined;
   for (const arm of el.types) {
     const s = broadcastRowShape(arm, element.seen, depth);
-    if (s === null) return null;
+    if (s === null || s === 'unknown rank' || s === 'mixed rank') return s;
     if (shape === undefined) shape = s;
     else if (shape === 'leaf' || s === 'leaf') {
-      if (shape !== s) return null;
-    } else if (shape.dims.length !== s.dims.length) return null;
+      if (shape !== s) return 'mixed rank';
+    } else if (shape.dims.length !== s.dims.length) return 'mixed rank';
     else {
       const same = shape.dims.every((n, i) => n === s.dims[i]);
       shape = {
@@ -1894,10 +2096,39 @@ function broadcastRowShape(
  * under the value machinery's zip-to-shortest semantics):
  * - every operand's dims provably identical → those dims;
  * - identical ranks, differing/open entries → that rank, all lengths open;
- * - any rank unknown, or ranks differ → plain unbounded `list<R>`
- *   (today's behavior — no invented structure).
- * A rank-1 all-open result also stays plain `list<R>` (byte-identical to
- * today for the common unbounded case).
+ * - the rank of the result is not known → a tensor of unknown rank whose
+ *   cells are `R` (`tensor<R>`, a list node with `dimensions` `null`): the
+ *   value is an arrangement of `R` cells of some depth. The rank is not
+ *   known when an operand is a tensor of unknown rank (`tensor<U>`, or a
+ *   list whose rows are one), when an operand is a union of tensors of
+ *   different ranks (`list<integer> | matrix<integer>`,
+ *   `unionOperandShape`), and when two operands have different known
+ *   ranks: a vector against a matrix broadcasts the vector over the rows
+ *   (`[10, 20]` against `[[1, 2], [3, 4]]` gives `[[10, 10], [20, 20]]`),
+ *   so the value has the larger rank, and a plain `list<R>` does not
+ *   describe it. The rows of every operand must be uniform (a value whose
+ *   rows differ in length is not a tensor), and no value of `R` may be a
+ *   list (`cannotHoldAList`: a number, a boolean, a tuple), since the
+ *   cells of a tensor are not lists. Otherwise the answer is a nested
+ *   plain list: one `list` level for each axis of the largest rank when
+ *   every operand has one known rank (`list<list<R>>` for a vector against
+ *   a `list<list<number>>`), and `list<R | list<any>>`, a list of cells or
+ *   lists of any depth, when the depth is not known (an operand of unknown
+ *   rank, a union of lists of different ranks whose rows differ in length,
+ *   or an `R` that can hold a list);
+ * - an operand whose shape is not known otherwise is read by
+ *   `unknownShapeOperandDepth`: a `broadcastable<T>` whose `T` cannot hold
+ *   a list holds a tensor of unknown rank, and counts as an operand of
+ *   unknown rank above; an operand whose values can be nested lists of any
+ *   depth (`any`, `list<any>`, an abstract indexed collection whose
+ *   elements can be lists) gives `list<R | list<any>>`; any other operand
+ *   (a `range`, an abstract `indexed_collection<T>` whose elements cannot
+ *   be lists, a union of scalars and lists of rank 1) gives the plain
+ *   `list<R>`: a broadcast over an abstract collection is a list of the
+ *   cell result (no invented structure).
+ * A rank-1 all-open result stays plain `list<R>`, which denotes the same
+ * values as `vector<R>` (byte-identical to the earlier output for the
+ * common unbounded case).
  */
 export function broadcastShapedResultType(
   operandTypes: ReadonlyArray<Readonly<Type>>,
@@ -1910,21 +2141,80 @@ export function broadcastShapedResultType(
     absentCell
   );
   if (ragged !== undefined) return ragged;
+  const cells = elementType as Type;
+  // A nested list of unknown depth whose rows may differ in length:
+  // `list<R | list<any>>`, a list whose elements are cells or lists. Every
+  // broadcast result is in it. When `R` already admits every list, it is
+  // `list<R>`.
+  const anyDepth = (): Type =>
+    isSubtype(LIST_OF_ANY, cells)
+      ? broadcastResultType(cells)
+      : broadcastResultType(widen(cells, LIST_OF_ANY));
   let dims: number[] | null = null;
   let uniform = true;
+  let mixedRanks = false;
+  let unknownRank = false;
+  let maxRank = 0;
   for (const t of operandTypes) {
     const shape = broadcastOperandShape(t);
-    if (shape === null) return broadcastResultType(elementType); // rank unknown
+    if (shape === null) {
+      // The rank is not known. A value of the operand can still be a
+      // tensor of rank 2 or more (a `broadcastable<number>` that holds a
+      // matrix), or a nested list of any depth (`list<any>`, `any`), and
+      // the broadcast maps it at its leaves: the one-level `list<R>` does
+      // not hold such a value.
+      const deep = unknownShapeOperandDepth(t);
+      if (deep === 'any depth') return anyDepth();
+      if (deep === 'tensor') {
+        unknownRank = true;
+        continue;
+      }
+      return broadcastResultType(elementType);
+    }
+    // The rank of this operand is not known: the loop goes on, so that the
+    // uniformity of the other operands is known before the answer.
+    if (shape === 'unknown rank') {
+      unknownRank = true;
+      continue;
+    }
+    // A value of this operand can be a nested list of any depth whose rows
+    // differ in length: no tensor describes the result.
+    if (shape === 'mixed rank') return anyDepth();
     const d = shape.dims;
     if (!shape.uniform) uniform = false;
+    maxRank = Math.max(maxRank, d.length);
     if (dims === null) {
       dims = d;
     } else if (dims.length !== d.length) {
-      return broadcastResultType(elementType); // rank mismatch
+      // Two known ranks that differ: the value has the larger rank when the
+      // shapes nest, so the rank of the result is read as unknown below,
+      // once the uniformity of every operand is known.
+      mixedRanks = true;
     } else {
       // Same rank: keep provably-identical entries, open the rest.
       for (let i = 0; i < dims.length; i++) if (dims[i] !== d[i]) dims[i] = -1;
     }
+  }
+  if (unknownRank || mixedRanks) {
+    // Every operand is a tensor (its rows are uniform), so the value is a
+    // tensor of some rank whose cells are `R`: `tensor<R>`, when no value
+    // of `R` is a list. When `R` can hold a list, a tensor of `R` cells
+    // would not describe the depth of the value, and the answer is the
+    // nested list of any depth.
+    if (uniform) {
+      if (cannotHoldAList(cells))
+        return { kind: 'list', elements: cells, dimensions: null };
+      return anyDepth();
+    }
+    // Some rows may differ in length. With an operand of unknown rank the
+    // depth is not known either. Otherwise every operand has one known
+    // rank, and a broadcast over operands of different ranks has the
+    // largest of them (a vector against a matrix broadcasts the vector
+    // over the rows): one plain list level for each.
+    if (unknownRank) return anyDepth();
+    let nested = cells;
+    for (let k = 0; k < maxRank; k++) nested = broadcastResultType(nested);
+    return nested;
   }
   if (dims === null) return broadcastResultType(elementType);
   // Rank-1 fully-open adds no information over the plain form.
@@ -1957,22 +2247,24 @@ export const MAX_CELL_DEPTH = 8;
 
 /**
  * The number of list levels between a collection type and its one `elements`
- * type: the rank of a dimensioned list (`list<integer^2x3>` holds its leaves
- * two levels down), and 1 for any other collection.
+ * type: the rank of a tensor with a dimension list (`list<integer^2x3>`
+ * holds its leaves two levels down), and 1 for any other collection. A
+ * tensor of unknown rank (`dimensions` is `null`) holds its cells at an
+ * unknown depth; it is read as one level here, as a plain list of its
+ * cells, which is what its callers did before the unknown rank existed.
  */
 export function collectionLevels(t: Readonly<Type>): number {
-  return typeof t !== 'string' &&
-    t.kind === 'list' &&
-    t.dimensions !== undefined
+  return typeof t !== 'string' && t.kind === 'list' && t.dimensions
     ? Math.max(t.dimensions.length, 1)
     : 1;
 }
 
 /** The type of one cell of the list type `t`: its `elements`, or, for a
- * dimensioned list of rank 2 or more, the list of its remaining dimensions
- * (`list<integer^2x3>` has cells of type `list<integer^3>`). */
+ * tensor of rank 2 or more, the tensor of its remaining dimensions
+ * (`list<integer^2x3>` has cells of type `list<integer^3>`). A tensor of
+ * unknown rank reads as a list of its cells here. */
 function listCellType(t: ListType): Type {
-  if (t.dimensions === undefined || t.dimensions.length < 2) return t.elements;
+  if (!t.dimensions || t.dimensions.length < 2) return t.elements;
   const rest = t.dimensions.slice(1);
   // An open length of rank 1 (`[-1]`) adds nothing to a plain list.
   if (rest.length === 1 && rest[0] === -1)
@@ -2566,9 +2858,9 @@ function overlapsDeferred(
  *
  * `string` is the one collection type that is NOT unwrapped. A string is an
  * indexed collection of its characters, but it is ATOMIC under broadcast —
- * exactly as `broadcastableCollectionElementType` records by declining to
- * give `string` a broadcast element type — so a `-> string` handler result
- * contributes a whole `string` per cell, never a `character`. Without the
+ * a string is not a tensor, so it is not a `broadcastable<character>` — so
+ * a `-> string` handler result contributes a whole `string` per cell, never
+ * a `character`. Without the
  * exception `String("x=", [1, 2])`, whose value is `["x=1", "x=2"]`, typed
  * `list<character^2>`.
  *
@@ -2598,6 +2890,15 @@ export function broadcastElementType(
     return widen(...branches);
   }
   if (r === 'string') return type as Type;
+  // A `broadcastable<T>` contributes `T`: the broadcast reaches the cells
+  // of its collection arm, which are `T`. A tensor (a dimension list, or an
+  // unknown rank) contributes its cells `U`, not its rows: the broadcast
+  // reaches every cell. `collectionElementType` would answer the rows of a
+  // matrix and `T | tensor<T>` for a broadcastable, which every reader of
+  // the broadcast cell would then inherit.
+  if (typeof r !== 'string' && r.kind === 'broadcastable') return r.elements;
+  if (typeof r !== 'string' && r.kind === 'list' && r.dimensions !== undefined)
+    return r.elements;
   return collectionElementType(r) ?? (type as Type);
 }
 

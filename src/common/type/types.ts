@@ -512,8 +512,37 @@ export type CollectionType = {
  */
 export type ListType = {
   kind: 'list';
+  /**
+   * What `elements` is the type of depends on `dimensions` (see below): the
+   * elements of a plain list, or the cells of a tensor.
+   */
   elements: Type;
-  dimensions?: number[];
+  /**
+   * The `dimensions` field distinguishes three kinds of list type.
+   *
+   * - Absent (`undefined`): a plain list, spelled `list<E>`. `elements` is
+   *   the type of the ELEMENTS, what indexing returns. A matrix of integers
+   *   is a `list<vector<integer>>`, never a `list<integer>`.
+   * - An array of lengths: a tensor of that rank, spelled `vector<U>`,
+   *   `matrix<U>` or `list<U^dims>`. `elements` is the type of the CELLS,
+   *   the leaves at depth equal to the rank; the elements of a matrix are
+   *   its rows. A length of `-1` is an open length.
+   * - `null`: a tensor of unknown rank (1 or more), spelled `tensor<U>` or
+   *   bare `tensor`. `elements` is the type of the cells, as for an array.
+   *
+   * `listTensorRank()` reads the rank, and is `undefined` for the first and
+   * the third case. The type parser refuses a cell type that is a list, for
+   * an array and for `null` (`cellTypeMayCarryDimensions` in
+   * `primitive.ts`): `tensor<boolean>` and `list<boolean^(2x2)>` parse,
+   * `tensor<list<integer>>` does not. The named heads `vector<U>` and
+   * `matrix<U>` also require a cell type that can hold a number
+   * (`cellTypeCanHoldANumber`), so `vector<string>` does not parse. An
+   * internally built type is read by its cells whatever its cell type.
+   *
+   * Decided by the user on 2026-10-21; the record is
+   * `docs/plans/2026-10-21-list-element-tensor-cell.md`.
+   */
+  dimensions?: number[] | null;
   /**
    * The DIMENSION VARIABLES of a list pattern, aligned with `dimensions`: a
    * name at index `i` means that axis is quantified by the enclosing `where`
@@ -527,6 +556,17 @@ export type ListType = {
    */
   dimensionVariables?: readonly (string | undefined)[];
 };
+
+/**
+ * The rank of the list type `t`: the number of its axes when `t` is a
+ * tensor with a dimension list (`vector<U>` is 1, `matrix<U>` is 2,
+ * `list<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
+ * whose `dimensions` is absent) and for a tensor of unknown rank
+ * (`tensor<U>`, whose `dimensions` is `null`).
+ */
+export function listTensorRank(t: Readonly<ListType>): number | undefined {
+  return t.dimensions ? t.dimensions.length : undefined;
+}
 
 export type SymbolType = {
   kind: 'symbol';
@@ -561,15 +601,34 @@ export type SetType = {
 };
 
 /**
- * A `broadcastable<T>` is either a `T`, or a list of `T`
- * applied element-wise (runtime broadcasting). It is the static type of an
- * arithmetic result whose operand's collection-ness is not statically visible.
+ * A `broadcastable<T>` is either a `T`, or a collection of `T` to which an
+ * operation applies element-wise (runtime broadcasting). It is the static
+ * type of an arithmetic result whose operand's collection-ness is not
+ * statically visible. The node kind exists for every `T`, numeric or not.
+ *
+ * What the collection arm is depends on `T`:
+ *
+ * - When no value of `T` is a list (`T` is a number type, `boolean`,
+ *   `string`, a tuple, `integer | missing`, …; `cannotHoldAList` in
+ *   `subtype.ts`), the arm is `tensor<T>`, a tensor of any rank whose cells
+ *   are `T` (a list node with `dimensions` `null`). So a matrix of numbers
+ *   is a `broadcastable<number>`, a matrix of booleans is a
+ *   `broadcastable<boolean>`, and a plain list of numbers, of booleans or
+ *   of points is one too, read at rank 1. A `list<list<boolean>>` is not a
+ *   `broadcastable<boolean>`: its rows may differ in length, so it is not
+ *   a tensor.
+ * - When `T` can hold a list (`any`, `value`, a type variable), the arm is
+ *   the plain list `list<T>`, read by its elements: a `list<any>` is a
+ *   `broadcastable<any>`.
  *
  * A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
- * any list whose elements are subtypes of `T` (a tuple, a string and an
- * abstract `indexed_collection<T>` are not lists). It is *not* a
- * subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
- * scalar). See `subtype.ts` for the full relation.
+ * any subtype of the collection arm (a tuple, a string and an abstract
+ * `indexed_collection<T>` are not lists). It is *not* a subtype of `T` (it
+ * may be a collection) nor of its collection arm (it may be a scalar). See
+ * `subtype.ts` for the full relation (`broadcastCollectionArm` builds the
+ * arm). Decided by the user on 2026-10-21 (decision D4 of
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md`, refined to keep the
+ * node for every `T`).
  */
 export type BroadcastableType = {
   kind: 'broadcastable';

@@ -63,7 +63,11 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
-import { isPointListValue, isTuple } from '../collection-utils.js';
+import {
+  isPointListValue,
+  isTuple,
+  leafwardElementType,
+} from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
@@ -1759,14 +1763,12 @@ function isPyCollectionOperand(e: Expression): boolean {
  * axis for the outer list, two for the `matrix` dimensions) and
  * `list<vector<real>>` is rank 2. These cases are recovered here.
  *
- * A dimension-less list whose elements are a NUMBER type (`list<number>`, the
- * `tensor` spelling) has NO statically known rank: a matrix and every higher
- * tensor conform to it, not only a vector. So `list<number>`,
- * `list<list<number>>` (a rank-3 tensor conforms to it) and
- * `list<list<list<real>>>` are all reported as not statically known, and the
- * caller tests the rank when the code runs. The `vector` spelling is
- * different: it carries `dimensions: [-1]`, and a matrix does not conform to
- * it.
+ * A plain list is read by its elements: `list<number>` is rank 1 (its
+ * elements are numbers, so there is no deeper level), `list<list<number>>`
+ * is rank 2. A tensor of unknown rank (the `tensor` spelling, whose
+ * `dimensions` is `null`) has NO statically known rank: a matrix and every
+ * higher tensor conform to it, and the caller tests the rank when the code
+ * runs.
  */
 function pyStaticRank(e: Expression): number | undefined {
   const rank = e.rank;
@@ -1776,17 +1778,19 @@ function pyStaticRank(e: Expression): number | undefined {
 
 /**
  * The number of axes of a list type whose nested element types end in a
- * NUMBER type, or `undefined` when the type does not fix it. A list with
- * `dimensions` contributes one axis per dimension. A dimension-less list of
- * LISTS contributes one axis. A dimension-less list of NUMBERS fixes no rank
- * (a tensor of any rank conforms to it), so the answer is `undefined`.
+ * NUMBER type, or `undefined` when the type does not fix it. A list with a
+ * dimension list contributes one axis per dimension. A plain list
+ * contributes one axis: a plain list of numbers is rank 1, a plain list of
+ * lists one more than its rows. A tensor of unknown rank (`dimensions` is
+ * `null`) fixes no rank, so the answer is `undefined`.
  */
 function pyListTypeRank(type: Type): number | undefined {
   // A type reference answers layout questions as its definition (§4.6 step 1).
   const t = resolveTypeForCompilation(type);
   if (typeof t !== 'object' || t.kind !== 'list') return undefined;
-  if (isSubtype(t.elements, 'number')) return t.dimensions?.length || undefined;
+  if (t.dimensions === null) return undefined;
   const own = t.dimensions?.length ?? 1;
+  if (isSubtype(t.elements, 'number')) return own;
   const inner = pyListTypeRank(t.elements);
   return inner === undefined ? undefined : own + inner;
 }
@@ -1827,7 +1831,10 @@ function pyFiniteEntries(expr: Expression): boolean {
   let t: Type | undefined = expr.type.type;
   for (let depth = 0; t !== undefined && depth < 16; depth++) {
     if (isSubtype(t, 'finite_number')) return true;
-    t = collectionElementType(t);
+    // Toward the entries (`leafwardElementType`): the element of a tensor
+    // of unknown rank is `U | tensor<U>`, a union this walk could not
+    // descend, where its cells `U` are the entries.
+    t = leafwardElementType(t);
   }
   return false;
 }
@@ -1844,7 +1851,7 @@ function pyNormEntries(expr: Expression): PyNormEntries {
   let t: Type | undefined = expr.type.type;
   for (let depth = 0; t !== undefined && depth < 16; depth++) {
     if (isSubtype(t, 'integer')) return 'integer';
-    t = collectionElementType(t);
+    t = leafwardElementType(t);
   }
   return pyFiniteEntries(expr) ? 'finite' : 'any';
 }

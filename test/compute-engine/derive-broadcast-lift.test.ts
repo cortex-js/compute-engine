@@ -29,11 +29,11 @@ describe('the descriptor route lifts like the expression route', () => {
     // power is element-wise on both routes. A nested list with row
     // lengths IS a matrix, and its power to an integer literal is the
     // matrix power: the matrix cases are in the next block.
-    ['Power', ['list<list<integer>^2>', 'integer']],
+    ['Power', ['list<list<integer>>', 'integer']],
     ['Power', ['number | list<number>', 'integer']],
     ['Power', ['indexed_collection<integer>', 'integer']],
     ['Length', ['list<integer^3>']],
-    ['Negate', ['list<list<integer^2>^2>']],
+    ['Negate', ['list<vector<integer^2>>']],
     ['Abs', ['list<tuple<integer, integer>>']],
     ['Power', ['vector<integer^2>', 'integer']],
     ['Multiply', ['list<integer^3>', 'list<integer^3>']],
@@ -71,8 +71,10 @@ describe('the descriptor route lifts like the expression route', () => {
     ['matrix<integer^(2x2)>', -1],
     ['matrix<integer^(2x2)>', -2],
     ['matrix<integer^(2x2)>', 1],
-    ['list<list<integer^2>^2>', 2],
-    ['list<list<integer^2>^2>', -2],
+    // A list of rows of one length, which is not a matrix type (the cells
+    // of a list with dimensions cannot be lists).
+    ['list<vector<integer^2>>', 2],
+    ['list<vector<integer^2>>', -2],
     ['matrix<real^(3x3)>', 3],
     ['matrix<integer>', -2],
     ['matrix<integer^(2x3)>', 2],

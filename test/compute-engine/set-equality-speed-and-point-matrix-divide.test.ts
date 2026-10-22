@@ -365,7 +365,8 @@ describe('a list of points against a matrix', () => {
 
   test('the quotient is a list of lists of points', () => {
     const e = ce.box(['Divide', PL, M] as any);
-    expect(e.type.toString()).toBe('list<list<tuple<rational, rational>^2>>');
+    // A tuple cell may carry dimensions, so the quotient has the matrix's shape.
+    expect(e.type.toString()).toBe('list<tuple<rational, rational>^(2x2)>');
     const value = e.evaluate();
     expect(value.toString()).toBe('[[(1, 2),(1/2, 1)],[(1, 4/3),(3/4, 1)]]');
     expect(value.type.matches(e.type)).toBe(true);

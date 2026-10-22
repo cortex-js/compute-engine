@@ -336,14 +336,19 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
     expect(v.toString()).toBe('[Hold(1),Hold(2)]');
   });
 
-  // No length: `PointX("")` is `Missing`, and a list value that mixes
-  // `Missing` with characters is typed with no length (`["", "b"]` gives
-  // `[Missing, "b"]`, typed `list<character | missing>`), so a length in the
-  // static type would not hold that value.
+  // `PointX("")` is `Missing`, so a cell is a character or `Missing`. A list
+  // value that mixes `Missing` with characters carries its length
+  // (`["", "b"]` gives `[Missing, "b"]`, typed `list<character | missing^2>`),
+  // so the length in the static type holds both values.
   test('PointX over strings is not typed as lists of numbers', () => {
-    expect(
-      engine.box(['Map', 'PointX', ['List', "'a'", "'b'"]]).type.toString()
-    ).toBe('list<character | missing>');
+    for (const strings of [
+      ["'a'", "'b'"],
+      ["''", "'b'"],
+    ]) {
+      const e = engine.box(['Map', 'PointX', ['List', ...strings]]);
+      expect(e.type.toString()).toBe('list<character | missing^2>');
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+    }
   });
 });
 

@@ -755,18 +755,22 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     );
     // The scalar call is the per-element answer the wrap is built from.
     pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
+    // The result keeps the operand's shape: a list may carry dimensions
+    // when its cells cannot hold a list, and a tuple cannot.
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<integer, integer>>',
+      'list<tuple<integer, integer>^2>',
       '[(1, 1),(2, 2)]'
     );
     // Rank 2 — the depth the peel has to reach (the broadcast maps to the
-    // scalar LEAVES, so `T` is `integer`, not a matrix row).
+    // scalar LEAVES, so `T` is `integer`, not a matrix row). A plain list is
+    // read by its elements, and the elements of the value are rows of
+    // tuples, so the result has the rank of the operand.
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<integer, integer>>',
+      'list<tuple<integer, integer>^(2x2)>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -778,10 +782,11 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
       'x',
     ]);
     pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
+    // The result keeps the operand's shape, as on the operator-def arm.
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<integer, integer>>',
+      'list<tuple<integer, integer>^2>',
       '[(1, 1),(2, 2)]'
     );
     // The value route maps to the scalar LEAVES too: its zip re-dispatches
@@ -792,7 +797,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<integer, integer>>',
+      'list<tuple<integer, integer>^(2x2)>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -806,10 +811,11 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
       e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T: number')
     );
     pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
+    // The result keeps the operand's shape: a tuple cell may carry it.
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<integer, integer>>',
+      'list<tuple<integer, integer>^2>',
       '[(1, 1),(2, 2)]'
     );
   });
@@ -849,16 +855,247 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.declare('f', '(x: T) -> tuple<T, T> where T');
     // All members mapped: the peel distributes (the `Add` widen artifact).
+    // A plain list is read by its elements, so the matrix arm, whose image
+    // is a rectangle of tuples, is not a `list<tuple<…>>`. Since a tuple
+    // cannot hold a list, a tensor of tuples of unknown rank holds the image
+    // of either arm (it was typed arm by arm before 2026-10-22).
     ce.declare('v', 'list<integer> | matrix<integer>');
     expect(ce.box(['f', 'v'] as any).type.toString()).toBe(
-      'list<tuple<integer, integer>>'
+      'tensor<tuple<integer, integer>>'
     );
+    for (const value of [
+      ['List', 1, 2],
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+    ]) {
+      const arm = new ComputeEngine();
+      arm.declare('f', '(x: T) -> tuple<T, T> where T');
+      arm.assign('f', arm.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+      arm.declare('v', 'list<integer> | matrix<integer>');
+      const staticType = arm.box(['f', 'v'] as any).type;
+      arm.assign('v', arm.box(value as any));
+      const evaluated = arm.box(['f', 'v'] as any).evaluate();
+      expect(evaluated.type.matches(staticType)).toBe(true);
+    }
     // One member the broadcast never maps (a `set` is lift-ADMITTED but
-    // inert): distributing would claim `integer | set<integer>` while the
-    // runtime may echo the set whole. The union contributes ITSELF.
+    // inert): the solver binds `T` to the whole union, but the call maps a
+    // list value at its leaves and passes a set value whole, so the call is
+    // typed arm by arm. The list arm gives a list of tuples of integers, the
+    // set arm a tuple of sets. (Before 2026-10-22 the answer was
+    // `list<tuple<list<integer> | set<integer>, …>>`, which holds neither
+    // `[(1, 1), (2, 2)]` nor `(Set(1, 2), Set(1, 2))`.)
     ce.declare('u', 'list<integer> | set<integer>');
     expect(ce.box(['f', 'u'] as any).type.toString()).toBe(
-      'list<tuple<list<integer> | set<integer>, list<integer> | set<integer>>>'
+      'list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>'
+    );
+    for (const [decl, value, expected] of [
+      ['list<integer> | set<integer>', ['List', 1, 2], '[(1, 1),(2, 2)]'],
+      [
+        'list<integer> | set<integer>',
+        ['Set', 1, 2],
+        '(Set(1, 2), Set(1, 2))',
+      ],
+      // A tuple arm and a string arm bind whole too.
+      [
+        'list<integer> | tuple<integer, integer>',
+        ['List', 1, 2],
+        '[(1, 1),(2, 2)]',
+      ],
+      [
+        'list<integer> | tuple<integer, integer>',
+        ['Tuple', 3, 4],
+        '((3, 4), (3, 4))',
+      ],
+      ['list<integer> | string', ['List', 1, 2], '[(1, 1),(2, 2)]'],
+      ['list<integer> | string', { str: 'ab' }, '("ab", "ab")'],
+      // The mapped arms are typed together, as one operand.
+      [
+        'list<integer> | set<integer> | matrix<integer>',
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+        '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]',
+      ],
+      [
+        'list<integer> | set<integer> | matrix<integer>',
+        ['Set', 1, 2],
+        '(Set(1, 2), Set(1, 2))',
+      ],
+    ] as const) {
+      const arm = new ComputeEngine();
+      arm.declare('f', '(x: T) -> tuple<T, T> where T');
+      arm.assign('f', arm.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+      arm.declare('u', decl);
+      const staticType = arm.box(['f', 'u'] as any).type;
+      arm.assign('u', arm.box(value as any));
+      const evaluated = arm.box(['f', 'u'] as any).evaluate();
+      expect(evaluated.toString()).toBe(expected);
+      expect(evaluated.type.matches(staticType)).toBe(true);
+    }
+    // The same typing when the literal carries its signature, which the
+    // engine holds as an operator definition.
+    for (const value of [
+      ['List', 1, 2],
+      ['Set', 1, 2],
+    ]) {
+      const op = new ComputeEngine();
+      op.assign(
+        'f',
+        e1(op, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T')
+      );
+      op.declare('u', 'list<integer> | set<integer>');
+      const staticType = op.box(['f', 'u'] as any).type;
+      expect(staticType.toString()).toBe(
+        'list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>'
+      );
+      op.assign('u', op.box(value as any));
+      const evaluated = op.box(['f', 'u'] as any).evaluate();
+      expect(evaluated.type.matches(staticType)).toBe(true);
+    }
+  });
+
+  test('an abstract collection operand is typed mapped and whole', () => {
+    // A value of `collection<integer>` can be a list, which the call maps at
+    // its leaves, or a set, which the call passes whole. The static type is
+    // the union of the two readings: the mapped reading of the indexed
+    // counterpart `indexed_collection<integer>`, and the whole reading
+    // `tuple<collection<integer>, collection<integer>>`. (Before 2026-10-22
+    // the answer was `broadcastable<tuple<collection<integer>, …>>` for
+    // `collection<integer>`, and `list<tuple<collection<integer> |
+    // list<integer>, …>>` for the union with `list<integer>`: neither holds
+    // `[(1, 1), (2, 2)]`, and the second does not hold
+    // `(Set(1, 2), Set(1, 2))`.)
+    const both =
+      'list<list<any> | tuple<integer, integer>> | tuple<collection<integer>, collection<integer>>';
+    for (const [decl, expectedStatic] of [
+      ['collection<integer>', both],
+      ['list<integer> | collection<integer>', both],
+    ] as const) {
+      for (const [value, expected] of [
+        [['List', 1, 2], '[(1, 1),(2, 2)]'],
+        [['Set', 1, 2], '(Set(1, 2), Set(1, 2))'],
+      ] as const) {
+        // The declared polytype (a value definition) and the literal that
+        // carries its signature (an operator definition).
+        for (const route of ['declared', 'literal'] as const) {
+          const arm = new ComputeEngine();
+          if (route === 'declared') {
+            arm.declare('f', '(x: T) -> tuple<T, T> where T');
+            arm.assign(
+              'f',
+              arm.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any)
+            );
+          } else
+            arm.assign(
+              'f',
+              e1(arm, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T')
+            );
+          arm.declare('c', decl);
+          const staticType = arm.box(['f', 'c'] as any).type;
+          expect(staticType.toString()).toBe(expectedStatic);
+          arm.assign('c', arm.box(value as any));
+          const evaluated = arm.box(['f', 'c'] as any).evaluate();
+          expect(evaluated.toString()).toBe(expected);
+          expect(evaluated.type.matches(staticType)).toBe(true);
+        }
+      }
+    }
+  });
+
+  test('a literal with no declared polytype is typed arm by arm', () => {
+    // `g := x ↦ (x, x)` has the inferred signature
+    // `(unknown) -> tuple<unknown, unknown>`. Over a union with an arm that
+    // the call passes whole, each arm is typed on its own: the list arm (and
+    // the indexed counterpart of an abstract collection) through the
+    // broadcast, the set or abstract collection arm from the body with the
+    // arm as the type of the operand, or from the signature result when the
+    // body gives no type. (Before 2026-10-22 the answer was `list<any>`,
+    // which does not hold `(Set(1, 2), Set(1, 2))`.)
+    for (const [decl, expectedStatic] of [
+      [
+        'list<integer> | set<integer>',
+        'list<tuple<integer, integer>> | tuple<unknown, unknown>',
+      ],
+      [
+        'list<integer> | collection<integer>',
+        'list<tuple<unknown, unknown>> | tuple<unknown, unknown>',
+      ],
+    ] as const) {
+      for (const [value, expected] of [
+        [['List', 1, 2], '[(1, 1),(2, 2)]'],
+        [['Set', 1, 2], '(Set(1, 2), Set(1, 2))'],
+      ] as const) {
+        const arm = new ComputeEngine();
+        arm.assign('g', arm.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+        arm.declare('c', decl);
+        const staticType = arm.box(['g', 'c'] as any).type;
+        expect(staticType.toString()).toBe(expectedStatic);
+        arm.assign('c', arm.box(value as any));
+        const evaluated = arm.box(['g', 'c'] as any).evaluate();
+        expect(evaluated.toString()).toBe(expected);
+        expect(evaluated.type.matches(staticType)).toBe(true);
+      }
+    }
+  });
+
+  test('several operands that may be mapped or whole are typed over every combination', () => {
+    // Each operand takes its value independently: with two abstract
+    // collections, both may be lists (the call zips them), both may be sets
+    // (the call binds them whole), or one of each (the call maps the list
+    // and passes the set whole at each element). The static type is the
+    // union of the results of the combinations. (Before 2026-10-22 the
+    // answer was `broadcastable<tuple<collection<integer>,
+    // collection<integer>>>`, which holds neither `[(1, 3), (2, 4)]` nor
+    // `[(1, Set(3, 4)), (2, Set(3, 4))]`.)
+    const LIST_A = ['List', 1, 2];
+    const LIST_B = ['List', 3, 4];
+    const SET_A = ['Set', 1, 2];
+    const SET_B = ['Set', 3, 4];
+    for (const decl of [
+      'collection<integer>',
+      'list<integer> | set<integer>',
+    ] as const) {
+      for (const [a, b, expected] of [
+        [LIST_A, LIST_B, '[(1, 3),(2, 4)]'],
+        [SET_A, SET_B, '(Set(1, 2), Set(3, 4))'],
+        [LIST_A, SET_B, '[(1, Set(3, 4)),(2, Set(3, 4))]'],
+        [SET_A, LIST_B, '[(Set(1, 2), 3),(Set(1, 2), 4)]'],
+      ] as const) {
+        const arm = new ComputeEngine();
+        arm.declare('h', '(x: T, y: T) -> tuple<T, T> where T');
+        arm.assign(
+          'h',
+          arm.box(['Function', ['Tuple', 'x', 'y'], 'x', 'y'] as any)
+        );
+        arm.declare('a', decl);
+        arm.declare('b', decl);
+        const staticType = arm.box(['h', 'a', 'b'] as any).type;
+        arm.assign('a', arm.box(a as any));
+        arm.assign('b', arm.box(b as any));
+        const evaluated = arm.box(['h', 'a', 'b'] as any).evaluate();
+        expect(evaluated.toString()).toBe(expected);
+        expect(evaluated.type.matches(staticType)).toBe(true);
+      }
+    }
+  });
+
+  test('more combinations than the limit give `any`', () => {
+    // Four operands of two arms each are 16 combinations, more than the
+    // limit of 8: the answer is `any`, which holds every value.
+    const ce = fresh();
+    ce.declare('h', '(a: T, b: T, c: T, d: T) -> tuple<T, T, T, T> where T');
+    ce.assign(
+      'h',
+      ce.box([
+        'Function',
+        ['Tuple', 'a', 'b', 'c', 'd'],
+        'a',
+        'b',
+        'c',
+        'd',
+      ] as any)
+    );
+    for (const s of ['p', 'q', 'r', 's'])
+      ce.declare(s, 'list<integer> | set<integer>');
+    expect(ce.box(['h', 'p', 'q', 'r', 's'] as any).type.toString()).toBe(
+      'any'
     );
   });
 
@@ -866,23 +1103,45 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.declare('f', '(x: T) -> tuple<T, T> where T');
     // A `list` outer has a static rank, so the peel descends to the LEAF and
-    // `broadcastShapedResultType` re-adds every level.
+    // `broadcastShapedResultType` re-adds every level. The rows are
+    // `vector<integer^2>`, so the result is a rectangle of tuples with
+    // rows of two: a list whose cells are tuples may carry that shape.
     ce.declare('h', 'list<list<integer^2>>');
     expect(ce.box(['f', 'h'] as any).type.toString()).toBe(
-      'list<tuple<integer, integer>>'
+      'list<tuple<integer, integer>^(?x2)>'
     );
-    // An `indexed_collection`/`broadcastable` outer has NO static rank
-    // (`staticCollectionDims` answers `null`), so the wrapper re-adds exactly
-    // ONE level — the peel must take exactly one too, or the type comes out
-    // flat while the runtime stays nested.
+    // The runtime maps a value of an `indexed_collection` or a
+    // `broadcastable` outer at its leaves too: `[[1, 2], [3, 4]]` gives
+    // `[[(1, 1), (2, 2)], [(3, 3), (4, 4)]]`, and `[1, 2]` for the
+    // broadcastable gives `[(1, 1), (2, 2)]`. So the peel descends to the
+    // leaf for these kinds as well, and the result has the depth of the
+    // operand. (Before 2026-10-22 the peel took one level, and the result
+    // claimed tuples of rows, which the value does not hold.)
     ce.declare('g', 'indexed_collection<list<integer^2>>');
     expect(ce.box(['f', 'g'] as any).type.toString()).toBe(
-      'list<tuple<vector<integer^2>, vector<integer^2>>>'
+      'list<list<tuple<integer, integer>>>'
     );
     ce.declare('b', 'broadcastable<list<integer^2>>');
     expect(ce.box(['f', 'b'] as any).type.toString()).toBe(
-      'broadcastable<tuple<vector<integer^2>, vector<integer^2>>>'
+      'broadcastable<tuple<integer, integer>>'
     );
+    const matrix = ['List', ['List', 1, 2], ['List', 3, 4]];
+    for (const [decl, value] of [
+      ['indexed_collection<list<integer^2>>', matrix],
+      ['broadcastable<list<integer^2>>', ['List', 1, 2]],
+      ['broadcastable<list<integer^2>>', matrix],
+    ] as const) {
+      const arm = new ComputeEngine();
+      arm.declare('f', '(x: T) -> tuple<T, T> where T');
+      arm.assign('f', arm.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+      arm.declare('v', decl);
+      const staticType = arm.box(['f', 'v'] as any).type;
+      arm.assign('v', arm.box(value as any));
+      const call = arm.box(['f', 'v'] as any);
+      const evaluated = call.evaluate();
+      expect(evaluated.type.matches(staticType)).toBe(true);
+      expect(evaluated.type.matches(call.type)).toBe(true);
+    }
   });
 
   test('`Apply` is NOT a map: it binds the argument whole', () => {

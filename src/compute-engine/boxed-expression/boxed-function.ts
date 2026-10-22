@@ -34,7 +34,11 @@ import {
 } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { callResultType } from './call-result-type.js';
-import { isPolymorphicType } from '../../common/type/instantiate.js';
+import {
+  expandAliasesForLift,
+  isMappedActual,
+  isPolymorphicType,
+} from '../../common/type/instantiate.js';
 import { isWildcard } from './pattern-utils.js';
 import { isErrorTypedOperand } from './error-typed-operand.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -147,6 +151,7 @@ import {
   isAbsentScalarTerm,
   collectionSourceOperands,
   viewOverListedSource,
+  shapedBroadcastResultType,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -201,6 +206,7 @@ import {
   instantiatedResultTypeOverActuals,
   substituteDeclaredBounds,
   type ArmInferenceContext,
+  type SolveActual,
 } from './generic-instantiation.js';
 import type {
   EffectLabel,
@@ -211,6 +217,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
+import { reduceType } from '../../common/type/reduce.js';
 import {
   couldMatch,
   isSubtype,
@@ -232,7 +239,6 @@ import {
 import {
   broadcastResultType,
   nestedBroadcastResultType,
-  broadcastShapedResultType,
   functionResult,
   staticMembership,
   isSignatureType,
@@ -243,6 +249,9 @@ import {
   stripMissingFromType,
   collectionElementType,
   resolveTypeAlias,
+  unfoldAliasOnDescent,
+  descendIntoConstructor,
+  type AliasDescent,
   typeContainsMissing,
   typeHasNanFreeNumericCell,
   widen,
@@ -10267,11 +10276,31 @@ function lambdaBroadcastType(
   generic = false,
   // The per-element result derived from the body for the mapped operands
   // (`derivedBroadcastElementResult`), called once the lift is known to
-  // apply; `undefined` keeps `perElementResult`.
-  derive?: (mappedAt: ReadonlyArray<boolean>) => Type | undefined,
+  // apply; `undefined` keeps `perElementResult`. `operandTypes` has the
+  // same meaning as the parameter of this function with that name.
+  derive?: (
+    mappedAt: ReadonlyArray<boolean>,
+    operandTypes?: ReadonlyArray<Type | undefined>
+  ) => Type | undefined,
   // The function literal that is applied, when it is known.
-  literal?: Expression
+  literal?: Expression,
+  // For a generic literal: the instantiated result of the call when each
+  // operand with a type in `arms` has that type and the other operands keep
+  // their types. It lets union operands be typed arm by arm
+  // (`operandArms`).
+  instantiateWith?: (arms: ReadonlyArray<Type | undefined>) => Type | undefined,
+  // The type to read for each operand in place of the type of the operand
+  // expression, or `undefined` to read the expression. An operand with such
+  // a type takes part in the broadcast, unless `wholeAt` marks it. Only the
+  // typing arm by arm (`byArms` below) gives it, to type the arms of union
+  // operands.
+  operandTypes?: ReadonlyArray<Type | undefined>,
+  // The operands of `operandTypes` that bind whole: their type is an arm
+  // that the broadcast does not map (a `set`, a scalar), and the call passes
+  // their value whole to the literal at each element of the mapped operands.
+  wholeAt?: ReadonlyArray<boolean>
 ): Type | undefined {
+  const typeAt = (i: number): Type => operandTypes?.[i] ?? ops[i].type.type;
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
   // never mapped), then the body's own arithmetic decides the shape:
   // `g := x ↦ 2x` gives `g((1,2)) = 2·(1,2) = (2,4)`, a tuple, while
@@ -10302,9 +10331,8 @@ function lambdaBroadcastType(
   // derivation declines.
   if (
     ops.some(
-      (x, i) =>
-        (isNumericTupleType(x.type.type) ||
-          mayBeNumericTupleType(x.type.type)) &&
+      (_x, i) =>
+        (isNumericTupleType(typeAt(i)) || mayBeNumericTupleType(typeAt(i))) &&
         parameterReachesBody(literal, i)
     ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
@@ -10312,10 +10340,134 @@ function lambdaBroadcastType(
     return 'any';
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
-  const mapped = ops.filter(
-    (x, i) => mappable(i) && isLambdaBroadcastParticipant(x)
+  const participates = (i: number) =>
+    mappable(i) &&
+    wholeAt?.[i] !== true &&
+    (operandTypes?.[i] !== undefined || isLambdaBroadcastParticipant(ops[i]));
+  const mapped = ops.filter((_x, i) => participates(i));
+  const mappedTypes = ops.flatMap((_x, i) =>
+    participates(i) ? [typeAt(i)] : []
   );
+  // The result of the call for one combination of arms of the operands at
+  // `indices`: `combo[k]` is the arm of the operand `indices[k]`, with its
+  // type and whether the broadcast maps it. A generic literal reads the
+  // result from its type solver (`instantiateWith`). Another literal derives
+  // it from its body (`derive`): through the broadcast below when an arm is
+  // mapped, and with each operand typed as its arm when every arm binds
+  // whole.
+  const comboResult = (
+    indices: ReadonlyArray<number>,
+    combo: ReadonlyArray<OperandArm>
+  ): Type | undefined => {
+    const types: Array<Type | undefined> = ops.map(() => undefined);
+    const whole: boolean[] = ops.map(() => false);
+    indices.forEach((i, k) => {
+      types[i] = combo[k].type;
+      whole[i] = !combo[k].mapped;
+    });
+    const armResult = generic ? instantiateWith?.(types) : perElementResult;
+    if (armResult === undefined) return undefined;
+    if (combo.some((arm) => arm.mapped))
+      return (
+        lambdaBroadcastType(
+          ops,
+          armResult,
+          slots,
+          inferredResult,
+          generic,
+          derive,
+          literal,
+          undefined,
+          types,
+          whole
+        ) ?? armResult
+      );
+    // The numeric-tuple rule above, for these arms. It applies only when
+    // the function has a value (`literal`): the body may then compute on
+    // the tuple and give a value of another shape. A function with no value
+    // does not evaluate, and the call keeps the signature result.
+    if (
+      literal !== undefined &&
+      indices.some(
+        (i, k) =>
+          (isNumericTupleType(combo[k].type) ||
+            mayBeNumericTupleType(combo[k].type)) &&
+          parameterReachesBody(literal, i)
+      ) &&
+      (inferredResult || isSubtype(armResult, 'number'))
+    )
+      return 'any';
+    if (generic) return armResult;
+    // When the body gives no type for the arms, the signature result
+    // stands, as it does for a call over operands of those types alone.
+    return (
+      derive?.(
+        ops.map(() => false),
+        types
+      ) ?? armResult
+    );
+  };
+  // The type of the call when the operands at `indices` are typed arm by
+  // arm (`operandArms`), or `undefined` when that typing does not apply.
+  // The call maps a value of a mapped arm at its leaves and passes a value
+  // of another arm whole, and each operand takes its value independently of
+  // the others, so the answer is the union of the results over every
+  // combination of one arm for each operand. With
+  // `h: (x: T, y: T) -> tuple<T, T>` and `a, b: collection<integer>`,
+  // `h(a, b)` is `[(1, 3), (2, 4)]` for two lists, `(Set(1, 2), Set(3, 4))`
+  // for two sets, and `[(1, Set(3, 4)), (2, Set(3, 4))]` for a list and a
+  // set. An operand of `indices` that has no such arms must be one that the
+  // broadcast maps (a list), and it is mapped in every combination;
+  // otherwise the typing does not apply. When the number of combinations
+  // is more than `MAX_OPERAND_ARM_COMBINATIONS`, the answer is `any`, which
+  // holds every value.
+  const byArms = (indices: ReadonlyArray<number>): Type | undefined => {
+    if (slots !== undefined || operandTypes !== undefined) return undefined;
+    if (generic ? instantiateWith === undefined : derive === undefined)
+      return undefined;
+    const armsAt: Array<ReadonlyArray<OperandArm>> = [];
+    let split = false;
+    for (const i of indices) {
+      const arms = operandArms(typeAt(i));
+      if (arms !== undefined) {
+        split = true;
+        armsAt.push(arms);
+        continue;
+      }
+      const t = expandAliasesForLift(typeAt(i));
+      if (t === null || !isMappedActual(t)) return undefined;
+      armsAt.push([{ type: typeAt(i), mapped: true }]);
+    }
+    if (!split) return undefined;
+    const count = armsAt.reduce((n, arms) => n * arms.length, 1);
+    if (count > MAX_OPERAND_ARM_COMBINATIONS) return 'any';
+    const results: Type[] = [];
+    const combo: OperandArm[] = [];
+    const visit = (k: number): boolean => {
+      if (k === armsAt.length) {
+        const r = comboResult(indices, combo);
+        if (r === undefined) return false;
+        results.push(r);
+        return true;
+      }
+      for (const arm of armsAt[k]) {
+        combo[k] = arm;
+        if (!visit(k + 1)) return false;
+      }
+      return true;
+    };
+    if (!visit(0)) return undefined;
+    return reduceType({ kind: 'union', types: results });
+  };
   if (mapped.length > 0) {
+    // A literal over operands whose types are unions with an arm that the
+    // broadcast does not map (a `set`, a tuple, a scalar, an abstract
+    // `collection`) is typed arm by arm (`byArms`).
+    const byArm = byArms(
+      ops.flatMap((_x, i) => (participates(i) ? [i] : []))
+    );
+    if (byArm !== undefined) return byArm;
+
     // D10 (§4.4, re-ruled 2026-08-04): `perElementResult` is the
     // PER-ELEMENT result — the solver bound each lift-admitted operand's
     // element type — so the ordinary wrap below is the whole answer. It
@@ -10332,7 +10484,7 @@ function lambdaBroadcastType(
     // `number | list<number>`, the same as `2u`, instead of
     // the definite `list<E>` that `u := 5` contradicts.
     const loneUnionResult = loneUnionBroadcastResultType(
-      mapped.map((x) => x.type.type),
+      mappedTypes,
       perElementResult
     );
     if (loneUnionResult !== undefined) return loneUnionResult;
@@ -10344,7 +10496,8 @@ function lambdaBroadcastType(
     if (!generic && derive !== undefined)
       perElementResult =
         derive(
-          ops.map((x, i) => mappable(i) && isLambdaBroadcastParticipant(x))
+          ops.map((_x, i) => participates(i)),
+          operandTypes
         ) ?? perElementResult;
 
     // A collection-valued per-element result keeps the plain nested lift
@@ -10360,33 +10513,88 @@ function lambdaBroadcastType(
           isSubtype(m, COLLECTION_SHAPE_TYPE)
         ));
     // One list level per rank the broadcast descends: a nested list is
-    // mapped at its leaves (`nestedBroadcastResultType`). Two exceptions
-    // take one level: a GENERIC signature, whose type solver bound its type
-    // parameter to the element one rank down, so `perElementResult` already
-    // reflects the argument's rank, and one list level is the whole lift
-    // (the dimensioned encoding of the value makes it a member of that
-    // type: a `list<tuple<…>^(2x2)>` is a `list<tuple<…>>`); and a declared
-    // `broadcastable<T>` slot plan (`slots`), which maps exactly one rank.
-    if (collectionValued)
+    // mapped at its leaves (`nestedBroadcastResultType`). A declared
+    // `broadcastable<T>` slot plan (`slots`) maps exactly one rank, and
+    // takes one level. A GENERIC signature takes the shape-aware typing
+    // below: the call maps the literal over the leaves of its operand, so
+    // the value has the operand's rank (`g := (x: T) -> tuple<T, T>` over
+    // `[[1, 2], [3, 4]]` is `[[(1, 1), (2, 2)], [(3, 3), (4, 4)]]`, a
+    // `list<tuple<integer, integer>^(2x2)>`). One list level around the
+    // result, `list<tuple<integer, integer>>`, does not hold that value: a
+    // list is read by its elements, and the elements of the value are rows
+    // of tuples. The shape-aware typing applies only when the type solver
+    // bound the type parameter to the leaves of every operand
+    // (`genericLiftLevels`); otherwise the result is wrapped once for each
+    // level the solver removed, as before. An operand with rows of
+    // different lengths gives a value whose rows differ in length, and the
+    // result is wrapped in plain lists, one for each level of the operand.
+    const shapeAwareGeneric = generic && slots === undefined;
+    if (shapeAwareGeneric) {
+      const levels = genericLiftLevels(mappedTypes);
+      if (levels === 'nested')
+        return nestedBroadcastResultType(mappedTypes, perElementResult);
+      if (levels !== undefined) {
+        // When the leaf the solver reached may still be a list (`any`, the
+        // element of a `list<any>`), the call maps that list at its leaves
+        // too, and an element of the innermost level is a cell or a list of
+        // any depth: `list<R | list<any>>`.
+        let wrapped = levels.leafMayBeList
+          ? widen(perElementResult, { kind: 'list', elements: 'any' })
+          : perElementResult;
+        for (let k = 0; k < levels.levels; k++)
+          wrapped = broadcastResultType(wrapped);
+        return wrapped;
+      }
+    }
+    if (collectionValued && !shapeAwareGeneric)
       return generic || slots !== undefined
         ? broadcastResultType(perElementResult)
-        : nestedBroadcastResultType(
-            mapped.map((x) => x.type.type),
-            perElementResult
-          );
+        : nestedBroadcastResultType(mappedTypes, perElementResult);
     // Shape-aware (§D6.1): the map preserves the source's structure. When
     // the mapped operands have different ranks (a matrix beside a list),
     // the shape-aware form gives one plain list level, but the value is
     // mapped to the DEEPEST rank (`[[1,2],[3,4]]` beside `[5,6]` gives a
     // matrix), so the nested form, which wraps one level per rank of the
-    // deepest operand, is the one the value is a member of. A generic
-    // signature and a declared slot plan keep the shape-aware form, for the
-    // reasons given above (one list level is their whole lift).
-    const types = mapped.map((x) => x.type.type);
-    const shaped = broadcastShapedResultType(types, perElementResult);
-    if (generic || slots !== undefined) return shaped;
+    // deepest operand, is the one the value is a member of. A declared slot
+    // plan keeps the shape-aware form, for the reason given above (one rank
+    // is its whole lift).
+    const types = mappedTypes;
+    // The source's shape is kept when the per-element result may carry
+    // dimensions (a result that cannot be a list: a number, a boolean, a
+    // tuple), and spelled as nested plain lists otherwise
+    // (`shapedBroadcastResultType`).
+    const shaped = shapedBroadcastResultType(types, perElementResult);
+    if (slots !== undefined) return shaped;
     const nested = nestedBroadcastResultType(types, perElementResult);
-    return listRank(nested) > listRank(shaped) ? nested : shaped;
+    const result = listRank(nested) > listRank(shaped) ? nested : shaped;
+    // A generic literal over an operand whose rank is not known (a
+    // `tensor<integer>`): a result that cannot be a list is a tensor of
+    // unknown rank (`tensor<R>`; `x ↦ (x, x)` gives a
+    // `tensor<tuple<integer, integer>>`), but no type spells a nesting of
+    // unknown depth whose cells may be lists, and the shaped form is then
+    // the rank-1 reading `list<R>`, which holds the value only when the
+    // operand has rank 1.
+    // When some operand is not known to have rank 1, the elements of the
+    // value may be `R` or a list, so the answer is `list<R | list<any>>`.
+    // One mapped operand whose type is a union of lists of known ranks
+    // (`list<integer> | matrix<integer>`) is typed arm by arm instead: a
+    // value of the operand is a value of one arm, and the call over it has
+    // the shape of that arm (`unionArmsGenericResult`).
+    if (
+      shapeAwareGeneric &&
+      typeof result === 'object' &&
+      result.kind === 'list' &&
+      result.dimensions === undefined &&
+      listRank(result) === listRank(perElementResult) + 1 &&
+      !types.every((t) => staticCollectionDims(t)?.length === 1)
+    )
+      return (
+        unionArmsGenericResult(types, perElementResult) ?? {
+          kind: 'list',
+          elements: widen(perElementResult, { kind: 'list', elements: 'any' }),
+        }
+      );
+    return result;
   }
   // No operand is a statically-visible collection, but an operand's
   // collection-ness may not be statically knowable — it might broadcast at
@@ -10397,15 +10605,26 @@ function lambdaBroadcastType(
   // same rule as arm 2 of `broadcastLiftType`, `broadcast-lift-type.ts`).
   // An operand that holds a set now is typed from that value: the call does
   // not map over it.
-  if (
-    ops.some(
-      (x, i) =>
-        mappable(i) &&
-        (isPossiblyCollectionTyped(x) ||
-          (abstractCollectionCell(x.type.type) !== undefined &&
-            !holdsUnindexedCollection(x)))
-    )
-  ) {
+  const triggers = ops.flatMap((x, i) =>
+    mappable(i) &&
+    (isPossiblyCollectionTyped(x) ||
+      (abstractCollectionCell(x.type.type) !== undefined &&
+        !holdsUnindexedCollection(x)))
+      ? [i]
+      : []
+  );
+  if (triggers.length > 0) {
+    // A generic literal over operands of an abstract collection type
+    // (`collection<integer>`) is typed arm by arm: the call maps a value
+    // that is a list or a range at its leaves, and passes a set whole, so
+    // the result is the union of the mapped and whole readings over the
+    // operands (`byArms`). The `broadcastable` of the instantiated result
+    // below does not hold the mapped values: the type solver bound the type
+    // parameter to the whole collection, not to its elements.
+    if (generic) {
+      const byArm = byArms(triggers);
+      if (byArm !== undefined) return byArm;
+    }
     // A top-typed trigger gives a numeric application the top type (see
     // `topTypeOfTriggers` in `broadcast-lift-type.ts`); the cell of an
     // abstract collection is such a trigger too, as in `broadcastLiftType`.
@@ -10424,6 +10643,179 @@ function lambdaBroadcastType(
     return broadcastableOf(perElementResult);
   }
   return undefined;
+}
+
+/**
+ * For a call of a generic function literal that broadcasts over operands of
+ * the types `types`: the number of list levels (`levels`) to wrap around
+ * the instantiated result when the type solver did not bind the type
+ * parameter to the leaves of an operand, or `undefined` when the
+ * shape-aware typing applies (the solver reached the leaves of every
+ * operand, or an operand is a tensor of unknown rank or a
+ * `broadcastable`).
+ *
+ * The solver binds a parameter at a mapped slot to one element of the
+ * operand, peeled through every list level (`liftedElementTypeOf`,
+ * `common/type/instantiate.ts`), and the call maps the literal over the
+ * leaves of the operand. This function counts the levels the same way, for
+ * a list and for an `indexed_collection`. The peel stops at an element
+ * that is not a list: when that element may still be a list (`any`, the
+ * element of a `list<any>`), the instantiated result describes that
+ * element, not a leaf, and the shape-aware typing would add levels that the
+ * result already stands for, so the result is wrapped once for each peeled
+ * level, and `leafMayBeList` is set: the call maps such an element at its
+ * leaves too, so the caller widens the cell with `list<any>`. A tensor of
+ * unknown rank is peeled once, to `U | tensor<U>`, and takes the
+ * shape-aware typing, which gives a result of unknown rank. A
+ * `broadcastable<T>` takes the shape-aware typing too, since its value is
+ * a `T` or a collection of `T`. A union of mapped collections is peeled arm
+ * by arm, as the solver peels it. An operand that the solver does not peel
+ * (a union with an arm that is not a mapped collection, a top type) gives
+ * one level, as before, with `leafMayBeList` set for a top type or a bare
+ * collection name.
+ *
+ * The answer is `'nested'` when the peel of a list operand reaches a union
+ * that has a list member. The rows of a ragged list (`[[1], [2, 3]]`, a
+ * `list<vector<integer^1> | vector<integer^2>>`) are such a union: the
+ * solver peels each row to its leaves and binds the parameter to their
+ * join (`integer`), and the call maps each row to its leaves, so the
+ * value is `[[(1, 1)], [(2, 2), (3, 3)]]` for `x ↦ (x, x)`. The rows of the
+ * value differ in length, so the caller wraps the result in plain lists,
+ * one level for each level of the operand
+ * (`nestedBroadcastResultType`): `list<list<tuple<integer, integer>>>`.
+ * When the members reach their leaves at different depths, or a member is
+ * not a list (`[1, [2, 3]]`), each element of the value has its own depth,
+ * and `nestedBroadcastResultType` gives `list<any>`.
+ */
+function genericLiftLevels(
+  types: ReadonlyArray<Type>
+): { levels: number; leafMayBeList: boolean } | 'nested' | undefined {
+  let levels = 0;
+  let incomplete = false;
+  let unknownRank = false;
+  let ragged = false;
+  const read = (t0: Type, seen0: AliasDescent): boolean => {
+    // The alias is unfolded under the descent guard: an alias that names
+    // itself as a union arm (`type alias lcyc = lcyc | list<integer>`)
+    // unfolds to the same union each time. When the guard cuts it, the
+    // operand is read as not peeled, and the result takes one level.
+    const unfolded = unfoldAliasOnDescent(t0, seen0);
+    if (unfolded === undefined) return false;
+    const t = unfolded.type;
+    const seen = unfolded.seen;
+    if (typeof t === 'object' && t.kind === 'union')
+      return t.types.every((m) => read(m, seen));
+    if (typeof t === 'object' && t.kind === 'list' && t.dimensions === null) {
+      unknownRank = true;
+      return true;
+    }
+    // A `broadcastable<T>` holds a `T` or a collection of `T`: the depth of
+    // its value is not known, whatever `T` is. The solver binds the
+    // parameter to the leaves of `T` (`liftedElementTypeOf`), and the
+    // shape-aware typing gives a result of any depth (a tensor of unknown
+    // rank when `T` cannot hold a list).
+    if (typeof t === 'object' && t.kind === 'broadcastable') {
+      unknownRank = true;
+      return true;
+    }
+    if (
+      typeof t !== 'object' ||
+      !(t.kind === 'list' || t.kind === 'indexed_collection')
+    )
+      return false;
+    let e = collectionElementType(t);
+    if (e === undefined) return false;
+    let depth = 1;
+    // The solver peels the element of an `indexed_collection` to its
+    // leaves, as it peels the element of a list (`liftedElementTypeOf`),
+    // and the levels are counted the same way.
+    if (t.kind === 'list' || t.kind === 'indexed_collection') {
+      while (typeof e === 'object' && e.kind === 'list') {
+        // The leaves of a tensor of unknown rank are its cells, as the
+        // solver reads them (`peelListLevels`, `common/type/instantiate.ts`).
+        // Each element of the operand is a tensor with its own rank
+        // (`[[1, 2], [[3]]]` is a `list<tensor<integer>>`), so the elements
+        // of the value can have different depths, and the result takes the
+        // nested form.
+        if (e.dimensions === null) {
+          ragged = true;
+          e = e.elements;
+          break;
+        }
+        const next = collectionElementType(e);
+        if (next === undefined) break;
+        e = next;
+        depth += 1;
+      }
+      if (
+        typeof e === 'object' &&
+        e.kind === 'union' &&
+        e.types.some((m) => typeof m === 'object' && m.kind === 'list')
+      )
+        ragged = true;
+    }
+    levels = Math.max(levels, depth);
+    if (mayBeListElement(e, descendIntoConstructor(seen))) incomplete = true;
+    return true;
+  };
+  // A transparent alias is read through its definition, as the type solver
+  // reads it (`expandAliasesForLift`, `common/type/instantiate.ts`): the
+  // solver binds the parameter to the leaves under the alias, and the levels
+  // must be counted to the same leaves. An alias that nests itself in a list
+  // element has leaves at a depth the type does not bound; the solver then
+  // binds the parameter to `any`, and the result takes the nested form,
+  // which is `list<any>` for such an operand.
+  //
+  // An operand that the solver does not peel binds the parameter whole, and
+  // the result takes one level. When the operand is a top type or a bare
+  // collection name (`any`, `list`), the call maps a value of it at its
+  // leaves, which can be at any depth, so `leafMayBeList` is set and the
+  // caller widens the cell with `list<any>`.
+  for (const t0 of types) {
+    const t = expandAliasesForLift(t0);
+    if (t === null) return 'nested';
+    if (!read(t, undefined))
+      return {
+        levels: 1,
+        leafMayBeList: typeof t === 'string' && mayBeListElement(t, undefined),
+      };
+  }
+  if (unknownRank) return undefined;
+  if (ragged) return 'nested';
+  // The peel stopped at an element that may still be a list (`any` for a
+  // `list<any>` operand): the call maps that element at its leaves too.
+  return incomplete ? { levels, leafMayBeList: true } : undefined;
+}
+
+/** Whether a value of the element type `t` may be a list: a top type, a
+ * bare collection name, a list or an abstract indexed collection, or a
+ * union with such an arm. The alias is unfolded under the descent guard
+ * `seen`, and an alias that the guard cuts (it names itself as a union arm)
+ * answers `true`: nothing is known about its values. */
+function mayBeListElement(t0: Type, seen0: AliasDescent): boolean {
+  const unfolded = unfoldAliasOnDescent(t0, seen0);
+  if (unfolded === undefined) return true;
+  const t = unfolded.type;
+  const seen = unfolded.seen;
+  if (typeof t === 'string')
+    return (
+      t === 'any' ||
+      t === 'unknown' ||
+      t === 'value' ||
+      t === 'expression' ||
+      t === 'list' ||
+      t === 'collection' ||
+      t === 'indexed_collection'
+    );
+  if (
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'broadcastable'
+  )
+    return true;
+  if (t.kind === 'union') return t.types.some((m) => mayBeListElement(m, seen));
+  return false;
 }
 
 /**
@@ -10459,22 +10851,27 @@ function derivedBroadcastElementResult(
   expr: BoxedFunction,
   mappedAt: ReadonlyArray<boolean>,
   perElementResult: Type,
-  oneRank: boolean
+  oneRank: boolean,
+  // The type to read for each operand in place of the type of the operand
+  // expression (one arm of its union type), or `undefined` to read the
+  // expression.
+  operandTypes?: ReadonlyArray<Type | undefined>
 ): Type | undefined {
   const args: OperandDescriptor[] = [];
   // By position, not by identity: one boxed expression may fill a mapped
   // slot and a slot that binds whole.
   for (const [i, x] of expr.ops.entries()) {
+    const t = operandTypes?.[i];
     if (mappedAt[i]) {
       // A declared `broadcastable<T>` slot plan maps exactly one rank (a
       // nested row binds whole), so the cell is the element one rank down;
       // a scalar-parameter broadcast descends to the leaves.
       const cell = oneRank
-        ? collectionElementType(resolveTypeAlias(x.type.type))
-        : broadcastLeafType(x.type.type);
+        ? collectionElementType(resolveTypeAlias(t ?? x.type.type))
+        : broadcastLeafType(t ?? x.type.type);
       if (cell === undefined) return undefined;
       args.push(describeType(cell));
-    } else args.push(describeOperand(x));
+    } else args.push(t !== undefined ? describeType(t) : describeOperand(x));
   }
   return callResultType(
     expr.engine,
@@ -10512,6 +10909,152 @@ function broadcastLeafType(t0: Type): Type | undefined {
     t = resolveTypeAlias(e);
   }
   return undefined;
+}
+
+/** The type solver's view of the operands `ops`, with each operand that has
+ * a type in `arms` read as having that type (one arm of its union type). */
+function operandActualsWithArms(
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<Type | undefined>
+): SolveActual[] {
+  return ops.map((x, i) => {
+    const actual = actualOfOperand(x);
+    const arm = arms[i];
+    if (arm === undefined) return actual;
+    return {
+      type: arm,
+      literal: actual.literal,
+      valid: actual.valid,
+      inferable: actual.inferable,
+      get liftable(): boolean {
+        return actual.liftable;
+      },
+    };
+  });
+}
+
+/** One arm of the type of an operand of a broadcast call (`operandArms`):
+ * its type, and whether the broadcast maps a value of it. */
+type OperandArm = { readonly type: Type; readonly mapped: boolean };
+
+/** The largest number of combinations of arms (`operandArms`) that a call
+ * is typed over, one result for each combination. A call over more
+ * combinations is typed `any`. */
+const MAX_OPERAND_ARM_COMBINATIONS = 8;
+
+/**
+ * The arms of the type `t0` of an operand of a broadcast call, when `t0` is
+ * a union with an arm that the broadcast maps and an arm that it does not
+ * map: one arm for the union of the arms that the broadcast maps
+ * (`mapped: true`), and one arm for each other arm (`mapped: false`).
+ * `undefined` when the rule does not apply.
+ *
+ * The type solver binds the type parameter of a generic literal to such a
+ * union as a whole (`liftedElementTypeOf`, `common/type/instantiate.ts`).
+ * But the call passes a value of an arm that is not mapped (a `set`, a
+ * tuple, a scalar) whole to the literal, and maps a value of a mapped arm
+ * at its leaves, so one answer for the whole union does not describe the
+ * values. With `f: (x: T) -> tuple<T, T>` and
+ * `u: list<integer> | set<integer>`, `f(u)` is `[(1, 1), (2, 2)]` for
+ * `u := [1, 2]` and `(Set(1, 2), Set(1, 2))` for `u := Set(1, 2)`. The
+ * caller types the call once for the mapped arms, typed together as one
+ * operand that the broadcast maps (`list<tuple<integer, integer>>`), and
+ * once for each other arm, typed as an operand that binds whole
+ * (`tuple<set<integer>, set<integer>>`), and joins the results.
+ *
+ * An arm of an abstract collection type (`collection<integer>`, or a `t0`
+ * that is such a type and not a union) has values that the call maps (a
+ * list, a range) and values that it passes whole (a set, a dictionary), so
+ * it gives both readings: it is an arm that binds whole, and its indexed
+ * counterpart (`indexed_collection<integer>`) joins the mapped arms. With
+ * the same `f` and `c: collection<integer>`, `f(c)` is `[(1, 1), (2, 2)]`
+ * for `c := [1, 2]` and `(Set(1, 2), Set(1, 2))` for `c := Set(1, 2)`.
+ *
+ * The rule applies when `t0`, read through its transparent aliases, has at
+ * least one arm that the call maps (`isMappedActual`, or an abstract
+ * collection) and at least one arm that it passes whole. It does not apply
+ * when another arm that is not a mapped kind may still hold a list (a top
+ * type): the call can map a value of such an arm or pass it whole, and its
+ * values have no indexed counterpart to type.
+ */
+function operandArms(t0: Type): ReadonlyArray<OperandArm> | undefined {
+  const t = expandAliasesForLift(t0);
+  if (t === null) return undefined;
+  const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
+  const mappedArms: Type[] = [];
+  const wholeArms: Type[] = [];
+  for (const arm of arms) {
+    if (isMappedActual(arm)) {
+      mappedArms.push(arm);
+      continue;
+    }
+    wholeArms.push(arm);
+    const indexed = indexedReadingOfAbstractCollection(arm);
+    if (indexed !== undefined) mappedArms.push(indexed);
+    else if (mayBeListElement(arm, undefined)) return undefined;
+  }
+  if (mappedArms.length === 0 || wholeArms.length === 0) return undefined;
+  return [
+    {
+      type:
+        mappedArms.length === 1
+          ? mappedArms[0]
+          : { kind: 'union', types: mappedArms },
+      mapped: true,
+    },
+    ...wholeArms.map((type) => ({ type, mapped: false })),
+  ];
+}
+
+/** The indexed counterpart of an abstract collection type: `indexed_collection<E>`
+ * for `collection<E>`, and `indexed_collection` for a bare `collection`.
+ * `undefined` for another type. A value of the counterpart is a value of
+ * `t0` that a broadcast maps (a list, a range). */
+function indexedReadingOfAbstractCollection(t0: Type): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (t === 'collection') return 'indexed_collection';
+  if (typeof t === 'object' && t.kind === 'collection')
+    return { kind: 'indexed_collection', elements: t.elements };
+  return undefined;
+}
+
+/**
+ * The result type of a call of a generic function literal over ONE mapped
+ * operand whose type `types[0]` is a union of list types, typed arm by arm:
+ * the union of the shape-aware results for each arm
+ * (`shapedBroadcastResultType`). `perElementResult` is the instantiated
+ * result for one leaf, which the type solver bound from the join of the
+ * leaves of every arm. For `(x: T) -> tuple<T, T>` over
+ * `v: list<integer> | matrix<integer>`, a value of `v` is a list of
+ * integers, whose image is a list of tuples, or a matrix, whose image is a
+ * rectangle of tuples: the answer is
+ * `list<tuple<integer, integer>> | list<tuple<integer, integer>^(?x?)>`. A
+ * union is kept rather than a join: the join of the two arms is one list
+ * whose rows may differ in length, which loses the matrix shape. The shaped
+ * result of the whole union has no rank to spell for a result that is not
+ * numeric, and the caller's fallback gives `list<R | list<any>>`.
+ *
+ * `undefined` when there is not exactly one operand, when it is not a
+ * union, or when an arm is not a list whose rank is known: a list whose
+ * elements may be lists, or a tensor of unknown rank.
+ */
+function unionArmsGenericResult(
+  types: ReadonlyArray<Type>,
+  perElementResult: Type
+): Type | undefined {
+  if (types.length !== 1) return undefined;
+  const t = resolveTypeAlias(types[0]);
+  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
+  const results: Type[] = [];
+  for (const arm of t.types) {
+    const r = resolveTypeAlias(arm);
+    if (typeof r !== 'object' || r.kind !== 'list') return undefined;
+    if (r.dimensions === null) return undefined;
+    if (r.dimensions === undefined && staticCollectionDims(r) === null)
+      return undefined;
+    results.push(shapedBroadcastResultType([arm], perElementResult));
+  }
+  return reduceType({ kind: 'union', types: results });
 }
 
 /** The number of list levels of `t` (a dimensioned list counts one per
@@ -11295,14 +11838,21 @@ function type(expr: BoxedFunction): Type | BoxedType {
         declaredSlots,
         def.inferredSignature,
         instantiated !== undefined,
-        (mappedAt) =>
+        (mappedAt, operandTypes) =>
           derivedBroadcastElementResult(
             expr,
             mappedAt,
             lambdaResult,
-            declaredSlots !== undefined
+            declaredSlots !== undefined,
+            operandTypes
           ),
-        lambdaLiteralOf(def)
+        lambdaLiteralOf(def),
+        (arms) =>
+          instantiatedResultTypeOverActuals(
+            resolvedOf(),
+            operandActualsWithArms(expr.ops, arms),
+            { threadable: true }
+          )
       );
       // Through `applyContractB` directly, NOT `maybeAbsorb`: the
       // missing-value absorption never applied on this return, and the
@@ -11454,14 +12004,23 @@ function type(expr: BoxedFunction): Type | BoxedType {
         isPolymorphicType(sig),
         // As on the operator-definition route: the body's per-element
         // result when it can be derived (`derivedBroadcastElementResult`).
-        (mappedAt) =>
+        (mappedAt, operandTypes) =>
           derivedBroadcastElementResult(
             expr,
             mappedAt,
             sigResult,
-            valueSlots !== undefined
+            valueSlots !== undefined,
+            operandTypes
           ),
-        heldValue
+        heldValue,
+        // Read only when the signature declares no `broadcastable<T>` slot,
+        // where every position is threadable on this branch.
+        (arms) =>
+          instantiatedResultTypeOverActuals(
+            sig,
+            operandActualsWithArms(expr.ops, arms),
+            { threadable: true }
+          )
       );
       if (lifted !== undefined) return lifted;
     }

@@ -525,7 +525,9 @@ function substituteDimensions(
   | { dimensions: number[]; dimensionVariables?: (string | undefined)[] }
   | undefined {
   const names = t.dimensionVariables;
-  if (names === undefined || t.dimensions === undefined) return undefined;
+  // A tensor of unknown rank (`dimensions` is `null`) has no axis to
+  // substitute.
+  if (names === undefined || !t.dimensions) return undefined;
   let changed = false;
   const dimensions = [...t.dimensions];
   const dimensionVariables: (string | undefined)[] = [...names];
@@ -1086,64 +1088,6 @@ export interface TypeAlgebra {
 
 let _algebra: TypeAlgebra | undefined;
 
-/**
- * The flat shape of a list type spelled as nested dimensioned lists, or
- * `undefined` when `t` is not such a type.
- *
- * `list<vector<integer^3>^2>` (a list of two rows of three integers) and
- * `matrix<integer^(2x3)>` describe the same values; the flat spelling is the
- * one the subtype relation and the dimension solver read lengths from. Each
- * level whose elements are a list with DIMENSIONS is merged into its parent:
- * the parent's dimensions followed by the element's. A level whose elements
- * are a list with no dimensions stops the merge: its rows can differ in
- * length. A level whose elements state the length `-1` on any axis
- * (`vector<integer>`, the rows of `list<vector<integer>^2>`) also stops the
- * merge: `-1` says only that each row has SOME length, not that all rows
- * have the same one, so `[[1], [2, 3]]` is a value of
- * `list<vector<integer>^2>` and is not a matrix.
- *
- * An OUTER list with no dimensions admits any shape of its elements, so its
- * values can have any number of axes above the rows: `list<vector<integer^3>>`
- * holds a 2×2 arrangement of rows of three integers (a rank-3 value) as well
- * as a 2×3 matrix. Its flat spelling is therefore a list with NO dimensions
- * of the cells (`list<integer>`): the cells in any shape. It is a
- * `list<integer>` and a `collection<integer>`, and it is not a
- * `matrix<integer>` (user decision 2026-10-21; reading the missing length as
- * one axis of any length, `-1`, made it a matrix, which does not hold the
- * rank-3 value, and the relation was not transitive). The dimension solver
- * then pins no length from such a type. Used by `isSubtype` (`subtype.ts`)
- * and by the dimension pinning of `walkPattern`.
- */
-export function flattenNestedListType(t: Type): Type | undefined {
-  if (typeof t !== 'object' || t.kind !== 'list') return undefined;
-  let elements = t.elements;
-  let dimensions = t.dimensions ?? [];
-  let merged = false;
-  while (
-    typeof elements === 'object' &&
-    elements.kind === 'list' &&
-    elements.dimensions !== undefined &&
-    !elements.dimensions.includes(-1)
-  ) {
-    dimensions = [...dimensions, ...elements.dimensions];
-    elements = elements.elements;
-    merged = true;
-  }
-  if (!merged) return undefined;
-  if (t.dimensions === undefined) {
-    // Rows with an axis of length 0 have no cell, so the cells read `never`
-    // (`list<list<never^0>>`, any arrangement of empty rows). A `list<never>`
-    // with no dimensions is the type of the empty list `[]` alone, which the
-    // subtype rule admits at a list whose first axis has length 0
-    // (`vector<integer^0>`); the nested type also holds `[[], []]`, which
-    // such a list does not. So that type keeps its nested spelling.
-    if (elements === 'never' && dimensions.includes(0)) return undefined;
-    // An outer list with no dimensions: the cells in any shape.
-    return { kind: 'list', elements };
-  }
-  return { kind: 'list', elements, dimensions };
-}
-
 /** @internal — called by `subtype.ts` at module load. */
 export function _setTypeAlgebra(algebra: TypeAlgebra): void {
   _algebra = algebra;
@@ -1445,7 +1389,12 @@ export function solveTypeArguments(
     if (opts?.skip?.(i) || opts?.inferable?.(i)) return actual;
     if (!opts?.lifted?.(i) || !isVariable(pattern)) return actual;
     s.lifted.add(pattern.name);
-    return liftedElementTypeOf(actual);
+    // A transparent alias is read through its definition, because the
+    // runtime maps over the leaves of the value, not over the alias name.
+    // When the depth of the leaves is not known (an alias that nests itself
+    // in a list element), the variable binds to `any`.
+    const expanded = expandAliasesForLift(actual);
+    return expanded === null ? 'any' : liftedElementTypeOf(expanded);
   });
 
   // Pass 1 + pass 2a — the covariant sweep, over every position.
@@ -1999,23 +1948,6 @@ export function groundSkeleton(t: Type, covariant = true): Type {
  * `out`, and `X<A> <: X<never>` always holds under `in` (the flipped position
  * already yields `never`), so both admit every application as they stand.
  */
-/**
- * The element type `any | list<any>` of a list with dimensions in a
- * skeleton (`admissionSkeleton()`, `groundSkeleton()`), where it stands for
- * a type variable: any value, a list included. The element type `any` of a
- * list with dimensions reads as scalars (`isScalarTopElement()` in
- * `subtype.ts`), which recognizes this object by identity and does not read
- * it that way. It is frozen and never reduced: the union reduction would
- * absorb its list arm into `any`.
- */
-export const ANY_OR_LIST_ELEMENT: Type = Object.freeze({
-  kind: 'union',
-  types: Object.freeze([
-    'any',
-    Object.freeze({ kind: 'list', elements: 'any' }),
-  ]),
-}) as unknown as Type;
-
 export function admissionSkeleton(t: Type, covariant = true): Type {
   if (!hasFreeTypeVariables(t)) return t;
   return skeleton(t, covariant, true);
@@ -2056,29 +1988,16 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
     case 'list': {
       // A length slot's variable reads as the `-1` wildcard its `dimensions`
       // entry already holds; only the name goes.
+      // The cells of a tensor pattern (`matrix<T^(MxN)>`) read as `any`
+      // cells in the skeleton, `list<any^(-1x-1)>`, which admits every
+      // matrix: the subtype relation compares the cells of two tensors
+      // whatever they are, so no special element type is needed for a
+      // slot that stands for a type variable.
       const next: ListType = {
         ...t,
         elements: skeleton(t.elements, covariant, membership),
       };
       delete next.dimensionVariables;
-      // The element type of a list with dimensions that is a top type reads
-      // as scalars (`isScalarTopElement()` in `subtype.ts`), but here the
-      // top type stands for a type variable, which can be a list
-      // (`list<T^N>` with `T := list<integer>`). So it is replaced by
-      // `ANY_OR_LIST_ELEMENT`, which admits lists of rows too, and the
-      // dimensions are kept.
-      const top = (e: Type): boolean =>
-        e === 'any' ||
-        (typeof e === 'object' &&
-          e.kind === 'union' &&
-          e.types.includes('any'));
-      if (
-        covariant &&
-        next.dimensions !== undefined &&
-        hasFreeTypeVariables(t.elements) &&
-        top(next.elements)
-      )
-        next.elements = ANY_OR_LIST_ELEMENT;
       return next;
     }
     case 'set':
@@ -2211,6 +2130,11 @@ function elementTypeOf(type: Type): Type | undefined {
     return type.elements;
   if (type.kind === 'list') {
     const dims = (type as ListType).dimensions;
+    // A tensor of unknown rank, `tensor<U>`: one index yields a cell or a
+    // tensor of lower rank, `U | tensor<U>` (`listElementType` in
+    // `subtype.ts`). The broadcast leaf readers below
+    // (`liftedElementTypeOf`, `peelListLevels`) read its cells instead.
+    if (dims === null) return { kind: 'union', types: [type.elements, type] };
     if (dims && dims.length > 1)
       return {
         kind: 'list',
@@ -2258,19 +2182,14 @@ function elementTypeOf(type: Type): Type | undefined {
  * re-ruling. So does an `unknown`/`any` actual, which keeps its D8 top-type
  * absorption verbatim.
  *
- * How DEEP the peel goes is decided by the OUTER actual's kind, so that it
- * mirrors term for term the rank the wrapper re-adds:
- * - a `list` outer peels ALL THE WAY DOWN the `list` nesting, because the
- *   runtime maps to the scalar LEAVES (`x ↦ (x, x)` over a 2×2 matrix
- *   evaluates to a 2×2 of tuples, not a 2×2 of tuples-of-rows) and
- *   `broadcastShapedResultType` re-adds exactly the RANK
- *   `staticCollectionDims` reports — which recurses through `list` elements
- *   only, and stops on an `unknown`/bare-`list` element or a non-`list` kind
- *   such as `tuple`;
- * - an `indexed_collection`/`broadcastable` outer has NO static rank
- *   (`staticCollectionDims` answers `null` for it), so the wrapper re-adds
- *   exactly ONE level and the peel takes exactly one — even when the element
- *   is itself a list.
+ * The peel goes ALL THE WAY DOWN the `list` nesting of the element, for a
+ * `list`, an `indexed_collection` and a `broadcastable` outer alike,
+ * because the runtime maps a value of each of them to its scalar LEAVES
+ * (`x ↦ (x, x)` over a 2×2 matrix evaluates to a 2×2 of tuples, not a 2×2
+ * of tuples-of-rows, and the same holds when the operand is declared
+ * `indexed_collection<list<integer>>` or `broadcastable<list<integer^2>>`).
+ * The call-site typing (`genericLiftLevels`, `boxed-function.ts`) counts
+ * the same levels and gives the result the depth of the operand.
  */
 function liftedElementTypeOf(actual: Type): Type {
   // A UNION of shapes (`list<integer> | matrix<integer>`, the `Add` widen
@@ -2293,23 +2212,154 @@ function liftedElementTypeOf(actual: Type): Type {
 
   if (typeof actual !== 'object' || !MAPPED_KINDS.has(actual.kind))
     return actual;
-  let t = elementTypeOf(actual);
+  // A broadcast over a tensor of unknown rank maps to its cells, which are
+  // not lists.
+  if (actual.kind === 'list' && actual.dimensions === null)
+    return actual.elements;
+  const t = elementTypeOf(actual);
   if (t === undefined) return actual;
-  if (actual.kind === 'list') {
-    while (typeof t === 'object' && t.kind === 'list') {
-      const next = elementTypeOf(t);
-      if (next === undefined) break;
-      t = next;
+  // The runtime maps a value of an `indexed_collection` or a
+  // `broadcastable` operand at its leaves too, as it maps a list: `x ↦
+  // (x, x)` over an `indexed_collection<list<integer>>` that holds
+  // `[[1, 2], [3]]` gives `[[(1, 1), (2, 2)], [(3, 3)]]`. So the list levels
+  // of the element are removed for these kinds as well.
+  return peelListLevels(t);
+}
+
+/**
+ * The leaves of the element type `t` of a list operand that a broadcast
+ * maps over: each `list` level is removed in turn. A union whose members
+ * are all lists (the rows of a ragged list, `vector<integer^1> |
+ * vector<integer^2>`) is peeled member by member, and the answer is the
+ * join of their leaves (`integer`), because the runtime maps every row to
+ * its leaves whatever its length: `x ↦ (x, x)` over `[[1], [2, 3]]` gives
+ * `[[(1, 1)], [(2, 2), (3, 3)]]`. A union with a member that is not a list
+ * (`integer | vector<integer^2>`) stops the peel. The call-site typing
+ * counts the levels the same way (`genericLiftLevels`,
+ * `boxed-function.ts`).
+ */
+function peelListLevels(t: Type): Type {
+  while (typeof t === 'object') {
+    if (t.kind === 'union') {
+      if (!t.types.every((m) => typeof m === 'object' && m.kind === 'list'))
+        return t;
+      return algebra().widen(...t.types.map((m) => peelListLevels(m)));
     }
+    if (t.kind !== 'list') return t;
+    // The leaves of a tensor of unknown rank are its cells.
+    if (t.dimensions === null) return t.elements;
+    const next = elementTypeOf(t);
+    if (next === undefined) return t;
+    t = next;
   }
   return t;
+}
+
+/**
+ * `t` with each transparent alias that a broadcast maps through replaced by
+ * its definition: an alias at the top, in an arm of a union, or as the
+ * element of a list with no dimensions, of an `indexed_collection` or of a
+ * `broadcastable`. The broadcast maps an operand of each of these kinds to
+ * its leaves, so the leaves are read through the alias. Without this
+ * step an alias operand contributed its own name as the element type: with
+ * `type alias lcyc = lcyc | list<integer>` and `v: lcyc`, the call of
+ * `(x: T) -> tuple<T, T>` over `v` bound `T` to `lcyc`, and the result
+ * claimed tuples of `lcyc`, where the value holds tuples of integers.
+ *
+ * An alias that meets itself again as an arm of its own union, with no
+ * list element entered since it was unfolded (the `lcyc` arm of `lcyc`),
+ * adds no value, and the arm is dropped. An alias that meets itself again
+ * inside a list element (`type alias nest = list<nest> | list<integer>`)
+ * nests to a depth that the type does not bound: the answer is `null`, and
+ * the caller must use a result that holds a value of any depth.
+ *
+ * An alias whose definition holds no collection that a broadcast maps (an
+ * alias of a tuple, of a number type) is kept as a reference, so an echoed
+ * type still prints the alias name.
+ *
+ * Shared by the type solver (the operand of a lifted parameter) and the
+ * call-site typing of a generic broadcast (`genericLiftLevels`,
+ * `boxed-expression/boxed-function.ts`), so that the two read the same
+ * leaves.
+ */
+export function expandAliasesForLift(t: Type): Type | null {
+  const result = expandLiftAliases(t, [], []);
+  return result === undefined ? t : result;
+}
+
+/**
+ * The walk of {@link expandAliasesForLift}. `active` holds the declarations
+ * unfolded on the current path, `bare` those unfolded since the walk last
+ * entered a list element. Returns `undefined` for an arm to drop (a bare
+ * repeat of an alias) and `null` for a repeat inside a list element.
+ */
+function expandLiftAliases(
+  t: Type,
+  active: ReadonlyArray<TypeReference>,
+  bare: ReadonlyArray<TypeReference>
+): Type | null | undefined {
+  if (typeof t !== 'object') return t;
+  if (t.kind === 'reference' && t.alias === true && t.def !== undefined) {
+    const decl = declarationOf(t);
+    if (bare.includes(decl)) return undefined;
+    if (active.includes(decl)) return null;
+    const body = aliasDefinitionAt(t);
+    if (body === undefined) return t;
+    const expanded = expandLiftAliases(body, [...active, decl], [
+      ...bare,
+      decl,
+    ]);
+    if (expanded === undefined) return t;
+    if (expanded !== null && !holdsMappedCollection(expanded)) return t;
+    return expanded;
+  }
+  if (t.kind === 'union') {
+    const types: Type[] = [];
+    let changed = false;
+    for (const arm of t.types) {
+      const x = expandLiftAliases(arm, active, bare);
+      if (x === null) return null;
+      if (x !== arm) changed = true;
+      if (x !== undefined) types.push(x);
+    }
+    if (!changed) return t;
+    if (types.length === 0) return undefined;
+    return types.length === 1 ? types[0] : { kind: 'union', types };
+  }
+  // The broadcast maps an `indexed_collection` and a `broadcastable` at
+  // their leaves too, so their elements are entered as the elements of a
+  // list are.
+  if (
+    (t.kind === 'list' && t.dimensions === undefined) ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'broadcastable'
+  ) {
+    const e = expandLiftAliases(t.elements, active, []);
+    if (e === null) return null;
+    if (e === undefined || e === t.elements) return t;
+    return { ...t, elements: e };
+  }
+  return t;
+}
+
+/** Whether a value of `t` may be a collection that a broadcast maps over:
+ * `t` is one of {@link MAPPED_KINDS} (or a bare spelling of one), or a union
+ * with such an arm. */
+function holdsMappedCollection(t: Type): boolean {
+  if (typeof t === 'string')
+    return t === 'list' || t === 'indexed_collection' || t === 'range';
+  if (t.kind === 'union') return t.types.some((m) => holdsMappedCollection(m));
+  return MAPPED_KINDS.has(t.kind);
 }
 
 /** Whether an actual is one of the kinds a broadcast MAPS over — the union
  * members `liftedElementTypeOf` may distribute the peel across. The bare
  * `list`/`indexed_collection` spellings carry no element type but ARE mapped
- * (they peel to unrestricted `any`). */
-function isMappedActual(t: Type): boolean {
+ * (they peel to unrestricted `any`). The call-site typing of a generic
+ * broadcast reads the same test to split a union operand into the arms the
+ * broadcast maps and the arms it binds whole (`unionOperandArmsResult`,
+ * `boxed-expression/boxed-function.ts`). */
+export function isMappedActual(t: Type): boolean {
   if (t === 'list' || t === 'indexed_collection' || t === 'range') return true;
   return typeof t === 'object' && MAPPED_KINDS.has(t.kind);
 }
@@ -2488,8 +2538,8 @@ function walkPattern(
   // of `never`.
   //
   // `broadcastable` is deliberately NOT in this list: strings are
-  // broadcast-atomic, so `broadcastableCollectionElementType` (`subtype.ts`)
-  // declines `string` and `isSubtype('string', broadcastable<T>)` is false.
+  // broadcast-atomic (a string is not a tensor, so
+  // `isSubtype('string', broadcastable<T>)` is false).
   // Binding `T = character` from a string at such a pattern would infer an
   // element type for a slot the string cannot inhabit as a collection.
   if (
@@ -2555,16 +2605,23 @@ function walkPattern(
       // `f(bic)` with `f: (broadcastable<T>) -> list<T>` as
       // `list<list<indexed_collection>>`, which the value `[[1], [2]]` for
       // `bic = [1, 2]` is not.
-      // Read bare and explicit collections through the same element rule.
+      // Read bare and explicit collections through the same element rule,
+      // except a tensor of unknown rank, `tensor<S>`, which binds `T ≥ S`
+      // (its cells), since `tensor<S>` is the collection arm of
+      // `broadcastable<S>`.
       const inner =
         typeof actual === 'object' &&
-        (actual.kind === 'broadcastable' ||
-          actual.kind === 'list' ||
-          actual.kind === 'indexed_collection')
-          ? elementTypeOf(actual)!
-          : actual === 'list' || actual === 'indexed_collection'
+        actual.kind === 'list' &&
+        actual.dimensions === null
+          ? actual.elements
+          : typeof actual === 'object' &&
+              (actual.kind === 'broadcastable' ||
+                actual.kind === 'list' ||
+                actual.kind === 'indexed_collection')
             ? elementTypeOf(actual)!
-            : actual;
+            : actual === 'list' || actual === 'indexed_collection'
+              ? elementTypeOf(actual)!
+              : actual;
       return walkPattern(
         s,
         pattern.elements,
@@ -2664,27 +2721,12 @@ function walkPattern(
       )
         return false;
       // A length slot's variable is pinned to the actual's length on that
-      // axis, when the actual states one. The axes pair from the outside in,
-      // so a rank-2 actual at a rank-1 pattern pins the OUTER length and
-      // leaves the peeled row to the element position below — the same
-      // reading `peeledRowMatches` (subtype.ts) gives the ground case.
-      // A NESTED spelling of a shape (`list<vector<integer^3>^2>` for
-      // `matrix<integer^(2x3)>`) is read as the flat shape when the pattern
-      // states more axes than the actual (`flattenNestedListType`), so that
-      // `cols(nl)` with `nl: list<vector<integer^3>^2>` pins `N` to 3, as
-      // the flat spelling does. An outer list with no dimensions
-      // (`list<vector<integer^3>>`) has a flat shape with no dimensions, so
-      // it pins nothing. A list whose element type is `never` (the
+      // axis, when the actual is a tensor with a dimension list that states
+      // one. The axes pair from the outside in, so a rank-2 actual at a
+      // rank-1 pattern pins the OUTER length and leaves the row to the
+      // element position below. A list whose element type is `never` (the
       // type of the empty list `[]`, which states no dimensions) can hold no
       // element, so its outer length is 0.
-      if (
-        pattern.kind === 'list' &&
-        pattern.dimensions !== undefined &&
-        typeof actual === 'object' &&
-        actual.kind === 'list' &&
-        (actual.dimensions?.length ?? 1) < pattern.dimensions.length
-      )
-        actual = flattenNestedListType(actual) ?? actual;
       if (
         phase === 'lower' &&
         covariant &&
@@ -2692,7 +2734,7 @@ function walkPattern(
         pattern.dimensionVariables !== undefined &&
         typeof actual === 'object' &&
         actual.kind === 'list' &&
-        actual.dimensions !== undefined
+        actual.dimensions
       ) {
         const names = pattern.dimensionVariables;
         const dims = actual.dimensions;
@@ -2713,19 +2755,30 @@ function walkPattern(
         actual.elements === 'never'
       )
         pinValue(s, pattern.dimensionVariables[0], 0, index);
-      // The element position of a DIMENSIONED pattern is what remains after
-      // peeling as many axes as the pattern states: `matrix<T^(MxN)>` — and
-      // the ground `matrix<T>`, whose axes are `[-1, -1]` — binds `T` to the
-      // scalar element of a rank-2 actual, `list<T^N>` to the row of one. A
+      // The element position of a TENSOR pattern is its cell slot. With a
+      // dimension list, it is what remains of a tensor actual after peeling
+      // as many axes as the pattern states: `matrix<T^(MxN)>` — and the
+      // ground `matrix<T>`, whose axes are `[-1, -1]` — binds `T` to the
+      // cells of a rank-2 actual, `list<T^N>` to the row of one. A pattern
+      // of unknown rank, `tensor<T>`, binds `T` to the cells of any tensor
+      // actual, and to the elements of a plain list (read at rank 1). A
       // pattern with no dimensions keeps the one-index reading
-      // (`elementTypeOf`), which peels one axis.
+      // (`elementTypeOf`): the rows of a matrix, a cell or a tensor of a
+      // tensor of unknown rank.
       let element: Type | undefined;
       if (
         pattern.kind === 'list' &&
-        pattern.dimensions !== undefined &&
+        pattern.dimensions === null &&
+        typeof actual === 'object' &&
+        actual.kind === 'list'
+      )
+        element = actual.elements;
+      else if (
+        pattern.kind === 'list' &&
+        pattern.dimensions &&
         typeof actual === 'object' &&
         actual.kind === 'list' &&
-        actual.dimensions !== undefined &&
+        actual.dimensions &&
         actual.dimensions.length >= pattern.dimensions.length
       ) {
         const rest = actual.dimensions.slice(pattern.dimensions.length);

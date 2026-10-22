@@ -28,10 +28,13 @@ import {
   widestConditionalTarget,
 } from '../common/type/conditional-conformance.js';
 import {
+  collectionElementType,
   isGroupedTypeText,
   isValidTypeName,
   signatureEffects,
   stripNumericRanges,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../common/type/utils.js';
 import {
   effectSetToString,
@@ -2561,10 +2564,70 @@ function overlapConflict(
     // Comparable targets are the `number`/`integer` refinement case, which is
     // explicitly allowed: the more specific implementation wins at dispatch.
     if (isSubtype(target, c.target) || isSubtype(c.target, target)) continue;
-    if (!typesOverlap(target, c.target)) continue;
+    if (!sharesNonEmptyValue(target, c.target)) continue;
     return { other: c.targetKey, meet: meetDescription(target, c.target) };
   }
   return null;
+}
+
+/**
+ * Whether two conformance targets share a value that is not an empty
+ * collection: the overlap that makes two conformances compete for a value.
+ *
+ * An empty collection carries no element that dispatch could select on, so
+ * two targets that share only the empty collection are both admitted, and a
+ * call on the empty collection itself is reported as ambiguous at dispatch,
+ * like every other value that two incomparable targets admit (protocols
+ * design P29). `typesOverlap` does not ignore the empty list: two plain
+ * lists always overlap there (`list<string>` and `list<integer>` share `[]`,
+ * and their meet is `list<never>`), and so do a plain list and a rank-1
+ * tensor whose length is open or zero, or a plain list and an abstract
+ * collection. So when one target is a list and the other a list or an
+ * abstract collection, this test asks two things: whether they overlap at
+ * all, and whether their element types overlap (a non-empty shared value
+ * holds a shared element). An element type here is what one index returns
+ * (`collectionElementType`): the elements of a plain list, the rows of a
+ * matrix, `U | tensor<U>` for a tensor of unknown rank. A target whose
+ * first axis is zero holds only the empty list. A union is read arm by arm,
+ * and a transparent alias through its definition, under the descent guard
+ * (`unfoldAliasOnDescent`): an alias that names itself is read by
+ * `typesOverlap` at its first repeat, the conservative answer.
+ */
+function sharesNonEmptyValue(
+  a: Type,
+  b: Type,
+  seenA?: AliasDescent,
+  seenB?: AliasDescent
+): boolean {
+  const ua = unfoldAliasOnDescent(a, seenA);
+  const ub = unfoldAliasOnDescent(b, seenB);
+  if (ua === undefined || ub === undefined) return typesOverlap(a, b);
+  const ra = ua.type;
+  const rb = ub.type;
+  if (typeof ra === 'object' && ra.kind === 'union')
+    return ra.types.some((t) => sharesNonEmptyValue(t, rb, ua.seen, ub.seen));
+  if (typeof rb === 'object' && rb.kind === 'union')
+    return rb.types.some((t) => sharesNonEmptyValue(ra, t, ua.seen, ub.seen));
+  const isList = (t: Type) => typeof t === 'object' && t.kind === 'list';
+  const isListOrAbstract = (t: Type) =>
+    typeof t === 'object' &&
+    (t.kind === 'list' ||
+      t.kind === 'collection' ||
+      t.kind === 'indexed_collection');
+  if (
+    !(isList(ra) || isList(rb)) ||
+    !isListOrAbstract(ra) ||
+    !isListOrAbstract(rb)
+  )
+    return typesOverlap(ra, rb);
+  const zeroLength = (t: Type) =>
+    typeof t === 'object' && t.kind === 'list' && t.dimensions?.[0] === 0;
+  if (zeroLength(ra) || zeroLength(rb)) return false;
+  if (!typesOverlap(ra, rb)) return false;
+  const ea = collectionElementType(ra);
+  const eb = collectionElementType(rb);
+  if (ea === undefined || eb === undefined) return true;
+  return typesOverlap(ea, eb);
 }
 
 /** The meet of two overlapping targets, for the diagnostic's benefit. */

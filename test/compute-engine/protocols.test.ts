@@ -62,7 +62,12 @@ describe('typesOverlap (the P4/P9 predicate)', () => {
     // the same-head recursion these two would be reported as non-overlapping
     // and an ambiguous conformance would slip through P4.
     expect(overlap('list<integer<1..10>>', 'list<integer<5..20>>')).toBe(true);
+    // Two lists with no dimensions share the empty list, so they overlap
+    // even when their elements do not; a fixed-length list is never empty.
     expect(overlap('list<integer<1..10>>', 'list<integer<20..30>>')).toBe(
+      true
+    );
+    expect(overlap('list<integer<1..10>^2>', 'list<integer<20..30>^2>')).toBe(
       false
     );
   });

@@ -129,13 +129,17 @@ describe('point accessors over an empty collection — interpreter', () => {
     // The flat-point reading: `PointX([3, 4])` is `3`, so an empty
     // `list<number>` is that point with every coordinate absent. The value and
     // the static type agree — a mismatch is what this pin is here to catch.
+    // The absent coordinate is a number slot, so its marker is `NaN`, as for
+    // `First` of the same list: `Missing` is not a `number`.
     const ce = new ComputeEngine();
     ce.declare('v', 'list<number>');
     ce.assign('v', ce.box(['List']));
     for (const head of ['PointX', 'PointY', 'PointZ']) {
       const expr = ce.box([head, 'v']);
       expect(expr.type.toString()).toBe('number');
-      expect(expr.evaluate().toString()).toBe('"Missing"');
+      const value = expr.evaluate();
+      expect(value.toString()).toBe('NaN');
+      expect(value.type.matches(expr.type)).toBe(true);
     }
     // A numeric consumer projects the marker to `NaN`, which is the value the
     // compiled route answers for the same input.

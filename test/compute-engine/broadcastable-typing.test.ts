@@ -44,14 +44,17 @@ describe('broadcastable<T> typing (phase B)', () => {
     );
   });
 
-  test('At over a broadcastable base is a valid canonical `number`', () => {
+  test('At over a broadcastable base is a valid canonical element read', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(number) -> unknown');
     const at = ce.parse('(2h(x)-1)[1]');
     expect(at.operator).toBe('At');
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    expect(at.type.toString()).toBe('number');
+    // A `broadcastable<number>` is a number or a tensor of any rank: the
+    // first element is a number (rank 1) or a tensor (rank 2 and more), and
+    // the read of a scalar has no element, which `missing` records.
+    expect(at.type.toString()).toBe('missing | number | tensor');
   });
 
   test('runtime agreement: list-returning `f` broadcasts, scalar `g` stays scalar', () => {
@@ -314,7 +317,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(ce.box(['Sin', 0.5]).type.toString()).toBe('real');
   });
 
-  test('At over a phase-C broadcastable base is a valid `number`', () => {
+  test('At over a phase-C broadcastable base is a valid element read', () => {
     const ce = mkEngine();
     const at = ce.box([
       'At',
@@ -323,7 +326,9 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     ]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    expect(at.type.toString()).toBe('number');
+    // The element of a `broadcastable<number>` is a number or a tensor, and
+    // the read of a scalar has no element (`missing`).
+    expect(at.type.toString()).toBe('missing | number | tensor');
   });
 });
 
@@ -440,13 +445,14 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const p1 = ce.box(['m', p0]);
     expect(p1.type.toString()).toBe('broadcastable<number>');
 
-    // `At(m(2h(1)), 1)` is valid with an element type from the return. §3.C:
-    // the access is `T | marker(T)`; a numeric `T` absorbs its absence value
-    // (I6/Q2), so the type widens to `number` (BREAKING — was `number`).
+    // `At(m(2h(1)), 1)` is valid with an element type from the return: the
+    // access is `T | marker(T)` where `T` is the element of a
+    // `broadcastable<number>`, a number or a tensor (a tensor of any rank
+    // has rows), and the marker of that union is `missing`.
     const at = ce.box(['At', ['m', p0], 1]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    expect(at.type.toString()).toBe('number');
+    expect(at.type.toString()).toBe('missing | number | tensor');
 
     // Chaining stays single-layer broadcastable (idempotent).
     expect(ce.box(['m', p1]).type.toString()).toBe('broadcastable<number>');

@@ -495,14 +495,27 @@ the types of mathematical expressions. It models:
   `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`, with finite/non-finite
   variants and bounded ranges (e.g. `integer<5..10>`).
 - **Collections**: `list`, `set`, `tuple`, `record`, `dictionary`, with shapes
-  (e.g. `matrix<number^(2x3)>` for a matrix).
-- **Broadcastable values**: `broadcastable<T>` — "a `T`, or an indexed
-  collection of `T`, element-wise". The static type of arithmetic whose
+  (e.g. `matrix<number^(2x3)>` for a matrix). A list type with no dimensions,
+  `list<E>`, is read by its elements: a matrix of integers is a
+  `list<vector<integer>>`, not a `list<integer>`. A vector, a matrix, a
+  `tensor<U>` (any rank) and a `list<U^dims>` are read by their cells. The
+  cells of a list with dimensions and of a tensor cannot be lists
+  (`list<boolean^2>` and `tensor<boolean>` are valid, `list<list<integer>^2>`
+  is not), and the cells of a type spelled `vector` or `matrix` must be able
+  to hold a number (`vector<string>` is not valid). The rules are in
+  `docs/TYPE-SYSTEM.md`, section "Lists, tensors and `broadcastable`".
+- **Broadcastable values**: `broadcastable<T>` — "a `T`, or an array of any
+  rank whose cells are `T`, element-wise" (`T | tensor<T>`, for a `T` that
+  cannot hold a list). The static type of arithmetic whose
   operand may broadcast at runtime (an unknown-return call such as
   `2h(x) - 1`). `T <: broadcastable<T>` and
   `list<T> <: broadcastable<T>`, but `broadcastable<T>` is not a subtype of
-  `T` or `list<T>`. Produced by the `Add`/`Multiply` type handlers and the
-  generic broadcast-typing wrapper in `boxed-function.ts`; the trigger is
+  `T`, of `list<T>` or of `T | list<T>` (a matrix is not a `list<number>`): a
+  parameter that accepts a number or a numeric array of any rank is spelled
+  `number | tensor`. Produced by the `Add`/`Multiply` type handlers and the
+  generic broadcast typing (`broadcastLiftType()` in
+  `boxed-expression/broadcast-lift-type.ts`, called from
+  `boxed-function.ts`); the trigger is
   applications-only (a bare symbol's `unknown` is inference-pending and
   stays scalar). See the Broadcastable section of `doc/08-guide-types.md`.
 - **Function signatures**: `(x: number, number?) -> number`, including named,

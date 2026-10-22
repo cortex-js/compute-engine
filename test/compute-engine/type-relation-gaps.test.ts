@@ -169,15 +169,19 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
     expect(violations).toEqual([]);
   });
 
-  it('a matrix is a broadcastable of its cells, as a list of its cells is', () => {
-    // `matrix<integer> <: list<integer> <: broadcastable<integer>`: the flat
-    // reading of a matrix is a list of its cells.
-    expect(ce.type('matrix<integer>').matches('list<integer>')).toBe(true);
+  it('a matrix is a broadcastable of its cells, and a list of its rows', () => {
+    // `broadcastable<integer>` is `integer | tensor<integer>`, and a matrix
+    // is a tensor; a matrix is a list of its rows, never of its cells.
+    expect(ce.type('matrix<integer>').matches('list<integer>')).toBe(false);
+    expect(ce.type('matrix<integer>').matches('list<vector<integer>>')).toBe(
+      true
+    );
     expect(ce.type('matrix<integer>').matches('broadcastable<integer>')).toBe(
       true
     );
     expect(ce.type('matrix').matches('broadcastable<number>')).toBe(true);
-    // The row reading still holds.
+    // The row reading holds through `broadcastable<T>`, which is
+    // `T | list<T>` for a non-numeric `T`.
     expect(
       ce.type('matrix<integer>').matches('broadcastable<list<integer>>')
     ).toBe(true);
@@ -520,9 +524,12 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     expect(couldMatch(u, 'string')).toBe(false);
     const scalarElapsed = performance.now() - start;
     const listStart = performance.now();
+    // Two lists with no dimensions share the empty list, so they could
+    // match; the distribution over the arms still runs for the element
+    // meet.
     expect(
       couldMatch({ kind: 'list', elements: u } as Type, listOfListOfString)
-    ).toBe(false);
+    ).toBe(true);
     const listElapsed = performance.now() - listStart;
     // The wall-clock bounds depend on the machine, so they are asserted only
     // in a `CE_PERF=1` run. They are about three times the time measured on
@@ -745,9 +752,10 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     const start = performance.now();
     expect(couldMatch(lists, 'boolean')).toBe(false);
     expect(couldMatch('boolean', lists)).toBe(false);
+    // Two lists with no dimensions share the empty list.
     expect(
       couldMatch(listOfShapes, { kind: 'list', elements: 'string' } as Type)
-    ).toBe(false);
+    ).toBe(true);
     const elapsed = performance.now() - start;
     // The wall-clock bound depends on the machine, so it is asserted only in
     // a `CE_PERF=1` run. The answers above do not depend on time.
@@ -784,23 +792,27 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['record{a: real<0..0>}', 'record{b: integer}'],
     ['record{a: rational<1..1>}', 'record{b: integer}'],
     ['value', '!integer'],
-    // A matrix is a list of its cells and a list of its rows:
-    // `matrix<integer>` is below both types of each pair.
+    // Two lists with no dimensions share the empty list, whatever their
+    // elements.
     ['list<integer>', 'list<list<integer>>'],
     ['list<integer | missing>', 'list<list<integer>>'],
     ['list<number>', 'list<list<integer>>'],
     ['indexed_collection<integer>', 'list<list<integer>>'],
-    ['broadcastable<integer>', 'list<list<integer>>'],
-    ['matrix<integer^(2x3)>', 'list<list<integer>>'],
-    // A rank-3 list is below both.
     ['list<list<list<integer>>>', 'list<integer>'],
     ['list<list<list<integer>>>', 'list<list<integer>>'],
-    // `boolean` is outside both `integer` and `string`.
-    ['!integer', '!string'],
-    // `matrix<integer>` is a list of integers, and a list of rows that are
-    // bare lists (lists of values) or lists of integers.
     ['list<integer>', 'list<list>'],
     ['list<integer>', 'list<list<integer> | list<string>>'],
+    ['list<tuple<never>>', 'list<list<tuple<never>>>'],
+    ['list<string>', 'list<list<integer>>'],
+    ['list<integer>', 'list<list<string>>'],
+    ['list<missing>', 'list<list<integer>>'],
+    ['list<string>', 'list<list<integer> | list<boolean>>'],
+    // A matrix is a list of its rows: `matrix<integer>` is a tensor of
+    // integers and a list of integer lists.
+    ['broadcastable<integer>', 'list<list<integer>>'],
+    ['matrix<integer^(2x3)>', 'list<list<integer>>'],
+    // `boolean` is outside both `integer` and `string`.
+    ['!integer', '!string'],
   ])('%s could match %s', (a, b) => {
     expect(ce.type(a).couldMatch(b)).toBe(true);
     expect(ce.type(b).couldMatch(a)).toBe(true);
@@ -829,7 +841,6 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['record{a: never}', '!integer'],
     ['tuple<never>', '!integer'],
     ['list<never^2>', '!integer'],
-    ['list<tuple<never>>', 'list<list<tuple<never>>>'],
     // An intersection of disjoint types, and `!any`, have no value.
     ['record{a: integer & string}', 'record{}'],
     // `integer` and `real` hold finite numbers only: a range that starts at
@@ -846,13 +857,8 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['record{a: integer}', 'collection<tuple<"b", integer>>'],
     ['record{a: integer, b: integer}', 'collection<tuple<"a", integer>>'],
     ['integer', '!number'],
-    // The cells cannot be both a string and an integer.
-    ['list<string>', 'list<list<integer>>'],
-    ['list<integer>', 'list<list<string>>'],
-    // An absent cell is not a row.
-    ['list<missing>', 'list<list<integer>>'],
-    // A list with one fixed axis admits rank 1 only, and its cells are not
-    // rows, so no matrix is below it.
+    // A list with one fixed axis is never empty, admits rank 1 only, and
+    // its cells are not rows, so no matrix is below it.
     ['list<integer^3>', 'list<list<integer>>'],
     ['vector<integer^3>', 'list<list<integer>>'],
     // The rows of a 3×3 matrix have 3 cells, not 2.
@@ -862,7 +868,6 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     // it. The subtype test cannot prove the cover (it tests the arms one by
     // one), so an overlap must come from a witness, not from `number ⊄ B`.
     ['number', '!(complex | infinity | nan)'],
-    ['list<string>', 'list<list<integer> | list<boolean>>'],
   ])('%s cannot match %s', (a, b) => {
     expect(ce.type(a).couldMatch(b)).toBe(false);
     expect(ce.type(b).couldMatch(a)).toBe(false);

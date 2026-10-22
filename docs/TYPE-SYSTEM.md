@@ -81,13 +81,173 @@ Explicit element arguments remain explicit through parsing, reduction and
 serialization. In particular, `<unknown>` no longer collapses into a bare
 family name. Its implemented subtype and generic-default behavior is unchanged;
 the agreed migration to an inference marker is separate work. The numeric
-defaults and rank constraints of vector, matrix and tensor spellings remain.
+defaults and rank constraints of vector, matrix and tensor spellings remain;
+the next section gives their rules.
 
 Compiler shape checks cannot use a bare kind as proof that its elements
 exclude Nothing. A raw lazy collection can retain omitted positions. Until
 compiled targets have a distinct omission representation, operations that
 need that distinction require an explicit omission-free content contract,
 a structural proof, or a compilation refusal.
+
+### Lists, tensors and `broadcastable`
+
+A list type with no dimensions is read by its ELEMENTS, the values that indexing
+returns. A list type with dimensions (a vector, a matrix, a `list<U^dims>`) and
+a tensor are read by their CELLS, the values at the depth of the rank. The two
+readings do not mix: a matrix of integers is a `list<vector<integer>>` and a
+`list<list<integer>>`, and it is not a `list<integer>`.
+
+**The three forms.** A list type is one node kind, `ListType`
+(`src/common/type/types.ts`). Its `dimensions` field selects the form:
+
+| `dimensions` | Spelling                                 | Meaning                                         | Element type                                               |
+| ------------ | ---------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------- |
+| absent       | `list<E>`                                | a list whose elements are `E`                   | `E`                                                        |
+| an array     | `vector<U>`, `matrix<U>`, `list<U^dims>` | a tensor of that rank, with cells `U`           | rank 1: `U`; rank 2 or more: the rows, `list<U^dims[1..]>` |
+| `null`       | `tensor<U>`, bare `tensor`               | a tensor of unknown rank (1 or more), cells `U` | `U \| tensor<U>`                                           |
+
+`-1` in `dims` is an axis of any length. `listTensorRank(t)`
+(`src/common/type/types.ts`) returns the rank of the second form, and
+`undefined` for the other two. `collectionElementType()`
+(`src/common/type/utils.ts`) returns the element type of the table. `set<E>` is
+read like `list<E>`: its elements are `E`. A code site that reads `dimensions`
+must handle all three values: `if (dims)` treats a `tensor<U>` as a plain list
+of its cells, and `dims !== undefined` followed by `dims.length` fails on it.
+
+**The cells.** The type builder applies two rules to the cell type, each with
+one predicate in `src/common/type/primitive.ts`:
+
+- The cells of a list with dimensions and of a tensor cannot be lists
+  (`cellTypeMayCarryDimensions()`, re-exported by `utils.ts`). The predicate
+  refuses a list of any form, `collection`, `indexed_collection`,
+  `broadcastable`, the bare names of these families, and a union or an
+  intersection with such an arm. So `list<list<integer>^2>`,
+  `list<vector<integer^3>^2>`, `list<list^2>` and `tensor<list<integer>>` are
+  parse errors: the shape is written in one place, as `list<integer^(2x3)>` or
+  `matrix<integer^(2x3)>`. Cells that are not numbers and not lists are valid:
+  `list<boolean^2>`, `list<string^2>`, `list<tuple<number, number>^3>`,
+  `list<boolean^(2x2)>`, `list<(integer | missing)^3>`, `tensor<boolean>` and
+  `tensor<tuple<number, number>>` parse.
+- The cells of a type spelled `vector<U>` or `matrix<U>` must also be able to
+  hold a number (`cellTypeCanHoldANumber()`). The predicate accepts a number
+  type, a numeric range or value, `any`, `unknown`, `never`, `value`, `scalar`,
+  `expression`, a type variable, a reference to a declared type, and a union of
+  which one arm is accepted. So `vector<string>`, `vector<boolean>`,
+  `matrix<boolean>` and `matrix<list<integer>>` are parse errors. Write
+  `list<string>`, `list<string^3>` for exactly three strings, or
+  `list<boolean^(2x2)>` for a 2×2 array of booleans.
+
+The engine asks `cellTypeMayCarryDimensions()` before it attaches dimensions to
+the type of a list literal, a broadcast or a `Map` result: `[[1, 2], [3, 4]]` is
+`matrix<integer^(2x2)>`, `[True, False]` is `list<boolean^2>`,
+`[(1, 2), (3, 4)]` is `list<tuple<integer, integer>^2>`, `M < 3` with
+`M := [[1, 2], [3, 4]]` is `list<boolean^(2x2)>`, and the ragged `[[1], [2, 3]]`
+is `list<vector<integer^1> | vector<integer^2>>`. A broadcast whose result rank
+is not known (over operands of different ranks, over an operand whose type is a
+union of ranks, or over a tensor of unknown rank) is typed `tensor<R>` for a
+result `R` that cannot hold a list: `U + 1` with
+`U: list<integer> | matrix<integer>` is `tensor<integer>`, and `T < 3` with
+`T: tensor<integer>` is `tensor<boolean>`. A symbol declared `broadcastable<T>`
+that holds a list is read as a tensor of unknown rank too: with
+`b: broadcastable<number>` holding a list, `-b` is `tensor`. An operand whose
+elements may be lists of any depth (`any`, bare `list`, `list<any>`, a bare
+`indexed_collection`) is mapped at its leaves, so the result type holds lists
+at any depth: `Sin(xs)` with `xs: list<any>` is `list<list<any> | number>`, and
+`C < 2` with `C: indexed_collection` is `list<boolean | list<any>>`
+(`broadcastShapedResultType()` and `unknownShapeOperandDepth()`, `utils.ts`).
+An element-wise `Which` or `If` reads such a mask as element-wise
+(`isPossiblyNestedBooleanMask()`, `library/control-structures.ts`): a flat
+value selects position by position, and a nested value does not evaluate.
+
+The subtype relation does not depend on these rules: a list with dimensions is
+read by its cells, whatever its cell type. A stricter rule, under which every
+list with dimensions and every tensor has numeric cells, is a change of
+`cellTypeMayCarryDimensions()` alone. It was measured on 2026-10-21 and not
+applied: a bound list of points then loses its length, so the GPU target refuses
+a minimum-distance field over a list of points (four tests), and about 70
+expected types lose a length. The user can still choose it
+(`docs/plans/2026-10-21-list-element-tensor-cell.md`, decision D3).
+
+**Subtype.** `R` is the element type of the left side, from the table above (the
+rows of a matrix).
+
+| Left           | Right                                               | Holds when                                                                               |
+| -------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `list<E1>`     | `list<E2>`                                          | `E1 <: E2`                                                                               |
+| `list<E>`      | `collection<F>`, `indexed_collection<F>`            | `E <: F`                                                                                 |
+| `list<E>`      | `list<U^-1>` (a `vector<U>` of any length)          | `E <: U`; never for a fixed length or a rank of 2 or more                                |
+| `list<E>`      | `tensor<U>`, `broadcastable<U>`                     | `E <: U`                                                                                 |
+| `list<U^dims>` | `list<V^dims2>`                                     | `U <: V`, the same rank, and each axis of `dims2` is `-1` or equal to the axis of `dims` |
+| `list<U^dims>` | `tensor<V>`                                         | `U <: V`                                                                                 |
+| `list<U^dims>` | `broadcastable<V>`                                  | `U <: V`                                                                                 |
+| `list<U^dims>` | `list<E>`, `collection<E>`, `indexed_collection<E>` | `R <: E`                                                                                 |
+| `tensor<U>`    | `tensor<V>`, `broadcastable<V>`                     | `U <: V`                                                                                 |
+| `tensor<U>`    | `list<E>`, `collection<E>`, `indexed_collection<E>` | `U \| tensor<U> <: E`                                                                    |
+| `tensor<U>`    | `list<V^dims>`                                      | never: the rank is not known                                                             |
+
+Examples: `matrix<integer>` is a `list<vector<integer>>`, a
+`list<list<integer>>`, a `collection<vector<integer>>` and a `tensor<integer>`,
+but not a `list<integer>` or a `collection<integer>`. A `list<vector<integer>>`
+is not a matrix, because its rows can have different lengths. A `list<U>` with a
+number type `U` and a `vector<U>` denote the same values, so the relation holds
+in both directions between them. `list<integer>` and `list<list<integer>>` are
+not related. The relation is covariant in the cell type and in the element type:
+`vector<value>` is a `vector<any>`, and `list<expression^3>` is a `list<any^3>`.
+
+**`broadcastable<T>`** is `T | tensor<T>` for a `T` that cannot hold a list (a
+number type, `boolean`, `string`, a tuple, `integer | missing`). A matrix of
+numbers is a `broadcastable<number>`, and a matrix of integers is a
+`broadcastable<integer | missing>`; a `list<list<number>>` is not a
+`broadcastable<number>`, because its rows can have different lengths.
+`broadcastable<boolean>` is `boolean | tensor<boolean>`: a comparison over a
+matrix gives a matrix of booleans, which `boolean | list<boolean>` does not
+hold. `broadcastable<tuple<number, number>>` is a point or an array of points of
+any rank. The node is kept for every `T` (`broadcastableOf()` builds it), so a
+site that tests `kind === 'broadcastable'` sees every spelling. Its element type
+is `T | tensor<T>`. `broadcastable<T>` is a subtype of `T | tensor<T>`, and not
+of `T | list<T>`: a site that accepts a number or a numeric array of any rank
+spells `number | tensor`.
+
+**Meet.**
+
+- `list<E1> & list<E2>` is `list<E1 & E2>`. When the element meet is `never`,
+  the result is `list<never>`, the type of the empty list `[]`, which is a value
+  of both: `list<integer> & list<string>` and
+  `list<integer> & list<list<integer>>` are `list<never>`.
+- `list<U^dims> & list<V^dims2>` is the cell meet with the meet of the shapes,
+  axis by axis: an axis of any length meets a fixed length as the fixed length,
+  and two different fixed lengths give `never`.
+  `list<integer^(2x-1)> & list<number^(-1x3)>` is `matrix<integer^(2x3)>`;
+  `vector<integer^2> & vector<integer^3>` and
+  `matrix<integer> & vector<integer>` are `never`. A meet of two list types is
+  `never` only when their shapes exclude each other.
+- `list<E> & list<U^-1>` is `list<E & U>`: `list<integer> & vector<number>` is
+  `list<integer>`. A `vector<U>` of any length and a `list<U>` hold the same
+  values when `U` cannot hold a list, so the reducer drops the open axis.
+- `tensor<U> & tensor<V>` is `tensor<U & V>`, and `tensor<U> & list<V^dims>` is
+  `list<(U & V)^dims>`: `tensor<number> & matrix<integer>` is `matrix<integer>`.
+- `list<E> & list<U^dims>` with a rank of 2 or more is decided by the meet of
+  `E` and the rows `R`: the result is `list<U^dims>` when `R <: E`
+  (`list<vector<number>> & matrix<integer>` is `matrix<integer>`), `never` when
+  the meet of `E` and `R` is `never` (`list<integer> & matrix<integer>`), and
+  the intersection as written otherwise.
+
+These rules are the rules of the type reducer (`reduceType()`,
+`src/common/type/reduce.ts`). `narrow()` (`src/common/type/subtype.ts`) gives
+the same answers for two list types, but it answers `never` for some pairs of
+different kinds that share values
+(`matrix<number> & collection<vector<integer>>` is `matrix<integer>` in the
+reducer): `ROADMAP.md` records this as an open defect.
+
+**Join.** The join (`widen()`) of a list with dimensions and a plain list is a
+plain list of the join of their elements: `matrix<integer>` and `list<integer>`
+join to `list<integer | vector<integer>>`.
+
+These rules replace, since the user decisions of 2026-10-21, a relation that
+also read the `E` of `list<E>` as a cell type, so that a matrix was a
+`list<number>`. What changed for users is in the `CHANGELOG.md` entry "A list
+type with no dimensions is read by its elements".
 
 ## Number literal types
 
@@ -201,6 +361,21 @@ because booleans and strings are meant to join once their literals carry
 singleton types; arithmetic between lengths (`^(M+N)`) is not supported.
 Design record: `docs/plans/2026-09-29-dimension-variables-design.md`.
 
+A generic function whose parameter is a bare type variable maps over a
+collection operand at its leaves, and the call type puts back every list level
+it went through (`genericLiftLevels()`, `boxed-expression/boxed-function.ts`,
+with `liftedElementTypeOf()` in `instantiate.ts`). With
+`f: (x: T) -> tuple<T, T> where T`, `f(h)` for `h: list<list<integer>>` is
+`list<list<tuple<integer, integer>>>`, and an `indexed_collection` or
+`broadcastable` operand is read the same way. When the operand type is a union
+whose options the call reads differently (a list is mapped, a set or a scalar is
+passed whole), the result is the join of one answer per option:
+`f(u)` for `u: list<integer> | set<integer>` is
+`list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>`. A
+`collection<E>` operand can be either, so it gets both answers. With several
+such operands, every combination is typed; above eight combinations the result
+is `any` (`operandArms()`, `boxed-function.ts`).
+
 Transparent aliases substitute their arguments into their body. Nominal types
 mint identity: structural equality with the body is not membership. A
 parameterized nominal reference retains its type arguments and variance;
@@ -234,7 +409,7 @@ or `any`, which rejects no arm, and for an argument whose type only overlaps a
 parameter: a `collection` argument at a `string` parameter can be a string or
 not. When the possible arms have different results, the result type is the
 join of their results: `Slice(s, 1, 2)` with an untyped or `collection`-typed
-`s` is `string | list<unknown>`, not the result of one arm. A type variable
+`s` is `list<any> | string`, not the result of one arm. A type variable
 whose argument does not satisfy its bound reads as the part of the bound the
 argument can be (`T where T: string` with a `collection` argument gives
 `string`). Argument validation still uses the selected arm, and inference into

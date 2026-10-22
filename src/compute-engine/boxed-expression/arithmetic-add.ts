@@ -479,9 +479,13 @@ export function absorbScalarsIntoCells(
   // kind a multi-dimensional shape lives in `dimensions` rather than in nested
   // `elements`, so read `elements` directly: `collectionElementType` would
   // answer a `matrix`'s ROW type (`vector`), and widening a scalar into that
-  // produced the nonsense `list<list<integer | vector>>` for `2Y`.
+  // produced the nonsense `list<list<integer | vector>>` for `2Y`. The same
+  // holds for a `broadcastable<S>` collection operand, whose cells are `S`
+  // (one index into its tensor arm yields `S | tensor<S>`, and reading that
+  // typed `2h(x) - 1` as `broadcastable<number | tensor>`).
   const elt =
-    typeof collectionType !== 'string' && collectionType.kind === 'list'
+    typeof collectionType !== 'string' &&
+    (collectionType.kind === 'list' || collectionType.kind === 'broadcastable')
       ? collectionType.elements
       : collectionElementType(collectionType);
   if (elt === undefined || elt === 'any') return collectionType as Type;

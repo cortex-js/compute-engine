@@ -63,6 +63,12 @@ import {
   explicitBroadcastPointNorm,
   literalHasNoDoubleValue,
   pointHasBroadcastComponent,
+  leafwardElementType,
+  pointCollectionElementType,
+  isBroadcastablePointType,
+  isNestedPointCollectionType,
+  everyPointCoordinateIsNumeric,
+  mayHoldNumericArrayOfRank,
 } from './base-compiler.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
@@ -1059,7 +1065,10 @@ function pointCoordinateTypes(t: Type, k: number): Type[] {
     const coord = tupleElementType(stripped, k);
     return coord === undefined ? [] : [coord];
   }
-  const element = collectionElementType(stripped);
+  // Toward the cells (`leafwardElementType`): the element of a tensor of
+  // unknown rank contains the tensor itself, which would send the walk
+  // round for ever.
+  const element = leafwardElementType(stripped);
   if (element === undefined || typeof element === 'string') return [];
   return pointCoordinateTypes(element, k);
 }
@@ -1135,6 +1144,34 @@ function compileIntervalPointComponent(
   // `PointList` lowering to compile it through.
   if (typeof t !== 'string' && t.kind === 'tuple')
     return `_IA.component(${compileIntervalCollectionOperand(arg, compile, target)}, ${k})`;
+  // A `broadcastable<P>` of points is one point or a tensor of points, and a
+  // collection of points at more than one level (`tensor<tuple<…>>`,
+  // `list<list<tuple<…>>>`) maps down to its points at every level: the
+  // static type does not fix the reading of the array, so the helper decides
+  // at the value, with no list reading stated. Stating it read one point
+  // `(3, 4)` as a list of two points and answered two absent coordinates.
+  // An empty array is the empty list, the helper's default reading.
+  //
+  // The helper reads an array as a point only when every cell of it is a
+  // coordinate. A point with a coordinate that is not provably a number
+  // (`broadcastable<tuple<string, number>>`, whose `y` coordinate passes the
+  // test above) would be read as some other list, and the answer would be
+  // wrong, so the compile is refused.
+  if (isBroadcastablePointType(t) || isNestedPointCollectionType(t)) {
+    if (!everyPointCoordinateIsNumeric(t))
+      throw new Error(
+        `Could not compile \`${name}\`: a coordinate of a point of the ` +
+          `operand (type \`${arg.type.toString()}\`) is not provably a ` +
+          `number, and the run-time dispatch reads such a point as a list.`
+      );
+    // When every row of a collection of points at more than one level, or
+    // of a `broadcastable<P>` of points, is empty, the value does not decide
+    // the reading, so the static type is carried into the helper (its fifth
+    // argument): each empty row is the empty list of coordinates, as the
+    // interpreter answers. An empty array cannot be a point here: the test
+    // above admits only points with one coordinate or more.
+    return `_IA.pointComponent(${compileIntervalCollectionOperand(arg, compile, target)}, ${k}, true, undefined, true)`;
+  }
   // The type PROVES a list of points, so the reading is stated to the helper
   // (its fourth argument): a point whose other coordinates are not numbers
   // (`list<tuple<string, number>>`) would otherwise fail the helper's own
@@ -1146,8 +1183,21 @@ function compileIntervalPointComponent(
   )
     return `_IA.pointComponent(${compileIntervalCollectionOperand(arg, compile, target)}, ${k}, true, true)`;
   if (mayBePointList(t)) {
+    // The helper sees a tuple and a list as the same array, so it cannot
+    // tell a list of lists of points (which the interpreter maps down to its
+    // points) from a numeric array of rank 3 or more (which the interpreter
+    // element-indexes). When the static type admits such numeric data, the
+    // helper is told so (its sixth argument), and it throws a `RangeError`
+    // for a value of that shape instead of answering. Every other value has
+    // one reading and is answered.
+    if (mayHoldNumericArrayOfRank(t, 3)) {
+      const emptyBroadcasts = elementTypeBroadcastsWhenEmpty(
+        pointCollectionElementType(stripMissingFromType(t))
+      );
+      return `_IA.pointComponent(${compileIntervalCollectionOperand(arg, compile, target)}, ${k}, ${emptyBroadcasts}, undefined, false, true)`;
+    }
     const emptyReading = elementTypeBroadcastsWhenEmpty(
-      collectionElementType(stripMissingFromType(t))
+      pointCollectionElementType(stripMissingFromType(t))
     )
       ? ''
       : ', false';
@@ -1819,7 +1869,8 @@ function isIntervalPointValuedOperand(
       return t.types.length > 0 && t.types.every((arm) => pointValued(arm));
     if (t.kind === 'tuple') return isIntervalPointType(t);
     if (!isSubtype(t, 'indexed_collection<any>')) return false;
-    const element = collectionElementType(t);
+    // Toward the cells (`leafwardElementType`), as in `pointCoordinateTypes`.
+    const element = leafwardElementType(t);
     return element !== undefined && pointValued(element);
   };
   // The absence arm of a RESTRICTED point or list of points

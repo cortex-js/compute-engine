@@ -6,7 +6,7 @@ import {
 } from '../../common/type/primitive.js';
 import type { OperandDescriptor, Sign } from '../global-types.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, tensorOf } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
 import {
   absRange,
@@ -180,6 +180,22 @@ export function broadcastOperandType(x: OperandDescriptor): Type {
   let t = x.type;
   if (x.facts.collection !== true && !isBroadcastableType(t)) return t;
   while (true) {
+    // The broadcast maps over the CELLS of its operand. For a
+    // `broadcastable<T>` those are `T`, and for a tensor of unknown rank
+    // (`tensor<U>`, whose `dimensions` is `null`) they are `U`:
+    // `collectionElementType` answers what one index returns instead
+    // (`T | tensor<T>`), which is not what the handler sees per cell, and
+    // a walk through it would carry a `tensor` arm into every result
+    // (`2h(x) - 1` typed `broadcastable<number | tensor>`).
+    const r = resolveTypeAlias(t);
+    if (
+      typeof r !== 'string' &&
+      (r.kind === 'broadcastable' ||
+        (r.kind === 'list' && r.dimensions === null))
+    ) {
+      t = r.elements;
+      continue;
+    }
     const elements = collectionElementType(t);
     if (elements === undefined || elements === t) return t;
     t = elements;
@@ -1647,8 +1663,12 @@ export function extendedReductionType(
     let v: Type = t;
     if (typeof t === 'object' && t.kind === 'list') {
       // A matrix (`list<real^2x2>`) sums column by column, to a list, not
-      // to a scalar.
-      if ((t.dimensions?.length ?? 1) > 1) return undefined;
+      // to a scalar. A tensor of unknown rank (`tensor<U>`, whose
+      // `dimensions` is `null`) may be a matrix, so its reduction is not
+      // known to be a scalar either: `shapedSumType` and
+      // `shapedProductType` type it.
+      if (t.dimensions === null || (t.dimensions?.length ?? 1) > 1)
+        return undefined;
       // A list with no last element (`Range(1, ∞)`, read off the structure:
       // the type carries no length claim) has no finite sum; it is left to
       // the top type, as an `indexed_collection` operand is.
@@ -1801,7 +1821,9 @@ const NUMBER_OR_NAN_TYPE = parseType('number | nan');
 type ShapedOperand = {
   kind: 'list' | 'collection' | 'indexed_collection' | 'set';
   elements: Type;
-  dimensions?: number[];
+  /** As on `ListType`: absent for a plain list, a dimension list for a
+   * tensor of known rank, `null` for a tensor of unknown rank. */
+  dimensions?: number[] | null;
 };
 function shapedOperandType(d: OperandDescriptor): ShapedOperand | undefined {
   const t = resolveTypeAlias(d.type);
@@ -1832,6 +1854,18 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
   };
 
   const dims = t.kind === 'list' ? t.dimensions : undefined;
+  if (dims === null) {
+    // A tensor of unknown rank (`tensor<U>`) sums along its first axis to
+    // a cell when it is a vector and to a tensor of one rank less
+    // otherwise; it may also be empty, and the sum of no elements is the
+    // number `0`.
+    const elements = componentSum(t.elements);
+    if (elements === undefined) return undefined;
+    return reduceType({
+      kind: 'union',
+      types: [elements, tensorOf(elements), 'integer'],
+    });
+  }
   if (dims !== undefined && dims.length > 1) {
     // A matrix (or a higher-rank list) sums along its first axis. A
     // dimension of unknown size (`-1`, as in `matrix<real>`) stays unknown;
@@ -1909,9 +1943,12 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
     // do not add, and the sum is then an `incompatible-dimensions` error
     // value, which this type does not describe: the type describes the sum
     // of rows that add, as the type of `Add` of two lists with no length
-    // does. A dimension of size 0 (an empty row) is not read.
-    if (el.dimensions !== undefined && el.dimensions.some((n) => n === 0))
-      return undefined;
+    // does. A dimension of size 0 (an empty row) is not read. An element
+    // that is a tensor of unknown rank (`tensor<U>`, whose `dimensions` is
+    // `null`) has no dimension to read: the sum of such elements is a
+    // tensor of the same unknown rank whose cells are the component sums,
+    // which the spread below keeps.
+    if (el.dimensions && el.dimensions.some((n) => n === 0)) return undefined;
     const elements = componentSum(el.elements);
     if (elements === undefined) return undefined;
     shaped = { ...el, elements };
@@ -2053,6 +2090,19 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   };
 
   const dims = t.kind === 'list' ? t.dimensions : undefined;
+  if (dims === null) {
+    // A tensor of unknown rank (`tensor<U>`) multiplies its elements to a
+    // cell when it is a vector, and to a tensor of one rank less when its
+    // rows multiply (a matrix known not to be square has no product, and
+    // the call stays unevaluated; that case is not described). It may also
+    // be empty, and the product of no elements is the number `1`.
+    const elements = entryProduct(t.elements);
+    if (elements === undefined) return undefined;
+    return reduceType({
+      kind: 'union',
+      types: [elements, tensorOf(elements), 'integer'],
+    });
+  }
   if (dims !== undefined && dims.length > 1) {
     // A matrix operand is a list of rows, which multiply element-wise. A
     // dimension of unknown size (`-1`) stays unknown; when it is the first
@@ -2082,7 +2132,11 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   }
   if (el.kind !== 'list') return undefined;
   const elDims = el.dimensions;
-  if (elDims !== undefined) {
+  // An element that is a tensor of unknown rank (`tensor<U>`, whose
+  // `dimensions` is `null`) is not known not to be square, so it is not
+  // refused; the product of such elements is a tensor of the same unknown
+  // rank, which the spread below keeps.
+  if (elDims) {
     // A dimension of unknown size (`-1`, as in `matrix<real>`) stays
     // unknown; a matrix is refused only when it is KNOWN not to be square.
     if (elDims.some((n) => n === 0)) return undefined;

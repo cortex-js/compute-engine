@@ -127,7 +127,6 @@ import {
   isGroupedTypeText,
   resolveTypeAlias,
   broadcastResultType,
-  broadcastShapedResultType,
   nestedBroadcastResultType,
   descendIntoConstructor,
   isBareCutOnDescent,
@@ -282,6 +281,8 @@ import {
   lazyBroadcastMapIfNeeded,
   zipBroadcast,
   isWalkableFiniteCollection,
+  mayCarryDimensions,
+  shapedBroadcastResultType,
 } from '../collection-utils.js';
 import { abstractCollectionCell } from '../boxed-expression/broadcast-lift-type.js';
 import { validatedLiteralApplicationOperands } from '../boxed-expression/box.js';
@@ -1112,7 +1113,11 @@ function applyLiteralMapType(
       collections.map((a) => a.type),
       perElement
     );
-  return broadcastShapedResultType(
+  // The source's shape is kept when the per-element result may carry
+  // dimensions (a result that cannot be a list: a number, a boolean, a
+  // tuple), and spelled as nested plain lists otherwise
+  // (`shapedBroadcastResultType`).
+  return shapedBroadcastResultType(
     collections.map((a) => a.type),
     perElement
   );
@@ -1740,18 +1745,26 @@ function heldOperandType(
         })),
       };
     case 'list-literal': {
-      let elements: Type = widen(
+      const rows: Type = widen(
         ...s.elements.map((e) => heldComponentType(context, e))
       );
+      if (s.shape.length === 0) return { kind: 'list', elements: rows };
       // A shape of rank r > 1 (`[[1, 2], [3, 4]]` is 2×2) puts the LEAF type
       // in `elements`: the components are rows, so descend r − 1 ranks. The
       // row type in a 2×2 shape counted the inner rank twice
       // (`list<vector<integer^2>^(2x2)>`).
+      let elements: Type = rows;
       for (let k = 1; k < s.shape.length; k++)
         elements = collectionElementType(elements) ?? 'unknown';
-      return s.shape.length > 0
+      // The shape is written as a dimension list only when the leaf cells
+      // may carry one (`mayCarryDimensions`: a cell that cannot be a list),
+      // as the `List` type handler does (`shapedListTypeD`,
+      // `library/collections.ts`): a held `[True, False]` is a
+      // `list<boolean^2>`. Otherwise the literal is a plain list of its
+      // components.
+      return mayCarryDimensions(elements)
         ? { kind: 'list', elements, dimensions: [...s.shape] }
-        : { kind: 'list', elements };
+        : { kind: 'list', elements: rows };
     }
     case 'application':
       return deriveApplicationOf(s, s.children, context) ?? 'unknown';
@@ -1787,9 +1800,21 @@ function pipeMapResultType(source: Readonly<Type>, elementType: Type): Type {
       return { kind: source, elements: elementType };
     return { kind: 'collection', elements: elementType };
   }
+  // As in `mapResultType`: the lambda is applied to each OUTER element of
+  // the source (a row, for a matrix), so only the outer length of a
+  // dimensioned source is a length of the result, and only when the
+  // mapping's result may carry a dimension (`mayCarryDimensions`: a result
+  // that cannot be a list, such as a number, a boolean or a tuple; piping
+  // `[1, 2, 3]` into `(x) => x > 1` is a `list<boolean^3>`). A source of
+  // unknown rank (`tensor<U>`, whose `dimensions` is `null`) has no length
+  // to keep.
   if (source.kind === 'list')
-    return source.dimensions !== undefined
-      ? { kind: 'list', elements: elementType, dimensions: source.dimensions }
+    return source.dimensions?.length && mayCarryDimensions(elementType)
+      ? {
+          kind: 'list',
+          elements: elementType,
+          dimensions: [source.dimensions[0]],
+        }
       : { kind: 'list', elements: elementType };
   if (
     source.kind === 'indexed_collection' ||
@@ -2671,7 +2696,16 @@ function randomListType(
   const litCount = kOp ? operandLiteralValue(kOp) : undefined;
   const count =
     litCount !== undefined && Number.isInteger(litCount) ? litCount : null;
-  if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
+  // The count is written as a dimension only when the elements may carry
+  // one (`mayCarryDimensions`: elements that cannot be lists):
+  // `RandomChoice([True, False], 3)` is a `list<boolean^3>`, and a list of
+  // random rows is a plain list.
+  if (
+    count !== null &&
+    count > 0 &&
+    count <= MAX_RANDOM_ELEMENT_COUNT &&
+    mayCarryDimensions(elt)
+  )
     return { kind: 'list', elements: elt, dimensions: [count] };
   return { kind: 'list', elements: elt };
 }

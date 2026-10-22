@@ -114,7 +114,7 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
   });
 
   test('the types', () => {
-    expect(type(['PointX', RL])).toBe('missing | vector<2>');
+    expect(type(['PointX', RL])).toBe('missing | vector<integer^2>');
     expect(type(['PointX', RP])).toBe('number');
     expect(type(['PointY', ['List', RP, ['Tuple', 3, 4]]])).toBe(
       'list<missing | number>'

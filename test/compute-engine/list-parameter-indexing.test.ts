@@ -476,7 +476,7 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
 
   test('a list of points still types a LIST (broadcast)', () => {
     const e = ce.box(['PointX', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]]);
-    expect(e.type.toString()).toBe('vector<2>');
+    expect(e.type.toString()).toBe('vector<integer^2>');
     expect(e.evaluate().toString()).toBe('[1,3]');
   });
 
@@ -489,7 +489,7 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
     // Non-indexed, so it never reached the broadcast arm of the type handler
     // and was typed as an element access while the VALUE was a list.
     const e = ce.box(['PointX', ['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]]);
-    expect(e.type.toString()).toBe('list<number>');
+    expect(e.type.toString()).toBe('list<integer>');
     expect(e.evaluate().toString()).toBe('[1,3]');
   });
 });

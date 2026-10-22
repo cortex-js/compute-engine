@@ -165,7 +165,10 @@ describe('callable evaluation follows lexical binding', () => {
     const view = ce.box(['Map', 'h', ['List', ['List', 1, 2], ['List', 3, 4]]]);
     ce.popScope();
     ce.assign('h', ce.box(['Function', "'shadow'", 'u']));
-    expect(view.type.toString()).toBe('list<vector<real^2>^2>');
+    // The shape of a tensor is spelled in one place: two rows of two reals
+    // are a `matrix<real^(2x2)>`.
+    expect(view.type.toString()).toBe('matrix<real^(2x2)>');
+    expect(view.evaluate().type.matches(view.type)).toBe(true);
     expect(ce.box(['ListFrom', view]).evaluate().json).toEqual([
       'List',
       ['List', 1, 2],

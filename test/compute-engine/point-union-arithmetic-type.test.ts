@@ -608,23 +608,26 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
   test('a list cell with a point arm is typed arm by arm too', () => {
     // A symbol declared `broadcastable<tuple<…>>` that holds a list of
     // points is a list now, and its cell is the point: its squares are
-    // points. The handler's one answer typed `list<number>`.
+    // points. The handler's one answer typed `list<number>`. The result is
+    // typed from the declaration, whose collection branch is a tensor of
+    // points of any rank, so the answer is `tensor<…>`: it holds this
+    // rank-1 value and a later value of a higher rank.
     const ce = new ComputeEngine();
     declare(ce, TYPES);
     ce.assign('r', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
     ce.assign('p', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    expect(ce.box(['Power', 'r', 2]).type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
+    const squares = ce.box(['Power', 'r', 2]);
+    expect(squares.type.toString()).toBe('tensor<tuple<number, number>>');
+    expect(squares.evaluate().type.matches(squares.type)).toBe(true);
     expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe(
-      'list<tuple<number, number>>'
+      'tensor<tuple<number, number>>'
     );
     // The elements of one list pick their arm on their own (`[1, (1, 2)]`),
-    // so the arms' answers are joined inside ONE list type, not wrapped
-    // apart (`list<number> | list<tuple<…>>` admits no mixed list; dual
-    // review).
+    // so the arms' answers are joined inside ONE collection type, not
+    // wrapped apart (`list<number> | list<tuple<…>>` admits no mixed list;
+    // dual review).
     expect(ce.box(['Power', 'p', 2]).type.toString()).toBe(
-      'list<number | tuple<number, number>>'
+      'tensor<number | tuple<number, number>>'
     );
     // A declared list of numbers or points: each element squares to a
     // number or a point.

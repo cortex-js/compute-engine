@@ -233,13 +233,20 @@ describe('the refined signature follows the body', () => {
   });
 
   test('a value assigned later to a free symbol of the body refines the result', () => {
-    // Before, `f` kept `-> number` while `f(2)` evaluated to a list.
+    // Before, `f` kept `-> number` while `f(2)` evaluated to a list. The
+    // parameter `x` is `unknown`, so it may hold a list of lists, and then
+    // `a x` is a list of lists too: the result is a list whose elements are
+    // numbers or lists.
     const ce = freshEngine();
     ce.declare('f', '(unknown) -> unknown');
     ce.assign('f', ce.parse('(x) \\mapsto 1 + a x'));
     ce.assign('a', ce.parse('[1,2,3]'));
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> list<number>');
-    expect(ce.box(['f', 2]).evaluate().toString()).toBe('[3,5,7]');
+    expect(ce.box('f').type.toString()).toBe(
+      '(unknown) -> list<list<any> | number>'
+    );
+    const call = ce.box(['f', 2]);
+    expect(call.evaluate().toString()).toBe('[3,5,7]');
+    expect(call.evaluate().type.matches(call.type)).toBe(true);
   });
 
   test('a concrete declared slot stays the contract', () => {

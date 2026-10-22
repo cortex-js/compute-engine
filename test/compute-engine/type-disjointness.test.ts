@@ -165,14 +165,14 @@ describe('BoxedType.isDisjointFrom', () => {
     ).toBe(true);
   });
 
-  // Characterization, not a guarantee: the predicate errs toward "may
-  // overlap". Two same-category composites whose parameters cannot coincide
-  // are NOT claimed disjoint — `list<never>` is a subtype of both, so the
-  // claim would rest on how the empty list is typed rather than on the
-  // lattice. `couldMatch()` answers this question decisively.
-  it('is conservative for same-category composites with disjoint parameters', () => {
+  // Two same-category composites whose parameters cannot coincide are NOT
+  // disjoint: the empty list is a value of both (`list<never>` is a subtype
+  // of both), and `couldMatch()` says so too. A fixed-length list is never
+  // empty, so `couldMatch()` refutes that pair.
+  it('is not disjoint for same-category composites with disjoint parameters', () => {
     expect(ce.type('list<integer>').isDisjointFrom('list<string>')).toBe(false);
-    expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(false);
+    expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(true);
+    expect(ce.type('list<integer^2>').couldMatch('list<string^2>')).toBe(false);
     expect(isSubtype('list<never>', 'list<integer>')).toBe(true);
     expect(isSubtype('list<never>', 'list<string>')).toBe(true);
   });

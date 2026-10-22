@@ -3,12 +3,12 @@ import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   asNumericRange,
   assertGroundType,
-  couldMatch,
   isEmptyType,
-  isPrimitiveSubtype,
+  broadcastCollectionArm,
   isSubtype,
-  isScalarTopElement,
-  holdsListElements,
+  listElementType,
+  listShapeKey,
+  meetListTypes,
   meetNumericRangeMembers,
   provablyDisjoint,
   meetPrimitiveTypes,
@@ -34,7 +34,7 @@ import type {
 import { isValidPrimitiveType } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
 import { unfoldAliasOnDescent, type AliasDescent } from './utils.js';
-import { aliasDefinitionAt, flattenNestedListType } from './instantiate.js';
+import { aliasDefinitionAt } from './instantiate.js';
 import { declarationOf } from './reference.js';
 
 /**
@@ -188,16 +188,6 @@ export function closeImaginaryUnderArithmetic(
   // not see one: it is returned unchanged.
   if (t.kind === 'variable') return t;
   return isSubtype(t, 'imaginary') ? 'complex' : t;
-}
-
-/** The shape of a list as a comparison key: its lengths, with a dimension
- * variable's name standing in for the `-1` it rides on, so two patterns that
- * differ only in WHICH variable names an axis are not merged. */
-function shapeKey(t: ListType): string {
-  if (t.dimensions === undefined) return '';
-  return t.dimensions
-    .map((d, i) => t.dimensionVariables?.[i] ?? String(d))
-    .join();
 }
 
 function decorate(t: Type): Type {
@@ -401,15 +391,16 @@ let meetMemo: Map<Type, Map<Type, Type | undefined>> | undefined;
  * - Two applications of the same collection constructor meet ELEMENTWISE
  *   (see {@link meetCollections}); the pair is not empty, because the empty
  *   collection inhabits both.
- * - Collections of different kinds, and a list with dimensions beside one
- *   with none, meet elementwise too ({@link meetCollectionKinds},
- *   {@link meetShapedWithUnshapedList}), but a list whose length is fixed
- *   and not zero has no value when the element meet is empty.
+ * - Collections of different kinds meet elementwise too
+ *   ({@link meetCollectionKinds}); a list is read by its elements, the rows
+ *   of a matrix (`listElementType`).
  * - A pair no rule above applies to yields `undefined`, meaning "no meet
  *   rule, and not shown to be empty either": an overload pair
- *   ({@link isOverloadPair}), a pair that can share a matrix by different
- *   readings, a transparent alias that is cut on a recursion or beside
- *   another alias, and an operand that is itself a kept intersection, each
+ *   ({@link isOverloadPair}), a plain list beside a tensor of rank 2 or
+ *   more, or of unknown rank, whose rows are neither inside nor disjoint
+ *   from the list's elements ({@link meetListTypes}), a transparent alias
+ *   that is cut on a recursion or beside another alias, and an operand that
+ *   is itself a kept intersection, each
  *   unless {@link provablyDisjoint} refutes it (or, for two aliases,
  *   {@link mayShareFiniteValue}). Everything else collapses
  *   to `never`. Callers
@@ -627,10 +618,6 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
   const nodeA = bareCollectionAsNode(a);
   const nodeB = bareCollectionAsNode(b);
 
-  // A list with dimensions and a list with none.
-  const shaped = meetShapedWithUnshapedList(nodeA, nodeB);
-  if (shaped !== undefined) return shaped === 'keep' ? undefined : shaped;
-
   // Two applications of the SAME collection constructor meet ELEMENTWISE.
   const collection = meetCollections(nodeA, nodeB);
   if (collection !== undefined)
@@ -649,8 +636,8 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
   if (isOverloadPair(a, b)) return undefined;
 
   // A transparent alias, and an intersection kept as written by a rule
-  // above (`list<number> & collection<list<integer>>`, which integer
-  // matrices inhabit), have no meet rule of their own. The pair is refuted
+  // above (`list<number> & tensor<integer>`, which lists of integers
+  // inhabit), have no meet rule of their own. The pair is refuted
   // only when `provablyDisjoint()` proves it disjoint; otherwise it is kept
   // as written. Refuting it refused a value in both: with
   // `type alias Q = indexed_collection<integer>`, a `Q` holding `[1, 2]` is
@@ -661,13 +648,16 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
   return 'never';
 }
 
-/** `broadcastable<T>` as the union it denotes, `T | list<T>`, or
+/** `broadcastable<T>` as the union it denotes: `T`, or its collection arm
+ *  (`broadcastCollectionArm` in `subtype.ts`: a tensor of any rank whose
+ *  cells are `T` when no value of `T` is a list, a plain `list<T>`
+ *  otherwise), or
  *  `undefined` when `t` is not a broadcastable. */
 function expandBroadcastable(t: Type): Type | undefined {
   if (typeof t !== 'object' || t.kind !== 'broadcastable') return undefined;
   return {
     kind: 'union',
-    types: [t.elements, { kind: 'list', elements: t.elements }],
+    types: [t.elements, broadcastCollectionArm(t.elements)],
   };
 }
 
@@ -675,27 +665,18 @@ function expandBroadcastable(t: Type): Type | undefined {
  * The meet of two applications of the SAME collection constructor, or
  * `undefined` when `a` and `b` are not such a pair.
  *
- * The meet is elementwise, and it is never empty: the EMPTY collection
- * inhabits both sides whatever their element types say, because `[]` is
- * `list<never>` and `never <: X` makes `list<never>` a subtype of every list.
- * So `list<integer> & list<string>` is `list<never>` — the type of the empty
- * list alone — and refuting the pair outright, as this used to, was unsound.
- *
- * Two lists with different fixed shapes are met row by row
- * (`meetShapedLists()`). Two lists with no dimensions, two indexed
- * collections or two collections whose element types are at mixed depth
- * (`elementsAtMixedDepth()`) give `'keep'`, the
- * intersection as written: an integer matrix is a `list<number>` (its cells
- * are numbers) and a `list<list<integer>>` (its rows are lists of
- * integers), but the elementwise meet `list<never>` holds only `[]`. The
- * empty list does not make a list with a fixed length and no zero axis
- * inhabited, so `list<number^2> & list<string^2>` is `never`.
- *
- * Doing this does NOT disturb the protocol-conformance ruling that counts two
- * collections with disjoint element types as non-overlapping (an empty
- * collection carries no element a conformance could dispatch on). That rule
- * lives in {@link typesOverlap}, which answers from `sameHeadArguments`
- * BEFORE it ever consults this meet.
+ * Two sets, two collections or two indexed collections meet elementwise.
+ * Two lists meet by the rules of `meetListTypes` (`subtype.ts`): two plain
+ * lists elementwise, two tensors cellwise with their axes met one by one, a
+ * plain list and a rank-1 tensor as that tensor with the meet of the
+ * elements and the cells; a plain list beside a tensor of rank 2 or more,
+ * or of unknown rank, is the tensor when its rows are inside the elements
+ * of the list, `never` when the two share no value, and otherwise `'keep'`,
+ * the intersection as written. The meet of two lists is empty (`never`)
+ * only when their shapes exclude each other: two plain lists whose element
+ * types share no value meet to `list<never>`, the type of the empty list,
+ * which is a value of both (`typesOverlap` still counts such a pair as not
+ * overlapping, by the protocol rule stated there).
  */
 function meetCollections(a: Type, b: Type): Type | 'keep' | undefined {
   if (typeof a !== 'object' || typeof b !== 'object') return undefined;
@@ -706,31 +687,12 @@ function meetCollections(a: Type, b: Type): Type | 'keep' | undefined {
 
   switch (a.kind) {
     case 'list': {
-      const other = b as ListType;
-      if (shapeKey(a) !== shapeKey(other)) return meetShapedLists(a, other);
-      if (
-        a.dimensions === undefined &&
-        elementsAtMixedDepth(a.elements, other.elements, true)
-      )
-        return 'keep';
-      const elements =
-        a.dimensions === undefined
-          ? meetElements(a.elements, other.elements)
-          : meetDimensionedElements(a.elements, other.elements, true);
-      if (elements === 'keep') return 'keep';
-      if (isEmptyType(elements) && a.dimensions?.every((d) => d > 0))
-        return 'never';
-      return decorate({ ...a, elements });
+      const meet = meetListTypes(a, b as ListType, meetElements);
+      return meet === 'keep' || meet === 'never' ? meet : decorate(meet);
     }
 
     case 'collection':
     case 'indexed_collection':
-      // A list is in both kinds, so a matrix can be in two of them by
-      // different readings, as for two lists with no dimensions.
-      if (
-        elementsAtMixedDepth(a.elements, (b as CollectionType).elements, true)
-      )
-        return 'keep';
       return decorate({
         ...a,
         elements: meetElements(a.elements, (b as CollectionType).elements),
@@ -1043,576 +1005,12 @@ function withoutBareSelfArms(
   return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
 }
 
-/** `list<any>`, built as a literal node (the type parser is not yet
- * initialized when this module loads under jest) and frozen, because it is
- * shared. */
-const LIST_ANY_TYPE: Type = Object.freeze({
-  kind: 'list',
-  elements: 'any',
-}) as Type;
-
-/**
- * Whether the element types `x` and `y` of two collections are at mixed
- * depth: one of them can be a list, and the other can be a value that is
- * not a list. A matrix can then be a value of both collections, by its
- * cells for one and by its rows for the other: an integer matrix is a
- * `list<number>` (its cells are numbers) and a `collection<list<integer>>`
- * (its rows are lists of integers), although `number` and `list<integer>`
- * share no value. The elementwise meet does not hold such a matrix, so the
- * callers keep the intersection as written for such a pair.
- */
-function elementsAtMixedDepth(x: Type, y: Type, forMeet = false): boolean {
-  return elementsCanNest(x, y, forMeet) || elementsCanNest(y, x, forMeet);
-}
-
-/**
- * The directed half of `elementsAtMixedDepth()`: the elements `rows` can be
- * lists whose cells are values that are not lists, of the type `cells`. A
- * list with fixed dimensions reads its elements as rows only (its shape is
- * fixed), so for such a list only this direction gives a matrix:
- * `list<list<integer>^3>` and `collection<number>` share an integer 3×2
- * matrix, but `list<integer^3>` and `collection<list<integer>>` share none.
- */
-function elementsCanNest(
-  rows: Type,
-  cells: Type,
-  forMeet = false,
-  fixedRows = false
-): boolean {
-  // The elements of a list with dimensions whose element type is a scalar
-  // top type are scalars (`isScalarTopElement()`), not rows.
-  if (fixedRows && isScalarTopElement(rows)) return false;
-  // When the rows are inside the cells, the elementwise meet already holds
-  // such a matrix: its cells are in both element types
-  // (`list<unknown> & indexed_collection<boolean>` is `list<boolean>`, and a
-  // boolean matrix is a `list<boolean>`).
-  if (isSubtype(rows, cells)) return false;
-  // The case `cells` inside `rows` needs a meet that reads cells, a
-  // collection with no fixed shape. When `rows` are the elements of a list
-  // with fixed dimensions (`fixedRows`), the meet is a list with the same
-  // dimensions, whose elements are its rows only, and it misses a tensor
-  // whose sub-tensors deeper down are values of `cells`:
-  // `list<list^3> & list<vector<integer^2>>` shares a 3×2×2 integer tensor,
-  // which `list<vector<integer^2>^3>` does not hold, and
-  // `vector<collection> & list<string>` shares a string matrix (its rows
-  // are lists, so it is a `vector<collection>`, and its cells are strings),
-  // which `vector<string>` does not hold. Such a tensor needs `rows` that
-  // hold lists of `cells` (a scalar top type does not, see the first test
-  // of this function). The cells need not be lists themselves: since the
-  // subtype rule for lists reads the rows of a value whether or not its
-  // scalar element matches (user decision 2026-10-21), a matrix of scalar
-  // cells is such a tensor too.
-  if (isSubtype(cells, rows))
-    return fixedRows && rowsCanHoldCells(rows, cells, forMeet, fixedRows);
-  // When `rows` holds every element of its own collections (`json` in
-  // `type alias json = list<json> | integer`), a cell of such a matrix,
-  // which is an element of a row at some depth, is in `rows` too, and in
-  // `cells`: a collection with no fixed shape of the meet of the two
-  // element types holds the matrix, read at the depth of that cell. A list
-  // with fixed dimensions reads its rows only, so the test does not apply
-  // to it.
-  if (!fixedRows && holdsItsElements(rows)) return false;
-  // A matrix has cells, so both element types must hold a value:
-  // `couldMatch(t, t)` also finds a type with no value that is not spelled
-  // `never` (`tuple<list<never^1>>`).
-  return (
-    couldMatch(cells, cells) &&
-    couldMatch(rows, rows) &&
-    rowsCanHoldCells(rows, cells, forMeet, fixedRows)
-  );
-}
-
-/**
- * Whether every element of a collection value of `t` is a value of `t`:
- * `json` in `type alias json = list<json> | integer`, whose lists hold
- * `json` values. An arm that is not a collection has no element. An arm that
- * is a list or an abstract collection of `E` must have its elements in `t`,
- * and, since such a value can also be a matrix whose cells are values of
- * `E`, the lists of `E` too. A set of `E` holds values of `E` only. Any
- * other arm (a tuple, a record, a dictionary, a string, a top type, an
- * application of a generic alias) answers `false`, "not shown". A
- * transparent alias is read through its definition.
- *
- * The answer is a conjunction over the arms that can be reached, so it does
- * not depend on the path: an alias or a union already visited anywhere in
- * the walk is checked once (`visited`), and the work grows with the size
- * of the alias graph, not with its number of paths.
- */
-function holdsItsElements(
-  t: Type,
-  whole: Type = t,
-  visited: Set<unknown> = new Set()
-): boolean {
-  if (isTransparentAlias(t)) {
-    // Two applications of one generic declaration can be different types.
-    if ((t.args?.length ?? 0) > 0) return false;
-    const decl = declarationOf(t);
-    if (visited.has(decl)) return true;
-    visited.add(decl);
-    const def = aliasDefinitionAt(t);
-    return def !== undefined && holdsItsElements(def, whole, visited);
-  }
-  if (typeof t === 'object' && t.kind === 'union') {
-    if (visited.has(t)) return true;
-    visited.add(t);
-    return t.types.every((arm) => holdsItsElements(arm, whole, visited));
-  }
-  if (t === 'any' || t === 'unknown') return false;
-  if (provablyDisjoint(t, COLLECTION_ANY_TYPE)) return true;
-  if (typeof t !== 'object') return false;
-  switch (t.kind) {
-    case 'set':
-      return isSubtype(t.elements, whole);
-    case 'list': {
-      const dims = t.dimensions;
-      if (dims !== undefined && dims.length > 1)
-        return isSubtype(
-          { kind: 'list', elements: t.elements, dimensions: dims.slice(1) },
-          whole
-        );
-      return (
-        isSubtype(t.elements, whole) &&
-        (dims !== undefined ||
-          isSubtype({ kind: 'list', elements: t.elements }, whole))
-      );
-    }
-    case 'collection':
-    case 'indexed_collection':
-      return (
-        isSubtype(t.elements, whole) &&
-        isSubtype({ kind: 'list', elements: t.elements }, whole)
-      );
-    default:
-      return false;
-  }
-}
-
-/** `collection<any>`, built as a literal node and frozen for the same
- * reasons as `LIST_ANY_TYPE`. */
-const COLLECTION_ANY_TYPE: Type = Object.freeze({
-  kind: 'collection',
-  elements: 'any',
-}) as Type;
-
-/** How deep `rowsCanHoldCells()` looks into nested element types. The walk
- * follows the structure of the type, one level per step, so its cost grows
- * with the depth only; the limit stops a recursive alias. */
-const NESTED_ROW_DEPTH = 64;
-
-/** No alias unfolded yet, for the first call of `rowsCanHoldCells()`. */
-const NO_ALIASES: ReadonlyMap<TypeReference, number> = new Map();
-
-/** The state of one search of `rowsCanHoldCells()`: the answer for each row
- * type already decided, the number of calls open on the stack, and the
- * smallest stack index of a recursive alias met again since the current
- * call started (see `rowsCanHoldCells()`). */
-type RowSearch = { memo: Map<Type, boolean>; open: number; low: number };
-
-/**
- * Whether a value of `rows` can be a non-empty list whose cells, at some
- * depth, are of type `cells`: `list<integer>` holds number cells, and
- * `list<list<integer>>` holds them one level deeper (a 2×2×2 tensor), but
- * `list<string^2>` holds none, and neither does `list<never>`, whose only
- * value is `[]`. The walk follows the element types of collections and the
- * arms of unions; a row must have an element that can be a cell, or that
- * holds cells deeper. A top type (`any`, `unknown`) holds such a list.
- *
- * A transparent alias is read as its definition. A recursive alias met
- * again on the path asks the same question again (the cells do not change
- * during a search), so that path adds nothing and answers `false`: a list
- * that holds such cells holds them at a finite depth, without the repeat.
- * Such a `false` holds on that path only while the call that unfolded the
- * alias is open, so the answer of a row type is kept when it is `true`, or
- * when every alias met again was unfolded by this call or by one it made
- * (the lowlink rule of Tarjan's algorithm). With
- * `type alias M = list<M^2> | integer`, `list<M^2>` cannot hold string
- * cells at any depth.
- *
- * Past `NESTED_ROW_DEPTH` levels, and for an intersection, the answer is
- * not known: for the meet (`forMeet`) it is whether `rows` can be a list at
- * all, which only keeps an intersection as written; for the overlap test it
- * is `false`, which claims no common value.
- *
- * For the meet, an element matches cells unless `provablyDisjoint()`
- * refutes the pair: anything weaker drops a value. `couldMatch()` does not
- * count an empty collection shared by two disjoint element types (a matrix
- * of empty sets is a `list<set<integer>>` and a
- * `collection<list<set<string>>>`), and its last test is assignability,
- * which misses overlapping pairs such as two function signatures.
- *
- * With `fixedRows`, `rows` are the elements of a list with fixed
- * dimensions, which the meet keeps with its dimensions and reads by its
- * rows only. An element of a list with no dimensions, or of an abstract
- * collection, met in the walk can then be a list of its element type too:
- * a value of `list<integer>` can be an integer matrix, whose elements are
- * lists of integers. Without `fixedRows` the meet is a collection with no
- * fixed shape, which reads its values at any depth, and that reading adds
- * no value it does not already hold.
- */
-function rowsCanHoldCells(
-  rows: Type,
-  cells: Type,
-  forMeet: boolean,
-  fixedRows = false,
-  depth = 0,
-  unfolded: ReadonlyMap<TypeReference, number> = NO_ALIASES,
-  search: RowSearch = { memo: new Map(), open: 0, low: Infinity }
-): boolean {
-  // One question can meet the same row type on several branches (the arms
-  // of `list<R^2> | list<R^3>` at each level of a chain of aliases): the
-  // answer for a row type is kept for the rest of this search, so the work
-  // grows with the number of distinct row types, not with the number of
-  // paths.
-  const known = search.memo.get(rows);
-  if (known !== undefined) return known;
-  const index = search.open++;
-  const outerLow = search.low;
-  search.low = Infinity;
-  try {
-    const answer = rowsCanHoldCellsUncached(
-      rows,
-      cells,
-      forMeet,
-      fixedRows,
-      depth,
-      unfolded,
-      search,
-      index
-    );
-    if (answer || search.low >= index) search.memo.set(rows, answer);
-    return answer;
-  } finally {
-    search.open -= 1;
-    // A repeat of an alias unfolded below this call is still open for the
-    // caller.
-    search.low = Math.min(outerLow, search.low < index ? search.low : Infinity);
-  }
-}
-
-function rowsCanHoldCellsUncached(
-  rows: Type,
-  cells: Type,
-  forMeet: boolean,
-  fixedRows: boolean,
-  depth: number,
-  unfolded: ReadonlyMap<TypeReference, number>,
-  search: RowSearch,
-  index: number
-): boolean {
-  if (depth >= NESTED_ROW_DEPTH)
-    return forMeet && couldMatch(rows, LIST_ANY_TYPE);
-  const deeper = (t: Type, d: number, names = unfolded): boolean =>
-    rowsCanHoldCells(t, cells, forMeet, fixedRows, d, names, search);
-  // For the overlap test, a cell matches by `typesOverlap()`, so the
-  // protocol rule applies to the cells too (`list<list<set<never>>>` and
-  // `collection<set<integer>>` share empty sets only).
-  const elementMatches = (e: Type): boolean =>
-    forMeet ? !provablyDisjoint(e, cells) : typesOverlap(e, cells);
-  const holdsThrough = (e: Type): boolean =>
-    elementMatches(e) || deeper(e, depth + 1);
-  // An element of a list with no dimensions, or of an abstract collection,
-  // read as a list of the element type (see `fixedRows` above).
-  const holdsThroughUnshaped = (e: Type): boolean =>
-    holdsThrough(e) ||
-    (fixedRows && elementMatches({ kind: 'list', elements: e }));
-  // A named type holds a non-empty list of any cells when it is a top type
-  // or a name that `list` is below: a bare collection name (the
-  // unrestricted `<any>` form), `value`, `expression`. The subtype rule for
-  // lists reads the rows of a matrix toward such an element
-  // (`matrix<integer>` is a `vector<value>`), so the meet must hold the
-  // matrix too (`vector<value> & list<integer>` is not `vector<integer>`).
-  if (typeof rows !== 'object')
-    return (
-      rows === 'any' ||
-      rows === 'unknown' ||
-      isPrimitiveSubtype('list', rows as PrimitiveType)
-    );
-  switch (rows.kind) {
-    case 'union':
-      return rows.types.some((t) => deeper(t, depth));
-    case 'broadcastable':
-      return (
-        deeper(rows.elements, depth) || holdsThroughUnshaped(rows.elements)
-      );
-    case 'list': {
-      // The elements of a list with two or more dimensions are its sub-rows,
-      // not its scalar cells: a `2×0` row holds two empty rows and no cell.
-      const dims = rows.dimensions;
-      if (dims === undefined) return holdsThroughUnshaped(rows.elements);
-      if (dims[0] === 0) return false;
-      return holdsThrough(
-        dims.length > 1
-          ? { kind: 'list', elements: rows.elements, dimensions: dims.slice(1) }
-          : rows.elements
-      );
-    }
-    case 'indexed_collection':
-    case 'collection':
-      return holdsThroughUnshaped(rows.elements);
-    case 'reference': {
-      // A transparent alias is read as its definition, once on a path: a
-      // chain of aliases with no cycle is followed to its end, and a
-      // recursive alias met again answers `false` (see above). (A budget
-      // of unfolds for the whole path stopped a long chain with no cycle.)
-      // An application of a generic alias is never taken as a repeat: two
-      // applications of one declaration can be different types
-      // (`Id<Id<list<integer>>>` with `type alias Id<T> = T`), so it is
-      // unfolded under the depth limit only.
-      if (rows.alias === true && rows.def !== undefined) {
-        const generic = (rows.args?.length ?? 0) > 0;
-        const decl = declarationOf(rows);
-        const unfoldedAt = generic ? undefined : unfolded.get(decl);
-        if (unfoldedAt !== undefined) {
-          search.low = Math.min(search.low, unfoldedAt);
-          return false;
-        }
-        const def = aliasDefinitionAt(rows);
-        if (def !== undefined)
-          return deeper(
-            def,
-            depth + 1,
-            generic ? unfolded : new Map([...unfolded, [decl, index]])
-          );
-      }
-      return forMeet && couldMatch(rows, LIST_ANY_TYPE);
-    }
-    case 'intersection':
-      return forMeet && couldMatch(rows, LIST_ANY_TYPE);
-    default:
-      return false;
-  }
-}
-
-/**
- * The readings of the elements of a list with two or more dimensions: its
- * cells, and its rows of every rank (list subtyping can peel any number of
- * outer dimensions). An element of a collection that holds the list is one
- * of these. `list<integer^(2x3)>` gives `integer` and `list<integer^3>`.
- */
-function matrixReadings(t: ListType): Type[] {
-  const dims = t.dimensions ?? [];
-  const readings: Type[] = [t.elements];
-  for (let k = 1; k < dims.length; k++)
-    readings.push({
-      kind: 'list',
-      elements: t.elements,
-      dimensions: dims.slice(k),
-    });
-  return readings;
-}
-
-/**
- * The meet of a list with two or more dimensions with a collection whose
- * elements are `elements`: `never` when no reading of the list
- * (`matrixReadings()`) can be such an element and the list is not empty
- * (`list<integer^(2x3)> & collection<string>`), otherwise `'keep'`, the
- * intersection as written.
- */
-function meetMatrixWith(matrix: ListType, elements: Type): 'never' | 'keep' {
-  const dims = matrix.dimensions ?? [];
-  // The elements of the list can themselves be lists, which give deeper
-  // readings: `list<list<integer^2>^(2x3)>` and `collection<number>` share
-  // a 2×3×2 integer tensor.
-  if (elementsCanNest(matrix.elements, elements, true)) return 'keep';
-  if (
-    dims.every((d) => d > 0) &&
-    matrixReadings(matrix).every((r) => provablyDisjoint(r, elements))
-  )
-    return 'never';
-  return 'keep';
-}
-
-/**
- * Whether a matrix can be in the collection `narrow` and in a collection of
- * `elements`, by different readings (`elementsAtMixedDepth()`). A list with
- * one fixed dimension reads its elements as rows only
- * (`elementsCanNest()`). A list with two or more dimensions is read by
- * `meetMatrixWith()` and `matrixReadings()` instead.
- */
-function mayShareMatrix(
-  narrow: ListType | CollectionType | SetType | TupleType,
-  elements: Type,
-  forMeet = false
-): boolean {
-  if (narrow.kind === 'list' && narrow.dimensions !== undefined)
-    return elementsCanNest(narrow.elements, elements, forMeet, true);
-  if (narrow.kind === 'list' || narrow.kind === 'indexed_collection')
-    return elementsAtMixedDepth(narrow.elements, elements, forMeet);
-  return false;
-}
-
-/** Whether `t` is a list whose outer dimension is zero: it holds `[]` only. */
-function isZeroLengthList(t: Type): boolean {
-  return typeof t === 'object' && t.kind === 'list' && t.dimensions?.[0] === 0;
-}
-
 /** Whether `t` is a transparent alias or an intersection: an operand that
  * `meet2()` keeps as written when it cannot refute the pair. */
 function isKeptOperand(t: Type): boolean {
   if (typeof t !== 'object') return false;
   if (t.kind === 'intersection') return true;
   return t.kind === 'reference' && t.alias === true;
-}
-
-/**
- * The meet of a list with dimensions and a list with none, or `undefined`
- * when `a` and `b` are not such a pair. A list with no dimensions has any
- * shape, so the meet has the shape of the other list and the meet of the
- * elements: `list<number^2> & list<integer>` is `list<integer^2>`. Two
- * lists with different fixed shapes are met by `meetShapedLists()`.
- *
- * The answer is `'keep'`, the intersection as written, when the list with
- * dimensions has two or more of them (an element of the other list is then
- * a cell or a row of it), or when the element types are at mixed depth
- * (`elementsAtMixedDepth()`), unless `provablyDisjoint()` refutes the pair.
- * With no common element, a list whose length is fixed and not zero has no
- * value: `list<string> & list<integer^2>` is `never`.
- */
-function meetShapedWithUnshapedList(
-  a: Type,
-  b: Type
-): Type | 'keep' | undefined {
-  if (typeof a !== 'object' || typeof b !== 'object') return undefined;
-  if (a.kind !== 'list' || b.kind !== 'list') return undefined;
-  if ((a.dimensions === undefined) === (b.dimensions === undefined))
-    return undefined;
-  const shaped = a.dimensions !== undefined ? a : b;
-  const unshaped = shaped === a ? b : a;
-  const dims = shaped.dimensions!;
-  if (dims.length > 1) return meetMatrixWith(shaped, unshaped.elements);
-  if (elementsCanNest(shaped.elements, unshaped.elements, true, true))
-    return provablyDisjoint(a, b) ? 'never' : 'keep';
-  const elements = meetDimensionedElements(
-    shaped.elements,
-    unshaped.elements,
-    false
-  );
-  if (elements === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
-  if (isEmptyType(elements) && dims[0] > 0) return 'never';
-  return decorate({ ...shaped, elements });
-}
-
-/**
- * The meet of `x`, the element type of a list with dimensions, and `y`, an
- * element type of the other operand, or `'keep'` when it has no spelling.
- * When `x` is a scalar top type (`isScalarTopElement()`), the elements are
- * scalars, so the meet is `y` without its lists: `never` when `y` holds
- * lists only (`list<any^3> & list<list^3>` has no value), `y` when it holds
- * none, and `'keep'` when it holds both (`integer | list<integer>`). When
- * `yHasDimensions`, `y` is the element type of a list with dimensions too,
- * and the same holds with `x` and `y` swapped. Otherwise a scalar top `y`
- * (from `list<any>`, `collection<unknown>`) can hold lists, and is read as
- * usual. Any other pair gives the meet of the two types.
- */
-function meetDimensionedElements(
-  x: Type,
-  y: Type,
-  yHasDimensions: boolean
-): Type | 'keep' {
-  const scalars = scalarsBesideLists(x, y, yHasDimensions);
-  if (scalars === 'lists only') return 'never';
-  if (scalars === 'lists and scalars') return 'keep';
-  return reduceType({ kind: 'intersection', types: [x, y] });
-}
-
-/**
- * When one of `x` and `y` is a scalar top element type of a list with
- * dimensions (`isScalarTopElement()`) and the other is not: whether the
- * other holds lists only, or lists and other values. `undefined` in any
- * other case. `x` is the element type of a list with dimensions; `y` is
- * one too when `yHasDimensions`.
- */
-function scalarsBesideLists(
-  x: Type,
-  y: Type,
-  yHasDimensions: boolean
-): 'lists only' | 'lists and scalars' | undefined {
-  const sx = isScalarTopElement(x);
-  const sy = yHasDimensions && isScalarTopElement(y);
-  if (sx === sy) return undefined;
-  const other = sx ? y : x;
-  if (isSubtype(other, LIST_ANY_TYPE)) return 'lists only';
-  if (holdsListElements(other)) return 'lists and scalars';
-  return undefined;
-}
-
-/**
- * The rows of a list with dimensions: a list with the outer axis removed,
- * or the elements when there is one axis. `list<integer^(2x3)>` gives
- * `list<integer^3>`. A non-empty value of the list is a list of `d₁`
- * values of its rows, where `d₁` is the outer axis: the subtype rule for
- * lists reads a value one axis down in the same way as the whole value.
- * The reverse is not always true: `[[1], [2, 3]]` is a list of two values
- * of `vector<integer>`, the rows of `matrix<integer^(2x?)>`, but not a
- * matrix.
- */
-function shapedListRows(t: ListType): Type {
-  const dims = t.dimensions!;
-  if (dims.length === 1) return t.elements;
-  return { kind: 'list', elements: t.elements, dimensions: dims.slice(1) };
-}
-
-/**
- * The meet of two lists with dimensions and different shapes.
- *
- * A non-empty value of both has one length on the outer axis, which both
- * must allow (`-1` allows any length), and each of its rows is a value of
- * the rows of both (`shapedListRows()`). So two different fixed lengths
- * give `never`, and so do rows with no common value and an outer axis
- * that is not zero or `-1`.
- *
- * The candidate meet is a list of that length whose element is the meet of
- * the rows, with the axes merged when that meet has a fixed shape:
- * `list<number^(2x2)> & list<list<integer>^2>` is `list<integer^(2x2)>`,
- * because the rows `list<number^2>` and `list<integer>` meet to
- * `list<integer^2>`, and `list<number^2> & list<integer^-1>` is
- * `list<integer^2>`. The candidate is the answer when its cells cannot be
- * lists, and when it is a subtype of both operands. The first test keeps
- * the candidate complete: when its cells can be lists (`any`, `unknown`),
- * the subtype rule reads some values of the operands by deeper rows that
- * the candidate does not hold. The second test refuses a candidate that the
- * subtype rule reads differently: a list with one axis whose element type
- * holds the cells of a matrix does not hold the matrix
- * (`list<number^(3x2)>` is not a `list<unknown^3>`), and rows with an axis
- * of length `-1` do not merge (they can differ in length). Any other pair
- * is `'keep'`, the intersection as written, unless `provablyDisjoint()`
- * refutes it.
- *
- * A dimension variable (in a pattern, not in a ground type) is not read:
- * the answer is then `'keep'`.
- */
-function meetShapedLists(a: ListType, b: ListType): Type | 'keep' {
-  if (a.dimensions === undefined || b.dimensions === undefined) return 'keep';
-  if (a.dimensionVariables !== undefined || b.dimensionVariables !== undefined)
-    return 'keep';
-  const da = a.dimensions[0];
-  const db = b.dimensions[0];
-  if (da !== -1 && db !== -1 && da !== db) return 'never';
-  const length = da === -1 ? db : da;
-  // A list with one axis has element rows, read as `meetDimensionedElements()`
-  // reads them: a scalar top type there holds no list.
-  const rows =
-    a.dimensions.length === 1 || b.dimensions.length === 1
-      ? meetDimensionedElements(
-          a.dimensions.length === 1 ? shapedListRows(a) : shapedListRows(b),
-          a.dimensions.length === 1 ? shapedListRows(b) : shapedListRows(a),
-          b.dimensions.length === 1 && a.dimensions.length === 1
-        )
-      : reduceType({
-          kind: 'intersection',
-          types: [shapedListRows(a), shapedListRows(b)],
-        });
-  if (rows === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
-  if (isEmptyType(rows) && length > 0) return 'never';
-  const list: ListType = { kind: 'list', elements: rows, dimensions: [length] };
-  const candidate = (flattenNestedListType(list) ?? list) as ListType;
-  if (
-    provablyDisjoint(candidate.elements, LIST_ANY_TYPE) &&
-    isSubtype(candidate, a) &&
-    isSubtype(candidate, b)
-  )
-    return decorate(candidate);
-  return provablyDisjoint(a, b) ? 'never' : 'keep';
 }
 
 /** A bare `list`, `indexed_collection`, `collection` or `set` as its
@@ -1676,13 +1074,20 @@ function collectionKindPair(
  * `broadcastable<number> | string` refused an argument typed
  * `indexed_collection<integer>` that holds a list.
  *
- * The answer is `'keep'`, the intersection as written, when a matrix can be
- * in both: the narrow one is a list with two or more dimensions, or a list
- * or an indexed collection whose elements are at mixed depth with the wide
- * one's (`elementsAtMixedDepth()`), unless `provablyDisjoint()` refutes the
- * pair. An empty element meet leaves the empty collection, except for a
- * list whose length is fixed and not zero, and for a tuple, whose every
- * slot must hold a value: those give `never`.
+ * A list is read by its elements (`listElementType`): the cells of a rank-1
+ * tensor, the rows of a deeper one. The meet of a tensor with a dimension
+ * list and a `collection<F>` is the tensor whose rows are the meet of its
+ * rows with `F`: `matrix<number> & collection<vector<integer>>` is
+ * `matrix<integer>`, and `matrix<integer> & collection<number>` is `never`
+ * (no row of a matrix is a number). When the meet of the rows is not a
+ * tensor of the lower rank with the same cells, the pair is kept as
+ * written. A tensor of unknown rank beside a collection is read at rank 1
+ * (its elements are cells) and at rank 2 or more (its elements are
+ * tensors), and is kept as written when the two readings give different
+ * cells (see the comment in the function). An empty element meet
+ * leaves the empty collection, except for a tensor whose length is fixed
+ * and not zero, and for a tuple, whose every slot must hold a value: those
+ * give `never`.
  */
 function meetCollectionKinds(a: Type, b: Type): Type | 'keep' | undefined {
   // A bare `tuple` has no fixed number of slots, so it has no slot-wise
@@ -1708,19 +1113,82 @@ function meetCollectionKinds(a: Type, b: Type): Type | 'keep' | undefined {
     if (elements.some((e) => isEmptyType(e.type))) return 'never';
     return { ...narrow, elements };
   }
-  if (narrow.kind === 'list' && (narrow.dimensions?.length ?? 0) > 1)
-    return meetMatrixWith(narrow, wide.elements);
-  if (mayShareMatrix(narrow, wide.elements, true))
-    return provablyDisjoint(a, b) ? 'never' : 'keep';
-  const elements =
-    narrow.kind === 'list' && narrow.dimensions !== undefined
-      ? meetDimensionedElements(narrow.elements, wide.elements, false)
-      : meetElements(narrow.elements);
-  if (elements === 'keep') return provablyDisjoint(a, b) ? 'never' : 'keep';
+  if (narrow.kind === 'list' && narrow.dimensions === null) {
+    // A tensor of unknown rank `tensor<U>` beside a `collection<E>` or an
+    // `indexed_collection<E>`. A value of both is a tensor each of whose
+    // elements is in `E`. At rank 1 its elements are cells, in `U & E`
+    // (`cells` below). At rank 2 or more its elements are tensors of cells
+    // `U`, in `tensor<U> & E` (`rows` below), and its cells are the cells
+    // of those rows. So:
+    // - when no row can be in `E` (`rows` is empty, or `tensor<U>` is
+    //   provably disjoint from `E`), only the rank-1 reading remains:
+    //   `vector<U & E>`, the lists of cells in both, and `list<never>` (the
+    //   empty list, in both) when the cells meet to `never`;
+    // - `tensor<U & E>` when it is in both (its elements, `C | tensor<C>`
+    //   with `C = U & E`, are in `E`) and it holds every value of rank 2 or
+    //   more (the rows are a `tensor<C>`): `tensor<number> &
+    //   collection<integer | tensor<integer>>` is `tensor<integer>`. `meet2`
+    //   answers the case `U | tensor<U> <: E` before reaching here.
+    // - otherwise the intersection is kept as written. The two readings can
+    //   give different cells: `tensor<number> & collection<tensor<integer>>`
+    //   holds the integer matrices, but its rank-1 values are only the empty
+    //   list, so neither `tensor<never>` nor `tensor<integer>` is the meet.
+    const cells = meetElements(narrow.elements);
+    const cellTensor: ListType = {
+      kind: 'list',
+      elements: cells,
+      dimensions: null,
+    };
+    const tensorOfU: ListType = {
+      kind: 'list',
+      elements: narrow.elements,
+      dimensions: null,
+    };
+    const rows = reduceType({
+      kind: 'intersection',
+      types: [tensorOfU, wide.elements],
+    });
+    if (isEmptyType(rows) || provablyDisjoint(tensorOfU, wide.elements)) {
+      if (isEmptyType(cells))
+        return decorate({ kind: 'list', elements: 'never' });
+      return decorate({ kind: 'list', elements: cells, dimensions: [-1] });
+    }
+    if (
+      isSubtype(listElementType(cellTensor), wide.elements) &&
+      isSubtype(rows, cellTensor)
+    )
+      return decorate(cellTensor);
+    return 'keep';
+  }
+  if (
+    narrow.kind === 'list' &&
+    narrow.dimensions &&
+    narrow.dimensions.length > 1
+  ) {
+    const dims = narrow.dimensions;
+    const rows = meetElements(listElementType(narrow));
+    if (isEmptyType(rows)) return 'never';
+    // The rows met to a tensor of the lower rank: the result has the outer
+    // axis of the narrow tensor before the axes of that meet.
+    if (
+      typeof rows === 'object' &&
+      rows.kind === 'list' &&
+      rows.dimensions &&
+      rows.dimensions.length === dims.length - 1 &&
+      rows.dimensionVariables === undefined
+    )
+      return decorate({
+        kind: 'list',
+        elements: rows.elements,
+        dimensions: [dims[0], ...rows.dimensions],
+      });
+    return 'keep';
+  }
+  const elements = meetElements(narrow.elements);
   if (
     isEmptyType(elements) &&
     narrow.kind === 'list' &&
-    narrow.dimensions !== undefined &&
+    narrow.dimensions &&
     narrow.dimensions[0] > 0
   )
     return 'never';
@@ -2047,69 +1515,91 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
   // `meet2`/`reduceType` keep their semantics for every other caller.
   //
   // Residual, deliberately accepted (protocols design P4): two same-head
-  // COLLECTIONS with disjoint element types still share the EMPTY value
-  // (`[]`), so strictly they are not disjoint. The ruling counts them as
+  // COLLECTIONS with disjoint element types still share the EMPTY value,
+  // so strictly they are not disjoint. The ruling counts them as
   // non-overlapping — an empty collection carries no element a conformance
-  // could ever dispatch on.
-  const args = sameHeadArguments(a, b);
-  if (args !== null) {
-    // The elements of two lists with the same dimensions, one of them with
-    // a scalar top element type, share no value when the other's elements
-    // are all lists (`scalarsBesideLists()`): `list<any^3>` and
-    // `list<list^3>`.
-    if (
-      typeof a === 'object' &&
-      typeof b === 'object' &&
-      a.kind === 'list' &&
-      b.kind === 'list' &&
-      a.dimensions !== undefined &&
-      scalarsBesideLists(a.elements, b.elements, true) === 'lists only'
-    )
-      return false;
-    if (args[0].every((t, i) => typesOverlap(t, args[1][i]))) return true;
-    // Two collections of the same kind with no fixed shape can share a
-    // tensor through elements at different depths (`elementsAtMixedDepth()`):
-    // a rank-3 tensor of reals is a `list<list<list<real>>>` and a
-    // `list<number>`, whose elements do not overlap.
-    const unshaped = (t: Type): t is ListType | CollectionType =>
-      typeof t === 'object' &&
-      ((t.kind === 'list' && t.dimensions === undefined) ||
-        t.kind === 'indexed_collection' ||
-        t.kind === 'collection');
-    return (
-      unshaped(a) && unshaped(b) && elementsAtMixedDepth(a.elements, b.elements)
-    );
-  }
-
-  // Two lists with different fixed shapes are compared row by row, as the
-  // meet does (`meetShapedLists()`), so that the protocol rule applies to
-  // the rows too: `list<integer^(2x2)>` and `list<list<integer>^2>` share
-  // integer matrices, and `list<integer^(-1x2)>` and
-  // `vector<list<string>>` share the empty list only. A list whose outer
-  // axis is zero holds `[]` only. Rows that overlap are not enough: the
-  // subtype rule reads some lists differently from their rows
-  // (`shapedListRows()`), so the meet must also be inhabited.
+  // could ever dispatch on. Two PLAIN LISTS are the exception since
+  // 2026-10-21: their meet is `list<never>` (the empty list, a value of
+  // both, `meetListTypes`), and this predicate agrees with the meet, as
+  // `couldMatch` does: `list<integer>` and `list<list<integer>>` overlap.
+  // So do two tensors of unknown rank, or one beside a plain list: their
+  // meet holds the empty list too (`tensor<integer> & tensor<string>` is
+  // `tensor<never>`, and `broadcastable<integer>` and
+  // `broadcastable<string>` share it through their tensor arms).
   if (
     typeof a === 'object' &&
     typeof b === 'object' &&
     a.kind === 'list' &&
     b.kind === 'list' &&
-    a.dimensions !== undefined &&
-    b.dimensions !== undefined &&
-    a.dimensionVariables === undefined &&
-    b.dimensionVariables === undefined
+    !a.dimensions &&
+    !b.dimensions
+  )
+    return true;
+  const args = sameHeadArguments(a, b);
+  if (args !== null)
+    return args[0].every((t, i) => typesOverlap(t, args[1][i]));
+
+  // Two list types of different shapes, by the rules of the meet
+  // (`meetListTypes`, which answers `never` only when the shapes exclude
+  // each other). Two tensors with dimension lists share a value when their
+  // ranks are the same, each axis is open on one side or the same length
+  // on both, and their cells overlap, or when both admit the empty shape
+  // (a first axis that is open or zero); a tensor of unknown rank shares a
+  // value with any tensor whose cells overlap its own, and the empty list
+  // with any of them. A plain list and a rank-1 tensor share the empty
+  // list unless the tensor's length is fixed and positive, in which case
+  // their elements must overlap. A plain list and a tensor of rank 2 or
+  // more share a value when the elements of the list overlap the rows of
+  // the tensor (`listElementType`): `list<list<integer>>` and
+  // `matrix<number>` share integer matrices, `list<number>` and
+  // `matrix<integer>` share none (the empty list is not a matrix).
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'list' &&
+    b.kind === 'list'
   ) {
-    const da = a.dimensions[0];
-    const db = b.dimensions[0];
-    if (da === 0 || db === 0) return false;
-    if (da !== -1 && db !== -1 && da !== db) return false;
-    if (!typesOverlap(shapedListRows(a), shapedListRows(b))) return false;
+    const emptyAdmitted = (t: ListType): boolean =>
+      t.dimensions === undefined ||
+      t.dimensions === null ||
+      (t.dimensions.length === 1 && t.dimensions[0] <= 0);
+    if (a.dimensions !== undefined && b.dimensions !== undefined) {
+      const da = a.dimensions;
+      const db = b.dimensions;
+      if (da && db) {
+        if (da.length !== db.length) return false;
+        for (let i = 0; i < da.length; i++)
+          if (da[i] !== -1 && db[i] !== -1 && da[i] !== db[i]) return false;
+        if (da[0] <= 0 && db[0] <= 0) return true;
+      } else {
+        // A tensor of unknown rank holds the empty list `[]`, as does
+        // another tensor of unknown rank, a tensor whose first axis has
+        // length 0, and a rank-1 tensor with an open length (the subtype
+        // rule for `list<never>`): `tensor<integer>` and `tensor<string>`
+        // share `[]` although their cells do not overlap.
+        const other = da ?? db;
+        if (
+          other === null ||
+          other === undefined ||
+          other[0] === 0 ||
+          (other.length === 1 && other[0] === -1)
+        )
+          return true;
+      }
+      if (da?.[0] === 0 || db?.[0] === 0) return false;
+      return typesOverlap(a.elements, b.elements);
+    }
+    const tensor = a.dimensions === undefined ? b : a;
+    if (emptyAdmitted(tensor)) return true;
+    if (tensor.dimensions![0] === 0) return false;
+    return typesOverlap(listElementType(a), listElementType(b));
   }
 
-  // A broadcastable is `T | list<T>`: its arms are compared one by one, with
-  // the rule above for each pair, so the cross terms are read
+  // A broadcastable is `T` or its collection arm (`tensor<T>`, or
+  // `list<T>` when `T` can hold a list): its arms are compared one by one,
+  // with the rule above for each pair, so the cross terms are read
   // (`broadcastable<integer>` and `broadcastable<list<integer>>` share
-  // `[1, 2]`) and a pair that shares the empty list only is not counted
+  // `[1, 2]`), and two collection arms share the empty list
   // (`broadcastable<integer>` and `broadcastable<string>`).
   const ea = expandBroadcastable(a);
   const eb = expandBroadcastable(b);
@@ -2122,48 +1612,26 @@ function typesOverlapUncached(a: Type, b: Type): boolean {
   }
 
   // The same argument-wise rule for collections of different kinds
-  // (`collectionKindPair()`), and for a list with dimensions beside a list
-  // with none: `list<integer>` and `collection<string>` share the empty
-  // collection only, as `list<integer>` and `list<string>` do. A pair that
-  // can share a matrix (a list with two or more dimensions, or elements at
-  // mixed depth) is decided by the meet below instead.
+  // (`collectionKindPair()`): `list<integer>` and `collection<string>`
+  // share the empty collection only, as `list<integer>` and `list<string>`
+  // do. A list is read by its elements (`listElementType`), so
+  // `matrix<integer>` and `collection<number>` share no value, while
+  // `matrix<integer>` and `collection<list<integer>>` share every integer
+  // matrix.
   const kinds = collectionKindPair(a, b);
-  const shapes =
-    typeof a === 'object' &&
-    typeof b === 'object' &&
-    a.kind === 'list' &&
-    b.kind === 'list' &&
-    (a.dimensions === undefined) !== (b.dimensions === undefined)
-      ? ([
-          a.dimensions !== undefined ? a : b,
-          a.dimensions !== undefined ? b : a,
-        ] as const)
-      : undefined;
-  const narrow = kinds?.[0] ?? shapes?.[0];
-  const wide = kinds?.[1] ?? shapes?.[1];
-  if (narrow !== undefined && wide !== undefined) {
-    if (isZeroLengthList(narrow)) return false;
-    // The scalar elements of a list with one axis share no value with
-    // elements that are all lists (`scalarsBesideLists()`):
-    // `vector<unknown^3>` and `list<list>` do not overlap. With two or more
-    // axes, an element of the other is a row, not a scalar cell.
-    if (
-      narrow.kind === 'list' &&
-      narrow.dimensions?.length === 1 &&
-      scalarsBesideLists(narrow.elements, wide.elements, false) === 'lists only'
-    )
-      return false;
+  if (kinds !== undefined) {
+    const [narrow, wide] = kinds;
     if (narrow.kind === 'tuple')
       return narrow.elements.every((e) => typesOverlap(e.type, wide.elements));
-    // A list with two or more dimensions: an element of the other is one of
-    // its readings (`matrixReadings()`).
-    if (narrow.kind === 'list' && (narrow.dimensions?.length ?? 0) > 1) {
-      if (!elementsCanNest(narrow.elements, wide.elements))
-        return matrixReadings(narrow).some((r) =>
-          typesOverlap(r, wide.elements)
-        );
-    } else if (!mayShareMatrix(narrow, wide.elements))
-      return typesOverlap(narrow.elements, wide.elements);
+    if (narrow.kind === 'list') {
+      // A plain list beside an abstract collection shares the empty list,
+      // as two plain lists do (its meet is a list of the element meet,
+      // never empty).
+      if (narrow.dimensions === undefined) return true;
+      if (narrow.dimensions?.[0] === 0) return false;
+      return typesOverlap(listElementType(narrow), wide.elements);
+    }
+    return typesOverlap(narrow.elements, wide.elements);
   }
 
   const meet = reduceType({ kind: 'intersection', types: [a, b] });
@@ -2183,8 +1651,9 @@ function sameHeadArguments(a: Type, b: Type): [Type[], Type[]] | null {
   switch (a.kind) {
     case 'list': {
       const other = b as ListType;
-      // A differing shape is not an argument-wise question.
-      if (shapeKey(a) !== shapeKey(other)) return null;
+      // A differing shape is not an argument-wise question. A plain list
+      // and a tensor of unknown rank are different shapes (`listShapeKey`).
+      if (listShapeKey(a) !== listShapeKey(other)) return null;
       return [[a.elements], [other.elements]];
     }
 

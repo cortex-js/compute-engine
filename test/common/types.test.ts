@@ -1799,8 +1799,10 @@ describe('reduceType Tests', () => {
       // `broadcastable<T>` is `T | list<T>`. Both scalar arms and both cross
       // terms are empty, leaving only `list<never>` — the empty list, which
       // does inhabit both, so the pair must not refute.
+      // Since 2026-10-22 both collection arms are tensors (a string cannot
+      // hold a list), so the empty collection is spelled `tensor<never>`.
       const m = meetOf('broadcastable<integer>', 'broadcastable<string>');
-      expect(typeToString(m)).toBe('list<never>');
+      expect(typeToString(m)).toBe('tensor<never>');
       expect(isSubtype(parseType('list<never>'), m)).toBe(true);
     });
 

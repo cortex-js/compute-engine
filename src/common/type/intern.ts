@@ -121,7 +121,9 @@ function freezeNode(t: Exclude<Type, string>): void {
   if (t.kind === 'tuple') {
     for (const e of t.elements) Object.freeze(e);
     Object.freeze(t.elements);
-  } else if (t.kind === 'list' && t.dimensions !== undefined) {
+  } else if (t.kind === 'list' && t.dimensions) {
+    // `dimensions` is `null` for a tensor of unknown rank; there is then no
+    // array to freeze.
     Object.freeze(t.dimensions);
     if (t.dimensionVariables !== undefined) Object.freeze(t.dimensionVariables);
   } else if (t.kind === 'record') {

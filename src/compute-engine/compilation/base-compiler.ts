@@ -57,6 +57,8 @@ import {
   couldBeNumericTuple,
   hasTupleOrStringArm,
   isFiniteIndexedCollection,
+  isBroadcastablePointType,
+  isNestedPointCollectionType,
   isNumericTuple,
   isPointListValue,
   isPossiblyCollectionTyped,
@@ -67,6 +69,8 @@ import {
   isTupleWithListCoordinate,
   isPointListArgumentType,
   isPointParameterType,
+  leafwardElementType,
+  pointCollectionElementType,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -1044,7 +1048,10 @@ function typeHasStringEvidence(
         typeHasStringEvidence(x, visited)
       );
   }
-  const elt = collectionElementType(r);
+  // Toward the cells (`leafwardElementType`): the element of a tensor of
+  // unknown rank contains the tensor itself, which would send the walk
+  // round for ever.
+  const elt = leafwardElementType(r);
   if (elt === undefined) return false;
   return typeHasStringEvidence(elt, visited);
 }
@@ -1105,7 +1112,9 @@ export function unfaithfulComparisonAggregate(
       }
       return null;
     }
-    const elt = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`), for the reason given at
+    // `typeHasStringEvidence`.
+    const elt = leafwardElementType(r);
     if (elt === undefined) return null;
     return walk(elt, false, visited);
   };
@@ -2043,6 +2052,131 @@ export function isGatedNumericListOperand(e: Expression): boolean {
  */
 export function isGatedListComponent(op: Expression): boolean {
   return broadcastingComponentKind(op.type.type) === 'gated-list';
+}
+
+/**
+ * `leafwardElementType`, `pointCollectionElementType`,
+ * `isBroadcastablePointType` and `isNestedPointCollectionType`
+ * (`collection-utils.ts`) for the interval target, which must not import
+ * `collection-utils` directly (see `pointHasBroadcastComponent`).
+ */
+export {
+  leafwardElementType,
+  pointCollectionElementType,
+  isBroadcastablePointType,
+  isNestedPointCollectionType,
+};
+
+/**
+ * True when every coordinate of every point that a value of type `t` can
+ * hold is a number: `t` is a tuple whose components are all numbers, or a
+ * `broadcastable`, a list or a union whose points are all such tuples, at
+ * every level. A bare `tuple`, a coordinate that is not provably a number
+ * (`string`, `number | missing`), and any other type answer `false`.
+ *
+ * The run-time point dispatch of the compile targets (`_SYS.pointComponent`
+ * in `javascript-runtime.ts`, `pointComponent` in `interval/collections.ts`)
+ * sees a point and a list of numbers as the same array. It reads an array
+ * as a point only when every cell of it is a number. A point that has a
+ * non-numeric coordinate (`("a", 1)`) is then read as a list that is not a
+ * list of points, and the answer is wrong. The compile targets use this
+ * test to refuse such an operand, so that the interpreter answers.
+ */
+export function everyPointCoordinateIsNumeric(t: Type, depth = 0): boolean {
+  // The depth limit stops a self-referential alias.
+  if (depth > 16) return false;
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return false;
+  if (r.kind === 'tuple')
+    return (
+      r.elements.length > 0 &&
+      r.elements.every((c) => isSubtype(c.type, 'number'))
+    );
+  if (r.kind === 'union')
+    return r.types.every((arm) =>
+      everyPointCoordinateIsNumeric(arm, depth + 1)
+    );
+  if (r.kind === 'broadcastable' || r.kind === 'list')
+    return everyPointCoordinateIsNumeric(r.elements, depth + 1);
+  return false;
+}
+
+/**
+ * True when a value of type `t` may be an array of numbers of rank `rank` or
+ * more, with no tuple at any level: `[[[1, 2], [3, 4]]]` for `rank` 3. The
+ * answer is `true` for a type that states nothing (`unknown`, `any`, a bare
+ * `list`), and for a type this test does not read, so a caller that refuses
+ * on `true` fails closed. A tuple answers `false`: the interpreter reads a
+ * tuple as a point, never as numeric data.
+ *
+ * The run-time point dispatch of the compile targets (`_SYS.pointComponent`
+ * in `javascript-runtime.ts`, `pointComponent` in `interval/collections.ts`)
+ * sees a tuple and a list as the same array. So it cannot tell a list of
+ * lists of points (`[[(1, 2), (3, 4)]]`, which the interpreter maps down to
+ * its points, `[[1, 3]]`) from a numeric array of rank 3 (`[[[1, 2], [3,
+ * 4]]]`, which the interpreter element-indexes, `[[1, 2], [3, 4]]`). The
+ * compile targets use this test to refuse an operand whose static type
+ * admits such numeric data, so that the interpreter answers.
+ */
+export function mayHoldNumericArrayOfRank(
+  t: Type,
+  rank: number,
+  depth = 0
+): boolean {
+  // The depth limit stops a self-referential alias.
+  if (depth > 16) return true;
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') {
+    if (rank <= 0) return couldMatch(r, 'number');
+    if (
+      r === 'unknown' ||
+      r === 'any' ||
+      r === 'value' ||
+      r === 'expression' ||
+      r === 'list' ||
+      r === 'set' ||
+      r === 'collection' ||
+      r === 'indexed_collection'
+    )
+      return true;
+    if (r === 'range') return rank <= 1;
+    return false;
+  }
+  const next = (x: Type, n: number) =>
+    mayHoldNumericArrayOfRank(x, n, depth + 1);
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((arm) => next(arm, rank));
+    case 'intersection':
+      return r.types.every((arm) => next(arm, rank));
+    case 'tuple':
+      return false;
+    // A numeric range type (`real<0..1>`) is a number.
+    case 'numeric':
+      return rank <= 0;
+    case 'list': {
+      if (rank <= 0) return false;
+      const dims = r.dimensions;
+      // A tensor of unknown rank (`tensor<U>`) holds every rank.
+      if (dims === null) return next(r.elements, 0);
+      if (dims !== undefined)
+        return dims.length >= rank && next(r.elements, 0);
+      return next(r.elements, rank - 1);
+    }
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return rank > 0 && next(r.elements, rank - 1);
+    case 'broadcastable':
+      // `broadcastable<T>` is `T` or a tensor of `T` cells of any rank.
+      return next(r.elements, 0) || next(r.elements, rank);
+    case 'record':
+    case 'dictionary':
+    case 'signature':
+      return false;
+    default:
+      return true;
+  }
 }
 
 /**
@@ -6634,7 +6768,10 @@ export class BaseCompiler {
       );
     if (r.kind === 'union')
       return r.types.some((m) => BaseCompiler.typeHasComplexLeaf(m, seen));
-    const elt = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`): the element of a tensor of
+    // unknown rank contains the tensor itself, which would send the walk
+    // round for ever.
+    const elt = leafwardElementType(r);
     if (elt === undefined) return false;
     return BaseCompiler.typeHasComplexLeaf(elt, seen);
   }
@@ -6655,7 +6792,8 @@ export class BaseCompiler {
       );
     if (typeof r !== 'string' && r.kind === 'union')
       return r.types.every((m) => BaseCompiler.wideEntriesType(m, seen));
-    const elt = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
+    const elt = leafwardElementType(r);
     if (elt !== undefined) return BaseCompiler.wideEntriesType(elt, seen);
     return BaseCompiler.wideNumericType(r);
   }
@@ -6726,7 +6864,8 @@ export class BaseCompiler {
       );
     if (typeof r !== 'string' && r.kind === 'union')
       return r.types.every((m) => BaseCompiler.realEntriesType(m, seen));
-    const elt = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
+    const elt = leafwardElementType(r);
     if (elt !== undefined) return BaseCompiler.realEntriesType(elt, seen);
     return isSubtype(finitePartOfType(stripMissingFromType(r)), 'real');
   }
@@ -11159,6 +11298,25 @@ export class BaseCompiler {
     // type, and the broadcast lowering took the absolute value of each
     // coordinate: `[[1, 3], [2, 3]]` where the interpreter answers
     // `[√10, √13]`.
+    //
+    // A `broadcastable<P>` of points is one point or a tensor of points of
+    // any rank, and the static type does not say which. On the JavaScript
+    // target the shape is read at run time (`_SYS.absShape`): one point is
+    // its norm, a list of points one norm per point, and a tensor of points
+    // of rank 2 or more a tensor of norms, as the interpreter answers. The
+    // `Norm` rewrite below cannot give the last answer: the interpreter's
+    // `Norm` refuses a tensor of points of rank 2 or more. A collection of
+    // points at more than one level (`isNestedPointCollectionType`, a
+    // `tensor<tuple<…>>`) takes the same dispatch, for the same reason; the
+    // element-wise lowering took the absolute value of each coordinate.
+    if (
+      h === 'Abs' &&
+      args.length === 1 &&
+      target.language === 'javascript' &&
+      (isBroadcastablePointType(args[0].type.type) ||
+        isNestedPointCollectionType(args[0].type.type))
+    )
+      return `_SYS.absShape(${BaseCompiler.compile(args[0], target)})`;
     if (
       h === 'Abs' &&
       args.length === 1 &&
@@ -14585,7 +14743,8 @@ export class BaseCompiler {
     const realComponents = (t: Type): boolean => {
       if (typeof t !== 'string' && t.kind === 'union')
         return t.types.every(realComponents);
-      const element = collectionElementType(t);
+      // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
+      const element = leafwardElementType(t);
       return element !== undefined
         ? realComponents(element)
         : !isNonRealNumber(t);
@@ -14787,7 +14946,9 @@ export class BaseCompiler {
     }
     if (t.kind !== 'list') return undefined;
     const dims = t.dimensions;
-    if (dims === undefined || dims.length !== 1) return undefined;
+    // Only a rank-1 dimension list states a width. A plain list and a
+    // tensor of unknown rank (`dimensions` is `null`) state none.
+    if (!dims || dims.length !== 1) return undefined;
     const elt = collectionElementType(t);
     if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
     return dims[0];
@@ -17358,6 +17519,16 @@ export class BaseCompiler {
    * they agree on the shape of the value.
    */
   static foldsCollectionElements(coll: Expression): boolean {
+    // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+    // may be a matrix, whose elements are rows: its elements are typed
+    // `U | tensor<U>`, which is not an indexed collection, so the test
+    // below would choose the scalar fold and read a row as one number. The
+    // guarded element-wise fold dispatches on each element, so it is the
+    // fold for such an operand.
+    const source = coll.isCanonical ? coll : coll.canonical;
+    const t = resolveTypeForCompilation(source.type.type);
+    if (typeof t !== 'string' && t.kind === 'list' && t.dimensions === null)
+      return true;
     const elt = BaseCompiler.collectionElementTypeOf(coll);
     if (elt === undefined) return false;
     const element = resolveTypeForCompilation(elt);
@@ -25645,7 +25816,8 @@ export class BaseCompiler {
     if (r.kind === 'tuple')
       return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
     if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-    const element = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
+    const element = leafwardElementType(r);
     return element !== undefined && BaseCompiler.isNumericShaped(element);
   }
 
@@ -25666,7 +25838,8 @@ export class BaseCompiler {
     if (r.kind === 'tuple')
       return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
     if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-    const element = collectionElementType(r);
+    // Toward the cells (`leafwardElementType`), as in `typeHasComplexLeaf`.
+    const element = leafwardElementType(r);
     return element !== undefined && BaseCompiler.isNumericShaped(element);
   }
 
@@ -37384,11 +37557,20 @@ export class BaseCompiler {
    * spelling in both.
    */
   static declaredTypeText(t: Type): string {
+    // A tensor of unknown rank with `number` cells prints `tensor` (the
+    // printer leaves the cell type out); the diagnostic shows the cells.
     if (
       typeof t !== 'string' &&
       t.kind === 'list' &&
       t.elements === 'number' &&
-      t.dimensions !== undefined &&
+      t.dimensions === null
+    )
+      return 'tensor<number>';
+    if (
+      typeof t !== 'string' &&
+      t.kind === 'list' &&
+      t.elements === 'number' &&
+      t.dimensions &&
       (t.dimensions.length === 1 || t.dimensions.length === 2)
     ) {
       const head = t.dimensions.length === 1 ? 'vector' : 'matrix';

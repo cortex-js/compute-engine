@@ -488,6 +488,7 @@ import {
   resolveShapedTypeAlias,
   unionHasGenuineScalarBranch,
   isWalkableFiniteCollection,
+  shapedOrPlainListType,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
@@ -2088,11 +2089,13 @@ function hasInexactRationalComponent(d: OperandDescriptor): boolean {
  */
 function collectionElementTypeOf(t: Type): Type | undefined {
   if (typeof t === 'string') return undefined;
-  if (
-    t.kind === 'list' ||
-    t.kind === 'indexed_collection' ||
-    t.kind === 'collection'
-  )
+  // A list is read by `collectionElementType`: the elements of a plain
+  // `list<E>` are `E`, the elements of a matrix are its rows, and the
+  // elements of a tensor of unknown rank (`tensor<U>`) are a cell or a
+  // tensor, `U | tensor<U>`. Reading the cells `U` of such a tensor as its
+  // elements would claim scalars for an operand that may be a matrix.
+  if (t.kind === 'list') return collectionElementType(t);
+  if (t.kind === 'indexed_collection' || t.kind === 'collection')
     return t.elements;
   return undefined;
 }
@@ -2231,9 +2234,12 @@ function pointOverCollectionQuotientType(
       ((typeof cell === 'object' && cell.kind === 'union') || zero !== 'none')
     )
       dims = undefined;
+    // A list of points carries the divisor's dimensions only when a point
+    // cell may carry one (`shapedOrPlainListType`); otherwise it is spelled
+    // as nested plain lists of points, one level per dimension.
     results.push(
       dims !== undefined
-        ? { kind: 'list', elements: cell, dimensions: dims }
+        ? shapedOrPlainListType(cell, dims)
         : broadcastResultType(cell)
     );
   }
@@ -2369,10 +2375,12 @@ function pointListOverMatrixQuotientType(
   )
     return undefined;
   const matrix = resolveTypeAlias(den.type);
+  // A tensor of unknown rank (`dimensions` is `null`) is not known to be a
+  // matrix, and is not read here.
   if (
     typeof matrix !== 'object' ||
     matrix.kind !== 'list' ||
-    matrix.dimensions === undefined ||
+    !matrix.dimensions ||
     !factsOf(matrix).matrix
   )
     return undefined;
@@ -2392,11 +2400,10 @@ function pointListOverMatrixQuotientType(
       kind: 'union',
       types: [quotient, pointByZeroCellType(num, point, zero)],
     });
-  return {
-    kind: 'list',
-    elements: quotient,
-    dimensions: matrix.dimensions,
-  };
+  // The matrix of points carries the matrix's dimensions only when a point
+  // cell may carry one; otherwise it is a list of lists of points
+  // (`shapedOrPlainListType`).
+  return shapedOrPlainListType(quotient, matrix.dimensions);
 }
 
 /**
@@ -2974,12 +2981,12 @@ function isLinearAlgebraCollectionType(t0: Type): boolean {
 }
 
 /** Twin of `isFixedShapeCollection`: a dimensioned list — a `vector<n>`, a
- * `matrix`, a higher-rank tensor. */
+ * `matrix`, a higher-rank tensor. A tensor of unknown rank (`dimensions` is
+ * `null`) has no fixed shape: it broadcasts like an abstract collection
+ * (`dimensionlessIndexedElementType`). */
 function isFixedShapeCollectionType(t0: Type): boolean {
   const t = resolveTypeAlias(t0);
-  return (
-    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
-  );
+  return typeof t !== 'string' && t.kind === 'list' && !!t.dimensions;
 }
 
 /**
@@ -3013,9 +3020,10 @@ function dimensionlessIndexedElementType(
   if (t.kind === 'indexed_collection') return t.elements;
   // A `list` broadcasts only when it is unbounded/dimensionless. A fixed
   // shape carries `dimensions` and is left to tensor typing — except as a
-  // branch of a union.
+  // branch of a union. A tensor of unknown rank (`dimensions` is `null`)
+  // has no fixed shape to read, so it broadcasts here too, over its cells.
   if (t.kind === 'list')
-    return t.dimensions === undefined || inUnion ? t.elements : undefined;
+    return !t.dimensions || inUnion ? t.elements : undefined;
   if (t.kind === 'union') {
     const scalarSibling = unionHasGenuineScalarBranch(t);
     for (const b of t.types) {
@@ -3037,7 +3045,9 @@ function isBroadcastCollectionTypeOf(t: Type): boolean {
 function numericTensorElementType(t0: Type): Type | undefined {
   const t = resolveTypeAlias(t0);
   if (typeof t === 'string' || t.kind !== 'list') return undefined;
-  if (t.dimensions === undefined) return undefined;
+  // A plain list and a tensor of unknown rank (`dimensions` is `null`)
+  // carry no dimension list, and are not read here.
+  if (!t.dimensions) return undefined;
   return factsOf(t.elements).belowNumber ? t.elements : undefined;
 }
 
@@ -3049,8 +3059,7 @@ function isTensorOperand(d: OperandDescriptor): boolean {
   // view allocates, and most operands of an arithmetic derivation are
   // scalars that fail it.
   const t = d.type;
-  if (typeof t === 'string' || t.kind !== 'list' || t.dimensions === undefined)
-    return false;
+  if (typeof t === 'string' || t.kind !== 'list' || !t.dimensions) return false;
   return d.structureOf?.()?.kind === 'list-literal';
 }
 
@@ -3345,9 +3354,18 @@ function pointNestOf(t0: Type, seen?: AliasDescent): PointNest | undefined {
           const r = resolveTypeAlias(arm);
           return typeof r !== 'string' && r.kind === 'tuple';
         })));
+  // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+  // has no rank to count, so it is not a nest of points.
+  if (t.kind === 'list' && t.dimensions === null) return undefined;
   const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
-  if (isPoint(elt))
-    return { cell: elt, rank: dims, withCell: (c) => ({ ...t, elements: c }) };
+  // Another point type takes the same shape: the dimensions of a
+  // dimensioned list when a point cell may carry them, nested plain lists
+  // of the same rank otherwise (`shapedOrPlainListType`).
+  const withCell = (c: Type): Type =>
+    t.kind === 'list' && t.dimensions
+      ? shapedOrPlainListType(c, t.dimensions)
+      : { ...t, elements: c };
+  if (isPoint(elt)) return { cell: elt, rank: dims, withCell };
   if (dims > 1) return undefined;
   const inner = pointNestOf(elt, element.seen);
   if (inner === undefined) return undefined;
@@ -9066,23 +9084,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               (typeof point === 'object' && point.kind === 'tuple')) &&
             typeof m === 'object' &&
             m.kind === 'list' &&
-            m.dimensions !== undefined &&
+            !!m.dimensions &&
             factsOf(m).matrix &&
             cell !== undefined
           )
+            // The matrix of points takes the matrix's dimensions when a
+            // point cell may carry them, and is a list of lists of points
+            // otherwise (`shapedOrPlainListType`).
             return BoxedType.forResult(
-              withFloatRationalCellsAsReal(ops, {
-                kind: 'list',
-                elements: scaleTupleComponents(
-                  point,
-                  scalarFactors.every((x) =>
-                    isDeclaredScalarNumberOperand(x, engine)
-                  )
-                    ? [cell, ...scalarFactors.map((x) => x.type)]
-                    : [cell]
-                ),
-                dimensions: m.dimensions,
-              }),
+              withFloatRationalCellsAsReal(
+                ops,
+                shapedOrPlainListType(
+                  scaleTupleComponents(
+                    point,
+                    scalarFactors.every((x) =>
+                      isDeclaredScalarNumberOperand(x, engine)
+                    )
+                      ? [cell, ...scalarFactors.map((x) => x.type)]
+                      : [cell]
+                  ),
+                  m.dimensions
+                )
+              ),
               engine._typeResolver
             );
         }
@@ -9148,13 +9171,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             tensor === undefined
               ? undefined
               : (resolveTypeAlias(tensor.type) as ListType).dimensions;
-          if (dims !== undefined)
+          // The dimensions of the tensor factor are kept when a point cell
+          // may carry them, and the list of points is nested plain lists
+          // otherwise (`shapedOrPlainListType`). A tensor of unknown rank
+          // (`dims` is `null`) is not a tensor operand (`isNumericTensorOperand`
+          // reads a literal), so `dims` is a dimension list here.
+          if (dims)
             return BoxedType.forResult(
-              withFloatRationalCellsAsReal(ops, {
-                kind: 'list',
-                elements: scaled,
-                dimensions: dims,
-              }),
+              withFloatRationalCellsAsReal(
+                ops,
+                shapedOrPlainListType(scaled, dims)
+              ),
               engine._typeResolver
             );
           return BoxedType.forResult(
@@ -9329,17 +9356,73 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // value contradicts. `absorbScalarsIntoCells` performs the widening
           // — the same helper, and the same reason, as the single-collection
           // branch above.
+          //
+          // A list of rows of points (`list<list<tuple<…>>>`) beside a list
+          // of numbers is typed the same way: the broadcast pairs each row of
+          // points with one number, which scales every point of the row, so
+          // the cells of the product are points
+          // (`[[(1, 2), (3, 4)], [(5, 6)]]·[2, 3]` is
+          // `[[(2, 4), (6, 8)], [(15, 18)]]`). A matrix of numbers, or a
+          // plain nested list of numbers (`[[1, 2], [3]]`), is admitted beside
+          // such rows when it has no more levels than the point collection
+          // has above its points: each point is then paired with one number.
+          // Without this, the widen below joined the rows of points and the
+          // numbers into one element type (`list<integer | list<tuple<…>>>`),
+          // and the broadcast lift wrapped that type in one more list, a type
+          // that does not hold the value.
           const tupleCollections = collectionOps.filter((x) =>
-            typeCouldBeNumericTupleCollection(x.type)
+            typeCouldBeNestedNumericTupleCollection(x.type)
           );
+          // The number of list levels above the points of the point
+          // collection, or `undefined` when it cannot be read (a union, or a
+          // tensor of unknown rank).
+          const pointRank = (t: Type): number | undefined => {
+            let x = resolveTypeAlias(t);
+            let rank = 0;
+            for (let depth = 0; depth < 8; depth++) {
+              if (
+                typeof x !== 'object' ||
+                (x.kind !== 'list' && x.kind !== 'indexed_collection') ||
+                (x.kind === 'list' && x.dimensions === null)
+              )
+                return undefined;
+              rank += x.kind === 'list' && x.dimensions ? x.dimensions.length : 1;
+              const element = resolveTypeAlias(x.elements);
+              if (typeof element === 'object' && element.kind === 'tuple')
+                return rank;
+              x = element;
+            }
+            return undefined;
+          };
+          const pointsRank =
+            tupleCollections.length === 1
+              ? (pointRank(tupleCollections[0].type) ?? 1)
+              : 1;
           const scalarSiblings: Type[] = [];
           const siblingsAreRank1Scalars =
             tupleCollections.length === 1 &&
             collectionOps.every((x) => {
               if (x === tupleCollections[0]) return true;
-              if (factsOf(x.type).matrix) return false;
-              const el = collectionElementTypeOf(x.type);
-              if (el === undefined || !factsOf(el).belowNumber) return false;
+              // Walk down the levels of the sibling to its leaves. The
+              // number that scales a point is a leaf of the sibling: a
+              // number of a vector, a cell of a matrix, or a number of a
+              // plain nested list that is not a matrix
+              // (`list<list<integer>>`, such as `[[1, 2], [3]]`). The
+              // sibling is admitted only when its leaves are numbers and
+              // it has no more levels than the point collection has above
+              // its points. A tensor of unknown rank has the element type
+              // `U | tensor<U>`, which has no element type of its own, so
+              // the walk stops on it and its leaves are not numbers.
+              let el: Type = x.type;
+              let depth = 0;
+              for (;;) {
+                const next = collectionElementTypeOf(resolveTypeAlias(el));
+                if (next === undefined) break;
+                depth += 1;
+                if (depth > pointsRank) return false;
+                el = next;
+              }
+              if (depth === 0 || !factsOf(el).belowNumber) return false;
               scalarSiblings.push(el);
               return true;
             });
@@ -12333,8 +12416,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 6000,
       // The parameter admits a POINT (a `tuple`, or the flat `list<number>`
       // spelling a data import produces) and a LIST of points (`list<tuple>`,
-      // or the `list<list<number>>` spelling — which types as `list<number>`
-      // when the rows are equal-length, i.e. a matrix). Deliberately NOT
+      // or the `list<list<number>>` spelling; a matrix is a list of its
+      // rows, so it is a `list<list<number>>` too). Deliberately NOT
       // `value`/`any`: a scalar or a string must still be rejected at the call
       // boundary (Tycho items 130/138).
       signature:

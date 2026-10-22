@@ -89,28 +89,30 @@ describe('broadcastable<T> — subsumption (positive)', () => {
   });
 
   it('fits its own defining union (branches covered by different members)', () => {
-    // `broadcastable<T>` = `T | list<T>`, and `list<T> <: indexed_collection<T>`;
-    // the union rhs covers the scalar and collection branches with *different*
-    // members, which the member-wise union probe alone would reject.
+    // `broadcastable<T>` = `T | tensor<T>` for a numeric `T`; the union rhs
+    // covers the scalar and tensor branches with *different* members, which
+    // the member-wise union probe alone would reject.
+    expect(isSubtype('broadcastable<number>', 'number | tensor')).toBe(true);
+    expect(isSubtype('broadcastable<integer>', 'number | tensor')).toBe(true);
+    // A tensor of unknown rank is not an indexed collection of its cells:
+    // the elements of a matrix are its rows.
     expect(
       isSubtype('broadcastable<number>', 'number | indexed_collection<number>')
-    ).toBe(true);
-    expect(
-      isSubtype(
-        'broadcastable<integer>',
-        'number | indexed_collection<number>'
-      )
-    ).toBe(true);
+    ).toBe(false);
     // ... including as a member of a union lhs.
     expect(
       isSubtype(
         'broadcastable<integer> | string',
-        'integer | indexed_collection<integer> | string'
+        'integer | tensor<integer> | string'
       )
     ).toBe(true);
-    // `broadcastable<T>` is `T | list<T>`, so a `list<T>` member covers its
-    // collection branch.
+    // A `list<number>` member does not cover the collection branch: a
+    // list of numbers is read by its elements and holds no matrix, which a
+    // `tensor` does.
     expect(isSubtype('broadcastable<number>', 'number | list<number>')).toBe(
+      false
+    );
+    expect(isSubtype('number | list<number>', 'broadcastable<number>')).toBe(
       true
     );
   });
@@ -156,8 +158,20 @@ describe('broadcastable<T> — subsumption (negative)', () => {
 
 describe('broadcastable<T> — collectionElementType', () => {
   it('returns the element type', () => {
+    // The collection arm of a `broadcastable<integer>` is a tensor of any
+    // rank, whose elements are integers (rank 1) or tensors (rank 2 and
+    // more).
     expect(s(collectionElementType(parseType('broadcastable<integer>'))!)).toBe(
-      'integer'
+      'integer | tensor<integer>'
+    );
+    // A `T` that cannot hold a list has a tensor arm too since 2026-10-22
+    // (the arm was `list<boolean>`, whose elements are `boolean`).
+    expect(s(collectionElementType(parseType('broadcastable<boolean>'))!)).toBe(
+      'boolean | tensor<boolean>'
+    );
+    // A `T` that can hold a list keeps the plain list arm.
+    expect(s(collectionElementType(parseType('broadcastable<any>'))!)).toBe(
+      'any'
     );
   });
 });

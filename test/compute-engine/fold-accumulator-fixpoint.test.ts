@@ -166,8 +166,11 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       ['List', ['List', 1], ['List', 2], ['List', 3]],
       ['Function', ['Join', 'a', 'x'], 'a', 'x'],
     ] as any);
-    expect(scan.type.toString()).toBe('list<list<integer>^3>');
+    // A list whose elements are lists carries no dimensions, so the three
+    // rows of different lengths are a plain `list<list<integer>>`.
+    expect(scan.type.toString()).toBe('list<list<integer>>');
     expect(scan.evaluate().toString()).toBe('[[1],[1,2],[1,2,3]]');
+    expect(scan.evaluate().type.matches(scan.type)).toBe(true);
   });
 
   it('leaves an annotated accumulator alone', () => {

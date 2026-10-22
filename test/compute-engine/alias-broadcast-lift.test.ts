@@ -255,18 +255,36 @@ describe('alias lift: self-referential aliases terminate', () => {
     }
   });
 
-  test('a recursive alias with a scalar arm is admitted and lifted like the direct spelling', () => {
+  test('a recursive alias with a scalar arm is admitted and lifted soundly', () => {
     // The `integer` arm is what makes `json` numeric; the element walk meets
-    // it on the second unfold.
+    // it on the second unfold. A `json` value can nest lists to any depth
+    // (`[1, [2, 3]]`), and a plain list type is read by its elements, so the
+    // result is NOT the type of the one-level spelling `number | list<number>`:
+    // that type does not hold `[sin(1), [sin(2), sin(3)]]`. The result type
+    // keeps the nesting it can see and ends in `list<any>`, which holds the
+    // deeper levels.
     expect(ce.box(['Sin', 'j']).errors).toHaveLength(0);
     expect(ce.box(['Sin', 'j']).type.toString()).toBe(
-      ce.box(['Sin', 'sl']).type.toString()
+      'list<list<list<any> | number> | number> | number'
     );
     expect(ce.box(['Multiply', 2, 'j']).type.toString()).toBe(
-      ce.box(['Multiply', 2, 'sl']).type.toString()
+      'list<list<list<any> | number> | number> | number'
     );
+    expect(ce.box(['Sin', 'sl']).type.toString()).toBe('list<number> | number');
     expect(ce.box(['Sin', 'z']).errors).toHaveLength(0);
     expect(ce.box(['Multiply', 2, 'z']).errors).toHaveLength(0);
+
+    const ce2 = new ComputeEngine();
+    ce2.declareType('json', 'list<json> | integer', { alias: true });
+    ce2.declare('j', 'json');
+    ce2.assign('j', ['List', 1, ['List', 2, 3]]);
+    for (const op of [
+      ['Sin', 'j'],
+      ['Multiply', 2, 'j'],
+    ] as const) {
+      const e = ce2.box(op as any);
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+    }
   });
 
   test('a recursive alias evaluates through the lift', () => {
@@ -310,5 +328,49 @@ describe('alias lift: a scalar alias survives the cell readers', () => {
     expect(
       typeToString(widenNumericCellsWithNan(ce.type('list<len>').type))
     ).toBe('list<len | nan>');
+  });
+});
+
+//
+// A generic call over an `indexed_collection` or a `broadcastable` of a
+// self-referential alias. The runtime maps such an operand at its leaves, as
+// it maps a list, so the type solver reads the leaves through the alias
+// (`expandAliasesForLift` and `liftedElementTypeOf`,
+// `common/type/instantiate.ts`), and the call-site typing counts the same
+// levels (`genericLiftLevels`, `boxed-function.ts`). Before 2026-10-22 the
+// solver entered the element of a list only, bound `T` to `lcyc`, and the
+// call over `[[1, 2], [3]]` was typed `list<tuple<lcyc, lcyc>>`, which does
+// not hold `[[(1, 1), (2, 2)], [(3, 3)]]`.
+//
+
+describe('alias lift: a generic call reads the leaves of an abstract collection', () => {
+  const typed = (decl: string, value: any): string => {
+    const ce = new ComputeEngine();
+    ce.declareType('lcyc', 'lcyc | list<integer>', { alias: true });
+    ce.declare('g', '(x: T) -> tuple<T, T> where T');
+    ce.assign('g', ce.box(['Function', ['Tuple', 'x', 'x'], 'x'] as any));
+    ce.declare('v', decl);
+    ce.assign('v', ce.box(value));
+    const e = ce.box(['g', 'v'] as any);
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
+    return e.type.toString();
+  };
+  const ragged = ['List', ['List', 1, 2], ['List', 3]];
+  const matrix = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  test('an indexed collection of an alias of lists', () => {
+    for (const value of [ragged, matrix])
+      expect(typed('indexed_collection<lcyc>', value)).toBe(
+        'list<list<tuple<integer, integer>>>'
+      );
+  });
+
+  test('a broadcastable of an alias of lists', () => {
+    // The value is an `lcyc` (a list of integers) or a list of them, so the
+    // depth is 1 or 2.
+    for (const value of [ragged, matrix, ['List', 1, 2]])
+      expect(typed('broadcastable<lcyc>', value)).toBe(
+        'list<list<any> | tuple<integer, integer>>'
+      );
   });
 });

@@ -39,8 +39,10 @@ describe('BoxedType.couldMatch', () => {
     expect(
       ce.type('tuple<integer, integer>').couldMatch(POINT_LIST)
     ).toBe(false);
-    // Element types that cannot coincide.
-    expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(false);
+    // Element types that cannot coincide: two lists with no dimensions
+    // still share the empty list, a fixed-length list does not.
+    expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(true);
+    expect(ce.type('list<integer^2>').couldMatch('list<string^2>')).toBe(false);
     // A set and a list are different runtime shapes.
     expect(ce.type('set<integer>').couldMatch('list<integer>')).toBe(false);
   });

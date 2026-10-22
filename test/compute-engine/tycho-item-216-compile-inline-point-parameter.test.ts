@@ -78,7 +78,11 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     );
     const r = compile(ce.parse(String.raw`d((x,y))`), { to: 'interval-js' });
     expect(r.success).toBe(true);
-    expect(r.preamble).toContain('_IA.pointComponent(P, 0)');
+    // The parameter may also be a numeric array of rank 3, which the call
+    // states to the helper.
+    expect(r.preamble).toContain(
+      '_IA.pointComponent(P, 0, true, undefined, false, true)'
+    );
   });
 
   test('two point parameters, one of them a numeric literal point', () => {

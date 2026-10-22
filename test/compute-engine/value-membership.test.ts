@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { typeAcceptsValue } from '../../src/compute-engine/boxed-expression/value-membership';
+import {
+  admissionOf,
+  typeAcceptsValue,
+} from '../../src/compute-engine/boxed-expression/value-membership';
 
 /**
  * Phase 0 of the function-polymorphism design
@@ -176,6 +179,47 @@ describe('VALUE MEMBERSHIP — typeAcceptsValue', () => {
     expect(
       typeAcceptsValue(ce.box(['List', 'someSym']), t('list<"red">'))
     ).toBe(false);
+  });
+});
+
+// ─── Tensors: the shape of the value first, then every cell ──────────────────
+
+describe('VALUE MEMBERSHIP — tensors are read by their cells', () => {
+  const t = (s: string) => ce.type(s).type;
+  const L = (...xs: any[]) => ['List', ...xs];
+  const admission = (v: any, type: any) =>
+    admissionOf(ce.box(v), typeof type === 'string' ? t(type) : type);
+
+  it('a ragged value is not a tensor, whatever the cell type', () => {
+    // The rows of `[[1], [2, 3]]` are values of `any`, but the value is
+    // not rectangular, so it is not a `tensor<any>`.
+    expect(admission(L(L(1), L(2, 3)), 'tensor<any>')).toBe('refute');
+    expect(admission(L(1, L(2)), 'tensor<any>')).toBe('refute');
+    expect(admission(L(L(1), L(2, 3)), 'tensor<integer>')).toBe('refute');
+  });
+
+  it('a literal cell type admits its values at any rank', () => {
+    // The cells of `[[0, 0], [0, 0]]` are `0`; its rows are lists, which
+    // are not values of `0`.
+    expect(admission(L(L(0, 0), L(0, 0)), 'tensor<0>')).toBe('admit');
+    expect(admission(L(0, 0), 'tensor<0>')).toBe('admit');
+    expect(admission(L(L(0, 0), L(0, 1)), 'tensor<0>')).toBe('refute');
+    expect(admission(L(L(0, 0), L(0, 0)), 'tensor<1>')).toBe('refute');
+  });
+
+  it('a literal cell type of rank 2 checks the shape and every cell', () => {
+    // `list<0^(2x2)>` has no spelling (the parser reads `0^` as a power),
+    // so the type is built as a `ListType`.
+    const zeros = (dimensions: number[]) => ({
+      kind: 'list',
+      elements: { kind: 'value', value: 0 },
+      dimensions,
+    });
+    expect(admission(L(L(0, 0), L(0, 0)), zeros([2, 2]))).toBe('admit');
+    expect(admission(L(L(0, 0), L(0, 0)), zeros([-1, 2]))).toBe('admit');
+    expect(admission(L(L(0, 0), L(0, 1)), zeros([2, 2]))).toBe('refute');
+    expect(admission(L(L(0, 0), L(0, 0)), zeros([2, 3]))).toBe('refute');
+    expect(admission(L(L(0, 0), L(0)), zeros([2, -1]))).toBe('refute');
   });
 });
 

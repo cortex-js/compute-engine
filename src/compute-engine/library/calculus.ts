@@ -4602,8 +4602,10 @@ volumes
       // `docs/SCOPING-MODEL.md`). The integrand's
       // own variable stays owned by its `Function` literal.
       scoped: indexingSetSites(1),
-      signature:
-        '(function, limits+) -> number | list<number> | tuple | list<tuple>',
+      // A list integrand of any rank gives a tensor of the same shape
+      // (`integralTypeOf`): `tensor` admits a vector and a matrix of
+      // integrals alike, where `list<number>` admits a vector only.
+      signature: '(function, limits+) -> number | tensor | tuple | list<tuple>',
       // An integral where a lower or upper bound is a LIST
       // (`∫_{-∞}^{G} f(Z) dZ` with `G = [-1, 0, 1]`) is one integral per
       // element, and its value is the list of those integrals. This applies

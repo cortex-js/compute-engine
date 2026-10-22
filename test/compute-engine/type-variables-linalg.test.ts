@@ -219,8 +219,8 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
     expect(ce.box(['Inverse', 'Z']).type.toString()).toBe(
       'matrix<complex^(2x2)>'
     );
-    // The nested spelling of a square integer matrix.
-    ce.declare('NN', 'list<list<integer^2>^2>');
+    // The `list` spelling of a square integer matrix.
+    ce.declare('NN', 'list<integer^(2x2)>');
     expect(ce.box(['Inverse', 'NN']).type.toString()).toBe(
       'matrix<rational^(2x2)>'
     );

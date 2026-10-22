@@ -260,13 +260,11 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     // A `vector` carries `dimensions: [-1]`, so it is provably rank 1.
     ce.declare('normVec1', 'vector<real>');
     expect(src(['Norm', 'normVec1', 2])).toBe(sn('normVec1', '2'));
-    // A dimension-less `list<number>` is NOT provably rank 1: a matrix
-    // conforms to it too, and on a matrix the order 2 is the spectral norm.
-    // So the emitted code tests the rank when it runs.
+    // A dimension-less `list<number>` is a list of numbers, so it is rank 1
+    // too (a matrix is a list of vectors, not a list of numbers): the order
+    // 2 is the vector norm, with no rank test at run time.
     ce.declare('normList1', 'list<number>');
-    expect(src(['Norm', 'normList1', 2])).toBe(
-      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${gn('_x', '2')} if np.ndim(_x) <= 2 else ${gn('_x')})(normList1)`
-    );
+    expect(src(['Norm', 'normList1', 2])).toBe(gn('normList1', '2'));
   });
 
   it('order 2 on an operand of unknown rank tests the rank when it runs', () => {
@@ -662,18 +660,17 @@ describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => 
     );
   });
 
-  it('a dimension-less nested list has no static rank', () => {
-    // `list<list<list<real>>>` carries no `dimensions`, and its innermost
-    // `list<real>` admits a matrix, so a rank-4 value conforms to it too. The
-    // emitted code tests the rank when it runs.
-    expect(src(['Norm', 'normT3X', 2])).toBe(
-      `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${sn('_x', '2')} if np.ndim(_x) <= 2 else ${sn('_x')})(normT3X)`
-    );
-    expect(src(['Norm', 'normT3X', 1])).toBe(
-      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normT3X)"
-    );
+  it('a dimension-less nested list has the rank of its nesting', () => {
+    // `list<list<list<real>>>` carries no `dimensions`, but a list is read
+    // by its elements, so its rank is 3: the order 2 above rank 2 is the
+    // flattened 2-norm, with no rank test at run time.
+    expect(src(['Norm', 'normT3X', 2])).toBe(sn('normT3X'));
+    // An explicit order other than 2 on a static rank above 2 is refused at
+    // compile time (`np.linalg.norm` raises for it), as for any operand of
+    // a statically known rank 3; a run-time order takes the rank-3 branch.
+    expect(() => src(['Norm', 'normT3X', 1])).toThrow(/above rank 2/);
     expect(src(['Norm', 'normT3X', 'normRunP'])).toBe(
-      `(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (${sn('_x', '_p')} if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (${sn('_x', "'fro'")} if (isinstance(_q, str) and _q == 'Frobenius') else ${sn('_x', '_p')} if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (${sn('_x')} if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normT3X, normRunP)`
+      `(lambda _x, _q: (lambda _p: ${sn('_x')} if _p == 2 else float('nan'))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normT3X, normRunP)`
     );
   });
 

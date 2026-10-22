@@ -16,7 +16,9 @@ const wgsl = new WGSLTarget();
 ce.declare('N2', 'vector<integer^2>');
 ce.declare('N4', 'vector<integer^4>');
 ce.declare('S4', 'vector<number^4>');
-ce.declare('B2', 'vector<boolean^2>');
+// The cells of a `vector` are numbers; a boolean mask of length 2 is spelled
+// `list<boolean^2>`.
+ce.declare('B2', 'list<boolean^2>');
 ce.declare('L', 'list<number>');
 ce.declare('P', 'tuple<number, number>');
 ce.declare('Q', 'tuple<number, number>');

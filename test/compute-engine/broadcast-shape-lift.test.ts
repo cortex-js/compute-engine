@@ -55,9 +55,11 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
   test('mixed-shape n-ary operands: no dims invented (merge rule)', () => {
     ce.declare('A2', 'matrix<2x2>');
     ce.declare('v3', 'vector<3>');
-    // Rank mismatch across shape-bearing operands → plain unbounded list.
+    // Rank mismatch across shape-bearing operands → a tensor of unknown
+    // rank: the vector broadcasts over the rows, so the value has rank 2,
+    // which the plain `list<boolean>` answered before 2026-10-22 does not hold.
     expect(ce.box(['Greater', 'A2', 'v3']).type.toString()).toBe(
-      'list<boolean>'
+      'tensor<boolean>'
     );
   });
 
@@ -117,9 +119,9 @@ describe('D6.2 — overlap-deferred validation', () => {
 
   test('partially-dimensioned nested list defers (rank from dims + nesting)', () => {
     const ce = new ComputeEngine();
-    // list<list<number>^2>: 2 rows, each an open-length numeric list —
-    // rank 2, compatible with `matrix`.
-    ce.declare('rl', 'list<list<number>^2>');
+    // matrix<number^(2x?)>: 2 rows of one open length (the one-place
+    // spelling of a 2-row block) — rank 2, compatible with `matrix`.
+    ce.declare('rl', 'matrix<number^(2x?)>');
     expect(ce.box(['Determinant', 'rl']).isValid).toBe(true);
   });
 

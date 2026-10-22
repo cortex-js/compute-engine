@@ -31,7 +31,9 @@ function expectValueMatchesType(json: unknown): void {
 
 describe('the broadcast lift keeps a collection-valued per-element result', () => {
   test.each<[unknown, string]>([
-    [['ComplexRoots', ['List', 1, 8], 3], 'list<list<number>^2>'],
+    // A list whose elements are lists carries no length: the cells of a
+    // list with dimensions cannot be lists.
+    [['ComplexRoots', ['List', 1, 8], 3], 'list<list<number>>'],
     [['ComplexRoots', ['Tuple', 1, 8], 3], 'tuple<list<number>, list<number>>'],
     [
       ['NumeratorDenominator', ['Tuple', 0.5, 0.25]],
@@ -47,13 +49,13 @@ describe('the broadcast lift keeps a collection-valued per-element result', () =
   });
 
   // The broadcast over a nested list descends to its leaves, so each leaf
-  // gives one list of roots. (The value is typed `list<complex^(1x2x3)>`,
-  // and the subtype check does not read that type as a
-  // `list<list<number>^(1x2)>`: it peels one outer dimension only.)
+  // gives one list of roots: a list of lists of lists of numbers, with no
+  // length (its elements are lists).
   test('a nested list operand', () => {
     expect(typeOf(['ComplexRoots', ['List', ['List', 1, 8]], 3])).toBe(
-      'list<list<number>^(1x2)>'
+      'list<list<list<number>>>'
     );
+    expectValueMatchesType(['ComplexRoots', ['List', ['List', 1, 8]], 3]);
   });
 
   // A handler that answers the operand's own collection type (`Negate`) or
@@ -139,10 +141,12 @@ describe('the integer functions with a collection result map over a list', () =>
     return listed;
   }
 
+  // A list whose elements are lists carries no length (the cells of a list
+  // with dimensions cannot be lists); a list of tuples keeps its length.
   test.each<[string, unknown[][], string]>([
-    ['FactorInteger', [[12, 18]], 'list<list<tuple<integer, integer>>^2>'],
-    ['Divisors', [[6, 8]], 'list<list<integer>^2>'],
-    ['PrimeFactors', [[12, 7]], 'list<list<integer>^2>'],
+    ['FactorInteger', [[12, 18]], 'list<list<tuple<integer, integer>>>'],
+    ['Divisors', [[6, 8]], 'list<list<integer>>'],
+    ['PrimeFactors', [[12, 7]], 'list<list<integer>>'],
     [
       'ExtendedGCD',
       [
@@ -151,17 +155,17 @@ describe('the integer functions with a collection result map over a list', () =>
       ],
       'list<tuple<integer, integer, integer>^2>',
     ],
-    ['ContinuedFraction', [[['Rational', 3, 7], 2.5]], 'list<list<integer>^2>'],
+    ['ContinuedFraction', [[['Rational', 3, 7], 2.5]], 'list<list<integer>>'],
     [
       'IntegerDigits',
       [
         [255, 16],
         [16, 2],
       ],
-      'list<list<integer>^2>',
+      'list<list<integer>>',
     ],
-    ['DigitCount', [[122, 10]], 'list<list<integer>^2>'],
-    ['PrimitiveRootList', [[7, 8]], 'list<list<integer>^2>'],
+    ['DigitCount', [[122, 10]], 'list<list<integer>>'],
+    ['PrimitiveRootList', [[7, 8]], 'list<list<integer>>'],
   ])('%s', (op, columns, type) => {
     const listed = expectElementWise(op, columns);
     expect(listed.type.toString()).toBe(type);

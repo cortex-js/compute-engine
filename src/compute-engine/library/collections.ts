@@ -76,6 +76,13 @@ import {
   listFiniteUncountedCollection,
   viewCanListSource,
   viewOverListedSource,
+  mayCarryDimensions,
+  nestedPlainListType,
+  leafwardElementType,
+  pointCollectionElementType,
+  shapedOrPlainListType,
+  isNestedPointCollectionType,
+  isBroadcastablePointType,
 } from '../collection-utils.js';
 import {
   MeasuredWalk,
@@ -112,6 +119,7 @@ import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
+  cannotHoldAList,
   isObjectType,
   isSubtype,
   joinUnresolvedArm,
@@ -3444,8 +3452,14 @@ function mapResultType(
     // matrix, that element is a row. Thus the result keeps only the outer
     // length of the source. The lambda result type (`elementType`) gives
     // the shape of each element. `Map((r) => 0, [[1,2],[3,4]])` is `[0, 0]`,
-    // a list of 2 integers, not a 2x2 matrix.
-    if (source.dimensions?.length) t.dimensions = [source.dimensions[0]];
+    // a list of 2 integers, not a 2x2 matrix. The length is kept only when
+    // the lambda's result may carry a dimension (`mayCarryDimensions`: a
+    // result that cannot be a list, such as a number, a boolean or a
+    // tuple); `Map((x) => x > 1, [1, 2, 3])` is a `list<boolean^3>`. A
+    // source of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+    // has no length to keep.
+    if (source.dimensions?.length)
+      return listOfLengthType(source.dimensions[0], t.elements);
     return t;
   }
   if (source.kind === 'indexed_collection')
@@ -3528,9 +3542,45 @@ function zipMapResultType(
       : undefined
   );
   const first = lengths[0];
+  // As in `mapResultType`, the length is kept only when the lambda's result
+  // may carry a dimension (`listOfLengthType`).
   if (first !== undefined && lengths.every((n) => n === first))
-    result.dimensions = [first];
+    return listOfLengthType(first, result.elements);
   return result;
+}
+
+/**
+ * The type of a list of `length` elements of type `element` (`length` is
+ * `-1` for an open length), for the `Map` result types. The length is a
+ * dimension only when it can be spelled: a list may carry dimensions when
+ * its cells cannot be lists (`mayCarryDimensions`), so a list of numbers
+ * is `list<real^2>`, a list of booleans `list<boolean^2>`, and a list of
+ * lists a plain `list<list<integer>>`. An
+ * element that is itself a tensor of numbers with fixed lengths
+ * (`vector<real^2>`, the image of each row of a 2 by 2 matrix under a
+ * broadcast) makes the list a tensor of one more rank, `list<real^(2x2)>`:
+ * every element has those lengths, so the rows are uniform. An element
+ * tensor with an open length, or of unknown rank, gives a plain list of
+ * the element, since its rows may differ in length.
+ */
+function listOfLengthType(length: number, element: Type): ListType {
+  if (mayCarryDimensions(element))
+    return { kind: 'list', elements: element, dimensions: [length] };
+  const e = resolveTypeAlias(element);
+  if (
+    typeof e === 'object' &&
+    e.kind === 'list' &&
+    e.dimensions &&
+    e.dimensions.length > 0 &&
+    e.dimensions.every((n) => n >= 0) &&
+    mayCarryDimensions(e.elements)
+  )
+    return {
+      kind: 'list',
+      elements: e.elements,
+      dimensions: [length, ...e.dimensions],
+    };
+  return { kind: 'list', elements: element };
 }
 
 /* ------------------------------------------------------------------------ *
@@ -4164,7 +4214,10 @@ function hasOpenDepth(t: Type): boolean {
     return resolved.types.some((x) => hasOpenDepth(x));
   if (!typeCouldBeCollection(resolved) || isSubtype(resolved, 'string'))
     return false;
-  const element = collectionElementType(resolved);
+  // The walk reads toward the cells (`leafwardElementType`): the element
+  // of a tensor of unknown rank contains the tensor itself, and its depth
+  // is open only when its cells are.
+  const element = leafwardElementType(resolved);
   return element === undefined || hasOpenDepth(element);
 }
 
@@ -5068,7 +5121,8 @@ function isRefusedPointListComponentType(t: Type): boolean {
   if (!isSubtype(present, COLLECTION_SHAPE_TYPE)) return false;
   if (provablyDisjoint(present, INDEXED_COLLECTION_SHAPE_TYPE)) return true;
   if (isPointElementType(present) || isSubtype(present, 'string')) return false;
-  const elements = collectionElementType(present);
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elements = pointCollectionElementType(present);
   return elements !== undefined && isPointElementType(elements);
 }
 
@@ -5653,7 +5707,8 @@ function isPointLikeD(d: OperandDescriptor): boolean {
 
 /** Descriptor twin of {@link hasPointElementType}. */
 function hasPointElementTypeD(d: OperandDescriptor): boolean {
-  const elt = d.facts.elementType ?? collectionElementType(d.type);
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt = d.facts.elementType ?? pointCollectionElementType(d.type);
   // A restricted point cell, typed `missing | tuple<…>`, is a point cell: a
   // restricted list of points reports its elements that way
   // (the `When` type handler, `library/control-structures.ts`), as the
@@ -5672,7 +5727,7 @@ function hasPointElementTypeD(d: OperandDescriptor): boolean {
  * question here is which reading the DECLARATION asks for.
  */
 function emptyCollectionBroadcastsD(d: OperandDescriptor): boolean {
-  return elementTypeBroadcastsWhenEmpty(collectionElementType(d.type));
+  return elementTypeBroadcastsWhenEmpty(pointCollectionElementType(d.type));
 }
 
 /**
@@ -5994,15 +6049,27 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // point, not a collection of them.
   if (emptyCollectionBroadcastsD(xs) && isProvablyEmptyCollectionD(xs))
     return { kind: 'list', elements: 'never' };
-  // The coordinate of each point of a list of points. A point with an absent
-  // coordinate (`tuple<integer, missing>`) answers `Missing` there
-  // (`PointY([(1, Missing), (2, 3)])` is `[Missing, 3]`), so the coordinate
-  // type keeps a `missing` arm when the component at this position of a
-  // point element type holds one. An absent
-  // POINT of the list (a `missing` cell) was removed from the operand type
-  // before this handler ran; its `missing` arm is restored by the absence
-  // machinery (`absorbOperandAbsence`), so a `missing` arm here can only come
-  // from a coordinate.
+  // A tensor of points of rank 2 or more or of unknown rank, or a list
+  // whose elements are collections of points: the accessor maps over the
+  // points (`pointComponentAt`), and the coordinates keep the shape
+  // (`nestedPointCoordinateType`).
+  const nested = nestedPointCoordinateType(t, position, true);
+  if (nested !== undefined) return nested;
+  // The coordinate of each point of a list of points: the component type of
+  // the point element type at this position, as for a collection of points
+  // at more than one level (`nestedPointCoordinateType`). A point list may
+  // hold a coordinate that is not a number (`PointX` of a
+  // `list<tuple<string, number>>` is a list of strings), and the type must
+  // contain it. A point with an absent coordinate (`tuple<integer, missing>`)
+  // answers `Missing` there (`PointY([(1, Missing), (2, 3)])` is
+  // `[Missing, 3]`), and the component type holds that `missing` arm. An
+  // absent POINT of the list (a `missing` cell) was removed from the operand
+  // type before this handler ran; its `missing` arm is restored by the
+  // absence machinery (`absorbOperandAbsence`), so a `missing` arm here can
+  // only come from a coordinate. A component type that is `unknown` (an
+  // inference-pending point) is read as `number`, as the single-point
+  // reading above folds it, and an element type that states no component at
+  // this position (a bare `tuple`, a coordinate row) answers `number`.
   const elementOfList = collectionElementType(t);
   const pointArms =
     elementOfList !== undefined ? pointElementArms(elementOfList) : [];
@@ -6016,12 +6083,12 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         )
       : undefined;
   const coordinate: Type =
-    coordinateOfList !== undefined && typeContainsMissing(coordinateOfList)
-      ? parseType('number | missing')
-      : 'number';
+    coordinateOfList === undefined || coordinateOfList === 'unknown'
+      ? 'number'
+      : coordinateOfList;
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) {
-    if (collectionBroadcastsPointsD(xs) === false)
-      return componentResultTypeD(xs, position);
+    const broadcasts = collectionBroadcastsPointsD(xs);
+    if (broadcasts === false) return componentResultTypeD(xs, position);
     if (
       typeof t !== 'string' &&
       t.kind === 'list' &&
@@ -6032,7 +6099,9 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         elements: 'number',
         dimensions: [t.dimensions![0]],
       };
-    return mapResultType(t, coordinate);
+    const mapped = mapResultType(t, coordinate);
+    if (broadcasts === true) return mapped;
+    return undecidedPointReadingType(xs, position, elementOfList, mapped);
   }
   if (collectionBroadcastsPointsD(xs) === true)
     return { kind: 'list', elements: coordinate };
@@ -6051,6 +6120,159 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   )
     return { kind: 'list', elements: coordinate };
   return componentResultTypeD(xs, position);
+}
+
+/**
+ * The type of a point accessor over an ordered collection `xs` whose type
+ * does not decide how the accessor reads it (`collectionBroadcastsPointsD`
+ * answers `undefined`: a symbol with no value declared `list`,
+ * `list<list<any>>` or `tensor<number>`). `elements` is the element type of
+ * the collection, and `mapped` the type of the reading as a list of points.
+ *
+ * At evaluation the first element decides (`pointComponentAt`): a point (a
+ * tuple, or a row of numbers) maps the accessor over the elements, and
+ * gives a list of coordinates (`mapped`); a collection of points maps the
+ * accessor down to the points, and gives a list of lists of coordinates;
+ * any other element (a number, a numeric array of rank 2 or more) reads
+ * the collection as one point spelled flat, and gives the element at the
+ * position (`componentResultTypeD`). So the answer is the join of the
+ * readings that the element type admits:
+ *
+ * - elements that are points: the list of coordinates, `mapped`;
+ * - elements that are numbers: the element at the position;
+ * - elements that are rows of numbers: `mapped`;
+ * - any other element type: `mapped`, joined with the element at the
+ *   position, and, when an element may be a list (it may then be a
+ *   collection of points), with `list<any>`. With `v: tensor<number>`,
+ *   `PointX(v)` is `1` for `v := [1, 2]`, `[1, 3]` for
+ *   `v := [[1, 2], [3, 4]]`, and the first row `[[1, 2], [3, 4]]` for a
+ *   numeric array of rank 3. The list of coordinates alone,
+ *   `list<number>`, holds only the second value.
+ *
+ * An element type that is `unknown` or `any` states nothing about its
+ * values, and the element at the position is read as a number, as the
+ * coordinate of an inference-pending point is everywhere else in this file.
+ */
+function undecidedPointReadingType(
+  xs: OperandDescriptor,
+  position: number,
+  elements: Type | undefined,
+  mapped: Type
+): Type {
+  if (elements === undefined) return mapped;
+  const e = stripMissingFromType(resolveTypeAlias(elements));
+  if (isPointElementType(e)) return mapped;
+  if (isSubtype(e, 'number')) return componentResultTypeD(xs, position);
+  if (isSubtype(e, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const inner = collectionElementType(e);
+    if (inner !== undefined && isSubtype(inner, 'number')) return mapped;
+  }
+  const top = e === 'any' || e === 'unknown';
+  const parts: Type[] = [
+    mapped,
+    top ? 'number' : componentResultTypeD(xs, position),
+  ];
+  if (mayHoldPointCollection(e, 0))
+    parts.push({ kind: 'list', elements: 'any' });
+  return reduceType({ kind: 'union', types: parts });
+}
+
+/** Whether a value of the type `t0` may be a collection whose elements, at
+ * some depth, are points (tuples): a top type, a bare collection name, or a
+ * list or collection whose cells or elements may be points or such
+ * collections. A tensor of numbers (`tensor<number>`) is not: its cells are
+ * numbers. Past a depth of 8 (an alias that nests itself) the answer is
+ * `true`. */
+function mayHoldPointCollection(t0: Type, depth: number): boolean {
+  if (depth > 8) return true;
+  const t = resolveTypeAlias(t0);
+  if (cannotHoldAList(t)) return false;
+  if (typeof t === 'string') return true;
+  if (t.kind === 'union')
+    return t.types.some((m) => mayHoldPointCollection(m, depth + 1));
+  if (
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'set'
+  ) {
+    // The cells of a list with dimensions, or of a tensor of unknown rank,
+    // are not lists: they are points or they are not.
+    const cells = t.kind === 'list' && t.dimensions !== undefined;
+    const e = resolveTypeAlias(t.elements);
+    if (isPointElementType(stripMissingFromType(e))) return true;
+    if (cells) return false;
+    return mayHoldPointCollection(e, depth + 1);
+  }
+  return true;
+}
+
+/**
+ * The type of a point accessor over a collection of points at more than one
+ * level, or `undefined` for any other operand type.
+ *
+ * - A tensor whose cells are points, of rank 2 or more or of unknown rank
+ *   (`list<tuple<number, number>^(2x2)>`, `tensor<tuple<number, number>>`):
+ *   a tensor of the coordinate at `position`, with the same shape
+ *   (`shapedOrPlainListType`). `PointX` of a `tensor<tuple<number,
+ *   number>>` is a `tensor<number>`.
+ * - A list whose elements are collections of points
+ *   (`list<list<tuple<number, number>>>`): a list of the coordinate type of
+ *   an element, `list<list<number>>`.
+ *
+ * The values agree: `pointComponentAt` maps the accessor over every element
+ * whose own elements are points, down to the points. A list of points of
+ * rank 1 is the caller's (the answer is `undefined` at `top`), where its
+ * absence markers and its union arms are read. Below the top, a list of
+ * points of rank 1 is a list of its coordinates.
+ *
+ * An alias is unfolded under the descent guard (`unfoldAliasOnDescent`): a
+ * self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
+ * is cut when it reaches itself again, and the answer is then `undefined`,
+ * so the caller's other readings apply.
+ */
+function nestedPointCoordinateType(
+  t: Type,
+  position: number,
+  top: boolean,
+  seen?: AliasDescent
+): Type | undefined {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const r = unfolded.type;
+  // The rows of a ragged list of points (`[[(1, 2)], [(3, 4), (5, 6)]]`)
+  // are a union of lists of points of different lengths: each arm is read
+  // in turn, and every arm must be a collection of points.
+  if (!top && typeof r !== 'string' && r.kind === 'union') {
+    const arms: Type[] = [];
+    for (const arm of r.types) {
+      const a = nestedPointCoordinateType(arm, position, false, unfolded.seen);
+      if (a === undefined) return undefined;
+      arms.push(a);
+    }
+    return reduceType({ kind: 'union', types: arms });
+  }
+  if (typeof r === 'string' || r.kind !== 'list') return undefined;
+  const dims = r.dimensions;
+  if (dims !== undefined) {
+    if (!isPointElementType(r.elements)) return undefined;
+    if (top && dims !== null && dims.length < 2) return undefined;
+    const coord = tupleComponentType(r.elements, position);
+    if (coord === undefined) return undefined;
+    return shapedOrPlainListType(coord, dims);
+  }
+  if (isPointElementType(r.elements)) {
+    if (top) return undefined;
+    const coord = tupleComponentType(r.elements, position);
+    return coord === undefined ? undefined : { kind: 'list', elements: coord };
+  }
+  const inner = nestedPointCoordinateType(
+    r.elements,
+    position,
+    false,
+    unfolded.seen
+  );
+  return inner === undefined ? undefined : { kind: 'list', elements: inner };
 }
 
 /**
@@ -6287,17 +6509,23 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
 
   const widened = widenElementTypes(cells);
 
+  // A dimension list is attached only to cells that may carry one
+  // (`mayCarryDimensions`: a cell that cannot be a list): `[True, False]` is
+  // a `list<boolean^2>`, `[(1, 2), (3, 4)]` is a
+  // `list<tuple<integer, integer>^2>`, and a 2 by 2 arrangement of booleans
+  // is a `list<boolean^(2x2)>`. Any other cell population is spelled as
+  // nested plain lists, one level per dimension. So is a union of cells
+  // that is not a number type (`[[1, True], [2, False]]` is a
+  // `list<list<boolean | integer>>`), except a union of tuples of one arity
+  // at rank 2 or more, which keeps the shape.
   if (
-    typeof widened !== 'string' &&
-    widened.kind === 'union' &&
-    !isSubtype(widened, 'number') &&
-    !(dims.length > 1 && isUnionOfTuplesOfOneArity(widened.types))
-  ) {
-    let nested: Type = widened;
-    for (let i = 0; i < dims.length; i++)
-      nested = { kind: 'list', elements: nested };
-    return internType(nested);
-  }
+    !mayCarryDimensions(widened) ||
+    (typeof widened !== 'string' &&
+      widened.kind === 'union' &&
+      !isSubtype(widened, 'number') &&
+      !(dims.length > 1 && isUnionOfTuplesOfOneArity(widened.types)))
+  )
+    return internType(nestedPlainListType(widened as Type, dims.length));
 
   return internType({
     kind: 'list',
@@ -7341,10 +7569,14 @@ function unrestricted(e: Expression): Expression {
 }
 
 /**
- * The first element of the collection `xs` that is not absent, or
- * `undefined` when there is none. Only a written-out `List` is read past
- * its first element: its elements are in memory, while the elements of a
- * lazy collection are computed one by one.
+ * The first element of the collection `xs` that is not absent, or the first
+ * element when every element is absent, or `undefined` when there is no
+ * element. The walk stops at the first present element, so a lazy
+ * collection computes only its leading absent elements and one more. A lazy
+ * collection is read past an absent element as a written-out `List` is: a
+ * lazy `Map` whose first element is `Missing` evaluated `PointX` to
+ * `Missing` (the first element read by element indexing), where the same
+ * elements written out answered the list of coordinates.
  *
  * The coordinate accessors decide from this element whether they broadcast
  * over `xs`. An absent element (`Missing`, such as the point of an
@@ -7355,11 +7587,10 @@ function unrestricted(e: Expression): Expression {
  * cannot decide either: `PointX([<error>, (1, 2)])` is `[<error>, 1]`.
  */
 function firstPresentElement(xs: Expression): Expression | undefined {
-  const all = isFunction(xs, 'List');
   let first: Expression | undefined;
   for (const e of xs.each()) {
     if (first === undefined) first = e;
-    if (!all || (!isAbsentSymbol(e) && e.isValid)) return e;
+    if (!isAbsentSymbol(e) && e.isValid) return e;
   }
   return first;
 }
@@ -7511,7 +7742,8 @@ function isPointLike(e: Expression): boolean {
 // `elementTypeBroadcastsWhenEmpty`, which asks the wider question of which
 // reading the declared element type calls for.
 function hasPointElementType(xs: Expression): boolean {
-  const elt = collectionElementType(xs.type.type);
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt = pointCollectionElementType(xs.type.type);
   // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
   // arity, as much a point element as a structural `tuple<…>`. A union of
   // tuple spellings — what a list literal of two differently-typed points
@@ -7551,6 +7783,20 @@ function hasPointElementType(xs: Expression): boolean {
 function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
+  // An absent element (`missing`, such as the point of a restriction whose
+  // condition is false) is not a point and not a scalar, so it does not
+  // decide the reading of a non-empty collection (`firstPresentElement`),
+  // and its arm does not decide here either: a `list<tuple<…> | missing>`
+  // reads as a `list<tuple<…>>`, and a `list<missing>`, which says nothing
+  // about points, reads as the bottom `never` does.
+  if (elt === 'missing') return true;
+  if (typeof elt !== 'string' && elt.kind === 'union') {
+    const present = elt.types.filter((arm) => arm !== 'missing');
+    if (present.length < elt.types.length)
+      return elementTypeBroadcastsWhenEmpty(
+        present.length === 1 ? present[0] : { kind: 'union', types: present }
+      );
+  }
   // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
   // arity, as much a point element as a structural `tuple<…>`. A union of
   // tuple spellings — what a list literal of two differently-typed points
@@ -7574,6 +7820,15 @@ function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
 function staticPointArity(t: Type): number | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'tuple') return t.elements?.length;
+  // A tensor whose cells are points (`list<tuple<…>^(2x2)>`,
+  // `tensor<tuple<…>>`): the accessors map over the cells, so the arity is
+  // that of the cell. The inner dimension below counts points, not
+  // coordinates, for such a tensor.
+  if (t.kind === 'list' && t.dimensions !== undefined) {
+    const cell = resolveTypeAlias(t.elements);
+    if (typeof cell !== 'string' && cell.kind === 'tuple')
+      return cell.elements?.length;
+  }
   if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) {
     const inner = t.dimensions![t.dimensions!.length - 1];
     return inner > 0 ? inner : undefined;
@@ -7585,9 +7840,22 @@ function staticPointArity(t: Type): number | undefined {
   // happens to agree. `PointZ([7, 8])` is therefore an out-of-range element
   // access carrying the position-preserving marker, exactly like
   // `Third([7, 8])`, not a point-dimension error.
-  const elt = collectionElementType(t);
+  //
+  // The points of a `broadcastable<T>` are `T`, whose element type is read
+  // through `pointCollectionElementType` (through `collectionElementType` it
+  // is `T | tensor<T>`, a union that is not a tuple).
+  const elt = pointCollectionElementType(t);
   if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
     return elt.elements?.length;
+  // A list whose elements are lists of points is mapped down to its points
+  // (`pointComponentAt`), so the arity is that of the points of an element.
+  if (
+    t.kind === 'list' &&
+    t.dimensions === undefined &&
+    typeof elt === 'object' &&
+    elt.kind === 'list'
+  )
+    return staticPointArity(elt);
   return undefined;
 }
 
@@ -7612,7 +7880,10 @@ function concretePointArity(e: Expression): number | undefined {
 // `pointComponentAt` decides broadcast-vs-index. `undefined` when the operand
 // is not a concrete point or list of points (a list of scalars element-indexes
 // like First/Second/Third, and proves nothing about a point arity).
-function runtimePointArity(xs: Expression): number | undefined {
+function runtimePointArity(
+  xs: Expression,
+  raw?: Expression
+): number | undefined {
   const t = xs.type.type;
   if (
     (typeof t !== 'string' && t.kind === 'tuple') ||
@@ -7620,10 +7891,107 @@ function runtimePointArity(xs: Expression): number | undefined {
   )
     return concretePointArity(xs);
   if (isWalkableFiniteCollection(xs)) {
-    const first = firstPresentElement(xs);
-    if (first !== undefined) return concretePointArity(first);
+    const first = firstDecidingElement(xs);
+    if (first === undefined) return undefined;
+    // Every element is an empty row, and the declared type of `raw` (the
+    // operand before evaluation) reads such rows as rows of points
+    // (`readsEmptyRowsAsPointRows`): the accessor maps down to the rows
+    // (`pointComponentAt`), and an empty row has no point whose arity could
+    // be measured.
+    if (
+      isEmptyRow(unrestricted(first)) &&
+      raw !== undefined &&
+      readsEmptyRowsAsPointRows(raw.type.type)
+    )
+      return undefined;
+    // A collection of collections of points (a tensor of points of rank 2
+    // or more) is mapped down to its points (`pointComponentAt`), so the
+    // arity is the arity of its first point.
+    const arity = concretePointArity(first);
+    if (arity === undefined && isPointCollectionLike(unrestricted(first)))
+      return runtimePointArity(unrestricted(first));
+    return arity;
   }
   return undefined;
+}
+
+// True when `e` is a finite indexed collection whose first present element
+// is a TUPLE point or, recursively, such a collection: a list of tuples, a
+// list of lists of tuples, and so on. A tuple and a string are excluded: a
+// tuple is one point, and the accessors element-index a string.
+//
+// A numeric row (`[1, 2]`, the coordinate-row spelling `isPointLike`
+// admits) is not a point here. A rank-3 numeric tensor
+// (`[[[1, 2], [3, 4]]]`) keeps the element-indexing reading, which is the
+// reading of its type (the element type of the collection) and of the
+// compiled code; read as a collection of coordinate rows, it answered a
+// value that no part of the engine typed.
+//
+// Only the first element of each level that is not empty is read
+// (`firstDecidingElement`), as `pointComponentAt` decides at one level, so
+// the test does not walk the whole collection.
+function isPointCollectionLike(e: Expression): boolean {
+  if (e.isFiniteCollection !== true || e.isIndexedCollection !== true)
+    return false;
+  const t = e.type.type;
+  if (isFunction(e, 'Tuple') || (typeof t !== 'string' && t.kind === 'tuple'))
+    return false;
+  if (e.type.matches('string')) return false;
+  if (!isWalkableFiniteCollection(e)) return false;
+  const first = firstDecidingElement(e);
+  if (first === undefined) return false;
+  const f = unrestricted(first);
+  return (
+    isFunction(f, 'Tuple') ||
+    isPointElementType(f.type.type) ||
+    isPointCollectionLike(f)
+  );
+}
+
+// True when `e` is an empty collection that is not a string and not a
+// tuple: an empty row such as `[]`.
+function isEmptyRow(e: Expression): boolean {
+  if (e.isCollection !== true || e.isFiniteCollection !== true) return false;
+  if (e.count !== 0) return false;
+  const t = e.type.type;
+  if (isFunction(e, 'Tuple') || (typeof t !== 'string' && t.kind === 'tuple'))
+    return false;
+  return !e.type.matches('string');
+}
+
+// True when the declared type `t` reads a collection whose every element is
+// an empty row (`[[], []]`) as rows of points, each row with no points: a
+// collection of points at more than one level (`isNestedPointCollectionType`),
+// or a `broadcastable<P>` of points (`isBroadcastablePointType`), which is one
+// point or a tensor of points of any rank. A value `[[], []]` of such a type
+// is a tensor of points with two rows and no columns, and its coordinate is
+// `[[], []]`. Read as a list of two points, it answered `[Missing, Missing]`,
+// which no coordinate type of the operand holds.
+function readsEmptyRowsAsPointRows(t: Type): boolean {
+  return isNestedPointCollectionType(t) || isBroadcastablePointType(t);
+}
+
+// The element that decides how a point accessor reads the collection `xs`:
+// the first present element (`firstPresentElement`) that is not an empty row
+// (`isEmptyRow`), or the first present element when every element is an
+// empty row. An empty row has the element type `never`, which is below
+// `number`, so it is a point spelled as a row with no coordinates
+// (`isPointLike`). When it decided the reading, `[[], [(1, 2), (3, 4)]]`
+// was read as a list of two points and answered `[Missing, (1, 2)]`, where
+// its type `list<list<number>>` asks for `[[], [1, 3]]`. A list of rows
+// whose first non-empty row is a numeric row keeps the reading the empty
+// row gave: both are coordinate rows. The run-time dispatch of the compile
+// targets skips empty rows in the same way (`_SYS.pointComponent` in
+// `compilation/javascript-runtime.ts`, `pointComponent` in
+// `interval/collections.ts`).
+function firstDecidingElement(xs: Expression): Expression | undefined {
+  const first = firstPresentElement(xs);
+  if (first === undefined || !isEmptyRow(unrestricted(first))) return first;
+  for (const e of xs.each()) {
+    if (isAbsentSymbol(e) || !e.isValid) continue;
+    if (!isEmptyRow(unrestricted(e))) return e;
+  }
+  return first;
 }
 
 // A statically absent component is a type-level fact and produces a typed
@@ -7808,7 +8176,8 @@ function pointComponentAt(
   ce: ComputeEngine,
   operator: string,
   numericApproximation = false,
-  raw?: Expression
+  raw?: Expression,
+  expression?: Expression
 ): Expression | undefined {
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
@@ -7836,10 +8205,42 @@ function pointComponentAt(
     // element for indexed and non-indexed collections alike, and taking just
     // one element keeps the peek O(1) (no materialization of a large domain).
     // An absent element does not decide the reading, and a restricted point
-    // is read as its point (see `firstPresentElement`).
-    const first = firstPresentElement(xs);
+    // is read as its point (see `firstPresentElement`). An empty row does
+    // not decide it either when a later element is not empty (see
+    // `firstDecidingElement`).
+    const first = firstDecidingElement(xs);
     if (first !== undefined) {
-      if (isPointLike(unrestricted(first))) {
+      // When every element is an empty row (`[[], []]`), the value does not
+      // tell the readings apart. The declared type of `raw` then decides, as
+      // it does for an empty collection below: a collection of points at
+      // more than one level, or a `broadcastable<P>` of points
+      // (`readsEmptyRowsAsPointRows`), maps down to its rows (the branch
+      // after the next one), and each empty row answers the empty list. Read
+      // as a list of points, each empty row answered the absence marker.
+      const emptyRowsOfNestedPoints =
+        isEmptyRow(unrestricted(first)) &&
+        raw !== undefined &&
+        readsEmptyRowsAsPointRows(raw.type.type);
+      // When every element is absent or failed (`[Missing, Missing]`), no
+      // element decides the reading either, and the declared element type
+      // decides, as it does for an empty collection below
+      // (`elementTypeBroadcastsWhenEmpty`, which ignores a `missing` arm). A
+      // reading that broadcasts answers the absence marker for each element
+      // (`pointComponentOf`). Read by element indexing, a
+      // `list<tuple<…> | missing>` holding only absent points answered one
+      // `Missing`, where its coordinate type is a list.
+      const noPresentElement = isAbsentSymbol(first) || !first.isValid;
+      const absentElementsBroadcast =
+        noPresentElement &&
+        !xs.type.matches('string') &&
+        (elementTypeBroadcastsWhenEmpty(
+          pointCollectionElementType((raw ?? xs).type.type)
+        ) ||
+          isNestedPointCollectionType((raw ?? xs).type.type));
+      if (
+        !emptyRowsOfNestedPoints &&
+        (absentElementsBroadcast || isPointLike(unrestricted(first)))
+      ) {
         // Hybrid laziness (Tycho item 52): past the eager threshold — or for
         // an indexed collection of unknown size — return the lazy projection
         // `Map(p ↦ At(p, position), xs)` instead of materializing every
@@ -7891,6 +8292,57 @@ function pointComponentAt(
         }
         return ce.function('List', comps);
       }
+      // Elements that are themselves collections of points — a tensor of
+      // points of rank 2 or more, `[[(3, 4), (6, 8)], [(5, 12), (0, 1)]]` —
+      // map the accessor over each element, so the coordinate is read off
+      // every point and the shape is kept: `PointX` of that value is
+      // `[[3, 6], [5, 0]]`. The accessor maps over the points, the cells of
+      // the tensor, as `Abs` of the same value does, and as the type
+      // handler states (`pointComponentTypeD` reads a `tensor<tuple<…>>` as
+      // a tensor of coordinates). Read as element indexing, the value was
+      // the first row of points, which no coordinate type describes.
+      //
+      // When every element is an empty row (`[[], []]`), the value does not
+      // tell the readings apart (`emptyRowsOfNestedPoints`, above).
+      if (
+        isPointCollectionLike(unrestricted(first)) ||
+        emptyRowsOfNestedPoints
+      ) {
+        // Past the eager threshold, or for an indexed collection of unknown
+        // size, the accessor is mapped lazily over the elements, as the
+        // branch above maps `At` over a list of points: the eager loop below
+        // would read every element. A written-out `List` is in memory, so it
+        // stays eager.
+        const n = xs.count;
+        if (
+          !isFunction(xs, 'List') &&
+          xs.isIndexedCollection === true &&
+          (n === undefined || n > MAX_SIZE_EAGER_COLLECTION)
+        )
+          return lazyBroadcastMap(
+            ce,
+            POINT_ACCESSOR_BY_POSITION[position - 1],
+            [xs],
+            (x) => x === xs,
+            numericApproximation
+          );
+        const rows: Expression[] = [];
+        for (const e of xs.each()) {
+          const row =
+            e.isCollection === true
+              ? (pointComponentAt(
+                  e,
+                  position,
+                  ce,
+                  operator,
+                  numericApproximation
+                ) ??
+                ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]))
+              : pointComponentOf(e, position, ce);
+          rows.push(row);
+        }
+        return ce.function('List', rows);
+      }
       // Elements are not points → element indexing, like First/Second/Third.
       return componentAt(xs, position, ce, operator);
     }
@@ -7916,14 +8368,26 @@ function pointComponentAt(
     // are characters, never points, so the accessors element-INDEX it
     // (`PointX("abc")` is `"a"`) and an empty string keeps the marker, exactly
     // as `First("")` does.
+    //
+    // A collection of points at more than one level (a `tensor<tuple<…>>`,
+    // a `list<list<tuple<…>>>`) is mapped down to its points when it is not
+    // empty, so an empty one broadcasts too. Its element type is a list of
+    // points, or a point beside a tensor of points, which the element-type
+    // rule reads as indexing.
     if (
       !xs.type.matches('string') &&
-      elementTypeBroadcastsWhenEmpty(
-        collectionElementType((raw ?? xs).type.type)
-      )
+      (elementTypeBroadcastsWhenEmpty(
+        pointCollectionElementType((raw ?? xs).type.type)
+      ) ||
+        isNestedPointCollectionType((raw ?? xs).type.type))
     )
       return ce.function('List', []);
-    return componentAt(xs, position, ce, operator);
+    // The absence marker of the element read is that of the type of the
+    // application `expression` (`componentAt`): `NaN` for a numeric
+    // coordinate. The empty value holds no element that shows the domain, so
+    // without the application `PointX(v)` for `v: list<number>` assigned
+    // `[]` answered `Missing`, which its type `number` does not hold.
+    return componentAt(xs, position, ce, operator, expression);
   }
 
   // An indexed collection whose finiteness is undecidable (a point view over
@@ -9473,15 +9937,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             typeof t !== 'string' && t.kind === 'list'
               ? t.dimensions
               : undefined;
-          const w = dims !== undefined && dims.length > 0 ? dims[0] : null;
+          // A component of unknown rank (`tensor<U>`, whose `dimensions`
+          // is `null`) has no known width, as a plain list has none.
+          const w = dims && dims.length > 0 ? dims[0] : null;
           if (w === null || width === null) width = null;
           else if (width === undefined) width = w;
           else width = Math.min(width, w);
         }
+        // The width is written as a dimension when a list of points may
+        // carry one (`mayCarryDimensions`). A tuple cell cannot be a list,
+        // so it may: `PointList([1, 2], [3, 4])` is a
+        // `list<tuple<integer, integer>^2>`.
+        const points: Type = { kind: 'tuple', elements: coordinates };
         const list: Type = {
           kind: 'list',
-          elements: { kind: 'tuple', elements: coordinates },
-          ...(typeof width === 'number' ? { dimensions: [width] } : {}),
+          elements: points,
+          ...(typeof width === 'number' && mayCarryDimensions(points)
+            ? { dimensions: [width] }
+            : {}),
         };
         return BoxedType.forResult(
           absentSource ? { kind: 'union', types: [list, 'missing'] } : list,
@@ -15017,7 +15490,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ce,
         'PointX',
         numericApproximation ?? false,
-        rawAccessorOperand(expression)
+        rawAccessorOperand(expression),
+        expression
       ),
   },
 
@@ -15041,7 +15515,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ce,
         'PointY',
         numericApproximation ?? false,
-        rawAccessorOperand(expression)
+        rawAccessorOperand(expression),
+        expression
       ),
   },
 
@@ -15076,7 +15551,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a
       // per-point marker inside a broadcast list is not wanted.
-      const arity = runtimePointArity(xs);
+      const arity = runtimePointArity(xs, rawAccessorOperand(expression));
       if (arity !== undefined && arity < 3)
         return pointArityError(ce, 'PointZ', 3, arity);
       return pointComponentAt(
@@ -15085,7 +15560,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ce,
         'PointZ',
         numericApproximation ?? false,
-        rawAccessorOperand(expression)
+        rawAccessorOperand(expression),
+        expression
       );
     },
   },

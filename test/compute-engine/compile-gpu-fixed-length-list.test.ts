@@ -8,7 +8,7 @@
  *     width off the OUTER dimension of a 1-axis `list` type and says nothing
  *     about what the elements are. So a symbol typed `list<complex^3>` (three
  *     `vec2` cells), `list<boolean^3>` (a `bvec3`, which has no arithmetic)
- *     and `list<list<number^2>^3>` (a 3x2 block) all read back as `vec3`, and
+ *     and `matrix<number^(3x2)>` (a 3x2 block) all read back as `vec3`, and
  *     `sin(c)`, `c + c`, `length(c)` and `max(max(b.x, b.y), b.z)` were
  *     emitted behind a reported success — source no shader compiler accepts.
  *     `gpuComponentCount` now asks the element question too, so these shapes
@@ -100,20 +100,25 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
     );
   });
 
-  // A 3x2 block. The LITERAL spelling has always been refused by the `vecN`
-  // constructor guard; the TYPED symbol reached the same gates as a `vec3`.
-  describe('list<list<number^2>^3>', () => {
-    const ce = engineWith({ m: 'list<list<number^2>^3>' });
+  // A 3x2 block, spelled in one place (a list with dimensions cannot have a
+  // list as its cell, so `list<list<number^2>^3>` is no longer a type). The
+  // LITERAL spelling has always been refused by the `vecN` constructor
+  // guard; the TYPED symbol reached the same gates as a `vec3`.
+  describe('matrix<number^(3x2)>', () => {
+    const ce = engineWith({ m: 'matrix<number^(3x2)>' });
 
+    // A typed 3x2 matrix takes the matrix route: a componentwise builtin
+    // has no `matN` overload, and a 3x2 block has no native square `matN`
+    // type, so the operator `+` has no overload either.
     test('a componentwise builtin declines', () => {
       expect(() => glsl.compile(ce.box(['Sin', 'm']), NO_FOLD)).toThrow(
-        /no array overload/
+        /no `matN` overload/
       );
     });
 
     test('infix arithmetic declines', () => {
       expect(() => glsl.compile(ce.box(['Add', 'm', 'm']), NO_FOLD)).toThrow(
-        /shader ARRAY/
+        /no native square `matN`/
       );
     });
 

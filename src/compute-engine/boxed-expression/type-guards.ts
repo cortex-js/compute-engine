@@ -304,9 +304,10 @@ export function isTensor(
 ): expr is Expression & TensorInterface {
   if (!isFunction(expr, 'List')) return false;
   const t = expr.type.type;
-  return (
-    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
-  );
+  // A shape claim is a dimension list. A `List` value is typed from its
+  // cells, so it never carries the `null` dimensions of a tensor of unknown
+  // rank; that spelling is a declared type, and it makes no shape claim.
+  return typeof t !== 'string' && t.kind === 'list' && !!t.dimensions;
 }
 
 export function isDictionary(

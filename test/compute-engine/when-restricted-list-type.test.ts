@@ -127,7 +127,7 @@ describe('a restricted list is one held restriction', () => {
 describe('the applications over a restricted list follow', () => {
   test('a coordinate accessor', () => {
     const r = probe(engine(), ['PointX', RL]);
-    expect(r.type).toBe('missing | vector<2>');
+    expect(r.type).toBe('missing | vector<integer^2>');
     expect(r.value).toBe('[1,3] {0 < t}');
     expect(r.admitted).toBe(true);
     expect(r.twoStep).toBe('"Missing"');
@@ -367,13 +367,12 @@ describe('a union element type under a length', () => {
     expect(isSubtype(t, parseType(typeToString(t))!)).toBe(true);
   });
 
-  test('a union holding a list is parenthesized so that it parses back', () => {
-    const t = parseType('list<(list<(integer | missing)^2> | missing)^2>')!;
-    // `list<list<integer | missing^2> | missing^2>` did not parse back to the
-    // same type.
-    expect(typeToString(t)).toBe(
-      'list<(list<integer | missing^2> | missing)^2>'
-    );
+  test('a union holding a tuple is parenthesized so that it parses back', () => {
+    // The cell of a list with dimensions cannot be a list, so the union
+    // holds a tuple: `list<missing | tuple<integer, integer>^2>` would not
+    // parse back to the same type.
+    const t = parseType('list<(tuple<integer, integer> | missing)^2>')!;
+    expect(typeToString(t)).toBe('list<(missing | tuple<integer, integer>)^2>');
     expect(isSubtype(parseType(typeToString(t))!, t)).toBe(true);
     expect(isSubtype(t, parseType(typeToString(t))!)).toBe(true);
   });

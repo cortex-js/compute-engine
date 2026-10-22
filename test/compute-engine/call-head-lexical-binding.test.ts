@@ -218,9 +218,11 @@ describe('call-head inference follows lexical bindings', () => {
     ['(h: (real) -> real) ↦ [h(k) for k in 1..3]', 'list<real>'],
     ['(h: (real) -> real) ↦ [1,2] |> (x ↦ h(x))', 'vector<real^2>'],
     ['(h: (real) -> real) ↦ (x ↦ h(x))([1,2])', 'vector<real^2>'],
+    // The shape of a tensor is spelled in one place: two rows of two reals
+    // are a `matrix<real^(2x2)>`, not a `list<vector<real^2>^2>`.
     [
       '(h: (real) -> real) ↦ map(x ↦ h(x), [[1,2],[3,4]])',
-      'list<vector<real^2>^2>',
+      'matrix<real^(2x2)>',
     ],
   ])('structural derivation retains the callee in %s', (source, result) => {
     const ce = new ComputeEngine();
@@ -242,7 +244,8 @@ describe('call-head inference follows lexical bindings', () => {
       describeOperand(fn),
       describeOperand(ce.box(['List', ['List', 1, 2], ['List', 3, 4]])),
     ]);
-    expect(typeToString(result!)).toBe('list<vector<real^2>^2>');
+    // The shape of a tensor is spelled in one place, on the outer list.
+    expect(typeToString(result!)).toBe('matrix<real^(2x2)>');
     expect(
       deriveApplicationType(ce, 'Apply', [
         describeType(ce.type('(real) -> real').type),
@@ -301,7 +304,8 @@ describe('call-head inference follows lexical bindings', () => {
       describeOperand(fn),
       describeOperand(ce.box(['List', ['List', 1, 2], ['List', 3, 4]])),
     ]);
-    expect(typeToString(result!)).toBe('list<vector<integer^2>^2>');
+    // The shape of a tensor is spelled in one place, on the outer list.
+    expect(typeToString(result!)).toBe('matrix<integer^(2x2)>');
   });
 
   test('a captured Coalesce keeps fallback reachability', () => {

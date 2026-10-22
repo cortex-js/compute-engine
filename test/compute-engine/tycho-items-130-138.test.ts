@@ -212,7 +212,9 @@ describe('POINT ACCESSORS over both spellings (Tycho item 138)', () => {
 
   test('the projected TYPE drops the inner dimension', () => {
     expect(ce.box(['PointX', R_LISTS]).type.toString()).toBe('vector<3>');
-    expect(ce.box(['PointX', R_TUPLES]).type.toString()).toBe('vector<3>');
+    expect(ce.box(['PointX', R_TUPLES]).type.toString()).toBe(
+      'vector<integer^3>'
+    );
   });
 
   test('PointZ over a 3-D row list projects the third coordinate', () => {

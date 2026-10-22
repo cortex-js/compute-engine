@@ -51,6 +51,49 @@ import {
 import type { TypeVariableErrorCode } from './instantiate.js';
 import { typeToString } from './serialize.js';
 import { applyTypeReference, recordForwardArity } from './reference.js';
+import {
+  cellTypeCanHoldANumber,
+  cellTypeMayCarryDimensions,
+} from './primitive.js';
+
+/**
+ * Refuse a dimensioned spelling whose cell type is not allowed. Two rules
+ * (`primitive.ts`), both user decisions of 2026-10-21 recorded in
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md`:
+ *
+ * - `list<U^dims>` and `tensor<U>`: the cells of a list with dimensions,
+ *   or of a tensor of unknown rank, cannot be lists
+ *   (`cellTypeMayCarryDimensions`, the one predicate the engine's literal
+ *   typing asks too). The shape is spelled in one place, on the outer list
+ *   (`list<T^(2x3)>`), so `list<list<integer>^2>` and
+ *   `tensor<list<integer>>` are refused, while `tensor<boolean>` and
+ *   `tensor<tuple<number, number>>` are accepted.
+ * - The named heads `vector<U>` and `matrix<U>`: the cells must be able to
+ *   hold a number (`cellTypeCanHoldANumber`), since the cells of a vector
+ *   or a matrix are numbers, and cannot be lists, as for `list<U^dims>`;
+ *   `vector<string>` and `vector<integer | list<integer>>` are refused,
+ *   and a list of two strings is spelled `list<string^2>`.
+ */
+function checkTensorCells(
+  head: 'list' | 'vector' | 'matrix' | 'tensor',
+  cells: Type
+): void {
+  const cellText = typeToString(cells);
+  if (!cellTypeMayCarryDimensions(cells)) {
+    const spelled =
+      head === 'tensor' ? `tensor<${cellText}>` : `${head}<${cellText}^…>`;
+    throw new Error(
+      `The cells of a ${
+        head === 'list' ? 'list with dimensions' : head
+      } cannot be lists, but \`${spelled}\` names \`${cellText}\` as its cell type. Spell the shape in one place, on the outer list: \`list<T^(2x3)>\` for two rows of three cells of type \`T\`, \`tensor<T>\` for any rank`
+    );
+  }
+  if (head === 'list' || head === 'tensor') return;
+  if (cellTypeCanHoldANumber(cells)) return;
+  throw new Error(
+    `The cells of a vector or a matrix are numbers, but \`${head}<${cellText}^…>\` names \`${cellText}\` as its cell type. A list whose elements are not numbers is spelled \`list<${cellText}>\` (with a length, \`list<${cellText}^n>\`); a fixed-length sequence of non-numbers is a tuple`
+  );
+}
 
 export class TypeBuilder implements ASTVisitor<Type> {
   private typeResolver: TypeResolver;
@@ -288,11 +331,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // representation must not silently become an omitted annotation.
     if (node.dimensions === undefined)
       return { kind: 'list', elements, dimensions: undefined };
+    checkTensorCells('list', elements);
     return { kind: 'list', elements, ...this.buildDimensions(node.dimensions) };
   }
 
   visitVectorType(node: VectorTypeNode): Type {
     const elements = this.buildType(node.elementType);
+    checkTensorCells('vector', elements);
 
     if (node.dimension !== undefined) {
       return {
@@ -313,6 +358,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitMatrixType(node: MatrixTypeNode): Type {
     const elements = this.buildType(node.elementType);
+    checkTensorCells('matrix', elements);
 
     if (node.dimensions) {
       return {
@@ -328,8 +374,14 @@ export class TypeBuilder implements ASTVisitor<Type> {
 
   visitTensorType(node: TensorTypeNode): Type {
     const elements = this.buildType(node.elementType);
+    checkTensorCells('tensor', elements);
 
-    return { kind: 'list', elements };
+    // A tensor of unknown rank (1 or more) whose cells are `elements`:
+    // `dimensions: null`. A list node with no `dimensions` is a different
+    // type, a plain list whose ELEMENTS are `elements` (`list<number>` holds
+    // numbers; a `tensor` holds numbers at any depth, and its elements are
+    // its rows when its rank is 2 or more).
+    return { kind: 'list', elements, dimensions: null };
   }
 
   visitTupleType(node: TupleTypeNode): Type {

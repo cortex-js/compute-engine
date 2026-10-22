@@ -290,13 +290,16 @@ describe('SUBTYPE OF NESTED DIMENSIONS', () => {
     ['matrix<integer^(2x2)>', 'list<list<unknown>>'],
     ['matrix<integer^(2x2)>', 'list<list<integer>>'],
     ['matrix<integer^(2x2)>', 'list<collection>'],
-    ['matrix<integer^(2x2)>', 'list<vector<integer^2>^2>'],
-    ['list<complex^(1x2x3)>', 'list<list<number>^(1x2)>'],
+    // The shape of a tensor is spelled in one place, on the outer list: the
+    // nested spellings `list<vector<integer^2>^2>` and `list<list<number>^(1x2)>`
+    // are not types.
+    ['matrix<integer^(2x2)>', 'list<integer^(2x2)>'],
+    ['list<complex^(1x2x3)>', 'list<number^(1x2x?)>'],
     ['list<complex^(1x2x3)>', 'list<list<list<number>>>'],
     ['list<complex^(1x2x3)>', 'list<list>'],
     ['list<complex^(1x2x3)>', 'list<list<list>>'],
-    ['list<complex^(1x2x3)>', 'list<matrix<number^(2x3)>^1>'],
-    ['list<complex^(1x2x3)>', 'list<list<vector<number^3>^2>^1>'],
+    ['list<complex^(1x2x3)>', 'list<number^(1x2x3)>'],
+    ['list<complex^(1x2x3)>', 'list<list<vector<number^3>>>'],
     ['matrix<integer^(-1x2)>', 'list<vector<integer^2>>'],
   ])('%s is a subtype of %s', (a, b) => {
     expect(sub(a, b)).toBe(true);
@@ -304,22 +307,22 @@ describe('SUBTYPE OF NESTED DIMENSIONS', () => {
 
   test.each([
     // The rows of a 2×2 matrix have length 2, not 3.
-    ['matrix<integer^(2x2)>', 'list<list<integer>^3>'],
+    ['matrix<integer^(2x2)>', 'list<integer^(?x3)>'],
     // A 2×2 matrix has 2 rows, not 3.
-    ['matrix<integer^(2x2)>', 'list<vector<integer^2>^3>'],
+    ['matrix<integer^(2x2)>', 'list<integer^(3x2)>'],
     // The entries are integers, not strings.
     ['matrix<integer^(2x2)>', 'list<list<string>>'],
     // A list is not a set.
     ['matrix<integer^(2x2)>', 'list<set>'],
     // The first two axes are 1×2, not 2×3.
-    ['list<complex^(1x2x3)>', 'list<list<number>^(2x3)>'],
-    ['list<complex^(1x2x3)>', 'list<list<number>^3>'],
-    ['list<complex^(1x2x3)>', 'list<matrix<number^(2x3)>^2>'],
-    ['list<complex^(1x2x3)>', 'list<list<vector<number^3>^3>^1>'],
+    ['list<complex^(1x2x3)>', 'list<number^(2x3x?)>'],
+    ['list<complex^(1x2x3)>', 'list<number^(3x?x?)>'],
+    ['list<complex^(1x2x3)>', 'list<number^(2x2x3)>'],
+    ['list<complex^(1x2x3)>', 'list<number^(1x3x3)>'],
     // A complex is not a list: there is no fourth level.
     ['list<complex^(1x2x3)>', 'list<list<list<list>>>'],
     // An axis of any length is not an axis of length 3.
-    ['matrix<integer^(-1x2)>', 'list<vector<integer^2>^3>'],
+    ['matrix<integer^(-1x2)>', 'list<integer^(3x2)>'],
     // A list with no shape is not a matrix.
     ['list<list>', 'matrix<integer^(2x2)>'],
     ['list<list<integer>>', 'matrix<integer^(2x2)>'],

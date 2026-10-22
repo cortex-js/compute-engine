@@ -1,7 +1,10 @@
 import { factsOf } from '../common/type/facts.js';
 import {
   widenAll,
+  broadcastCellType,
   broadcastElementType,
+  broadcastShapedResultType,
+  cellTypeMayCarryDimensions,
   collectionElementType,
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
@@ -19,6 +22,8 @@ import {
   markInferredTypeOperand,
 } from './boxed-expression/inferred-annotations.js';
 import {
+  broadcastCollectionArm,
+  cannotHoldAList,
   couldMatch,
   isSubtype,
   resolveTypeReference,
@@ -1733,10 +1738,220 @@ export function isFixedShapeCollection(expr: Expression): boolean {
   // `typeCouldBeNumericCollection`): a symbol declared with an alias of
   // `vector<2>` broadcasts exactly like one declared `vector<2>`, so the
   // trigger must see the shape, not the reference node.
+  //
+  // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+  // has no fixed shape: it broadcasts like an abstract collection, through
+  // `isBroadcastCollectionType`, and never reaches a tensor handler.
   const t = resolveTypeAlias(expr.type.type);
-  return (
-    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
+  return typeof t !== 'string' && t.kind === 'list' && !!t.dimensions;
+}
+
+/**
+ * Whether a list whose cells are of type `cell` may carry a dimension list,
+ * that is, be typed as a `vector`, a `matrix` or a tensor rather than as a
+ * plain list (or nested plain lists) of its elements. The rule is the type
+ * system's (`cellTypeMayCarryDimensions`, `common/type/primitive.ts`): the
+ * cells of a list with dimensions cannot be lists. So booleans, strings and
+ * tuples keep their lengths: `[True, False]` is a `list<boolean^2>`, `M < 3`
+ * over a 2×2 matrix `M` is a `list<boolean^(2x2)>`, and
+ * `Map((x) => x > 1, [1, 2, 3])` is a `list<boolean^3>`. The names
+ * `vector<U>` and `matrix<U>` ask more of their cells (they must be able
+ * to hold a number), and `tensor<U>` takes any cell that cannot hold a
+ * list. Every site of the engine that attaches dimensions to a type it
+ * builds asks here, so a change of the rule (for example to numeric cells
+ * only, the rule of decision D3 in
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md`, which was measured
+ * and not applied) is a change of this one function.
+ */
+export function mayCarryDimensions(cell: Readonly<Type>): boolean {
+  return cellTypeMayCarryDimensions(cell as Type);
+}
+
+/**
+ * The type one level toward the leaves of the collection type `t`, for a
+ * walk that reads every level down to the scalar cells: the cells `U` of a
+ * tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`), and
+ * `collectionElementType(t)` for any other type. The element type of such
+ * a tensor is `U | tensor<U>` (what one index returns: a cell, or a tensor
+ * of lower rank), an element that contains the tensor itself, so a walk
+ * that descended through it would never reach the cells.
+ */
+export function leafwardElementType(t: Readonly<Type>): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'list' && r.dimensions === null)
+    return r.elements;
+  return collectionElementType(t);
+}
+
+/**
+ * The cell type a broadcast maps over for an operand of type `t`: the
+ * operand's own type for a scalar, its cells for a collection of any rank
+ * (`broadcastCellType`, `common/type/utils.ts`), read first for the two
+ * spellings whose element type is not their cell type. A `broadcastable<T>`
+ * is a `T` or a tensor of `T` cells, and a tensor of unknown rank
+ * `tensor<U>` has `U` cells; for both, `collectionElementType` answers what
+ * one index returns, `T | tensor<T>`, a union that the walk of
+ * `broadcastCellType` cannot descend, so the cell it reported kept a
+ * `tensor` arm (`2h(x) - 1` with `h: (number) -> unknown` was typed
+ * `broadcastable<number | tensor>` instead of `broadcastable<number>`). A
+ * union is read arm by arm and the arms are joined, as
+ * `broadcastElementType` joins them.
+ *
+ * The alias unfold runs under the descent guard (`unfoldAliasOnDescent`,
+ * `common/type/utils.ts`): an alias that names itself, as a union arm
+ * (`type alias lcyc = lcyc | list<integer>`) or inside a cell type, is
+ * returned unchanged at its first repeat on a path, and the cell type of
+ * that occurrence is then read by `broadcastCellType`, which has its own
+ * guard. Without the guard, each recursive call unfolded the alias again and
+ * the walk never stopped.
+ */
+export function broadcastCellTypeOf(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): Type {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return broadcastCellType(t);
+  const r = unfolded.type;
+  if (typeof r !== 'string') {
+    if (
+      r.kind === 'broadcastable' ||
+      (r.kind === 'list' && r.dimensions === null)
+    )
+      return broadcastCellTypeOf(r.elements, unfolded.seen);
+    if (r.kind === 'union') {
+      const arms = r.types.map((x) => broadcastCellTypeOf(x, unfolded.seen));
+      if (arms.some((x, i) => x !== r.types[i])) return widenAll(arms) as Type;
+    }
+  }
+  return broadcastCellType(t);
+}
+
+/**
+ * The per-element type a broadcastable operator's answer contributes to
+ * its broadcast result, ONE rank unwrapped (`broadcastElementType`,
+ * `common/type/utils.ts`), with the same two spellings read first as in
+ * `broadcastCellTypeOf`: a `broadcastable<S>` answer contributes `S`, and a
+ * tensor of unknown rank contributes its cells. Through
+ * `collectionElementType` both would contribute `S | tensor<S>`, and the
+ * lift then wrapped that into `broadcastable<S | tensor<S>>`.
+ *
+ * The alias unfold runs under the descent guard (`unfoldAliasOnDescent`,
+ * `common/type/utils.ts`): an alias that names itself as a union arm
+ * (`type alias lcyc = lcyc | list<integer>`) is returned unchanged at its
+ * first repeat on a path, as `broadcastElementType` returns it. Without the
+ * guard, each union arm unfolded the alias again and the walk never stopped.
+ */
+export function broadcastElementTypeOf(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): Type {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return t as Type;
+  const r = unfolded.type;
+  if (typeof r !== 'string') {
+    if (
+      r.kind === 'broadcastable' ||
+      (r.kind === 'list' && r.dimensions === null)
+    )
+      return r.elements;
+    if (r.kind === 'union') {
+      const arms = r.types.map((x) => broadcastElementTypeOf(x, unfolded.seen));
+      if (arms.some((x, i) => x !== r.types[i])) return widenAll(arms) as Type;
+    }
+  }
+  return broadcastElementType(t);
+}
+
+/**
+ * The plain-list spelling of a list of rank `rank` whose cells are `cell`:
+ * `rank` list levels around the cell, with no dimension list. It is the
+ * type of a shaped value whose cells cannot carry dimensions
+ * (`mayCarryDimensions`), that is, cells that may be lists: a 2 by 2
+ * arrangement of `list<integer>` cells is a `list<list<list<integer>>>`.
+ * Booleans, strings and tuples carry dimensions (`list<boolean^(2x2)>`).
+ */
+export function nestedPlainListType(cell: Type, rank: number): Type {
+  let t: Type = cell;
+  for (let k = 0; k < Math.max(rank, 1); k++) t = { kind: 'list', elements: t };
+  return t;
+}
+
+/**
+ * The type of a shaped list whose cells are `cell` and whose dimensions are
+ * `dims` (`null` for a tensor of unknown rank): the dimensioned form when
+ * the cells may carry dimensions (they cannot be lists: numbers, booleans,
+ * strings, tuples), the nested plain form otherwise. A comparison over a
+ * tensor of unknown rank is therefore a `tensor<boolean>`. For an unknown
+ * rank with cells that may be lists there is no exact spelling (the depth
+ * of the nesting is not known). An element of such a value is a cell (rank
+ * 1) or a list (rank 2 or more), so the answer is `list<cell | list<any>>`.
+ * The rank-1 reading, the plain `list<cell>`, does not hold a value of rank
+ * 2 or more.
+ */
+export function shapedOrPlainListType(
+  cell: Type,
+  dims: ReadonlyArray<number> | null
+): Type {
+  if (mayCarryDimensions(cell))
+    return {
+      kind: 'list',
+      elements: cell,
+      dimensions: dims === null ? null : [...dims],
+    };
+  if (dims === null)
+    return {
+      kind: 'list',
+      elements: reduceType({
+        kind: 'union',
+        types: [cell, { kind: 'list', elements: 'any' }],
+      }),
+    };
+  return nestedPlainListType(cell, dims.length);
+}
+
+/**
+ * `t` with every dimension list whose cells cannot carry one
+ * (`mayCarryDimensions`) rewritten as nested plain lists
+ * (`shapedOrPlainListType`). The walk enters unions and the elements of
+ * lists; it stops at any other node.
+ */
+export function withoutUnspellableDimensions(t: Type): Type {
+  if (typeof t === 'string') return t;
+  if (t.kind === 'union') {
+    const arms = t.types.map(withoutUnspellableDimensions);
+    return arms.every((x, i) => x === t.types[i])
+      ? t
+      : { kind: 'union', types: arms };
+  }
+  if (t.kind !== 'list') return t;
+  const elements = withoutUnspellableDimensions(t.elements);
+  if (t.dimensions === undefined)
+    return elements === t.elements ? t : { kind: 'list', elements };
+  if (mayCarryDimensions(elements))
+    return elements === t.elements ? t : { ...t, elements };
+  return shapedOrPlainListType(elements, t.dimensions);
+}
+
+/**
+ * The shape-aware result type of a broadcast (`broadcastShapedResultType`,
+ * `common/type/utils.ts`) under the rule that the cells of a list with
+ * dimensions cannot be lists (`mayCarryDimensions`): a broadcast over a
+ * matrix keeps the matrix shape when its cells come out numbers
+ * (`Sin(M)` is a `matrix<2x2>`), booleans (`M < 3` is a
+ * `list<boolean^(2x2)>`) or tuples, and is spelled as nested plain lists
+ * when its cells may be lists.
+ */
+export function shapedBroadcastResultType(
+  operandTypes: ReadonlyArray<Readonly<Type>>,
+  elementType: Readonly<Type>,
+  absentCell?: Readonly<Type>
+): Type {
+  const shaped = broadcastShapedResultType(
+    operandTypes,
+    elementType,
+    absentCell
   );
+  return withoutUnspellableDimensions(shaped);
 }
 
 /**
@@ -1838,9 +2053,12 @@ export function dimensionlessIndexedElement(
   // A `list` broadcasts only when it is unbounded/dimensionless (a plain
   // `list<E>`). A fixed shape (`vector<n>`, `matrix`) carries `dimensions` and
   // is left to tensor typing — except as a branch of a union beside a
-  // genuine scalar, see above.
+  // genuine scalar, see above. A tensor of unknown rank (`tensor<U>`, whose
+  // `dimensions` is `null`) has no fixed shape for the tensor handlers to
+  // read, so it broadcasts here too, over its cells `U`: `Sin(T)` maps
+  // every cell of `T` whatever its rank.
   if (t.kind === 'list')
-    return t.dimensions === undefined || inUnion ? t.elements : undefined;
+    return !t.dimensions || inUnion ? t.elements : undefined;
   if (t.kind === 'union') {
     const scalarSibling = unionHasGenuineScalarBranch(t);
     for (const b of t.types) {
@@ -1905,11 +2123,28 @@ export function broadcastSiblingType(t: Readonly<Type>): Type {
  * element type is baked into its NAME (`range`, whose members are integers by
  * definition) cannot carry a rewritten element, so it — like the bare
  * `indexed_collection` — becomes an `indexed_collection<elements>`.
+ *
+ * `elements` replaces the `elements` field of the branch: for a branch with
+ * no dimensions it is the type of one element of the result, for a branch
+ * with dimensions the type of one cell. A caller with the result for one
+ * leaf of a plain list whose elements are lists (`list<list<integer>>`)
+ * shapes it with `shapedBroadcastResultType` instead (see
+ * `loneUnionBroadcastResultType`).
  */
 function rewrapCollectionBranch(branch: Type, elements: Type): Type {
   // An alias branch is re-wrapped as the collection kind it names.
   branch = resolveTypeAlias(branch);
   if (branch === 'list') return { kind: 'list', elements };
+  // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+  // keeps its unknown rank when the new cells cannot be lists, and is a
+  // list of any depth otherwise (`shapedOrPlainListType`): a tensor whose
+  // cells are lists has no spelling.
+  if (
+    typeof branch !== 'string' &&
+    branch.kind === 'list' &&
+    branch.dimensions === null
+  )
+    return shapedOrPlainListType(elements, null);
   if (
     typeof branch !== 'string' &&
     (branch.kind === 'list' || branch.kind === 'indexed_collection')
@@ -1958,7 +2193,10 @@ export function scalarOrCollectionUnionBranches(
     if (dimensionlessIndexedElement(b, undefined, scalarSibling) !== undefined)
       collections.push(b);
     else if (typeof b !== 'string' && b.kind === 'broadcastable') {
-      collections.push({ kind: 'list', elements: b.elements });
+      // The collection half of `broadcastable<T>` is a tensor of any rank
+      // for a numeric `T` and a plain `list<T>` otherwise
+      // (`broadcastCollectionArm`, `common/type/subtype.ts`).
+      collections.push(broadcastCollectionArm(b.elements));
       hasScalarBranch = true;
     } else if (isTupleShapedType(b) || b === 'string') hasScalarBranch = true;
     else if (isSubtype(b, COLLECTION_SHAPE_TYPE)) return undefined;
@@ -2032,7 +2270,27 @@ export function loneUnionBroadcastResultType(
   for (const t of operandTypes) {
     const branches = scalarOrCollectionUnionBranches(t);
     if (branches === undefined) return undefined;
-    for (const b of branches) wrapped.push(rewrapCollectionBranch(b, element));
+    for (const b of branches) {
+      // When no value of `element` is a list, `element` is the result for
+      // one CELL (a leaf) of the branch. A list branch whose elements are
+      // lists (`list<list<integer>>`, a matrix, a ragged
+      // `list<vector<integer^1> | vector<integer^2>>`) holds its cells below
+      // the first level, so the result is shaped from the structure of the
+      // branch: `Sin u` with `u: integer | list<list<integer>>` is
+      // `number | list<list<number>>`. One list level around the cell result
+      // would not hold the nested value. An `element` that can be a list
+      // (`integer | list<integer>`, the answer of a handler that types the
+      // collection itself, as `Add` does) already describes one element of
+      // the branch, and takes one list level. A branch of another kind
+      // (`indexed_collection`, `range`) keeps its kind, with `element` as
+      // its element.
+      const r = resolveTypeAlias(b);
+      wrapped.push(
+        typeof r !== 'string' && r.kind === 'list' && cannotHoldAList(element)
+          ? shapedBroadcastResultType([r], element)
+          : rewrapCollectionBranch(b, element)
+      );
+    }
   }
   if (wrapped.length === 0) return undefined;
   return reduceType({ kind: 'union', types: [element, ...wrapped] });
@@ -2200,7 +2458,11 @@ function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
       arms.push({ cell: b.elements, rewrap: undefined });
       arms.push({
         cell: b.elements,
-        rewrap: (e) => ({ kind: 'list', elements: e }),
+        // The collection half of `broadcastable<T>`: a tensor of any rank
+        // for a result that cannot be a list (a number, a boolean, a
+        // tuple), a plain list otherwise (`broadcastCollectionArm`,
+        // `common/type/subtype.ts`).
+        rewrap: (e) => broadcastCollectionArm(e),
       });
     } else arms.push({ cell: b, rewrap: undefined });
   }
@@ -3337,6 +3599,92 @@ function pointListElementType(t: Type, depth = 0): Type | undefined {
 }
 
 /**
+ * The element type that a test for a list of points reads from the
+ * collection type `t`: the `T` of a `broadcastable<T>`, and
+ * `collectionElementType(t)` for any other type.
+ *
+ * `broadcastable<T>` is `T` or a tensor of `T` cells, so its element type
+ * through `collectionElementType` is `T | tensor<T>`. For a point `T`
+ * (`broadcastable<tuple<number, number>>`, a point or a list of points)
+ * that union is not a point type, and every point-list test that read it
+ * answered "not a list of points", where the operand is read as a point or
+ * a list of points everywhere else. The broadcast reads the cells of the
+ * operand, and the cells are `T`.
+ */
+export function pointCollectionElementType(
+  t: Readonly<Type>
+): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'broadcastable') return r.elements;
+  return collectionElementType(t);
+}
+
+/**
+ * True when `t` is `broadcastable<P>` and `P` is a point type (a tuple, or a
+ * union of tuples). A value of that type is ONE point, or a tensor of points
+ * of any rank (`broadcastable<P>` is `P | tensor<P>`). The type does not say
+ * which, so a consumer that reads points (`PointX`, `Norm`, `Abs`, `Dot`)
+ * must decide at the value: reading the operand as a list of points is wrong
+ * for one point. {@link pointCollectionElementType} reads such a type by its
+ * `P`, which is right for the element of a list of points only.
+ */
+export function isBroadcastablePointType(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t);
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'broadcastable' &&
+    isPointElementType(resolveTypeAlias(r.elements))
+  );
+}
+
+/**
+ * True when `t` is a collection of points at more than one level, or at a
+ * number of levels the type does not fix: a tensor whose cells are points,
+ * of unknown rank (`tensor<tuple<number, number>>`) or of rank 2 or more
+ * (`list<tuple<number, number>^(2x2)>`), or a list whose elements are such
+ * collections or lists of points (`list<list<tuple<number, number>>>`). A
+ * list of points of rank 1 (`list<tuple<…>>`, `list<tuple<…>^3>`) answers
+ * `false`.
+ *
+ * The point accessors map over the points of such a value at every level
+ * (`pointComponentAt`, `library/collections.ts`), so a consumer compiled
+ * for a list of points of rank 1 (a per-point map) is wrong for it, and a
+ * consumer that reads it as a matrix is wrong too: its cells are points,
+ * not numbers. An alias is unfolded under the descent guard.
+ */
+export function isNestedPointCollectionType(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): boolean {
+  return nestedPointCollection(t, true, seen);
+}
+
+function nestedPointCollection(
+  t: Readonly<Type>,
+  top: boolean,
+  seen: AliasDescent
+): boolean {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (typeof r === 'string') return false;
+  if (!top && r.kind === 'union')
+    return r.types.every((arm) => nestedPointCollection(arm, false, unfolded.seen));
+  if (r.kind !== 'list') return false;
+  const dims = r.dimensions;
+  if (dims !== undefined) {
+    if (!isPointElementType(resolveTypeAlias(r.elements))) return false;
+    return !top || dims === null || dims.length >= 2;
+  }
+  if (isPointElementType(resolveTypeAlias(r.elements))) return !top;
+  return nestedPointCollection(
+    r.elements,
+    false,
+    descendIntoConstructor(unfolded.seen)
+  );
+}
+
+/**
  * True when `expr` is a LIST OF POINTS — a finite indexed collection whose
  * elements are tuples (`[(0,0),(3,4)]`).
  *
@@ -3353,7 +3701,8 @@ function pointListElementType(t: Type, depth = 0): Type | undefined {
  */
 export function isPointListValue(expr: Expression): boolean {
   // A nominal `type`/`type alias` for a point list is a point list.
-  const elt = collectionElementType(resolveType(expr.type.type));
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt = pointCollectionElementType(resolveType(expr.type.type));
   // The bare `tuple` (what a `list<tuple>` declaration reports), a
   // parameterized tuple, and a union of tuple spellings (what a list literal
   // of two differently typed points infers) all read as a point element —
@@ -5341,7 +5690,8 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
   if (typeof a === 'string') return false;
   if (a.kind === 'tuple') return false;
   if (!isSubtype(a, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-  const element = collectionElementType(a);
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const element = pointCollectionElementType(a);
   if (element === undefined) return false;
   const e = stripMissingFromType(element);
   if (e === 'never') return false;

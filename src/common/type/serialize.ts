@@ -1,7 +1,7 @@
-import { NUMERIC_TYPES_SET } from './primitive.js';
 import { effectSetToString } from './effects.js';
 import { isComplexInfinityValue, isIndeterminateValue } from './types.js';
 import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
+import { cellTypeCanHoldANumber, NUMERIC_TYPES_SET } from './primitive.js';
 
 // Binding tightness, ascending. A node is parenthesized when the context it is
 // being emitted into binds *tighter* than the node itself (see the check at the
@@ -201,90 +201,70 @@ export function typeToString(type: Type, precedence = 0): string {
         else result = `list<${inner}^(${shape})>`;
         break;
       }
-      if (
-        type.dimensions &&
-        typeof type.elements === 'string' &&
-        NUMERIC_TYPES_SET.has(type.elements as NumericPrimitiveType)
-      ) {
-        // We have a numeric list, possibly vector or matrix.
-        if (type.dimensions === undefined) {
-          //
-          // A list of numbers without dimensions is a tensor
-          //
-          if (type.elements === 'number') result = 'tensor';
-        } else if (type.dimensions.length === 1) {
-          //
-          // A list with one dimension is a vector
-          //
-          if (type.elements === 'number') {
-            if (type.dimensions[0] < 0) result = 'vector';
-            else result = `vector<${type.dimensions[0]}>`;
-          } else {
-            if (type.dimensions[0] < 0)
-              result = `vector<${typeToString(type.elements)}>`;
-            else
-              result = `vector<${typeToString(type.elements)}^${
-                type.dimensions[0]
-              }>`;
-          }
-        } else if (type.dimensions.length === 2) {
-          //
-          // A list with two dimensions is a matrix
-          //
-          const dims = type.dimensions;
-          // An open extent is stored as `-1` and is spelled `?`
-          // (`matrix<integer^(2x?)>`), which parses back to `-1`. The
-          // negative number does not parse.
-          const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
-          if (type.elements === 'number') {
-            // If the elements are 'number', we can use a simplified syntax
-            if (dims[0] < 0 && dims[1] < 0) result = 'matrix';
-            else result = `matrix<${shape}>`;
-          } else {
-            if (dims[0] < 0 && dims[1] < 0)
-              result = `matrix<${typeToString(type.elements)}>`;
-            else result = `matrix<${typeToString(type.elements)}^(${shape})>`;
-          }
-        }
-      }
-      if (!result) {
+      {
         const dims = type.dimensions;
-        if (
-          dims !== undefined &&
-          dims.length <= 2 &&
-          dims.every((d) => d < 0)
-        ) {
-          // An all-open rank of 1 or 2 has a NAMED head — `vector<T>` and
-          // `matrix<T>` — and must use it, because the nesting below cannot
-          // express either one faithfully. At rank 1 the nested form is
-          // `list<T>`, which parses back with no dimensions at all, i.e.
-          // rank-UNCONSTRAINED: strictly weaker than the rank-1 type being
-          // serialized. The named heads carry their rank explicitly and avoid
-          // making rank preservation depend on how a nested element type is
-          // normalized. (The numeric branch above already reaches for these
-          // spellings; this extends them to every element type.)
-          const head = dims.length === 1 ? 'vector' : 'matrix';
-          result = `${head}<${typeToString(type.elements)}>`;
-        } else if (dims !== undefined && dims.some((d) => d < 0)) {
-          // An open extent (`-1`, the open-length sentinel) is spelled `?`:
-          // `list<T^(2x?x3)>` parses back to the same `[2, -1, 3]` shape.
-          // The negative number does not parse, and a nested spelling
-          // (`list<list<list<T^3>>^2>`) is weaker, because it allows rows of
-          // different lengths.
-          const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
-          const elements = typeToString(type.elements);
-          result = `list<${underLength(type.elements, elements)}^(${shape})>`;
+        const elements = typeToString(type.elements);
+        if (dims === null) {
+          // A tensor of unknown rank: `tensor` when its cells are `number`,
+          // `tensor<U>` otherwise (`tensor<integer>`, `tensor<boolean>`,
+          // `tensor<tuple<number, number>>`). The spelling parses back to
+          // the same `null` dimensions for every cell type the parser
+          // accepts (`cellTypeMayCarryDimensions`). A cell type that is a
+          // list (`tensor<list<integer>>`) is refused by the parser, but is
+          // still printed with the `tensor` head: this function also gives
+          // the interning key (`internType` in `intern.ts`) and the de-dup
+          // key (`typeToDedupKey`), and a tensor of unknown rank must never
+          // share a key with the plain list of its cells, which is a
+          // different type.
+          result =
+            type.elements === 'number' ? 'tensor' : `tensor<${elements}>`;
+        } else if (dims === undefined) {
+          // A plain list, whose elements are `elements`. `list<number>` is
+          // spelled as written: it is a list of numbers, not a tensor (a
+          // tensor's elements are its rows when its rank is 2 or more).
+          result = `list<${elements}>`;
         } else {
-          // Serialize generic list types
-          const dimensions = dims
-            ? dims.length === 1
-              ? `^${dims[0].toString()}`
-              : `^(${dims.join('x')})`
-            : '';
-          const elements = typeToString(type.elements);
-          result = `list<${
-            dimensions === '' ? elements : underLength(type.elements, elements)
-          }${dimensions}>`;
+          // A tensor with a dimension list: `elements` is the type of its
+          // cells. An open length is stored as `-1` and is spelled `?`
+          // (`matrix<integer^(2x?)>`, `list<T^(2x?x3)>`), which parses back
+          // to `-1`; the negative number does not parse. The named heads
+          // `vector` and `matrix` are used only for a cell type they accept,
+          // one that can hold a number (`cellTypeCanHoldANumber`): an
+          // all-open rank of 1 or 2 is then `vector<T>`/`matrix<T>` (a
+          // nested spelling such as `list<list<T>>` is a different, weaker
+          // type, whose rows can differ in length), and a fixed length uses
+          // the named head for a numeric name (`vector<integer^3>`,
+          // `matrix<integer^(2x3)>`) and the `list<T^dims>` spelling for any
+          // other (`list<unknown^2>`, `list<any^(2x2)>`), which is how a
+          // consumer that reads the spelling of a list literal sees it. A
+          // cell type that cannot hold a number (`boolean`, a tuple) always
+          // takes the `list` head (`list<boolean^?>`, `list<boolean^(2x2)>`),
+          // which parses back to the same shape. The cell type `number` has
+          // the short forms `vector`, `vector<3>`, `matrix`, `matrix<2x3>`.
+          const inner = underLength(type.elements, elements);
+          const numberCells = type.elements === 'number';
+          const numericCells =
+            typeof type.elements === 'string' &&
+            NUMERIC_TYPES_SET.has(type.elements as NumericPrimitiveType);
+          const namedHeads = cellTypeCanHoldANumber(type.elements);
+          const allOpen = dims.every((d) => d < 0);
+          const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
+          if (!namedHeads) {
+            result =
+              dims.length === 1
+                ? `list<${inner}^${shape}>`
+                : `list<${inner}^(${shape})>`;
+          } else if (dims.length === 1) {
+            if (numberCells) result = allOpen ? 'vector' : `vector<${shape}>`;
+            else if (allOpen) result = `vector<${elements}>`;
+            else if (numericCells) result = `vector<${inner}^${shape}>`;
+            else result = `list<${inner}^${shape}>`;
+          } else if (dims.length === 2) {
+            if (numberCells) result = allOpen ? 'matrix' : `matrix<${shape}>`;
+            else if (allOpen) result = `matrix<${elements}>`;
+            else if (numericCells) result = `matrix<${inner}^(${shape})>`;
+            else result = `list<${inner}^(${shape})>`;
+          } else result = `list<${inner}^(${shape})>`;
         }
       }
       break;

@@ -30,6 +30,171 @@
   the reducers, `Coalesce`, `IsMissing`), operators that hold their operands
   (`Expand`, `Integrate`, `ForAll`), and a parameter typed `expression`,
   `symbol`, `any` or `unknown`. Decision P2.
+- **A list type with no dimensions is read by its elements. A vector, a matrix
+  and a tensor are read by their cells.** `list<T>` and `set<T>` now read `T` as
+  the type of the elements, the values that indexing returns. A matrix of
+  integers is a `list<vector<integer>>` and a `list<list<integer>>`. It is no
+  longer a `list<integer>`. Before, the subtype relation also read `T` as the
+  type of the cells (a list type with no dimensions "admitted any shape"), while
+  indexing, the library and the compiler read `T` as the element type. The two
+  readings together let a wrong value through: with `L: list<number>`, the
+  assignment `L := [[1, 2], [3, 4]]` was accepted, `L[1] + 1` was typed `number`
+  and gave `[2, 3]`, `Mean(L)` was accepted and failed at run time, and a
+  compiled `Sum(L)` gave the string `"01,23,4"`. Now the assignment is refused:
+  a value of type `matrix<integer^(2x2)>` is not compatible with `list<number>`.
+  `list<integer>` and `list<list<integer>>` are not related. Their meet is
+  `list<never>`, the type of the empty list `[]`, which is a value of both. For
+  the same reason `couldMatch()` and `typesOverlap()` answer `true` for two
+  lists with no dimensions, whatever their elements.
+
+  `vector<U>`, `matrix<U>`, `tensor<U>` and `list<U^dims>` read `U` as the type
+  of the cells, the values at the depth of the rank. The elements of a matrix
+  are its rows: `matrix<integer>` is a `list<vector<integer>>`. A
+  `list<vector<integer>>` is not a matrix, because its rows can have different
+  lengths. The shape is written in one place: two rows of three integers are
+  `list<integer^(2x3)>`, which is `matrix<integer^(2x3)>`. Two spellings are now
+  parse errors:
+  - A list with dimensions or a tensor whose cells are lists:
+    `list<list<integer>^2>`, `list<vector<integer^3>^2>`, `list<list^2>`,
+    `tensor<list<integer>>`. Write `list<integer^(2x3)>` for a matrix, or
+    `list<list<integer>>` for rows of any lengths.
+  - A `vector` or a `matrix` whose cell type cannot hold a number:
+    `vector<string>`, `vector<boolean>`, `matrix<boolean>`,
+    `matrix<list<integer>>`. Write `list<string>`, or `list<string^3>` for a
+    list of three strings, and `list<boolean^(2x2)>` for a 2×2 array of
+    booleans.
+
+  A list with dimensions or a tensor whose cells are not numbers is valid when
+  its cells are not lists: `list<boolean^2>`, `list<string^2>`,
+  `list<tuple<number, number>^3>`, `list<boolean^(2x2)>` and
+  `list<(integer | missing)^3>` parse as before, and `tensor<boolean>` and
+  `tensor<tuple<number, number>>` are arrays of any rank of booleans and of
+  points. The types of the literals do not change: `[True, False]` is
+  `list<boolean^2>`, `[(1, 2), (3, 4)]` is `list<tuple<integer, integer>^2>`,
+  `[[1, 2], [3, 4]]` is `matrix<integer^(2x2)>`, and with
+  `M := [[1, 2], [3, 4]]`, `M < 3` is `list<boolean^(2x2)>` and `Sin(M)` is
+  `matrix<2x2>`.
+
+  `tensor<U>` is an array of any rank (1 or more) with cells of type `U`, and
+  bare `tensor` is a numeric array of any rank. Before, `tensor<U>` meant
+  `list<U>` (`tensor<boolean>` was `list<boolean>`, which does not hold a matrix
+  of booleans), and bare `tensor` meant `list<number>`. The element type of a
+  `tensor<U>` is `U | tensor<U>`: a cell, or a tensor of a lower rank. A matrix
+  of integers matches `tensor<integer>`, but not `list<integer>`. A `list<U>`
+  with a number type `U` and a `vector<U>` denote the same values:
+  `list<integer>` matches `vector<integer>`, and `vector<integer>` matches
+  `list<integer>`.
+
+  `broadcastable<T>` is `T | tensor<T>` for a `T` that cannot hold a list (a
+  number type, `boolean`, `string`, a tuple, `integer | missing`). A matrix of
+  numbers matches `broadcastable<number>`, a matrix of integers matches
+  `broadcastable<integer | missing>`, and a `list<list<number>>` does not match
+  `broadcastable<number>` (its rows can have different lengths).
+  `broadcastable<boolean>` is `boolean | tensor<boolean>`, so the matrix of
+  booleans that a comparison over a matrix gives is one of its values, and
+  `broadcastable<tuple<number, number>>` is a point or an array of points of any
+  rank. `broadcastable<T>` no longer matches `T | list<T>`: to accept a number
+  or a numeric array of any rank, write `number | tensor`, and for booleans
+  `boolean | tensor<boolean>`.
+
+  The relation is covariant again: `vector<value>` matches `vector<any>`, and
+  `list<expression^3>` matches `list<any^3>`. They did not match before. The
+  meet of two lists with no dimensions is the list of the meet of their
+  elements: `list<integer> & list<string>` is `list<never>`. A meet of two list
+  types is `never` only when their shapes cannot be the same:
+  `vector<integer^2> & vector<integer^3>` is `never`.
+
+  Some result types change:
+  - A broadcast over operands of different ranks, over an operand whose type is
+    a union of ranks, or over a tensor of unknown rank, is typed `tensor<R>`,
+    for a result `R` that cannot hold a list. With
+    `U: list<integer> | matrix<integer>`, `U + 1` is `tensor<integer>` (it was
+    `list<integer | vector<integer>>`). With `T: tensor<integer>`, `T < 3` is
+    `tensor<boolean>`. With an operator declared `broadcastable: true` and the
+    signature `(number, number) -> number`, the call with `[[1, 2], [3, 4]]` and
+    `[10, 20]` is `tensor` (it was `list<number>`).
+  - `Map` over a matrix whose function keeps the length of the rows keeps the
+    shape of the matrix: with `h: (real) -> real`,
+    `map(x ↦ h(x), [[1,2],[3,4]])` is `matrix<real^(2x2)>` (it was
+    `list<vector<real^2>^2>`, a spelling that is now a parse error).
+  - A generic function literal over a matrix keeps the shape of the operand:
+    with `g` the literal `(x: T) -> tuple<T, T> where T` with the body `(x, x)`,
+    `g([[1, 2], [3, 4]])` is `list<tuple<integer, integer>^(2x2)>` (it was
+    `list<tuple<integer, integer>>`). Over a ragged list, see Resolved Issues.
+  - A conditional protocol conformance `type list<T> is P where …` binds `T` to
+    the elements of the receiver, as the generic solver does. For a matrix, the
+    elements are the rows. With `type list<T> is Named where T: number`,
+    `name([1, 2])` uses the conformance as before, but `name([[1, 2], [3, 4]])`
+    now gives a `protocol-implementation-missing` error: `T` is
+    `vector<integer^2>`, which is not a `number` (before, `T` was the cell type
+    `integer`).
+  - A cell pattern `vector<T>` or `list<T^N>` in a generic signature binds `T`
+    to the cells of a tensor of rank 1, and a matrix no longer matches it:
+    `first: (x: list<T^N>) -> T where T, N` applied to `[[1, 2], [3, 4]]` is an
+    `incompatible-type` error (it was typed `vector<integer^2>`). A plain
+    pattern `list<T>` binds `T` to the rows of the matrix.
+  - `Norm` and `Trace` spell their tensor parameter `tensor` and accept a matrix
+    as before. The result of `Integrate` spells its array arm `tensor`. `Mean`
+    and the other statistics functions still accept a matrix when the expression
+    is boxed, and refuse it when it is evaluated.
+  - A broadcast over an operand that may hold a list of any depth is typed so.
+    With `b: broadcastable<number>` holding a list, `-b` is `tensor` (it was
+    `list<number>`, which does not hold a matrix value of `b`); with no value,
+    it is `broadcastable<number>` as before. With `C: indexed_collection`,
+    `C < 2` is `list<boolean | list<any>>` (it was `list<boolean>`): an element
+    of `C` may be a list, which the comparison maps at its leaves.
+  - A generic function applied to a union whose options the broadcast reads
+    differently is typed one option at a time. With
+    `f: (x: T) -> tuple<T, T> where T` and `u: list<integer> | set<integer>`,
+    `f(u)` is `list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>`
+    (it was `list<tuple<list<integer> | set<integer>, …>>`, which holds neither
+    value). An operand of type `collection<integer>`, which may be mapped or
+    passed whole, gets both answers.
+  - `PointX`, `PointY` and `PointZ` of a list of points have the type of the
+    coordinate: `PointX` of a `list<tuple<string, number>>` is `list<string>`
+    (it was `list<number>`), and of a `list<tuple<integer, integer>>` it is
+    `list<integer>`. Over rows of points whose first row is empty,
+    `PointX([[], [(1, 2), (3, 4)]])` is `[[], [1, 3]]` (it was
+    `[Missing, (1, 2)]`). The compiled JavaScript refuses a point accessor over
+    points whose coordinates may not be numbers, and throws a `RangeError` at
+    run time on a value whose shape its type does not decide (numbers of rank 3
+    or more beside points).
+
+  This entry replaces these entries of 0.160.0, where they describe the reading
+  of a list type:
+  - "The type `broadcastable<T>` is now `T | list<T>`": for a `T` that cannot
+    hold a list, the collection part is now `tensor<T>`. Every subtype of
+    `list<T>` is still a `broadcastable<T>`, and a tuple is still not a
+    `broadcastable<number>`.
+  - "The meet (intersection) of two collection types of different kinds is the
+    narrower kind with the meet of the elements": `list<number>` and
+    `collection<list<integer>>` no longer share a matrix. The type reducer now
+    gives `list<never>` for their meet.
+  - "The overlap test of types (`typesOverlap()`)": two lists with no dimensions
+    now always overlap, because the empty list is a value of both.
+    `list<list<list<real>>>` and `list<number>` still overlap, but only through
+    the empty list: they no longer share a tensor of rank 3.
+  - "A list with dimensions whose element type is a top type (`vector<unknown>`,
+    …) holds scalars, not lists": `list<list^2>` and `list<list<integer>^2>` are
+    now parse errors. A matrix is still not a `vector<unknown>`, because the
+    ranks are different.
+  - "The meet of two collection types of the same kind no longer drops values
+    that are in both": `list<number> & list<list<integer>>` is `list<never>`
+    again, since no matrix is a `list<number>`, and the example
+    `list<number^(2x2)> & list<list<integer>^2>` is now a parse error.
+  - "The subtype relation of lists now reads a value in every way it can be
+    read": the nested spelling read as its flat shape, the removal of outer axes
+    by `collection<E>`, and `list<vector<integer^3>>` as a `list<integer>` are
+    removed. `matrix<string>` and `vector<collection>` are now parse errors,
+    `list<vector<integer^1>^2>` is a parse error, and `list<vector<integer^3>>`
+    is not a `list<integer>`.
+  - In Resolved Issues, "Subtype relation: `matrix<T>` is a subtype of
+    `broadcastable<T>`": still true. `couldMatch()` still answers `true` for
+    `list<integer>` and `list<list<integer>>`, but the reason is now the empty
+    list: a matrix is not a value of `list<integer>`.
+
+  The rules are in `docs/TYPE-SYSTEM.md`, section "Lists, tensors and
+  `broadcastable`".
 
 ### New Features
 
@@ -212,6 +377,21 @@
   was already the case for scopes that an evaluation pushes itself.
 
 ### Resolved Issues
+
+- **Two typing defects of 0.161.0, fixed by the change to the reading of list
+  types (see Breaking Changes).** A symbol declared
+  `(broadcastable<unknown>) -> unknown` refused the function literal
+  `(x) => (x, x)`: `ce.assign` threw a type error, because
+  `provablyAdmits('nothing', 'broadcastable<unknown>')` answered `true`, as if
+  the type stated that a `Nothing` value is possible. A `broadcastable<T>` is
+  now read as the union of its two parts, so `broadcastable<unknown>` states
+  nothing about `Nothing`, as `unknown` does not, and the assignment is
+  accepted. A generic function literal over a ragged list gave a type that does
+  not hold the value: with `g` the literal `(x: T) -> tuple<T, T> where T` with
+  the body `(x, x)`, `g([[1], [2, 3]])` was typed
+  `list<tuple<vector<integer^1> | vector<integer^2>, vector<integer^1> | vector<integer^2>>>`,
+  and its value is `[[(1, 1)], [(2, 2), (3, 3)]]`. It is now typed
+  `list<list<tuple<integer, integer>>>`, which holds the value.
 
 - **`FindFit` reports `converged: true` at an exact fit** (Tycho row 418). A
   degree-10 polynomial through 11 points is an exact interpolation whose

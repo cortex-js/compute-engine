@@ -228,9 +228,11 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
   });
 
   test('a generic literal keeps its one-level wrap and is not derived', () => {
-    // The type solver binds the type parameter itself, and one list level
-    // is the whole lift: the dimensioned encoding of the value makes it a
-    // member of that type (`generic-function-literals.test.ts`).
+    // The type solver binds the type parameter itself (to the leaves of the
+    // operand), so the result is not derived from the body. The call maps
+    // the literal over the leaves, so the result has the operand's shape: a
+    // list is read by its elements, and one list level around the tuple
+    // would not hold the rows of tuples of the value.
     const ce = new ComputeEngine();
     ce.assign('g', [
       'Function',
@@ -238,9 +240,158 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       'x',
     ] as any);
     const call = ce.box(['g', ['List', ['List', 1, 2], ['List', 3, 4]]]);
-    expect(call.type.toString()).toBe('list<tuple<integer, integer>>');
+    expect(call.type.toString()).toBe('list<tuple<integer, integer>^(2x2)>');
     const value = call.evaluate();
     expect(value.toString()).toBe('[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over a ragged list is typed by the leaves of its rows', () => {
+    // The rows of `[[1], [2, 3]]` differ in length, so its type is
+    // `list<vector<integer^1> | vector<integer^2>>`. The call maps the
+    // literal over the leaves of every row, so the type parameter binds to
+    // the leaves (`integer`), and the result is wrapped in one plain list
+    // for each level of the operand, because the rows of the value differ
+    // in length too. Binding the parameter to a row gave
+    // `list<tuple<vector<integer^1> | vector<integer^2>, …>>`, which does
+    // not hold the value.
+    const ce = new ComputeEngine();
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    const call = ce.box(['g', ['List', ['List', 1], ['List', 2, 3]]]);
+    expect(call.type.toString()).toBe('list<list<tuple<integer, integer>>>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[[(1, 1)],[(2, 2),(3, 3)]]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over an alias that names itself as a union arm', () => {
+    // `lcyc` unfolds to `lcyc | list<integer>`, which contains `lcyc`
+    // again. The `lcyc` arm adds no value, so the solver reads the operand
+    // as `list<integer>` and binds `T` to its leaves, `integer`
+    // (`expandAliasesForLift`). The type parameter bound to the alias name
+    // gave `list<tuple<lcyc, lcyc>>`, which does not hold the value: the
+    // value holds tuples of integers. The rank of `lcyc` is not read
+    // statically, so the result also admits list elements.
+    const ce = new ComputeEngine();
+    ce.declareType('lcyc', 'lcyc | list<integer>', { alias: true });
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    ce.declare('v', 'lcyc');
+    ce.assign('v', ce.box(['List', 1, 2]));
+    const call = ce.box(['g', 'v']);
+    expect(call.type.toString()).toBe(
+      'list<list<any> | tuple<integer, integer>>'
+    );
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(1, 1),(2, 2)]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over a list whose element is a self-referential alias', () => {
+    // The elements of `w` are `lcyc`, that is `list<integer>`, so the call
+    // maps two levels down, and the rows of the value differ in length.
+    const ce = new ComputeEngine();
+    ce.declareType('lcyc', 'lcyc | list<integer>', { alias: true });
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    ce.declare('w', 'list<lcyc>');
+    ce.assign('w', ce.box(['List', ['List', 1, 2], ['List', 3]]));
+    const call = ce.box(['g', 'w']);
+    expect(call.type.toString()).toBe('list<list<tuple<integer, integer>>>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[[(1, 1),(2, 2)],[(3, 3)]]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over an alias that nests itself in a list element', () => {
+    // A value of `lnest` has leaves at any depth, so the type parameter
+    // binds to `any` and the result is a list of any depth.
+    const ce = new ComputeEngine();
+    ce.declareType('lnest', 'list<lnest> | list<integer>', { alias: true });
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    ce.declare('n', 'lnest');
+    ce.assign('n', ce.box(['List', ['List', 1, 2], ['List', ['List', 3]]]));
+    const call = ce.box(['g', 'n']);
+    expect(call.type.toString()).toBe('list<any>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[[(1, 1),(2, 2)],[[(3, 3)]]]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over an alias of a list binds the leaves, not the alias', () => {
+    // `L` is a transparent alias of `list<integer>`. The call maps over the
+    // integers of the value, so `T` is `integer`. `T` bound to `L` gave
+    // `list<tuple<L, L>>` and, for the identity, `list<L>`.
+    const ce = new ComputeEngine();
+    ce.declareType('L', 'list<integer>', { alias: true });
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    ce.assign('id', [
+      'Function',
+      ['Typed', 'x', { str: '(x: T) -> T where T' }],
+      'x',
+    ] as any);
+    ce.declare('a', 'L');
+    ce.assign('a', ce.box(['List', 1, 2]));
+    const pair = ce.box(['g', 'a']);
+    expect(pair.type.toString()).toBe('list<tuple<integer, integer>>');
+    expect(pair.evaluate().toString()).toBe('[(1, 1),(2, 2)]');
+    expect(pair.evaluate().type.matches(pair.type)).toBe(true);
+    const same = ce.box(['id', 'a']);
+    expect(same.type.toString()).toBe('list<integer>');
+    expect(same.evaluate().type.matches(same.type)).toBe(true);
+  });
+
+  test('a lambda with no signature over a self-referential alias', () => {
+    // The count of list levels of the result unfolds `lcyc` under the
+    // descent guard (`nestedBroadcastResultType`). Without the guard the
+    // `lcyc` arm of `lcyc | list<integer>` was unfolded again and again,
+    // and reading `.type` overflowed the stack.
+    const ce = new ComputeEngine();
+    ce.declareType('lcyc', 'lcyc | list<integer>', { alias: true });
+    ce.assign('h', ['Function', ['Tuple', 'x', 'x'], 'x'] as any);
+    ce.declare('v', 'lcyc');
+    ce.assign('v', ce.box(['List', 1, 2]));
+    const call = ce.box(['h', 'v']);
+    expect(call.type.toString()).toBe('list<tuple<unknown, unknown>>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(1, 1),(2, 2)]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a generic literal over a list of tensors of unknown rank', () => {
+    // Each element of a `list<tensor<integer>>` is a tensor with its own
+    // rank, so the elements of the value can have different depths, and
+    // the result is a nested list.
+    const ce = new ComputeEngine();
+    ce.assign('g', [
+      'Function',
+      ['Typed', ['Tuple', 'x', 'x'], { str: '(x: T) -> tuple<T, T> where T' }],
+      'x',
+    ] as any);
+    ce.declare('w', 'list<tensor<integer>>');
+    ce.assign('w', ce.box(['List', ['List', 1, 2], ['List', ['List', 3]]]));
+    const call = ce.box(['g', 'w']);
+    expect(call.type.toString()).toBe('list<any>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[[(1, 1),(2, 2)],[[(3, 3)]]]');
     expect(value.type.matches(call.type)).toBe(true);
   });
 
@@ -616,7 +767,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           'u',
         ]);
         expect(ce.box(['outer', ['Tuple', 'x', 2]]).type.toString()).toBe(
-          'tuple<list<number>, list<number>>'
+          'tuple<list<real>, list<real>>'
         );
       }
     });

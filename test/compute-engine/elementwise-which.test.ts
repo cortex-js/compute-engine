@@ -1032,3 +1032,82 @@ describe('perf smoke', () => {
     if (process.env.CE_PERF === '1') expect(canaryUnits).toBeLessThan(5000);
   });
 });
+
+describe('an element-wise selection over an arm whose elements are lists', () => {
+  // The selection indexes each list arm position by position, so a position
+  // holds an element of the arm: a row of a matrix. The arms were read by
+  // their cells, so `If(C, [[1], [2], [3]], 0)` was typed `vector<integer^3>`
+  // while its value is `[[1], 0, [3]]`.
+  const C = ['List', 'True', 'False', 'True'];
+  const ROWS = ['List', ['List', 1], ['List', 2], ['List', 3]];
+  const cases: Array<[unknown, string, string]> = [
+    [['If', C, ROWS, 0], 'list<integer | vector<integer^1>>', '[[1],0,[3]]'],
+    [
+      ['If', C, ROWS, ['List', ['List', 0], ['List', 0], ['List', 0]]],
+      'list<vector<integer^1>>',
+      '[[1],[0],[3]]',
+    ],
+    [
+      ['Which', C, ROWS, 'True', 0],
+      'list<integer | vector<integer^1>>',
+      '[[1],0,[3]]',
+    ],
+    // With no default, an unselected position holds the absence marker of a
+    // list element, `Missing`, not the numeric `NaN`.
+    [
+      ['Which', C, ROWS],
+      'list<missing | vector<integer^1>>',
+      '[[1],"Missing",[3]]',
+    ],
+  ];
+  test.each(cases)('%j', (expr, type, value) => {
+    const ce = engine();
+    const e = ce.box(expr as any);
+    expect(e.type.toString()).toBe(type);
+    const v = e.evaluate();
+    expect(v.toString()).toBe(value);
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  test('a tensor arm of unknown rank holds a cell or a tensor at a position', () => {
+    const ce = engine();
+    ce.declare('T', 'tensor<integer>');
+    ce.declare('B', 'list<boolean>');
+    expect(ce.box(['If', 'B', 'T', 0]).type.toString()).toBe(
+      'list<integer | tensor<integer>>'
+    );
+  });
+
+  test('an arm of a different length is a dimension error at evaluation', () => {
+    // A signature's result type describes the successful values
+    // (`docs/ERROR-MODEL.md` §4): the length mismatch is reported by the
+    // value, as for `[1, 2] + [1, 2, 3]`.
+    const ce = engine();
+    const e = ce.box(['If', C, ROWS, ['List', 0]]);
+    expect(e.evaluate().toString()).toBe(
+      'Error("incompatible-dimensions", "3 vs 1")'
+    );
+  });
+});
+
+describe('ELEMENT-WISE WHICH OVER A MASK THAT MAY BE NESTED', () => {
+  // A comparison over a bare `indexed_collection` is typed
+  // `list<boolean | list<any>>`: an element of the collection may be a list,
+  // which the comparison maps at its leaves. Such a mask still selects
+  // element-wise when its value is flat. A nested value does not evaluate,
+  // and the expression keeps its own type.
+  test('the selection is typed element-wise, and both values match', () => {
+    for (const value of [
+      ['List', 1, 2, 3],
+      ['List', ['List', 1, 2], ['List', 3]],
+    ]) {
+      const ce = engine();
+      ce.declare('C', 'indexed_collection');
+      const e = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]);
+      expect(e.type.toString()).toBe('list<integer>');
+      ce.assign('C', ce.box(value as any));
+      const v = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]).evaluate();
+      expect(v.type.matches(e.type)).toBe(true);
+    }
+  });
+});

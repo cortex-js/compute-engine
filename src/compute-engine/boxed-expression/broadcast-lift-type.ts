@@ -42,9 +42,7 @@ import {
 } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
-  broadcastCellType,
   broadcastElementType,
-  broadcastShapedResultType,
   collectionElementType,
   isNumericScalarType,
   nestedBroadcastResultType,
@@ -60,6 +58,7 @@ import {
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
+  broadcastCollectionArm,
   isSubtype,
   provablyAdmits,
   widen,
@@ -81,6 +80,11 @@ import {
   scalarOrListUnionCellType,
   scalarOrCollectionUnionBranches,
   typeCouldBeCollection,
+  mayCarryDimensions,
+  shapedBroadcastResultType,
+  shapedOrPlainListType,
+  broadcastCellTypeOf,
+  broadcastElementTypeOf,
 } from '../collection-utils.js';
 
 /** The facts about one operand the broadcast lift reads. Every member is a
@@ -154,7 +158,9 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
     textAtom,
     tensorShape:
       structure?.kind === 'list-literal' && structure.shape !== undefined,
-    matrixFact: dims !== undefined && dims.length === 2,
+    // A matrix fact is a dimension list of length 2. A tensor of unknown
+    // rank (`dimensions` is `null`) makes no shape claim, so it is not one.
+    matrixFact: !!dims && dims.length === 2,
     typeIsUnknown: t === 'unknown',
     // A descriptor has no value channel that separates a symbol holding a
     // set from a valueless one (its `collection` fact is also read from the
@@ -169,12 +175,93 @@ export function isBroadcastCollectionTypeOf(t: Type): boolean {
   return dimensionlessIndexedElement(t) !== undefined;
 }
 
-/** `isFixedShapeCollection` on a type: a `list` with dimensions. */
+/** `isFixedShapeCollection` on a type: a `list` with a dimension list. A
+ * tensor of unknown rank (`dimensions` is `null`) has no fixed shape, and
+ * broadcasts like an abstract collection. */
 export function isFixedShapeCollectionTypeOf(t: Type): boolean {
   const r = resolveTypeAlias(t);
-  return (
-    typeof r !== 'string' && r.kind === 'list' && r.dimensions !== undefined
-  );
+  return typeof r !== 'string' && r.kind === 'list' && !!r.dimensions;
+}
+
+/**
+ * Whether a handler's answer `t` states the shape of a collection, so that
+ * the broadcast wrapper keeps it instead of re-wrapping the cell result: a
+ * list with a dimension list (`Negate` of a matrix IS the operand's
+ * matrix), a tensor of unknown rank, or a plain list whose elements are
+ * read down to a non-list type (`list<list<integer>>` is two list levels
+ * of integers, its own shape). The element may also be a union whose arms
+ * are lists or types that cannot be lists (`list<list<real> | real>`, the
+ * sum of `L: list<list<integer> | integer>` and `0.5`): the handler typed
+ * each arm of the operand's element, and wrapping its answer again nested
+ * one list level too many (`list<list<list<real> | real> | list<real> |
+ * real>`). A list arm of such a union is not read further: its elements
+ * may be left open by the handler (`list<unknown>` for the deeper levels
+ * of a self-referential alias) without making the answer shapeless. A
+ * shapeless collection (`indexed_collection<…>` of `-Range(1, 5)`, a bare
+ * `list`, a list of `any`) is not one, and the wrapper types it from the
+ * operands.
+ */
+function handlerAnswerStatesShape(
+  t: Type,
+  seen?: AliasDescent,
+  depth = 0
+): boolean {
+  if (depth > MAX_CELL_DEPTH) return false;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (typeof r === 'string' || r.kind !== 'list') return false;
+  if (r.dimensions !== undefined) return true;
+  return elementStatesShape(r.elements, unfolded.seen, depth + 1);
+}
+
+/**
+ * Whether the element type `el` of a plain list in a handler's answer is
+ * read down to non-list types (`handlerAnswerStatesShape`): a type that
+ * cannot be a list, a list that states its shape, or a union whose every
+ * arm is a list or a type that cannot be a list (`inUnion` is true for an
+ * arm). The alias unfold runs under the descent guard
+ * (`unfoldAliasOnDescent`): a self-referential alias
+ * (`type alias b = list<b | integer>`) that repeats on the path is the type
+ * of an enclosing level, whose shape is the one being read, so it does not
+ * decide the answer.
+ */
+function elementStatesShape(
+  el: Type,
+  seen: AliasDescent | undefined,
+  depth: number,
+  inUnion = false
+): boolean {
+  if (depth > MAX_CELL_DEPTH) return false;
+  const unfolded = unfoldAliasOnDescent(el, seen);
+  if (unfolded === undefined) return true;
+  const r = unfolded.type;
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.every((arm) =>
+      elementStatesShape(arm, unfolded.seen, depth, true)
+    );
+  if (typeof r !== 'string' && r.kind === 'list')
+    return inUnion || handlerAnswerStatesShape(r, unfolded.seen, depth);
+  // A plain list of `r` has the rank-1 reading exactly when `r` cannot be
+  // a list (`staticCollectionDims`).
+  return staticCollectionDims({ kind: 'list', elements: r }) !== null;
+}
+
+/**
+ * The list type `r` with the cell type `cell`: the same shape when the
+ * cells may carry its dimensions, nested plain lists of the same rank
+ * otherwise (`shapedOrPlainListType`). A cell that gains a `missing` arm
+ * keeps a numeric shape (`list<integer | missing^(2x2)>` is a tensor whose
+ * cells may be absent, a spelling the parser reads back); a point cell does
+ * not.
+ */
+function withCellType(
+  r: ListType | CollectionType | BroadcastableType,
+  cell: Type
+): Type {
+  if (r.kind === 'list' && r.dimensions !== undefined && !mayCarryDimensions(cell))
+    return shapedOrPlainListType(cell, r.dimensions);
+  return { ...r, elements: cell };
 }
 
 /** `isLinearAlgebraCollection` on a type. */
@@ -367,7 +454,7 @@ export function abstractCollectionCell(
     return undefined;
   // The leaf of a bare `list` element is `unknown`, typed `value` for the
   // reason given above.
-  const leaf = broadcastCellType(e);
+  const leaf = broadcastCellTypeOf(e);
   return { cell: leaf === 'unknown' ? 'value' : leaf, nestedElement: e };
 }
 
@@ -993,10 +1080,10 @@ function withAbsentPointCells(
           anyCell,
           descendIntoConstructor(unfolded.seen)
         );
-        return inner === cell ? t : { ...r, elements: inner };
+        return inner === cell ? t : withCellType(r, inner);
       }
       return anyCell || isPointCellType(cell)
-        ? { ...r, elements: widen('missing', cell) }
+        ? withCellType(r, widen('missing', cell))
         : t;
     }
     default:
@@ -1233,7 +1320,11 @@ function withAbsentCellMarkers(
   // A dimensioned list with a marker at one of its inner depths is written
   // as a list of rows, one level at a time.
   let list: ListType | CollectionType | BroadcastableType = r;
-  if (levels > 1 && r.kind === 'list' && r.dimensions !== undefined) {
+  // A tensor of unknown rank (`dimensions` is `null`) has one level here
+  // (`collectionLevels`): its cells take the marker as the cells of a plain
+  // list do, and the type stays a tensor of unknown rank
+  // (`tensor<number | nan>`).
+  if (levels > 1 && r.kind === 'list' && r.dimensions) {
     let inner = false;
     for (let d = depth + 1; d < depth + levels; d++)
       if (depths.has(d)) inner = true;
@@ -1267,7 +1358,7 @@ function withAbsentCellMarkers(
         : { kind: 'union', types: [cell, marker] };
   }
   if (cell === list.elements) return list === r ? t : list;
-  return { ...list, elements: cell };
+  return withCellType(list, cell);
 }
 
 /** `t` without its top-level `missing` arm (cells are kept as they are). */
@@ -1420,6 +1511,9 @@ function pointLeafArity(
     return result;
   }
   if (t.kind !== 'list' && t.kind !== 'indexed_collection') return null;
+  // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+  // has no rank to count, so it is not a point list of a known rank.
+  if (t.kind === 'list' && t.dimensions === null) return null;
   const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
   const element = unfoldAliasOnDescent(
     t.elements,
@@ -1523,6 +1617,25 @@ function pointsBesideDeeperNumbers(types: ReadonlyArray<Type>): boolean {
     else pointRank = Math.min(pointRank, leaf.rank);
   }
   return pointRank !== Infinity && scalarRank > pointRank;
+}
+
+/** Whether the operand types are a list of points beside a deeper
+ * collection of numbers (`pointsBesideDeeperNumbers`) and the handler's
+ * answer `answer` is a list of points whose rank is the rank of the deepest
+ * operand: the handler typed the pairing of each point with a row of
+ * numbers itself, and its answer is the shape of the value. The ranks are
+ * read down to the point or number leaves (`pointLeafArity`). */
+function handlerTypedPointsBesideDeeperNumbers(
+  answer: Type,
+  types: ReadonlyArray<Type>
+): boolean {
+  if (!pointsBesideDeeperNumbers(types)) return false;
+  const leaf = pointLeafArity(answer, 0);
+  if (leaf === null || leaf.arity === undefined) return false;
+  let deepest = 0;
+  for (const t of types)
+    deepest = Math.max(deepest, pointLeafArity(t, 0)?.rank ?? 0);
+  return leaf.rank === deepest;
 }
 
 /** Whether every operand type has the same list rank down to its point or
@@ -1717,7 +1830,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     let answer = input.abstractCellResult?.(
       points?.cells ??
         views.map((v, i) =>
-          isTrigger(v, i) ? broadcastCellType(v.type) : undefined
+          isTrigger(v, i) ? broadcastCellTypeOf(v.type) : undefined
         )
     );
     // A cell of a collection of numbers beside the points may be zero, and
@@ -1751,10 +1864,15 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // a list of lists of points. A trigger that is a collection of numbers of
   // the same rank is paired cell by cell with the points, and its cell is a
   // number: each point of `[[(1, 2), (3, 4)]] / [[1, 2]]` is divided by one
-  // number, and the cells of the result are points. `undefined` when no
-  // trigger is a list of points, when a trigger is neither, or when the
-  // ranks differ (a list of points beside a matrix pairs each point with a
-  // row; the handler types that pairing itself).
+  // number, and the cells of the result are points. A collection of numbers
+  // of a lower rank is paired with rows of points, and each point of a row
+  // is divided by the one number of the row: `[[(1, 2), (3, 4)]] / [2]` is
+  // `[[(1/2, 1), (3/2, 2)]]`, so its cell is a number too, and the cells of
+  // the result are points. `undefined` when no trigger is a list of points,
+  // when a trigger is neither, when two lists of points have different
+  // ranks, or when a collection of numbers is deeper than the points (a
+  // list of points beside a matrix pairs each point with a row; the handler
+  // types that pairing itself).
   //
   // `zeroCells` are the same cells with each number cell that may be zero
   // replaced by `number`, or `undefined` when no number cell may be zero.
@@ -1767,7 +1885,10 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       }
     | undefined {
     if (input.broadcastsOverTuples) return undefined;
+    // `rank` is the rank of the lists of points, `numberRank` the largest
+    // rank of the collections of numbers.
     let rank: number | undefined;
+    let numberRank = 0;
     let point = false;
     let mayBeZero = false;
     const cells: (Type | undefined)[] = [];
@@ -1780,11 +1901,10 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
         continue;
       }
       const leaf = pointLeafArity(v.type, 0);
-      if (leaf === null || (rank !== undefined && leaf.rank !== rank))
-        return undefined;
-      rank = leaf.rank;
+      if (leaf === null) return undefined;
       if (leaf.arity === undefined) {
-        const cell = broadcastCellType(v.type);
+        numberRank = Math.max(numberRank, leaf.rank);
+        const cell = broadcastCellTypeOf(v.type);
         cells.push(cell);
         if (isSubtype({ kind: 'value', value: 0 }, cell)) {
           mayBeZero = true;
@@ -1792,13 +1912,15 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
         } else zeroCells.push(cell);
         continue;
       }
+      if (rank !== undefined && leaf.rank !== rank) return undefined;
+      rank = leaf.rank;
       const p = pointLeafType(v.type);
       if (p === undefined) return undefined;
       point = true;
       cells.push(p);
       zeroCells.push(p);
     }
-    if (!point) return undefined;
+    if (!point || rank === undefined || numberRank > rank) return undefined;
     return { cells, zeroCells: mayBeZero ? zeroCells : undefined };
   }
 
@@ -1815,7 +1937,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       // tuple operands; a scalar operand is the same in every cell.
       const element =
         perElementCollection((v) => isTupleShapedType(v.type)) ??
-        broadcastElementType(sigResult);
+        broadcastElementTypeOf(sigResult);
       return {
         kind: 'tuple',
         elements: Array.from({ length: arity }, () => ({
@@ -1832,7 +1954,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // with a tuple branch, stays the cell.
   const cellResult = hasTupleBranch(sigResult)
     ? resolveTypeAlias(sigResult)
-    : broadcastElementType(sigResult);
+    : broadcastElementTypeOf(sigResult);
 
   // Arm 1 (statically-visible collection): a materialized finite indexed
   // collection, an operand typed as an unbounded list / indexed collection,
@@ -1871,6 +1993,23 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       pointsBesideDeeperNumbers(types)
     )
       return nestedBroadcastResultType(types, cellResult);
+    // A head that types a point whole (`Divide` scales a point), over a list
+    // of points beside a deeper collection of numbers: the broadcast pairs
+    // each point with a row of numbers and applies the head to the point and
+    // to each number of the row, so the cells of the result are points, at
+    // the rank of the deepest operand. A handler that types this pairing
+    // itself (`pointListOverMatrixQuotientType` for `Divide`) answers a list
+    // of points of that rank, with the matrix's dimensions when they are
+    // known, and that answer is the result. The typing below reads the cell
+    // of that answer and gives one list level around it for operands of
+    // different ranks, `list<tuple<…>>`, which does not hold the value: a
+    // list is read by its elements, and the elements of the value are rows
+    // of points.
+    if (
+      !input.broadcastsOverTuples &&
+      handlerTypedPointsBesideDeeperNumbers(sigResult, types)
+    )
+      return resolveTypeAlias(sigResult);
     // A point-or-point-list operand (a symbol declared
     // `tuple<number, number> | list<tuple<number, number>>` and left
     // valueless) is a lone scalar-or-collection union whose scalar branch is
@@ -1947,11 +2086,17 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // as the one-cell typing already answered for such a list: the empty
     // list, whose sum is `[]`, is left out on purpose, as it was.
     if (input.armwiseTupleArms === true && input.armCellResult !== undefined) {
+      // A `broadcastable<E>` trigger that holds a collection now holds the
+      // collection arm of the broadcastable (`broadcastCollectionArm`):
+      // `tensor<E>`, of any rank, when `E` cannot hold a list (a tuple, a
+      // number), so that `P` declared `broadcastable<tuple<number, number>>`
+      // can hold `[[(3, 4)], [(6, 8)]]`. A rank-1 `list<E>` does not hold
+      // that value.
       const armedTypes = types.map((t) => {
         const elements = broadcastableElementsOf(t);
         return elements === undefined
           ? t
-          : ({ kind: 'list', elements } as Type);
+          : (broadcastCollectionArm(elements) as Type);
       });
       if (
         armedTypes.some((t) => hasTupleCell(t)) &&
@@ -1995,7 +2140,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
             // `cellResult` above: it is not unwrapped.
             hasTupleBranch(unionCell)
             ? resolveTypeAlias(unionCell)
-            : broadcastElementType(unionCell))
+            : broadcastElementTypeOf(unionCell))
     );
     if (loneUnionResult !== undefined) return loneUnionResult;
 
@@ -2006,7 +2151,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     if (
       deferToHandler &&
       isSubtype(sigResult, COLLECTION_SHAPE_TYPE) &&
-      staticCollectionDims(sigResult) !== null
+      handlerAnswerStatesShape(sigResult)
     )
       return resolveTypeAlias(sigResult);
 
@@ -2061,12 +2206,16 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
         // the shaped form, one list level for a rank mismatch, does not
         // give.
         return sameLeafRank(shapeTypes)
-          ? broadcastShapedResultType(shapeTypes, point, absentCell)
+          ? shapedBroadcastResultType(shapeTypes, point, absentCell)
           : nestedBroadcastResultType(shapeTypes, point);
       }
     }
 
-    return broadcastShapedResultType(shapeTypes, perComponent, absentCell);
+    // The operands' shape is kept when the per-element result may carry
+    // dimensions, that is, when it cannot be a list (`Sin(M)` is a
+    // `matrix<2x2>`, `M < 3` is a `list<boolean^(2x2)>`), and spelled as
+    // nested plain lists otherwise.
+    return shapedBroadcastResultType(shapeTypes, perComponent, absentCell);
   }
 
   // Arm 2 (possibly a collection): the operand's collection-ness is not

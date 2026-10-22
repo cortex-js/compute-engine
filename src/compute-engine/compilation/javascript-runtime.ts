@@ -4421,10 +4421,41 @@ export const SYS_HELPERS = {
    *  - an absent coordinate otherwise, and a non-array value (the
    *    interpreter's `incompatible-type` error) answer `NaN`.
    */
-  pointComponent: (v: unknown, k: number, emptyBroadcasts = true): unknown => {
+  pointComponent: (
+    v: unknown,
+    k: number,
+    emptyBroadcasts = true,
+    nested = false,
+    undecidedNesting = false
+  ): unknown => {
     if (!Array.isArray(v)) return NaN;
     if (v.length === 0) return emptyBroadcasts ? [] : NaN;
-    const first = v[0];
+    // The element that decides the reading is the first one that is not an
+    // empty array, as in the interpreter (`firstDecidingElement`): an empty
+    // row passes the row test below, and when it decided, `[[], [(1, 2),
+    // (3, 4)]]` was read as a list of points, `[NaN, [1, 2]]`, where the
+    // interpreter maps down to the points, `[[], [1, 3]]`. An absent element
+    // (`undefined`, this target's spelling of `Missing`, or `null`) does not
+    // decide either, as in the interpreter (`firstPresentElement`): when it
+    // decided, `[Missing, (1, 2), (3, 4)]` was element-indexed, and `PointY`
+    // of it answered the point `[1, 2]`.
+    const isAbsent = (e: unknown): boolean => e === undefined || e === null;
+    const deciding = (a: unknown[]): unknown =>
+      a.find((e) => !isAbsent(e) && !(Array.isArray(e) && e.length === 0)) ??
+      a.find((e) => !isAbsent(e)) ??
+      a[0];
+    const first = deciding(v);
+    // Every element is absent: no element decides the reading, and the
+    // caller's reading of an empty array (`emptyBroadcasts`, read from the
+    // declared element type) decides, as in the interpreter. A broadcast
+    // gives the absence marker for each element.
+    if (isAbsent(first)) return emptyBroadcasts ? v.map(() => NaN) : NaN;
+    // Every element is an empty array, and the caller states that the
+    // static type is a collection of points at more than one level
+    // (`nested`): each empty row is the empty list of coordinates, as the
+    // interpreter answers.
+    if (nested && Array.isArray(first) && first.length === 0)
+      return v.map(() => []);
     // A cell holds a coordinate when it is a JavaScript number — the absence
     // marker `NaN` and the infinities included — or the `{ re, im }` object a
     // complex value is erased to, `complex` being a subtype of `number`.
@@ -4436,8 +4467,49 @@ export const SYS_HELPERS = {
     // `[[1, "a"], [3, "b"]]` as a list of points and answered `[1, 3]`, where
     // the interpreter reads a row of mixed cells as no point at all and
     // element-indexes, answering the first row. An empty row passes, as it
-    // does in the interpreter, where its element type is the bottom `never`.
+    // does in the interpreter, where its element type is the bottom `never`;
+    // it decides only when every element is an empty row (`deciding`).
     const rows = Array.isArray(first) && first.every(isCoordinate);
+    // A list whose first element is itself a list of points (a tensor of
+    // points of rank 2 or more) is mapped element by element down to its
+    // points, as the interpreter's `pointComponentAt` maps it: `PointX` of
+    // `[[(3, 4), (6, 8)], [(5, 12), (0, 1)]]` is `[[3, 6], [5, 0]]`. Only
+    // the first element of each level that is not empty is read, as the
+    // interpreter peeks it. A point found this way is not empty: the
+    // interpreter maps down only to a point that is a tuple. The arity of
+    // the first point decides the third coordinate for the whole
+    // application, as it does for a list of points.
+    if (!rows) {
+      let p: unknown = first;
+      let point: unknown[] | undefined;
+      while (Array.isArray(p) && p.length > 0) {
+        const head = deciding(p);
+        if (!Array.isArray(head)) break;
+        if (head.length > 0 && head.every(isCoordinate)) {
+          point = head;
+          break;
+        }
+        p = head;
+      }
+      if (point !== undefined) {
+        // An array of this shape is a list of lists of points or a numeric
+        // array of rank 3 or more, and the interpreter reads the two
+        // differently (it element-indexes the numeric array). When the
+        // caller states that the static type admits both
+        // (`undecidedNesting`), no answer is given: a compiled answer would
+        // differ from the interpreter's for one of them.
+        if (undecidedNesting)
+          throw new RangeError(
+            'Point coordinate access: the operand is a list of lists of ' +
+              'points or a numeric array of rank 3 or more, which compiled ' +
+              'code cannot tell apart'
+          );
+        if (k === 2 && point.length < 3) return NaN;
+        return v.map((e) =>
+          SYS_HELPERS.pointComponent(e, k, emptyBroadcasts, nested)
+        );
+      }
+    }
     if (k === 2 && (rows ? first.length : v.length) < 3) return NaN;
     if (rows) return v.map((p) => (Array.isArray(p) ? (p[k] ?? NaN) : NaN));
     return v[k] ?? NaN;

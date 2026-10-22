@@ -181,7 +181,11 @@ export function isTensorValue(x: Expression): boolean {
 export function tensorShape(x: Expression): number[] | null {
   if (!isFunction(x, 'List')) return null;
   const t = x.type.type;
-  if (typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined)
+  // The shape is the dimension list of the value's type. A `List` value is
+  // typed from its cells, so it never carries the `null` dimensions of a
+  // tensor of unknown rank; a type with no dimension list has no shape to
+  // pack.
+  if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
     return [...t.dimensions];
   return null;
 }

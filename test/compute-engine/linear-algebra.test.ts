@@ -3408,8 +3408,8 @@ describe('MatrixPower', () => {
       ['matrix<real^(3x3)>', -1, 'matrix<real^(3x3)>'],
       ['matrix<rational^(2x2)>', -3, 'matrix<rational^(2x2)>'],
       ['matrix<complex^(2x2)>', 2, 'matrix<complex^(2x2)>'],
-      // A nested spelling of a 2×2 matrix types as the flat one.
-      ['list<list<integer^2>^2>', 2, 'matrix<integer^(2x2)>'],
+      // The `list` spelling of a 2×2 matrix types as the `matrix` one.
+      ['list<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
       // The shape is unknown: the element type is kept.
       ['matrix<integer>', 2, 'matrix<integer>'],
       // A non-square matrix has no power: the declared `matrix` is kept.
@@ -4693,5 +4693,23 @@ describe('a matrix with a zero extent', () => {
     const after = new ComputeEngine();
     after.assign('B', after.box(E));
     expect(after.parse('B^2').evaluate().toString()).toBe(error);
+  });
+});
+
+describe('Norm of an empty collection of points of unknown rank', () => {
+  // `tensor<tuple<number, number>>` is a collection of points whose rank
+  // the type does not fix. The type handler types its norm `list<number>`,
+  // one norm per point. An empty value has no points, so its norm is the
+  // empty list, not the norm 0 of an empty vector, which the type does not
+  // hold.
+  test('the norm is the empty list and matches its type', () => {
+    const engine = new ComputeEngine();
+    engine.declare('T', 'tensor<tuple<number, number>>');
+    engine.assign('T', engine.box(['List']));
+    const expr = engine.box(['Norm', 'T']);
+    expect(expr.type.toString()).toBe('list<number>');
+    const value = expr.evaluate();
+    expect(value.toString()).toBe('[]');
+    expect(value.type.matches(expr.type)).toBe(true);
   });
 });

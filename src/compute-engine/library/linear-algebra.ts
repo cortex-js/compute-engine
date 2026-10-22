@@ -8,7 +8,10 @@ import {
   isSubtype,
   isSubtypeOfBroadcastOrIndexed,
 } from '../../common/type/subtype.js';
-import { closeImaginaryUnderArithmetic } from '../../common/type/reduce.js';
+import {
+  closeImaginaryUnderArithmetic,
+  reduceType,
+} from '../../common/type/reduce.js';
 import {
   broadcastCellType,
   collectionElementType,
@@ -40,7 +43,9 @@ import {
   canEnumerateFiniteSource,
   hasAccessibleComponents,
   innerCollectionCannotBeWalked,
+  isBroadcastablePointType,
   isFiniteIndexedCollection,
+  isNestedPointCollectionType,
   isNumericTuple,
   isPointListValue,
   isTuple,
@@ -48,6 +53,7 @@ import {
   isTupleShapedType,
   isValuelessCollectionTyped,
   isWalkableFiniteCollection,
+  pointCollectionElementType,
 } from '../collection-utils.js';
 import {
   Expression,
@@ -1102,8 +1108,9 @@ function isPointListOperand(
   // The `missing` arm of an element is not read: an element that is a
   // restricted point, or an absent point, is typed `missing | tuple<…>`, and
   // the norm of such a cell is a number (its norm, or `NaN` when absent).
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
   const cell =
-    d.facts.elementType ?? collectionElementType(resolveType(d.type));
+    d.facts.elementType ?? pointCollectionElementType(resolveType(d.type));
   const elt =
     cell === undefined ? undefined : resolveType(stripMissingFromType(cell));
   if (
@@ -1120,6 +1127,28 @@ function isPointListOperand(
     }
   }
   return false;
+}
+
+/**
+ * The type of the cells of a `Reshape` operand of list type `t`: the
+ * element type read down through the list levels, until it is not a list
+ * (`list<integer>` and `matrix<integer>` give `integer`,
+ * `list<vector<integer>>` gives `integer` two levels down). A tensor of
+ * unknown rank reads its cells directly. The walk is bounded, so a type
+ * that nests without end (an alias of itself) stops as a list, which is not
+ * a number.
+ */
+function reshapeCellType(t: Type): Type {
+  let cell: Type = t;
+  for (let depth = 0; depth < 8; depth++) {
+    const r = resolveTypeAlias(cell);
+    if (typeof r === 'string' || r.kind !== 'list') return r;
+    if (r.dimensions === null) return r.elements;
+    const next = collectionElementType(r);
+    if (next === undefined) return r;
+    cell = next;
+  }
+  return cell;
 }
 
 /**
@@ -1206,7 +1235,14 @@ function isVectorOfNumbers(x: Expression): boolean {
   // — its elements are numbers too, so the rank must be one.
   if (t.kind === 'indexed_collection') return isSubtype(t.elements, 'number');
   if (t.kind !== 'list') return false;
-  if (t.dimensions !== undefined && t.dimensions.length !== 1) return false;
+  // A plain `list<E>` (no dimensions) is a vector when its elements are
+  // numbers: its elements are what one index returns, so there is no
+  // deeper level. A tensor with a dimension list is a vector only at rank
+  // 1. A tensor of unknown rank (`tensor<U>`, whose `dimensions` is
+  // `null`) may be a matrix, so it is not known to be a vector, and it
+  // takes the structural route below like a matrix does.
+  if (t.dimensions === null) return false;
+  if (t.dimensions && t.dimensions.length !== 1) return false;
   return isSubtype(t.elements, 'number');
 }
 
@@ -1233,7 +1269,12 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
     };
   if (t.kind !== 'list') return 'value';
   const dims = t.dimensions;
-  // Rank unknown: the element type is still preserved, but no shape claim.
+  // A tensor of unknown rank (`tensor<U>`, whose `dimensions` is `null`)
+  // transposes to a tensor of the same unknown rank with the same cells:
+  // the type is returned as it is. A plain list (no dimensions) is a list
+  // of its elements; the transpose keeps the element type and makes no
+  // shape claim.
+  if (dims === null) return t;
   if (!dims) return { kind: 'list', elements: t.elements };
   // Scalar-ish or vector (rank ≤ 1): identity.
   if (dims.length <= 1) return t;
@@ -1623,7 +1664,9 @@ function isPointListNotPointOperand(
 function pointListElementDescriptor(
   d: OperandDescriptor
 ): OperandDescriptor | undefined {
-  const elt = d.facts.elementType ?? collectionElementType(resolveType(d.type));
+  // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
+  const elt =
+    d.facts.elementType ?? pointCollectionElementType(resolveType(d.type));
   if (elt === undefined) return undefined;
   // A cell that may be absent (`missing | tuple<…>`, the cell of a restricted
   // list of points or of a list holding a restricted point) contributes its
@@ -2166,8 +2209,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // an absent value for an expression the runtime keeps intact.
         if (!isSubtype(value.type, LIST_SHAPE_TYPE))
           return BoxedType.forResult('value', context.engine._typeResolver);
-        const col = value.type as ListType;
-        if (!isSubtype(col.elements, 'number'))
+        // The cells of the operand are read through its element type, one
+        // list level at a time, down to the first non-list type: the
+        // elements of a plain `list<E>` are `E`, the elements of a matrix
+        // are its rows (`collectionElementType`), and a `list<vector<integer>>`
+        // reaches `integer` two levels down. Reading `elements` directly
+        // would take a row type for a cell type.
+        if (!isSubtype(reshapeCellType(value.type), 'number'))
           return BoxedType.forResult('value', context.engine._typeResolver);
         return BoxedType.forResult(
           parseType(`list<number^${dims}>`),
@@ -3273,15 +3321,25 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const points = [a, b].map((d, i) =>
             listOfPoints[i] ? pointListElementDescriptor(d) : d
           );
-          if (points.every((d) => d !== undefined && isNumericTupleOperand(d)))
+          if (points.every((d) => d !== undefined && isNumericTupleOperand(d))) {
+            const product =
+              innerProductType(points[0]!, points[1]!, derive) ?? 'number';
+            const list: Type = { kind: 'list', elements: product };
+            // When every operand read as a list of points is a
+            // `broadcastable<P>` of points, each may be one point, and the
+            // product of two points is one number: the result is the
+            // product or the list of products. Typed as the list alone, the
+            // product of two points did not match its type.
+            const mayBeOnePoint = [a, b].every(
+              (d, i) => !listOfPoints[i] || isBroadcastablePointType(d.type)
+            );
             return BoxedType.forResult(
-              {
-                kind: 'list',
-                elements:
-                  innerProductType(points[0]!, points[1]!, derive) ?? 'number',
-              },
+              mayBeOnePoint
+                ? reduceType({ kind: 'union', types: [product, list] })
+                : list,
               engine._typeResolver
             );
+          }
         }
         return BoxedType.forResult('value', engine._typeResolver);
       },
@@ -4330,7 +4388,24 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             declineWideNormType(pointNormTypeOf(x, engine)),
             engine._typeResolver
           );
+        // A `broadcastable<P>` of points is one point or a list of points:
+        // its norm is one number or one number per point. Typed
+        // `list<number>` alone, the norm of one point did not match its
+        // type. (A tensor of points of rank 2 or more is refused at
+        // evaluation, with an error.)
         if (isPointListOperand(x, engine))
+          return BoxedType.forResult(
+            isBroadcastablePointType(x.type)
+              ? parseType('number | list<number>')
+              : { kind: 'list', elements: 'number' },
+            engine._typeResolver
+          );
+        // A collection of points whose rank the type does not fix at 1
+        // (`tensor<tuple<number, number>>`): a value of rank 1 has one norm
+        // per point, and a deeper value is refused at evaluation. Without
+        // this arm the declared `real | +oo | nan` stood, which the list of
+        // norms does not match.
+        if (isNestedPointCollectionType(x.type))
           return BoxedType.forResult(
             { kind: 'list', elements: 'number' },
             engine._typeResolver
@@ -4712,7 +4787,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // which is the same value as an empty vector. Thus the test reads the
         // operand BEFORE evaluation (`expression.ops`), with the same
         // predicates the `type` handler above uses, so that the value and the
-        // type (`list<number>`) agree. When the operands of `expression` do
+        // type (`list<number>`) agree. These predicates include the test for
+        // a collection of points whose rank the type does not fix
+        // (`tensor<tuple<number, number>>`), which the type handler also
+        // types `list<number>`. When the operands of `expression` do
         // not match the evaluated operands one for one, there is no such
         // information and the empty vector reading applies.
         if (x.isFiniteCollection === true && x.count === 0) {
@@ -4722,7 +4800,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               : undefined;
           if (raw !== undefined) {
             const d = describe(raw);
-            if (!isTupleOperand(d, ce) && isPointListOperand(d, ce))
+            if (
+              !isTupleOperand(d, ce) &&
+              (isPointListOperand(d, ce) || isNestedPointCollectionType(d.type))
+            )
               return ce.function('List', []);
           }
           return ce.Zero;
@@ -7545,8 +7626,12 @@ function finiteDimension(value: Expression): number | undefined {
     type.kind === 'list'
   ) {
     const dimensions = (type as ListType).dimensions;
+    // Only a dimension list of known, finite lengths gives the count. A
+    // plain list (no dimensions) and a tensor of unknown rank
+    // (`dimensions` is `null`) say nothing of the size, and the value is
+    // read below (a packed tensor, or a walk over a finite collection).
     if (
-      dimensions !== undefined &&
+      dimensions &&
       dimensions.length > 0 &&
       dimensions.every((d) => Number.isInteger(d) && d >= 0)
     ) {

@@ -532,3 +532,75 @@ describe('MAX/MIN OF A DICTIONARY IN THE INTERPRETER', () => {
     expect(ce.box(['Max', 'd']).evaluate().toString()).toBe(ERROR);
   });
 });
+
+describe('MAX AND MIN OVER A TENSOR OF UNKNOWN RANK', () => {
+  // A `tensor<integer>` may hold a list of numbers or a matrix. The
+  // compiled reduce read each row of a matrix as a number, so `Max` of
+  // `[[1, 2], [3, 4]]` was `NaN` where `evaluate()` gives 4. The operand is
+  // refused as a matrix is, and the fallback runs the interpreter, which
+  // agrees with `evaluate()` at every rank.
+  const MATRIX = [
+    [1, 2],
+    [3, 4],
+  ];
+  test.each([
+    ['Max', [3, 1, 2], 3, MATRIX, 4],
+    ['Min', [3, 1, 2], 1, MATRIX, 1],
+  ] as const)('%s(w) with w: tensor<integer>', (op, v1, r1, v2, r2) => {
+    const ce = new ComputeEngine();
+    const body = [op, 'w'];
+    expect(() =>
+      compile(lambda(ce, body, 'tensor<integer>'), { fallback: false })
+    ).toThrow(/an element of the data is a collection/);
+    expect(() =>
+      compile(lambda(ce, body, 'matrix<integer>'), { fallback: false })
+    ).toThrow(/an element of the data is a collection/);
+    const c = compile(lambda(ce, body, 'tensor<integer>'));
+    expect(c.success).toBe(false);
+    const run = c.run as (v: unknown) => unknown;
+    expect(run(v1)).toBe(r1);
+    expect(run(v2)).toBe(r2);
+    const toList = (v: unknown): unknown =>
+      Array.isArray(v) ? ['List', ...v.map(toList)] : v;
+    const f = lambda(ce, body, 'tensor<integer>');
+    expect(ce.box([f, toList(v1)] as any).evaluate().re).toBe(r1);
+    expect(ce.box([f, toList(v2)] as any).evaluate().re).toBe(r2);
+  });
+
+  // `broadcastable<number>` is a number or a `tensor<number>`, so its value
+  // may be a matrix too. It is the type that a numeric function gives over
+  // a scalar or a list operand, and a program usually holds a flat list in
+  // it, so it compiles. On a flat list the compiled code gives the answer of
+  // the interpreter. On a matrix it throws at run time, and does not give a
+  // wrong number.
+  test.each([
+    ['Max', [3, 1, 2], 3],
+    ['Min', [3, 1, 2], 1],
+  ] as const)('%s(w) with w: broadcastable<number>', (op, v, r) => {
+    const ce = new ComputeEngine();
+    const body = [op, 'w'];
+    const c = compile(lambda(ce, body, 'broadcastable<number>'), {
+      fallback: false,
+    });
+    expect(c.success).toBe(true);
+    const run = c.run as (v: unknown) => unknown;
+    const f = lambda(ce, body, 'broadcastable<number>');
+    expect(ce.box([f, ['List', ...v]] as any).evaluate().re).toBe(r);
+    expect(run(v)).toBe(r);
+    expect(run(5)).toBe(5);
+    expect(() => run(MATRIX)).toThrow(/not a real number/);
+  });
+
+  // The other statistics read each row of a matrix as a number (the
+  // compiled `Mean` of `[[1, 2], [3, 5]]` was `null` and `Mode` was
+  // `[1, 2]`, where the interpreter reports a type error), so a
+  // `broadcastable<number>` operand is refused for them.
+  test.each(['Mean', 'Mode'])('%s(w) with w: broadcastable<number>', (op) => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      compile(lambda(ce, [op, 'w'], 'broadcastable<number>'), {
+        fallback: false,
+      })
+    ).toThrow(/an element of the data is a collection/);
+  });
+});

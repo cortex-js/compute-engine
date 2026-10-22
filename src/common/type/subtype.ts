@@ -46,8 +46,7 @@ import { isEffectSubset } from './effects.js';
 import {
   _setTypeAlgebra,
   aliasDefinitionAt,
-  ANY_OR_LIST_ELEMENT,
-  flattenNestedListType,
+  freeTypeVariables,
   instantiatesTo,
   substituteTypeVariables,
 } from './instantiate.js';
@@ -895,9 +894,11 @@ function provablyDisjointRules(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.every((t) => provablyDisjoint(a, t));
 
-  // `broadcastable<T>` is the union `T | list<T>` (the same
-  // expansion `isSubtype` uses on both sides), so it distributes exactly like
-  // a union: disjoint from it iff disjoint from BOTH arms. Without this the
+  // `broadcastable<T>` is the union of `T` and its collection arm
+  // (`broadcastCollectionArm`: `tensor<T>` when no value of `T` is a list,
+  // `list<T>` otherwise), the same expansion `isSubtype` uses on both
+  // sides, so it distributes exactly like a union: disjoint from it iff disjoint from
+  // BOTH arms. Without this the
   // category test below finds no bucket for the `broadcastable` kind — it
   // spans two — and falls through to the conservative "may overlap". That
   // answer is safe for this predicate in isolation, but `box.ts` only KEEPS an
@@ -909,12 +910,12 @@ function provablyDisjointRules(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'broadcastable')
     return (
       provablyDisjoint(a, b.elements) &&
-      provablyDisjoint(a, { kind: 'list', elements: b.elements })
+      provablyDisjoint(a, broadcastCollectionArm(b.elements))
     );
   if (typeof a === 'object' && a.kind === 'broadcastable')
     return (
       provablyDisjoint(a.elements, b) &&
-      provablyDisjoint({ kind: 'list', elements: a.elements }, b)
+      provablyDisjoint(broadcastCollectionArm(a.elements), b)
     );
 
   // An intersection is disjoint from `other` as soon as ANY member is: the
@@ -1115,11 +1116,16 @@ function typeCategory(t: Type): PrimitiveType | undefined {
  * A `-1` is a wildcard ("any size along this axis"), and an absent
  * `dimensions` is unconstrained.
  */
+/**
+ * Whether two dimension lists admit a common shape: the same rank, and on
+ * each axis an open length (`-1`) or the same length. A tensor of unknown
+ * rank (`null`) admits every shape.
+ */
 function dimensionsCouldMatch(
-  a: number[] | undefined,
-  b: number[] | undefined
+  a: number[] | null,
+  b: number[] | null
 ): boolean {
-  if (a === undefined || b === undefined) return true;
+  if (a === null || b === null) return true;
   if (a.length !== b.length) return false;
   return a.every((d, i) => d === -1 || b[i] === -1 || d === b[i]);
 }
@@ -1145,12 +1151,16 @@ function dimensionsCouldMatch(
  * inhabitants, so nothing could be a `never` — where `isSubtype` treats it as
  * a subtype of everything.
  *
- * It also deliberately ignores the EMPTY collection as a witness. `[]` types
- * `list<never>` and so inhabits every list type, which on a purist reading
- * would make every pair of list types "could match" and render the predicate
- * useless for classification. `list<integer>.couldMatch('list<string>')` is
- * therefore `false` — the question being asked is about element shape. The
- * empty list's own type answers `true` against any list type, as it should.
+ * Two PLAIN lists could always match: `[]` types `list<never>`, a value of
+ * both, and their meet is `list<never>`, which is not empty
+ * (`meetListTypes`; user decision of 2026-10-21, which aligned this
+ * predicate with the meet). So `list<integer>.couldMatch('list<string>')`
+ * and `list<integer>.couldMatch('list<list<integer>>')` are `true`. A tensor
+ * with a fixed, positive first axis holds no empty list, so against a plain
+ * list its cells must match the list's elements; two tensors could match
+ * when their shapes could be equal and their cells could match, or when
+ * both admit the empty shape. Other collection kinds (`set`, `collection`,
+ * `indexed_collection`) keep the element-wise reading.
  *
  * It is *not* the negation of {@linkcode provablyDisjoint}: that predicate is
  * conservative (unproven ⇒ "may overlap"), which makes it answer `true` for
@@ -1289,11 +1299,12 @@ function inhabitationWalk(
       return all(t.elements.map((e) => e.type));
     case 'list':
       // A list holds at least one cell only when every axis has a fixed,
-      // positive length (`list<never^1>`); a list with no dimensions, or
-      // with an open (`-1`) or zero-length axis, holds the empty list
-      // (`list<never>` is the type of `[]`).
+      // positive length (`list<never^1>`); a list with no dimensions, a
+      // tensor of unknown rank (`dimensions` is `null`), or a list with an
+      // open (`-1`) or zero-length axis, holds the empty list (`list<never>`
+      // is the type of `[]`).
       if (
-        t.dimensions !== undefined &&
+        t.dimensions &&
         t.dimensions.length > 0 &&
         t.dimensions.every((d) => d > 0)
       )
@@ -1571,9 +1582,10 @@ function couldMatchStructure(a: Type, b: Type): boolean {
   if (typeof b === 'object' && b.kind === 'union')
     return b.types.some((t) => couldMatchWithin(a, t));
 
-  // `broadcastable<T>` is the union `T | list<T>` (the same
-  // expansion `isSubtype` and `provablyDisjoint` use), so it distributes
-  // like one: it could match iff EITHER arm could. Without this a
+  // `broadcastable<T>` is the union of `T` and its collection arm
+  // (`broadcastCollectionArm`: `tensor<T>` when no value of `T` is a list,
+  // `list<T>` otherwise), the same expansion `isSubtype` and `provablyDisjoint` use,
+  // so it distributes like one: it could match iff EITHER arm could. Without this a
   // broadcastable subject fell to the containment fallback, which answered
   // `broadcastable<number>` vs `collection<any>` with `false` even though
   // the collection arm inhabits it. Both sides gain the expansion together
@@ -1581,12 +1593,12 @@ function couldMatchStructure(a: Type, b: Type): boolean {
   if (typeof a === 'object' && a.kind === 'broadcastable')
     return (
       couldMatchWithin(a.elements, b) ||
-      couldMatchWithin({ kind: 'list', elements: a.elements }, b)
+      couldMatchWithin(broadcastCollectionArm(a.elements), b)
     );
   if (typeof b === 'object' && b.kind === 'broadcastable')
     return (
       couldMatchWithin(a, b.elements) ||
-      couldMatchWithin(a, { kind: 'list', elements: b.elements })
+      couldMatchWithin(a, broadcastCollectionArm(b.elements))
     );
 
   // Neither is any other type shown to have no value (`record{a: never}`,
@@ -1641,11 +1653,33 @@ function couldMatchStructure(a: Type, b: Type): boolean {
   // `list<T>` are different runtime shapes, and no value is both.
   if (typeof a === 'object' && typeof b === 'object') {
     if (a.kind === 'list' && b.kind === 'list') {
-      if (
-        dimensionsCouldMatch(a.dimensions, b.dimensions) &&
-        couldMatchWithin(a.elements, b.elements)
-      )
-        return true;
+      // The rules of the meet (`meetListTypes`), which answers `never` only
+      // when the shapes exclude each other. Two plain lists always share
+      // the empty list. Two tensors (a dimension list, or an unknown rank)
+      // share a value when their shapes can agree and their cells can, or
+      // when both admit the empty shape (a first axis that is open or
+      // zero). A plain list and a rank-1 tensor share the empty list unless
+      // the tensor's length is fixed and positive. Otherwise the elements
+      // of the plain list are compared with the elements of the tensor
+      // (`listElementType`: the cells of a rank-1 tensor, the rows of a
+      // deeper one, a cell or a tensor for an unknown rank): a matrix of
+      // integers is a `list<vector<integer>>`, not a `list<integer>`.
+      const emptyAdmitted = (t: ListType): boolean =>
+        t.dimensions === undefined ||
+        t.dimensions === null ||
+        (t.dimensions.length === 1 && t.dimensions[0] <= 0);
+      if (a.dimensions === undefined && b.dimensions === undefined) return true;
+      if (a.dimensions !== undefined && b.dimensions !== undefined) {
+        if (dimensionsCouldMatch(a.dimensions, b.dimensions)) {
+          if (couldMatchWithin(a.elements, b.elements)) return true;
+          if (emptyAdmitted(a) && emptyAdmitted(b)) return true;
+        }
+      } else {
+        const tensor = a.dimensions === undefined ? b : a;
+        if (emptyAdmitted(tensor)) return true;
+        if (couldMatchWithin(listElementType(a), listElementType(b)))
+          return true;
+      }
     } else if (a.kind === 'tuple' && b.kind === 'tuple') {
       const bElements = b.elements;
       if (
@@ -1710,8 +1744,19 @@ function couldMatchStructure(a: Type, b: Type): boolean {
       const indexedPlusList =
         kinds.includes('indexed_collection') && kinds.includes('list');
       if (genericPlusSpecific || indexedPlusList) {
-        const ea = (a as CollectionType | SetType | ListType).elements;
-        const eb = (b as CollectionType | SetType | ListType).elements;
+        // A plain list beside an abstract collection: the empty list is a
+        // value of both, as it is of two plain lists, and their meet
+        // (`meetCollectionKinds`) is the list of the element meet, never
+        // empty.
+        const plainList = (t: Type): boolean =>
+          typeof t === 'object' && t.kind === 'list' && t.dimensions === undefined;
+        if (plainList(a) || plainList(b)) return true;
+        // The elements of a list are what one index returns
+        // (`listElementType`): the rows of a matrix, not its cells.
+        const elementsOf = (t: CollectionType | SetType | ListType): Type =>
+          t.kind === 'list' ? listElementType(t) : t.elements;
+        const ea = elementsOf(a as CollectionType | SetType | ListType);
+        const eb = elementsOf(b as CollectionType | SetType | ListType);
         if (couldMatchWithin(ea, eb)) return true;
       } else if (kinds.includes('collection') && kinds.includes('dictionary')) {
         const dict = (a.kind === 'dictionary' ? a : b) as DictionaryType;
@@ -1917,68 +1962,242 @@ const MAX_WITNESS_CANDIDATES = 256;
 const LIST_OF_ANY_TYPE: Type = Object.freeze({ kind: 'list', elements: 'any' });
 
 /**
- * Whether `t`, the element type of a list with dimensions, is a scalar top
- * type: a type that contains `unknown` (`unknown`, `any`, `any | integer`).
- * The elements of such a list are scalars, not lists: `vector<unknown>` is a
- * list of scalars, of rank 1 (user decision 2026-10-21). A list arm beside a
- * top arm (`any | vector<boolean>`) is absorbed by the union reduction, so
- * it reads the same.
+ * `tensor<U>`: a tensor of unknown rank (1 or more) whose cells are `U`.
  */
-export function isScalarTopElement(t: Type): boolean {
-  // The element type of a skeleton that stands for a type variable, which
-  // can be a list (`ANY_OR_LIST_ELEMENT` in `instantiate.ts`).
-  if (t === ANY_OR_LIST_ELEMENT) return false;
-  // Only a top name, or a type that can hold one (a union, a reference, an
-  // intersection, a negation), can contain `unknown`; the test runs for
-  // every list compared with a list with dimensions.
-  if (typeof t === 'string') return t === 'any' || t === 'unknown';
-  if (
-    t.kind !== 'union' &&
-    t.kind !== 'reference' &&
-    t.kind !== 'intersection' &&
-    t.kind !== 'negation'
-  )
-    return false;
-  return isSubtype('unknown', t);
+export function tensorOf(cells: Type): ListType {
+  return { kind: 'list', elements: cells, dimensions: null };
 }
 
 /**
- * Whether the element type `t` of a list can hold a list and is not a
- * scalar top type (`isScalarTopElement()`): `list`, `list<integer>`,
- * `integer | list<integer>`. Such elements are not in a list with
- * dimensions whose element type is a scalar top type.
+ * Whether no value of the type `t` is a list: `t` is a subtype of `number`,
+ * or it is provably disjoint from `list<any>` (a boolean, a string, a
+ * tuple, a record, a set, a function, `integer | missing`, the markers).
+ * A top (`any`, `unknown`), `value`, `expression`, a negation such as
+ * `!integer`, and a type with a free type variable can hold a list, and
+ * answer `false`.
+ *
+ * This is the semantic form of the syntactic test
+ * `cellTypeMayCarryDimensions` (`primitive.ts`), which the type parser
+ * applies to the cells of `tensor<U>` and `list<U^dims>`. The subtype
+ * relation needs the semantic form: `value` passes the syntactic test, but
+ * a `list<value>` holds matrices, so reading it as a rank-1
+ * `tensor<value>` would make the relation intransitive
+ * (`matrix<integer> <: list<value>`, and `matrix<integer>` is not a rank-1
+ * tensor).
  */
-export function holdsListElements(t: Type): boolean {
-  if (isScalarTopElement(t)) return false;
-  // A primitive name holds a list when `list` is below it, or when it is
-  // below `list` (`range`); most composite
-  // kinds are decided by their kind alone.
-  if (typeof t === 'string')
-    return (
-      isPrimitiveSubtype('list', t as PrimitiveType) ||
-      // `never` is below every type, but it has no value.
-      (t !== 'never' && isPrimitiveSubtype(t as PrimitiveType, 'list'))
-    );
-  switch (t.kind) {
-    case 'list':
-    case 'collection':
-    case 'indexed_collection':
-    case 'broadcastable':
+export function cannotHoldAList(t: Type): boolean {
+  if (isSubtype(t, 'number')) return true;
+  if (freeTypeVariables(t).size > 0) return false;
+  return provablyDisjoint(t, LIST_OF_ANY_TYPE);
+}
+
+/**
+ * The collection arm of `broadcastable<T>`, which denotes `T` or this arm
+ * (`BroadcastableType` in `types.ts`): `tensor<T>`, a tensor of any rank
+ * whose cells are `T`, when no value of `T` is a list (`cannotHoldAList`:
+ * a number, a boolean, a string, a tuple, `integer | missing`), so that a
+ * matrix of numbers is a `broadcastable<number>` and a matrix of booleans
+ * is a `broadcastable<boolean>`; the plain list `list<T>`, read by its
+ * elements, when `T` can hold a list (`any`, `value`, a type variable), so
+ * that a `list<any>` is a `broadcastable<any>`. Every rule that expands a
+ * broadcastable (the subtype relation, `couldMatch`, `provablyDisjoint`,
+ * the reducer's `expandBroadcastable`, the element type of
+ * `collectionElementType`) builds its arm here.
+ */
+export function broadcastCollectionArm(elements: Type): ListType {
+  if (cannotHoldAList(elements)) return tensorOf(elements);
+  return { kind: 'list', elements };
+}
+
+/**
+ * The type of the elements of the list type `t`: what one index into a
+ * value of `t` returns.
+ *
+ * - A plain list, `list<E>` (no dimensions): `E`.
+ * - A tensor with a dimension list, `vector<U>`, `matrix<U>`,
+ *   `list<U^dims>`: the cells `U` at rank 1, and the rows, a tensor of the
+ *   remaining axes with the same cells, at rank 2 or more (`matrix<U>`
+ *   gives `vector<U>`, `list<U^(2x3x4)>` gives `matrix<U^(3x4)>`).
+ * - A tensor of unknown rank, `tensor<U>`: a cell or a tensor of lower
+ *   rank, `U | tensor<U>`.
+ *
+ * The same reading as `collectionElementType` in `utils.ts`, which calls
+ * this function for a list. (Section 3.2 of
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md`.)
+ */
+export function listElementType(t: Readonly<ListType>): Type {
+  const dims = t.dimensions;
+  if (dims === undefined) return t.elements;
+  if (dims === null)
+    return { kind: 'union', types: [t.elements, tensorOf(t.elements)] };
+  if (dims.length <= 1) return t.elements;
+  return { kind: 'list', elements: t.elements, dimensions: dims.slice(1) };
+}
+
+/**
+ * The questions `tensor<U> <: list<E>` open on the stack, keyed by the
+ * interning keys of the two types (`cyclePairKey`).
+ */
+let openTensorListQuestions: Set<string> | null = null;
+
+/**
+ * Whether the tensor of unknown rank `lhs` (`tensor<U>`) is a subtype of
+ * the plain list `rhs` (`list<E>`): whether its elements, `U | tensor<U>`,
+ * are `E`.
+ *
+ * The elements of `tensor<U>` contain `tensor<U>` itself, so the question
+ * can come back with the same two types when `E` is recursive: with
+ * `type alias nest = list<nest | integer>`, `tensor<integer> <: nest` asks
+ * `integer | tensor<integer> <: nest | integer`, then
+ * `tensor<integer> <: nest` again, without end. The rule is coinductive: a
+ * question that is open further up the stack is assumed to hold. This is
+ * sound because each repeat passes through this function, which goes one
+ * list level down into the value, and every value is finite: a value that
+ * is not in `E` fails at a finite depth, on a branch that does not repeat.
+ * The answer is recorded as an assumption (`noteSubtypeAssumption`), so
+ * the memo of `isSubtype` does not keep an answer that depends on it above
+ * the question it repeats.
+ */
+function tensorFitsPlainList(
+  lhs: Readonly<ListType>,
+  rhs: Readonly<ListType>
+): boolean {
+  enterCycleKeys();
+  try {
+    const key = `${cyclePairKey(lhs)}<:${cyclePairKey(rhs)}`;
+    if (openTensorListQuestions?.has(key)) {
+      noteSubtypeAssumption(subtypePairs?.active.get(key) ?? -1);
       return true;
-    case 'numeric':
-    case 'value':
-    case 'tuple':
-    case 'record':
-    case 'object':
-    case 'set':
-    case 'dictionary':
-    case 'signature':
-    case 'symbol':
-    case 'expression':
-      return false;
-    default:
-      return !provablyDisjoint(t, LIST_OF_ANY_TYPE);
+    }
+    openTensorListQuestions ??= new Set();
+    openTensorListQuestions.add(key);
+    try {
+      return isSubtype(listElementType(lhs), rhs.elements);
+    } finally {
+      openTensorListQuestions.delete(key);
+      if (openTensorListQuestions.size === 0) openTensorListQuestions = null;
+    }
+  } finally {
+    leaveCycleKeys();
   }
+}
+
+/**
+ * The meet of two list types, or `'keep'` when the pair has no spelling
+ * and the caller keeps the intersection as written. `meet` is the meet of
+ * two element or cell types: the intersection reducer's, or `narrow`'s.
+ *
+ * A list type is a plain list (`list<E>`, elements `E`), a tensor with a
+ * dimension list (cells `U`, one length per axis, `-1` an open length), or
+ * a tensor of unknown rank (`tensor<U>`, cells `U`). The rules:
+ *
+ * - Two plain lists: `list<E1 & E2>`, always. When the element meet is
+ *   empty the answer is `list<never>`, the type of the empty list `[]`,
+ *   which is a value of both: `list<integer> & list<string>` is
+ *   `list<never>`, not `never`.
+ * - Two tensors with dimension lists: the cell meet, with the axes met one
+ *   by one (an open axis meets a fixed one as the fixed one, two different
+ *   fixed lengths give `never`); different ranks give `never`. The answer
+ *   is `never` only when the shapes exclude each other: an empty cell meet
+ *   gives `never` when every axis is fixed and positive (no value has the
+ *   shape and no cell), and a tensor of `never` cells otherwise (it holds
+ *   the empty list). A pattern with dimension variables is kept as written
+ *   unless the two shapes are spelled the same.
+ * - Two tensors of unknown rank: `tensor<U & V>`. A tensor of unknown rank
+ *   and a tensor with a dimension list: that dimension list with the cell
+ *   meet.
+ * - A plain list and a tensor of rank 1: the rank-1 tensor with the meet of
+ *   the elements and the cells; `never` only when that meet is empty and
+ *   the length is fixed and positive. With an open length this is the rule
+ *   that `list<U>` and `vector<U>` denote the same values for a numeric `U`.
+ * - A plain list and a tensor of rank 2 or more: the elements of the tensor
+ *   are its rows `R`. The tensor itself when `R` is a subtype of the
+ *   elements of the plain list, `never` when the meet of the two is empty
+ *   (the empty list is not a tensor of rank 2 or more, so no value is in
+ *   both), and `'keep'` otherwise.
+ * - A plain list and a tensor of unknown rank: `'keep'`, except that the
+ *   tensor is the answer when its elements (a cell or a tensor) are a
+ *   subtype of the list's elements, and `list<never>` (the empty list, a
+ *   rank-1 tensor of length 0) when the elements of the list can be
+ *   neither a cell nor a tensor.
+ *
+ * (Section 3.4 of `docs/plans/2026-10-21-list-element-tensor-cell.md`.)
+ */
+export function meetListTypes(
+  a: Readonly<ListType>,
+  b: Readonly<ListType>,
+  meet: (x: Type, y: Type) => Type
+): Type | 'keep' {
+  const da = a.dimensions;
+  const db = b.dimensions;
+  if (da === undefined && db === undefined)
+    return { kind: 'list', elements: meet(a.elements, b.elements) };
+  if (da === undefined || db === undefined) {
+    const plain = da === undefined ? a : b;
+    const tensor = plain === a ? b : a;
+    const dims = tensor.dimensions;
+    if (dims === null) {
+      const rows = listElementType(tensor);
+      if (isSubtype(rows, plain.elements)) return tensor;
+      if (
+        provablyDisjoint(plain.elements, tensor.elements) &&
+        provablyDisjoint(plain.elements, tensor)
+      )
+        return { kind: 'list', elements: 'never' };
+      return 'keep';
+    }
+    if (dims!.length <= 1) {
+      const cells = meet(plain.elements, tensor.elements);
+      if (isEmptyType(cells) && dims!.length === 1 && dims![0] > 0)
+        return 'never';
+      return { ...tensor, elements: cells };
+    }
+    const rows = listElementType(tensor);
+    if (isSubtype(rows, plain.elements)) return tensor;
+    if (isEmptyType(meet(rows, plain.elements))) return 'never';
+    return 'keep';
+  }
+  if (da === null || db === null) {
+    const cells = meet(a.elements, b.elements);
+    const shaped = da === null ? b : a;
+    if (isEmptyType(cells) && shaped.dimensions?.every((d) => d > 0))
+      return 'never';
+    return { ...shaped, elements: cells };
+  }
+  // Two tensors with dimension lists.
+  if (listShapeKey(a) === listShapeKey(b)) {
+    const cells = meet(a.elements, b.elements);
+    if (isEmptyType(cells) && da.every((d) => d > 0)) return 'never';
+    return { ...a, elements: cells };
+  }
+  if (a.dimensionVariables !== undefined || b.dimensionVariables !== undefined)
+    return 'keep';
+  if (da.length !== db.length) return 'never';
+  const dimensions: number[] = [];
+  for (let i = 0; i < da.length; i++) {
+    if (da[i] === -1) dimensions.push(db[i]);
+    else if (db[i] === -1 || da[i] === db[i]) dimensions.push(da[i]);
+    else return 'never';
+  }
+  const cells = meet(a.elements, b.elements);
+  if (isEmptyType(cells) && dimensions.every((d) => d > 0)) return 'never';
+  return { kind: 'list', elements: cells, dimensions };
+}
+
+/**
+ * The shape of a list type as a comparison key: `''` for a plain list,
+ * `'tensor'` for a tensor of unknown rank, and otherwise its lengths, with a
+ * dimension variable's name standing in for the `-1` it rides on, so two
+ * patterns that differ only in which variable names an axis are not read
+ * as the same shape. A plain list and a tensor of unknown rank are
+ * different types, so their keys differ.
+ */
+export function listShapeKey(t: Readonly<ListType>): string {
+  if (t.dimensions === undefined) return '';
+  if (t.dimensions === null) return 'tensor';
+  return t.dimensions
+    .map((d, i) => t.dimensionVariables?.[i] ?? String(d))
+    .join();
 }
 
 /**
@@ -2336,6 +2555,14 @@ export function provablyAdmits(
   if (typeof t === 'object') {
     if (t.kind === 'union')
       return t.types.some((arm) => provablyAdmits(marker, arm, seen));
+    // A `broadcastable<T>` is the union of `T` and a collection of `T`, and
+    // is read arm by arm as a union is: `broadcastable<unknown>` states
+    // nothing about the markers, as `unknown` does not.
+    if (t.kind === 'broadcastable')
+      return (
+        provablyAdmits(marker, t.elements, seen) ||
+        isSubtype(marker, broadcastCollectionArm(t.elements))
+      );
     if (isTransparentAliasReference(t)) {
       const decl: unknown = declarationOf(t) ?? t;
       if (seen?.has(decl)) return false;
@@ -2635,13 +2862,15 @@ function isSubtypeRules(
     if (typeof lhs === 'string')
       return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
 
-    // `broadcastable<T> <: R` (R a primitive) iff `T <: R` and
-    // `list<T> <: R`: the value may be a scalar or a list, so it is a
-    // subtype of `R` only when both branches are.
+    // `broadcastable<T> <: R` (R a primitive) iff `T <: R` and the
+    // collection arm of the broadcastable (`broadcastCollectionArm`:
+    // `tensor<T>` when no value of `T` is a list, `list<T>` otherwise) is a subtype of
+    // `R`: the value may be a scalar or a collection, so it is a subtype of
+    // `R` only when both branches are.
     if (lhs.kind === 'broadcastable') {
       return (
         isSubtype(lhs.elements, rhs) &&
-        isSubtype({ kind: 'list', elements: lhs.elements }, rhs)
+        isSubtype(broadcastCollectionArm(lhs.elements), rhs)
       );
     }
 
@@ -2758,14 +2987,15 @@ function isSubtypeRules(
   // members had to be augmented first.)
   if (rhs.kind === 'union') {
     const rhsMembers = rhs.types;
-    // A broadcastable lhs is the union `T | list<T>`, so it fits
-    // a union rhs iff BOTH branches are covered — possibly by *different*
-    // members (`broadcastable<number> <: number | list<number>`).
-    // The member-wise probe below would require a single member to cover the
-    // whole broadcastable and wrongly reject exactly that case.
+    // A broadcastable lhs is the union of `T` and its collection arm
+    // (`broadcastCollectionArm`), so it fits a union rhs iff BOTH branches
+    // are covered — possibly by *different* members
+    // (`broadcastable<number> <: number | tensor<number>`). The member-wise
+    // probe below would require a single member to cover the whole
+    // broadcastable and wrongly reject exactly that case.
     const broadcastableFitsUnion = (b: BroadcastableType) =>
       isSubtype(b.elements, rhs) &&
-      isSubtype({ kind: 'list', elements: b.elements }, rhs);
+      isSubtype(broadcastCollectionArm(b.elements), rhs);
     if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
       return broadcastableFitsUnion(lhs);
     if (typeof lhs !== 'string' && lhs.kind === 'union') {
@@ -2820,17 +3050,36 @@ function isSubtypeRules(
   }
 
   //
-  // Handle broadcastable on the rhs: `broadcastable<T>` = a `T`, or a list
-  // of `T` applied element-wise. This must precede the
-  // `typeof lhs === 'string'` fall-through below (a string `lhs` such as
-  // `integer` would otherwise short-circuit to `false`).
+  // Handle broadcastable on the rhs: `broadcastable<T>` = a `T`, or its
+  // collection arm (`broadcastCollectionArm`: a tensor of any rank whose
+  // cells are `T` when no value of `T` is a list, a plain list of `T`
+  // otherwise), to
+  // which an element-wise operation applies (user decision D4 of
+  // 2026-10-21, `docs/plans/2026-10-21-list-element-tensor-cell.md`). This
+  // must precede the `typeof lhs === 'string'` fall-through below (a string
+  // `lhs` such as `integer` would otherwise short-circuit to `false`).
   //
   if (rhs.kind === 'broadcastable') {
-    // BOTH broadcastable: covariant in the element type. Checked *before* the
-    // scalar branch so `broadcastable<integer> <: broadcastable<number>`
-    // matches on the element types rather than falling into the scalar branch.
+    // BOTH broadcastable: the elements and the collection arms must both
+    // fit, since each side is the union of the two. The arms are compared
+    // as well as the elements because the arm depends on whether the
+    // element type can hold a list: `broadcastable<integer>` holds tensors
+    // of every rank (its arm is `tensor<integer>`), while
+    // `broadcastable<integer | list<integer>>` (arm
+    // `list<integer | list<integer>>`, read by its elements) holds no
+    // tensor of rank 3, so the first is not a subtype of the second
+    // although `integer` is an `integer | list<integer>`.
+    // Checked *before* the scalar branch so `broadcastable<integer> <:
+    // broadcastable<number>` matches on the element types rather than
+    // falling into the scalar branch.
     if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
-      return isSubtype(lhs.elements, rhs.elements);
+      return (
+        isSubtype(lhs.elements, rhs.elements) &&
+        isSubtype(
+          broadcastCollectionArm(lhs.elements),
+          broadcastCollectionArm(rhs.elements)
+        )
+      );
 
     // A union is broadcastable iff each of its members is.
     if (typeof lhs !== 'string' && lhs.kind === 'union')
@@ -2841,37 +3090,29 @@ function isSubtypeRules(
     // Scalar branch: `S <: T ⟹ S <: broadcastable<T>`.
     if (isSubtype(lhs, rhs.elements)) return true;
 
-    // Collection branch: `broadcastable<T>` is `T | list<T>`, so every
-    // subtype of `list<T>` is in it. Tuples, strings and the abstract
-    // `indexed_collection<T>` are not lists, so they fail here (a runtime
-    // broadcast binds a point atomically), and sets are not indexed.
-    if (isSubtype(lhs, { kind: 'list', elements: rhs.elements })) return true;
-    const elem = broadcastableCollectionElementType(lhs as Type);
-    if (elem !== undefined) {
-      if (isSubtype(elem, rhs.elements)) return true;
-      // A rank-n list (n ≥ 2) also has the flat scalar reading: a
-      // `matrix<integer>` is a `list<integer>`, and an element-wise
-      // operator applied to it reaches its integer cells
-      // (`2·[[1, 2], [3, 4]]` is `[[2, 4], [6, 8]]`). For a
-      // one-dimensional list, `elem` is already its element type.
-      return (
-        typeof lhs !== 'string' &&
-        lhs.kind === 'list' &&
-        isSubtype(lhs.elements, rhs.elements)
-      );
-    }
-
-    return false;
+    // Collection branch: every subtype of the collection arm is in it. For
+    // a `T` that cannot hold a list the arm is `tensor<T>`: by the rules
+    // for lists, a tensor with a dimension list fits when its cells are `T`
+    // (`matrix<integer>` is a `broadcastable<number>`, and
+    // `list<boolean^(2x2)>` a `broadcastable<boolean>`), and a plain list
+    // fits when its elements are `T`, the rank-1 reading (`list<integer>`
+    // is a `broadcastable<number>`; `list<list<integer>>` is not, since a
+    // list of integers is not a number). For a `T` that can hold a list
+    // the arm is the plain `list<T>`, read by its elements. Tuples, strings and the
+    // abstract `indexed_collection<T>` are not lists, so they fail here (a
+    // runtime broadcast binds a point atomically), and sets are not
+    // indexed.
+    return isSubtype(lhs, broadcastCollectionArm(rhs.elements));
   }
 
   //
   // Handle broadcastable on the lhs (rhs is a non-broadcastable object):
-  // `broadcastable<T> <: R ⟺ T <: R and list<T> <: R`.
+  // `broadcastable<T> <: R ⟺ T <: R and the collection arm <: R`.
   //
   if (typeof lhs !== 'string' && lhs.kind === 'broadcastable') {
     return (
       isSubtype(lhs.elements, rhs) &&
-      isSubtype({ kind: 'list', elements: lhs.elements }, rhs)
+      isSubtype(broadcastCollectionArm(lhs.elements), rhs)
     );
   }
 
@@ -3182,12 +3423,12 @@ function isSubtypeRules(
     if (lhs.kind === 'indexed_collection')
       return isSubtype(lhs.elements, rhs.elements);
 
+    // A list is an indexed collection of its elements (`listElementType`):
+    // a matrix of integers is an `indexed_collection<vector<integer>>`,
+    // not an `indexed_collection<integer>`, and a `tensor<integer>` is an
+    // `indexed_collection<integer | tensor<integer>>`.
     if (lhs.kind === 'list')
-      return (
-        isSubtype(lhs.elements, rhs.elements) ||
-        peeledRowMatches(lhs, rhs.elements) ||
-        flattenedListMatches(lhs, rhs)
-      );
+      return isSubtype(listElementType(lhs), rhs.elements);
 
     if (lhs.kind === 'tuple') {
       // A tuple is a subtype of a collection if all its elements are subtypes of the collection elements
@@ -3200,12 +3441,10 @@ function isSubtypeRules(
     if (lhs.kind === 'collection' || lhs.kind === 'indexed_collection')
       return isSubtype(lhs.elements, rhs.elements);
 
+    // A list is a collection of its elements (`listElementType`), as for
+    // an indexed collection above.
     if (lhs.kind === 'list')
-      return (
-        isSubtype(lhs.elements, rhs.elements) ||
-        peeledRowMatches(lhs, rhs.elements) ||
-        flattenedListMatches(lhs, rhs)
-      );
+      return isSubtype(listElementType(lhs), rhs.elements);
 
     if (lhs.kind === 'tuple')
       return lhs.elements.every((x) => isSubtype(x.type, rhs.elements));
@@ -3258,127 +3497,62 @@ function isSubtypeRules(
   // Handle lists
   //
   if (rhs.kind === 'list' && lhs.kind === 'list') {
-    // Encoding bridge (tensor-unification Phase C): a dimensioned rank-n
-    // list IS a list of rank-(n-k) lists, for each k from 1 to n-1 —
-    // `matrix<E^2x2>` ⊆ `list<vector<2>>` and `list<E^(1x2x3)>` ⊆
-    // `list<list<E>^(1x2)>`: peel the k outer dimensions and compare the
-    // rank-(n-k) sub-tensor with the rhs element. A dimensioned rhs of rank
-    // m < n fixes the number of peeled axes to m, and its dimensions must
-    // accept the first m dimensions of the lhs. An rhs with no dimensions
-    // admits any shape, so any k is a candidate. The rhs element can be any
-    // type that admits a list, not only a list type: the bare `list` is a
-    // string representation, and `collection` admits a row as well.
+    // A list type is one of three things (`ListType` in `types.ts`): a
+    // plain list `list<E>` whose ELEMENTS are `E` (no dimensions); a tensor
+    // with a dimension list (`vector<U>`, `matrix<U>`, `list<U^dims>`)
+    // whose CELLS are `U` and whose elements are its rows; a tensor of
+    // unknown rank `tensor<U>` (dimensions `null`) whose cells are `U`.
+    // The rules (section 3.3 of
+    // `docs/plans/2026-10-21-list-element-tensor-cell.md`):
     //
-    // The rows are read whether or not the scalar element matches the rhs
-    // element (user decision 2026-10-21): a value is of the rhs type when
-    // one of its readings is, so `matrix<string>` is a `vector<collection>`
-    // (its rows are lists) as `matrix<integer>` is, although a string is
-    // itself a collection, and `matrix<integer>` is a `vector<integer | list>`.
-    // Reading the rows only when the scalar element does not match made the
-    // relation depend on the spelling of the element, and not transitive:
-    // `matrix<integer>` was a `list<unknown^(2x2)>`, which was a
-    // `vector<integer | list>` (its rows were read, `unknown` not being an
-    // `integer | list`), but `matrix<integer>` was not (its scalar matched,
-    // so its rank was read). The peel is tried toward a dimensioned rhs of
-    // lower rank in every case, and toward an rhs with no dimensions only
-    // when the scalar element does not match (when it does, the rhs admits
-    // any shape, so the answer is already yes).
+    // - Toward a plain list `list<E2>`: the elements of the lhs
+    //   (`listElementType`: `E1` for a plain list, the cells of a rank-1
+    //   tensor, the rows of a deeper one, `U | tensor<U>` for an unknown
+    //   rank) must be `E2`. So `matrix<integer>` is a
+    //   `list<vector<integer>>` and not a `list<integer>`, and
+    //   `vector<integer>` is a `list<integer>`.
+    //   A tensor of unknown rank is decided by `tensorFitsPlainList`, which
+    //   answers a repeated question coinductively (see there).
+    // - Toward a tensor of unknown rank `tensor<V>`: the cells of the lhs
+    //   must be `V`. A plain list `list<E>` is read at rank 1, so it fits
+    //   when its elements are `V` and no element is a list
+    //   (`cannotHoldAList`): every list of numbers, of booleans or of
+    //   tuples is a rank-1 tensor. A `list<value>` is not a `tensor<value>`:
+    //   its elements can be matrices, and reading them as cells would make
+    //   the relation intransitive (`matrix<integer> <: list<value>`, while
+    //   `matrix<integer>` is not a `tensor<value>` of rank 1).
+    // - Toward a tensor with a dimension list: a tensor of unknown rank
+    //   never fits (its rank is not known); a plain list fits only a
+    //   rank-1 tensor with an open length, `list<U^?>` (`vector<U>`), when
+    //   its elements are numbers that are `U` (user decision D5: `list<U>`
+    //   and `vector<U>` denote the same values for a numeric `U`). The
+    //   elements must be numeric: a `list<value>` holds matrices, which a
+    //   `vector<value>` (rank 1) does not, and without the restriction the
+    //   relation was not transitive (`matrix<integer> <: list<value>`, and
+    //   `list<value>` would be a `vector<value>`). A tensor with a
+    //   dimension list fits when it has the same rank, its cells are `V`,
+    //   and each axis of the rhs is open or equal to the axis of the lhs.
     //
-    // The one exception is the scalar top: the elements of a list with
-    // dimensions whose element type is a scalar top type are scalars
-    // (`isScalarTopElement()`, user decision 2026-10-21), so a matrix is
-    // not a `vector<unknown>` although its rows are values, and a list
-    // whose elements can be lists (`list<list^2>`, a list of two rows) is
-    // not a `list<unknown^2>` either, as the flat spelling of the same
-    // values (`list<integer^(2x2)>`) is not. Without that, the relation was
-    // not transitive: `list<integer^(2x2x2)>` is a `list<list^2>`, which was
-    // a `vector<unknown>`, but `list<integer^(2x2x2)>` is not a
-    // `vector<unknown>`.
-    // Tested even when the two element types are the same object: the test
-    // also refuses the peel below, and `matrix<unknown>` is not a
-    // `vector<unknown>` although both spell their element `unknown`.
-    const rhsHoldsScalars =
-      rhs.dimensions !== undefined && isScalarTopElement(rhs.elements);
-    // A list with an axis of length 0 has no element, so its element type
-    // does not matter: `list<list^0>` is a `list<unknown^0>`.
-    const lhsHasElements = !(lhs.dimensions?.includes(0) ?? false);
-    const elementsMatch =
-      !(rhsHoldsScalars && lhsHasElements && holdsListElements(lhs.elements)) &&
-      isSubtype(lhs.elements, rhs.elements);
-    if (lhs.dimensions !== undefined && lhs.dimensions.length >= 2) {
-      const lhsDims = lhs.dimensions;
-      const peeled = (k: number): Type => ({
-        kind: 'list',
-        elements: lhs.elements,
-        dimensions: lhsDims.slice(k),
-      });
-      if (rhs.dimensions === undefined) {
-        if (!elementsMatch)
-          for (let k = 1; k < lhsDims.length; k++)
-            if (isSubtype(peeled(k), rhs.elements)) return true;
-      } else if (rhs.dimensions.length < lhsDims.length) {
-        const rhsDims = rhs.dimensions;
-        if (
-          rhsDims.every((d, i) => d === -1 || d === lhsDims[i]) &&
-          // A peeled row is a list, which the scalars of `rhs` are not.
-          !rhsHoldsScalars &&
-          isSubtype(peeled(rhsDims.length), rhs.elements)
-        )
-          return true;
-      }
+    // The cells of a tensor are compared whatever they are, so an
+    // internally built tensor of non-numeric cells is read soundly, and
+    // the relation is covariant in the cells (`vector<value>` is a
+    // `vector<any>`).
+    const lhsDims = lhs.dimensions;
+    const rhsDims = rhs.dimensions;
+
+    if (rhsDims === undefined) {
+      if (lhsDims === null) return tensorFitsPlainList(lhs, rhs);
+      return isSubtype(listElementType(lhs), rhs.elements);
     }
 
-    // The reverse of the bridge above: a list of dimensioned lists IS a
-    // dimensioned list of the concatenated shape — `list<vector<E^3>^2>` ⊆
-    // `matrix<E^(2x3)>` and ⊆ `matrix<E>`, and ⊆ `list<E>` as the flat
-    // spelling `list<E^(2x3)>` is. A declared type can take the nested
-    // spelling (a literal never does: `staticCollectionDims` flattens it),
-    // and without this a symbol declared that way was admitted at a
-    // `matrix` parameter only provisionally. An outer list with no
-    // dimensions admits any shape of its rows, so its flat spelling has no
-    // dimensions (`list<vector<integer^3>>` reads as `list<integer>`, the
-    // cells in any shape): it matches a target with no dimensions and the
-    // collection kinds, and no target with dimensions (user decision
-    // 2026-10-21; reading the missing length as one axis made
-    // `list<vector<integer^3>>` a `matrix<integer>`, which does not hold its
-    // rank-3 values). Rows with no dimensions are not read this way, and rows
-    // with the length `-1` on an axis (`list<vector<integer>^2>`) are not
-    // either: in both cases the rows can differ in length (`[[1], [2, 3]]`),
-    // and the rows of a matrix cannot. A flat length of `-1` says only that
-    // each row has some length, not that all rows have the same one. The
-    // levels above such rows still merge. `flattenNestedListType` merges
-    // every level it can at once, so flattening its result again merges
-    // nothing and returns `undefined`: the recursive call below cannot
-    // flatten a second time.
-    //
-    // The merged spelling is compared with every rhs, not only with an rhs
-    // of two or more dimensions (user decision 2026-10-21): the two
-    // spellings name the same values, so they must give the same answers.
-    // The merge was once refused toward an rhs with no dimensions
-    // (`list<integer>`) because code that reads the element type of such a
-    // list expects scalars; but that rhs admits the flat spelling of the
-    // same values already, and the refusal made the relation not
-    // transitive: `list<vector<integer^1>^2>` was a `matrix`, and a `matrix`
-    // is a `list<number>`, but `list<vector<integer^1>^2>` was not. The
-    // merge is tried when the elements do not match, and also when they do
-    // but the rhs has more dimensions than the lhs: at an rhs whose element
-    // type admits a row (`list<(any | list<any>)^(-1x-1)>`, the admission
-    // skeleton of a generic `matrix<T^(MxN)>`, with `ANY_OR_LIST_ELEMENT`)
-    // a row matches the element, and the shape check below then compares
-    // one axis with two.
-    if (
-      (!elementsMatch ||
-        (rhs.dimensions !== undefined &&
-          (lhs.dimensions?.length ?? 1) < rhs.dimensions.length)) &&
-      flattenedListMatches(lhs, rhs)
-    )
-      return true;
+    if (rhsDims === null) {
+      if (lhsDims === undefined && !cannotHoldAList(lhs.elements)) return false;
+      return isSubtype(lhs.elements, rhs.elements);
+    }
 
-    // Check that the element types match
-    if (!elementsMatch) return false;
+    if (lhsDims === null) return false;
 
-    // Check that the dimensions match
-    if (rhs.dimensions) {
+    if (lhsDims === undefined) {
       // The type of the empty list literal, `list<never>`, has no dimensions,
       // and its only value `[]` has length 0. So it is a subtype of a list
       // type whose first axis has length 0: `[]` is a value of
@@ -3386,24 +3560,24 @@ function isSubtypeRules(
       // rows). A one-axis list of any length (`list<integer^?>`, the `-1`
       // wildcard) admits the length 0 as well.
       if (
-        !lhs.dimensions &&
         lhs.elements === 'never' &&
-        (rhs.dimensions[0] === 0 ||
-          (rhs.dimensions[0] === -1 && rhs.dimensions.length === 1))
+        (rhsDims[0] === 0 || (rhsDims[0] === -1 && rhsDims.length === 1))
       )
         return true;
-      // If rhs has some dimensions, lhs must have dimensions as well
-      if (!lhs.dimensions) return false;
-      // The shape (number of dimensions) must match
-      if (lhs.dimensions.length !== rhs.dimensions.length) return false;
-
-      for (let i = 0; i < lhs.dimensions.length; i++) {
-        // A dimension of -1 means any size is allowed
-        if (rhs.dimensions[i] !== -1 && lhs.dimensions[i] !== rhs.dimensions[i])
-          return false;
-      }
+      if (rhsDims.length === 1 && rhsDims[0] === -1)
+        return (
+          isSubtype(lhs.elements, 'number') &&
+          isSubtype(lhs.elements, rhs.elements)
+        );
+      return false;
     }
 
+    if (lhsDims.length !== rhsDims.length) return false;
+    if (!isSubtype(lhs.elements, rhs.elements)) return false;
+    for (let i = 0; i < lhsDims.length; i++) {
+      // A dimension of -1 means any size is allowed
+      if (rhsDims[i] !== -1 && lhsDims[i] !== rhsDims[i]) return false;
+    }
     return true;
   }
 
@@ -3671,39 +3845,6 @@ function isIndexedCollection(type: Type): boolean {
 }
 
 /**
- * The element type of a collection eligible for broadcasting (a `list` or a
- * `range`), or `undefined` for anything else. A tuple is excluded, because a
- * broadcast passes a point whole. The abstract `indexed_collection<T>` is
- * excluded, because its value can be a tuple. A set is excluded, because it
- * is not indexed. For a list it gives what `collectionElementType()`
- * (`utils.ts`) gives; it does not import that function, because the import
- * would make a circular dependency between the two files.
- */
-function broadcastableCollectionElementType(type: Type): Type | undefined {
-  if (typeof type === 'string') {
-    // A bare list admits every element type, just like list<any>.
-    if (type === 'list') return 'any';
-    // An index span carries a known element type (finite positive integers),
-    // so it broadcasts as `integer`, not as an opaque `unknown`.
-    if (type === 'range') return 'integer';
-    return undefined;
-  }
-  if (type.kind === 'list') {
-    const dims = type.dimensions;
-    // A multi-dimensional list indexed by one index yields a sub-tensor with
-    // one fewer dimension, not its scalar element (see `collectionElementType`).
-    if (dims && dims.length > 1)
-      return {
-        kind: 'list',
-        elements: type.elements,
-        dimensions: dims.slice(1),
-      };
-    return type.elements;
-  }
-  return undefined;
-}
-
-/**
  * Whether `lhs` is a `T` (`T` is `elements`), or a list or an ABSTRACT
  * `indexed_collection` whose elements fit the same test. When `elements` is
  * itself a `broadcastable<U>`, the elements are tested with this function
@@ -3712,11 +3853,16 @@ function broadcastableCollectionElementType(type: Type): Type | undefined {
  *
  * This is the relation that `isSubtype(lhs, broadcastable<T>)` gave when
  * `broadcastable<T>` meant `T | indexed_collection<T>`. Now that it means
- * `T | list<T>`, a value typed only `indexed_collection<T>` is no longer in
+ * `T | tensor<T>`, a value typed only `indexed_collection<T>` is no longer in
  * it, because such a value can be a tuple. Some engine checks ask the older
  * question on purpose: "is this operand a number, or a collection of numbers
  * that broadcast reaches", where an operand whose type does not say whether
  * it is a list or a tuple must still pass. Those checks call this function.
+ *
+ * A list is read by its elements (`listElementType`: the cells of a rank-1
+ * tensor, the rows of a deeper one, the elements of a plain list), as the
+ * subtype relation reads it. There is no flat reading of a plain list of
+ * lists: `list<list<number>>` does not fit `number`.
  *
  * A tuple and a string are refused here, as they were before: the type of
  * such an operand says that it is not a list.
@@ -3789,73 +3935,11 @@ function fitsBroadcastOrIndexed(
     case 'broadcastable':
     case 'indexed_collection':
       return fits(lhs.elements);
-    case 'list': {
-      // The peeled reading (a row of a matrix) and the flat reading (a cell
-      // of a matrix), as in the `broadcastable` rule of `isSubtype`.
-      const elem = broadcastableCollectionElementType(lhs);
-      return (elem !== undefined && fits(elem)) || fits(lhs.elements);
-    }
+    case 'list':
+      return fits(listElementType(lhs));
     default:
       return fits(lhs);
   }
-}
-
-/**
- * A dimensioned rank-n list (n ≥ 2) has TWO consistent readings as a
- * collection: the flat scalar-dtype reading (`matrix<integer^(2x3)>` is a
- * collection of `integer`) and the peeled reading — the one the runtime uses,
- * where indexing yields a sub-tensor with one fewer dimension ("the first
- * element of a matrix is its first row"). `collectionElementType` (utils.ts)
- * and `broadcastableCollectionElementType` above both report the PEELED row;
- * membership in `collection<E>` / `indexed_collection<E>` must accept it too,
- * or a signature instantiated from the element type
- * (`(indexed_collection<T>, …) … where T` solving `T = vector<integer^3>`) rejects the very
- * operand that produced it.
- *
- * Additive only: the caller checks the scalar reading first and consults this
- * one afterwards, so both readings are admitted and no previously-accepted
- * membership is lost.
- *
- * Any number of outer axes can be peeled, as the subtype rule for two lists
- * peels them toward a list with no dimensions (user decision 2026-10-21):
- * `list<boolean^(2x2x2)>` is a `list<vector<boolean^2>>` (a 2×2 arrangement
- * of rows of two booleans), and a `list<E>` is a `collection<E>`, so it is a
- * `collection<vector<boolean^2>>` too. Peeling one axis only here made the
- * relation not transitive.
- */
-function peeledRowMatches(lhs: ListType, elements: Type): boolean {
-  const dims = lhs.dimensions;
-  if (!dims || dims.length <= 1) return false;
-  for (let k = 1; k < dims.length; k++)
-    if (
-      isSubtype(
-        { kind: 'list', elements: lhs.elements, dimensions: dims.slice(k) },
-        elements
-      )
-    )
-      return true;
-  return false;
-}
-
-/**
- * Whether `lhs`, a list whose elements are lists with dimensions (the
- * nested spelling of a matrix or a tensor, `list<vector<integer^3>^2>`), is
- * a subtype of `rhs` when read in its flat spelling (`list<integer^(2x3)>`,
- * `flattenNestedListType()`; `list<integer>` with no dimensions when the
- * outer list states none). The two spellings name the same values, so every
- * rhs that admits the flat one admits the nested one: a list with fewer
- * dimensions or none, a `collection`, an `indexed_collection`. `false` when
- * `lhs` has no nested spelling to merge.
- */
-function flattenedListMatches(lhs: ListType, rhs: Type): boolean {
-  if (
-    typeof lhs.elements === 'string' ||
-    lhs.elements.kind !== 'list' ||
-    lhs.elements.dimensions === undefined
-  )
-    return false;
-  const flat = flattenNestedListType(lhs);
-  return flat !== undefined && isSubtype(flat, rhs);
 }
 
 /**
@@ -4002,6 +4086,24 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 
+  // Two list types meet by the rules of `meetListTypes` (two plain lists
+  // elementwise, two tensors cellwise with their axes met, a plain list
+  // and a rank-1 tensor as that tensor), with this function as the meet of
+  // the elements, so the answer agrees with the intersection reducer
+  // (`reduce.ts`) for these pairs. A pair the rules keep as an
+  // intersection has no spelling here and answers `never`, as every other
+  // incomparable composite pair does (a known divergence from the reducer,
+  // recorded in `ROADMAP.md`).
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'list' &&
+    b.kind === 'list'
+  ) {
+    const m = meetListTypes(a, b, (x, y) => narrow2(x, y) as Type);
+    return m === 'keep' ? 'never' : m;
+  }
+
   // A union meets arm by arm: `(A | B) ∧ C` is `(A ∧ C) | (B ∧ C)`, with the
   // empty arms dropped. Without this a union was tested only as a whole, so
   // `narrow('missing | vector<real^4>', 'indexed_collection | dictionary')`
@@ -4094,6 +4196,24 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
 
   if (isSubtype(a, b)) return b;
   if (isSubtype(b, a)) return a;
+
+  // The join of a tensor (a dimension list, or an unknown rank) and a plain
+  // list is a plain list of the join of their elements: the rows of the
+  // tensor (`listElementType`) beside the elements of the list.
+  // `widen(matrix<integer>, list<string>)` is `list<vector<integer> |
+  // string>`, a type that holds both. Two plain lists, and two tensors,
+  // keep the union below (`list` is a lossy supertype).
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'list' &&
+    b.kind === 'list' &&
+    (a.dimensions === undefined) !== (b.dimensions === undefined)
+  )
+    return {
+      kind: 'list',
+      elements: widen2(listElementType(a), listElementType(b)) as Type,
+    };
 
   // Two types that are not subtypes of each other. Try the common
   // supertype: this works well for related numeric types (e.g.

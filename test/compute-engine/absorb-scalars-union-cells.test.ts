@@ -287,13 +287,16 @@ describe('A SCALAR FOLDS INTO THE CELLS OF A LIST LITERAL', () => {
       ['Multiply', ['List', ['Range', 1, 3], 5], 2],
       'list<integer | list<integer>>',
     ],
+    // A list whose elements are lists carries no dimensions (only a list
+    // whose cells cannot hold a list may), so the two rows are a plain
+    // `list<list<…>>`.
     [
       ['Add', ['List', ['Range', 1, 3], ['Range', 2, 4]], 0.5],
-      'list<list<real>^2>',
+      'list<list<real>>',
     ],
     [
       ['Add', ['List', ['Range', 1, 3], ['Range', 2, 4]], 1],
-      'list<list<integer>^2>',
+      'list<list<integer>>',
     ],
     // `(i, 1) · i` is `(-1, i)`: a product is not closed over `imaginary`
     [
@@ -691,7 +694,9 @@ describe('TWO COLLECTIONS WITH IMAGINARY CELLS COMBINED CELL BY CELL', () => {
       'two lists of ranges added',
       {},
       ['Add', ['List', ['Range', 1, 3]], ['List', ['Range', 1, 3]]],
-      'list<list<integer>^1>',
+      // A list whose elements are lists carries no dimensions, so the one
+      // row is a plain `list<list<integer>>`.
+      'list<list<integer>>',
     ],
     // A list of points plus a point: the points are added component by
     // component

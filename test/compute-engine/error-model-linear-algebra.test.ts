@@ -94,7 +94,7 @@ describe('Norm — Contract B declaration', () => {
     const ce = new ComputeEngine();
     ce.box(['Norm', 'normArg'] as any);
     expect(ce.box('normArg').type.toString()).toBe(
-      'list<number> | list<tuple> | number | tuple'
+      'list<tuple> | number | tensor | tuple'
     );
   });
 
@@ -301,7 +301,7 @@ describe('Trace — Contract B declaration', () => {
     // A batch trace reduces two axes and stays a collection; there is
     // nothing cheap to claim about its shape, so the declared union applies.
     expect(ce.box(['Trace', RANK3] as any).type.toString()).toBe(
-      'list<number> | number'
+      'number | tensor'
     );
     expect(
       ce
@@ -314,7 +314,7 @@ describe('Trace — Contract B declaration', () => {
   test('an undeclared operand symbol is inferred from the flipped carrier', () => {
     const ce = new ComputeEngine();
     ce.box(['Trace', 'traceArg'] as any);
-    expect(ce.box('traceArg').type.toString()).toBe('list<number> | number');
+    expect(ce.box('traceArg').type.toString()).toBe('number | tensor');
   });
 
   test('the parse route agrees with the box route', () => {

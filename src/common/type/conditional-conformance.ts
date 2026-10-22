@@ -7,7 +7,12 @@ import type {
   TypeParameter,
   TypeReference,
 } from './types.js';
-import { isSubtype } from './subtype.js';
+import {
+  cannotHoldAList,
+  isSubtype,
+  listElementType,
+  listShapeKey,
+} from './subtype.js';
 import {
   freeTypeVariables,
   isDecidedConstraintType,
@@ -53,7 +58,9 @@ function mentions(t: Type, variables: ReadonlySet<string>): boolean {
  *
  * The receiver's SHAPE is ignored unless the pattern states one — `["a", "b"]`
  * synthesizes `list<string^2>`, and `list<T>` must match it (a dimensioned list
- * IS a list). This is deliberately looser than `reduce.ts`'s
+ * IS a list), with `T` bound to the receiver's elements, here `string`. A
+ * pattern that states a shape (`matrix<T>`) must be fitted by the receiver's
+ * shape (`subjectFitsTensorPattern`). This is deliberately looser than `reduce.ts`'s
  * `sameHeadArguments`, whose caller (the overlap predicate) compares two
  * DECLARED targets and must treat differing shapes as incomparable.
  */
@@ -95,11 +102,25 @@ function matchHead(
   switch (pattern.kind) {
     case 'list': {
       const other = subject as ListType;
-      if (
-        pattern.dimensions !== undefined &&
-        pattern.dimensions.join() !== (other.dimensions?.join() ?? '')
-      )
-        return false;
+      // A plain list pattern `list<T>` matches a list of any shape, and `T`
+      // binds to the ELEMENTS of the subject, what one index into it
+      // returns (`listElementType`): the elements of a plain list, the
+      // cells of a rank-1 tensor, the rows of a tensor of rank 2 or more
+      // (`list<string^(2x1)>` binds `T = list<string^1>`), and
+      // `U | tensor<U>` for a tensor of unknown rank. The `elements` field
+      // of a dimensioned subject is its cell type, which is not the element
+      // type at rank 2 or more. The generic solver binds `T` the same way
+      // (`walkPattern` in `instantiate.ts`).
+      if (pattern.dimensions === undefined)
+        return matchHead(
+          pattern.elements,
+          listElementType(other),
+          variables,
+          bindings
+        );
+      // A tensor pattern (`vector<T>`, `matrix<T>`, `tensor<T>`) binds `T`
+      // to the CELLS of a subject whose shape fits the pattern's.
+      if (!subjectFitsTensorPattern(pattern, other)) return false;
       return matchHead(pattern.elements, other.elements, variables, bindings);
     }
 
@@ -161,6 +182,56 @@ function matchHead(
     default:
       return false;
   }
+}
+
+/**
+ * Whether the shape of the list type `subject` fits the shape of the tensor
+ * pattern `pattern` (a list pattern whose `dimensions` field is `null` or a
+ * dimension list), so that the pattern's element position, its cell type,
+ * can be matched against the cells of the subject (its `elements` field).
+ *
+ * - A tensor of unknown rank, `tensor<T>`, fits a tensor of any rank, and a
+ *   plain list whose elements cannot be lists (`cannotHoldAList`), read at
+ *   rank 1 with its elements as the cells (`list<E>` is a subtype of
+ *   `tensor<U>` when `E` is a subtype of `U` and no value of `E` is a
+ *   list). A `list<any>` or a `list<list<integer>>` does not fit.
+ * - A pattern with a dimension variable on an axis fits a subject whose
+ *   shape is spelled the same only (`listShapeKey`).
+ * - Otherwise the subject must be a tensor of the same rank whose length on
+ *   each axis is the pattern's length, or any length where the pattern has
+ *   an open axis (`-1`): `matrix<T>` fits `matrix<integer^(2x2)>`. A plain
+ *   list of numbers fits a rank-1 pattern with an open length (`list<E>`
+ *   and `vector<E>` denote the same values when `E` is a subtype of
+ *   `number`); a `list<string>` does not fit `vector<T>`, since a
+ *   `list<string>` is not a vector. A tensor of unknown rank fits no
+ *   pattern with a dimension list, because its rank is not known.
+ *
+ * These are the shape conditions of the subtype rules for lists in
+ * `subtype.ts`. (Section 3.3 of
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md`.)
+ */
+function subjectFitsTensorPattern(
+  pattern: Readonly<ListType>,
+  subject: Readonly<ListType>
+): boolean {
+  const dims = pattern.dimensions;
+  const subjectDims = subject.dimensions;
+  if (dims === null)
+    return subjectDims !== undefined || cannotHoldAList(subject.elements);
+  if (dims === undefined) return false;
+  if (pattern.dimensionVariables !== undefined)
+    return listShapeKey(pattern) === listShapeKey(subject);
+  if (subjectDims === null) return false;
+  if (subjectDims === undefined)
+    return (
+      dims.length === 1 &&
+      dims[0] === -1 &&
+      isSubtype(subject.elements, 'number')
+    );
+  return (
+    subjectDims.length === dims.length &&
+    dims.every((d, i) => d === -1 || d === subjectDims[i])
+  );
 }
 
 /**
