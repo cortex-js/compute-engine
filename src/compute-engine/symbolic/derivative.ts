@@ -293,6 +293,7 @@ const DERIVATIVES_TABLE = {
   Floor: 0,
   Ceil: 0,
   Round: 0,
+  Truncate: 0,
   Sign: 0,
   // https://proofwiki.org/wiki/Derivative_of_Error_Function
   Erf: [
@@ -394,8 +395,8 @@ function scaleForAngularUnit(
  * derivative table, scaled for the engine's angular unit; `undefined` for a
  * head the table does not know. The formula is built with `subs()`, not
  * evaluated, so an exact `arg` keeps an exact derivative (`ln 10` stays
- * symbolic). A step function (`Floor`, `Ceil`, `Round`, `Sign`) has the
- * derivative `0`: its slope is zero almost everywhere.
+ * symbolic). A step function (`Floor`, `Ceil`, `Round`, `Truncate`, `Sign`)
+ * has the derivative `0`: its slope is zero almost everywhere.
  *
  * Used by the error propagation of a `Measurement` operand
  * (`measurementUnaryByHead`, `library/measurement-arithmetic.ts`): the
@@ -2522,6 +2523,27 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
 }
 
 /**
+ * Whether a bound of a big operator that depends on `v` is constant between
+ * its jumps: its derivative in `v` is 0. The derivative of a step function
+ * is 0 away from its jumps (`D(⌊x⌋)` is `0`), so `⌊x⌋`, `⌈x/2⌉`,
+ * `round(2x)` and `x − (x mod 1)` qualify, and `x` or `x/2` do not. Only
+ * a step that the derivative reduces to 0 qualifies: `Floor`, `Ceil`,
+ * `Round`, `Truncate` and `Sign` of the variable; a step whose derivative
+ * stays symbolic (`Heaviside`, `If(1 < x, 3, 5)`) does not, and the sum
+ * keeps its `D`. The
+ * derivative is computed with no trace: it is a test, not a step of the
+ * result. A bound that is not pure does not qualify: a call of a function
+ * whose body draws a random number has a derivative of 0 because the body
+ * does not mention `v`, but its value changes from one evaluation to the
+ * next.
+ */
+function isStepBound(bound: Expression, v: string, depth: number): boolean {
+  if (!bound.isPure) return false;
+  const d = differentiate(bound, v, depth + 1);
+  return d !== undefined && d.isValid && d.isSame(0);
+}
+
+/**
  * The derivative of a `Sum` or a `Product` with respect to `v`.
  *
  * The derivative is computed only when every indexing set is a `Limits`
@@ -2532,6 +2554,15 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
  * definite set of terms: the derivative then stays unevaluated
  * (`undefined`). A `Limits` clause with no bounds at all runs over
  * `1..+∞`, as an explicit infinite range does.
+ *
+ * One exception, for a `Sum`: a `Limits` bound that depends on `v` only
+ * through a step (`⌊x⌋`, `⌈x⌉`, `round(2x)`), so that its derivative is 0
+ * (`isStepBound()`). Between two jumps of the bound the set of terms is
+ * fixed, and the derivative there is the sum of the derivatives of the
+ * terms, with the same bounds: `d/dx Σ_{i=1}^{⌊x⌋} cos(i x)` is
+ * `Σ_{i=1}^{⌊x⌋} −i sin(i x)`. At a jump the sum is not continuous and has
+ * no derivative; the result there is the value of that sum, as `D(⌊x⌋)` is
+ * `0` at an integer (Tycho row 420).
  *
  * When `v` is the index of one of the indexing sets, every `v` in the body is
  * that index, not the variable of differentiation. The operator is then a
@@ -2602,9 +2633,14 @@ function differentiateBigOp(
       isFunction(set, 'Limits') &&
       isSymbol(set.op2, 'Nothing') &&
       isSymbol(set.op3, 'Nothing');
+    // A bound of a `Sum` that depends on `v` but is constant between its
+    // jumps (`⌊x⌋`): see `isStepBound()`.
+    const fixedBound = (x: Expression): boolean =>
+      !dependsOnVariable(x, v) ||
+      (isSum && isFunction(set, 'Limits') && isStepBound(x, v, depth));
     if (
       !noBounds &&
-      others.some((x) => isSymbol(x, 'Nothing') || dependsOnVariable(x, v))
+      others.some((x) => isSymbol(x, 'Nothing') || !fixedBound(x))
     )
       return undefined;
     indexes.push(index.symbol);

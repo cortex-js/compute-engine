@@ -576,9 +576,15 @@ export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
 /**
  * Numeric n-th derivative by COMPOSING the 8th-order centered-difference
  * stencil: the order-k derivative is the stencil applied to the numeric
- * order-(k-1) derivative. Cost is 9^order evaluations of `f`; accuracy
- * degrades with order (roughly 1e-10 relative at order 1, ~1e-4 at
- * order 3 with the default step).
+ * order-(k-1) derivative; accuracy degrades with order (roughly 1e-10
+ * relative at order 1, ~1e-4 at order 3 with the default step). The step
+ * is halved until the stencils of successive steps settle
+ * (`settledValue`), so that the window holds no jump of `f`; the value is
+ * `NaN` when they never settle (at a jump). Each value of `f` is computed
+ * once, and the stencils of two steps share samples: a smooth function
+ * costs 12, 44, 67 and 154 calls of `f` at orders 1 to 4 (8, 64, 512 and
+ * 4096 for one stencil without the cache), and a point at a jump, where
+ * every halving runs, 72, 230, 514 and 914.
  *
  * This is the SHARED numeric-differentiation route of the item-177
  * derivative fallback: the interpreter (`Apply` of an unresolved
@@ -596,13 +602,158 @@ export function centeredDiffHigherOrder(
 ): number {
   if (!Number.isFinite(order) || order <= 0) return f(x);
   const k = Math.floor(order);
+  // A value of `f` is computed once per point: the stencils of two steps
+  // share samples. The samples in the window of the two stencils give the
+  // size of `f` that `settledValue` reads.
+  const values = new Map<number, number>();
+  const g = (t: number): number => {
+    let v = values.get(t);
+    if (v === undefined) {
+      v = f(t);
+      values.set(t, v);
+    }
+    return v;
+  };
   // Scale the per-level step so the TOTAL sampling width (k levels × 4·step
   // on each side) stays 4h — the same window the order-1 stencil uses.
   // Without this, the composed window grows to k·4h and steps outside the
   // function's domain near a boundary (√(x + √(x + …)) is real only for
   // x ≥ −1/4: an order-2 stencil at x = 0.5 with h = 0.1 sampled x − 0.8,
   // returning NaN where the derivative is perfectly finite).
-  return composedCenteredDiff(f, x, k, h / k);
+  let step = h / k;
+  const steps = [composedCenteredDiff(g, x, k, step)];
+  for (let n = 0; n < MAX_STENCIL_HALVINGS; n++) {
+    step /= 2;
+    steps.push(composedCenteredDiff(g, x, k, step));
+    const size = sampleSize(values, x, 8 * k * step, (v) => v);
+    const value = settledValue(steps, size, k, step);
+    if (value !== undefined) return value;
+  }
+  return NaN;
+}
+
+/**
+ * The number of times `centeredDiffHigherOrder` halves its step before it
+ * answers `NaN`: the narrowest window is 2⁻¹⁶ of the first one, `±6 · 10⁻⁶`
+ * around the point for the default step of 0.1.
+ */
+const MAX_STENCIL_HALVINGS = 16;
+
+/** The size of the values of `f` in a window (see `sampleSize`). */
+type SampleSize = { magnitude: number; spread: number };
+
+/**
+ * The size of the finite values of `f` sampled within `radius` of `x`: the
+ * largest magnitude, and the spread, the largest less the smallest. The
+ * radius is the window of the coarser of the two stencils compared, `4 k`
+ * of its steps; a sample of a wider window does not count, since it can be
+ * much larger than any in the window (`exp(1000 t)` at 0.4 reaches 10³⁴⁷,
+ * an overflow, at the edge of the first window, and 10²⁶⁰ at the edge of
+ * the second, where the derivative is 5 · 10¹⁷⁶). A sample that is not
+ * finite (outside the domain, an overflow) does not count either.
+ */
+function sampleSize<T>(
+  values: ReadonlyMap<number, T>,
+  x: number,
+  radius: number,
+  read: (v: T) => number | undefined
+): SampleSize {
+  let lo = Infinity;
+  let hi = -Infinity;
+  let magnitude = 0;
+  for (const [t, value] of values) {
+    if (Math.abs(t - x) > radius) continue;
+    const v = read(value);
+    if (v === undefined || !Number.isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    magnitude = Math.max(magnitude, Math.abs(v));
+  }
+  return { magnitude, spread: hi >= lo ? hi - lo : 0 };
+}
+
+/**
+ * The value of the derivative of order `k` from the stencils of successive
+ * steps, each half the one before (`steps`, the coarsest first), once the
+ * last of them have settled; `undefined` while they have not. They have
+ * settled when the step is small enough that the window holds no jump of
+ * the function and no feature narrower than it.
+ *
+ * The window of the stencil reaches 4 steps on each side of the point (0.4
+ * for the default step of 0.1), and every sample in it enters the value. A
+ * jump of the function in the window enters it with a weight of up to
+ * `1/(280 · step)`, so the value at x = 1.9 of the derivative of
+ * `Σ_{i=1}^{⌊x⌋} cos(i x)` read the jump at 2 and was −5.3, where the
+ * derivative is −0.95 (Tycho row 420). Halving the step changes that
+ * weight, so the two values disagree; the window narrows until the jump is
+ * outside it, or, at the jump itself, the values never agree and the
+ * derivative is `NaN`. The same test narrows the window for a smooth
+ * function that varies faster than the first step resolves (`cos(20 x)`,
+ * whose value at a step of 0.1 is off by 14%), and for a point within 0.4
+ * of the edge of the domain (a sample outside it is `NaN`).
+ *
+ * Only finite values settle: an overflowed sample makes a value infinite,
+ * and `∞ ≤ ∞` must not pass. The values have settled in one of two ways:
+ *
+ * - The last two agree: they differ by less than a relative part of the
+ *   larger, plus the rounding of the two stencils. The value is that of
+ *   the coarser step, so a smooth function, whose first two steps agree,
+ *   keeps the value of the first stencil bit for bit. The relative part
+ *   is 10⁻⁶ at order 1, and 100 times larger for each order above, up to
+ *   0.1: a smooth function agrees to about 10⁻¹¹ at order 1, and each
+ *   order multiplies the rounding of the stencil by `1/step`.
+ * - The last three converge as the stencil does: the difference of the
+ *   last two is 64 to 4096 times smaller than the one before (the error
+ *   of the 8th-order stencil shrinks 256 times at each halving, 1024 times
+ *   where its first term is 0). Then the error of the last value is the
+ *   last difference over that ratio less 1. When that error is within the
+ *   relative part of the last value, the value is the last one. When it is
+ *   not, but the limit the values approach, the last value plus that
+ *   error, is 0 to within the relative part, the value is that limit: this
+ *   settles a derivative that is 0 (`t⁹` at 0), which the values approach,
+ *   256 times closer at each halving, without ever agreeing to a part of
+ *   each other. The limit is read from the values only, not from the size
+ *   of `f` over a window, which can be far larger than the derivative at
+ *   the point (`exp(1000 t)` at 0.4 reaches 10³⁰⁴ in the first window,
+ *   where the derivative is 5 · 10¹⁷⁶). A jump in the window does not
+ *   settle this way: its weight grows as the step shrinks, so the
+ *   differences grow, and when it leaves the window the difference drops
+ *   far more than 4096 times.
+ *
+ * The rounding of one stencil is `ε · magnitude · 2.1ᵏ / stepᵏ`, with the
+ * largest finite sample in the window of the two stencils compared
+ * (`sampleSize`): 2.1 is the sum of the magnitudes of the coefficients of
+ * the 8th-order stencil, 2.08. Without it the 4th derivative of `10⁶ x³`
+ * and the 2nd derivative of `sin` at 0, both 0, would compare two values
+ * that are rounding only, never settle, and be `NaN`. The size is read from
+ * the samples, not from `f(x)`, which the stencil of order 1 does not
+ * sample: `sin(t)/t` has no value at 0, and its derivative there is 0.
+ */
+function settledValue(
+  steps: ReadonlyArray<number>,
+  size: SampleSize,
+  k: number,
+  fineStep: number
+): number | undefined {
+  const n = steps.length;
+  const [coarse, fine] = [steps[n - 2], steps[n - 1]];
+  if (!Number.isFinite(coarse) || !Number.isFinite(fine)) return undefined;
+  if (coarse === fine) return coarse;
+  const relative = Math.min(0.1, 1e-6 * 100 ** (k - 1));
+  const rounding = (Number.EPSILON * size.magnitude * 2.1 ** k) / fineStep ** k;
+  const near = Math.abs(coarse - fine);
+  if (
+    near <=
+    relative * Math.max(Math.abs(coarse), Math.abs(fine)) + 2 * rounding
+  )
+    return coarse;
+  if (n < 3 || !Number.isFinite(steps[n - 3])) return undefined;
+  const ratio = Math.abs(steps[n - 3] - coarse) / near;
+  if (ratio < 64 || ratio > 4096) return undefined;
+  if (near / (ratio - 1) <= relative * Math.abs(fine) + 2 * rounding)
+    return fine;
+  const limit = fine + (fine - coarse) / (ratio - 1);
+  return Math.abs(limit) <= relative * Math.abs(fine) ? limit : undefined;
 }
 
 function composedCenteredDiff(
@@ -626,8 +777,8 @@ function composedCenteredDiff(
  * composition for a higher order are exactly those of the scalar stencil,
  * so every component agrees bit-for-bit with the scalar stencil applied to
  * that component alone. The component count is read from the first sample;
- * a sample that is not an array of that length, or a function that answers
- * no array, makes the result `undefined`.
+ * a sample of the first step that is not an array of that length, or a
+ * function that answers no array, makes the result `undefined`.
  */
 export function centeredDiffHigherOrderVector(
   f: (x: number) => ReadonlyArray<number> | undefined,
@@ -640,7 +791,39 @@ export function centeredDiffHigherOrderVector(
     return v === undefined ? undefined : [...v];
   }
   const k = Math.floor(order);
-  return composedCenteredDiffVector(f, x, k, h / k);
+  // The step is halved as in `centeredDiffHigherOrder`. Each component
+  // keeps the value at which its stencils settle (`settledValue`, with the
+  // size of that component's samples), the value the scalar stencil gives
+  // for that component alone; a component that never settles is `NaN`
+  // (`√t` at `t = 0`), and the others keep their values. A step with a
+  // sample that is not an array of the length ends the halving, with the
+  // components that settled so far.
+  const values = new Map<number, ReadonlyArray<number> | undefined>();
+  const g = (t: number): ReadonlyArray<number> | undefined => {
+    if (values.has(t)) return values.get(t);
+    const v = f(t);
+    values.set(t, v);
+    return v;
+  };
+  let step = h / k;
+  const first = composedCenteredDiffVector(g, x, k, step);
+  if (first === undefined) return undefined;
+  // The values of each component at each step.
+  const steps: number[][] = first.map((c) => [c]);
+  const settled: (number | undefined)[] = first.map(() => undefined);
+  for (let n = 0; n < MAX_STENCIL_HALVINGS; n++) {
+    step /= 2;
+    const next = composedCenteredDiffVector(g, x, k, step);
+    if (next === undefined || next.length !== first.length) break;
+    for (let i = 0; i < next.length; i++) {
+      if (settled[i] !== undefined) continue;
+      steps[i].push(next[i]);
+      const size = sampleSize(values, x, 8 * k * step, (v) => v?.[i]);
+      settled[i] = settledValue(steps[i], size, k, step);
+    }
+    if (settled.every((c) => c !== undefined)) return settled as number[];
+  }
+  return settled.map((c) => c ?? NaN);
 }
 
 function composedCenteredDiffVector(

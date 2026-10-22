@@ -8,7 +8,7 @@
   declared element contract is checked too, so `xs: list<string>` refuses
   `["a", Missing]`. An author who wants absence writes it: `string | missing`,
   `list<string | missing>`, or a refining declaration (`list`, `list<unknown>`).
-  A numeric declaration still admits `NaN`, the numeric absence marker, so a
+  A `number` declaration still admits `NaN`, the numeric absence marker, so a
   numeric restriction such as `3 {a > 0}` (typed `integer | nan`) binds to `n:
   number` as before; a restricted non-numeric value such as `(1, 2) {a > 0}`
   (typed `missing | tuple<integer, integer>`) needs `tuple<number, number> |
@@ -222,7 +222,13 @@
   (`trim(xs[i])`, as it already did at a `function`'s annotated parameter) and
   as the initializer of a declaration that excludes absence (`let y: string =
   xs[i]`). The discharges are the same everywhere: `xs[i]?!`, `xs[i] ??
-  fallback`, a guard, or a type that admits absence. Decision P3.
+  fallback`, a guard, or a type that admits absence. Decision P3. A numeric
+  read at a `real`, `integer` or `complex` declaration is reported too, since
+  these types exclude `NaN`: `let r: real = zs[i]` for `zs: list<real>` (typed
+  `nan | real`) was refused only when the program ran; write `zs[i]?!`,
+  `zs[i] ?? 0`, or declare `real | nan`. A value with another type outside
+  the declaration, such as `a / b` (`infinity | nan | real`), is not
+  reported.
 
 - **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408). A
   third argument `{global: {b: [lo, hi]}}` searches the named parameters (at
@@ -291,6 +297,46 @@
 
 ### Behavior Changes
 
+- **A `Sum` or `Product` bound may be a type that could be a number**
+  (Tycho row 421; the fix is under Resolved Issues). A bound whose type is a
+  union with a number arm (`number | string`, `broadcastable<number | tuple>`)
+  or a top type (`value`, `expression`) is now accepted, where it was an
+  `incompatible-type` error; `string`, `boolean`, a list or a tuple type, and
+  a literal string, `NaN` or `Missing`, are still refused. Such a bound gets no
+  closed form and no fold of two equal bounds, so the operator evaluates only
+  when its value is a number: with `y: number | tuple` holding `(3, 4)`,
+  `\prod_{n=1}^{y} n` stays unevaluated, where a closed form would have given
+  `Factorial((3, 4))`, a tuple. Its `javascript` compile answers `NaN` for a
+  value that is not a number, where `Math.floor` read the string `"3"` as 3 and
+  `true` as 1; a bound typed as a number, `unknown` or `any` compiles as
+  before.
+
+- **A numerical derivative narrows its window until the value settles**
+  (Tycho row 420; the fix is under Resolved Issues). The numerical derivative
+  of an expression that stays symbolic (its `javascript` compile, `ND`, and a
+  derivative of a function with no closed form under `N()`) is an 8th-order
+  centered stencil whose samples reach 0.4 on each side of the point. It now
+  halves its step until the values of successive steps agree (to 10⁻⁶ at order
+  1, a looser part at higher orders) or converge at the rate of the stencil,
+  and is `NaN` when they never do, at a jump of the function. A smooth function
+  keeps its value bit for bit, and the compiled and interpreted values stay
+  identical. Other values change: `ND` of `\cos(20x)` at 0.05 is −16.829419,
+  the derivative, where it was −14.55; `ND` of `\sqrt{x}` at 0.05 is 2.236068
+  where a sample below 0 made it `NaN`; `ND` of `x\lfloor x\rfloor` at 2, a
+  jump, stays unevaluated where it was 14.19. A smooth function costs 12 calls
+  of the function at order 1 instead of 8, fewer than before at orders 2 to 4
+  (44, 67 and 154 instead of 64, 512 and 4096), and a point at a jump up to 72
+  at order 1.
+
+- **`FindRoot` polishes a steep equation to its root** (Tycho row 419; the fix
+  is under Resolved Issues). A root solve whose accepted step was below the
+  relative step tolerance stopped there, even when the step had removed most
+  of the residual: on a steep equation the step to the root is that small
+  relative to the parameter. It now goes on while its steps more than halve the
+  sum of squared residuals. `a^2 = 10^{12}` from `a = 1` ends at `a = 10^6`
+  exactly (it stopped at a residual of 0.14), and `\sin(10^8 a) = 0.5` at a
+  residual of 6e-9 instead of 3e-5. `FindFit` is unchanged.
+
 - **`FindFit` and `FindRoot` stop polishing at the tolerance's precision**
   (Tycho row 418; the fix is under Resolved Issues). A solve within its
   tolerance ends once an accepted step moves every parameter by less than
@@ -320,9 +366,10 @@
   `fs: list<unknown>` is `list<unknown>` (it was `list<integer>` for a value
   that could hold an error), and `Filter(tu, p)` over
   `tu: tuple<unknown, missing>` is `list<missing | unknown>` (it was
-  `list<missing>` for the value `[1]`). A union keeps an absence or error arm
-  beside `unknown` (`missing | unknown`) and absorbs a value arm
-  (`integer | unknown` is `unknown`). An `incompatible-type` diagnostic shows a
+  `list<missing>` for the value `[1]`). A union keeps an absence arm beside
+  `unknown` (`missing | unknown`) and absorbs a value arm
+  (`integer | unknown` is `unknown`); a union with an `error` arm reduces to
+  `error`, as before. An `incompatible-type` diagnostic shows a
   generic parameter whose variable got no bound by the variable's name,
   `indexed_collection<T>`, instead of `indexed_collection<unknown>`. A lambda
   whose parameters are not inferred yet, `(unknown) -> number`, still does not
@@ -392,6 +439,56 @@
   `list<tuple<vector<integer^1> | vector<integer^2>, vector<integer^1> | vector<integer^2>>>`,
   and its value is `[[(1, 1)], [(2, 2), (3, 3)]]`. It is now typed
   `list<list<tuple<integer, integer>>>`, which holds the value.
+
+- **A `Sum` or `Product` bound refused a union type with a number arm**
+  (Tycho row 421). With `x` declared `broadcastable<number | tuple>`,
+  `\sum_{n=1}^{x} n^2`, `\sum_{n=x}^{5} n` and `\prod_{n=1}^{x} n` were
+  invalid, so a function such as `s(a) = \sum_{k=1}^{a} k` over that
+  declaration never registered, while the bound of an integral and the
+  operands of `Mod` and `Max` accepted the same declaration. The check of a
+  bound said it refuses only a bound that cannot be a number, but it accepted
+  only a type below `number`. Now `s(3)` is 6 and `s([1, 2, 3])` is
+  `[1, 3, 6]`, as over a parameter declared `any`.
+
+- **The derivative of a sum whose bound is `⌊x⌋`** (Tycho row 420).
+  `D(Sum(Cos(i x), Limits(i, 1, Floor(x))), x)` stayed unevaluated, because a
+  bound that depends on the variable declined the rule for a sum, and the
+  numerical derivative of its compile read across the jumps of the sum at the
+  integers: −5.308 at x = 1.9, where the derivative is −0.946. A bound of a
+  `Sum` whose derivative is 0, a step of the variable (`Floor`, `Ceil`,
+  `Round`, `Truncate` or `Sign` of it, also through a call of a function), now
+  keeps the rule: between two jumps the set of terms is fixed, and the
+  derivative is `Σ_{i=1}^{⌊x⌋} −i sin(i x)`, which compiles to `javascript`
+  and `interval-js`; the derivative of order 2 closes too. At a jump the result
+  is the value of that sum, as `D(⌊x⌋)` is 0 at an integer. A bound that is
+  not a step (`x`) or not pure keeps the derivative unevaluated. A `Product`
+  with such a bound still stays unevaluated, and its numerical derivative is
+  now right between the jumps and `NaN` at them (the change under Behavior
+  Changes): `D(Product(x + i, Limits(i, 1, Floor(x))), x)` at 1.9 is 1, where
+  it was 57.3. `D(Truncate(x), x)` is 0, as for `Floor`; it stayed
+  unevaluated.
+
+- **`FindRoot` reports `converged: false` far from a root of a steep
+  equation** (Tycho row 419). The root test of 0.161.0 allows each residual
+  `tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`. Its Jacobian part is a
+  first-order claim, that a zero lies within a relative change of `tolerance`
+  of the parameters, and it had no check: `2 - \sin(10^{18} a) = 0` has no
+  real root, and its Jacobian, up to 10^18, let a residual of 1 to 3 pass at
+  every point (`converged: true` from `a = 1`, from `a = 0` and under the bound
+  `a \le 0`). An equation whose residual is above `tolerance` is now a root
+  only when the residual confirms the claim. Each parameter is moved by
+  `±2 · tolerance · max(1, |θ_j|)` toward and away from the zero. The central
+  difference of the residual must be the change the Jacobian predicts to
+  within half, and the parabola through the three values must reach
+  `tolerance`, change sign, or touch 0 to within the rounding of the
+  parameters (a root of even multiplicity, such as `10^{24}(a^2-2)^2 = 0`).
+  At a bound, the side inside the bounds is checked and a zero just past the
+  bound is accepted. Over 100 starts, `2 - \sin(10^{18} a) = 0`,
+  `\sin(10^{12} a) = 0.5` and `\sin(10^{10} a) = 0.5`, which oscillate faster
+  than the tolerance can resolve, go from 100, 100 and 93 starts reported
+  `converged` to none; `\sin(10^8 a) = 0.5`, `a^3 - 2a = 10^9`, `10^{12} a = 1`
+  and `e^a = 10^{30}` stay converged. The check costs at most two residual
+  evaluations per equation, at the points where the solve would stop.
 
 - **`FindFit` reports `converged: true` at an exact fit** (Tycho row 418). A
   degree-10 polynomial through 11 points is an exact interpolation whose

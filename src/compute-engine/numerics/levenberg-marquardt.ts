@@ -78,7 +78,26 @@ export interface LMOptions {
    * max(1, |θⱼ|)` is the change of its residual over a unit relative change
    * of the parameters it reads, so the relative part says those parameters
    * are determined to that relative precision. A non-finite residual or
-   * scale is never a root. A stationary point of the sum of squares whose
+   * scale is never a root. The relative part is a first-order claim: a
+   * zero of the equation lies within that relative change of the
+   * parameters. An equation whose residual needs the relative part (it is
+   * above the absolute part) is a root only when the residual confirms the
+   * claim. Each parameter is moved by `±2 · rootTolerance · max(1, |θⱼ|)`,
+   * with the sign of `Jᵢⱼ` that lowers `|rᵢ|` for `+`. The central
+   * difference of the residual over that step must be the change the
+   * Jacobian predicts to within half of it, and the parabola through the
+   * three values must reach the absolute part, cross 0, or touch 0 to
+   * within the rounding of the parameters (a root of even multiplicity).
+   * When one end of the step is outside the bounds, the end inside must
+   * show the predicted change to within half, and the end toward the zero,
+   * when it is inside, must reach the absolute part or cross 0. A linear
+   * equation always passes (twice the change reaches past its zero); an
+   * equation so steep that its Jacobian means nothing at that scale does
+   * not: `2 − sin(10¹⁸ a) = 0` has no zero, and at every point its
+   * Jacobian, up to 10¹⁸, made a residual of 3 pass the first-order test
+   * (Tycho row 419). The check costs at most two residual evaluations per
+   * such equation, and runs only where the solve would stop
+   * (`zeroWithinReach` in the function). A stationary point of the sum of squares whose
    * residual is above the tolerance (a least-squares minimum that is not a
    * root, `a² + 1 = 0`) is reported `converged: false`, with `stationary:
    * true`. The projected-gradient test does not stop a root solve on its
@@ -277,6 +296,112 @@ export function levenbergMarquardt(
     return true;
   };
 
+  // For a root solve, whether each equation whose residual is above the
+  // absolute part of its allowance has a zero within twice the relative
+  // change that allowance grants (see `rootTolerance`): the first-order
+  // test of `withinTolerance` says so, and this checks it with the residual
+  // itself. Each parameter takes the step `±2 · rootTolerance · max(1,
+  // |θⱼ|)`, with the sign of `Jᵢⱼ` that lowers `|rᵢ|` for `+` (a parameter
+  // fixed by its bounds does not move), and the residual is evaluated at
+  // both ends. Along that line, with the residual's sign at the point taken
+  // as positive, the three values give a parabola `z(s) = z₀ + b s + c s²`
+  // for `s` in [−1, 1]. The row has a zero within reach when:
+  //
+  // - `b`, a central difference, is the change the Jacobian predicts for
+  //   the step to within half of it. Over a reach of 200 radians,
+  //   `sin(10¹² a) = 0.5` near `a = 1` lands on values that are chance, so
+  //   its parabola says nothing, and with the prediction off it is not a
+  //   root at a residual of 0.18. `2 − sin(10¹⁸ a) = 0`, with no zero, is
+  //   refused here too: its values lie between 1 and 3, so its central
+  //   difference is at most 1, and the prediction is at least twice the
+  //   residual, at least 2; the two agree to within half only at that
+  //   limit, where the parabola's lowest value is 0.75.
+  // - The lowest value of the parabola on [−1, 1] is within the absolute
+  //   part, or below 0 (the residual changes sign), or within the rounding
+  //   of a root of even multiplicity: at the double nearest to the root of
+  //   `10²⁴ (a² − 2)² = 0` the residual is 2 · 10⁻⁷, and it touches 0
+  //   without crossing it. That rounding is the parabola's rise over one
+  //   unit in the last place of the parameters, at most `rootTolerance / ε`
+  //   units over the step (`c · (ε / (2 · rootTolerance))²`, times 4).
+  //
+  // A linear equation always passes: twice its first-order reach goes past
+  // its zero. When one end of the step is outside the bounds, the zero may
+  // lie past the bound within reach (`eᵃ = 10³⁰` with an upper bound one
+  // unit in the last place below its root): the end inside the bounds must
+  // show the change the Jacobian predicts, to within half, and the end
+  // toward the zero, when it is inside, must reach the absolute part or
+  // cross 0. With both ends outside the bounds, the row is not a root.
+  //
+  // Rows with the same probe point share one evaluation. The last point
+  // checked is remembered, since a solve can ask twice at one point.
+  let probedPoint: number[] | undefined;
+  let probedResult = false;
+  const zeroWithinReach = (
+    rr: number[],
+    JJ: number[][],
+    t: number[]
+  ): boolean => {
+    if (rootTolerance === undefined) return true;
+    if (t === probedPoint) return probedResult;
+    const tol = rootTolerance;
+    const rel = Number.EPSILON / (2 * tol);
+    const probes = new Map<string, number[]>();
+    const residualAt = (point: number[]): number[] => {
+      const key = point.join(',');
+      let rp = probes.get(key);
+      if (rp === undefined) {
+        rp = residual(point);
+        probes.set(key, rp);
+      }
+      return rp;
+    };
+    const inBounds = (point: number[]): boolean =>
+      point.every((v, j) => v >= lo[j] && v <= hi[j]);
+    let result = true;
+    for (let i = 0; i < rr.length && result; i++) {
+      const ri = rr[i];
+      if (Math.abs(ri) <= tol) continue;
+      const sign = Math.sign(ri);
+      const row = JJ[i];
+      const step = t.map((v, j) =>
+        lo[j] === hi[j]
+          ? 0
+          : -sign * Math.sign(row[j]) * 2 * tol * Math.max(1, Math.abs(v))
+      );
+      // The change of `z` the Jacobian predicts for the step: negative.
+      let predicted = 0;
+      for (let j = 0; j < p; j++) predicted += sign * row[j] * step[j];
+      const z0 = Math.abs(ri);
+      const plus = t.map((v, j) => v + step[j]);
+      const minus = t.map((v, j) => v - step[j]);
+      const plusInside = inBounds(plus);
+      const minusInside = inBounds(minus);
+      const asPredicted = (change: number, expected: number): boolean =>
+        Math.abs(change - expected) <= 0.5 * Math.abs(expected);
+      if (plusInside && minusInside) {
+        const zp = sign * residualAt(plus)[i];
+        const zm = sign * residualAt(minus)[i];
+        const b = (zp - zm) / 2;
+        const c = (zp + zm) / 2 - z0;
+        let lowest = Math.min(zp, zm);
+        if (c > 0 && Math.abs(b) <= 2 * c) lowest = z0 - (b * b) / (4 * c);
+        const rounding = c > 0 ? 4 * c * rel * rel : 0;
+        result = asPredicted(b, predicted) && lowest <= tol + rounding;
+      } else if (plusInside) {
+        const zp = sign * residualAt(plus)[i];
+        result = asPredicted(zp - z0, predicted) && zp <= tol;
+      } else if (minusInside) {
+        const zm = sign * residualAt(minus)[i];
+        result = asPredicted(zm - z0, -predicted);
+      } else {
+        result = false;
+      }
+    }
+    probedPoint = t;
+    probedResult = result;
+    return result;
+  };
+
   // Whether the cost at a point is at its rounding floor: the sum of squares
   // of the first-order rounding of each residual's evaluation, a machine
   // epsilon of the magnitude of the terms its row computes, `Σⱼ |Jᵢⱼ · θⱼ|`
@@ -307,7 +432,12 @@ export function levenbergMarquardt(
   // Whether a point is `converged` (see `LMResult`): a root solve only
   // within its tolerance; a fit at a stationary point (`stat`, the solver's
   // own stop test there) or within its tolerance (an exact fit); a solve
-  // with no tolerance at a stationary point.
+  // with no tolerance at a stationary point. A root solve checks its
+  // first-order test with the residual (`zeroWithinReach`, which costs
+  // residual evaluations) only at a stationary point, where the solve would
+  // stop; a point that fails the check is not converged, and the solve goes
+  // on. The point a solve stops at for another reason is checked after the
+  // loop.
   const isConverged = (
     rr: number[],
     JJ: number[][],
@@ -315,7 +445,7 @@ export function levenbergMarquardt(
     stat: boolean
   ): boolean =>
     rootTolerance !== undefined
-      ? withinTolerance(rr, JJ, t)
+      ? withinTolerance(rr, JJ, t) && (!stat || zeroWithinReach(rr, JJ, t))
       : stat || withinTolerance(rr, JJ, t);
 
   let theta = clampVec(theta0.slice());
@@ -566,8 +696,17 @@ export function levenbergMarquardt(
         // convergence on the rejection path (where λ growth or the box projection
         // shrink the PROPOSED step at a point that never improved) — the original
         // bug. A root solve that settles here keeps the root test's answer:
-        // at a minimum above its tolerance `converged` stays false.
-        if (stepStalled) {
+        // at a minimum above its tolerance `converged` stays false. A root
+        // solve whose step, small relative to θ, still more than halved the
+        // cost has not settled and goes on: on a steep equation the step to
+        // the root is below `stepTol` relative to θ, and the solve stopped at
+        // a residual the next steps remove (`a² = 10¹²` at a residual of
+        // 0.14, one step from 0; `sin(10⁸ a) = 0.5` at 3 · 10⁻⁵, two steps
+        // from 6 · 10⁻⁹).
+        if (
+          stepStalled &&
+          !(rootTolerance !== undefined && actual > 0.5 * (F + actual))
+        ) {
           stationary = true;
           converged = isConverged(r, J, theta, true);
           break;
@@ -590,6 +729,12 @@ export function levenbergMarquardt(
         nu *= 2;
       }
     }
+
+    // A root solve that stopped at a point within the first-order test
+    // without the residual check (a tolerance stall, a step that collapsed
+    // on rejection, `maxIterations`) checks it now (see `isConverged`).
+    if (converged && rootTolerance !== undefined)
+      converged = zeroWithinReach(r, J, theta);
   } catch (e) {
     if (!isTimeoutCancellation(e)) throw e;
     timedOut = true;

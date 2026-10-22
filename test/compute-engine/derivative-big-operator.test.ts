@@ -228,6 +228,25 @@ describe('the derivative of a Sum', () => {
     });
 
     test('a bound that calls a function whose body reads the variable: the derivative stays unevaluated', () => {
+      // g(1) = x is not a step: the set of terms changes with `x`.
+      const result = engine()
+        .box([
+          'D',
+          [
+            'Sum',
+            ['Cos', ['Multiply', 'i', 'x']],
+            ['Limits', 'i', 1, ['g', 1]],
+          ],
+          'x',
+        ])
+        .evaluate();
+      expect(result.operator).toBe('D');
+    });
+
+    test('a bound that calls a function whose body is a step of the variable', () => {
+      // N(1) = ⌊x⌋: between two integers the set of terms is fixed, and
+      // the derivative is the sum of the derivatives of the terms (Tycho
+      // row 420).
       const result = engine()
         .box([
           'D',
@@ -239,7 +258,8 @@ describe('the derivative of a Sum', () => {
           'x',
         ])
         .evaluate();
-      expect(result.operator).toBe('D');
+      expect(result.operator).toBe('Sum');
+      expect(result.toString()).toContain('sin');
     });
 
     test('a function passed as an argument: its body is followed', () => {
@@ -325,9 +345,7 @@ describe('the derivative of a Sum', () => {
       .box(['D', ['Sum', ['Power', 'x', 'i'], ['Limits', 'i', 0, 'n']], 'x'])
       .evaluate();
     expect([...result.unknowns].sort()).toEqual(['n', 'x']);
-    expect(result.subs({ n: 3 }).evaluate().toString()).toBe(
-      '3x^2 + 2x + 1'
-    );
+    expect(result.subs({ n: 3 }).evaluate().toString()).toBe('3x^2 + 2x + 1');
   });
 
   test('the new sum is built on the scope of the original sum', () => {
@@ -512,9 +530,7 @@ describe('the derivative of a Product', () => {
       [2, 1.5],
     ])
       expect(
-        result
-          .subs({ x: ce.number(x0), constructor: ce.number(c0) })
-          .N().re
+        result.subs({ x: ce.number(x0), constructor: ce.number(c0) }).N().re
       ).toBeCloseTo(2 * x0 + 2 * c0 + 3, 10);
   });
 
@@ -523,7 +539,11 @@ describe('the derivative of a Product', () => {
     // One factor, but a machine number cannot count past 10^20 one by one.
     const big = { num: '100000000000000000000' };
     const result = ce
-      .box(['D', ['Product', ['Add', 'x', 'k'], ['Limits', 'k', big, big]], 'x'])
+      .box([
+        'D',
+        ['Product', ['Add', 'x', 'k'], ['Limits', 'k', big, big]],
+        'x',
+      ])
       .evaluate();
     expect(result.operator).toBe('D');
   });

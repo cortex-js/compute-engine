@@ -698,6 +698,20 @@ Jacobian and `θ` the parameters, so a minimum of the sum of squared
 
 residuals that is not a root (`a^2 + 1 = 0`) is `converged: False`.
 
+When the residual is above `tolerance`, the residual itself must
+
+confirm the Jacobian term: with each parameter moved by
+
+`±2 · tolerance · max(1, |θ_j|)` toward and away from the zero, the
+
+change of the residual is the change the Jacobian predicts to within
+
+half, and the residual reaches `tolerance`, changes sign, or touches
+
+0 to within the rounding of the parameters. So a steep equation with
+
+no root (`2 - sin(10^18 a) = 0`) is not `converged` either.
+
 `stationary` is the solver's own stop test, true at such a minimum
 
 too; a stacked system of data rows next to an equation reads it as

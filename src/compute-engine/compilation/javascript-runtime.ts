@@ -3621,6 +3621,13 @@ export const SYS_HELPERS = {
   // goes to the helper unchanged.
   gamma: (z: number): number =>
     Number.isInteger(z) && z <= 0 ? Infinity : gamma(z),
+  // The bound of a compiled `Sum` or `Product` loop: the floor of a number,
+  // or of a complex value with no imaginary part; anything else, a string,
+  // a boolean or an array, is `NaN`, and the loop answers `NaN`. A bound may
+  // be declared a union with a number arm (`number | string`), and
+  // `Math.floor` read the string `"3"` as 3, `true` as 1 and `[3]` as 3,
+  // where the interpreter leaves the operator unevaluated (Tycho row 421).
+  bound: (v: unknown): number => Math.floor(machineReal(v)),
   // The common divisor of two reals (`realGcd`). An operand beyond the safe
   // integer range, or infinite, throws (`integerOperand`).
   gcd: (a: number, b: number): number =>

@@ -10831,6 +10831,13 @@ function assertFiniteBound(
  * Compile a bound expression to JavaScript code.
  * For numeric constants, emits the number directly.
  * For symbolic expressions, compiles using Math.floor() to ensure integer bounds.
+ * A bound whose type is a union with a number arm, or a top type such as
+ * `value` (`number | string`, `broadcastable<number | tuple>`), may be a
+ * string, a boolean or an array at run time, which `Math.floor` reads as a
+ * number (`"3"` as 3): it goes through `_SYS.bound`, which answers `NaN`
+ * for a value that is not a number, so the loop answers `NaN` (Tycho row
+ * 421). A bound typed `unknown` or `any` keeps `Math.floor`, as the
+ * interpreter keeps the reading it gives an undeclared symbol.
  */
 function compileBound(
   expr: Expression,
@@ -10838,7 +10845,11 @@ function compileBound(
   target: CompileTarget<Expression>
 ): string {
   if (numVal !== undefined) return String(numVal);
-  return `Math.floor(${BaseCompiler.compile(expr, target)})`;
+  const code = BaseCompiler.compile(expr, target);
+  const t = expr.type;
+  if (!t.isUnknown && t.type !== 'any' && !isSubtype(t.type, 'number'))
+    return `_SYS.bound(${code})`;
+  return `Math.floor(${code})`;
 }
 
 /**

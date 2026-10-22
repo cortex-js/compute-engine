@@ -57,7 +57,7 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
@@ -633,6 +633,9 @@ function isDegenerateBounds(
   if (lower.isInfinity === true || upper.isInfinity === true) return false;
   if (!lower.isValid || !upper.isValid) return false;
   if (!lower.isPure || !upper.isPure) return false;
+  // A bound that may not be a number is not a point: with `x: number |
+  // string`, `Sum(1, Limits(n, x, x))` folded to 1 even when `x` is a string.
+  if (boundMayNotBeNumber(lower) || boundMayNotBeNumber(upper)) return false;
   return structural ? sameBoundStructure(lower, upper) : lower.isSame(upper);
 }
 
@@ -732,6 +735,10 @@ export function symbolicSumClosedForm(
   // a clause with one bound unevaluated, so this test only guards other
   // callers.
   if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
+    return undefined;
+  // A bound that may not be a number (`boundMayNotBeNumber()`) is not
+  // substituted either: its value may be a string or a tuple.
+  if (boundMayNotBeNumber(lower) || boundMayNotBeNumber(upper))
     return undefined;
 
   // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
@@ -843,6 +850,11 @@ export function symbolicProductClosedForm(
   // they keep a clause with one bound unevaluated, so this test only guards
   // other callers.
   if (isSymbol(lower, 'Nothing') || isSymbol(upper, 'Nothing'))
+    return undefined;
+  // A bound that may not be a number (`boundMayNotBeNumber()`) is not
+  // substituted either: `Π_{k=1}^{y} k = y!` with a tuple `y` gave a tuple,
+  // since `Factorial` maps over a collection.
+  if (boundMayNotBeNumber(lower) || boundMayNotBeNumber(upper))
     return undefined;
 
   // Π_{k=1}^{n} k = n!  (bare index, lower bound 1).
@@ -3056,6 +3068,18 @@ export function canonicalLimits(
  * `Missing` bound erred; a bound that only EVALUATES to an absence, such as
  * a piecewise call, keeps the run-time reading and the operator answers
  * `NaN`.)
+ *
+ * A bound whose type only COULD be a number is accepted too: a union with a
+ * number arm (`broadcastable<number | tuple>`, `number | string`) or a top
+ * type such as `value` or `expression` (`couldMatch`), as the bound of an
+ * integral, or the operand of `Mod` or `Max`, accepts it. Such a bound was
+ * refused (Tycho row 421), and `f(x) = Σ_{n=1}^{x} n²` over that declaration
+ * never registered. It is a bound that may not be a number
+ * (`boundMayNotBeNumber()`): no closed form substitutes it, and two equal
+ * ones are not folded to one term, so a sum or product with a symbol of
+ * that type as a bound evaluates only when the symbol's value is a number.
+ * A call that substitutes a value that is not a number into the bound
+ * (`s("a")`, `s((3, 4))`) is refused here, as a literal string is.
  */
 function checkBound(bound: Expression | null): Expression | null {
   if (bound === null) return null;
@@ -3065,9 +3089,37 @@ function checkBound(bound: Expression | null): Expression | null {
     return bound.engine.typeError('number', bound.type, bound);
   if (bound.isNumber) return bound;
   const t = bound.type;
-  if (t.isUnknown || t.type === 'any') return bound;
-  if (t.matches('number') || numericMissingSlot(t.type)) return bound;
+  if (isNumericBoundType(t) || couldMatch(t.type, 'number')) return bound;
   return bound.engine.typeError('number', t, bound);
+}
+
+/**
+ * Whether the type of a bound says it is a number: a numeric type, a numeric
+ * slot that may be absent (`missing | real`, see `checkBound`), or a type
+ * that says nothing (`unknown`, `any`), which keeps the reading the engine
+ * gives an undeclared symbol.
+ */
+function isNumericBoundType(t: Expression['type']): boolean {
+  return (
+    t.isUnknown ||
+    t.type === 'any' ||
+    t.matches('number') ||
+    numericMissingSlot(t.type)
+  );
+}
+
+/**
+ * Whether a bound that `checkBound` accepted may hold a value that is not a
+ * number: its type is a union with a number arm, or a top type such as
+ * `value` (`x: number | string`, `x: broadcastable<number | tuple>`). Such a
+ * bound is not substituted by a closed form (`Π_{k=1}^{y} k = y!` with a
+ * tuple `y` gave a tuple, since `Factorial` maps over a collection) and is
+ * not a point when the two bounds are the same (`Σ_{n=x}^{x} 1` folded to 1
+ * with a string `x`).
+ */
+function boundMayNotBeNumber(bound: Expression): boolean {
+  if (isSymbol(bound) && bound.symbol === 'Nothing') return false;
+  return !isNumericBoundType(bound.type);
 }
 
 /**

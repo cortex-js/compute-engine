@@ -97,17 +97,30 @@ describe('Derivative of a point-valued function through the stencil', () => {
   });
 
   test('a component the stencil cannot compute is NaN in place on both routes', () => {
-    // `√t` has no real value at the samples left of zero, `t` is fine.
+    // `√t` has no real value at the samples left of zero, at every step
+    // when `t = 0`; `t` is fine.
     define('q', String.raw`(\sqrt{t}, t)`);
-    const interpreted = ce.box(['ND', 'q', 0.2]).N();
+    const interpreted = ce.box(['ND', 'q', 0]).N();
     expect(interpreted.operator).toBe('Tuple');
     const got = components(interpreted);
     expect(got[0]).toBeNaN();
     expect(got[1]).toBeCloseTo(1, 8);
     const r = compile(ce.box(['ND', 'q', 'u']), { fallback: false });
-    const compiled = r.run!({ u: 0.2 }) as number[];
+    const compiled = r.run!({ u: 0 }) as number[];
     expect(compiled[0]).toBeNaN();
     expect(compiled[1]).toBe(got[1]);
+  });
+
+  test('a point near the edge of the domain narrows the stencil (Tycho row 420)', () => {
+    // At `t = 0.2` the first window, ±0.4, reaches below 0, where `√t` has
+    // no real value; the stencil narrows until it does not.
+    define('qEdge', String.raw`(\sqrt{t}, t)`);
+    const got = components(ce.box(['ND', 'qEdge', 0.2]).N());
+    expect(got[0]).toBeCloseTo(1 / (2 * Math.sqrt(0.2)), 8);
+    expect(got[1]).toBeCloseTo(1, 8);
+    const r = compile(ce.box(['ND', 'qEdge', 'u']), { fallback: false });
+    const compiled = r.run!({ u: 0.2 }) as number[];
+    expect(compiled).toEqual(got);
   });
 
   test('an exact constant inside the value is numericized on the interpreted vehicle', () => {
