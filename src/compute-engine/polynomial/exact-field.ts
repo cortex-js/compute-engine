@@ -27,6 +27,9 @@ export function rationalCoefficient(
   denominator = 1n
 ): RationalCoefficient {
   if (denominator === 0n) throw new RangeError('Zero rational denominator');
+  if (denominator === 1n) return { numerator, denominator };
+  if (denominator === -1n) return { numerator: -numerator, denominator: 1n };
+  if (numerator === 0n) return { numerator: 0n, denominator: 1n };
   const g = integerGcd(numerator, denominator) * (denominator < 0n ? -1n : 1n);
   return { numerator: numerator / g, denominator: denominator / g };
 }
@@ -35,10 +38,12 @@ export const rationalField: ExactField<RationalCoefficient> = {
   zero: rationalCoefficient(0n),
   one: rationalCoefficient(1n),
   add: (a, b) =>
-    rationalCoefficient(
-      a.numerator * b.denominator + b.numerator * a.denominator,
-      a.denominator * b.denominator
-    ),
+    a.denominator === b.denominator
+      ? rationalCoefficient(a.numerator + b.numerator, a.denominator)
+      : rationalCoefficient(
+          a.numerator * b.denominator + b.numerator * a.denominator,
+          a.denominator * b.denominator
+        ),
   neg: (a) => ({ numerator: -a.numerator, denominator: a.denominator }),
   mul: (a, b) =>
     rationalCoefficient(
@@ -109,32 +114,49 @@ export class FieldPolynomials<T> {
   mul(a: readonly T[], b: readonly T[]): T[] {
     if (!a.length || !b.length) return [];
     const r = Array<T>(a.length + b.length - 1).fill(this.field.zero);
+    const nonzero = b.map((c) => !this.field.isZero(c));
     for (let i = 0; i < a.length; i++) {
       this.work.tick(b.length);
-      for (let j = 0; j < b.length; j++)
-        r[i + j] = this.field.add(r[i + j], this.field.mul(a[i], b[j]));
+      if (this.field.isZero(a[i])) continue;
+      for (let j = 0; j < b.length; j++) {
+        if (!nonzero[j]) continue;
+        const product = this.field.mul(a[i], b[j]);
+        r[i + j] = this.field.isZero(r[i + j])
+          ? product
+          : this.field.add(r[i + j], product);
+      }
     }
     return this.trim(r);
   }
   divrem(a: readonly T[], divisor: readonly T[]): [T[], T[]] {
     const b = this.trim(divisor);
     if (!b.length) throw new RangeError('Polynomial division by zero');
-    let r = this.trim(a);
+    const r = this.trim(a);
+    if (r.length < b.length) return [[], r];
     const q = Array<T>(Math.max(0, r.length - b.length + 1)).fill(
       this.field.zero
     );
-    const inv = this.field.inv(b[b.length - 1]);
+    const leading = b[b.length - 1];
+    const monic =
+      leading === this.field.one ||
+      this.field.isZero(
+        this.field.add(leading, this.field.neg(this.field.one))
+      );
+    const inv = monic ? undefined : this.field.inv(leading);
     while (r.length >= b.length) {
       this.work.tick(b.length);
       const d = r.length - b.length;
-      const c = this.field.mul(r[r.length - 1], inv);
+      const c = monic ? r[r.length - 1] : this.field.mul(r[r.length - 1], inv!);
       q[d] = c;
-      for (let i = 0; i < b.length; i++)
+      // The leading term cancels exactly. Avoid constructing its product and
+      // zero coefficient, especially when coefficients are field extensions.
+      for (let i = 0; i < b.length - 1; i++)
         r[i + d] = this.field.add(
           r[i + d],
           this.field.neg(this.field.mul(c, b[i]))
         );
-      r = this.trim(r);
+      r.pop();
+      while (r.length && this.field.isZero(r[r.length - 1])) r.pop();
     }
     return [this.trim(q), r];
   }

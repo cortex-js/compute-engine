@@ -4,6 +4,10 @@ import {
   partialFraction,
 } from '../boxed-expression/factor.js';
 import { distribute } from '../symbolic/distribute.js';
+import {
+  factorNumberFieldExpression,
+  validateAlgebraicGenerator,
+} from '../polynomial/boxed-number-field.js';
 import { expand, expandAll } from '../boxed-expression/expand.js';
 import {
   polynomialDegree,
@@ -113,16 +117,46 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x]) => expandAll(reduceTransformerOperand(x.canonical)),
     },
 
+    AlgebraicGenerator: {
+      description:
+        'An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected.',
+      lazy: true,
+      signature: '(list<number>) -> number',
+      evaluate: (ops, { engine: ce, expression }) => {
+        // The defining relation is exact data, even under N(). The generic
+        // numeric operand walk may already have approximated list entries.
+        const generator = expression ?? ce.function('AlgebraicGenerator', ops);
+        return validateAlgebraicGenerator(generator) ?? generator;
+      },
+    },
+
     Factor: {
       description:
         'Factor a polynomial expression into a product of irreducible factors. ' +
-        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. ' +
+        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. ' +
         'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
       inspectsErrors: true, // see `Expand`
-      signature: '(value, symbol?) -> value',
-      evaluate: ([x, varExpr]) => {
+      signature: '(value, symbol?, value?) -> value',
+      evaluate: ([x, varExpr, generator], { expression }) => {
         if (!x) return x;
+
+        if (generator) {
+          // Explicit-field factoring reads the original exact expression,
+          // not numeric approximations supplied by an enclosing N().
+          if (expression && isFunction(expression))
+            [x, varExpr, generator] = expression.ops;
+          const variable = varExpr && sym(varExpr.canonical);
+          if (!variable) return undefined;
+          const protect = new Set([variable]);
+          return (
+            factorNumberFieldExpression(
+              reduceTransformerOperand(x.canonical, protect),
+              variable,
+              reduceTransformerOperand(generator.canonical, protect)
+            ) ?? expression
+          );
+        }
 
         // With a variable, factor in that variable. The variable is protected
         // from resolution: with `x := 5`, `Factor(x^2 - 1, x)` is a question

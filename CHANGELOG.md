@@ -33,6 +33,15 @@
 
 ### New Features
 
+- `Factor(polynomial, variable, generator)` factors over an explicitly selected
+  algebraic extension of the rationals. Exact radicals and `ImaginaryUnit` can
+  select a field; `AlgebraicGenerator(List(...))` supplies a general irreducible
+  rational defining polynomial in ascending coefficient order. The TypeScript
+  backend uses certified modular lifting and recombination with a norm fallback.
+  Unsupported or incomplete explicit-field requests remain unevaluated. Existing
+  one- and two-argument factoring behavior is unchanged. See
+  [number-field factoring](docs/number-field-factoring.md) for examples and limits.
+
 - **The presence assertion `x?!`** (`AssertPresent(x)` in MathJSON, `⁈` is
   an alias): the value of `x`, or an `expected-present` error naming the
   operand when `x` is absent (`Missing`, `Undefined`, `NaN`, `Indeterminate`,
