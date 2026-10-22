@@ -13059,7 +13059,7 @@ export class BaseCompiler {
         selectionOperandUnder
       );
       if (selection !== null && selection !== undefined) return selection;
-      BaseCompiler.assertScalarCondition(args[0]);
+      BaseCompiler.assertScalarCondition(args[0], target);
       // Mixed real/complex arms: coerce every real arm to the `{re, im}`
       // convention, so the node has one representation whichever arm runs
       // (`branchComplexCoercion`; Tycho item 60). Computed over BOTH arms even when one
@@ -13296,7 +13296,14 @@ export class BaseCompiler {
       // union, whose flat array could be a point or a list — fails closed.
       // Measured on the Tycho corpus (2026-09-15): 11 restriction rows in
       // four documents declined here.
-      if (args[1].type.matches('collection<any>')) {
+      // A condition that MAY be a list (`B < 0` for `B:
+      // broadcastable<number>`) takes the same helper, which reads a
+      // condition that is not an array at run time as one scalar condition.
+      // The scalar guard below would refuse it (`assertScalarCondition`).
+      if (
+        args[1].type.matches('collection<any>') ||
+        BaseCompiler.mayBeCollectionCondition(args[1].type.type)
+      ) {
         const valueType = args[0].type;
         // A point is one value; so is a string, which the lattice reads as
         // an indexed collection of its characters but the restriction never
@@ -24985,11 +24992,39 @@ export class BaseCompiler {
     );
   }
 
-  static assertScalarCondition(cond: Expression): void {
+  static assertScalarCondition(
+    cond: Expression,
+    target?: CompileTarget<Expression>
+  ): void {
     if (cond.type.matches('collection<any>'))
       throw new Error(
         'Could not compile: a branch condition is a collection-valued expression, ' +
           'which is never a scalar boolean. Materialize the collection first.'
+      );
+    // A condition that may be a collection at run time (`B < 0` for
+    // `B: broadcastable<number>` is a `broadcastable<boolean>`) selects
+    // element-wise in the interpreter when it is a list, of any rank. A
+    // conditional expression of the target would read the truthiness of an
+    // array instead: Python raises on an array of two or more elements, and
+    // the interval target answers an interval where the interpreter answers
+    // a list. So when the caller names its `target`, such a condition is
+    // refused. A shader target (one with `loweredSymbolType`) is exempt: a
+    // variable of a shader is a uniform of a fixed type, so its value is
+    // not a list of a rank the code did not declare. A target with an
+    // element-wise selection (the JavaScript `_SYS.select`,
+    // `target.selection`) never reaches this check with such a condition,
+    // and neither does the `When` of the base compiler, which restricts
+    // element by element (`_SYS.restrict`).
+    if (
+      target !== undefined &&
+      target.loweredSymbolType === undefined &&
+      BaseCompiler.mayBeCollectionCondition(cond.type.type)
+    )
+      throw new Error(
+        'Could not compile: a branch condition may be a collection at run ' +
+          `time ('${cond.type.toString()}'), and the selection is then ` +
+          'element-wise, which this target does not lower. Declare the ' +
+          'operands as scalars, or evaluate instead.'
       );
     if (BaseCompiler.isContradictedScalarDeclaration(cond))
       throw new Error(
@@ -25003,11 +25038,34 @@ export class BaseCompiler {
       );
   }
 
+  /**
+   * Whether a condition of type `t` may be a list at run time without
+   * being provably one: a `broadcastable<T>`, or a union with a list arm
+   * beside a scalar arm (`boolean | list<boolean>`). A tuple arm does not
+   * count: a tuple binds whole and selects as a scalar
+   * (`boolean | tuple<boolean, boolean>`). A type of unknown contents
+   * (`unknown`, `any`) does not count either: its values are scalars until
+   * proven otherwise, as everywhere in the compiler.
+   */
+  static mayBeCollectionCondition(t: Readonly<Type>, depth = 0): boolean {
+    const r = resolveTypeForCompilation(t);
+    if (typeof r === 'string') return false;
+    if (r.kind === 'broadcastable') return true;
+    if (r.kind !== 'union' || depth > 8) return false;
+    return r.types.some((arm) => {
+      const a = resolveTypeForCompilation(arm);
+      if (typeof a === 'string')
+        return a === 'list' || a === 'indexed_collection';
+      if (a.kind === 'list' || a.kind === 'indexed_collection') return true;
+      return BaseCompiler.mayBeCollectionCondition(a, depth + 1);
+    });
+  }
+
   static guardCondition(
     cond: Expression,
     target: CompileTarget<Expression>
   ): TargetSource {
-    BaseCompiler.assertScalarCondition(cond);
+    BaseCompiler.assertScalarCondition(cond, target);
     const code = BaseCompiler.compile(cond, target);
     if (target.assertBoolean && !BaseCompiler.isBooleanValued(cond))
       return target.assertBoolean(code);
@@ -26236,7 +26294,7 @@ export class BaseCompiler {
     decidability: ConditionNode,
     target: CompileTarget<Expression>
   ): CompiledCondition {
-    BaseCompiler.assertScalarCondition(cond);
+    BaseCompiler.assertScalarCondition(cond, target);
     if (decidability.test.kind === 'value') {
       const { expr, negate } = BaseCompiler.peelNegations(cond);
       return {

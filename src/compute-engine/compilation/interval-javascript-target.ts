@@ -892,7 +892,7 @@ function compileIntervalSelectionValue(
           target
         ) ?? compileArm(i + 1));
     if (isSymbol(cond, 'True')) return arm;
-    BaseCompiler.assertScalarCondition(cond);
+    BaseCompiler.assertScalarCondition(cond, target);
     return compileIntervalConditional(
       i === 0 ? BaseCompiler.compileValueOperand(cond, target) : compileArm(i),
       arm,
@@ -921,7 +921,7 @@ function compileIntervalRestrictedValue(
   const [value, cond] = when.ops;
   if (compileIntervalCollectionValue(value, target) === undefined)
     return undefined;
-  BaseCompiler.assertScalarCondition(cond);
+  BaseCompiler.assertScalarCondition(cond, target);
   const spelled = BaseCompiler.withCseOperand(when, 0, target, () =>
     compileIntervalCollectionValue(value, target)!
   );
@@ -3182,8 +3182,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `When`: expected 2 arguments (value, condition)'
       );
-    // `When` is not a selection form: its condition must be a scalar boolean.
-    BaseCompiler.assertScalarCondition(args[1]);
+    // `When` is not a selection form: its condition must be a scalar boolean,
+    // and a condition that may be a list at run time is refused (`target`).
+    BaseCompiler.assertScalarCondition(args[1], target);
     // A restricted RELATION (`y ≤ K(x) {K(x) > 0}` as one row) is a verdict:
     // where the restriction fails the relation holds nowhere, where it is
     // undecided the relation holds at most where it held — the conjunction.
@@ -3228,7 +3229,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       // The arms may be collection values; the conditions may not (the
       // head is exempt from the scalar-operand gate for its arms' sake).
-      BaseCompiler.assertScalarCondition(cond);
+      BaseCompiler.assertScalarCondition(cond, target);
       const region = intervalConditionRegion(cond);
       return compileIntervalConditional(
         i === 0 ? compile(cond) : compile(cond, i),

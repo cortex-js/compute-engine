@@ -4,22 +4,22 @@
 
 - **`has()` on a dictionary is the symbol test; the key test is `hasKey()`.**
   `has(v)` asks whether the symbol (or function operator) `v` occurs in an
-  expression, and a dictionary now answers that over the values of its
-  entries, as every other expression does. Before, a dictionary replaced it
-  with a key test: `ce.box({ dict: { a: { sym: 'u' } } }).has('u')` was
-  `false` and `.has('a')` was `true`; now `.has('u')` is `true`, `.has('a')` is
-  `false` (a key is a string, not a symbol, unless `a` also occurs in a value),
-  and `.has('Dictionary')` is `true`. The key test moves to the new method
+  expression, and a dictionary now answers that over the values of its entries,
+  as every other expression does. Before, a dictionary replaced it with a key
+  test: `ce.box({ dict: { a: { sym: 'u' } } }).has('u')` was `false` and
+  `.has('a')` was `true`; now `.has('u')` is `true`, `.has('a')` is `false` (a
+  key is a string, not a symbol, unless `a` also occurs in a value), and
+  `.has('Dictionary')` is `true`. The key test moves to the new method
   `hasKey(key)` of `DictionaryInterface` (records included). **Migration:**
   replace `dict.has(key)` with `dict.hasKey(key)` wherever you test whether a
   dictionary or a record has a key. A call `dict.has(key)` still compiles,
   because `has()` exists on every expression, and now returns a different
   answer. The other symbol queries read dictionary values too: `.symbols`,
-  `.unknowns`, `.freeVariables`, `.subexpressions`, `.errors` and the
-  references of a dictionary, or of an expression that holds one, now include
-  what its values hold (`.errors` of `{"a" -> Error("oops")}` lists the error,
-  though the dictionary stays valid). `has()`, `.subexpressions` and these
-  queries visit a value shared by several entries once.
+  `.unknowns`, `.freeVariables`, `.subexpressions`, `.errors` and the references
+  of a dictionary, or of an expression that holds one, now include what its
+  values hold (`.errors` of `{"a" -> Error("oops")}` lists the error, though the
+  dictionary stays valid). `has()`, `.subexpressions` and these queries visit a
+  value shared by several entries once.
 
 - **A declared type is a contract on every value the symbol takes.** `s: string`
   now refuses `Missing` and `Undefined` as it refuses `5`, on the engine's
@@ -253,44 +253,118 @@
   `real | nan`. A value with another type outside the declaration, such as
   `a / b` (`infinity | nan | real`), is not reported.
 
+### Improvements
+
+- **More operators have a precise static result type.** A type handler now
+  derives the result from the operand types, where the declared result was a
+  bare `dictionary`, `tuple`, `list`, `matrix`, `value` or `unknown`. Each type
+  contains every value the operator can return for operands of those types; when
+  the operand types do not decide it, the declared result stays.
+  - `FindRoot` and `FindFit` are typed as their result record:
+    `FindRoot(x^2 - 2, [(x, 1)])` is
+    `record{parameters: record{x: real}, converged: boolean, residualNorm: nan | real | signed_infinity, iterations: integer, stationary: boolean}`
+    (`FindFit` has no `stationary`). So the Epsil static check reports
+    `let c: string = r.converged`.
+  - The linear-algebra operators `Shape`, `PseudoInverse`, `LinearSolve`,
+    `AdjugateMatrix`, `Kernel`, `MatrixMultiply`, `HadamardProduct`,
+    `RowReduce`, `Diagonal`, `IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`,
+    `Eigenvalues`, `Eigenvectors`, `Eigen`, `LUDecomposition`,
+    `QRDecomposition`, `CholeskyDecomposition`, `SingularValues` and
+    `CharacteristicPolynomial` carry the dimensions and the cell type of the
+    result: `PseudoInverse` of a 3×2 matrix is a 2×3 matrix, and
+    `IdentityMatrix(3)` is `matrix<integer^(3x3)>`.
+  - `TrigExpand`, `TrigToExp` and `TrigReduce` of a numeric operand are
+    `number`; `TupleFrom` of a list of known length is a tuple of that many
+    components (`TupleFrom([1, 2, 3])` is `tuple<integer, integer, integer>`).
+  - A pipe whose stage is the name of a library operator is typed as the call:
+    `16 |> Sqrt` is `real` (it was `unknown`), and `[3, 1, 2] |> Sort` is
+    `list<integer>`. So the static check reports `let s: string = 16 |> sqrt`. A
+    stage that names a user function is not typed: a function parameter with the
+    same name may be the function that is called.
+
 ### Behavior Changes
 
-- **The derivative of an element selector, and of a list with a constant
-  point** (follow-up of Tycho row 424). `First`, `Second`, `Third`, `Last`,
-  `Rest`, `Most`, `Reverse`, `Take`, `Drop`, `DeleteAt`, `RotateLeft`,
-  `RotateRight`, `Slice` and `At` (also with several indices) are linear in
-  their container for a fixed selection, as `PointX`/`PointY`/`PointZ` already
-  were: the derivative is the selector applied to the derivative of the
-  container. This holds when the selection does not depend on the variable or
-  is constant between its jumps (`\lceil u\rceil`); a selection that varies
-  with the variable declines. `D(Last(h(u)), u)` over a path of 29 pieces is a
-  closed form in about 0.1 s (it declined after about 1.1 s). A selector that
-  reads by value (`Sort`, `Filter`, `Unique`, `Max`, …) is not linear and keeps
-  the generic rule. In the derivative of a list, a tuple or a piecewise branch,
-  a constant element that is a point now gets the zero point of its arity, not
-  the scalar `0`: with `Q := (1, 2)`, `D([(t, t^2), Q], t)` is
-  `[(1, 2t), (0, 0)]` (it was `[(1, 2t), 0]`). A selection of a constant
-  container gives the zero of the selection's shape (`D(Take([1,2,3], 2), u)`
-  is `[0, 0]`), an absent element stays absent (`Missing`), and an index past
-  the end gives the same value as the original selection.
+- **Element-wise `If` and `Which` over a mask of any rank.** A condition that is
+  a nested list of `True`/`False`/`Missing` now selects at every level. It
+  stayed unevaluated before. With `M := [[1, 2], [3, 4]]`:
+  - `If(M < 3, M, 0)` is `[[1, 2], [0, 0]]`, typed `matrix<integer^(2x2)>`.
+  - `Which(M < 2, 10, M < 4, M, True, 0)` is `[[10, 2], [3, 0]]`.
+  - The mask may be uneven: `If([[True], [False, True]], 7, 0)` is
+    `[[7], [0, 7]]`.
 
-- **A call of a user function that shadows a library operator compiles**
-  (Tycho row 423; the fix is under Resolved Issues). On the `javascript`,
-  `interval-js`, GLSL and WGSL targets, a call bound to a user definition with
-  a library name (`Gamma := x ↦ (x-1)!`, `Sin`, `Sqrt`, `Square`) compiles as a
-  call of that user function, where `compile()` declined and the interpreter
-  ran it. Before the target compiles, such a call is renamed to a private name
+  At each level, a list condition and a list arm must have the same length, and
+  a scalar is used at every position. A position decided by a scalar condition
+  takes the arm's value there whole. Results for a mask of rank 1 do not change.
+
+  An arm of lower rank than the mask is refused, as `Add` refuses it:
+  `If(M < 3, [10, 20], 0)` is `Error("incompatible-dimensions", "2x2 vs 2")`.
+
+  The compiled JavaScript gives the same values. Before, it compiled, and then
+  threw `Condition must evaluate to "True" or "False"` at run time. Under a mask
+  of rank 2 or more, compiled code cannot tell a point from a row of numbers, so
+  an arm whose type does not say where its points are (`list`, `list<any>`,
+  `tensor<tuple<…>>`) throws a `RangeError` at run time when a nested mask meets
+  an array element. Declare such an arm `matrix` or `list<tuple<…>>` to avoid
+  it. A mask that is flat at run time is not affected.
+
+- **The types of `If` and `Which` hold every value they can give.**
+  - A condition of unknown rank types the result `list<C | list<any>>`, where
+    `C` joins the arms: `Which(C < 2, 1, True, 0)` with `C: indexed_collection`
+    is `list<integer | list<any>>` (it was `list<integer>`).
+  - A `broadcastable<T>` arm contributes `T`: with `B: broadcastable<number>`,
+    `If(B < 0, -B, B)` is `broadcastable<number> | list<list<any> | number>`. It
+    was `broadcastable<broadcastable<number>>`, a type with no meaning. The
+    `list` option holds the uneven value of a mask of lower rank than an arm
+    (`[[1, 2], 0]`).
+  - A condition typed `boolean | list<boolean>` types the result like a
+    condition that may be a mask: it typed as a scalar before.
+
+- **The Python and interval-JavaScript targets refuse a condition that may be a
+  list** in `If`, `Which` and `When`, so the `fallback` option decides. With
+  `B: broadcastable<number>`, Python emitted `0 if np.less(B, 0) else B`, which
+  raises for an array of two or more elements, and the interval target gave
+  `empty` for `If(B < 0, 0, B)`. The compile of `B < 0` on its own on Python no
+  longer overflows the stack. GLSL and WGSL do not change. On JavaScript,
+  `When(v, B < 0)` with `B: broadcastable<number>` now restricts element by
+  element when `B` holds a list: it compiled as one scalar test and gave `v` for
+  `B = [-1, 2]`, where the interpreter gives `[v, NaN]`.
+
+- **The derivative of an element selector, and of a list with a constant point**
+  (follow-up of Tycho row 424). `First`, `Second`, `Third`, `Last`, `Rest`,
+  `Most`, `Reverse`, `Take`, `Drop`, `DeleteAt`, `RotateLeft`, `RotateRight`,
+  `Slice` and `At` (also with several indices) are linear in their container for
+  a fixed selection, as `PointX`/`PointY`/`PointZ` already were: the derivative
+  is the selector applied to the derivative of the container. This holds when
+  the selection does not depend on the variable or is constant between its jumps
+  (`\lceil u\rceil`); a selection that varies with the variable declines.
+  `D(Last(h(u)), u)` over a path of 29 pieces is a closed form in about 0.1 s
+  (it declined after about 1.1 s). A selector that reads by value (`Sort`,
+  `Filter`, `Unique`, `Max`, …) is not linear and keeps the generic rule. In the
+  derivative of a list, a tuple or a piecewise branch, a constant element that
+  is a point now gets the zero point of its arity, not the scalar `0`: with
+  `Q := (1, 2)`, `D([(t, t^2), Q], t)` is `[(1, 2t), (0, 0)]` (it was
+  `[(1, 2t), 0]`). A selection of a constant container gives the zero of the
+  selection's shape (`D(Take([1,2,3], 2), u)` is `[0, 0]`), an absent element
+  stays absent (`Missing`), and an index past the end gives the same value as
+  the original selection.
+
+- **A call of a user function that shadows a library operator compiles** (Tycho
+  row 423; the fix is under Resolved Issues). On the `javascript`,
+  `interval-js`, GLSL and WGSL targets, a call bound to a user definition with a
+  library name (`Gamma := x ↦ (x-1)!`, `Sin`, `Sqrt`, `Square`) compiles as a
+  call of that user function, where `compile()` declined and the interpreter ran
+  it. Before the target compiles, such a call is renamed to a private name
   declared in a temporary scope, so no part of the compiler reads it as the
   library operator (the angular-unit rewrite, sign rules, scalar facts,
-  derivative recurrences, lazy streams). Decline messages still name the
-  user's function. These keep the decline and run interpreted: a user
-  definition of an operator the language builds by name (`Add`, `Less`, `And`,
-  `If`, `Sum`, …), a multi-clause function, a definition with its own
-  `compile` handler, stated `derivative`, `lazy`, `broadcastable` or declared
-  effects, a node bound to the library operator, and every user function on the
-  Python target. A declaration in a scratch scope of a name that no binding
-  outside the scratch scopes holds now advances no state version, so such a
-  compile leaves the engine's type, sign and memo caches as they were.
+  derivative recurrences, lazy streams). Decline messages still name the user's
+  function. These keep the decline and run interpreted: a user definition of an
+  operator the language builds by name (`Add`, `Less`, `And`, `If`, `Sum`, …), a
+  multi-clause function, a definition with its own `compile` handler, stated
+  `derivative`, `lazy`, `broadcastable` or declared effects, a node bound to the
+  library operator, and every user function on the Python target. A declaration
+  in a scratch scope of a name that no binding outside the scratch scopes holds
+  now advances no state version, so such a compile leaves the engine's type,
+  sign and memo caches as they were.
 
 - **A numerical integral answers `NaN` at once when its integrand has no real
   value on part of the range** (Tycho row 422; the fix is under Resolved
@@ -369,16 +443,33 @@
 
 ### Resolved Issues
 
+- **`HadamardProduct`, and the element-wise sum, difference, quotient and power
+  of two tensors, gave `undefined` cells when the two tensors had different data
+  types.** `HadamardProduct([[0.5, 1], [1, 3]], [[1, 2], [3, 4]])` threw a
+  `TypeError` when the type of the result was read. The operation was taken from
+  the first tensor's arithmetic before the two tensors were converted to a
+  common data type; it is now taken after. The product is `[[0.5, 2], [3, 12]]`.
+- **`TrigExpand`, `TrigToExp` and `TrigReduce` bind their operand when they are
+  canonicalized**, as the other operators do. The operand is still not evaluated
+  before the rewrite. So `Nothing` is removed from the argument list:
+  `TrigExpand(Nothing)` is the error of a missing argument, as `Sin(Nothing)` is
+  (it was `Nothing`, and `TrigReduce(Nothing)` was `0`).
+- **A `FindFit` evaluated with `evaluateAsync` and cut short by the deadline
+  while its data was evaluated reported no parameters** (`parameters: {}`). It
+  reports the parameters at their starts, as the synchronous route does. On that
+  route a malformed parameter spec is now an error before the data is evaluated,
+  and a start such as `Random()` is evaluated once, as on the synchronous route
+  (it was evaluated twice).
+
 - **An index that occurred only in a dictionary value was left in a `Sum` or
-  `Product`.** Every check of the form "does this expression mention `k`?"
-  asked a dictionary for a key named `k` (see the `has()`/`hasKey()` entry
-  under Breaking Changes), so `\sum_{k=1}^{2} \mathrm{If}(x<1, \{"v"\to k\}, 0)`
+  `Product`.** Every check of the form "does this expression mention `k`?" asked
+  a dictionary for a key named `k` (see the `has()`/`hasKey()` entry under
+  Breaking Changes), so `\sum_{k=1}^{2} \mathrm{If}(x<1, \{"v"\to k\}, 0)`
   evaluated to `2 \cdot \mathrm{If}(x<1, \{"v"\to k\}, 0)` with the bound `k`
   left in, and `simplify()` gave `3\,\mathrm{If}(\dots k \dots)` for the sum to
   3 and `\mathrm{If}(\dots k \dots)^3` for the product. The terms are now
-  evaluated one by one, and `simplify()` keeps the sum. The compiler checks
-  that look for a function literal or a `Return` now see one in a dictionary
-  value.
+  evaluated one by one, and `simplify()` keeps the sum. The compiler checks that
+  look for a function literal or a `Return` now see one in a dictionary value.
 
 - **The compiler declined a call of a user function that shadows a library
   operator** (Tycho row 423). A Desmos document defines its own Gamma,

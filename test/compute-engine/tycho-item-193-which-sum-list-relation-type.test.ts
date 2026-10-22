@@ -109,13 +109,15 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
     // definitely broadcasts and the whole chain is a definite `list<…>`. This
     // path already worked; it must keep working. `C` is a bare
     // `indexed_collection`, which may hold lists, so the mask is a list whose
-    // elements are booleans or lists.
+    // elements are booleans or lists. A nested mask selects at each level, so
+    // an element of the `Which`, and of the `Sum` of such selections, is a
+    // cell or a list.
     test('relation, Which and Sum all type list and evaluate to lists', () => {
       const { rows, assign } = witness('list<number>');
 
       expect(rows.relation.type.toString()).toBe('list<boolean | list<any>>');
-      expect(rows.which.type.toString()).toBe('list<integer>');
-      expect(rows.sum.type.toString()).toBe('list<integer>');
+      expect(rows.which.type.toString()).toBe('list<integer | list<any>>');
+      expect(rows.sum.type.toString()).toBe('list<integer | list<any>>');
 
       assign();
 

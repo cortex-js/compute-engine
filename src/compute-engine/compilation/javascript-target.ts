@@ -526,6 +526,7 @@ import {
 } from './broadcast.js';
 import { makeBroadcastAsync, isShippableCode } from '../kernel-pool.js';
 import { literalParamsMap } from '../library/core.js';
+import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import type {
   CompileMode,
@@ -1726,24 +1727,46 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
+  // A mask that is not provably flat (of rank 1) may have rank 2 or more at
+  // run time, which the helper selects node by node (`selectNested`). Only
+  // then are the absence value of each depth and the depth of the points of
+  // a list arm passed, so the code of a flat mask is unchanged.
+  const flat = elementwiseMaskRank(conds.map((c) => c.type.type)) === 1;
   if (target && absent === undefined) {
     // The cell of an arm: a point arm is lifted whole, a list arm is indexed
     // (its element), and a scalar arm is lifted.
-    const cellTypes = args
-      .filter((_x, i) => i % 2 === 1)
-      .map((x) => {
-        const t = x.type.type;
-        if (mayBePointArm(t)) return t;
-        if (isSubtype(t, 'indexed_collection<any>'))
-          return collectionElementType(t) ?? 'unknown';
-        return t;
-      });
+    const cellOf = (t: Type): Type => {
+      if (mayBePointArm(t)) return t;
+      if (isSubtype(t, 'indexed_collection<any>'))
+        return collectionElementType(t) ?? 'unknown';
+      return t;
+    };
     const nullLiteral = target.absence?.object?.nullLiteral;
-    absent =
+    const absentOf = (cellTypes: ReadonlyArray<Type>): string =>
       nullLiteral !== undefined &&
       BaseCompiler.absenceKind(cellTypes, target) === 'object'
         ? nullLiteral
         : 'NaN';
+    let cellTypes = args
+      .filter((_x, i) => i % 2 === 1)
+      .map((x) => cellOf(x.type.type));
+    absent = absentOf(cellTypes);
+    // Under a mask of rank 2 or more, an unmatched position `d` levels down
+    // holds the absence value of the arms' cells at that depth, as in the
+    // interpreter (`noMatchCell`): with a matrix arm `M`, `If(M < 3, M)` has
+    // a row at depth 1 and a number at depth 2.
+    if (!flat) {
+      const byDepth = [absent];
+      const rank = elementwiseMaskRank(conds.map((c) => c.type.type));
+      for (let d = 2; d <= (rank ?? 8); d++) {
+        const next = cellTypes.map(cellOf);
+        if (next.every((t, i) => t === cellTypes[i])) break;
+        cellTypes = next;
+        byDepth.push(absentOf(cellTypes));
+      }
+      if (byDepth.some((a) => a !== absent))
+        absent = `_SYS.absentByDepth(${byDepth.join(', ')})`;
+    }
   }
   if (target) {
     // The generic branch behind the fused loop's guard keeps the operand
@@ -1775,12 +1798,67 @@ function compileJSSelection(
       ? '_SYS.select('
       : `_SYS.selectAbsent(${absent}, `;
   return `${head}${args
-    .map((x, i) =>
-      i % 2 === 1 && mayBePointArm(x.type.type)
-        ? `() => _SYS.wholeArm(${compile(x, i)})`
-        : `() => (${compile(x, i)})`
-    )
+    .map((x, i) => {
+      if (i % 2 === 0) return `() => (${compile(x, i)})`;
+      if (mayBePointArm(x.type.type))
+        return `() => _SYS.wholeArm(${compile(x, i)})`;
+      // A list of points under a mask that may be nested: its points are
+      // whole at their depth (`WholeArm`).
+      const depth = flat ? undefined : pointDepthOfArm(x.type.type);
+      if (depth !== undefined)
+        return `() => _SYS.wholeAt(${depth}, ${compile(x, i)})`;
+      // A list arm whose type does not give the depth of its points but
+      // may hold points (an element type `tuple<…> | tensor<tuple<…>>`, or
+      // `any`): a point is an array at this ABI, like a row, so under a
+      // mask of rank 2 or more the helper throws where it cannot tell the
+      // two apart (`_SYS.pointDepthUnknown`). The interpreter refuses a
+      // point arm of lower rank than the mask (`incompatible-dimensions`).
+      if (!flat && mayHoldPointAtUnknownDepth(x.type.type))
+        return `() => _SYS.pointDepthUnknown(${compile(x, i)})`;
+      return `() => (${compile(x, i)})`;
+    })
     .join(', ')})`;
+}
+
+/**
+ * The depth of the points of a list arm of a selection: 1 for a list of
+ * points, 2 for a list of lists of points, and `undefined` when no level of
+ * the arm may be a point (`mayBePointArm`) or the arm is not a list.
+ */
+function pointDepthOfArm(t: Type): number | undefined {
+  let cell = t;
+  for (let depth = 1; depth <= 8; depth++) {
+    if (!isSubtype(cell, 'indexed_collection<any>')) return undefined;
+    const next = collectionElementType(cell);
+    if (next === undefined || next === cell) return undefined;
+    if (mayBePointArm(next)) return depth;
+    cell = next;
+  }
+  return undefined;
+}
+
+/**
+ * May an arm of type `t` hold a point at a depth that `pointDepthOfArm`
+ * cannot give? True when `t`, or one of its levels of elements, is a union
+ * with a point arm beside a list arm (`tuple<…> | tensor<tuple<…>>`, the
+ * element type of `tensor<tuple<…>>`), or when the elements of a level may
+ * be a point (`any`, `unknown`: the elements of `list<any>` and of a bare
+ * `list`). The arm itself typed `unknown` does not count: its value is a
+ * scalar until proven otherwise, as everywhere in the compiler.
+ */
+function mayHoldPointAtUnknownDepth(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved !== 'string' && resolved.kind === 'union')
+    return resolved.types.some(
+      (arm) =>
+        isPointElementType(arm) || mayHoldPointAtUnknownDepth(arm, depth + 1)
+    );
+  if (!isSubtype(resolved, 'indexed_collection<any>')) return false;
+  const next = collectionElementType(resolved);
+  if (next === undefined || next === resolved) return false;
+  if (couldMatch(next, 'tuple')) return true;
+  return mayHoldPointAtUnknownDepth(next, depth + 1);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
+import { isSubtype } from '../../src/common/type/subtype';
 
 /**
  * Element-wise `Which`/`If` over list-valued conditions.
@@ -1093,21 +1094,557 @@ describe('an element-wise selection over an arm whose elements are lists', () =>
 describe('ELEMENT-WISE WHICH OVER A MASK THAT MAY BE NESTED', () => {
   // A comparison over a bare `indexed_collection` is typed
   // `list<boolean | list<any>>`: an element of the collection may be a list,
-  // which the comparison maps at its leaves. Such a mask still selects
-  // element-wise when its value is flat. A nested value does not evaluate,
-  // and the expression keeps its own type.
+  // which the comparison maps at its leaves. Such a mask selects element-wise
+  // whether its value is flat or nested, so an element of the result is a
+  // cell or a list: `list<integer | list<any>>`.
   test('the selection is typed element-wise, and both values match', () => {
-    for (const value of [
-      ['List', 1, 2, 3],
-      ['List', ['List', 1, 2], ['List', 3]],
+    for (const [value, expected] of [
+      [['List', 1, 2, 3], '[1,0,0]'],
+      [['List', ['List', 1, 2], ['List', 3]], '[[1,0],[0]]'],
     ]) {
       const ce = engine();
       ce.declare('C', 'indexed_collection');
       const e = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]);
-      expect(e.type.toString()).toBe('list<integer>');
+      expect(e.type.toString()).toBe('list<integer | list<any>>');
       ce.assign('C', ce.box(value as any));
       const v = ce.box(['Which', ['Less', 'C', 2], 1, 'True', 0]).evaluate();
+      expect(v.toString()).toBe(expected);
       expect(v.type.matches(e.type)).toBe(true);
     }
+  });
+
+  test('a mask of unknown rank (tensor<boolean>) types its cells or lists', () => {
+    const ce = engine();
+    ce.declare('T', 'tensor<boolean>');
+    const e = ce.box(['If', 'T', 1, 0]);
+    expect(e.type.toString()).toBe('list<integer | list<any>>');
+    ce.assign(
+      'T',
+      ce.box(['List', ['List', 'True', 'False'], ['List', 'False', 'True']])
+    );
+    const v = ce.box(['If', 'T', 1, 0]).evaluate();
+    expect(v.toString()).toBe('[[1,0],[0,1]]');
+    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+  });
+});
+
+describe('a mask of rank 2 or more selects at each level', () => {
+  // At a node where some condition is a list, every list participant has
+  // the same length and each position is a node one level down; at a node
+  // where every condition is a scalar, the selected arm's value at that node
+  // is taken whole. The result follows the mask.
+  const M = ['List', ['List', 1, 2], ['List', 3, 4]];
+  function matrixEngine(): ComputeEngine {
+    const ce = engine();
+    ce.assign('M', ce.box(M as any));
+    return ce;
+  }
+
+  const cases: Array<[unknown, string | undefined, string, string]> = [
+    [
+      ['If', ['Less', 'M', 3], 'M', 0],
+      '\\mathrm{If}(M < 3, M, 0)',
+      '[[1,2],[0,0]]',
+      'matrix<integer^(2x2)>',
+    ],
+    [
+      ['If', ['Less', 'M', 3], 1, 0],
+      '\\mathrm{If}(M < 3, 1, 0)',
+      '[[1,1],[0,0]]',
+      'matrix<integer^(2x2)>',
+    ],
+    [
+      ['Which', ['Less', 'M', 2], 10, ['Less', 'M', 4], 'M', 'True', 0],
+      '\\begin{cases} 10 & M < 2 \\\\ M & M < 4 \\\\ 0 & \\text{otherwise} \\end{cases}',
+      '[[10,2],[3,0]]',
+      'matrix<integer^(2x2)>',
+    ],
+    // No else branch: an unselected cell of a numeric arm is `NaN`, so the
+    // cells are `number`.
+    [
+      ['If', ['Less', 'M', 3], 'M'],
+      '\\mathrm{If}(M < 3, M)',
+      '[[1,2],[NaN,NaN]]',
+      'matrix<2x2>',
+    ],
+    // An arm that no position selects is not evaluated, so its length is
+    // not checked.
+    [
+      ['If', ['Less', 'M', 0], ['List', 10, 20, 30], 0],
+      undefined,
+      '[[0,0],[0,0]]',
+      'matrix<integer^(2x2)>',
+    ],
+    // The rows of a lazy arm are read at the level where they are lists.
+    [
+      ['If', ['Less', 'M', 3], ['List', ['Range', 1, 2], ['Range', 3, 4]], 0],
+      undefined,
+      '[[1,2],[0,0]]',
+      'matrix<integer^(2x2)>',
+    ],
+    // A tuple arm is one value at each cell.
+    [
+      ['If', ['Less', 'M', 3], ['Tuple', 1, 2], ['Tuple', 0, 0]],
+      undefined,
+      '[[(1, 2),(1, 2)],[(0, 0),(0, 0)]]',
+      'list<tuple<integer, integer>^(2x2)>',
+    ],
+    // A string arm without a default: the unselected cells are `Missing`,
+    // and a union cell carries no dimensions.
+    [
+      ['If', ['Less', 'M', 3], { str: 'a' }],
+      undefined,
+      '[["a","a"],["Missing","Missing"]]',
+      'list<list<missing | string>>',
+    ],
+    // A mask of rank 3.
+    [
+      [
+        'If',
+        [
+          'List',
+          ['List', ['List', 'True', 'False']],
+          ['List', ['List', 'False', 'True']],
+        ],
+        1,
+        0,
+      ],
+      undefined,
+      '[[[1,0]],[[0,1]]]',
+      'list<integer^(2x1x2)>',
+    ],
+  ];
+
+  test.each(cases)('%j', (expr, latex, value, type) => {
+    const ce = matrixEngine();
+    const e = ce.box(expr as any);
+    expect(e.type.toString()).toBe(type);
+    const v = e.evaluate();
+    expect(v.toString()).toBe(value);
+    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+    if (latex !== undefined) {
+      const p = ce.parse(latex);
+      expect(p.type.toString()).toBe(type);
+      expect(p.evaluate().toString()).toBe(value);
+    }
+  });
+
+  test('the function route agrees with the box route', () => {
+    const ce = matrixEngine();
+    const v = ce
+      .function('If', [ce.box(['Less', 'M', 3]), ce.symbol('M'), ce.number(0)])
+      .evaluate();
+    expect(v.toString()).toBe('[[1,2],[0,0]]');
+  });
+
+  test('the numeric and asynchronous routes agree', async () => {
+    const ce = matrixEngine();
+    const e = ce.box(['If', ['Less', 'M', 3], ['Sqrt', 2], 0]);
+    expect(e.evaluate().toString()).toBe('[[sqrt(2),sqrt(2)],[0,0]]');
+    expect(e.N().toString()).toBe(
+      '[[1.4142135623730950488,1.4142135623730950488],[0,0]]'
+    );
+    const w = ce.box([
+      'Which',
+      ['Less', 'M', 2],
+      10,
+      ['Less', 'M', 4],
+      'M',
+      'True',
+      0,
+    ]);
+    expect((await w.evaluateAsync()).toString()).toBe('[[10,2],[3,0]]');
+  });
+
+  test('a mask whose rows have different lengths', () => {
+    const ce = engine();
+    const R = ['List', ['List', 'True'], ['List', 'False', 'True']];
+    const e = ce.box(['If', R, 7, 0] as any);
+    expect(e.type.toString()).toBe('list<integer | list<any>>');
+    const v = e.evaluate();
+    expect(v.toString()).toBe('[[7],[0,7]]');
+    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+    // The parse route reads the mask from a symbol.
+    ce.assign('R', ce.box(R as any));
+    const p = ce.parse('\\mathrm{If}(R, 7, 0)');
+    expect(p.type.toString()).toBe('list<integer | list<any>>');
+    expect(p.evaluate().toString()).toBe('[[7],[0,7]]');
+  });
+
+  test('a list participant of a different length is a dimension error', () => {
+    const ce = matrixEngine();
+    // An arm whose length differs from the mask at the top level.
+    expect(
+      ce
+        .box(['If', ['Less', 'M', 3], ['List', 10, 20, 30], 0])
+        .evaluate()
+        .toString()
+    ).toBe('Error("incompatible-dimensions", "2 vs 3")');
+    expect(
+      ce.parse('\\mathrm{If}(M < 3, [10, 20, 30], 0)').evaluate().toString()
+    ).toBe('Error("incompatible-dimensions", "2 vs 3")');
+    // An arm of lower rank than the mask, as `M + [10, 20]` is.
+    expect(
+      ce
+        .box(['If', ['Less', 'M', 3], ['List', 10, 20], 0])
+        .evaluate()
+        .toString()
+    ).toBe('Error("incompatible-dimensions", "2x2 vs 2")');
+    expect(
+      ce.parse('\\mathrm{If}(M < 3, [10, 20], 0)').evaluate().toString()
+    ).toBe('Error("incompatible-dimensions", "2x2 vs 2")');
+    // An arm whose rows differ from the rows of the mask.
+    expect(
+      ce
+        .box(['If', ['Less', 'M', 3], ['List', ['List', 1], ['List', 2]], 0])
+        .evaluate()
+        .toString()
+    ).toBe('Error("incompatible-dimensions", "2 vs 1")');
+    // Two conditions whose rows differ.
+    expect(
+      ce
+        .box([
+          'Which',
+          ['List', ['List', 'True', 'False'], ['List', 'True']],
+          1,
+          ['List', ['List', 'True', 'True'], ['List', 'True', 'True']],
+          2,
+          'True',
+          0,
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('Error("incompatible-dimensions", "1 vs 2")');
+    // An unbounded arm that a position selects.
+    expect(
+      ce
+        .box(['If', ['Less', 'M', 3], ['Cycle', ['List', 1]], 0])
+        .evaluate()
+        .toString()
+    ).toBe('Error("incompatible-dimensions", "2 vs Infinity")');
+  });
+
+  test('a Missing cell at any depth is an error cell at its position', () => {
+    const ce = engine();
+    const v = ce
+      .box([
+        'If',
+        ['List', ['List', 'True', 'Missing'], ['List', 'False', 'True']],
+        1,
+        0,
+      ])
+      .evaluate();
+    expect(v.ops![0].ops![0].toString()).toBe('1');
+    expect(v.ops![0].ops![1].operator).toBe('Error');
+    expect(v.ops![1].toString()).toBe('[0,1]');
+  });
+
+  test('a symbolic cell at any depth keeps the expression inert', () => {
+    const ce = engine();
+    ce.declare('x', 'boolean');
+    const r = ce
+      .box([
+        'If',
+        ['List', ['List', 'True', 'x'], ['List', 'False', 'True']],
+        1,
+        0,
+      ])
+      .evaluate();
+    expect(r.operator).toBe('If');
+  });
+
+  test('a condition after a lifted True is not evaluated', () => {
+    // `Which(M < 2, 1, True, 2, <a mask of another shape>, 3)`: the third
+    // condition is unreachable, so it neither shapes nor errors the result.
+    const ce = matrixEngine();
+    const v = ce
+      .box([
+        'Which',
+        ['Less', 'M', 2],
+        1,
+        'True',
+        2,
+        ['List', 'True', 'False', 'True'],
+        3,
+      ])
+      .evaluate();
+    expect(v.toString()).toBe('[[1,2],[2,2]]');
+  });
+
+  test('a scalar True condition at a node selects the arm whole there', () => {
+    // `V < 3` is `[True, False]`: at position 0 the first condition is the
+    // scalar `True`, and the second condition (a row of `M < 2`) makes the
+    // node a list node, so the first row of the first arm `M` is read
+    // there.
+    const ce = matrixEngine();
+    ce.assign('V', ce.box(['List', 1, 5]));
+    const e = ce.box([
+      'Which',
+      ['Less', 'V', 3],
+      'M',
+      ['Less', 'M', 2],
+      0,
+      'True',
+      5,
+    ]);
+    // The masks have different ranks, so the rank of the result is not
+    // known statically.
+    expect(e.type.toString()).toBe('list<integer | list<any>>');
+    const v = e.evaluate();
+    expect(v.toString()).toBe('[[1,2],[5,5]]');
+    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+  });
+});
+
+describe('the result type of a selection over a broadcastable arm', () => {
+  // `broadcastable<T>` is defined for a `T` that cannot hold a list, so a
+  // `broadcastable` arm contributes its cells: the result is never a
+  // `broadcastable<broadcastable<…>>`. An element of a `broadcastable` arm
+  // can be a list, so the mask can have a lower rank than the arm, and the
+  // result also admits a list of cells or lists of any depth.
+  const cases: Array<[unknown, string, string]> = [
+    [
+      ['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'],
+      '\\mathrm{If}(B < 0, -B, B)',
+      'broadcastable<number> | list<list<any> | number>',
+    ],
+    [
+      ['If', ['Less', 'B', 0], 0, 'B'],
+      '\\mathrm{If}(B < 0, 0, B)',
+      'broadcastable<number> | list<list<any> | number>',
+    ],
+    [
+      ['Which', ['Less', 'B', 0], 0, 'True', 'B'],
+      '\\begin{cases} 0 & B < 0 \\\\ B & \\text{otherwise} \\end{cases}',
+      'broadcastable<number> | list<list<any> | number>',
+    ],
+    [
+      ['If', ['Less', 'B', 0], 0, 1],
+      '\\mathrm{If}(B < 0, 0, 1)',
+      'broadcastable<integer>',
+    ],
+  ];
+  test.each(cases)('%j', (expr, latex, type) => {
+    const ce = engine();
+    ce.declare('B', 'broadcastable<number>');
+    expect(ce.box(expr as any).type.toString()).toBe(type);
+    expect(ce.parse(latex).type.toString()).toBe(type);
+  });
+
+  test('the type holds the value for a matrix, a vector and a scalar', () => {
+    const values: Array<[unknown, unknown, string]> = [
+      [
+        ['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'],
+        ['List', ['List', 1, -2], ['List', -3, 4]],
+        '[[1,2],[3,4]]',
+      ],
+      [
+        ['If', ['Less', 'B', 0], 0, 'B'],
+        ['List', ['List', 1, -2], ['List', -3, 4]],
+        '[[1,0],[0,4]]',
+      ],
+      [['Which', ['Less', 'B', 0], 0, 'True', 'B'], ['List', 1, -2], '[1,0]'],
+      [['If', ['Less', 'B', 0], ['Negate', 'B'], 'B'], -3, '3'],
+    ];
+    for (const [expr, value, expected] of values) {
+      const ce = engine();
+      ce.declare('B', 'broadcastable<number>');
+      // The type is read while `B` has no value, as a document is typed
+      // before its rows are computed.
+      const type = ce.box(expr as any).type;
+      ce.assign('B', ce.box(value as any));
+      const v = ce.box(expr as any).evaluate();
+      expect(v.toString()).toBe(expected);
+      expect(isSubtype(v.type.type, type.type)).toBe(true);
+    }
+  });
+
+  test('a mask of lower rank than the arm gives a value that is not a tensor', () => {
+    // With `C := [-1, 1]` and `B := [[1, 2], [3, 4]]`, the selection takes
+    // the first row of `B` whole and lifts `0`: `[[1, 2], 0]`. The type read
+    // before the assignment holds this value through its list arm.
+    const ce = engine();
+    ce.declare('B', 'broadcastable<number>');
+    ce.declare('C', 'broadcastable<number>');
+    const expr = ['If', ['Less', 'C', 0], 'B', 0];
+    const type = ce.box(expr as any).type;
+    expect(type.toString()).toBe(
+      'broadcastable<number> | list<list<any> | number>'
+    );
+    ce.assign('C', ce.box(['List', -1, 1]));
+    ce.assign('B', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    const v = ce.box(expr as any).evaluate();
+    expect(v.toString()).toBe('[[1,2],0]');
+    expect(isSubtype(v.type.type, type.type)).toBe(true);
+  });
+});
+
+describe('the result type when the shape of a condition is not known', () => {
+  // The type is read while the symbols have no value, as a document is
+  // typed before its rows are computed, and must hold the value computed
+  // after the assignments.
+  function typedThenEvaluated(
+    declarations: Record<string, string>,
+    expr: unknown,
+    values: Record<string, unknown>
+  ): { type: string; value: string; holds: boolean } {
+    const ce = engine();
+    for (const [name, type] of Object.entries(declarations))
+      ce.declare(name, type as any);
+    const type = ce.box(expr as any).type;
+    for (const [name, value] of Object.entries(values))
+      ce.assign(name, ce.box(value as any));
+    const v = ce.box(expr as any).evaluate();
+    return {
+      type: type.toString(),
+      value: v.toString(),
+      holds: isSubtype(v.type.type, type.type),
+    };
+  }
+  const MASK = ['List', ['List', 'True', 'False'], ['List', 'False', 'True']];
+
+  test('a condition of unknown type after a mask makes the rank unknown', () => {
+    expect(
+      typedThenEvaluated(
+        { u: 'unknown' },
+        ['Which', ['List', 'False', 'False'], 5, 'u', 1, 'True', 0],
+        { u: MASK }
+      )
+    ).toEqual({
+      type: 'list<integer | list<any>>',
+      value: '[[1,0],[0,1]]',
+      holds: true,
+    });
+    expect(
+      typedThenEvaluated(
+        { u: 'any', M: 'matrix<integer^(2x2)>' },
+        ['Which', ['Less', 'M', 0], 5, 'u', 1, 'True', 0],
+        { M: ['List', ['List', 1, 2], ['List', 3, 4]], u: MASK }
+      )
+    ).toEqual({
+      type: 'list<integer | list<any>>',
+      value: '[[1,0],[0,1]]',
+      holds: true,
+    });
+  });
+
+  test('a clause before the first mask can select its arm whole', () => {
+    // A scalar `True` before the mask gives the arm itself.
+    expect(
+      typedThenEvaluated(
+        { x: 'real' },
+        [
+          'Which',
+          ['Greater', 'x', 0],
+          5,
+          ['List', 'True', 'False'],
+          1,
+          'True',
+          0,
+        ],
+        { x: 1 }
+      )
+    ).toEqual({ type: 'integer | vector<integer^2>', value: '5', holds: true });
+    // A condition of unknown type before the mask: the arm whole, or a
+    // selection of unknown rank.
+    expect(
+      typedThenEvaluated(
+        { u: 'unknown' },
+        ['Which', 'u', 5, ['List', 'True', 'False'], 1, 'True', 0],
+        { u: 'True' }
+      )
+    ).toEqual({
+      type: 'integer | list<integer | list<any>>',
+      value: '5',
+      holds: true,
+    });
+  });
+
+  test('the no-match cell reads the arms of the clauses before the first mask', () => {
+    // The string arm of the scalar clause makes the no-match cell `Missing`,
+    // in the value as in the type, although only the numeric arm after it
+    // is selected. Before, the evaluation read only the arms from the mask
+    // onward and answered `[1, NaN]`, which the type does not hold.
+    expect(
+      typedThenEvaluated(
+        { x: 'real' },
+        [
+          'Which',
+          ['Greater', 'x', 0],
+          { str: 's' },
+          ['List', 'True', 'False'],
+          1,
+        ],
+        { x: -1 }
+      )
+    ).toEqual({
+      type: 'list<integer | missing | string> | string',
+      value: '[1,"Missing"]',
+      holds: true,
+    });
+  });
+
+  test('a condition that is a scalar or a mask is typed for both outcomes', () => {
+    // The result type is the union of the scalar result and of the
+    // element-wise result. Before, it was the scalar result only, `integer`,
+    // which does not hold `[1, 0]`.
+    const declarations = { c: 'boolean | list<boolean>' };
+    const LIST = ['List', 'True', 'False'];
+    expect(
+      typedThenEvaluated(declarations, ['If', 'c', 1, 0], { c: LIST })
+    ).toEqual({ type: 'integer | list<integer>', value: '[1,0]', holds: true });
+    expect(
+      typedThenEvaluated(declarations, ['If', 'c', 1, 0], { c: 'True' })
+    ).toEqual({ type: 'integer | list<integer>', value: '1', holds: true });
+    expect(
+      typedThenEvaluated(declarations, ['Which', 'c', 1], { c: LIST })
+    ).toEqual({
+      type: 'integer | list<number> | missing',
+      value: '[1,NaN]',
+      holds: true,
+    });
+    // With two list arms, every outcome is a list: no scalar cell is added
+    // to the type, as a `broadcastable` result type would add.
+    const lists = ['If', 'c', ['List', 1, 2], ['List', 3, 4]];
+    expect(typedThenEvaluated(declarations, lists, { c: LIST })).toEqual({
+      type: 'list<integer>',
+      value: '[1,4]',
+      holds: true,
+    });
+    expect(typedThenEvaluated(declarations, lists, { c: 'False' })).toEqual({
+      type: 'list<integer>',
+      value: '[3,4]',
+      holds: true,
+    });
+  });
+
+  test('a union of masks of different ranks is a mask of unknown rank', () => {
+    const declarations = { P: 'list<boolean^(2x2)> | list<boolean^3>' };
+    expect(
+      typedThenEvaluated(declarations, ['If', 'P', 1, 0], { P: MASK })
+    ).toEqual({
+      type: 'list<integer | list<any>>',
+      value: '[[1,0],[0,1]]',
+      holds: true,
+    });
+    expect(
+      typedThenEvaluated(declarations, ['If', 'P', 1, 0], {
+        P: ['List', 'True', 'False', 'True'],
+      })
+    ).toEqual({
+      type: 'list<integer | list<any>>',
+      value: '[1,0,1]',
+      holds: true,
+    });
+  });
+
+  test('a union of masks of one rank keeps that rank', () => {
+    expect(
+      typedThenEvaluated(
+        { P: 'list<boolean^2> | list<boolean^3>' },
+        ['If', 'P', 1, 0],
+        { P: ['List', 'True', 'False'] }
+      )
+    ).toEqual({ type: 'list<integer>', value: '[1,0]', holds: true });
   });
 });

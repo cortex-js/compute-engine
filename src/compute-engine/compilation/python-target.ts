@@ -592,7 +592,11 @@ function hasNestedTupleEvidence(x: Expression): boolean {
     if (typeof r === 'string') return !top && r === 'tuple';
     if (r.kind === 'tuple') return !top;
     if (r.kind === 'union') return r.types.some((m) => walk(m, top, visited));
-    const elt = collectionElementType(r);
+    // `leafwardElementType`, not `collectionElementType`: the element type
+    // of a `tensor<U>` (and of a `broadcastable<U>`) is `U | tensor<U>`, so
+    // the walk met the tensor again and overflowed the stack (`B < 0` for
+    // `B: broadcastable<number>`). The cells `U` are the next level.
+    const elt = leafwardElementType(r);
     if (elt === undefined) return false;
     return walk(elt, false, visited);
   };
@@ -5411,7 +5415,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // A provably collection-valued condition must fail closed: a non-empty
     // Python list is TRUTHY, so the conditional expression below would
     // silently take the value branch for every element instead of selecting.
-    BaseCompiler.assertScalarCondition(args[1]);
+    // A condition that MAY be a list at run time is refused too (`target`).
+    BaseCompiler.assertScalarCondition(args[1], target);
     // The VALUE is the conditional position (operand 0); the condition is
     // eager — see the `When` entry of the lazy-operand inventory.
     if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
@@ -5428,7 +5433,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // `guardCondition` assert, and Python truthiness would turn a collection
     // condition into a silent whole-expression pick.
     for (let i = 0; i < args.length; i += 2)
-      BaseCompiler.assertScalarCondition(args[i]);
+      BaseCompiler.assertScalarCondition(args[i], target);
     // A position no clause matched, and a position whose condition is
     // undecided, answer the same thing: the absence literal of the arms'
     // domain (`pythonAbsent`).

@@ -589,6 +589,61 @@ position in `instantiate.ts`, as the row 425 fix does for a `T` that can hold
 a list). Measure the effect on compiled point readers (`PointX`/`PointY` over
 point arrays) before landing.
 
+### Residues of the fix of Tycho row 425 (OPEN — found 2026-10-22)
+
+With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
+`broadcastable<vector<2>>`. The fix of row 425 (an index into it is typed
+`number | vector<2>`, plus `missing`) left these:
+
+- **`Sum(g(x))` is typed `number`, but its value is `[6, 12]` for
+  `x = [1, 2, 3]`** (the same on `cc468eb4f`). The compiled form declines, so
+  no wrong value reaches the caller, but the static type does not hold the
+  value.
+- **The interpreter leaves `Sum(Rest(g(3)))` and `Reduce(Rest(g(3)), Add, 0)`
+  unevaluated** (the same on `cc468eb4f`), while `Take(g(3), 1)` and
+  `Sum([6])` evaluate: `Rest` of a function call is not known to be a finite
+  collection.
+- **Compiled `Dot(g(x)[1], [1, 1])` declines.** It compiled on `cc468eb4f`,
+  but gave `NaN` for `x = 3`, where the interpreter answers an error. To
+  compile it again, the `Dot` lowering needs a run-time check that its operand
+  is an array (`collArg`, `compilation/javascript-target.ts`).
+- **Compiled `PointX` of a number gives `NaN`; the interpreter answers
+  `incompatible-type`** (both on `cc468eb4f`; reachable as `PointX(g(x)[1])`
+  with a number `x`). `_SYS.pointComponent` documents `NaN` as the compiled
+  stand-in for the error. Making it throw changes that convention.
+- **`Equal` over an operand that may be absent as a whole is typed without
+  `missing`.** With `p: missing | vector<2>` (on `cc468eb4f`), or
+  `p: matrix<2x2> | vector<2> | missing`, `Equal(p, 1)` is typed as a list or
+  tensor of `boolean | missing`. When `p` is `Missing`, the value is
+  `Missing`, which that type does not hold: the broadcast keeps the absence of
+  the cells, not of the whole operand.
+- **An unseeded `Reduce` over an empty list gives `Nothing` in the interpreter
+  and `NaN` when compiled** (`Reduce([], Multiply)`, every list type, on
+  `cc468eb4f` too).
+- **`Reduce(p, Multiply, 1)` over `p: list<…> | missing` is typed `missing`
+  alone**, which does not hold a present product (`Product(Rest(p))` for
+  `p: list<vector<2>> | missing` becomes this form; on `cc468eb4f` too).
+- **A chained index through a tuple-valued function disagrees at an empty
+  argument.** With `tup(t)` returning a tuple and `x = []`,
+  `At(At(tup(x), 1), 1)` and `At(First(tup(x)), 2)` give `NaN` in the
+  interpreter (its chained-index route) and `Missing` when compiled; a single
+  `At` of an absent base gives `Missing` in both.
+- **`Sqrt(Sum(p))` with a `NaN` cell** (`p = [Missing, [1, 2]]`): the compiled
+  complex lane gives `{re: 0, im: NaN}` for that cell, the interpreter `NaN`.
+- **`Sin(tv)` for `tv: tuple<number, number> | vector<number^2>` is typed
+  `number`**, while the value is a vector or a tuple of numbers (also `Sqrt`,
+  `Power`; on `cc468eb4f` too). The lift of a union operand reads a union of
+  lists with dimensions, not a union of a tuple and a list.
+  `test/compute-engine/tycho-item-249-union-collection-operand.test.ts` pins
+  `number` for it.
+- **`Determinant(Scan(m, Add))` stays unevaluated in the interpreter** for
+  `m: matrix<number>`, while the compiled code gives the value (`-2` for
+  `[[1,2],[3,4]]`; on `cc468eb4f` too). `Transpose(Scan(p, Add))` at `p = []`
+  also stays unevaluated, while compiled code gives `[]`.
+- **A `When`-restricted function compiles to `Missing` where the interpreter
+  gives the restricted values**: `r(t) = When([t, 2t], c > 0)` with `c: real`
+  (on `cc468eb4f` too).
+
 ### A compiled user function reads a free symbol of its body from the compile scope (OPEN, wrong value — found 2026-10-22 by the review of the fix of Tycho row 423)
 
 With a global `a := 2` and `G := x ↦ x + a`, then `ce.pushScope()`,
@@ -1015,22 +1070,70 @@ dictionary). These remain, each measured with a fix and reverted:
   `string | tensor<string>`, which can be a matrix of strings. To compile it
   again, verify the nested comparison against the interpreter (a matrix of
   strings compared with a string) and widen the rule to a tensor of strings.
-- **Three behaviors found during the change, not changed by it.** Each is the
+- **Two behaviors found during the change, not changed by it.** Each is the
   same on 0.161.0. (1) `Dot` of two empty `broadcastable` point lists stays
   unevaluated (`MatrixMultiply([], [])`), while the compiled code gives `[]`.
-  (2) `If(M < 3, M, 0)` with `M` a matrix stays unevaluated: the element-wise
-  `If` does not read a mask of rank 2. (3) A generic function literal applied
-  directly (`[["Function", …], "v"]`) binds `v` whole, while the same literal
-  called through a symbol (`g(v)`) maps over the elements of `v`. (4) Found
-  2026-10-22: with `B: broadcastable<integer>` (declared, no value),
-  `If(B < 3, B, 0)` is typed `broadcastable<broadcastable<integer>>`. A
-  `broadcastable` inside a `broadcastable` is a type the arithmetic
-  operators never produce (`broadcastable-typing.test.ts`, "idempotence:
-  never broadcastable<broadcastable<…>>"); the expected type is
-  `broadcastable<integer>`. In the same probe, `If(M < 3, M, 0)` with `M` a
-  2×2 matrix of integers is typed `list<integer | vector<integer^2>>`, which
-  is sound but wider than the `matrix<integer^(2x2)>` the element-wise `If`
-  of point (2) would give.
+  (2) A generic function literal applied directly (`[["Function", …], "v"]`)
+  binds `v` whole, while the same literal called through a symbol (`g(v)`)
+  maps over the elements of `v`.
+- **Compiled code reads an undeclared symbol as a number, so a list argument
+  gives a wrong value (found 2026-10-22).** With `M` not declared,
+  `compile(If(M < 3, M, 0))` (JavaScript) emits
+  `((_.M !== undefined) ? ((_.M < 3) ? (_.M) : (0)) : NaN)`; `run({M: [1, 5]})`
+  and `run({M: [[1, 2], [3, 4]]})` both give `0`, while the interpreter gives
+  `[1, 0]` and `[[1, 2], [0, 0]]`. Nothing checks at run time that the
+  argument is a number. Expected: a run-time check of an argument that the
+  compiled code assumes to be a number (or a refusal to compile a symbol whose
+  type is not known), so a list argument gives the interpreter's value or an
+  error.
+- **The `List` literal gives no dimensions to cells that may be `missing`
+  (found 2026-10-22).** `[1, NaN]` is typed `list<integer | nan^2>`, but
+  `[1, Missing]` is typed `list<integer | missing>`, and
+  `[[Missing, -2], [-3, Missing]]` is `list<list<integer | missing>>`, which is
+  not a `broadcastable<number | missing>`. The parser accepts
+  `list<(integer | missing)^(2x2)>`, and `mayCarryDimensions("integer |
+  missing")` is true. `shapedListTypeD` (`library/collections.ts`) declines
+  the dimensions for a union cell that is not a number type; its exception for
+  an absent point (`missing` beside tuples of one arity) is not applied to an
+  absent number. Expected: the same rule for any cell type whose part without
+  `missing` can carry dimensions.
+- **A list that holds an error value is typed `list<unknown>` (needs a
+  decision).** `Which([True, False], 1, Missing, 2)` is typed `vector<2>`, and
+  its value `[1, Error(…)]` is typed `list<unknown>`: the `List` literal joins
+  `integer` with the `error` cell to `unknown`. So the type of a value with an
+  error cell is never a subtype of the static type. `docs/ERROR-MODEL.md` §4
+  says a result type describes the successful values, which may make the
+  static type correct; the question is what the type of the value itself
+  should be (the join without the error cell, or a type with an `error` arm).
+- **`If`/`Which` with a condition whose type cannot be read keep the scalar
+  type (soundness, found 2026-10-22).** `If(c, 1, 0)` with `c` of unknown type
+  alone is typed `integer`, but when `c` holds a list at run time the value is
+  a list. (Beside a condition that is surely a mask, an unreadable condition
+  now gives the type of a mask of unknown rank. A condition of type
+  `boolean | list<boolean>` is typed for both outcomes when every other
+  condition is a scalar, `scalarOrMaskConditionShape()` in
+  `library/control-structures.ts`; a `Which` with two such conditions keeps
+  the scalar type.) Also: a clause before the first mask whose condition is
+  undecided gives `Missing`, and the type of the arms before the first mask
+  does not add `missing`.
+- **Compiled `When`, `If` and `Which` disagree with the interpreter in three
+  cases (found 2026-10-22).** (1) `When(v, C)` with `C` a mask of rank 2
+  (`C: list<boolean^(2x2)>`, or `B < 0` with `B` holding a matrix): the
+  compiled JavaScript (`_SYS.restrict`) reads each row as one condition that
+  is not `True` and gives `[NaN, NaN]`, while the interpreter keeps the `When`
+  unevaluated. `If` and `Which` select at every level of a mask; whether
+  `When` should too is a decision. (2) An arm typed as a point or a list of
+  points (`tuple<…> | list<tuple<…>>`) that holds one point at run time: under
+  a nested mask the compiled code refuses it as an arm of lower rank (`NaN`),
+  while the interpreter lifts the point whole; under a flat mask the same
+  ambiguity existed before. (3) `When(B, B < 0)` with
+  `B: broadcastable<number>` is refused on JavaScript ("a value that may be a
+  list or a point"): a `broadcastable<number>` cannot be a point, so it could
+  be zipped when it is an array at run time and repeated when it is not (a
+  run-time mode for the `zip` argument of `_SYS.restrict`). The compiled
+  `When` evaluates its value even when the condition is false, as it already
+  did for a condition that is surely a list; this matters only for a value
+  with an effect (`Random()`).
 - **The empty tuple type prints as the bare `tuple` (soundness of the round
   trip, found 2026-10-22).** `ce.box(["Tuple"])` is typed
   `{kind: "tuple", elements: []}`, and `typeToString()` prints it `tuple`. The
@@ -1042,6 +1145,16 @@ dictionary). These remain, each measured with a fix and reverted:
   `tuple<>`, if the parser accepts it, or a new spelling), printed by the
   serializer. Reproduction: the `base-defects.mts` probe of the list-shape
   measurement (`docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`).
+- **A meet builds a list with dimensions whose cells are lists (found
+  2026-10-22).** The meet of `list<unknown^2>` and `list<list<any^2>>` is
+  `{kind: "list", elements: {kind: "list", elements: "any", dimensions: [2]},
+  dimensions: [2]}`, printed `list<list<any^2>^2>`, which the parser refuses
+  ("the cells of a list with dimensions cannot be lists"). Every reader of
+  `dimensions` assumes cells that are not lists. Expected: the meet of a
+  rank-1 tensor and a plain list whose elements are tensors of fixed shape is
+  the tensor of the combined shape, here two rows of two cells,
+  `list<any^(2x2)>` (printed `matrix<any^(2x2)>`). Reproduction: `u-meet.mts` of the list-shape measurement
+  (`docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`).
 - **A list with dimensions accepts cells that are an alias of a list (found
   2026-10-22).** After `ce.declareType("Row", "vector<integer^3>", {alias:
   true})`, `ce.declare("R2", "list<Row^2>")` is accepted and typed
@@ -2748,21 +2861,94 @@ values agree, with a maximum number of steps) takes two or three arguments, so
 the signature does not fit it either. Decision: implement it, or remove the
 declaration.
 
-### A pipe whose stage is an operator name is typed `unknown` (OPEN, small — found 2026-10-22)
+### Static types that do not contain the value: defects found while adding result type handlers (OPEN — found 2026-10-22)
 
-`16 |> Sqrt` and `[3, 1, 2] |> Sort` have the static type `unknown`, but
-`Sqrt(16)` is typed `4` and the pipe evaluates to `4` (and to
-`vector<integer^3>`). `Pipe` is `lazy`, so its stage arrives unbound: the type
-handler (`library/core.ts`, `Pipe`) reads `f.type`, which is `unknown` for a
-held operator name, and `functionResult(unknown)` falls back to `unknown`. A
-function literal stage is canonicalized first and is typed correctly. Effect:
-the Epsil static check does not see a mismatch such as
-`let s: string = 16 |> Sqrt`, and a later stage gets no inference from the
-earlier one. A fix types an operator-name stage as the call `f(x)` would be
-typed; it must keep the type read pure (`pipe-type-read-purity.test.ts` pins
-that a type read of a `Pipe` stage does not advance the engine's version
-counters). Reproduce:
-`npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); console.log(ce.box(['Pipe', 16, 'Sqrt']).type.toString())"`.
+Found by the probes that check `isSubtype(value type, static type)` for the
+new handlers of `FindRoot`, `FindFit`, the linear-algebra operators, the
+trigonometric rewrites and `TupleFrom`. None is caused by those handlers; each
+is in code that existed before.
+
+- **A float cell can be typed `integer`, so a handler that claims `rational`
+  is not sound** (decision needed). A parsed `2.0` is typed `integer`, and
+  `1.5e308` is too. `Inverse` and `MatrixPower` with a negative exponent claim
+  `rational` cells: `Inverse` of `[[2.0, 1], [1, 3]]` is typed
+  `matrix<rational^(2x2)>`, and its value is `matrix<real^(2x2)>`.
+  `Determinant` of `[[2.0, 1/3], [1, 3]]` is typed `rational`, and its value
+  is a float. The matrix product of the same operands has the same defect.
+  The new handlers use a table that never claims `rational` from a product
+  or a quotient (`matrixResultCellType`, `library/linear-algebra.ts`). The
+  choice: the older handlers follow the same table, or a float literal stops
+  being typed `integer`.
+- **The range of a sum with a float operand does not contain the value.**
+  `2.0 + 1/3` is typed `real<2.329..2.341>`, and its value is typed
+  `real<2.3..2.4>`, which is not a subtype of it.
+- **A composite loses the range of a component that evaluates to a float.**
+  With `x := 0.5`, `Tuple(Abs(x))` is typed `tuple<real<0..>>`, and its value
+  `tuple<real>`; `[Sin(x)^2]` has the same defect. `Tuple(Range(1, 3))` is
+  typed `tuple<range>`, and its value is `tuple<vector<integer^3>>`.
+- **A declared symbol accepts a symbol with no type as its value**
+  (`q: integer := uu`). Then `Tuple(q)` is typed `tuple<integer>`, and its
+  value `tuple<unknown>`. With `L := [u, v]`, `At(L, 1)` is typed `number`,
+  and its value `unknown`.
+- **Declared result types that do not contain the value.**
+  `MatrixMultiply` of two vectors is a scalar, but the declared result is
+  `matrix | vector`. A lazy matrix above 10000 cells (`IdentityMatrix(101)`,
+  `Diagonal` of a long vector) is typed `list<list<integer>>`, which is not a
+  `matrix`. `TrigExpand`, `TrigToExp` and `TrigReduce` declare
+  `(value) -> value`, but `Missing`, `Nothing`, a symbol with no type and the
+  error of `TrigReduce(Tuple(…))` are not `value`.
+- **A matrix of symbols with no type** (`[[x, y], [z, w]]`, typed
+  `matrix<2x2>`): its `AdjugateMatrix` value is typed `list<list<unknown>>`
+  and its `PseudoInverse` value `list<list<broadcastable<number>>>`, neither
+  of which is a matrix.
+- **`Simplify(Sin(r) * P)` with `P: boolean` is typed
+  `broadcastable<number>`, and its value is an error.** `heldOperandType`
+  (`library/core.ts`) passes the unbound children to `derive`. Two readers
+  of a held operand's type overlap: `heldOperandType` and `denotedTypeOf`
+  (`library/calculus.ts`). Merge them into one.
+- **A held name is typed by the binding where the type is read, not by the
+  one it is evaluated with.** A `lazy` operator receives its operands
+  unbound, and `heldOperandType` (`library/core.ts`) looks a held symbol up
+  by name, as do the `Pipe` derivations of a held application head
+  (`pipeImplicitTopicCallType`, `pipeShorthandApplicationType`). In
+  `(xs) ↦ (xs |> Filter(p))` with a global `xs: list<string>`, the pipe is
+  typed from the global, and the parameter is the list that is filtered.
+  The static check can then report an error for a correct program. The
+  stage typing `pipeNamedStageType` resolves only the names of library
+  operators (`resolvesToSystemBinding()`, `operand-descriptor.ts`), which a
+  parameter that has the name of a library operator (`(Sqrt) ↦ 16 |> Sqrt`)
+  still defeats. A fix records, when the lazy operator is canonicalized,
+  which held names a local scope binds. `TrigExpand`, `TrigToExp` and
+  `TrigReduce` avoid the problem by binding their operand at
+  canonicalization.
+- **A `FindRoot` or `FindFit` cut short by the deadline while its parameter
+  starts are evaluated reports `parameters: {}`** (decision needed), which
+  the record type of the result (`record{parameters: record{a: real}, …}`,
+  `fitRecordType()` in `nonlinear-fit.ts`) does not admit. The specs are
+  parsed, and the starts evaluated, inside the deadline, and
+  `timeoutRecord` has no parameter names then. The choice: type the
+  parameter fields `nan | real` and report each parameter as `NaN` in that
+  case, or keep the record type and accept this case outside it.
+- **The empty tuple type prints as `tuple`**, which is the spelling of bare
+  `tuple`, a type that admits every arity.
+- **`[1, Missing]` is typed `list<integer | missing>` with no length**, so it
+  cannot be assigned to a declared `list<(integer | missing)^2>`.
+
+Evaluate results found wrong or questionable on the same probes:
+
+- `IdentityMatrix(n)` and `ZeroMatrix(2, n)` with a symbol `n` give an
+  `expected-positive-integer` error instead of staying unevaluated.
+- `Kernel(n)` for `n: integer` with no value gives `[]`; `Shape(m)` for an
+  unassigned `m: matrix<integer>` gives `(-1, -1)`.
+- `LinearSolve` with complex cells that overflow gives `[0, 0]`.
+- `Kernel([[1.5e308, 1.5e308, 1], [1.5e308, -1.5e308, 1]])` gives
+  `[[0, 0, 1]]`, which is not in the kernel: the chop sets the small
+  component to zero.
+- `LUDecomposition`, `QRDecomposition` and `CholeskyDecomposition` of exact
+  integer matrices return floats under `evaluate()`.
+- `TrigReduce` returns a list or an equation in exponential form instead of
+  reduced; `TrigReduce(Missing)` is `NaN` where `TrigExpand(Missing)` is
+  `Missing`; `TrigReduce(Nothing)` is `0`.
 
 ### An operator result that may be absent is typed `number` when it is numeric (OPEN, small — found 2026-09-30)
 

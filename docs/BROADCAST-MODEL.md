@@ -142,6 +142,20 @@ Corollary rules for the strict regime:
   (conditions and selected arms) must share one length, checked through the
   same `broadcastLengthMismatch`. Selection is lazy per element and an
   unmatched position preserves shape with the documented absence value.
+- Selection over a mask of any rank (2026-10-22): a condition may be a nested
+  list of `True`/`False`/`Missing`, uneven rows included. The rule above
+  applies at every level of the mask: at a level where a condition is a list,
+  every list condition and every list arm must share its length, and a scalar
+  lifts; at a level where every condition is a scalar, the first `True`
+  clause takes its arm's value there WHOLE (`If([True, False], [[1], [2]], 0)`
+  is `[[1], 0]`). An arm that is a list at a level and a scalar where the mask
+  is still a list (an arm of lower rank than the mask) is refused with the
+  `incompatible-dimensions` error of `Add` (`If(M < 3, [10, 20], 0)` with `M`
+  a 2×2 matrix). The compiled JavaScript follows the same rule
+  (`selectNested`, `compilation/javascript-runtime.ts`); the Python and
+  interval-JavaScript targets refuse a condition that may be a list.
+  Tests: `elementwise-which.test.ts` and `compile-elementwise-which.test.ts`,
+  "a mask of rank 2 or more".
 
 ## Audit record (2026-07-27)
 
