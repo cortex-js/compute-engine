@@ -489,7 +489,12 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   base whose upper end is 0 has its own case in both power kernels (0 for a
   positive exponent, 1 for the exponent 0, `empty` for a wholly negative
   one), and the exactness provers certify those literal bounds. The row
-  closes when Tycho's instrument prints `READY` on an installed release.** `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
+  closes when Tycho's instrument prints `READY` on an installed release.
+  User decision 2026-10-21: the point base 0 with an exponent interval that
+  reaches 0 (`[0, 0.5]`) answers the plain interval `[0, 1]`, as the
+  generic branch does for `[0, 2]^[0, 1]` (locked in by the Tycho item 260
+  test); the jump from 1 at the exponent 0 to 0 beside it is NOT reported
+  as `singular`.** `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
   answers `{kind: 'empty'}` for `x` in `[0.2, 0.4]`, for the point interval
   `[0.5, 0.5]`, and for every other exponent interval, where the value is 0
   at every point; the control `0.5^{x}` answers `[0.758, 0.871]`. With the

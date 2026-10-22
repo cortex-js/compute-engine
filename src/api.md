@@ -7468,6 +7468,60 @@ Return the next token, without advancing the index
 
 <MemberCard>
 
+##### Parser.environmentName()? {#environmentname}
+
+```ts
+environmentName(): string | null
+```
+
+The name of the innermost environment (`\begin{name} … \end{name}`)
+whose body is being read, or `null` outside an environment. A row of a
+`cases` environment records a second reading of an assignment to a
+subscripted name (see `parseAssign()` in `definitions-core.ts`).
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.\_recordBlockRowAlternative()? {#_recordblockrowalternative}
+
+```ts
+_recordBlockRowAlternative(expr, local): void
+```
+
+Record `local` as the second reading of the row expression `expr` of a
+`cases` environment: the declaration of a block local, which the block
+branch of `parseCasesEnvironment()` swaps in when the environment turns
+out to be a block.
+
+####### expr
+
+[`MathJsonExpression`](#mathjsonexpression)
+
+####### local
+
+[`MathJsonExpression`](#mathjsonexpression)
+
+</MemberCard>
+
+<MemberCard>
+
+##### Parser.blockRowAlternative()? {#blockrowalternative}
+
+```ts
+blockRowAlternative(expr): MathJsonExpression | null
+```
+
+The recorded second reading of a row expression, or `null`.
+
+####### expr
+
+[`MathJsonExpression`](#mathjsonexpression)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Parser.binderSymbol() {#bindersymbol}
 
 ```ts
