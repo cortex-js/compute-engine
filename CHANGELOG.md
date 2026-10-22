@@ -71,28 +71,45 @@
   of the cells, the values at the depth of the rank. The elements of a matrix
   are its rows: `matrix<integer>` is a `list<vector<integer>>`. A
   `list<vector<integer>>` is not a matrix, because its rows can have different
-  lengths. The shape is written in one place: two rows of three integers are
-  `list<integer^(2x3)>`, which is `matrix<integer^(2x3)>`. Two spellings are now
-  parse errors:
-  - A list with dimensions or a tensor whose cells are lists:
+  lengths. A list has elements and may have a length (`list<T^n>`); `vector`,
+  `matrix` and `tensor` have cells and may have a shape, written in one place:
+  two rows of three integers are `matrix<integer^(2x3)>`, and a 2×3×4 array is
+  `tensor<integer^(2x3x4)>`. Two spellings are now parse errors:
+  - A list with two or more axes: `list<integer^(2x3)>`, `list<integer^2x3>`,
+    `list<boolean^(2x?)>`, `list<T^(MxN)>`, `list<2x3>`. The message names the
+    spelling to use: `list<boolean^(2x2)>` gives "A list type has one axis at
+    most, its length (`list<T^n>`), but this type has 2 axes. Write
+    `matrix<boolean^(2x2)>` instead". `list<U^n>` with one axis is valid.
+  - A list with a length, a vector, a matrix or a tensor whose cells are lists:
     `list<list<integer>^2>`, `list<vector<integer^3>^2>`, `list<list^2>`,
-    `tensor<list<integer>>`. Write `list<integer^(2x3)>` for a matrix, or
+    `matrix<list<integer>>`, `tensor<list<integer>>`. The message names the
+    spelling with one shape (`list<list<integer^3>^2>` gives "Write
+    `matrix<integer^(2x3)>`, with the shape in one place"); write
     `list<list<integer>>` for rows of any lengths.
-  - A `vector` or a `matrix` whose cell type cannot hold a number:
-    `vector<string>`, `vector<boolean>`, `matrix<boolean>`,
-    `matrix<list<integer>>`. Write `list<string>`, or `list<string^3>` for a
-    list of three strings, and `list<boolean^(2x2)>` for a 2×2 array of
-    booleans.
 
-  A list with dimensions or a tensor whose cells are not numbers is valid when
-  its cells are not lists: `list<boolean^2>`, `list<string^2>`,
-  `list<tuple<number, number>^3>`, `list<boolean^(2x2)>` and
-  `list<(integer | missing)^3>` parse as before, and `tensor<boolean>` and
-  `tensor<tuple<number, number>>` are arrays of any rank of booleans and of
-  points. The types of the literals do not change: `[True, False]` is
-  `list<boolean^2>`, `[(1, 2), (3, 4)]` is `list<tuple<integer, integer>^2>`,
-  `[[1, 2], [3, 4]]` is `matrix<integer^(2x2)>`, and with
-  `M := [[1, 2], [3, 4]]`, `M < 3` is `list<boolean^(2x2)>` and `Sin(M)` is
+  `vector`, `matrix` and `tensor` accept every cell type that is not a list:
+  `matrix<boolean>`, `matrix<string^(2x2)>`, `vector<string^2>` (printed
+  `list<string^2>`), `tensor<boolean>` and `tensor<tuple<number, number>>` are
+  valid. Before, a `vector` or a `matrix` cell had to be able to hold a number,
+  so `matrix<boolean>` was a parse error while `matrix<any>` was not. The bare
+  names `vector`, `matrix` and `tensor` still mean number cells, so the
+  linear-algebra operators, whose signatures use the bare names, still refuse a
+  matrix of booleans. A printed type takes its head from its rank: rank 1 is
+  `vector<…>` when the cells can hold a number and `list<E^n>` otherwise, rank 2
+  is `matrix<…>`, rank 3 or more is `tensor<U^(…)>`, and an unknown rank is
+  `tensor<U>`. The types themselves do not change, only their spelling:
+
+  | Value                                 | Before                                | Now                                     |
+  | ------------------------------------- | ------------------------------------- | --------------------------------------- |
+  | `[True, False]`                       | `list<boolean^2>`                     | `list<boolean^2>` (same)                |
+  | `[[1, 2], [3, 4]]`                    | `matrix<integer^(2x2)>`               | `matrix<integer^(2x2)>` (same)          |
+  | `M < 3`, with `M := [[1, 2], [3, 4]]` | `list<boolean^(2x2)>`                 | `matrix<boolean^(2x2)>`                 |
+  | `(1, 2) * M`                          | `list<tuple<integer, integer>^(2x2)>` | `matrix<tuple<integer, integer>^(2x2)>` |
+  | `[["a", "b"], ["c", "d"]]`            | `list<string^(2x2)>`                  | `matrix<string^(2x2)>`                  |
+  | a 2×3×4 array of integers             | `list<integer^(2x3x4)>`               | `tensor<integer^(2x3x4)>`               |
+  | `Determinant` of a matrix of booleans | refused                               | refused (same)                          |
+
+  `[(1, 2), (3, 4)]` is still `list<tuple<integer, integer>^2>`, and `Sin(M)` is
   `matrix<2x2>`.
 
   `tensor<U>` is an array of any rank (1 or more) with cells of type `U`, and
@@ -139,7 +156,7 @@
     `list<vector<real^2>^2>`, a spelling that is now a parse error).
   - A generic function literal over a matrix keeps the shape of the operand:
     with `g` the literal `(x: T) -> tuple<T, T> where T` with the body `(x, x)`,
-    `g([[1, 2], [3, 4]])` is `list<tuple<integer, integer>^(2x2)>` (it was
+    `g([[1, 2], [3, 4]])` is `matrix<tuple<integer, integer>^(2x2)>` (it was
     `list<tuple<integer, integer>>`). Over a ragged list, see Resolved Issues.
   - A conditional protocol conformance `type list<T> is P where …` binds `T` to
     the elements of the receiver, as the generic solver does. For a matrix, the
@@ -202,7 +219,7 @@
   - "The meet of two collection types of the same kind no longer drops values
     that are in both": `list<number> & list<list<integer>>` is `list<never>`
     again, since no matrix is a `list<number>`, and the example
-    `list<number^(2x2)> & list<list<integer>^2>` is now a parse error.
+    `matrix<number^(2x2)> & list<list<integer>^2>` is now a parse error.
   - "The subtype relation of lists now reads a value in every way it can be
     read": the nested spelling read as its flat shape, the removal of outer axes
     by `collection<E>`, and `list<vector<integer^3>>` as a `list<integer>` are
@@ -218,6 +235,19 @@
   `broadcastable`".
 
 ### New Features
+
+- **`FixedPoint(f, x)` applies `f` from `x` until two successive values are the
+  same.** It was declared but did nothing: a call stayed unevaluated.
+  `FixedPoint(x => (x + 2/x)/2, 1.0)` is `1.414213562373095…`, and
+  `FixedPoint(Cos, 1.0)` is `0.739085133…`, correct to the working precision.
+  Two values are the same when they are identical, when they are numbers, one of
+  them a float, that agree to the working precision, or when they are lists or
+  tuples whose elements are the same. An optional third argument is the maximum
+  number of applications (the engine iteration limit by default); when it is
+  reached, the last value is returned. Without a maximum, a call that cannot
+  converge stays unevaluated: `FixedPoint(Cos, 1)` (`Cos(1)` is exact, and each
+  step nests it) and an exact iteration whose terms gain digits; `N` gives their
+  numeric fixed point. The result type is the result type of `f`.
 
 - **The presence assertion `x?!`** (`AssertPresent(x)` in MathJSON, `⁈` is an
   alias): the value of `x`, or an `expected-present` error naming the operand

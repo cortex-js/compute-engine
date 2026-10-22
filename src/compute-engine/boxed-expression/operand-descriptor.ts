@@ -43,6 +43,50 @@ export function deriveApplicationOf(
     : deriveCalleeType(application.callee, operands, context);
 }
 
+/**
+ * Whether the name `name`, looked up where a type handler runs, resolves to
+ * the binding of the engine's SYSTEM scope: a library operator or constant,
+ * not a user declaration.
+ *
+ * A `lazy` operator receives its operands unbound, so a type handler that
+ * types a held symbol can only look its name up in the scope where the type
+ * is read. That scope is not the one the operand is evaluated in when a
+ * function parameter or a block local has the same name: in
+ * `(F) ↦ (3 |> F)` with a global `F`, the parameter is the function that is
+ * called, and the global `F` says nothing about it. A user name (a
+ * function, a variable, a declared operator) is the usual name of a
+ * parameter, so a handler resolves a held name only when this is true. A
+ * parameter that has the name of a library operator (`(Sqrt) ↦ …`) is not
+ * detected. The lookup of a held application head by name has the same
+ * limit.
+ *
+ * The system scope is the first entry of the engine's context stack. The
+ * type handler's view of the engine (`PureEngineView`) does not include
+ * the stack, so it is read through a structural cast. The read is pure.
+ */
+export function resolvesToSystemBinding(
+  engine: TypeHandlerContext['engine'],
+  name: string
+): boolean {
+  const ambient = engine.lookupDefinition(name);
+  if (ambient === undefined) return false;
+  const stack = (
+    engine as unknown as {
+      contextStack?: ReadonlyArray<{
+        lexicalScope: {
+          bindings: ReadonlyMap<string, { value?: unknown; operator?: unknown }>;
+        };
+      }>;
+    }
+  ).contextStack;
+  const system = stack?.[0]?.lexicalScope.bindings.get(name);
+  if (system === undefined) return false;
+  return (
+    (ambient.operator !== undefined && ambient.operator === system.operator) ||
+    (ambient.value !== undefined && ambient.value === system.value)
+  );
+}
+
 /** A call head's own contract when resolving its name would select a
  * different binding. A held literal also keeps its body structure so omission
  * inspection can see returned branches hidden by a broader signature. */

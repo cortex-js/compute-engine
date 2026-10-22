@@ -27,7 +27,10 @@ import type {
   EvaluateOptions,
   Expression,
   IComputeEngine,
+  OperandDescriptor,
 } from './global-types.js';
+import type { Type } from '../common/type/types.js';
+import { SIGNED_INFINITY_TYPE } from '../common/type/primitive.js';
 import { runWithEvaluationEffects } from './effects-registry.js';
 import {
   isDictionary,
@@ -278,6 +281,12 @@ function parseParamSpecs(paramsExpr: Expression): ParamSpec[] | 'error' | null {
   return result;
 }
 
+/** The error of a `FindFit` call whose parameter specs `parseParamSpecs`
+ * refuses. */
+function malformedFitSpecError(ce: IComputeEngine): Expression {
+  return ce.error('unexpected-argument', 'FindFit: malformed parameter spec');
+}
+
 /** Variable symbol names from a symbol or list of symbols. */
 function parseVars(varsExpr: Expression): string[] | null {
   if (isSymbol(varsExpr)) return [varsExpr.symbol];
@@ -290,6 +299,143 @@ function parseVars(varsExpr: Expression): string[] | null {
     return names.length > 0 ? names : null;
   }
   return null;
+}
+
+//
+// Static type of the result record
+//
+
+/**
+ * The static type of the record that `FindRoot` and `FindFit` return, for the
+ * `type` handlers of the two operators. `params` describes the parameter-spec
+ * operand (the second operand of `FindRoot`, the third of `FindFit`).
+ *
+ * The record has the keys that `buildRecord` always writes:
+ *
+ * - `parameters`: one field per parameter, each a finite float. The solver
+ *   accepts a step only when the cost at the new point is finite, and a
+ *   timeout reports the starts clamped to the bounds, which are finite.
+ * - `converged` (and `stationary`, for `FindRoot` only): a boolean.
+ * - `residualNorm`: `NaN` when no residual was computed (a timeout, the
+ *   point of a sampled scan), `+∞` when the sum of squares overflows
+ *   (`x^2 + 10^200 = 0`), a finite float otherwise. The infinite arm is the
+ *   signed pair `+∞ | −∞`, not `+∞` alone: a record field holding the
+ *   literal `+∞` is typed by its tier, which is that pair.
+ * - `iterations`: an integer.
+ *
+ * A record has no optional fields, so the keys `timedOut` and `phase`, which
+ * only a call cut short by a deadline has, are not in the type: width
+ * subtyping admits a record with more keys.
+ *
+ * One value is outside this type, by decision: a deadline that fires while
+ * the parameter starts are evaluated (`parseParamSpecs` evaluates each start
+ * and bound) leaves `timeoutRecord` with no parameter names, and the record
+ * has `parameters: {}`. Typing each parameter `nan | real` to admit a
+ * report of `NaN` in that case would weaken every read of a parameter, for
+ * a case that needs a time limit shorter than the evaluation of a few
+ * constants (user decision, 2026-10-22).
+ *
+ * The parameter names are read from the structure of the operand, which a
+ * lazy operator receives as written: a symbol, a list or set of specs, and
+ * each spec a symbol or a tuple (also `Delimiter(Sequence(…))` from the
+ * LaTeX parser) whose first part is a symbol. The evaluate handler reads the
+ * same shapes on the canonical form (`parseParamSpecs`). When a shape cannot
+ * be read here (a container or a spec written in another form, a structure
+ * that the descriptor does not give), `parameters` is `dictionary<real>`,
+ * which admits a record of any parameter names. When a spec has a number of
+ * parts that `parseParamSpecs` refuses (3, or more than 4), the call is an
+ * error, and the answer is `undefined`, so the declared `dictionary` stays.
+ *
+ * An error result (a malformed spec, a start that is not finite) is not
+ * described by this type, as the declared `dictionary` did not describe it:
+ * the result type of a signature describes the successful values
+ * (`docs/ERROR-MODEL.md`, "The declared result type of a signature
+ * constrains successful values").
+ *
+ * Pure: reads the descriptors only.
+ */
+export function fitRecordType(
+  operator: FitOperator,
+  params: OperandDescriptor | undefined
+): Type | undefined {
+  const names = paramNamesOfDescriptor(params);
+  if (names === 'error') return undefined;
+  const parameters: Type =
+    names === undefined
+      ? { kind: 'dictionary', values: 'real' }
+      : {
+          kind: 'record',
+          // `Object.fromEntries` makes an own property of every name,
+          // `__proto__` included.
+          elements: Object.fromEntries(names.map((n) => [n, 'real'])),
+        };
+  const residualNorm: Type = {
+    kind: 'union',
+    types: ['real', 'nan', SIGNED_INFINITY_TYPE],
+  };
+  const elements: Record<string, Type> = {
+    parameters,
+    converged: 'boolean',
+    residualNorm,
+    iterations: 'integer',
+  };
+  if (operator === 'FindRoot') elements.stationary = 'boolean';
+  return { kind: 'record', elements };
+}
+
+/**
+ * The parameter names of a parameter-spec operand read from its structure
+ * (see `fitRecordType`): the names, `'error'` for a spec whose number of
+ * parts `parseParamSpecs` refuses, or `undefined` when the names cannot be
+ * read.
+ */
+function paramNamesOfDescriptor(
+  d: OperandDescriptor | undefined
+): string[] | 'error' | undefined {
+  const s = d?.structureOf?.();
+  if (s === undefined) return undefined;
+  let specs: ReadonlyArray<OperandDescriptor>;
+  if (s.kind === 'symbol') specs = [d!];
+  else if (s.kind === 'list-literal') specs = s.elements;
+  else if (s.kind === 'application' && (s.head === 'List' || s.head === 'Set'))
+    specs = s.children;
+  else return undefined;
+  if (specs.length === 0) return undefined;
+
+  const names: string[] = [];
+  for (const spec of specs) {
+    const parts = specPartsOfDescriptor(spec);
+    if (parts === undefined || parts.length === 0) return undefined;
+    if (parts.length === 3 || parts.length > 4) return 'error';
+    const name = parts[0].structureOf?.();
+    if (name?.kind !== 'symbol') return undefined;
+    if (!names.includes(name.name)) names.push(name.name);
+  }
+  return names;
+}
+
+/** The parts of one parameter spec read from its structure: the name, then
+ * the optional start and bounds. `undefined` when the shape is not one that
+ * `specParts` reads on the canonical form. */
+function specPartsOfDescriptor(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const s = d.structureOf?.();
+  if (s === undefined) return undefined;
+  if (s.kind === 'symbol') return [d];
+  if (s.kind === 'tuple' || s.kind === 'list-literal') return s.elements;
+  if (s.kind !== 'application') return undefined;
+  // `Pair` and `Triple` canonicalize to `Tuple`.
+  if (['Tuple', 'Pair', 'Triple', 'List', 'Sequence'].includes(s.head))
+    return s.children;
+  if (s.head === 'Delimiter') {
+    const inner = s.children[0];
+    if (inner === undefined) return undefined;
+    const t = inner.structureOf?.();
+    if (t?.kind === 'application' && t.head === 'Sequence') return t.children;
+    return [inner];
+  }
+  return undefined;
 }
 
 /** The limit on the number of globally searched parameters: a grid over three
@@ -2403,14 +2549,32 @@ export async function findFitAsync(
 ): Promise<Expression | undefined> {
   const route = asyncRoute(ce, 'FindFit', options);
   let data: Expression | undefined;
+  let specs: ParamSpec[] | undefined;
   try {
     checkAborted(options.signal);
-    if (ops.length >= 4) data = await ops[0].canonical.evaluateAsync(options);
+    if (ops.length >= 4) {
+      // The specs are parsed before the data is evaluated, as on the
+      // synchronous route (`findFitSetup`): a malformed spec is an error
+      // before any data is read, and a deadline that fires while the data
+      // is evaluated reports the parameters at their starts
+      // (`timeoutRecord`), not an empty `parameters` record. The setup
+      // reuses these specs.
+      const parsed = parseParamSpecs(ops[2].canonical);
+      if (parsed === 'error') return malformedFitSpecError(ce);
+      if (parsed === null) return undefined;
+      specs = parsed;
+      route.ctx.specs = specs;
+      data = await ops[0].canonical.evaluateAsync(options);
+    }
   } catch (e) {
     return route.timeoutOrThrow(e);
   }
   return solveSetupAsync(ce, route, (ctx) =>
-    findFitSetup(ce, ops, ctx, { data, deadlineFrame: route.deadlineFrame })
+    findFitSetup(ce, ops, ctx, {
+      data,
+      deadlineFrame: route.deadlineFrame,
+      specs,
+    })
   );
 }
 
@@ -2604,6 +2768,10 @@ function findFitSetup(
   evaluated?: {
     data: Expression | undefined;
     deadlineFrame: () => DeadlineFrame | undefined;
+    /** The specs the asynchronous route parsed before it evaluated the
+     * data: they are not parsed again, so a start such as `Random()` is
+     * evaluated once, as on the synchronous route. */
+    specs?: ParamSpec[];
   }
 ): FitSetup {
   const done = (value: Expression | undefined) => ({ done: value });
@@ -2618,11 +2786,8 @@ function findFitSetup(
   const paramsOp = ops[2].canonical;
   const varsOp = ops[3].canonical;
 
-  const specs = parseParamSpecs(paramsOp);
-  if (specs === 'error')
-    return done(
-      ce.error('unexpected-argument', 'FindFit: malformed parameter spec')
-    );
+  const specs = evaluated?.specs ?? parseParamSpecs(paramsOp);
+  if (specs === 'error') return done(malformedFitSpecError(ce));
   if (!specs) return done(undefined);
   ctx.specs = specs;
 

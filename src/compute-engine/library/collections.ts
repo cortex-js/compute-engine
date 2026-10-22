@@ -156,6 +156,7 @@ import {
   RecordType,
   TupleType,
   Type,
+  listTensorRank,
 } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -171,6 +172,7 @@ import {
   resolveTypeAlias,
   staticCollectionDims,
   stripMissingFromType,
+  stripNumericRanges,
   typeContainsMissing,
   typeCouldHoldMissing,
   widen,
@@ -2747,7 +2749,7 @@ function checkCallbackSource(
  * tuple-pattern hint ONLY — never the arity verdict — so an operator that
  * omits it still reports the mismatch, just without the suggested rewrite.
  */
-function canonicalCallbackOperand(
+export function canonicalCallbackOperand(
   op: Expression | undefined,
   arity?: {
     operator: string;
@@ -3657,6 +3659,123 @@ function tupleTypeOfD(
           : storedComponentTypeD(op),
     })),
   });
+}
+
+/**
+ * The largest number of components for which the type handler of
+ * `TupleFrom` builds a tuple type. A longer source keeps the declared
+ * `tuple`, so a declared `list<integer^100000>` does not make a type with
+ * 100 000 components.
+ */
+const TUPLE_FROM_MAX_COMPONENTS = 1024;
+
+/**
+ * The component types of `TupleFrom(...ops)`, in order, or `undefined` when
+ * the operand types do not determine them. The evaluate handler walks each
+ * operand that is a collection, contributes each other operand as it is, and
+ * then removes every `Nothing`. So:
+ *
+ * - A list or tuple LITERAL contributes one component per element, typed
+ *   as a `Tuple` operand is (`storedComponentTypeD`).
+ * - An operand typed as a list of known length `n` (`list<T^n>`, a vector,
+ *   a matrix) contributes `n` components of its element type (the rows,
+ *   for a matrix). A tuple type contributes its components.
+ * - An operand that is not a collection contributes itself.
+ *
+ * Any other operand gives `undefined`: a list of unknown length, a `Range`,
+ * a set, a string, a dictionary, an operand that may or may not be a
+ * collection. So does a component that may be `Nothing`, which the evaluate
+ * handler removes, and which changes the number of components.
+ *
+ * A component must also keep its type when it is evaluated. A component
+ * that can hold a list is refused when it is not a literal: a `Range`
+ * component evaluates to a list, which a `range` type does not contain. A
+ * list or tuple type whose element type admits every number but is not
+ * `unknown` (`list<number^2>`) is refused too: a list literal of symbols
+ * with no type is typed `vector<2>` (the generic-symbol fold), so
+ * `L := [u, v]` matches `list<number^2>`, and `TupleFrom(L)` is `(u, v)`,
+ * whose components have the type `unknown`, which is not below `number`.
+ * Each component loses its numeric range (`stripNumericRanges`): with
+ * `x := 0.5`, `Abs(x)` is typed `real<0..>`, and the component it gives is
+ * the number `0.5`, which a tuple types `real`, not `real<0..>`.
+ *
+ * An operand that may be absent as a whole is not handled here: the result
+ * type gains a `missing` arm outside the handler (`missingBehavior:
+ * 'propagate'`). An absent CELL is a component like any other
+ * (`TupleFrom([1, Missing])` is `(1, Missing)`): `TupleFrom` is one of the
+ * operators that move cells without computing from them
+ * (`ABSENT_CELLS_PASS_THROUGH`, `broadcast-lift-type.ts`), so the handler
+ * sees the `missing` arm of a cell, and the result type keeps it.
+ */
+function tupleFromComponentTypes(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
+): Type[] | undefined {
+  const result: Type[] = [];
+  // A component is accepted when it cannot be `Nothing`, and when it is a
+  // number or string literal, or cannot hold a list. A list or tuple
+  // literal is accepted when each of its elements is: its stored type is
+  // read from its elements, and an element that is not a literal can
+  // change kind when it is evaluated (`Tuple(Range(1, 2), 1)` is typed
+  // `tuple<range, integer>`, and evaluates to `([1, 2], 1)`). `Undefined`
+  // is an absent component, typed `missing` (`storedComponentTypeD`).
+  const literalComponent = (d: OperandDescriptor): boolean => {
+    if (isUndefinedSymbolD(d)) return true;
+    if (provablyAdmits('nothing', d.type) || resultMayBeNothing(d, engine))
+      return false;
+    const s = d.structureOf?.();
+    if (s?.kind === 'number' || s?.kind === 'string') return true;
+    if (s?.kind === 'list-literal' || s?.kind === 'tuple')
+      return s.elements.every(literalComponent);
+    return cannotHoldAList(d.type);
+  };
+  // A component type read from a list or tuple TYPE, not from a literal.
+  const typedComponent = (t: Type): boolean => {
+    if (provablyAdmits('nothing', t)) return false;
+    if (isSubtype('number', t)) return false;
+    if (cannotHoldAList(t)) return true;
+    // A row of a matrix is a list with dimensions, and stays one.
+    const row = resolveTypeReference(t) ?? t;
+    return (
+      typeof row === 'object' &&
+      row.kind === 'list' &&
+      listTensorRank(row) !== undefined
+    );
+  };
+  for (const op of ops) {
+    const s = op.structureOf?.();
+    if (s?.kind === 'list-literal' || s?.kind === 'tuple') {
+      if (result.length + s.elements.length > TUPLE_FROM_MAX_COMPONENTS)
+        return undefined;
+      if (!s.elements.every(literalComponent)) return undefined;
+      result.push(...s.elements.map(storedComponentTypeD));
+    } else if (op.facts.collection === false) {
+      // An operand that is always absent (`Missing`, typed `missing`): the
+      // result is `Missing`, and the `missing` arm is added outside the
+      // handler, so no tuple type is claimed for it.
+      if (isSubtype(op.type, 'missing') || isUndefinedSymbolD(op))
+        return undefined;
+      if (!literalComponent(op)) return undefined;
+      result.push(storedComponentTypeD(op));
+    } else {
+      const t = resolveTypeReference(op.type) ?? op.type;
+      if (typeof t === 'object' && t.kind === 'tuple') {
+        const components = t.elements.map((e) => e.type);
+        if (!components.every(typedComponent)) return undefined;
+        result.push(...components);
+      } else {
+        const dims = staticCollectionDims(t);
+        const n = dims?.[0];
+        if (n === undefined || n < 0 || n > TUPLE_FROM_MAX_COMPONENTS)
+          return undefined;
+        const element = collectionElementType(t);
+        if (element === undefined || !typedComponent(element)) return undefined;
+        for (let i = 0; i < n; i++) result.push(element);
+      }
+    }
+    if (result.length > TUPLE_FROM_MAX_COMPONENTS) return undefined;
+  }
+  return result.map(stripNumericRanges);
 }
 
 /** Descriptor twin of {@link elementTypeOf}. */
@@ -19568,6 +19687,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // An absent collection answers `Missing` — see `SetFrom`.
     missingBehavior: 'propagate',
     signature: '(value*) -> tuple',
+    // The component types, when the operand types determine them
+    // (`tupleFromComponentTypes`): `TupleFrom([1, 2, 3])` is a
+    // `tuple<integer, integer, integer>`.
+    type: (ops, { engine }) => {
+      const components = tupleFromComponentTypes(ops, engine);
+      if (components === undefined) return undefined;
+      return BoxedType.forResult(
+        internType({
+          kind: 'tuple',
+          elements: components.map((type) => ({ type })),
+        }),
+        engine._typeResolver
+      );
+    },
     // Provable declines only — see `ListFrom`.
     canEnumerate: canEnumerateCollectionOperands,
     evaluate: (ops, { engine: ce }) => {

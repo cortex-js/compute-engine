@@ -700,6 +700,21 @@
       "description": "Convert any color to sRGB (channels 0-1)"
     },
     {
+      "name": "AssertPresent",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(any) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.",
+      "examples": [
+        "[1, 2][1]?!"
+      ]
+    },
+    {
       "name": "Assign",
       "category": "Core",
       "arity": "2",
@@ -967,7 +982,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket"
     },
     {
@@ -1231,7 +1246,7 @@
       "name": "ChunkBy",
       "category": "Collections",
       "arity": "1",
-      "signature": "((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)",
+      "signature": "((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1639,7 +1654,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; an inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to the optional `n` terms (default 20).",
       "examples": [
         "ContinuedFraction(43/19)  // [2, 3, 1, 4]"
@@ -2031,7 +2046,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert an angle in degrees.",
       "examples": [
         "Degrees(30)",
@@ -2042,7 +2057,7 @@
       "name": "DeleteAt",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)",
+      "signature": "((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2211,7 +2226,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.",
       "examples": [
         "DigitCount(122, 10, 2)  // 2"
@@ -2405,7 +2420,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the sorted list of positive divisors of an integer `n`. The sign of `n` is ignored.",
       "examples": [
         "Divisors(12)  // [1, 2, 3, 4, 6, 12]"
@@ -2435,7 +2450,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Construct an angle from degrees, minutes, and seconds.",
       "examples": [
         "DMS(30, 15)",
@@ -2461,7 +2476,7 @@
       "name": "Drop",
       "category": "Collections",
       "arity": "1",
-      "signature": "((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)",
+      "signature": "((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2942,7 +2957,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the extended GCD of `a` and `b` as a tuple `(g, x, y)` where `g = gcd(a, b)` is non-negative and `a·x + b·y = g` (Bézout coefficients).",
       "examples": [
         "ExtendedGCD(12, 18)  // (6, -1, 1)"
@@ -2958,7 +2973,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Factor a polynomial expression into a product of irreducible factors. Supports perfect square trinomials, difference of squares, and quadratic factoring with rational roots. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
+      "description": "Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
     },
     {
       "name": "Factorial",
@@ -3000,7 +3015,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the prime factorization of an integer `n` as a list of `[prime, exponent]` tuples, ordered by ascending prime. For a negative `n`, a leading `[-1, 1]` tuple carries the sign.",
       "examples": [
         "FactorInteger(360)  // [(2, 3), (3, 2), (5, 1)]"
@@ -3068,7 +3083,7 @@
       "name": "Find",
       "category": "Collections",
       "arity": "2",
-      "signature": "(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T",
+      "signature": "(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3082,26 +3097,26 @@
     {
       "name": "FindFit",
       "category": "Statistics",
-      "arity": "4",
-      "signature": "(any, any, any, any) -> dictionary",
+      "arity": "optional",
+      "signature": "(any, any, any, any, dictionary?) -> dictionary",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Nonlinear least-squares fit of a model to data. FindFit(data, model, params, vars): fit `model` (an expression in `vars` and the parameters) to `data`, a list of (x…, y) tuples or a plain list of y values. Each parameter spec is a bare symbol, (a, a0), or (a, a0, lo, hi) with box constraints. Returns a record {parameters, converged, residualNorm, iterations}. The joint form takes a list of models and matching datasets sharing parameters."
+      "description": "Nonlinear least-squares fit of a model to data. FindFit(data, model, params, vars): fit `model` (an expression in `vars` and the parameters) to `data`, a list of (x…, y) tuples or a plain list of y values. Each parameter spec is a bare symbol, (a, a0), or (a, a0, lo, hi) with box constraints. Returns a record {parameters, converged, residualNorm, iterations}. `converged` is true at a stationary point of the sum of squared residuals (a minimum of the misfit, which is not zero for noisy data), and at an exact fit: every residual within the engine's tolerance of the terms its own row computes. The joint form takes a list of models and matching datasets sharing parameters. An optional fifth argument is a dictionary of options: `{global: {b: [lo, hi]}}` searches the named parameters (at most two) over the given range for the lowest sum of squared residuals instead of returning the local minimum nearest the start; `iterations` is then the total over every solver run. The search samples each parameter on a grid: a parameter that scales the phase of a periodic function of a variable (`b` in `cos(b x + c)`) gets a point in every basin of the residual, about `π / (span of x)` apart; `{global: {b: [lo, hi, step]}}` sets the step of the grid instead (when the model is linear in the other parameters; otherwise the solver runs from each point of a coarse grid of 24 points, or 6 × 6). A step on the phase `c` of `a cos(b x + c)` keeps it on the grid; without a step the phase is solved by least squares. With more than 300 data rows the grid is scanned on a stratified sample of 300 rows, and the best grid points are then solved again and refined on every row. With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers and gives the record of `evaluate()`; the solver runs stay on the calling thread."
     },
     {
       "name": "FindRoot",
       "category": "Core",
-      "arity": "2",
-      "signature": "(any, any) -> dictionary",
+      "arity": "optional",
+      "signature": "(any, any, dictionary?) -> dictionary",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "FindRoot(equations, params): numerically find parameter values that\n\nzero the residuals. `equations` is an equation (`lhs == rhs`), a bare\n\nresidual expression (read as `= 0`), or a list of either. `params` is\n\na list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with\n\nbox constraints), matching `FindFit`. Returns a record\n\n{parameters, converged, residualNorm, iterations}.",
+      "description": "FindRoot(equations, params): numerically find parameter values that\n\nzero the residuals. `equations` is an equation (`lhs == rhs`), a bare\n\nresidual expression (read as `= 0`), or a list of either. `params` is\n\na list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with\n\nbox constraints), matching `FindFit`. Returns a record\n\n{parameters, converged, stationary, residualNorm, iterations}.\n\n`converged` is true only at a root: every residual is within the\n\nengine's tolerance scaled by its own equation,\n\n`|r_i| ≤ tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`, with `J` the\n\nJacobian and `θ` the parameters, so a minimum of the sum of squared\n\nresiduals that is not a root (`a^2 + 1 = 0`) is `converged: False`.\n\nWhen the residual is above `tolerance`, the residual itself must\n\nconfirm the Jacobian term: with each parameter moved by\n\n`±2 · tolerance · max(1, |θ_j|)` toward and away from the zero, the\n\nchange of the residual is the change the Jacobian predicts to within\n\nhalf, and the residual reaches `tolerance`, changes sign, or touches\n\n0 to within the rounding of the parameters. So a steep equation with\n\nno root (`2 - sin(10^18 a) = 0`) is not `converged` either.\n\n`stationary` is the solver's own stop test, true at such a minimum\n\ntoo; a stacked system of data rows next to an equation reads it as\n\n`FindFit` reads `converged`. An optional third argument is the options\n\ndictionary of `FindFit`: `{global: {b: [lo, hi]}}` searches the\n\nnamed parameters (at most two) over the range for the lowest sum\n\nof squared residuals of the whole system; the constant phase\n\ncoefficients of the equations (`3.22` in `cos(3.22 b + c)`) space\n\nthe grid as the span of a variable does for a fit. With a kernel\n\npool on the engine (`ce.workers`), `evaluateAsync()` scans the grid\n\non the workers.",
       "examples": [
         "FindRoot(x^2 - 2, [(x, 1)])"
       ]
@@ -3124,14 +3139,18 @@
     {
       "name": "FixedPoint",
       "category": "Control Structures",
-      "arity": "1",
-      "signature": "(any) -> unknown",
+      "arity": "optional",
+      "signature": "(function, initial: any, maxIterations: integer?) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": true,
+      "lazy": false,
       "broadcastable": false,
-      "description": "Iterate a function until a fixed point is reached."
+      "description": "Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.\n\nTwo values are the same when they are structurally identical, or when they are numbers, one of them a float, that agree to the working precision (their difference is at most a few units of the last digit, relative to their size), or when they are lists or tuples of the same length whose elements are the same. A sequence of exact values stops only when two of them are identical.\n\nWithout a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.\n\nThe optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit. When the maximum is reached, the last value is returned.",
+      "examples": [
+        "FixedPoint(x => (x + 2 / x) / 2, 1.0)",
+        "FixedPoint(Cos, 1.0)"
+      ]
     },
     {
       "name": "FlatMap",
@@ -3827,7 +3846,7 @@
       "name": "Insert",
       "category": "Collections",
       "arity": "3",
-      "signature": "(indexed_collection<T>, integer, T) -> list<T> where T",
+      "signature": "(indexed_collection<T>, integer, T) -> list<T> where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3847,7 +3866,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the digits of `n` in the given `base` (default 10), most-significant first. The sign of `n` is ignored. With a third argument `length`, the result is zero-padded on the left (or truncated to its least-significant digits) to that length.",
       "examples": [
         "IntegerDigits(255, 16)  // [15, 15]"
@@ -3888,7 +3907,7 @@
       "name": "Integrate",
       "category": "Calculus",
       "arity": "variadic",
-      "signature": "(function, limits+) -> number | list<number> | tuple | list<tuple>",
+      "signature": "(function, limits+) -> number | tensor | tuple | list<tuple>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5289,7 +5308,7 @@
       "name": "Most",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)",
+      "signature": "((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5814,6 +5833,21 @@
       "description": "Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0."
     },
     {
+      "name": "NSolve",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any, any*) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "NSolve(equation, unknown): the solutions of an equation as floats.\n\nIt is Mathematica `NSolve`: it takes the same operands as `Solve`,\n\nincluding domain specs and systems of equations, and gives the `N` of\n\neach solution of `Solve`:\n\n`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no\n\nsolution set, `NSolve` stays unevaluated: for a polynomial `Solve`\n\nalready gives numeric roots when there is no closed form, and\n\n`FindRoot` gives one local root from a start value.",
+      "examples": [
+        "NSolve(x^2 == 2, x)"
+      ]
+    },
+    {
       "name": "NthPrime",
       "category": "Number Theory",
       "arity": "1",
@@ -5969,7 +6003,7 @@
       "name": "Ordering",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T",
+      "signature": "(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6086,7 +6120,7 @@
       "name": "Partition",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T",
+      "signature": "(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6463,7 +6497,7 @@
       "name": "Position",
       "category": "Collections",
       "arity": "2",
-      "signature": "(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T",
+      "signature": "(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6613,7 +6647,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Return the sorted list of distinct prime factors of an integer `n`. The sign of `n` is ignored; `PrimeFactors(1)` is the empty list.",
       "examples": [
         "PrimeFactors(360)  // [2, 3, 5]"
@@ -6724,7 +6758,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "The sorted list of all primitive roots modulo `n`: the generators of the multiplicative group of integers mod `n`. The list is empty when there is none (unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p), and for `n = 0`. `PrimitiveRootList(1)` is `[0]`, as `PrimitiveRoot(1)` is 0. The sign of `n` is ignored. Undefined when `n` cannot be factored or there are too many roots to list.",
       "examples": [
         "PrimitiveRootList(7)  // [3, 5]",
@@ -7009,7 +7043,7 @@
       "name": "RandomShuffle",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T)",
+      "signature": "((T) random -> T where T: string) & ((indexed_collection<T>) random -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7257,7 +7291,7 @@
       "name": "ReplaceAt",
       "category": "Collections",
       "arity": "3",
-      "signature": "(indexed_collection<T>, integer, T) -> list<T> where T",
+      "signature": "(indexed_collection<T>, integer, T) -> list<T> where T: any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7316,7 +7350,7 @@
       "name": "Rest",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)",
+      "signature": "((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7343,7 +7377,7 @@
       "name": "Reverse",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)",
+      "signature": "((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7385,7 +7419,7 @@
       "name": "RotateLeft",
       "category": "Collections",
       "arity": "optional",
-      "signature": "((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)",
+      "signature": "((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7400,7 +7434,7 @@
       "name": "RotateRight",
       "category": "Collections",
       "arity": "optional",
-      "signature": "((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)",
+      "signature": "((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7869,7 +7903,7 @@
       "name": "Slice",
       "category": "Collections",
       "arity": "1",
-      "signature": "((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)",
+      "signature": "((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7916,7 +7950,7 @@
       "name": "Sort",
       "category": "Collections",
       "arity": "optional",
-      "signature": "((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T)",
+      "signature": "((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -8427,7 +8461,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling\n\n`Table(i^2, (i, 1, n))`.",
+      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from\n\n1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,\n\nand the equivalent tuple spelling `Table(i^2, (i, 1, n))`.",
       "examples": [
         "Table(i^2, (i, 1, 5))"
       ]
@@ -8466,7 +8500,7 @@
       "name": "Take",
       "category": "Collections",
       "arity": "1",
-      "signature": "((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)",
+      "signature": "((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -9046,7 +9080,7 @@
       "name": "Unique",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T) -> T where T: string) & ((collection<T>) -> list<T> where T)",
+      "signature": "((T) -> T where T: string) & ((collection<T>) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,

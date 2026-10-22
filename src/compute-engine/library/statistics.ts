@@ -114,7 +114,7 @@ import {
 import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
 import { randomCount } from './random-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { findFit, findFitAsync } from '../nonlinear-fit.js';
+import { findFit, findFitAsync, fitRecordType } from '../nonlinear-fit.js';
 import {
   distributionMean,
   distributionStandardDeviation,
@@ -1852,6 +1852,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // stay held; the data operand is evaluated inside the handler).
       lazy: true,
       signature: '(any, any, any, any, dictionary?) -> dictionary',
+      // The record of the result, with one field per parameter of the
+      // third operand (`fitRecordType`).
+      type: (ops, context) =>
+        BoxedType.forResult(
+          fitRecordType('FindFit', ops[2]),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce }) => findFit(ce, ops),
       // The global scan on the engine's kernel pool, when it has one and the
       // model compiled to code a worker can run; otherwise on this thread.

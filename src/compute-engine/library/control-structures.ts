@@ -1,6 +1,7 @@
 import { markCallableHome } from '../boxed-expression/binders.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  applicable,
   declareAssignmentLocals,
   enterNestedBodyScopes,
   evaluateStatements,
@@ -8,6 +9,9 @@ import {
   exitNestedBodyScopes,
   resolveEscapingLambda,
 } from '../function-utils.js';
+import type { CallbackSupply } from '../boxed-expression/callback-arity.js';
+import { canonicalCallbackOperand } from './collections.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
   isInFunctionBody,
   recordAssignmentLocals,
@@ -30,6 +34,7 @@ import {
   broadcastCellType,
   broadcastElementType,
   collectionElementType,
+  functionResult,
   resolveTypeAlias,
   resolveTypeForCompilation,
   widen,
@@ -70,6 +75,7 @@ import { isGenericTarget } from '../multi-clause.js';
 import { canonInstallSkipped } from '../clause-identity.js';
 import {
   CancellationError,
+  checkDeadline,
   run,
   runAsync,
 } from '../../common/interruptible.js';
@@ -1271,12 +1277,201 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
 
     FixedPoint: {
-      description: 'Iterate a function until a fixed point is reached.',
-      lazy: true,
-      signature: '(any) -> unknown',
+      examples: [
+        'FixedPoint(x => (x + 2 / x) / 2, 1.0)',
+        'FixedPoint(Cos, 1.0)',
+      ],
+      description: [
+        'Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.',
+        'Two values are the same when they are structurally identical, or when they are numbers, one of them a float, that agree to the working precision (their difference is at most a few units of the last digit, relative to their size), or when they are lists or tuples of the same length whose elements are the same. A sequence of exact values stops only when two of them are identical.',
+        'Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.',
+        'The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit. When the maximum is reached, the last value is returned.',
+      ],
+      complexity: 8200,
+      // The callback slot is the bare `function` primitive, as for `Iterate`:
+      // the result type of the function is the type of the result, which the
+      // signature grammar cannot relate to the initial value. The type
+      // handler reads it instead.
+      signature: '(function, initial: any, maxIterations: integer?) -> unknown',
+      // The result is a value of the function (the loop applies it at least
+      // once), so its type is the function's result type. A function whose
+      // result type is not known gives the declared `unknown`. `widen` is
+      // not used: it drops an `unknown` operand, which would type the result
+      // as the initial value.
+      type: ([f], { engine }) => {
+        const result = functionResult(f?.type);
+        if (result === undefined || result === 'unknown') return undefined;
+        return BoxedType.forResult(result, engine._typeResolver);
+      },
+      canonical: (ops, { engine: ce }) => {
+        // Each problem is reported in the slot of the operand, as the
+        // boxing validation does (`checkArity`): a missing operand is
+        // `Error("missing")`, an extra one `Error("unexpected-argument")`.
+        // The callback is checked as for the other callback operators
+        // (`canonicalCallbackOperand`): a value that is not a function (`3`,
+        // a string) and a function that cannot take one argument are
+        // errors, and an explicit function of no parameter (`() => 42`) is
+        // accepted, as it ignores its arguments.
+        const fnOp = ops[0];
+        const fn =
+          fnOp === undefined
+            ? ce.error('missing')
+            : (canonicalCallbackOperand(fnOp, {
+                operator: 'FixedPoint',
+                supply: FIXED_POINT_SUPPLY,
+              }) ?? ce.typeError('function', fnOp.canonical.type.type, fnOp));
+        return ce._fn('FixedPoint', [
+          fn,
+          ops[1]?.canonical ?? ce.error('missing'),
+          ...ops.slice(2, 3).map((x) => x.canonical),
+          ...ops
+            .slice(3)
+            .map((x) => ce.error('unexpected-argument', x.toString())),
+        ]);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        const [fn, initial, maxOp] = ops;
+        if (fn === undefined || initial === undefined) return undefined;
+        let limit = ce.iterationLimit;
+        if (maxOp !== undefined) {
+          // A maximum that is not a number yet (a symbol with no value)
+          // leaves the call unevaluated.
+          if (!isNumber(maxOp)) return undefined;
+          if (!maxOp.isInteger || maxOp.re < 1)
+            return ce.error('expected-positive-integer', maxOp.toString());
+          limit = maxOp.re;
+        }
+        const f = applicable(fn);
+        let x = numericApproximation ? initial.N() : initial;
+        // Without a maximum, an iteration that cannot converge leaves the
+        // call unevaluated (`isDivergingFixedPointStep`): `Cos(1)` stays
+        // exact, so the values nest (`Cos(Cos(1))`, …), and Newton's
+        // iteration on exact rationals doubles its digits at each step.
+        // Either one would run to the iteration limit on values whose cost
+        // grows at each step. With a maximum, the caller bounds the work, and
+        // the last value is returned as the description says.
+        const sizeBound =
+          maxOp === undefined
+            ? Math.max(FIXED_POINT_MIN_SIZE_BOUND, 8 * x.toString().length)
+            : undefined;
+        const epsilon = fixedPointEpsilon(ce.precision);
+        for (let i = 0; i < limit; i++) {
+          checkDeadline(ce._deadlineFrame);
+          let y = f([x]);
+          // A function that cannot be applied leaves the call unevaluated.
+          if (y === undefined) return undefined;
+          if (numericApproximation) y = y.N();
+          if (y.operator === 'Error') return y;
+          if (isSameFixedPointValue(x, y, epsilon)) return y;
+          if (
+            sizeBound !== undefined &&
+            isDivergingFixedPointStep(x, y, sizeBound)
+          )
+            return undefined;
+          x = y;
+        }
+        return x;
+      },
     },
   },
 ];
+
+/** The smallest bound, in characters of the printed value, on the size of
+ * an exact number of `FixedPoint` (see `isDivergingFixedPointStep`). */
+const FIXED_POINT_MIN_SIZE_BOUND = 512;
+
+/** `FixedPoint` applies its function to the previous value alone. */
+const FIXED_POINT_SUPPLY: CallbackSupply = {
+  count: 1,
+  describes: 'the previous value',
+};
+
+/**
+ * The relative difference under which two floats of `FixedPoint` are the
+ * same, for the engine precision `precision` (in decimal digits).
+ *
+ * At machine precision, the last 7 bits of the two floats may differ (as for
+ * the `SameQ` of Mathematica): `2^-46`, about `1.4e-14`. At a higher
+ * precision, the last 2 decimal digits may differ: `10^-(precision - 2)`.
+ * The test is relative: the absolute engine tolerance (`1e-10`) stopped the
+ * iteration for √(1e-24) at five times the root, and returned a value with
+ * only 10 correct digits of the 21 printed.
+ */
+function fixedPointEpsilon(precision: number): number {
+  return precision <= MACHINE_PRECISION
+    ? 2 ** -46
+    : 10 ** -(precision - 2);
+}
+
+/**
+ * Whether two successive values of `FixedPoint` are the same, which ends the
+ * iteration:
+ *
+ * - they are structurally identical (`isSame`);
+ * - they are number literals, one of them a float, whose difference is at
+ *   most `epsilon` times the larger magnitude (`fixedPointEpsilon`). Two
+ *   exact numbers must be identical: a sequence of exact rationals that
+ *   converges never has two equal terms;
+ * - they are lists or tuples of the same length whose elements are the same
+ *   by these rules, so a vector iteration stops as a scalar one does.
+ */
+function isSameFixedPointValue(
+  a: Expression,
+  b: Expression,
+  epsilon: number
+): boolean {
+  if (a.isSame(b)) return true;
+  if (isNumber(a) && isNumber(b)) {
+    if (a.isExact && b.isExact) return false;
+    const d = b.sub(a);
+    if (!isNumber(d)) return false;
+    // A `NaN` or an infinite difference compares false.
+    return (
+      Math.hypot(d.re, d.im) <=
+      epsilon * Math.max(Math.hypot(a.re, a.im), Math.hypot(b.re, b.im))
+    );
+  }
+  if (
+    isFunction(a) &&
+    isFunction(b) &&
+    a.operator === b.operator &&
+    (a.operator === 'List' || a.operator === 'Tuple') &&
+    a.nops === b.nops
+  )
+    return a.ops.every((x, i) => isSameFixedPointValue(x, b.ops[i], epsilon));
+  return false;
+}
+
+/**
+ * Whether the step from `x` to `y` shows that the iteration of `FixedPoint`
+ * cannot converge, so that the call stays unevaluated:
+ *
+ * - `y` contains `x` as a proper part: the function did not evaluate to a
+ *   new value, but wrapped the previous one (`Cos(1)` from `1`,
+ *   `Sqrt(1 + Sqrt(2))` from `Sqrt(2)`), and each step nests it again;
+ * - `y` is an exact number whose printed form is longer than `sizeBound`
+ *   characters: the terms of an exact iteration that converges to an
+ *   irrational number gain digits at each step.
+ *
+ * A float, a string and a collection of floats have a fixed size and are
+ * never cut short.
+ */
+function isDivergingFixedPointStep(
+  x: Expression,
+  y: Expression,
+  sizeBound: number
+): boolean {
+  if (isNumber(y))
+    return y.isExact && y.toString().length > sizeBound;
+  if (!isFunction(y)) return false;
+  return y.ops.some((op) => containsSubexpression(op, x));
+}
+
+/** Whether `e` is `part`, or has it as a part at any depth. */
+function containsSubexpression(e: Expression, part: Expression): boolean {
+  if (e.isSame(part)) return true;
+  return isFunction(e) && e.ops.some((op) => containsSubexpression(op, part));
+}
 
 /**
  * Whether a value of type `t` masks to `NaN`: its type, less any `missing`

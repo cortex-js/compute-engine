@@ -2,7 +2,8 @@
 
 Status: decided 2026-10-21 (user: D1 yes, D2 yes, D3 yes, D4 yes, D5 option
 (a), D6 yes); implemented 2026-10-21 (slices 1 to 4; D4 narrowed and D6 not
-applied, see section 5). This note
+applied, see section 5). The user confirmed the narrowed D4 on 2026-10-22;
+D6 was measured on 2026-10-22 (section 5). This note
 answers questions Q2, Q7 and Q8 of
 [the collection types proposal](2026-10-20-bare-tuple-record-any.md). It is
 limited to `unknown` and inference. Presence assertions and the diagnostic
@@ -454,7 +455,8 @@ snapshots changed):
   them; `refineConstructorPlaceholder()` refines tuple slots and record
   fields. A declared `x: unknown` assigned a literal still promotes
   (`engine-declarations.ts`: an `unknown` incumbent is not joined).
-- **D4 narrowed.** The general join (`widen`) keeps `unknown` NEUTRAL: the
+- **D4 narrowed** (confirmed by the user on 2026-10-22). The general join
+  (`widen`) keeps `unknown` NEUTRAL: the
   first measurement, with the arm kept everywhere, failed about 60 tests in
   20 suites, because the inference joins read `unknown` as "no information
   yet" (the seed of a recursion fixpoint, the result of a call whose callee
@@ -481,6 +483,33 @@ snapshots changed):
   strings in `src/compute-engine/library`; "handler" means a `type:` handler
   was found in the same definition) is the starting point for a per-site
   review; no signature was changed.
+- **D6 measured (2026-10-22)**, from the definitions themselves
+  (`STANDARD_LIBRARIES`, each `signature` parsed with `parseType()`, the
+  type of each documented example read from the boxed example before
+  evaluation). Of the 656 library signatures, 44 spell `unknown`:
+  - 24 have the result `unknown`, and 21 of them have a `type` handler. A
+    handler's answer replaces the signature's result, so for these 21 the
+    `-> unknown` slot is only the fallback when the handler gives up. The
+    examples are resolved (`Coalesce`, `AssertPresent`, `Typed`, `Field`,
+    `At` are `integer`; `Evaluate` and `N` are numeric), except `Hold` and
+    `ReleaseHold` (opaque on purpose) and `Pipe` whose stage is an operator
+    name (`16 |> Sqrt` is `unknown`; a defect, in `ROADMAP.md`). Rewriting
+    these slots to `-> any` changes only the fallback, and there it stops
+    inference instead of leaving the type open.
+  - 3 have the result `unknown` and no handler: `Spread`, `FixedPoint` and
+    `MemberCall`. For these the slot is the type, and `-> any` would stop
+    the inference after the call.
+  - 11 spell `unknown` in a parameter: `Block` (`unknown*`), `Dictionary`
+    (`tuple<string, unknown>*`), and the callback slots of `Reduce`, `Fold`,
+    `Scan` (`(unknown, T) -> unknown`) and of `Ordering`, `MaxBy`, `MinBy`,
+    `ArgMax`, `ArgMin`, `GroupBy` (`(T) -> unknown`). Under D1 every result
+    type is below `unknown`, so a callback result `-> unknown` accepts every
+    result, as `-> any` does. An annotated callback is accepted:
+    `reduce([1, 2, 3], (acc: integer, x: integer) => acc + x, 0)` is `6`
+    with no diagnostic, and so are `fold` and `maxBy` with typed callbacks.
+
+  Conclusion: the rewrite to `any` changes the documentation text and, where
+  a handler gives up or is missing, removes inference. It is not applied.
 - Documentation: the types guide (local), `docs/INFERENCE_ROADMAP.md`,
   `docs/ERROR-MODEL.md`, `CLAUDE.md` (API trap) and `CHANGELOG.md`.
 - Not done: the Epsil hover does not show the written contract beside the
@@ -491,7 +520,7 @@ snapshots changed):
 
 | File | Operator | Signature | Type handler |
 | --- | --- | --- | --- |
-| `collections.ts` | `?` | `(value: indexed_collection<any>` | dictionary<any>, index: (number|string|character|boolean|indexed_collection<any>)+) -> unknown | no handler |
+| `collections.ts` | `?` | `(value: indexed_collection<any> \| dictionary<any>, index: (number \| string \| character \| boolean \| indexed_collection<any>)+) -> unknown` | no handler |
 | `collections.ts` | `Dictionary` | `(tuple<string, unknown>*) -> dictionary` | no handler |
 | `collections.ts` | `Reduce` | `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | handler |
 | `collections.ts` | `Fold` | `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T` | no handler |

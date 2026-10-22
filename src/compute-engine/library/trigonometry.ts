@@ -49,7 +49,10 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import type { Expression } from '../types-expression.js';
-import type { OperandDescriptor } from '../types-definitions.js';
+import type {
+  OperandDescriptor,
+  TypeHandlerContext,
+} from '../types-definitions.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isFunction,
@@ -247,6 +250,57 @@ function complexKernelValue(
 
 /** The carrier of `Arctan`, for the error its evaluate handler gives `~oo`. */
 const ARCTAN_CARRIER = parseType('complex | signed_infinity');
+
+/**
+ * The result type of the rewrite verbs `TrigExpand`, `TrigToExp` and
+ * `TrigReduce`, from the type of their one operand.
+ *
+ * Each verb rewrites the trigonometric and hyperbolic functions of its
+ * operand into other numeric expressions, and keeps the operator of every
+ * other node. So a numeric operand gives a numeric value, and a boolean
+ * operand (an equation, an inequality, a logical connective) gives a
+ * boolean value of the same operator.
+ *
+ * A numeric operand gives `number`, never the operand's own type:
+ *
+ * - `TrigToExp` introduces the imaginary unit, so the rewrite of a real
+ *   operand is typed `complex` (`TrigToExp(Cos(e))` is
+ *   `(e^(ie) + e^(-ie))/2`, typed `complex`).
+ * - The rewrite of a ranged operand is not typed with that range
+ *   (`Sin(2x)^2`, typed `real<0..1>` for a real `x`, expands to
+ *   `4 sin(x)^2 cos(x)^2`, which no handler bounds above).
+ *
+ * `TrigReduce` gives `number` only: it reads its operand as a sum of
+ * products through the arithmetic of `add()` and `mul()`, which is not
+ * defined for a boolean operand (the boolean value it gives today comes
+ * from the shortcut `0 + b = b`, not from the rewrite).
+ *
+ * Any other operand (a collection, a string, an absent value, an operand
+ * whose type is not known) gives `undefined`: the declared result, `value`,
+ * stands. A collection operand keeps its shape under `TrigExpand` and
+ * `TrigToExp`, but `TrigReduce` of a tuple is an error, so no shape is
+ * claimed for any of the three.
+ *
+ * The three verbs are `lazy`, so their operand is not evaluated first, but
+ * their `canonical` handler binds it (`.canonical`, which evaluates
+ * nothing), so the operand's type is known here, with the binding it is
+ * evaluated with: a function parameter that has the name of a global is
+ * that parameter. An operand that is not bound (a structural or raw form)
+ * is typed `unknown` and gives `undefined`.
+ */
+function trigRewriteType(
+  context: TypeHandlerContext,
+  x: OperandDescriptor | undefined,
+  booleans: boolean
+): Type | undefined {
+  if (x === undefined) return undefined;
+  const t = x.type;
+  // `never` is a subtype of every type, and proves nothing about the value.
+  if (t === 'never') return undefined;
+  if (isSubtype(t, 'number')) return 'number';
+  if (booleans && isSubtype(t, 'boolean')) return 'boolean';
+  return undefined;
+}
 
 export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1776,6 +1830,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'TrigExpand(sin(2x)) → 2 sin(x) cos(x)',
       lazy: true,
       signature: '(value) -> value',
+      type: ([x], context) => {
+        const t = trigRewriteType(context, x, true);
+        return t === undefined
+          ? undefined
+          : BoxedType.forResult(t, context.engine._typeResolver);
+      },
+      // The operand is bound here (`.canonical` evaluates nothing), so the
+      // type handler reads its type with the binding it is evaluated with.
+      canonical: (ops, { engine }) =>
+        engine._fn(
+          'TrigExpand',
+          checkArity(
+            engine,
+            ops.map((x) => x.canonical),
+            1
+          )
+        ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
         const r = trigExpand(x.canonical);
@@ -1791,6 +1862,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}',
       lazy: true,
       signature: '(value) -> value',
+      type: ([x], context) => {
+        const t = trigRewriteType(context, x, true);
+        return t === undefined
+          ? undefined
+          : BoxedType.forResult(t, context.engine._typeResolver);
+      },
+      // The operand is bound here (`.canonical` evaluates nothing), so the
+      // type handler reads its type with the binding it is evaluated with.
+      canonical: (ops, { engine }) =>
+        engine._fn(
+          'TrigToExp',
+          checkArity(
+            engine,
+            ops.map((x) => x.canonical),
+            1
+          )
+        ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
         const r = trigToExp(x.canonical);
@@ -1807,6 +1895,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2',
       lazy: true,
       signature: '(value) -> value',
+      type: ([x], context) => {
+        const t = trigRewriteType(context, x, false);
+        return t === undefined
+          ? undefined
+          : BoxedType.forResult(t, context.engine._typeResolver);
+      },
+      // The operand is bound here (`.canonical` evaluates nothing), so the
+      // type handler reads its type with the binding it is evaluated with.
+      canonical: (ops, { engine }) =>
+        engine._fn(
+          'TrigReduce',
+          checkArity(
+            engine,
+            ops.map((x) => x.canonical),
+            1
+          )
+        ),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
         const r = trigReduce(x.canonical);

@@ -640,6 +640,7 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
   'Zip',
   'ListFrom',
   'SetFrom',
+  'TupleFrom',
   'DictionaryFrom',
   'Values',
   'Union',

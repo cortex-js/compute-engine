@@ -36,6 +36,7 @@ import {
   deriveApplicationOf,
   describeBoundSymbol,
   describeType,
+  resolvesToSystemBinding,
 } from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
 import { isInferredTypedParameter } from '../boxed-expression/inferred-annotations.js';
@@ -148,7 +149,7 @@ import {
   canonicalSolve,
   evaluateSolve,
 } from '../boxed-expression/solve-domain.js';
-import { findRoot, findRootAsync } from '../nonlinear-fit.js';
+import { findRoot, findRootAsync, fitRecordType } from '../nonlinear-fit.js';
 import { BLOCK_DEFINITION } from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
@@ -1439,6 +1440,40 @@ function pipeImplicitTopicCallType(
   const operands = [...st.children];
   operands.splice(at, 0, describeType(topicType));
   return deriveApplicationOf(st, operands, context);
+}
+
+/**
+ * The static type of a `Pipe` whose stage is the name of a LIBRARY operator
+ * (`16 |> Sqrt`, `xs |> Sort`). `x |> f` is `f(x)`, so its type is the type
+ * of that call, which `context.derive` gives from the operator's definition
+ * and the topic's type, with the operator's own broadcast lift
+ * (`[1, 4] |> Sqrt` is a list). This canonicalizes and evaluates nothing.
+ * `Pipe` is `lazy`, so the stage arrives unbound and its own type is
+ * `unknown`: without this, `16 |> Sqrt` was typed `unknown` while
+ * `Sqrt(16)` is typed `4`.
+ *
+ * Returns `undefined` for any other stage. A user name (`x |> f`) is not
+ * typed: the held name is looked up where the type is read, and a function
+ * parameter or a block local with the same name is the binding the pipe
+ * calls (`resolvesToSystemBinding()`). A user function literal also maps
+ * over a collection argument (`lambdaBroadcastType`,
+ * `boxed-expression/boxed-function.ts`), which `context.derive` does not
+ * model.
+ */
+function pipeNamedStageType(
+  context: TypeHandlerContext,
+  topic: OperandDescriptor | undefined,
+  stage: OperandDescriptor
+): Type | undefined {
+  if (topic === undefined) return undefined;
+  const st = stage.structureOf?.();
+  if (st?.kind !== 'symbol' || st.lookupByName === false) return undefined;
+  if (!resolvesToSystemBinding(context.engine, st.name)) return undefined;
+  if (context.engine.lookupDefinition(st.name)?.operator === undefined)
+    return undefined;
+  return context.derive(st.name, [
+    describeType(heldOperandType(context, topic)),
+  ]);
 }
 
 /**
@@ -5615,12 +5650,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // collection of that result rather than the result itself, and when the
       // stage is a call that gets the piped value as an implicit argument
       // (`pipeImplicitTopicCallType`), where the pipe is that completed call.
+      // A stage that is the name of a library operator (`16 |> Sqrt`) is
+      // typed as the call of that operator (`pipeNamedStageType`).
       type: ([x, f], context) =>
         BoxedType.forResult(
           f
             ? (pipeImplicitMapType(context, x, f) ??
                 pipeShorthandApplicationType(context, x, f) ??
                 pipeImplicitTopicCallType(context, x, f) ??
+                pipeNamedStageType(context, x, f) ??
                 functionResult(f.type) ??
                 'unknown')
             : undefined,
@@ -8828,6 +8866,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, any, dictionary?) -> dictionary',
       examples: ['FindRoot(x^2 - 2, [(x, 1)])'],
+      // The record of the result, with one field per parameter of the
+      // second operand (`fitRecordType`).
+      type: (ops, context) =>
+        BoxedType.forResult(
+          fitRecordType('FindRoot', ops[1]),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce }) => findRoot(ce, ops),
       // The global scan on the engine's kernel pool, when it has one and the
       // equations compiled to code a worker can run; otherwise on this

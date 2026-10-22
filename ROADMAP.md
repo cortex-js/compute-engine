@@ -643,6 +643,20 @@ With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
 - **A `When`-restricted function compiles to `Missing` where the interpreter
   gives the restricted values**: `r(t) = When([t, 2t], c > 0)` with `c: real`
   (on `cc468eb4f` too).
+- **Compiled broadcast arithmetic reads `number` cells as real.** For
+  `p: tensor<number>` holding `[0, 1+i, 2]`, compiled `Add(p, 1)` gives the
+  string `"[object Object]1"` (on `cc468eb4f` too): the broadcast lowering of
+  an operand typed `number | tensor` uses plain `+`/`*` inside `_SYS.bcast`.
+  Since the fix of row 425, `Add(Sum(Rest(p)), 1)` also takes that lowering
+  (its type is now `number | tensor`, which holds a matrix sum); on
+  `cc468eb4f` it was typed `number` and compiled on the complex lane, which
+  was right for a one-level `p` only. The folds themselves now use the
+  complex-aware add. Decision owed: whether a compiled `number` cell may hold
+  a complex value (then `bcast` needs the complex-aware combiner, at a cost
+  per element) or not (then such a value is outside the compiled contract).
+- **`Dot(p, p)` for `p: list<number>` at `p = []`**: the interpreter leaves
+  `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0` (on
+  `cc468eb4f` too).
 
 ### A compiled user function reads a free symbol of its body from the compile scope (OPEN, wrong value — found 2026-10-22 by the review of the fix of Tycho row 423)
 
@@ -2848,19 +2862,6 @@ stays `-> unknown` on later reads), so the hypothesis pass reads `unknown` from
 call graph as one unit, or retire a callee's memo when the function it was
 derived inside settles.
 
-### `FixedPoint` is declared but does nothing (OPEN, decision — found 2026-10-22)
-
-`FixedPoint` is in the control-structures library
-(`library/control-structures.ts`) with the description "Iterate a function
-until a fixed point is reached", the signature `(any) -> unknown` and
-`lazy: true`, but it has no `evaluate` handler, no test and no example: a call
-stays unevaluated. It also appears in `src/math-json/OPERATORS.json`. It dates
-from a work-in-progress commit (`981ae939b`, 2023-09-21). The usual meaning
-(`FixedPoint(f, x)`, iterate `x`, `f(x)`, `f(f(x))`, … until two successive
-values agree, with a maximum number of steps) takes two or three arguments, so
-the signature does not fit it either. Decision: implement it, or remove the
-declaration.
-
 ### Static types that do not contain the value: defects found while adding result type handlers (OPEN — found 2026-10-22)
 
 Found by the probes that check `isSubtype(value type, static type)` for the
@@ -2921,14 +2922,6 @@ is in code that existed before.
   which held names a local scope binds. `TrigExpand`, `TrigToExp` and
   `TrigReduce` avoid the problem by binding their operand at
   canonicalization.
-- **A `FindRoot` or `FindFit` cut short by the deadline while its parameter
-  starts are evaluated reports `parameters: {}`** (decision needed), which
-  the record type of the result (`record{parameters: record{a: real}, …}`,
-  `fitRecordType()` in `nonlinear-fit.ts`) does not admit. The specs are
-  parsed, and the starts evaluated, inside the deadline, and
-  `timeoutRecord` has no parameter names then. The choice: type the
-  parameter fields `nan | real` and report each parameter as `NaN` in that
-  case, or keep the record type and accept this case outside it.
 - **The empty tuple type prints as `tuple`**, which is the spelling of bare
   `tuple`, a type that admits every arity.
 - **`[1, Missing]` is typed `list<integer | missing>` with no length**, so it

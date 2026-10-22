@@ -53,9 +53,25 @@ Skip to the next iteration of the enclosing loop.
 
 ### fixedPoint
 
-MathJSON `FixedPoint` · `(any) -> unknown`
+MathJSON `FixedPoint` · `(function, initial: any, maxIterations: integer?) -> unknown`
 
-Iterate a function until a fixed point is reached.
+Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.
+
+Two values are the same when they are structurally identical, or when they are numbers, one of them a float, that agree to the working precision (their difference is at most a few units of the last digit, relative to their size), or when they are lists or tuples of the same length whose elements are the same. A sequence of exact values stops only when two of them are identical.
+
+Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.
+
+The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit. When the maximum is reached, the last value is returned.
+
+```epsil
+fixedPoint(x => (x + 2 / x) / 2, 1.0)
+// ➔ 1.4142135623730950488
+```
+
+```epsil
+fixedPoint(cos, 1.0)
+// ➔ 0.739085133215160641631
+```
 
 ### If
 

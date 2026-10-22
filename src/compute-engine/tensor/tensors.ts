@@ -12,6 +12,34 @@ import type {
   TensorField,
 } from '../global-types.js';
 
+/**
+ * Apply an element-wise operation of a tensor field to `lhs` and `rhs`.
+ * `select` reads the operation from a field.
+ *
+ * Two tensors of different dtypes are aligned to their common dtype FIRST
+ * (`AbstractTensor.align`), and the operation is read from the field of that
+ * dtype. An operation read from `lhs`'s own field before the alignment is
+ * given cells of another dtype: `HadamardProduct` of a `float64` matrix and
+ * an `expression` matrix produced `undefined` cells, and reading the type of
+ * the result threw a `TypeError`.
+ *
+ * A function, not a method: a method with a `TensorField<DataTypeMap[DT]>`
+ * parameter would change how `AbstractTensor<DT>` varies with `DT`, and the
+ * casts between tensor classes would stop compiling.
+ */
+function elementwise<DT extends keyof DataTypeMap>(
+  lhs: AbstractTensor<DT>,
+  select: (
+    field: TensorField<DataTypeMap[DT]>
+  ) => (a: DataTypeMap[DT], b: DataTypeMap[DT]) => DataTypeMap[DT],
+  rhs: AbstractTensor<DT> | DataTypeMap[DT]
+): AbstractTensor<DT> {
+  if (!(rhs instanceof AbstractTensor))
+    return AbstractTensor.broadcast(select(lhs.field), lhs, rhs);
+  const [l, r] = AbstractTensor.align(lhs, rhs);
+  return AbstractTensor.broadcast(select(l.field), l, r);
+}
+
 // @todo: See also:
 // - https://github.com/scalanlp/breeze/wiki/Linear-Algebra-Cheat-Sheet
 // - https://mathjs.org/docs/datatypes/matrices.html
@@ -1041,29 +1069,33 @@ export abstract class AbstractTensor<
   }
 
   add(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
-    return AbstractTensor.broadcast(this.field.add.bind(this.field), this, rhs);
+    return elementwise(this, (f) => f.add.bind(f), rhs);
   }
 
   subtract(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
-    return AbstractTensor.broadcast(this.field.sub.bind(this.field), this, rhs);
+    return elementwise(this, (f) => f.sub.bind(f), rhs);
   }
 
   // Hadamard product: \odot or \circ
   multiply(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
-    return AbstractTensor.broadcast(this.field.mul.bind(this.field), this, rhs);
+    return elementwise(this, (f) => f.mul.bind(f), rhs);
   }
 
   divide(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
-    return AbstractTensor.broadcast(this.field.div.bind(this.field), this, rhs);
+    return elementwise(this, (f) => f.div.bind(f), rhs);
   }
 
   power(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
     // `field.pow` takes the exponent as a `number`, while `broadcast` supplies
     // it as a tensor element (`DataTypeMap[DT]`). The exponent is numeric for
     // the tensor dtypes that support `power`, so adapt the signature here.
-    const pow = (lhs: DataTypeMap[DT], exp: DataTypeMap[DT]): DataTypeMap[DT] =>
-      this.field.pow(lhs, exp as number);
-    return AbstractTensor.broadcast(pow, this, rhs);
+    return elementwise(
+      this,
+      (f) =>
+        (lhs: DataTypeMap[DT], exp: DataTypeMap[DT]): DataTypeMap[DT] =>
+          f.pow(lhs, exp as number),
+      rhs
+    );
   }
 
   // // aka inner product

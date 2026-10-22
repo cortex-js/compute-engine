@@ -2073,6 +2073,201 @@ function squareMatrixPowerType(
   );
 }
 
+/**
+ * The number types that the result-type handlers of the matrix operators
+ * read from the cells of an operand, from the narrowest outwards. A cell
+ * type in none of them (`number`, which admits NaN and the infinities, a
+ * symbolic or a non-numeric cell) makes these handlers decline.
+ */
+const MATRIX_CELL_TIERS = ['integer', 'rational', 'real', 'complex'] as const;
+type MatrixCellTier = (typeof MATRIX_CELL_TIERS)[number];
+
+/**
+ * The dimensions and the cell tier of an operand of a matrix operator, read
+ * from its type, or `undefined` when the type does not give both.
+ *
+ * The dimensions come from `staticCollectionDims()`: an array with one
+ * extent for each axis, `-1` for an extent that is not known. A plain
+ * `list<E>` whose elements cannot be lists is a vector of unknown length,
+ * `[-1]`. A tensor of unknown rank, a ragged list, a union of shapes and a
+ * type that is not a list give `undefined`.
+ *
+ * The empty type `never` gives `undefined`, for the operand and for its
+ * cells: it is a subtype of every type, so a tier test would let it claim
+ * `integer`.
+ */
+function matrixOperandShape(
+  d: OperandDescriptor | undefined
+): { dims: number[]; tier: MatrixCellTier } | undefined {
+  if (d === undefined || isSubtype(d.type, 'never')) return undefined;
+  const dims = staticCollectionDims(d.type);
+  if (dims === null || dims.length === 0) return undefined;
+  const cell = broadcastCellType(d.type);
+  if (isSubtype(cell, 'never')) return undefined;
+  const tier = MATRIX_CELL_TIERS.find((t) => isSubtype(cell, t));
+  if (tier === undefined) return undefined;
+  return { dims, tier };
+}
+
+/** The wider of two cell tiers. */
+function widerCellTier(a: MatrixCellTier, b: MatrixCellTier): MatrixCellTier {
+  return MATRIX_CELL_TIERS.indexOf(a) >= MATRIX_CELL_TIERS.indexOf(b) ? a : b;
+}
+
+/**
+ * The cell type of the result of a matrix operator, for operand cells of the
+ * tier `tier`, by the way the operator computes its result cells:
+ *
+ * - `'copy'`: the result cells are operand cells, or the integer `0`. The
+ *   tier is kept.
+ * - `'ring'`: the result cells are sums, differences and products of
+ *   operand cells. A cell typed `integer` is an exact integer or a float
+ *   with an integer value (`2.0` and `1.5e308` are typed `integer`), and
+ *   the sums and products of such values have integer values, so `integer`
+ *   is kept. A `rational` result is not claimed: the product of the float
+ *   `2.0` and the exact `1/3` is the float `0.666…`, typed `real`. The
+ *   operators compute with exact numbers and big decimals, so a real result
+ *   does not overflow to an infinity. A complex float is a pair of machine
+ *   numbers: a product can overflow and give `ComplexInfinity` or `NaN`, so
+ *   a complex operand gives `number`.
+ * - `'field'`: the result cells are also quotients of operand cells. An
+ *   integer or rational operand gives `real`. A real operand gives
+ *   `number`: a real cell can be a subnormal float, and its reciprocal
+ *   overflows to `+∞` (`PseudoInverse([[1.5e-320]])` is `[[+∞]]`), which
+ *   `real` does not admit. An integer or rational cell is never subnormal:
+ *   it is `0`, or at least `1` in magnitude, or an exact rational. A complex
+ *   operand gives `number`.
+ * - `'numeric'`: the result cells are computed by a kernel in machine
+ *   precision (`rref`, the LU, QR and Cholesky kernels, the eigenvalue and
+ *   singular value kernels) or by a closed form that can be irrational or
+ *   complex (the eigenvalues of an integer matrix). An overflow, a rounding
+ *   error at the edge of the domain of `acos`, or a zero pivot can give an
+ *   infinity or `NaN`, so the cells are `number`.
+ */
+function matrixResultCellType(
+  tier: MatrixCellTier,
+  kind: 'copy' | 'ring' | 'field' | 'numeric'
+): Type {
+  if (kind === 'copy') return tier;
+  if (kind === 'numeric' || tier === 'complex') return 'number';
+  if (kind === 'ring' && tier === 'integer') return 'integer';
+  if (kind === 'field' && tier === 'real') return 'number';
+  return 'real';
+}
+
+/**
+ * The extent of a square matrix with the dimensions `dims`: the known extent
+ * of the two, or `-1` when neither is known. `undefined` when `dims` is not
+ * of rank 2 or its two extents are known and not equal: the operators that
+ * require a square matrix answer `expected-square-matrix` for it.
+ */
+function squareMatrixExtent(dims: ReadonlyArray<number>): number | undefined {
+  if (dims.length !== 2) return undefined;
+  const [rows, columns] = dims;
+  if (rows >= 0 && columns >= 0 && rows !== columns) return undefined;
+  return rows >= 0 ? rows : columns;
+}
+
+/**
+ * The common value of two extents, `-1` when neither is known, or
+ * `undefined` when both are known and not equal.
+ */
+function commonExtent(a: number, b: number): number | undefined {
+  if (a >= 0 && b >= 0 && a !== b) return undefined;
+  return a >= 0 ? a : b;
+}
+
+/** A tensor type with cells `cell` and the dimensions `dims`. */
+function tensorType(cell: Type, dims: number[]): Type {
+  return { kind: 'list', elements: cell, dimensions: dims };
+}
+
+/**
+ * The type of a matrix operator with one matrix operand whose result has a
+ * shape derived from the operand's: `shape` maps the operand dimensions to
+ * the result dimensions, or to `undefined` to decline. `kind` is the way the
+ * result cells are computed (`matrixResultCellType()`). The handler declines
+ * when the operand is not a matrix of known rank 2 with cells of a number
+ * tier.
+ */
+function matrixMapType(
+  m: OperandDescriptor | undefined,
+  kind: 'copy' | 'ring' | 'field' | 'numeric',
+  shape: (dims: number[]) => number[] | undefined,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  const operand = matrixOperandShape(m);
+  if (operand === undefined || operand.dims.length !== 2) return undefined;
+  const dims = shape(operand.dims);
+  if (dims === undefined) return undefined;
+  return BoxedType.forResult(
+    tensorType(matrixResultCellType(operand.tier, kind), dims),
+    context.engine._typeResolver
+  );
+}
+
+/**
+ * The dimensions of the matrix product of operands with the dimensions `a`
+ * and `b` (each of rank 1 or 2), as the `MatrixMultiply` evaluate handler
+ * computes it, or `undefined`: for two vectors (the result is a scalar,
+ * which the declared `matrix | vector` result does not admit), and for inner
+ * extents that are known and not equal (the handler answers
+ * `incompatible-dimensions`).
+ */
+function matrixProductDims(
+  a: ReadonlyArray<number>,
+  b: ReadonlyArray<number>
+): number[] | undefined {
+  if (a.length === 2 && b.length === 2) {
+    if (commonExtent(a[1], b[0]) === undefined) return undefined;
+    return [a[0], b[1]];
+  }
+  if (a.length === 2 && b.length === 1) {
+    if (commonExtent(a[1], b[0]) === undefined) return undefined;
+    return [a[0]];
+  }
+  if (a.length === 1 && b.length === 2) {
+    if (commonExtent(a[0], b[0]) === undefined) return undefined;
+    return [b[1]];
+  }
+  return undefined;
+}
+
+/**
+ * The positive integer value of a number literal operand of a constant
+ * matrix constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`), or
+ * `undefined` when the operand is not such a literal. A symbolic operand, or
+ * a literal that is not a positive integer, gives `undefined`: the evaluate
+ * handlers answer `expected-positive-integer` for it.
+ */
+function positiveIntegerLiteral(
+  d: OperandDescriptor | undefined
+): number | undefined {
+  if (d === undefined) return undefined;
+  const v = operandLiteralValue(d);
+  return v !== undefined && Number.isSafeInteger(v) && v >= 1 ? v : undefined;
+}
+
+/**
+ * The type of a constant matrix constructor with `rows` and `columns`
+ * (literal operands, see `positiveIntegerLiteral()`): an integer matrix of
+ * that shape. It declines for an extent that is not a literal, and for a
+ * matrix with more than `MAX_SIZE_EAGER_TENSOR` entries: that matrix is a
+ * lazy `Tabulate`, typed `list<list<integer>>`, which is not a `matrix`.
+ */
+function constantMatrixType(
+  rows: number | undefined,
+  columns: number | undefined,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  if (rows === undefined || columns === undefined) return undefined;
+  if (rows * columns > MAX_SIZE_EAGER_TENSOR) return undefined;
+  return BoxedType.forResult(
+    tensorType('integer', [rows, columns]),
+    context.engine._typeResolver
+  );
+}
+
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
@@ -2135,6 +2330,24 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the shape tuple of an expression.',
       complexity: 8200,
       signature: '(value) -> tuple',
+      // An operand whose type has a known rank `r` (a vector, a matrix, a
+      // `list<U^dims>`, or a plain list whose elements cannot be lists) has
+      // a shape of `r` integers. The extents are typed `integer`, not their
+      // values: the shape of a matrix with an unknown extent has `-1` at
+      // that axis. Another operand (a scalar, a tensor of unknown rank, a
+      // ragged list) declines, and the declared `tuple` applies.
+      type: ([xs], context) => {
+        if (xs === undefined || isSubtype(xs.type, 'never')) return undefined;
+        const dims = staticCollectionDims(xs.type);
+        if (dims === null || dims.length === 0) return undefined;
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: dims.map(() => ({ type: 'integer' as const })),
+          },
+          context.engine._typeResolver
+        );
+      },
       // The evaluate handler declines (stays unevaluated) only for a
       // collection that `shapeOfOperand()` cannot give a shape: a collection
       // that is not indexed, an infinite collection, one with an unknown
@@ -2695,6 +2908,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Moore-Penrose pseudoinverse of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      // The pseudoinverse of an m×n matrix is n×m. Its cells are quotients
+      // of the cells of the operand (`matrixResultCellType()`, `'field'`).
+      // A rank-deficient matrix stays unevaluated.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'field',
+          ([rows, columns]) => [columns, rows],
+          context
+        ),
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
 
@@ -2716,6 +2939,30 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       keywords: ['linear system', 'solve'],
       complexity: 8300,
       signature: '(matrix, matrix|vector) -> value',
+      // The solution of `A·x = b` for a square n×n matrix `A` has the shape
+      // of `b`: a vector of n cells, or an n×p matrix. Its cells are
+      // computed from the inverse of `A`, so they are quotients of the cells
+      // (`matrixResultCellType()`, `'field'`). The handler declines when `A`
+      // is not square or the extents of `A` and `b` are known and not
+      // equal: the evaluate handler answers an error for them. A singular
+      // `A` stays unevaluated.
+      type: ([a, b], context) => {
+        const A = matrixOperandShape(a);
+        const B = matrixOperandShape(b);
+        if (A === undefined || B === undefined) return undefined;
+        const n = squareMatrixExtent(A.dims);
+        if (n === undefined || B.dims.length > 2) return undefined;
+        const rows = commonExtent(n, B.dims[0]);
+        if (rows === undefined) return undefined;
+        const tier = widerCellTier(A.tier, B.tier);
+        return BoxedType.forResult(
+          tensorType(
+            matrixResultCellType(tier, 'field'),
+            B.dims.length === 1 ? [rows] : [rows, B.dims[1]]
+          ),
+          context.engine._typeResolver
+        );
+      },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         const A = a;
         const B = b;
@@ -2758,6 +3005,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      // The adjugate of an n×n matrix is n×n, and each cell is a minor: a
+      // sum of products of cells (`matrixResultCellType()`, `'ring'`). A
+      // matrix that is not square stays unevaluated, and the handler
+      // declines when its extents are known and not equal.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'ring',
+          (dims) => {
+            const n = squareMatrixExtent(dims);
+            return n === undefined ? undefined : [n, n];
+          },
+          context
+        ),
       evaluate: (ops, { numericApproximation }) => {
         const op1 = ops[0];
         if (isTensorValue(op1)) {
@@ -2917,6 +3178,32 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Kernel (null space) of a linear map',
       complexity: 8200,
       signature: '(value) -> list',
+      // The kernel is a list of basis vectors, possibly empty (the kernel of
+      // a matrix of full column rank is `[]`). Each basis vector has one cell
+      // for each column of the operand: n cells for an m×n matrix or a
+      // vector of n cells (a 1×n linear form). A matrix of floats takes a
+      // kernel in machine precision (`matrixResultCellType()`,
+      // `'numeric'`), so the cells are `number`. The kernel of a scalar is
+      // `[[1]]` or `[]`. Another operand declines.
+      type: ([map], context) => {
+        if (map === undefined || isSubtype(map.type, 'never')) return undefined;
+        let basisVector: Type;
+        if (isSubtype(map.type, 'number')) {
+          basisVector = tensorType('integer', [1]);
+        } else {
+          const operand = matrixOperandShape(map);
+          if (operand === undefined || operand.dims.length > 2)
+            return undefined;
+          basisVector = tensorType(
+            matrixResultCellType(operand.tier, 'numeric'),
+            [operand.dims[operand.dims.length - 1]]
+          );
+        }
+        return BoxedType.forResult(
+          { kind: 'list', elements: basisVector },
+          context.engine._typeResolver
+        );
+      },
       evaluate: ([map], { engine: ce }) => {
         const op = map;
 
@@ -3044,6 +3331,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Matrix and vector multiplication.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      // An m×n matrix times an n×p matrix is m×p, times a vector of n cells
+      // is a vector of m cells, and a vector of m cells times an m×n matrix
+      // is a vector of n cells (`matrixProductDims()`). The cells are sums of
+      // products of cells (`matrixResultCellType()`, `'ring'`). The handler
+      // declines for two vectors, whose product is a scalar, and for inner
+      // extents that are known and not equal.
+      type: ([a, b], context) => {
+        const A = matrixOperandShape(a);
+        const B = matrixOperandShape(b);
+        if (A === undefined || B === undefined) return undefined;
+        const dims = matrixProductDims(A.dims, B.dims);
+        if (dims === undefined) return undefined;
+        return BoxedType.forResult(
+          tensorType(
+            matrixResultCellType(widerCellTier(A.tier, B.tier), 'ring'),
+            dims
+          ),
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (both operands must be tensor values); success
       // is not cheaply decidable — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
@@ -3520,6 +3827,30 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      // The product has the shape of its operands, and each cell is the
+      // product of two cells (`matrixResultCellType()`, `'ring'`). The
+      // handler declines when the ranks differ or two extents are known and
+      // not equal: the evaluate handler answers `incompatible-dimensions`.
+      type: ([a, b], context) => {
+        const A = matrixOperandShape(a);
+        const B = matrixOperandShape(b);
+        if (A === undefined || B === undefined) return undefined;
+        if (A.dims.length !== B.dims.length || A.dims.length > 2)
+          return undefined;
+        const dims: number[] = [];
+        for (let i = 0; i < A.dims.length; i++) {
+          const extent = commonExtent(A.dims[i], B.dims[i]);
+          if (extent === undefined) return undefined;
+          dims.push(extent);
+        }
+        return BoxedType.forResult(
+          tensorType(
+            matrixResultCellType(widerCellTier(A.tier, B.tier), 'ring'),
+            dims
+          ),
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (both operands must be tensor values); success
       // is not cheaply decidable — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
@@ -4034,6 +4365,28 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // is inferred to have a numeric type, which would fail a `symbol`
       // signature check. The evaluate handler validates it with `isSymbol`.
       signature: '(matrix, any?) -> expression',
+      // The characteristic polynomial of a square matrix of numbers is a
+      // polynomial in a numeric variable, so it is a `number`. This also
+      // holds for an `unknown` variable (the default `x` when it is not
+      // declared), whose arithmetic is typed `number`. The handler declines
+      // for a variable whose type is not a number, which goes through
+      // `Determinant`, for a matrix that is not square, and for cells
+      // outside the number tiers (a symbolic or NaN cell).
+      type: ([mat, variable], context) => {
+        if (
+          variable !== undefined &&
+          variable.type !== 'unknown' &&
+          !(
+            isSubtype(variable.type, 'number') &&
+            !isSubtype(variable.type, 'never')
+          )
+        )
+          return undefined;
+        const operand = matrixOperandShape(mat);
+        if (operand === undefined) return undefined;
+        if (squareMatrixExtent(operand.dims) === undefined) return undefined;
+        return BoxedType.forResult('number', context.engine._typeResolver);
+      },
       evaluate: ([mat, variable], { engine: ce }) => {
         const A = mat;
         if (!isTensorValue(A)) return undefined;
@@ -4085,6 +4438,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Reduced row echelon form (RREF) of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
+      // The reduced row echelon form has the shape of the operand. A matrix
+      // with a float entry (also an entry typed `integer`, such as
+      // `1.5e308`) is reduced in machine precision, where an overflow gives
+      // NaN (`matrixResultCellType()`, `'numeric'`), so the cells are
+      // `number`.
+      type: ([m], context) =>
+        matrixMapType(m, 'numeric', (dims) => dims, context),
       evaluate: ([m], { engine: ce }) => {
         const op = m;
         if (!isTensorValue(op)) return undefined;
@@ -4130,6 +4490,39 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Extract a matrix diagonal or build a diagonal matrix.',
       complexity: 8200,
       signature: '(value) -> value',
+      // - A number is returned as is, so the result has its type.
+      // - A vector of n cells gives the n×n matrix with these cells on the
+      //   diagonal and the integer 0 elsewhere. The cell tier is kept
+      //   (`matrixResultCellType()`, `'copy'`). The handler declines for a
+      //   vector of unknown length and for n² > `MAX_SIZE_EAGER_TENSOR`:
+      //   that matrix is a lazy `Tabulate`, typed `list<list<…>>`.
+      // - An m×n matrix gives the vector of its min(m, n) diagonal cells.
+      // Another operand declines, and the declared `value` applies.
+      type: ([x], context) => {
+        if (x === undefined || isSubtype(x.type, 'never')) return undefined;
+        if (isSubtype(x.type, 'number'))
+          return BoxedType.forResult(x.type, context.engine._typeResolver);
+        const operand = matrixOperandShape(x);
+        if (operand === undefined) return undefined;
+        const cell = matrixResultCellType(operand.tier, 'copy');
+        const { dims } = operand;
+        if (dims.length === 1) {
+          const n = dims[0];
+          if (n < 0 || n * n > MAX_SIZE_EAGER_TENSOR) return undefined;
+          return BoxedType.forResult(
+            tensorType(cell, [n, n]),
+            context.engine._typeResolver
+          );
+        }
+        if (dims.length !== 2) return undefined;
+        const [rows, columns] = dims;
+        return BoxedType.forResult(
+          tensorType(cell, [
+            rows >= 0 && columns >= 0 ? Math.min(rows, columns) : -1,
+          ]),
+          context.engine._typeResolver
+        );
+      },
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0];
 
@@ -4196,6 +4589,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'n-by-n identity matrix.',
       complexity: 8100,
       signature: '(integer) -> matrix',
+      // `matrix<integer^(n×n)>` for a literal n (`constantMatrixType()`).
+      type: ([n], context) => {
+        const size = positiveIntegerLiteral(n);
+        return constantMatrixType(size, size, context);
+      },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const nExpr = ops[0];
         const n = nExpr.re;
@@ -4227,6 +4625,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Matrix filled with zeros.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
+      // `matrix<integer^(m×n)>` for literal extents, m×m with one operand
+      // (`constantMatrixType()`).
+      type: ([m, n], context) => {
+        const rows = positiveIntegerLiteral(m);
+        const columns = n === undefined ? rows : positiveIntegerLiteral(n);
+        return constantMatrixType(rows, columns, context);
+      },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0];
         const m = mExpr.re;
@@ -4266,6 +4671,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Matrix filled with ones.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
+      // `matrix<integer^(m×n)>` for literal extents, m×m with one operand
+      // (`constantMatrixType()`).
+      type: ([m, n], context) => {
+        const rows = positiveIntegerLiteral(m);
+        const columns = n === undefined ? rows : positiveIntegerLiteral(n);
+        return constantMatrixType(rows, columns, context);
+      },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0];
         const m = mExpr.re;
@@ -5051,6 +5463,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
       signature: '(matrix) -> list',
+      // An n×n matrix has n eigenvalues, repeated ones included. They can be
+      // irrational or complex for an integer matrix, and the kernels for a
+      // 3×3 or larger matrix compute in machine precision
+      // (`matrixResultCellType()`, `'numeric'`), so they are `number`.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'numeric',
+          (dims) => {
+            const n = squareMatrixExtent(dims);
+            return n === undefined ? undefined : [n];
+          },
+          context
+        ),
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — a full ground test would
       // walk every entry. See `canEnumerateFiniteSource`.
@@ -5158,6 +5584,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> list',
+      // One eigenvector of n cells for each of the n eigenvalues of an n×n
+      // matrix, so the result is n×n. The cells are `number`, as for
+      // `Eigenvalues`.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'numeric',
+          (dims) => {
+            const n = squareMatrixExtent(dims);
+            return n === undefined ? undefined : [n, n];
+          },
+          context
+        ),
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
@@ -5222,6 +5661,24 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
+      // The pair of the `Eigenvalues` and the `Eigenvectors` results.
+      type: ([m], context) => {
+        const operand = matrixOperandShape(m);
+        if (operand === undefined) return undefined;
+        const n = squareMatrixExtent(operand.dims);
+        if (n === undefined) return undefined;
+        const cell = matrixResultCellType(operand.tier, 'numeric');
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: [
+              { type: tensorType(cell, [n]) },
+              { type: tensorType(cell, [n, n]) },
+            ],
+          },
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
@@ -5262,6 +5719,28 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'LU decomposition of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      // The triple `(P, L, U)` of n×n matrices for an n×n matrix. P is a
+      // permutation matrix of the integers 0 and 1. L and U are computed in
+      // machine precision (`matrixResultCellType()`, `'numeric'`), so their
+      // cells are `number`.
+      type: ([m], context) => {
+        const operand = matrixOperandShape(m);
+        if (operand === undefined) return undefined;
+        const n = squareMatrixExtent(operand.dims);
+        if (n === undefined) return undefined;
+        const cell = matrixResultCellType(operand.tier, 'numeric');
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: [
+              { type: tensorType('integer', [n, n]) },
+              { type: tensorType(cell, [n, n]) },
+              { type: tensorType(cell, [n, n]) },
+            ],
+          },
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
@@ -5293,6 +5772,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'QR decomposition of a matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
+      // The pair `(Q, R)` for an m×n matrix: Q is m×m and R is m×n. Both are
+      // computed in machine precision (`matrixResultCellType()`,
+      // `'numeric'`), so their cells are `number`.
+      type: ([m], context) => {
+        const operand = matrixOperandShape(m);
+        if (operand === undefined || operand.dims.length !== 2)
+          return undefined;
+        const [rows, columns] = operand.dims;
+        const cell = matrixResultCellType(operand.tier, 'numeric');
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: [
+              { type: tensorType(cell, [rows, rows]) },
+              { type: tensorType(cell, [rows, columns]) },
+            ],
+          },
+          context.engine._typeResolver
+        );
+      },
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
@@ -5324,6 +5823,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
       signature: '(matrix) -> matrix',
+      // The n×n factor L of an n×n matrix, computed in machine precision
+      // (`matrixResultCellType()`, `'numeric'`), so its cells are `number`.
+      // A matrix that is not positive definite gives the error
+      // `expected-positive-definite-matrix`, which no matrix type admits:
+      // the declared `matrix` does not admit it either.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'numeric',
+          (dims) => {
+            const n = squareMatrixExtent(dims);
+            return n === undefined ? undefined : [n, n];
+          },
+          context
+        ),
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
@@ -5396,6 +5910,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'numeric otherwise.',
       complexity: 8700,
       signature: '(matrix) -> list',
+      // An m×n matrix has min(m, n) singular values, zeros included. They
+      // are irrational for most exact matrices and are computed in machine
+      // precision for a larger one (`matrixResultCellType()`, `'numeric'`),
+      // so they are `number`. The length is not known when one extent is
+      // not known.
+      type: ([m], context) =>
+        matrixMapType(
+          m,
+          'numeric',
+          ([rows, columns]) => [
+            rows >= 0 && columns >= 0 ? Math.min(rows, columns) : -1,
+          ],
+          context
+        ),
       // Provable declines only (the operand must be a walkable, finite tensor
       // value); success is not cheaply decidable — the exact path may bail to
       // the numeric SVD, which itself declines. See
