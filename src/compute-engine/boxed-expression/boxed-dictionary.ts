@@ -10,7 +10,10 @@ import type {
   CanonicalOptions,
 } from '../global-types.js';
 
-import { _BoxedExpression } from './abstract-boxed-expression.js';
+import {
+  _BoxedExpression,
+  hasSymbolOrOperator,
+} from './abstract-boxed-expression.js';
 import { cachedValue, type CachedValue } from './cache.js';
 import {
   digest128,
@@ -83,10 +86,10 @@ export class BoxedDictionary
    * that collides with an `Object.prototype` member. Prototype-free, or three
    * things go wrong at once: a `__proto__` entry cannot be stored at all (the
    * assignment invokes the inherited setter, so the entry vanishes while
-   * `get`/`has` still answer from the prototype), and reading a MISSING
+   * `get`/`hasKey` still answer from the prototype), and reading a MISSING
    * `toString`/`valueOf` key hands the caller the inherited JS FUNCTION as if
    * it were the stored value. Every read below must therefore avoid
-   * prototype-derived methods too — see `has` and `match`. */
+   * prototype-derived methods too — see `hasKey` and `match`. */
   private readonly _keyValues: Record<string, Expression> = Object.create(null);
   private _digest: string | undefined;
   /** Memo for {@link type}, keyed on the composite cache generation
@@ -493,7 +496,25 @@ export class BoxedDictionary
     return this._keyValues[key];
   }
 
-  has(key: string): boolean {
+  /** True if `v` is `Dictionary` (the operator of this expression), or if a
+   * VALUE of the dictionary includes the symbol `v` or a node with the
+   * operator `v`. This is the same test as on every other expression, so a
+   * walk that asks "does this expression mention `x`?" gets the correct
+   * answer when it reaches a dictionary.
+   *
+   * The keys are strings, not symbols, so a key never matches: for
+   * `{"a" -> u}`, `has("u")` is `true` and `has("a")` is `false`. To test
+   * whether the dictionary has a key, use `hasKey()`.
+   *
+   * The walk is the one of a function expression (`hasSymbolOrOperator()`),
+   * with one visited set, so a dictionary held under several keys is walked
+   * once. */
+  override has(v: string | string[]): boolean {
+    return hasSymbolOrOperator(this, v);
+  }
+
+  /** True if the dictionary has an entry with the key `key`. */
+  hasKey(key: string): boolean {
     // `Object.hasOwn`, not `this._keyValues.hasOwnProperty(…)`: the backing
     // map has no prototype, so it carries no such method.
     return Object.hasOwn(this._keyValues, key);

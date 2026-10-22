@@ -168,7 +168,7 @@ describe('isDictionary', () => {
       ['Tuple', { str: 'a' }, 1],
     ]);
     if (isDictionary(expr)) {
-      expect(expr.has('a')).toBe(true);
+      expect(expr.hasKey('a')).toBe(true);
       expect(expr.keys).toBeDefined();
     }
   });

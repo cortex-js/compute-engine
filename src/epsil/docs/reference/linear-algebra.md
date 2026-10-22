@@ -591,7 +591,7 @@ matrixRank([[1, 2], [2, 4]])
 
 ### norm
 
-MathJSON `Norm` · `(list<number> | list<tuple> | number | tuple, (+oo | real | string)?) -> +oo | nan | real`
+MathJSON `Norm` · `(list<tuple> | number | tensor | tuple, (+oo | real | string)?) -> +oo | nan | real`
 
 Vector or matrix norm.
 
@@ -706,7 +706,7 @@ singularValues([[3, 0], [0, 4]])
 
 ### trace
 
-MathJSON `Trace` · `(list<number> | number, axis1: integer?, axis2: integer?) -> list<number> | number`
+MathJSON `Trace` · `(number | tensor, axis1: integer?, axis2: integer?) -> number | tensor`
 
 Trace of a matrix or pair of tensor axes.
 

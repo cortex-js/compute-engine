@@ -293,6 +293,7 @@ import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   _BoxedExpression,
   DISPLAY_MATERIALIZATION,
+  hasSymbolOrOperator,
 } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
@@ -2384,33 +2385,11 @@ export class BoxedFunction
   }
 
   has(v: string | string[]): boolean {
-    // An explicit walk with a visited set rather than a recursion through
-    // each operand's `has`: an expression that shares its operands (a user
-    // function applied to its own previous result embeds that result once
-    // per mention of the parameter) unfolds exponentially in the nesting
-    // depth, and every function node must be asked once.
-    const visited = new Set<Expression>();
-    const pending: Expression[] = [this];
-    while (pending.length > 0) {
-      const e = pending.pop()!;
-      if (!isFunction(e)) {
-        if (e.has(v)) return true;
-        continue;
-      }
-      if (visited.has(e)) continue;
-      visited.add(e);
-      // Does the operator name match?
-      const operator = e.operator;
-      if (typeof v === 'string') {
-        if (operator === v) return true;
-      } else if (v.includes(operator)) return true;
-      // Otherwise ask the operands. A store-backed list has only number
-      // operands, which never match a name, so it is not walked (and not
-      // boxed).
-      if (e instanceof BoxedFunction && e._numericStore !== undefined) continue;
-      for (const op of e.ops) pending.push(op);
-    }
-    return false;
+    // One explicit walk with one visited set over the function nodes and
+    // the dictionaries (`hasSymbolOrOperator()`), not a recursion through
+    // each operand's `has()`: an expression that shares its operands
+    // unfolds exponentially in the nesting depth.
+    return hasSymbolOrOperator(this, v);
   }
 
   /**

@@ -726,10 +726,10 @@ parses one.
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1508,10 +1508,10 @@ type(type): BoxedType
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1610,10 +1610,10 @@ createScope(bindings?, parent?): InspectableScope
 
 `Record`\<`string`, 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1709,10 +1709,10 @@ declareType(name, type, options?): void
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1775,10 +1775,10 @@ declare(id, type, scope?): IComputeEngine
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1854,10 +1854,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 ####### arg2?
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -1874,10 +1874,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -1904,10 +1904,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -1954,10 +1954,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -1984,10 +1984,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -4636,10 +4636,10 @@ type(type): BoxedType
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -12103,10 +12103,10 @@ parses one.
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -12885,10 +12885,10 @@ type(type): BoxedType
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -12987,10 +12987,10 @@ createScope(bindings?, parent?): InspectableScope
 
 `Record`\<`string`, 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -13086,10 +13086,10 @@ declareType(name, type, options?): void
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -13152,10 +13152,10 @@ declare(id, type, scope?): IComputeEngine
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -13231,10 +13231,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 ####### arg2?
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -13251,10 +13251,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -13281,10 +13281,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -13331,10 +13331,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -13361,10 +13361,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
+     \| [`ListType`](#listtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`RecordType`](#recordtype)
@@ -14989,6 +14989,10 @@ const subexpressions = expr.getSubexpressions('Add');
 // -> `[['Add', 'a', 'b'], ['Add', 'c', 'd']]`
 ```
 
+The walk continues into the values of a dictionary. A function
+expression or a dictionary that occurs several times as the SAME object
+(a shared subexpression) is listed once.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -15016,6 +15020,10 @@ const expr = ce.parse('a + b * c + d');
 const subexpressions = expr.subexpressions;
 // -> `[['Add', 'a', 'b'], ['Add', 'c', 'd'], 'a', 'b', 'c', 'd']`
 ```
+
+The walk continues into the values of a dictionary. A function
+expression or a dictionary that occurs several times as the SAME object
+(a shared subexpression) is listed once.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -15659,6 +15667,16 @@ has(v): boolean
 ```
 
 True if the expression includes a symbol `v` or a function operator `v`.
+
+When `v` is an array, true if the expression includes any of the names
+in `v`.
+
+A dictionary is a node with the operator `Dictionary`, and the test
+looks at the values of its entries. A key is a string, not a symbol, so
+a key never matches: for `{"a" -> u}`, `has("u")` and
+`has("Dictionary")` are `true` and `has("a")` is `false`. To test
+whether a dictionary has a key, use `hasKey()` of
+`DictionaryInterface`.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -17013,10 +17031,10 @@ singular values of a matrix.
 get type(): BoxedType
 set type(type: 
   | string
+  | ListType
   | AlgebraicType
   | NegationType
   | CollectionType
-  | ListType
   | SetType
   | BroadcastableType
   | RecordType
@@ -17201,11 +17219,19 @@ get(key): Expression | undefined
 
 <MemberCard>
 
-##### DictionaryInterface.has() {#has-1}
+##### DictionaryInterface.hasKey() {#haskey}
 
 ```ts
-has(key): boolean
+hasKey(key): boolean
 ```
+
+True if the dictionary has an entry with the key `key`.
+
+This is the key test. The `has()` method of the expression is the
+symbol test: on a dictionary it looks for a symbol in the VALUES and
+never matches a key, because a key is a string, not a symbol. For
+`{"a" -> u}`, `hasKey("a")` is `true`, `has("a")` is `false` and
+`has("u")` is `true`.
 
 ####### key
 
@@ -18470,10 +18496,10 @@ new BoxedType(type, typeResolver?): BoxedType
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -18769,10 +18795,10 @@ Box an ordinary type, sharing immutable type values within a resolver.
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -18829,10 +18855,10 @@ Normalization is shared only for immutable input types.
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -18865,10 +18891,10 @@ Normalization is shared only for immutable input types.
 ####### type
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -18944,10 +18970,10 @@ polymorphic one.
 ####### other
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -18976,10 +19002,10 @@ is(other): boolean
 ####### other
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -19022,10 +19048,10 @@ Throws if `other` is a string that is not a valid type.
 ####### other
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -19084,10 +19110,10 @@ Throws if `other` is a string that is not a valid type.
 ####### other
 
   \| `string`
+  \| [`ListType`](#listtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
-  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`RecordType`](#recordtype)
@@ -19804,7 +19830,7 @@ type CollectionType = {
 type ListType = {
   kind: "list";
   elements: Type;
-  dimensions: number[];
+  dimensions: number[] | null;
   dimensionVariables: readonly (string | undefined)[];
 };
 ```
@@ -19891,15 +19917,34 @@ type BroadcastableType = {
 };
 ```
 
-A `broadcastable<T>` is either a `T`, or a list of `T`
-applied element-wise (runtime broadcasting). It is the static type of an
-arithmetic result whose operand's collection-ness is not statically visible.
+A `broadcastable<T>` is either a `T`, or a collection of `T` to which an
+operation applies element-wise (runtime broadcasting). It is the static
+type of an arithmetic result whose operand's collection-ness is not
+statically visible. The node kind exists for every `T`, numeric or not.
+
+What the collection arm is depends on `T`:
+
+- When no value of `T` is a list (`T` is a number type, `boolean`,
+  `string`, a tuple, `integer | missing`, …; `cannotHoldAList` in
+  `subtype.ts`), the arm is `tensor<T>`, a tensor of any rank whose cells
+  are `T` (a list node with `dimensions` `null`). So a matrix of numbers
+  is a `broadcastable<number>`, a matrix of booleans is a
+  `broadcastable<boolean>`, and a plain list of numbers, of booleans or
+  of points is one too, read at rank 1. A `list<list<boolean>>` is not a
+  `broadcastable<boolean>`: its rows may differ in length, so it is not
+  a tensor.
+- When `T` can hold a list (`any`, `value`, a type variable), the arm is
+  the plain list `list<T>`, read by its elements: a `list<any>` is a
+  `broadcastable<any>`.
 
 A `T` (and any subtype of `T`) is a subtype of `broadcastable<T>`, and so is
-any list whose elements are subtypes of `T` (a tuple, a string and an
-abstract `indexed_collection<T>` are not lists). It is *not* a
-subtype of `T` (it may be a collection) nor of `list<T>` (it may be a
-scalar). See `subtype.ts` for the full relation.
+any subtype of the collection arm (a tuple, a string and an abstract
+`indexed_collection<T>` are not lists). It is *not* a subtype of `T` (it
+may be a collection) nor of its collection arm (it may be a scalar). See
+`subtype.ts` for the full relation (`broadcastCollectionArm` builds the
+arm). Decided by the user on 2026-10-21 (decision D4 of
+`docs/plans/2026-10-21-list-element-tensor-cell.md`, refined to keep the
+node for every `T`).
 
 </MemberCard>
 
@@ -20264,5 +20309,25 @@ identity.
 ##### v
 
 `unknown`
+
+</MemberCard>
+
+<MemberCard>
+
+### listTensorRank() {#listtensorrank}
+
+```ts
+function listTensorRank(t): number | undefined
+```
+
+The rank of the list type `t`: the number of its axes when `t` is a
+tensor with a dimension list (`vector<U>` is 1, `matrix<U>` is 2,
+`list<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
+whose `dimensions` is absent) and for a tensor of unknown rank
+(`tensor<U>`, whose `dimensions` is `null`).
+
+##### t
+
+`Readonly`\<[`ListType`](#listtype)\>
 
 </MemberCard>

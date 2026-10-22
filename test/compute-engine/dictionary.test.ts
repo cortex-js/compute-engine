@@ -209,17 +209,20 @@ describe('Dictionary', () => {
       }
     });
 
-    test('dictionary has method', () => {
+    test('dictionary hasKey method', () => {
       const dict = box([
         'Dictionary',
         ['Tuple', { str: 'x' }, 120],
         ['Tuple', { str: 'y' }, 36],
       ]);
 
+      expect(isDictionary(dict)).toBe(true);
       if (isDictionary(dict)) {
-        expect(dict.has('x')).toBe(true);
-        expect(dict.has('y')).toBe(true);
-        expect(dict.has('z')).toBe(false);
+        expect(dict.hasKey('x')).toBe(true);
+        expect(dict.hasKey('y')).toBe(true);
+        expect(dict.hasKey('z')).toBe(false);
+        // `has()` is the symbol test: no value mentions the symbol `x`.
+        expect(dict.has('x')).toBe(false);
       }
     });
 

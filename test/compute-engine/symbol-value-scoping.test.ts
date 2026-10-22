@@ -237,15 +237,17 @@ describe('SPEC: name capture through call frames', () => {
 
   test('a stored DICTIONARY’s values are not captured either', () => {
     // The dereference helper's fast path used to be "no symbols, nothing to
-    // protect", and `symbols` does not descend into a dictionary — so a stored
+    // protect", and `symbols` did not descend into a dictionary — so a stored
     // dictionary skipped the protection entirely and its values were evaluated
-    // in the ambient frame, giving `{k: 6}`.
+    // in the ambient frame, giving `{k: 6}`. `symbols` now includes the
+    // symbols of the values (user decision 2026-10-22, `has()` and the
+    // free-variable walks read the values of a dictionary).
     const ce = engine();
     const dict = ce.box([
       'Dictionary',
       ['Tuple', { str: 'k' }, ['Add', 'x', 1]],
     ]);
-    expect(dict.symbols).toEqual([]); // why the fast path missed it
+    expect(dict.symbols).toEqual(['x']);
     ce.box(['Assign', 'a', dict]).evaluate();
     ce.box(['Assign', 'g', ['Function', 'a', 'x']]).evaluate();
     expect(ce.box(['g', 5]).evaluate().toString()).toContain('x');

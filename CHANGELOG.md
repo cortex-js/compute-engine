@@ -2,6 +2,25 @@
 
 ### Breaking Changes
 
+- **`has()` on a dictionary is the symbol test; the key test is `hasKey()`.**
+  `has(v)` asks whether the symbol (or function operator) `v` occurs in an
+  expression, and a dictionary now answers that over the values of its
+  entries, as every other expression does. Before, a dictionary replaced it
+  with a key test: `ce.box({ dict: { a: { sym: 'u' } } }).has('u')` was
+  `false` and `.has('a')` was `true`; now `.has('u')` is `true`, `.has('a')` is
+  `false` (a key is a string, not a symbol, unless `a` also occurs in a value),
+  and `.has('Dictionary')` is `true`. The key test moves to the new method
+  `hasKey(key)` of `DictionaryInterface` (records included). **Migration:**
+  replace `dict.has(key)` with `dict.hasKey(key)` wherever you test whether a
+  dictionary or a record has a key. A call `dict.has(key)` still compiles,
+  because `has()` exists on every expression, and now returns a different
+  answer. The other symbol queries read dictionary values too: `.symbols`,
+  `.unknowns`, `.freeVariables`, `.subexpressions`, `.errors` and the
+  references of a dictionary, or of an expression that holds one, now include
+  what its values hold (`.errors` of `{"a" -> Error("oops")}` lists the error,
+  though the dictionary stays valid). `has()`, `.subexpressions` and these
+  queries visit a value shared by several entries once.
+
 - **A declared type is a contract on every value the symbol takes.** `s: string`
   now refuses `Missing` and `Undefined` as it refuses `5`, on the engine's
   assignment route and in Epsil (static check and run time alike); a declared
@@ -236,6 +255,25 @@
 
 ### Behavior Changes
 
+- **The derivative of an element selector, and of a list with a constant
+  point** (follow-up of Tycho row 424). `First`, `Second`, `Third`, `Last`,
+  `Rest`, `Most`, `Reverse`, `Take`, `Drop`, `DeleteAt`, `RotateLeft`,
+  `RotateRight`, `Slice` and `At` (also with several indices) are linear in
+  their container for a fixed selection, as `PointX`/`PointY`/`PointZ` already
+  were: the derivative is the selector applied to the derivative of the
+  container. This holds when the selection does not depend on the variable or
+  is constant between its jumps (`\lceil u\rceil`); a selection that varies
+  with the variable declines. `D(Last(h(u)), u)` over a path of 29 pieces is a
+  closed form in about 0.1 s (it declined after about 1.1 s). A selector that
+  reads by value (`Sort`, `Filter`, `Unique`, `Max`, …) is not linear and keeps
+  the generic rule. In the derivative of a list, a tuple or a piecewise branch,
+  a constant element that is a point now gets the zero point of its arity, not
+  the scalar `0`: with `Q := (1, 2)`, `D([(t, t^2), Q], t)` is
+  `[(1, 2t), (0, 0)]` (it was `[(1, 2t), 0]`). A selection of a constant
+  container gives the zero of the selection's shape (`D(Take([1,2,3], 2), u)`
+  is `[0, 0]`), an absent element stays absent (`Missing`), and an index past
+  the end gives the same value as the original selection.
+
 - **A call of a user function that shadows a library operator compiles**
   (Tycho row 423; the fix is under Resolved Issues). On the `javascript`,
   `interval-js`, GLSL and WGSL targets, a call bound to a user definition with
@@ -330,6 +368,17 @@
   engine tolerance makes more fits exact.
 
 ### Resolved Issues
+
+- **An index that occurred only in a dictionary value was left in a `Sum` or
+  `Product`.** Every check of the form "does this expression mention `k`?"
+  asked a dictionary for a key named `k` (see the `has()`/`hasKey()` entry
+  under Breaking Changes), so `\sum_{k=1}^{2} \mathrm{If}(x<1, \{"v"\to k\}, 0)`
+  evaluated to `2 \cdot \mathrm{If}(x<1, \{"v"\to k\}, 0)` with the bound `k`
+  left in, and `simplify()` gave `3\,\mathrm{If}(\dots k \dots)` for the sum to
+  3 and `\mathrm{If}(\dots k \dots)^3` for the product. The terms are now
+  evaluated one by one, and `simplify()` keeps the sum. The compiler checks
+  that look for a function literal or a `Return` now see one in a dictionary
+  value.
 
 - **The compiler declined a call of a user function that shadows a library
   operator** (Tycho row 423). A Desmos document defines its own Gamma,

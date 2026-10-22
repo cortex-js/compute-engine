@@ -60,6 +60,7 @@ import {
   isCharacter,
   isNumber,
   isFunction,
+  isDictionary,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { bindingInContext } from './binders.js';
@@ -1530,21 +1531,102 @@ export abstract class _BoxedExpression implements Expression {
   }
 }
 
+/**
+ * The subexpressions of `expr` whose operator is `name` (all of them when
+ * `name` is empty), `expr` included, in pre-order.
+ *
+ * The walk continues into the operands of a function expression and into
+ * the VALUES of a dictionary (the keys are strings, not expressions).
+ *
+ * A function expression or a dictionary that is reached several times (a
+ * shared operand: a user function applied to its own previous result
+ * embeds that result once per mention of the parameter) is listed and
+ * walked only the first time. Otherwise the walk is exponential in the
+ * nesting depth of the sharing.
+ */
 export function getSubexpressions(
   expr: Expression,
   name: MathJsonSymbol
 ): ReadonlyArray<Expression> {
-  const result = !name || expr.operator === name ? [expr] : [];
-  if (isFunction(expr)) {
-    for (const op of expr.ops) result.push(...getSubexpressions(op, name));
-  }
+  const result: Expression[] = [];
+  collectSubexpressions(expr, name, result, new Set());
   return result;
+}
+
+function collectSubexpressions(
+  expr: Expression,
+  name: MathJsonSymbol,
+  result: Expression[],
+  visited: Set<Expression>
+): void {
+  const isNode = isFunction(expr) || isDictionary(expr);
+  if (isNode) {
+    if (visited.has(expr)) return;
+    visited.add(expr);
+  }
+  if (!name || expr.operator === name) result.push(expr);
+  if (isFunction(expr))
+    for (const op of expr.ops)
+      collectSubexpressions(op, name, result, visited);
+  else if (isDictionary(expr))
+    for (const value of expr.values)
+      collectSubexpressions(value, name, result, visited);
+}
+
+/**
+ * True if `root` includes the symbol `v`, or a node whose operator is `v`.
+ * When `v` is an array, true if `root` includes any of the names in `v`.
+ * This is the body of `has()` for function expressions and dictionaries.
+ *
+ * A dictionary is a node too: its operator is `Dictionary`, and the walk
+ * continues into the VALUES of its entries. The keys are strings, not
+ * symbols, so a key never matches.
+ *
+ * The walk is explicit, with ONE visited set for the function nodes and the
+ * dictionaries. It does not ask each operand or value for its own `has()`,
+ * because each such call would start a new walk with a new visited set. An
+ * expression that shares its operands (a user function applied to its own
+ * previous result embeds that result once per mention of the parameter, and
+ * a dictionary can hold the same dictionary under several keys) unfolds
+ * exponentially in the nesting depth, so each node must be asked once.
+ */
+export function hasSymbolOrOperator(
+  root: Expression,
+  v: string | string[]
+): boolean {
+  const matches =
+    typeof v === 'string'
+      ? (name: string) => name === v
+      : (name: string) => v.includes(name);
+  const visited = new Set<Expression>();
+  const pending: Expression[] = [root];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (isFunction(e)) {
+      if (visited.has(e)) continue;
+      visited.add(e);
+      if (matches(e.operator)) return true;
+      // A store-backed list has only number operands, which never match a
+      // name, so it is not walked (and not boxed).
+      if (e._numericStore !== undefined) continue;
+      for (const op of e.ops) pending.push(op);
+    } else if (isDictionary(e)) {
+      if (visited.has(e)) continue;
+      visited.add(e);
+      if (matches(e.operator)) return true;
+      for (const value of e.values) pending.push(value);
+    } else if (isSymbol(e)) {
+      if (matches(e.symbol)) return true;
+    }
+  }
+  return false;
 }
 
 /**
  * Return the symbols in the expression, recursively. This does not include
  * the symbols used as operator names, e.g. `Add`, `Sin`, etc...
  *
+ * The values of a dictionary are walked; its keys are strings, not symbols.
  */
 function getSymbols(
   expr: Expression,
@@ -1556,6 +1638,13 @@ function getSymbols(
 ): void {
   if (isSymbol(expr)) {
     result.add(expr.symbol);
+    return;
+  }
+
+  if (isDictionary(expr)) {
+    if (visited.has(expr)) return;
+    visited.add(expr);
+    for (const value of expr.values) getSymbols(value, result, visited);
     return;
   }
 
@@ -1687,13 +1776,19 @@ function getReferences(
   refFns: Set<string>,
   memo: Map<Expression, readonly [Set<string>, Set<string>]> = new Map()
 ): void {
-  if (isFunction(expr)) {
+  // A dictionary is memoized as a function node is: the same dictionary can
+  // be the value of several keys, or of several dictionaries.
+  if (isFunction(expr) || isDictionary(expr)) {
     // A store-backed list (`ce.list()`) holds numbers only: nothing to
     // reference, and walking it would box every element. Other written-out
     // data (a list of numbers and failed cells, `_isLiteralData()`) holds no
     // symbol either. Each `Error` node of a list in which every cell failed
     // was walked, with two lookups of its operator, at each read.
-    if (expr._numericStore !== undefined || expr._isLiteralData()) return;
+    if (
+      isFunction(expr) &&
+      (expr._numericStore !== undefined || expr._isLiteralData())
+    )
+      return;
     const hit = memo.get(expr);
     if (hit !== undefined) {
       for (const s of hit[0]) freeVars.add(s);
@@ -1766,6 +1861,14 @@ function collectReferences(
     const value =
       def !== undefined && 'value' in def ? def.value.value : undefined;
     if (value === undefined) freeVars.add(s);
+    return;
+  }
+
+  // A dictionary binds no name: it references what its values reference. Its
+  // keys are strings, not symbols.
+  if (isDictionary(expr)) {
+    for (const value of expr.values)
+      getReferences(value, freeVars, refFns, memo);
     return;
   }
 

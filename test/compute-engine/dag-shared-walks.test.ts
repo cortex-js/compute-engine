@@ -24,7 +24,10 @@ import {
   lex,
   revlex,
 } from '../../src/compute-engine/boxed-expression/polynomial-degree';
-import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
+import {
+  isDictionary,
+  isFunction,
+} from '../../src/compute-engine/boxed-expression/type-guards';
 import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 import { inferFunctionLiteralEffects } from '../../src/compute-engine/boxed-expression/effects-inference';
 
@@ -83,6 +86,60 @@ describe('walks over a shared tower are linear in distinct nodes', () => {
     expect(e.has('Nope')).toBe(false);
     expect(e.has('Add')).toBe(true);
     expect(e.has(['Nope', 'y'])).toBe(true);
+  });
+
+  test('a tower of shared dictionaries: has(), unknowns and symbols ask each node once', () => {
+    // `d_n = {"a" -> d_(n-1), "b" -> d_(n-1)}`: 31 distinct dictionaries,
+    // 2^30 paths. `has()` walks the values of a dictionary in the same walk
+    // as the operands of a function, with one visited set; a walk that asks
+    // each value for its own `has()` starts a new visited set per value and
+    // unfolds the tower (depth 24 took 9 s).
+    let d = ce.box({ dict: { v: { sym: 'q' } } });
+    for (let i = 0; i < 30; i++)
+      d = ce.box([
+        'Dictionary',
+        ['KeyValuePair', { str: 'a' }, d],
+        ['KeyValuePair', { str: 'b' }, d],
+      ]);
+    let cur = d;
+    let depth = 0;
+    while (isDictionary(cur) && cur.hasKey('a')) {
+      expect(cur.get('a')).toBe(cur.get('b'));
+      cur = cur.get('a')!;
+      depth++;
+    }
+    expect(depth).toBe(30);
+    expect(d.has('zz')).toBe(false);
+    expect(d.has('q')).toBe(true);
+    expect(d.unknowns).toEqual(['q']);
+    expect(d.symbols).toEqual(['q']);
+    // A list that holds the tower walks it once as well.
+    const l = ce.function('List', [d, d]);
+    expect(l.has('zz')).toBe(false);
+    expect(l.freeVariables).toEqual(['q']);
+  });
+
+  test('subexpressions list and walk a shared node once', () => {
+    // `getSubexpressions()` walks each function node and each dictionary
+    // once: a shared operand is listed the first time it is reached, and
+    // its subtree is not walked again.
+    const e = sharedTower(30);
+    assertShared(e);
+    // 30 `Max` nodes, the `Add`, and its two symbols.
+    expect(e.subexpressions.length).toBe(33);
+    expect(e.getSubexpressions('Add').length).toBe(1);
+    expect(e.getSubexpressions('Max').length).toBe(30);
+    expect(e.errors).toEqual([]);
+
+    let d = ce.box({ dict: { v: { fn: ['Sin', 'q'] } } });
+    for (let i = 0; i < 30; i++)
+      d = ce.box([
+        'Dictionary',
+        ['KeyValuePair', { str: 'a' }, d],
+        ['KeyValuePair', { str: 'b' }, d],
+      ]);
+    expect(d.getSubexpressions('Sin').length).toBe(1);
+    expect(d.getSubexpressions('Dictionary').length).toBe(31);
   });
 
   test('the ordering tie-breaker (leaf count) is memoized', () => {

@@ -563,6 +563,32 @@ them.
   many compiled results: measure first. User decision owed: whether such an
   integral should be complex on both routes.
 
+### An index into a tuple or string held in `broadcastable<T>` is typed without the cell's own elements (OPEN, soundness — found 2026-10-22 by the fix of Tycho row 425; session compute-engine-f4 takes it after row 425 lands)
+
+The static type of an index does not hold its value when the operand is the
+scalar arm `T` of `broadcastable<T>` and `T` is indexable but cannot hold a
+list (a tuple or a string). Measured on `cc468eb4f`:
+
+- `p: broadcastable<tuple<number, number>>` holding `(1, 2)`: `At(p, 1)`
+  evaluates to `1` and is typed
+  `missing | tensor<tuple<number, number>> | tuple<number, number>`.
+- The same `p`: `Take(p, 1)` evaluates to `[1]` and is typed
+  `list<tuple<number, number>>`.
+- `p: broadcastable<string>` holding `"abc"`: `At(p, 1)` evaluates to a
+  character and is typed `missing | string | tensor<string>`.
+
+The rule that a tuple or a string is ONE cell for broadcasting
+(`test/common/type/list-element-tensor-cell.test.ts`, "broadcastable<T>
+yields T | tensor<T> when T cannot hold a list") stays true; it does not
+require an index into the scalar arm to skip the value's own elements. Fix:
+when the operand may be the scalar arm `T` and `T` is indexable, the index
+result also joins `T`'s own element type (the tuple's slot types,
+`character`), and `Take`/`Drop` join a list of them
+(`collectionElementType()` in `common/type/utils.ts`, and the solver's element
+position in `instantiate.ts`, as the row 425 fix does for a `T` that can hold
+a list). Measure the effect on compiled point readers (`PointX`/`PointY` over
+point arrays) before landing.
+
 ### A compiled user function reads a free symbol of its body from the compile scope (OPEN, wrong value — found 2026-10-22 by the review of the fix of Tycho row 423)
 
 With a global `a := 2` and `G := x ↦ x + a`, then `ce.pushScope()`,
@@ -581,20 +607,24 @@ a user function that shadows a library name.
 The fix of row 424 (a declined `D` is recorded, and `PointX`/`PointY`/`PointZ`
 and `At` of a container are differentiated as linear accessors) left these:
 
-- **The derivative of a list with a constant point element mixes points and
-  scalars.** With `Q := (1, 2)` and `k := t ↦ [(t, t²), Q]`, `D(k(u), u)` is
-  `[(1, 2u), 0]`, and `D(U(u), u)` for a piecewise `U` with a constant point
-  branch is `If(0 < u, (1, 0), 0)`. The element-wise rule for a `List`/`Tuple`
-  (`symbolic/derivative.ts`) gives the scalar `0` for any constant element,
-  where a point needs the zero point of its arity. The accessor rule repairs
-  this for its own result only (`withZeroPoints`). The general fix changes the
-  output of every derivative of a collection with a constant point element:
-  measure the snapshot change first. User decision owed.
-- **`First`, `Last` and the other element selectors over a call** still go
-  through the generic chain rule, which reads the selector as an unknown
-  scalar function: `D(Last(h(u)), u)` declines after about 1.1 s (the decline
-  is now recorded, so later evaluations are free). The linear accessor rule
-  would apply to them. User decision owed: whether to extend it.
+- **The derivative of a written `Missing` is `0`.** `D([u, Missing], u)` is
+  `[1, 0]`, while the list holds `Missing`: the general symbol rule gives `0`
+  for every symbol that does not depend on the variable, `Missing` included.
+  The selector rules keep an absent element absent (a constant list's zero is
+  built from its value), so the two disagree. User decision owed: whether the
+  derivative of `Missing` is `Missing` (absence propagates, as in arithmetic)
+  or `0`.
+- **A dictionary with an `Error` value is valid, but `.errors` lists the
+  error.** `{"a" -> Error("oops")}` reports `isValid === true`, while
+  `[1, Error("oops")]` and `(1, Error("oops"))` report `false`. Since the
+  `has()`/`hasKey()` change (2026-10-22), `.errors` walks dictionary values, so
+  `.errors.length` is 1 and the two properties disagree for a dictionary only.
+  `error-value.ts` keeps an error inside a `Dictionary` literal instead of
+  letting it spread, so the validity may be intended. User decision owed:
+  make such a dictionary invalid, as a list and a tuple are, or keep it valid.
+- **`has()` on a `BoxedObject` is always `false`.** A mutable object does not
+  look into its field values. User decision owed: whether `has()` should read
+  them, as it now does for a dictionary.
 - **Evaluating a symbolic closed form again rebuilds its nodes.** The value of
   `D(PointY(h(u)), u)` for Tycho's 29-piece path, a symbolic list, costs about
   18 ms each time it is evaluated again; the memo for unevaluated nodes does
@@ -991,7 +1021,35 @@ dictionary). These remain, each measured with a fix and reverted:
   (2) `If(M < 3, M, 0)` with `M` a matrix stays unevaluated: the element-wise
   `If` does not read a mask of rank 2. (3) A generic function literal applied
   directly (`[["Function", …], "v"]`) binds `v` whole, while the same literal
-  called through a symbol (`g(v)`) maps over the elements of `v`.
+  called through a symbol (`g(v)`) maps over the elements of `v`. (4) Found
+  2026-10-22: with `B: broadcastable<integer>` (declared, no value),
+  `If(B < 3, B, 0)` is typed `broadcastable<broadcastable<integer>>`. A
+  `broadcastable` inside a `broadcastable` is a type the arithmetic
+  operators never produce (`broadcastable-typing.test.ts`, "idempotence:
+  never broadcastable<broadcastable<…>>"); the expected type is
+  `broadcastable<integer>`. In the same probe, `If(M < 3, M, 0)` with `M` a
+  2×2 matrix of integers is typed `list<integer | vector<integer^2>>`, which
+  is sound but wider than the `matrix<integer^(2x2)>` the element-wise `If`
+  of point (2) would give.
+- **The empty tuple type prints as the bare `tuple` (soundness of the round
+  trip, found 2026-10-22).** `ce.box(["Tuple"])` is typed
+  `{kind: "tuple", elements: []}`, and `typeToString()` prints it `tuple`. The
+  string `tuple` parses as a tuple of any arity, so a printed type read back is
+  wider (`tuple<integer>` is a subtype of the parsed type and not of the
+  original), and the dedup key of the empty tuple is the key of the bare
+  `tuple`, so the two types can replace each other in an interned or reduced
+  union. Expected: a spelling that parses back to the empty tuple (for example
+  `tuple<>`, if the parser accepts it, or a new spelling), printed by the
+  serializer. Reproduction: the `base-defects.mts` probe of the list-shape
+  measurement (`docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`).
+- **A list with dimensions accepts cells that are an alias of a list (found
+  2026-10-22).** After `ce.declareType("Row", "vector<integer^3>", {alias:
+  true})`, `ce.declare("R2", "list<Row^2>")` is accepted and typed
+  `list<Row^2>`, although the cells of a list with dimensions cannot be lists:
+  `list<vector<integer^3>^2>` is refused. `cellTypeMayCarryDimensions()`
+  (`common/type/primitive.ts`) does not resolve an alias before it tests the
+  cell type. Expected: the same refusal as for the spelled-out type (or the
+  cell rule applied to the alias's definition everywhere the predicate runs).
 - **A declared function admits a valueless collection symbol whose type
   cannot fit its parameter (soundness, found 2026-10-22).** With
   `h: (list<integer>) -> integer` and `S: list<string>` (declared, no value),
@@ -2676,6 +2734,35 @@ stays `-> unknown` on later reads), so the hypothesis pass reads `unknown` from
 `G` and is refuted. A fix would treat the strongly connected component of the
 call graph as one unit, or retire a callee's memo when the function it was
 derived inside settles.
+
+### `FixedPoint` is declared but does nothing (OPEN, decision — found 2026-10-22)
+
+`FixedPoint` is in the control-structures library
+(`library/control-structures.ts`) with the description "Iterate a function
+until a fixed point is reached", the signature `(any) -> unknown` and
+`lazy: true`, but it has no `evaluate` handler, no test and no example: a call
+stays unevaluated. It also appears in `src/math-json/OPERATORS.json`. It dates
+from a work-in-progress commit (`981ae939b`, 2023-09-21). The usual meaning
+(`FixedPoint(f, x)`, iterate `x`, `f(x)`, `f(f(x))`, … until two successive
+values agree, with a maximum number of steps) takes two or three arguments, so
+the signature does not fit it either. Decision: implement it, or remove the
+declaration.
+
+### A pipe whose stage is an operator name is typed `unknown` (OPEN, small — found 2026-10-22)
+
+`16 |> Sqrt` and `[3, 1, 2] |> Sort` have the static type `unknown`, but
+`Sqrt(16)` is typed `4` and the pipe evaluates to `4` (and to
+`vector<integer^3>`). `Pipe` is `lazy`, so its stage arrives unbound: the type
+handler (`library/core.ts`, `Pipe`) reads `f.type`, which is `unknown` for a
+held operator name, and `functionResult(unknown)` falls back to `unknown`. A
+function literal stage is canonicalized first and is typed correctly. Effect:
+the Epsil static check does not see a mismatch such as
+`let s: string = 16 |> Sqrt`, and a later stage gets no inference from the
+earlier one. A fix types an operator-name stage as the call `f(x)` would be
+typed; it must keep the type read pure (`pipe-type-read-purity.test.ts` pins
+that a type read of a `Pipe` stage does not advance the engine's version
+counters). Reproduce:
+`npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); console.log(ce.box(['Pipe', 16, 'Sqrt']).type.toString())"`.
 
 ### An operator result that may be absent is typed `number` when it is numeric (OPEN, small — found 2026-09-30)
 

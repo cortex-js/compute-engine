@@ -1519,6 +1519,10 @@ export interface Expression {
    * // -> `[['Add', 'a', 'b'], ['Add', 'c', 'd']]`
    * ```
    *
+   * The walk continues into the values of a dictionary. A function
+   * expression or a dictionary that occurs several times as the SAME object
+   * (a shared subexpression) is listed once.
+   *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
@@ -1535,6 +1539,10 @@ export interface Expression {
    * const subexpressions = expr.subexpressions;
    * // -> `[['Add', 'a', 'b'], ['Add', 'c', 'd'], 'a', 'b', 'c', 'd']`
    * ```
+   *
+   * The walk continues into the values of a dictionary. A function
+   * expression or a dictionary that occurs several times as the SAME object
+   * (a shared subexpression) is listed once.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -2021,6 +2029,16 @@ export interface Expression {
 
   /**
    * True if the expression includes a symbol `v` or a function operator `v`.
+   *
+   * When `v` is an array, true if the expression includes any of the names
+   * in `v`.
+   *
+   * A dictionary is a node with the operator `Dictionary`, and the test
+   * looks at the values of its entries. A key is a string, not a symbol, so
+   * a key never matches: for `{"a" -> u}`, `has("u")` and
+   * `has("Dictionary")` are `true` and `has("a")` is `false`. To test
+   * whether a dictionary has a key, use `hasKey()` of
+   * `DictionaryInterface`.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -3353,7 +3371,15 @@ export interface ObjectInterface {
  */
 export interface DictionaryInterface {
   get(key: string): Expression | undefined;
-  has(key: string): boolean;
+  /** True if the dictionary has an entry with the key `key`.
+   *
+   * This is the key test. The `has()` method of the expression is the
+   * symbol test: on a dictionary it looks for a symbol in the VALUES and
+   * never matches a key, because a key is a string, not a symbol. For
+   * `{"a" -> u}`, `hasKey("a")` is `true`, `has("a")` is `false` and
+   * `has("u")` is `true`.
+   */
+  hasKey(key: string): boolean;
   get keys(): string[];
   get entries(): [string, Expression][];
   get values(): Expression[];

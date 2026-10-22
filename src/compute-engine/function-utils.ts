@@ -3080,27 +3080,14 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
   return walk(expr, false);
 }
 
-/** Find a referenced name in a value, including dictionary cells. A
- * dictionary's `has()` checks its keys, not the names in its values. */
+/** Find a referenced name in a value, including the values of a dictionary.
+ * `has()` walks the values of a dictionary (its keys are strings, not
+ * symbols), with one visited set for the whole value. */
 function hasReferencedName(
   expr: Expression,
   names: string | string[]
 ): boolean {
-  const wanted = new Set(typeof names === 'string' ? [names] : names);
-  const seen = new Set<Expression>();
-  const pending = [expr];
-  while (pending.length > 0) {
-    const e = pending.pop()!;
-    if (seen.has(e)) continue;
-    seen.add(e);
-    if (isSymbol(e) && wanted.has(e.symbol)) return true;
-    if (isDictionary(e)) pending.push(...e.values);
-    else if (isFunction(e)) {
-      if (wanted.has(e.operator)) return true;
-      if (e._numericStore === undefined) pending.push(...e.ops);
-    }
-  }
-  return false;
+  return expr.has(names);
 }
 
 /**

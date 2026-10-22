@@ -14,6 +14,8 @@ import {
   isFunction,
   isString,
   isExpression,
+  isDictionary,
+  isAbsentSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -27,10 +29,13 @@ import {
 import { shadowsLibraryName } from '../library-shadowing.js';
 import type { Type } from '../../common/type/types.js';
 import {
+  type AliasDescent,
   collectionElementType,
   isPointElementType,
   resolveTypeAlias,
   stripMissingFromType,
+  typeContainsMissing,
+  unfoldAliasOnDescent,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
@@ -1389,6 +1394,106 @@ const POINT_ACCESSOR_SLOT: Record<string, number> = {
   PointZ: 2,
 };
 
+/**
+ * The operators that select elements of an indexed collection by their
+ * positions and do not compute with the values of the elements, with the
+ * smallest and the largest number of operands of each. The first operand
+ * is the collection; the other operands (a count, an index, a span) say
+ * which positions are selected.
+ *
+ * When the selection operands do not change with the variable, the result
+ * is a linear function of the collection: the same positions of the
+ * derivative of the collection are the derivative of the result
+ * (`d/du Last(h(u)) = Last(h′(u))`). The derivative of a collection has the
+ * same length as the collection, so a selection out of range is out of
+ * range in the derivative too, and gives the same absence or error.
+ *
+ * Not in this table: the operators whose selection depends on the values
+ * of the elements (`Sort`, `Filter`, `Unique`, `Dedup`, `TakeWhile`,
+ * `DropWhile`, `MaxBy`, `MinBy`, `Position`), and the operators that add
+ * values to the collection or group its elements (`Insert`, `ReplaceAt`,
+ * `Append`, `Join`, `Chunk`, `Partition`, `Cycle`, `Repeat`).
+ */
+const ELEMENT_SELECTOR_ARITY: Record<string, [number, number]> = {
+  At: [2, Infinity],
+  First: [1, 1],
+  Second: [1, 1],
+  Third: [1, 1],
+  Last: [1, 1],
+  Rest: [1, 1],
+  Most: [1, 1],
+  Reverse: [1, 1],
+  Take: [2, 2],
+  Drop: [2, 2],
+  DeleteAt: [2, 2],
+  RotateLeft: [1, 2],
+  RotateRight: [1, 2],
+  Slice: [2, 3],
+};
+
+/**
+ * How the selection of `expr` changes with `v`:
+ *
+ * - `'linear'`: `expr` is a point accessor (`PointX`, `PointY`, `PointZ`
+ *   with one operand) or an element selector (`ELEMENT_SELECTOR_ARITY`)
+ *   whose selection operands are constant for a derivative with respect to
+ *   `v` (`isConstantIndex()`). It is linear in its first operand.
+ * - `'variable'`: `expr` is an element selector and a selection operand
+ *   changes with `v` (`Take(L, u)`, `At(L, u)`). A count, an index or a
+ *   span is an integer, so its value cannot change continuously, and the
+ *   derivative has no closed form.
+ * - `'keyed'`: `expr` is `At` of a dictionary or a record, or `At` with a
+ *   string key (`At({"a": u, "b": u²}, "b")`). Its elements are not
+ *   positions of an indexed collection: the derivative of a constant one
+ *   is `At` of the zero of the value, and the others decline.
+ * - `undefined`: `expr` is not a selector, or has a number of operands that
+ *   the selector does not take.
+ */
+function selectorKind(
+  expr: Expression & FunctionInterface,
+  v: string,
+  depth: number
+): 'linear' | 'variable' | 'keyed' | undefined {
+  if (POINT_ACCESSOR_SLOT[expr.operator] !== undefined)
+    return expr.nops === 1 ? 'linear' : undefined;
+  const arity = ELEMENT_SELECTOR_ARITY[expr.operator];
+  if (arity === undefined) return undefined;
+  if (expr.nops < arity[0] || expr.nops > arity[1]) return undefined;
+  // Only `At` reads by a key. The other selectors read by position also
+  // when the type of the container can be a dictionary
+  // (`list<number> | dictionary<number>`): `accessorOfContainerDerivative()`
+  // then requires a written-out list.
+  if (
+    expr.operator === 'At' &&
+    (mayBeKeyedCollectionType(expr.op1.type.type) ||
+      expr.ops.slice(1).some((op) => isString(op)))
+  )
+    return 'keyed';
+  return expr.ops.slice(1).every((op) => isConstantIndex(op, v, depth))
+    ? 'linear'
+    : 'variable';
+}
+
+/** Whether a value of type `t` can be a dictionary or a record (`t`, or an
+ * arm of `t` when it is a union, is one), a collection read by keys. */
+function mayBeKeyedCollectionType(
+  t: Type,
+  seen: AliasDescent = undefined
+): boolean {
+  // A self-referential alias is unfolded once per path of the walk
+  // (`unfoldAliasOnDescent()`): `type alias cyc = cyc | list<number>`
+  // reaches itself through a union arm.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (r === 'dictionary' || r === 'record') return true;
+  if (typeof r === 'string') return false;
+  if (r.kind === 'dictionary' || r.kind === 'record') return true;
+  if (r.kind === 'union')
+    return r.types.some((arm) => mayBeKeyedCollectionType(arm, unfolded.seen));
+  return false;
+}
+
 /** The containers whose operands are their elements, in order. */
 const LITERAL_CONTAINERS = new Set(['Tuple', 'PointList', 'List']);
 
@@ -1467,15 +1572,78 @@ function isConstantIndex(index: Expression, v: string, depth: number): boolean {
 }
 
 /**
+ * Whether the list of shape `dims` (the lengths, outermost first) whose
+ * cells are `cell` has at most `MAX_DERIVATIVE_NODES` nodes. The count
+ * starts at the innermost length, as `zeroList()` builds the list: each
+ * level has one node for the list and its length times the nodes of one
+ * element (`[2, 10000]` of numbers is 2 × (10000 + 1) + 1 = 20003 nodes).
+ */
+function zeroListFitsBudget(cell: Expression, dims: number[]): boolean {
+  let nodes = isFunction(cell) ? cell.nops + 1 : 1;
+  for (let i = dims.length - 1; i >= 0; i--) {
+    nodes = nodes * dims[i] + 1;
+    if (nodes > MAX_DERIVATIVE_NODES) return false;
+  }
+  return true;
+}
+
+/**
+ * The list of shape `dims` (the lengths, outermost first) whose cells are
+ * `cell`. The number of nodes is checked against the size limit of a
+ * differentiation (`MAX_DERIVATIVE_NODES`) BEFORE the list is built: a
+ * declared length can be very large (`vector<integer^100000000>`), and the
+ * check of the result in `differentiate()` runs only after the result is
+ * built. A list over the limit stops the differentiation, which declines,
+ * as for any other result over the limit.
+ */
+function zeroList(cell: Expression, dims: number[]): Expression {
+  if (!zeroListFitsBudget(cell, dims)) {
+    differentiationOverBudget = true;
+    throw kOverBudget;
+  }
+  const ce = cell.engine;
+  let zero = cell;
+  for (const n of [...dims].reverse()) {
+    const element = zero;
+    zero = ce.function(
+      'List',
+      Array.from({ length: n }, () => element)
+    );
+  }
+  return zero;
+}
+
+/**
  * The zero of a value of type `t`: `0` for a number, the point
  * `(0, …, 0)` for a point of known arity whose coordinates can be numbers
- * (a tuple, or a union of tuples of the same arity), `undefined` for any
- * other type.
+ * (a tuple, or a union of tuples of the same arity), a list of zeros for a
+ * list whose lengths are all known and whose cells have a zero
+ * (`vector<integer^2>` gives `[0, 0]`, `list<tuple<integer, integer>^2>`
+ * gives `[(0, 0), (0, 0)]`), `undefined` for any other type.
  */
-function zeroOfType(ce: Expression['engine'], t: Type): Expression | undefined {
+function zeroOfType(
+  ce: Expression['engine'],
+  t: Type,
+  seen: AliasDescent = undefined
+): Expression | undefined {
   if (isSubtype(t, 'number')) return ce.Zero;
-  const r = resolveTypeAlias(t);
+  // A self-referential alias is unfolded once per path of the walk
+  // (`unfoldAliasOnDescent()`): `type alias cyc = cyc | list<number>`
+  // reaches itself.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const r = unfolded.type;
   if (typeof r === 'string') return undefined;
+  if (r.kind === 'list') {
+    // A plain list (no `dimensions`) and a tensor of unknown rank (`null`)
+    // have no known length. A length of `-1` is an open length.
+    const dims = r.dimensions;
+    if (!dims || dims.some((n) => !Number.isInteger(n) || n < 0))
+      return undefined;
+    const cell = zeroOfType(ce, r.elements, unfolded.seen);
+    if (cell === undefined) return undefined;
+    return zeroList(cell, dims);
+  }
   const arms = r.kind === 'union' ? r.types.map(resolveTypeAlias) : [r];
   let arity: number | undefined;
   for (const arm of arms) {
@@ -1501,40 +1669,212 @@ function zeroOfType(ce: Expression['engine'], t: Type): Expression | undefined {
 }
 
 /**
+ * `d`, the derivative of `op`, an element of a written-out collection or a
+ * value arm of a piecewise expression. When `d` is the scalar `0` and the
+ * type of `op` is a point or a list of known lengths, the result is the
+ * zero of that type (`zeroOfType()`): the derivative of the constant point
+ * `Q := (1, 2)` in `[(t, t²), Q]` is the point `(0, 0)`, so the derivative
+ * of the list is `[(1, 2t), (0, 0)]` and not `[(1, 2t), 0]`, a list that
+ * mixes a point and a number. A number keeps the scalar `0`. When the type
+ * of `op` has no zero here (a list of unknown length, a type that is not
+ * known), `d` stays the scalar `0`.
+ *
+ * When the type of `op` says that it can be absent (it has a `missing`
+ * arm, as `missing | tuple<integer, integer>`), a zero built from the type
+ * would turn an absent value into a present point. The zero is then built
+ * from the VALUE of `op` when `op` does not depend on `v` and its value is
+ * known (`zeroOfConstantContainerValue()`): `Missing` stays `Missing`, and
+ * `(1, 2)` gives `(0, 0)`. Otherwise `d` stays the scalar `0`, and a
+ * selector that reads the list declines (`withZeroPoints()`).
+ */
+function withZeroOfShape(op: Expression, d: Expression, v: string): Expression {
+  if (!d.isSame(0)) return d;
+  if (typeContainsMissing(op.type.type)) {
+    if (dependsOnVariable(op, v)) return d;
+    return zeroOfConstantContainerValue(op) ?? d;
+  }
+  return zeroOfType(d.engine, op.type.type) ?? d;
+}
+
+/**
+ * Whether `expr` is a zero that `zeroOfConstantValue()` or `zeroOfType()`
+ * builds: the scalar `0`, a tuple or a list whose elements are zeros, or
+ * `Map(x ↦ z, xs)` where `z` is a zero. The derivative of a container
+ * that is such a zero says that the container is constant.
+ */
+function isZeroValue(expr: Expression): boolean {
+  if (expr.isSame(0)) return true;
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'List'))
+    return expr.ops.every(isZeroValue);
+  // The canonical form of a function literal holds its body in a `Block`.
+  if (isFunction(expr, 'Block') && expr.nops === 1)
+    return isZeroValue(expr.op1);
+  if (isFunction(expr, 'Map') && expr.nops === 2) {
+    const fn = expr.op1;
+    return isFunction(fn, 'Function') && isZeroValue(fn.op1);
+  }
+  return false;
+}
+
+/**
+ * The zero of the VALUE of `container`, an expression that does not depend
+ * on the variable: each number is `0`, each absence marker (`Missing`,
+ * `Undefined`, `NaN`) stays as it is, and the tuples, lists and
+ * dictionaries keep their structure (`[(1, 2), Missing]` gives
+ * `[(0, 0), Missing]`). A selector applied to this zero gives an absent
+ * value where the selector applied to the container does.
+ *
+ * `undefined` when the value is not known (a symbol with no value, an
+ * expression that is not pure), is not written out (a lazy collection), or
+ * has more nodes than the size limit of a differentiation.
+ */
+function zeroOfConstantContainerValue(
+  container: Expression
+): Expression | undefined {
+  if (!container.isPure) return undefined;
+  const count = container.count;
+  if (typeof count === 'number' && count > MAX_DERIVATIVE_NODES)
+    return undefined;
+  const ce = container.engine;
+  let nodes = 0;
+  const zero = (e: Expression): Expression | undefined => {
+    nodes += 1;
+    if (nodes > MAX_DERIVATIVE_NODES) return undefined;
+    if (isAbsentSymbol(e)) return e;
+    if (isNumber(e)) return e.isNaN ? e : ce.Zero;
+    if (isFunction(e, 'Tuple') || isFunction(e, 'List')) {
+      const ops: Expression[] = [];
+      for (const op of e.ops) {
+        const z = zero(op);
+        if (z === undefined) return undefined;
+        ops.push(z);
+      }
+      return ce.function(e.operator, ops);
+    }
+    if (isDictionary(e)) {
+      const entries: Expression[] = [];
+      for (const [key, value] of e.entries) {
+        const z = zero(value);
+        if (z === undefined) return undefined;
+        entries.push(ce.function('KeyValuePair', [ce.string(key), z]));
+      }
+      return ce.function('Dictionary', entries);
+    }
+    return undefined;
+  };
+  return zero(container.evaluate());
+}
+
+/**
+ * The derivative of `expr`, a value that is constant (or constant between
+ * its jumps): the zero of its shape.
+ *
+ * - The type of `expr` gives the shape (`zeroOfType()`): `Last(P)` for a
+ *   list of points `P` gives `(0, 0)`.
+ * - A list whose type has no length and whose elements have a zero gives
+ *   a list of zeros as long as `expr`: when `readCount` is true and the
+ *   number of elements of `expr` is known and the list is within the size
+ *   limit (`zeroListFitsBudget()`), the list itself (`[1, 2, 3]` gives
+ *   `[0, 0, 0]`), otherwise `Map(x ↦ 0, expr)` (`Take(P, ⌈u⌉)` gives
+ *   `Map(x ↦ (0, 0), Take(P, ⌈u⌉))`). The number of elements is read only
+ *   for a value that does not depend on the variable.
+ * - The scalar `0` when the shape is not known.
+ *
+ * `undefined` when the type of `expr` has a `missing` arm at any level: the
+ * value, or one of its elements, can be absent, and a zero built from the
+ * type would turn that absence into a present zero (`Last(P)` is
+ * `Missing` when `P` is `[(1, 2), Missing]`). Use the value of a constant
+ * then (`zeroOfConstantContainerValue()`).
+ */
+function zeroOfConstantValue(
+  expr: Expression,
+  readCount: boolean
+): Expression | undefined {
+  const ce = expr.engine;
+  if (typeContainsMissing(expr.type.type)) return undefined;
+  const type = stripMissingFromType(expr.type.type);
+  const zero = zeroOfType(ce, type);
+  if (zero !== undefined) return zero;
+  if (!isSubtype(type, 'list')) return ce.Zero;
+  const element = collectionElementType(type);
+  const cell =
+    element === undefined
+      ? undefined
+      : zeroOfType(ce, stripMissingFromType(element));
+  if (cell === undefined) return ce.Zero;
+  const count = readCount ? expr.count : undefined;
+  if (
+    typeof count === 'number' &&
+    Number.isInteger(count) &&
+    count >= 0 &&
+    zeroListFitsBudget(cell, [count])
+  )
+    return zeroList(cell, [count]);
+  return ce.function('Map', [
+    ce.function('Function', [cell, ce.symbol('x')]),
+    expr,
+  ]);
+}
+
+/**
  * `d`, the derivative of a value of type `t`, with each scalar `0` that
  * stands for a point replaced by the zero point (`zeroOfType()`), or
  * `undefined` when that cannot be decided.
  *
- * The elementwise rule gives the scalar `0` for an element that does not
- * depend on the variable, also when the element is a point (a symbol
- * `Q := (1, 2)`, a read `P[3]` of a list of points): the derivative of
- * `[(t, t²), Q]` is `[(1, 2t), 0]`. An accessor applied to that list reads
- * a list that mixes points and scalars, and gives a wrong value
- * (`PointY` of it was `[2t, Missing]`). The type of the value says which
- * elements are points: a list of points is read element by element, a
- * point is kept, and the value arms of a piecewise derivative (`If`,
- * `Which`) are read with the same type. A derivative that is not a
- * written-out list has elements that cannot be read here, so it is
- * accepted only when its elements are numbers.
+ * The elementwise rule and the piecewise rule give the zero of its shape
+ * for a constant element or arm whose own type is a point
+ * (`withZeroOfShape()`), and a derivative that is the scalar `0` as a
+ * whole is read before this function (the selector rule of
+ * `differentiateNode()`). One case remains, which this function repairs or
+ * declines: an element or an arm whose own type did not give a shape (a
+ * list of unknown length, a type that is not known) and that stayed the
+ * scalar `0`, while the type of the container says that it is a point. An
+ * accessor applied to a list that mixes points and scalars gives a wrong
+ * value (`PointY([(1, 2t), 0])` is `[2t, Missing]`). The type of the ORIGINAL container says which elements
+ * are points: a list of points is read element by element, a point is
+ * kept, and the value arms of a piecewise derivative (`If`, `Which`) are
+ * read with the same type. A derivative that is not a written-out list has
+ * elements that cannot be read here, so it is accepted only when its
+ * elements are numbers.
  */
 function withZeroPoints(d: Expression, t: Type): Expression | undefined {
   const ce = d.engine;
   const type = stripMissingFromType(t);
-  if (d.isSame(0)) return zeroOfType(ce, type);
+  // A scalar `0` for a number is kept as it is. For a point or a list that
+  // can be absent (`missing | tuple<…>`) it is not repaired: the zero point
+  // would turn an absent value into a present one.
+  if (d.isSame(0)) {
+    if (isSubtype(type, 'number')) return d;
+    return typeContainsMissing(t) ? undefined : zeroOfType(ce, type);
+  }
   if (isFunction(d, 'If') || isFunction(d, 'Which')) {
     const isWhich = d.operator === 'Which';
     if (isWhich && d.nops % 2 !== 0) return undefined;
     const ops: Expression[] = [];
     for (const [i, op] of d.ops.entries()) {
       const isValueArm = isWhich ? i % 2 === 1 : i > 0;
-      const arm = isValueArm ? withZeroPoints(op, type) : op;
+      const arm = isValueArm ? withZeroPoints(op, t) : op;
       if (arm === undefined) return undefined;
       ops.push(arm);
     }
     return ce.function(d.operator, ops);
   }
   if (isSubtype(type, 'number') || isPointElementType(type)) return d;
-  const element = collectionElementType(type);
+  // A selection of a collection (`Take(xs′, 2)`, the derivative of
+  // `Take(h(u), 2)`) gives elements of its collection. A selection that
+  // this differentiator built has a collection that was repaired when the
+  // selection was built (`accessorOfContainerDerivative()`), and any other
+  // selection reads elements of a value, not zeros that stand for points.
+  if (isFunction(d) && ELEMENT_SELECTOR_ARITY[d.operator] !== undefined)
+    return d;
+  // A list of zeros as long as a value (`Map(x ↦ (0, 0), Take(P, ⌈u⌉))`,
+  // built by `zeroOfConstantValue()` from the type of its elements).
+  if (isFunction(d, 'Map') && isZeroValue(d)) return d;
+  // The elements are read with the type of the container WITHOUT its own
+  // `missing` arm only: `stripMissingFromType()` also removes the `missing`
+  // arm of the elements, which says that an element can be absent.
+  const element =
+    collectionElementType(withoutAbsentArm(t)) ?? collectionElementType(type);
   if (element === undefined) return undefined;
   if (isFunction(d, 'List')) {
     const ops: Expression[] = [];
@@ -1548,21 +1888,69 @@ function withZeroPoints(d: Expression, t: Type): Expression | undefined {
   return isSubtype(stripMissingFromType(element), 'number') ? d : undefined;
 }
 
+/** The type `t` without its top-level `missing` arm (`missing | list<T>`
+ * gives `list<T>`). The arms of the parts of `t` are kept. */
+function withoutAbsentArm(t: Type): Type {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return r;
+  const arms = r.types.filter((arm) => arm !== 'missing');
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
 /**
  * The derivative of the accessor `expr` (`PointX`, `PointY`, `PointZ`, or
- * `At` with a constant index) from the derivative `dContainer` of its
+ * an element selector with constant selection operands, see
+ * `selectorKind()`) from the derivative `dContainer` of its
  * container: the accessor of `dContainer`, after the scalar zeros that
  * stand for points are replaced by zero points (`withZeroPoints()`, which
  * reads the type of the ORIGINAL container: the derivative does not say
  * whether a list of two numbers is one point or two coordinates).
  * `undefined` when the reading cannot be decided or the result is not
  * valid.
+ *
+ * With `isExactZero`, `dContainer` is a zero built from the value or from
+ * the type of the container (`zeroOfConstantContainerValue()`,
+ * `zeroOfConstantValue()`). Each of its elements has the shape of the
+ * element it stands for, so it is used as it is.
+ *
+ * A `PointList` derivative is used as it is: it is the `PointList` of the
+ * derivatives of the components (the elementwise rule), which zips as the
+ * differentiated `PointList` does. A scalar `0` component is repeated by
+ * the zip, which is correct only for a component that is a number: the
+ * elementwise rule gives a constant collection component a list of zeros
+ * of the same length. When the container is a written-out `PointList`, a
+ * scalar `0` component whose original component is not a number is
+ * checked here too, and the derivative declines.
  */
 function accessorOfContainerDerivative(
   expr: Expression & FunctionInterface,
-  dContainer: Expression
+  dContainer: Expression,
+  isExactZero = false
 ): Expression | undefined {
-  const repaired = withZeroPoints(dContainer, expr.op1.type.type);
+  // A container whose type can be a dictionary or a record
+  // (`list<number> | dictionary<number>`) is read by position only when the
+  // zero or the derivative is a written-out list or tuple.
+  if (
+    mayBeKeyedCollectionType(expr.op1.type.type) &&
+    !isFunction(dContainer, 'List') &&
+    !isFunction(dContainer, 'Tuple')
+  )
+    return undefined;
+  let repaired: Expression | undefined;
+  if (isExactZero) repaired = dContainer;
+  else if (isFunction(dContainer, 'PointList')) {
+    const container = expr.op1;
+    if (
+      isFunction(container, 'PointList') &&
+      (container.nops !== dContainer.nops ||
+        dContainer.ops.some(
+          (d, i) =>
+            d.isSame(0) && !isSubtype(container.ops[i].type.type, 'number')
+        ))
+    )
+      return undefined;
+    repaired = dContainer;
+  } else repaired = withZeroPoints(dContainer, expr.op1.type.type);
   if (repaired === undefined) return undefined;
   const accessed = expr.engine.function(expr.operator, [
     repaired,
@@ -1693,16 +2081,46 @@ function differentiateNode(
   // `Derivative(p, 1)`), whereas an operator definition (`g(t) := …`) is
   // resolved by applying and EVALUATING it, which had already turned the
   // `PointList` into a `Tuple`.
+  //
+  // An element that does not depend on `v` has the derivative `0`. When the
+  // element is a point or a list of known lengths, that derivative is the
+  // zero of its shape (`withZeroOfShape()`): with `Q := (1, 2)`, the
+  // derivative of `[(t, t²), Q]` is `[(1, 2t), (0, 0)]`. It was
+  // `[(1, 2t), 0]`, a list that mixes a point and a number.
+  //
+  // A component of a `PointList` that is a constant collection must stay a
+  // collection of the same length: the zip repeats a scalar component for
+  // every point, but a collection component sets the number of points (the
+  // zip stops at the shortest component). When its type gives no zero (a
+  // list of unknown length), the zero is a list of zeros as long as the
+  // component (`zeroOfConstantValue()`). With `c := [5, 6]`, the
+  // derivative of `PointList(u, c)` is `PointList(1, [0, 0])`, the points
+  // `[(1, 0), (1, 0)]`; the scalar `0` gave the single point `(1, 0)`. A
+  // component whose zero cannot be built stays the scalar `0`, and a
+  // selector of the `PointList` declines (`accessorOfContainerDerivative()`).
   if (
     expr.operator === 'List' ||
     expr.operator === 'Tuple' ||
     expr.operator === 'PointList'
   ) {
-    const elements = expr.ops.map(
-      (op) =>
+    const isPointList = expr.operator === 'PointList';
+    const elements = expr.ops.map((op) => {
+      const d = withZeroOfShape(
+        op,
         differentiate(op, v, depth + 1, trace) ??
-        ce._fn('D', [op, ce.symbol(v)])
-    );
+          ce._fn('D', [op, ce.symbol(v)]),
+        v
+      );
+      if (isPointList && d.isSame(0) && op.type.matches('collection'))
+        return (
+          (dependsOnVariable(op, v)
+            ? undefined
+            : zeroOfConstantContainerValue(op)) ??
+          zeroOfConstantValue(op, false) ??
+          d
+        );
+      return d;
+    });
     if (elements.some((e) => !e.isValid)) return undefined;
     return ce.function(expr.operator, elements);
   }
@@ -1757,21 +2175,87 @@ function differentiateNode(
   // integer that jumps at each integer and is constant between the jumps)
   // is a constant index between its jumps, the convention of `D(⌈u⌉) = 0`:
   // `d/du At(L(u), ⌈u⌉)` is `At(L′(u), ⌈u⌉)`.
-  if (
-    ((POINT_ACCESSOR_SLOT[expr.operator] !== undefined && expr.nops === 1) ||
-      (expr.operator === 'At' &&
-        expr.nops === 2 &&
-        isConstantIndex(expr.op2, v, depth))) &&
-    dependsOnVariable(expr.op1, v)
-  ) {
+  //
+  // The other operators that select elements by position (`First`, `Last`,
+  // `Take`, `Drop`, `Rest`, `Most`, `Slice`, `Reverse`, …; see
+  // `ELEMENT_SELECTOR_ARITY`) are linear for the same reason when their
+  // count, index or span is constant: `d/du Last(h(u))` is `Last(h′(u))`.
+  // They also fell through to the generic chain rule, which gave a product
+  // of the derivative of the container with an unknown partial derivative
+  // (`[Last′(L(u)), 2u·Last′(L(u)), …]`), and declined after about 1.1 s for
+  // the long list of points of Tycho ledger row 424.
+  //
+  // A selector whose count, index or span changes with `v` (`Take(L(u), u)`,
+  // `At(P, u)`) has no closed form, and the derivative declines. The generic
+  // chain rule gave unknown partial derivatives of the selector with
+  // respect to the selection operand (`Apply(Derivative("At", 0, 1), P, u)`).
+  //
+  // A selector with a constant selection of a container that does not
+  // depend on `v` is a constant, and its derivative is the zero of its shape
+  // (`zeroOfConstantValue()`): `D(Take([1, 2, 3], 2), u)` is `[0, 0]`,
+  // and `D(Last(P), u)` is `(0, 0)` for a list of points `P`. The generic
+  // chain rule multiplied an unknown partial derivative by the derivative
+  // of the container, and gave a list as long as the container:
+  // `D(First([1, 2]), u)` was `[0, 0]`.
+  //
+  // The zero is the selector applied to the zero of the CONTAINER, so that
+  // a selection out of range stays out of range: `D(Third([1, 2]), u)` is
+  // `Third([0, 0])`, which is `NaN` as `Third([1, 2])` is. Only when the
+  // shape of a constant container is not known is the zero read from the
+  // type of the selection.
+  //
+  // A container whose derivative is the scalar `0` (a selection that is
+  // constant between its jumps, `Take(P, ⌈u⌉)`) is read the same way: its
+  // zero is built from its own type and value (`zeroOfConstantValue()`,
+  // `Map(x ↦ (0, 0), Take(P, ⌈u⌉))`), and the selector is applied to it.
+  // `D(At([⌈u⌉], 2), u)` is `At([0], 2)`, out of range as `At([⌈u⌉], 2)`
+  // is. Read through the zero repair (`withZeroPoints()`), the scalar `0` of
+  // a list of unknown length had no zero, and an outer selector declined
+  // (`D(PointY(Take(P, ⌈u⌉)), u)`).
+  //
+  // `At` of a dictionary or a record by a key that depends on `v` declines:
+  // the generic chain rule gave unknown partial derivatives of `At` (with a
+  // record, an `Error`). A constant one is `At` of the zero of the value of
+  // the dictionary (`zeroOfConstantContainerValue()`): a key that is absent
+  // stays absent.
+  //
+  // A constant container is read by its VALUE when it is known
+  // (`zeroOfConstantContainerValue()`), so that an absent element stays
+  // absent: with `P := [(1, 2), Missing]`, `D(Last(P), u)` is
+  // `Last([(0, 0), Missing])`, which is `Missing`. When the value is not
+  // known, the zero is built from the type, and the derivative declines if
+  // the type says that a value can be absent.
+  const selection = selectorKind(expr, v, depth);
+  if (selection === 'variable') return undefined;
+  if (selection === 'keyed') {
+    if (dependsOnVariable(expr, v)) return undefined;
+    const zero = zeroOfConstantContainerValue(expr.op1);
+    if (zero === undefined) return undefined;
+    return ce.function('At', [zero, ...expr.ops.slice(1)]);
+  }
+  if (selection === 'linear' && !dependsOnVariable(expr.op1, v)) {
+    const zero =
+      zeroOfConstantContainerValue(expr.op1) ??
+      zeroOfConstantValue(expr.op1, true);
+    if (zero === undefined) return undefined;
+    if (zero.isSame(0))
+      return zeroOfConstantValue(expr, !dependsOnVariable(expr, v));
+    return accessorOfContainerDerivative(expr, zero, true);
+  }
+  if (selection === 'linear') {
     recordD(trace, expr, v, 'derivative.rewrite', () =>
       ce.function(expr.operator, [
         dPlaceholder(expr.op1, v),
         ...expr.ops.slice(1),
       ])
     );
-    const dContainer = differentiate(expr.op1, v, depth + 1, trace);
+    let dContainer = differentiate(expr.op1, v, depth + 1, trace);
     if (dContainer === undefined || !dContainer.isValid) return undefined;
+    if (dContainer.isSame(0)) {
+      const zero = zeroOfConstantValue(expr.op1, false);
+      if (zero === undefined) return undefined;
+      return accessorOfContainerDerivative(expr, zero, true);
+    }
     return accessorOfContainerDerivative(expr, dContainer);
   }
 
@@ -1799,6 +2283,12 @@ function differentiateNode(
   // routes, because a lazy operator holds its operands, so canonicalize each
   // arm before differentiating it (`.canonical` binds structure without
   // substituting assigned symbol values).
+  //
+  // An arm that does not depend on `v` and is a point (or a list of known
+  // lengths) has the zero of its shape as its derivative, as an element of
+  // a written-out list has (`withZeroOfShape()`): the derivative of
+  // `If(0 < u, (u, 1), Q)` is `If(0 < u, (1, 0), (0, 0))`, not
+  // `If(0 < u, (1, 0), 0)`.
   if (expr.operator === 'Which' || expr.operator === 'If') {
     // `Which` operands are strictly paired `(condition, value)`; an odd count
     // is a malformed call that the `Which` canonical handler reports as an
@@ -1811,9 +2301,11 @@ function differentiateNode(
     const ops = expr.ops.map((op, i) => {
       if (!isValueArm(i)) return op;
       const arm = op.canonical;
-      return (
+      return withZeroOfShape(
+        arm,
         differentiate(arm, v, depth + 1, trace) ??
-        ce._fn('D', [arm, ce.symbol(v)])
+          ce._fn('D', [arm, ce.symbol(v)]),
+        v
       );
     });
     if (ops.some((e) => !e.isValid)) return undefined;
@@ -2678,6 +3170,13 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
       if (isSymbol(e)) {
         if (e.symbol === v) return true;
         calls.push({ name: e.symbol, nargs: 1, fn: e });
+        continue;
+      }
+      // A dictionary is not a function: its values are not operands. Its
+      // `has()` tests whether a KEY is present (`DictionaryInterface`), not
+      // whether a symbol occurs in it, so its values are walked.
+      if (isDictionary(e)) {
+        for (const value of e.values) pending.push(value);
         continue;
       }
       if (!isFunction(e)) {

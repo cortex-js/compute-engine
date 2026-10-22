@@ -65,7 +65,7 @@ Derivative operator that returns a derivative function.
 
 ### integrate
 
-MathJSON `Integrate` · `(function, limits+) -> list<number> | list<tuple> | number | tuple`
+MathJSON `Integrate` · `(function, limits+) -> list<tuple> | number | tensor | tuple`
 
 Symbolic integral with optional bounds.
 
