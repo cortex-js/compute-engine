@@ -87,6 +87,7 @@ import {
   tupleElementType,
 } from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   overriddenCompilationHeads,
   readsCallerSource,
@@ -5528,9 +5529,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     let result: CompilationResult<'interval-js', IntervalValue>;
     try {
       // A `vars`-mapped symbol is compiled as the valueless input of its
-      // declared type (`withVarsValuesHidden`).
+      // declared type (`withVarsValuesHidden`). A call of a user function
+      // that shadows a library operator is compiled under a private name
+      // (`withShadowingCallsRenamed`).
       result = withVarsValuesHidden(expr, options.vars, () =>
-        this.compileOrThrow(expr, options)
+        withShadowingCallsRenamed(expr, options, (renamed) =>
+          this.compileOrThrow(renamed, options)
+        )
       );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented

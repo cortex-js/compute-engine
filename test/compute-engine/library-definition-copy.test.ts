@@ -240,8 +240,9 @@ describe('a copy that replaces a handler shadows the library operator', () => {
         .evaluate()
         .toString()
     ).toBe('3');
+    // The compiled code calls the user function, not the library `Sin`.
     const f = compiled(ce, ['Sin', 'x']);
-    expect(f.success).toBe(false);
+    expect(f.success).toBe(true);
     expect(f.run({ x: 2 })).toBe(6);
   });
 

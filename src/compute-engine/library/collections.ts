@@ -7718,7 +7718,13 @@ function componentAt(
 // point the two coincide (`First` of a 2-tuple is its x-coordinate); on a list
 // of points they diverge (`First` returns the first point, not the x-list).
 function isPointLike(e: Expression): boolean {
-  const t = e.type.type;
+  // An element that is a point or absent (`missing | tuple<…>`, the type of
+  // `At(P, k)` for a list of points `P`, or of a difference of two such
+  // reads) is a point, as the type handler reads it (`isPointLikeD`). Read
+  // as a non-point, the list `[At(P, ⌈u⌉), At(P, ⌈u⌉ + 1)]` was indexed as
+  // one point: `PointY` of it gave its second element, a point, where its
+  // type is `list<missing | number>`.
+  const t = stripMissingFromType(resolveTypeAlias(e.type.type));
   if (isPointElementType(t) || e.operator === 'Tuple') return true;
   // The list-of-lists spelling of a point list: a row of coordinates. A data
   // import produces `[[0,0],[3,4]]` rather than a list of tuples, and the
@@ -7864,7 +7870,10 @@ function staticPointArity(t: Type): number | undefined {
 function concretePointArity(e: Expression): number | undefined {
   // A restricted point has the arity of its body.
   e = unrestricted(e);
-  const t = e.type.type;
+  // A point that may be absent (`missing | tuple<…>`, the type of `At(P, k)`
+  // for a list of points `P`) has the arity of its tuple arm, as
+  // `isPointLike` reads it as a point.
+  const t = stripMissingFromType(e.type.type);
   if (typeof t !== 'string' && t.kind === 'tuple')
     return t.elements?.length ?? (isFunction(e) ? e.nops : undefined);
   if (isFunction(e) && e.operator === 'Tuple') return e.nops;
@@ -8136,7 +8145,9 @@ function pointComponentOf(
   // and wrapping it as `PointY(5)` would plant an invalid application in the
   // coordinate list where the absence marker belongs.
   if (!isPointLike(e)) return absenceMarker(ce, e);
-  const arity = staticPointArity(e.type.type);
+  // The arity of a point that may be absent is that of its tuple arm (see
+  // `isPointLike`).
+  const arity = staticPointArity(stripMissingFromType(e.type.type));
   if (arity !== undefined && arity < position) return absenceMarker(ce, e);
   return ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]);
 }

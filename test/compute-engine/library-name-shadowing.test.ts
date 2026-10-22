@@ -111,10 +111,10 @@ describe('a user function shadows a head that canonicalization folds', () => {
     expect(run('((Square) => Square(3))(x => x + 100)')).toBe('103');
   });
 
-  test('compiled code falls back to the interpreter for a shadowed head', () => {
+  test('compiled code calls the user function of a shadowed head', () => {
     // The target lowers `Square` as the library operator (`y * y`), which is
-    // not what the interpreter calls; compilation fails closed and `compile()`
-    // falls back to interpreting the user function.
+    // not what the interpreter calls. The compiled code calls the user
+    // function instead, as for a user function with another name.
     const ce = new ComputeEngine();
     ce.declare('y', 'real');
     ce.box([
@@ -125,7 +125,7 @@ describe('a user function shadows a head that canonicalization folds', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const f = compile(ce.box(['Square', 'y']));
-      expect(f.success).toBe(false);
+      expect(f.success).toBe(true);
       expect(f.run!({ y: 2 })).toBe(102);
     } finally {
       warn.mockRestore();

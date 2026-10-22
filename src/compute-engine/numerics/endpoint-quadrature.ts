@@ -65,6 +65,12 @@ export interface GaussKronrodOutcome {
   /** The sum of the magnitudes of the values of the panels: the scale of the
    * integrand, which bounds the absolute tolerance. */
   magnitude: number;
+  /** The integrand is `NaN` on a set that is not some isolated points, and
+   * its finite samples next to that set are not of rounding size: a bisected
+   * panel and its two children each have a majority of `NaN` samples (see
+   * `adaptiveFinite`, `gauss-kronrod.ts`). `estimate` and `error` are then
+   * `NaN`. */
+  nanRegion?: true;
   lo: CornerSeries;
   hi: CornerSeries;
 }

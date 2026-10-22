@@ -510,6 +510,7 @@ import {
   type LoopInvariantBinding,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
 import {
   MIN_UNROLLED_WIDTH,
@@ -9889,11 +9890,15 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // A `vars`-mapped symbol is compiled as the valueless input of its
       // declared type: its engine value is hidden for both attempts
       // (`withVarsValuesHidden`).
+      // A call of a user function that shadows a library operator is
+      // compiled under a private name (`withShadowingCallsRenamed`).
       return withVarsValuesHidden(expr, options.vars, () =>
         compileWithAutoEscalation(requestedMode, JS_SUPPORTED_MODES, (m) =>
-          this.compileOrThrow(
-            expr,
-            m === requestedMode ? options : { ...options, mode: m }
+          withShadowingCallsRenamed(expr, options, (renamed) =>
+            this.compileOrThrow(
+              renamed,
+              m === requestedMode ? options : { ...options, mode: m }
+            )
           )
         )
       );

@@ -58,6 +58,24 @@ interface Panel {
    * panel: 0 for a starting panel, and one more than the parent for a child.
    * Set by the adaptive loop, not by `gk15`. */
   depth?: number;
+  /** The number of samples of the integrand on this panel, of 15, that are
+   * `NaN`. An infinite sample (an integrable singularity at a node) is not
+   * counted. Set by `gk15`. */
+  nanSamples?: number;
+  /** The number of samples of the integrand on this panel, of 15, that are
+   * not finite (`NaN` or infinite). Set by `gk15`. */
+  nonFiniteSamples?: number;
+  /** The largest magnitude of a finite sample on this panel, or `-∞` when
+   * no sample is finite. Set by `gk15`. */
+  largestFinite?: number;
+  /** The smallest and the largest node of this panel where the sample is
+   * `NaN`. Set by `gk15` when `nanSamples` is not 0. */
+  nanNodes?: [first: number, last: number];
+  /** True when the boundary of a `NaN` set in this panel or in a panel it
+   * comes from was examined, and the values next to it were of rounding size
+   * (`nanSetBorderIsLarge`). The panel and its children are then not
+   * examined again. Set by the adaptive loop. */
+  nanUndecided?: boolean;
 }
 
 /**
@@ -115,7 +133,43 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   if (resasc !== 0 && error !== 0)
     error = resasc * Math.min(1, Math.pow((200 * error) / resasc, 1.5));
 
-  return { a, b, value, error };
+  // Count the `NaN` samples and the other samples that are not finite, and
+  // find the largest finite sample. A `NaN` value can also come from samples
+  // `+∞` and `−∞` in the same panel, which are not `NaN` samples.
+  let nanSamples = 0;
+  let nonFiniteSamples = 0;
+  let largestFinite = Number.NEGATIVE_INFINITY;
+  let nanFirst = Number.POSITIVE_INFINITY;
+  let nanLast = Number.NEGATIVE_INFINITY;
+  const tally = (v: number, x: number) => {
+    if (Number.isFinite(v)) {
+      if (Math.abs(v) > largestFinite) largestFinite = Math.abs(v);
+      return;
+    }
+    nonFiniteSamples += 1;
+    if (Number.isNaN(v)) {
+      nanSamples += 1;
+      nanFirst = Math.min(nanFirst, x);
+      nanLast = Math.max(nanLast, x);
+    }
+  };
+  tally(fc, center);
+  for (let k = 0; k < 7; k++) {
+    tally(fv1[k], center - halfLength * XGK[k]);
+    tally(fv2[k], center + halfLength * XGK[k]);
+  }
+
+  const panel: Panel = {
+    a,
+    b,
+    value,
+    error,
+    nanSamples,
+    nonFiniteSamples,
+    largestFinite,
+  };
+  if (nanSamples > 0) panel.nanNodes = [nanFirst, nanLast];
+  return panel;
 }
 
 /** Selection key: a non-finite panel error is treated as the worst offender. */
@@ -182,6 +236,33 @@ const INITIAL_PANELS = 16;
  * bisection gave two non-finite children. See `mustStopAllBad` in
  * `adaptiveFinite`. */
 const ALL_BAD_STOP_PANELS = 16;
+
+/** The smallest number of `NaN` samples (or of samples that are not finite),
+ * of the 15 samples of a panel, that shows that the integrand is `NaN` (or
+ * not finite) on a part of the panel, not only at some isolated points. A
+ * point is at most one node of a panel, so a few isolated points give a few
+ * such samples. See `nanRegion` and `refinementFailed` in `adaptiveFinite`. */
+const NAN_MAJORITY = 8;
+
+/** The largest ratio of the values next to the boundary of a set where the
+ * integrand is `NaN` to the largest finite sample of the integrand, for which
+ * that set is not reported as a region with no value (`nanRegion` in
+ * `adaptiveFinite`). Below this ratio the integrand has decreased to the size
+ * of the rounding of its largest value at the boundary, which is also what an
+ * integrand that overflows in its tail shows (`sinh x/cosh² x` is `∞/∞` for
+ * `x > 710`, where its value is about `10⁻³⁰⁸`). See `nanSetBorderIsLarge`. */
+const NAN_BORDER_RATIO = 2 ** -50;
+
+/** The distance from the boundary of a `NaN` set, as a fraction of the
+ * interval, of the first point where `nanSetBorderIsLarge` reads the
+ * integrand. The function also reads it at 2, 4 and 8 times this distance. */
+const NAN_BORDER_DISTANCE = 2 ** -20;
+
+/** The largest number of boundaries of `NaN` sets that one adaptive loop
+ * examines (`nanSetBorderIsLarge`). Each examination costs about 30 to 60
+ * evaluations of the integrand. After this number, a `NaN` set is not
+ * reported as a region with no value. */
+const NAN_BORDER_TESTS = 32;
 
 /** The smallest error that `adaptiveQuadrature` reports, in units of
  * `Number.EPSILON` times the larger of `|estimate|` and the sum of the
@@ -657,6 +738,93 @@ function shellsDiverge(
 }
 
 /**
+ * Whether the integrand has values that are not of rounding size next to the
+ * boundary of a set where it is `NaN`. `parent` is a panel of `[a, b]` with a
+ * majority of `NaN` samples, and `largest` is the largest finite sample on
+ * the interval.
+ *
+ * On each side of the `NaN` nodes of `parent`, the function finds a point
+ * where `f` is not `NaN` (it steps out from the outermost `NaN` node by
+ * `1/16`, `1/8`, … of the width of `parent`, inside the open interval
+ * `(a, b)`), and bisects between the two points until the boundary is known
+ * to `NAN_BORDER_DISTANCE·(b − a)/16`. It then reads `f` at `1`, `2`, `4` and
+ * `8` times `NAN_BORDER_DISTANCE·(b − a)` from the boundary, away from the
+ * `NaN` set. The values at these points, at a fixed fraction of the interval
+ * from the boundary, show what is next to the boundary:
+ * - next to a set where the integrand has no real value, a value that is not
+ *   of rounding size: `√x` at `x = 2⁻²⁰` is `0.001`, and `x^(−1/2)` is large;
+ * - in a tail where the terms of a decreasing integrand overflow, a value of
+ *   about `10⁻³⁰⁸`: `eˣ/(1 + eˣ)²` is `∞/∞` for `x > 709.8`, and is
+ *   `10⁻³⁰⁵` at `x = 702`.
+ * The samples of the panels next to the `NaN` set can be far from it: on
+ * `[0, 10000]`, the starting panel `[0, 625]` of the logistic density holds
+ * its peak, and the `NaN` set starts at `709.8`.
+ *
+ * Returns `true` when a value read next to a boundary (an infinite value
+ * included) is larger than `NAN_BORDER_RATIO` times `largest` (or than the
+ * values read, when they are larger). Returns `false` when no boundary
+ * could be found (`f` is `NaN` up to the ends of the interval, or the points
+ * to read are outside it or `NaN`): then the `NaN` set is not reported as a
+ * region with no value.
+ */
+function nanSetBorderIsLarge(
+  f: (x: number) => number,
+  a: number,
+  b: number,
+  parent: Panel,
+  largest: number
+): boolean {
+  if (parent.nanNodes === undefined) return false;
+  const distance = (b - a) * NAN_BORDER_DISTANCE;
+  const width = parent.b - parent.a;
+  // The largest magnitude of `f` next to the boundary on the side `dir`
+  // (`-1` for the left, `1` for the right) of the `NaN` node `xNaN`, or
+  // `undefined` when no boundary was found on that side.
+  const borderValue = (xNaN: number, dir: number): number | undefined => {
+    // A panel or an interval so narrow that its sixteenth, or the reading
+    // distance, rounds to 0 gives no step to search with: doubling a step
+    // of 0 never moves, and the search would read the same `NaN` point
+    // without end (`[0, 64 · Number.MIN_VALUE]`).
+    if (!(width / 16 > 0) || !(distance > 0)) return undefined;
+    let xValue: number | undefined;
+    for (let step = width / 16; step <= b - a; step *= 2) {
+      const x = xNaN + dir * step;
+      if (!(x > a && x < b)) break;
+      if (!Number.isNaN(f(x))) {
+        xValue = x;
+        break;
+      }
+    }
+    if (xValue === undefined) return undefined;
+    let n = xNaN;
+    let v = xValue;
+    while (Math.abs(v - n) > distance / 16) {
+      const m = 0.5 * (n + v);
+      if (m === n || m === v) break;
+      if (Number.isNaN(f(m))) n = m;
+      else v = m;
+    }
+    let result: number | undefined;
+    for (let j = 0; j < 4; j++) {
+      const x = v + dir * distance * 2 ** j;
+      if (!(x > a && x < b)) break;
+      const y = f(x);
+      if (Number.isNaN(y)) break;
+      result = Math.max(result ?? 0, Math.abs(y));
+    }
+    return result;
+  };
+  const [first, last] = parent.nanNodes;
+  const values = [borderValue(first, -1), borderValue(last, 1)].filter(
+    (v): v is number => v !== undefined
+  );
+  if (values.length === 0) return false;
+  const border = Math.max(...values);
+  if (border === Number.POSITIVE_INFINITY) return true;
+  return border > NAN_BORDER_RATIO * Math.max(largest, border);
+}
+
+/**
  * Adaptive GK15 over a finite interval `[a, b]`.
  */
 function adaptiveFinite(
@@ -685,6 +853,12 @@ function adaptiveFinite(
   let badPanels = 0;
   let roundoffStop = false;
   let divergent = false;
+  // True when the loop stopped because the integrand is `NaN` on a set that
+  // is not some isolated points (see the test after each bisection below).
+  let nanRegion = false;
+  // The number of boundaries of `NaN` sets examined by `nanSetBorderIsLarge`
+  // (see the test after each bisection below).
+  let nanBorderTests = 0;
 
   // Fold a panel into the running totals, skipping non-finite contributions.
   const addPanel = (p: Panel) => {
@@ -774,20 +948,23 @@ function adaptiveFinite(
 
   // True when no panel is finite.
   const allPanelsBad = () => badPanels === panels.length;
-  // True when a bisection gave two bad children. A non-finite value at one
-  // point (a removable singularity such as `(x²-1)/(x²-1)` at x = ±1) makes
-  // at most one panel bad, because a point is a node of at most one panel.
-  // When a bad panel is bisected, a point at its center goes to the shared
-  // boundary of the two children, which is not a node of either child. A
-  // point at another node of the parent is, in general, not a node of a
-  // child. So two bad children show non-finite values at new points, not
-  // only the isolated point that made the parent bad.
+  // True when a bisection gave two bad children that each have at least
+  // `NAN_MAJORITY` samples that are not finite. A non-finite value at one
+  // point (a removable singularity such as `(x²-1)/(x²-1)` at x = ±1) is at
+  // most one node of a panel. The center of a child can be such a point:
+  // with `u = x − ⌊x⌋`, `sin(u)/u` is `0/0` at each integer, and on
+  // `[0, 64]` the centers of the 16 starting panels and of their children
+  // are integers, so two bad children alone stopped the loop with `NaN`
+  // (the integral is `64·2·Si(1/2) = 63.1177`). The other nodes are at
+  // irrational fractions of the panel from its center, so isolated points
+  // give a few non-finite samples, and two children with a majority of
+  // them show that the integrand is not finite on a part of each child.
   let refinementFailed = false;
   // True when the loop must stop with a `NaN` result: no panel is finite,
   // there are at least `ALL_BAD_STOP_PANELS` panels, and a bisection gave
-  // two bad children. Without this stop, all errors are infinite and the
-  // loop would keep halving panels until they are too narrow to split (more
-  // than 30,000 evaluations).
+  // two bad children (`refinementFailed`). Without this stop, all errors are
+  // infinite and the loop would keep halving panels until they are too narrow
+  // to split (more than 30,000 evaluations).
   //
   // "No panel is finite" alone is not enough evidence: k isolated points can
   // make k panels bad. For example, on [0, 16] with the 16 default starting
@@ -837,7 +1014,85 @@ function adaptiveFinite(
     const left = gk15(f, iv.a, mid);
     const right = gk15(f, mid, iv.b);
     left.depth = right.depth = (iv.depth ?? 0) + 1;
-    if (panelIsBad(left) && panelIsBad(right)) refinementFailed = true;
+    if (
+      panelIsBad(left) &&
+      panelIsBad(right) &&
+      (left.nonFiniteSamples ?? 0) >= NAN_MAJORITY &&
+      (right.nonFiniteSamples ?? 0) >= NAN_MAJORITY
+    )
+      refinementFailed = true;
+
+    // Stop with a `NaN` result (`nanRegion`) when the integrand is `NaN` on
+    // a part of the interval and has no value there. For example, the real
+    // function `Math.sqrt(y)` is `NaN` for every `y < 0`, and its integral on
+    // an interval that includes negative values has no real value. Without
+    // this stop, each bisection of a panel inside the `NaN` set gives two
+    // bad children, the loop bisects them until the panel budget is used
+    // (more than 30,000 evaluations), and the caller then samples the
+    // integrand for the Monte-Carlo fallback (`1e7` evaluations). Three
+    // conditions must be true:
+    //
+    // 1. The parent and its two children each have at least `NAN_MAJORITY`
+    //    `NaN` samples of 15. A `NaN` at isolated points (removable
+    //    singularities: `(x² − 1)/(x² − 1)` at `x = ±1`, `u/u` with
+    //    `u = x − ⌊x⌋` at each integer) does not stop the loop. Each point is
+    //    at most one node of a panel. The center of a panel can be such a
+    //    point, but the other nodes are at irrational fractions of the panel
+    //    from its center, so a few isolated points give a few `NaN` samples.
+    //    An infinite sample (an integrable singularity) is not a `NaN`
+    //    sample.
+    //
+    // 2. The parent is not inside the `2⁻³⁰·(b − a)` next to an endpoint.
+    //    There, the narrowest shells can sample the integrand where its
+    //    value rounds below a bound of its domain (`√(1 − x² − y²)` just
+    //    inside the bound `x = √(1 − y²)`), and the endpoint tests and the
+    //    extrapolation of the shells examine that tail. A parent that
+    //    touches an endpoint but is wider than that is tested: the `NaN` set
+    //    of `∫_{−0.2}^∞ y^(−1/2)·e^(−y/2) dy` starts at the endpoint.
+    //
+    // 3. The values of the integrand next to the boundary of the `NaN` set,
+    //    at a small fixed fraction of the interval from it, are not of
+    //    rounding size: larger than `NAN_BORDER_RATIO` times the largest
+    //    finite sample on the interval (`nanSetBorderIsLarge`). An integrand
+    //    that decreases to 0 can be `NaN` in its tail because its terms
+    //    overflow (`sinh x/cosh² x` is `∞/∞`, and `eˣ/(1 + eˣ)²` is `∞/∞`,
+    //    for `x > 710`), and the integral has a value. The values next to
+    //    such a tail are of rounding size. They are also of rounding size
+    //    next to a `NaN` set at a zero of high order (the real code of
+    //    `y^20.5·e^(−y/2)` is `NaN` for `y < 0`), and the two cases are not
+    //    different from the values alone. Then, and when no boundary is
+    //    found, the loop continues as if this test did not exist: the bad
+    //    panels are bisected, and the caller decides what to do with the
+    //    result, which does not converge. The children of the panel are
+    //    marked (`nanUndecided`), and the panels that come from them are not
+    //    examined again, but another `NaN` set in another part of the
+    //    interval is examined. At most `NAN_BORDER_TESTS` boundaries are
+    //    examined.
+    if (iv.nanUndecided === true) left.nanUndecided = right.nanUndecided = true;
+    else if (
+      nanBorderTests < NAN_BORDER_TESTS &&
+      (iv.nanSamples ?? 0) >= NAN_MAJORITY &&
+      (left.nanSamples ?? 0) >= NAN_MAJORITY &&
+      (right.nanSamples ?? 0) >= NAN_MAJORITY &&
+      iv.b - a > (b - a) * 2 ** -30 &&
+      b - iv.a > (b - a) * 2 ** -30
+    ) {
+      nanBorderTests += 1;
+      let largest = Math.max(
+        left.largestFinite ?? Number.NEGATIVE_INFINITY,
+        right.largestFinite ?? Number.NEGATIVE_INFINITY
+      );
+      for (const p of panels)
+        largest = Math.max(
+          largest,
+          p.largestFinite ?? Number.NEGATIVE_INFINITY
+        );
+      if (nanSetBorderIsLarge(f, a, b, iv, largest)) {
+        nanRegion = true;
+        break;
+      }
+      left.nanUndecided = right.nanUndecided = true;
+    }
 
     removePanel(iv);
     addPanel(left);
@@ -949,7 +1204,10 @@ function adaptiveFinite(
   // loop does not bisect). Then an integrand with removable
   // singularities at the node of each starting panel also gives NaN,
   // because no finite value is known.
-  if (allPanelsBad())
+  // The same `NaN` result is given when the integrand is `NaN` on a set that
+  // is not some isolated points (`nanRegion`), with the flag that tells a
+  // caller not to sample the integrand.
+  if (nanRegion || allPanelsBad())
     return {
       estimate: NaN,
       error: NaN,
@@ -957,6 +1215,7 @@ function adaptiveFinite(
       divergent: false,
       unresolved: false,
       magnitude: 0,
+      ...(nanRegion ? { nanRegion: true as const } : {}),
       ...corners,
     };
 
@@ -1051,7 +1310,14 @@ export function insideQuadrature(): boolean {
  * still integrated, even when every starting panel is bad: the bad panels
  * are bisected until their nodes miss the singular points. If the panel
  * budget stops the loop before any panel is finite, the estimate is also
- * `NaN`.
+ * `NaN`. An integrand that is `NaN` on a set that is not some isolated points
+ * (a bisected panel and its two children each have a majority of `NaN`
+ * samples), next to finite samples that are not of rounding size, yields a
+ * `NaN` estimate and `nanRegion: true` at once, after a few hundred
+ * evaluations: the integral has no value. Next to finite samples of rounding
+ * size (a tail where the terms of a decreasing integrand overflow, such as
+ * `sinh x/cosh² x` for `x > 710`), the `NaN` panels are bisected as other bad
+ * panels, and the result does not converge.
  *
  * An expired deadline throws a timeout `CancellationError`; there is no
  * partial result.
@@ -1095,6 +1361,11 @@ export function adaptiveQuadrature(
   /** Set only with `singularEndpoints`: see `QuadratureResult` in
    * `endpoint-quadrature.ts`. */
   singularCorner?: true;
+  /** The integrand is `NaN` on a set that is not some isolated points, and
+   * `estimate` and `error` are `NaN`: the integral has no value. A caller
+   * must not sample the integrand (Monte Carlo), whose mean is then also
+   * `NaN`. See `GaussKronrodOutcome` in `endpoint-quadrature.ts`. */
+  nanRegion?: true;
 } {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
@@ -1143,7 +1414,11 @@ export function adaptiveQuadrature(
       singularEndpoints: options?.singularEndpoints,
     };
     const left = adaptiveQuadrature(f, a, 0, halfOptions);
+    // A half where the integrand is `NaN` on a set that is not some isolated
+    // points makes the whole integral have no value.
+    if (left.nanRegion === true) return left;
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
+    if (right.nanRegion === true) return right;
     const estimate = left.estimate + right.estimate;
     const error = left.error + right.error;
     // Each half converged against a tolerance scaled to its OWN magnitude, so
@@ -1227,6 +1502,16 @@ export function adaptiveQuadrature(
         initialPanels,
         deadline
       );
+      // The integrand is `NaN` on a set that is not some isolated points:
+      // the integral has no value, and there is nothing to extrapolate.
+      if (r.nanRegion === true)
+        return {
+          estimate: NaN,
+          error: NaN,
+          converged: false,
+          divergent: false,
+          nanRegion: true as const,
+        };
       // The integrand is evaluated in doubles and the panel values are
       // summed in doubles, so the estimate has a rounding error of some
       // units in the last place of the sum of the magnitudes of the panel

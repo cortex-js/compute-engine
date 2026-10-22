@@ -48,9 +48,27 @@ import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
   boundVariableNamesInOperand,
+  ownBindingRewriteCount,
   rewriteWithBinders,
   sameBindingDef,
 } from '../boxed-expression/binders.js';
+import {
+  memoDepsStillValid,
+  snapshotMemoDeps,
+  type MemoDeps,
+} from '../boxed-expression/collection-element-memo.js';
+import {
+  beginObjectDeps,
+  endObjectDeps,
+  mergeObjectDeps,
+  objectDepsValid,
+  type ObjectDeps,
+} from '../boxed-expression/object-deps.js';
+import { containsObject } from '../boxed-expression/object-walk.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { sequenceReadStopCount } from '../boxed-expression/sequence-read-stops.js';
+import { cycleDetectionCount } from '../boxed-expression/cycle-guard.js';
+import { incompleteWalkCount } from '../boxed-expression/incomplete-walks.js';
 
 import {
   applicable,
@@ -77,6 +95,7 @@ import {
 import {
   derivative,
   differentiate,
+  isDifferentiating,
   memoizedDerivativeResult,
   memoizedPartialDerivative,
 } from '../symbolic/derivative.js';
@@ -1564,6 +1583,11 @@ function integrateRealPart(
     return gk.oscillates === true
       ? { estimate: NaN, error: NaN }
       : { estimate: NaN, error: NaN, divergent: true };
+  // The integrand is `NaN` on a set that is not some isolated points (for
+  // example, an integrand that has no real value on a part of the interval):
+  // the integral has no value. The samples of Monte Carlo would also be
+  // `NaN` there, and they cost up to `1e7` evaluations.
+  if (gk.nanRegion === true) return { estimate: NaN, error: NaN };
   if (
     (gk.converged || gk.extrapolated === true) &&
     Number.isFinite(gk.estimate)
@@ -2282,6 +2306,10 @@ function nIntegrateMultiple(
       if (gk.oscillates !== true) divergent = true;
       return { estimate: NaN, error: NaN };
     }
+    // The integrand of this level is `NaN` on a set that is not some isolated
+    // points: the level has no value, and sampling it would also give `NaN`
+    // (see `integrateRealPart`).
+    if (gk.nanRegion === true) return { estimate: NaN, error: NaN };
     // A stalled level whose error bound already beats the sampler keeps its
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
@@ -2916,6 +2944,183 @@ function foldDerivativeResult(f: Expression): Expression {
       );
   }
   return hasSymbolicTranscendental(f) ? f : f.evaluate();
+}
+
+/**
+ * The record that a `D` node has no closed form (its evaluate handler
+ * declined), in the state of the engine that the stamps describe:
+ * - `worldVersion`: the `world` axis (`ce._worldVersion`), which advances
+ *   for an assumption, a redefinition, an inference and a configuration
+ *   change;
+ * - `factsHidden`: the side of a fact-suppression window
+ *   (`ce._factsHidden()`);
+ * - `deps`: for each symbol that the node reads, directly or through the
+ *   body of a user function it calls or the value of a symbol it reads, the
+ *   binding it resolves to and the `_writeVersion` of that binding
+ *   (`snapshotMemoDeps()`). A value write, a type write and a new
+ *   declaration that shadows the name each invalidate it;
+ * - `variables`: for each differentiation variable of the node, its
+ *   definition and its type. The variables are bound by the node itself, so
+ *   `snapshotMemoDeps()` leaves them out, but the rules read their types:
+ *   `D(|x|, x)` declines for an `x` typed as a tuple and is `sgn(x)` for a
+ *   real `x`, and a type write to such a definition does not advance the
+ *   `world` axis. The `_writeVersion` of the definition cannot be used: the
+ *   value shield of each evaluation of the node writes the definition;
+ * - `objectDeps`: the versions of the mutable objects whose fields the
+ *   attempt read.
+ */
+type DeclinedDerivative = {
+  worldVersion: number;
+  factsHidden: boolean;
+  deps: MemoDeps;
+  variables: VariableStamp[];
+  objectDeps: ObjectDeps | undefined;
+};
+
+/** A differentiation variable of a `D` node, the definition it is bound to
+ * and its type, as a string. */
+type VariableStamp = [node: Expression, def: object | undefined, type: string];
+
+/** The stamps of the differentiation variables of the `D` node `expr`. */
+function variableStamps(expr: Expression): VariableStamp[] {
+  if (!isFunction(expr)) return [];
+  return expr.ops
+    .slice(1)
+    .filter((op) => isSymbol(op))
+    .map((op) => [op, op.valueDefinition, op.type.toString()]);
+}
+
+/** Is each variable still bound to the definition it was bound to, with
+ * the same type? */
+function variableStampsValid(stamps: VariableStamp[]): boolean {
+  return stamps.every(
+    ([node, def, type]) =>
+      node.valueDefinition === def && node.type.toString() === type
+  );
+}
+
+/** The declines of `D` nodes, one slot for `evaluate()` and one for a
+ * numeric approximation. Weakly held: the record goes with the node. */
+const DECLINED_DERIVATIVES = new WeakMap<
+  Expression,
+  [DeclinedDerivative | undefined, DeclinedDerivative | undefined]
+>();
+
+/**
+ * `expression` when an earlier evaluation of this same `D` node declined
+ * (found no closed form) and nothing it depends on changed since then (see
+ * {@link DeclinedDerivative}), otherwise `undefined`. A hit hands the object
+ * dependencies of the record to the enclosing cache-backed computations, as
+ * the other value memos do.
+ */
+function declinedDerivativeHit(
+  expression: Expression | undefined,
+  numeric: boolean
+): Expression | undefined {
+  if (expression === undefined) return undefined;
+  const entry = DECLINED_DERIVATIVES.get(expression)?.[numeric ? 1 : 0];
+  if (entry === undefined) return undefined;
+  const ce = expression.engine;
+  if (
+    ce._atTransientConfiguration ||
+    entry.worldVersion !== ce._worldVersion ||
+    entry.factsHidden !== ce._factsHidden() ||
+    !memoDepsStillValid(expression, entry.deps) ||
+    !variableStampsValid(entry.variables) ||
+    !objectDepsValid(entry.objectDeps)
+  )
+    return undefined;
+  mergeObjectDeps(entry.objectDeps);
+  return expression;
+}
+
+/**
+ * Run `attempt`, the differentiation of the `D` node `expression`, and
+ * record a decline (`attempt` returns `undefined`) so that the next
+ * evaluation of the same node does not work it out again
+ * ({@link declinedDerivativeHit}). A recorded decline returns `expression`
+ * itself, not `undefined`: the evaluation driver then gives the node as its
+ * value, and does not box a new `D` node with an empty record. That is what
+ * makes the record reach a later evaluation of the value, such as the read
+ * of a function parameter that holds the derivative.
+ *
+ * A derivative with no closed form costs a full attempt: a `D` of a call of
+ * a user function expands its body, and the size limit of the differentiator
+ * can be reached only after a large result was built. Without the record, a
+ * value that holds such a `D` paid that cost again at each evaluation, and a
+ * function that reads its parameter `n` times paid it about `n + 2` times
+ * (Tycho ledger row 424: 0.6 s for each attempt, 5 s for nine reads).
+ *
+ * A decline is not recorded when it may be provisional or when the record
+ * could not be validated later, the same rules as the memo of a stored value
+ * (`BoxedSymbol._memoizedStoredValue()`):
+ * - inside a transient precision or angular-unit window;
+ * - when the attempt met a reference cycle, a stopped sequence read, a walk
+ *   that missed elements, or a re-pointed binding;
+ * - when the node is not transitively pure (it can read a random number),
+ *   holds a mutable object, or has a dependency that cannot be recorded
+ *   (an unbound name);
+ * - when the node holds an error;
+ * - when the attempt runs inside another differentiation (a `D` nested in
+ *   the operand of a `D`): it shares the size budget of the enclosing
+ *   differentiation (`isDifferentiating()`), so it can decline because of
+ *   the nodes that the enclosing one built.
+ * A decline that is not recorded returns `undefined`, as before.
+ */
+function withDeclinedDerivativeMemo(
+  expression: Expression | undefined,
+  numeric: boolean,
+  attempt: () => Expression | undefined
+): Expression | undefined {
+  // A node that holds an error (`D(If(x), x)`, where `If(x)` lacks its then
+  // branch) is not recorded: the evaluation driver gives the error as the
+  // value of a decline, which it does not for the node itself.
+  if (
+    expression === undefined ||
+    !expression.isCanonical ||
+    !expression.isValid ||
+    expression.engine._atTransientConfiguration ||
+    isDifferentiating()
+  )
+    return attempt();
+  const ce = expression.engine;
+  const cyclesBefore = cycleDetectionCount();
+  const rewritesBefore = ownBindingRewriteCount();
+  const sequenceStopsBefore = sequenceReadStopCount();
+  const walksBefore = incompleteWalkCount();
+  beginObjectDeps();
+  let objectDeps: ObjectDeps | undefined;
+  let result: Expression | undefined;
+  try {
+    result = attempt();
+  } finally {
+    objectDeps = endObjectDeps();
+  }
+  if (result !== undefined) return result;
+  if (
+    cycleDetectionCount() !== cyclesBefore ||
+    ownBindingRewriteCount() !== rewritesBefore ||
+    sequenceReadStopCount() !== sequenceStopsBefore ||
+    incompleteWalkCount() !== walksBefore ||
+    !isTransitivelyPure(expression) ||
+    containsObject(expression)
+  )
+    return undefined;
+  // The dependencies are read AFTER the attempt: an inference that the
+  // attempt made (a symbol narrowed by a use) is then part of the state the
+  // record describes.
+  const deps = snapshotMemoDeps(expression);
+  if (deps === undefined) return undefined;
+  const slots = DECLINED_DERIVATIVES.get(expression) ?? [undefined, undefined];
+  slots[numeric ? 1 : 0] = {
+    worldVersion: ce._worldVersion,
+    factsHidden: ce._factsHidden(),
+    deps,
+    variables: variableStamps(expression),
+    objectDeps,
+  };
+  DECLINED_DERIVATIVES.set(expression, slots);
+  return expression;
 }
 
 /**
@@ -4179,7 +4384,7 @@ volumes
 
         return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, expression, numericApproximation }) => {
         // Guard against a malformed `D` with no operand (see the canonical
         // handler above): there is nothing to differentiate, so leave it
         // unevaluated rather than crashing on `ops[0].canonical`.
@@ -4202,45 +4407,61 @@ volumes
           if (n) diffVars.push(n);
         }
 
-        const result = withValueShield(ce, diffVars, () => {
-          let f: Expression | undefined = ops[0].canonical;
+        // A derivative with no closed form is not worked out again while
+        // nothing it depends on changed: the node is its own value (see
+        // `withDeclinedDerivativeMemo`).
+        const declined = declinedDerivativeHit(
+          expression,
+          numericApproximation === true
+        );
+        if (declined !== undefined) return declined;
 
-          // Unwrap Function literals to get the body for differentiation.
-          // For non-Function expressions (e.g., ['f', 'x']), do NOT call
-          // .evaluate() before differentiating — that would prematurely
-          // substitute variable values (e.g., x=5) and lose structural info.
-          if (isFunction(f, 'Function')) {
-            f = f.op1;
-          }
+        const result = withDeclinedDerivativeMemo(
+          expression,
+          numericApproximation === true,
+          () =>
+            withValueShield(ce, diffVars, () => {
+              let f: Expression | undefined = ops[0].canonical;
 
-          const params = ops.slice(1);
-          if (params.length === 0) f = undefined;
-          for (const param of params) {
-            const paramSym = sym(param);
-            if (!paramSym) {
-              f = undefined;
-              break;
-            }
-            f = differentiate(f!, paramSym);
-            if (f === undefined) break;
-          }
-          f = f?.canonical;
-          // Avoid recursive evaluation
-          if (f?.operator === 'D') return f;
-          // Avoid evaluating symbolic derivative applications like Digamma'(x)
-          // which would incorrectly evaluate to 0
-          if (
-            f?.operator === 'Apply' &&
-            isFunction(f) &&
-            f.op1?.operator === 'Derivative'
-          )
-            return f;
-          // Fold the raw rule output: a plain `evaluate()`, except that a
-          // result carrying symbolic transcendentals (like `ln(2)`) is
-          // returned as it stands to preserve the symbolic form, and a
-          // piecewise result is folded arm by arm.
-          return f === undefined ? undefined : foldDerivativeResult(f);
-        });
+              // Unwrap Function literals to get the body for differentiation.
+              // For non-Function expressions (e.g., ['f', 'x']), do NOT call
+              // .evaluate() before differentiating — that would prematurely
+              // substitute variable values (e.g., x=5) and lose structural info.
+              if (isFunction(f, 'Function')) {
+                f = f.op1;
+              }
+
+              const params = ops.slice(1);
+              if (params.length === 0) f = undefined;
+              for (const param of params) {
+                const paramSym = sym(param);
+                if (!paramSym) {
+                  f = undefined;
+                  break;
+                }
+                f = differentiate(f!, paramSym);
+                if (f === undefined) break;
+              }
+              f = f?.canonical;
+              // Avoid recursive evaluation
+              if (f?.operator === 'D') return f;
+              // Avoid evaluating symbolic derivative applications like Digamma'(x)
+              // which would incorrectly evaluate to 0
+              if (
+                f?.operator === 'Apply' &&
+                isFunction(f) &&
+                f.op1?.operator === 'Derivative'
+              )
+                return f;
+              // Fold the raw rule output: a plain `evaluate()`, except that a
+              // result carrying symbolic transcendentals (like `ln(2)`) is
+              // returned as it stands to preserve the symbolic form, and a
+              // piecewise result is folded arm by arm.
+              return f === undefined ? undefined : foldDerivativeResult(f);
+            })
+        );
+        // The memo recorded the decline: the node is its value.
+        if (result === expression) return result;
 
         // A derivative is an OPEN expression in the differentiation variable,
         // which this node now binds in its own scope (`scoped: operandsFrom(1)`).

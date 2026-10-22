@@ -96,6 +96,7 @@ import { isBroadcastableCollection } from '../collection-utils.js';
 import { literalParamsMap } from '../library/core.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   overriddenCompilationHeads,
   unrollFixedWidthCollections,
@@ -17196,9 +17197,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           });
     try {
       // A `vars`-mapped symbol is compiled as the valueless input of its
-      // declared type (`withVarsValuesHidden`).
+      // declared type (`withVarsValuesHidden`). A call of a user function
+      // that shadows a library operator is compiled under a private name
+      // (`withShadowingCallsRenamed`).
       return withVarsValuesHidden(expr, options.vars, () =>
-        this.compileOrThrow(expr, options, storage)
+        withShadowingCallsRenamed(expr, options, (renamed) =>
+          this.compileOrThrow(renamed, options, storage)
+        )
       );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented

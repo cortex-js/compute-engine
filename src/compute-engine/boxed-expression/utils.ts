@@ -2015,10 +2015,28 @@ export function updateDef(
     // scope, advanced the version and invalidated every memoized signature:
     // for a chain of functions in which each calls the next twice, the
     // derivations grew exponentially with the length of the chain.
+    //
+    // A fresh declaration in a scratch scope SHADOWS another binding when a
+    // scope above the target scope, anywhere in the chain, binds `name` and
+    // lives outside every registered scratch scope. An existing expression
+    // can read that binding by name through the current scope chain (a
+    // value shield shadows a function-valued symbol for this reason), and it
+    // reads the new binding from now on, so such a repair keeps its axis
+    // advance (`axisMaskOf`). The walk does not stop at a scratch binding of
+    // the name: that binding shadows the outer one in turn, and the same
+    // readers read it, so a declaration that shadows it shadows a binding
+    // that they read too.
+    let shadowing = false;
+    if (scratchRoot !== undefined && fresh === true && scope !== undefined) {
+      for (let s = scope.parent; s && !shadowing; s = s.parent)
+        if (s.bindings.has(name) && scratchRootOf(ce, s) === undefined)
+          shadowing = true;
+    }
     ce._noteStateEvent({
       kind: 'binding-repair',
       ...(scratchRoot !== undefined ? { scratch: true } : {}),
       ...(fresh === true ? { fresh: true } : {}),
+      ...(shadowing ? { shadowing: true } : {}),
     });
     // The definition installed just now is passed as `justInstalled` so a
     // recursive body — which noted its OWN name while canonicalizing — is not

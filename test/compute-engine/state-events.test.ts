@@ -20,6 +20,7 @@ import {
   type AxisMask,
 } from '../../src/compute-engine/engine-configuration-lifecycle';
 import { containsSignatureArm } from '../../src/common/type/utils';
+import { withScratchScope } from '../../src/compute-engine/scratch-scopes';
 import { parseType } from '../../src/common/type/parse';
 
 function mask(any: boolean, semantic: boolean, world: boolean): AxisMask {
@@ -78,6 +79,34 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
     ],
     // binding-repair: G only (§2: updateDef internal, minted-ctor removal).
     ['binding-repair', { kind: 'binding-repair' }, mask(true, false, false)],
+    [
+      'binding-repair (fresh)',
+      { kind: 'binding-repair', fresh: true },
+      mask(true, false, false),
+    ],
+    [
+      'binding-repair (scratch)',
+      { kind: 'binding-repair', scratch: true },
+      mask(true, false, false),
+    ],
+    // binding-repair (scratch, fresh): the zero mask. The repair that a
+    // declaration of a NEW callable name in a scratch scope emits: no
+    // binding of the name existed for an expression to read, and the scope
+    // is popped before any expression outside the computation runs — the
+    // rule of `declare (scratch)` above.
+    [
+      'binding-repair (scratch, fresh)',
+      { kind: 'binding-repair', scratch: true, fresh: true },
+      mask(false, false, false),
+    ],
+    // ...unless the new binding shadows a binding outside the scratch scopes
+    // (a value shield of a function-valued symbol): existing expressions
+    // read that name through the current scope chain.
+    [
+      'binding-repair (scratch, fresh, shadowing)',
+      { kind: 'binding-repair', scratch: true, fresh: true, shadowing: true },
+      mask(true, false, false),
+    ],
     // redefine: M+E — emitted ONLY by the callers that install an operator
     // half (callableAfter true by construction at every emitting site).
     [
@@ -344,6 +373,111 @@ describe('end-to-end advancement (legacy counters, public API)', () => {
     const m = advanced(() => ce.declare('zprobe', 'integer'));
     expect(m.any).toBe(true);
     expect(m.world).toBe(false);
+  });
+
+  test('a scratch repair of a new name selects no callable axis', () => {
+    expect(
+      callableAxisSelects({ kind: 'binding-repair', scratch: true, fresh: true })
+    ).toBe(false);
+    // Every other combination selects it.
+    expect(callableAxisSelects({ kind: 'binding-repair' })).toBe(true);
+    expect(
+      callableAxisSelects({ kind: 'binding-repair', scratch: true })
+    ).toBe(true);
+    expect(callableAxisSelects({ kind: 'binding-repair', fresh: true })).toBe(
+      true
+    );
+    expect(
+      callableAxisSelects({
+        kind: 'binding-repair',
+        scratch: true,
+        fresh: true,
+        shadowing: true,
+      })
+    ).toBe(true);
+  });
+
+  test('a scratch declaration of a callable name: new name or shadow', () => {
+    // A new name advances no axis. A declaration that shadows a binding
+    // outside the scratch scopes (the declaration of a value shield for the
+    // function-valued `f`) is marked `shadowing` and keeps its advance.
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('x\\mapsto x+1'));
+    const repairs: StateEvent[] = [];
+    const e = engine as unknown as {
+      _noteStateEvent: (event: StateEvent) => void;
+      _anyVersion: number;
+      context: { lexicalScope: object };
+    };
+    const note = e._noteStateEvent.bind(engine);
+    e._noteStateEvent = (event) => {
+      if (event.kind === 'binding-repair') repairs.push(event);
+      note(event);
+    };
+    const fType = engine.box('f').type.toString();
+    engine.pushScope();
+    try {
+      withScratchScope(e as never, e.context.lexicalScope, () => {
+        const any0 = e._anyVersion;
+        engine.declare('newName', { type: '(number) -> number' });
+        expect(e._anyVersion).toBe(any0);
+        engine.declare('f', { type: fType });
+        expect(e._anyVersion).toBe(any0 + 1);
+      });
+    } finally {
+      engine.popScope();
+    }
+    expect(repairs).toEqual([
+      { kind: 'binding-repair', scratch: true, fresh: true },
+      { kind: 'binding-repair', scratch: true, fresh: true, shadowing: true },
+    ]);
+  });
+
+  test('a scratch declaration that shadows a scratch shadow of a function', () => {
+    // Two nested scratch scopes. In the outer one, `f` shadows the assigned
+    // function `f`; in the inner one, `f` shadows that scratch binding. The
+    // readers of the outer binding read the inner one too, so the inner
+    // declaration is `shadowing` as well. A new name declared in both scopes
+    // shadows only a scratch binding, and advances nothing.
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('x\\mapsto x+1'));
+    const repairs: StateEvent[] = [];
+    const e = engine as unknown as {
+      _noteStateEvent: (event: StateEvent) => void;
+      _anyVersion: number;
+      context: { lexicalScope: object };
+    };
+    const note = e._noteStateEvent.bind(engine);
+    e._noteStateEvent = (event) => {
+      if (event.kind === 'binding-repair') repairs.push(event);
+      note(event);
+    };
+    const fType = engine.box('f').type.toString();
+    const scratch = (f: () => void) => {
+      engine.pushScope();
+      try {
+        withScratchScope(e as never, e.context.lexicalScope, f);
+      } finally {
+        engine.popScope();
+      }
+    };
+    scratch(() => {
+      engine.declare('f', { type: fType });
+      engine.declare('newName', { type: '(number) -> number' });
+      scratch(() => {
+        const any0 = e._anyVersion;
+        engine.declare('newName', { type: '(number) -> number' });
+        expect(e._anyVersion).toBe(any0);
+        engine.declare('f', { type: fType });
+        expect(e._anyVersion).toBe(any0 + 1);
+      });
+    });
+    expect(repairs).toEqual([
+      { kind: 'binding-repair', scratch: true, fresh: true, shadowing: true },
+      { kind: 'binding-repair', scratch: true, fresh: true },
+      { kind: 'binding-repair', scratch: true, fresh: true },
+      { kind: 'binding-repair', scratch: true, fresh: true, shadowing: true },
+    ]);
   });
 
   test('a scratch declare selects no callable axis, whatever it is shaped like', () => {

@@ -526,6 +526,85 @@ reproduced with `npx tsx` on the main tree at `63b8ffe3b` (0.159.0).
   `scripts/repros/2026-10-21-ce417-zero-base-interval-power-repro.mts` in
   Tycho; the row closes when it prints `READY` on an installed release.
 
+### Defects found by the fix of Tycho row 422 (OPEN — found 2026-10-22 on `ece7ba4ba`)
+
+The fix of row 422 (a numerical integral whose integrand is NaN on part of
+the range now answers NaN at once) found four more defects. It did not fix
+them.
+
+- **A wrong value from the symbolic integral (HIGH).** The antiderivative of
+  `sin(x − Round(x))/(x − Round(x))` is given as
+  `SinIntegral(x − Round(x))`. That expression does not account for the
+  jumps of `Round`, so `Integrate(…, Limits(x, 0, 64)).evaluate()` gives `0`,
+  and the compiled `\int_t^{64}` gives `−0` at t = 0. The value is
+  `128·Si(1/2) = 63.11774950951254`. An antiderivative through a step function
+  must be split at the jumps, or the definite integral must decline to the
+  numeric route.
+- **A tail that overflows is slow and inaccurate.** An integrand that decays
+  to 0 but evaluates to NaN far in its tail through overflow
+  (`\frac{e^x}{(1+e^x)^2}`, `\frac{\sinh x}{\cosh^2 x}`, `x^{100}e^{-x}` on
+  [0, ∞)) goes to the Monte-Carlo fallback: about 450 ms and an error near
+  10⁻⁴. The logistic density on [0, 1000] is `NaN` on the interpreted route.
+  The samples cannot tell such a tail from a region where the integrand has
+  no real value. The integrand of row 422 with k = 43 (`y^{20.5}e^{-y/2}` on
+  [−0.2, ∞)) is about 10⁻¹³ next to its NaN region, just as an overflowed
+  tail is. On the interpreted route, the engine could evaluate the integrand
+  at one NaN point with its own arithmetic: an overflowed tail gives a tiny
+  finite value, a region with no real value gives a complex value or NaN.
+- **The k = 43 case takes about 750 ms to answer `NaN`**, for the reason
+  above.
+- **A power with a symbolic exponent is compiled on the real lane.** With
+  `k = 1`, the interpreted integral of `y^{k/2-1}…` on a range that holds
+  negative values gives `NaN`, and the same integral written with the number
+  `-\frac{1}{2}` gives the complex value `1.0000 − 0.3691i`. The compiler
+  switches a power to complex arithmetic only when the exponent is a number
+  literal (`base-compiler.ts`, the complex-promotion rule of `Power`), and the
+  interpreter compiles the integrand internally. Changing that rule can change
+  many compiled results: measure first. User decision owed: whether such an
+  integral should be complex on both routes.
+
+### A compiled user function reads a free symbol of its body from the compile scope (OPEN, wrong value — found 2026-10-22 by the review of the fix of Tycho row 423)
+
+With a global `a := 2` and `G := x ↦ x + a`, then `ce.pushScope()`,
+`ce.declare('a', …)`, `ce.assign('a', 1000)` and `compile(G(x))`, the compiled
+code gives `1001` at x = 1, and the interpreter gives `G(1) = 3`. The body of a
+user function is compiled with its free symbols resolved in the scope the
+compile runs in, not in the lexical scope of the definition (the literal's
+`localScope` chain). The interpreter reads the definition's scope. Fix: compile
+the free symbols of a user function body against the definition's own scope,
+or decline when a free symbol of the body resolves to a different definition
+in the compile scope. Probe: the case above, for a function named `G` and for
+a user function that shadows a library name.
+
+### Residues of the fix of Tycho row 424 (OPEN — found 2026-10-22 on `ece7ba4ba`)
+
+The fix of row 424 (a declined `D` is recorded, and `PointX`/`PointY`/`PointZ`
+and `At` of a container are differentiated as linear accessors) left these:
+
+- **The derivative of a list with a constant point element mixes points and
+  scalars.** With `Q := (1, 2)` and `k := t ↦ [(t, t²), Q]`, `D(k(u), u)` is
+  `[(1, 2u), 0]`, and `D(U(u), u)` for a piecewise `U` with a constant point
+  branch is `If(0 < u, (1, 0), 0)`. The element-wise rule for a `List`/`Tuple`
+  (`symbolic/derivative.ts`) gives the scalar `0` for any constant element,
+  where a point needs the zero point of its arity. The accessor rule repairs
+  this for its own result only (`withZeroPoints`). The general fix changes the
+  output of every derivative of a collection with a constant point element:
+  measure the snapshot change first. User decision owed.
+- **`First`, `Last` and the other element selectors over a call** still go
+  through the generic chain rule, which reads the selector as an unknown
+  scalar function: `D(Last(h(u)), u)` declines after about 1.1 s (the decline
+  is now recorded, so later evaluations are free). The linear accessor rule
+  would apply to them. User decision owed: whether to extend it.
+- **Evaluating a symbolic closed form again rebuilds its nodes.** The value of
+  `D(PointY(h(u)), u)` for Tycho's 29-piece path, a symbolic list, costs about
+  18 ms each time it is evaluated again; the memo for unevaluated nodes does
+  not cover new result nodes.
+- **A parameter that holds a tuple is evaluated again at each read.** The
+  stored-value memo skips a `Tuple` value (`boxed-symbol.ts`), so a function
+  that reads its point parameter `n` times evaluates the tuple's elements `n`
+  times. With the decline record and the closed form, this costs little for
+  row 424, but it remains a cost for any expensive element.
+
 ### Four collection test suites fail at HEAD (OPEN — measured 2026-10-21 on `23db30a67`)
 
 `collection-absent-followups`, `collection-type-followups`,
@@ -913,6 +992,25 @@ dictionary). These remain, each measured with a fix and reverted:
   `If` does not read a mask of rank 2. (3) A generic function literal applied
   directly (`[["Function", …], "v"]`) binds `v` whole, while the same literal
   called through a symbol (`g(v)`) maps over the elements of `v`.
+- **A declared function admits a valueless collection symbol whose type
+  cannot fit its parameter (soundness, found 2026-10-22).** With
+  `h: (list<integer>) -> integer` and `S: list<string>` (declared, no value),
+  `h(S)` is accepted and typed `integer`; with `f: (matrix<2x2>) -> integer`,
+  `f(S)` is accepted too. The same calls with a value refuse it (`h(["a"])`,
+  and `h(S)` after `S := ["a"]`), the library operator `Determinant(S)`
+  refuses it, and a declared `string` symbol at `h` is refused. The
+  admission is the threadable branch of the required-parameter loop of
+  `validateArguments()` (`boxed-expression/validate.ts`): a user function is
+  threadable, `couldBeUnkeyedCollectionOperand(S)` is true, and without the
+  `checkNumericCollections` option the operand is admitted with no check of
+  its type against the parameter, whole or by element. `h(S)` can be
+  defended: the empty list is a value of both `list<string>` and
+  `list<integer>`, and the general rule for a symbol with no value admits it
+  when the two types share a value. `f(S)` cannot: no `list<string>` is a
+  2×2 matrix, and no string is one either (a lifted call). Expected: refuse
+  an operand whose type shares no value with the parameter, whole or by its
+  elements. Not fixed yet; the fix changes the admission of every threadable
+  call, so it needs a full-suite measurement.
 - **The inferred signature of a function literal reads an `unknown` parameter
   as a number (soundness; needs a decision).** `g := x ↦ [x]` gets the
   signature `(unknown) -> vector<1>`, which says the element is a number. With

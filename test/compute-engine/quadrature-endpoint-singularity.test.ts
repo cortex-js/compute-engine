@@ -1424,9 +1424,20 @@ describe('a singular corner that is not resolved', () => {
     // The panels inside `[3, 4]` have no value and the totals skip them.
     // The error of the other panels (0) was reported as the error, so a
     // caller kept the estimate as accurate.
-    const r = adaptiveQuadrature((y) => (y >= 3 && y <= 4 ? NaN : 1), 0, 10);
+    const r = adaptiveQuadrature(
+      (y) => (y >= 3 && y <= 4 ? Infinity : 1),
+      0,
+      10
+    );
     expect(r.converged).toBe(false);
     expect(r.error).toBe(Infinity);
+    // When the values inside `[3, 4]` are `NaN`, not infinite, the loop
+    // stops at the first bisection that gives two `NaN` children, and the
+    // integral has no value (`nanRegion`).
+    const n = adaptiveQuadrature((y) => (y >= 3 && y <= 4 ? NaN : 1), 0, 10);
+    expect(n.converged).toBe(false);
+    expect(n.estimate).toBeNaN();
+    expect(n.nanRegion).toBe(true);
     // A non-finite value at an isolated point (the center of a starting
     // panel) is still bisected away.
     const p = adaptiveQuadrature(

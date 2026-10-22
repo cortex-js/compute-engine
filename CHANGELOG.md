@@ -1,35 +1,36 @@
-## Unreleased
+## [Unreleased]
 
 ### Breaking Changes
 
-- **A declared type is a contract on every value the symbol takes.** `s:
-  string` now refuses `Missing` and `Undefined` as it refuses `5`, on the
-  engine's assignment route and in Epsil (static check and run time alike); a
-  declared element contract is checked too, so `xs: list<string>` refuses
+- **A declared type is a contract on every value the symbol takes.** `s: string`
+  now refuses `Missing` and `Undefined` as it refuses `5`, on the engine's
+  assignment route and in Epsil (static check and run time alike); a declared
+  element contract is checked too, so `xs: list<string>` refuses
   `["a", Missing]`. An author who wants absence writes it: `string | missing`,
   `list<string | missing>`, or a refining declaration (`list`, `list<unknown>`).
   A `number` declaration still admits `NaN`, the numeric absence marker, so a
-  numeric restriction such as `3 {a > 0}` (typed `integer | nan`) binds to `n:
-  number` as before; a restricted non-numeric value such as `(1, 2) {a > 0}`
-  (typed `missing | tuple<integer, integer>`) needs `tuple<number, number> |
-  missing`. This reverses the rule of 2026-09-09 under which a declared type
-  described the successes only and a symbol declared `string` could report
-  `string` while holding `Missing`. Decision P1 and P1b of
+  numeric restriction such as `3 {a > 0}` (typed `integer | nan`) binds to
+  `n: number` as before; a restricted non-numeric value such as `(1, 2) {a > 0}`
+  (typed `missing | tuple<integer, integer>`) needs
+  `tuple<number, number> | missing`. This reverses the rule of 2026-09-09 under
+  which a declared type described the successes only and a symbol declared
+  `string` could report `string` while holding `Missing`. Decision P1 and P1b of
   `docs/plans/2026-10-21-presence-contracts-and-assertion.md`.
+
 - **One default for an absent argument at a library parameter that excludes
-  absence: it is refused.** An operator with no absence behavior of its own
-  now answers an `incompatible-type` error naming the parameter when an
-  absent value (`Missing`, `Undefined`) reaches a parameter typed as data
-  that excludes absence (`string`, `boolean`, `value`, a color, …), as a user
-  function does for the same argument. Before, the handler received the
-  marker and answered as it happened to: `Parse(Missing)` and
-  `IsSquareMatrix(Missing)` computed a value from it, `ToUpperCase(Missing)`
-  was already an error. Unchanged: numeric and collection operators answer
-  the marker of their result (`Sin(Missing)` is `NaN`, `Reverse(Missing)` is
-  `Missing`), operators that own their absence semantics (`Length`, `Equal`,
-  the reducers, `Coalesce`, `IsMissing`), operators that hold their operands
-  (`Expand`, `Integrate`, `ForAll`), and a parameter typed `expression`,
-  `symbol`, `any` or `unknown`. Decision P2.
+  absence: it is refused.** An operator with no absence behavior of its own now
+  answers an `incompatible-type` error naming the parameter when an absent value
+  (`Missing`, `Undefined`) reaches a parameter typed as data that excludes
+  absence (`string`, `boolean`, `value`, a color, …), as a user function does
+  for the same argument. Before, the handler received the marker and answered as
+  it happened to: `Parse(Missing)` and `IsSquareMatrix(Missing)` computed a
+  value from it, `ToUpperCase(Missing)` was already an error. Unchanged: numeric
+  and collection operators answer the marker of their result (`Sin(Missing)` is
+  `NaN`, `Reverse(Missing)` is `Missing`), operators that own their absence
+  semantics (`Length`, `Equal`, the reducers, `Coalesce`, `IsMissing`),
+  operators that hold their operands (`Expand`, `Integrate`, `ForAll`), and a
+  parameter typed `expression`, `symbol`, `any` or `unknown`. Decision P2.
+
 - **A list type with no dimensions is read by its elements. A vector, a matrix
   and a tensor are read by their cells.** `list<T>` and `set<T>` now read `T` as
   the type of the elements, the values that indexing returns. A matrix of
@@ -146,10 +147,11 @@
   - A generic function applied to a union whose options the broadcast reads
     differently is typed one option at a time. With
     `f: (x: T) -> tuple<T, T> where T` and `u: list<integer> | set<integer>`,
-    `f(u)` is `list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>`
-    (it was `list<tuple<list<integer> | set<integer>, …>>`, which holds neither
-    value). An operand of type `collection<integer>`, which may be mapped or
-    passed whole, gets both answers.
+    `f(u)` is
+    `list<tuple<integer, integer>> | tuple<set<integer>, set<integer>>` (it was
+    `list<tuple<list<integer> | set<integer>, …>>`, which holds neither value).
+    An operand of type `collection<integer>`, which may be mapped or passed
+    whole, gets both answers.
   - `PointX`, `PointY` and `PointZ` of a list of points have the type of the
     coordinate: `PointX` of a `list<tuple<string, number>>` is `list<string>`
     (it was `list<number>`), and of a `list<tuple<integer, integer>>` it is
@@ -198,37 +200,272 @@
 
 ### New Features
 
-- **The presence assertion `x?!`** (`AssertPresent(x)` in MathJSON, `⁈` is
-  an alias): the value of `x`, or an `expected-present` error naming the
-  operand when `x` is absent (`Missing`, `Undefined`, `NaN`, `Indeterminate`,
-  the set `isMissing` recognizes). `Nothing` passes through, an error operand
-  propagates. Its type is the present part of the operand's type: `xs[i]?!`
-  with `xs: list<string>` is a `string`, so `f(xs[i]?!)` is accepted at a
-  parameter that excludes absence, and `let y: string = xs[i]?!` too. It is a
-  postfix operator at the factorial's precedence and must abut its operand;
-  as for `3! + 1`, write `x?! + 1`, not `x?!+1`. Compiled: JavaScript,
-  the interval JavaScript target and Python raise with the message `expected-present: <operand> is absent`; the
-  check is omitted when the operand's type already excludes absence (a
-  declared length and a literal index, a type without `nan`); a shader target
-  compiles the identity and does not read the assertion as a proof, so a later
-  absence test on the value keeps its own rule (decision P5). Decision P4.
+- **The presence assertion `x?!`** (`AssertPresent(x)` in MathJSON, `⁈` is an
+  alias): the value of `x`, or an `expected-present` error naming the operand
+  when `x` is absent (`Missing`, `Undefined`, `NaN`, `Indeterminate`, the set
+  `isMissing` recognizes). `Nothing` passes through, an error operand
+  propagates. Its type is the present part of the operand's type: `xs[i]?!` with
+  `xs: list<string>` is a `string`, so `f(xs[i]?!)` is accepted at a parameter
+  that excludes absence, and `let y: string = xs[i]?!` too. It is a postfix
+  operator at the factorial's precedence and must abut its operand; as for
+  `3! + 1`, write `x?! + 1`, not `x?!+1`. Compiled: JavaScript, the interval
+  JavaScript target and Python raise with the message
+  `expected-present: <operand> is absent`; the check is omitted when the
+  operand's type already excludes absence (a declared length and a literal
+  index, a type without `nan`); a shader target compiles the identity and does
+  not read the assertion as a proof, so a later absence test on the value keeps
+  its own rule (decision P5). Decision P4.
+
 - **The Epsil static check narrows a symbol an `isMissing` guard proves
-  present.** `if isMissing(v) { "none" } else { f(v) }`, `if !isMissing(v) &&
-  v != "b" { f(v) }` and `isMissing(v) || f(v) == "a"` are no longer reported
-  at a parameter that excludes absence. A reassignment inside the region ends
-  it; a function literal in the region is not entered.
-- **The Epsil static check reports a possibly absent value wherever the run
-  time refuses it**: at a library parameter that excludes absence
-  (`trim(xs[i])`, as it already did at a `function`'s annotated parameter) and
-  as the initializer of a declaration that excludes absence (`let y: string =
-  xs[i]`). The discharges are the same everywhere: `xs[i]?!`, `xs[i] ??
-  fallback`, a guard, or a type that admits absence. Decision P3. A numeric
-  read at a `real`, `integer` or `complex` declaration is reported too, since
-  these types exclude `NaN`: `let r: real = zs[i]` for `zs: list<real>` (typed
-  `nan | real`) was refused only when the program ran; write `zs[i]?!`,
-  `zs[i] ?? 0`, or declare `real | nan`. A value with another type outside
-  the declaration, such as `a / b` (`infinity | nan | real`), is not
-  reported.
+  present.** `if isMissing(v) { "none" } else { f(v) }`,
+  `if !isMissing(v) && v != "b" { f(v) }` and `isMissing(v) || f(v) == "a"` are
+  no longer reported at a parameter that excludes absence. A reassignment inside
+  the region ends it; a function literal in the region is not entered.
+
+- **The Epsil static check reports a possibly absent value wherever the run time
+  refuses it**: at a library parameter that excludes absence (`trim(xs[i])`, as
+  it already did at a `function`'s annotated parameter) and as the initializer
+  of a declaration that excludes absence (`let y: string = xs[i]`). The
+  discharges are the same everywhere: `xs[i]?!`, `xs[i] ?? fallback`, a guard,
+  or a type that admits absence. Decision P3. A numeric read at a `real`,
+  `integer` or `complex` declaration is reported too, since these types exclude
+  `NaN`: `let r: real = zs[i]` for `zs: list<real>` (typed `nan | real`) was
+  refused only when the program ran; write `zs[i]?!`, `zs[i] ?? 0`, or declare
+  `real | nan`. A value with another type outside the declaration, such as
+  `a / b` (`infinity | nan | real`), is not reported.
+
+### Behavior Changes
+
+- **A call of a user function that shadows a library operator compiles**
+  (Tycho row 423; the fix is under Resolved Issues). On the `javascript`,
+  `interval-js`, GLSL and WGSL targets, a call bound to a user definition with
+  a library name (`Gamma := x ↦ (x-1)!`, `Sin`, `Sqrt`, `Square`) compiles as a
+  call of that user function, where `compile()` declined and the interpreter
+  ran it. Before the target compiles, such a call is renamed to a private name
+  declared in a temporary scope, so no part of the compiler reads it as the
+  library operator (the angular-unit rewrite, sign rules, scalar facts,
+  derivative recurrences, lazy streams). Decline messages still name the
+  user's function. These keep the decline and run interpreted: a user
+  definition of an operator the language builds by name (`Add`, `Less`, `And`,
+  `If`, `Sum`, …), a multi-clause function, a definition with its own
+  `compile` handler, stated `derivative`, `lazy`, `broadcastable` or declared
+  effects, a node bound to the library operator, and every user function on the
+  Python target. A declaration in a scratch scope of a name that no binding
+  outside the scratch scopes holds now advances no state version, so such a
+  compile leaves the engine's type, sign and memo caches as they were.
+
+- **A numerical integral answers `NaN` at once when its integrand has no real
+  value on part of the range** (Tycho row 422; the fix is under Resolved
+  Issues). The adaptive quadrature, on both the interpreted and the compiled
+  route, stops with `NaN` when a panel and both of its halves have a majority of
+  `NaN` samples, and the integrand next to the `NaN` set is not of rounding
+  size, so the integrand has no real value there: the Monte-Carlo fallback is
+  not run. `\int_{-1}^{1}\sqrt{x}\,dx` on the compiled real route was `0.6667`
+  (the part below 0 was left out) and is now `NaN`, as the interpreter's real
+  route is. Removable points no longer stop the quadrature:
+  `\int_0^{64}\frac{u}{u}dx` with `u = x - \lfloor x\rfloor` gives 64, where the
+  quadrature gave `NaN` and only the Monte-Carlo fallback gave an approximate
+  value. An integrand that overflows to `NaN` in a tail it has decayed in (the
+  logistic density on [0, ∞)) keeps its earlier result.
+
+- **A `D` that has no closed form is not worked out again** (Tycho row 424; the
+  fix is under Resolved Issues). When the derivative of a `D` node gives no
+  closed form, the node is returned as it is, and the attempt is recorded:
+  evaluating the same node again, or reading a parameter that holds it, does not
+  differentiate again. A write to a symbol the derivative reads (a value, a
+  type, a definition of a function it calls), a change of the type of the
+  variable, an assumption, or a change of the configuration makes the record
+  invalid. A decline made inside another differentiation, under a temporary
+  precision or angular unit, or for a node that is not pure, is not recorded.
+
+- **A `Sum` or `Product` bound may be a type that could be a number** (Tycho row
+  421; the fix is under Resolved Issues). A bound whose type is a union with a
+  number arm (`number | string`, `broadcastable<number | tuple>`) or a top type
+  (`value`, `expression`) is now accepted, where it was an `incompatible-type`
+  error; `string`, `boolean`, a list or a tuple type, and a literal string,
+  `NaN` or `Missing`, are still refused. Such a bound gets no closed form and no
+  fold of two equal bounds, so the operator evaluates only when its value is a
+  number: with `y: number | tuple` holding `(3, 4)`, `\prod_{n=1}^{y} n` stays
+  unevaluated, where a closed form would have given `Factorial((3, 4))`, a
+  tuple. Its `javascript` compile answers `NaN` for a value that is not a
+  number, where `Math.floor` read the string `"3"` as 3 and `true` as 1; a bound
+  typed as a number, `unknown` or `any` compiles as before.
+
+- **A numerical derivative narrows its window until the value settles** (Tycho
+  row 420; the fix is under Resolved Issues). The numerical derivative of an
+  expression that stays symbolic (its `javascript` compile, `ND`, and a
+  derivative of a function with no closed form under `N()`) is an 8th-order
+  centered stencil whose samples reach 0.4 on each side of the point. It now
+  halves its step until the values of successive steps agree (to 10⁻⁶ at order
+  1, a looser part at higher orders) or converge at the rate of the stencil, and
+  is `NaN` when they never do, at a jump of the function. A smooth function
+  keeps its value bit for bit, and the compiled and interpreted values stay
+  identical. Other values change: `ND` of `\cos(20x)` at 0.05 is −16.829419, the
+  derivative, where it was −14.55; `ND` of `\sqrt{x}` at 0.05 is 2.236068 where
+  a sample below 0 made it `NaN`; `ND` of `x\lfloor x\rfloor` at 2, a jump,
+  stays unevaluated where it was 14.19. A smooth function costs 12 calls of the
+  function at order 1 instead of 8, fewer than before at orders 2 to 4 (44, 67
+  and 154 instead of 64, 512 and 4096), and a point at a jump up to 72 at
+  order 1.
+
+- **`FindRoot` polishes a steep equation to its root** (Tycho row 419; the fix
+  is under Resolved Issues). A root solve whose accepted step was below the
+  relative step tolerance stopped there, even when the step had removed most of
+  the residual: on a steep equation the step to the root is that small relative
+  to the parameter. It now goes on while its steps more than halve the sum of
+  squared residuals. `a^2 = 10^{12}` from `a = 1` ends at `a = 10^6` exactly (it
+  stopped at a residual of 0.14), and `\sin(10^8 a) = 0.5` at a residual of 6e-9
+  instead of 3e-5. `FindFit` is unchanged.
+
+- **`FindFit` and `FindRoot` stop polishing at the tolerance's precision**
+  (Tycho row 418; the fix is under Resolved Issues). A solve within its
+  tolerance ends once an accepted step moves every parameter by less than
+  `tolerance · max(1, |θ_j|)` while the cost is at its rounding floor, where it
+  went on to the gradient test or to the iteration cap: a badly scaled exact fit
+  takes 5 iterations instead of 200, and its `stationary` key can be true
+  without the gradient test. The `converged` key of a `FindFit` record now reads
+  the engine's tolerance (`ce.tolerance`, never below 64 machine epsilons),
+  which it ignored before: a fit whose every residual is within the tolerance of
+  the terms its row computes is converged, stationary or not. Setting a looser
+  engine tolerance makes more fits exact.
+
+### Resolved Issues
+
+- **The compiler declined a call of a user function that shadows a library
+  operator** (Tycho row 423). A Desmos document defines its own Gamma,
+  `\Gamma(x)=(x-1)!`; with `Gamma := x ↦ x + 100`, the interpreter gave
+  `\Gamma(0.5) = 100.5`, and the `javascript` and `interval-js` compiles of any
+  expression that called it failed ("a user definition shadows the library
+  operator `Gamma`"), while the same function named `G` compiled. Both
+  `declare(name, "function")` and `declare(name, { signature })` followed by
+  `assign` now compile `\Gamma(\frac{1}{2}) + x` to 101.5 at x = 1.
+
+- **A numerical integral took 0.5 to 2 s to answer `NaN`** (Tycho row 422). The
+  chi-square tail
+  `\int_{x}^{\infty}\frac{y^{\frac{k}{2}-1}e^{-\frac{y}{2}}}{2^{\frac{k}{2}}\Gamma(\frac{k}{2})}dy`
+  with `k = 1` has no real value at x < 0, where the integrand is not real on
+  `[x, 0)`. The adaptive quadrature bisected the `NaN` panels until its budget
+  of 1500 panels was spent, and then each route drew 10⁷ Monte-Carlo samples,
+  whose mean was `NaN` again. Now x = −0.2 and x = −1 answer `NaN` in under 15
+  ms on both routes, and x = 1 still gives 0.3173105. Written with the number
+  `-\frac{1}{2}` as the exponent, the interpreted value at x = −0.2 is the
+  complex `1.0000 − 0.3691i` (the principal value, which the interpreter
+  integrates in two parts) and the compiled real value is `NaN`; that is not
+  changed.
+
+- **`D(PointY(h(u)), u)` took seconds, and was worked out again at each
+  evaluation** (Tycho row 424). With `h` a path joined from 29 linear pieces,
+  the derivative went through the generic chain rule, which reads `PointY` as an
+  unknown scalar function and multiplied by the derivative of the path, a list
+  of 29 points, until a size limit declined: 0.6 to 3.6 s, paid again at each
+  evaluation and at each read of a parameter holding the value (9 reads: 30 s).
+  `PointX`, `PointY`, `PointZ` and `At` (with an index that does not depend on
+  the variable, or that is constant between its jumps, such as `\lceil u\rceil`)
+  are now differentiated as linear accessors: the accessor of the derivative of
+  the container, with a constant point element of a list given the zero point.
+  The derivative of the row is a closed form in 60 ms, and 9 reads cost what 1
+  does. The generic rule gave wrong values too: with `g := t ↦ (t, t^2)`,
+  `D(PointY(g(u)), u)` was a tuple, and is now `2u`. `PointZ` of a list of 2-D
+  points whose elements may be absent reports the dimension error, as for
+  present points.
+
+- **Two typing defects of 0.161.0, fixed by the change to the reading of list
+  types (see Breaking Changes).** A symbol declared
+  `(broadcastable<unknown>) -> unknown` refused the function literal
+  `(x) => (x, x)`: `ce.assign` threw a type error, because
+  `provablyAdmits('nothing', 'broadcastable<unknown>')` answered `true`, as if
+  the type stated that a `Nothing` value is possible. A `broadcastable<T>` is
+  now read as the union of its two parts, so `broadcastable<unknown>` states
+  nothing about `Nothing`, as `unknown` does not, and the assignment is
+  accepted. A generic function literal over a ragged list gave a type that does
+  not hold the value: with `g` the literal `(x: T) -> tuple<T, T> where T` with
+  the body `(x, x)`, `g([[1], [2, 3]])` was typed
+  `list<tuple<vector<integer^1> | vector<integer^2>, vector<integer^1> | vector<integer^2>>>`,
+  and its value is `[[(1, 1)], [(2, 2), (3, 3)]]`. It is now typed
+  `list<list<tuple<integer, integer>>>`, which holds the value.
+
+- **A `Sum` or `Product` bound refused a union type with a number arm** (Tycho
+  row 421). With `x` declared `broadcastable<number | tuple>`,
+  `\sum_{n=1}^{x} n^2`, `\sum_{n=x}^{5} n` and `\prod_{n=1}^{x} n` were invalid,
+  so a function such as `s(a) = \sum_{k=1}^{a} k` over that declaration never
+  registered, while the bound of an integral and the operands of `Mod` and `Max`
+  accepted the same declaration. The check of a bound said it refuses only a
+  bound that cannot be a number, but it accepted only a type below `number`. Now
+  `s(3)` is 6 and `s([1, 2, 3])` is `[1, 3, 6]`, as over a parameter declared
+  `any`.
+
+- **The derivative of a sum whose bound is `⌊x⌋`** (Tycho row 420).
+  `D(Sum(Cos(i x), Limits(i, 1, Floor(x))), x)` stayed unevaluated, because a
+  bound that depends on the variable declined the rule for a sum, and the
+  numerical derivative of its compile read across the jumps of the sum at the
+  integers: −5.308 at x = 1.9, where the derivative is −0.946. A bound of a
+  `Sum` whose derivative is 0, a step of the variable (`Floor`, `Ceil`, `Round`,
+  `Truncate` or `Sign` of it, also through a call of a function), now keeps the
+  rule: between two jumps the set of terms is fixed, and the derivative is
+  `Σ_{i=1}^{⌊x⌋} −i sin(i x)`, which compiles to `javascript` and `interval-js`;
+  the derivative of order 2 closes too. At a jump the result is the value of
+  that sum, as `D(⌊x⌋)` is 0 at an integer. A bound that is not a step (`x`) or
+  not pure keeps the derivative unevaluated. A `Product` with such a bound still
+  stays unevaluated, and its numerical derivative is now right between the jumps
+  and `NaN` at them (the change under Behavior Changes):
+  `D(Product(x + i, Limits(i, 1, Floor(x))), x)` at 1.9 is 1, where it was 57.3.
+  `D(Truncate(x), x)` is 0, as for `Floor`; it stayed unevaluated.
+
+- **`FindRoot` reports `converged: false` far from a root of a steep equation**
+  (Tycho row 419). The root test of 0.161.0 allows each residual
+  `tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`. Its Jacobian part is a
+  first-order claim, that a zero lies within a relative change of `tolerance` of
+  the parameters, and it had no check: `2 - \sin(10^{18} a) = 0` has no real
+  root, and its Jacobian, up to 10^18, let a residual of 1 to 3 pass at every
+  point (`converged: true` from `a = 1`, from `a = 0` and under the bound
+  `a \le 0`). An equation whose residual is above `tolerance` is now a root only
+  when the residual confirms the claim. Each parameter is moved by
+  `±2 · tolerance · max(1, |θ_j|)` toward and away from the zero. The central
+  difference of the residual must be the change the Jacobian predicts to within
+  half, and the parabola through the three values must reach `tolerance`, change
+  sign, or touch 0 to within the rounding of the parameters (a root of even
+  multiplicity, such as `10^{24}(a^2-2)^2 = 0`). At a bound, the side inside the
+  bounds is checked and a zero just past the bound is accepted. Over 100 starts,
+  `2 - \sin(10^{18} a) = 0`, `\sin(10^{12} a) = 0.5` and
+  `\sin(10^{10} a) = 0.5`, which oscillate faster than the tolerance can
+  resolve, go from 100, 100 and 93 starts reported `converged` to none;
+  `\sin(10^8 a) = 0.5`, `a^3 - 2a = 10^9`, `10^{12} a = 1` and `e^a = 10^{30}`
+  stay converged. The check costs at most two residual evaluations per equation,
+  at the points where the solve would stop.
+
+- **`FindFit` reports `converged: true` at an exact fit** (Tycho row 418). A
+  degree-10 polynomial through 11 points is an exact interpolation whose
+  constant term is 0. The fit reached the rounding floor (a residual norm of
+  3e-10) and reported `converged: false` after 200 iterations, since the record
+  of a fit read `converged` from the solver's stationarity tests alone, and
+  neither can pass on a problem scaled that badly: the Jacobian columns reach
+  10^10, so a residual at the rounding floor still has a gradient far above the
+  absolute gradient tolerance, and the constant term, whose true value is 0,
+  never takes a step that is small relative to itself (the per-component stall
+  test of 0.161.0; the whole-vector stall test it replaced reported this fit
+  converged after one iteration). A fit whose every residual is within the
+  engine's tolerance of the terms its row computes,
+  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij · θ_j|)`, is now `converged`, whatever the
+  gradient and the parameters' magnitudes; a fit with a misfit is converged at a
+  stationary point as before. The scale is the model's terms, not the
+  `max(1, |θ_j|)` of the root test of `FindRoot`, under which a degree-10
+  polynomial over `x` in [10, 20] would tolerate a residual of 1 at data of
+  magnitude 1. A root solve or a fit within its tolerance stops polishing once
+  an accepted step moves every parameter by less than the tolerance of its own
+  scale (`tolerance · max(1, |θ_j|)`, the precision to which the tolerance test
+  says the parameters are determined) while the cost is at its rounding floor,
+  so the same fit now takes 5 iterations from the exact coefficients and 44 from
+  a start of 1, and the stacked `FindRoot` form 4 and 39 instead of 20 and 92; a
+  point whose residual is still dropping (`1 + (10^{12} a)^2 = 0` from
+  `a = 10^{-11}`, within the root tolerance of its steep equation at a residual
+  of 101) goes on to its minimum as before. A solve cut short by a deadline
+  reports `converged: false` beside `timedOut: true`, as the record's contract
+  says; a root solve that timed out while polishing a root reported both true.
+  The `FindFit` record still has no `stationary` key.
+
+## 0.161.0 _2026-10-21_
+
+### New Features
 
 - **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408). A
   third argument `{global: {b: [lo, hi]}}` searches the named parameters (at
@@ -297,58 +534,6 @@
 
 ### Behavior Changes
 
-- **A `Sum` or `Product` bound may be a type that could be a number**
-  (Tycho row 421; the fix is under Resolved Issues). A bound whose type is a
-  union with a number arm (`number | string`, `broadcastable<number | tuple>`)
-  or a top type (`value`, `expression`) is now accepted, where it was an
-  `incompatible-type` error; `string`, `boolean`, a list or a tuple type, and
-  a literal string, `NaN` or `Missing`, are still refused. Such a bound gets no
-  closed form and no fold of two equal bounds, so the operator evaluates only
-  when its value is a number: with `y: number | tuple` holding `(3, 4)`,
-  `\prod_{n=1}^{y} n` stays unevaluated, where a closed form would have given
-  `Factorial((3, 4))`, a tuple. Its `javascript` compile answers `NaN` for a
-  value that is not a number, where `Math.floor` read the string `"3"` as 3 and
-  `true` as 1; a bound typed as a number, `unknown` or `any` compiles as
-  before.
-
-- **A numerical derivative narrows its window until the value settles**
-  (Tycho row 420; the fix is under Resolved Issues). The numerical derivative
-  of an expression that stays symbolic (its `javascript` compile, `ND`, and a
-  derivative of a function with no closed form under `N()`) is an 8th-order
-  centered stencil whose samples reach 0.4 on each side of the point. It now
-  halves its step until the values of successive steps agree (to 10⁻⁶ at order
-  1, a looser part at higher orders) or converge at the rate of the stencil,
-  and is `NaN` when they never do, at a jump of the function. A smooth function
-  keeps its value bit for bit, and the compiled and interpreted values stay
-  identical. Other values change: `ND` of `\cos(20x)` at 0.05 is −16.829419,
-  the derivative, where it was −14.55; `ND` of `\sqrt{x}` at 0.05 is 2.236068
-  where a sample below 0 made it `NaN`; `ND` of `x\lfloor x\rfloor` at 2, a
-  jump, stays unevaluated where it was 14.19. A smooth function costs 12 calls
-  of the function at order 1 instead of 8, fewer than before at orders 2 to 4
-  (44, 67 and 154 instead of 64, 512 and 4096), and a point at a jump up to 72
-  at order 1.
-
-- **`FindRoot` polishes a steep equation to its root** (Tycho row 419; the fix
-  is under Resolved Issues). A root solve whose accepted step was below the
-  relative step tolerance stopped there, even when the step had removed most
-  of the residual: on a steep equation the step to the root is that small
-  relative to the parameter. It now goes on while its steps more than halve the
-  sum of squared residuals. `a^2 = 10^{12}` from `a = 1` ends at `a = 10^6`
-  exactly (it stopped at a residual of 0.14), and `\sin(10^8 a) = 0.5` at a
-  residual of 6e-9 instead of 3e-5. `FindFit` is unchanged.
-
-- **`FindFit` and `FindRoot` stop polishing at the tolerance's precision**
-  (Tycho row 418; the fix is under Resolved Issues). A solve within its
-  tolerance ends once an accepted step moves every parameter by less than
-  `tolerance · max(1, |θ_j|)` while the cost is at its rounding floor, where it
-  went on to the gradient test or to the iteration cap: a badly scaled exact
-  fit takes 5 iterations instead of 200, and its `stationary` key can be true
-  without the gradient test. The `converged` key of a `FindFit` record now
-  reads the engine's tolerance (`ce.tolerance`, never below 64 machine
-  epsilons), which it ignored before: a fit whose every residual is within the
-  tolerance of the terms its row computes is converged, stationary or not.
-  Setting a looser engine tolerance makes more fits exact.
-
 - **`unknown` is an inference marker, not a content type.** Every type is now a
   subtype of `unknown`, the absence markers, `error` and `any` included:
   `ce.type("missing").matches("unknown")` and
@@ -367,15 +552,15 @@
   that could hold an error), and `Filter(tu, p)` over
   `tu: tuple<unknown, missing>` is `list<missing | unknown>` (it was
   `list<missing>` for the value `[1]`). A union keeps an absence arm beside
-  `unknown` (`missing | unknown`) and absorbs a value arm
-  (`integer | unknown` is `unknown`); a union with an `error` arm reduces to
-  `error`, as before. An `incompatible-type` diagnostic shows a
-  generic parameter whose variable got no bound by the variable's name,
-  `indexed_collection<T>`, instead of `indexed_collection<unknown>`. A lambda
-  whose parameters are not inferred yet, `(unknown) -> number`, still does not
-  satisfy `(any) -> number`. `expression` and `value` are the contracts that
-  exclude the immediate markers. Design and decisions:
-  `docs/plans/2026-10-21-unknown-inference-marker.md`.
+  `unknown` (`missing | unknown`) and absorbs a value arm (`integer | unknown`
+  is `unknown`); a union with an `error` arm reduces to `error`, as before. An
+  `incompatible-type` diagnostic shows a generic parameter whose variable got no
+  bound by the variable's name, `indexed_collection<T>`, instead of
+  `indexed_collection<unknown>`. A lambda whose parameters are not inferred yet,
+  `(unknown) -> number`, still does not satisfy `(any) -> number`. `expression`
+  and `value` are the contracts that exclude the immediate markers. Design and
+  decisions: `docs/plans/2026-10-21-unknown-inference-marker.md`.
+
 - **`FindRoot` reports `converged` only at a root** (Tycho row 414).
   `FindRoot(a^2 + 1 = 0, a)` gave `converged: True` with `residualNorm: 1`: the
   solver's stop test is a stationary point of the sum of squared residuals,
@@ -424,102 +609,6 @@
   was already the case for scopes that an evaluation pushes itself.
 
 ### Resolved Issues
-
-- **Two typing defects of 0.161.0, fixed by the change to the reading of list
-  types (see Breaking Changes).** A symbol declared
-  `(broadcastable<unknown>) -> unknown` refused the function literal
-  `(x) => (x, x)`: `ce.assign` threw a type error, because
-  `provablyAdmits('nothing', 'broadcastable<unknown>')` answered `true`, as if
-  the type stated that a `Nothing` value is possible. A `broadcastable<T>` is
-  now read as the union of its two parts, so `broadcastable<unknown>` states
-  nothing about `Nothing`, as `unknown` does not, and the assignment is
-  accepted. A generic function literal over a ragged list gave a type that does
-  not hold the value: with `g` the literal `(x: T) -> tuple<T, T> where T` with
-  the body `(x, x)`, `g([[1], [2, 3]])` was typed
-  `list<tuple<vector<integer^1> | vector<integer^2>, vector<integer^1> | vector<integer^2>>>`,
-  and its value is `[[(1, 1)], [(2, 2), (3, 3)]]`. It is now typed
-  `list<list<tuple<integer, integer>>>`, which holds the value.
-
-- **A `Sum` or `Product` bound refused a union type with a number arm**
-  (Tycho row 421). With `x` declared `broadcastable<number | tuple>`,
-  `\sum_{n=1}^{x} n^2`, `\sum_{n=x}^{5} n` and `\prod_{n=1}^{x} n` were
-  invalid, so a function such as `s(a) = \sum_{k=1}^{a} k` over that
-  declaration never registered, while the bound of an integral and the
-  operands of `Mod` and `Max` accepted the same declaration. The check of a
-  bound said it refuses only a bound that cannot be a number, but it accepted
-  only a type below `number`. Now `s(3)` is 6 and `s([1, 2, 3])` is
-  `[1, 3, 6]`, as over a parameter declared `any`.
-
-- **The derivative of a sum whose bound is `⌊x⌋`** (Tycho row 420).
-  `D(Sum(Cos(i x), Limits(i, 1, Floor(x))), x)` stayed unevaluated, because a
-  bound that depends on the variable declined the rule for a sum, and the
-  numerical derivative of its compile read across the jumps of the sum at the
-  integers: −5.308 at x = 1.9, where the derivative is −0.946. A bound of a
-  `Sum` whose derivative is 0, a step of the variable (`Floor`, `Ceil`,
-  `Round`, `Truncate` or `Sign` of it, also through a call of a function), now
-  keeps the rule: between two jumps the set of terms is fixed, and the
-  derivative is `Σ_{i=1}^{⌊x⌋} −i sin(i x)`, which compiles to `javascript`
-  and `interval-js`; the derivative of order 2 closes too. At a jump the result
-  is the value of that sum, as `D(⌊x⌋)` is 0 at an integer. A bound that is
-  not a step (`x`) or not pure keeps the derivative unevaluated. A `Product`
-  with such a bound still stays unevaluated, and its numerical derivative is
-  now right between the jumps and `NaN` at them (the change under Behavior
-  Changes): `D(Product(x + i, Limits(i, 1, Floor(x))), x)` at 1.9 is 1, where
-  it was 57.3. `D(Truncate(x), x)` is 0, as for `Floor`; it stayed
-  unevaluated.
-
-- **`FindRoot` reports `converged: false` far from a root of a steep
-  equation** (Tycho row 419). The root test of 0.161.0 allows each residual
-  `tolerance · (1 + Σ_j |J_ij| · max(1, |θ_j|))`. Its Jacobian part is a
-  first-order claim, that a zero lies within a relative change of `tolerance`
-  of the parameters, and it had no check: `2 - \sin(10^{18} a) = 0` has no
-  real root, and its Jacobian, up to 10^18, let a residual of 1 to 3 pass at
-  every point (`converged: true` from `a = 1`, from `a = 0` and under the bound
-  `a \le 0`). An equation whose residual is above `tolerance` is now a root
-  only when the residual confirms the claim. Each parameter is moved by
-  `±2 · tolerance · max(1, |θ_j|)` toward and away from the zero. The central
-  difference of the residual must be the change the Jacobian predicts to
-  within half, and the parabola through the three values must reach
-  `tolerance`, change sign, or touch 0 to within the rounding of the
-  parameters (a root of even multiplicity, such as `10^{24}(a^2-2)^2 = 0`).
-  At a bound, the side inside the bounds is checked and a zero just past the
-  bound is accepted. Over 100 starts, `2 - \sin(10^{18} a) = 0`,
-  `\sin(10^{12} a) = 0.5` and `\sin(10^{10} a) = 0.5`, which oscillate faster
-  than the tolerance can resolve, go from 100, 100 and 93 starts reported
-  `converged` to none; `\sin(10^8 a) = 0.5`, `a^3 - 2a = 10^9`, `10^{12} a = 1`
-  and `e^a = 10^{30}` stay converged. The check costs at most two residual
-  evaluations per equation, at the points where the solve would stop.
-
-- **`FindFit` reports `converged: true` at an exact fit** (Tycho row 418). A
-  degree-10 polynomial through 11 points is an exact interpolation whose
-  constant term is 0. The fit reached the rounding floor (a residual norm of
-  3e-10) and reported `converged: false` after 200 iterations, since the record
-  of a fit read `converged` from the solver's stationarity tests alone, and
-  neither can pass on a problem scaled that badly: the Jacobian columns reach
-  10^10, so a residual at the rounding floor still has a gradient far above the
-  absolute gradient tolerance, and the constant term, whose true value is 0,
-  never takes a step that is small relative to itself (the per-component stall
-  test of 0.161.0; the whole-vector stall test it replaced reported this fit
-  converged after one iteration). A fit whose every residual is within the
-  engine's tolerance of the terms its row computes,
-  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij · θ_j|)`, is now `converged`, whatever
-  the gradient and the parameters' magnitudes; a fit with a misfit is
-  converged at a stationary point as before. The scale is the model's terms,
-  not the `max(1, |θ_j|)` of the root test of `FindRoot`, under which a
-  degree-10 polynomial over `x` in [10, 20] would tolerate a residual of 1 at
-  data of magnitude 1. A root solve or a fit within its tolerance stops
-  polishing once an accepted step moves every parameter by less than the
-  tolerance of its own scale (`tolerance · max(1, |θ_j|)`, the precision to
-  which the tolerance test says the parameters are determined) while the cost
-  is at its rounding floor, so the same fit now takes 5 iterations from the
-  exact coefficients and 44 from a start of 1, and the stacked `FindRoot` form
-  4 and 39 instead of 20 and 92; a point whose residual is still dropping
-  (`1 + (10^{12} a)^2 = 0` from `a = 10^{-11}`, within the root tolerance of
-  its steep equation at a residual of 101) goes on to its minimum as before.
-  A solve cut short by a deadline reports `converged: false` beside
-  `timedOut: true`, as the record's contract says; a root solve that timed
-  out while polishing a root reported both true. The `FindFit` record still
-  has no `stationary` key.
 
 - **On the `interval-js` target, `0^x` over an exponent interval has the value
   0** (Tycho row 417). `compile(ce.parse('0^{x}'), {to: 'interval-js'})`

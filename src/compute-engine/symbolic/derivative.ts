@@ -25,6 +25,14 @@ import {
   isOperatorDef,
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  collectionElementType,
+  isPointElementType,
+  resolveTypeAlias,
+  stripMissingFromType,
+} from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   boundVariableBindings,
   boundVariableNamesInOperand,
@@ -138,6 +146,18 @@ function boundedNodeCount(expr: Expression, limit: number): number {
 const kOverBudget = Symbol('derivative-over-budget');
 let differentiationOverBudget = false;
 let differentiationNesting = 0;
+
+/**
+ * Whether a differentiation is running now. A differentiation that starts
+ * while another one runs (the evaluation of a nested `D`) shares the size
+ * budget of the enclosing one: it can decline only because the enclosing
+ * differentiation has already built many nodes, and the same derivative
+ * computed alone would close. A cache of declines does not record such a
+ * decline.
+ */
+export function isDifferentiating(): boolean {
+  return differentiationNesting > 0;
+}
 
 //
 // ── Derivative trace ────────────────────────────────────────────────
@@ -1400,8 +1420,10 @@ function isAccessorOfZippedPointList(
  * `PointList` or a `List` with a literal integer index, 1-based, a negative
  * index counting from the end as `At` reads it. A slot the container does
  * not have (`PointZ` of a 2-point, an index out of range) is `undefined`
- * too: the accessor's value is then an absence, which the generic rule
- * handles as it did.
+ * too. The accessor of a container that depends on the variable is then
+ * the accessor of the derivative of the container (see
+ * `accessorOfContainerDerivative()`), which reads the same absent slot and
+ * gives the same absence or error as the accessor of the container.
  *
  * A `PointList` is a single point only when no component is a collection;
  * otherwise it zips its components into a list of points (`PointList([a,
@@ -1430,6 +1452,123 @@ function selectedOperand(expr: Expression): Expression | undefined {
     return k >= 0 && k < n ? container.ops[k] : undefined;
   }
   return undefined;
+}
+
+/**
+ * Whether the index `index` of an `At` is constant for a derivative with
+ * respect to `v`: it does not depend on `v`, or it is pure and its
+ * derivative is `0`. The second case is an index such as `⌈u⌉`, which jumps
+ * at each integer and is constant between the jumps (`D(⌈u⌉) = 0`).
+ */
+function isConstantIndex(index: Expression, v: string, depth: number): boolean {
+  if (!dependsOnVariable(index, v)) return true;
+  if (!index.isPure) return false;
+  return differentiate(index, v, depth + 1)?.isSame(0) === true;
+}
+
+/**
+ * The zero of a value of type `t`: `0` for a number, the point
+ * `(0, …, 0)` for a point of known arity whose coordinates can be numbers
+ * (a tuple, or a union of tuples of the same arity), `undefined` for any
+ * other type.
+ */
+function zeroOfType(ce: Expression['engine'], t: Type): Expression | undefined {
+  if (isSubtype(t, 'number')) return ce.Zero;
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return undefined;
+  const arms = r.kind === 'union' ? r.types.map(resolveTypeAlias) : [r];
+  let arity: number | undefined;
+  for (const arm of arms) {
+    if (typeof arm === 'string' || arm.kind !== 'tuple') return undefined;
+    const elements = arm.elements;
+    if (elements === undefined) return undefined;
+    // A coordinate typed `unknown` (a function whose parameter has no
+    // inferred type yet) can hold a number.
+    if (
+      !elements.every(
+        (x) => isSubtype(x.type, 'number') || isSubtype('number', x.type)
+      )
+    )
+      return undefined;
+    if (arity !== undefined && arity !== elements.length) return undefined;
+    arity = elements.length;
+  }
+  if (arity === undefined) return undefined;
+  return ce.function(
+    'Tuple',
+    Array.from({ length: arity }, () => ce.Zero)
+  );
+}
+
+/**
+ * `d`, the derivative of a value of type `t`, with each scalar `0` that
+ * stands for a point replaced by the zero point (`zeroOfType()`), or
+ * `undefined` when that cannot be decided.
+ *
+ * The elementwise rule gives the scalar `0` for an element that does not
+ * depend on the variable, also when the element is a point (a symbol
+ * `Q := (1, 2)`, a read `P[3]` of a list of points): the derivative of
+ * `[(t, t²), Q]` is `[(1, 2t), 0]`. An accessor applied to that list reads
+ * a list that mixes points and scalars, and gives a wrong value
+ * (`PointY` of it was `[2t, Missing]`). The type of the value says which
+ * elements are points: a list of points is read element by element, a
+ * point is kept, and the value arms of a piecewise derivative (`If`,
+ * `Which`) are read with the same type. A derivative that is not a
+ * written-out list has elements that cannot be read here, so it is
+ * accepted only when its elements are numbers.
+ */
+function withZeroPoints(d: Expression, t: Type): Expression | undefined {
+  const ce = d.engine;
+  const type = stripMissingFromType(t);
+  if (d.isSame(0)) return zeroOfType(ce, type);
+  if (isFunction(d, 'If') || isFunction(d, 'Which')) {
+    const isWhich = d.operator === 'Which';
+    if (isWhich && d.nops % 2 !== 0) return undefined;
+    const ops: Expression[] = [];
+    for (const [i, op] of d.ops.entries()) {
+      const isValueArm = isWhich ? i % 2 === 1 : i > 0;
+      const arm = isValueArm ? withZeroPoints(op, type) : op;
+      if (arm === undefined) return undefined;
+      ops.push(arm);
+    }
+    return ce.function(d.operator, ops);
+  }
+  if (isSubtype(type, 'number') || isPointElementType(type)) return d;
+  const element = collectionElementType(type);
+  if (element === undefined) return undefined;
+  if (isFunction(d, 'List')) {
+    const ops: Expression[] = [];
+    for (const op of d.ops) {
+      const repaired = withZeroPoints(op, element);
+      if (repaired === undefined) return undefined;
+      ops.push(repaired);
+    }
+    return ce.function('List', ops);
+  }
+  return isSubtype(stripMissingFromType(element), 'number') ? d : undefined;
+}
+
+/**
+ * The derivative of the accessor `expr` (`PointX`, `PointY`, `PointZ`, or
+ * `At` with a constant index) from the derivative `dContainer` of its
+ * container: the accessor of `dContainer`, after the scalar zeros that
+ * stand for points are replaced by zero points (`withZeroPoints()`, which
+ * reads the type of the ORIGINAL container: the derivative does not say
+ * whether a list of two numbers is one point or two coordinates).
+ * `undefined` when the reading cannot be decided or the result is not
+ * valid.
+ */
+function accessorOfContainerDerivative(
+  expr: Expression & FunctionInterface,
+  dContainer: Expression
+): Expression | undefined {
+  const repaired = withZeroPoints(dContainer, expr.op1.type.type);
+  if (repaired === undefined) return undefined;
+  const accessed = expr.engine.function(expr.operator, [
+    repaired,
+    ...expr.ops.slice(1),
+  ]);
+  return accessed.isValid ? accessed : undefined;
 }
 
 /** The differentiation rules themselves. Always reached through
@@ -1598,6 +1737,42 @@ function differentiateNode(
     const dContainer = differentiate(expr.op1, v, depth + 1, trace);
     if (dContainer === undefined || !dContainer.isValid) return undefined;
     return ce.function(expr.operator, [dContainer, ...expr.ops.slice(1)]);
+  }
+
+  // The same accessors over a container that is not written out: a call of
+  // a function that gives a point or a list of points (`PointY(h(u))`), or
+  // any other expression. An accessor reads one coordinate of each point,
+  // and `At` with an index that does not depend on `v` reads one element.
+  // Both are linear, so the derivative is the accessor of the derivative of
+  // the container: with `g := t ↦ (t, t²)`, `d/du PointY(g(u))` is
+  // `PointY((1, 2u))`, which is `2u`. Without this rule the accessor fell
+  // through to the generic chain rule below, which read it as an unknown
+  // scalar function of the container. It gave the wrong tuple
+  // `(PointY′(g(u)), 2u·PointY′(g(u)))`, and for a container that is a long
+  // list of points it built a product of the list with the unknown partial
+  // derivative, larger than the size limit, and declined after about 0.5 s
+  // (Tycho ledger row 424).
+  //
+  // An index that depends on `v` but whose derivative is `0` (`⌈u⌉`, an
+  // integer that jumps at each integer and is constant between the jumps)
+  // is a constant index between its jumps, the convention of `D(⌈u⌉) = 0`:
+  // `d/du At(L(u), ⌈u⌉)` is `At(L′(u), ⌈u⌉)`.
+  if (
+    ((POINT_ACCESSOR_SLOT[expr.operator] !== undefined && expr.nops === 1) ||
+      (expr.operator === 'At' &&
+        expr.nops === 2 &&
+        isConstantIndex(expr.op2, v, depth))) &&
+    dependsOnVariable(expr.op1, v)
+  ) {
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      ce.function(expr.operator, [
+        dPlaceholder(expr.op1, v),
+        ...expr.ops.slice(1),
+      ])
+    );
+    const dContainer = differentiate(expr.op1, v, depth + 1, trace);
+    if (dContainer === undefined || !dContainer.isValid) return undefined;
+    return accessorOfContainerDerivative(expr, dContainer);
   }
 
   // Piecewise definitions (`Which`, and its two-branch form `If`): each value

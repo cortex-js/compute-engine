@@ -44,6 +44,12 @@ export type StateEvent =
        * FRESH declaration, `updateDef`). It does not advance the definition
        * version: see `noteStateEvent`. */
       fresh?: boolean;
+      /** Set only with `scratch` and `fresh`: the first binding of the name
+       * above the target scope lives outside every registered scratch scope,
+       * so an existing expression can read it by name and reads the new
+       * binding from now on (`updateDef`). See the `binding-repair` case of
+       * {@link axisMaskOf}. */
+      shadowing?: boolean;
     }
   | { kind: 'redefine'; callableBefore: boolean; callableAfter: boolean }
   | { kind: 'type-write'; callableBefore: boolean; callableAfter: boolean }
@@ -90,8 +96,10 @@ export function callableAxisSelects(e: StateEvent): boolean {
     case 'assumption':
     case 'inference':
     case 'config':
-    case 'binding-repair':
       return true;
+    case 'binding-repair':
+      // A new name in a scratch scope has no reader (see `axisMaskOf`).
+      return !(e.scratch === true && e.fresh === true && e.shadowing !== true);
     case 'redefine':
     case 'type-write':
       return e.callableBefore || e.callableAfter;
@@ -165,9 +173,12 @@ const OBJECT_STORE_BUMPS_ANY: boolean = (() => {
  * key on. A scratch `binding-repair` or `inference` changes a binding that
  * already exists, and expressions the computation built earlier may have
  * cached a type (`any` axis) or an effect set (`callable` axis) from it. So
- * both still advance `any` and `callable`. A value-type inference advances
- * `any` later, through the deferred `inference-settled` event
- * (`noteStateEvent`), as it does for any binding. A scratch `declare` makes a
+ * both still advance `any` and `callable`. The exception is the repair that
+ * a declaration of a NEW callable name emits (`fresh`, and no `shadowing`):
+ * no binding existed for an expression to read, so it advances nothing, as
+ * a scratch `declare` does (the `binding-repair` case below). A value-type
+ * inference advances `any` later, through the deferred `inference-settled`
+ * event (`noteStateEvent`), as it does for any binding. A scratch `declare` makes a
  * new binding that no expression has resolved to yet (an expression binds its
  * names when it is canonicalized, and a new declaration does not rebind it),
  * so it advances neither `any` nor `callable`.
@@ -244,9 +255,28 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       if (e.parameter) return { any: false, semantic: false, world: false };
       return { any: true, semantic: false, world: false };
     case 'binding-repair':
-      // A SCRATCH repair (the auto-declared head `b` of `b(x)` in the scope
-      // where a derivation boxes a function body again) advances `any`, as
-      // every repair does (see "Scratch events" above).
+      // The repair of a NEW name declared in a scratch scope advances
+      // nothing: it is `scratch` and `fresh` (the target scope held no
+      // binding of the name), and it shadows no binding outside the scratch
+      // scopes (`shadowing` is not set). No expression can have read the
+      // binding: an expression binds its names when it is canonicalized,
+      // the name resolved to nothing visible outside the computation before
+      // the declaration, and the scratch scope is popped before any
+      // expression outside the computation runs. This is the rule of a
+      // scratch `declare` (below), for the event that a declaration of a
+      // callable name emits in addition to it. The private copies that the
+      // compiler declares for a user function with a library name
+      // (`withShadowingCallsRenamed()`, `compilation/shadowing-calls.ts`)
+      // are such declarations. A fresh scratch declaration that shadows a
+      // binding outside the scratch scopes (a value shield of a
+      // function-valued symbol) keeps its advance: existing expressions read
+      // that name through the current scope chain.
+      if (e.scratch === true && e.fresh === true && e.shadowing !== true)
+        return { any: false, semantic: false, world: false };
+      // Any other SCRATCH repair (the auto-declared head `b` of `b(x)` in the
+      // scope where a derivation boxes a function body again: the name
+      // already has a binding there) advances `any`, as every repair does
+      // (see "Scratch events" above).
       return { any: true, semantic: false, world: false };
     case 'redefine':
       // A zero-mask redefinition is valid only when an accompanying value
