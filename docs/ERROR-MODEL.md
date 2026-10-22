@@ -1444,43 +1444,54 @@ is mandatory:
    as a declared predicate, or as a check inside the handler routed to
    the matching channel.
 
-**Assignment admits `missing` into a declared type — RULED 2026-09-09.**
-The same reading applies to a DECLARED SYMBOL: its type describes the
-values the symbol takes when it has one, so absence is not a second type
-the declaration must also spell. When a value is checked against a
-declared type, the value's `missing` member is removed before the subtype
-test. A restriction carries the absent case in its type — `3 {a > 0}`
-types `integer | missing` while `a` is unbound, and `(1, 2) {a > 0}` types
-`missing | tuple<integer, integer>` — so `ce.declare("n", "number")`
-followed by `ce.assign("n", 3 {a > 0})` binds, and so does a gated tuple
-into `tuple<number, number>`. The marker on its own can bind to a
-non-callable declaration under this assignment policy. This does not mean
-that every content type includes `missing`. Three things
-do NOT change. The DECLARED type stays exactly as written (`n.type` is
-`number`, not `number | missing`). Subtyping is untouched:
-`missing <: number` is still false, so `matches()` answers as it always
-did. And where NOTHING is declared, the INFERRED type still keeps its
-`T | missing` arm, so a consumer that gates on `type.matches("number")`
-must still strip the absence arm when it reads an inferred or an
-expression type. Dereferencing the symbol answers the gated value or the
-marker, and the per-parameter `missingBehavior` policy — not this rule —
-still governs what an absent ARGUMENT does at a parameter slot. One value
-is excluded: the bare marker does not bind to a declaration with a
-CALLABLE arm — a plain signature, the `function` wildcard, or a union such
-as `number | (number) -> number`. `missing` strips to the bottom type,
-which is a subtype of every signature, and admitting it would install a
-callable definition under a contract nothing proved. Only that value is
-refused: a gated scalar assigned to `number | (number) -> number` strips
-to `integer` and binds through the scalar arm.
+**A declared type is a contract on every value the symbol takes — decided
+2026-10-21 (decision P1 of
+`docs/plans/2026-10-21-presence-contracts-and-assertion.md`), reversing the
+rule of 2026-09-09.** From 2026-09-09 to 2026-10-21 an assignment removed the
+value's `missing` member before the subtype test, so `ce.declare("s",
+"string")` followed by `ce.assign("s", Missing)` bound, and `s` reported
+`string` while evaluating to `Missing`; the rule had been written for a
+restricted value `3 {a > 0}`, which then typed `integer | missing`. Since the
+decision of 2026-09-25 a numeric restriction masks to `NaN` and types
+`integer | nan`, which `number` admits with no strip, so the strip admitted
+exactly what a contract should refuse: the bare markers `Missing` and
+`Undefined`, and a restricted non-numeric value such as `(1, 2) {a > 0}`
+(typed `missing | tuple<integer, integer>`). Now the value is checked as it
+is: `s: string` refuses `Missing` and `Undefined` as it refuses `5`; a
+declared element contract is checked too (`xs: list<string>` refuses `["a",
+Missing]`, decision P1b); `string | missing`, `any`, and a refining
+declaration (`list`, `list<unknown>`) admit absence; a numeric declaration
+admits `NaN`. The Epsil static check (`declaredTypeMismatch`,
+`static-diagnostics.ts`), the Epsil run time and the engine's assignment
+route (`matchesDeclaredTypeAxes`, `effects-inference.ts`) agree. The reader
+of a declared symbol can trust the declaration; an inferred type keeps its
+`T | missing` member as before. The assumption check still asks what a value
+is when it is present (`presentedValueType`), because an assumption is a
+constraint on the present value. Pinned by
+`test/compute-engine/declared-contract-presence.test.ts`.
 
-This remains the implemented assignment behavior. It must not be read as
-the rule for the inference marker `unknown`: an explicit successful-value
-contract and a request to infer a type are different things. The design
-note's Q1 asks whether declarations retain this assignment policy with
-separate computed presence information or instead require explicit absence.
-Either way, a known missing value must not disappear from analysis merely
-because the declared contract says `string`, `tuple`, or another present
-content type.
+**An absent argument at a library parameter that excludes absence is refused
+— decided 2026-10-21 (decision P2).** The resolved absence behavior of an
+operator (`resolvedMissingBehavior`, `boxed-operator-definition.ts`) used to
+leave the `pass-through` class with no rule: the handler received the absent
+value and answered as it happened to (an error value from `ToUpperCase`, a
+value computed from the marker by `Parse` or `IsSquareMatrix`, the marker
+from `ToCNF`). Now `refusesAbsentOperandAt(i)` gives one default: an absent
+scalar operand at a position whose declared parameter type excludes absence
+and is read as data (not a number, a collection, a function, `expression`,
+`symbol`, `any` or `unknown`) is an `incompatible-type` error naming the
+parameter, the answer a user function gives for the same argument. A
+declared `handle`, a resolved `propagate`, an operator that holds its
+operands (`lazy`, a hold class other than `evaluate`) and a function literal
+are exempt. The Epsil static check reports a possibly absent argument at
+such a parameter, as it does at a `function`'s annotated parameter
+(decision P3), and narrows a symbol an `isMissing` guard proves present
+(`presence-narrowing.ts`). The presence assertion `x?!` (`AssertPresent`,
+`library/core.ts`) is the third discharge beside `??` and a guard: the value
+when present, an `expected-present` error when absent (decision P4). Pinned
+by `test/compute-engine/absent-argument-library-default.test.ts`,
+`test/compute-engine/assert-present.test.ts` and
+`test/epsil/presence-narrowing.test.ts`.
 
 **An absent argument at an annotated parameter of a function literal —
 RULED 2026-09-30.** A function literal with at least one annotated

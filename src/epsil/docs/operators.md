@@ -77,6 +77,7 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 100  | Power                 | `**`   |       | infix   | right         |
 | 101  | Sqrt, Root            |        | `√` `∛` `∜` | prefix |          |
 | 110  | Factorial             | `!`    |       | postfix |               |
+| 110  | AssertPresent         | `?!`   | `⁈`   | postfix |               |
 | 110  | Power                 |        | `x²` `xⁿ⁺¹` | postfix |        |
 | 110  | Subscript             |        | `xₖ₊₁` | postfix |              |
 
@@ -276,6 +277,43 @@ Like `|>`, it is looser than `->`, so a dictionary value needs parentheses:
 
 Write `{a -> 1, b -> (x ?? 2)}` instead. It is also looser than `||` and `&&`
 (the C# position), so `a ?? b || c` is `a ?? (b || c)`.
+
+## Presence assertion: `?!` {#presence-assertion}
+
+`x?!` is `AssertPresent(x)`: the value of `x`, or an `expected-present` error
+when `x` is **absent** (`missing`, `NaN`, an indeterminate form such as
+`0/0`). It is the third way to discharge a possibly absent value, beside a
+fallback (`??`) and a guard (`isMissing`): use it where absence is a violated
+precondition and an invented replacement would hide a bug.
+
+```epsil
+function f(p: string) { p }
+let xs: list<string> = ["a", "b"]
+let i = 2
+f(xs[i]?!)         // "b"; with i = 5, Error("expected-present", …)
+```
+
+The static check accepts the asserted value where it would report the plain
+read: the type of `xs[i]?!` is the present part of the type of `xs[i]`
+(`string`, not `missing | string`), so it fits a parameter or a declaration
+that excludes absence. Only the value itself is checked, never the cells of a
+collection: `xs?!` asserts that the list is there, not that no cell is
+absent. `Nothing` is an omission marker, not an absent datum, and passes
+through; an error operand propagates unchanged.
+
+`?!` is a postfix operator at the factorial's precedence (110). It must abut
+its operand, like `!`, and a following operator needs a space, because an
+operator run is one token: write `x?! + 1`, not `x?!+1` (as `3! + 1`, not
+`3!+1`). `⁈` (U+2048) is an alias. A postfix operand is parenthesized when
+serialized: `(n!)?!`, `(x?!)!`.
+
+Compiled code raises on the absent branch (JavaScript, the interval
+JavaScript target, Python) with the
+message `expected-present: <operand> is absent`; the check is left out when
+the operand's type already excludes absence (a declared length with a literal
+index, a type without `nan`). A shader target (GLSL, WGSL) cannot raise:
+there the assertion compiles as the identity and the absent value flows on
+as `NaN`, and a later absence test on the value keeps its own rule.
 
 ## Type test: `is`
 

@@ -6465,8 +6465,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
         object: {
           nullLiteral: 'None',
           isAbsent: (x) => `(${x} is None)`,
-          coalesce: (x, d) => `(${d} if ${x} is None else ${x})`,
+          // The operand is bound to a lambda parameter so it is evaluated
+          // once, as on the numeric axis: an operand with an effect or a
+          // random value must not run twice.
+          coalesce: (x, d) => `(lambda _c: ${d} if _c is None else _c)(${x})`,
         },
+        // A raised `ValueError`, as an expression: the generator-throw
+        // idiom this target already uses for its integer-operand checks
+        // (`pythonIntegerDivisionLike`). `AssertPresent` (`x?!`) uses it
+        // for the absent branch.
+        raise: (message) => `(_ for _ in ()).throw(ValueError(${message}))`,
         // A written `Missing` is `math.nan` here, not `None`: numpy raises
         // on `None` (`np.cos(None)`, `np.median([1, None, 3])`) where the
         // interpreter answers `NaN`, and the collection-equality helper of

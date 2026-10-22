@@ -12,6 +12,7 @@ import {
   stringValue,
   symbol,
 } from '../math-json/utils.js';
+import { narrowGuardedReads } from './presence-narrowing.js';
 import type {
   EffectSet,
   FunctionSignature,
@@ -22,6 +23,7 @@ import {
   isGroupedTypeText,
   isWildcardFunctionType,
   signatureEffects,
+  resolveTypeAlias,
   withParameterNamesOf,
 } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
@@ -977,14 +979,26 @@ function canonicalizationDiagnostics(
         pinned,
         constants
       );
-      boxed = ce.box(statement);
+      // For this check only, a read of a symbol that an `isMissing` test
+      // proves present is wrapped in `AssertPresent`, so the engine's
+      // possibly-absent-argument report is not raised on a guarded call
+      // (`presence-narrowing.ts`). The run time evaluates the statement as
+      // written. `narrowGuardedReads` returns the statement itself when it
+      // wrapped nothing; otherwise the messages of this statement must not
+      // show the wrapper (`narrowedStatement`, read by `epsilSnippet`).
+      const narrowed = narrowGuardedReads(statement);
+      narrowedStatement = narrowed !== statement;
+      boxed = ce.box(narrowed);
       canonical = boxed.json;
     } catch (e) {
       // An expired time budget is the host's cancellation, not a statement
       // that failed to box: swallowing it here would let the pass — and then
       // the program — run on past its deadline. It propagates to the caller
       // (`executeEpsil` turns it into the program's cancelled value).
-      if (isTimeoutCancellation(e)) throw e;
+      if (isTimeoutCancellation(e)) {
+        narrowedStatement = false;
+        throw e;
+      }
       // Otherwise canonicalization is best-effort: a statement the engine
       // cannot box is left to the run phase rather than crashing the check.
       continue;
@@ -1306,6 +1320,7 @@ function canonicalizationDiagnostics(
       diagnostics.push(diagnostic);
     }
   }
+  narrowedStatement = false;
 
   return diagnostics;
 }
@@ -2905,11 +2920,12 @@ function declaredTypeMismatch(
   }
   if (declared.isUnknown || value.type.isUnknown) return undefined;
 
-  const isClosedLiteral =
-    isNumber(value) ||
-    isString(value) ||
-    isSymbol(value, 'True') ||
-    isSymbol(value, 'False');
+  // A closed literal IS its runtime value, so the full `matches()` check
+  // applies to it. A list, tuple or set literal of closed literals is closed
+  // too, the absence symbols included: `let xs: list<string> = ["a",
+  // Missing]` is reported here as the run time refuses it (user decision
+  // P1b, 2026-10-21: a declared element contract is checked on assignment).
+  const isClosedLiteral = isClosedLiteralValue(value);
   // LITERAL NARROWING: `let c: character = "a"` is not a mismatch. Epsil has
   // no character literal, so a one-grapheme-cluster string LITERAL written at
   // a name whose declared type expects a character (and refuses a string)
@@ -2927,11 +2943,66 @@ function declaredTypeMismatch(
   const mismatch = isClosedLiteral
     ? !value.type.matches(declared)
     : declared.isDisjointFrom(value.type);
-  if (!mismatch) return undefined;
+  if (!mismatch) {
+    // A POSSIBLY absent initializer (`let y: string = xs[i]`, typed
+    // `missing | string`) at a declaration that excludes absence: the run
+    // time refuses the absent case (user decision P1, 2026-10-21), and the
+    // static check reports it on the same terms as a possibly absent
+    // argument at a strict parameter (decision P3). The discharges are the
+    // same: `xs[i]?!`, `xs[i] ?? fallback`, or a declaration `string |
+    // missing`. A numeric read (`zs[i]` on a `list<number>`) is typed
+    // `number` or `nan`, with no `missing` arm, and is not reported. A value
+    // with a top-level `missing` arm is refused by the run time at ANY
+    // declaration that does not admit `missing`, numeric or not (`let n:
+    // number = m` with `m: number | missing`, `let y: integer =
+    // first(filter(ys, …))`), so it is reported at every such declaration.
+    if (
+      !isSubtype('missing', declared.type) &&
+      hasTopLevelMissingArm(value.type.type)
+    )
+      return (
+        `The value \`${epsilSnippet(value.json)}\` of type "${value.type}" may be absent, ` +
+        `and the declared type "${declared}" excludes absence. Write ` +
+        `\`${epsilSnippet(value.json)}?!\` to assert that it is present, ` +
+        `\`${epsilSnippet(value.json)} ?? fallback\` to replace an absent value, ` +
+        `or declare \`${declared} | missing\``
+      );
+    return undefined;
+  }
 
   const lead = `The value "${value.toString()}" of type "${value.type}" is not compatible with the declared type "${declared}"`;
   const hint = unboundSignatureHint(value, declared);
   return hint === undefined ? lead : `${lead}. ${hint}`;
+}
+
+/** Whether `t` is `missing` or a union with a `missing` arm: the value as a
+ * WHOLE may be absent. An absent cell inside a collection (`list<missing |
+ * string>`) is not this: the value is a list, and the declared element
+ * contract judges the cell. */
+function hasTopLevelMissingArm(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'missing') return true;
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return r.types.some((arm) => resolveTypeAlias(arm) === 'missing');
+}
+
+/** Whether `value` is a literal whose static type is exactly its runtime
+ * type: a number, a string, a boolean, an absence or omission symbol, or a
+ * list, tuple or set literal of such values. */
+function isClosedLiteralValue(value: ReturnType<ComputeEngine['box']>): boolean {
+  if (
+    isNumber(value) ||
+    isString(value) ||
+    isSymbol(value, 'True') ||
+    isSymbol(value, 'False') ||
+    isSymbol(value, 'Missing') ||
+    isSymbol(value, 'Undefined') ||
+    isSymbol(value, 'Nothing')
+  )
+    return true;
+  if (isFunction(value, 'List') || isFunction(value, 'Tuple') || isFunction(value, 'Set'))
+    return value.ops.every((op) => isClosedLiteralValue(op));
+  return false;
 }
 
 /**
@@ -3754,9 +3825,31 @@ function text(expr: MathJsonExpression): string {
   return stringValue(expr) ?? epsilSnippet(expr);
 }
 
+/**
+ * Whether the statement the check is boxing was rewritten by
+ * `narrowGuardedReads` (`presence-narrowing.ts`). That rewrite wraps a read
+ * of a symbol that an `isMissing` test proves present in `AssertPresent(v)`,
+ * for the check only: the author did not write `v?!`, so a message that
+ * quotes the engine's `where` operand (or a value of the boxed statement)
+ * must not show the wrapper. While the flag is set, `epsilSnippet` prints
+ * `AssertPresent(<symbol>)` as the bare symbol. The flag is per statement:
+ * `canonicalizationDiagnostics` sets it right before it boxes each statement,
+ * builds that statement's messages inside the same loop iteration, and clears
+ * it when the loop ends (or before it rethrows a time-budget cancellation).
+ */
+let narrowedStatement = false;
+
 /** A statement (or subexpression) in Epsil source form, condensed to a
  * single line so it can be quoted in a diagnostic message. */
 function epsilSnippet(expr: MathJsonExpression): string {
+  // The check's own `AssertPresent` wrapper around a symbol is not the
+  // author's text (see `narrowedStatement`).
+  if (
+    narrowedStatement &&
+    operator(expr) === 'AssertPresent' &&
+    symbol(operand(expr, 1)) !== null
+  )
+    return epsilSnippet(operand(expr, 1)!);
   let snippet: string;
   try {
     snippet = serializeEpsil(expr).replaceAll(/\s+/g, ' ').trim();

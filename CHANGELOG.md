@@ -1,6 +1,63 @@
 ## Unreleased
 
+### Breaking Changes
+
+- **A declared type is a contract on every value the symbol takes.** `s:
+  string` now refuses `Missing` and `Undefined` as it refuses `5`, on the
+  engine's assignment route and in Epsil (static check and run time alike); a
+  declared element contract is checked too, so `xs: list<string>` refuses
+  `["a", Missing]`. An author who wants absence writes it: `string | missing`,
+  `list<string | missing>`, or a refining declaration (`list`, `list<unknown>`).
+  A numeric declaration still admits `NaN`, the numeric absence marker, so a
+  numeric restriction such as `3 {a > 0}` (typed `integer | nan`) binds to `n:
+  number` as before; a restricted non-numeric value such as `(1, 2) {a > 0}`
+  (typed `missing | tuple<integer, integer>`) needs `tuple<number, number> |
+  missing`. This reverses the rule of 2026-09-09 under which a declared type
+  described the successes only and a symbol declared `string` could report
+  `string` while holding `Missing`. Decision P1 and P1b of
+  `docs/plans/2026-10-21-presence-contracts-and-assertion.md`.
+- **One default for an absent argument at a library parameter that excludes
+  absence: it is refused.** An operator with no absence behavior of its own
+  now answers an `incompatible-type` error naming the parameter when an
+  absent value (`Missing`, `Undefined`) reaches a parameter typed as data
+  that excludes absence (`string`, `boolean`, `value`, a color, …), as a user
+  function does for the same argument. Before, the handler received the
+  marker and answered as it happened to: `Parse(Missing)` and
+  `IsSquareMatrix(Missing)` computed a value from it, `ToUpperCase(Missing)`
+  was already an error. Unchanged: numeric and collection operators answer
+  the marker of their result (`Sin(Missing)` is `NaN`, `Reverse(Missing)` is
+  `Missing`), operators that own their absence semantics (`Length`, `Equal`,
+  the reducers, `Coalesce`, `IsMissing`), operators that hold their operands
+  (`Expand`, `Integrate`, `ForAll`), and a parameter typed `expression`,
+  `symbol`, `any` or `unknown`. Decision P2.
+
 ### New Features
+
+- **The presence assertion `x?!`** (`AssertPresent(x)` in MathJSON, `⁈` is
+  an alias): the value of `x`, or an `expected-present` error naming the
+  operand when `x` is absent (`Missing`, `Undefined`, `NaN`, `Indeterminate`,
+  the set `isMissing` recognizes). `Nothing` passes through, an error operand
+  propagates. Its type is the present part of the operand's type: `xs[i]?!`
+  with `xs: list<string>` is a `string`, so `f(xs[i]?!)` is accepted at a
+  parameter that excludes absence, and `let y: string = xs[i]?!` too. It is a
+  postfix operator at the factorial's precedence and must abut its operand;
+  as for `3! + 1`, write `x?! + 1`, not `x?!+1`. Compiled: JavaScript,
+  the interval JavaScript target and Python raise with the message `expected-present: <operand> is absent`; the
+  check is omitted when the operand's type already excludes absence (a
+  declared length and a literal index, a type without `nan`); a shader target
+  compiles the identity and does not read the assertion as a proof, so a later
+  absence test on the value keeps its own rule (decision P5). Decision P4.
+- **The Epsil static check narrows a symbol an `isMissing` guard proves
+  present.** `if isMissing(v) { "none" } else { f(v) }`, `if !isMissing(v) &&
+  v != "b" { f(v) }` and `isMissing(v) || f(v) == "a"` are no longer reported
+  at a parameter that excludes absence. A reassignment inside the region ends
+  it; a function literal in the region is not entered.
+- **The Epsil static check reports a possibly absent value wherever the run
+  time refuses it**: at a library parameter that excludes absence
+  (`trim(xs[i])`, as it already did at a `function`'s annotated parameter) and
+  as the initializer of a declaration that excludes absence (`let y: string =
+  xs[i]`). The discharges are the same everywhere: `xs[i]?!`, `xs[i] ??
+  fallback`, a guard, or a type that admits absence. Decision P3.
 
 - **`FindRoot` takes the options dictionary of `FindFit`** (Tycho row 408). A
   third argument `{global: {b: [lo, hi]}}` searches the named parameters (at

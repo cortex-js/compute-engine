@@ -3698,6 +3698,7 @@ function applyOperatorDefinition(
               operatorName: name,
               // Contract B NaN admission — same as the strict site above.
               nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+              refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
             }
           ) ?? xs),
       { metadata, canonical: true, scope }
@@ -3861,6 +3862,7 @@ function applyOperatorDefinition(
               resolutionOut: seamResolution,
               operatorName: name,
               nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+              refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
               noInference: true,
               // A `broadcastable: true` library operator refuses a provably
               // non-numeric collection at boxing (see the plain route below
@@ -3993,6 +3995,7 @@ function applyOperatorDefinition(
           // is tested ahead of carrier disjointness — see
           // `nanPolicyAdmitsParam` in `validate.ts`.
           nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+          refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
           // A `broadcastable: true` LIBRARY operator — an elementwise head
           // such as `Abs`, `Sin`, `Ln` — refuses a provably non-numeric
           // collection at a threadable numeric slot at boxing

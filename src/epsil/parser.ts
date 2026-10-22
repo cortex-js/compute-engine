@@ -7108,8 +7108,16 @@ export class Parser {
    */
   private peekPostfix(): OperatorDef | null {
     const token = this.current;
-    if (token.type !== 'OPERATOR') return null;
     if (token.precededByWhitespace) return null;
+    // A single fancy glyph that spells a postfix operator (`⁈`, U+2048, is
+    // `?!` in the `FANCY_UNICODE` table) reaches the parser as an `ERROR`
+    // token, because the glyph is not an operator character for the lexer;
+    // read it as its ASCII spelling, as `peekInfix` does for `×`.
+    if (token.type === 'ERROR') {
+      const mapped = this.fancyOperator(token);
+      return mapped === null ? null : (postfixOperatorForSymbol(mapped) ?? null);
+    }
+    if (token.type !== 'OPERATOR') return null;
     // NOTE: the lexer maximal-munches a run of operator characters into one
     // token, so a `!` directly abutting another operator char is not seen here
     // as a lone `!` (`3!^2` lexes `!^` as one token — write `3! ^ 2`; `x!+1`

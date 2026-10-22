@@ -7,20 +7,26 @@ import {
 import { typeToString } from '../../src/common/type/serialize';
 
 /**
- * Assignment admits `missing` into a DECLARED type (ruled 2026-09-09).
+ * A declared type is a contract on every value the symbol takes (user
+ * decision P1 of `docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
+ * 2026-10-21). This file was written for the rule of 2026-09-09 that it
+ * reverses, under which the value's `missing` member was removed before the
+ * subtype test, so `(1, 2) {a > 0}` (typed `missing | tuple<integer,
+ * integer>`) and the bare marker bound to a symbol declared
+ * `tuple<number, number>`. Now:
  *
- * A restriction carries the absent case in its type: `3 {a > 0}` types
- * `integer | missing` while `a` is unbound, and `(1, 2) {a > 0}` types
- * `missing | tuple<integer, integer>`. Before this ruling the assignment
- * compatibility check demanded a subtype of the declared type, so both were
- * refused by a symbol declared `number` / `tuple<number, number>`.
+ * - a restricted NUMERIC value still binds to a numeric declaration: since
+ *   2026-09-25 it masks to `NaN` and types `integer | nan`, and `nan` is a
+ *   number;
+ * - a restricted non-numeric value and the bare marker need a declaration
+ *   that admits absence (`tuple<number, number> | missing`), and the declared
+ *   type stays exactly as written;
+ * - a declared element contract judges an absent cell (decision P1b);
+ * - subtyping is unchanged (`missing <: number` is still false), and a symbol
+ *   with NO declaration still infers the `T | missing` arm.
  *
- * Absence is a state every type can take — the way `NaN` inhabits `number` —
- * so the value's `missing` member is removed before the subtype test. The
- * DECLARED type stays exactly as written, the value binds, and dereferencing
- * the symbol answers the gated value or the marker. Subtyping itself is
- * unchanged: `missing <: number` is still false, and a symbol with NO
- * declaration still infers the `T | missing` arm.
+ * The alias and `Dot`/`Norm` sections at the end pin the type helpers
+ * (`typeContainsMissing`, `stripMissingFromType`), which other sites use.
  */
 
 function gatedTuple(ce: ComputeEngine) {
@@ -47,18 +53,22 @@ describe('the type a restriction carries', () => {
   });
 });
 
-describe('ce.assign() admits a gated value into a declared type', () => {
-  test('a gated tuple binds to `tuple<number, number>`', () => {
+describe('ce.assign() of a gated value into a declared type', () => {
+  test('a gated tuple needs a declaration that admits absence', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'tuple<number, number>');
-    expect(() => ce.assign('P', gatedTuple(ce))).not.toThrow();
+    expect(() => ce.assign('P', gatedTuple(ce))).toThrow(
+      /not compatible with the type "tuple<number, number>"/
+    );
+    ce.declare('PM', 'tuple<number, number> | missing');
+    expect(() => ce.assign('PM', gatedTuple(ce))).not.toThrow();
   });
 
   test('the declared type stays exactly as written', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number>');
+    ce.declare('P', 'tuple<number, number> | missing');
     ce.assign('P', gatedTuple(ce));
-    expect(ce.box('P').type.toString()).toBe('tuple<number, number>');
+    expect(ce.box('P').type.toString()).toBe('missing | tuple<number, number>');
   });
 
   test('a gated scalar binds to `number`', () => {
@@ -72,7 +82,7 @@ describe('ce.assign() admits a gated value into a declared type', () => {
 describe('the bound gate still decides at evaluation', () => {
   test('a satisfied gate answers the tuple', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number>');
+    ce.declare('P', 'tuple<number, number> | missing');
     ce.assign('P', gatedTuple(ce));
     ce.assign('a', 1);
     expect(ce.box('P').evaluate().toString()).toBe('(1, 2)');
@@ -81,7 +91,7 @@ describe('the bound gate still decides at evaluation', () => {
 
   test('a failed gate answers the marker', () => {
     const ce = new ComputeEngine();
-    ce.declare('P', 'tuple<number, number>');
+    ce.declare('P', 'tuple<number, number> | missing');
     ce.assign('P', gatedTuple(ce));
     ce.assign('a', -1);
     expect(ce.box('P').evaluate().symbol).toBe('Missing');
@@ -100,21 +110,24 @@ describe('the bound gate still decides at evaluation', () => {
   });
 });
 
-describe('the marker itself binds to a declared type', () => {
-  test('`Missing` binds to a declared `number`', () => {
+describe('the marker itself needs a declaration that admits absence', () => {
+  test('`Missing` does not bind to a declared `number`', () => {
     const ce = new ComputeEngine();
     ce.declare('m', 'number');
-    expect(() => ce.assign('m', ce.symbol('Missing'))).not.toThrow();
-    expect(ce.box('m').type.toString()).toBe('number');
-    expect(ce.box('m').evaluate().symbol).toBe('Missing');
+    expect(() => ce.assign('m', ce.symbol('Missing'))).toThrow(
+      /not compatible with the type "number"/
+    );
+    ce.declare('mm', 'number | missing');
+    expect(() => ce.assign('mm', ce.symbol('Missing'))).not.toThrow();
+    expect(ce.box('mm').evaluate().symbol).toBe('Missing');
   });
 
-  test('`Missing` binds to a declared tuple type', () => {
+  test('`Missing` does not bind to a declared tuple type', () => {
     const ce = new ComputeEngine();
     ce.declare('T', 'tuple<number, number>');
-    ce.assign('T', ce.symbol('Missing'));
-    expect(ce.box('T').type.toString()).toBe('tuple<number, number>');
-    expect(ce.box('T').evaluate().symbol).toBe('Missing');
+    expect(() => ce.assign('T', ce.symbol('Missing'))).toThrow(
+      /not compatible with the type "tuple<number, number>"/
+    );
   });
 
   test('a declared FUNCTION SIGNATURE is not opened by the marker', () => {
@@ -130,23 +143,29 @@ describe('the marker itself binds to a declared type', () => {
   });
 });
 
-describe('the other declared-type admission routes', () => {
+describe('the other declared-type routes agree', () => {
   test('ce.declare() with a gated value', () => {
     const ce = new ComputeEngine();
-    ce.declare('R', {
-      type: 'tuple<number, number>',
+    expect(() =>
+      ce.declare('R', { type: 'tuple<number, number>', value: gatedTuple(ce) })
+    ).toThrow(/not compatible/);
+    ce.declare('RM', {
+      type: 'tuple<number, number> | missing',
       value: gatedTuple(ce),
     });
-    expect(ce.box('R').type.toString()).toBe('tuple<number, number>');
+    expect(ce.box('RM').type.toString()).toBe('missing | tuple<number, number>');
   });
 
   test('the `Assign` operator', () => {
     const ce = new ComputeEngine();
     ce.declare('Q', 'tuple<number, number>');
+    expect(ce.box(['Assign', 'Q', gatedTuple(ce)]).evaluate().operator).toBe(
+      'Error'
+    );
+    ce.declare('QM', 'tuple<number, number> | missing');
     expect(
-      ce.box(['Assign', 'Q', gatedTuple(ce)]).evaluate().operator
+      ce.box(['Assign', 'QM', gatedTuple(ce)]).evaluate().operator
     ).not.toBe('Error');
-    expect(ce.box('Q').type.toString()).toBe('tuple<number, number>');
   });
 
   test('the `:=` parse route', () => {
@@ -194,22 +213,22 @@ describe('a genuinely incompatible value is still refused', () => {
   });
 });
 
-describe('the strip reaches an absence arm nested in a collection', () => {
-  test('a list with an absent element binds to `list<number>`', () => {
-    // `stripMissingFromType` is the shared strip-before-validate helper and it
-    // descends into element types, so a list holding an absent element is a
-    // list of numbers whose element is absent. Same principle, one level down.
+describe('a declared element contract judges an absent cell (P1b)', () => {
+  test('a list with an absent element does not bind to `list<number>`', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     expect(() =>
       ce.assign('L', ce.box(['List', 1, ce.symbol('Missing')]))
+    ).toThrow(/not compatible with the type "list<number>"/);
+    ce.declare('LM', 'list<number | missing>');
+    expect(() =>
+      ce.assign('LM', ce.box(['List', 1, ce.symbol('Missing')]))
     ).not.toThrow();
-    expect(ce.box('L').type.toString()).toBe('list<number>');
   });
 
-  test('a record with an absent field binds to a record type', () => {
+  test('a record with a gated numeric field binds to a record type', () => {
     // A dictionary literal whose keys are bare identifiers types
-    // `record{…}`, so the absence arm sits on a FIELD.
+    // `record{…}`; the gated field is `integer | nan`, which `number` admits.
     const ce = new ComputeEngine();
     ce.declare('R', 'record{x: number}');
     expect(() =>
@@ -221,10 +240,9 @@ describe('the strip reaches an absence arm nested in a collection', () => {
     expect(ce.box('R').type.toString()).toBe('record{x: number}');
   });
 
-  test('a dictionary with an absent value binds to `dictionary<number>`', () => {
+  test('a dictionary with a gated numeric value binds to `dictionary<number>`', () => {
     // A key that is not a bare identifier makes the literal type
-    // `dictionary<T>` rather than `record{…}`, so this exercises the other
-    // dictionary arm of the strip.
+    // `dictionary<T>` rather than `record{…}`.
     const ce = new ComputeEngine();
     ce.declare('D', 'dictionary<number>');
     expect(() =>
@@ -236,7 +254,7 @@ describe('the strip reaches an absence arm nested in a collection', () => {
     expect(ce.box('D').type.toString()).toBe('dictionary<number>');
   });
 
-  test('a set with an absent element binds to `set<number>`', () => {
+  test('a set with a gated numeric element binds to `set<number>`', () => {
     const ce = new ComputeEngine();
     ce.declare('S', 'set<number>');
     expect(() =>
@@ -246,8 +264,6 @@ describe('the strip reaches an absence arm nested in a collection', () => {
   });
 
   test('a nested carrier that does not fit is still refused', () => {
-    // The strip removes the absence arm one level down too; the field's
-    // carrier still has to fit the declared field type.
     const ce = new ComputeEngine();
     ce.declare('W', 'record{x: string}');
     expect(() =>
@@ -259,11 +275,7 @@ describe('the strip reaches an absence arm nested in a collection', () => {
   });
 });
 
-describe('a declaration with a CALLABLE arm still refuses the bare marker', () => {
-  // `hasFunctionSignature` is true only when EVERY arm of a union is a
-  // signature, so a mixed declaration escapes it. The carve-out asks the
-  // weaker question — is ANY arm callable? — because the bare marker strips
-  // to the bottom type, which is a subtype of every arm.
+describe('a declaration with a CALLABLE arm refuses the bare marker', () => {
   test('`Missing` does not bind to `number | (number) -> number`', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'number | (number) -> number');
@@ -272,10 +284,8 @@ describe('a declaration with a CALLABLE arm still refuses the bare marker', () =
     );
   });
 
-  test('a gated SCALAR still binds through the non-callable arm', () => {
-    // Only a value that could match through the callable arm ALONE is
-    // refused. `3 {a > 0}` strips to `integer`, which the `number` arm
-    // admits on its own merits.
+  test('a gated SCALAR binds through the non-callable arm', () => {
+    // `3 {a > 0}` is `integer | nan`, which the `number` arm admits.
     const ce = new ComputeEngine();
     ce.declare('h', 'number | (number) -> number');
     expect(() => ce.assign('h', gatedScalar(ce))).not.toThrow();
@@ -322,8 +332,8 @@ describe('the compiler sees no new shape', () => {
     expect(compiledScalar('number')).toBe(compiledScalar('number | missing'));
   });
 
-  test('a declared tuple compiles as its `| missing` spelling does', () => {
-    expect(compiledTuple('tuple<number, number>')).toBe(
+  test('a declared tuple that admits absence compiles the gated read', () => {
+    expect(compiledTuple('tuple<number, number> | missing')).toBe(
       compiledTuple('missing | tuple<number, number>')
     );
   });
@@ -363,7 +373,7 @@ describe('a `Typed` parameter is governed by its own missing policy', () => {
   });
 });
 
-describe('the strip reads through a structural alias', () => {
+describe('the absence helpers read through a structural alias', () => {
   // A structural alias (`declareType(…, { alias: true })`) IS its definition,
   // so `typeContainsMissing` and `stripMissingFromType` must read through a
   // reference to it, at the top and at a nested position. Before this, both

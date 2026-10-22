@@ -1,6 +1,9 @@
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
-import { coalesceResultType } from '../../common/type/coalesce.js';
+import {
+  coalesceResultType,
+  presentType,
+} from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
@@ -398,6 +401,20 @@ function delimitedOperands(
     isFunction(op1)
     ? flattenSequence(op1.ops)
     : [op1];
+}
+
+/**
+ * True when no value of type `t` is absent. The absent values (`Missing`,
+ * `Undefined`, `NaN`, `Indeterminate`) have the types `missing` and `nan`,
+ * so a type that admits neither cannot hold one: a `list<…>`, a `tuple<…>`,
+ * a `string`, a `dictionary`, a function type, an `integer` or a `real`.
+ * Every type is a subtype of `unknown`, so an unresolved type returns false;
+ * so does `number`, which admits `nan`. `Coalesce` and `AssertPresent` use
+ * this to treat a value of such a type as present even when it still carries
+ * free variables, since no substitution of those variables makes it absent.
+ */
+function typeCannotBeAbsent(t: Type): boolean {
+  return !isSubtype('missing', t) && !isSubtype('nan', t);
 }
 
 /** The `absence-marker-binding` error when `name` is an absence marker. */
@@ -4621,8 +4638,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const v = ops[i].evaluate({ numericApproximation });
           last = v;
           if (isMissingValue(v)) continue;
+          // A value whose type cannot be absent (a list, a tuple, a string,
+          // a dictionary, a function literal) is present even when it still
+          // carries free variables: `Coalesce([x, 1], 2)` is `[x, 1]`. See
+          // `typeCannotBeAbsent`.
+          if (typeCannotBeAbsent(v.type.type)) return v;
           // An operand whose absence cannot be decided (it still carries free
-          // variables) leaves the expression partially unevaluated from here
+          // variables and its type admits an absent outcome) leaves the
+          // expression partially unevaluated from here
           // on: return `Coalesce` of this operand and the remaining tail —
           // with the tail left UNEVALUATED. `Coalesce` short-circuits, so an
           // operand past an undecided one may never be needed; evaluating it
@@ -4641,6 +4664,72 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Every operand was absent: return the last operand's value verbatim
         // (still absent).
         return last!;
+      },
+    },
+
+    AssertPresent: {
+      description:
+        'Assert that a value is present: return it unchanged, or an ' +
+        '`expected-present` error when it is ABSENT (`Missing`, `Undefined`, ' +
+        '`NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an ' +
+        'absent datum, and passes through; an error operand propagates. ' +
+        'Epsil spells it `x?!`. Only the value itself is checked, never the ' +
+        'cells of a collection.',
+      complexity: 500,
+      // Lazy with a `canonical` handler (the lazy-operator trap): the
+      // operand is evaluated once, here, so an effect in it runs once and
+      // the absent branch is the only one that fails.
+      lazy: true,
+      // The absent value is the input this test exists for (§3.A of the
+      // missing-value typing design): declared `handle`, so no gate answers
+      // the marker before the operator sees it.
+      missingBehavior: 'handle',
+      signature: '(any) -> unknown',
+      examples: ['[1, 2][1]?!'],
+      // The successful outcomes are the present ones (`presentType`):
+      // `string | missing` gives `string`, `number` gives `number` without
+      // `nan`, `integer | nothing | missing` gives `integer | nothing`. An
+      // unresolved type stays unresolved: presence is not evidence of a
+      // concrete content type.
+      type: ([x], context) =>
+        BoxedType.forResult(presentType(x.type), context.engine._typeResolver),
+      canonical: (args, { engine: ce, scope }) => {
+        const xs = flattenSequence(args);
+        if (xs.length === 1 || (!ce.strict && xs.length > 0))
+          return ce._fn('AssertPresent', canonical(ce, xs, scope));
+        // `checkArity` also erases `Nothing`, which must count as an argument
+        // here: a written `Nothing?!` passes `Nothing` through.
+        return ce._fn('AssertPresent', [
+          xs[0] === undefined
+            ? ce.error('missing')
+            : canonical(ce, [xs[0]], scope)[0],
+          ...xs
+            .slice(1)
+            .map((x) => ce.error('unexpected-argument', x.toString())),
+        ]);
+      },
+      evaluate: ([x], { engine: ce, numericApproximation }) => {
+        if (x === undefined) return ce.error('missing');
+        const v = x.evaluate({ numericApproximation });
+        // The failure names the operand as written, not its value: the
+        // value is the marker, which says nothing about where it came from.
+        if (isMissingValue(v)) return ce.error('expected-present', x.toString());
+        // A value whose type cannot be absent is present even when it still
+        // carries free variables: a list, a tuple, a string, a dictionary or
+        // a function literal stays that kind of value under any substitution
+        // of its free variables, so `AssertPresent([x, 1])` is `[x, 1]` and
+        // `Length(AssertPresent([x, 1]))` reduces to 2. The test reads the
+        // type: `missing` and `nan` are the absent outcomes (`Missing`,
+        // `Undefined`, `NaN`, `Indeterminate`), so a type that admits
+        // neither is present. Every type is a subtype of `unknown`, so an
+        // unresolved symbol keeps the assertion; so does `number`, which
+        // admits `nan`.
+        if (typeCannotBeAbsent(v.type.type)) return v;
+        // Undecided (the operand still carries free variables and its type
+        // admits an absent outcome): the assertion stays, on the evaluated
+        // operand, as `Coalesce` does with an undecided operand.
+        if (v.freeVariables.length > 0) return ce._fn('AssertPresent', [v]);
+        return v;
       },
     },
 

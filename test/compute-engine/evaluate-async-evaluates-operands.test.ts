@@ -691,6 +691,7 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
   const SYNCHRONOUS = new Set([
     'About',
     'Apart',
+    'AssertPresent',
     'Assign',
     'Assume',
     'Cancel',

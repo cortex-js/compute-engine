@@ -46,13 +46,20 @@ separate; the following items do not block the original tuple/record task:
   `unknown` position (`tuple<unknown, integer>`, `list<list<unknown>>`,
   `record{a: unknown}`) is unrestricted and does not refine from an assignment
   yet (D2 scope).
-- Choose presence-assertion syntax and the default diagnostic/assignment policy
-  for possible absence (Q1/Q3). Analysis, measured behavior and the decisions
-  P1 to P5 (declared contract, element contract, library default for an absent
-  argument, static report policy, `?!` / `AssertPresent` / `expected-present`,
-  compiled assertion on targets without a raise):
-  `docs/plans/2026-10-21-presence-contracts-and-assertion.md` (2026-10-21,
-  decisions pending).
+- Presence contracts and the presence assertion (Q1/Q3): decided and
+  implemented 2026-10-21 (`docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
+  decisions P1 to P5, section 9 for the record). Residues: (a) an operator that
+  holds its operands (`Expand`, `Factor`, `Together`, `ToCNF`: `lazy`) still
+  answers `Missing` for an absent argument, by the exemption of decision P2;
+  (b) the static guard narrowing does not enter a function literal and stops
+  at a reassignment of the guarded name, so `if !isMissing(v) { let g = () =>
+  f(v) … }` is still reported; (c) `Undefined` has no type of its own (it is
+  typed `unknown`), so a strict declaration refuses it by its value only, never
+  statically; (d) there is no lowercase `assertPresent` spelling, by the rule
+  that an operator with a symbol has none (`coalesce` has none either); the
+  function form is `AssertPresent(x)`; (e) a `missing` cell inside a value
+  (`list<string | missing>`) is judged by the element contract, not by the
+  whole-value report, which is what decision P1b asks.
 - Decide record-field omission, optional-field representation and an explicit
   key-removal operation; classify outstanding custom folds, Dot, ordering and
   structural conversions (Q5/Q10).
@@ -884,9 +891,9 @@ item above.
   error for the entry `("b", Missing)`. An open record's entry type should be
   `tuple<string, any>` wherever its elements are read (`collectionElementType`
   and the `elttype` handlers). Also, `ce.assign('rm', {a: Missing})` with
-  `rm: record` is accepted although the value does not match the declaration
-  (see "A declared collection accepts an assigned value that is not of its
-  type").
+  `rm: record` is accepted: a bare `record` admits absent fields (0.160.0);
+  whether a declared FIELD contract (`record{a: integer}`) refuses an absent
+  field is part of Q5/Q6, the record-omission decisions.
 
 ### `Factor` leaves some reducible factors of a univariate polynomial with rational coefficients (OPEN — found 2026-10-20 by the review of PR #461)
 
@@ -2413,6 +2420,19 @@ that may be absent. A fix would add `nan` to the handler's arms, and changes the
 types of many expressions: measure the snapshot changes before landing it.
 
 ### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — two defects)
+
+Update 2026-10-21 (decisions P2 to P4 of
+`docs/plans/2026-10-21-presence-contracts-and-assertion.md`): the Epsil static
+report now covers a library parameter that excludes absence (`trim(xs[i])`)
+and the initializer of a declaration that excludes absence (`let y: string =
+xs[i]`), on the same terms as a `function`'s annotated parameter; a symbol an
+`isMissing` guard proves present is narrowed for the check
+(`src/epsil/presence-narrowing.ts`); the assertion `xs[i]?!`
+(`AssertPresent`) discharges the report and fails at run time with
+`expected-present`. Defect 1 below no longer reproduces: the gasket program
+runs with no diagnostic on the main tree at `119beb329` (measured 2026-10-21,
+before and after this work; the fix came with an earlier change). Defect 2
+(compiling a bare parameter that receives a list of points) is still open.
 
 The rule since 2026-09-30, for a function literal (an Epsil `function`, a lambda
 with an annotated parameter): at evaluation, an absent value (`Missing`) at a

@@ -1518,6 +1518,17 @@ export interface CompileTarget<Expr = unknown> {
       coalesce: (x: TargetSource, d: TargetSource) => TargetSource;
     };
     /**
+     * An EXPRESSION that raises a run-time error carrying `message` (a
+     * target string literal). The presence assertion `AssertPresent(x)`
+     * (Epsil `x?!`) lowers to "`x` unless absent, else raise". A target that
+     * cannot raise (a shader) leaves it out: there the assertion compiles as
+     * the identity and is NOT read as a proof of presence, so a later absence
+     * test on the same value stays in the code (user decision P5 of
+     * `docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
+     * 2026-10-21).
+     */
+    raise?: (message: TargetSource) => TargetSource;
+    /**
      * How a WRITTEN absence symbol (`Missing`, `Undefined`) is spelled when
      * the target has both axes. The default is the object null, which keeps
      * an absent list cell distinct from a `NaN` cell for the collection

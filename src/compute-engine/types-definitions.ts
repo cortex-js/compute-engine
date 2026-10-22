@@ -2904,6 +2904,22 @@ export interface BoxedOperatorDefinition
    * selects the positions. */
   stripsMissingAt(i: number): boolean;
 
+  /** The declared type of parameter position `i` (0-based: the required
+   * parameters, then the optional ones, then the variadic one for every
+   * later position), or `undefined` for an overload set or a position past a
+   * non-variadic signature. */
+  declaredParameterTypeAt(i: number): Type | undefined;
+
+  /** True when an absent scalar operand (`Missing`, `Undefined`) at position
+   * `i` is refused at evaluation with an `incompatible-type` error naming the
+   * parameter's type: a declared `reject`, or the default for an operator
+   * with no absence behavior of its own whose parameter at `i` excludes
+   * absence and is read as data (not a number, a collection, a function,
+   * `expression`, `symbol`, `any` or `unknown`). User decision P2 of
+   * `docs/plans/2026-10-21-presence-contracts-and-assertion.md`
+   * (2026-10-21). */
+  refusesAbsentOperandAt(i: number): boolean;
+
   /** True for a function literal whose parameter annotations are enforced at
    * a call (at least one annotated parameter). Such a function admits an
    * argument typed `missing | T` at boxing, and answers an

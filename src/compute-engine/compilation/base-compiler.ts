@@ -2627,6 +2627,7 @@ export class BaseCompiler {
     'Sign',
     'IsMissing',
     'Coalesce',
+    'AssertPresent',
     'Typed',
     'Apply',
     'Spread',
@@ -13260,6 +13261,58 @@ export class BaseCompiler {
             `guarantee 'isnan' survives).`
         );
       return axis.isAbsent(BaseCompiler.compileValueOperand(args[0], target));
+    }
+
+    // The presence assertion `AssertPresent(x)` (Epsil `x?!`): `x` unless it
+    // is absent, else a raised run-time error `expected-present` naming the
+    // operand as written (the interpreter's `Error("expected-present", …)`).
+    //
+    // - A static proof removes the check: an operand whose compilation type
+    //   has no `missing` member and does not admit `nan` can only be present,
+    //   so the operand compiles as is. This is the only way the check is
+    //   omitted (user decision P4).
+    // - A target with no `raise` (a shader) compiles the assertion as the
+    //   identity; the author accepts the absent value flowing on (user
+    //   decision P5, 2026-10-21). The operand is compiled with its OWN type,
+    //   not the asserted one, so nothing downstream reads the assertion as a
+    //   proof: the node's `Present(T)` type is not consulted here, and a
+    //   later `IsMissing`/`Coalesce` on the value keeps its test.
+    // - An operand that may be `Nothing` is declined, as for `IsMissing`: the
+    //   targets cannot tell an omission from an absent datum.
+    if (h === 'AssertPresent') {
+      if (args.length !== 1)
+        throw new Error(
+          'Could not compile `AssertPresent`: expected exactly one argument'
+        );
+      const operand = args[0];
+      const t = compilationType(operand);
+      if (provablyAdmits('nothing', t))
+        throw new Error(
+          `Could not compile \`AssertPresent\`: target '${target.language ?? 'unknown'}' ` +
+            `cannot distinguish a possible 'Nothing' input from an absent datum.`
+        );
+      const code = BaseCompiler.compileValueOperand(operand, target);
+      const proved =
+        !typeContainsMissing(t) &&
+        !isSubtype('nan', resolveTypeForCompilation(t)) &&
+        resolveTypeForCompilation(t) !== 'unknown';
+      if (proved) return code;
+      const raise = target.absence?.raise;
+      if (raise === undefined) return code;
+      const axis = BaseCompiler.absenceAxisForType(t, target, 'AssertPresent');
+      if (axis.coalesce === undefined)
+        throw new Error(
+          `Could not compile \`AssertPresent\`: target '${target.language ?? 'unknown'}' cannot ` +
+            `discharge absence (no 'coalesce' capability).`
+        );
+      const message = JSON.stringify(
+        `expected-present: ${operand.toString()} is absent`
+      );
+      // "The value unless absent, else the fallback" is the target's
+      // `coalesce`, with the raise as the fallback: the operand is bound once
+      // by that spelling, and the fallback is reached only on the absent
+      // branch, so the raise fires only then.
+      return axis.coalesce(code, raise(message));
     }
 
     if (h === 'Coalesce') {
@@ -25276,8 +25329,12 @@ export class BaseCompiler {
    *   conditional whose result may be absent (no else arm, no default) is
    *   then caught by its own absence and NaN tests (`operandMayBeAbsent`);
    *   for any other, the comparison decides false, as for any NaN operand.
-   * - The operands of `Coalesce` and `IsMissing` are not inputs: those
-   *   operators give a value for an absent operand.
+   * - The operands of `Coalesce`, `IsMissing` and `AssertPresent` are not
+   *   inputs: those operators give a defined answer for an absent operand (a
+   *   fallback, a verdict, a raised error). The exception is `AssertPresent`
+   *   on a target with no `raise` (a shader): there the assertion compiles
+   *   as the identity (user decision P5), the absent value flows on, so its
+   *   operand stays an input.
    *
    * A name the target itself binds to a loop index with literal bounds
    * (`isDecidedLoopIndex`) is never absent and is left out.
@@ -25323,7 +25380,12 @@ export class BaseCompiler {
         }
         if (!isFunction(e)) return;
         const h = e.operator;
-        if (h === 'Coalesce' || h === 'IsMissing') return;
+        if (
+          h === 'Coalesce' ||
+          h === 'IsMissing' ||
+          (h === 'AssertPresent' && target?.absence?.raise !== undefined)
+        )
+          return;
         // The operands of a binder see the names it binds, from the operand
         // where each name comes into scope (a later clause of a
         // comprehension sees an earlier index; the body sees every index).

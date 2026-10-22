@@ -2749,6 +2749,12 @@ function nanPolicyAdmitsParam(
 /** Engine-internal knobs of {@link validateArguments} (phase 2c of
  * `docs/TYPE-SYSTEM.md`). Not for library callers. */
 export interface ValidateArgumentsInternals {
+  /** Whether the operator refuses an absent operand at position `index`
+   * at evaluation (`refusesAbsentOperandAt`, `boxed-operator-definition.ts`):
+   * the Epsil static check then reports a possibly absent argument there,
+   * as it does at a function literal's annotated parameter
+   * (`refusesAbsentArgument`). */
+  refusesAbsentAt?: (index: number) => boolean;
   /** Repair-free TRIAL mode: this call is an overload arm's trial, running
    * under a repair-forbidding rollback frame. The two construction-level
    * repairs are admitted by their write-free preconditions and NOT executed
@@ -2918,9 +2924,27 @@ export function refusesAbsentArgument(
   ce: ComputeEngine,
   op: Expression,
   param: Type,
-  internals: ValidateArgumentsInternals | undefined
+  internals: ValidateArgumentsInternals | undefined,
+  index?: number
 ): boolean {
-  if (internals?.enforcesParameterAnnotations !== true) return false;
+  // A library operator whose evaluation refuses an absent operand at this
+  // position (user decision P2, 2026-10-21) is reported by the Epsil static
+  // check on the same terms as a function literal's annotated parameter
+  // (user decision P3): the rule is one rule, read from the definition. The
+  // library case is a static report only, never a boxing refusal, so it
+  // applies only while a pre-pass runs (`_staticAssignmentEvidence` is
+  // defined then). An operand typed `missing` is usually a symbol that holds
+  // the absent value, and a canonical form must not depend on the value
+  // assigned to a symbol: refused at boxing, `ToUpperCase(w)` would keep its
+  // error after `w` was assigned a string. Outside the pre-pass the engine
+  // defers to evaluation, whose gate refuses the absent operand when the
+  // call runs (`boxed-function.ts`).
+  const libraryRefuses =
+    index !== undefined &&
+    ce._staticAssignmentEvidence !== undefined &&
+    internals?.refusesAbsentAt?.(index) === true;
+  if (internals?.enforcesParameterAnnotations !== true && !libraryRefuses)
+    return false;
   if (
     param === 'unknown' ||
     isSubtype('missing', param) ||
@@ -3624,7 +3648,7 @@ export function validateArguments(
       // An absent argument at an annotated parameter of a function literal
       // is refused before any provisional admission — see
       // `refusesAbsentArgument`.
-      if (refusesAbsentArgument(ce, op, param, internals)) {
+      if (refusesAbsentArgument(ce, op, param, internals, idx)) {
         result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
         isValid = false;
         continue;
@@ -3910,7 +3934,7 @@ export function validateArguments(
       }
       // An absent argument at an annotated parameter of a function literal —
       // see the required-param gate.
-      if (refusesAbsentArgument(ce, op, param, internals)) {
+      if (refusesAbsentArgument(ce, op, param, internals, i)) {
         result.push(
           ce.typeError(
             displayOptParams[i - params.length] ?? param,

@@ -9545,6 +9545,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           isAbsent: (x) => `(${x} === undefined)`,
           coalesce: (x, d) => `(${x} ?? ${d})`,
         },
+        // A thrown `Error`, as an expression: an arrow function that throws,
+        // called at once. `AssertPresent` (`x?!`) uses it for the absent branch.
+        raise: (message) => `((_m) => { throw new Error(_m); })(${message})`,
       },
       indent: 0,
       ws: (s?: string) => s ?? '',

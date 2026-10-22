@@ -301,7 +301,9 @@ describe('a numeric function of a value that can be a list or absent', () => {
 
   test('the type keeps the absence arm, and the value agrees', () => {
     const c = new ComputeEngine();
-    c.declare('V', PT);
+    // `V` takes `Missing` below, so its declaration admits absence (a
+    // declared type is a contract on every value, decision P1, 2026-10-21).
+    c.declare('V', `${PT} | missing`);
     const p = c.box(['Power', ['PointX', 'V'], 2]);
     expect(p.type.toString()).toBe(
       'list<number> | missing | number | tuple<number, number>'

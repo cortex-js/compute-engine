@@ -1,8 +1,8 @@
 # Presence contracts and the presence assertion (Q1 and Q3)
 
-Status: analysis and recommendations, 2026-10-21. No code changed. The
-decisions P1 to P5 in section 5 are the user's; sections 6 and 7 are the
-implementation plan once they are taken.
+Status: decided 2026-10-21 (P1 (a), P1b yes, P2 (a), P3 (a), P4 `?!` and `⁈`
+with `AssertPresent`, P5 (b) in its safe form) and implemented the same day,
+slices S1 to S6; section 9 is the implementation record.
 
 Scope: what a declaration `x: T` promises about absence (question Q1 of
 `docs/plans/2026-10-20-bare-tuple-record-any.md`), when a possibly absent
@@ -476,3 +476,108 @@ S6 needs P3 and lands after S1 and S3.
   contract refuses it only through the value check, never statically.
 - Record-field omission (Q5/Q6) decides what `rm: record := {a: Missing}`
   means; P1b covers lists and tuples only.
+
+## 9. Implementation record (2026-10-21)
+
+Decisions taken by the user: P1 (a) strict declared contract; P1b yes; P2 (a)
+refuse uniformly; P3 (a) keep the error and extend it to library parameters
+once the discharges exist; P4 postfix `?!`, alias `⁈`, MathJSON
+`AssertPresent`, error code `expected-present`; P5 (b) in the safe form: on a
+target that cannot raise the assertion compiles as the identity and is not
+read as a proof, so a later absence test on the value keeps its own rule.
+
+What landed, by slice:
+
+- **S1.** `AssertPresent` in `src/compute-engine/library/core.ts` (lazy,
+  `handle`, type `presentType(operand)`, evaluation through
+  `isMissingValue`); the `?!` row in `src/epsil/operators.ts` (postfix, 110);
+  `peekPostfix` in `parser.ts` reads a fancy glyph (`⁈`) in postfix position
+  as the parser already did in infix position; the serializer needed nothing
+  (`(n!)?!`, `(x?!)!`). There is no lowercase `assertPresent` spelling: the
+  naming rule gives none to an operator with a symbol (`coalesce` has none);
+  the function form is `AssertPresent(x)`. The plan's section 6 said
+  otherwise; this record corrects it.
+- **S2.** A `raise` entry in the compile target's absence capability
+  (`compilation/types.ts`), supplied by the JavaScript target (an arrow
+  function that throws) and the Python target (the generator-throw idiom
+  the target already used). `base-compiler.ts` lowers `AssertPresent` as the
+  target's `coalesce` with the raise as the fallback, omits the check when
+  the compilation type has no `missing` member and admits no `nan`, and
+  compiles the identity on a target without `raise`. `AssertPresent` is in
+  the named-lowering set and in the input walk beside `Coalesce` and
+  `IsMissing`.
+- **S3.** `src/epsil/presence-narrowing.ts`: for the static check only, a
+  read of a symbol in a region an `isMissing` test proves present is wrapped
+  in `AssertPresent` before the statement is boxed
+  (`canonicalizationDiagnostics`, `static-diagnostics.ts`). Regions: the
+  else arm of `If(IsMissing(v), …)`, the then arm of `If(Not(IsMissing(v)),
+  …)`, the later operands of `And` after `Not(IsMissing(v))` and of `Or` after
+  `IsMissing(v)`. A reassignment ends the region; a function literal is not
+  entered; binding positions and the operand of `IsMissing`/`Coalesce`/
+  `AssertPresent` are not wrapped. `if let v: !missing = …` already narrowed.
+- **S4.** `matchesDeclaredTypeAxes` (`effects-inference.ts`) no longer strips
+  the value's `missing` member, and refuses the absence symbols `Missing` and
+  `Undefined` (typed `unknown`) at a declaration that does not admit
+  `missing`. `declaredTypeMismatch` (`static-diagnostics.ts`) treats a list,
+  tuple or set literal of closed literals as closed, so `let xs: list<string>
+  = ["a", Missing]` is reported statically, and reports a possibly absent
+  initializer at a declaration that excludes absence. The `presentedValueType`
+  of the assumption check is unchanged.
+- **S5.** `refusesAbsentOperandAt(i)` and `declaredParameterTypeAt(i)` on the
+  operator definition (`boxed-operator-definition.ts`, mirrored in
+  `types-definitions.ts` and `types-expression.ts`); both evaluation gates in
+  `boxed-function.ts` (the synchronous one and its asynchronous twin) answer
+  `incompatible-type` naming the parameter for a `pass-through` operator at
+  such a position. The declared `reject` keeps its `unexpected-argument`
+  message.
+- **S6.** `refusesAbsentArgument` (`validate.ts`) takes the operand index and
+  the box route's `refusesAbsentAt` (three sites in `box.ts`), so the Epsil
+  static check reports a possibly absent argument at a library parameter on
+  the terms of S5.
+
+Measurements (worktree on `119beb329`):
+
+- The library inventory of section 2.3 rerun after S5, one `T | missing`
+  argument holding `Missing` at the first parameter of each operator with a
+  declared signature (623 operators): `pass-through` operators answering an
+  error value 43 → 63; computing a value from the marker 24 → 12; answering
+  the marker 17 → 10; inert 21 → 20. The 12 that still compute are
+  `Signature`, `Wildcard`, `WildcardSequence`, `WildcardOptionalSequence`,
+  `DeclareProtocol` (a `symbol` parameter, read as a form), `Condition`
+  (`expression`), and `TrigExpand`, `TrigToExp`, `TrigReduce`,
+  `PolynomialDegree`, `CoefficientList`, `PolynomialRoots` (operators that
+  hold their operands). The 10 that still answer the marker are `Expand`,
+  `ExpandAll`, `Factor`, `Together`, `Distribute`, `Cancel`,
+  `PartialFraction`, `Apart` (`lazy`), `Matrix` and `BuiltinFunction`. The
+  numeric and collection operators (`propagate`, 194) and the declared
+  `handle` operators are unchanged.
+- The gasket program of the ROADMAP entry "An absent argument at a function
+  parameter" runs with no diagnostic before and after this work: that false
+  report was fixed by an earlier change.
+- Test files added: `test/compute-engine/assert-present.test.ts`,
+  `test/epsil/assert-present.test.ts`, `test/epsil/presence-narrowing.test.ts`,
+  `test/compute-engine/declared-contract-presence.test.ts`,
+  `test/compute-engine/absent-argument-library-default.test.ts`. One existing
+  test changed: `absence-discharge.test.ts` (the `text: string` row now
+  expects the assignment of `Missing` to be refused). The full-suite
+  comparison against the clean-HEAD baseline is in the delivery report.
+
+Dual review (Claude and Codex, 2026-10-21): 11 findings, all applied. The
+three both reviewers found: the binder rule of the narrowing read the wrong
+operand (`Loop`, `Comprehension`, `Sum`, `Product` put the body first and
+the binder in an `Element`/`Limits` clause); the Python object-axis
+`coalesce` repeated its operand, so the compiled assertion and `Coalesce`
+evaluated it twice; the static report of a possibly absent initializer
+exempted numeric declarations, which hid `let n: number = m` with `m:
+number | missing`. The others: the library refusal fired at boxing on every
+route for a `missing`-typed symbol (now a static-check report only; the
+evaluation gate refuses at run time); a loop back edge kept a proof past a
+reassignment; a guard inside a function literal was not narrowed; a
+collection with a symbolic cell kept the assertion unevaluated (`Length([x,
+1]?!)` did not reduce; `Coalesce` had the same rule and now returns such a
+value too); a message quoted `v?!` the author did not write; the right side
+of `v := f(v)` lost its proof; the interval JavaScript target had no `raise`
+(it now raises, and its `run()` converts the throw into the `entire`
+interval as it does every error); two comment and indentation nits. Full
+suite after the fixes: see the delivery report.
+

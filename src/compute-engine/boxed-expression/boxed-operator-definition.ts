@@ -287,6 +287,35 @@ function resolveCarrierBound(
   return param.bound ?? 'any';
 }
 
+/**
+ * Whether a declared parameter type refuses an absent value under the
+ * default of `refusesAbsentOperandAt`: it excludes absence (no `missing`
+ * member, no `any`/`unknown`) and is read as data, not as a form (`expression`,
+ * `symbol`), a number (`NaN` is its marker), a collection or a function
+ * (the `propagate` rule), or a type variable (read at its use). A union
+ * refuses only when every arm does.
+ */
+function parameterExcludesAbsence(t: Type): boolean {
+  if (typeof t === 'object' && t.kind === 'variable') return false;
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.every((arm) => parameterExcludesAbsence(arm));
+  if (
+    t === 'any' ||
+    t === 'unknown' ||
+    t === 'expression' ||
+    t === 'symbol' ||
+    t === 'never'
+  )
+    return false;
+  if (isSubtype('missing', t)) return false;
+  if (isSubtype(t, 'number')) return false;
+  if (isSubtype(t, COLLECTION_SHAPE_TYPE) && !isSubtype(t, 'string'))
+    return false;
+  if (t === 'function' || (typeof t === 'object' && t.kind === 'signature'))
+    return false;
+  return true;
+}
+
 function parameterTypeAt(signature: Type, i: number): Type | undefined {
   if (typeof signature === 'string') return undefined;
   if (signature.kind !== 'signature') return undefined;
@@ -1122,6 +1151,56 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const b = this.resolvedMissingBehavior;
     if (b !== 'propagate' && b !== 'handle') return false;
     return this.missingStrip === 'all' || this.missingStrip.includes(i);
+  }
+
+  /** The declared type of parameter position `i` (0-based; see
+   * `parameterTypeAt`), or `undefined` for an overload set, an inferred
+   * signature, or a position past a non-variadic signature. */
+  declaredParameterTypeAt(i: number): Type | undefined {
+    return parameterTypeAt(this.signature.type, i);
+  }
+
+  /**
+   * Whether an absent scalar operand (`Missing`, `Undefined`) at position
+   * `i` is refused at evaluation with an `incompatible-type` error naming
+   * the parameter's type. This is the one default for a parameter that
+   * excludes absence (rule R3, user decision P2 of
+   * `docs/plans/2026-10-21-presence-contracts-and-assertion.md`,
+   * 2026-10-21); a user function already answers the same error for the
+   * same argument (`declaredScalarConformance`, `boxed-function.ts`).
+   *
+   * - A declared `missingBehavior: 'reject'` refuses at every position.
+   * - A declared `handle` or a resolved `propagate` never refuses here: the
+   *   handler owns the absent value, or the marker of the codomain answers.
+   * - Otherwise (the `pass-through` resolution), position `i` refuses when
+   *   its declared parameter type excludes absence and is not read as a
+   *   form: not a numeric type (`NaN` is the numeric absence marker and is
+   *   read as data), not a collection or a function (the `propagate` rule
+   *   covers operators whose parameters are all of those), not
+   *   `expression`, `symbol`, `any` or `unknown`, and not a union with such
+   *   an arm. The operator must evaluate its operands: a `lazy` operator, a
+   *   hold class other than `evaluate`, a function literal (its application
+   *   checks its own arguments) and an inferred signature are exempt.
+   *
+   * Before this rule the handler of a `pass-through` operator received the
+   * absent value and answered as it happened to: an `incompatible-type`
+   * error value (`ToUpperCase`, `Trim`), a value computed from the marker as
+   * if it were data (`Parse`, `IsSquareMatrix`), the marker itself
+   * (`Expand`, `ToCNF`), or the unevaluated application.
+   */
+  refusesAbsentOperandAt(i: number): boolean {
+    const b = this.resolvedMissingBehavior;
+    if (b === 'reject') return true;
+    if (b !== 'pass-through') return false;
+    if (
+      this.lazy ||
+      this.holdClass !== 'evaluate' ||
+      this._isLambda ||
+      this.inferredSignature === true
+    )
+      return false;
+    const p = parameterTypeAt(this.signature.type, i);
+    return p !== undefined && parameterExcludesAbsence(p);
   }
 
   threadsConditionalsAt(i: number): boolean {

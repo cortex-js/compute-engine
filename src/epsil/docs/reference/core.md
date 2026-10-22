@@ -385,6 +385,17 @@ arc(A, B, C)
 // ➔ Arc(A, B, C)
 ```
 
+### AssertPresent
+
+`(any) -> unknown`
+
+Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`Missing`, `Undefined`, `NaN`, or `Indeterminate`). `Nothing` is an omission marker, not an absent datum, and passes through; an error operand propagates. Epsil spells it `x?!`. Only the value itself is checked, never the cells of a collection.
+
+```epsil
+[1, 2][1]?!
+// ➔ 1
+```
+
 ### Assign
 
 `(expression | symbol, any) scope -> any`

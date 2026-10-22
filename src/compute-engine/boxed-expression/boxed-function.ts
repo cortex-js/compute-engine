@@ -6657,6 +6657,28 @@ export class BoxedFunction
             ]);
           return absentScalarMarker(this.engine, this);
         }
+        // The default for an operator with no absence behavior of its own
+        // (`pass-through`): an absent operand at a position whose declared
+        // parameter excludes absence is an `incompatible-type` error naming
+        // that parameter, as a user function answers for the same argument
+        // (`refusesAbsentOperandAt`, `boxed-operator-definition.ts`; user
+        // decision P2, 2026-10-21). The handler no longer sees the marker.
+        if (behavior === 'pass-through') {
+          const k = tail.findIndex(
+            (x, i) => isAbsentScalarSymbol(x) && def.refusesAbsentOperandAt(i)
+          );
+          if (k >= 0)
+            // With the breadcrumb a handler's own refusal carries: the
+            // operator and the 1-based position of the refused operand.
+            return withErrorFrames(
+              this.engine.typeError(
+                def.declaredParameterTypeAt(k) ?? 'value',
+                tail[k].type,
+                tail[k]
+              ),
+              [{ operator: this._operator, index: k + 1 }]
+            );
+        }
       }
 
       //
@@ -7861,6 +7883,28 @@ export class BoxedFunction
               ).toString(),
             ]);
           return absentScalarMarker(this.engine, this);
+        }
+        // The default for an operator with no absence behavior of its own
+        // (`pass-through`): an absent operand at a position whose declared
+        // parameter excludes absence is an `incompatible-type` error naming
+        // that parameter, as a user function answers for the same argument
+        // (`refusesAbsentOperandAt`, `boxed-operator-definition.ts`; user
+        // decision P2, 2026-10-21). The handler no longer sees the marker.
+        if (behavior === 'pass-through') {
+          const k = tail.findIndex(
+            (x, i) => isAbsentScalarSymbol(x) && def.refusesAbsentOperandAt(i)
+          );
+          if (k >= 0)
+            // With the breadcrumb a handler's own refusal carries: the
+            // operator and the 1-based position of the refused operand.
+            return withErrorFrames(
+              this.engine.typeError(
+                def.declaredParameterTypeAt(k) ?? 'value',
+                tail[k].type,
+                tail[k]
+              ),
+              [{ operator: this._operator, index: k + 1 }]
+            );
         }
       }
 

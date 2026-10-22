@@ -177,6 +177,15 @@ describe('successful fallback result types', () => {
       expect(derived).toBe('string');
       ce.assign('text', ce.string('ok'));
       expect(expr.evaluate().string).toBe('ok');
+      if (type === 'string') {
+        // A declared `string` is a contract on every value the symbol takes
+        // (user decision P1, 2026-10-21): the absent value is refused at the
+        // assignment, so the fallback is never reached through `text`.
+        expect(() => ce.assign('text', ce.Missing)).toThrow(
+          /not compatible with the type "string"/
+        );
+        return;
+      }
       ce.assign('text', ce.Missing);
       expect(expr.evaluate().operator).toBe('Error');
     }

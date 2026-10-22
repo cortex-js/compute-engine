@@ -466,6 +466,15 @@ interface BoxedOperatorDefinition
   readonly resolvedMissingBehavior:
     'reject' | 'propagate' | 'handle' | 'pass-through';
   stripsMissingAt(i: number): boolean;
+
+  /** The declared type of parameter position `i` (0-based), or `undefined`
+   * for an overload set or a position past a non-variadic signature. */
+  declaredParameterTypeAt(i: number): Type | undefined;
+
+  /** True when an absent scalar operand (`Missing`, `Undefined`) at position
+   * `i` is refused at evaluation with an `incompatible-type` error naming the
+   * parameter's type (user decision P2, 2026-10-21). */
+  refusesAbsentOperandAt(i: number): boolean;
   /** True for a function literal whose parameter annotations are enforced at
    * a call. See `types-definitions.ts`. */
   readonly enforcesParameterAnnotations: boolean;

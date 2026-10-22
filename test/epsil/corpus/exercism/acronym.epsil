@@ -1,5 +1,5 @@
 // Acronym: first letter of each word, upper-cased. Hyphens separate words.
 // `w[1]` is a character, which every string operator accepts.
-acronym(s) = stringJoin(map(w => toUpperCase(w[1]), stringSplit(stringReplace(s, "-", " "))), "")
+acronym(s) = stringJoin(map(w => toUpperCase(w[1]?!), stringSplit(stringReplace(s, "-", " "))), "")
 (acronym("Portable Network Graphics"), acronym("Complementary metal-oxide semiconductor"), acronym("Ruby on Rails"))
 // ➔ ("PNG", "CMOS", "ROR")

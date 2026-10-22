@@ -836,6 +836,36 @@ Use `isMissing` when the distinction between those representations is not
 important, and [`??`](/epsil/operators/#absence-coalescing) — the operator form
 of `Coalesce` — to supply a fallback.
 
+Three ways discharge a possibly absent value, and the static check accepts
+each of them where it reports the plain read:
+
+- `x ?? fallback` replaces an absent value;
+- `if isMissing(x) { … } else { … }` branches, and the symbol is known
+  present in the else branch (and after `!isMissing(x) &&` in a condition);
+- [`x?!`](/epsil/operators/#presence-assertion) asserts that `x` is present
+  and fails with an `expected-present` error when it is not. Use it where
+  absence is a violated precondition rather than a case to handle.
+
+**A declared type is a contract on every value the symbol takes.** `let s:
+string = missing` is an error, as `let s: string = 5` is, and so is a later
+`s := missing`; `let xs: list<string> = ["a", missing]` is an error too,
+because the element contract excludes absence. Write the absence into the
+type when it is possible: `let s: string | missing = missing`, `let xs:
+list<string | missing> = ["a", missing]`, or let the type be inferred (`let
+xs = ["a", missing]` is a `list<string | missing>`). A numeric declaration
+admits `NaN`, the numeric absence marker: `let n: number = NaN` is fine, and
+so is `let n: number = zs[i]` for `zs: list<number>`. A declaration that
+excludes absence and is initialized from a possibly absent value (`let y:
+string = xs[i]`) is reported by the static check; discharge the read with
+`?!`, `??`, or declare `string | missing`.
+
+```epsil-live
+let xs: list<string> = ["a", "b"]
+let i = 2
+(xs[i] ?? "none", xs[i]?!, if isMissing(xs[i]) { "none" } else { xs[i] })
+// ➔ ("b", "b", "b")
+```
+
 ## Background: what kind of type system this is
 
 None of this section is needed to use Epsil — it is background for readers

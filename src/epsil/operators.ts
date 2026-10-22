@@ -423,6 +423,22 @@ export const OPERATORS: OperatorDef[] = [
     precedence: 110,
     kind: 'postfix',
   },
+
+  // Presence assertion `x?!` → `AssertPresent(x)`: the value of `x`, or an
+  // `expected-present` error when `x` is absent (`missing`, `NaN`); `Nothing`
+  // passes through. Postfix at the factorial's precedence, so it binds to the
+  // access it follows (`xs[i]?!`, `p.x?!`) and tighter than every infix
+  // operator; it must abut its operand like `!`. The lexer scans a maximal
+  // run of operator characters, so `x?!+1` is the one token `?!+`, exactly
+  // as `3!+1` is `!+`: write `x?! + 1`. U+2048 `⁈` is read as `?!` by the
+  // character table (`characters.ts`). The serializer parenthesizes a
+  // postfix operand (`(n!)?!`, `(x?!)!`), as it does for `(n!)!`.
+  {
+    name: 'AssertPresent',
+    symbol: '?!',
+    precedence: 110,
+    kind: 'postfix',
+  },
 ];
 
 const INFIX_BY_SYMBOL = new Map<string, OperatorDef>();

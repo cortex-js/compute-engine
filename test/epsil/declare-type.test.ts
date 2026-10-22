@@ -804,12 +804,16 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
       'type point = tuple<number, number>\nlet p: point = (1, 2)\np'
     );
     const messages = r.diagnostics.map((d) => d.message);
-    expect(messages).toHaveLength(1);
-    expect(messages[0][0]).toBe('runtime-error');
+    // The static check reports it first: a tuple literal of closed literals
+    // is a closed literal, judged by the full `matches()` check (since
+    // 2026-10-21, with the strict declared contract). Then the run time.
+    expect(messages).toHaveLength(2);
+    expect(messages[0][0]).toBe('static-type-error');
+    expect(messages[1][0]).toBe('runtime-error');
     // The declared-type rejection is an `incompatible-type` error VALUE (the
     // `Declare` operator route does not throw), so the diagnostic quotes the
     // coded error rather than an opaque host message.
-    expect(String(messages[0][1])).toContain('expected `');
+    expect(String(messages[1][1])).toContain('expected `');
     expect(String(messages[0][1])).toContain('point');
     // The type itself IS registered — only the annotation is refused.
     expect(ce.type('point').matches('point')).toBe(true);

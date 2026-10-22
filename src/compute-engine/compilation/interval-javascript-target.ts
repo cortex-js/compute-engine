@@ -5421,6 +5421,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           coalesce: (x, d) => `_IA.coalesce(${x}, () => ${d})`,
           coversValueModel: true,
         },
+        // A thrown `Error`, as an expression, as on the JavaScript target:
+        // `AssertPresent` (`x?!`) uses it for the absent branch, so the
+        // assertion is not silently removed on this target.
+        raise: (message) => `((_m) => { throw new Error(_m); })(${message})`,
       },
       indent: 0,
       ws: (s?: string) => s ?? '',
