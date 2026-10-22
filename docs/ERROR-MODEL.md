@@ -56,43 +56,52 @@ These are immediate-content restrictions, not guarantees about every nested
 element. A collection containing `Missing` is itself a collection value.
 Both `value` and `expression` include numeric `nan`, and therefore `NaN`
 and `Indeterminate`. These contracts alone do not establish presence for
-`IsMissing`, `??`, or the proposed presence assertion; the agreed absence
-predicate includes both numeric markers, pending implementation.
+`IsMissing`, `??`, or the presence assertion `x?!` (`AssertPresent`); the
+absence predicate (`isMissingValue`) includes both numeric markers.
 Evaluation failure is separate: an expression with a successful-value
 contract may still fail when evaluated.
 
-A join keeps the unresolved part (`widen(unknown, integer)` is
-`integer | unknown`), so a value-derived type does not drop a slot it could
-not resolve. `never` is the bottom type, below every content type; it is
+A join derived from a value keeps the unresolved part
+(`joinUnresolvedArm()` in `subtype.ts`: the slots of a tuple and the
+element join of `ListJoin`), so a value-derived type does not drop a slot it
+could not resolve. The general join is neutral in `unknown`
+(`widen(unknown, integer)` is `integer`), because the inference joins read
+`unknown` as "no information yet". `never` is the bottom type, below every content type; it is
 neither an absent datum nor an inference placeholder.
 
-The collection-name change and assignment presence guarantees remain
-separate decisions. Raw callback results in lazy views (R) are now selected,
-with explicit materialization and omission through `ListFrom`. Follow-up
-decisions select aggregates skipping `Nothing`, no implicit compaction from
+Raw callback results in lazy views (R) are selected, with explicit
+materialization and omission through `ListFrom`. Follow-up decisions select
+aggregates skipping `Nothing`, no implicit compaction from
 storing/passing/nesting views, and preserved data-tuple slots. Open record
-types are retained. Record-field omission and the diagnostic default for
-possible absence remain open. A syntactic presence assertion is requested;
-postfix `?!` is a candidate spelling, not implemented or finally selected.
-The recommendation is a runtime check that establishes presence, following
-the same absence predicate as `??`, rather than an unchecked compiler
-override. Its checked return type removes the handled absence forms
-(`Missing`, `Undefined`, `NaN`, and `Indeterminate`) while preserving
-`nothing` and arbitrary other content types; `Nothing` is not handled.
-A compiler may eliminate the check only with proof; otherwise it must
-represent failure or reject compilation. This does not promise a new
-compiler lowering. See the
-[design note](plans/2026-10-20-bare-tuple-record-any.md) for their rules and
-open questions, and [type-system reference](TYPE-SYSTEM.md) for current
-subtyping. In particular, accepting a possibly absent argument can mean
+types are retained. Record-field omission remains open.
+
+The presence contracts were decided and implemented on 2026-10-21 (user
+decisions P1 to P5, `docs/plans/2026-10-21-presence-contracts-and-assertion.md`;
+the decision records are in section 4 of this file, "What a signature
+promises"). A
+declared type refuses an absent value (`s: string` refuses `Missing`); a
+library parameter that excludes absence refuses an absent argument with
+`incompatible-type`; the Epsil static check reports a possibly absent value
+at such a parameter or declaration. The presence assertion is the postfix
+`x?!` (alias `⁈`, MathJSON `AssertPresent`). It is a runtime check that uses
+the same absence predicate as `??`: it fails with `expected-present` for
+`Missing`, `Undefined`, `NaN` and `Indeterminate`, and passes `Nothing`
+through. Its type is `presentType()` of the operand (`coalesce.ts`), which
+removes those absence forms and keeps `nothing`. A compiler omits the check
+only when the operand's type proves presence; the JavaScript and Python
+targets raise, and a target that cannot raise compiles the identity without
+reading the assertion as a proof. See the
+[design note](plans/2026-10-20-bare-tuple-record-any.md) for the collection
+rules and [type-system reference](TYPE-SYSTEM.md) for current subtyping.
+In particular, accepting a possibly absent argument can mean
 propagating it, handling it, or checking it at runtime; it does not make
 `missing` a subtype of the parameter's content type.
 
 ### Numeric absence handling — agreed change of 2026-10-20
 
-**Implemented for checks and fallbacks; new assertion pending:** treat `NaN` and
-`Indeterminate` alike in `IsMissing`, `Coalesce` / `??`, and the proposed
-presence assertion. Both count as absent, both select a fallback, and both
+**Implemented** (the presence assertion since 2026-10-21): treat `NaN` and
+`Indeterminate` alike in `IsMissing`, `Coalesce` / `??`, and the presence
+assertion `x?!`. Both count as absent, both select a fallback, and both
 fail the assertion. `Missing` and `Undefined` continue to do so;
 `Nothing` remains an omission marker rather than an absent datum.
 
@@ -1460,8 +1469,9 @@ exactly what a contract should refuse: the bare markers `Missing` and
 is: `s: string` refuses `Missing` and `Undefined` as it refuses `5`; a
 declared element contract is checked too (`xs: list<string>` refuses `["a",
 Missing]`, decision P1b); `string | missing`, `any`, and a refining
-declaration (`list`, `list<unknown>`) admit absence; a numeric declaration
-admits `NaN`. The Epsil static check (`declaredTypeMismatch`,
+declaration (`list`, `list<unknown>`) admit absence; a `number` declaration
+admits `NaN`, while `real`, `integer` and `complex` hold finite values and
+refuse it (`real | nan` admits it). The Epsil static check (`declaredTypeMismatch`,
 `static-diagnostics.ts`), the Epsil run time and the engine's assignment
 route (`matchesDeclaredTypeAxes`, `effects-inference.ts`) agree. The reader
 of a declared symbol can trust the declaration; an inferred type keeps its

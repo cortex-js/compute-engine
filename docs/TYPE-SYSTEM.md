@@ -21,46 +21,106 @@ work belongs in `TYPE_SYSTEM_ROADMAP.md` or an active file under `plans/`.
 - Absence in a numeric result normalizes to `NaN`. `Missing` remains a
   non-numeric absence value and comparisons over it use three-valued logic.
 
-### Implemented hierarchy and the agreed role of `unknown`
+### The subtype hierarchy and the role of `unknown`
 
-The current implementation includes these subtype relationships:
+`unknown` is an inference marker, not a content type (user decisions D1 to
+D5, 2026-10-21, `plans/2026-10-21-unknown-inference-marker.md`). It asks
+the engine to determine a type; it does not promise that a datum is
+present, absent or of any particular content. The subtype relation reads it
+so:
 
 ```text
-integer <: value <: expression <: unknown <: any
+never <: every type
+integer <: value <: expression
 function <: expression
 symbol <: expression
-never <: every type
+every type <: unknown          (any, error, missing and nothing included)
+unknown <: any
+unknown <: unknown
 ```
 
-Thus, a diagram placing `unknown` and `expression` as sibling branches under
-`any` does not describe the implemented relation. Nor is `never` merely
-another branch under `any`: it is the bottom type, below all types,
-including `unknown`, `error`, `nothing`, and `missing`.
+So `isSubtype(X, 'unknown')` is true for every `X`, and `unknown` is a
+subtype only of `any` and of itself: `unknown` proves no contract. A test
+for "a value, not a marker" is spelled `expression` or `value`, not
+`unknown`. `never` is the bottom type, below all types, including
+`unknown`, `error`, `nothing` and `missing`.
 
-`value` accepts data values, including scalars, collections, objects, and
+Because every type is below `unknown`, `isSubtype('nothing', t)` answers
+"can `t` hold `Nothing`?", and an `unknown` arm makes the answer true. A
+site that needs EVIDENCE that a type admits a marker asks
+`provablyAdmits('nothing' | 'missing' | 'error', t)` (`subtype.ts`), which
+ignores an `unknown` arm and reads a union or a `broadcastable<T>` one arm
+at a time.
+
+Joins and meets:
+
+- The general join is neutral in `unknown`, as in `never`:
+  `widen('unknown', 'integer')` is `integer`. The inference joins read
+  `unknown` as "no information yet" (the seed of a recursion fixpoint, a
+  call whose callee is not derived yet).
+- A join derived from a VALUE keeps the unresolved arm:
+  `joinUnresolvedArm()` (`subtype.ts`) for the slots of a tuple (beside
+  absence markers only, so a free symbol in a point stays a numeric slot)
+  and for the element join of `ListJoin`/`Join`.
+- The reducer absorbs a value arm into `unknown` (`integer | unknown` is
+  `unknown`), keeps an absence arm beside it (`missing | unknown`), and
+  reduces a union with an `error` arm to `error`.
+- A meet resolves `unknown`: `narrow('unknown', 'integer')` is `integer`.
+
+A function signature with a parameter that is not inferred yet,
+`(unknown, unknown) -> number`, does not satisfy `(any, any) -> number`:
+`acceptsParameter()` (`subtype.ts`) lets such a parameter accept an
+`expression`, not `any` or an absence marker. The generic solver does not
+read an `unknown` parameter as evidence for a type variable
+(`signatureHasUnresolvedParameter()`, `instantiate.ts`).
+
+`value` accepts data values, including scalars, collections, objects and
 opaque values such as regular expressions. `expression` also accepts
-functions and symbols. Both exclude immediate `missing`, `nothing`, and
+functions and symbols. Both exclude the immediate `missing`, `nothing` and
 `error` types, but include numeric `nan`, and therefore `NaN` and
 `Indeterminate`. These contracts alone do not establish presence for
-`IsMissing`, `??`, or the proposed presence assertion. The agreed absence
-predicate includes both numeric markers, pending implementation; see the
+`IsMissing`, `??` or the presence assertion `x?!`; the absence predicate
+(`isMissingValue`) includes both numeric markers. See the
 [numeric absence amendment](ERROR-MODEL.md#numeric-absence-handling--agreed-change-of-2026-10-20).
-`unknown` currently accepts those ordinary expression types and represents
-unresolved information, but excludes `any`, `error`, `nothing`, and
-`missing`. This is the implementation's combination of a content supertype
-and an inference placeholder.
 
-**Agreed design direction, not yet implemented:** `unknown` is an inference
-marker/placeholder, not a concrete type requiring a position in the lattice.
-Use `value`, `expression`, and `any` for content contracts. An unresolved
-marker is not evidence that a runtime value is present or satisfies a
-particular contract. Inference must resolve it from valid evidence, or a
-check must remain deferred.
+As a declaration, an `unknown` element or slot asks for refinement: bare
+`list`, `list<unknown>`, bare `tuple`, bare `record` and a transparent alias
+of any of them refine from each assignment (`xs: list<unknown> := [1,
+Missing]` reports `list<integer | missing>`), while `list<any>` is a
+contract that never moves (`placeholderSkeletonOf()`,
+`boxed-value-definition.ts`). A nested `unknown` position
+(`list<tuple<unknown, integer>>`) does not refine.
 
-The representation of unresolved types, subtype API behavior, and migration
-from the current relation remain open. See the
-[collection and inference design note](plans/2026-10-20-bare-tuple-record-any.md).
-Code must not assume the implemented subtype rules have already changed.
+### Declared types and absence
+
+A declared type is a contract on every value the symbol takes (user
+decisions P1 and P1b, 2026-10-21,
+`plans/2026-10-21-presence-contracts-and-assertion.md`). `s: string`
+refuses `Missing` and `Undefined` as it refuses `5`, and `xs: list<string>`
+refuses `["a", Missing]`. Write the absence into the type when it is
+possible: `string | missing`, `list<string | missing>`, or a refining
+declaration (`list`, `list<unknown>`). `number` admits `NaN`; `real`,
+`integer` and `complex` hold finite values only and refuse it, so
+`real | nan` is the declaration that admits it. The check is
+`matchesDeclaredTypeAxes()` (`effects-inference.ts`) on the engine's
+assignment route and the Epsil run time, and `declaredTypeMismatch()`
+(`src/epsil/static-diagnostics.ts`) in the Epsil static check, which also
+reports a possibly absent initializer (`let y: string = xs[i]`, typed
+`missing | string`; `let r: real = zs[i]`, typed `nan | real`).
+
+A library operator with no declared absence behavior refuses an absent
+operand at a parameter typed as data (`string`, `boolean`, `value`, …) with
+`incompatible-type` (decision P2, `refusesAbsentOperandAt()`,
+`boxed-operator-definition.ts`). Numeric, collection, function,
+`expression`, `symbol`, `any` and `unknown` parameters are exempt, and so
+are lazy and held operators. The discharges are `x ?? fallback`, an
+`isMissing` guard (narrowed for the static check by
+`src/epsil/presence-narrowing.ts`), and `x?!`. The type of `x?!` is
+`presentType()` of the operand (`common/type/coalesce.ts`): the type without
+`missing` and `nan`, with `nothing` kept. The type of `x ?? y` is
+`presentType(Tx) | Ty` (`coalesceResultType()`): the last fallback is
+returned even when it is absent, so with `y: missing` the result is still
+possibly absent.
 
 ## Collection family contracts
 
@@ -79,8 +139,8 @@ remain numeric outcomes, even where named absence markers are excluded.
 
 Explicit element arguments remain explicit through parsing, reduction and
 serialization. In particular, `<unknown>` no longer collapses into a bare
-family name. Its implemented subtype and generic-default behavior is unchanged;
-the agreed migration to an inference marker is separate work. The numeric
+family name; bare `list` and `list<unknown>` denote the same values and both
+refine as declarations (previous section). The numeric
 defaults and rank constraints of vector, matrix and tensor spellings remain;
 the next section gives their rules.
 

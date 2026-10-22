@@ -522,6 +522,20 @@ the types of mathematical expressions. It models:
   optional, and variadic arguments.
 - **Algebraic types**: union (`|`), intersection (`&`), negation (`!`), plus the
   special types `any`, `unknown`, `nothing`, `never`, `error`.
+- **`unknown` is an inference marker, not a content type**: every type is a
+  subtype of it (`any` and the absence markers included), and it is a
+  subtype only of `any` and itself, so it proves no contract. A site that
+  needs evidence that a type admits a marker asks `provablyAdmits()`
+  (`subtype.ts`). As a declaration (`list`, `list<unknown>`, bare `tuple`
+  or `record`) it asks the engine to refine from each assignment. Rules:
+  `docs/TYPE-SYSTEM.md`, section "The subtype hierarchy and the role of
+  `unknown`".
+- **Declared types and absence**: a declared type is a contract on every
+  value the symbol takes, so `s: string` refuses `Missing`, `real` refuses
+  `NaN`, and `string | missing` or `real | nan` admits them. A library
+  parameter typed as data refuses an absent argument. The postfix `x?!`
+  (`AssertPresent`) asserts presence at run time. Rules:
+  `docs/TYPE-SYSTEM.md`, section "Declared types and absence".
 
 Types are written as strings in a small grammar and parsed through
 `lexer.ts → parser.ts → type-builder.ts` into a `Type` AST; `subtype.ts` and

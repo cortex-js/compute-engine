@@ -852,9 +852,12 @@ string = missing` is an error, as `let s: string = 5` is, and so is a later
 because the element contract excludes absence. Write the absence into the
 type when it is possible: `let s: string | missing = missing`, `let xs:
 list<string | missing> = ["a", missing]`, or let the type be inferred (`let
-xs = ["a", missing]` is a `list<string | missing>`). A numeric declaration
+xs = ["a", missing]` is a `list<string | missing>`). A `number` declaration
 admits `NaN`, the numeric absence marker: `let n: number = NaN` is fine, and
-so is `let n: number = zs[i]` for `zs: list<number>`. A declaration that
+so is `let n: number = zs[i]` for `zs: list<number>`. The types `real`,
+`integer` and `complex` hold finite values only, so `let r: real = zs[i]`
+for `zs: list<real>` is reported: the read is typed `nan | real`. Discharge
+it the same way (`zs[i]?!`, `zs[i] ?? 0`), or declare `real | nan`. A declaration that
 excludes absence and is initialized from a possibly absent value (`let y:
 string = xs[i]`) is reported by the static check; discharge the read with
 `?!`, `??`, or declare `string | missing`.

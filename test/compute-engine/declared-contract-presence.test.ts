@@ -8,9 +8,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // `s: string` refuses `Missing` and `Undefined` as it refuses `5`; a declared
 // element contract (`list<string>`) refuses a value with an absent cell. An
 // author who wants absence writes it (`string | missing`), or uses a
-// refining declaration (`list`, `list<unknown>`). A numeric declaration
-// still admits `NaN`, the numeric absence marker. The Epsil static check,
-// the Epsil runtime and the engine's assignment route agree.
+// refining declaration (`list`, `list<unknown>`). A `number` declaration
+// admits `NaN`, the numeric absence marker; `real`, `integer` and `complex`
+// hold finite values only and refuse it (write `real | nan`). The Epsil
+// static check, the Epsil runtime and the engine's assignment route agree.
 //
 // This reverses the rule of 2026-09-09 ("assignment admits `missing` into a
 // declared type"), recorded in `docs/ERROR-MODEL.md`.
@@ -138,7 +139,7 @@ describe('the Epsil routes', () => {
     ).toEqual([]);
   });
 
-  test('a numeric declaration admits NaN and a numeric read', () => {
+  test('a `number` declaration admits NaN and a numeric read', () => {
     expect(run('let n: number = NaN\nn')).toEqual({
       value: 'NaN',
       diagnostics: [],
@@ -146,6 +147,64 @@ describe('the Epsil routes', () => {
     expect(
       run('let zs: list<number> = [4]\nlet i: integer = 3\nlet n: number = zs[i]\nn')
     ).toEqual({ value: 'NaN', diagnostics: [] });
+  });
+
+  test('a `real` or `integer` declaration refuses NaN', () => {
+    expect(() => {
+      ce.declare('r', 'real');
+      ce.assign('r', ce.NaN);
+    }).toThrow(/not compatible/);
+    ce.declare('rn', 'real | nan');
+    ce.assign('rn', ce.NaN);
+    expect(ce.box('rn').evaluate().isNaN).toBe(true);
+
+    // A read whose only misfit is the `nan` arm is reported statically, as
+    // the run time refuses it.
+    const r = run(
+      'let zs: list<real> = [4.5]\nlet i: integer = 3\nlet r: real = zs[i]\nr'
+    );
+    expect(r.diagnostics.join('\n')).toMatch(
+      /may be `NaN`, and the declared type "real" excludes `NaN`[^]*`zs\[i\]\?!`[^]*declare `real \| nan`/
+    );
+    expect(r.diagnostics.join('\n')).toMatch(/expected `real`, got `NaN`/);
+
+    // The discharges.
+    expect(
+      run('let zs: list<real> = [4.5]\nlet i: integer = 3\nlet r: real = zs[i] ?? 0\nr')
+    ).toEqual({ value: '0', diagnostics: [] });
+    expect(
+      run('let zs: list<real> = [4.5]\nlet i: integer = 1\nlet r: real = zs[i]?!\nr')
+    ).toEqual({ value: '4.5', diagnostics: [] });
+
+    // A value with another arm outside the declaration overlaps it and is
+    // not reported: `a / b` is `infinity | nan | real`.
+    expect(
+      run('let a: real = 2\nlet b: real = 3\nlet r: real = a / b\nr')
+    ).toEqual({ value: '2/3', diagnostics: [] });
+  });
+
+  test('a possible-NaN report does not hide the later checks of the name', () => {
+    // The run time installs the binding when the read is in range, so a
+    // later write to the constant and a later use are still checked.
+    const c = run(
+      'let zs: list<real> = [4.5]\nlet i: integer = 1\nconst r: real = zs[i]\nr = 3\nr'
+    );
+    expect(c.diagnostics.join('\n')).toMatch(/may be `NaN`/);
+    expect(c.diagnostics.join('\n')).toMatch(/constant-assignment/);
+
+    const u = run(
+      'let zs: list<real> = [4.5]\nlet i: integer = 1\nlet r: real = zs[i]\nlet s: string = r\ns'
+    );
+    expect(u.diagnostics.join('\n')).toMatch(
+      /static-type-error The value "r" of type "real" is not compatible with the declared type "string"/
+    );
+  });
+
+  test('a value that may be absent or NaN suggests a declaration with both', () => {
+    const r = run(
+      'let ws: list<real | missing> = [4.5]\nlet i: integer = 1\nlet r: real = ws[i]\nr'
+    );
+    expect(r.diagnostics.join('\n')).toMatch(/declare `real \| missing \| nan`/);
   });
 
   test('a numeric declaration refuses a value with a `missing` arm', () => {

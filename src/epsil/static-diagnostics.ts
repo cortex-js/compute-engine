@@ -1077,15 +1077,20 @@ function canonicalizationDiagnostics(
     // evaluation time (see `declaredTypeMismatch`). Computed BEFORE the
     // signature registration below: when the mismatch is provable, the
     // runtime `Declare` refuses to install the binding, so registering its
-    // signature would model a binding the program never gets.
+    // signature would model a binding the program never gets. A possibly
+    // absent or possibly `NaN` initializer (`let r: real = zs[i]`) is
+    // reported too, but the run time installs the binding in the usual case,
+    // so the steps below still model it: a later write to that `const`, or
+    // a later use of the name, is checked as for any other binding.
     const declMismatch = declaredTypeMismatch(ce, boxed);
+    const provableDeclMismatch = declMismatch?.provable === true;
 
     // If this statement pins a names-carrying function signature when it
     // evaluates, make the pinned signature visible to the LATER statements of
     // this program (never to earlier ones — registration follows the walk's
     // source order, so a call written before the assignment still has no
     // names to check, matching the runtime where the callee is unassigned).
-    if (declMismatch === undefined) registerPinnedSignature(ce, boxed, pinned);
+    if (!provableDeclMismatch) registerPinnedSignature(ce, boxed, pinned);
 
     // A `const` declaration that the run time installs makes a later
     // `function` statement for the same name, and a later assignment to it,
@@ -1093,7 +1098,7 @@ function canonicalizationDiagnostics(
     // refused at run time (`variable-redeclaration`), so the binding of the
     // name stays the earlier one, which is not a constant when it is a
     // `let`.
-    if (declMismatch === undefined && variableRedeclaration === undefined) {
+    if (!provableDeclMismatch && variableRedeclaration === undefined) {
       const name = constantDeclarationName(boxed);
       if (name !== undefined)
         constants.set(name, statementRange(statement, source));
@@ -1119,7 +1124,7 @@ function canonicalizationDiagnostics(
     // The statement's ASSIGNMENT type effect, visible to the LATER statements
     // of this program (never earlier ones — the walk is in source order,
     // matching the runtime where the assignment has not yet run).
-    if (declMismatch === undefined)
+    if (!provableDeclMismatch)
       applyAssignmentTypeEffect(ce, boxed, effectDeclared);
 
     const errors: MathJsonExpression[] = [];
@@ -1165,7 +1170,7 @@ function canonicalizationDiagnostics(
         severity: 'error',
         message: [
           'static-type-error',
-          declMismatch,
+          declMismatch.message,
           snippet,
           'incompatible-type',
         ],
@@ -2893,12 +2898,16 @@ function isNamedSignature(t: Type): boolean {
  * matching the pass's philosophy.
  *
  * Returns the diagnostic description, or `undefined` when the statement is
- * not a checkable declaration or no mismatch is provable.
+ * not a checkable declaration or no mismatch is found. `provable` is `true`
+ * when every run of the statement fails, so the run time never installs the
+ * binding. It is `false` for a possibly absent or possibly `NaN` initializer
+ * (`let r: real = zs[i]`): the run time refuses only the absent case, and in
+ * the usual case it installs the binding.
  */
 function declaredTypeMismatch(
   ce: ComputeEngine,
   boxed: ReturnType<ComputeEngine['box']>
-): string | undefined {
+): { message: string; provable: boolean } | undefined {
   if (!isFunction(boxed, 'Declare')) return undefined;
   // `["Declare", sym, "'type'", {dict}]` — the annotation is positional and
   // optional; without one there is nothing to check against.
@@ -2950,40 +2959,86 @@ function declaredTypeMismatch(
     // static check reports it on the same terms as a possibly absent
     // argument at a strict parameter (decision P3). The discharges are the
     // same: `xs[i]?!`, `xs[i] ?? fallback`, or a declaration `string |
-    // missing`. A numeric read (`zs[i]` on a `list<number>`) is typed
-    // `number` or `nan`, with no `missing` arm, and is not reported. A value
-    // with a top-level `missing` arm is refused by the run time at ANY
-    // declaration that does not admit `missing`, numeric or not (`let n:
-    // number = m` with `m: number | missing`, `let y: integer =
+    // missing`. A value with a top-level `missing` arm is refused by the run
+    // time at ANY declaration that does not admit `missing`, numeric or not
+    // (`let n: number = m` with `m: number | missing`, `let y: integer =
     // first(filter(ys, …))`), so it is reported at every such declaration.
-    if (
+    //
+    // A numeric read is typed with a `nan` arm instead (`zs[i]` on a
+    // `list<real>` is `nan | real`). Only `number` (and a union that names
+    // `nan`) admits `NaN`: `real`, `integer` and `complex` hold finite values
+    // only, and the run time refuses `NaN` there. So a `nan` arm is reported
+    // at a declaration that does not admit `nan`, when every OTHER arm fits
+    // the declaration: the possible `NaN` is then the only reason the value
+    // can fail. A value with another arm outside the declaration (`a / b`
+    // with `a, b: real` is `infinity | nan | real`) overlaps the declaration
+    // and is not reported, as an overlap is not reported elsewhere in this
+    // check.
+    const absentArm =
       !isSubtype('missing', declared.type) &&
-      hasTopLevelMissingArm(value.type.type)
-    )
-      return (
-        `The value \`${epsilSnippet(value.json)}\` of type "${value.type}" may be absent, ` +
-        `and the declared type "${declared}" excludes absence. Write ` +
-        `\`${epsilSnippet(value.json)}?!\` to assert that it is present, ` +
-        `\`${epsilSnippet(value.json)} ?? fallback\` to replace an absent value, ` +
-        `or declare \`${declared} | missing\``
-      );
+      hasTopLevelArm(value.type.type, 'missing')
+        ? 'missing'
+        : !isSubtype('nan', declared.type) &&
+            hasTopLevelArm(value.type.type, 'nan') &&
+            otherArmsFit(value.type.type, 'nan', declared.type)
+          ? 'nan'
+          : undefined;
+    if (absentArm !== undefined) {
+      const snippet = epsilSnippet(value.json);
+      // `?!` is a postfix operator: `a / b?!` would assert `b` alone, so a
+      // snippet with an infix operator is wrapped in parentheses.
+      const operand = /\s/.test(snippet) ? `(${snippet})` : snippet;
+      // A value that may be `Missing` or `NaN` (`ws[i]` on a
+      // `list<real | missing>` is `missing | nan | real`) needs both arms in
+      // the suggested declaration. `?!` and `??` discharge both already.
+      const alsoNaN =
+        absentArm === 'missing' &&
+        !isSubtype('nan', declared.type) &&
+        hasTopLevelArm(value.type.type, 'nan');
+      const message =
+        absentArm === 'missing'
+          ? `The value \`${snippet}\` of type "${value.type}" may be absent, ` +
+            `and the declared type "${declared}" excludes absence. Write ` +
+            `\`${operand}?!\` to assert that it is present, ` +
+            `\`${operand} ?? fallback\` to replace an absent value, ` +
+            `or declare \`${declared} | missing${alsoNaN ? ' | nan' : ''}\``
+          : `The value \`${snippet}\` of type "${value.type}" may be \`NaN\`, ` +
+            `and the declared type "${declared}" excludes \`NaN\`. Write ` +
+            `\`${operand}?!\` to assert that it is not \`NaN\`, ` +
+            `\`${operand} ?? fallback\` to replace \`NaN\`, ` +
+            `or declare \`${declared} | nan\``;
+      return { message, provable: false };
+    }
     return undefined;
   }
 
   const lead = `The value "${value.toString()}" of type "${value.type}" is not compatible with the declared type "${declared}"`;
   const hint = unboundSignatureHint(value, declared);
-  return hint === undefined ? lead : `${lead}. ${hint}`;
+  return {
+    message: hint === undefined ? lead : `${lead}. ${hint}`,
+    provable: true,
+  };
 }
 
-/** Whether `t` is `missing` or a union with a `missing` arm: the value as a
- * WHOLE may be absent. An absent cell inside a collection (`list<missing |
- * string>`) is not this: the value is a list, and the declared element
- * contract judges the cell. */
-function hasTopLevelMissingArm(t: Type): boolean {
+/** Whether `t` is `arm` (`missing` or `nan`) or a union with that arm: the
+ * value as a WHOLE may be absent. An absent cell inside a collection
+ * (`list<missing | string>`) is not this: the value is a list, and the
+ * declared element contract judges the cell. */
+function hasTopLevelArm(t: Type, arm: 'missing' | 'nan'): boolean {
   const r = resolveTypeAlias(t);
-  if (r === 'missing') return true;
+  if (r === arm) return true;
   if (typeof r === 'string' || r.kind !== 'union') return false;
-  return r.types.some((arm) => resolveTypeAlias(arm) === 'missing');
+  return r.types.some((x) => resolveTypeAlias(x) === arm);
+}
+
+/** Whether every arm of `t` other than `arm` is a subtype of `declared`. A
+ * `t` that is `arm` alone has no other arm, and the answer is `true`. */
+function otherArmsFit(t: Type, arm: 'missing' | 'nan', declared: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return true;
+  return r.types
+    .filter((x) => resolveTypeAlias(x) !== arm)
+    .every((x) => isSubtype(x, declared));
 }
 
 /** Whether `value` is a literal whose static type is exactly its runtime

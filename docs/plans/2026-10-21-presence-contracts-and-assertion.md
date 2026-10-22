@@ -22,9 +22,11 @@ and `ce.assign`, the Epsil routes use `executeEpsil`.
   decision of 2026-10-20). `Nothing` is an omission marker, not an absent
   value: it passes through both.
 - **A type that excludes absence**: a type with no `missing` member, such as
-  `string`, `tuple<number, number>` or `list<string>`. A numeric type
-  (`number`, `integer`, `real`) admits `NaN`, which is a number, so a numeric
-  type never excludes the numeric absence marker.
+  `string`, `tuple<number, number>` or `list<string>`. The type `number`
+  admits `NaN`, so it never excludes the numeric absence marker. The types
+  `real`, `integer` and `complex` hold finite values only and exclude `NaN`
+  (correction of 2026-10-22: this entry first said that every numeric type
+  admits `NaN`; `isSubtype('nan', 'real')` is false).
 - **A possibly absent expression**: an expression whose static type has a
   `missing` member. `xs[i]` with `xs: list<string>` is typed
   `missing | string` because the index is not proved in range.
@@ -205,8 +207,9 @@ therefore reports correct programs that test before they call.
 
 - **R1. A declared type is a contract on every value the symbol takes.**
   `s: string` refuses `Missing` and `Undefined` as it refuses `5`. An author
-  who wants absence writes it: `s: string | missing`. A numeric declaration
-  still admits `NaN`, because `nan` is a number. The same holds for a
+  who wants absence writes it: `s: string | missing`. A `number`
+  declaration still admits `NaN`, because `nan` is part of `number`; `real`,
+  `integer` and `complex` refuse it, as they did before. The same holds for a
   declared collection: `xs: list<string>` refuses `["a", Missing]`; write
   `list<string | missing>`, or a bare `list` / `list<unknown>` that refines
   from the value (decisions D2 and D3 of 2026-10-21). The Epsil static check
@@ -522,7 +525,11 @@ What landed, by slice:
   tuple or set literal of closed literals as closed, so `let xs: list<string>
   = ["a", Missing]` is reported statically, and reports a possibly absent
   initializer at a declaration that excludes absence. The `presentedValueType`
-  of the assumption check is unchanged.
+  of the assumption check is unchanged. Added 2026-10-22: the same report for
+  a `nan` arm at a declaration that does not admit `nan` (`let r: real =
+  zs[i]`, typed `nan | real`), when every other arm of the value fits the
+  declaration; the run time already refused that value. `let r: real = a / b`
+  (`infinity | nan | real`) overlaps the declaration and is not reported.
 - **S5.** `refusesAbsentOperandAt(i)` and `declaredParameterTypeAt(i)` on the
   operator definition (`boxed-operator-definition.ts`, mirrored in
   `types-definitions.ts` and `types-expression.ts`); both evaluation gates in
