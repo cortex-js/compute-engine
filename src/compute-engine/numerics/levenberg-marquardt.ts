@@ -20,19 +20,26 @@ import { isTimeoutCancellation } from '../../common/interruptible.js';
 export interface LMResult {
   theta: number[];
   /**
-   * Without `rootTolerance`: the solver's own stop test passed (`stationary`).
-   * With `rootTolerance`: the returned point is a root, that is, its residual
-   * norm is within the tolerance (`isRoot` below), and the solve was not cut
-   * short by a deadline.
+   * With `rootTolerance`: the returned point is a root, that is, every
+   * residual is within the tolerance (`withinTolerance` below). With
+   * `fitTolerance`: the solver's own stop test passed (`stationary`), or
+   * every residual is within the tolerance (an exact fit). With neither:
+   * `stationary`. Always false when the solve was cut short by a deadline
+   * (`timedOut`), whatever the last point had reached.
    */
   converged: boolean;
   /**
    * The solver's own stop test passed at the returned point: the projected
    * gradient is below `gradTol`, or an accepted improving step was negligible
-   * (`stepTol`), or every parameter is blocked at a bound. This is a
-   * stationary point of the sum of squared residuals, which is a minimum of
-   * the misfit for a least-squares fit, and a root only when the residual is
-   * zero there. Without `rootTolerance` this is `converged`.
+   * (`stepTol`), or every parameter is blocked at a bound, or the solve was
+   * within its tolerance and an accepted step moved every parameter by less
+   * than the precision the tolerance determines it to, with the cost at its
+   * rounding floor (`toleranceStalled` in the loop). This is a stationary
+   * point of the sum of squared residuals, which is a minimum of the misfit
+   * for a least-squares fit, and a root only when the residual is zero
+   * there. Only a solve with neither tolerance has `converged` equal to
+   * `stationary`: a root solve is `converged` only at a root, and a fit
+   * within its tolerance is `converged` before it is stationary.
    */
   stationary: boolean;
   /** ‖r(θ̂)‖₂ at the returned point. */
@@ -79,9 +86,39 @@ export interface LMOptions {
    * (`10⁻⁶ (a² − 4) = 0`) is "stationary" at every point, and the solve
    * must go on to the root. It stops at a root, when an accepted step is
    * negligible, when no step improves, or at `maxIterations`.
-   * Without this option (a least-squares fit) `converged` is `stationary`.
+   * Without this option and without `fitTolerance`, `converged` is
+   * `stationary`.
    */
   rootTolerance?: number;
+  /**
+   * The tolerance of a least-squares FIT (`FindFit`): the solver reports
+   * `converged` at a stationary point of the sum of squared residuals (a
+   * minimum of the misfit, which is not zero for noisy data), and also at a
+   * point where every residual is within the tolerance of the terms its row
+   * computes,
+   *
+   *     |rᵢ| ≤ fitTolerance · (1 + Σⱼ |Jᵢⱼ · θⱼ|)  for every i,
+   *
+   * an exact fit: the residual of each data point is within the relative
+   * tolerance of the model value there (a linear model's value is a sum of
+   * the terms `Jᵢⱼ · θⱼ`, and a nonlinear model's terms are of the order of
+   * its value), with an absolute part for a value at 0. The scale is the
+   * terms themselves, not the `max(1, |θⱼ|)` of a root solve: with the
+   * latter a degree-10 polynomial over `x` in [10, 20] tolerates a residual
+   * of 1 at data of magnitude 1, so an exit before stationarity would call
+   * a fit that is not one `converged`. The stationarity tests alone miss an
+   * exact fit when the problem is badly scaled: at a degree-10 polynomial
+   * through 11 points the Jacobian columns reach 10¹⁰, so a residual at the
+   * rounding floor still has a gradient far above `gradTol`, and a
+   * parameter whose true value is 0 never takes a step that is small
+   * relative to itself (`stepTol`). Such a fit went on to `maxIterations`
+   * and was reported `converged: false` (Tycho row 418). A point within the
+   * tolerance is still polished: the solve goes on until it is stationary,
+   * or until an accepted step moves every parameter by less than the
+   * tolerance of its own scale while the cost is at its rounding floor (see
+   * `toleranceStalled` in the loop).
+   */
+  fitTolerance?: number;
   /**
    * Called once at the top of each iteration with the (0-based) iteration
    * index. The caller uses this to check an evaluation deadline; throwing from
@@ -192,33 +229,94 @@ export function levenbergMarquardt(
   const stepTol = options.stepTol ?? 1e-10;
   const onIteration = options.onIteration;
   const rootTolerance = options.rootTolerance;
+  const fitTolerance = options.fitTolerance;
+  // The residual tolerance of the solve, whichever kind it is: a root solve
+  // reports `converged` only within it, a fit also at a stationary point.
+  const tolerance = rootTolerance ?? fitTolerance;
 
   const clampVec = (t: number[]): number[] =>
     t.map((v, j) => clampScalar(v, lo[j], hi[j]));
 
-  // The root test of `rootTolerance` at a point: its residual, Jacobian and
-  // parameters (see the option). Always true for a least-squares fit, where
-  // convergence is the stationarity test alone. Each equation is tested
-  // against its own scale, from its own row of the Jacobian and the
-  // parameters it reads: one scale for the whole system would let a steep
-  // equation, or a large parameter of another equation, hide a residual
-  // that is not zero (`[a² + 1, 10¹² b]` at the start has a residual of 1
-  // and a system-wide scale of 10¹²). A residual or a scale that is not
-  // finite is not a root: an infinite Jacobian entry (`√a` at `a = 0`) or an
-  // overflowed square would otherwise pass as `Infinity ≤ Infinity`.
-  const isRoot = (rr: number[], JJ: number[][], t: number[]): boolean => {
-    if (rootTolerance === undefined) return true;
-    for (let i = 0; i < rr.length; i++) {
-      let scale = 0;
-      const row = JJ[i];
+  // The scale of one equation or data row at a point, from its own row of
+  // the Jacobian and the parameters it reads. A root solve reads
+  // `Σⱼ |Jᵢⱼ| · max(1, |θⱼ|)`, the change of the residual over a unit
+  // relative change of the parameters (see `rootTolerance`); a fit reads the
+  // magnitude of the terms the row computes, `Σⱼ |Jᵢⱼ · θⱼ|` (see
+  // `fitTolerance`). Each row has its own scale: one scale for the whole
+  // system would let a steep equation, or a large parameter of another
+  // equation, hide a residual that is not zero (`[a² + 1, 10¹² b]` at the
+  // start has a residual of 1 and a system-wide scale of 10¹²).
+  const rowScale = (row: number[], t: number[]): number => {
+    let scale = 0;
+    if (rootTolerance !== undefined) {
       for (let j = 0; j < p; j++)
         scale += Math.abs(row[j]) * Math.max(1, Math.abs(t[j]));
-      const allowance = rootTolerance * (1 + scale);
+    } else {
+      for (let j = 0; j < p; j++) scale += Math.abs(row[j] * t[j]);
+    }
+    return scale;
+  };
+
+  // The tolerance test of `rootTolerance`/`fitTolerance` at a point: its
+  // residual, Jacobian and parameters (see the options). False when the
+  // solve has no tolerance, where convergence is the stationarity test
+  // alone. A residual or a scale that is not finite is not within the
+  // tolerance: an infinite Jacobian entry (`√a` at `a = 0`) or an overflowed
+  // square would otherwise pass as `Infinity ≤ Infinity`.
+  const withinTolerance = (
+    rr: number[],
+    JJ: number[][],
+    t: number[]
+  ): boolean => {
+    if (tolerance === undefined) return false;
+    for (let i = 0; i < rr.length; i++) {
+      const allowance = tolerance * (1 + rowScale(JJ[i], t));
       if (!Number.isFinite(allowance) || !(Math.abs(rr[i]) <= allowance))
         return false;
     }
     return true;
   };
+
+  // Whether the cost at a point is at its rounding floor: the sum of squares
+  // of the first-order rounding of each residual's evaluation, a machine
+  // epsilon of the magnitude of the terms its row computes, `Σⱼ |Jᵢⱼ · θⱼ|`
+  // (the data value is of the same order at a fit). Below it the solver
+  // is minimizing rounding, and the gains of its steps mean nothing: an
+  // exact degree-10 polynomial fit at a cost of 2 · 10⁻²⁰ still gained
+  // 10⁻²⁴ an accepted step. Read only by the tolerance stall below: a point
+  // within the tolerance whose cost is still far above the floor is still
+  // improving, and goes on (`1 + (10¹² a)² = 0` from `a = 10⁻¹¹` is within
+  // the root tolerance of its steep equation at a residual of 101, and
+  // reaches its minimum, a residual of 1, which is not a root).
+  const costAtRoundingFloor = (
+    JJ: number[][],
+    t: number[],
+    FF: number
+  ): boolean => {
+    let floor = 0;
+    for (let i = 0; i < JJ.length; i++) {
+      let terms = 0;
+      const row = JJ[i];
+      for (let j = 0; j < p; j++) terms += Math.abs(row[j] * t[j]);
+      const rounding = Number.EPSILON * terms;
+      floor += rounding * rounding;
+    }
+    return FF <= 0.5 * floor;
+  };
+
+  // Whether a point is `converged` (see `LMResult`): a root solve only
+  // within its tolerance; a fit at a stationary point (`stat`, the solver's
+  // own stop test there) or within its tolerance (an exact fit); a solve
+  // with no tolerance at a stationary point.
+  const isConverged = (
+    rr: number[],
+    JJ: number[][],
+    t: number[],
+    stat: boolean
+  ): boolean =>
+    rootTolerance !== undefined
+      ? withinTolerance(rr, JJ, t)
+      : stat || withinTolerance(rr, JJ, t);
 
   let theta = clampVec(theta0.slice());
   let r = residual(theta);
@@ -265,9 +363,9 @@ export function levenbergMarquardt(
 
   // `stationary` is the solver's own stop test at the current point; it is
   // cleared by every accepted step, which moves the point. `converged` adds
-  // the root test of `rootTolerance` (always true for a least-squares fit).
-  // With a root tolerance, a root is reported as soon as an accepted step
-  // reaches it, even when the gradient test has not passed there.
+  // the tolerance test (`isConverged`). With a tolerance, a root or an exact
+  // fit is reported as soon as an accepted step reaches it, even when the
+  // gradient test has not passed there.
   let stationary = false;
   let converged = false;
   let iterations = 0;
@@ -298,13 +396,14 @@ export function levenbergMarquardt(
     let nu = 2;
 
     stationary = projGradNorm(theta, g) < gradTol;
-    converged = rootTolerance === undefined ? stationary : isRoot(r, J, theta);
+    converged = isConverged(r, J, theta, stationary);
 
-    // A root solve that has reached a root goes on until the point is also
-    // stationary (the gradient test, or a negligible accepted step): the
-    // first point within the root tolerance of a steep equation can still
-    // be polished (`10¹² x = 3 · 10¹²` is within its bound at a residual of
-    // 74, where one more step reaches 0.002). For a fit `converged` is
+    // A solve that has reached a root or an exact fit goes on until the
+    // point is also stationary (the gradient test, a negligible accepted
+    // step, or a step within the tolerance of every parameter): the first
+    // point within the tolerance of a steep equation can still be polished
+    // (`10¹² x = 3 · 10¹²` is within its bound at a residual of 74, where
+    // one more step reaches 0.002). Without a tolerance `converged` is
     // `stationary`, so the condition is the plain one.
     while (!(converged && stationary) && iterations < maxIterations) {
       if (onIteration) onIteration(iterations);
@@ -325,7 +424,7 @@ export function levenbergMarquardt(
         // a root solve it is a root only when its residual is within the
         // tolerance; the bounds keep the solver from moving further anyway.
         stationary = true;
-        converged = isRoot(r, J, theta);
+        converged = isConverged(r, J, theta, true);
         break;
       }
 
@@ -367,6 +466,32 @@ export function levenbergMarquardt(
       const stepStalled = step.every(
         (s, j) => Math.abs(s) < stepTol * (Math.abs(theta[j]) + stepTol)
       );
+      // Whether the (projected) step moves every parameter by less than
+      // the tolerance of its own scale, `tolerance · max(1, |θⱼ|)`, with a
+      // parameter below 1 held to the absolute tolerance. Read only once the
+      // point is within the tolerance AND its cost is at the rounding floor
+      // (`costAtRoundingFloor`), as a post-acceptance stall check like
+      // `stepStalled`: such a solve has nothing left to polish. Both parts
+      // are needed. Without the floor, a point within the tolerance whose
+      // residual is still dropping fast stops too early: `1 + (10¹² a)² = 0`
+      // from `a = 10⁻¹¹` is within the root tolerance at a residual of 101
+      // (its Jacobian is 2 · 10¹³), its first step is 5 · 10⁻¹², below the
+      // absolute tolerance, and it would stop at a residual of 25 instead
+      // of reaching the minimum, a residual of 1, which is not a root; and
+      // `10¹² k = 1` from `k = 1` would stop at a relative error of 10⁻³ in
+      // `k`, which `stepStalled`, relative to `k`, never allows. Without the
+      // step part, a step that lands at the floor from far away would stop
+      // before a stationarity test ran at the new point. `stepStalled`
+      // alone cannot end such a solve when a parameter's true value is 0:
+      // its steps shrink with it, and no step is ever small relative to the
+      // parameter (the constant term of an exact polynomial fit through the
+      // origin crept from 7 · 10⁻¹² toward 0 by 5 · 10⁻¹⁴ a step until
+      // `maxIterations`, Tycho row 418).
+      const toleranceStalled =
+        tolerance !== undefined &&
+        step.every(
+          (s, j) => Math.abs(s) <= tolerance * Math.max(1, Math.abs(theta[j]))
+        );
 
       const rNew = residual(thetaNew);
       const FNew = cost(rNew);
@@ -411,18 +536,28 @@ export function levenbergMarquardt(
         // carries the stationarity of the point it was found at.
         stationary = projGradNorm(theta, g) < gradTol;
 
-        // A root solve has converged at a root (see `rootTolerance`); it
+        // A root solve has converged at a root (see `rootTolerance`), a fit
+        // at a stationary point or an exact fit (`fitTolerance`); the solve
         // stops once the point is also stationary (the loop condition), so
         // the first point within the bound of a steep equation is polished
-        // by the steps that follow. A least-squares fit stops at a
-        // stationary point. A root solve that is not at a root goes on past
-        // one: the gradient test is absolute, so a residual scaled small
-        // passes it far from the root, and at a least-squares minimum that
-        // is not a root the next steps are rejected until the step
-        // collapses, which exits below.
-        converged =
-          rootTolerance === undefined ? stationary : isRoot(r, J, theta);
+        // by the steps that follow. A root solve that is not at a root goes
+        // on past a stationary point: the gradient test is absolute, so a
+        // residual scaled small passes it far from the root, and at a
+        // least-squares minimum that is not a root the next steps are
+        // rejected until the step collapses, which exits below.
+        converged = isConverged(r, J, theta, stationary);
         if (converged && stationary) break;
+
+        // A solve within its tolerance, at the rounding floor of its cost,
+        // whose accepted step moved every parameter by less than the
+        // precision the tolerance determines it to (`toleranceStalled`) has
+        // settled: the point is stationary for the purpose of the record.
+        // Judged on the step just taken, after it, so a point that the step
+        // reached is not stopped at before a test ran there.
+        if (converged && toleranceStalled && costAtRoundingFloor(J, theta, F)) {
+          stationary = true;
+          break;
+        }
 
         // Secondary (stall) convergence test — applied ONLY here, after an
         // accepted improving step: the step we just took, and accepted, is
@@ -434,7 +569,7 @@ export function levenbergMarquardt(
         // at a minimum above its tolerance `converged` stays false.
         if (stepStalled) {
           stationary = true;
-          if (rootTolerance === undefined) converged = true;
+          converged = isConverged(r, J, theta, true);
           break;
         }
 
@@ -458,6 +593,13 @@ export function levenbergMarquardt(
   } catch (e) {
     if (!isTimeoutCancellation(e)) throw e;
     timedOut = true;
+    // A solve cut short is not converged, whatever its last point had
+    // reached: a fit within its tolerance, or a root solve at a root, that
+    // was still polishing would otherwise report `converged: true` beside
+    // `timedOut: true`, which the record's contract (`LMResult`, the setup
+    // timeout record of `nonlinear-fit.ts`) and the global search
+    // (`best.converged && !timedOut`) both exclude.
+    converged = false;
   }
 
   // `bestR`/`bestTheta` hold the lowest-cost point seen; on convergence that is

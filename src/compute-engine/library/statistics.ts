@@ -1820,7 +1820,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         '`vars` and the parameters) to `data`, a list of (x…, y) tuples or a ' +
         'plain list of y values. Each parameter spec is a bare symbol, ' +
         '(a, a0), or (a, a0, lo, hi) with box constraints. Returns a record ' +
-        '{parameters, converged, residualNorm, iterations}. The joint form ' +
+        '{parameters, converged, residualNorm, iterations}. `converged` is ' +
+        'true at a stationary point of the sum of squared residuals (a ' +
+        'minimum of the misfit, which is not zero for noisy data), and at ' +
+        "an exact fit: every residual within the engine's tolerance scaled " +
+        'by its own row, the test `FindRoot` uses for a root. The joint form ' +
         'takes a list of models and matching datasets sharing parameters. ' +
         'An optional fifth argument is a dictionary of options: ' +
         '`{global: {b: [lo, hi]}}` searches the named parameters (at most ' +

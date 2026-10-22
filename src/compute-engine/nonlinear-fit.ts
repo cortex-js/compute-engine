@@ -41,6 +41,7 @@ import { angularChainFactor } from './symbolic/angular-unit.js';
 import { implicitCompileNumericResult } from './implicit-compile.js';
 import {
   levenbergMarquardt,
+  type LMOptions,
   type LMResult,
 } from './numerics/levenberg-marquardt.js';
 import {
@@ -960,11 +961,12 @@ function buildRecord(
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
   ];
   // `FindRoot` only: `converged` is true only at a root (the residual is
-  // within the solver's tolerance, `rootToleranceOf`), while `stationary`
+  // within the solver's tolerance, `solverToleranceOf`), while `stationary`
   // is the solver's own stop test, a minimum of the sum of squared residuals
   // that may not be a root (`a² + 1 = 0`, or a stacked system of data rows
-  // whose misfit is not zero). The `FindFit` record is unchanged: there
-  // `converged` is the stationarity test.
+  // whose misfit is not zero). The `FindFit` record has no `stationary`
+  // key: there `converged` is the stationarity test, or an exact fit (every
+  // residual within the same tolerance).
   if (operator === 'FindRoot')
     entries.push(
       ce.tuple(
@@ -1003,26 +1005,33 @@ interface SetupContext {
 }
 
 /**
- * The root tolerance of the solver for an operator (`LMOptions.rootTolerance`):
- * `FindRoot` reports `converged` only at a point whose residual norm is
- * within the engine's tolerance, scaled by the system (Tycho row 414: a
- * minimum of the sum of squares that is not a root, `a² + 1 = 0`, was
- * reported converged). `FindFit` has none: its convergence is the solver's
- * stationarity test, since the misfit of the data is not zero at a good fit.
+ * The residual tolerance of the solver for an operator, as the option that
+ * carries it: `FindRoot` passes `LMOptions.rootTolerance` and reports
+ * `converged` only at a point whose every residual is within the engine's
+ * tolerance, scaled by its own equation (Tycho row 414: a minimum of the
+ * sum of squares that is not a root, `a² + 1 = 0`, was reported converged).
+ * `FindFit` passes `LMOptions.fitTolerance`: its convergence is the solver's
+ * stationarity test, since the misfit of the data is not zero at a good
+ * fit, or an exact fit, every residual within the same tolerance (Tycho row
+ * 418: a degree-10 polynomial through 11 points, exact to rounding, was
+ * reported `converged: false` because the stationarity tests cannot pass on
+ * a problem scaled that badly).
  */
-function rootToleranceOf(
+function solverToleranceOf(
   ce: IComputeEngine,
   operator: FitOperator
-): number | undefined {
-  if (operator !== 'FindRoot') return undefined;
+): Pick<LMOptions, 'rootTolerance' | 'fitTolerance'> {
   // The solver runs in doubles: the residual at a root carries the rounding
   // of its terms, so a tolerance below what doubles resolve could never be
   // met (an engine tolerance of 1e-30 is allowed), and every root solve
   // would report `converged: false`.
-  return Math.max(ce.tolerance, ROOT_TOLERANCE_FLOOR);
+  const tolerance = Math.max(ce.tolerance, ROOT_TOLERANCE_FLOOR);
+  return operator === 'FindRoot'
+    ? { rootTolerance: tolerance }
+    : { fitTolerance: tolerance };
 }
 
-/** The smallest root tolerance (see `rootToleranceOf`): 64 machine
+/** The smallest solver tolerance (see `solverToleranceOf`): 64 machine
  * epsilons, about 1.4e-14. */
 const ROOT_TOLERANCE_FLOOR = 64 * Number.EPSILON;
 
@@ -1200,7 +1209,7 @@ function solve(
     deadlineFrame,
     signal
   );
-  const rootTolerance = rootToleranceOf(ce, operator);
+  const solverTolerance = solverToleranceOf(ce, operator);
 
   // A deadline expiring during the starting-point evaluation or the solver's
   // own initial residual/Jacobian — before any iteration completed — still
@@ -1218,7 +1227,7 @@ function solve(
     result = levenbergMarquardt(residual, jacobian, theta0, {
       lo,
       hi,
-      rootTolerance,
+      ...solverTolerance,
       onIteration: () => {
         checkDeadline(deadlineFrame());
         checkAborted(signal);
@@ -1948,7 +1957,7 @@ function prepareGlobalSearch(
 
   const p = specs.length;
   const cb = makeCallbacks(ce, units, specs, deadlineFrame, signal);
-  const rootTolerance = rootToleranceOf(ce, operator);
+  const solverTolerance = solverToleranceOf(ce, operator);
   const lo = cb.lo.slice();
   const hi = cb.hi.slice();
   for (const s of scans) {
@@ -2105,7 +2114,7 @@ function prepareGlobalSearch(
     levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
       lo,
       hi,
-      rootTolerance,
+      ...solverTolerance,
       onIteration,
     });
   // A phase that the scan solves by least squares is refined UNBOUNDED. The
@@ -2131,7 +2140,7 @@ function prepareGlobalSearch(
     const r = levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
       lo: phaseLo,
       hi: phaseHi,
-      rootTolerance,
+      ...solverTolerance,
       onIteration,
     });
     const theta = r.theta.slice();

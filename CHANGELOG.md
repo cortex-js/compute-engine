@@ -126,6 +126,18 @@
 
 ### Behavior Changes
 
+- **`FindFit` and `FindRoot` stop polishing at the tolerance's precision**
+  (Tycho row 418; the fix is under Resolved Issues). A solve within its
+  tolerance ends once an accepted step moves every parameter by less than
+  `tolerance · max(1, |θ_j|)` while the cost is at its rounding floor, where it
+  went on to the gradient test or to the iteration cap: a badly scaled exact
+  fit takes 5 iterations instead of 200, and its `stationary` key can be true
+  without the gradient test. The `converged` key of a `FindFit` record now
+  reads the engine's tolerance (`ce.tolerance`, never below 64 machine
+  epsilons), which it ignored before: a fit whose every residual is within the
+  tolerance of the terms its row computes is converged, stationary or not.
+  Setting a looser engine tolerance makes more fits exact.
+
 - **`unknown` is an inference marker, not a content type.** Every type is now a
   subtype of `unknown`, the absence markers, `error` and `any` included:
   `ce.type("missing").matches("unknown")` and
@@ -200,6 +212,37 @@
   was already the case for scopes that an evaluation pushes itself.
 
 ### Resolved Issues
+
+- **`FindFit` reports `converged: true` at an exact fit** (Tycho row 418). A
+  degree-10 polynomial through 11 points is an exact interpolation whose
+  constant term is 0. The fit reached the rounding floor (a residual norm of
+  3e-10) and reported `converged: false` after 200 iterations, since the record
+  of a fit read `converged` from the solver's stationarity tests alone, and
+  neither can pass on a problem scaled that badly: the Jacobian columns reach
+  10^10, so a residual at the rounding floor still has a gradient far above the
+  absolute gradient tolerance, and the constant term, whose true value is 0,
+  never takes a step that is small relative to itself (the per-component stall
+  test of 0.161.0; the whole-vector stall test it replaced reported this fit
+  converged after one iteration). A fit whose every residual is within the
+  engine's tolerance of the terms its row computes,
+  `|r_i| ≤ tolerance · (1 + Σ_j |J_ij · θ_j|)`, is now `converged`, whatever
+  the gradient and the parameters' magnitudes; a fit with a misfit is
+  converged at a stationary point as before. The scale is the model's terms,
+  not the `max(1, |θ_j|)` of the root test of `FindRoot`, under which a
+  degree-10 polynomial over `x` in [10, 20] would tolerate a residual of 1 at
+  data of magnitude 1. A root solve or a fit within its tolerance stops
+  polishing once an accepted step moves every parameter by less than the
+  tolerance of its own scale (`tolerance · max(1, |θ_j|)`, the precision to
+  which the tolerance test says the parameters are determined) while the cost
+  is at its rounding floor, so the same fit now takes 5 iterations from the
+  exact coefficients and 44 from a start of 1, and the stacked `FindRoot` form
+  4 and 39 instead of 20 and 92; a point whose residual is still dropping
+  (`1 + (10^{12} a)^2 = 0` from `a = 10^{-11}`, within the root tolerance of
+  its steep equation at a residual of 101) goes on to its minimum as before.
+  A solve cut short by a deadline reports `converged: false` beside
+  `timedOut: true`, as the record's contract says; a root solve that timed
+  out while polishing a root reported both true. The `FindFit` record still
+  has no `stationary` key.
 
 - **On the `interval-js` target, `0^x` over an exponent interval has the value
   0** (Tycho row 417). `compile(ce.parse('0^{x}'), {to: 'interval-js'})`
