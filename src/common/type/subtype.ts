@@ -2017,7 +2017,7 @@ export function broadcastCollectionArm(elements: Type): ListType {
  * - A tensor with a dimension list, `vector<U>`, `matrix<U>`,
  *   `list<U^dims>`: the cells `U` at rank 1, and the rows, a tensor of the
  *   remaining axes with the same cells, at rank 2 or more (`matrix<U>`
- *   gives `vector<U>`, `list<U^(2x3x4)>` gives `matrix<U^(3x4)>`).
+ *   gives `vector<U>`, `tensor<U^(2x3x4)>` gives `matrix<U^(3x4)>`).
  * - A tensor of unknown rank, `tensor<U>`: a cell or a tensor of lower
  *   rank, `U | tensor<U>`.
  *
@@ -3094,7 +3094,7 @@ function isSubtypeRules(
     // a `T` that cannot hold a list the arm is `tensor<T>`: by the rules
     // for lists, a tensor with a dimension list fits when its cells are `T`
     // (`matrix<integer>` is a `broadcastable<number>`, and
-    // `list<boolean^(2x2)>` a `broadcastable<boolean>`), and a plain list
+    // `matrix<boolean^(2x2)>` a `broadcastable<boolean>`), and a plain list
     // fits when its elements are `T`, the rank-1 reading (`list<integer>`
     // is a `broadcastable<number>`; `list<list<integer>>` is not, since a
     // list of integers is not a number). For a `T` that can hold a list
@@ -3556,7 +3556,7 @@ function isSubtypeRules(
       // The type of the empty list literal, `list<never>`, has no dimensions,
       // and its only value `[]` has length 0. So it is a subtype of a list
       // type whose first axis has length 0: `[]` is a value of
-      // `list<integer^0>`, and of `list<integer^(0x2)>` (a matrix with no
+      // `list<integer^0>`, and of `matrix<integer^(0x2)>` (a matrix with no
       // rows). A one-axis list of any length (`list<integer^?>`, the `-1`
       // wildcard) admits the length 0 as well.
       if (

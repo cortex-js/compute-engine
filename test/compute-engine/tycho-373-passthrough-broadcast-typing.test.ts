@@ -240,7 +240,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       'x',
     ] as any);
     const call = ce.box(['g', ['List', ['List', 1, 2], ['List', 3, 4]]]);
-    expect(call.type.toString()).toBe('list<tuple<integer, integer>^(2x2)>');
+    expect(call.type.toString()).toBe('matrix<tuple<integer, integer>^(2x2)>');
     const value = call.evaluate();
     expect(value.toString()).toBe('[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]');
     expect(value.type.matches(call.type)).toBe(true);

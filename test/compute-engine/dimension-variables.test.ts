@@ -40,12 +40,12 @@ describe('DIMENSION VARIABLES — grammar and round trip', () => {
       '(x: matrix<real^(NxN)>) -> real where N',
     ],
     [
-      '(x: list<integer^(3xN)>) -> integer where N',
+      '(x: matrix<integer^(3xN)>) -> integer where N',
       '(x: matrix<integer^(3xN)>) -> integer where N',
     ],
     [
-      '(x: list<integer^(MxNxP)>) -> integer where M, N, P',
-      '(x: list<integer^(MxNxP)>) -> integer where M, N, P',
+      '(x: tensor<integer^(MxNxP)>) -> integer where M, N, P',
+      '(x: tensor<integer^(MxNxP)>) -> integer where M, N, P',
     ],
     // Spaced separators and a mixed literal/variable shape.
     [
@@ -65,7 +65,7 @@ describe('DIMENSION VARIABLES — grammar and round trip', () => {
   });
 
   test('a dimension variable is the -1 wildcard plus a name', () => {
-    const t = parseType('(x: list<T^(2xN)>) -> T where T, N') as any;
+    const t = parseType('(x: matrix<T^(2xN)>) -> T where T, N') as any;
     const x = t.args[0].type;
     expect(x.dimensions).toEqual([2, -1]);
     expect(x.dimensionVariables).toEqual([undefined, 'N']);
@@ -275,12 +275,12 @@ describe('DIMENSION VARIABLES — shapes and substitution into the result', () =
     // The `T` of `list<T^N>` and of `vector<T>` is the type of the CELLS of
     // a rank-1 tensor, and a matrix has rank 2, so a matrix is not a value
     // of either pattern and the call is an `incompatible-type` error, for a
-    // literal matrix as for a symbol declared `list<integer^(2x2)>`. The
+    // literal matrix as for a symbol declared `matrix<integer^(2x2)>`. The
     // plain `list<T>` is read by its elements: a matrix is a list of its
     // rows, and `T` is the row type.
     declare(ce, 'gu', '(x: vector<unknown>) -> unknown');
     declare(ce, 'gl', '(x: list<T>) -> T where T');
-    ce.declare('nl2', 'list<integer^(2x2)>');
+    ce.declare('nl2', 'matrix<integer^(2x2)>');
     const flat = ce.box(['first', L('[[1,2],[3,4]]')]);
     const nested = ce.box(['first', 'nl2']);
     expect(flat.isValid).toBe(false);
@@ -632,10 +632,11 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
   });
 });
 
-// The shape of a tensor is spelled in one place, on the outer list: a list
-// with dimensions cannot have list cells, so the nested spelling
-// `list<vector<integer^3>^2>` is not a type, and two rows of three integers
-// are `list<integer^(2x3)>`, that is `matrix<integer^(2x3)>`. A plain list
+// The shape of a tensor is spelled in one place, on the outer `matrix` or
+// `tensor` head: a list with dimensions cannot have list cells, so the nested
+// spelling `list<vector<integer^3>^2>` is not a type, and two rows of three
+// integers are `matrix<integer^(2x3)>` (`tensor<integer^(2x3)>` is the same
+// type). A plain list
 // of rows (`list<vector<integer^3>>`) is read by its elements: it is a
 // list of vectors, not a matrix (its rows may be anything that is a
 // vector of three integers, and it carries no length), so it is admitted
@@ -652,10 +653,10 @@ describe('DIMENSION VARIABLES — a list of rows is not a matrix', () => {
     'mm',
     '(a: matrix<T^(MxN)>, b: matrix<T^(NxP)>) -> matrix<T^(MxP)> where T, M, N, P'
   );
-  ce.declare('nl', 'list<integer^(2x3)>');
-  ce.declare('nq', 'list<integer^(3x3)>');
+  ce.declare('nl', 'matrix<integer^(2x3)>');
+  ce.declare('nq', 'matrix<integer^(3x3)>');
   ce.declare('nu', 'list<vector<integer^3>>');
-  ce.declare('nb', 'list<integer^(3x4)>');
+  ce.declare('nb', 'matrix<integer^(3x4)>');
 
   test('the lengths are pinned', () => {
     expect(ce.box(['rows', 'nl']).type.toString()).toBe('2');
@@ -676,23 +677,23 @@ describe('DIMENSION VARIABLES — a list of rows is not a matrix', () => {
   });
 
   test.each([
-    ['list<integer^(2x3)>', 'matrix<integer>', true],
-    ['list<integer^(2x3)>', 'matrix<integer^(2x3)>', true],
-    ['list<integer^(2x3)>', 'matrix<integer^(3x2)>', false],
-    ['list<integer^(2x3)>', 'matrix<real>', true],
+    ['matrix<integer^(2x3)>', 'matrix<integer>', true],
+    ['tensor<integer^(2x3)>', 'matrix<integer^(2x3)>', true],
+    ['matrix<integer^(2x3)>', 'matrix<integer^(3x2)>', false],
+    ['matrix<integer^(2x3)>', 'matrix<real>', true],
     // A plain list of rows is read by its elements: a list of vectors, not
     // a matrix, and not a list of integers.
     ['list<vector<integer^3>>', 'matrix<integer>', false],
     ['list<vector<integer^3>>', 'matrix<integer^(2x3)>', false],
-    ['list<vector<integer^3>>', 'list<integer^(?x3)>', false],
+    ['list<vector<integer^3>>', 'matrix<integer^(?x3)>', false],
     ['list<vector<integer^3>>', 'list<integer>', false],
     ['list<vector<integer^3>>', 'collection<integer>', false],
     ['list<vector<integer^3>>', 'list<list<integer>>', true],
     ['list<vector<integer^3>>', 'collection<vector<integer>>', true],
     // Plain lists nested around a matrix or a vector are not a tensor of
     // the larger rank.
-    ['list<list<vector<integer^2>>>', 'list<integer^(4x3x2)>', false],
-    ['list<matrix<integer^(2x2)>>', 'list<integer^(3x2x2)>', false],
+    ['list<list<vector<integer^2>>>', 'tensor<integer^(4x3x2)>', false],
+    ['list<matrix<integer^(2x2)>>', 'tensor<integer^(3x2x2)>', false],
     // Rows with no length can differ in length: not a matrix.
     ['list<list<integer>>', 'matrix<integer>', false],
     // Rows of length `-1` (any length) can differ in length too: `[[1],
@@ -702,7 +703,7 @@ describe('DIMENSION VARIABLES — a list of rows is not a matrix', () => {
     // A matrix is a list of its rows, and a tensor of rank 3 a list of its
     // matrices.
     ['matrix<integer^(2x3)>', 'list<vector<integer^3>>', true],
-    ['list<integer^(3x2x2)>', 'list<matrix<integer^(2x2)>>', true],
+    ['tensor<integer^(3x2x2)>', 'list<matrix<integer^(2x2)>>', true],
   ])('%s <: %s is %s', (a, b, expected) => {
     expect(ce.type(a).matches(ce.type(b))).toBe(expected);
   });

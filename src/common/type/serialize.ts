@@ -181,9 +181,11 @@ export function typeToString(type: Type, precedence = 0): string {
     case 'list':
       if (type.dimensionVariables !== undefined && type.dimensions) {
         // A list PATTERN with a dimension variable: always the explicit
-        // `^` spelling with the element type, so `list<T^N>`, `vector<T^N>`
-        // and `matrix<T^(MxN)>` round-trip through the same parser path. An
-        // open axis beside a variable is spelled `?`.
+        // `^` spelling with the element type, so `list<T^N>`, `vector<T^N>`,
+        // `matrix<T^(MxN)>` and `tensor<T^(LxMxN)>` round-trip through the
+        // same parser path. The head follows the rank, as for a shape of
+        // literal lengths below. An open axis beside a variable is spelled
+        // `?`.
         const dims = type.dimensions.map(
           (d, i) => type.dimensionVariables![i] ?? (d < 0 ? '?' : String(d))
         );
@@ -196,9 +198,13 @@ export function typeToString(type: Type, precedence = 0): string {
         const shape = dims.some((p) => p === '?' || p.includes('x'))
           ? dims.join(' x ')
           : dims.join('x');
-        if (dims.length === 1) result = `vector<${inner}^${dims[0]}>`;
+        const named = cellTypeCanHoldANumber(type.elements);
+        if (dims.length === 1)
+          result = named
+            ? `vector<${inner}^${dims[0]}>`
+            : `list<${inner}^${dims[0]}>`;
         else if (dims.length === 2) result = `matrix<${inner}^(${shape})>`;
-        else result = `list<${inner}^(${shape})>`;
+        else result = `tensor<${inner}^(${shape})>`;
         break;
       }
       {
@@ -226,21 +232,22 @@ export function typeToString(type: Type, precedence = 0): string {
         } else {
           // A tensor with a dimension list: `elements` is the type of its
           // cells. An open length is stored as `-1` and is spelled `?`
-          // (`matrix<integer^(2x?)>`, `list<T^(2x?x3)>`), which parses back
-          // to `-1`; the negative number does not parse. The named heads
-          // `vector` and `matrix` are used only for a cell type they accept,
-          // one that can hold a number (`cellTypeCanHoldANumber`): an
-          // all-open rank of 1 or 2 is then `vector<T>`/`matrix<T>` (a
-          // nested spelling such as `list<list<T>>` is a different, weaker
-          // type, whose rows can differ in length), and a fixed length uses
-          // the named head for a numeric name (`vector<integer^3>`,
-          // `matrix<integer^(2x3)>`) and the `list<T^dims>` spelling for any
-          // other (`list<unknown^2>`, `list<any^(2x2)>`), which is how a
-          // consumer that reads the spelling of a list literal sees it. A
-          // cell type that cannot hold a number (`boolean`, a tuple) always
-          // takes the `list` head (`list<boolean^?>`, `list<boolean^(2x2)>`),
-          // which parses back to the same shape. The cell type `number` has
-          // the short forms `vector`, `vector<3>`, `matrix`, `matrix<2x3>`.
+          // (`matrix<integer^(2x?)>`, `tensor<T^(2x?x3)>`), which parses back
+          // to `-1`; the negative number does not parse. The head depends on
+          // the rank. Rank 2 is always `matrix` (`matrix<boolean^(2x2)>`,
+          // `matrix<integer | missing^(2x2)>`), and an all-open rank 2 is
+          // `matrix<T>` (a nested spelling such as `list<list<T>>` is a
+          // different, weaker type, whose rows can differ in length). Rank 3
+          // or more is always `tensor<T^(…)>`: the parser refuses a list
+          // with two or more axes (`list<T^(2x3)>`). Rank 1 uses `vector`
+          // for a cell type that can hold a number
+          // (`cellTypeCanHoldANumber`): `vector<T>` when the length is open,
+          // and `vector<integer^3>` for a numeric name. Any other rank 1 is
+          // `list<T^n>` (`list<unknown^2>`, `list<boolean^2>`,
+          // `list<boolean^?>`), which is how a consumer that reads the
+          // spelling of a list literal sees it. Each spelling parses back to
+          // the same shape. The cell type `number` has the short forms
+          // `vector`, `vector<3>`, `matrix`, `matrix<2x3>`.
           const inner = underLength(type.elements, elements);
           const numberCells = type.elements === 'number';
           const numericCells =
@@ -249,11 +256,11 @@ export function typeToString(type: Type, precedence = 0): string {
           const namedHeads = cellTypeCanHoldANumber(type.elements);
           const allOpen = dims.every((d) => d < 0);
           const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
-          if (!namedHeads) {
+          if (!namedHeads && dims.length !== 2) {
             result =
               dims.length === 1
                 ? `list<${inner}^${shape}>`
-                : `list<${inner}^(${shape})>`;
+                : `tensor<${inner}^(${shape})>`;
           } else if (dims.length === 1) {
             if (numberCells) result = allOpen ? 'vector' : `vector<${shape}>`;
             else if (allOpen) result = `vector<${elements}>`;
@@ -262,9 +269,8 @@ export function typeToString(type: Type, precedence = 0): string {
           } else if (dims.length === 2) {
             if (numberCells) result = allOpen ? 'matrix' : `matrix<${shape}>`;
             else if (allOpen) result = `matrix<${elements}>`;
-            else if (numericCells) result = `matrix<${inner}^(${shape})>`;
-            else result = `list<${inner}^(${shape})>`;
-          } else result = `list<${inner}^(${shape})>`;
+            else result = `matrix<${inner}^(${shape})>`;
+          } else result = `tensor<${inner}^(${shape})>`;
         }
       }
       break;

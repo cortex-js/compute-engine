@@ -770,7 +770,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<integer, integer>^(2x2)>',
+      'matrix<tuple<integer, integer>^(2x2)>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -797,7 +797,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<integer, integer>^(2x2)>',
+      'matrix<tuple<integer, integer>^(2x2)>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -1108,7 +1108,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     // rows of two: a list whose cells are tuples may carry that shape.
     ce.declare('h', 'list<list<integer^2>>');
     expect(ce.box(['f', 'h'] as any).type.toString()).toBe(
-      'list<tuple<integer, integer>^(?x2)>'
+      'matrix<tuple<integer, integer>^(?x2)>'
     );
     // The runtime maps a value of an `indexed_collection` or a
     // `broadcastable` outer at its leaves too: `[[1, 2], [3, 4]]` gives

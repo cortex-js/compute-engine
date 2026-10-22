@@ -675,7 +675,7 @@ describe('point accessors over higher-rank data, non-numeric coordinates and emp
         [7, 8],
       ],
     ];
-    ce.declare('M', 'list<integer^(2x2x2)>');
+    ce.declare('M', 'tensor<integer^(2x2x2)>');
     ce.assign('M', ce.box(numericList(data) as any));
     for (const [op, i] of [
       ['PointX', 0],

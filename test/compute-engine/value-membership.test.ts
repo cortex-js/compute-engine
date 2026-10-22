@@ -208,7 +208,7 @@ describe('VALUE MEMBERSHIP — tensors are read by their cells', () => {
   });
 
   it('a literal cell type of rank 2 checks the shape and every cell', () => {
-    // `list<0^(2x2)>` has no spelling (the parser reads `0^` as a power),
+    // `matrix<0^(2x2)>` has no spelling (the parser reads `0^` as a power),
     // so the type is built as a `ListType`.
     const zeros = (dimensions: number[]) => ({
       kind: 'list',

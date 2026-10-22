@@ -722,7 +722,7 @@ describe('PRODUCT OF ROWS OF POINTS AND NUMBERS', () => {
     ],
     [
       ['Multiply', 'P', 'M2'],
-      'list<tuple<integer, integer>^(?x?)>',
+      'matrix<tuple<integer, integer>>',
       '[[(1, 2),(2, 4)],[(9, 12),(12, 16)]]',
     ],
   ])('%j', (expr, type, evaluated) => {

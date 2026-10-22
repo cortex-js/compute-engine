@@ -259,7 +259,7 @@ describe('a point divided by a matrix', () => {
     expect(value.toString()).toBe(
       '[[(1, 2),(1/2, 1)],[(1/3, 2/3),(1/4, 1/2)]]'
     );
-    expect(e.type.toString()).toBe('list<tuple<rational, rational>^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<tuple<rational, rational>^(2x2)>');
     expect(value.type.matches(e.type)).toBe(true);
     expect(e.N().toString()).toMatch(/^\[\[\(1, 2\),\(0\.5, 1\)\],\[\(0\.333/);
     // The same value as the product with the cell-wise reciprocal.
@@ -273,7 +273,7 @@ describe('a point divided by a matrix', () => {
 
   test('parse route', () => {
     const e = ce.parse('(1, 2)/\\begin{pmatrix}1 & 2\\\\ 3 & 4\\end{pmatrix}');
-    expect(e.type.toString()).toBe('list<tuple<rational, rational>^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<tuple<rational, rational>^(2x2)>');
     expect(e.evaluate().toString()).toBe(
       '[[(1, 2),(1/2, 1)],[(1/3, 2/3),(1/4, 1/2)]]'
     );
@@ -296,9 +296,9 @@ describe('a point divided by a matrix', () => {
 
   test('a symbol with no value is typed by the value it will have', () => {
     for (const [json, type] of [
-      [['Divide', P, 'm'], 'list<tuple<number, number>^(2x2)>'],
-      [['Divide', 'q', M], 'list<tuple^(2x2)>'],
-      [['Divide', 'q', 'm'], 'list<tuple^(2x2)>'],
+      [['Divide', P, 'm'], 'matrix<tuple<number, number>^(2x2)>'],
+      [['Divide', 'q', M], 'matrix<tuple^(2x2)>'],
+      [['Divide', 'q', 'm'], 'matrix<tuple^(2x2)>'],
     ] as const) {
       const e = ce.box(json as any);
       expect([json, e.type.toString()]).toEqual([json, type]);
@@ -333,11 +333,11 @@ describe('the type of a product of a point and a tensor that is not a literal', 
   const P = ['Tuple', 1, 2];
 
   test.each([
-    [['Multiply', P, 'm'], 'list<tuple<number, number>^(2x2)>'],
-    [['Multiply', P, 'n'], 'list<tuple<number, number>^(2x2)>'],
+    [['Multiply', P, 'm'], 'matrix<tuple<number, number>^(2x2)>'],
+    [['Multiply', P, 'n'], 'matrix<tuple<number, number>^(2x2)>'],
     [['Multiply', P, 'v'], 'list<tuple<number, number>^2>'],
     [['Multiply', P, 'w'], 'list<tuple<number, number>^2>'],
-    [['Multiply', P, ['Divide', 1, M]], 'list<tuple<number, number>^(2x2)>'],
+    [['Multiply', P, ['Divide', 1, M]], 'matrix<tuple<number, number>^(2x2)>'],
   ])('%j is typed %s', (json, type) => {
     const e = ce.box(json as any);
     expect(e.type.toString()).toBe(type);
@@ -356,7 +356,7 @@ describe('a list of points against a matrix', () => {
       ['Multiply', M, PL],
     ]) {
       const e = ce.box(json as any);
-      expect(e.type.toString()).toBe('list<tuple<integer, integer>^(2x2)>');
+      expect(e.type.toString()).toBe('matrix<tuple<integer, integer>^(2x2)>');
       const value = e.evaluate();
       expect(value.toString()).toBe('[[(1, 2),(2, 4)],[(9, 12),(12, 16)]]');
       expect(value.type.matches(e.type)).toBe(true);
@@ -366,7 +366,7 @@ describe('a list of points against a matrix', () => {
   test('the quotient is a list of lists of points', () => {
     const e = ce.box(['Divide', PL, M] as any);
     // A tuple cell may carry dimensions, so the quotient has the matrix's shape.
-    expect(e.type.toString()).toBe('list<tuple<rational, rational>^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<tuple<rational, rational>^(2x2)>');
     const value = e.evaluate();
     expect(value.toString()).toBe('[[(1, 2),(1/2, 1)],[(1, 4/3),(3/4, 1)]]');
     expect(value.type.matches(e.type)).toBe(true);
@@ -378,17 +378,17 @@ describe('a list of points against a matrix', () => {
     for (const [json, type, value] of [
       [
         ['Multiply', 2, PL, M],
-        'list<tuple<integer, integer>^(2x2)>',
+        'matrix<tuple<integer, integer>^(2x2)>',
         '[[(2, 4),(4, 8)],[(18, 24),(24, 32)]]',
       ],
       [
         ['Multiply', ['Rational', 1, 2], M, PL],
-        'list<tuple<rational, rational>^(2x2)>',
+        'matrix<tuple<rational, rational>^(2x2)>',
         '[[(1/2, 1),(1, 2)],[(9/2, 6),(6, 8)]]',
       ],
       [
         ['Multiply', 'a', PL, M],
-        'list<tuple<real, real>^(2x2)>',
+        'matrix<tuple<real, real>^(2x2)>',
         '[[(a, 2a),(2a, 4a)],[(9a, 12a),(12a, 16a)]]',
       ],
     ] as const) {
@@ -412,7 +412,7 @@ describe('a list of rows of points', () => {
     // rows.
     const e = ce.box(['List', ['List', a, b], ['List', b, a]] as any);
     expect(e.type.toString()).toBe(
-      'list<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>'
+      'matrix<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>'
     );
     expect(e.type.matches('list<list<any>>')).toBe(true);
     // A literal of rank 2 whose cells are of different kinds keeps its two
@@ -441,7 +441,7 @@ describe('a list of rows of points', () => {
       expect(e.evaluate().type.matches(e.type)).toBe(true);
     }
     expect(ce.box(['Add', M2, ['Tuple', 1, 1]]).type.toString()).toBe(
-      'list<tuple<integer, integer>^(2x2)>'
+      'matrix<tuple<integer, integer>^(2x2)>'
     );
   });
 });
@@ -466,12 +466,12 @@ describe('a point divided by a collection with a zero cell', () => {
     ],
     [
       ['Divide', P, ['List', ['List', 1, 0], ['List', 3, 4]]],
-      'list<(tuple<infinity, infinity> | tuple<rational, rational>)^(2x2)>',
+      'matrix<(tuple<infinity, infinity> | tuple<rational, rational>)^(2x2)>',
       '[[(1, 2),(~oo, ~oo)],[(1/3, 2/3),(1/4, 1/2)]]',
     ],
     [
       ['Divide', P0, ['List', ['List', 1, 0], ['List', 3, 4]]],
-      'list<(tuple<nan, infinity> | tuple<rational, rational>)^(2x2)>',
+      'matrix<(tuple<nan, infinity> | tuple<rational, rational>)^(2x2)>',
       '[[(0, 2),(Indeterminate, ~oo)],[(0, 2/3),(0, 1/2)]]',
     ],
     [
@@ -504,7 +504,7 @@ describe('a point divided by a collection with a zero cell', () => {
   test('parse route', () => {
     const e = ce.parse('(1, 2)/\\begin{pmatrix}1 & 0\\\\ 3 & 4\\end{pmatrix}');
     expect(e.type.toString()).toBe(
-      'list<(tuple<infinity, infinity> | tuple<rational, rational>)^(2x2)>'
+      'matrix<(tuple<infinity, infinity> | tuple<rational, rational>)^(2x2)>'
     );
     expect(e.evaluate().type.matches(e.type)).toBe(true);
   });

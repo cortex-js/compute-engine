@@ -3040,7 +3040,7 @@ function isBroadcastCollectionTypeOf(t: Type): boolean {
 }
 
 /** The element type of a dimensioned list type whose elements are provably
- * numbers (`vector<integer^2>`, `list<real^2x3>`), or `undefined` for any
+ * numbers (`vector<integer^2>`, `matrix<real^(2x3)>`), or `undefined` for any
  * other type — a list of points, a list of strings, a dimensionless list. */
 function numericTensorElementType(t0: Type): Type | undefined {
   const t = resolveTypeAlias(t0);
@@ -3319,7 +3319,7 @@ function isDeclaredScalarNumberOperand(
 
 /**
  * A type that is statically a list of points of any rank: a list of points
- * (`list<tuple<…>>`), a matrix of points (`list<tuple<…>^(2x2)>`), or a list
+ * (`list<tuple<…>>`), a matrix of points (`matrix<tuple<…>^(2x2)>`), or a list
  * of such lists (`list<list<tuple<…>>>`). A cell can also be a union of
  * tuple types (points whose components have different types).
  *

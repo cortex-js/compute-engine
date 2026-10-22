@@ -278,7 +278,7 @@ describe('GLSL sampler-backed At — the carrier type', () => {
     // (`missing | vector<4>`), which the §3.F gate refuses ahead of any
     // target lowering — with or without the hint. The lowering's own
     // multi-axis arm is a backstop behind that gate.
-    const ce = engineWith({ S: 'list<number^4x4>', k: 'integer' });
+    const ce = engineWith({ S: 'matrix<number^(4x4)>', k: 'integer' });
     const plain = message(() => glsl.compile(read(ce), NO_FOLD));
     const hinted = message(() =>
       glsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER })

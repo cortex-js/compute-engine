@@ -233,7 +233,7 @@ describe('describeType()', () => {
   });
 
   test('a dimensioned list type carries its shape', () => {
-    const t = ce.type('list<integer^2x3>').type;
+    const t = ce.type('matrix<integer^(2x3)>').type;
     const d = describeType(t);
     expect(d.facts.collection).toBe(true);
     expect(d.facts.finiteCollection).toBe(true);

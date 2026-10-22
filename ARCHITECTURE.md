@@ -497,13 +497,15 @@ the types of mathematical expressions. It models:
 - **Collections**: `list`, `set`, `tuple`, `record`, `dictionary`, with shapes
   (e.g. `matrix<number^(2x3)>` for a matrix). A list type with no dimensions,
   `list<E>`, is read by its elements: a matrix of integers is a
-  `list<vector<integer>>`, not a `list<integer>`. A vector, a matrix, a
-  `tensor<U>` (any rank) and a `list<U^dims>` are read by their cells. The
-  cells of a list with dimensions and of a tensor cannot be lists
-  (`list<boolean^2>` and `tensor<boolean>` are valid, `list<list<integer>^2>`
-  is not), and the cells of a type spelled `vector` or `matrix` must be able
-  to hold a number (`vector<string>` is not valid). The rules are in
-  `docs/TYPE-SYSTEM.md`, section "Lists, tensors and `broadcastable`".
+  `list<vector<integer>>`, not a `list<integer>`. A `list<U^n>`, a vector, a
+  matrix and a tensor (`tensor<U^(2x3x4)>`, or `tensor<U>` of any rank) are
+  read by their cells. Every head accepts every cell type that is not a list
+  (`list<boolean^2>`, `matrix<boolean>` and `tensor<boolean>` are valid,
+  `list<list<integer>^2>` and `matrix<list<integer>>` are not), and the bare
+  names `vector`, `matrix` and `tensor` mean number cells. A `list` has one
+  axis at most: `list<boolean^(2x2)>` is refused, and is spelled
+  `matrix<boolean^(2x2)>`. The rules are in `docs/TYPE-SYSTEM.md`, section
+  "Lists, tensors and `broadcastable`".
 - **Broadcastable values**: `broadcastable<T>` — "a `T`, or an array of any
   rank whose cells are `T`, element-wise" (`T | tensor<T>`, for a `T` that
   cannot hold a list). The static type of arithmetic whose

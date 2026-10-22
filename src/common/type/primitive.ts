@@ -377,7 +377,7 @@ export function isValidType(t: any): t is Readonly<Type> {
  * The primitive names of the list families: a value of one of these is, or
  * can be, a list. A list whose cells could be lists does not carry
  * dimensions (`cellTypeMayCarryDimensions`): its shape is spelled in one
- * place, on the outer list.
+ * place, on the outer head.
  */
 const LIST_FAMILY_NAMES: ReadonlySet<string> = new Set([
   'list',
@@ -389,13 +389,14 @@ const LIST_FAMILY_NAMES: ReadonlySet<string> = new Set([
 
 /**
  * Whether a list whose cells have the type `t` may carry dimensions, that
- * is, be spelled `list<t^dims>` or `tensor<t>` by the type builder, or be
- * typed with a shape by the engine's literal typing.
+ * is, be spelled `list<t^n>`, `vector<t>`, `matrix<t>` or `tensor<t>` by
+ * the type builder, or be typed with a shape by the engine's literal
+ * typing.
  *
  * The rule in force (user decision of 2026-10-21, after the measurement
  * recorded in `docs/plans/2026-10-21-list-element-tensor-cell.md`): the
  * cells of a list with dimensions cannot themselves be lists. A shape is
- * spelled in one place, on the outer list (`list<T^(2x3)>`), never nested
+ * spelled in one place, on the outer head (`matrix<T^(2x3)>`), never nested
  * (`list<list<T^3>^2>`), so that one value has one spelling. Accepted: every
  * primitive name that is not a list family name (the numeric names,
  * `boolean`, `string`, `symbol`, `color`, `missing`, `nothing`, `error`,
@@ -413,12 +414,13 @@ const LIST_FAMILY_NAMES: ReadonlySet<string> = new Set([
  * subtype relation (this module is a leaf that the type builder can
  * import).
  *
- * A tensor of unknown rank, `tensor<U>`, accepts the same cell types
- * (`tensor<boolean>`, `tensor<tuple<number, number>>`; not
- * `tensor<list<integer>>`). The named heads `vector<U>` and `matrix<U>` ask
- * a second, stricter question of their cells: that they can hold a number
- * (`cellTypeCanHoldANumber`), so `vector<string>` is a parse error while
- * `list<string^2>` is a list of two strings.
+ * Every head applies this one rule to its cells (user decision of
+ * 2026-10-22, option U of
+ * `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`):
+ * `matrix<boolean>`, `vector<string^2>`, `tensor<boolean>` and
+ * `tensor<tuple<number, number>>` are accepted; `matrix<list<integer>>` and
+ * `tensor<list<integer>>` are not. Only the bare names `vector`, `matrix`
+ * and `tensor` mean number cells.
  *
  * The subtype relation asks the semantic form of this question,
  * `cannotHoldAList` in `subtype.ts`: `value` and `any` pass the syntactic
@@ -452,7 +454,7 @@ export function cellTypeMayCarryDimensions(t: Type): boolean {
  * The primitive names, other than the numeric names, whose values include
  * numbers: the tops, the bottom, and the names that `number` is below in the
  * primitive lattice. A cell type spelled with one of these could still be
- * numeric, so a vector or a matrix of it is accepted
+ * numeric, so a rank-1 list of it prints with the `vector` head
  * (`cellTypeCanHoldANumber`).
  */
 const PRIMITIVES_THAT_CAN_HOLD_A_NUMBER: ReadonlySet<string> = new Set([
@@ -465,12 +467,18 @@ const PRIMITIVES_THAT_CAN_HOLD_A_NUMBER: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether the cell type `t` could hold a number: the rule the named tensor
- * heads `vector<U>` and `matrix<U>` apply to their cells (user decision D3
- * of 2026-10-21, `docs/plans/2026-10-21-list-element-tensor-cell.md`; the
- * cells of a vector or a matrix are numbers, which is what the runtime
- * tensor fields hold). `tensor<U>` applies the weaker rule of
- * `cellTypeMayCarryDimensions`. It answers `false` only for a type that
+ * Whether the cell type `t` could hold a number. Only the printer
+ * (`typeToString` in `serialize.ts`) asks this question: a list of rank 1
+ * prints as `vector<…>` when its cells can hold a number and as `list<…^n>`
+ * otherwise (`vector<integer^3>`, `list<boolean^2>`). The parser does not
+ * ask it: every head accepts every cell type that is not a list
+ * (`cellTypeMayCarryDimensions`), so `vector<string^2>` parses (and prints
+ * `list<string^2>`) and `matrix<boolean>` parses. User decision of
+ * 2026-10-22, option U of
+ * `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`; until then the
+ * parser refused `vector` and `matrix` cells that cannot hold a number.
+ *
+ * It answers `false` only for a type that
  * provably holds no number: a non-numeric primitive name (`string`,
  * `boolean`, `symbol`, a collection name), a string or boolean literal
  * type, a composite that is not a number (a list, a tuple, a record, a
@@ -489,8 +497,8 @@ const PRIMITIVES_THAT_CAN_HOLD_A_NUMBER: ReadonlySet<string> = new Set([
  * (`a: matrix<T^(MxN)>` in
  * `function mm(a: matrix<T^(MxN)>, …) -> … where T, M, N, P`) before the
  * clause is parsed. Such a name says nothing about the cells, as a
- * `variable` node does not, so `matrix<T>` is accepted on that route as it
- * is by `parseType` with the clause.
+ * `variable` node does not, so `vector<T^N>` prints with the `vector` head
+ * on that route as it does from `parseType` with the clause.
  */
 export function cellTypeCanHoldANumber(t: Type): boolean {
   if (typeof t === 'string')

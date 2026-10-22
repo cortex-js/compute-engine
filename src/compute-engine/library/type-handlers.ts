@@ -1666,7 +1666,7 @@ export function extendedReductionType(
     const t = resolveTypeAlias(d.type);
     let v: Type = t;
     if (typeof t === 'object' && t.kind === 'list') {
-      // A matrix (`list<real^2x2>`) sums column by column, to a list, not
+      // A matrix (`matrix<real^(2x2)>`) sums column by column, to a list, not
       // to a scalar. A tensor of unknown rank (`tensor<U>`, whose
       // `dimensions` is `null`) may be a matrix, so its reduction is not
       // known to be a scalar either: `shapedSumType` and

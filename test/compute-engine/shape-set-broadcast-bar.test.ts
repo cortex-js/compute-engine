@@ -104,7 +104,7 @@ describe('Shape and Rank of a lazy collection or a set', () => {
     // `matrix<never^(2x0)>`: the literal has no cell, so its element type is
     // `never` (`shapedListTypeD()`, `library/collections.ts`).
     expect(ce.box(['List', ['List'], ['List']]).type.toString()).toBe(
-      'list<never^(2x0)>'
+      'matrix<never^(2x0)>'
     );
   });
 });

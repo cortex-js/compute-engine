@@ -1187,7 +1187,7 @@ describe('a mask of rank 2 or more selects at each level', () => {
       ['If', ['Less', 'M', 3], ['Tuple', 1, 2], ['Tuple', 0, 0]],
       undefined,
       '[[(1, 2),(1, 2)],[(0, 0),(0, 0)]]',
-      'list<tuple<integer, integer>^(2x2)>',
+      'matrix<tuple<integer, integer>^(2x2)>',
     ],
     // A string arm without a default: the unselected cells are `Missing`,
     // and a union cell carries no dimensions.
@@ -1211,7 +1211,7 @@ describe('a mask of rank 2 or more selects at each level', () => {
       ],
       undefined,
       '[[[1,0]],[[0,1]]]',
-      'list<integer^(2x1x2)>',
+      'tensor<integer^(2x1x2)>',
     ],
   ];
 
@@ -1619,7 +1619,7 @@ describe('the result type when the shape of a condition is not known', () => {
   });
 
   test('a union of masks of different ranks is a mask of unknown rank', () => {
-    const declarations = { P: 'list<boolean^(2x2)> | list<boolean^3>' };
+    const declarations = { P: 'matrix<boolean^(2x2)> | list<boolean^3>' };
     expect(
       typedThenEvaluated(declarations, ['If', 'P', 1, 0], { P: MASK })
     ).toEqual({

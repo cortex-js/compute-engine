@@ -62,11 +62,11 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
   test('[[x,y],[z,w]] undeclared symbols → matrix<2x2> (fold at every leaf)', () => {
     const t = typeOf(['List', ['List', 'x', 'y'], ['List', 'z', 'w']]);
     expect(t).toBe('matrix<2x2>');
-    // matrix<2x2> is the surface form of list<number^2x2>
+    // matrix<2x2> is the surface form of matrix<number^(2x2)>
     expect(
       ce
         .box(['List', ['List', 'x', 'y'], ['List', 'z', 'w']])
-        .type.matches('list<number^(2x2)>')
+        .type.matches('matrix<number^(2x2)>')
     ).toBe(true);
   });
 
@@ -176,7 +176,7 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     const boxed = ce.box(['List', ['List'], ['List']]);
     expect(boxed.type.matches('matrix<2x0>')).toBe(true);
     expect(boxed.type.matches('matrix<integer^(2x0)>')).toBe(true);
-    expect(boxed.type.toString()).toBe('list<never^(2x0)>');
+    expect(boxed.type.toString()).toBe('matrix<never^(2x0)>');
     // A ragged literal with an empty row claims no shape: the join of the
     // empty row (`list<never>`) and the 1-vector is a plain list of the
     // joined elements.
@@ -192,7 +192,7 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
   // whole broadcast collection. The arm-1 wrapper assumes a SCALAR per-element
   // `sigResult` and peels one rank off before re-shaping, which turned an
   // honest `matrix<E^(2x2)>` into the mixed-encoding
-  // `list<vector<E^2>^(2x2)>`. The pre-existing `deferToHandler` gate only
+  // `matrix<vector<E^2>^(2x2)>`. The pre-existing `deferToHandler` gate only
   // dropped the `isFixedShapeCollection` disjunct — enough for a matrix-TYPED
   // SYMBOL (`-M → matrix`), but a matrix LITERAL still entered
   // `broadcastingOps` through `isFiniteIndexedCollection` and got re-wrapped.
@@ -211,8 +211,8 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
 
   test('rank 3 too — the re-wrap nested a matrix inside a rank-3 shape', () => {
     const e = ce.box(['Negate', ['List', M22, M22]]);
-    expect(e.type.toString()).toBe('list<integer^(2x2x2)>');
-    expect(e.evaluate().type.toString()).toBe('list<integer^(2x2x2)>');
+    expect(e.type.toString()).toBe('tensor<integer^(2x2x2)>');
+    expect(e.evaluate().type.toString()).toBe('tensor<integer^(2x2x2)>');
   });
 
   test('a matrix-TYPED symbol and rank 1 are unchanged', () => {
@@ -340,7 +340,7 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expect(e.evaluate().type.matches(e.type.toString())).toBe(true);
     // `Remainder(M, 7)` no longer widens to a union at all: element-binding
     // joins the matrix LEAF with the scalar, so the wrapper gives the clean
-    // matrix (was `list<integer | vector<integer^2>^(2x2)>`).
+    // matrix (was `matrix<integer | vector<integer^2>^(2x2)>`).
     expect(ce.box(['Remainder', M22, 7]).type.toString()).toBe(
       'matrix<integer^(2x2)>'
     );

@@ -14,7 +14,7 @@ import { typeToString } from '../../src/common/type/serialize';
  * - A list with dimensions (`vector<U>`, `matrix<U>`, `list<U^dims>`) is
  *   read by its cells, and its elements are its rows. The cells of a named
  *   `vector`, `matrix` or `tensor` are numbers; a `list<U^dims>` may carry
- *   dimensions when `U` cannot hold a list (`list<boolean^(2x2)>`).
+ *   dimensions when `U` cannot hold a list (`matrix<boolean^(2x2)>`).
  * - `tensor<U>` is a tensor of unknown rank whose cells are `U`; its
  *   elements are `U | tensor<U>`.
  * - A list of numbers and an open-length vector of the same numbers denote
@@ -76,7 +76,7 @@ describe('the subtype relation of lists is transitive', () => {
     // A rank-3 tensor is a list of matrices, which is a list of lists of
     // vectors.
     [
-      'list<integer^(2x3x4)>',
+      'tensor<integer^(2x3x4)>',
       'list<matrix<integer^(3x4)>>',
       'list<matrix<integer>>',
     ],
@@ -94,7 +94,7 @@ describe('the subtype relation of lists is transitive', () => {
     ['list<integer | tensor<integer>>', 'list<number | tensor>', 'list<any>'],
     // A dimensioned list of non-numbers is read by its cells too: its rows
     // are fixed-length lists of the cell type.
-    ['list<boolean^(2x2)>', 'list<list<boolean^2>>', 'list<list<boolean>>'],
+    ['matrix<boolean^(2x2)>', 'list<list<boolean^2>>', 'list<list<boolean>>'],
     [
       'list<list<boolean^2>>',
       'list<list<boolean>>',
@@ -112,7 +112,7 @@ describe('the subtype relation of lists is transitive', () => {
       'broadcastable<tuple<number, number>>',
     ],
     [
-      'list<string^(2x2)>',
+      'matrix<string^(2x2)>',
       'list<list<string>>',
       'collection<collection<string>>',
     ],
@@ -140,14 +140,14 @@ describe('the elements of a tensor of rank 2 or more are its rows', () => {
     ['matrix<integer>', 'collection<collection<integer>>'],
     ['matrix<integer>', 'list<integer | list>'],
     // A rank-3 tensor is a list of matrices, and a list of lists of lists.
-    ['list<integer^(2x2x2)>', 'list<integer | list>'],
-    ['list<integer^(2x2x2)>', 'list<list<list<integer>>>'],
-    ['list<integer^(2x2x2)>', 'list<matrix<integer^(2x2)>>'],
+    ['tensor<integer^(2x2x2)>', 'list<integer | list>'],
+    ['tensor<integer^(2x2x2)>', 'list<list<list<integer>>>'],
+    ['tensor<integer^(2x2x2)>', 'list<matrix<integer^(2x2)>>'],
     // A dimensioned list of non-numbers has rows too.
-    ['list<string^(2x2)>', 'list<list<string>>'],
-    ['list<boolean^(2x2)>', 'list<collection<boolean>>'],
+    ['matrix<string^(2x2)>', 'list<list<string>>'],
+    ['matrix<boolean^(2x2)>', 'list<collection<boolean>>'],
     // An open axis admits the fixed length.
-    ['list<integer^(3x2)>', 'matrix<integer^(?x2)>'],
+    ['matrix<integer^(3x2)>', 'matrix<integer^(?x2)>'],
   ])('%s is a %s', (a, b) => {
     expect(sub(a, b)).toBe(true);
   });
@@ -164,10 +164,10 @@ describe('the elements of a tensor of rank 2 or more are its rows', () => {
     ['matrix<unknown>', 'vector<unknown>'],
     ['matrix<any>', 'vector<any>'],
     // The rows of a 2×2×2 tensor are 2×2 matrices, not 2-vectors.
-    ['list<integer^(2x2x2)>', 'list<vector<integer^2>>'],
+    ['tensor<integer^(2x2x2)>', 'list<vector<integer^2>>'],
     // A fixed axis must agree with the target's axis.
-    ['list<integer^(3x2)>', 'matrix<integer^(2x?)>'],
-    ['list<integer^(3x2)>', 'list<vector<integer^3>>'],
+    ['matrix<integer^(3x2)>', 'matrix<integer^(2x?)>'],
+    ['matrix<integer^(3x2)>', 'list<vector<integer^3>>'],
   ])('%s is not a %s', (a, b) => {
     expect(sub(a, b)).toBe(false);
   });
@@ -178,7 +178,7 @@ describe('a plain list of vectors is not a tensor', () => {
     // The rows of a `list<vector<integer^3>>` may differ in number and the
     // rows of a `list<vector<integer>>` in length, so neither is a matrix.
     ['list<vector<integer^3>>', 'matrix<integer>'],
-    ['list<vector<integer^3>>', 'list<integer^(?x3)>'],
+    ['list<vector<integer^3>>', 'matrix<integer^(?x3)>'],
     ['list<vector<integer>>', 'matrix'],
     ['list<list<integer>>', 'matrix<integer>'],
     // A list of vectors is not a list of numbers (decided 2026-10-21; this
@@ -217,30 +217,33 @@ describe('a plain list of vectors is not a tensor', () => {
 
 describe('a collection reads the elements of a tensor as its rows', () => {
   test('a 2×2×2 tensor is a list of 2×2 matrices, and a collection of them', () => {
-    expect(sub('list<integer^(2x2x2)>', 'list<matrix<integer^(2x2)>>')).toBe(
+    expect(sub('tensor<integer^(2x2x2)>', 'list<matrix<integer^(2x2)>>')).toBe(
       true
     );
     expect(
-      sub('list<integer^(2x2x2)>', 'collection<matrix<integer^(2x2)>>')
+      sub('tensor<integer^(2x2x2)>', 'collection<matrix<integer^(2x2)>>')
     ).toBe(true);
     expect(
-      sub('list<integer^(2x2x2)>', 'indexed_collection<matrix<integer^(2x2)>>')
+      sub(
+        'tensor<integer^(2x2x2)>',
+        'indexed_collection<matrix<integer^(2x2)>>'
+      )
     ).toBe(true);
     expect(
       typesOverlap(
         parseType('collection<matrix<integer^(2x2)>>'),
-        parseType('list<integer^(2x2x2)>')
+        parseType('tensor<integer^(2x2x2)>')
       )
     ).toBe(true);
   });
 
   test('a tensor is not a collection of rows of another shape', () => {
     expect(
-      sub('list<integer^(2x2x2)>', 'collection<matrix<integer^(3x3)>>')
+      sub('tensor<integer^(2x2x2)>', 'collection<matrix<integer^(3x3)>>')
     ).toBe(false);
-    expect(sub('list<integer^(2x2x2)>', 'collection<vector<integer^2>>')).toBe(
-      false
-    );
+    expect(
+      sub('tensor<integer^(2x2x2)>', 'collection<vector<integer^2>>')
+    ).toBe(false);
   });
 });
 
@@ -286,7 +289,7 @@ describe('the meet follows the readings', () => {
     // A list of strings holds no list of integers of length 2, and a
     // rank-2 tensor is not a vector.
     expect(meet('list<string>', 'list<integer^2>')).toBe('never');
-    expect(meet('list<any^(3x2)>', 'vector<any>')).toBe('never');
+    expect(meet('matrix<any^(3x2)>', 'vector<any>')).toBe('never');
   });
 
   test('the meet of a list of vectors and a matrix is kept as written', () => {
@@ -303,7 +306,7 @@ describe('the meet follows the readings', () => {
     // `list<list<never^0>>` holds `[[], []]` (two empty rows), which a list
     // whose first axis has length 0 does not; the plain list is read by its
     // elements, so it is not a `vector<integer^0>`, the type of `[]` alone.
-    const w = 'list<never^(2x0)>';
+    const w = 'matrix<never^(2x0)>';
     expect(sub(w, 'list<list<never^0>>')).toBe(true);
     expect(sub(w, 'vector<integer^0>')).toBe(false);
     expect(sub('list<list<never^0>>', 'vector<integer^0>')).toBe(false);

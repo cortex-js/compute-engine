@@ -85,7 +85,7 @@ describe('A NEGATIVE POWER OF AN OPERAND THAT CAN BE A MATRIX', () => {
       ['Power', 'u', -1],
       ['Power', 'u', -1],
     ],
-    // `g(A)` has the type `list<unknown^(2x2)>`: it can be a matrix
+    // `g(A)` has the type `matrix<unknown^(2x2)>`: it can be a matrix
     [
       ['Power', ['g', 'A'], -1],
       ['Power', ['g', 'A'], -1],

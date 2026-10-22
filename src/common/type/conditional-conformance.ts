@@ -106,7 +106,7 @@ function matchHead(
       // binds to the ELEMENTS of the subject, what one index into it
       // returns (`listElementType`): the elements of a plain list, the
       // cells of a rank-1 tensor, the rows of a tensor of rank 2 or more
-      // (`list<string^(2x1)>` binds `T = list<string^1>`), and
+      // (`matrix<string^(2x1)>` binds `T = list<string^1>`), and
       // `U | tensor<U>` for a tensor of unknown rank. The `elements` field
       // of a dimensioned subject is its cell type, which is not the element
       // type at rank 2 or more. The generic solver binds `T` the same way

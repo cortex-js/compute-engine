@@ -168,7 +168,7 @@ function structuralShapeOfOps(ops: ReadonlyArray<Expression>): number[] | null {
  */
 export function isTensorValue(x: Expression): boolean {
   if (!isTensor(x)) return false;
-  // A value with a zero extent (`[[], []]`, typed `list<never^(2x0)>`) has
+  // A value with a zero extent (`[[], []]`, typed `matrix<never^(2x0)>`) has
   // no cell, so the tensor kernels have nothing to pack and decline it. The
   // consumers then take the route of a general collection: `Flatten([[],
   // []])` is `[]`, and `Trace` and `Norm` refuse the operand with an

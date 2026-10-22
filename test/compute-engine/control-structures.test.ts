@@ -257,8 +257,8 @@ describe('CONTROL STRUCTURES', () => {
           .type.toString();
       };
       const dims = (levels: number) => Array(levels).fill(2).join('x');
-      expect(typeOf('t', 24)).toBe(`list<list<number^(${dims(24)})>>`);
-      expect(typeOf('k', 20)).toBe(`list<list<integer^(${dims(20)})>>`);
+      expect(typeOf('t', 24)).toBe(`list<tensor<number^(${dims(24)})>>`);
+      expect(typeOf('k', 20)).toBe(`list<tensor<integer^(${dims(20)})>>`);
     });
   });
 

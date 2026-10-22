@@ -4,12 +4,17 @@
  *
  * - `list<E>` holds ELEMENTS `E`: a matrix of integers is a
  *   `list<vector<integer>>`, never a `list<integer>`.
- * - `vector<U>`, `matrix<U>`, `list<U^dims>` are tensors whose CELLS are
- *   `U`; their elements are their rows.
+ * - `vector<U>`, `matrix<U>`, `list<U^n>` and `tensor<U^(…)>` are tensors
+ *   whose CELLS are `U`; their elements are their rows.
  * - `tensor<U>` is a tensor of unknown rank whose cells are `U`.
  *
+ * Option U of `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`
+ * (user decision of 2026-10-22): every head accepts every cell type that
+ * cannot hold a list, and a `list` has one axis at most.
+ *
  * This file pins the representation and its round trips, the parse errors
- * for a non-numeric cell type, the element type, the subtype relation, the
+ * for a cell type that can be a list and for a list with two or more axes,
+ * the element type, the subtype relation, the
  * meet and the join, and runs a corpus check for covariance, transitivity,
  * antisymmetry and the soundness of `narrow`.
  */
@@ -71,7 +76,7 @@ describe('REPRESENTATION (section 3.1)', () => {
       elements: 'number',
       dimensions: [2, 3],
     });
-    expect(listTensorRank(t('list<integer^(2x3x4)>') as never)).toBe(3);
+    expect(listTensorRank(t('tensor<integer^(2x3x4)>') as never)).toBe(3);
   });
 
   test('tensor and tensor<U> store null dimensions', () => {
@@ -109,9 +114,9 @@ describe('REPRESENTATION (section 3.1)', () => {
     'matrix<integer>',
     'matrix<integer^(2x3)>',
     'matrix<integer^(2x?)>',
-    'list<integer^(2x3x4)>',
-    'list<integer^(2x?x4)>',
-    'list<any^(2x2x2)>',
+    'tensor<integer^(2x3x4)>',
+    'tensor<integer^(2x?x4)>',
+    'tensor<any^(2x2x2)>',
     'broadcastable<number>',
     'broadcastable<boolean>',
     'collection<vector<integer>>',
@@ -132,10 +137,11 @@ describe('REPRESENTATION (section 3.1)', () => {
     expect(str(t('vector<number>'))).toBe('vector');
     expect(str(t('matrix<number^(2x3)>'))).toBe('matrix<2x3>');
     expect(str(t('list<integer^3>'))).toBe('vector<integer^3>');
-    expect(str(t('list<integer^(2x3)>'))).toBe('matrix<integer^(2x3)>');
-    // A fixed length with a non-numeric cell type keeps the `list` head.
+    expect(str(t('matrix<integer^(2x3)>'))).toBe('matrix<integer^(2x3)>');
+    // At rank 1, a fixed length with a cell type that is not a numeric
+    // name keeps the `list` head. Rank 2 is always `matrix`.
     expect(str(t('list<unknown^2>'))).toBe('list<unknown^2>');
-    expect(str(t('list<any^(2x2)>'))).toBe('list<any^(2x2)>');
+    expect(str(t('matrix<any^(2x2)>'))).toBe('matrix<any^(2x2)>');
     expect(str(t('vector<any>'))).toBe('vector<any>');
   });
 
@@ -147,17 +153,42 @@ describe('REPRESENTATION (section 3.1)', () => {
   });
 });
 
-describe('THE CELLS OF A VECTOR OR A MATRIX ARE NUMERIC (decision D3)', () => {
+describe('EVERY HEAD TAKES THE SAME CELLS (option U)', () => {
+  // User decision of 2026-10-22 (option U of
+  // `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`): `vector<U>`
+  // and `matrix<U>` accept every cell type that cannot hold a list, as
+  // `tensor<U>` and `list<U^n>` do. Until then a `vector` or `matrix` cell
+  // had to be able to hold a number. A rank-1 list whose cells cannot hold
+  // a number prints with the `list` head; rank 2 prints with `matrix`.
   test.each([
-    'vector<string>',
-    'vector<boolean>',
-    'vector<string^3>',
-    'matrix<string^(2x2)>',
-    'vector<tuple<number, number>>',
-    'vector<symbol>',
-    'vector<"a" | "b">',
-  ])('%s is a parse error', (s) => {
-    expect(() => t(s)).toThrow(/cells of a vector or a matrix are numbers/);
+    ['vector<string>', 'list<string^?>'],
+    ['vector<boolean>', 'list<boolean^?>'],
+    ['vector<string^3>', 'list<string^3>'],
+    ['matrix<string^(2x2)>', 'matrix<string^(2x2)>'],
+    ['vector<tuple<number, number>>', 'list<tuple<number, number>^?>'],
+    ['vector<symbol>', 'list<symbol^?>'],
+    ['vector<"a" | "b">', 'list<"a" | "b"^?>'],
+    ['matrix<boolean>', 'matrix<boolean>'],
+  ])('%s is accepted and prints as %s', (s, printed) => {
+    const parsed = t(s);
+    expect(str(parsed)).toBe(printed);
+    expect(parseType(printed)).toEqual(parsed);
+  });
+
+  test('a matrix of booleans is not a numeric matrix: Determinant refuses it', () => {
+    // The bare names keep number cells, and the linear-algebra signatures
+    // use the bare names, so accepting `matrix<boolean>` as a type does not
+    // make a matrix of booleans an operand of `Determinant`.
+    const ce = new ComputeEngine();
+    expect(isSubtype(t('matrix<boolean>'), t('matrix'))).toBe(false);
+    const det = ce.box([
+      'Determinant',
+      ['List', ['List', 'True', 'False'], ['List', 'False', 'True']],
+    ]);
+    expect(det.isValid).toBe(false);
+    expect(JSON.stringify(det.json)).toContain(
+      `["ErrorCode","'incompatible-type'","'matrix'","'matrix<boolean^(2x2)>'"]`
+    );
   });
 
   // The cells of a named head cannot be lists either, even when they can
@@ -170,7 +201,7 @@ describe('THE CELLS OF A VECTOR OR A MATRIX ARE NUMERIC (decision D3)', () => {
     ['tensor<integer | list>', 'tensor'],
     ['tensor<list<integer>>', 'tensor'],
     ['tensor<vector<integer>>', 'tensor'],
-    ['list<(integer | list<integer>)^3>', 'list with dimensions'],
+    ['list<(integer | list<integer>)^3>', 'list with a length'],
   ])('%s is a parse error: its cells can be lists', (s, head) => {
     expect(() => t(s)).toThrow(`The cells of a ${head} cannot be lists`);
   });
@@ -187,9 +218,120 @@ describe('THE CELLS OF A VECTOR OR A MATRIX ARE NUMERIC (decision D3)', () => {
     expect(t(s)).toMatchObject({ kind: 'list', dimensions: null });
   });
 
-  test('the error names the list spelling of a list of non-numbers', () => {
-    expect(() => t('vector<string>')).toThrow(/list<string>/);
-    expect(() => t('matrix<boolean^(2x2)>')).toThrow(/list<boolean>/);
+  test('a list with two or more axes is refused, and the error names the matrix or tensor spelling', () => {
+    // A list has one axis at most, its length. The message is never empty:
+    // it says how many axes the type has and which spelling to write.
+    expect(() => t('list<boolean^(2x2)>')).toThrow(
+      'A list type has one axis at most, its length (`list<T^n>`), but this type has 2 axes. Write `matrix<boolean^(2x2)>` instead'
+    );
+    expect(() => t('list<integer^2x3>')).toThrow(
+      'Write `matrix<integer^(2x3)>` instead'
+    );
+    expect(() => t('list<string^(2x3x4)>')).toThrow(
+      'this type has 3 axes. Write `tensor<string^(2x3x4)>` instead'
+    );
+    expect(() => t('list<integer^(2x?x3)>')).toThrow(
+      'Write `tensor<integer^(2x?x3)>` instead'
+    );
+    // Numbers have the short form; a leading shape is refused too.
+    expect(() => t('list<number^(2x3)>')).toThrow(
+      'Write `matrix<2x3>` instead'
+    );
+    expect(() => t('list<2x3>')).toThrow('Write `matrix<any^(2x3)>` instead');
+    // Dimension variables.
+    expect(() => parseType('(x: list<T^(MxN)>) -> T where T, M, N')).toThrow(
+      'Write `matrix<T^(MxN)>` instead'
+    );
+    // One axis is a list with a length, and stays valid.
+    expect(str(t('list<integer^3>'))).toBe('vector<integer^3>');
+    expect(str(t('list<boolean^3>'))).toBe('list<boolean^3>');
+  });
+
+  test('a list with a length whose cells are lists is refused, and the error names the spelling with one shape', () => {
+    expect(() => t('list<list<integer^3>^2>')).toThrow(
+      'Write `matrix<integer^(2x3)>`, with the shape in one place'
+    );
+    expect(() => t('matrix<vector<integer^3>^(2x2)>')).toThrow(
+      'Write `tensor<integer^(2x2x3)>`, with the shape in one place'
+    );
+    expect(() => t('matrix<list<integer>>')).toThrow(
+      'The cells of a matrix cannot be lists'
+    );
+  });
+
+  test('a cell that is a plain list is advised as nested lists, a cell with a length or a shape as one shape', () => {
+    // A plain list admits rows of different lengths, so a rectangular
+    // spelling such as `matrix<integer^(2x?)>` would refuse values that the
+    // written type allows.
+    expect(() => t('list<list<integer>^2>')).toThrow(
+      'Write `list<list<integer>>` for rows of any lengths'
+    );
+    expect(() => t('list<vector<integer>^2>')).toThrow(
+      'Write `matrix<integer^(2x?)>`, with the shape in one place'
+    );
+    expect(() => t('list<list<integer^3>^2>')).toThrow(
+      'Write `matrix<integer^(2x3)>`, with the shape in one place'
+    );
+  });
+
+  // A `^` with no dimension after it, or an empty group `^()`, is a parse
+  // error for every head. It was dropped before, so `tensor<integer^>` was a
+  // tensor of unknown rank and `list<number^>` a plain list.
+  test.each([
+    'list<number^>',
+    'list<number^()>',
+    'vector<integer^>',
+    'vector<integer^()>',
+    'matrix<integer^>',
+    'matrix<integer^()>',
+    'tensor<integer^>',
+    'tensor<integer^()>',
+  ])('%s is a parse error: a ^ needs a dimension', (s) => {
+    expect(() => t(s)).toThrow(
+      'Expected a positive integer, `?` or a dimension variable after ^'
+    );
+  });
+
+  test('a matrix shape with other than two axes is refused, and the error names the spelling the printer gives', () => {
+    expect(() => t('matrix<integer^(2x3x4)>')).toThrow(
+      'A matrix type has two axes, but this type has 3 axes. Write `tensor<integer^(2x3x4)>` instead'
+    );
+    expect(() => t('matrix<integer^3>')).toThrow(
+      'A matrix type has two axes, but this type has 1 axis. Write `vector<integer^3>` instead'
+    );
+    expect(() => t('matrix<2x3x4>')).toThrow(
+      'Write `tensor<number^(2x3x4)>` instead'
+    );
+    expect(() => t('matrix<3>')).toThrow('Write `vector<3>` instead');
+    // With declared dimension variables the axis count is checked too.
+    expect(() => parseType('(x: matrix<T^N>) -> T where T, N')).toThrow(
+      'this type has 1 axis. Write `vector<T^N>` instead'
+    );
+    // A dimension that names an undeclared variable reports that variable
+    // first: `Mxidx` is one name, not `M x idx`.
+    expect(() =>
+      parseType('(x: matrix<T^(Mxidx)>) -> T where T, M, idx')
+    ).toThrow('`Mxidx` is not quantified');
+    // The advised spellings parse.
+    expect(str(t('tensor<integer^(2x3x4)>'))).toBe('tensor<integer^(2x3x4)>');
+    expect(str(t('vector<integer^3>'))).toBe('vector<integer^3>');
+  });
+
+  test('a tensor has no leading shape: a numeral after `<` is a literal cell type', () => {
+    // `tensor<0>` is an array of zeros of any rank, so `tensor<2x3x4>` cannot
+    // be read as a shape; the error names the spelling to use.
+    expect(t('tensor<0>')).toEqual({
+      kind: 'list',
+      elements: { kind: 'value', value: 0 },
+      dimensions: null,
+    });
+    expect(() => t('tensor<2x3x4>')).toThrow('tensor<number^(2x3x4)>');
+    expect(() => t('tensor<2x3>')).toThrow('no leading shape');
+    expect(str(t('tensor<number^(2x3x4)>'))).toBe('tensor<number^(2x3x4)>');
+    // A type variable after `<` is still the cell type.
+    expect(str(parseType('(x: tensor<T>) -> T where T'))).toBe(
+      '(x: tensor<T>) -> T where T'
+    );
   });
 
   test.each([
@@ -240,16 +382,26 @@ describe('THE CELLS OF A VECTOR OR A MATRIX ARE NUMERIC (decision D3)', () => {
     expect(r.value.toString()).toBe('[[1,2],[3,4]]');
   });
 
-  test('a non-numeric cell type is still refused on the Epsil route', () => {
+  test('a non-numeric cell type is accepted on the Epsil route', () => {
+    const ce = new ComputeEngine();
+    expect(
+      executeEpsil(
+        ce,
+        'function ok(a: vector<string>, b: matrix<boolean>) -> string { "x" }'
+      ).diagnostics
+    ).toEqual([]);
+  });
+
+  test('a list with two axes is refused on the Epsil route, with the message', () => {
     const ce = new ComputeEngine();
     const messages = executeEpsil(
       ce,
-      'function bad(a: vector<string>) -> string { "x" }'
+      'function bad(a: list<boolean^(2x2)>) -> string { "x" }'
     ).diagnostics.map((d) =>
       Array.isArray(d.message) ? d.message.join(' ') : String(d.message)
     );
-    expect(messages.join('\n')).toMatch(
-      /cells of a vector or a matrix are numbers/
+    expect(messages.join('\n')).toContain(
+      'but this type has 2 axes. Write `matrix<boolean^(2x2)>` instead'
     );
   });
 });
@@ -271,9 +423,9 @@ describe('CONDITIONAL CONFORMANCE BINDS THE ELEMENTS OF A PLAIN LIST PATTERN', (
   };
 
   test('`list<T>` binds the elements: the rows of a tensor of rank 2 or more', () => {
-    // `[["a"], ["b"]]` types `list<string^(2x1)>`: its elements are
+    // `[["a"], ["b"]]` types `matrix<string^(2x1)>`: its elements are
     // `list<string^1>`, not its cells `string`.
-    expect(instance('list<T>', 'list<string^(2x1)>')).toBe(
+    expect(instance('list<T>', 'matrix<string^(2x1)>')).toBe(
       'list<list<string^1>>'
     );
     expect(instance('list<T>', 'list<string^2>')).toBe('list<string>');
@@ -326,14 +478,14 @@ describe('THE CELLS OF A LIST WITH DIMENSIONS CANNOT BE LISTS', () => {
   test.each([
     'list<boolean^2>',
     'list<string^2>',
-    'list<boolean^(2x2)>',
+    'matrix<boolean^(2x2)>',
     'list<tuple<number, number>^3>',
-    'list<string^(2x2)>',
+    'matrix<string^(2x2)>',
     'list<symbol^2>',
     'list<record{a: integer}^2>',
     'list<set<integer>^2>',
     'list<integer | string^2>',
-    'list<any^(2x2x2)>',
+    'tensor<any^(2x2x2)>',
     'list<unknown^2>',
     'list<never^2>',
   ])('%s parses', (s) => {
@@ -346,7 +498,7 @@ describe('THE CELLS OF A LIST WITH DIMENSIONS CANNOT BE LISTS', () => {
       elements: 'boolean',
       dimensions: [2],
     });
-    expect(t('list<boolean^(2x2)>')).toEqual({
+    expect(t('matrix<boolean^(2x2)>')).toEqual({
       kind: 'list',
       elements: 'boolean',
       dimensions: [2, 2],
@@ -364,10 +516,12 @@ describe('THE CELLS OF A LIST WITH DIMENSIONS CANNOT BE LISTS', () => {
     'list<range^2>',
     'list<(integer | list<integer>)^2>',
   ])('%s is a parse error', (s) => {
-    expect(() => t(s)).toThrow(
-      /cells of a list with dimensions cannot be lists/
-    );
-    expect(() => t(s)).toThrow(/list<T\^\(2x3\)>/);
+    expect(() => t(s)).toThrow(/cells of a list with a length cannot be lists/);
+    // The message names a spelling to write: nested plain lists when the
+    // cell is a plain list (`list<list<integer>>`), the merged shape when it
+    // can be read (`matrix<integer^(2x?)>`), else the example
+    // `matrix<T^(2x3)>`.
+    expect(() => t(s)).toThrow(/`(matrix|list)</);
   });
 
   test('cellTypeMayCarryDimensions is the one predicate', () => {
@@ -388,15 +542,15 @@ describe('THE CELLS OF A LIST WITH DIMENSIONS CANNOT BE LISTS', () => {
     );
   });
 
-  test('the serializer keeps the list head for non-numeric cells', () => {
+  test('the serializer keeps the list head for non-numeric cells at rank 1', () => {
     expect(str(t('list<boolean^2>'))).toBe('list<boolean^2>');
-    expect(str(t('list<boolean^(2x2)>'))).toBe('list<boolean^(2x2)>');
+    expect(str(t('matrix<boolean^(2x2)>'))).toBe('matrix<boolean^(2x2)>');
     expect(str(t('list<tuple<number, number>^3>'))).toBe(
       'list<tuple<number, number>^3>'
     );
-    // An all-open shape with non-numeric cells is spelled with `?`, which
-    // parses back to the same shape; the `vector`/`matrix` heads would not
-    // parse with such cells.
+    // An all-open rank 1 with non-numeric cells is spelled with `?`, which
+    // parses back to the same shape. An all-open rank 2 is `matrix<U>`,
+    // for every cell type that cannot hold a list.
     const openRow: Type = {
       kind: 'list',
       elements: 'boolean',
@@ -409,7 +563,7 @@ describe('THE CELLS OF A LIST WITH DIMENSIONS CANNOT BE LISTS', () => {
       elements: 'boolean',
       dimensions: [-1, -1],
     };
-    expect(str(openMatrix)).toBe('list<boolean^(?x?)>');
+    expect(str(openMatrix)).toBe('matrix<boolean>');
     expect(parseType(str(openMatrix))).toEqual(openMatrix);
     // A tensor of unknown rank with non-numeric cells is spelled
     // `tensor<boolean>`, which parses back to it.
@@ -472,7 +626,7 @@ describe('ELEMENT TYPE (section 3.2)', () => {
   test('a tensor of rank 2 or more yields its rows', () => {
     expect(el('matrix<integer>')).toBe('vector<integer>');
     expect(el('matrix<integer^(2x3)>')).toBe('vector<integer^3>');
-    expect(el('list<integer^(2x3x4)>')).toBe('matrix<integer^(3x4)>');
+    expect(el('tensor<integer^(2x3x4)>')).toBe('matrix<integer^(3x4)>');
   });
   test('tensor<U> yields U | tensor<U>', () => {
     expect(el('tensor<integer>')).toBe('integer | tensor<integer>');
@@ -543,7 +697,7 @@ describe('SUBTYPE (section 3.3)', () => {
       expect(sub('list<integer | missing>', 'tensor<integer | missing>')).toBe(
         true
       );
-      expect(sub('list<boolean^(2x2)>', 'tensor<boolean>')).toBe(true);
+      expect(sub('matrix<boolean^(2x2)>', 'tensor<boolean>')).toBe(true);
       expect(sub('list<list<boolean>>', 'tensor<boolean>')).toBe(false);
       // A `list<value>` holds lists of matrices, which are not cells of a
       // `tensor<value>`: a non-numeric element type is not read at rank 1.
@@ -567,7 +721,9 @@ describe('SUBTYPE (section 3.3)', () => {
       expect(sub('matrix<number>', 'matrix<integer>')).toBe(false);
       expect(sub('vector<integer^3>', 'matrix<integer>')).toBe(false);
       expect(sub('matrix<integer>', 'vector<integer>')).toBe(false);
-      expect(sub('list<integer^(2x3x4)>', 'list<number^(2x?x4)>')).toBe(true);
+      expect(sub('tensor<integer^(2x3x4)>', 'tensor<number^(2x?x4)>')).toBe(
+        true
+      );
     });
     test('covariance is restored in the cells', () => {
       expect(sub('vector<value>', 'vector<any>')).toBe(true);
@@ -578,7 +734,7 @@ describe('SUBTYPE (section 3.3)', () => {
     test('a tensor fits tensor<V> iff its cells are V', () => {
       expect(sub('matrix<integer>', 'tensor')).toBe(true);
       expect(sub('vector<integer^3>', 'tensor<integer>')).toBe(true);
-      expect(sub('list<integer^(2x3x4)>', 'tensor<real>')).toBe(true);
+      expect(sub('tensor<integer^(2x3x4)>', 'tensor<real>')).toBe(true);
       expect(sub('matrix<real>', 'tensor<integer>')).toBe(false);
     });
     test('a tensor fits list<E> iff its rows are E', () => {
@@ -595,10 +751,10 @@ describe('SUBTYPE (section 3.3)', () => {
       expect(sub('matrix<integer^(2x3)>', 'list<vector<integer^2>>')).toBe(
         false
       );
-      expect(sub('list<integer^(2x3x4)>', 'list<matrix<integer^(3x4)>>')).toBe(
-        true
-      );
-      expect(sub('list<integer^(2x3x4)>', 'list<list<list<integer>>>')).toBe(
+      expect(
+        sub('tensor<integer^(2x3x4)>', 'list<matrix<integer^(3x4)>>')
+      ).toBe(true);
+      expect(sub('tensor<integer^(2x3x4)>', 'list<list<list<integer>>>')).toBe(
         true
       );
     });
@@ -614,7 +770,7 @@ describe('SUBTYPE (section 3.3)', () => {
     test('a tensor fits broadcastable<V> iff its cells are V', () => {
       expect(sub('matrix<integer>', 'broadcastable<number>')).toBe(true);
       expect(sub('vector<integer^3>', 'broadcastable<integer>')).toBe(true);
-      expect(sub('list<integer^(2x3x4)>', 'broadcastable<real>')).toBe(true);
+      expect(sub('tensor<integer^(2x3x4)>', 'broadcastable<real>')).toBe(true);
       expect(sub('matrix<real>', 'broadcastable<integer>')).toBe(false);
     });
   });
@@ -643,7 +799,7 @@ describe('SUBTYPE (section 3.3)', () => {
     test('tensor<U> never fits a tensor with a dimension list', () => {
       expect(sub('tensor<integer>', 'matrix<integer>')).toBe(false);
       expect(sub('tensor<integer>', 'vector<integer>')).toBe(false);
-      expect(sub('tensor<integer>', 'list<any^(2x2x2)>')).toBe(false);
+      expect(sub('tensor<integer>', 'tensor<any^(2x2x2)>')).toBe(false);
     });
     test('tensor<U> <: broadcastable<V> iff U <: V', () => {
       expect(sub('tensor<integer>', 'broadcastable<number>')).toBe(true);
@@ -684,7 +840,7 @@ describe('SUBTYPE (section 3.3)', () => {
     test('broadcastable<T> is T | tensor<T> when T cannot hold a list', () => {
       expect(sub('list<boolean>', 'broadcastable<boolean>')).toBe(true);
       expect(sub('list<list<boolean>>', 'broadcastable<boolean>')).toBe(false);
-      expect(sub('list<boolean^(2x2)>', 'broadcastable<boolean>')).toBe(true);
+      expect(sub('matrix<boolean^(2x2)>', 'broadcastable<boolean>')).toBe(true);
       expect(
         sub(
           'list<tuple<number, number>>',
@@ -715,7 +871,7 @@ describe('SUBTYPE (section 3.3)', () => {
       ).toBe(true);
       expect(
         sub(
-          'list<(integer | missing)^(2x2)>',
+          'matrix<(integer | missing)^(2x2)>',
           'broadcastable<integer | missing>'
         )
       ).toBe(true);
@@ -1227,7 +1383,7 @@ describe('CORPUS CHECK', () => {
     (x: string) => `matrix<${x}>`,
     (x: string) => `matrix<${x}^(2x2)>`,
     (x: string) => `tensor<${x}>`,
-    (x: string) => `list<${x}^(2x2x2)>`,
+    (x: string) => `tensor<${x}^(2x2x2)>`,
     (x: string) => `collection<${x}>`,
     (x: string) => `indexed_collection<${x}>`,
     (x: string) => `broadcastable<${x}>`,

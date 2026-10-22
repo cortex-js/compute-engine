@@ -200,7 +200,7 @@ describe('a list that holds a restricted point or masked points', () => {
   // are `missing | tuple<…>` was typed as a list of rank 1,
   // `list<missing | tuple<…>>`, which claimed that its elements are the
   // points, where they are the rows.
-  const MATRIX_OF_POINTS = 'list<(missing | tuple<number, number>)^(2x2)>';
+  const MATRIX_OF_POINTS = 'matrix<(missing | tuple<number, number>)^(2x2)>';
 
   /** The value when `t` is `t`, by `evaluate()` or by `N()`. The value must
    * match the static type. */

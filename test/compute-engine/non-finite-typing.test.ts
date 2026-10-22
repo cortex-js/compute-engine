@@ -998,7 +998,7 @@ describe('POSSIBLY INFINITE EXTENDED-REAL OPERANDS', () => {
     [['Multiply', 'y', 'I'], 'list<nan | real | signed_infinity>'],
     [
       ['Multiply', 'y', ['List', ['List', 0, 1], ['List', 2, 3]]],
-      'list<nan | real | signed_infinity^(2x2)>',
+      'matrix<nan | real | signed_infinity^(2x2)>',
     ],
     [
       ['Multiply', 'y', 'T'],
@@ -1077,7 +1077,7 @@ describe('EXTENDED-REAL NARROWING: POLES, INFINITE RANGES, MATRICES', () => {
   ce.declare('k', 'integer');
   ce.declare('n', 'integer');
   ce.assume(ce.parse('n >= 0'));
-  ce.declare('M', 'list<real^(2x2)>');
+  ce.declare('M', 'matrix<real^(2x2)>');
   test.each([
     // `0^−1` and `0^−∞` are the complex infinity `~oo`.
     [['Power', 'h', 'y'], 'infinity | nan | real'],

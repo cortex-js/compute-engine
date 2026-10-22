@@ -235,7 +235,7 @@ describe('TUPLEFROM RESULT TYPE', () => {
   ce.declare('L3', 'list<integer^3>');
   ce.assign('L3', ce.box(['List', 4, 5, 6]));
   ce.declare('V3', 'list<integer^3>');
-  ce.declare('M23', 'list<integer^(2x3)>');
+  ce.declare('M23', 'matrix<integer^(2x3)>');
   ce.assign('M23', ce.box(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]));
   ce.declare('Lu', 'list<integer>');
   ce.assign('Lu', ce.box(['List', 1, 2]));

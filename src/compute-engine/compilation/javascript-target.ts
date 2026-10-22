@@ -2909,7 +2909,7 @@ export function mayBePointList(t: Type): boolean {
       return false;
     // A row whose cells are themselves numeric rows, at one level or more
     // (the collection is a numeric tensor of rank 3 or more,
-    // `list<integer^(2x2x2)>`, `list<list<list<number>>>`), holds no point
+    // `tensor<integer^(2x2x2)>`, `list<list<list<number>>>`), holds no point
     // at any level: the interpreter element-indexes it
     // (`isPointCollectionLike` in `library/collections.ts` maps down only to
     // tuple points). The run-time dispatch cannot tell a numeric row from a
@@ -6605,7 +6605,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Dot`: missing argument');
     // A collection of points at more than one level (a `tensor<tuple<…>>`, a
-    // `list<tuple<…>^(2x2)>`): its cells are points, not numbers, so the
+    // `matrix<tuple<…>^(2x2)>`): its cells are points, not numbers, so the
     // matrix product below is not the interpreter's answer, and the
     // point-list product reads a list of points of rank 1 only. The
     // compilation declines.
@@ -6780,7 +6780,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] != null && isString(args[1]) && args[1].string === 'Infinity')
       args = [args[0], args[0].engine.PositiveInfinity, ...args.slice(2)];
     // A collection of points at more than one level (a `tensor<tuple<…>>`, a
-    // `list<tuple<…>^(2x2)>`): the interpreter answers one norm per point
+    // `matrix<tuple<…>^(2x2)>`): the interpreter answers one norm per point
     // for a list of points and refuses a deeper value, while every lowering
     // below reads the array as one point, as a list of points or as a
     // matrix of numbers. None of them is that answer for every rank, so the

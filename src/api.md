@@ -20184,8 +20184,8 @@ Examples of types strings:
 - `"collection<(number, boolean)>"` -- a collection of tuples
 - `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
 - `"vector<boolean^32>"` -- a list type with a fixed size of 32 elements
-- `"matrix<integer^(2x3)>"` -- an integer matrix of 2 columns and 3 rows
-- `"list<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
+- `"matrix<integer^(2x3)>"` -- an integer matrix of 2 rows and 3 columns
+- `"tensor<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
 - `"number -> number"` -- a signature with a single argument
 - `"(x: number, number) -> number"` -- a signature with a named argument
 - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
@@ -20322,7 +20322,7 @@ function listTensorRank(t): number | undefined
 
 The rank of the list type `t`: the number of its axes when `t` is a
 tensor with a dimension list (`vector<U>` is 1, `matrix<U>` is 2,
-`list<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
+`tensor<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
 whose `dimensions` is absent) and for a tensor of unknown rank
 (`tensor<U>`, whose `dimensions` is `null`).
 

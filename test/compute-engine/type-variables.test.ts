@@ -464,7 +464,7 @@ describe('DIMENSIONED ACTUALS — the row reading of a matrix (subtype.ts)', () 
     ).toBe(false);
     expect(isSubtype(m, parseType('indexed_collection<string>'))).toBe(false);
     // Rank 3 peels to rank 2, not to the scalar-plus-one.
-    const t3 = parseType('list<integer^(2x3x4)>');
+    const t3 = parseType('tensor<integer^(2x3x4)>');
     expect(
       isSubtype(t3, parseType('indexed_collection<matrix<integer^(3x4)>>'))
     ).toBe(true);
@@ -1139,7 +1139,7 @@ describe('END TO END — a user-declared generic operator', () => {
     // The polytype arm binds `T` to the operand's ELEMENT under D10 (re-ruled
     // 2026-08-04), so the wrapper builds the shape around it exactly as it
     // does for the ground reference — same encoding, no
-    // `list<vector<integer^2>^(2x2)>` mix.
+    // `matrix<vector<integer^2>^(2x2)>` mix.
     expect(ce.box(['pEcho', m22]).type.toString()).toBe(
       'matrix<integer^(2x2)>'
     );
@@ -1160,7 +1160,7 @@ describe('END TO END — a user-declared generic operator', () => {
     // LEAF with the scalar operand, so `T = integer` and the wrapper
     // gives the same clean matrix the ground reference does. (Before the
     // 2026-08-04 re-ruling this was the widen artifact
-    // `list<integer | vector<integer^2>^(2x2)>` — the very
+    // `matrix<integer | vector<integer^2>^(2x2)>` — the very
     // mixed encoding the wrapper exists to repair.)
     ce.declare('pRem', {
       signature: '(T, T) -> T where T: number',

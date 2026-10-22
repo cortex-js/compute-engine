@@ -51,48 +51,109 @@ import {
 import type { TypeVariableErrorCode } from './instantiate.js';
 import { typeToString } from './serialize.js';
 import { applyTypeReference, recordForwardArity } from './reference.js';
-import {
-  cellTypeCanHoldANumber,
-  cellTypeMayCarryDimensions,
-} from './primitive.js';
+import { cellTypeMayCarryDimensions } from './primitive.js';
+
+/** The `dimensions` and `dimensionVariables` of a list type with a shape. */
+type BuiltDimensions = {
+  dimensions: number[];
+  dimensionVariables?: (string | undefined)[];
+};
 
 /**
- * Refuse a dimensioned spelling whose cell type is not allowed. Two rules
- * (`primitive.ts`), both user decisions of 2026-10-21 recorded in
- * `docs/plans/2026-10-21-list-element-tensor-cell.md`:
+ * Refuse a dimensioned spelling whose cell type is not allowed. One rule
+ * for every head (`list<U^n>`, `vector<U>`, `matrix<U>`, `tensor<U>`, with
+ * or without a shape): the cells cannot be lists
+ * (`cellTypeMayCarryDimensions` in `primitive.ts`, the one predicate that
+ * the engine's literal typing asks too). Every other cell type is accepted:
+ * `matrix<boolean>`, `vector<string^2>`, `tensor<tuple<number, number>>`.
+ * The shape is spelled in one place, on the outer head, so
+ * `list<list<integer^3>^2>`, `matrix<list<integer>>` and
+ * `tensor<list<integer>>` are refused, and the error names the spelling
+ * with one shape (`matrix<integer^(2x3)>`) when it can be found.
  *
- * - `list<U^dims>` and `tensor<U>`: the cells of a list with dimensions,
- *   or of a tensor of unknown rank, cannot be lists
- *   (`cellTypeMayCarryDimensions`, the one predicate the engine's literal
- *   typing asks too). The shape is spelled in one place, on the outer list
- *   (`list<T^(2x3)>`), so `list<list<integer>^2>` and
- *   `tensor<list<integer>>` are refused, while `tensor<boolean>` and
- *   `tensor<tuple<number, number>>` are accepted.
- * - The named heads `vector<U>` and `matrix<U>`: the cells must be able to
- *   hold a number (`cellTypeCanHoldANumber`), since the cells of a vector
- *   or a matrix are numbers, and cannot be lists, as for `list<U^dims>`;
- *   `vector<string>` and `vector<integer | list<integer>>` are refused,
- *   and a list of two strings is spelled `list<string^2>`.
+ * `outer` is the shape of the spelling, absent for a tensor of unknown
+ * rank. User decisions of 2026-10-21 (no list cells) and 2026-10-22 (one
+ * cell rule for every head), recorded in
+ * `docs/plans/2026-10-21-list-element-tensor-cell.md` and
+ * `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md` (option U).
  */
 function checkTensorCells(
   head: 'list' | 'vector' | 'matrix' | 'tensor',
-  cells: Type
+  cells: Type,
+  outer?: BuiltDimensions
 ): void {
+  if (cellTypeMayCarryDimensions(cells)) return;
   const cellText = typeToString(cells);
-  if (!cellTypeMayCarryDimensions(cells)) {
-    const spelled =
-      head === 'tensor' ? `tensor<${cellText}>` : `${head}<${cellText}^…>`;
-    throw new Error(
-      `The cells of a ${
-        head === 'list' ? 'list with dimensions' : head
-      } cannot be lists, but \`${spelled}\` names \`${cellText}\` as its cell type. Spell the shape in one place, on the outer list: \`list<T^(2x3)>\` for two rows of three cells of type \`T\`, \`tensor<T>\` for any rank`
-    );
-  }
-  if (head === 'list' || head === 'tensor') return;
-  if (cellTypeCanHoldANumber(cells)) return;
+  const spelled =
+    outer === undefined ? `tensor<${cellText}>` : `${head}<${cellText}^…>`;
+  const nested = nestedListSpelling(cells, outer);
+  const merged = mergedShapeSpelling(cells, outer);
+  const advice =
+    nested !== undefined
+      ? `Write \`${nested}\` for rows of any lengths`
+      : merged !== undefined
+        ? `Write \`${merged}\`, with the shape in one place`
+        : 'Spell the shape in one place, on the outer head: `matrix<T^(2x3)>` for two rows of three cells of type `T`, `tensor<T>` for any rank';
   throw new Error(
-    `The cells of a vector or a matrix are numbers, but \`${head}<${cellText}^…>\` names \`${cellText}\` as its cell type. A list whose elements are not numbers is spelled \`list<${cellText}>\` (with a length, \`list<${cellText}^n>\`); a fixed-length sequence of non-numbers is a tuple`
+    `The cells of a ${
+      head === 'list' ? 'list with a length' : head
+    } cannot be lists, but \`${spelled}\` names \`${cellText}\` as its cell type. ${advice}`
   );
+}
+
+/**
+ * The spelling with nested plain lists for a shape whose cell type `cells`
+ * is a plain list (a list with no length). Such a cell admits lists of
+ * different lengths, so a rectangular spelling would refuse values that the
+ * written type allows: `list<list<integer>^2>` gives `list<list<integer>>`,
+ * not `matrix<integer^(2x?)>`. There is one plain list for each axis of
+ * `outer` around `cells`. Otherwise `undefined`.
+ */
+function nestedListSpelling(
+  cells: Type,
+  outer: BuiltDimensions | undefined
+): string | undefined {
+  if (outer === undefined) return undefined;
+  if (typeof cells === 'string' || cells.kind !== 'list') return undefined;
+  if (cells.dimensions !== undefined) return undefined;
+  let result: Type = cells;
+  for (let i = 0; i < outer.dimensions.length; i++)
+    result = { kind: 'list', elements: result, dimensions: undefined };
+  return typeToString(result);
+}
+
+/**
+ * The spelling with one shape for a shape written in two places: the outer
+ * shape `outer` followed by the shape of the cell type `cells`, when `cells`
+ * is a list with a length or a shape whose own cells are not lists.
+ * `list<list<integer^3>^2>` gives `matrix<integer^(2x3)>`. Otherwise
+ * `undefined`.
+ */
+function mergedShapeSpelling(
+  cells: Type,
+  outer: BuiltDimensions | undefined
+): string | undefined {
+  if (outer === undefined) return undefined;
+  if (typeof cells === 'string' || cells.kind !== 'list') return undefined;
+  if (!Array.isArray(cells.dimensions)) return undefined;
+  if (!cellTypeMayCarryDimensions(cells.elements)) return undefined;
+  const inner = cells.dimensions;
+  const dimensions = [...outer.dimensions, ...inner];
+  const hasVariables =
+    outer.dimensionVariables !== undefined ||
+    cells.dimensionVariables !== undefined;
+  const dimensionVariables = hasVariables
+    ? [
+        ...(outer.dimensionVariables ?? outer.dimensions.map(() => undefined)),
+        ...(cells.dimensionVariables ?? inner.map(() => undefined)),
+      ]
+    : undefined;
+  return typeToString({
+    kind: 'list',
+    elements: cells.elements,
+    dimensions,
+    ...(dimensionVariables !== undefined ? { dimensionVariables } : {}),
+  });
 }
 
 export class TypeBuilder implements ASTVisitor<Type> {
@@ -331,20 +392,31 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // representation must not silently become an omitted annotation.
     if (node.dimensions === undefined)
       return { kind: 'list', elements, dimensions: undefined };
-    checkTensorCells('list', elements);
-    return { kind: 'list', elements, ...this.buildDimensions(node.dimensions) };
+    const shape = this.buildDimensions(node.dimensions);
+    checkTensorCells('list', elements, shape);
+    // A list has one axis at most, its length (`list<integer^3>`). An array
+    // with two or more axes is a matrix or a tensor, and has one spelling
+    // (`matrix<integer^(2x3)>`, `tensor<integer^(2x3x4)>`): the spelling
+    // `list<integer^(2x3)>` is refused, and the message names the spelling
+    // to use. The printer gives that spelling, so it parses back to the
+    // same type. User decision of 2026-10-22, recorded in
+    // `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md` (option U).
+    if (shape.dimensions.length >= 2) {
+      const spelling = typeToString({ kind: 'list', elements, ...shape });
+      throw new Error(
+        `A list type has one axis at most, its length (\`list<T^n>\`), but this type has ${shape.dimensions.length} axes. Write \`${spelling}\` instead`
+      );
+    }
+    return { kind: 'list', elements, ...shape };
   }
 
   visitVectorType(node: VectorTypeNode): Type {
     const elements = this.buildType(node.elementType);
-    checkTensorCells('vector', elements);
 
     if (node.dimension !== undefined) {
-      return {
-        kind: 'list',
-        elements,
-        ...this.buildDimensions([node.dimension]),
-      };
+      const shape = this.buildDimensions([node.dimension]);
+      checkTensorCells('vector', elements, shape);
+      return { kind: 'list', elements, ...shape };
     }
 
     // An UNSIZED vector is rank-1 with an open length, and `-1` is how this
@@ -353,27 +425,51 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // the dimension the two built the identical type and the rank-1 promise
     // was silently dropped at parse time. `visitMatrixType` below already
     // defaults the same way, to `[-1, -1]`.
+    checkTensorCells('vector', elements, { dimensions: [-1] });
     return { kind: 'list', elements, dimensions: [-1] };
   }
 
   visitMatrixType(node: MatrixTypeNode): Type {
     const elements = this.buildType(node.elementType);
-    checkTensorCells('matrix', elements);
 
     if (node.dimensions) {
-      return {
-        kind: 'list',
-        elements,
-        ...this.buildDimensions(node.dimensions),
-      };
+      const shape = this.buildDimensions(node.dimensions);
+      checkTensorCells('matrix', elements, shape);
+      // A matrix has exactly two axes. A shape with another number of axes
+      // (`matrix<integer^3>`, `matrix<2x3x4>`) is refused, and the message
+      // names the spelling the printer gives for that shape, which parses
+      // back to the same type (`vector<integer^3>`, `tensor<number^(2x3x4)>`).
+      // The check is skipped when a dimension names a variable that no
+      // enclosing `where` clause declares: in `matrix<T^(Mxidx)>` with
+      // `where T, M, idx`, `Mxidx` is one undeclared name, and the error that
+      // the declaration validation gives for it ("is not quantified") names
+      // the real mistake, which an axis count does not.
+      const undeclared = shape.dimensionVariables?.some(
+        (name) => name !== undefined && this.typeParameter(name) === undefined
+      );
+      if (!undeclared && shape.dimensions.length !== 2) {
+        const n = shape.dimensions.length;
+        const spelling = typeToString({ kind: 'list', elements, ...shape });
+        throw new Error(
+          `A matrix type has two axes, but this type has ${n} ${n === 1 ? 'axis' : 'axes'}. Write \`${spelling}\` instead`
+        );
+      }
+      return { kind: 'list', elements, ...shape };
     }
 
     // Default matrix dimensions (unknown size)
+    checkTensorCells('matrix', elements, { dimensions: [-1, -1] });
     return { kind: 'list', elements, dimensions: [-1, -1] };
   }
 
   visitTensorType(node: TensorTypeNode): Type {
     const elements = this.buildType(node.elementType);
+
+    if (node.dimensions !== undefined) {
+      const shape = this.buildDimensions(node.dimensions);
+      checkTensorCells('tensor', elements, shape);
+      return { kind: 'list', elements, ...shape };
+    }
     checkTensorCells('tensor', elements);
 
     // A tensor of unknown rank (1 or more) whose cells are `elements`:

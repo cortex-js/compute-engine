@@ -101,6 +101,9 @@ export interface MatrixTypeNode extends ASTNode {
 export interface TensorTypeNode extends ASTNode {
   kind: 'tensor';
   elementType: TypeNode;
+  /** The shape of a tensor of known rank (`tensor<boolean^(2x2)>`); absent
+   * for a tensor of unknown rank (`tensor<U>`). */
+  dimensions?: DimensionNode[];
 }
 
 export interface TupleTypeNode extends ASTNode {

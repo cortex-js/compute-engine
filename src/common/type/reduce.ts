@@ -1712,7 +1712,7 @@ function reduceListType(type: ListType): Type {
   if (reducedType === 'nothing')
     return decorate({ kind: 'list', elements: 'nothing' });
 
-  // Every axis is kept, a zero-length axis too. `list<integer^(2x0)>` is two
+  // Every axis is kept, a zero-length axis too. `matrix<integer^(2x0)>` is two
   // empty rows: a value the engine can hold, of rank 2 and with 0 elements.
   // Dropping the zero axis changed the rank of the type (it became
   // `vector<integer^2>`, a list of two integers), and an all-zero shape is

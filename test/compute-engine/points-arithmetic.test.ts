@@ -2024,7 +2024,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     const ce = pointListEngine('matrix<2x2>');
     const quotient = ce.box(['Divide', 'p', 'q']).type;
     // A tuple cell may carry dimensions, so the quotient has the matrix's shape.
-    expect(quotient.toString()).toBe('list<tuple<number, number>^(2x2)>');
+    expect(quotient.toString()).toBe('matrix<tuple<number, number>^(2x2)>');
     expect(quotient.matches('list<tuple<number, number>^?>')).toBe(false);
   });
 
@@ -2055,7 +2055,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     // `list<tuple<number, number>> | matrix<2x2>`.
     const ce = pointListEngine('matrix<2x2>');
     const e = ce.box(['Multiply', 'p', 'q']);
-    expect(e.type.toString()).toBe('list<tuple<number, number>^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<tuple<number, number>^(2x2)>');
     ce.assign('p', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
     ce.assign('q', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
     const value = e.evaluate();
@@ -2779,7 +2779,7 @@ describe('a list times a point types as a list of points', () => {
       ['List', ['List', 1, 2], ['List', 3, 4]],
       ['Tuple', 3, 4],
     ]);
-    expect(expr.type.toString()).toBe('list<tuple<integer, integer>^(2x2)>');
+    expect(expr.type.toString()).toBe('matrix<tuple<integer, integer>^(2x2)>');
     expect(expr.evaluate().toString()).toBe(
       '[[(3, 4),(6, 8)],[(9, 12),(12, 16)]]'
     );

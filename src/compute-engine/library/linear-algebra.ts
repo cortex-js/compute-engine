@@ -1152,27 +1152,44 @@ function reshapeCellType(t: Type): Type {
 }
 
 /**
- * The `^`-suffix a `Reshape` target shape contributes to the result type,
- * for example `2x3` in `list<number^2x3>`, or the empty string when no
- * static extent list can be read.
+ * The extents of a `Reshape` target shape, for example `[2, 3]` for the
+ * shape `(2, 3)`, or `undefined` when no static extent list can be read.
+ * The empty shape `()` gives `[]`: the evaluate handler then returns a
+ * scalar, not a list, so the caller must not read `[]` as "no shape known".
  *
  * Only integer literals become extents. The expressions-shape handler
  * serialized every shape operand instead, so a symbolic extent produced an
  * unparseable type string (`list<number^"n"x2>`) and reading the type
- * THREW; an unreadable extent now drops the whole shape claim, which is
- * the same answer an empty target shape already gave.
+ * THREW; an unreadable extent now drops the whole shape claim.
  */
-function targetShapeDimensions(shape: OperandDescriptor | undefined): string {
-  if (shape === undefined) return '';
+function targetShapeDimensions(
+  shape: OperandDescriptor | undefined
+): number[] | undefined {
+  if (shape === undefined) return undefined;
   const elements = operandOperands(shape);
-  if (elements === undefined) return '';
+  if (elements === undefined) return undefined;
   const extents: number[] = [];
   for (const el of elements) {
     const v = operandLiteralValue(el);
-    if (v === undefined || !Number.isInteger(v) || v < 0) return '';
+    if (v === undefined || !Number.isInteger(v) || v < 0) return undefined;
     extents.push(v);
   }
-  return extents.join('x');
+  return extents;
+}
+
+/**
+ * The result type of a `Reshape` with numeric cells, from the extents
+ * `targetShapeDimensions()` reads. An empty shape gives a scalar cell,
+ * `number`. An unreadable shape gives the bare `tensor` (number cells, rank
+ * unknown), because the value can be a matrix or a tensor of any rank. A
+ * known shape gives `tensor<number^AxB…>`, spelled with the `tensor` head
+ * because the type parser refuses a `list` with two or more axes; the
+ * parser reads one axis as a `vector` and two axes as a `matrix`.
+ */
+function reshapeResultType(dims: number[] | undefined): string {
+  if (dims === undefined) return 'tensor';
+  if (dims.length === 0) return 'number';
+  return `tensor<number^${dims.join('x')}>`;
 }
 
 /**
@@ -1231,7 +1248,7 @@ function isVectorOfNumbers(x: Expression): boolean {
   if (t === 'range') return true;
   if (typeof t === 'string') return false;
   // A lazy collection types `indexed_collection<T>`; a literal or a sized
-  // value types `list<T>` with dimensions, and a matrix is `list<number^m×n>`
+  // value types `list<T>` with dimensions, and a matrix is `matrix<number^(mxn)>`
   // — its elements are numbers too, so the rank must be one.
   if (t.kind === 'indexed_collection') return isSubtype(t.elements, 'number');
   if (t.kind !== 'list') return false;
@@ -2447,7 +2464,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (isSubtype(value.type, 'number')) {
           // Scalar input
           return BoxedType.forResult(
-            parseType(`list<number^${dims}>`),
+            parseType(reshapeResultType(dims)),
             context.engine._typeResolver
           );
         }
@@ -2466,15 +2483,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!isSubtype(reshapeCellType(value.type), 'number'))
           return BoxedType.forResult('value', context.engine._typeResolver);
         return BoxedType.forResult(
-          parseType(`list<number^${dims}>`),
+          parseType(reshapeResultType(dims)),
           context.engine._typeResolver
         );
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         let op1 = ops[0];
-        const targetShape = isFunction(ops[1])
-          ? ops[1].ops.map((op) => op.re)
-          : [];
+        // Each extent must be a non-negative integer literal after
+        // evaluation. Otherwise the call stays unevaluated: a symbol with no
+        // value (`m` declared `integer`) has a `re` of NaN, which built an
+        // empty list, and a literal such as `2.5` or `-1` built a ragged or
+        // empty list.
+        const targetShape: number[] = [];
+        if (isFunction(ops[1])) {
+          for (const op of ops[1].ops) {
+            if (!isNumber(op) || op.im !== 0) return undefined;
+            const extent = op.re;
+            if (!Number.isInteger(extent) || extent < 0) return undefined;
+            targetShape.push(extent);
+          }
+        }
 
         // Handle empty shape tuple - return scalar
         if (targetShape.length === 0) {

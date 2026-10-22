@@ -1786,8 +1786,8 @@ function heldOperandType(
       if (s.shape.length === 0) return { kind: 'list', elements: rows };
       // A shape of rank r > 1 (`[[1, 2], [3, 4]]` is 2×2) puts the LEAF type
       // in `elements`: the components are rows, so descend r − 1 ranks. The
-      // row type in a 2×2 shape counted the inner rank twice
-      // (`list<vector<integer^2>^(2x2)>`).
+      // row type in a 2×2 shape counted the inner rank twice (a 2×2 shape
+      // whose cells were `vector<integer^2>`).
       let elements: Type = rows;
       for (let k = 1; k < s.shape.length; k++)
         elements = collectionElementType(elements) ?? 'unknown';

@@ -1753,11 +1753,10 @@ export function isFixedShapeCollection(expr: Expression): boolean {
  * system's (`cellTypeMayCarryDimensions`, `common/type/primitive.ts`): the
  * cells of a list with dimensions cannot be lists. So booleans, strings and
  * tuples keep their lengths: `[True, False]` is a `list<boolean^2>`, `M < 3`
- * over a 2×2 matrix `M` is a `list<boolean^(2x2)>`, and
+ * over a 2×2 matrix `M` is a `matrix<boolean^(2x2)>`, and
  * `Map((x) => x > 1, [1, 2, 3])` is a `list<boolean^3>`. The names
- * `vector<U>` and `matrix<U>` ask more of their cells (they must be able
- * to hold a number), and `tensor<U>` takes any cell that cannot hold a
- * list. Every site of the engine that attaches dimensions to a type it
+ * `vector<U>`, `matrix<U>` and `tensor<U>` take the same cells, any cell
+ * that cannot hold a list. Every site of the engine that attaches dimensions to a type it
  * builds asks here, so a change of the rule (for example to numeric cells
  * only, the rule of decision D3 in
  * `docs/plans/2026-10-21-list-element-tensor-cell.md`, which was measured
@@ -1868,7 +1867,7 @@ export function broadcastElementTypeOf(
  * type of a shaped value whose cells cannot carry dimensions
  * (`mayCarryDimensions`), that is, cells that may be lists: a 2 by 2
  * arrangement of `list<integer>` cells is a `list<list<list<integer>>>`.
- * Booleans, strings and tuples carry dimensions (`list<boolean^(2x2)>`).
+ * Booleans, strings and tuples carry dimensions (`matrix<boolean^(2x2)>`).
  */
 export function nestedPlainListType(cell: Type, rank: number): Type {
   let t: Type = cell;
@@ -1938,7 +1937,7 @@ export function withoutUnspellableDimensions(t: Type): Type {
  * dimensions cannot be lists (`mayCarryDimensions`): a broadcast over a
  * matrix keeps the matrix shape when its cells come out numbers
  * (`Sin(M)` is a `matrix<2x2>`), booleans (`M < 3` is a
- * `list<boolean^(2x2)>`) or tuples, and is spelled as nested plain lists
+ * `matrix<boolean^(2x2)>`) or tuples, and is spelled as nested plain lists
  * when its cells may be lists.
  */
 export function shapedBroadcastResultType(
@@ -3641,7 +3640,7 @@ export function isBroadcastablePointType(t: Readonly<Type>): boolean {
  * True when `t` is a collection of points at more than one level, or at a
  * number of levels the type does not fix: a tensor whose cells are points,
  * of unknown rank (`tensor<tuple<number, number>>`) or of rank 2 or more
- * (`list<tuple<number, number>^(2x2)>`), or a list whose elements are such
+ * (`matrix<tuple<number, number>^(2x2)>`), or a list whose elements are such
  * collections or lists of points (`list<list<tuple<number, number>>>`). A
  * list of points of rank 1 (`list<tuple<…>>`, `list<tuple<…>^3>`) answers
  * `false`.

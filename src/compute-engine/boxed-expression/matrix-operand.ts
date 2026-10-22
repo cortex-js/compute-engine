@@ -8,7 +8,7 @@ import { isSymbol } from './type-guards.js';
  * the type is `unknown` or `any` (the call `g(x)` of a function that was not
  * declared), a union such as `number | matrix`, or a collection that is not
  * known to be a matrix or a vector (`g(A)` with `A` a matrix has the type
- * `list<unknown^(2x2)>`). A tuple is not a matrix. An operand of a scalar
+ * `matrix<unknown^(2x2)>`). A tuple is not a matrix. An operand of a scalar
  * type (`number`, `real`, `integer`) is `false`.
  *
  * A symbol of type `unknown` (a symbol with no declaration and no value) is

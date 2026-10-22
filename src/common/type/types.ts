@@ -523,8 +523,9 @@ export type ListType = {
    * - Absent (`undefined`): a plain list, spelled `list<E>`. `elements` is
    *   the type of the ELEMENTS, what indexing returns. A matrix of integers
    *   is a `list<vector<integer>>`, never a `list<integer>`.
-   * - An array of lengths: a tensor of that rank, spelled `vector<U>`,
-   *   `matrix<U>` or `list<U^dims>`. `elements` is the type of the CELLS,
+   * - An array of lengths: a tensor of that rank, spelled `vector<U>` or
+   *   `list<U^n>` (rank 1), `matrix<U>` (rank 2) or `tensor<U^(…)>` (any
+   *   rank). `elements` is the type of the CELLS,
    *   the leaves at depth equal to the rank; the elements of a matrix are
    *   its rows. A length of `-1` is an open length.
    * - `null`: a tensor of unknown rank (1 or more), spelled `tensor<U>` or
@@ -533,14 +534,16 @@ export type ListType = {
    * `listTensorRank()` reads the rank, and is `undefined` for the first and
    * the third case. The type parser refuses a cell type that is a list, for
    * an array and for `null` (`cellTypeMayCarryDimensions` in
-   * `primitive.ts`): `tensor<boolean>` and `list<boolean^(2x2)>` parse,
-   * `tensor<list<integer>>` does not. The named heads `vector<U>` and
-   * `matrix<U>` also require a cell type that can hold a number
-   * (`cellTypeCanHoldANumber`), so `vector<string>` does not parse. An
-   * internally built type is read by its cells whatever its cell type.
+   * `primitive.ts`): `tensor<boolean>` and `matrix<boolean^(2x2)>` parse,
+   * `tensor<list<integer>>` does not. Every head accepts the same cell
+   * types, so `vector<string^2>` parses too. The parser also refuses a
+   * `list` with two or more axes (`list<boolean^(2x2)>`): a list has one
+   * axis at most, its length. An internally built type is read by its
+   * cells whatever its cell type.
    *
-   * Decided by the user on 2026-10-21; the record is
-   * `docs/plans/2026-10-21-list-element-tensor-cell.md`.
+   * Decided by the user on 2026-10-21 and 2026-10-22; the records are
+   * `docs/plans/2026-10-21-list-element-tensor-cell.md` and
+   * `docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md` (option U).
    */
   dimensions?: number[] | null;
   /**
@@ -560,7 +563,7 @@ export type ListType = {
 /**
  * The rank of the list type `t`: the number of its axes when `t` is a
  * tensor with a dimension list (`vector<U>` is 1, `matrix<U>` is 2,
- * `list<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
+ * `tensor<U^(2x3x4)>` is 3), and `undefined` for a plain list (`list<E>`,
  * whose `dimensions` is absent) and for a tensor of unknown rank
  * (`tensor<U>`, whose `dimensions` is `null`).
  */
@@ -895,8 +898,8 @@ export type Type =
  * - `"collection<(number, boolean)>"` -- a collection of tuples
  * - `"collection<(value:number, seen:boolean)>"` -- a collection of named tuples
  * - `"vector<boolean^32>"` -- a list type with a fixed size of 32 elements
- * - `"matrix<integer^(2x3)>"` -- an integer matrix of 2 columns and 3 rows
- * - `"list<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
+ * - `"matrix<integer^(2x3)>"` -- an integer matrix of 2 rows and 3 columns
+ * - `"tensor<integer^(2x3x4)>"` -- a tensor of dimensions 2x3x4
  * - `"number -> number"` -- a signature with a single argument
  * - `"(x: number, number) -> number"` -- a signature with a named argument
  * - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)

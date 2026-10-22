@@ -63,7 +63,7 @@ describe('isSubtype with an intersection on the right', () => {
   });
 
   test('does not erase dimensions from `list<any>`', () => {
-    expect(parseType('list<any^2x3>')).toEqual({
+    expect(parseType('matrix<any^(2x3)>')).toEqual({
       kind: 'list',
       elements: 'any',
       dimensions: [2, 3],
@@ -71,7 +71,7 @@ describe('isSubtype with an intersection on the right', () => {
 
     // `reduceType()` must not collapse a dimensioned `list<any>` either: the
     // bare `list` primitive cannot carry a shape.
-    expect(reduceType(parseType('list<any^2x3>'))).toEqual({
+    expect(reduceType(parseType('matrix<any^(2x3)>'))).toEqual({
       kind: 'list',
       elements: 'any',
       dimensions: [2, 3],
@@ -143,7 +143,7 @@ describe('isSubtype with an intersection on the right', () => {
       ['matrix', 'matrix'],
       ['matrix<any>', 'matrix<any>'],
       ['matrix<real>', 'matrix<real>'],
-      ['list<any^2x3>', 'list<any^(2x3)>'],
+      ['matrix<any^2x3>', 'matrix<any^(2x3)>'],
     ] as const) {
       const once = typeToString(reduceType(parseType(source)) as Type);
       expect(once).toBe(expected);

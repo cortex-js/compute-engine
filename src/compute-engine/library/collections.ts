@@ -3563,7 +3563,7 @@ function zipMapResultType(
  * lists a plain `list<list<integer>>`. An
  * element that is itself a tensor of numbers with fixed lengths
  * (`vector<real^2>`, the image of each row of a 2 by 2 matrix under a
- * broadcast) makes the list a tensor of one more rank, `list<real^(2x2)>`:
+ * broadcast) makes the list a tensor of one more rank, `matrix<real^(2x2)>`:
  * every element has those lengths, so the rows are uniform. An element
  * tensor with an open length, or of unknown rank, gives a plain list of
  * the element, since its rows may differ in length.
@@ -6554,7 +6554,7 @@ function mayHoldPointCollection(t0: Type, depth: number): boolean {
  * level, or `undefined` for any other operand type.
  *
  * - A tensor whose cells are points, of rank 2 or more or of unknown rank
- *   (`list<tuple<number, number>^(2x2)>`, `tensor<tuple<number, number>>`):
+ *   (`matrix<tuple<number, number>^(2x2)>`, `tensor<tuple<number, number>>`):
  *   a tensor of the coordinate at `position`, with the same shape
  *   (`shapedOrPlainListType`). `PointX` of a `tensor<tuple<number,
  *   number>>` is a `tensor<number>`.
@@ -6783,7 +6783,7 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
 /**
  * The **honest** shape-derived type of a literal `List` whose elements are
  * `ops` (§D3 of `docs/COLLECTIONS-MODEL.md`): a dimensioned `list` type
- * (`list<C^2x3>`) when the list is shape-regular over atomic cells, or
+ * (`matrix<C^(2x3)>`) when the list is shape-regular over atomic cells, or
  * `null` (no shape claim) otherwise — the caller then falls back on the
  * plain `list<widen(…)>` form.
  *
@@ -6793,8 +6793,7 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * union-free widened cell type, or a union of tuple types.
  *
  * A literal whose levels are all empty below the first has no cell, and its
- * element type is `never`: `[[], []]` is `list<never^(2x0)>` (the matrix type
- * `matrix<never^(2x0)>`). Since `never` is a subtype of every type, that is a
+ * element type is `never`: `[[], []]` is `matrix<never^(2x0)>`. Since `never` is a subtype of every type, that is a
  * subtype of `matrix<integer^(2x0)>`, and the literal can be assigned to a
  * symbol declared with that type. The empty literal `[]` claims no shape and
  * stays `list<never>`, which is already a subtype of `list<T^0>` for every
@@ -6815,7 +6814,7 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * `missing`, the type of an absent point, or without it): points
  * whose components have different types (`(1, 1/2)` and `(1/2, 1)`) are
  * cells of one kind, and a matrix of them is
- * `list<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>`. A list
+ * `matrix<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>`. A list
  * of rank 1 of such points keeps the type `list<tuple<…> | tuple<…>>`, which
  * the point accessors read as a list of points.
  *
@@ -6855,7 +6854,7 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   // (`mayCarryDimensions`: a cell that cannot be a list): `[True, False]` is
   // a `list<boolean^2>`, `[(1, 2), (3, 4)]` is a
   // `list<tuple<integer, integer>^2>`, and a 2 by 2 arrangement of booleans
-  // is a `list<boolean^(2x2)>`. Any other cell population is spelled as
+  // is a `matrix<boolean^(2x2)>`. Any other cell population is spelled as
   // nested plain lists, one level per dimension. So is a union of cells
   // that is not a number type (`[[1, True], [2, False]]` is a
   // `list<list<boolean | integer>>`), except a union of tuples of one arity
@@ -8168,7 +8167,7 @@ function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
 function staticPointArity(t: Type): number | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'tuple') return t.elements?.length;
-  // A tensor whose cells are points (`list<tuple<…>^(2x2)>`,
+  // A tensor whose cells are points (`matrix<tuple<…>^(2x2)>`,
   // `tensor<tuple<…>>`): the accessors map over the cells, so the arity is
   // that of the cell. The inner dimension below counts points, not
   // coordinates, for such a tensor.
@@ -11809,7 +11808,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // The two structural cases the 1-arg form can decide without dispatching
     // anything: a literal `List`/`Set` node holds exactly the operands it was
     // written with, and a list type carrying declared DIMENSIONS
-    // (`vector<integer^3>`, `list<real^(2x3)>`) fixes the element count in the
+    // (`vector<integer^3>`, `matrix<real^(2x3)>`) fixes the element count in the
     // type itself. Both are finite, so they report the exact `integer`.
     //
     // The handler's `+oo` singleton does not survive as written: a handler

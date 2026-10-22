@@ -2487,7 +2487,7 @@ function selectionArmCells(
  *   at boxing, and `error`).
  * - `mask`: provably a mask. `rank` and `dimensions` are given when they are
  *   known. A type with dimensions (`list<boolean^3>`, or
- *   `list<boolean^(2x2)>` for `M < 3` over a 2×2 matrix `M`) has its rank and
+ *   `matrix<boolean^(2x2)>` for `M < 3` over a 2×2 matrix `M`) has its rank and
  *   dimensions. A collection of condition values without dimensions
  *   (`list<boolean>`, `indexed_collection<boolean>`) has rank 1: a literal
  *   condition types `list<boolean^n>`, a declared or derived one
@@ -2496,7 +2496,7 @@ function selectionArmCells(
  *   rank (`isPossiblyNestedBooleanMask`: `tensor<boolean>`,
  *   `list<boolean | list<any>>`, a ragged mask) has an unknown rank, and so
  *   has a union of masks of different ranks
- *   (`list<boolean^(2x2)> | list<boolean^3>`).
+ *   (`matrix<boolean^(2x2)> | list<boolean^3>`).
  * - `possible`: a mask for some values and a scalar for others
  *   (`broadcastable<boolean>`).
  * - `unreadable`: any other type (`unknown`, `any`, a union with such an

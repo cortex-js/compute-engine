@@ -768,7 +768,7 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
       'list',
     ]) {
       const c = new ComputeEngine();
-      c.declare('C', 'list<boolean^(2x2)>');
+      c.declare('C', 'matrix<boolean^(2x2)>');
       c.declare('P', type as any);
       const expr = ['If', 'C', 'P', 0];
       const r = compile(c.box(expr as any), { fallback: false });
@@ -818,7 +818,7 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
     for (const type of ['matrix<integer^(2x2)>', 'broadcastable<number>'])
       expect(
         compiledAndInterpreted(
-          { C: 'list<boolean^(2x2)>', P: type },
+          { C: 'matrix<boolean^(2x2)>', P: type },
           ['If', 'C', 'P', 0],
           { C, P: MATRIX }
         )

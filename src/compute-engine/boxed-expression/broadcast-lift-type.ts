@@ -265,7 +265,7 @@ function elementStatesShape(
  * The list type `r` with the cell type `cell`: the same shape when the
  * cells may carry its dimensions, nested plain lists of the same rank
  * otherwise (`shapedOrPlainListType`). A cell that gains a `missing` arm
- * keeps a numeric shape (`list<integer | missing^(2x2)>` is a tensor whose
+ * keeps a numeric shape (`matrix<integer | missing^(2x2)>` is a tensor whose
  * cells may be absent, a spelling the parser reads back); a point cell does
  * not.
  */
@@ -1146,7 +1146,7 @@ function isCellListKind(
  * 1 for an absent cell of `t` (`list<list<integer> | missing>`), 2 for an
  * absent cell of a cell (`list<list<integer | missing>>`), and so on. A
  * `missing` component of a tuple is an absent coordinate, not an absent
- * cell, and is not read. A dimensioned list (`list<integer^2x3>`) holds its
+ * cell, and is not read. A dimensioned list (`matrix<integer^(2x3)>`) holds its
  * leaf cells at the depth of its rank. The walk reads the same kinds as
  * `missingOutsideTuples`.
  *
@@ -1306,7 +1306,7 @@ export function absentCellsArePoints(t: Type): boolean {
  * `list<list<number>>`. With the marker it is `list<list<number> | nan>`.
  *
  * A dimensioned list type keeps its cells in one `elements` type
- * (`matrix` is `list<number^(?x?)>`): when a marker falls on an inner
+ * (`matrix` is `matrix<number^(?x?)>`): when a marker falls on an inner
  * depth, the list is written one level at a time, so the row can carry it
  * (`list<list<number> | nan>`). The walk unfolds an alias under the descent
  * guard, and keeps a cut as it is.
@@ -2228,7 +2228,7 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
 
     // The operands' shape is kept when the per-element result may carry
     // dimensions, that is, when it cannot be a list (`Sin(M)` is a
-    // `matrix<2x2>`, `M < 3` is a `list<boolean^(2x2)>`), and spelled as
+    // `matrix<2x2>`, `M < 3` is a `matrix<boolean^(2x2)>`), and spelled as
     // nested plain lists otherwise.
     return shapedBroadcastResultType(shapeTypes, perComponent, absentCell);
   }

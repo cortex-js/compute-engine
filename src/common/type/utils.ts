@@ -29,13 +29,8 @@ export { isValidType };
 // Whether a list whose cells have a given type may carry dimensions (be a
 // tensor). Defined in `primitive.ts`, a leaf module, so that the type
 // builder can ask the same question as the engine's literal typing without
-// a circular import; consumers in the engine import it from here. The
-// second predicate is the extra rule of the named heads `vector<U>` and
-// `matrix<U>`: their cells can hold a number.
-export {
-  cellTypeCanHoldANumber,
-  cellTypeMayCarryDimensions,
-} from './primitive.js';
+// a circular import; consumers in the engine import it from here.
+export { cellTypeMayCarryDimensions } from './primitive.js';
 
 // Re-export widen/narrow from subtype (moved there to break the
 // subtype ↔ utils cycle; they depend on isSubtype)
@@ -1958,8 +1953,8 @@ export function nestedBroadcastResultType(
  * `-1` — the same wildcard convention `matrix`/`vector` parse to.
  *
  * A tensor type states its rank: its dimension list is the answer, whatever
- * its cell type (`list<T^2x3>` → `[2, 3]`; `matrix`, which is
- * `list<number^(?x?)>`, → `[-1, -1]`). A tensor of unknown rank
+ * its cell type (`matrix<T^(2x3)>` → `[2, 3]`; `matrix`, which is
+ * `matrix<number^(?x?)>`, → `[-1, -1]`). A tensor of unknown rank
  * (`tensor<U>`, `dimensions` `null`) → `null`.
  *
  * A plain list `list<E>` is not a tensor type, and its rank is not read
@@ -2246,7 +2241,7 @@ function broadcastRowShape(
  * Rank/shape-aware broadcast result type (§D6.1 of
  * `docs/COLLECTIONS-MODEL.md`): mirror the
  * shape-bearing operands' statically-provable structure onto the broadcast
- * result, in the **dimensioned** encoding (`list<R^2x2>`), so a fixed-shape
+ * result, in the **dimensioned** encoding (`matrix<R^(2x2)>`), so a fixed-shape
  * source (`Sqrt(M)` with `M: matrix<2x2>`) types compatibly with `matrix`/
  * `vector` signature parameters.
  *
@@ -2406,7 +2401,7 @@ export const MAX_CELL_DEPTH = 8;
 
 /**
  * The number of list levels between a collection type and its one `elements`
- * type: the rank of a tensor with a dimension list (`list<integer^2x3>`
+ * type: the rank of a tensor with a dimension list (`matrix<integer^(2x3)>`
  * holds its leaves two levels down), and 1 for any other collection. A
  * tensor of unknown rank (`dimensions` is `null`) holds its cells at an
  * unknown depth; it is read as one level here, as a plain list of its
@@ -2420,7 +2415,7 @@ export function collectionLevels(t: Readonly<Type>): number {
 
 /** The type of one cell of the list type `t`: its `elements`, or, for a
  * tensor of rank 2 or more, the tensor of its remaining dimensions
- * (`list<integer^2x3>` has cells of type `list<integer^3>`). A tensor of
+ * (`matrix<integer^(2x3)>` has cells of type `list<integer^3>`). A tensor of
  * unknown rank reads as a list of its cells here. */
 function listCellType(t: ListType): Type {
   if (!t.dimensions || t.dimensions.length < 2) return t.elements;

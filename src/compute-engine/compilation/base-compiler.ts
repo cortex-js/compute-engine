@@ -15560,7 +15560,7 @@ export class BaseCompiler {
           collection.some((a) => isBoundPossiblyCollectionTyped(a, target))
         ) {
           // `linearAlgebraLane` also reads an operand whose type is a union
-          // with an absent arm (`At(P, 1)` with `P: list<matrix<complex^2x2>>`
+          // with an absent arm (`At(P, 1)` with `P: list<matrix<complex^(2x2)>>`
           // is typed `matrix<complex^2x2> | missing`), which the two other
           // tests miss: the product of two complex matrices was compiled with
           // the real matrix product, and its complex entries became `NaN`.

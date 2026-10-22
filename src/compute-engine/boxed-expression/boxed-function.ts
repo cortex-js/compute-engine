@@ -10498,7 +10498,7 @@ function lambdaBroadcastType(
     // below: the call maps the literal over the leaves of its operand, so
     // the value has the operand's rank (`g := (x: T) -> tuple<T, T>` over
     // `[[1, 2], [3, 4]]` is `[[(1, 1), (2, 2)], [(3, 3), (4, 4)]]`, a
-    // `list<tuple<integer, integer>^(2x2)>`). One list level around the
+    // `matrix<tuple<integer, integer>^(2x2)>`). One list level around the
     // result, `list<tuple<integer, integer>>`, does not hold that value: a
     // list is read by its elements, and the elements of the value are rows
     // of tuples. The shape-aware typing applies only when the type solver
@@ -11007,7 +11007,7 @@ function indexedReadingOfAbstractCollection(t0: Type): Type | undefined {
  * `v: list<integer> | matrix<integer>`, a value of `v` is a list of
  * integers, whose image is a list of tuples, or a matrix, whose image is a
  * rectangle of tuples: the answer is
- * `list<tuple<integer, integer>> | list<tuple<integer, integer>^(?x?)>`. A
+ * `list<tuple<integer, integer>> | matrix<tuple<integer, integer>>`. A
  * union is kept rather than a join: the join of the two arms is one list
  * whose rows may differ in length, which loses the matrix shape. The shaped
  * result of the whole union has no rank to spell for a result that is not
@@ -11038,7 +11038,7 @@ function unionArmsGenericResult(
 
 /** The number of list levels of `t` (a dimensioned list counts one per
  * dimension): 0 for a non-list, 1 for `list<integer>`, 2 for
- * `list<list<integer>>` and for `list<integer^(2x2)>`. */
+ * `list<list<integer>>` and for `matrix<integer^(2x2)>`. */
 function listRank(t: Type): number {
   if (typeof t !== 'object' || t.kind !== 'list') return 0;
   return (t.dimensions?.length ?? 1) + listRank(t.elements);

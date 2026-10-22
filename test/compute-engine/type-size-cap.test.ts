@@ -229,7 +229,7 @@ describe('derived types of a shared tower', () => {
     // The dimensioned list type is already a summary and is never widened.
     const tower = sharedTower('List', 26);
     expect(tower.type.toString()).toBe(
-      `list<number^(${Array(26).fill('2').join('x')})>`
+      `tensor<number^(${Array(26).fill('2').join('x')})>`
     );
   });
 });

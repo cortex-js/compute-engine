@@ -107,7 +107,7 @@ describe('Conjugate — (T) -> T where T: number', () => {
     expect(e.op1.type.toString()).toBe('matrix<integer^(2x2)>');
     // D10 bound `T` to the FULL actual, so the arm's result IS the operand's
     // own type: the broadcast wrapper must not unwrap and re-shape it (that
-    // produced the mixed-encoding `list<vector<integer^2>^(2x2)>`).
+    // produced the mixed-encoding `matrix<vector<integer^2>^(2x2)>`).
     // A GROUND broadcastable — `Sin`, `Sqrt` — already answers `matrix<…>`
     // here, so this is the shape that keeps the two paths in agreement.
     expect(e.type.toString()).toBe('matrix<integer^(2x2)>');
@@ -220,7 +220,7 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
       'matrix<complex^(2x2)>'
     );
     // The `list` spelling of a square integer matrix.
-    ce.declare('NN', 'list<integer^(2x2)>');
+    ce.declare('NN', 'matrix<integer^(2x2)>');
     expect(ce.box(['Inverse', 'NN']).type.toString()).toBe(
       'matrix<rational^(2x2)>'
     );

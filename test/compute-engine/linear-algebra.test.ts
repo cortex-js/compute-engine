@@ -996,14 +996,14 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.expr(['Determinant', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 });
@@ -1135,6 +1135,71 @@ describe('Reshape', () => {
       `[[[a,b,c],[d,"e_1","f_1"]],[[g,h,"i_1"],[j,k,l]]]`
     );
   });
+
+  it('has a static type with the target shape', () => {
+    // The type handler builds the shaped type with the `tensor` head: the
+    // type parser refuses a `list` with two or more axes.
+    const six = ['List', 1, 2, 3, 4, 5, 6];
+    expect(ce.expr(['Reshape', six, ['Tuple', 2, 3]]).type.toString()).toBe(
+      'matrix<2x3>'
+    );
+    expect(
+      ce.expr(['Reshape', six, ['Tuple', 3, 1, 2]]).type.toString()
+    ).toBe('tensor<number^(3x1x2)>');
+    expect(ce.expr(['Reshape', six, ['Tuple', 6]]).type.toString()).toBe(
+      'vector<6>'
+    );
+    expect(ce.expr(['Reshape', 42, ['Tuple', 2, 2]]).type.toString()).toBe(
+      'matrix<2x2>'
+    );
+
+    // Each static type must hold the evaluated value. The type handler reads
+    // number literals only, so an extent that is a symbol makes the shape
+    // unreadable: the static type is then the bare `tensor` (number cells,
+    // rank unknown), which holds the 2×2 matrix the evaluation gives when
+    // `n` is 2. The empty shape `()` evaluates to a scalar (the first cell),
+    // so its static type is `number`, not a list. A fresh engine keeps the
+    // assignment of `n` out of the shared engine.
+    const ce2 = new ComputeEngine();
+    ce2.assign('n', 2);
+    ce2.declare('m', 'integer');
+    const cases: [Expression, string][] = [
+      [['Reshape', six, ['Tuple', 'n', 2]], 'tensor'],
+      [['Reshape', six, ['Tuple', 'm', 2]], 'tensor'],
+      [['Reshape', 42, ['Tuple', 'n', 2]], 'tensor'],
+      [['Reshape', six, ['Tuple']], 'number'],
+      [['Reshape', 42, ['Tuple']], 'number'],
+      [['Reshape', six, ['Tuple', 6]], 'vector<6>'],
+      [['Reshape', six, ['Tuple', 2, 3]], 'matrix<2x3>'],
+    ];
+    for (const [json, staticType] of cases) {
+      const expr = ce2.box(json);
+      expect(expr.type.toString()).toBe(staticType);
+      expect(expr.evaluate().type.matches(expr.type)).toBe(true);
+    }
+    expect(
+      ce2.box(['Reshape', six, ['Tuple', 'n', 2]]).evaluate().toString()
+    ).toBe('[[1,2],[3,4]]');
+    expect(ce2.box(['Reshape', six, ['Tuple']]).evaluate().toString()).toBe(
+      '1'
+    );
+
+    // An extent with no value keeps the call unevaluated (it built an empty
+    // list), and the static type `tensor` holds the value that a later
+    // assignment gives.
+    const pending = ce2.box(['Reshape', six, ['Tuple', 'm', 2]]);
+    expect(pending.evaluate().toString()).toBe('Reshape([1,2,3,4,5,6], (m, 2))');
+    ce2.assign('m', 3);
+    const reshaped = pending.evaluate();
+    expect(reshaped.toString()).toBe('[[1,2],[3,4],[5,6]]');
+    expect(reshaped.type.matches(pending.type)).toBe(true);
+    // An extent that is not a non-negative integer keeps the call
+    // unevaluated too: these built a ragged or an empty list.
+    for (const extent of [2.5, -1]) {
+      const bad = ce2.box(['Reshape', six, ['Tuple', extent, 2]]);
+      expect(bad.evaluate().operator).toBe('Reshape');
+    }
+  });
 });
 
 describe('Inverse', () => {
@@ -1181,14 +1246,14 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.expr(['Inverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 
@@ -1373,14 +1438,14 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.expr(['PseudoInverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "tensor<number^(3x4x2)>"), [[[a,b],[c,d],["e_1","f_1"],[g,h]],[["i_1",j],[k,l],[m,"n_1"],[o,p]],[[q,r],[s,t],[u,v],[w,"x_1"]]])`
     );
   });
 });
@@ -3408,8 +3473,8 @@ describe('MatrixPower', () => {
       ['matrix<real^(3x3)>', -1, 'matrix<real^(3x3)>'],
       ['matrix<rational^(2x2)>', -3, 'matrix<rational^(2x2)>'],
       ['matrix<complex^(2x2)>', 2, 'matrix<complex^(2x2)>'],
-      // The `list` spelling of a 2×2 matrix types as the `matrix` one.
-      ['list<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
+      // The `tensor` spelling of a 2×2 matrix types as the `matrix` one.
+      ['tensor<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
       // The shape is unknown: the element type is kept.
       ['matrix<integer>', 2, 'matrix<integer>'],
       // A non-square matrix has no power: the declared `matrix` is kept.

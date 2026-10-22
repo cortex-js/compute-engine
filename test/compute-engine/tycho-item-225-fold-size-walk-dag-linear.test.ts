@@ -84,7 +84,7 @@ describe('a binder whose bound reads a shared tower', () => {
 
 describe('canonicalizing over a shared list tower', () => {
   // The list counterpart of `sharedTower`: `List(t, t)` nested `depth` times.
-  // Its type is the dimensioned `list<number^(2x2x…)>`, so every reader of
+  // Its type is the dimensioned `tensor<number^(2x2x…)>`, so every reader of
   // the shape must stay linear in the number of DISTINCT nodes.
   function sharedListTower(ce: ComputeEngine, depth: number) {
     let t = ce.parse('x + 1');
@@ -120,7 +120,7 @@ describe('canonicalizing over a shared list tower', () => {
       expect(length.isCanonical).toBe(true);
       expect(element.isCanonical).toBe(true);
       expect(types).toEqual([
-        `list<number^(${Array(26).fill('2').join('x')})>`,
+        `tensor<number^(${Array(26).fill('2').join('x')})>`,
         'integer',
         'boolean',
         'unknown',

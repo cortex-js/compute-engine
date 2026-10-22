@@ -192,7 +192,7 @@ function indexedFromType(t: Type): Tri {
   return factsOf(t).indexed;
 }
 
-/** A dimensioned list type (`list<integer^2x3>`) is the one static shape a
+/** A dimensioned list type (`matrix<integer^(2x3)>`) is the one static shape a
  * type can carry. Dimensions may hold placeholders for unknown extents, so
  * only an all-concrete dimension list counts. */
 function shapeFromType(t: Type): readonly number[] | undefined {

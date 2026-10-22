@@ -100,7 +100,7 @@ survey(
   ['List', ['List', 1, 2], ['List', 3, 4]],
   [
     ['Sin(L)', ['Sin', 'L'], 'matrix<2x2>'],
-    ['Mod(L, 2)', ['Mod', 'L', 2], 'list<nan | real^(2x2)>'],
+    ['Mod(L, 2)', ['Mod', 'L', 2], 'matrix<nan | real^(2x2)>'],
     ['Multiply(2, L)', ['Multiply', 2, 'L'], 'matrix<2x2>'],
     [
       'Add([1,2], L)',

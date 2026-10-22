@@ -153,21 +153,23 @@ a structural proof, or a compilation refusal.
 ### Lists, tensors and `broadcastable`
 
 A list type with no dimensions is read by its ELEMENTS, the values that indexing
-returns. A list type with dimensions (a vector, a matrix, a `list<U^dims>`) and
-a tensor are read by their CELLS, the values at the depth of the rank. The two
+returns. A list type with dimensions (a `list<U^n>`, a vector, a matrix, a
+`tensor<U^dims>`) and a tensor of unknown rank are read by their CELLS, the values at the depth of the rank. The two
 readings do not mix: a matrix of integers is a `list<vector<integer>>` and a
 `list<list<integer>>`, and it is not a `list<integer>`.
 
 **The three forms.** A list type is one node kind, `ListType`
 (`src/common/type/types.ts`). Its `dimensions` field selects the form:
 
-| `dimensions` | Spelling                                 | Meaning                                         | Element type                                               |
-| ------------ | ---------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------- |
-| absent       | `list<E>`                                | a list whose elements are `E`                   | `E`                                                        |
-| an array     | `vector<U>`, `matrix<U>`, `list<U^dims>` | a tensor of that rank, with cells `U`           | rank 1: `U`; rank 2 or more: the rows, `list<U^dims[1..]>` |
-| `null`       | `tensor<U>`, bare `tensor`               | a tensor of unknown rank (1 or more), cells `U` | `U \| tensor<U>`                                           |
+| `dimensions` | Spelling                                                  | Meaning                                         | Element type                                                 |
+| ------------ | --------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
+| absent       | `list<E>`                                                 | a list whose elements are `E`                   | `E`                                                          |
+| an array     | `list<U^n>`, `vector<U>`, `matrix<U>`, `tensor<U^(dims)>` | a tensor of that rank, with cells `U`           | rank 1: `U`; rank 2 or more: the rows, `tensor<U^dims[1..]>` |
+| `null`       | `tensor<U>`, bare `tensor`                                | a tensor of unknown rank (1 or more), cells `U` | `U \| tensor<U>`                                             |
 
-`-1` in `dims` is an axis of any length. `listTensorRank(t)`
+`-1` in `dims` is an axis of any length, spelled `?`. In the tables below,
+`tensor<U^dims>` stands for every spelling of the second form, whatever its
+rank. `listTensorRank(t)`
 (`src/common/type/types.ts`) returns the rank of the second form, and
 `undefined` for the other two. `collectionElementType()`
 (`src/common/type/utils.ts`) returns the element type of the table. `set<E>` is
@@ -175,34 +177,53 @@ read like `list<E>`: its elements are `E`. A code site that reads `dimensions`
 must handle all three values: `if (dims)` treats a `tensor<U>` as a plain list
 of its cells, and `dims !== undefined` followed by `dims.length` fails on it.
 
-**The cells.** The type builder applies two rules to the cell type, each with
-one predicate in `src/common/type/primitive.ts`:
+**The cells and the axes.** A list has elements and may have a length;
+`vector`, `matrix` and `tensor` have cells, of any type that is not a list, and
+may have a shape. The bare names `vector`, `matrix` and `tensor` mean number
+cells. The type builder (`src/common/type/type-builder.ts`) applies two rules:
 
-- The cells of a list with dimensions and of a tensor cannot be lists
-  (`cellTypeMayCarryDimensions()`, re-exported by `utils.ts`). The predicate
-  refuses a list of any form, `collection`, `indexed_collection`,
-  `broadcastable`, the bare names of these families, and a union or an
-  intersection with such an arm. So `list<list<integer>^2>`,
-  `list<vector<integer^3>^2>`, `list<list^2>` and `tensor<list<integer>>` are
-  parse errors: the shape is written in one place, as `list<integer^(2x3)>` or
-  `matrix<integer^(2x3)>`. Cells that are not numbers and not lists are valid:
-  `list<boolean^2>`, `list<string^2>`, `list<tuple<number, number>^3>`,
-  `list<boolean^(2x2)>`, `list<(integer | missing)^3>`, `tensor<boolean>` and
-  `tensor<tuple<number, number>>` parse.
-- The cells of a type spelled `vector<U>` or `matrix<U>` must also be able to
-  hold a number (`cellTypeCanHoldANumber()`). The predicate accepts a number
-  type, a numeric range or value, `any`, `unknown`, `never`, `value`, `scalar`,
-  `expression`, a type variable, a reference to a declared type, and a union of
-  which one arm is accepted. So `vector<string>`, `vector<boolean>`,
-  `matrix<boolean>` and `matrix<list<integer>>` are parse errors. Write
-  `list<string>`, `list<string^3>` for exactly three strings, or
-  `list<boolean^(2x2)>` for a 2×2 array of booleans.
+- The cells of every head with a shape cannot be lists
+  (`cellTypeMayCarryDimensions()` in `src/common/type/primitive.ts`,
+  re-exported by `utils.ts`). The predicate refuses a list of any form,
+  `collection`, `indexed_collection`, `broadcastable`, the bare names of these
+  families, and a union or an intersection with such an arm. So
+  `list<list<integer>^2>`, `list<vector<integer^3>^2>`, `list<list^2>`,
+  `matrix<list<integer>>` and `tensor<list<integer>>` are parse errors: the
+  shape is written in one place. The error names that spelling when it can be
+  found: `list<list<integer^3>^2>` is refused with "Write
+  `matrix<integer^(2x3)>`". Every other cell type is valid with every head:
+  `list<boolean^2>`, `vector<string^3>`, `list<tuple<number, number>^3>`,
+  `matrix<boolean^(2x2)>`, `matrix<boolean>`, `list<(integer | missing)^3>`,
+  `tensor<boolean>` and `tensor<tuple<number, number>>` parse.
+- A `list` has one axis at most, its length (`list<integer^3>`). A list with two
+  or more axes is refused, with an error that names the spelling to use:
+  `list<boolean^(2x2)>` and `list<boolean^2x2>` give "Write
+  `matrix<boolean^(2x2)>` instead", `list<integer^(2x3x4)>` gives "Write
+  `tensor<integer^(2x3x4)>` instead". The same holds with `?` and with
+  dimension variables (`list<T^(MxN)>` is refused, `matrix<T^(MxN)>` is
+  valid).
+
+These are the user decisions of 2026-10-22 (option U of
+`docs/plans/2026-10-22-list-lengths-and-tensor-shapes.md`). Before them a
+`vector` or `matrix` cell had to be able to hold a number, and an array of
+booleans of rank 2 was spelled `list<boolean^(2x2)>`.
+
+**The printed form.** `typeToString()` (`src/common/type/serialize.ts`) is the
+only function that chooses the head, by rank. Rank 1 is `vector<…>` when the
+cells can hold a number (`cellTypeCanHoldANumber()`, which only the printer
+asks) and `list<E^n>` otherwise: `vector<integer^3>`, `list<boolean^2>`, and
+`vector<string^2>` prints `list<string^2>`. Rank 2 is always `matrix<…>`:
+`matrix<integer^(2x2)>`, `matrix<boolean^(2x2)>`, `matrix<boolean>` for open
+axes, and `matrix<2x2>` for number cells. Rank 3 or more is
+`tensor<U^(…)>`: `tensor<integer^(2x3x4)>`. An unknown rank is `tensor<U>`.
+Every printed form parses back to the same type.
 
 The engine asks `cellTypeMayCarryDimensions()` before it attaches dimensions to
 the type of a list literal, a broadcast or a `Map` result: `[[1, 2], [3, 4]]` is
 `matrix<integer^(2x2)>`, `[True, False]` is `list<boolean^2>`,
 `[(1, 2), (3, 4)]` is `list<tuple<integer, integer>^2>`, `M < 3` with
-`M := [[1, 2], [3, 4]]` is `list<boolean^(2x2)>`, and the ragged `[[1], [2, 3]]`
+`M := [[1, 2], [3, 4]]` is `matrix<boolean^(2x2)>`, `(1, 2) * M` is
+`matrix<tuple<integer, integer>^(2x2)>`, and the ragged `[[1], [2, 3]]`
 is `list<vector<integer^1> | vector<integer^2>>`. A broadcast whose result rank
 is not known (over operands of different ranks, over an operand whose type is a
 union of ranks, or over a tensor of unknown rank) is typed `tensor<R>` for a
@@ -238,13 +259,13 @@ rows of a matrix).
 | `list<E>`      | `collection<F>`, `indexed_collection<F>`            | `E <: F`                                                                                 |
 | `list<E>`      | `list<U^-1>` (a `vector<U>` of any length)          | `E <: U`; never for a fixed length or a rank of 2 or more                                |
 | `list<E>`      | `tensor<U>`, `broadcastable<U>`                     | `E <: U`                                                                                 |
-| `list<U^dims>` | `list<V^dims2>`                                     | `U <: V`, the same rank, and each axis of `dims2` is `-1` or equal to the axis of `dims` |
-| `list<U^dims>` | `tensor<V>`                                         | `U <: V`                                                                                 |
-| `list<U^dims>` | `broadcastable<V>`                                  | `U <: V`                                                                                 |
-| `list<U^dims>` | `list<E>`, `collection<E>`, `indexed_collection<E>` | `R <: E`                                                                                 |
+| `tensor<U^dims>` | `tensor<V^dims2>`                                   | `U <: V`, the same rank, and each axis of `dims2` is `-1` or equal to the axis of `dims` |
+| `tensor<U^dims>` | `tensor<V>`                                         | `U <: V`                                                                                 |
+| `tensor<U^dims>` | `broadcastable<V>`                                  | `U <: V`                                                                                 |
+| `tensor<U^dims>` | `list<E>`, `collection<E>`, `indexed_collection<E>` | `R <: E`                                                                                 |
 | `tensor<U>`    | `tensor<V>`, `broadcastable<V>`                     | `U <: V`                                                                                 |
 | `tensor<U>`    | `list<E>`, `collection<E>`, `indexed_collection<E>` | `U \| tensor<U> <: E`                                                                    |
-| `tensor<U>`    | `list<V^dims>`                                      | never: the rank is not known                                                             |
+| `tensor<U>`    | `tensor<V^dims>`                                    | never: the rank is not known                                                             |
 
 Examples: `matrix<integer>` is a `list<vector<integer>>`, a
 `list<list<integer>>`, a `collection<vector<integer>>` and a `tensor<integer>`,
@@ -280,20 +301,20 @@ spells `number | tensor`.
   the result is `list<never>`, the type of the empty list `[]`, which is a value
   of both: `list<integer> & list<string>` and
   `list<integer> & list<list<integer>>` are `list<never>`.
-- `list<U^dims> & list<V^dims2>` is the cell meet with the meet of the shapes,
-  axis by axis: an axis of any length meets a fixed length as the fixed length,
-  and two different fixed lengths give `never`.
-  `list<integer^(2x-1)> & list<number^(-1x3)>` is `matrix<integer^(2x3)>`;
+- `tensor<U^dims> & tensor<V^dims2>` is the cell meet with the meet of the
+  shapes, axis by axis: an axis of any length meets a fixed length as the fixed
+  length, and two different fixed lengths give `never`.
+  `matrix<integer^(2x?)> & matrix<number^(?x3)>` is `matrix<integer^(2x3)>`;
   `vector<integer^2> & vector<integer^3>` and
   `matrix<integer> & vector<integer>` are `never`. A meet of two list types is
   `never` only when their shapes exclude each other.
 - `list<E> & list<U^-1>` is `list<E & U>`: `list<integer> & vector<number>` is
   `list<integer>`. A `vector<U>` of any length and a `list<U>` hold the same
   values when `U` cannot hold a list, so the reducer drops the open axis.
-- `tensor<U> & tensor<V>` is `tensor<U & V>`, and `tensor<U> & list<V^dims>` is
-  `list<(U & V)^dims>`: `tensor<number> & matrix<integer>` is `matrix<integer>`.
-- `list<E> & list<U^dims>` with a rank of 2 or more is decided by the meet of
-  `E` and the rows `R`: the result is `list<U^dims>` when `R <: E`
+- `tensor<U> & tensor<V>` is `tensor<U & V>`, and `tensor<U> & tensor<V^dims>`
+  is `tensor<(U & V)^dims>`: `tensor<number> & matrix<integer>` is `matrix<integer>`.
+- `list<E> & tensor<U^dims>` with a rank of 2 or more is decided by the meet of
+  `E` and the rows `R`: the result is `tensor<U^dims>` when `R <: E`
   (`list<vector<number>> & matrix<integer>` is `matrix<integer>`), `never` when
   the meet of `E` and `R` is `never` (`list<integer> & matrix<integer>`), and
   the intersection as written otherwise.

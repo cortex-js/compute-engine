@@ -212,10 +212,13 @@ function normalizedTypeName(value: string): string {
 
 (* --- Collection-like Types --- *)
 
-<list_type> ::= "list" ( "<" <type> ( "^" <dimensions> )? ">" )?
+(* A `list` has one axis at most, its length: `list<integer^(2x3)>` is
+   refused, and is spelled `matrix<integer^(2x3)>`. The cells of every head
+   with a shape cannot be lists (`matrix<list<integer>>` is refused). *)
+<list_type> ::= "list" ( "<" ( <type> ( "^" <dimension_specifier> )? | <dimension_specifier> ) ">" )?
               | "vector" ( "<" ( <type> ("^" <dimension_specifier>)? | <dimensions> ) ">" )?
               | "matrix" ( "<" ( <type> ("^" <dimensions>)? | <dimensions> ) ">" )?
-              | "tensor" ( "<" <type> ">" )?
+              | "tensor" ( "<" <type> ( "^" <dimensions> )? ">" )?
 
 <dimensions> ::= <dimension_specifier> ( "x" <dimension_specifier> )*
                | "(" <dimension_specifier> ( "x" <dimension_specifier> )* ")"
@@ -1485,7 +1488,8 @@ export class Parser {
     let dimensions: DimensionNode[] | undefined;
 
     if (this.match('<')) {
-      // Try leading dimensions first (e.g. `list<2x3>`)
+      // Try a leading length first (e.g. `list<3>`). The type builder
+      // refuses two or more axes (`list<2x3>`).
       dimensions = this.parseDimensions(true);
 
       if (!dimensions) {
@@ -1494,9 +1498,11 @@ export class Parser {
         if (type) {
           elementType = type;
 
-          // Dimensions after the element type (e.g. `list<integer^2x3>`).
-          // The type builder refuses a cell type that can hold a list
-          // (`checkTensorCells`, `type-builder.ts`).
+          // The length after the element type (e.g. `list<integer^3>`). The
+          // type builder refuses a cell type that can hold a list
+          // (`checkTensorCells`, `type-builder.ts`) and a shape of two or
+          // more axes (`list<integer^2x3>`, which is spelled
+          // `matrix<integer^(2x3)>`).
           if (this.match('^')) {
             dimensions = this.parseCaretDimensions();
           }
@@ -1531,15 +1537,10 @@ export class Parser {
             // The one length of the vector: a positive integer or a dimension
             // variable the enclosing `where` clause declares (`vector<T^N>`).
             const dims = this.parseCaretDimensions();
-            if (!dims)
-              this.error(
-                'Expected a positive integer or a dimension variable after ^',
-                'For example `vector<integer^3>`, or `vector<T^N> where T, N`'
-              );
             if (dims.length !== 1)
               this.error(
                 'A vector has exactly one dimension',
-                'Write `matrix<…>` or `list<…>` for a multi-dimensional shape'
+                'Write `matrix<…>` for two dimensions, `tensor<…>` for more'
               );
             dimension = dims[0];
           }
@@ -1600,15 +1601,37 @@ export class Parser {
       { name: 'number' }
     );
 
+    let dimensions: DimensionNode[] | undefined;
+
     if (this.match('<')) {
+      // No leading shape (`tensor<2x3x4>`), unlike `matrix<2x3>`: a numeral
+      // right after `<` is a literal cell type (`tensor<0>` is an array of
+      // zeros of any rank), and the parser cannot read ahead to tell the two
+      // apart. A tensor of numbers of a known shape is
+      // `tensor<number^(2x3x4)>`.
       const type = this.parseUnionType();
       if (type) {
         elementType = type;
+        // A tensor of known shape: `tensor<boolean^(2x2)>`.
+        if (this.match('^')) dimensions = this.parseCaretDimensions();
       }
+      // `tensor<2x3x4>`: the lexer reads `x3x4` as an identifier after the
+      // numeral `2`. Name the spelling to use rather than "invalid type".
+      if (
+        this.current.type === 'IDENTIFIER' &&
+        /^x/.test(this.current.value)
+      )
+        this.error(
+          'A tensor type has no leading shape',
+          'Write the shape after the cell type: `tensor<number^(2x3x4)>`'
+        );
       this.expect('>');
     }
 
-    return this.createNode<TensorTypeNode>('tensor', { elementType });
+    return this.createNode<TensorTypeNode>('tensor', {
+      elementType,
+      dimensions,
+    });
   }
 
   /**
@@ -1623,7 +1646,7 @@ export class Parser {
    * taken whole first, so a variable legally named `MxN` is not split.
    *
    * `leading` is true for the position right after `<` (`matrix<2x3>`,
-   * `list<2x3>`), where a bare in-scope variable name is an ELEMENT type
+   * `list<3>`), where a bare in-scope variable name is an ELEMENT type
    * (`matrix<T>`), never a length: only a numeral, `?`, or an `x`-joined group
    * of two or more dimensions is read as a shape there. After `^` every
    * spelling is a dimension.
@@ -1799,7 +1822,7 @@ export class Parser {
   ): DimensionNode[] {
     return segments.map((segment) => {
       // `0` is admitted: a zero-length axis is kept in the type
-      // (`reduceListType`, `reduce.ts`), so `list<integer^(2x0)>` is two
+      // (`reduceListType`, `reduce.ts`), so `matrix<integer^(2x0)>` is two
       // empty rows.
       if (/^[0-9]+$/.test(segment))
         return this.createNode<DimensionNode>('dimension', {
@@ -1820,12 +1843,21 @@ export class Parser {
     });
   }
 
-  private parseCaretDimensions(): DimensionNode[] | undefined {
+  private parseCaretDimensions(): DimensionNode[] {
     // Dimensions following `^`. The serializer parenthesizes multi-dimensional
-    // element types, e.g. `matrix<integer^(2x3)>` and `list<integer^(2x3)>`,
+    // element types, e.g. `matrix<integer^(2x3)>` and `tensor<integer^(2x3x4)>`,
     // so accept an optional surrounding `( … )`.
     const paren = this.match('(');
     const dimensions = this.parseDimensions();
+    // A `^` must be followed by at least one dimension, for every head. Without
+    // this check `tensor<integer^>`, `matrix<integer^()>` and `list<number^>`
+    // would parse as if the `^` were not there, as a type with a different
+    // rank than the one the author meant to write.
+    if (!dimensions)
+      this.error(
+        'Expected a positive integer, `?` or a dimension variable after ^',
+        'For example `list<integer^3>`, `matrix<integer^(2x3)>`, or `vector<T^N> where T, N`'
+      );
     if (paren) this.expect(')');
     return dimensions;
   }

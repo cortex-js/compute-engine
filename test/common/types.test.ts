@@ -115,7 +115,7 @@ describe('Constructed Type Parser', () => {
 
 describe('Collection Type Parser', () => {
   it('should parse lists with dimensions', () => {
-    expect(parseType('list<integer^2x3>')).toMatchInlineSnapshot(`
+    expect(parseType('matrix<integer^(2x3)>')).toMatchInlineSnapshot(`
       {
         "dimensions": [
           2,
@@ -235,7 +235,7 @@ describe('Collection Type Parser', () => {
   });
 
   it('should parse a list expression with dimensions and type', () => {
-    expect(parseType('list<number^2x3>')).toMatchInlineSnapshot(`
+    expect(parseType('matrix<number^(2x3)>')).toMatchInlineSnapshot(`
       {
         "dimensions": [
           2,
@@ -247,18 +247,24 @@ describe('Collection Type Parser', () => {
     `);
   });
 
-  it('should parse a list expression with dimensions and no type', () => {
+  it('should parse a list expression with a length and no type', () => {
     // An omitted element annotation permits any content type.
-    expect(parseType('list<2x3>')).toMatchInlineSnapshot(`
+    expect(parseType('list<3>')).toMatchInlineSnapshot(`
       {
         "dimensions": [
-          2,
           3,
         ],
         "elements": "any",
         "kind": "list",
       }
     `);
+  });
+
+  it('should refuse a list expression with two dimensions and no type', () => {
+    // A list has one axis at most: the shape `2x3` is a matrix.
+    expect(() => parseType('list<2x3>')).toThrow(
+      'Write `matrix<any^(2x3)>` instead'
+    );
   });
 
   // REVIEW.md F5–F7: the documented dimension syntaxes (`?`, spaces, and the
@@ -296,7 +302,7 @@ describe('Collection Type Parser', () => {
       'matrix<integer^(2x3)>',
       'matrix<?x3>',
       'list<number^2>',
-      'list<integer^(2x3)>',
+      'matrix<integer^(2x3)>',
     ]) {
       const once = typeToString(parseType(s));
       const twice = typeToString(parseType(once));
@@ -1284,8 +1290,12 @@ describe('isSubtype POSITIVE', () => {
 
 describe('isSubtype of collections', () => {
   it('should match collection type with matching dimensions', () => {
-    expect(isSubtype('list<integer^2x3>', 'list<integer^2x3>')).toBe(true);
-    expect(isSubtype('list<integer^2x3>', 'list<number^2x3>')).toBe(true);
+    expect(isSubtype('matrix<integer^(2x3)>', 'matrix<integer^(2x3)>')).toBe(
+      true
+    );
+    expect(isSubtype('matrix<integer^(2x3)>', 'matrix<number^(2x3)>')).toBe(
+      true
+    );
   });
 
   it('should match tuple type subtype', () => {
@@ -1368,15 +1378,21 @@ describe('isSubtype Tests NEGATIVE', () => {
   });
 
   it('should not match incompatible collection types', () => {
-    expect(isSubtype('list<integer^2x3>', 'list<string^2x3>')).toBe(false);
+    expect(isSubtype('matrix<integer^(2x3)>', 'matrix<string^(2x3)>')).toBe(
+      false
+    );
   });
 
   it('should not match collections with mismatched dimensions', () => {
-    expect(isSubtype('list<integer^2x3>', 'list<integer^3x3>')).toBe(false);
+    expect(isSubtype('matrix<integer^(2x3)>', 'matrix<integer^(3x3)>')).toBe(
+      false
+    );
   });
 
   it('should not match collections with mismatched shape', () => {
-    expect(isSubtype('list<integer^2x3x4>', 'list<integer^3x3>')).toBe(false);
+    expect(isSubtype('tensor<integer^(2x3x4)>', 'matrix<integer^(3x3)>')).toBe(
+      false
+    );
   });
 
   it('should not match tuples with different lengths', () => {
@@ -1862,13 +1878,13 @@ describe('reduceType Tests', () => {
   // Test Cases for Collection Types
 
   it('should reduce collection types by reducing the element type', () => {
-    expect(reduce('list<(integer | integer)^2x3>')).toMatchInlineSnapshot(
+    expect(reduce('matrix<(integer | integer)^(2x3)>')).toMatchInlineSnapshot(
       `"matrix<integer^(2x3)>"`
     );
   });
 
   it('should handle collections with complex nested types', () => {
-    expect(reduce('list<(integer & number)^2x3>')).toMatchInlineSnapshot(
+    expect(reduce('matrix<(integer & number)^(2x3)>')).toMatchInlineSnapshot(
       `"matrix<integer^(2x3)>"`
     );
   });
