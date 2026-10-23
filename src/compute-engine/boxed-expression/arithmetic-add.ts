@@ -1262,6 +1262,8 @@ export class Terms {
     this.engine = ce;
     let posInfinityCount = 0;
     let negInfinityCount = 0;
+    // Whether a term `±∞·c` with a `c` of unknown sign was kept in the sum.
+    let unsignedInfiniteTerm = false;
     // We're going to keep track of numeric values in an array, so that we can
     // sum them exactly at the end (some inexact values may cancel each other,
     // for example (0.1 - 0.1 + 1/4) -> 1/4.
@@ -1307,12 +1309,47 @@ export class Terms {
       }
 
       const [coef, rest] = exactSplit(ce, term);
-      if (coef.isPositiveInfinity) posInfinityCount += 1;
-      else if (coef.isNegativeInfinity) negInfinityCount += 1;
+      // An infinite coefficient absorbs the sum only when the sign of the
+      // term is known: a pure `±∞`, or `±∞·c` with a `c` of decided sign,
+      // which can flip it. With a `c` of unknown sign the term stays in the
+      // sum: `∞·c + 1` is `−∞` at `c < 0` and `0·∞` at `c = 0`, so it is
+      // not `+∞`. (`∫_{−∞}^{x} e^{−(z−m)²/(2s²)} dz` reached this fold with
+      // `−∞·√(s⁻²) + m·√(s⁻²)`, the argument of its `Erf` at the lower
+      // bound, and lost the guard `√(s⁻²) > 0` that the same integral
+      // carries at `m = 0`.)
+      if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
+        const restSign = rest.isSame(1)
+          ? 1
+          : rest.isPositive === true
+            ? 1
+            : rest.isNegative === true
+              ? -1
+              : 0;
+        if (restSign !== 0) {
+          if (coef.isPositiveInfinity === (restSign === 1))
+            posInfinityCount += 1;
+          else negInfinityCount += 1;
+        } else unsignedInfiniteTerm = true;
+      }
 
       if (rest.isSame(1)) {
         if (!coef.isZero || !coef.isExact) numericValues.push(coef);
       } else this._add(coef, rest);
+    }
+
+    // `∞·c − ∞·c` with a `c` of unknown sign: both infinite coefficients
+    // were kept on the same term, and their sum has no value. The form is
+    // indeterminate, as `∞ − ∞` is below.
+    if (unsignedInfiniteTerm) {
+      for (const { coef } of this.terms) {
+        if (
+          coef.some((v) => v.isPositiveInfinity) &&
+          coef.some((v) => v.isNegativeInfinity)
+        ) {
+          this.terms = [{ term: indeterminateFormAnswer(ce, terms), coef: [] }];
+          return;
+        }
+      }
     }
 
     // `∞ − ∞` is the indeterminate form: `Indeterminate`, or `NaN` when a
@@ -1320,6 +1357,13 @@ export class Terms {
     if (posInfinityCount > 0 && negInfinityCount > 0) {
       this.terms = [{ term: indeterminateFormAnswer(ce, terms), coef: [] }];
       return;
+    }
+    // A signed infinity absorbs the sum only when no term `±∞·c` of unknown
+    // sign was kept: `∞·c + ∞` is `∞ − ∞` at `c < 0`, so it stays a sum
+    // (the pure `∞` is a numeric term of it).
+    if (unsignedInfiniteTerm) {
+      posInfinityCount = 0;
+      negInfinityCount = 0;
     }
     if (posInfinityCount > 0) {
       this.terms = [{ term: ce.PositiveInfinity, coef: [] }];

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-383.
+Next free reference: CE-384.
 
 **Entry format.**
 
@@ -2587,6 +2587,20 @@ ordinary expression has, so that the check can use the type of the application
 instead of a walk.
 
 ## Symbolic computation
+
+### CE-383. A divergent improper integral with a parameter is a value under a condition that nothing satisfies
+
+**Status:** open; defect, small. Found 2026-10-23 while fixing Tycho row 428.
+
+`∫₀^∞ xⁿ dx` evaluates to `0 {0 < n + 1 ∧ n + 1 < 0}`: the endpoint leak
+table of `Integrate` (`classifyEndpointLeak`, `library/calculus.ts`) resolves
+`0^(n+1)` to `0` under `n + 1 > 0` and `∞^(n+1)` to `0` under `n + 1 < 0`, and
+the two conditions are joined with `And`. The integral diverges for every `n`.
+The result has no value for any `n`, so it is not wrong, but a reader takes a
+`When` for a value that holds on some range. Proposed fix: when the guards of
+the leaks of one definite integral contradict each other (two comparisons of
+the same expression with `0` in opposite directions), return the integral
+unevaluated, or `+∞` when the integrand is positive on the range.
 
 Two opt-in libraries extend coverage without changes to the core engine:
 **Rubi** (integration rules, `loadIntegrationRules(ce)`) and **Fungrim**

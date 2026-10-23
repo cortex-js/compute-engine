@@ -230,6 +230,8 @@ const MAX_NESTED_PARTIAL_ORDER = 64;
 // `e^{c·(±∞)}` with a symbolic rate `c`. Each such term has a limit of 0 on a
 // convergence condition (`n+1 > 0`, `1−s < 0`, `c > 0`); we resolve it to 0 and
 // carry the condition, so the definite integral becomes a `When`-guarded value.
+// `Erf(c·(±∞))` and `Erfc(c·(±∞))`, from the antiderivative of a Gaussian
+// with a symbolic coefficient, saturate to `±1` (`0` or `2`) under `c > 0`.
 // Anything outside this small table fails closed (caller stays inert) rather
 // than leaking an indeterminate form.
 //
@@ -245,7 +247,7 @@ function classifyEndpointLeak(
   node: Expression,
   ce: ComputeEngine
 ): { value: Expression; guard: Expression } | 'unresolvable' | null {
-  if (!isFunction(node, 'Power')) return null;
+  if (!isFunction(node, 'Power')) return classifyErfEndpointLeak(node, ce);
   const base = node.op1;
   const exp = node.op2;
 
@@ -280,6 +282,58 @@ function classifyEndpointLeak(
 }
 
 /**
+ * Whether `e` is a number literal `±∞` or `~∞`, or holds one at any depth.
+ * `has()` cannot answer this: it searches symbols, and the infinities are
+ * number literals, so `has(['PositiveInfinity', 'NegativeInfinity'])` is
+ * `false` for `(−∞)·√(s⁻²)`.
+ */
+function holdsInfinity(e: Expression): boolean {
+  if (isNumber(e)) return e.isInfinity === true;
+  return isFunction(e) && e.ops.some(holdsInfinity);
+}
+
+/**
+ * Split `q = (±∞)·c` into the sign of its single infinite factor and the
+ * finite, non-numeric cofactor `c`. Returns `null` when `q` is not such a
+ * product (a numeric cofactor is decidable and would already have folded),
+ * and `'unresolvable'` when `q` holds two infinite factors.
+ *
+ * A sum `(±∞)·c + d` whose other terms `d` hold no infinity is split as its
+ * infinite term: the finite terms do not change the limit of `e^{q}` or
+ * `Erf(q)`. The value at the lower bound of `∫_{−∞}^{x} e^{−(z−m)²/(2s²)} dz`
+ * is `Erf((−∞)·√(s⁻²) − m·√(s⁻²))`, which the sum handler keeps as a sum
+ * because the sign of `√(s⁻²)` is not known.
+ */
+function splitInfiniteProduct(
+  q: Expression,
+  ce: ComputeEngine
+): { infSign: 1 | -1; cofactor: Expression } | 'unresolvable' | null {
+  if (isFunction(q, 'Add')) {
+    const infinite = q.ops.filter(holdsInfinity);
+    if (infinite.length !== 1)
+      return infinite.length === 0 ? null : 'unresolvable';
+    return splitInfiniteProduct(infinite[0], ce);
+  }
+  if (!isFunction(q, 'Multiply')) return null;
+  let infSign: 0 | 1 | -1 = 0;
+  const rest: Expression[] = [];
+  for (const f of q.ops) {
+    if (f.isInfinity === true) {
+      if (infSign !== 0) return 'unresolvable';
+      // The undirected infinity `~∞` has neither sign: `e^{q}` and
+      // `Erf(q)` have no limit there.
+      if (f.isPositive === true) infSign = 1;
+      else if (f.isNegative === true) infSign = -1;
+      else return 'unresolvable';
+    } else rest.push(f);
+  }
+  if (infSign === 0 || rest.length === 0) return null;
+  const cofactor = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
+  if (isNumber(cofactor)) return null;
+  return { infSign, cofactor };
+}
+
+/**
  * Classify an exponential endpoint leak `e^{q}` by its exponent `q`. Resolves
  * only `q = (±∞)·c` with a single infinite factor and a finite, non-numeric
  * cofactor `c`: the limit is 0 when `q → −∞`, i.e. `c > 0` for a `−∞` factor,
@@ -289,18 +343,9 @@ function classifyExpEndpointLeak(
   q: Expression,
   ce: ComputeEngine
 ): { value: Expression; guard: Expression } | 'unresolvable' | null {
-  if (!isFunction(q, 'Multiply')) return null;
-  let infSign = 0;
-  const rest: Expression[] = [];
-  for (const f of q.ops) {
-    if (f.isInfinity === true) {
-      if (infSign !== 0) return 'unresolvable';
-      infSign = f.isPositive === true ? 1 : -1;
-    } else rest.push(f);
-  }
-  if (infSign === 0 || rest.length === 0) return null;
-  const cofactor = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
-  if (isNumber(cofactor)) return null; // decidable → would have folded
+  const split = splitInfiniteProduct(q, ce);
+  if (split === null || split === 'unresolvable') return split;
+  const { infSign, cofactor } = split;
   // `e^{c·(−∞)}` → 0 when Re(c) > 0, and `e^{c·(+∞)}` → 0 when Re(c) < 0.
   const re = guardRealPart(cofactor, ce);
   const guard =
@@ -308,6 +353,41 @@ function classifyExpEndpointLeak(
       ? ce.function('Greater', [re, ce.Zero])
       : ce.function('Less', [re, ce.Zero]);
   return { value: ce.Zero, guard };
+}
+
+/**
+ * Classify an error-function endpoint leak `Erf(q)` or `Erfc(q)` with
+ * `q = (±∞)·c`, a single infinite factor and a finite, non-numeric cofactor
+ * `c`. Such a term is the value at an infinite bound of the antiderivative of
+ * a Gaussian with a symbolic coefficient: `∫_{−∞}^{x} e^{−z²/(2s²)} dz` is
+ * `√(π/2)·√(s²)·(Erf(x/(√2·√(s²))) + 1)` for a real `s`, the normal
+ * distribution of Tycho row 428. `Erf` saturates at a signed real infinity,
+ * `Erf(+∞) = 1` and `Erf(−∞) = −1`, so for `c > 0` the value is the sign of
+ * the infinite factor, and `Erfc = 1 − Erf` gives `0` at `+∞` and `2` at
+ * `−∞`. The guard `c > 0` is carried as the condition of the result, the
+ * way `∫₀^∞ e^{−cx} dx` is `1/c {0 < c}`; a cofactor that is not a positive
+ * real number (a negative `c` flips both values, a complex `c` outside
+ * `|arg c| < π/4` has no limit) leaves the guard false and the result with
+ * no value. `Erfi` grows without bound at a real infinity, so an `Erfi`
+ * leak is unresolvable.
+ */
+function classifyErfEndpointLeak(
+  node: Expression,
+  ce: ComputeEngine
+): { value: Expression; guard: Expression } | 'unresolvable' | null {
+  if (!isFunction(node, 'Erf') && !isFunction(node, 'Erfc')) {
+    if (!isFunction(node, 'Erfi')) return null;
+    const split = splitInfiniteProduct(node.op1, ce);
+    return split === null ? null : 'unresolvable';
+  }
+  const split = splitInfiniteProduct(node.op1, ce);
+  if (split === null || split === 'unresolvable') return split;
+  const { infSign, cofactor } = split;
+  const erf = infSign; // Erf(c·(±∞)) for c > 0
+  const value =
+    node.operator === 'Erf' ? ce.number(erf) : ce.number(1 - erf); // Erfc
+  const guard = ce.function('Greater', [cofactor, ce.Zero]);
+  return { value, guard };
 }
 
 /**
@@ -426,7 +506,7 @@ function improperEndpointValue(
       lim.operator === 'Limit' ||
       lim.isNaN === true ||
       lim.isInfinity === true ||
-      lim.has(['PositiveInfinity', 'NegativeInfinity', 'ComplexInfinity']) ||
+      holdsInfinity(lim) ||
       lim.has(variable)
     )
       return undefined;
@@ -6252,10 +6332,18 @@ volumes
                         ]),
                       ]));
               } else {
+                // The resolved value is `raw` with each leak replaced by its
+                // limit, which can leave like terms uncollected
+                // (`½√(π/a) + ½√(π/a)` for `∫_{−∞}^{∞} e^{−az²} dz`): evaluate
+                // it once more before it is wrapped.
                 const guarded =
                   resolved === null
                     ? null
-                    : conditionalValue(ce, resolved.value, resolved.guard);
+                    : conditionalValue(
+                        ce,
+                        resolved.value.evaluate({ numericApproximation }),
+                        resolved.guard
+                      );
                 expr =
                   guarded ??
                   ce.function('Integrate', [

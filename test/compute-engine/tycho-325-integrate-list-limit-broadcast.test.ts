@@ -340,11 +340,18 @@ describe('Tycho 325: the pieces of the fix', () => {
       const v = ce.parse(latex).evaluate();
       expect(Math.abs(v.re - expected)).toBeLessThan(1e-12);
     }
-    // A coefficient with no value keeps the integral symbolic: the sign of
-    // the coefficient chooses between Erf and Erfi.
+    // A coefficient with no value whose sign can be read as written is an
+    // Erf form (since Tycho row 428: `1/a²` is positive wherever it is
+    // defined); a bare coefficient `b`, whose sign chooses between Erf and
+    // Erfi, keeps the integral symbolic.
+    const symbolic = ce
+      .parse('\\int \\exp(-\\frac{Z^2}{a^2})\\,\\mathrm{d}Z')
+      .evaluate();
+    expect(symbolic.has('Integrate')).toBe(false);
+    expect(symbolic.has('Erf')).toBe(true);
     expect(
       ce
-        .parse('\\int \\exp(-\\frac{Z^2}{a^2})\\,\\mathrm{d}Z')
+        .parse('\\int \\exp(-b Z^2)\\,\\mathrm{d}Z')
         .evaluate()
         .has('Integrate')
     ).toBe(true);

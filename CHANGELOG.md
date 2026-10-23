@@ -341,6 +341,25 @@
 
 ### Improvements
 
+- **A Gaussian with a symbolic coefficient integrates to an error function**
+  (Tycho row 428). `∫ exp(−z²/(2s²)) dz` is now
+  `√(π/2)·√(s²)·Erf(z/(√2·√(s²)))`, and `∫ exp(z²/(2s²)) dz` the same form with
+  `Erfi`; before, only a numeric coefficient (`∫ e^{−3z²} dz`) had a closed
+  form. The sign of the coefficient is read as written when what remains after
+  the sign is positive wherever it is defined, for every real value of the
+  symbols (`1/(2s²)`, `e^a`): `∫ e^{−a z²} dz` with a bare `a` stays
+  unevaluated, because at `a < 0` the `Erf` form needs an imaginary argument,
+  which the compile targets do not have, and so do `∫ e^{−s² z²} dz` and
+  `∫ e^{−|a| z²} dz`, whose closed form is `0/0` at `s = 0` or `a = 0` while
+  the integrand is 1. A symbol declared `complex` disqualifies the reading. A
+  definite integral with an infinite bound carries the condition
+  the way `∫₀^∞ e^{−cx} dx` is `1/c {0 < c}`: `∫_{−∞}^{∞} exp(−z²/(2s²)) dz` is
+  `√(2π)·√(s²) {0 < √(s⁻²)}`, and the normal distribution function
+  `1/(√(2π)s) ∫_{−∞}^{x} exp(−½ z²/s²) dz`, with or without a mean, is a
+  guarded closed form in `Erf`. Its compiled JavaScript calls `erf` instead of
+  running a numerical quadrature at every call: 2 469 calls take 2 ms instead
+  of 3.2 s, with the same values to 2e-15.
+
 - **More operators have a precise static result type.** A type handler now
   derives the result from the operand types, where the declared result was a
   bare `dictionary`, `tuple`, `list`, `matrix`, `value` or `unknown`. Each type
@@ -716,6 +735,17 @@
   engine tolerance makes more fits exact.
 
 ### Resolved Issues
+
+- **A sum with an infinite term of unknown sign folded to that infinity.**
+  `∞·c + 1` evaluated to `+∞` for a `c` with no known sign: the sum read the
+  coefficient `∞` of the term and ignored `c`, although the sum is `−∞` at
+  `c < 0` and `0·∞` at `c = 0`. Such a term now stays in the sum, also beside
+  a pure infinity (`∞·c + ∞` is `∞ − ∞` at `c < 0`), `∞·c − ∞·c` is
+  `Indeterminate`, and a term whose cofactor has a known sign still folds
+  (`−∞·3 + 1` is `−∞`). Found while fixing Tycho row 428: the value of
+  `∫_{−∞}^{x} exp(−(z−m)²/(2s²)) dz` at its lower bound, `Erf(−∞·√(s⁻²) −
+  m·√(s⁻²))`, folded to `−1` and lost the condition `√(s⁻²) > 0` that the same
+  integral carries at `m = 0`.
 
 - **A use of a call at a typed parameter rewrote the signature of the called
   function.** With `g := t ↦ [[t, 1], [2, 3]]`, whose signature is

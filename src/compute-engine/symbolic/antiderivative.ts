@@ -2491,14 +2491,149 @@ function integrateIndexPower(index: string, exponent: Expression): Expression {
 }
 
 /**
- * ∫ e^(a·x² + b·x + c) dx for a numeric, a ≠ 0 (the Gaussian integral).
+ * Whether every symbol of `e` may take a real value: none is declared with
+ * a type of non-real numbers (`complex`, `imaginary`). An undeclared symbol
+ * (type `unknown`) and a symbol typed `number` qualify. The real-domain
+ * readings below (`s^2 ≥ 0`, `e^s > 0`) are false at `s = i`.
+ */
+function symbolsMayBeReal(e: Expression): boolean {
+  if (isSymbol(e)) {
+    const t = e.type;
+    return !(t.matches('complex') && !t.matches('real'));
+  }
+  if (isFunction(e)) return e.ops.every(symbolsMayBeReal);
+  return true;
+}
+
+/**
+ * Whether `e` is non-negative for every real value of its symbols, read
+ * from its shape: a non-negative number, an even power (`s^2`, `s^(-2)`), a
+ * power of such a base, `Sqrt` of such an argument, `Abs`, `Exp` of a real
+ * argument, and a product, quotient or sum of such terms. A bare symbol
+ * counts only when its declared type says so. A symbol declared with a
+ * non-real type disqualifies the reading (`symbolsMayBeReal()`).
+ */
+function isNonNegativeForRealArguments(e: Expression): boolean {
+  if (isNumber(e)) return e.isNonNegative === true;
+  if (isSymbol(e)) return e.isNonNegative === true;
+  if (isFunction(e, 'Power')) {
+    const n = e.op2;
+    if (isNumber(n) && n.isInteger === true && n.re % 2 === 0)
+      return symbolsMayBeReal(e.op1);
+    return isNonNegativeForRealArguments(e.op1);
+  }
+  if (isFunction(e, 'Sqrt')) return isNonNegativeForRealArguments(e.op1);
+  if (isFunction(e, 'Abs')) return true;
+  if (isFunction(e, 'Exp')) return symbolsMayBeReal(e.op1);
+  if (
+    isFunction(e, 'Multiply') ||
+    isFunction(e, 'Divide') ||
+    isFunction(e, 'Add')
+  )
+    return e.ops.every(isNonNegativeForRealArguments);
+  return false;
+}
+
+/**
+ * Whether `e` is positive wherever it is defined, for every real value of
+ * its symbols. The difference from `isNonNegativeForRealArguments()` is a
+ * zero: `s^2` and `|a|` are zero at `0`, so they do not qualify, but
+ * `s^(-2)` does (it is infinite at `0`, not zero), and so does
+ * `1/(2s^2)`: a quotient is positive when its numerator is positive and its
+ * denominator non-negative. `Exp` of a real argument is positive; a sum of
+ * non-negative terms with one positive term is positive.
+ */
+function isPositiveForRealArguments(e: Expression): boolean {
+  if (isNumber(e)) return e.isPositive === true;
+  if (isSymbol(e)) return e.isPositive === true;
+  if (isFunction(e, 'Power')) {
+    const n = e.op2;
+    if (isNumber(n) && n.isInteger === true && n.re % 2 === 0 && n.re < 0)
+      return symbolsMayBeReal(e.op1);
+    return isPositiveForRealArguments(e.op1);
+  }
+  if (isFunction(e, 'Sqrt') || isFunction(e, 'Abs'))
+    return isPositiveForRealArguments(e.op1);
+  if (isFunction(e, 'Exp')) return symbolsMayBeReal(e.op1);
+  if (isFunction(e, 'Multiply'))
+    return e.ops.every(isPositiveForRealArguments);
+  if (isFunction(e, 'Divide'))
+    return (
+      isPositiveForRealArguments(e.op1) &&
+      isNonNegativeForRealArguments(e.op2)
+    );
+  if (isFunction(e, 'Add'))
+    return (
+      e.ops.every(isNonNegativeForRealArguments) &&
+      e.ops.some(isPositiveForRealArguments)
+    );
+  return false;
+}
+
+/**
+ * The sign of the leading coefficient `a` of a Gaussian exponent, which
+ * selects `Erf` (a < 0) or `Erfi` (a > 0) in `tryGaussianIntegral()`.
+ *
+ * A numeric `a` gives its sign, and so does the engine's sign inference
+ * when it has an answer (a symbol declared positive). It rarely has one
+ * for the coefficient of a normal distribution, `-1/(2s^2)`, because `s`
+ * may be zero. Such a coefficient is read as written: the sign of its
+ * numeric factors (`-1/(2s^2)` is negative, `1/s^2` is positive), accepted
+ * only when what remains after the sign is positive wherever it is defined,
+ * for every real value of the symbols (`isPositiveForRealArguments()`):
+ * `1/(2s^2)` and `e^a` are, a bare `a`, `s^2` and `|a|` are not. The
+ * restriction keeps the result real and defined on a real domain:
+ * `∫ e^{-a z^2} dz` read as `½√(π/a)·Erf(√a·z)` is correct for any `a` as
+ * an analytic function (`Erfi(t) = -i·Erf(i·t)`), but at `a < 0` it needs
+ * `Erf` of an imaginary argument, which the compile targets do not have,
+ * and at `a = 0` it is `0/0` while the integrand is `1`; so a compiled
+ * `∫_0^1 e^{-a x^2} dx` or `∫_0^1 e^{-s^2 x^2} dx` would answer `NaN` where
+ * the quadrature answers a real number. Those integrals therefore stay a
+ * quadrature unless the coefficient is declared positive. A symbol
+ * declared with a non-real type (`complex`) disqualifies the reading.
+ *
+ * Returns null when the sign cannot be read, and when `a` is numerically
+ * zero or not finite.
+ */
+function gaussianCoefficientSign(a: Expression): -1 | 1 | null {
+  const aVal = a.N().re;
+  if (aVal !== null && Number.isFinite(aVal)) {
+    if (aVal === 0) return null;
+    return aVal < 0 ? -1 : 1;
+  }
+  if (a.isNegative === true) return -1;
+  if (a.isPositive === true) return 1;
+  const written = (e: Expression): -1 | 1 => {
+    if (isFunction(e, 'Negate')) return written(e.op1) === 1 ? -1 : 1;
+    if (isNumber(e)) return e.isNegative === true ? -1 : 1;
+    if (isFunction(e, 'Multiply') || isFunction(e, 'Divide')) {
+      let sign: -1 | 1 = 1;
+      for (const op of e.ops) if (written(op) === -1) sign = sign === 1 ? -1 : 1;
+      return sign;
+    }
+    return 1;
+  };
+  const sign = written(a);
+  const magnitude = sign < 0 ? a.neg() : a;
+  return isPositiveForRealArguments(magnitude) ? sign : null;
+}
+
+/**
+ * ∫ e^(a·x² + b·x + c) dx for a ≠ 0 (the Gaussian integral).
  *
  * Complete the square: a·x²+b·x+c = a·(x − q)² + r, with q = −b/(2a),
  * r = c − b²/(4a). Then, with u = x − q,
  *   a < 0:  ∫ = e^r · ½·√(π/(−a)) · Erf(√(−a)·u)
  *   a > 0:  ∫ = e^r · ½·√(π/a)   · Erfi(√a·u)
  *
- * Returns null unless the exponent is a numeric quadratic in `index`.
+ * The coefficients may be symbolic (free of `index`) when the sign of `a`
+ * can be read (`gaussianCoefficientSign()`): the normal distribution
+ * `e^(-z²/(2s²))` integrates to an `Erf` in `s`, so a compiled cumulative
+ * distribution calls `erf` instead of a numerical quadrature (Tycho row
+ * 428). `e^(-a·z²)` with a bare `a` stays unevaluated.
+ *
+ * Returns null unless the exponent is a quadratic in `index` whose leading
+ * coefficient has a readable sign.
  */
 function tryGaussianIntegral(fn: Expression, index: string): Expression | null {
   const ce = fn.engine;
@@ -2515,19 +2650,19 @@ function tryGaussianIntegral(fn: Expression, index: string): Expression | null {
   const [c, b, a] = coeffs;
   if (a.has(index) || b.has(index) || c.has(index)) return null;
 
-  // The sign of `a` selects Erf vs Erfi, so we need a known numeric value.
-  const aVal = a.N().re;
-  if (aVal === null || aVal === 0 || !Number.isFinite(aVal)) return null;
+  // The sign of `a` selects Erf vs Erfi.
+  const sign = gaussianCoefficientSign(a);
+  if (sign === null) return null;
 
   const q = b.neg().div(ce.number(2).mul(a)); // −b/(2a)
   const r = c.sub(b.mul(b).div(ce.number(4).mul(a))); // c − b²/(4a)
   const eR = ce.function('Exp', [r]);
   const u = ce.symbol(index).sub(q);
 
-  const p = aVal < 0 ? a.neg() : a; // |a| > 0
+  const p = sign < 0 ? a.neg() : a; // |a| > 0
   const sqrtP = ce.function('Sqrt', [p]);
   const coef = ce.function('Sqrt', [ce.Pi.div(p)]).div(ce.number(2));
-  const special = ce.function(aVal < 0 ? 'Erf' : 'Erfi', [sqrtP.mul(u)]);
+  const special = ce.function(sign < 0 ? 'Erf' : 'Erfi', [sqrtP.mul(u)]);
   return eR.mul(coef).mul(special);
 }
 
