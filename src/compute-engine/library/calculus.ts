@@ -82,7 +82,10 @@ import {
   lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
-import { divergentTailSign } from '../numerics/divergent-tail.js';
+import {
+  divergentTailSign,
+  tailReachesInfinity,
+} from '../numerics/divergent-tail.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
@@ -1004,6 +1007,68 @@ function halfLinePoleVerdict(
   return tail === pole ? { sign: pole } : { sign: 'mixed' };
 }
 
+/** The integrals for which `exactDivergenceValue` is running the exact
+ * route, by engine: a key made of the hashes of the integrand and of the two
+ * bounds. The exact route cannot ask it again for the same integral (through
+ * a `.N()` of the integral inside the symbolic route), and another integral,
+ * evaluated meanwhile by an integration provider, is not blocked. */
+const exactDivergenceChecks = new WeakMap<object, Set<string>>();
+
+/**
+ * The value that the exact route gives to a definite integral that the
+ * numeric route found divergent, or whose quadrature overflowed, with no
+ * sign: `+∞` or `−∞`, or `NaN` for an integral with no value (the exact
+ * route gives `Indeterminate`). `undefined` when the exact route gives
+ * anything else (an unevaluated integral, a finite value): the numeric
+ * answer then stands.
+ *
+ * Compiled code already takes the closed form of such an integral, so `.N()`
+ * and `NIntegrate` agree with it: `∫₀^∞ (x − 1) dx` is `+∞` everywhere, where
+ * the numeric route alone cannot tell whether the negative part next to `0`
+ * cancels the divergence of the tail.
+ *
+ * `fn` is the integrand as a function literal of one parameter, and `lower`
+ * and `upper` are the values of the bounds. The exact route runs only on
+ * these divergent or overflowing integrals, and costs one symbolic
+ * integration.
+ */
+function exactDivergenceValue(
+  ce: ComputeEngine,
+  fn: Expression,
+  lower: Expression,
+  upper: Expression
+): Expression | undefined {
+  if (!isFunction(fn, 'Function') || fn.nops !== 2) return undefined;
+  const parameter = fn.ops[1];
+  if (!isSymbol(parameter)) return undefined;
+  let active = exactDivergenceChecks.get(ce);
+  if (active === undefined) {
+    active = new Set();
+    exactDivergenceChecks.set(ce, active);
+  }
+  const key = `${fn.hash} ${lower.hash} ${upper.hash}`;
+  if (active.has(key)) return undefined;
+  active.add(key);
+  let value: Expression;
+  try {
+    value = ce
+      .function('Integrate', [
+        fn,
+        ce.function('Limits', [parameter, lower, upper]),
+      ])
+      .evaluate();
+  } finally {
+    active.delete(key);
+  }
+  if (
+    value.isInfinity === true &&
+    (value.sgn === 'positive' || value.sgn === 'negative')
+  )
+    return value.sgn === 'positive' ? ce.PositiveInfinity : ce.NegativeInfinity;
+  if (value.isNaN === true) return ce.NaN;
+  return undefined;
+}
+
 /** The value of a definite integral with a proven pole strictly inside its
  * bounds: `+∞`/`−∞` when the integrand keeps one sign across every pole,
  * `NaN` when it changes sign (no value, not even an infinite one). */
@@ -1611,7 +1676,6 @@ function nIntegratePoleVerdict(
   }
 }
 
-
 /**
  * Integrate ONE real-valued part (`re` or `im`) of a one-limit integrand over
  * `[lower, upper]`. `Integrate(…).N()` and `NIntegrate` both call this
@@ -1651,7 +1715,13 @@ function integrateRealPart(
     /** The integrand holds an integral: each evaluation runs a quadrature. */
     nested?: boolean;
   }
-): { estimate: number; error: number; divergent?: true; infinite?: 1 | -1 } {
+): {
+  estimate: number;
+  error: number;
+  divergent?: true;
+  infinite?: 1 | -1;
+  overflow?: true;
+} {
   // Semi-infinite interval: a conditionally-convergent oscillatory
   // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
   // importance sampling. Try the dedicated lobe-integration +
@@ -1736,11 +1806,18 @@ function integrateRealPart(
   // An integrand that overflows on the tail of an infinite interval
   // (`∫₀^∞ eˣ dx`) gives a quadrature that is not a number and is not
   // reported as divergent. The tail gives the sign of the divergence
-  // (`divergentTailSign`). Monte Carlo would give a finite mean of samples
-  // that changes at each run.
+  // (`divergentTailSign`). When it does not (the sign changes,
+  // `∫₀^∞ (eˣ − 5) dx`) but the integrand reaches an infinite value on the
+  // tail (`tailReachesInfinity`), the result is reported as an `overflow`,
+  // with no value: Monte Carlo would give a finite mean of samples that
+  // changes at each run. The caller can still ask the exact route
+  // (`exactDivergenceValue`). An integrand that is only `NaN` on the tail
+  // (`sinh x / cosh² x`, an `∞/∞`) keeps the methods below.
   if (!Number.isFinite(gk.estimate) && (aInf || bInf)) {
     const infinite = divergentTailSign(jsf, lower, upper);
     if (infinite !== 0) return { estimate: NaN, error: NaN, infinite };
+    if (tailReachesInfinity(jsf, lower, upper))
+      return { estimate: NaN, error: NaN, overflow: true };
   }
   if (
     (gk.converged || gk.extrapolated === true) &&
@@ -5713,6 +5790,19 @@ volumes
             );
             if (endpoint !== undefined) return poleVerdictValue(ce, endpoint);
           }
+          // A divergence or an overflow with no sign: the exact route decides
+          // it when it can (`exactDivergenceValue`), as compiled code does
+          // with the closed form: `∫₀^∞ (x − 1) dx` is `+∞`. The bounds are
+          // passed as values, so that they are not evaluated again.
+          if ((re.divergent || re.overflow) && !integrand.sawImaginary()) {
+            const exact = exactDivergenceValue(
+              ce,
+              fnExpr,
+              lowerValue,
+              upperValue
+            );
+            if (exact !== undefined) return exact;
+          }
           // No sample was a number: nothing was integrated. Stay symbolic
           // (the closed form, when there is one, is then still reachable).
           if (Number.isNaN(re.estimate) && !integrand.sawNumeric())
@@ -6496,8 +6586,12 @@ volumes
         ]);
       },
       evaluate: ([f, a, b], { engine }) => {
-        // Uses compiled JS functions (machine arithmetic)
-        const [lower, upper] = [a.N().re, b.N().re];
+        // Uses compiled JS functions (machine arithmetic). The bounds are
+        // evaluated once: their values are passed on to the exact route below
+        // (`exactDivergenceValue`), so that a bound with an effect
+        // (`Random()`) is not evaluated again.
+        const [aValue, bValue] = [a.N(), b.N()];
+        const [lower, upper] = [aValue.re, bValue.re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
 
         // A pole strictly inside the bounds: the integral diverges, and the
@@ -6565,6 +6659,12 @@ volumes
             endpointPoleVerdict
           );
           if (endpoint !== undefined) return poleVerdictValue(engine, endpoint);
+        }
+        // A divergence or an overflow with no sign: the exact route decides
+        // it when it can (see the `Integrate` numeric path).
+        if ((re.divergent || re.overflow) && !integrand.sawImaginary()) {
+          const exact = exactDivergenceValue(engine, fn, aValue, bValue);
+          if (exact !== undefined) return exact;
         }
         // A numeric estimate is a float, even when its value is an integer
         // (`NIntegrate(1, 0, 2)` is `2.0`). `+ 0` turns a -0 into 0.

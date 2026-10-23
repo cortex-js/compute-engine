@@ -102,4 +102,32 @@ describe('a divergent integral over an infinite bound', () => {
       expect(routes(latex as string, lo, hi).evaluate).toEqual(expected);
     }
   );
+
+  test.each([
+    ['x-1', 0, 'PositiveInfinity', 'PositiveInfinity'],
+    ['1-x', 0, 'PositiveInfinity', 'NegativeInfinity'],
+    ['\\frac{x-1}{x^3}', 0, 'PositiveInfinity', 'NegativeInfinity'],
+    ['e^x - 5', 0, 'PositiveInfinity', 'PositiveInfinity'],
+    ['x^2-1', 'NegativeInfinity', 'PositiveInfinity', 'PositiveInfinity'],
+    ['\\frac{x-1}{x^2}', 0, 'PositiveInfinity', 'NaN'],
+  ])(
+    '.N() of ∫ %s from %s to %s, an integrand whose sign changes, is %s',
+    (latex, lo, hi, expected) => {
+      // ROADMAP CE-391.1: the numeric route found a divergence (or an
+      // overflow) it could not sign, and gave `NaN` or a Monte-Carlo value.
+      // The exact route decides it, as compiled code already did.
+      const r = routes(latex as string, lo, hi);
+      expect(r.N).toEqual(expected);
+      expect(r.NIntegrate).toEqual(expected);
+    }
+  );
+
+  test('an overflowing integrand with no sign is NaN, not a random value', () => {
+    // `x sin x · e^x` changes sign forever and overflows: no value, and the
+    // answer is the same at each run.
+    const a = routes('x \\sin(x) e^x', 0, 'PositiveInfinity').N;
+    const b = routes('x \\sin(x) e^x', 0, 'PositiveInfinity').N;
+    expect(a).toEqual('NaN');
+    expect(b).toEqual('NaN');
+  });
 });

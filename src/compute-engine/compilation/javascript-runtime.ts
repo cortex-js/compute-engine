@@ -118,7 +118,10 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
-import { divergentTailSign } from '../numerics/divergent-tail.js';
+import {
+  divergentTailSign,
+  tailReachesInfinity,
+} from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import type { Rational } from '../numerics/types.js';
@@ -6032,10 +6035,15 @@ export const SYS_HELPERS = {
       // Monte-Carlo fallback would spend 1e7 samples to find `NaN` again.
       if (r.nanRegion === true) return NaN;
       // An integrand that overflows on an infinite tail (`∫₀^∞ eˣ dx`): the
-      // tail gives the sign of the divergence, as in the interpreter.
+      // tail gives the sign of the divergence, as in the interpreter. With no
+      // sign, an integrand that reaches an infinite value on the tail has no
+      // value here (Monte Carlo would give a finite mean that changes at each
+      // run); one that is only `NaN` there (`sinh x / cosh² x`) keeps the
+      // methods below.
       if (!Number.isFinite(r.estimate)) {
         const sign = divergentTailSign(f, a, b);
         if (sign !== 0) return sign * Infinity;
+        if (tailReachesInfinity(f, a, b)) return NaN;
       }
       // The budget ran out somewhere below this level, so the panels this
       // quadrature accumulated rest on refused evaluations: the estimate is not

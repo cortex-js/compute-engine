@@ -95,3 +95,33 @@ export function divergentTailSign(
   if (!diverges) return 0;
   return positive ? orientation : orientation === 1 ? -1 : 1;
 }
+
+/**
+ * Whether `f` is `+∞` or `−∞` at some point of an infinite tail of the
+ * interval from `lower` to `upper` (the points of {@link divergentTailSign}).
+ * An integrand that reaches an infinite value on the tail grows past the
+ * largest double (`eˣ − 5`), so its quadrature overflow is a divergence, even
+ * when its sign is not known. An integrand that is only `NaN` there (an
+ * `∞/∞` such as `sinh x / cosh² x`, whose integral is `1`) gives `false`:
+ * its overflow is a rounding of a convergent integrand. An interval with two
+ * finite bounds has no tail, and gives `false`.
+ */
+export function tailReachesInfinity(
+  f: (x: number) => number,
+  lower: number,
+  upper: number
+): boolean {
+  const lo = Math.min(lower, upper);
+  const hi = Math.max(lower, upper);
+  const far: number[] = [];
+  for (let k = 0; k <= 1016; k += 8) far.push(2 ** k);
+  const points: number[] = [];
+  if (hi === Infinity)
+    for (const d of far) points.push((Number.isFinite(lo) ? lo : 0) + d);
+  if (lo === -Infinity)
+    for (const d of far) points.push((Number.isFinite(hi) ? hi : 0) - d);
+  return points.some((x) => {
+    const v = f(x);
+    return v === Infinity || v === -Infinity;
+  });
+}
