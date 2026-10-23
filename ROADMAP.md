@@ -2460,30 +2460,6 @@ operator applications denote function values when raw?"). Fix options: a small
 table of operators that denote functions, or canonicalize the callback operand
 before the requirement.
 
-### CE-387. A function that recurses through itself as a parameter stays unevaluated inside `Map`
-
-**Status:** open; defect, regression in 0.160.0. Reported in
-[#470](https://github.com/cortex-js/compute-engine/issues/470) (bisected to
-`c43a44d41`).
-
-`G = (self, t) ↦ If(Length(t) = 0, 0, Max(Map(c ↦ self(self, c), t)) + 1)`, the
-height of a tree given as nested lists. `G(G, [[[], []]])` returns the
-`Apply(...)` unevaluated; 0.159.0 gave `2`. A tree with one leaf per level
-(`[[[[]]]]`) still gives `3`, and the same recursion through a named function
-(`h := t ↦ …h(c)…`) works. The failure needs a node with two or more children
-below the top level: the second call `self(self, [])` that `Max`, `Reduce` or
-`Total` reads from the lazy `Map` finds no value for the symbol `self` in the
-runtime scope (`_getSymbolValue('self')` is `undefined`). The callee is resolved
-by the lexical binding (`calleeValue()` calls `callableBindingInContext()`,
-`boxed-expression/boxed-function.ts`), which finds the parameter's function, but
-the operand `self` is evaluated in the runtime scope and stays a free symbol.
-The guard against symbolic recursion (`SymbolicRecursion`, `function-utils.ts`)
-then sees a re-entrant application with a free-symbol argument and abandons the
-outermost application. To do: find why the parameter `self` has no value when
-the second element of the lazy `Map` is read (the first leaf's application
-probably removes the value of the activation that encloses it), and make the
-operand read the same binding as the callee.
-
 ### CE-130. A pre-boxed operand applied twice through a raw name is not told apart from a binding
 
 **Status:** open; design. Contract: `docs/SCOPING-MODEL.md`.
@@ -6540,6 +6516,44 @@ Measured dead ends, so they are not tried again:
   recorded made `block-locals-per-run.test.ts` ("a closure created before a
   `let` of the same body", destructuring `let`) give `read-before-declaration`
   errors.
+- `canonicalDivide(n, 1)` returns a valid function expression `n` that is not
+  a `Divide` as it is, so `Product.asRationalExpression()` could return the
+  numerator directly. Measured 2026-10-23: no gain beyond the noise, because
+  the type of the numerator is read later anyway.
+- `expandFunction()` (`expand.ts`) cannot skip `expandProducts` for a product
+  with no sum: `Expand` relies on that rebuild to combine like factors
+  (`Expand(x·x)` is `x^2`, `Expand(√x·√x)` is `x`), and the integrator relies
+  on it too.
+
+Round 2 (2026-10-23, uncommitted when written): the broadcast lift is skipped
+when every operand is typed by a number type and is not a collection
+(`isNumericScalarOperandView`, `broadcast-lift-type.ts`); the structure views
+of the operand descriptors are classes, not object literals with getters
+(V8 creates an object literal that defines a getter about 15 times more slowly
+than a class instance: 150 ns against 10 ns); `mulImpl` builds a product once
+when no factor is a sum, a `Negate`, a `Divide` or a matrix and the
+coefficient is finite and nonzero (`expandProductsChanges`); two predicates
+answer from the type first. Measured interleaved against 0.162.0 (minified,
+load high during the run): boxing 0.86×, `evaluate` 0.80×, `simplify` 0.81×,
+`D` 0.72×, `Expand` 0.72×, integrals 0.82× to 0.93×, `x^3 - x - 1 = 0` 0.90×.
+Against 0.133.0: core operations 1.0× to 1.23×, integrals 1.6× to 2.5×,
+`x^3 - x - 1 = 0` 2.1×, `x^4 + x^2 - 1 = 0` 0.5×. The type derivation went from
+29% to 22% of the small operations, the garbage collector from 8% to 3%.
+
+- **CE-385.6** `x^3 - x - 1 = 0` is about 1.5 times slower since commit
+  `cbf7f36e5` (0.149.0 → 0.150.0, found by bisection 2026-10-23), which made a
+  cubic give its three roots, the two complex ones included, instead of the
+  real root only. That is intended. The cost is in `validateRoots()`
+  (`solve.ts`, 32% of the solve): each float root of the numeric root finder
+  is substituted into the equation and evaluated, and the complex cube is
+  computed with big decimals because the default precision (21 digits) is
+  above machine precision. The roots are machine floats, so a residual in
+  machine precision (Horner on the coefficients) would decide the same in all
+  but borderline cases; this changes how `validateRoots()` decides, so it
+  needs a decision. The step CE-385.2 (0.141.0 → 0.142.0) does not reproduce
+  when the same cubic is timed with `ce.box(…).solve('x')`, interleaved in one
+  process (ratio 1.00, 2026-10-23); the step measured for the cubic is the one
+  at 0.150.0.
 
 Run every measurement under the box lock.
 

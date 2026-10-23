@@ -913,9 +913,24 @@ export function canonicalFunctionLiteralArguments(
   // parameter that was not already auto-declared during body canonicalization
   // (e.g. a parameter unreferenced in the body). Annotated parameters get
   // their declared type, non-inferred.
+  // A canonicalization of the literal while one of its applications runs (a
+  // function that receives itself as an argument is canonicalized again when
+  // the argument is read) finds the parameters hidden from the body scope
+  // (`hideBodyScopeParams`). It does not declare them again: it uses the
+  // hidden binding of each parameter, so the literal keeps the bindings that
+  // the running applications activate. The hidden bindings are in the body
+  // scope only while the parameter operands are bound (below): the running
+  // applications read their parameters in their call frames through the body
+  // scope, and a binding there with no value would hide them.
+  const reinstated: Array<[string, BoxedDefinition]> = [];
   for (const param of params) {
     for (const name of functionLiteralParameterNames(param)) {
       if (blockScope.bindings.has(name)) continue;
+      const hidden = hiddenBodyScopeParam(blockScope, name);
+      if (hidden !== undefined) {
+        reinstated.push([name, hidden]);
+        continue;
+      }
       // A destructuring pattern's leaves carry no annotation of their own, so
       // they are always declared with the inferred `unknown` type below.
       const t = isDestructuringParameter(param)
@@ -977,12 +992,27 @@ export function canonicalFunctionLiteralArguments(
   //
   // Rebinding is scoped to the names this literal binds, so nothing else in
   // the body moves.
-  block = rebindParameters(block, params);
+  //
+  // The hidden bindings of the parameters (see above) are in the body scope
+  // while the occurrences and the operands are bound, and leave it again
+  // even when binding them throws. The last application puts them back
+  // (`restoreBodyScopeParams`). The write is journaled for the reason given
+  // above for the shared binding.
+  for (const [name, binding] of reinstated) {
+    journalCheckpointMapEntry(ce, blockScope.bindings, name, name, 'declare');
+    blockScope.bindings.set(name, binding);
+  }
+  let literal: Expression;
+  try {
+    block = rebindParameters(block, params);
 
-  const literal = ce._fn('Function', [
-    block,
-    ...bindParameterOperands(ce, block, params),
-  ]);
+    literal = ce._fn('Function', [
+      block,
+      ...bindParameterOperands(ce, block, params),
+    ]);
+  } finally {
+    for (const [name] of reinstated) blockScope.bindings.delete(name);
+  }
 
   // Resolve the annotations NOW, while the scope that declares any
   // user-declared type name they use is still current: the literal can escape
@@ -2707,9 +2737,39 @@ function hideBodyScopeParams(
     if (stale) {
       hidden.push([name, binding]);
       bodyScope.bindings.delete(name);
+      if (params.has(name)) {
+        let byName = hiddenParamsOfBodyScope.get(bodyScope);
+        if (byName === undefined) {
+          byName = new Map();
+          hiddenParamsOfBodyScope.set(bodyScope, byName);
+        }
+        if (!byName.has(name)) byName.set(name, binding);
+      }
     }
   }
   return hidden;
+}
+
+/**
+ * For the body scope of a function literal that is being applied, the
+ * binding of each parameter that the applications hid
+ * (`hideBodyScopeParams`): the binding of the first application that hid it,
+ * which is the binding that the parameter operands of the literal hold. The
+ * last application to end forgets them (`restoreBodyScopeParams`).
+ */
+const hiddenParamsOfBodyScope = new WeakMap<
+  Scope,
+  Map<string, BoxedDefinition>
+>();
+
+/** The binding of the parameter `name` that an application of the literal
+ * whose body scope is `bodyScope` hid, while an application runs. */
+function hiddenBodyScopeParam(
+  bodyScope: Scope,
+  name: string
+): BoxedDefinition | undefined {
+  if (!appliedBodyScopes.has(bodyScope)) return undefined;
+  return hiddenParamsOfBodyScope.get(bodyScope)?.get(name);
 }
 
 /**
@@ -2863,12 +2923,75 @@ function staticParameterBinding(
     : undefined;
 }
 
-/** Restore param bindings removed by hideBodyScopeParams. */
+/**
+ * For the body scope of a function literal, the bindings that an application
+ * hid (`hideBodyScopeParams`) and did not put back when it ended, because
+ * another application of the same literal was still running. The last
+ * application to end puts them back (`restoreBodyScopeParams`).
+ */
+const deferredBodyScopeParams = new WeakMap<
+  Scope,
+  Array<[string, BoxedDefinition]>
+>();
+
+/** Keep `entries` aside for the last application of the literal whose body
+ * scope is `bodyScope` to put back (`restoreBodyScopeParams`). */
+function deferBodyScopeParams(
+  bodyScope: Scope,
+  entries: ReadonlyArray<[string, BoxedDefinition]>
+): void {
+  if (entries.length === 0) return;
+  const deferred = deferredBodyScopeParams.get(bodyScope);
+  if (deferred === undefined)
+    deferredBodyScopeParams.set(bodyScope, [...entries]);
+  else deferred.push(...entries);
+}
+
+/**
+ * Restore param bindings removed by hideBodyScopeParams.
+ *
+ * The body scope is shared by every application of the literal, and an
+ * application that is still running needs its parameters hidden: its body,
+ * and the closures and lazy collections it made, read them in its call
+ * frame through the body scope. A nested application can find the
+ * parameters in the body scope again (the literal was canonicalized again
+ * while the outer application ran, which declares them there), hide them
+ * too, and must not put them back when it ends. Otherwise the outer
+ * application reads them with no value: with `G = (self, t) ↦ …
+ * Max(Map(c ↦ self(self, c), t))`, the second element of the lazy `Map`
+ * found `self` without a value after the first element's call of `G` had
+ * ended, and the call stayed unevaluated. So while an application of the
+ * literal is still running (`appliedBodyScopes`, which the application that
+ * ends has already left), the bindings are kept aside, and the last
+ * application puts them back, after its own, for each name that it did not
+ * put back. A canonicalization of the literal during an application does not
+ * declare the parameters again: it uses their hidden bindings and takes them
+ * out of the body scope again (`canonicalFunctionLiteralArguments`).
+ */
 function restoreBodyScopeParams(
   bodyScope: Scope,
   hidden: Array<[string, BoxedDefinition]>
 ): void {
+  if (appliedBodyScopes.has(bodyScope)) {
+    deferBodyScopeParams(bodyScope, hidden);
+    return;
+  }
   for (const [name, binding] of hidden) bodyScope.bindings.set(name, binding);
+  const deferred = deferredBodyScopeParams.get(bodyScope);
+  if (deferred !== undefined) {
+    deferredBodyScopeParams.delete(bodyScope);
+    for (const [name, binding] of deferred)
+      if (!bodyScope.bindings.has(name)) bodyScope.bindings.set(name, binding);
+  }
+  // The binding of a parameter that the body scope held before the first
+  // application hid it. Applications that are awaited can end in another
+  // order than they started, and the last one to end then holds a binding
+  // that a later application hid: the first one is put back instead.
+  const firstHidden = hiddenParamsOfBodyScope.get(bodyScope);
+  if (firstHidden === undefined) return;
+  hiddenParamsOfBodyScope.delete(bodyScope);
+  for (const [name, binding] of firstHidden)
+    bodyScope.bindings.set(name, binding);
 }
 
 /**

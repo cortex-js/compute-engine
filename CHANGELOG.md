@@ -31,8 +31,34 @@
   increasing precision. The roots of every other route (squaring, a change of
   variable, the rational-root search, the numeric root finder) are still
   checked.
+- **Symbolic operations are 10% to 30% faster** (ROADMAP CE-385). Compared with
+  0.162.0: `D(x^3, x)` and `Expand((x + 1)^3)` take about 0.7 of the time,
+  `evaluate()` and `simplify()` of small expressions about 0.8, and
+  antiderivatives and definite integrals 0.8 to 0.9. The type of a new
+  expression is derived with less work when its operands are numbers: the
+  check for an element-wise application over a list is skipped, and fewer
+  objects are created for each operand. A product with no sum, no `Negate`,
+  no `Divide` and no matrix among its factors is built once instead of twice.
+  The results are the same.
 
 ### Resolved Issues
+
+- **A function that receives itself as an argument and recurses through a
+  lazy `Map` stayed unevaluated** (a regression in 0.160.0,
+  [#470](https://github.com/cortex-js/compute-engine/issues/470), ROADMAP
+  CE-387). With
+  `G = (self, t) ↦ If(Length(t) = 0, 0, Max(Map(c ↦ self(self, c), t)) + 1)`,
+  the height of a tree given as nested lists, `Apply(G, G, [[[], []]])` gave
+  the `Apply(…)` back, where 0.159.0 gave `2`; `Reduce` and `Sum` in place of
+  `Max` failed the same way. The body scope of a function literal is shared by
+  its applications, and an application hides its parameters there, so that
+  the body reads the values of its call frame. A nested application of the
+  same literal put the parameters back when it ended, and a canonicalization
+  of the literal during an application declared them again, while an
+  enclosing application still read its parameters through that scope: the
+  next element of the lazy `Map` then read `self` with no value. The
+  parameters now come back when the last application ends, and a
+  canonicalization during an application uses the hidden bindings.
 
 - **The signature of a function literal read a captured parameter as a number
   cell in a nested literal** (ROADMAP CE-379). With `g := x ↦ (() ↦ [x])`, the
