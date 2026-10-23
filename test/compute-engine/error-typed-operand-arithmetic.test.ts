@@ -82,16 +82,18 @@ describe('An operator with an operand typed error', () => {
   });
 
   // The operand typed `error` is a cell that fails when the list is
-  // evaluated. Nothing is known of the type of such a cell, so the element
-  // type is `unknown`, the same type as the value `[Error(…), 1]` that the
-  // evaluation gives (`literalElementType` in `library/collections.ts`).
-  // It was `list<error | integer>`, which a variable declared `list` refused.
+  // evaluated. A type describes the successful values
+  // (`docs/ERROR-MODEL.md` §4), so the failed cell is left out of the
+  // element type, and the type is the same as the type of the value
+  // `[Error(…), 1]` that the evaluation gives (`analyzeLevelD` in
+  // `library/collections.ts`). It was `list<error | integer>`, which a
+  // variable declared `list` refused, and then `list<unknown>`.
   test('a list that holds an operand typed error is not typed error', () => {
     expect(
       engine()
         .box(['List', E, 1] as any)
         .type.toString()
-    ).toBe('list<unknown>');
+    ).toBe('vector<integer^2>');
   });
 
   test('an operand that is not typed error keeps the numeric type', () => {

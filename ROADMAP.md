@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-373.
+Next free reference: CE-374.
 
 **Entry format.**
 
@@ -451,22 +451,6 @@ for a union cell that is not a number type. Its exception for an absent point
 Expected: the same rule for any cell type whose part without `missing` can carry
 dimensions.
 
-### CE-21. A list literal that holds an error value is typed `list<unknown>`
-
-**Status:** in progress; defect. User decision 2026-10-22: option (a), skip an
-`error` element in the join.
-
-The list `[1, 1/"a", 3]` holds an error in its second element (`1/"a"` is
-`Error(incompatible-type)`), and its type is `list<unknown>`: the `List` literal
-joins the element types `integer` and `error`, and that join is `unknown`.
-Without the error, `[1, 2, 3]` is `vector<integer^3>`. So the type says nothing
-about the elements that are not errors, and it is not a subtype of the type of
-any expression that produced the list (`If([True, Missing, False], 1, 0)` is
-typed `list<integer>` and evaluates to `[1, Error(…), 0]`, typed
-`list<unknown>`). The rule of `docs/ERROR-MODEL.md` (§4, "a type describes the
-successes") says the static type `list<integer>` is right. With option (a),
-`[1, 1/"a", 3]` is `list<integer^3>` (or `vector<integer^3>`). The rejected
-options were (b) `list<integer | error>` and (c) keep `list<unknown>`.
 
 ### CE-22. `If`/`Which` with a condition whose type cannot be read keep the scalar type
 
@@ -611,12 +595,26 @@ route must lift the call over a list operand as the expression route does.
 
 ### CE-364. `Multiply` of a number and a list with a cell of unknown type claims real cells
 
-**Status:** open; defect.
+**Status:** in progress; defect. Blocks CE-361 (its `Sum` typing reaches
+this `Multiply` in `tycho-item-336-nested-signature-derivation`).
 
 `ce.box(["Multiply", 2, ["List", "x"]])` is typed `vector<real^1>`, while `2x`
 alone is typed `number`. With `w := x ↦ 2·[x]`, `w(i)` is typed
 `vector<real^1>` and evaluates to `[2i]`. The cell type must be `number` (or the
-type of `2x`).
+type of `2x`). The same class: `2 · u` with `u: broadcastable<unknown>` is typed
+`broadcastable<integer>`, and `0.9 · u` `broadcastable<real>`.
+
+### CE-373. A point plus an operand of unknown type keeps the integer tier of the point
+
+**Status:** open; defect.
+
+`(1, 2) + q` with `q: unknown` is typed `number | tuple<integer, integer>`, and
+`p + u` with `p: broadcastable<tuple<integer, integer>>` and
+`u: broadcastable<unknown>` is typed `broadcastable<tuple<integer, integer>>`.
+With `q = 0.5` the value is `(1.5, 2.5)`, which neither type holds. The point
+arithmetic route keeps the components of the point when the other operand's
+type is unknown; it must widen them to `number`, as the scalar and list routes
+do (CE-364).
 
 ### CE-365. A use of a function widens its inferred signature
 

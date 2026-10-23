@@ -314,6 +314,40 @@
 
 ### Behavior Changes
 
+- **The type of a list or set literal that holds an error value describes
+  its other elements.** A type describes the successful values, so an
+  element whose type is `error` (an `Error` expression, or a failed
+  application such as `1/"a"`) is left out of the element type when another
+  element of the same level succeeded. `[1, 1/"a", 3]` is now typed
+  `vector<integer^3>`, as `[1, 2, 3]` is; it was `list<unknown>`.
+  `[[1, 1/"a"], [3, 4]]` is `matrix<integer^(2x2)>` (it was
+  `list<list<unknown>>`), and `Set(1, 1/"a")` is `set<integer>` (it was
+  `set<unknown>`). A level whose elements all failed keeps its type:
+  `[1/"a", 1/"a"]` is still `list<unknown>`, and a set whose elements all
+  failed is still `set<unknown>`. The error is still in the expression:
+  `isValid` is `false` and `errors` lists it. As a result, the value of an
+  element-wise `If` or `Which` with at least one successful cell matches the
+  static type of the expression: `If([True, Missing, False], 1, 0)` is typed
+  `list<integer>` and evaluates to `[1, Error(…), 0]`, typed
+  `vector<integer^3>`; that value was typed `list<unknown>`. A tuple is
+  unchanged: `(1, 1/"a")` is still typed `error`.
+
+  A variable with a declared type still refuses a collection that holds an
+  error element, at any depth (also inside a tuple slot or a dictionary
+  value, and through a symbol that holds the collection), unless the
+  declared element type admits `error` (`any`, `unknown`, or an explicit
+  `error` arm). With `s: list<number>`, `s := [1, Error("oops")]` throws, and
+  the `Assign` and `Declare` operators give an `incompatible-type` error. The
+  message now names the failed element ("The value holds the failed element
+  `Error("oops")`…"), and it no longer states the type of the value when that
+  type matches the declared type. A declared union is read arm by arm:
+  `list<number> | set<any>` refuses `[1, Error("oops")]`. `list<number |
+  error>` now admits that value; it was refused, because the value was typed
+  `list<unknown>`. A parameter binding does not refuse it: a function whose
+  parameter is declared `list<number>` runs when called with
+  `[1, Error("oops")]`, as before. A symbol without a declared type takes the
+  value, as before.
+
 - **An applied function literal is typed by its body** (Tycho row 426).
   `Apply(literal, args)`, and `xs |> literal` when the literal takes its
   argument whole, are now typed as the body with each parameter set to the

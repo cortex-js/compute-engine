@@ -131,6 +131,7 @@ import {
   GENERIC_PARTIAL_APPLICATION_MESSAGE,
   INVALID_SIGNATURE_MARKER_MESSAGE,
   TYPE_VARIABLE_INTRODUCTION_MESSAGE,
+  withoutFailedElementCheck,
 } from './boxed-expression/type-compatibility-error.js';
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
 import { isSubtype } from '../common/type/subtype.js';
@@ -2747,8 +2748,14 @@ function declareParameterActivation(
   bodyScope: Scope | undefined
 ): void {
   const pType = typedBinding(ce, param, value);
+  // A parameter binding does not refuse an argument that holds a failed
+  // element (`[1, Error(…)]` at a parameter declared `list<number>`): the
+  // body reads the failed element as a value. Only a declared variable
+  // refuses it (`withoutFailedElementCheck`).
   if (pType !== undefined)
-    ce.declare(name, { value, type: pType, inferred: false }, freshScope);
+    withoutFailedElementCheck(() =>
+      ce.declare(name, { value, type: pType, inferred: false }, freshScope)
+    );
   else ce.declare(name, { value, inferred: true }, freshScope);
 
   const staticBinding = staticParameterBinding(param, name, bodyScope);

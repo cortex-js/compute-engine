@@ -2529,8 +2529,22 @@ document's history):
   cells, with a type that says so (`list<number | error>`)? Today one error
   cell still makes the whole tree invalid: `[1, Sin("a"), 3]` has
   `isValid === false`, and `.errors` lists the error. Its type is
-  `list<unknown>` (it was `error` until 2026-10-19, and `ListJoin` then
-  wrapped such a list as one element), while a NaN or `~oo` cell is an
+  `vector<integer^3>`, the type of `[1, 2, 3]`: a type describes the
+  successes (§4), so an element typed `error` is left out of the element
+  type of a list or set literal when another element of the same level
+  succeeded (user decision 2026-10-22). A level whose elements all failed
+  keeps the type `list<unknown>` (`[Sin("a")]`), because a cell type
+  `never` would be read as a type with no value. A symbol with a declared
+  type still refuses such a list unless the declared element type admits
+  `error` (`any`, `unknown`, an explicit `error` arm): the declared-type
+  check reads the elements of the value, not only its type
+  (`failedElementRefusedBy`, `boxed-expression/type-compatibility-error.ts`).
+  A parameter binding does not refuse it: a call of a function whose
+  parameter is declared `list<number>` with the argument `[1, Sin("a")]`
+  runs. It was
+  `list<unknown>` from 2026-10-19 to 2026-10-22, and `error` before
+  2026-10-19, when `ListJoin` wrapped such a list as one element. A NaN or
+  `~oo` cell is an
   ordinary value (`[1, 1/0, 3]` is the valid `[1, ~oo, 3]`). The behavior
   this entry asked for is in place since 2026-10-19 without the validity
   change: the list is a collection that can be iterated (`isCollection` is

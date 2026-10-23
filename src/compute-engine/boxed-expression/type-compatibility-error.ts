@@ -1,10 +1,23 @@
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { reduceType } from '../../common/type/reduce.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  collectionElementType,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
 
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import {
+  isDictionary,
+  isExpression,
+  isFunction,
+  isSymbol,
+} from './type-guards.js';
 
 /**
  * Raised when a value cannot be installed under a symbol's DECLARED type:
@@ -168,10 +181,329 @@ export function unboundSignatureHint(
 }
 
 /**
+ * The declared type of one part of a value declared with the type `t`, for
+ * {@link failedElementRefusedBy}. `read` gives the type of the part for a
+ * type that is not a union and not an alias, or `undefined` when that type
+ * has no such part. `any` and `unknown` place no constraint on their
+ * contents and are their own part type. A union is read arm by arm, and the
+ * part types of the arms are joined and reduced; an arm without the part
+ * adds nothing, and an arm whose part is `any` or `unknown` makes the part
+ * `any` or `unknown`. `undefined` when no arm gives a part type (a nominal
+ * type, for example). `seen` stops the walk at an alias that names itself
+ * through a union arm (`type alias cyc = cyc | list<integer>`).
+ */
+function declaredPartType(
+  t: Readonly<Type>,
+  read: (t: Type) => Type | undefined,
+  seen: Set<Readonly<Type>> = new Set()
+): Type | undefined {
+  if (t === 'any' || t === 'unknown') return t;
+  if (seen.has(t)) return undefined;
+  seen.add(t);
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'object' && r.kind === 'union') {
+    const arms: Type[] = [];
+    for (const arm of r.types) {
+      const part = declaredPartType(arm, read, seen);
+      if (part === 'any' || part === 'unknown') return part;
+      if (part !== undefined) arms.push(part);
+    }
+    if (arms.length === 0) return undefined;
+    return arms.length === 1
+      ? arms[0]
+      : reduceType({ kind: 'union', types: arms });
+  }
+  return read(r);
+}
+
+/**
+ * The declared type of slot `i` of a `Tuple` literal declared with the type
+ * `r`: the slot type of a tuple type, and the element type of a collection
+ * type (a tuple is a collection of its slots). A `broadcastable<T>` is read
+ * through `T`.
+ */
+function tupleSlotPart(i: number): (r: Type) => Type | undefined {
+  const read = (r: Type): Type | undefined => {
+    if (r === 'tuple' || r === 'collection' || r === 'indexed_collection')
+      return 'any';
+    if (typeof r !== 'object') return undefined;
+    if (r.kind === 'tuple') return r.elements[i]?.type;
+    if (r.kind === 'collection' || r.kind === 'indexed_collection')
+      return r.elements;
+    if (r.kind === 'broadcastable') return declaredPartType(r.elements, read);
+    return undefined;
+  };
+  return read;
+}
+
+/**
+ * The declared type of the value at `key` of a dictionary literal declared
+ * with the type `r`: the value type of a dictionary type, the field type of
+ * a record type, and the value slot of the entry tuple of a collection type
+ * (the elements of a dictionary are its `(key, value)` entries).
+ */
+function dictionaryValuePart(key: string): (r: Type) => Type | undefined {
+  return (r: Type): Type | undefined => {
+    if (
+      r === 'dictionary' ||
+      r === 'record' ||
+      r === 'collection' ||
+      r === 'indexed_collection'
+    )
+      return 'any';
+    if (typeof r !== 'object') return undefined;
+    if (r.kind === 'dictionary') return r.values;
+    if (r.kind === 'record') return r.elements[key];
+    if (r.kind === 'collection' || r.kind === 'indexed_collection')
+      return declaredPartType(r.elements, tupleSlotPart(1));
+    return undefined;
+  };
+}
+
+/**
+ * The element type of a `List` or `Set` literal declared with the type `r`:
+ * read by `collectionElementType()` for a type that such a literal can have
+ * (a list, a tensor, a set, a `collection`, an `indexed_collection`, a
+ * `broadcastable`). The other collection kinds are not read: a `List` or
+ * `Set` literal cannot be a tuple, a dictionary or a record, and
+ * `collectionElementType()` builds the entry type of a dictionary by parsing
+ * the spelling of its value type, which fails for a user alias
+ * (`dictionary<json>`).
+ */
+function literalElementPart(r: Type): Type | undefined {
+  const literalKind =
+    typeof r === 'string'
+      ? r === 'list' ||
+        r === 'set' ||
+        r === 'collection' ||
+        r === 'indexed_collection'
+      : r.kind === 'list' ||
+        r.kind === 'set' ||
+        r.kind === 'collection' ||
+        r.kind === 'indexed_collection' ||
+        r.kind === 'broadcastable';
+  return literalKind ? collectionElementType(r) : undefined;
+}
+
+/**
+ * The number of {@link withoutFailedElementCheck} calls in progress. While it
+ * is not zero, {@link failedElementRefusedBy} finds nothing.
+ */
+let failedElementCheckSuspensions = 0;
+
+/**
+ * Run `fn` with the failed-element check of a declared type suspended.
+ *
+ * The check is a contract on a declared VARIABLE: `s := [1, Error(…)]` with
+ * `s: list<number>` is refused. A call that binds a parameter declared
+ * `list<number>` to the argument `[1, Error(…)]` is not refused: the call
+ * runs, and the body reads the failed element as a value, as it did before
+ * the type of such a list left the failed element out. The binding is made
+ * with `ce.declare()`, which runs the same declared-type check
+ * (`matchesDeclaredTypeAxes`), so the binding suspends the failed-element
+ * part of it (`declareParameterActivation`, `function-utils.ts`). The
+ * counter is module state, and `fn` runs synchronously, so the suspension
+ * ends when `fn` returns or throws.
+ */
+export function withoutFailedElementCheck<T>(fn: () => T): T {
+  failedElementCheckSuspensions += 1;
+  try {
+    return fn();
+  } finally {
+    failedElementCheckSuspensions -= 1;
+  }
+}
+
+/** The deepest level of nested literals the failed-element walk reads. A
+ * deeper value is not checked past this level. This bounds the walk for a
+ * value the memo does not stop. */
+const MAX_FAILED_ELEMENT_DEPTH = 256;
+
+/** The result of a walk in progress, for a value that holds itself through
+ * symbols (`y := [z]`, `z := [y]`). */
+const IN_PROGRESS = Symbol('in-progress');
+
+/**
+ * The state of one failed-element walk. `memo` holds, for each literal
+ * visited and each declared type it was read against (by its spelling), the
+ * result of that visit, or `IN_PROGRESS` while the visit runs. A literal
+ * shared by several parents (`t := List(u, u)`, repeated) is then read once
+ * per declared type, not once per path, and a cycle through symbol values
+ * ends at its first repeat.
+ */
+type FailedElementWalk = {
+  memo: Map<Expression, Map<string, Expression | undefined | typeof IN_PROGRESS>>;
+  depth: number;
+};
+
+/**
+ * The first failed element in `parts` (the parts of a value, each with its
+ * declared type) that the declared type does not admit, read through the
+ * literals nested in each part.
+ */
+function firstRefusedPart(
+  parts: Iterable<[Expression, Type | undefined]>,
+  walk: FailedElementWalk
+): Expression | undefined {
+  for (const [part, declared] of parts) {
+    if (declared === undefined || declared === 'any' || declared === 'unknown')
+      continue;
+    if (part.type.type === 'error') {
+      if (!isSubtype('error', declared)) return part;
+      continue;
+    }
+    const inner = refusedFailedElement(part, declared, walk);
+    if (inner !== undefined) return inner;
+  }
+  return undefined;
+}
+
+/**
+ * The first failed element of the collection literal `value` that the
+ * declared type `declared` does not admit, or `undefined` when there is none.
+ *
+ * A failed element is an element whose type is exactly `error` (an `Error`
+ * expression, or an application that failed, such as `1/"a"`). The type of
+ * a `List` or `Set` literal leaves such an element out
+ * (`docs/ERROR-MODEL.md` §4: a type describes the successful values), so
+ * `[1, Error(…)]` is typed `vector<integer^2>`, which a `list<number>`
+ * admits. A declared type is a contract on every value the symbol holds, so
+ * the declared-type check reads the elements themselves as well: the value
+ * is refused when it holds a failed element at a position whose declared
+ * element type is not a supertype of `error`. `list<number>` and
+ * `list<expression>` refuse `[1, Error(…)]`, and `list<list<number>>`
+ * refuses `[[1, Error(…)]]`. A declared element type `any` or `unknown`, or
+ * one with an explicit `error` arm (`list<number | error>`), admits it, and
+ * so does the bare `list`, whose element type is `any`.
+ *
+ * The walk reads the value, not its type: a `List` or `Set` literal and the
+ * literals nested in it, the literal a restriction (`When`) holds, and the
+ * literal a symbol holds as its value (`s := fs`, with `fs` holding
+ * `[1, Error(…)]`). It also reads the slots of a tuple literal and the
+ * values of a dictionary literal, whose types are built from the types of
+ * their parts, so a list with a failed element inside them is read too:
+ * `tuple<list<number>, integer>` refuses `([1, Error(…)], 2)`, and
+ * `dictionary<list<number>>` refuses `{"k" -> [1, Error(…)]}`; a tuple
+ * declared as a collection (`collection<list<number>>`) has each slot read
+ * against the element type. An element whose type is a union with an
+ * `error` arm is not a failed element. A position whose declared type
+ * cannot be read (a nominal type) is not checked.
+ *
+ * A declared union is read arm by arm: the value is refused unless one arm
+ * that its type matches also admits its failed elements. So
+ * `list<number> | set<any>` refuses `[1, Error(…)]`: the list matches the
+ * arm `list<number>`, which refuses the failed element, and does not match
+ * the arm `set<any>`. When the type of the value matches no arm on its own,
+ * the arms are read together.
+ *
+ * Nothing is found while a parameter binding suspends the check
+ * ({@link withoutFailedElementCheck}).
+ */
+export function failedElementRefusedBy(
+  value: Expression,
+  declared: Readonly<Type>
+): Expression | undefined {
+  if (failedElementCheckSuspensions > 0) return undefined;
+  return refusedFailedElement(value, declared, { memo: new Map(), depth: 0 });
+}
+
+function refusedFailedElement(
+  value: Expression,
+  declared: Readonly<Type>,
+  walk: FailedElementWalk
+): Expression | undefined {
+  // Read through restrictions and symbol values to the literal they hold.
+  // The number of steps is bounded: a chain of symbols could hold itself.
+  let held = value;
+  for (let step = 0; step < 16; step++) {
+    if (isFunction(held, 'When') && held.nops === 2) held = held.op1;
+    else if (isSymbol(held) && held.value !== undefined && held.value !== held)
+      held = held.value;
+    else break;
+  }
+  const literal =
+    isFunction(held, 'List') ||
+    isFunction(held, 'Set') ||
+    isFunction(held, 'Tuple') ||
+    isDictionary(held);
+  if (!literal || walk.depth >= MAX_FAILED_ELEMENT_DEPTH) return undefined;
+
+  const key = typeToString(declared as Type);
+  let byType = walk.memo.get(held);
+  if (byType === undefined) {
+    byType = new Map();
+    walk.memo.set(held, byType);
+  }
+  const known = byType.get(key);
+  if (known === IN_PROGRESS) return undefined;
+  if (byType.has(key)) return known;
+  byType.set(key, IN_PROGRESS);
+  walk.depth += 1;
+  let result: Expression | undefined;
+  try {
+    result = refusedInLiteral(held, declared, walk);
+  } finally {
+    walk.depth -= 1;
+  }
+  byType.set(key, result);
+  return result;
+}
+
+/** The body of {@link refusedFailedElement} for the literal `held`. */
+function refusedInLiteral(
+  held: Expression,
+  declared: Readonly<Type>,
+  walk: FailedElementWalk
+): Expression | undefined {
+  const resolved = resolveTypeAlias(declared);
+  if (typeof resolved === 'object' && resolved.kind === 'union') {
+    const valueType = held.type.type;
+    const matching = resolved.types.filter((arm) => isSubtype(valueType, arm));
+    if (matching.length > 0) {
+      let first: Expression | undefined;
+      for (const arm of matching) {
+        const found = refusedFailedElement(held, arm, walk);
+        if (found === undefined) return undefined;
+        first ??= found;
+      }
+      return first;
+    }
+  }
+  if (isFunction(held, 'List') || isFunction(held, 'Set')) {
+    const elements = declaredPartType(declared, literalElementPart);
+    return firstRefusedPart(
+      held.ops.map((op): [Expression, Type | undefined] => [op, elements]),
+      walk
+    );
+  }
+  if (isFunction(held, 'Tuple')) {
+    return firstRefusedPart(
+      held.ops.map((op, i): [Expression, Type | undefined] => [
+        op,
+        declaredPartType(declared, tupleSlotPart(i)),
+      ]),
+      walk
+    );
+  }
+  if (isDictionary(held)) {
+    return firstRefusedPart(
+      held.entries.map(([key, v]): [Expression, Type | undefined] => [
+        v,
+        declaredPartType(declared, dictionaryValuePart(key)),
+      ]),
+      walk
+    );
+  }
+  return undefined;
+}
+
+/**
  * The declared-type mismatch, with the message every host route has always
- * thrown (`Symbol "x"\n|   The value …`) — plus, for the
- * signature-vs-non-function near-miss, the {@link unboundSignatureHint}
- * explanation as an additional line.
+ * thrown (`Symbol "x"\n|   The value …`) — plus an explanation as an
+ * additional line: the {@link unboundSignatureHint} explanation for the
+ * signature-vs-non-function near-miss, or, for a collection that holds a
+ * failed element the declared type does not admit
+ * ({@link failedElementRefusedBy}), the name of that element.
  */
 export function declaredTypeError(
   symbol: string,
@@ -182,15 +514,32 @@ export function declaredTypeError(
   },
   declaredType: BoxedType
 ): TypeCompatibilityError {
-  const hint = unboundSignatureHint(value, declaredType);
+  const failed = isExpression(value)
+    ? failedElementRefusedBy(value, declaredType.type)
+    : undefined;
+  // The type of a collection with a failed element leaves that element out,
+  // and can match the declared type. Then the failed element is the only
+  // reason for the refusal: the message does not state the type of the
+  // value, and the error has no value type, so that the `Assign`/`Declare`
+  // error value does not read "expected `list<number>`, got
+  // `vector<integer^2>`". When the type does not match either, the message
+  // states it, and the failed element follows.
+  const onlyFailed = failed !== undefined && value.type.matches(declaredType);
+  const hint =
+    unboundSignatureHint(value, declaredType) ??
+    (failed !== undefined
+      ? `The value holds the failed element "${failed.toString()}". The type "${declaredType}" does not admit an error at the position of this element`
+      : undefined);
   return new TypeCompatibilityError(
     symbol,
     declaredType,
-    value.type,
+    onlyFailed ? undefined : value.type,
     'value',
     [
       `Symbol "${symbol}"`,
-      `The value "${value.toString()}" of type "${value.type}" is not compatible with the type "${declaredType}"`,
+      onlyFailed
+        ? `The value "${value.toString()}" is not compatible with the type "${declaredType}"`
+        : `The value "${value.toString()}" of type "${value.type}" is not compatible with the type "${declaredType}"`,
       ...(hint !== undefined ? [hint] : []),
     ].join('\n|   '),
     hint

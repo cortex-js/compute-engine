@@ -63,7 +63,9 @@ describe('A LIST LITERAL WITH A FAILED CELL IS A COLLECTION', () => {
     const xs = box(BOXED_FAILURE);
     expect(xs.isValid).toBe(false);
     expect(xs.errors.map((x) => x.toString())).toEqual([TYPE_ERROR]);
-    expect(xs.type.toString()).toBe('list<unknown>');
+    // The failed cell is left out of the element type, which describes the
+    // successful cells (`docs/ERROR-MODEL.md` §4).
+    expect(xs.type.toString()).toBe('vector<integer^3>');
   });
 
   test('a set literal with a failed cell is a collection too', () => {

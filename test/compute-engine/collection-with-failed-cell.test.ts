@@ -4,8 +4,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // A collection literal keeps a failed cell in its position
 // (`docs/ERROR-MODEL.md` §3). The tree is invalid (`isValid` is `false`),
-// but the literal is still a collection, and its type says so: a failed cell
-// makes the element type `unknown`. Before, the whole literal was typed
+// but the literal is still a collection, and its type says so. A type
+// describes the successful values (`docs/ERROR-MODEL.md` §4), so a failed
+// cell is left out of the element type: `[1, Error(…), 3]` is typed as
+// `[1, 2, 3]` is (user decision 2026-10-22; before it, a failed cell made the
+// element type `unknown`). Before that, the whole literal was typed
 // `error`, so on the host route a variable that held it was a scalar:
 // `ListJoin(fs, [2])` with `fs := [Error(…)]` gave `[[Error(…)], 2]`, and a
 // variable declared `list` refused the value.
@@ -25,37 +28,37 @@ describe('A LIST LITERAL WITH A FAILED CELL IS TYPED AS A COLLECTION', () => {
   test('box route', () => {
     const xs = ce.box(['List', 1, ERR, 3]);
     expect(xs.isValid).toBe(false);
-    expect(xs.type.toString()).toBe('list<unknown>');
+    expect(xs.type.toString()).toBe('vector<integer^3>');
+    // No cell succeeded: nothing is known of the cells.
     expect(ce.box(['List', ERR]).type.toString()).toBe('list<unknown>');
   });
 
   test('parse route', () => {
     const xs = ce.parse('[1, \\sin("a"), 3]');
     expect(xs.isValid).toBe(false);
-    expect(xs.type.toString()).toBe('list<unknown>');
+    expect(xs.type.toString()).toBe('vector<integer^3>');
   });
 
   test('a set literal', () => {
-    expect(ce.box(['Set', 1, ERR]).type.toString()).toBe('set<unknown>');
+    expect(ce.box(['Set', 1, ERR]).type.toString()).toBe('set<integer>');
   });
 
-  test('an absent cell keeps its arm beside the failed cell', () => {
-    // `unknown` is values-only: it does not admit `missing`, so the absent
-    // cell adds the `missing` arm.
+  test('an absent cell beside the failed cell is the only cell type', () => {
     expect(ce.box(['List', ERR, 'Missing']).type.toString()).toBe(
-      'list<missing | unknown>'
+      'list<missing^2>'
     );
     expect(ce.box(['Set', ERR, 'Missing']).type.toString()).toBe(
-      'set<missing | unknown>'
+      'set<missing>'
     );
     // A `NaN` cell is a value, and a `Nothing` cell is erased.
-    expect(ce.box(['List', ERR, 'NaN']).type.toString()).toBe('list<unknown>');
+    expect(ce.box(['List', ERR, 'NaN']).type.toString()).toBe('vector<nan^2>');
     const erased = ce.box(['List', ERR, 'Nothing']);
     expect(erased.nops).toBe(1);
     expect(erased.type.toString()).toBe('list<unknown>');
-    // An absent cell of a nested list is inside a value: no arm is added.
+    // The failed cell is in place of a row: the nested list gives the cell
+    // type.
     expect(ce.box(['List', ERR, ['List', 1, 'Missing']]).type.toString()).toBe(
-      'list<unknown>'
+      'list<list<integer | missing>>'
     );
   });
 
@@ -71,7 +74,7 @@ describe('A LIST LITERAL WITH A FAILED CELL IS TYPED AS A COLLECTION', () => {
     const xs = ce.box(['List', 1, ERR, 3]);
     const value = xs.evaluate();
     expect(value.toString()).toBe(`[1,${ERR_TEXT},3]`);
-    expect(value.type.toString()).toBe('list<unknown>');
+    expect(value.type.toString()).toBe('vector<integer^3>');
   });
 });
 
@@ -124,11 +127,13 @@ describe('A VARIABLE THAT HOLDS A LIST WITH A FAILED CELL (HOST ROUTE)', () => {
 
   test('a variable declared list<number> refuses the value', () => {
     // The failed cell is not a number: `error` is not a subtype of
-    // `number`, and the element type of the value is `unknown`.
+    // `number`. The type of the value leaves the failed cell out
+    // (`vector<integer^2>`), so the declared-type check reads the cells
+    // (`failedElementRefusedBy`), and the message names the failed cell.
     const ce = new ComputeEngine();
     ce.declare('fs', 'list<number>');
     expect(() => ce.assign('fs', ['List', 1, ERR])).toThrow(
-      /list<unknown>.*list<number>/
+      /not compatible with the type "list<number>"[\s\S]*failed element "Error\("oops"\)"/
     );
   });
 });
@@ -144,7 +149,7 @@ describe('A LIST WITH A FAILED CELL (EPSIL ROUTE)', () => {
     expect(r.value.nops).toBe(2);
     expect(r.value.ops![0].operator).toBe('Error');
     expect(r.value.ops![1].toString()).toBe('2');
-    expect(r.value.type.toString()).toBe('list<unknown>');
+    expect(r.value.type.toString()).toBe('vector<integer^2>');
   });
 
   test('a variable declared list accepts the value', () => {

@@ -6736,6 +6736,27 @@ type LevelShape = { dims: number[]; cells: Type[] };
  * level has the dimension 0 and no cell: `[[], []]` has the dimensions
  * `[2, 0]`.
  *
+ * An element whose type is exactly `error` (an `Error` expression, or an
+ * application that failed, such as `1/"a"`) keeps its position, so it counts
+ * in the dimension of its level, but it adds no cell type and no row shape.
+ * A type describes the successful values (`docs/ERROR-MODEL.md` §4), and a
+ * failed cell has none: `[1, 1/"a", 3]` has the dimensions `[3]` and the
+ * cell type `integer`, as `[1, 2, 3]` has. The skip needs at least one
+ * element of the level that did not fail. A level whose elements all failed
+ * blocks the shape claim (`null`), and the literal takes the element type of
+ * `literalElementType()`: `[1/"a", 1/"a"]` is `list<unknown>`. The join of
+ * no type would be `never`, and a list of cells typed `never`
+ * (`list<never^2>`) is read as a type with no value by the subtype and
+ * intersection code, so the literal would be read as impossible, and an
+ * index into it would be typed `never`. The error is still in the
+ * expression, which is not valid
+ * (`isValid` is false); only its type ignores it. A symbol with a declared
+ * type still refuses the list unless the declared element type admits
+ * `error`, because the declared-type check reads the
+ * elements as well (`failedElementRefusedBy`,
+ * `boxed-expression/type-compatibility-error.ts`). An element whose type is
+ * a union with an `error` arm is not skipped: it is a cell like any other.
+ *
  * `memo` holds the analysis of every nested list already visited, by
  * descriptor. A structure walk describes a shared node ONCE (the descriptor
  * memo of `describe()`, `boxed-expression/operand-descriptor.ts`), so the
@@ -6757,6 +6778,7 @@ function analyzeLevelD(
   const childShapes: LevelShape[] = [];
   const cellTypes: Type[] = [];
   const seenCells = new Set<Type>();
+  let failedCount = 0;
 
   for (const op of ops) {
     const structure = op.structureOf?.();
@@ -6768,6 +6790,8 @@ function analyzeLevelD(
       }
       if (sub === null) return null;
       childShapes.push(sub);
+    } else if (op.type === 'error') {
+      failedCount += 1;
     } else {
       const cell = classifyCellD(op);
       if (cell === null) return null;
@@ -6778,6 +6802,7 @@ function analyzeLevelD(
     }
   }
 
+  if (failedCount === ops.length) return null;
   if (childShapes.length > 0 && cellTypes.length > 0) return null;
   if (childShapes.length === 0) return { dims: [ops.length], cells: cellTypes };
 
@@ -6813,31 +6838,41 @@ function analyzeLevelD(
  * while the list handed it a complex value (Tycho item 332). With no unknown
  * component the join is `widenElementTypes` (the extended-real rule).
  *
- * An `error` component is a failed cell, which the literal keeps in its
- * position (`docs/ERROR-MODEL.md` §3). It has no value, so nothing is known
- * of the type the cell would have had, and it makes the element type
- * `unknown` too: `[1, Error(…)]` is `list` (`list<unknown>`). A join with
- * `error` would make the element type, and so the whole literal, `error`
- * (`reduceListType()`), and the literal would be read as a scalar.
+ * A component whose type is exactly `error` is a failed cell, which the
+ * literal keeps in its position (`docs/ERROR-MODEL.md` §3). A type
+ * describes the successful values (`docs/ERROR-MODEL.md` §4), and a failed
+ * cell has none, so it is left out of the join: `Set(1, Error(…))` is
+ * `set<integer>`, as `Set(1)` is. When every component failed, no type is
+ * left to join. The join of no type is `never`, but `list<never>` and
+ * `set<never>` are the types of the EMPTY collection, and this type states
+ * no length, so the element type is `unknown` (no information):
+ * `Set(Error(…))` is `set<unknown>`, and `[Error(…), Error(…)]` is
+ * `list<unknown>` (`analyzeLevelD()` claims no shape for it). A join
+ * with `error` itself would make the element type, and so the whole
+ * literal, `error` (`reduceListType()`), and the literal would be read as a
+ * scalar.
  *
  * `unknown` is the top of the VALUE types: it does not admit the absence
  * marker `missing`. So when another component can be absent (a `Missing`
  * cell, typed `missing` or `T | missing`), the element type keeps that
- * arm: `[Error(…), Missing]` is `list<unknown | missing>`, not
+ * arm: `[f(x), Missing]`, with `f` a function of unknown result type, is
+ * `list<unknown | missing>`, not
  * `list<unknown>`, which would claim that every cell is a value. A `NaN`
  * cell is a value (`nan` is a number type), and a `Nothing` cell is erased
  * when the literal is made canonical, so neither adds an arm.
  */
 function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
-  if (types.some((t) => t === 'unknown' || t === 'error')) {
-    const absent = types.some(
-      (t) => t !== 'unknown' && t !== 'error' && isSubtype('missing', t)
+  const successes = types.filter((t) => t !== 'error');
+  if (successes.length === 0 && types.length > 0) return 'unknown';
+  if (successes.some((t) => t === 'unknown')) {
+    const absent = successes.some(
+      (t) => t !== 'unknown' && isSubtype('missing', t)
     );
     return absent
       ? { kind: 'union', types: ['unknown', 'missing'] }
       : 'unknown';
   }
-  return widenElementTypes(types);
+  return widenElementTypes(successes);
 }
 
 /**

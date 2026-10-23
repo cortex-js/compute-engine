@@ -70,6 +70,7 @@ import { typeAcceptsValue } from './value-membership.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
 import {
   declaredTypeError,
+  failedElementRefusedBy,
   genericOverloadLiteralError,
 } from './type-compatibility-error.js';
 import { substituteDeclaredBounds } from './generic-instantiation.js';
@@ -563,6 +564,22 @@ export function matchesDeclaredTypeAxes(
     valueExpr !== undefined &&
     isAbsentSymbol(valueExpr) &&
     !isSubtype('missing', declared.type)
+  )
+    return false;
+
+  // The same contract for a failed element of a collection literal. The
+  // type of `[1, Error(…)]` leaves the failed element out (a type describes
+  // the successful values), so it is `vector<integer^2>`, which a
+  // `list<number>` admits. The value itself is read: a collection that holds
+  // a failed element is refused unless the declared type admits `error` at
+  // the position of that element (`failedElementRefusedBy`). The declared
+  // type is read before its placeholders are refined from the value below,
+  // so a declared `list<unknown>` still admits the value. A parameter
+  // binding suspends this part of the check (`withoutFailedElementCheck`):
+  // only a declared variable refuses the value.
+  if (
+    valueExpr !== undefined &&
+    failedElementRefusedBy(valueExpr, declared.type) !== undefined
   )
     return false;
 
