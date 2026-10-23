@@ -1,4 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { deriveApplicationType } from '../../src/compute-engine/boxed-expression/derive-application-type';
+import { describeType } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { BoxedType } from '../../src/common/type/boxed-type';
 
 const ce = new ComputeEngine();
 
@@ -160,6 +163,71 @@ describe('Numerator, Denominator and NumeratorDenominator keep extra operands', 
       ];
       expect(ce.box(input as any).evaluate().json).toEqual(expected);
       expect(ce.box(input as any).N().json).toEqual(expected);
+    }
+  );
+
+  // A surplus TUPLE is not a source of cells either: the component-wise
+  // tuple broadcast leaves the call whole, with one error, and the type is
+  // the handler's, not a lift over the surplus collection.
+  test.each([
+    [
+      'Numerator',
+      ['Numerator', ['Rational', 6, 4], ['Tuple', 1, 2]],
+      "'(1, 2)'",
+    ],
+    ['Denominator', ['Denominator', 5, ['Tuple', 1, 2]], "'(1, 2)'"],
+    [
+      'NumeratorDenominator',
+      ['NumeratorDenominator', ['Rational', 6, 4], ['Tuple', 1, 2]],
+      "'(1, 2)'",
+    ],
+    ['Numerator', ['Numerator', ['Rational', 6, 4], ['List', 1, 2]], "'[1,2]'"],
+  ])(
+    '%s with a surplus collection is one error, not a fan-out',
+    (operator, input, where) => {
+      const expected = [
+        'Error',
+        "'unexpected-argument'",
+        where,
+        ['ErrorTrace', ['ErrorFrame', `'${operator}'`, 2]],
+      ];
+      expect(ce.box(input as any).evaluate().json).toEqual(expected);
+      expect(ce.box(input as any).N().json).toEqual(expected);
+      const surplus = ce.box(input as any);
+      const plain = ce.box([operator, 5, 'x'] as any);
+      expect(surplus.type.toString()).toBe(plain.type.toString());
+    }
+  );
+
+  test('evaluateAsync() refuses a surplus tuple the same way', async () => {
+    const result = await ce
+      .box(['Numerator', ['Rational', 6, 4], ['Tuple', 1, 2]])
+      .evaluateAsync();
+    expect(result.operator).toBe('Error');
+  });
+
+  // The type derived from operand descriptors (`deriveApplicationType`, the
+  // route that types a call in the body of another function) is not lifted
+  // over a surplus collection either: it agrees with the expression route.
+  test.each([
+    ['Numerator', 'list<integer>', 'nothing | number'],
+    ['Numerator', 'tuple<integer, integer>', 'nothing | number'],
+    ['Denominator', 'list<integer>', 'nothing | number'],
+    [
+      'NumeratorDenominator',
+      'tuple<integer, integer>',
+      'nothing | tuple<number, number>',
+    ],
+  ])(
+    'the descriptor type of %s with a surplus %s is %s',
+    (operator, surplus, expected) => {
+      const t = deriveApplicationType(ce, operator, [
+        describeType('rational'),
+        describeType(ce.type(surplus).type),
+      ]);
+      expect(t === undefined ? 'undefined' : new BoxedType(t).toString()).toBe(
+        expected
+      );
     }
   );
 

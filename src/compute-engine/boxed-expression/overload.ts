@@ -319,6 +319,28 @@ export function arityBounds(sig: FunctionSignature): {
 }
 
 /**
+ * True when `def` opts in with the `'surplus-operands'` broadcast exemption
+ * and a call with `count` operands holds more operands than its signature
+ * admits: a surplus past a fixed arity. Such a call evaluates to one
+ * `unexpected-argument` error, so it is not broadcast over a surplus
+ * collection operand, and its type is not lifted to a collection. The
+ * expression route (`hasSurplusOperands()` in `boxed-function.ts`) and the
+ * descriptor route (`deriveApplicationType()`) both read this test.
+ */
+export function exceedsSurplusArity(
+  def: {
+    readonly signature: { readonly type: Type };
+    readonly broadcastExemptions: ReadonlyArray<string>;
+  },
+  count: number
+): boolean {
+  if (!def.broadcastExemptions.includes('surplus-operands')) return false;
+  const sig = def.signature.type;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return false;
+  return count > arityBounds(sig).max;
+}
+
+/**
  * True when a callback of type `opType` could be applied at SOME call arity
  * the slot arm supplies: the two arity ranges INTERSECT. Both are contiguous,
  * so this is the ordinary overlap test.

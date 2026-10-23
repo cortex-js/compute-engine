@@ -21,6 +21,18 @@
   `tycho-row-425-index-of-broadcastable-call.test.ts` that recorded the
   divergence are agreement checks again.
 
+- **A surplus tuple operand of `Numerator`, `Denominator` or
+  `NumeratorDenominator` gave a tuple of errors**
+  ([#467](https://github.com/cortex-js/compute-engine/issues/467), contributed
+  by [enumeratio](https://github.com/enumeratio)). A call with an operand past
+  the declared arity is one `unexpected-argument` error when the surplus
+  operand is a tuple, as it is for a list: `Numerator(3/2, (1, 2))` was
+  `(Error, Error)`, a tuple of two errors, and is now the one error. The type
+  of the call is no longer lifted over a surplus list or tuple (it was
+  `list<…>` or `tuple<…>`): it keeps the declared result type of the
+  operator, `nothing | number` for `Numerator` and `Denominator` and
+  `nothing | tuple<number, number>` for `NumeratorDenominator`.
+
 ## 0.162.0 _2026-10-23_
 
 ### Breaking Changes

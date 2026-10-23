@@ -57,7 +57,12 @@ import {
   type SolveActual,
   type Threadable,
 } from './generic-instantiation.js';
-import { arityBounds, isMoreSpecific, overloadArms } from './overload.js';
+import {
+  arityBounds,
+  exceedsSurplusArity,
+  isMoreSpecific,
+  overloadArms,
+} from './overload.js';
 import {
   ABSENT_CELLS_STAY_MISSING,
   absentCellsPresentType,
@@ -736,6 +741,10 @@ export function deriveApplicationType(
     const mappable = hooks.mappableSlot(def);
     if (!(def.broadcastable || mappable !== 'no-plan')) return perElement;
     if (hooks.isLambda(def)) return perElement;
+    // A call with a surplus operand evaluates to one error, so its value is
+    // not a collection: it keeps the per-element type, as on the expression
+    // route (`BoxedFunction.type`).
+    if (exceedsSurplusArity(def, operands.length)) return perElement;
     const views = operands.map(viewOfDescriptor);
     // The type handler called again with the operands in `cells` typed as
     // one cell of a broadcast (`cells[i]`), for the per-cell results the
