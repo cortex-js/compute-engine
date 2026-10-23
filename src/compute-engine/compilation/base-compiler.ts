@@ -6898,6 +6898,27 @@ export class BaseCompiler {
       if (lanes.some((l) => l === 'mixed')) return 'mixed';
       return BaseCompiler.isComplexValued(a);
     }
+    // A `Reduce` or `Scan` with `Add` or `Multiply` emits the same
+    // shape-agnostic combiner as `Sum` and `Product` (`_SYS.sadd`/
+    // `_SYS.smul`), so its entries are numbers or `{re, im}` objects as the
+    // elements are, wherever `Sum` of the same collection is read as
+    // complex-shaped (`isComplexValued`): elements of unknown type
+    // (`list<unknown>`), or rows whose cells are not provably real. With the
+    // real lane, the parent read a complex entry with `+`:
+    // `Reduce(L, Add, 0) + 1` over `[[1, 2], [i, 3]]` gave
+    // `["[object Object]1", 6]`, while `Sum(L) + 1` gave `[1 + i, 7]`. Rows
+    // of real numbers (`list<list<real>>`) keep the real lane, so a
+    // real-only parent (`Floor`) still compiles.
+    if (
+      isFunction(a) &&
+      (a.operator === 'Reduce' || a.operator === 'Scan') &&
+      a.nops >= 2 &&
+      (isSymbol(a.ops[1], 'Add') || isSymbol(a.ops[1], 'Multiply')) &&
+      (BaseCompiler.foldsCollectionElements(a.ops[0])
+        ? BaseCompiler.linearAlgebraLane([a.ops[0]]) !== 'real'
+        : !BaseCompiler.collectionFoldsReal(a.ops[0]))
+    )
+      return 'mixed';
     const complexEvidence =
       BaseCompiler.typeHasComplexLeaf(
         t,
@@ -6914,8 +6935,27 @@ export class BaseCompiler {
     // as real). Compiling the array case behind that refusal would trade
     // an honest decline for a run-time throw, so this shape keeps
     // declining (pinned in `broadcastable-compile.test.ts`).
-    if (isBoundPossiblyCollectionTyped(a)) return undefined;
+    //
+    // A FOLD over a collection is not such a binding: its value is
+    // computed by the compiled code, not passed by the host, so no entry
+    // check refuses it. Its value is a number, a `{re, im}` object, or an
+    // array whose entries are either: the shape-agnostic combiner
+    // (`_SYS.sadd`/`_SYS.smul`) gives a complex entry only where an
+    // element was complex. `'mixed'` is the lane that reads each of these
+    // shapes. Before this rule, `Sum(L) + 1` with `L: list<unknown>` did
+    // not compile, although `L` holds only real numbers in most programs.
+    if (isBoundPossiblyCollectionTyped(a))
+      return BaseCompiler.isCollectionFold(a) ? 'mixed' : undefined;
     return 'mixed';
+  }
+
+  /** Whether `a` folds a collection into one value with a builtin or a
+   * custom combiner: `Sum(L)` and `Product(L)` (one operand, no index),
+   * `Reduce(L, f, …)` and `Scan(L, f, …)`. */
+  private static isCollectionFold(a: Expression): boolean {
+    if (!isFunction(a)) return false;
+    if (a.operator === 'Sum' || a.operator === 'Product') return a.nops === 1;
+    return (a.operator === 'Reduce' || a.operator === 'Scan') && a.nops >= 2;
   }
 
   /**
@@ -6947,7 +6987,17 @@ export class BaseCompiler {
     seen = unfolded.seen;
     if (isNonRealNumber(r)) return true;
     if (wide && BaseCompiler.wideNumericType(r)) return true;
-    if (typeof r === 'string') return false;
+    // A collection written by its bare name (`list`, `set`) has `any`
+    // elements, which `leafwardElementType` returns: the walk continues
+    // to them below. A bare `list` in the complex mode is then read as a
+    // `list<any>`, as the type system reads it, and not as a list of real
+    // numbers.
+    if (typeof r === 'string') {
+      const elt = leafwardElementType(r);
+      return (
+        elt !== undefined && BaseCompiler.typeHasComplexLeaf(elt, seen, wide)
+      );
+    }
     if (r.kind === 'tuple')
       return r.elements.some((e) =>
         BaseCompiler.typeHasComplexLeaf(e.type, seen, wide)

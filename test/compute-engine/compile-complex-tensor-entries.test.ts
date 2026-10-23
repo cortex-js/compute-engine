@@ -293,17 +293,42 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
     expect(r.evaluated).toBe(evaluated);
   });
 
-  test('a complex parent over complex rows or matrices refuses to compile', () => {
-    for (const [type, expr] of [
-      ['list<matrix<complex^2x2>>', ['Add', ['Product', 'P'], 1]],
-      ['list<list<complex>>', ['Multiply', ['Sum', 'P'], 2]],
-    ] as const) {
-      const ce = new ComputeEngine();
-      ce.declare('P', type);
-      expect(() => compile(ce.box(expr as any), { fallback: false })).toThrow(
-        /Could not compile/
-      );
-    }
+  // The fold of complex rows or matrices may be a list or a number, and
+  // its entries numbers or `{re, im}` objects: the parent reads each entry
+  // with `_SYS.sadd`/`_SYS.smul`. These parents were refused before.
+  test.each([
+    [
+      'complex matrices',
+      'list<matrix<complex^2x2>>',
+      ['Add', ['Product', 'P'], 1],
+      [
+        [
+          [c(1, 1), 2],
+          [3, 4],
+        ],
+        [
+          [0, 1],
+          [1, 0],
+        ],
+      ],
+      [
+        [3, c(2, 1)],
+        [5, 4],
+      ],
+      '[[3,(2 + i)],[5,4]]',
+    ],
+    [
+      'complex rows',
+      'list<list<complex>>',
+      ['Multiply', ['Sum', 'P'], 2],
+      ROWS,
+      [c(8, 4), 12],
+      '[(8 + 4i),12]',
+    ],
+  ])('a complex parent over %s', (_, type, expr, value, compiled, evaluated) => {
+    const r = both(type as string, expr, value);
+    expect(r.compiled).toEqual(compiled);
+    expect(r.evaluated).toBe(evaluated);
   });
 
   test('Product of rows or square matrices has their shape', () => {

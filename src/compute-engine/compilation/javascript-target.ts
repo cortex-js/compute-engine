@@ -98,11 +98,13 @@ import {
   broadcastCollectionArm,
   couldMatch,
   isSubtype,
+  provablyAdmits,
 } from '../../common/type/subtype.js';
 import {
   isBroadcastablePointType,
   isNestedPointCollectionType,
   isTupleOrTupleUnionShapedType,
+  leafwardElementType,
   pointCollectionElementType,
 } from '../collection-utils.js';
 import type { Type, TupleType } from '../../common/type/types.js';
@@ -5010,6 +5012,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Reduce\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
+    refuseBuiltinFoldOfNonNumbers('Reduce', coll, op);
     // Product's canonical collection form is Reduce(Map(...), Multiply, 1).
     if (
       isSymbol(op) &&
@@ -5027,7 +5030,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     let combiner =
       nestedElementCombiner('Reduce', coll, op, init) ??
-      builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
+      builtinCombiner(
+        op,
+        BaseCompiler.foldLaneIsComplex(coll, init),
+        elementsMayBeAbsent(coll)
+      );
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
     let seed: string | undefined;
@@ -6553,9 +6560,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Scan\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
+    refuseBuiltinFoldOfNonNumbers('Scan', coll, op);
     const builtin =
       nestedElementCombiner('Scan', coll, op, init) ??
-      builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
+      builtinCombiner(
+        op,
+        BaseCompiler.foldLaneIsComplex(coll, init),
+        elementsMayBeAbsent(coll)
+      );
     // As `Reduce`: the accumulator's annotation is judged against the lane
     // `combinerPlan` chose, or else against the join of the seed's type (the
     // first element's, for a seedless scan) and the combiner's result type.
@@ -11278,6 +11290,18 @@ function compileSumProduct(
       );
       const element =
         elt === undefined ? undefined : resolveTypeForCompilation(elt);
+      // Elements whose cells are strings or booleans have no sum and no
+      // product: the interpreter reports an `incompatible-type` error. The
+      // compiled folds read them with JavaScript arithmetic: the product of
+      // `[["a"], ["b"]]` was `[NaN]`, the sum of `[[true], [false]]` was
+      // `[1]`.
+      if (elt !== undefined && cellsCannotBeNumbers(elt))
+        throw new Error(
+          `Could not compile \`${kind}\`: the elements of the operand (type ` +
+            `\`${args[0].type.toString()}\`) hold strings or booleans, which ` +
+            `have no ${kind === 'Sum' ? 'sum' : 'product'}. The interpreter ` +
+            `reports the type error instead.`
+        );
       // The same test `isComplexValued` reads for the shape of the value.
       if (
         element !== undefined &&
@@ -12901,32 +12925,96 @@ function builtinCombiner(
    * `success: true`. `Min`/`Max` have no meaning over complex values — the
    * interpreter declines them — so they fail closed here.
    */
-  complexLane = false
+  complexLane = false,
+  /**
+   * An element may be absent (`elementsMayBeAbsent`). JavaScript reads
+   * `null` as 0 in arithmetic (`2 * null` is 0, `Math.min(2, null)` is 0),
+   * and `_SYS.cplx(null)` has no `re`. Each operand is then read as `NaN`
+   * when it is absent (`{re: NaN, im: NaN}` in the complex lane, so that a
+   * sum does not keep a finite imaginary part), and the fold gives `NaN`
+   * from that step on, as the interpreter does.
+   */
+  absent = false
 ): string | undefined {
   if (!isSymbol(op)) return undefined;
+  const nan = complexLane ? '{ re: NaN, im: NaN }' : 'NaN';
+  const a = absent ? `(_a ?? ${nan})` : '_a';
+  const b = absent ? `(_b ?? ${nan})` : '_b';
   switch (op.symbol) {
     case 'Add':
       return complexLane
-        ? '(_a, _b) => { const _p = _SYS.cplx(_a), _q = _SYS.cplx(_b); return { re: _p.re + _q.re, im: _p.im + _q.im }; }'
-        : '(_a, _b) => _a + _b';
+        ? `(_a, _b) => { const _p = _SYS.cplx(${a}), _q = _SYS.cplx(${b}); return { re: _p.re + _q.re, im: _p.im + _q.im }; }`
+        : `(_a, _b) => ${a} + ${b}`;
     case 'Multiply':
       return complexLane
-        ? '(_a, _b) => { const _p = _SYS.cplx(_a), _q = _SYS.cplx(_b); return { re: _p.re * _q.re - _p.im * _q.im, im: _p.re * _q.im + _p.im * _q.re }; }'
-        : '(_a, _b) => _a * _b';
+        ? `(_a, _b) => { const _p = _SYS.cplx(${a}), _q = _SYS.cplx(${b}); return { re: _p.re * _q.re - _p.im * _q.im, im: _p.re * _q.im + _p.im * _q.re }; }`
+        : `(_a, _b) => ${a} * ${b}`;
     case 'Min':
       if (complexLane)
         throw new Error(
           `Could not compile \`Min\`: a fold over complex values has no ordering.`
         );
-      return '(_a, _b) => Math.min(_a, _b)';
+      return `(_a, _b) => Math.min(${a}, ${b})`;
     case 'Max':
       if (complexLane)
         throw new Error(
           `Could not compile \`Max\`: a fold over complex values has no ordering.`
         );
-      return '(_a, _b) => Math.max(_a, _b)';
+      return `(_a, _b) => Math.max(${a}, ${b})`;
   }
   return undefined;
+}
+
+/**
+ * Refuse a `Reduce` or `Scan` whose combiner is a builtin arithmetic head
+ * (`Add`, `Multiply`, `Min`, `Max`) over elements that are not numbers
+ * (`cellsCannotBeNumbers`: booleans, strings). The interpreter gives an
+ * `incompatible-type` error, or leaves `Max(True, False)` unevaluated; the
+ * JavaScript operators read `true` as 1, so `Reduce(L, Add, 0)` over
+ * `[true, false]` gave 1. A custom combiner is not refused: it does to a
+ * boolean what it does in the interpreter.
+ */
+function refuseBuiltinFoldOfNonNumbers(
+  operator: 'Reduce' | 'Scan',
+  coll: Expression,
+  op: Expression
+): void {
+  if (!isSymbol(op) || !BaseCompiler.BUILTIN_FOLD_HEADS.has(op.symbol)) return;
+  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  if (elt === undefined || !cellsCannotBeNumbers(elt)) return;
+  throw new Error(
+    `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+      `\`${typeToString(elt)}\` has no compiled form: the elements are not numbers. ` +
+      `The interpreter evaluates it instead.`
+  );
+}
+
+/**
+ * Whether an element of the collection `coll` may be absent: its element
+ * type admits `missing` (`list<number | missing>`). An element of
+ * type `unknown` is not counted: it is not evidence of an absent value.
+ */
+function elementsMayBeAbsent(coll: Expression): boolean {
+  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  return elt !== undefined && provablyAdmits('missing', elt);
+}
+
+/**
+ * Whether a cell of the type `t`, at any depth of its lists, may be absent:
+ * `list<list<number | missing>>`, or a row that may be absent
+ * (`list<vector<2> | missing>`). The real-only element-wise helpers
+ * (`_SYS.add`, `_SYS.mul`) read an absent cell as 0; the dispatching
+ * helpers (`_SYS.addAny`, `_SYS.mulAny`) read it as `NaN`.
+ */
+function cellsMayBeAbsent(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const r = resolveTypeForCompilation(t);
+  if (provablyAdmits('missing', r)) return true;
+  if (typeof r === 'string') return false;
+  if (r.kind === 'union')
+    return r.types.some((arm) => cellsMayBeAbsent(arm, depth + 1));
+  const elt = leafwardElementType(r);
+  return elt !== undefined && cellsMayBeAbsent(elt, depth + 1);
 }
 
 /**
@@ -13257,6 +13345,24 @@ function refuseNestedData(
   // `Max(w, 5)` over a list `w` compiles) is refused only for an operand
   // whose elements are collections; the other statistics pass the operands
   // as one array, so any list operand would be read as a number.
+  // Elements that are booleans are not numbers either (strings are refused
+  // as collections above): the interpreter gives an `incompatible-type`
+  // error for `Mean([True, False])` and leaves `Max(True, False)`
+  // unevaluated, while the compiled code read `true` as 1.
+  const hasNonNumericElements = (a: Expression | undefined): boolean => {
+    if (a === undefined) return false;
+    const present = resolveTypeForCompilation(
+      stripMissingFromType(a.type.type)
+    );
+    const elt = collectionElementType(present);
+    return elt !== undefined && cellsCannotBeNumbers(elt);
+  };
+  if (args.some(hasNonNumericElements))
+    throw new Error(
+      `Could not compile \`${operator}\`: an element of the data is not a number ` +
+        `(a boolean or a string), which the compiled code would read as a number. ` +
+        `The interpreter evaluates it instead.`
+    );
   const nested =
     args.length === 1 || spreadsListOperands
       ? args.some(hasCollectionElements)
@@ -14383,6 +14489,44 @@ function hasNumericCells(t: Type, depth = 0): boolean {
 }
 
 /**
+ * True when no cell of the type `t`, through any number of lists and
+ * unions, can be a number: every cell is a string, a character or a
+ * boolean (`list<string>`, `list<boolean | missing>`). An absent arm
+ * (`missing`) is ignored, and so is an empty list (`never`). False for
+ * `unknown` and `any`, for a point (a tuple), and for any type that admits
+ * a number.
+ */
+function cellsCannotBeNumbers(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string') {
+    if (r === 'never' || r === 'nothing' || r === 'unknown' || r === 'any')
+      return false;
+    if (
+      isSubtype(r, 'string') ||
+      isSubtype(r, 'character') ||
+      isSubtype(r, 'boolean')
+    )
+      return true;
+    // A bare collection name (`list`) has `any` elements.
+    const elt = leafwardElementType(r);
+    return elt !== undefined && cellsCannotBeNumbers(elt, depth + 1);
+  }
+  if (r.kind === 'union') {
+    const present = r.types.filter(
+      (arm) => resolveTypeForCompilation(arm) !== 'missing'
+    );
+    return (
+      present.length > 0 &&
+      present.every((arm) => cellsCannotBeNumbers(arm, depth + 1))
+    );
+  }
+  if (r.kind !== 'list') return false;
+  const elt = leafwardElementType(r);
+  return elt !== undefined && cellsCannotBeNumbers(elt, depth + 1);
+}
+
+/**
  * True when the element type `elt` is a union with two or more different
  * list arms (`matrix<2x2> | vector<2>`): elements of different shapes,
  * which `Add` and `Multiply` do not combine.
@@ -14456,9 +14600,12 @@ function leafCellType(t: Type, seen?: AliasDescent): Type | undefined {
 
 function foldLane(coll: Expression): 'real' | 'complex' | 'wide' {
   if (!BaseCompiler.foldsCollectionElements(coll)) return 'wide';
-  return BaseCompiler.linearAlgebraLane([coll]) === 'complex'
-    ? 'complex'
-    : 'real';
+  if (BaseCompiler.linearAlgebraLane([coll]) === 'complex') return 'complex';
+  // A cell that may be absent takes the dispatching helpers, which read it
+  // as `NaN`: with the real-only `_SYS.mul`, the product of the rows
+  // `[2, null]` and `[3, 4]` was `[6, 0]`, where the interpreter gives
+  // `[6, NaN]`.
+  return cellsMayBeAbsent(coll.type.type) ? 'wide' : 'real';
 }
 
 /**

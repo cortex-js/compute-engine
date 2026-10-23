@@ -2947,9 +2947,29 @@ function complexMulTensor(...args: BcastValue[]): BcastValue {
  * with `h` typed `-> unknown`) has `NaN` entries. This is the convention
  * the user kept on 2026-10-01: a lane not proved complex is real. Using
  * `complexMatmul` here would make every entry `{re, im}` and slow down a
- * real `list<number>` product. */
+ * real `list<number>` product.
+ *
+ * An absent entry (`null` or `undefined`) is `NaN` in both products, as in
+ * the interpreter. `scalarMul` reads it so; the matrix product reads the
+ * operands through `absentAsNaN` first, because `matmul` multiplies with
+ * `*`, which reads `null` as 0. */
 function mulTensorAny(...args: BcastValue[]): BcastValue {
-  return mulTensorWith(matmul, scalarMul, args);
+  return mulTensorWith(
+    (a, b) => matmul(absentAsNaN(a), absentAsNaN(b)),
+    scalarMul,
+    args
+  );
+}
+
+/** `x` with each absent entry (`null` or `undefined`), at any depth, read
+ * as `NaN`. An array with no absent entry and no row is returned as it is,
+ * so the common case copies only the outer array of a matrix. */
+function absentAsNaN(x: unknown): unknown {
+  if (x === null || x === undefined) return NaN;
+  if (!Array.isArray(x)) return x;
+  return x.some((e) => e === null || e === undefined || Array.isArray(e))
+    ? x.map(absentAsNaN)
+    : x;
 }
 
 function mulTensorWith(
