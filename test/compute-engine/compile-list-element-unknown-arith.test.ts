@@ -176,20 +176,11 @@ const X_VALUES: ReadonlyArray<Run> = [
   [[], ['List']],
 ];
 
-/** The cases that are not compared at `x = []`: the compiled `Equal` reads
- * a `NaN` operand as absent and answers `Missing` where the interpreter
- * answers `False` (ROADMAP CE-386). */
-const PRESENT_ONLY = new Set(['g(x)[1] = 1']);
-
 describe('CE-360: compiled operators over an element that may be a list', () => {
   for (const signature of SIGNATURES) {
     test.each(CASES)(`${signature}: %s`, (name, json) => {
       expectAgreement(
-        compiledAndInterpreted(
-          rowEngine(signature),
-          json,
-          PRESENT_ONLY.has(name) ? X_VALUES.slice(0, -1) : X_VALUES
-        )
+        compiledAndInterpreted(rowEngine(signature), json, X_VALUES)
       );
     });
   }
@@ -368,5 +359,70 @@ describe('CE-360: an element typed as a number stays scalar code', () => {
       } as never).code;
       expect(code).not.toMatch(/_SYS\.bcast/);
     }
+  });
+});
+
+describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence', () => {
+  // With `g := t ↦ [t, 2t]` and `x: any`, the operand `g(x)[5]` is typed
+  // `missing | number | vector<2>`. At `x = 3` its value is `NaN` (an index
+  // past the end of a list of numbers), which compares as IEEE says on both
+  // routes: `False` for `Equal`, `True` for `NotEqual`. The Kleene guard of
+  // the compiled equality read `NaN` as absent and answered `Missing`. At
+  // `x = "a"` the value is the object absence `undefined`, and both routes
+  // answer `Missing` (landed 2026-10-23).
+  function engine(value: any): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'any');
+    ce.assign(
+      'g',
+      ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
+    );
+    ce.assign('x', value === 'a' ? ce.string('a') : ce.box(value));
+    return ce;
+  }
+  const run = (ce: ComputeEngine, json: any, x: unknown): unknown =>
+    (compile(ce.box(json), { to: 'javascript', fallback: false }) as any).run({
+      x,
+    });
+
+  test('g(x)[5] = 1 at x = 3 is False on both routes', () => {
+    const ce = engine(3);
+    const json = ['Equal', ['At', ['g', 'x'], 5], 1];
+    expect(ce.box(json).evaluate().symbol).toBe('False');
+    expect(run(ce, json, 3)).toBe(false);
+  });
+
+  test('g(x)[5] ≠ 1 at x = 3 is True on both routes', () => {
+    const ce = engine(3);
+    const json = ['NotEqual', ['At', ['g', 'x'], 5], 1];
+    expect(ce.box(json).evaluate().symbol).toBe('True');
+    expect(run(ce, json, 3)).toBe(true);
+  });
+
+  test('g(x)[5] = 1 at x = "a" is Missing on both routes', () => {
+    const ce = engine('a');
+    const json = ['Equal', ['At', ['g', 'x'], 5], 1];
+    expect(ce.box(json).evaluate().symbol).toBe('Missing');
+    expect(run(ce, json, 'a')).toBeUndefined();
+  });
+
+  test('g(x)[5] = 1 at x = [] is Missing on both routes', () => {
+    const ce = engine(['List']);
+    const json = ['Equal', ['At', ['g', 'x'], 5], 1];
+    expect(ce.box(json).evaluate().symbol).toBe('Missing');
+    expect(run(ce, json, [])).toBeUndefined();
+  });
+
+  test('an impure operand of the guarded comparison is evaluated once', () => {
+    // The guard tests each operand for absence and the comparison reads it
+    // again: an element read or a call is bound to a temporary, so
+    // `Random()` draws once, and the read of `g(x)[1]` runs once.
+    const ce = engine(3);
+    const json = ['Equal', ['At', ['g', 'x'], 1], ['Random']];
+    const code = String(
+      (compile(ce.box(json), { to: 'javascript', fallback: false }) as any).code
+    );
+    expect(code.match(/drawNextRandomNumber/g)).toHaveLength(1);
+    expect(code.match(/atWithValueMarker/g)).toHaveLength(1);
   });
 });

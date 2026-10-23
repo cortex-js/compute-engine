@@ -13,11 +13,10 @@
   `.N()`. A request that the engine cannot answer within its limits (a
   coefficient it cannot read, an unsupported generator, the operation budget)
   stays unevaluated; it is never factored over the rationals instead, and an
-  unevaluated result is not a proof of irreducibility. A power of a generator
-  at or above the degree of its polynomial is reduced, as `(√2)^2` is 2: for
-  α a root of t² - 2, `α^2` is 2 and `Expand((x - α)(x + α))` is `x^2 - 2`.
-  The one- and two-argument forms of `Factor` are unchanged. Examples and
-  limits:
+  unevaluated result is not a proof of irreducibility. A power of a generator at
+  or above the degree of its polynomial is reduced, as `(√2)^2` is 2: for α a
+  root of t² - 2, `α^2` is 2 and `Expand((x - α)(x + α))` is `x^2 - 2`. The one-
+  and two-argument forms of `Factor` are unchanged. Examples and limits:
   [number-field factoring](https://github.com/cortex-js/compute-engine/blob/main/docs/number-field-factoring.md).
 
 ### Performance
@@ -38,40 +37,65 @@
   0.162.0: `D(x^3, x)` and `Expand((x + 1)^3)` take about 0.7 of the time,
   `evaluate()` and `simplify()` of small expressions about 0.8, and
   antiderivatives and definite integrals 0.7 to 0.8. The type of a new
-  expression is derived with less work when its operands are numbers: the
-  check for an element-wise application over a list is skipped, and fewer
-  objects are created for each operand. A product with no sum, no `Negate`,
-  no `Divide` and no matrix among its factors is built once instead of twice.
-  An indefinite integral no longer prepares the residue method, which applies
-  only to some definite integrals, and the check of a function type is done
-  once per type. The results are the same.
+  expression is derived with less work when its operands are numbers: the check
+  for an element-wise application over a list is skipped, and fewer objects are
+  created for each operand. A product with no sum, no `Negate`, no `Divide` and
+  no matrix among its factors is built once instead of twice. An indefinite
+  integral no longer prepares the residue method, which applies only to some
+  definite integrals, and the check of a function type is done once per type.
+  The results are the same.
 
 ### Resolved Issues
 
-- **`.N()` of an integral that diverges at an infinite bound gave a random
-  value or `NaN`** (ROADMAP CE-391). `evaluate()` gives `+∞` for
-  `∫₀^∞ eˣ dx`, but `.N()` gave a Monte-Carlo estimate that changed at each
-  run (`5007912 ± 2900000`), and `NaN` for `∫₀^∞ x dx`. When the integrand
-  has one sign on the interval and does not decay faster than `1/x` (or
-  overflows) on the infinite tail, `.N()`, `NIntegrate` and a compiled
-  integral now give `+∞` or `−∞`. An integrand whose sign changes
-  (`∫₀^∞ sin x dx`) still gives `NaN`.
-- **A function that receives itself as an argument and recurses through a
-  lazy `Map` stayed unevaluated** (a regression in 0.160.0,
+- **Compiled `Equal` and `NotEqual` read a `NaN` operand as absent and answered
+  `Missing` where the interpreter answers `False` or `True`** (ROADMAP CE-386).
+  With `g := t ↦ [t, 2t]` and `x: any`, the element `g(x)[5]` at `x = 3` is
+  `NaN` (an index past the end of a list of numbers), and the interpreter
+  answers `False` for `g(x)[5] = 1` and `True` for `g(x)[5] ≠ 1`. The compiled
+  equality over an operand that may hold an object-domain absence (here typed
+  `missing | number | vector<2>`) carried a guard that read `NaN` as absent, and
+  answered `Missing`. The guard now tests the object absence only (`undefined`):
+  a `NaN` operand compares as IEEE says on both routes, and `g(x)[5] = 1` at
+  `x = "a"`, where the element is the object absence, still answers `Missing` on
+  both. `IsMissing` and `Coalesce` keep reading `NaN` as absent. The guard is
+  also emitted for an element read or a call typed `any` or `unknown`, which
+  admits the absent value without a `missing` arm (a declared symbol of such a
+  type stays the scalar the host passes): with `g: (unknown) -> list`, the
+  element `g(x)[1]` is typed `any`, and `g(x)[1] = 1` at `x = []` answered `NaN`
+  where the interpreter answers `Missing`. Each operand of the guarded
+  comparison that is a call or an element read, or that is impure, is now
+  evaluated once: `Equal(g(x)[1], Random())` drew twice, in the absence test and
+  in the comparison.
+- **`.N()` of an integral that diverges at an infinite bound gave a random value
+  or `NaN`** (ROADMAP CE-391). `evaluate()` gives `+∞` for `∫₀^∞ eˣ dx`, but
+  `.N()` gave a Monte-Carlo estimate that changed at each run
+  (`5007912 ± 2900000`), and `NaN` for `∫₀^∞ x dx`. When the integrand has one
+  sign on the interval and does not decay faster than `1/x` (or overflows) on
+  the infinite tail, `.N()`, `NIntegrate` and a compiled integral now give `+∞`
+  or `−∞`. An integrand whose sign changes (`∫₀^∞ sin x dx`) still gives `NaN`.
+- **A definite integral over a half-infinite interval with a pole at its finite
+  bound was `ComplexInfinity`** (ROADMAP CE-391). `∫₀^∞ (x − 1)/x³ dx` and
+  `∫₀^∞ −1/x³ dx` gave `ComplexInfinity`, which is not the value of a real
+  integral. They are now `−∞`: the sign of the integrand next to the pole
+  decides, and the antiderivative at the infinite bound tells whether the tail
+  adds a divergence of its own. When it adds one of the other sign
+  (`∫₀^∞ (x − 1)/x² dx`), the integral has no value and is `Indeterminate`.
+- **A function that receives itself as an argument and recurses through a lazy
+  `Map` stayed unevaluated** (a regression in 0.160.0,
   [#470](https://github.com/cortex-js/compute-engine/issues/470), ROADMAP
   CE-387). With
   `G = (self, t) ↦ If(Length(t) = 0, 0, Max(Map(c ↦ self(self, c), t)) + 1)`,
-  the height of a tree given as nested lists, `Apply(G, G, [[[], []]])` gave
-  the `Apply(…)` back, where 0.159.0 gave `2`; `Reduce` and `Sum` in place of
-  `Max` failed the same way. The body scope of a function literal is shared by
-  its applications, and an application hides its parameters there, so that
-  the body reads the values of its call frame. A nested application of the
-  same literal put the parameters back when it ended, and a canonicalization
-  of the literal during an application declared them again, while an
-  enclosing application still read its parameters through that scope: the
-  next element of the lazy `Map` then read `self` with no value. The
-  parameters now come back when the last application ends, and a
-  canonicalization during an application uses the hidden bindings.
+  the height of a tree given as nested lists, `Apply(G, G, [[[], []]])` gave the
+  `Apply(…)` back, where 0.159.0 gave `2`; `Reduce` and `Sum` in place of `Max`
+  failed the same way. The body scope of a function literal is shared by its
+  applications, and an application hides its parameters there, so that the body
+  reads the values of its call frame. A nested application of the same literal
+  put the parameters back when it ended, and a canonicalization of the literal
+  during an application declared them again, while an enclosing application
+  still read its parameters through that scope: the next element of the lazy
+  `Map` then read `self` with no value. The parameters now come back when the
+  last application ends, and a canonicalization during an application uses the
+  hidden bindings.
 
 - **The signature of a function literal read a captured parameter as a number
   cell in a nested literal** (ROADMAP CE-379). With `g := x ↦ (() ↦ [x])`, the
@@ -216,26 +240,25 @@
   is read as the tensor of its elements: `Scan(L, Add, 0)·M` over a list of
   matrices now stays unevaluated (a tensor of rank 3 beside a matrix), as the
   same list literal does, where it gave a value. A lazy collection whose
-  elements have no known type (`Map(Reverse, L)`) is read from its values when
-  a matrix is beside it; two such collections keep the product of each entry,
-  as compiled code computes it. A point in such a collection stays a point.
+  elements have no known type (`Map(Reverse, L)`) is read from its values when a
+  matrix is beside it; two such collections keep the product of each entry, as
+  compiled code computes it. A point in such a collection stays a point.
 
 - **A list literal with an absent cell had no dimensions** (ROADMAP CE-389).
   `[[2, Missing], [3, 4]]` was typed `list<list<integer | missing>>`, while
   `[[2, 3], [3, 4]]` is a `matrix<integer^(2x2)>`. So it could not be assigned
-  to a symbol declared `matrix<(number | missing)^(2x2)>`, `Shape` and `Rank`
-  of it were `()` and `0`, `Multiply` of two such matrices paired their rows,
-  and `Determinant` and `Inverse` were an `incompatible-type` error. A literal
-  whose cells are numbers that may be absent now has the dimensions of its
-  shape (`matrix<(integer | missing)^(2x2)>`, `Shape` `(2, 2)`), and an
-  absent cell is read as `NaN` where a number is needed, as for an absent
-  operand: `[[2, Missing], [3, 4]]·[[1, 0], [0, 1]]` is `[[NaN, NaN], [3, 4]]`
-  (the value compiled code gives), its `Determinant` is `NaN`, and its
-  `Trace`, which reads the diagonal only, is `6`. `Transpose`, `Flatten` and
-  the other operators that move cells keep the absent cell. The type of such a
-  literal, and of a broadcast over it, now carries its length: `[1, Missing]`
-  is typed `list<(integer | missing)^2>`, and `Sin([Missing, 1])`
-  `vector<2>`.
+  to a symbol declared `matrix<(number | missing)^(2x2)>`, `Shape` and `Rank` of
+  it were `()` and `0`, `Multiply` of two such matrices paired their rows, and
+  `Determinant` and `Inverse` were an `incompatible-type` error. A literal whose
+  cells are numbers that may be absent now has the dimensions of its shape
+  (`matrix<(integer | missing)^(2x2)>`, `Shape` `(2, 2)`), and an absent cell is
+  read as `NaN` where a number is needed, as for an absent operand:
+  `[[2, Missing], [3, 4]]·[[1, 0], [0, 1]]` is `[[NaN, NaN], [3, 4]]` (the value
+  compiled code gives), its `Determinant` is `NaN`, and its `Trace`, which reads
+  the diagonal only, is `6`. `Transpose`, `Flatten` and the other operators that
+  move cells keep the absent cell. The type of such a literal, and of a
+  broadcast over it, now carries its length: `[1, Missing]` is typed
+  `list<(integer | missing)^2>`, and `Sin([Missing, 1])` `vector<2>`.
 
 ## 0.162.0 _2026-10-23_
 

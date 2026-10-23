@@ -13877,15 +13877,50 @@ export class BaseCompiler {
             `target '${target.language ?? 'unknown'}'. Discharge the operands ` +
             `with 'Coalesce' first.`
         );
-      const guardOf = (a: Expression): TargetSource => {
-        const axis = BaseCompiler.absenceAxisForType(a.type.type, target, h);
-        if (axis.isAbsent === undefined)
-          throw new Error(
-            `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' cannot test ` +
-              `absence (no 'isAbsent' capability).`
-          );
-        return axis.isAbsent(BaseCompiler.compileValueOperand(a, target));
-      };
+      // The absent operand of this guard is the OBJECT null (`undefined`):
+      // the absent value of a slot whose type admits an object. A NUMERIC
+      // absence, `NaN` (an index past the end of a list of numbers), is a
+      // number that compares as IEEE says, `False` for `Equal` and `True`
+      // for `NotEqual`, on both routes. The test is therefore the object
+      // axis's, whatever the operand's domain: the numeric axis's test
+      // (`absenceAxisForType`) reads `NaN` as absent too, which is right for
+      // `IsMissing` and `Coalesce` and wrong here. With `g := t ↦ [t, 2t]`
+      // and `x: any`, the operand `g(x)[5]` is typed
+      // `missing | number | vector<2>`, a mixed domain, and at `x = 3` its
+      // value is `NaN`: the numeric test answered `Missing` for
+      // `g(x)[5] = 1` where the interpreter answers `False` (ROADMAP CE-386,
+      // landed 2026-10-23); at `x = "a"` the value is `undefined` and both
+      // routes answer `Missing`.
+      const objectAxis = target.absence.object;
+      if (objectAxis.isAbsent === undefined)
+        throw new Error(
+          `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' cannot test ` +
+            `absence (no 'isAbsent' capability).`
+        );
+      const isAbsent = objectAxis.isAbsent;
+      // Each operand is compiled once, here. An operand that is an
+      // application (a call, an element read) or that is impure (`Random()`)
+      // is BOUND to a temporary that the absence tests and the inner
+      // comparison read, as the parameter of a function called at once with
+      // the operand's code. Without the binding the operand's code was
+      // spliced into each test and into the comparison: an impure operand
+      // drew twice, an operand after an absent one was not evaluated at all
+      // (the interpreter evaluates both operands, and a skipped draw moves
+      // every later draw of a seeded sequence), and an element read was
+      // computed twice. A symbol or a literal is spliced as it is, so the
+      // code of the common case does not change.
+      const codes = args.map((a) =>
+        BaseCompiler.compileValueOperand(a, target)
+      );
+      const bindings: { name: string; code: TargetSource }[] = [];
+      const operandCodes = args.map((a, i) => {
+        if (a.isPure !== false && !isFunction(a)) return codes[i];
+        const name = BaseCompiler.tempVar(target);
+        bindings.push({ name, code: codes[i] });
+        return name;
+      });
+      const operandCode = (i: number): TargetSource => operandCodes[i];
+      const guardOf = (i: number): TargetSource => isAbsent(operandCode(i));
       // The inner (both-present) comparison. For operands whose stripped
       // type is wholly STRING, the target's `Equal` codegen is the numeric
       // tolerance kernel — silently `false` for any pair of present strings
@@ -13899,9 +13934,7 @@ export class BaseCompiler {
       const allString = args.every((a) => isSubtype(strippedOf(a), 'string'));
       let inner: TargetSource;
       if (allString) {
-        const [a, b] = args.map((e) =>
-          BaseCompiler.compileValueOperand(e, target)
-        );
+        const [a, b] = args.map((_e, i) => operandCode(i));
         const pyOp = h === 'Equal' ? '==' : '!=';
         const jsOp = h === 'Equal' ? '===' : '!==';
         inner =
@@ -13915,9 +13948,16 @@ export class BaseCompiler {
             `Could not compile \`${h}\`: target '${target.language ?? 'unknown'}' has no equality ` +
               `codegen for the guarded (Kleene) form.`
           );
+        // The target's equality codegen compiles each operand through this
+        // function: an operand of the pair reads its bound code.
         inner = eqFn(
           args,
-          (e) => BaseCompiler.compileValueOperand(e, target),
+          (e) => {
+            const i = args.indexOf(e);
+            return i >= 0
+              ? operandCode(i)
+              : BaseCompiler.compileValueOperand(e, target);
+          },
           target
         );
       }
@@ -13925,10 +13965,16 @@ export class BaseCompiler {
       // A word-`chainOp` target (Python: `and`) spells logical-or `or` and the
       // conditional `X if C else Y`; a C-style target uses `||` and `C ? X : Y`.
       const pythonic = target.chainOp === 'and';
-      const guard = `${guardOf(args[0])} ${pythonic ? 'or' : '||'} ${guardOf(args[1])}`;
-      return pythonic
+      const guard = `${guardOf(0)} ${pythonic ? 'or' : '||'} ${guardOf(1)}`;
+      const guarded = pythonic
         ? `(${nullLit} if (${guard}) else ${inner})`
         : `((${guard}) ? ${nullLit} : ${inner})`;
+      if (bindings.length === 0) return guarded;
+      const names = bindings.map((b) => b.name).join(', ');
+      const values = bindings.map((b) => b.code).join(', ');
+      return pythonic
+        ? `(lambda ${names}: ${guarded})(${values})`
+        : `((${names}) => ${guarded})(${values})`;
     }
 
     // `Typed(value, type)` is a transparent runtime ascription — it constrains
@@ -26171,14 +26217,30 @@ export class BaseCompiler {
   /**
    * True when the value of `a` may be absent in an OBJECT domain: its type
    * has a `missing` arm and, without it, is not a number (`string | missing`,
-   * a restricted point). The Kleene `Equal`/`NotEqual` guard answers the
-   * target's object null for such an operand when it is absent.
+   * a restricted point), or it is an APPLICATION whose type is a top type,
+   * `any` or `unknown`, which admits the absent value without an arm of its
+   * own: the element of a bare `list`, `g(x)[1]` for `g: (unknown) -> list`,
+   * is typed `any`, and at `x = []` its value is `undefined`; without the
+   * guard, `_SYS.eq` answered `NaN` for `g(x)[1] = 1` where the interpreter
+   * answers `Missing` (ROADMAP CE-386). A SYMBOL of a top type is not such
+   * an operand: a declared `x: any` or `x: unknown` is read as the scalar
+   * the host passes (user decisions of 2026-08-08 for `unknown` and
+   * 2026-10-17 for `any`, Tycho ledger row 379), `Equal(u, 1)` keeps the
+   * plain scalar form, and an `If` over it keeps its plain branches. The
+   * Kleene `Equal`/`NotEqual` guard answers the target's object null for
+   * such an operand when it is absent.
    */
   private static isObjectDomainMissingOperand(a: Expression): boolean {
     const t = compilationType(a);
+    if ((t === 'any' || t === 'unknown') && isFunction(a)) return true;
     if (!typeContainsMissing(t)) return false;
     const stripped = resolveTypeForCompilation(stripMissingFromType(t));
-    return !(stripped === 'never' || isSubtype(stripped, 'number'));
+    // A bare absence type (`missing`, an element read whose every value is
+    // absent) is guarded too: its value is whichever absence its producer
+    // emits, and the guard reads only the object null as absent, so a
+    // numeric absence (`NaN`) still compares as IEEE says.
+    if (stripped === 'never') return true;
+    return !isSubtype(stripped, 'number');
   }
 
   /**
