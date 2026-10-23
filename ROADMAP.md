@@ -591,31 +591,6 @@ list literal becomes `Reduce(Rest(L), Multiply, 1)` at canonicalization, and
 `(collection<T>, reducer, initial?) -> value where T`. A `Reduce` whose reducer
 is `Add` or `Multiply` should be typed as `Sum` and `Product` are.
 
-### CE-375. Arithmetic over an operand of unknown type is typed as if the operand were not a point
-
-**Status:** open; question for the user.
-
-The convention: when an operand of `Add` or `Multiply` is typed `unknown`, the
-result is typed `broadcastable<number>`: a number, or a list of numbers of any
-depth. `Sum` and `Product` over a list of elements typed `unknown` use the same
-type. Example: with `f: (any) -> unknown`, `f(x) + f(y)` is typed
-`broadcastable<number>`. If `f` returns the point `(1, 2)`, the value is the
-point `(2, 4)`, which that type does not hold. A ragged list (`[1, [2, 3]]`) is
-not held either.
-
-Options:
-
-- (a) Keep `broadcastable<number>`: an operand of unknown type is read as a
-  number or a tensor of numbers, as a use of a valueless symbol narrows it to a
-  number. Points and ragged lists through an operand of unknown type stay
-  outside the type.
-- (b) Widen the result to a type that holds points and ragged lists too, for
-  example `number | list<any> | tuple`. Every result typed
-  `broadcastable<number>` today through an `unknown` operand changes; the number
-  of tests that change has not been measured.
-
-If nothing is decided, (a) stays.
-
 ### CE-365. A use of a function widens its inferred signature
 
 **Status:** open; defect, small.

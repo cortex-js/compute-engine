@@ -241,6 +241,17 @@ An element-wise `Which` or `If` reads such a mask as element-wise
 (`isPossiblyNestedBooleanMask()`, `library/control-structures.ts`): a flat
 value selects position by position, and a nested value does not evaluate.
 
+An operand typed `unknown` is read as a number or a tensor of numbers (user
+decision 2026-10-23). `Add` and `Multiply` with such an operand are typed
+`broadcastable<number>`: `f(x) + f(y)` with `f: (any) -> unknown`, and `2 · u`
+with `u: broadcastable<unknown>`. `Sum` and `Product` over a list whose
+elements are typed `unknown` are typed the same way. A cell of such an operand
+may be any number, so the result does not take the tier of the other operand
+(`[1, 2] + u` is `broadcastable<number>`, not `vector<integer^2>`). The type
+does not hold a point or a ragged list that comes through such an operand: if
+`f` returns `(1, 2)`, `f(x) + f(y)` is the point `(2, 4)`. This is the rule
+that a use of an unknown symbol follows: the use narrows the symbol to a number.
+
 The subtype relation does not depend on these rules: a list with dimensions is
 read by its cells, whatever its cell type. A stricter rule, under which every
 list with dimensions and every tensor has numeric cells, is a change of
