@@ -16192,10 +16192,11 @@ export class BaseCompiler {
     // array at run time, so it participates in the ≥2-operand test and a
     // `matrix`-typed symbol fails closed like a literal matrix (compiling it
     // through `_SYS.bcast` would Hadamard where the interpreter contracts).
-    // The products of matrices that compiled code can compute are emitted
+    // The products of matrices whose ranks the types give are emitted
     // before this method runs (`compileMatrixProduct`); a matrix reaches
-    // this point only beside an operand that may hold a point, or one that
-    // is gated.
+    // this point beside an operand that may hold a point, one that is
+    // gated, or one that may be a number or a list at run time (the last
+    // takes the run-time product `_SYS.mulChecked` below).
     // Equal- or unknown-length typed vectors still compile: for symbol
     // operands the interpreter broadcasts element-wise too.
     //
@@ -16299,7 +16300,18 @@ export class BaseCompiler {
       if (collection.length >= 2) {
         const isMatrix = (a: Expression): boolean =>
           (isTensorValue(a) && a.shape.length >= 2) || a.type.matches('matrix');
-        if (args.some(isMatrix)) return null;
+        const hasMatrix = args.some(isMatrix);
+        // An operand that may be a number or a list at run time (a
+        // `broadcastable<T>`, the fold `Sum(L)`) beside a matrix takes the
+        // run-time product below (`_SYS.mulChecked`), which computes the
+        // matrix product when a factor holds a matrix.
+        // `compileMatrixProduct` leaves such an operand to this method, and
+        // `Sum(L)·M` with `L: list<matrix<number>>` was refused. A matrix
+        // beside no such operand is refused here, as before.
+        const runtimeShaped = collection.some((a) =>
+          isBoundPossiblyCollectionTyped(a, target)
+        );
+        if (hasMatrix && !runtimeShaped) return null;
         // Two POINT-SHAPED operands — a numeric tuple, or a list whose
         // elements are provably tuples — have no product: the interpreter
         // answers the `no-product-between-points` error (at every element,
@@ -16363,30 +16375,52 @@ export class BaseCompiler {
             !isBoundPossiblyCollectionTyped(a, target) &&
             typeMayHoldTuple(a.type.type)
         );
+        // A matrix beside an operand that may hold points at run time (the
+        // sum of a list of lists of points, `At(L, 1)` over such a list, a
+        // `list<any>`): `_SYS.mulChecked` would read a list of points as a
+        // matrix and compute a matrix product, where the interpreter scales
+        // the entries of the matrix by the points. `pointHolder` does not
+        // test the operands that may be a number or a list, so this test
+        // reads them all, as `compileMatrixProduct` does (`mayHoldPoint`).
+        // An operand typed `unknown` or `any` (`Reduce(L, Add, 0)` over
+        // `list<list<unknown>>`) states no shape, and keeps the run-time
+        // product, as before.
         if (
-          atomicTuple === undefined &&
-          !pointHolder &&
-          collection.some((a) => isBoundPossiblyCollectionTyped(a, target))
-        ) {
-          // `linearAlgebraLane` also reads an operand whose type is a union
-          // with an absent arm (`At(P, 1)` with `P: list<matrix<complex^(2x2)>>`
-          // is typed `matrix<complex^2x2> | missing`), which the two other
-          // tests miss: the product of two complex matrices was compiled with
-          // the real matrix product, and its complex entries became `NaN`.
-          if (
-            args.some(
-              (a) =>
-                BaseCompiler.isComplexValued(a) ||
-                hasComplexElement(a) ||
-                BaseCompiler.linearAlgebraLane([a]) === 'complex'
-            )
+          hasMatrix &&
+          args.some(
+            (a) =>
+              !isMatrix(a) &&
+              a.type.type !== 'unknown' &&
+              a.type.type !== 'any' &&
+              BaseCompiler.mayHoldPoint(engine, a)
           )
-            return null;
+        )
+          return null;
+        if (atomicTuple === undefined && !pointHolder && runtimeShaped) {
+          // An operand in the complex lane takes the complex form,
+          // `_SYS.cmulChecked`: the real `_SYS.mulChecked` multiplies two
+          // vectors or a scalar with `*`, which reads a `{re, im}` entry as
+          // `NaN`. Its matrix product (`matrixProductShape`) reads complex
+          // entries in both forms; a scalar result is always `{re, im}` in
+          // the complex form, as the parent expects. `linearAlgebraLane`
+          // also reads an operand whose type is a union with an absent arm
+          // (`At(P, 1)` with `P: list<matrix<complex^(2x2)>>` is typed
+          // `matrix<complex^2x2> | missing`), which the two other tests miss.
+          const complex = args.some(
+            (a) =>
+              BaseCompiler.isComplexValued(a) ||
+              hasComplexElement(a) ||
+              BaseCompiler.linearAlgebraLane([a]) === 'complex'
+          );
           const compiledArgs = args
             .map((a) => BaseCompiler.compile(a, target))
             .join(', ');
-          return `_SYS.mulChecked(${compiledArgs})`;
+          return `_SYS.${complex ? 'cmulChecked' : 'mulChecked'}(${compiledArgs})`;
         }
+        // A matrix beside a point, or beside an operand that may hold
+        // points: the element-wise code below would not compute the matrix
+        // product.
+        if (hasMatrix) return null;
         // Statically-known mismatched rank-1 lengths: fail closed.
         const lengths = collection
           .filter((a) => isTensorValue(a) && a.shape.length === 1)

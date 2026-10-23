@@ -190,24 +190,45 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
     ).toBe('[NaN,NaN]');
   });
 
-  test('Multiply of complex rows or matrices read with At refuses to compile', () => {
-    // This route refuses complex operands, but its test missed an operand
-    // typed with an absent arm (`At(P, 1)`): it compiled the real product,
-    // and the complex entries became `NaN`.
-    const ce = new ComputeEngine();
-    for (const type of ['list<matrix<complex^2x2>>', 'list<list<complex>>']) {
-      ce.declare(`P${type.length}`, type);
-      expect(() =>
-        compile(
-          ce.box([
-            'Multiply',
-            ['At', `P${type.length}`, 1],
-            ['At', `P${type.length}`, 2],
-          ]),
-          { fallback: false }
-        )
-      ).toThrow(/Could not compile `Multiply`/);
+  test('Multiply of complex rows or matrices read with At', () => {
+    // An operand typed with an absent arm (`At(P, 1)`) may be a number or a
+    // list at run time, and takes the run-time product. With complex
+    // entries it is the complex form (`_SYS.cmulChecked`); the real form
+    // read the complex entries as `NaN`.
+    for (const [type, value, compiled, evaluated] of [
+      [
+        'list<matrix<complex^2x2>>',
+        [
+          [
+            [c(1, 1), 2],
+            [3, 4],
+          ],
+          [
+            [0, 1],
+            [1, 0],
+          ],
+        ],
+        [
+          [2, c(1, 1)],
+          [4, 3],
+        ],
+        '[[2,(1 + i)],[4,3]]',
+      ],
+      [
+        'list<list<complex>>',
+        [
+          [c(1, 1), 2],
+          [3, c(0, 4)],
+        ],
+        [c(3, 3), c(0, 8)],
+        '[(3 + 3i),8i]',
+      ],
+    ] as const) {
+      const r = both(type, ['Multiply', ['At', 'P', 1], ['At', 'P', 2]], value);
+      expect(r.compiled).toEqual(compiled);
+      expect(r.evaluated).toBe(evaluated);
     }
+    const ce = new ComputeEngine();
     ce.declare('Q', 'list<matrix<real^2x2>>');
     expect(
       compile(ce.box(['Multiply', ['At', 'Q', 1], ['At', 'Q', 2]]), {
@@ -325,11 +346,14 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
       [c(8, 4), 12],
       '[(8 + 4i),12]',
     ],
-  ])('a complex parent over %s', (_, type, expr, value, compiled, evaluated) => {
-    const r = both(type as string, expr, value);
-    expect(r.compiled).toEqual(compiled);
-    expect(r.evaluated).toBe(evaluated);
-  });
+  ])(
+    'a complex parent over %s',
+    (_, type, expr, value, compiled, evaluated) => {
+      const r = both(type as string, expr, value);
+      expect(r.compiled).toEqual(compiled);
+      expect(r.evaluated).toBe(evaluated);
+    }
+  );
 
   test('Product of rows or square matrices has their shape', () => {
     const ce = new ComputeEngine();

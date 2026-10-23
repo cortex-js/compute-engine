@@ -3556,6 +3556,13 @@ function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
  * (`complexMulTensor`).
  */
 function matrixProductShape(...args: unknown[]): unknown {
+  return matrixProductShapeWith(args, false);
+}
+
+/** `matrixProductShape`, and with `complex` set, the product is always
+ * `complexMulTensor` (every entry `{re, im}`), even when no entry of the
+ * values is complex: the caller reads the result as complex. */
+function matrixProductShapeWith(args: unknown[], complex: boolean): unknown {
   const arrays = args.filter((x): x is unknown[] => Array.isArray(x));
   if (arrays.length < 2) return undefined;
   const isVector = (v: unknown[]): boolean => !v.some((x) => Array.isArray(x));
@@ -3594,7 +3601,7 @@ function matrixProductShape(...args: unknown[]): unknown {
     throw rankThreeProductError();
   const isComplexEntry = (x: unknown): boolean =>
     Array.isArray(x) ? x.some(isComplexEntry) : isComplexObject(x);
-  return args.some(isComplexEntry)
+  return complex || args.some(isComplexEntry)
     ? complexMulTensor(...(args as BcastValue[]))
     : mulTensor(...(args as BcastValue[]));
 }
@@ -3611,6 +3618,21 @@ function mulChecked(...args: unknown[]): unknown {
   // interpreter when the element is absent.
   if (absentBesideScalars(args)) return undefined;
   return matrixProductShape(...args) ?? mulTensor(...(args as BcastValue[]));
+}
+
+/**
+ * `mulChecked` for operands in the complex lane (a `list<matrix<complex>>`
+ * fold, a complex scalar factor). Every product is `complexMulTensor`, whose
+ * entries are all `{re, im}`, also when the values hold only real entries at
+ * run time: the parent reads the result as complex (`Real` of an entry reads
+ * `.re`). `mulTensor` reads a complex entry as `NaN`.
+ */
+function complexMulChecked(...args: unknown[]): unknown {
+  if (absentBesideScalars(args)) return undefined;
+  return (
+    matrixProductShapeWith(args, true) ??
+    complexMulTensor(...(args as BcastValue[]))
+  );
 }
 
 /**
@@ -5078,6 +5100,7 @@ export const SYS_HELPERS = {
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
   mul: mulTensor,
   mulChecked,
+  cmulChecked: complexMulChecked,
   cmul: complexMulTensor,
   mulAny: mulTensorAny,
   // Interpreter-faithful `Equal`/`NotEqual` over operands whose

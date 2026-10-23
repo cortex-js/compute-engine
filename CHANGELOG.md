@@ -124,6 +124,20 @@
     compiled `Sum` of `[[true], [false]]` was `[1]`. With `fallback` (the
     default), `compile()` runs the interpreter for these.
 
+- **Compiled `Multiply` of a fold and a matrix did not compile** (ROADMAP
+  CE-388). With `M: matrix<number>` and `L: list<matrix<number>>` (or
+  `list<tensor<number>>`, or `list<unknown>`), `Sum(L)·M`, `M·Reduce(L, Add, 0)`
+  and `2·Sum(L)·M` were refused at compile time, so `compile()` ran the
+  interpreter. They now compile to the matrix product, decided on the shapes of
+  the values as in the interpreter: `Sum(L)·M` is `[[2, 2], [5, 3]]` for
+  `L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`. With
+  complex entries (`L: list<matrix<complex>>`, or an `At(P, 1)` of complex
+  matrices) the product is computed as complex; such products were refused
+  too. A factor that may hold points (`Sum(L)` over a list of lists of points,
+  or over `list<list<unknown>>`) beside a matrix is still refused: compiled code
+  holds a point as an array, and the interpreter scales the matrix by the
+  point.
+
 ## 0.162.0 _2026-10-23_
 
 ### Breaking Changes

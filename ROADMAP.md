@@ -1888,23 +1888,6 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-388. Compiled `Multiply` of a fold result and a matrix is refused
-
-**Status:** open; a refusal that a program can reach.
-
-With `M: matrix<number>` and `L` declared `list<matrix<number>>`,
-`list<tensor<number>>`, `list<list<unknown>>` or `list<unknown>`,
-`Multiply(Sum(L), M)`, `Multiply(M, Reduce(L, Add, 0))` and
-`Multiply(Scan(L, Add, 0), M)` do not compile ("scalar arithmetic over a
-list-valued operand", or "a factor is a tensor of rank 3 or more" for `Scan`).
-With `L: list<unknown>`, `Multiply(Sum(L), Sum(L))` does not compile either,
-while `Multiply(Reduce(L, Add, 0), Reduce(L, Add, 0))` does. The interpreter
-gives the matrix product for each (`[[2, 2], [5, 3]]` for `Sum(L)·M` with
-`L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`). With
-`fallback` (the default), `compile()` then runs the interpreter. Expected: the
-compiled code dispatches on the run-time shape (`_SYS.mulTensor`), as it does
-for two fold results.
-
 ### CE-389. A list literal with an absent cell has no dimensions
 
 **Status:** open; defect.
