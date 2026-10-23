@@ -277,13 +277,15 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
       vars: { x: 2 },
       expected: { re: 3, im: 3 },
       // The signature of `v` says `list<unknown>` (its parameter has no
-      // use that narrows it), so `v(x)[2]` is of unknown type when `x` is a
-      // free input, and the JavaScript target cannot read it as a scalar
-      // (ROADMAP CE-377: the compiler could commit a free input to the
-      // number lane, as it does for `x + 1`). The shader target refuses the
-      // base of the index, a list with no known length.
-      javascript: /scalar arithmetic over a list-valued operand/,
-      glsl: /the base \(type `list<unknown>`\) has no statically known length/,
+      // use that narrows it), so the engine types `v(x)[2]` as unknown when
+      // `x` is a free input. The compiler reads an untyped free input as a
+      // number, as the emitted code does, so `v(x)` is a `vector<2>` and
+      // `v(x)[2]` a number (ROADMAP CE-377, landed 2026-10-23; the
+      // JavaScript target declined before, and the shader target refused
+      // the base of the index as a list with no known length). The shader
+      // now reads the length, and declines at the list itself: its second
+      // element is the complex `k`, and a shader vector holds scalars.
+      glsl: /element 2 \(`k`\) is itself vector-valued/,
     },
   ];
 

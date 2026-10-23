@@ -312,15 +312,11 @@ describe('A COMPILED CALL OF A FUNCTION THAT RETURNS A LIST', () => {
       ]);
       const run = () =>
         compile(expr, { to: 'javascript', mode, fallback: false } as any);
-      // The signature of `g` says `list<unknown>`, so `g(x)[1]` is of
-      // unknown type when `x` is a free input. The complex lane cannot
-      // read an operand of unknown type as a scalar and declines (ROADMAP
-      // CE-377: the compiler could commit a free input to the number
-      // lane, as it does for `x + 1`).
-      if (mode === 'complex') {
-        expect(run).toThrow(/scalar arithmetic over a list-valued operand/);
-        return;
-      }
+      // The signature of `g` says `list<unknown>`, so the engine types
+      // `g(x)[1]` as unknown when `x` is a free input. The compiler reads
+      // an untyped free input as a number, as the emitted code does, so
+      // `g(x)[1]` is a number on every lane (ROADMAP CE-377, landed
+      // 2026-10-23; the complex lane declined before).
       expect(run().run({ x: 3 })).toBe(5);
     });
 

@@ -4505,7 +4505,29 @@ function gpuAtBaseShape(
         'there is no static element count to index against',
     };
 
-  const n = BaseCompiler.aggregateComponentCount(base);
+  let n = BaseCompiler.aggregateComponentCount(base);
+  // A call of a user function over an untyped free input: the engine types
+  // the call from the signature of the function, `list<unknown>` for
+  // `v := s ↦ [s, 2s]` and `v(x)` with `x` free, which states no length. The
+  // shader reads such an input as a float (`gpuTypeOfDeclaredType`), so the
+  // value of the call is the body at a number, `vector<2>`, which has one
+  // (`BaseCompiler.typeWithFreeInputsAsNumbers`). `gpuDeclaredComponentCount`
+  // gives a count only when the elements of that type are shader scalars, so
+  // the element test below is already made. ROADMAP CE-377.
+  let elementsRead = false;
+  if (
+    n === undefined &&
+    isFunction(base) &&
+    base.operator !== 'List' &&
+    base.operator !== 'Tuple'
+  ) {
+    const own: Type = base.type.type;
+    const read = BaseCompiler.typeWithFreeInputsAsNumbers(base, target);
+    if (read !== own) {
+      n = gpuDeclaredComponentCount(read);
+      elementsRead = n !== undefined;
+    }
+  }
   if (n === undefined) {
     // A CALLER-DECLARED name whose spelling this target's declaration frame
     // does not parse. `gpuDeclaredShapeFrame` enters such a name as
@@ -4589,6 +4611,8 @@ function gpuAtBaseShape(
         'the base has 1 element: there is no `vec1`, and a 1-element ' +
         'aggregate has no shader value shape of its own',
     };
+
+  if (elementsRead) return { count: n };
 
   // The elements. A name whose COUNT came from the GPU declaration frame is
   // judged against the shape the CALLER declared — its boxed type states no

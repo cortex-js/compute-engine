@@ -191,16 +191,11 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
         const det = ce.parse('\\operatorname{Determinant}(g(x)) + 1');
         // The signature of `g` says `(unknown) -> list<list<unknown>>` (its
         // parameter has no use that narrows it), so with a free `x` the
-        // entries of `g(x)` are of unknown type. The complex lane cannot
-        // read `Trace(g(x))` as a scalar and declines (ROADMAP CE-377: the
-        // compiler could commit a free input to the number lane, as it
-        // does for `x + 1`). The real lanes read the entries from the body.
-        if (mode === 'complex')
-          expect(() => js(trace, mode)).toThrow(
-            /scalar arithmetic over a list-valued operand/
-          );
-        else
-          expectValue(js(trace, mode).run({ x: 2 }), trace.subs({ x: 2 }).N());
+        // engine types the entries of `g(x)` as unknown. The compiler reads
+        // an untyped free input as a number, as the emitted code does, so
+        // `Trace(g(x))` is a scalar on every lane (ROADMAP CE-377, landed
+        // 2026-10-23; the complex lane declined before).
+        expectValue(js(trace, mode).run({ x: 2 }), trace.subs({ x: 2 }).N());
         expectValue(js(det, mode).run({ x: 2 }), det.subs({ x: 2 }).N());
       });
 });

@@ -60,11 +60,12 @@
  * `broadcastable<list<unknown>>`, an index into it is `missing | unknown`,
  * and the readers below give the types of the elements of a
  * `list<unknown>`. The checks that the type holds the value are unchanged.
- * Two consequences are recorded here, not accepted: compiled code that
- * cannot tell the lane of an element of unknown type declines (ROADMAP
- * CE-377), and the compiled `NaN` for an absent element where the
- * interpreter gives `Missing` (ROADMAP CE-368) is reachable from more
- * expressions.
+ * Two consequences followed, both fixed since: compiled code that could not
+ * tell the lane of an element of unknown type declined (ROADMAP CE-377,
+ * landed 2026-10-23: the compiler reads an untyped free input as a number,
+ * as the emitted code does), and the compiled `NaN` for an absent element
+ * where the interpreter gives `Missing` (ROADMAP CE-368, landed
+ * 2026-10-23) was reachable from more expressions.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';

@@ -1,4 +1,7 @@
-import { describeType } from '../boxed-expression/operand-descriptor.js';
+import {
+  describe as describeOperand,
+  describeType,
+} from '../boxed-expression/operand-descriptor.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
 import type {
@@ -11806,59 +11809,69 @@ export class BaseCompiler {
       // any depth, and only their own color-aware map recurses to the leaves
       // and refuses a collection whose type does not prove a color there.
       const collectionAwareHead = target.collectionAwareHeads?.has(h) === true;
+      // Whether this guard refuses the operand `a`: it is, or may be, a
+      // collection at run time, and no exemption below applies. The same
+      // test names the refused operand in the message.
+      const listValuedOperand = (a: Expression): boolean =>
+        // A STRING is not a list-valued operand FOR THIS PURPOSE. It
+        // matches `collection`/`indexed_collection` in the lattice (its
+        // elements are its grapheme clusters) but is ATOMIC under
+        // broadcast on both sides — the interpreter's
+        // `isFiniteBroadcastParticipant` excludes it, and it lowers to one
+        // JS string, not an array — so a broadcastable head over it is
+        // ordinary scalar code. Same exemption as the sibling gates
+        // (`compilesToArray`, `isArrayOperand`) carry.
+        !isProvablyStringOperand(a) &&
+        // Nor is a `Hypot` point leg, for the same reason: the head's own
+        // codegen consumes it whole, as one leg (`isHypotPointLeg`).
+        !BaseCompiler.isHypotPointLeg(h, a) &&
+        // Nor is a tuple at a head that declares the `'tuples'` broadcast
+        // exemption: the head owns that shape and its own codegen
+        // consumes the tuple whole, as the interpreter does. A color
+        // conversion reads `AsRgb((1, 0, 0))` as one color in 0-1 sRGB.
+        !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, a) &&
+        (a.isCollection ||
+          // The COLLECTION shape top, not the list/indexed spellings: a
+          // SET-typed operand matches neither `list<any>` nor
+          // `indexed_collection<any>`, and with the narrower test it
+          // escaped this guard entirely — `Add(T, 1)` for
+          // `T: set<number>` emitted `_.T + 1` (string concatenation or
+          // garbage at run time) where the interpreter answers an
+          // `incompatible-type` error.
+          a.type.matches('collection<any>') ||
+          // A GATED collection (a restricted point or list, typed
+          // `missing | C`) is an array at run time too, and the
+          // `missing` arm hides it from the test above. Without this, a
+          // shape `tryCompileBroadcast` declined for it — the product of
+          // two restricted points — emitted `[…] * […]`, which runs to
+          // NaN behind `success: true`.
+          isGatedIndexedCollection(a) ||
+          // An operand that MAY be a point at run time (a union with a
+          // tuple arm, `integer | tuple<real, real>`: the type of the
+          // sum of a list of points, which may be empty) is an array
+          // when it holds a point. `tryCompileBroadcast` has a plan for
+          // it under `Add` only; under any other head the scalar code
+          // ran to NaN: `2·Sum(P)` gave `NaN` where the interpreter
+          // answers the scaled point.
+          isRuntimePointShaped(a) ||
+          // Read WITH the target, as `tryCompileBroadcast` reads it:
+          // this guard is reached after that lowering declined, and an
+          // operand it proved a constructed scalar (a call of a user
+          // function whose body is a scalar over its point argument)
+          // must not be refused here on the conservative reading.
+          isBoundPossiblyCollectionTyped(a, target)) &&
+        // Nor, last, is an operand that the emitted code reads as one
+        // scalar because its untyped free inputs are read as numbers:
+        // `g(x)[1]` with `g := t ↦ [t, 2]` and `x` free is typed `unknown`
+        // by the engine, and `number` under that reading, the one the code
+        // around the call makes (`readsAsScalarThroughFreeInputs`; ROADMAP
+        // CE-377). Tested last, so its type walk runs only for an operand
+        // the readings above refuse.
+        !BaseCompiler.readsAsScalarThroughFreeInputs(a, target);
       if (
         isBroadcastableHead &&
         !collectionAwareHead &&
-        args.some(
-          (a) =>
-            // A STRING is not a list-valued operand FOR THIS PURPOSE. It
-            // matches `collection`/`indexed_collection` in the lattice (its
-            // elements are its grapheme clusters) but is ATOMIC under
-            // broadcast on both sides — the interpreter's
-            // `isFiniteBroadcastParticipant` excludes it, and it lowers to one
-            // JS string, not an array — so a broadcastable head over it is
-            // ordinary scalar code. Same exemption as the sibling gates
-            // (`compilesToArray`, `isArrayOperand`) carry.
-            !isProvablyStringOperand(a) &&
-            // Nor is a `Hypot` point leg, for the same reason: the head's own
-            // codegen consumes it whole, as one leg (`isHypotPointLeg`).
-            !BaseCompiler.isHypotPointLeg(h, a) &&
-            // Nor is a tuple at a head that declares the `'tuples'` broadcast
-            // exemption: the head owns that shape and its own codegen
-            // consumes the tuple whole, as the interpreter does. A color
-            // conversion reads `AsRgb((1, 0, 0))` as one color in 0-1 sRGB.
-            !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, a) &&
-            (a.isCollection ||
-              // The COLLECTION shape top, not the list/indexed spellings: a
-              // SET-typed operand matches neither `list<any>` nor
-              // `indexed_collection<any>`, and with the narrower test it
-              // escaped this guard entirely — `Add(T, 1)` for
-              // `T: set<number>` emitted `_.T + 1` (string concatenation or
-              // garbage at run time) where the interpreter answers an
-              // `incompatible-type` error.
-              a.type.matches('collection<any>') ||
-              // A GATED collection (a restricted point or list, typed
-              // `missing | C`) is an array at run time too, and the
-              // `missing` arm hides it from the test above. Without this, a
-              // shape `tryCompileBroadcast` declined for it — the product of
-              // two restricted points — emitted `[…] * […]`, which runs to
-              // NaN behind `success: true`.
-              isGatedIndexedCollection(a) ||
-              // An operand that MAY be a point at run time (a union with a
-              // tuple arm, `integer | tuple<real, real>`: the type of the
-              // sum of a list of points, which may be empty) is an array
-              // when it holds a point. `tryCompileBroadcast` has a plan for
-              // it under `Add` only; under any other head the scalar code
-              // ran to NaN: `2·Sum(P)` gave `NaN` where the interpreter
-              // answers the scaled point.
-              isRuntimePointShaped(a) ||
-              // Read WITH the target, as `tryCompileBroadcast` reads it:
-              // this guard is reached after that lowering declined, and an
-              // operand it proved a constructed scalar (a call of a user
-              // function whose body is a scalar over its point argument)
-              // must not be refused here on the conservative reading.
-              isBoundPossiblyCollectionTyped(a, target))
-        )
+        args.some(listValuedOperand)
       ) {
         const opMap = target.operators?.(h);
         const lowersToScalarInfix =
@@ -11907,10 +11920,30 @@ export class BaseCompiler {
             BaseCompiler.removeDefinitionsAddedSince(registry, before);
           if (specific !== undefined) throw specific;
           if (fallback !== undefined) throw fallback;
+          if (!BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h))
+            throw new Error(
+              `Could not compile \`${h}\`: a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
+            );
+          // A refused operand that is PROVABLY a collection is list-valued.
+          // When none is, the refused operand only may be a list at run
+          // time (an operand of unknown type, `h(x)` for
+          // `h: (unknown) -> unknown`): the message names it with its type,
+          // and the remedy is a declaration that excludes a list.
+          const refused = args.filter(listValuedOperand);
+          if (
+            refused.some(
+              (a) =>
+                a.isCollection ||
+                a.type.matches('collection<any>') ||
+                isGatedIndexedCollection(a)
+            )
+          )
+            throw new Error(
+              `Could not compile \`${h}\`: scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
+            );
+          const possible = refused[0];
           throw new Error(
-            BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h)
-              ? `Could not compile \`${h}\`: scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
-              : `Could not compile \`${h}\`: a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Materialize the list with evaluate() and compile a scalar element function instead.`
+            `Could not compile \`${h}\`: scalar arithmetic over a possibly list-valued operand (\`${possible.toString()}\`, of type \`${possible.type.toString()}\`) — the JavaScript compile target has no list-arithmetic support. Declare a type that excludes a list for the operand or its inputs, or materialize the list with evaluate() and compile a scalar element function instead.`
           );
         }
       }
@@ -33273,6 +33306,132 @@ export class BaseCompiler {
       scalarNames: scalar ? localNames : NO_NAMES,
       localNames,
     };
+  }
+
+  /**
+   * Whether `expr` is an untyped free input of the compiled code: a symbol
+   * that is not a parameter or a local of the emitted body (`boundVars`),
+   * not a caller mapping (`varsKeys`), not a block local, not a constant,
+   * that holds no value, and whose type the engine inferred from its uses
+   * (`inferredType`: it has no declaration). The compiled function receives
+   * its value from the host at each call.
+   */
+  private static isUntypedFreeInput(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (!isSymbol(expr) || expr.isConstant) return false;
+    if (
+      target.boundVars?.has(expr.symbol) ||
+      target.varsKeys?.has(expr.symbol) ||
+      isTopTypedLocalSymbol(expr)
+    )
+      return false;
+    if (expr.engine._getSymbolValue(expr.symbol) !== undefined) return false;
+    const current = expr.engine.lookupDefinition(expr.symbol);
+    const definition = isValueDef(current)
+      ? current.value
+      : expr.valueDefinition;
+    return definition?.inferredType === true;
+  }
+
+  /**
+   * The type of `expr` with each untyped free input read as a number, which
+   * is how the emitted JavaScript reads such an input. A free input with no
+   * declaration and no use that narrows it is typed `unknown` by the engine,
+   * and the emitted code binds it to the bare run-time value (`_.x`, or
+   * `_SYS.cplx(_.x)` on the complex lane) inside scalar code: `x + 1` is
+   * `_.x + 1`. The engine's type of an expression over such an input is
+   * wider than the value the code reads: a call `g(x)` of a user function
+   * is typed from the signature of `g`, `list<unknown>` for
+   * `g := t ↦ [t, 2]`, so `g(x)[1]` is `unknown` and `Trace(m(x))` is
+   * `number | tensor`, and the scalar-arithmetic guard refused them as
+   * possibly list-valued where the emitted code reads one number.
+   *
+   * This reading types the input `number` and rederives each application
+   * whose operands changed, bottom-up, with the engine's own derivation
+   * (`deriveApplicationType`), as the engine types the same expression when
+   * `x` is declared `number`: `g(x)` is the body at a number, `vector<2>`,
+   * `g(x)[1]` is `number`, and `Trace(m(x))` is `number`. An application
+   * whose operands keep their types keeps its own type, and so does one
+   * whose rederived type does not fit its own. The operands of a scoped
+   * operator (a `Sum` over an index) are not rederived. A scalar parameter
+   * of the emitted body (`isConstructedScalar`) is read as a number too.
+   * Only the TYPE is read here: a call of a user function is emitted as
+   * before, with its run-time broadcast (`_SYS.bcastFn`), so an input that
+   * holds a list at run time still maps the call over it; the scalar code
+   * around the call is the lane every free input already takes. `memo`
+   * holds the answers of one top-level call, so a shared subexpression is
+   * walked once. The shader targets read a free input as a float for the
+   * same reason, and `gpuAtBaseShape` (`gpu-target.ts`) reads the static
+   * length of a call's result through this type. ROADMAP CE-377 (landed
+   * 2026-10-23).
+   */
+  static typeWithFreeInputsAsNumbers(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    depth = 0,
+    memo: Map<Expression, Type> = new Map()
+  ): Type {
+    const own = expr.type.type;
+    if (depth > 32) return own;
+    if (isSymbol(expr)) {
+      if (own !== 'unknown') return own;
+      return BaseCompiler.isUntypedFreeInput(expr, target) ||
+        isConstructedScalar(expr, target)
+        ? 'number'
+        : own;
+    }
+    if (!isFunction(expr) || expr.operatorDefinition?.scoped) return own;
+    const known = memo.get(expr);
+    if (known !== undefined) return known;
+    const types = expr.ops.map((op) =>
+      BaseCompiler.typeWithFreeInputsAsNumbers(op, target, depth + 1, memo)
+    );
+    let result = own;
+    if (!types.every((t, i) => t === expr.ops[i].type.type)) {
+      const operands = expr.ops.map((op, i) =>
+        types[i] === op.type.type
+          ? describeOperand(op)
+          : describeOperand(op, types[i])
+      );
+      const inferred = deriveApplicationType(
+        expr.engine,
+        expr.operator,
+        operands
+      );
+      if (
+        inferred !== undefined &&
+        inferred !== 'never' &&
+        isSubtype(inferred, own)
+      )
+        result = inferred;
+    }
+    memo.set(expr, result);
+    return result;
+  }
+
+  /**
+   * Whether the emitted code reads `a` as one scalar although its own type
+   * admits a collection: its type with each untyped free input read as a
+   * number (`typeWithFreeInputsAsNumbers`) is a scalar type, a number, a
+   * boolean or a string, beside an absence marker at most. `g(x)[1]` with
+   * `g := t ↦ [t, 2]` and `x` free is typed `unknown` by the engine and
+   * `number` under that reading. An operand whose type the reading leaves
+   * unchanged is not read as a scalar here: the predicates on its own type
+   * decide.
+   */
+  private static readsAsScalarThroughFreeInputs(
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const t = BaseCompiler.typeWithFreeInputsAsNumbers(a, target);
+    if (t === a.type.type) return false;
+    const r = resolveTypeForCompilation(stripMissingFromType(t));
+    if (r === 'never') return false;
+    return (
+      isSubtype(r, 'number') || isSubtype(r, 'boolean') || isSubtype(r, 'string')
+    );
   }
 
   /** A shader's framed scalar locals have a concrete representation even
