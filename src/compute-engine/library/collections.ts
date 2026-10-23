@@ -5481,9 +5481,10 @@ function sliceResultTypeD(
 /**
  * The type of the list that a selector (`Take`, `Drop`, `Rest`, `Most`,
  * `Slice`) returns from the collection `xs`, when `xs` is a
- * `broadcastable<T>` whose `T` can hold a list; `undefined` for every other
- * operand, which keeps the type that the signature gives (`list<T>` for an
- * `indexed_collection<T>`).
+ * `broadcastable<T>` whose `T` can hold a list or can be indexed (a tuple:
+ * `Take(p, 1)` is the list `[1]` for `p = (1, 2)`); `undefined` for every
+ * other operand, which keeps the type that the signature gives (`list<T>`
+ * for an `indexed_collection<T>`).
  *
  * The signature binds `T` to the cells of the broadcastable, but a value of
  * the `T` arm is itself a list, and the selector returns its elements:
@@ -5500,23 +5501,39 @@ function selectorResultTypeD(
   // A structural application with no operand (`Rest()`) keeps the
   // signature's type.
   if (xs === undefined) return undefined;
-  // An operand that may be a string (`broadcastable<any>`,
-  // `broadcastable<string | list<string>>`) keeps the signature's type: its
-  // string arm (`T where T: string`) types a string result, which the
-  // value is for `p = "abc"` (`Take(p, 1)` is `"a"`).
-  if (!provablyDisjoint(xs.type, 'string')) return undefined;
   const indexed = broadcastableIndexElementTypeOf(xs.type);
-  return indexed === undefined
-    ? undefined
-    : { kind: 'list', elements: indexed };
+  if (indexed === undefined) return undefined;
+  if (provablyDisjoint(xs.type, 'string'))
+    return { kind: 'list', elements: indexed };
+  // A `broadcastable<T>` whose cells may be a string (`broadcastable<string>`,
+  // `broadcastable<any>`) may be one string, and a selector of a string is
+  // a string (`Take(p, 1)` is `"a"` for `p = "abc"`). Otherwise the value is
+  // a tensor, and the selector returns its elements, which can be tensors:
+  // `Take(p, 1)` is `[["ab"]]` for `p = [["ab"], ["cd"]]`. So the result is
+  // `string | list<E>`, with `E` what an index into the tensor returns. The
+  // `character` arm of `indexed` is what an index into one string returns,
+  // which is not an element of a list result. (A plain `string` operand is
+  // not a broadcastable and keeps the signature's type.)
+  const elements =
+    typeof indexed !== 'string' && indexed.kind === 'union'
+      ? reduceType({
+          kind: 'union',
+          types: indexed.types.filter((arm) => arm !== 'character'),
+        })
+      : indexed;
+  return reduceType({
+    kind: 'union',
+    types: ['string', { kind: 'list', elements }],
+  });
 }
 
 /**
  * Whether the operand `d` is an element read (`At`, `First`, `Second`,
- * `Third`, `Last`) of a `broadcastable<T>` whose `T` can hold a list
- * (`broadcastableIndexElementTypeOf`): `g(x)[1]` for `g(t) = [t, 2t]` and
- * `x: any`. The number arm of the type of such a read comes from the
- * scalar arm of the broadcastable.
+ * `Third`, `Last`) of a `broadcastable<T>` whose `T` can hold a list or
+ * can be indexed (`broadcastableIndexElementTypeOf`): `g(x)[1]` for
+ * `g(t) = [t, 2t]` and `x: any`, or `p[1]` for
+ * `p: broadcastable<tuple<number, number>>`. The number arm of the type of
+ * such a read comes from the scalar arm of the broadcastable.
  */
 function readsBroadcastableElement(d: OperandDescriptor | undefined): boolean {
   const s = d?.structureOf?.();
@@ -14653,9 +14670,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `collectionElementType` reports a record's ITERATION pair
         // `tuple<string, T>`, which is not what an access returns.
         // The base is an element read from a `broadcastable<T>` whose `T`
-        // can hold a list (`g(x)[1]`, typed `missing | number | vector<2>`,
-        // for `g(t) = [t, 2t]` and `x: any`): its number arm is skipped. An
-        // index into a number is an `incompatible-type` error, a value no
+        // can hold a list or can be indexed (`g(x)[1]`, typed
+        // `missing | number | vector<2>`, for `g(t) = [t, 2t]` and
+        // `x: any`): its number arm is skipped, and so is a `character` arm
+        // (the index into a `broadcastable<string>` is
+        // `character | missing | string | tensor<string>`). An index into a
+        // number or a character is an `incompatible-type` error, a value no
         // type holds, so `g(x)[1][2]` is the `number` of the vector arm.
         // Only for such a base: for another union with a number arm (the
         // accumulator of a fold under refinement, `integer | list<never>`)
@@ -14665,7 +14685,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           typeof t !== 'string' &&
           t.kind === 'union' &&
           readsBroadcastableElement(ops[0])
-            ? t.types.filter((arm) => !isSubtype(arm, 'number'))
+            ? t.types.filter(
+                (arm) => !isSubtype(arm, 'number') && arm !== 'character'
+              )
             : [];
         if (
           typeof t !== 'string' &&

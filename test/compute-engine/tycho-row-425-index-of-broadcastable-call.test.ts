@@ -29,9 +29,12 @@
  * compiled `Sum(g(x))` still maps over the collection arm. `g(x)[1]` is now
  * `missing | number | vector<2>`, which `Repeat` accepts as a count; a
  * vector count is refused at evaluation, and the compiled `Repeat` throws.
- * When `T` cannot hold a list (a number, a tuple, a string), `T` is a cell
- * and the reading is unchanged
+ * When `T` cannot hold a list and cannot be indexed (a number), `T` is a
+ * cell and the reading is unchanged
  * (`test/common/type/list-element-tensor-cell.test.ts`, "ELEMENT TYPE").
+ * A tuple or a string `T` is a cell for broadcasting too, but an index into
+ * one returns its slots or characters
+ * (`test/compute-engine/broadcastable-scalar-index-type.test.ts`).
  *
  * The readers of the wider types follow:
  *

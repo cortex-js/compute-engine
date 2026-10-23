@@ -286,11 +286,16 @@ matrix gives a matrix of booleans, which `boolean | list<boolean>` does not
 hold. `broadcastable<tuple<number, number>>` is a point or an array of points of
 any rank. The node is kept for every `T` (`broadcastableOf()` builds it), so a
 site that tests `kind === 'broadcastable'` sees every spelling. Its element type
-is `T | tensor<T>`; for a `T` that can hold a list, what an index returns
+is `T | tensor<T>`; for a `T` that can hold a list or can be indexed (a tuple,
+a string, a record, a dictionary), what an index returns
 (`indexElementType()`, used only by `At` with a scalar or a gather index,
 `First`, `Second`, `Third`, `Last` and the selectors `Take`, `Drop`, `Rest`,
 `Most`, `Slice`) also includes the elements of `T`
-itself, so an index into `broadcastable<vector<2>>` is `number | vector<2>`.
+itself, so an index into `broadcastable<vector<2>>` is `number | vector<2>`,
+an index into `broadcastable<tuple<number, number>>` is
+`number | tuple<number, number> | tensor<tuple<number, number>>`, and an index
+into `broadcastable<string>` is `character | string | tensor<string>`. A tuple
+or a string is still one cell for broadcasting.
 `broadcastable<T>` is a subtype of `T | tensor<T>`, and not
 of `T | list<T>`: a site that accepts a number or a numeric array of any rank
 spells `number | tensor`.

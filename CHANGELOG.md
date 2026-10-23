@@ -314,6 +314,39 @@
 
 ### Behavior Changes
 
+- **An index into a `broadcastable<T>` whose `T` is a tuple, a string, a
+  record or a dictionary is typed by what it can return.** With
+  `p: broadcastable<tuple<number, number>>` holding `(1, 2)`, `At(p, 1)` is
+  `1`, but it was typed
+  `missing | tensor<tuple<number, number>> | tuple<number, number>`, and
+  `Take(p, 1)` is `[1]`, but it was typed `list<tuple<number, number>>`. With
+  `p: broadcastable<string>` holding `"abc"`, `At(p, 1)` is the character
+  `"a"`, but it was typed `missing | string | tensor<string>`. The element
+  readers (`At`, `First`, `Second`, `Third`, `Last`) and the selectors
+  (`Take`, `Drop`, `Rest`, `Most`, `Slice`) now also include what an index
+  into one value of `T` returns: the slots of a tuple (a `nothing` slot
+  included), `character` for a string, the field types of a record (an
+  `unknown` field included) and the value type of a dictionary, also for such
+  an arm of a union `T`. `At(p, 1)` is now typed
+  `missing | number | tensor<tuple<number, number>> | tuple<number, number>`,
+  and a selector over `broadcastable<string>` is typed
+  `list<string | tensor<string>> | string`, which holds the rows of a 2-D
+  array of strings. A tuple and a string are still one cell for broadcasting,
+  and the aggregates (`Sum`, `Max`, `Reduce`) read the elements as before.
+
+  Compiled code: the JavaScript `At(p, 3)` of the one point `(1, 2)` gave
+  `Missing`; it now gives `NaN`, as the interpreter does. The JavaScript and
+  Python element readers and selectors of an operand that may be a string
+  without proof that it is a list (`broadcastable<string>`, a `broadcastable`
+  of one, an alias of one, `string | list<string>` on Python) now decline, so
+  the `fallback` option decides: they read a string by UTF-16 code unit or by
+  code point, so `At(p, 1)` of `"abc"` gave `undefined` (JavaScript) or `NaN`
+  (Python), and `First(p)` of `"😀b"` half of a surrogate pair. Such an
+  operand that holds a list of strings, which compiled correctly, now
+  declines too. JavaScript `First`, `Second` and `Third` of an operand typed
+  `any`, `value` or `broadcastable<any>` decline, as `At` and `Last` already
+  did.
+
 - **An index into a `broadcastable<T>` value is typed by what it can return**
   (Tycho row 425). With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
   `broadcastable<vector<2>>`: a number `x` gives a vector, a list `x` a list of

@@ -618,8 +618,9 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // (`broadcastCollectionArm`). The elements of the arm are `T` for a
   // plain `list<T>`, and `T | tensor<T>` for the `tensor<T>` of a numeric
   // `T`; the scalar reading adds nothing to either. (What an INDEX returns
-  // also includes the elements of a `T` that can hold a list: that reading
-  // is `indexElementType`, which only the element readers use.)
+  // also includes the elements of a `T` that can hold a list or can be
+  // indexed, such as a tuple or a string: that reading is
+  // `indexElementType`, which only the element readers use.)
   if (type.kind === 'broadcastable')
     return listElementType(broadcastCollectionArm(type.elements));
 
@@ -667,7 +668,8 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
  * the elements of the list that `Take`, `Drop`, `Rest`, `Most` and `Slice`
  * return). It is
  * {@link collectionElementType}, except for a `broadcastable<T>` whose `T`
- * can hold a list.
+ * can hold a list or can be indexed (a tuple, a string, a record, a
+ * dictionary).
  *
  * A `broadcastable<T>` is a `T` or a list of `T`. When `T` can hold a list
  * (`vector<2>`), a value of the `T` arm is itself a list, and one index into
@@ -675,6 +677,15 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
  * (the type of `g(x)` for `g(t) = [t, 2t]` and an `x` that can be a number
  * or a list) returns `number | vector<2>`: a number when the value is one
  * vector, a vector when it is a list of vectors.
+ *
+ * A tuple or a string is one cell for broadcasting (the collection arm of
+ * `broadcastable<tuple<number, number>>` is `tensor<tuple<number, number>>`),
+ * but an index into a value of the `T` arm still reads that value: `At(p,
+ * 1)` is `1` for `p = (1, 2)` and the character `"a"` for `p = "abc"`. So
+ * an index into `broadcastable<tuple<number, number>>` returns
+ * `number | tuple<number, number> | tensor<tuple<number, number>>`, and an
+ * index into `broadcastable<string>` returns
+ * `character | string | tensor<string>`.
  *
  * This is not the element type that the other readers use
  * (`collectionElementType`): a compile gate or an aggregate (`Sum`, `Max`,
@@ -722,9 +733,12 @@ function indexElementTypeOnDescent(
 /**
  * {@link indexElementType} when it differs from `collectionElementType`:
  * for a `broadcastable<T>` (or a transparent alias of one) whose `T` can
- * hold a list. `undefined` for every other type. A reader that has a more
- * precise element type from another source (the `elttype` handler of the
- * operand) uses that source only when this function answers `undefined`.
+ * hold a list, or whose `T` cannot hold a list but can be indexed (a
+ * tuple, a string, a record, a dictionary, or a union with such an arm).
+ * `undefined` for every other type, a `broadcastable<number>` included. A
+ * reader that has a more precise element type from another source (the
+ * `elttype` handler of the operand) uses that source only when this
+ * function answers `undefined`.
  */
 export function broadcastableIndexElementTypeOf(
   t: Readonly<Type>
@@ -732,10 +746,10 @@ export function broadcastableIndexElementTypeOf(
   const unfolded = unfoldAliasOnDescent(t, undefined);
   if (unfolded === undefined) return undefined;
   const r = unfolded.type;
+  if (typeof r === 'string' || r.kind !== 'broadcastable') return undefined;
   if (
-    typeof r === 'string' ||
-    r.kind !== 'broadcastable' ||
-    cannotHoldAList(r.elements)
+    cannotHoldAList(r.elements) &&
+    ownElementsOfBroadcastCell(r.elements, unfolded.seen) === undefined
   )
     return undefined;
   return broadcastableIndexElementType(r.elements, unfolded.seen);
@@ -744,14 +758,15 @@ export function broadcastableIndexElementTypeOf(
 /**
  * What one index into a value of `broadcastable<cells>` returns (see
  * {@link indexElementType}): the elements of the collection arm, joined
- * with the elements of a value of the `cells` arm when `cells` can hold a
- * list (`ownElementsOfBroadcastCell`). When `cells` cannot hold a list (a
- * number, a tuple, a string), it is a cell and adds nothing. `seen` is the
- * alias descent of the walk (`unfoldAliasOnDescent`).
+ * with what one index into a value of the `cells` arm returns
+ * (`ownElementsOfBroadcastCell`). A `cells` that can be indexed adds its
+ * own elements whether or not it can hold a list: the slots of a tuple,
+ * the characters of a string. A `cells` that cannot be indexed (a number,
+ * a boolean) adds nothing. `seen` is the alias descent of the walk
+ * (`unfoldAliasOnDescent`).
  */
 function broadcastableIndexElementType(cells: Type, seen: AliasDescent): Type {
   const armElements = listElementType(broadcastCollectionArm(cells));
-  if (cannotHoldAList(cells)) return armElements;
   const own = ownElementsOfBroadcastCell(cells, seen);
   return own === undefined
     ? armElements
@@ -760,18 +775,20 @@ function broadcastableIndexElementType(cells: Type, seen: AliasDescent): Type {
 
 /**
  * What one index into a value of the type `t` returns, when `t` is the cell
- * type of a `broadcastable<t>` that can hold a list, or `undefined` when a
- * value of `t` adds no element that the collection arm does not give.
+ * type of a `broadcastable<t>`, or `undefined` when a value of `t` adds no
+ * element that the collection arm does not give.
  *
  * - A transparent alias is unfolded under the descent guard: a recursive
  *   alias (`type alias R = broadcastable<R>`) is cut at its third unfold on
  *   one path, and the cut answers the alias itself.
- * - A union is read arm by arm. An arm that cannot hold a list (`missing`,
- *   a number, a tuple, a string) is a cell and adds nothing, as for a `T`
- *   that cannot hold a list. The elements of the other arms are joined:
- *   for `vector<2> | missing` (the cells of `h(x)` for
+ * - A union is read arm by arm, and the elements of the arms that add some
+ *   are joined: for `vector<2> | missing` (the cells of `h(x)` for
  *   `h(t) = When([t, 2t], t > 0)`), the elements are `number`.
  * - A nested `broadcastable<U>` adds what an index into it returns.
+ * - A type that cannot hold a list adds what an index into it returns
+ *   (`ownElementsOfIndexableCell`): the slots of a tuple, the characters
+ *   of a string, the values of a record or a dictionary. A number, a
+ *   boolean or an absence marker adds nothing.
  * - Another type adds its element type (`collectionElementType`). A type
  *   with no element type (`any`, a type variable) adds nothing.
  */
@@ -788,7 +805,6 @@ function ownElementsOfBroadcastCell(
   if (typeof r !== 'string' && r.kind === 'union') {
     let result: Type | undefined;
     for (const arm of r.types) {
-      if (cannotHoldAList(arm)) continue;
       const own = ownElementsOfBroadcastCell(arm, unfolded.seen);
       if (own === undefined) continue;
       result = result === undefined ? own : joinIndexElementTypes(result, own);
@@ -797,7 +813,34 @@ function ownElementsOfBroadcastCell(
   }
   if (typeof r !== 'string' && r.kind === 'broadcastable')
     return broadcastableIndexElementType(r.elements, unfolded.seen);
+  if (cannotHoldAList(r)) return ownElementsOfIndexableCell(r);
   return collectionElementType(r);
+}
+
+/**
+ * What one index into a value of the type `t` returns, for a `t` that
+ * cannot hold a list (`cannotHoldAList`) and is not a union: the join of
+ * the slot types of a tuple, `character` for a string, the join of the
+ * field types of a record (an `unknown` field is kept as an arm, as for
+ * the cells of a value: a field `a: unknown` can hold a string beside a
+ * field `b: integer`), and the value type of a dictionary (an index
+ * into a record or a dictionary is a key, which reads a value; the
+ * iteration pair that `collectionElementType` gives for them is not what
+ * an index returns). `undefined` for a type that cannot be indexed: a
+ * number, a boolean, a set, a function, `missing`, `nothing`, `never`.
+ */
+function ownElementsOfIndexableCell(t: Type): Type | undefined {
+  if (t === 'never' || t === 'nothing' || t === 'missing') return undefined;
+  if (t === 'tuple' || (typeof t !== 'string' && t.kind === 'tuple'))
+    return collectionElementType(t);
+  if (t === 'record' || t === 'dictionary') return 'any';
+  if (typeof t !== 'string' && t.kind === 'record') {
+    const fields = Object.values(t.elements);
+    return fields.length === 0 ? undefined : joinUnresolvedArm(fields);
+  }
+  if (typeof t !== 'string' && t.kind === 'dictionary') return t.values;
+  if (isSubtype(t, 'string')) return 'character';
+  return undefined;
 }
 
 /**
@@ -806,7 +849,10 @@ function ownElementsOfBroadcastCell(
  * does not absorb the other one: the two are kept as a union
  * (`list<unknown> | unknown` for an index into `broadcastable<list<unknown>>`),
  * so that a reader still sees the list arm and adds its absence marker
- * (`widen` would also drop an `unknown` arm).
+ * (`widen` would also drop an `unknown` arm). A `nothing` arm is kept too:
+ * `widen` absorbs it, but a slot of a tuple can hold `Nothing`, so one
+ * index into `broadcastable<tuple<nothing, nothing>>` holding
+ * `(Nothing, Nothing)` is `Nothing`.
  */
 function joinIndexElementTypes(a: Type, b: Type): Type {
   if (a === b) return a;
@@ -814,7 +860,21 @@ function joinIndexElementTypes(a: Type, b: Type): Type {
     return { kind: 'union', types: [b, a] };
   if (isSubtype(b, a)) return a;
   if (isSubtype(a, b)) return b;
-  return widen(a, b);
+  const joined = widen(a, b);
+  if (
+    provablyAdmits('nothing', joined) ||
+    (!provablyAdmits('nothing', a) && !provablyAdmits('nothing', b))
+  )
+    return joined;
+  return {
+    kind: 'union',
+    types: [
+      ...(typeof joined === 'object' && joined.kind === 'union'
+        ? joined.types
+        : [joined]),
+      'nothing',
+    ],
+  };
 }
 
 /**

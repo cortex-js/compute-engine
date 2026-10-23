@@ -563,31 +563,23 @@ them.
   many compiled results: measure first. User decision owed: whether such an
   integral should be complex on both routes.
 
-### An index into a tuple or string held in `broadcastable<T>` is typed without the cell's own elements (OPEN, soundness — found 2026-10-22 by the fix of Tycho row 425; session compute-engine-f4 takes it after row 425 lands)
+### Defects found by the fix of Tycho row 426 (OPEN — found 2026-10-22)
 
-The static type of an index does not hold its value when the operand is the
-scalar arm `T` of `broadcastable<T>` and `T` is indexable but cannot hold a
-list (a tuple or a string). Measured on `cc468eb4f`:
-
-- `p: broadcastable<tuple<number, number>>` holding `(1, 2)`: `At(p, 1)`
-  evaluates to `1` and is typed
-  `missing | tensor<tuple<number, number>> | tuple<number, number>`.
-- The same `p`: `Take(p, 1)` evaluates to `[1]` and is typed
-  `list<tuple<number, number>>`.
-- `p: broadcastable<string>` holding `"abc"`: `At(p, 1)` evaluates to a
-  character and is typed `missing | string | tensor<string>`.
-
-The rule that a tuple or a string is ONE cell for broadcasting
-(`test/common/type/list-element-tensor-cell.test.ts`, "broadcastable<T>
-yields T | tensor<T> when T cannot hold a list") stays true; it does not
-require an index into the scalar arm to skip the value's own elements. Fix:
-when the operand may be the scalar arm `T` and `T` is indexable, the index
-result also joins `T`'s own element type (the tuple's slot types,
-`character`), and `Take`/`Drop` join a list of them
-(`collectionElementType()` in `common/type/utils.ts`, and the solver's element
-position in `instantiate.ts`, as the row 425 fix does for a `T` that can hold
-a list). Measure the effect on compiled point readers (`PointX`/`PointY` over
-point arrays) before landing.
+- **A lazy collection operator inside a function literal reads the original
+  argument after the parameter is reassigned** (wrong value, on `3799d01dd`
+  too). `Apply((a: list<real>) ↦ Block(Assign(a, [1, 2]), Map(p, a)),
+  [7, 8, 9])` evaluates to `[21, 24, 27]` (it should map `[1, 2]`), and
+  `Filter` returns `[7, 8, 9]` the same way, while `Reverse` reads `[1, 2]`.
+  The static types describe the reassigned value, so the type and the value
+  disagree.
+- **`D` reuses its variable name after a parameter of the same name.**
+  `a ↦ (D(a^2, a), Reverse(a))` types its first slot `number`, but over a
+  list the value is the unevaluated `2 * [1.5, -2, 0.25]` (on `3799d01dd`
+  too).
+- **`x ↦ [x]`** types `(unknown) -> vector<1>` whatever `x` is; applied to a
+  set, a tuple, a record or a string the value does not fit. Same defect as
+  the entry "`g := x ↦ [x]` gets the signature …" below (user decision owed
+  there).
 
 ### Residues of the fix of Tycho row 425 (OPEN — found 2026-10-22)
 
@@ -650,6 +642,58 @@ With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
 - **A `When`-restricted function compiles to `Missing` where the interpreter
   gives the restricted values**: `r(t) = When([t, 2t], c > 0)` with `c: real`
   (on `cc468eb4f` too).
+- **A compiled list exponent with a fractional entry does not switch to
+  complex results in the default mode.** With `p: tensor<number>` holding
+  `[[1, 2], [3, -4]]`, compiled `p^[2, 0.5]` gives `NaN` for `(-4)^0.5`, where
+  the interpreter gives `2i` (on `556ca8d7e` too). A scalar exponent,
+  `p^0.5`, already gives `2i` in the default mode, and `mode: 'complex'` gives
+  `2i` for both. Fix: promote the element-wise power to the complex lane when
+  the exponent's cells may be fractional, as the scalar exponent does.
+- **The interpreter's `Multiply` of two matrices depends on how the factors
+  are written (OPEN, user decision 2026-10-22: `Multiply` of two matrices is
+  the matrix product).** Today a product whose matrix factors are all symbols
+  is entry-wise (`p·p`, `p·q`, and `m·m` even for `m: matrix<number>`), while a
+  product with a literal or computed matrix factor is the matrix product
+  (`p·sin(p)`, `p·[[0, 1], [1, 0]]`), measured 2026-10-22 on `556ca8d7e`; so
+  `p^2` (the matrix square) and `p·p` (the entry-wise square) disagree. The
+  user decided (2026-10-22), as SymPy, MATLAB and Julia do and so that
+  `Multiply` agrees with `Power`:
+  1. `Multiply` of two matrices (two axes) is the matrix product, as
+     `MatrixMultiply`, however the factors are written.
+  2. A vector or a plain list times a vector or a plain list stays entry-wise
+     (Desmos lists, Tycho's decoder).
+  3. A number times a matrix stays a scaling of each entry.
+  4. Compiled code follows the same rule: `matrix<…>` calls the matrix
+     product; `tensor<number>` and `list<list<number>>` dispatch on the
+     value's shape when the code runs, as `Power` does; a type that may hold
+     points (bare `list`, `any`) keeps the entry-wise product.
+  The entry-wise product stays available as `HadamardProduct`. A CHANGELOG
+  Breaking Changes entry names `HadamardProduct` as the way to get the old
+  result of `p·q` for two matrix symbols.
+- **A compiled power of a list that may hold points squares each entry, also
+  for a square matrix.** For a base typed bare `list`, `list<unknown>` or
+  `any` (a type that may hold points), compiled `p^2` gives the power of each
+  entry; when the value is a square matrix such as `[[1, 2], [3, -4]]`, the
+  interpreter gives the matrix power `[[7, -6], [-9, 22]]` (on `556ca8d7e`
+  too). Compiled code stores a list of points `[(1, 2), (3, 4)]` and that
+  matrix as the same array, and the interpreter powers the points entry by
+  entry, so compiled code cannot choose; it keeps the entry-wise code, which
+  plot code over point lists relies on. Types that cannot hold a point
+  (`tensor<number>`, `list<list<number>>`, `broadcastable<number>`) dispatch
+  on the value's shape since 2026-10-22. Fix: a compiled representation of
+  points that differs from a row.
+- **The `complex` compile mode declines an operand that may be a number or a
+  list and may hold a complex value**, where the default mode compiles it:
+  `broadcastable<number>` with `2b + 1` or `2b = 4`; `number | list<number>`
+  with `b + 1` or `sin(b)`; `Power(b, 2)`; `Add(Sum(Rest(p)), 1)` for
+  `p: tensor<number>`.
+  `BaseCompiler._operandElementLane` (`compilation/base-compiler.ts`) returns
+  no lane when `isBoundPossiblyCollectionTyped(a)` is true and the operand may
+  be complex; `broadcastable-compile.test.ts` pins this for
+  `broadcastable<complex>`. A decline, not a wrong value. Fix: choose the lane
+  for the scalar and the cells from the same evidence, and dispatch on the
+  value's shape when the code runs (found 2026-10-22 by the complex-mode fix
+  for list inputs).
 - **The `complex` compile mode does not reach the cells of a list input.**
   With `mode: 'complex'`, a scalar input declared `number` compiles on the
   complex lane (`Add(p, 1)` gives `{re: 2, im: 1}` for `p = 1+i`), but a list
@@ -1081,6 +1125,15 @@ dictionary). These remain, each measured with a fix and reverted:
   (2) A generic function literal applied directly (`[["Function", …], "v"]`)
   binds `v` whole, while the same literal called through a symbol (`g(v)`)
   maps over the elements of `v`.
+- **Compiled JavaScript adds a number to a point that the interpreter refuses
+  (found 2026-10-22).** With `P: broadcastable<tuple<number, number>>` holding
+  `[(3, 4), (6, 8)]`, `At(P, 1) + 1` evaluates to an `incompatible-type` error
+  (a tuple plus a number), while `compile(…).run({P: [[3, 4], [6, 8]]})`
+  returns `[4, 5]`: the compiled code reads the point as an array of numbers
+  and broadcasts the `+ 1` over it. The same at HEAD 903e2af7c. Expected: the
+  compiled code refuses (fail closed) or gives the interpreter's error.
+  Reproduction: box `["Add", ["At", "P", 1], 1]`, then compare `.evaluate()`
+  with the compiled run.
 - **Compiled code reads an undeclared symbol as a number, so a list argument
   gives a wrong value (found 2026-10-22).** With `M` not declared,
   `compile(If(M < 3, M, 0))` (JavaScript) emits

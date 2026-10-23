@@ -987,6 +987,7 @@ function hasPossiblyTextElements(e: Expression | undefined): boolean {
 export function couldBeStringOperand(e: Expression): boolean {
   const source = stringEvidenceSource(e);
   if (isTextAdmittingCollectionType(source.type.type)) return true;
+  if (isTextAdmittingBroadcastableType(source.type.type)) return true;
   const t = jsType(source);
   if (typeof t !== 'object' || t.kind !== 'union') return false;
   return t.types.some(
@@ -1957,6 +1958,39 @@ function isTextAdmittingCollectionType(t: Type): boolean {
 }
 
 /**
+ * True when the type `t` is a `broadcastable<T>` (or a union with one as an
+ * arm) whose cells `T` have an arm that is a subtype of `string` or
+ * `character`: `broadcastable<string>`, `broadcastable<string | number>`.
+ * A value of such a type may be one string, which the generic lowerings
+ * would read as an array of UTF-16 code units: `At(S, 1)` for
+ * `S: broadcastable<string>` holding `"abc"` gave `undefined` where the
+ * interpreter gives `"a"`, and `First(S)` of `"😀b"` gave half of a
+ * surrogate pair. So the operations on such an operand fail closed, as for
+ * the other types that admit text without proving it
+ * (`couldBeStringOperand`).
+ *
+ * A cell arm that is itself such a broadcastable, or an alias of one
+ * (`broadcastable<broadcastable<string>>`), admits text too: it is not a
+ * subtype of `string`, but its value may be one string. So each cell arm is
+ * read again by this test.
+ */
+function isTextAdmittingBroadcastableType(t: Type): boolean {
+  t = resolveTypeAlias(t);
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union') return t.types.some(isTextAdmittingBroadcastableType);
+  if (t.kind !== 'broadcastable') return false;
+  const cells = resolveTypeAlias(t.elements);
+  const arms =
+    typeof cells !== 'string' && cells.kind === 'union' ? cells.types : [cells];
+  return arms.some(
+    (m) =>
+      (m !== 'never' &&
+        (isSubtype(m, 'string') || isSubtype(m, 'character'))) ||
+      isTextAdmittingBroadcastableType(m)
+  );
+}
+
+/**
  * True when `e` compiles to a JavaScript array that supports index access and
  * `.length` — an indexed collection (list / vector / range) or a `list`-typed
  * expression (e.g. `Power(L, 2)`, which types as `list<number>` but is
@@ -2505,6 +2539,19 @@ function pointConstructorComponent(
 }
 
 /**
+ * True when the type `t` is a top type (`unknown`, `any`, `value`), a
+ * `broadcastable` whose cells are a top type, or a union with such an arm.
+ * An alias is resolved first.
+ */
+function isTopTypedElementReadBase(t: Type): boolean {
+  t = resolveTypeAlias(t);
+  if (t === 'unknown' || t === 'any' || t === 'value') return true;
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union') return t.types.some(isTopTypedElementReadBase);
+  return t.kind === 'broadcastable' && isTopTypedElementReadBase(t.elements);
+}
+
+/**
  * The element at 0-based position `idx` of `arg`, for the compiled
  * `First`/`Second`/`Third`.
  *
@@ -2546,6 +2593,18 @@ function compileNthElement(
       `Could not compile the element read: the operand may be text at run ` +
         `time (type \`${arg.type.toString()}\`) but is not provably a ` +
         `string. The interpreter evaluates it instead.`
+    );
+  // A top type (`unknown`, `any`, `value`), bare or as the cells of a
+  // `broadcastable` (`broadcastable<any>`), says nothing about the value,
+  // which may be one string: `First(p)` of `"😀b"` gave half of a surrogate
+  // pair. The `At` and `Last` lowerings refuse such an operand
+  // (`couldBeIndexedCollectionOperand`), and so does this one.
+  if (isTopTypedElementReadBase(stripMissingFromType(jsType(arg))))
+    throw new Error(
+      `Could not compile the element read: the type of the operand ` +
+        `(\`${arg.type.toString()}\`) does not say that it is a list, and ` +
+        `the value may be text at run time. The interpreter evaluates it ` +
+        `instead.`
     );
   const read = absentRead(arg);
   const collT = stripMissingFromType(jsType(arg));
@@ -12873,21 +12932,22 @@ function isUnionWithCollectionOrAbsentArm(t: Type): boolean {
 }
 
 /**
- * `t`, the type of the collection `coll`, without its number arms, when `t`
- * is a union of number arms and other arms (`number | vector<2>`) and
- * `coll` is an element read of a `broadcastable<T>` (`g(x)[1]` for
- * `g(t) = [t, 2t]`): the `At` type handler skips such a number arm, because
- * an index into a number is an error. For every other collection (a
- * declared `number | list<number>`), `t` is kept, as the type handler keeps
- * it.
+ * `t`, the type of the collection `coll`, without its number arms and its
+ * `character` arm, when `t` is a union of such arms and other arms
+ * (`number | vector<2>`) and `coll` is an element read of a
+ * `broadcastable<T>` (`g(x)[1]` for `g(t) = [t, 2t]`): the `At` type handler
+ * skips such an arm, because an index into a number or a character is an
+ * error. For every other collection (a declared `number | list<number>`),
+ * `t` is kept, as the type handler keeps it.
  */
 function withoutNumberArms(t: Type, coll: Expression): Type {
   if (!readsBroadcastableElement(coll)) return t;
   const r = resolveTypeForCompilation(t);
   if (typeof r === 'string' || r.kind !== 'union') return t;
-  const others = r.types.filter(
-    (arm) => !isSubtype(resolveTypeForCompilation(arm), 'number')
-  );
+  const others = r.types.filter((arm) => {
+    const a = resolveTypeForCompilation(arm);
+    return !isSubtype(a, 'number') && a !== 'character';
+  });
   if (others.length === 0 || others.length === r.types.length) return t;
   return others.length === 1 ? others[0] : { kind: 'union', types: others };
 }
@@ -12895,7 +12955,8 @@ function withoutNumberArms(t: Type, coll: Expression): Type {
 /**
  * True when `e` reads an element of a `broadcastable<T>` (`At`, `First`,
  * `Second`, `Third` or `Last` of it, or of a `Take`, `Drop`, `Rest`, `Most`
- * or `Slice` of it), whose `T` can hold a list. The broadcastable may be
+ * or `Slice` of it), whose `T` can hold a list or can be indexed (a tuple,
+ * a string, a record, a dictionary). The broadcastable may be
  * absent as a whole (`broadcastable<vector<2>> | missing`). The same test
  * as `readsBroadcastableElement()` in `library/collections.ts`, on an
  * expression.

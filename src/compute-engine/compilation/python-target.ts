@@ -89,6 +89,7 @@ import {
   RANGE_COUNT_TOLERANCE_CAP,
 } from '../numerics/range-count.js';
 import {
+  couldBeStringOperand,
   isNonFiniteBound,
   requirePrimitiveElements,
   refuseKleeneQuantifier,
@@ -3688,6 +3689,18 @@ function pyCollArg(
   // A collection of CHARACTERS is closed for the same capability reason: an
   // element is one grapheme cluster this target cannot order or re-segment.
   if (arg) assertPyNoCharacterOperand(kind, [arg]);
+  // An operand that may be one string at run time without being provably a
+  // string (`string | list<string>`, `broadcastable<string>`) matches
+  // `indexed_collection<any>` below, through its string arm. The emitted
+  // code would then read a string by code point: `First(p)` gave `_l[0]`.
+  // It is closed for the same reason as a string.
+  if (arg && couldBeStringOperand(arg))
+    throw new Error(
+      `Could not compile \`${kind}\`: ${position !== undefined ? `operand ${position}` : 'the operand'} ` +
+        `may be text at run time (type \`${arg.type.toString()}\`), and ` +
+        `Python has no stdlib grapheme segmentation. The interpreter ` +
+        `evaluates it.`
+    );
   if (
     !arg ||
     !(
@@ -3789,7 +3802,8 @@ function pyNthElement(
     if (
       present === 'never' ||
       isSubtype(present, 'string') ||
-      !isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE)
+      !isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE) ||
+      couldBeStringOperand(arg)
     )
       code = pyCollArg(kind, arg, compile);
     else {
@@ -5756,6 +5770,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (base == null || index == null || args.length !== 2)
       throw new Error(
         `Could not compile \`At\`: only the single-index form compiles.`
+      );
+    // A base that may be one string at run time (`string | list<string>`,
+    // `broadcastable<string>`) is admitted below through its string arm, and
+    // the emitted code answers `nan` for a string, where the interpreter
+    // answers the character at that index. See `pyCollArg`.
+    if (couldBeStringOperand(base))
+      throw new Error(
+        `Could not compile \`At\`: the first operand may be text at run time ` +
+          `(type \`${base.type.toString()}\`), and Python has no stdlib ` +
+          `grapheme segmentation. The interpreter evaluates it.`
       );
     // Admission mirrors the JavaScript target: provably an indexed collection,
     // or a union that merely ADMITS one (the `dictionary | indexed_collection`
