@@ -736,6 +736,37 @@
 
 ### Resolved Issues
 
+- **Collection fixes listed for 0.160.0 were not in the 0.160.0 and 0.161.0
+  packages.** A later change removed them before 0.160.0 was published, and
+  they are back in this release:
+  - `Dedup`, `Filter` and `TakeWhile` of a string held by a symbol of a wider
+    type give a string: with `c: list<integer> | string` holding `"aab"`,
+    `Dedup(c)` is `"ab"`, not `["a", "b"]`, and so is `Dedup(Filter(c, p))`.
+  - `Filter` and `Dedup` over a dictionary give a `Dictionary`, not a `Set` of
+    entry tuples, also when the dictionary is an arm of a union type and
+    through nested `Filter` and `Dedup` views. A view over a dictionary of
+    more than five entries prints as written (`Dedup(d)`).
+  - The preview of `Map(x ↦ x + 10, c)`, with `c` declared
+    `missing | list<integer>`, is the list `[11, 12]`, not `Set(11, 12)`.
+  - `Map` of a function literal whose parameter is annotated as a scalar
+    (`(x: integer) ↦ x + 1`) over a list of lists is refused when it is
+    boxed; it was typed `list<integer>` and gave an error for each row.
+  - `Map(Sqrt, [[1, 4], [9]])` is typed `list<vector<1> | vector<2>>`; it was
+    `list<list<number>>`.
+  - The types of `FlatMap` over a source with absent cells, of `Map` of an
+    operator whose declared result is `any` (`First`, `PointX`), of `Map`
+    over an alias of a tuple (`list<number>`, was `collection<number>`), and
+    of `Map` over a dictionary arm of a union hold their values again.
+
+- **The type of a `Map` did not hold its value in two cases.**
+  `Map(x ↦ If(x = 1, "x", x), [1, 2])` was typed `list<integer | string^2>`,
+  and its value `["x", 2]` is a `list<integer | string>`: a list whose
+  elements are a union that is not a number type now states no length, as a
+  list literal does. `Map(First, [[], [3]])` was typed `list<integer | nan>`
+  for the value `["Missing", 3]`: `First([])` is `Missing`, since the element
+  `[]` states no element type, and the type is now
+  `list<integer | missing | nan>`.
+
 - **A sum with an infinite term of unknown sign folded to that infinity.**
   `∞·c + 1` evaluated to `+∞` for a `c` with no known sign: the sum read the
   coefficient `∞` of the term and ignored `c`, although the sum is `−∞` at

@@ -576,7 +576,11 @@ describe('A SELF-REFERENTIAL ALIAS SOURCE', () => {
 // A union source of `Map` (with a callback whose result is not known) and of
 // `Filter` is read arm by arm: the value is in one of the arms. Echoed whole,
 // `tuple<integer, missing> | dictionary<integer>` claimed a tuple for a
-// value that is a list.
+// value that is a list. For `Map`, the arm of the dictionary is
+// `collection<unknown>`, and the union reducer keeps it as the supertype of
+// the arm of the tuple, so the union reduces to `collection<unknown>` (user
+// decision 2026-10-23: the reduction is accepted, although it drops the
+// `missing` element arm of `list<missing | unknown>`).
 //
 describe('A UNION SOURCE OF MAP AND FILTER', () => {
   test.each([
@@ -584,7 +588,7 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
       'tuple<integer, missing> | dictionary<integer>',
       ['Tuple', 1, 'Missing'],
       ['Map', ['Function', 'x', 'x'], 'v'],
-      'collection<unknown> | list<missing | unknown>',
+      'collection<unknown>',
       '[1,"Missing"]',
     ],
     [
@@ -598,7 +602,7 @@ describe('A UNION SOURCE OF MAP AND FILTER', () => {
       'tuple<integer, integer> | dictionary<integer>',
       ['Tuple', 1, 2],
       ['Map', ['Function', 'x', 'x'], 'v'],
-      'collection<unknown> | list',
+      'collection<unknown>',
       '[1,2]',
     ],
     [

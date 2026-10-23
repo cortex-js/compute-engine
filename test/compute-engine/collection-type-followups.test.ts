@@ -659,6 +659,9 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
   });
 
   test('Dedup over a bare record', () => {
+    // A symbol declared with the bare `record` takes its fields from each
+    // assignment, so `r` is typed `record{a: integer}` here, and so is the
+    // deduplicated record.
     const engine = new ComputeEngine();
     engine.declare('r', 'record');
     engine.assign('r', engine.box(['Dictionary', ['Tuple', "'a'", 1]]));
@@ -666,7 +669,7 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
       engine.box(['Dedup', 'r']),
       engine.parse('\\operatorname{Dedup}(r)'),
     ]) {
-      expect(expr.type.toString()).toBe('record');
+      expect(expr.type.toString()).toBe('record{a: integer}');
       const value = expr.evaluate({ materialization: true });
       expect(value.toString()).toBe('{"a" -> 1}');
       expect(value.type.matches(expr.type)).toBe(true);
@@ -675,7 +678,11 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
 
   test('Map over a dictionary arm of a union', () => {
     // The arm was echoed: `dictionary<integer> | list<missing | unknown>`
-    // for a value that is a set of entries.
+    // for a value that is a set of entries. The arms are now
+    // `collection<unknown>` and `list<missing | unknown>`, and the union
+    // reducer keeps the supertype of the two, `collection<unknown>` (user
+    // decision 2026-10-23: the reduction is accepted, although it drops the
+    // `missing` element arm of the list).
     const engine = new ComputeEngine();
     engine.declare('v', 'tuple<integer, missing> | dictionary<integer>');
     engine.assign('v', engine.box(DICT));
@@ -683,9 +690,7 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
       engine.box(['Map', ['Function', 'x', 'x'], 'v']),
       engine.parse('\\operatorname{Map}(x \\mapsto x, v)'),
     ]) {
-      expect(expr.type.toString()).toBe(
-        'collection<unknown> | list<missing | unknown>'
-      );
+      expect(expr.type.toString()).toBe('collection<unknown>');
       const value = expr.evaluate({ materialization: true });
       expect(value.toString()).toBe('Set(("b", -1), ("a", 1))');
       expect(value.type.matches(expr.type)).toBe(true);
@@ -718,9 +723,13 @@ describe('10. MAP OF AN OPERATOR WHOSE DECLARED RESULT IS `any`', () => {
       'list<any>',
       '[1,3]',
     ],
+    // The source is typed `list<list<integer>>`, so the call on an element
+    // is typed `integer | nan`. But `First([])` is `Missing`, since the
+    // element `[]` is typed `list<nothing>`: the type admits both markers
+    // (user decision 2026-10-23).
     [
       ['Map', 'First', ['List', ['List'], ['List', 3]]],
-      'list<any>',
+      'list<integer | missing | nan>',
       '["Missing",3]',
     ],
   ] as [MathJsonExpression, string, string][])('%j', (json, type, value) => {
@@ -1121,5 +1130,110 @@ describe('THE BROADCAST READING OF A CALLBACK OVER ROWS DECLINES', () => {
       engine.parse('\\operatorname{Map}(id, \\mathrm{rows})'),
     ])
       expect(expr.evaluate().type.matches(expr.type)).toBe(true);
+  });
+});
+
+describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
+  // A callback with no known result (a symbol declared `function`) gives
+  // `unknown` elements, with a `missing` arm when an element of the source
+  // can be absent (`any` can be). Before, the `unknown` arm was widened to
+  // `number`, for a callback that can answer a string.
+  test.each([
+    ['list<any>', 'list<missing | nothing | unknown>'],
+    ['dictionary<any>', 'collection<missing | unknown>'],
+    ['record', 'collection<missing | unknown>'],
+    ['dictionary<integer | missing>', 'collection<missing | unknown>'],
+  ])('a callback declared `function` over `%s`', (declared, type) => {
+    const engine = new ComputeEngine();
+    engine.declare('f', 'function');
+    engine.declare('xs', declared);
+    expect(engine.box(['Map', 'f', 'xs']).type.toString()).toBe(type);
+  });
+
+  test('a callback declared `function` that answers a string', () => {
+    const engine = new ComputeEngine();
+    engine.declare('f', 'function');
+    engine.declare('xs', 'list<any>');
+    engine.assign('f', engine.box(['Function', "'s'", 'x']));
+    engine.assign('xs', engine.box(['List', "'a'", 'Missing']));
+    expect(
+      expectTypeHoldsValue(
+        engine,
+        engine.box(['Map', 'f', 'xs']),
+        'list<missing | nothing | unknown>'
+      )
+    ).toBe('["s","s"]');
+  });
+
+  test('an element read from a point never adds `missing`', () => {
+    // Only an element that can be an empty collection makes `First` answer
+    // `Missing`; a point has its coordinates.
+    const engine = new ComputeEngine();
+    engine.declare('pts', 'list<tuple<number, number>>');
+    engine.assign('pts', engine.box(['List', ['Tuple', 1.5, 2]]));
+    for (const op of ['PointX', 'First'])
+      expect(
+        expectTypeHoldsValue(
+          engine,
+          engine.box(['Map', op, 'pts']),
+          'list<number>'
+        )
+      ).toBe('[1.5]');
+  });
+
+  test('FlatMap over a source that holds an absent cell through `any`', () => {
+    const engine = new ComputeEngine();
+    engine.declare('ys', 'list<any>');
+    engine.assign('ys', engine.box(['List', 1, 'Missing']));
+    expect(
+      expectTypeHoldsValue(
+        engine,
+        engine.box([
+          'FlatMap',
+          'ys',
+          ['Function', ['List', 'x'], ['Typed', 'x', "'integer'"]],
+        ]),
+        'list<number>'
+      )
+    ).toBe('[1,NaN]');
+    expect(
+      expectTypeHoldsValue(
+        engine,
+        engine.box(['FlatMap', 'ys', 'IsPrime']),
+        'list<boolean | missing>'
+      )
+    ).toBe('["False","Missing"]');
+  });
+
+  test('Map of an annotated literal over a set with an absent element', () => {
+    const engine = new ComputeEngine();
+    engine.declare('s', 'set<integer | missing>');
+    engine.assign('s', engine.box(['Set', 1, -2, 'Missing']));
+    const expr = engine.box([
+      'Map',
+      [
+        'Function',
+        ['If', ['Greater', 'x', 0], 'Missing', 'x'],
+        ['Typed', 'x', "'integer'"],
+      ],
+      's',
+    ]);
+    expect(expr.type.toString()).toBe('set<missing | number>');
+    const v = expr.evaluate({ materialization: true });
+    expect(v.toString()).toBe('Set(-2, NaN, "Missing")');
+    expect(v.type.matches(expr.type)).toBe(true);
+  });
+
+  test('a source of tensors does not unfold forever', () => {
+    // The element type of a `tensor<U>` is `U | tensor<U>`, a new object at
+    // each read: a walk through the elements must go toward the cells.
+    const engine = new ComputeEngine();
+    engine.declare('t', 'list<tensor<integer>>');
+    const expr = engine.box([
+      'Map',
+      ['Function', ['Block', ['Assign', 'y', 1], 'x'], 'x'],
+      't',
+    ]);
+    expect(() => expr.type.toString()).not.toThrow();
   });
 });

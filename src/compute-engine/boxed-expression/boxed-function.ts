@@ -112,7 +112,7 @@ import {
   isBroadcastCollectionTypeOf,
   isPossiblyCollectionTypedView,
 } from './broadcast-lift-type.js';
-import { listedBroadcastCells } from './listed-element.js';
+import { listedBroadcastCells, producesKeyed } from './listed-element.js';
 import {
   literalMayEraseElement,
   literalWithErasureResolved,
@@ -158,6 +158,7 @@ import {
   viewOverListedSource,
   shapedBroadcastResultType,
   isTopTypedBlockLocal,
+  isRecordShapedType,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -15295,6 +15296,62 @@ function isHeldEagerSource(x: Expression): boolean {
 }
 
 /**
+ * Whether `x`, an operand of the lazy operator application `expr`, is a
+ * symbol whose type is wider than `string` and whose value is a string
+ * (`c: list<integer> | string` holding `"aab"`), at an application whose
+ * type admits a string: `Dedup(c)`, `Filter(c, p)` and `TakeWhile(c, p)`
+ * keep the kind of a string source, so their result over that symbol can
+ * be a string.
+ *
+ * Such an operand is a source that `heldEagerSources()` replaces by its
+ * value: the operator is built again over the string, its type is the type
+ * over a string, and the kept characters are joined into a string
+ * (`evaluateStringPreservingCollection`). That is the result for a string
+ * literal written as the source, and for a symbol whose value is an
+ * application that evaluates to a string (`StringJoin(…)`, which
+ * `isHeldEagerSource()` selects). Over the symbol, the view was typed from
+ * the declared union, the characters were not joined, and `Dedup(c)` was
+ * the list `["a", "b"]` instead of the string `"ab"`.
+ *
+ * An application whose type does not admit a string (`Map(f, c)`, a list
+ * over a string) keeps the symbol, as before.
+ */
+function heldWiderStringSource(
+  expr: Expression,
+  x: Expression,
+  depth = 0
+): boolean {
+  // The type of the application must have a `string` arm. An application
+  // typed `unknown` or `any` is not selected: every type is a subtype of
+  // `unknown`, so `isSubtype('string', …)` says nothing about it.
+  const resolved = resolveTypeAlias(expr.type.type);
+  const arms =
+    typeof resolved !== 'string' && resolved.kind === 'union'
+      ? resolved.types
+      : [resolved];
+  if (
+    !arms.some(
+      (arm) => arm !== 'unknown' && arm !== 'any' && isSubtype('string', arm)
+    )
+  )
+    return false;
+  if (x.type.matches('string')) return false;
+  // A lazy view over such a symbol, whose type admits a string too
+  // (`Filter(c, p)` in `Dedup(Filter(c, p))`), is such a source as well:
+  // its evaluation gives the string, for the same reason. Before,
+  // `Dedup(Filter(c, p))` was the list `["a", "b"]`, while over the literal
+  // `"aab"` it is the string `"ab"`. The descent through nested views is
+  // bounded.
+  if (isFunction(x) && x.isLazyCollection)
+    return (
+      depth < 8 && x.ops.some((op) => heldWiderStringSource(x, op, depth + 1))
+    );
+  if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
+  const value = x.value;
+  return value !== undefined && isString(value);
+}
+
+/**
  * Whether `options` are those of the display preview (`toString()`, the
  * `latex` getter, `toLatex()` without a `materialization` option) and `expr`
  * is a lazy view. The preview passes the exact `DISPLAY_MATERIALIZATION`
@@ -15392,7 +15449,7 @@ function heldEagerSources(
         (isFunction(x, 'When') || isFunction(x, 'Which'))
       )
         return;
-      const held = isHeldEagerSource(x);
+      const held = isHeldEagerSource(x) || heldWiderStringSource(expr, x);
       // A collection without positions (a set held by a symbol of a wider
       // declared type) at a slot that reads its source by position is a
       // source too: its value is refused by `settleHeldEagerSources()`.
@@ -16662,9 +16719,20 @@ function* materializationSteps(
   // A static type that is an ABSTRACT collection (`collection<T>` over a
   // symbol declared with that type) is resolved by `isIndexedCollection`
   // itself, from the values the operands hold now.
+  //
+  // A static type that can be absent as a whole (`list<integer> | missing`,
+  // the type of `Map(f, c)` with `c: missing | list<integer>`) is read
+  // without its `missing` arm: a node that is materialized here is a
+  // collection, so its value is the present arm. `isIndexedCollection` reads
+  // the `missing` arm and answers `false` for such a type (see the getter),
+  // and the preview of `Map(x ↦ x + 10, c)` was `Set(11, 12)`, although the
+  // value is the list `[11, 12]`.
   const t = expr.type.type;
+  const present = threadedPresentType(t);
   const isIndexed =
     expr.isIndexedCollection ||
+    (present !== undefined &&
+      isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE)) ||
     ((t === 'unknown' || t === 'any' || t === 'value') &&
       def.collection?.at !== undefined &&
       expr.nops > 0 &&
@@ -16864,9 +16932,19 @@ function* materializationSteps(
   //
 
   const elttype = def.collection?.elttype?.(expr);
-  if (elttype && isSubtype(elttype, 'tuple<string, any>')) {
+  if (
+    (elttype && isSubtype(elttype, 'tuple<string, any>')) ||
+    keyedByHeldSource(expr)
+  ) {
     // If the collection is a collection of key-value pairs,
-    // we convert it to a Dictionary
+    // we convert it to a Dictionary.
+    // A truncated walk (the display preview, a bounded materialization)
+    // ends with the `ContinuationPlaceholder` marker, which is not an
+    // entry: the `Dictionary` built from it was an `incompatible-type`
+    // error, so `Dedup(d)` over a dictionary of seven entries printed as an
+    // error. A dictionary has no form for "and more entries", so the lazy
+    // form is kept.
+    if (xs.some((x) => isSymbol(x, 'ContinuationPlaceholder'))) return expr;
     return expr.engine.function('Dictionary', xs);
   }
 
@@ -16898,6 +16976,55 @@ function* materializationSteps(
   if (isIndexed) return expr.engine._fn('List', materialized);
 
   return expr.engine.function('Set', [...materialized]);
+}
+
+/**
+ * Whether `expr`, a view whose static type is a union with a keyed arm (a
+ * dictionary or a record), is keyed by the value its source holds now: its
+ * first operand holds a dictionary or a record. `Filter(v, p)` and
+ * `Dedup(v)`, with `v: tuple<integer, missing> | dictionary<integer>`
+ * holding a dictionary, select entries of that dictionary, and their value
+ * is a dictionary of the kept entries, as the dictionary arm of their type
+ * says. Their `elttype` handler reads the static type only, which states no
+ * entry type for the union, so without this test the entries were listed
+ * as a `Set` of tuples, which the type does not hold. A view whose static
+ * type is keyed as a whole is decided by its `elttype` handler.
+ */
+function keyedByHeldSource(expr: BoxedFunction): boolean {
+  if (expr.nops === 0) return false;
+  const t = resolveTypeAlias(expr.type.type);
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  if (
+    !t.types.some(
+      (arm) =>
+        isRecordShapedType(arm) ||
+        isSubtype(arm, { kind: 'dictionary', values: 'any' })
+    )
+  )
+    return false;
+  return holdsKeyedSource(expr.op1, 0);
+}
+
+/**
+ * Whether the source `x` of a keyed-capable view holds a dictionary or a
+ * record now: its value is keyed (`producesKeyed`), or it is a selection
+ * view that keeps the kind of its own source (`Filter`, `Dedup`) over such
+ * a source. `Filter(Filter(v, p), q)`, with `v` holding a dictionary, is a
+ * dictionary of the kept entries. The descent through symbol values and
+ * nested views is bounded, so a cycle of symbols ends.
+ */
+function holdsKeyedSource(x: Expression, depth: number): boolean {
+  if (depth > 16) return false;
+  if (isSymbol(x)) {
+    const value = x.value;
+    return value !== undefined && holdsKeyedSource(value, depth + 1);
+  }
+  if (producesKeyed(x)) return true;
+  return (
+    (isFunction(x, 'Filter') || isFunction(x, 'Dedup')) &&
+    x.nops > 0 &&
+    holdsKeyedSource(x.op1, depth + 1)
+  );
 }
 
 /**

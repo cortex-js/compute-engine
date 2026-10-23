@@ -195,7 +195,10 @@ import {
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
-import { broadcastAdmitsCollectionElement } from '../boxed-expression/callback-broadcast-admission.js';
+import {
+  broadcastAdmitsCollectionElement,
+  broadcastCallbackResultType,
+} from '../boxed-expression/callback-broadcast-admission.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
@@ -1302,11 +1305,23 @@ function dedupResultType(source: Type): Type {
  * Before, such a union was not an indexed collection as a whole, so it was
  * kept, and the type claimed a tuple for a value that is a list. A `string`
  * arm of a union gives `list<character> | string` (`STRING_ARM_IN_UNION`).
+ *
+ * A record source gives `dictionary<any>`: filtering can remove fields, so
+ * the value (a `Dictionary` of the kept entries) does not have every field
+ * of the record. `Filter({a: 1, b: -1}, (k, v) ↦ v > 0)` is `{a: 1}`, which
+ * the type `record{a: integer, b: integer}` does not hold. The values are
+ * not typed from the declared fields: a record type admits a value with
+ * more fields than it declares, of any type, absent values included, and
+ * the filter can keep them, such as the absent value that
+ * `Filter({a: Missing}, p ↦ True)` keeps. `dictionary<any>` is the same type
+ * as the bare `dictionary`. A dictionary source keeps its type.
  */
 function filterResultType(source: Type): Type {
   if (isSubtype(source, 'string')) return source;
   return resultTypeByArm(source, (t) => {
     if (t === 'string') return STRING_ARM_IN_UNION;
+    if (t === 'record' || (typeof t !== 'string' && t.kind === 'record'))
+      return { kind: 'dictionary', values: 'any' };
     return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
       ? { kind: 'list', elements: collectionElementType(t) ?? 'any' }
       : t;
@@ -1316,23 +1331,51 @@ function filterResultType(source: Type): Type {
 /**
  * The result type of `Dedup` and `Filter` for a `string` arm of a union
  * source: `list<character> | string`, because both values occur for a
- * symbol of the same declared type. With `c: list<integer> | string`:
- * - when `c` holds a string LITERAL (`"aab"`), the handler keeps the symbol
- *   as the source of the result, and the result is the view typed from the
- *   declared union, which is not `string`: the string is not rejoined
- *   (`evaluateStringPreservingCollection`, `boxed-function.ts`, reads the
- *   declared result type), and `Dedup(c)` is the list `["a", "b"]`;
- * - when `c` holds an application that evaluates to a string
- *   (`StringJoin(["a", "ab"])`), the handler evaluates the source and builds
- *   the operator again over the string literal, whose result type is
- *   `string`, and `Dedup(c)` is the string `"ab"`.
- * A source typed `string` alone keeps `string`: there the result is always
- * a string.
+ * source of the same type. With `c: list<integer> | string` holding
+ * `"aab"`, the evaluation of `Dedup(c)` and of `Dedup(Filter(c, p))` is the
+ * string `"ab"`: it builds the operator again over the string that the
+ * symbol holds (`heldWiderStringSource`, `boxed-function.ts`), whose result
+ * type is `string`, and the kept characters are joined
+ * (`evaluateStringPreservingCollection`, same file). The display preview
+ * (`toString()` of the unevaluated `Dedup(c)`) does not evaluate the
+ * source, so it lists the characters of the view typed from the union:
+ * `["a","b"]`. A source typed `string` alone keeps `string`: there the
+ * result is always a string.
  */
 const STRING_ARM_IN_UNION: Type = {
   kind: 'union',
   types: [{ kind: 'list', elements: 'character' }, 'string'],
 };
+
+/**
+ * The `elttype` collection handler of `Filter` and `Dedup`: the entry type
+ * of their static type when it is a dictionary or a record
+ * (`tuple<string, integer>` for `dictionary<integer>`), `undefined`
+ * otherwise.
+ *
+ * Over a dictionary or a record, both operators select entries, so their
+ * result is a dictionary of the kept entries, as their type says
+ * (`filterResultType`, `dedupResultType`). `materialize()`
+ * (`boxed-expression/boxed-function.ts`) builds a `Dictionary` for a view
+ * whose `elttype` is an entry tuple. Without this handler, the view was
+ * listed as a `Set` of entry tuples (`Set(("a", 1))`), which the type
+ * `dictionary<integer>` does not hold. The answer is read from the static
+ * type only, as an `elttype` handler must: a union type with a dictionary
+ * arm is decided by the value of the source in `materialize()`
+ * (`keyedByHeldSource`).
+ */
+function keyedViewElementType(expr: Expression): Type | undefined {
+  if (!isFunction(expr) || !producesKeyed(expr)) return undefined;
+  // The element of a keyed collection is its entry tuple: a bare `record`
+  // or `dictionary` gives `tuple<string, any>`. A type with no element type,
+  // or an `unknown` one, gives the entry tuple `tuple<string, unknown>`.
+  // Without an entry tuple, `Dedup(r)` with `r: record` holding `{a: 1}`
+  // was listed as `Set(("a", 1))`.
+  const element = collectionElementType(expr.type.type);
+  return element === undefined || element === 'unknown'
+    ? parseType('tuple<string, unknown>')
+    : element;
+}
 
 /**
  * The result type of `Map` over a source arm `t` when the element type of
@@ -1344,21 +1387,76 @@ const STRING_ARM_IN_UNION: Type = {
  *   it is (`Map(x ↦ x, t)` with `t := (1, Missing)` is `[1, Missing]`), and
  *   the bare `list` holds values only. Only the slots themselves are read:
  *   `tuple<tuple<integer, missing>, integer>` has no absent element.
+ * - A dictionary gives `collection<unknown>`, or
+ *   `collection<missing | unknown>` when its values can be absent (a bare
+ *   `dictionary`, whose values are `any`, can hold an absent value); a
+ *   record gives `collection<missing | unknown>`.
  */
 function unknownElementMapArm(t: Type): Type {
   if (t === 'range' || t === 'string' || t === 'indexed_collection')
     return 'list';
   if (t === 'tuple') return 'list';
+  // A bare `dictionary` is `dictionary<any>`: its values can be absent.
+  if (t === 'dictionary' || t === 'record')
+    return mapResultType(t, MISSING_OR_UNKNOWN);
   if (typeof t === 'string') return t;
   if (t.kind === 'indexed_collection') return 'list';
+  // A dictionary or a record gives a collection of the callback results,
+  // as the type of `Map` over a dictionary source alone does
+  // (`mapResultType`): the value is not a dictionary. Echoed, the arm of
+  // `tuple<integer, missing> | dictionary<integer>` claimed a dictionary for
+  // `Map(x ↦ x, v)` with `v` holding a dictionary, whose value is a set of
+  // entries. An entry whose value can be absent can give an absent result
+  // (`Map(x ↦ At(x, 2), w)` with `w := {a: Missing}` is `Set(Missing)`), as
+  // an absent slot of a tuple can. A record is open: it can hold more fields
+  // than it declares, absent ones included.
+  if (t.kind === 'dictionary')
+    return mapResultType(
+      t,
+      provablyAdmits('missing', t.values) ? MISSING_OR_UNKNOWN : 'unknown'
+    );
+  if (t.kind === 'record') return mapResultType(t, MISSING_OR_UNKNOWN);
   if (t.kind === 'tuple')
     return t.elements.some((e) => provablyAdmits('missing', e.type))
-      ? {
-          kind: 'list',
-          elements: { kind: 'union', types: ['unknown', 'missing'] },
-        }
+      ? { kind: 'list', elements: MISSING_OR_UNKNOWN }
       : 'list';
   return t;
+}
+
+/** The element type of a result whose elements are not known, and can be
+ * absent. */
+const MISSING_OR_UNKNOWN: Type = {
+  kind: 'union',
+  types: ['unknown', 'missing'],
+};
+
+/**
+ * Whether the type `t`, one arm of the source of a `Map`, states that an
+ * element can be absent: a slot of a tuple, a value of a dictionary or an
+ * element of another collection whose type admits `missing`
+ * (`provablyAdmits`: an `unknown` element is no evidence). A record is open,
+ * so it can hold an absent field that it does not declare.
+ */
+function armMayHoldAbsentElement(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  // A bare collection name admits arbitrary contents, as its `<any>` form
+  // does, and `any` admits an absent element.
+  if (typeof r === 'string')
+    return [
+      'list',
+      'set',
+      'tuple',
+      'record',
+      'dictionary',
+      'collection',
+      'indexed_collection',
+    ].includes(r);
+  if (r.kind === 'record') return true;
+  if (r.kind === 'dictionary') return provablyAdmits('missing', r.values);
+  if (r.kind === 'tuple')
+    return r.elements.some((e) => provablyAdmits('missing', e.type));
+  const element = collectionElementType(r);
+  return element !== undefined && provablyAdmits('missing', element);
 }
 
 /**
@@ -1959,9 +2057,22 @@ function callbackCompatibilityError(
   // Rule 5 — the effect bound, checked against the declared arrow.
   if (!narrowingPreservesEffects(opType, declared as Type)) return mint();
   // Rules 1/3/4.
+  // The broadcast admission applies to a callback that the evaluation
+  // broadcasts over a collection element: a named function or operator. A
+  // function literal written in place with an annotated parameter is
+  // applied to the element whole, and its annotation refuses a row:
+  // `Map((x: integer) ↦ x + 1, [[1, 2], [3, 4]])` gave an
+  // `incompatible-type` error for each row while it was admitted and typed
+  // `list<integer>`. A literal with bare parameters is not judged here
+  // (`widenUnannotatedLiteralParams`).
   if (callbackIncompatibility(supplyArrow, opType) !== undefined) {
     if (
-      !broadcastAdmitsCollectionElement(supplyArrow, opType, elementDerived) &&
+      (isFunction(fn, 'Function') ||
+        !broadcastAdmitsCollectionElement(
+          supplyArrow,
+          opType,
+          elementDerived
+        )) &&
       !pointArithmeticAdmits(fn, supplyArrow, opType)
     )
       return mint();
@@ -3569,8 +3680,20 @@ function zipMapResultType(
  * every element has those lengths, so the rows are uniform. An element
  * tensor with an open length, or of unknown rank, gives a plain list of
  * the element, since its rows may differ in length.
+ *
+ * An element that is a union which is not a number type states no length,
+ * as for a list literal (`shapedListTypeD`): `["x", 6]` is
+ * `list<integer | string>`, not `list<integer | string^2>`. With the length,
+ * the value of `Map(x ↦ If(x = 1, "x", x), [1, 2])`, once listed, did not
+ * match the type of the `Map`.
  */
 function listOfLengthType(length: number, element: Type): ListType {
+  const cell = resolveTypeAlias(element);
+  const mixed =
+    typeof cell !== 'string' &&
+    cell.kind === 'union' &&
+    !isSubtype(cell, 'number');
+  if (mixed) return { kind: 'list', elements: element };
   if (mayCarryDimensions(element))
     return { kind: 'list', elements: element, dimensions: [length] };
   const e = resolveTypeAlias(element);
@@ -4335,19 +4458,161 @@ function broadcastingCallbackElementTypeD(
     };
   }
   if (!elements.some((t) => typeCouldBeCollection(t!))) return undefined;
+  const known = (t: Type | undefined): t is Type =>
+    t !== undefined &&
+    t !== 'unknown' &&
+    t !== 'any' &&
+    t !== 'error' &&
+    t !== 'never';
+  // The element of one source that is a union of indexed collections (the
+  // rows of a ragged list, `vector<integer^1> | vector<integer^2>`) is typed
+  // arm by arm, and the answers are joined: the value is in one of the arms.
+  // The type handler of the operator answered `number` for the union as a
+  // whole, so `Map(Sqrt, [[1, 4], [9]])` was typed `list<number>` for the
+  // value `[[1, 2], [3]]`.
+  const element =
+    elements.length === 1 ? resolveTypeAlias(elements[0]!) : undefined;
+  if (
+    element !== undefined &&
+    typeof element !== 'string' &&
+    element.kind === 'union' &&
+    element.types.every(
+      (arm) =>
+        isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleShapedType(arm) &&
+        !isSubtype(arm, 'string')
+    )
+  ) {
+    const arms = element.types.map((arm) =>
+      derive(s.name, [describeBoundElement(arm, 0)])
+    );
+    return arms.every(known) ? widen(...arms) : 'unknown';
+  }
   const t = derive(
     s.name,
     elements.map((t, k) => describeBoundElement(t!, k))
   );
+  return known(t) ? t : 'unknown';
+}
+
+/**
+ * The element type of `Map(fn, source)` when `fn` is a function literal
+ * whose own result type `result` is the answer: `result` itself, or
+ * `result | indexed_collection<any>` when a parameter of the literal is
+ * bare (no type annotation) and an element of the source may be a
+ * collection whose depth the type does not state (`hasOpenContentDepth`:
+ * the source is typed `any` or `list<any>`).
+ *
+ * The own result type of the literal is computed with each bare parameter
+ * `unknown`, and an operator types an `unknown` operand as a scalar: the
+ * type of `x ↦ Sqrt(x)` is `(unknown) -> number`. When an element is a
+ * list, the call maps over it, so with `U: any` holding `[[1, 4], [9]]`,
+ * `Map(x ↦ Sqrt(x), U)` is `[[1, 2], [3]]`, which `list<number>` does not
+ * hold. The answer is the one `broadcastingCallbackElementTypeD` gives for
+ * a broadcastable operator named by a symbol (`Map(Sqrt, U)`). An
+ * annotated parameter does not get the wider answer: its annotation is
+ * checked at each call, so an element that is a collection is refused
+ * there. Nor does a body that reads no bare parameter (`x ↦ 1`). Any other
+ * callback gets `result` unchanged.
+ */
+function openDepthLiteralResult(
+  fn: OperandDescriptor,
+  source: OperandDescriptor,
+  result: Type | undefined
+): Type | undefined {
+  if (result === undefined || result === 'unknown' || result === 'any')
+    return result;
+  const literal = fn.structureOf?.();
+  if (literal?.kind !== 'function-literal') return result;
+  // Only a bare parameter that the body reads can bring a collection into
+  // the result: a constant body (`x ↦ 1`) answers its own type for every
+  // element. A parameter whose type the literal's own signature states
+  // (inferred from its uses: `x ↦ Length(x)` is `(x: collection) -> …`)
+  // was not typed as a scalar, so its own result type holds.
+  const signature = fn.type;
+  const parameterType = (k: number): Type | undefined =>
+    typeof signature !== 'string' && signature.kind === 'signature'
+      ? signature.args?.[k]?.type
+      : undefined;
+  const bare = new Map<string, number>();
+  literal.parameters.forEach((p, k) => {
+    const t = parameterType(k);
+    if (p.annotated === undefined && (t === undefined || t === 'unknown'))
+      bare.set(p.name, k);
+  });
   if (
-    t === undefined ||
-    t === 'unknown' ||
-    t === 'any' ||
-    t === 'error' ||
-    t === 'never'
+    bare.size === 0 ||
+    !structureMentionsParameter(literal.body, bare, new Set())
   )
-    return 'unknown';
-  return t;
+    return result;
+  const element =
+    source.facts.elementType ?? collectionElementType(source.type);
+  const open =
+    element === undefined
+      ? source.type === 'any' || source.type === 'value'
+      : hasOpenContentDepth(element);
+  if (!open) return result;
+  return {
+    kind: 'union',
+    types: [result, { kind: 'indexed_collection', elements: 'any' }],
+  };
+}
+
+/**
+ * `hasOpenDepth` for the types that state their content: `t` is `any` or
+ * `value`, or has a collection arm whose elements (at some depth) are one
+ * of these. An `unknown` element is not read as a collection here: it is a
+ * placeholder that inference refines (a parameter `xs` used as a collection
+ * is typed `collection<unknown>`), not a statement that an element can be
+ * anything, so `Map(x ↦ x + 1, xs)` keeps the result type of the literal.
+ */
+function hasOpenContentDepth(t: Type, seen: Set<Type> = new Set()): boolean {
+  if (t === 'any' || t === 'value') return true;
+  if (t === 'unknown') return false;
+  // A recursive alias (`R = list<R>`) reaches the same type again: it adds
+  // no open depth of its own, and without the guard the walk did not end.
+  if (seen.has(t)) return false;
+  seen.add(t);
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved !== 'string' && resolved.kind === 'union')
+    return resolved.types.some((x) => hasOpenContentDepth(x, seen));
+  if (!typeCouldBeCollection(resolved) || isSubtype(resolved, 'string'))
+    return false;
+  // The walk reads toward the cells (`leafwardElementType`): the element
+  // type of a `tensor<U>` is `U | tensor<U>`, a new object at each call, so
+  // `seen` never meets it again and `collectionElementType` would not end.
+  const element = leafwardElementType(resolved);
+  return element !== undefined && hasOpenContentDepth(element, seen);
+}
+
+/**
+ * The element type of the list that `FlatMap` builds from callback results
+ * of type `t`. The splice rule is the one of its evaluation: a collection
+ * result other than a string is spliced, and any other result (a string, a
+ * number, an absent value) is one element. A union is read arm by arm, and
+ * the answers are joined: `Reverse(x)` over cells `list<integer> | missing`
+ * gives `integer | missing` (`FlatMap([[1, 2], Missing], x ↦ Reverse(x))`
+ * is `[2, 1, Missing]`). Before, a union was not peeled, and the result
+ * claimed lists as elements.
+ */
+function flatMapSplicedType(t: Type, seen?: AliasDescent): Type {
+  if (t === 'string') return t;
+  // An alias that reaches itself as a bare arm of its own union
+  // (`cyc = cyc | list<integer>`) adds no value of its own there, so that
+  // arm adds no element (`never`) and the other arms decide. Without the
+  // guard, the walk unfolded it forever.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return 'never';
+  const resolved = unfolded.type;
+  if (typeof resolved !== 'string' && resolved.kind === 'union')
+    return reduceType({
+      kind: 'union',
+      types: resolved.types.map((arm) =>
+        flatMapSplicedType(arm, unfolded.seen)
+      ),
+    });
+  if (isSubtype(resolved, 'string')) return resolved;
+  return collectionElementType(resolved) ?? resolved;
 }
 
 /**
@@ -4453,6 +4718,41 @@ function callbackCallElementTypeD(
   )
     return undefined;
   return t;
+}
+
+/**
+ * The element type of `Map(f, xs)` when `f` names a user function
+ * (`isUserFunctionName`, or an operator definition made from a function
+ * literal) whose parameters are all scalar, and an element of
+ * `xs` is a collection: the call broadcasts over the element (user ruling
+ * of 2026-09-22), so its result is a list of the declared result
+ * (`broadcastCallbackResultType`). `undefined` otherwise. With
+ * `f: (number) -> number` and `xs := [[1, 2], [3, 4, 5]]`, the `Map` is
+ * `[[2, 4], [6, 8, 10]]`: it was typed `list<number>`.
+ */
+function userCallbackOverRowsTypeD(
+  fn: OperandDescriptor,
+  source: OperandDescriptor,
+  engine: PureEngineView
+): Type | undefined {
+  const s = fn.structureOf?.();
+  // A captured or synthetic symbol (`lookupByName === false`) is not the
+  // function that its name finds in the current scope.
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
+  const def = engine.lookupDefinition(s.name);
+  // A user function: a symbol that holds a function literal, or an operator
+  // definition made from one (`ce.assign('h', x ↦ …)`).
+  if (
+    !isUserFunctionName(engine, s.name) &&
+    def?.operator?.isUserFunctionDefinition !== true
+  )
+    return undefined;
+  const element = mappingSourceElementTypeD(source);
+  if (element === undefined) return undefined;
+  const signature = def?.operator?.signature.type ?? def?.value?.type?.type;
+  return signature === undefined
+    ? undefined
+    : broadcastCallbackResultType(signature, element);
 }
 
 /**
@@ -5649,6 +5949,99 @@ function callbackHasUnknownResult(
   );
 }
 
+/**
+ * The declared result of the callback `op` when it is a symbol that names
+ * an operator whose signature declares a result of `any` or `unknown`
+ * (`First`, `PointX`), or `undefined` otherwise.
+ *
+ * The result of such an operator says nothing about the elements of a `Map`
+ * over it, and the elements are not the elements of the source: with the
+ * source type copied, `Map(First, [[1, 2], [3]])` was typed
+ * `list<vector<integer^1> | vector<integer^2>>` for the value `[1, 3]`. The
+ * elements are then of the declared result type: `any` admits an absent
+ * element, which `First([])` gives.
+ */
+function callbackDeclaredTopResult(
+  op: OperandDescriptor | undefined,
+  engine: PureEngineView
+): 'any' | 'unknown' | undefined {
+  const s = op?.structureOf?.();
+  // A captured or synthetic symbol (`lookupByName === false`) is not the
+  // operator that its name finds in the current scope.
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
+  const def = engine.lookupDefinition(s.name)?.operator;
+  // A lazy operator (`Hold`) holds its operand, and its type handler types
+  // the call from that operand: the source type is kept for it.
+  if (def === undefined || def.lazy) return undefined;
+  const signature = def.signature.type;
+  const result = functionResult(signature);
+  return result === 'any' || result === 'unknown' ? result : undefined;
+}
+
+/**
+ * The element type `t` of a `Map` whose callback `op` names an operator
+ * whose declared result is `any` or `unknown` (`callbackDeclaredTopResult`),
+ * with `missing` added when `t` admits `NaN` but not `Missing`.
+ *
+ * Such an operator (`First`, `Last`) answers an absent element with the
+ * marker of the type of the element VALUE: `NaN` for an element typed as
+ * numbers, `Missing` for an element whose type states nothing, such as the
+ * empty literal `[]`. The type `t` is derived from the element type of the
+ * source, which can be wider than the type of each element value: in
+ * `[[], [3]]` (typed `list<list<integer>>`), the element `[]` is typed
+ * `list<nothing>`. So `Map(First, [[], [3]])` is `[Missing, 3]`, and was
+ * typed `list<integer | nan>`, which does not hold that value (user
+ * decision 2026-10-23: the type admits `Missing`, the value is unchanged).
+ */
+function withElementMarkerAbsence(
+  op: OperandDescriptor | undefined,
+  source: OperandDescriptor | undefined,
+  engine: PureEngineView,
+  t: Type | undefined
+): Type | undefined {
+  if (t === undefined || t === 'unknown' || t === 'any') return t;
+  if (callbackDeclaredTopResult(op, engine) === undefined) return t;
+  // Only an element that can be an empty collection gives `Missing` this
+  // way: a point (a tuple) has its coordinates, so `Map(PointX, pts)` over
+  // `list<tuple<number, number>>` stays `list<number>`.
+  const element =
+    source === undefined
+      ? undefined
+      : (source.facts.elementType ?? collectionElementType(source.type));
+  if (element === undefined || !mayBeEmptyCollection(element)) return t;
+  const r = resolveTypeAlias(t);
+  const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+  const admitsNaN = arms.some((a) => a !== 'unknown' && isSubtype('nan', a));
+  if (!admitsNaN || provablyAdmits('missing', t)) return t;
+  return widen(t, 'missing');
+}
+
+/**
+ * Whether a value of type `t` can be an empty collection: an arm of `t` is
+ * a list, a set or another collection type that does not state a length
+ * greater than zero. A tuple, a string and a scalar cannot.
+ */
+function mayBeEmptyCollection(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string')
+    return (
+      r === 'list' ||
+      r === 'set' ||
+      r === 'collection' ||
+      r === 'indexed_collection'
+    );
+  if (r.kind === 'union')
+    return r.types.some((x) => mayBeEmptyCollection(x, depth + 1));
+  if (r.kind === 'list')
+    return !r.dimensions || r.dimensions.length === 0 || r.dimensions[0] <= 0;
+  return (
+    r.kind === 'set' ||
+    r.kind === 'collection' ||
+    r.kind === 'indexed_collection'
+  );
+}
+
 /** Whether a function literal is the identity of one parameter, `x ↦ x`
  * (its body possibly a one-statement `Block`). */
 function isIdentityLiteral(
@@ -5703,14 +6096,36 @@ function withDeclaredCallbackAbsence(
     const { engine } = context;
     const sources = ops.slice(1);
     const fn = ops[0]?.structureOf?.();
+    // A function literal with an annotated parameter is not typed from its
+    // body with the absent cells (`bareMappingElementTypeD` reads bare
+    // parameters only): its own result type describes a present cell. For
+    // an absent cell, the annotation gives the body `NaN`, so the result is
+    // absorbed as for a declared callback: `Map((x: integer) ↦ x + 1, m)`
+    // with `m := [1, Missing]` is `[2, NaN]`, which was typed
+    // `list<integer>`.
+    const annotatedLiteral =
+      fn?.kind === 'function-literal' &&
+      fn.parameters.some((p) => p.annotated !== undefined);
+    // A callback with no known result (a symbol declared `function`) has no
+    // declared result to absorb into: the handler types its elements
+    // `unknown`, or `missing | unknown` for a source whose elements can be
+    // absent, from the sources as they are. Absorbed, the `unknown` arm
+    // was widened to `number`, and `Map(f, xs)` with `xs: list<any>` was
+    // typed `list<nothing | number>` for a callback that can answer a
+    // string.
     if (
       ops[0] === undefined ||
       !sources.some((d) => typeCouldHoldMissing(d.type)) ||
-      fn?.kind === 'function-literal'
+      (fn?.kind === 'function-literal' && !annotatedLiteral) ||
+      callbackHasUnknownResult(ops[0], engine)
     )
       return handler(ops, context);
     const declared = callbackResultTypeD(ops[0], engine);
-    if (declared !== undefined && typeCouldHoldMissing(declared))
+    if (
+      !annotatedLiteral &&
+      declared !== undefined &&
+      typeCouldHoldMissing(declared)
+    )
       return handler(ops, context);
     const present = ops.map((d, i) =>
       i === 0 || !typeContainsMissing(d.type)
@@ -5728,8 +6143,15 @@ function withDeclaredCallbackAbsence(
     // A source that can hold an absent cell only through `any`
     // (`list<any>`) has no `missing` arm for the absorption to read, so it
     // is given as `list<missing>`, a list with an absent cell.
-    const absorbed = absorbOperandAbsence(
-      t.type,
+    // The absorption reads the cells of a list or a collection only (a
+    // broadcast never reads the cells of a set), so a set result is
+    // absorbed as a list of its elements and made a set again:
+    // `Map((x: integer) ↦ If(x > 0, Missing, x), s)` with
+    // `s := Set(1, -2, Missing)` is `Set(-2, NaN, Missing)`.
+    const result = resolveTypeAlias(t.type);
+    const isSet = typeof result !== 'string' && result.kind === 'set';
+    const absorbedCells = absorbOperandAbsence(
+      isSet ? { kind: 'list', elements: result.elements } : t.type,
       ops.map((d) =>
         typeCouldHoldMissing(d.type) && !typeContainsMissing(d.type)
           ? { kind: 'list', elements: 'missing' }
@@ -5738,6 +6160,12 @@ function withDeclaredCallbackAbsence(
       false,
       false
     );
+    const absorbed: Type = isSet
+      ? {
+          kind: 'set',
+          elements: collectionElementType(absorbedCells) ?? absorbedCells,
+        }
+      : absorbedCells;
     // The absorption makes an absent cell `NaN`, which a numeric element
     // type holds. Some callbacks answer `Missing` for an absent cell instead
     // (`Not(Missing)` and `IsPrime(Missing)` are `Missing`), so the element
@@ -5746,6 +6174,14 @@ function withDeclaredCallbackAbsence(
     // L)` with `L: list<integer | missing>` holding `[4, Missing]` is
     // `[False, Missing]`. A callback that answers `NaN` (`Sqrt`) or an error
     // (`ToUpperCase`) for an absent value adds no arm.
+    // For an annotated literal, the absorption replaces a `missing` arm
+    // that the body returns for a present cell (`(x: integer) ↦ If(x > 0,
+    // Missing, x)`), so the result for a present cell is kept beside it.
+    if (annotatedLiteral)
+      return BoxedType.forResult(
+        joinedElements(t.type, absorbed),
+        engine._typeResolver
+      );
     return BoxedType.forResult(
       absentCellAnswerMayBeMissing(ops[0], sources, context.derive)
         ? withMissingElements(absorbed)
@@ -5753,6 +6189,26 @@ function withDeclaredCallbackAbsence(
       engine._typeResolver
     );
   });
+}
+
+/**
+ * The collection type `b` with the element type of the collection type `a`
+ * joined to its own (a union, not a widening), or `b` itself when one of
+ * them has no element type.
+ */
+function joinedElements(a: Type, b: Type): Type {
+  if (
+    typeof b === 'string' ||
+    (b.kind !== 'list' &&
+      b.kind !== 'set' &&
+      b.kind !== 'collection' &&
+      b.kind !== 'indexed_collection')
+  )
+    return b;
+  const ea = collectionElementType(a);
+  if (ea === undefined) return b;
+  const joined = reduceType({ kind: 'union', types: [ea, b.elements] });
+  return { kind: b.kind, elements: joined };
 }
 
 /**
@@ -12330,8 +12786,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
       // value-aware indexed-ness so the Map types `indexed_collection<T>`
       // rather than shedding indexed-ness to `collection<T>`.
+      // A structural alias of the source is read as its definition
+      // (`resolveTypeAlias`, which stops at a self-reference), so that
+      // `q: P`, with `P` an alias of `tuple<integer, missing>`, gives a list
+      // as the tuple does. Read as a reference, it fell to the abstract
+      // `collection` of `mapResultType`.
       const sourceType = (i: number): Type => {
-        const t = ops[i + 1].type;
+        const t = resolveTypeAlias(ops[i + 1].type);
         if (
           (t === 'unknown' || t === 'any' || t === 'value') &&
           ops[i + 1].facts.indexed === true
@@ -12355,11 +12816,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // element first (`callbackCallElementTypeD`), and a broadcastable
         // operator over elements that may be collections by its own type
         // handler (`broadcastingCallbackElementTypeD`).
-        const resultType =
+        const derived =
           bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
           bareOperatorElementTypeD(ops[0], [ops[1]], engine, derive) ??
-          broadcastingCallbackElementTypeD(ops[0], [ops[1]], engine, derive) ??
-          declaredOrCallElementTypeD(ops[0], [ops[1]], engine, derive);
+          userCallbackOverRowsTypeD(ops[0], ops[1], engine) ??
+          broadcastingCallbackElementTypeD(ops[0], [ops[1]], engine, derive);
+        const resultType = withElementMarkerAbsence(
+          ops[0],
+          ops[1],
+          engine,
+          derived ??
+            openDepthLiteralResult(
+              ops[0],
+              ops[1],
+              declaredOrCallElementTypeD(ops[0], [ops[1]], engine, derive)
+            )
+        );
         // A known callable with an unconstrained result does not return the
         // source's element type. Preserve any unless a call derivation above
         // proved a more precise result.
@@ -12429,13 +12901,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // The source type is not echoed for a callback that is known to be
           // a function with no known result type (a symbol declared
           // `function`), or that holds an error: its elements are not the
-          // elements of the source, so they are `unknown`.
+          // elements of the source, so they are `unknown`. Over a source
+          // whose elements can be absent, the callback can be applied to an
+          // absent element and answer it, so the elements are
+          // `missing | unknown`: `Map(x ↦ At(x, 2), w)` with `w` holding
+          // `{a: Missing}` is `Set(Missing)`. The rule is applied arm by arm
+          // over a union source, since each arm says whether its own
+          // elements can be absent.
           if (
             callbackHasUnknownResult(ops[0], engine) &&
             isSubtype(s, COLLECTION_SHAPE_TYPE)
           )
             return BoxedType.forResult(
-              mapOperatorResultType(s, 'unknown'),
+              resultTypeByArm(ops[1].type, (arm) =>
+                mapOperatorResultType(
+                  arm,
+                  armMayHoldAbsentElement(arm) ? MISSING_OR_UNKNOWN : 'unknown'
+                )
+              ),
+              engine._typeResolver
+            );
+          // Nor is it echoed for an operator whose declared result is `any`
+          // or `unknown` (`callbackDeclaredTopResult`): its elements are of
+          // that type.
+          const top = callbackDeclaredTopResult(ops[0], engine);
+          if (top !== undefined && isSubtype(s, COLLECTION_SHAPE_TYPE))
+            return BoxedType.forResult(
+              mapOperatorResultType(s, top),
               engine._typeResolver
             );
           // A union source is echoed arm by arm, with the same exceptions
@@ -12747,6 +13239,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      // A filtered dictionary is a dictionary (`keyedViewElementType`).
+      elttype: keyedViewElementType,
       elementMemo: true,
       // Structural, O(1), never walks the source: a filter of a finite source
       // is finite; a filter of an infinite/unknown source may be finite or
@@ -13763,17 +14257,107 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<T>, mapping: (T) any -> U) -> list where T, U',
-    type: (ops, { engine }) => {
-      const resultType = callbackResultTypeD(ops[1], engine);
+    // `FlatMap` gives each cell of its source to the callback as it is, an
+    // absent cell too (it is in `ABSENT_CELLS_PASS_THROUGH`,
+    // `broadcast-lift-type.ts`), so the source comes here with the `missing`
+    // arm of its cells. `FlatMap(l, x ↦ [x, x])` with `l` holding
+    // `[1, Missing]` is `[1, 1, Missing, Missing]`. Before, the cells were
+    // read as `NaN`, and the callback, whose parameter is not stamped for
+    // such a cell type, was typed with an `unknown` parameter, read as a
+    // number: the result was typed `list<number>`.
+    // - A function literal with bare parameters is typed from its body with
+    //   the parameter typed by the cells (`bareMappingElementTypeD`), as for
+    //   `Map`. Otherwise its own result type is used.
+    // - A declared result (`Sqrt`, `IsPrime`) says nothing about an absent
+    //   cell, so the result takes the absorption that `Map` applies for such
+    //   a callback (`withDeclaredCallbackAbsence`): `NaN` for a number, and a
+    //   `missing` arm when the call on an absent value can be absent.
+    // - A result that is not known gives the bare `list`, or
+    //   `list<missing | unknown>` when a cell can be absent, since the
+    //   callback can answer the absent cell as it is (`x ↦ x`).
+    type: (ops, { engine, derive }) => {
+      const source = ops[0];
+      const fn = ops[1];
+      const element =
+        source === undefined
+          ? undefined
+          : (source.facts.elementType ?? collectionElementType(source.type));
+      // A cell can be absent through a `missing` arm, or through `any`
+      // (`list<any>` can hold `Missing`; `provablyAdmits` reads `any` as
+      // evidence and an `unknown` element as none).
+      const absentCells =
+        element !== undefined &&
+        (typeContainsMissing(element) || provablyAdmits('missing', element));
+      const literal = fn?.structureOf?.();
+      const isLiteral = literal?.kind === 'function-literal';
+      const fromBody =
+        absentCells && isLiteral && source !== undefined && fn !== undefined
+          ? bareMappingElementTypeD(fn, [source], engine, derive)
+          : undefined;
+      const resultType = fromBody ?? callbackResultTypeD(fn, engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return BoxedType.forResult(parseType('list'), engine._typeResolver);
+        return BoxedType.forResult(
+          absentCells
+            ? {
+                kind: 'list',
+                elements: { kind: 'union', types: ['missing', 'unknown'] },
+              }
+            : parseType('list'),
+          engine._typeResolver
+        );
       // A `string` callback result is NOT peeled: the runtime splice keeps a
       // string whole (strings are atomic under deep descent), so the element
       // type is the string itself, not `character`. Type and value must agree.
-      const inner =
-        resultType === 'string' ? undefined : collectionElementType(resultType);
+      const result: ListType = {
+        kind: 'list',
+        elements: flatMapSplicedType(resultType),
+      };
+      // A result typed from the body with the absent cells
+      // (`fromBody`) already says what the callback answers for them.
+      if (!absentCells || fromBody !== undefined || fn === undefined)
+        return BoxedType.forResult(result, engine._typeResolver);
+      // Any other result (a declared one, or the own type of a literal)
+      // describes the call on a present cell only. The call on an absent
+      // cell is described as for a declared callback of `Map`: `NaN` for a
+      // number (`(x: integer) ↦ [x]` answers `NaN` for an absent cell, the
+      // absorption of `absorbOperandAbsence`), and a `missing` arm when that
+      // call can be absent. A literal with a bare parameter that
+      // `bareMappingElementTypeD` could not type gets that arm too: its own
+      // type was computed with the parameter `unknown`, a value, and the
+      // absent cell can go through its body as it is. The element type is
+      // the join of both calls: the absorption replaces a `missing` arm of
+      // the result that the callback returns for a present cell
+      // (`(x: integer) ↦ [x, Missing]` is `[1, Missing, NaN, Missing]` over
+      // `[1, Missing]`), so the result of the present call is kept beside it.
+      // A source that can hold an absent cell only through `any` has no
+      // `missing` arm for the absorption to read, so it is given as
+      // `list<missing>`, as `withDeclaredCallbackAbsence` does for `Map`.
+      const absorbed = absorbOperandAbsence(
+        result,
+        [
+          typeContainsMissing(element!)
+            ? source!.type
+            : { kind: 'list', elements: 'missing' },
+        ],
+        false,
+        false
+      );
+      const bareParameter =
+        literal?.kind === 'function-literal' &&
+        literal.parameters.some((p) => p.annotated === undefined);
+      const absent =
+        bareParameter || absentCellAnswerMayBeMissing(fn, [source!], derive)
+          ? withMissingElements(absorbed)
+          : absorbed;
+      const absentElements = collectionElementType(absent) ?? absent;
       return BoxedType.forResult(
-        { kind: 'list', elements: inner ?? resultType },
+        {
+          kind: 'list',
+          elements: reduceType({
+            kind: 'union',
+            types: [result.elements, absentElements],
+          }),
+        },
         engine._typeResolver
       );
     },
@@ -18610,6 +19194,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
+      // A deduplicated dictionary is a dictionary (`keyedViewElementType`).
+      elttype: keyedViewElementType,
       // Length is unknown without enumeration. For a finite source we can count
       // the deduped result (bounded); an infinite source stays unknown.
       count: (expr) => {

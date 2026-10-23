@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-384.
+Next free reference: CE-385.
 
 **Entry format.**
 
@@ -1461,20 +1461,27 @@ Q10 of `docs/plans/2026-10-20-bare-tuple-record-any.md`).
 numeric vector type. The list form and the all-absent tuple form both show it.
 Fix: include the uncombined seed in the result type, in a separate absence fix.
 
-### CE-73. Three collection test suites fail 59 tests
+### CE-384. A union of collection types drops the `missing` arm of an element
 
-**Status:** open; defect. Plan:
-`docs/plans/2026-10-20-bare-tuple-record-any.md`.
+**Status:** open; capability. User decision 2026-10-23: the reduction stays
+for now (`collection-type-followups.test.ts`, "Map over a dictionary arm of a
+union", pins it).
 
-Measured 2026-10-22: `collection-type-followups` fails 52 tests,
-`tuple-argument-binding` 6 and `map-over-tuple-result` 1. One example: `FlatMap`
-over a source with absent cells expects `list<integer | missing>` and gets
-`list<number>`. The failures appeared with commit `780a7d39f` ("Fix type
-handling in various functions and improve test coverage", 2026-10-21), which
-last touched these test files. The area is the bare-collection change of the
-plan above (0.160.0). Either the expectations or the typing must change; the
-owner of that plan decides. Reproduce:
-`npx jest --config ./config/jest.config.cjs -w 4 -- test/compute-engine/collection-type-followups.test.ts test/compute-engine/map-over-tuple-result.test.ts test/compute-engine/tuple-argument-binding.test.ts`.
+The union reducer (`reduceUnionType`, `src/common/type/reduce.ts`) keeps the
+supertype of two arms related by subtyping. Since every type is a subtype of
+`unknown`, `list<missing | unknown>` is a subtype of `collection<unknown>`, so
+`collection<unknown> | list<missing | unknown>` reduces to
+`collection<unknown>`. The set of values is the same, but `provablyAdmits`
+no longer finds the `missing` arm of the elements, so the Epsil static check
+cannot report a possibly absent element. Example: `Map(x ↦ x, v)` with
+`v: tuple<integer, missing> | dictionary<integer>` is typed
+`collection<unknown>`. At the top of a union, decision D1
+(`docs/plans/2026-10-21-unknown-inference-marker.md`) keeps `missing | unknown`
+as two arms; this entry is the same rule one level down, for the elements of a
+collection. Fix: in `covers()` of `reduceUnionType`, do not let an arm whose
+elements state `missing` be absorbed by an arm whose elements do not. This
+changes the reduction of every such union: measure the test and snapshot
+changes in the full suite first.
 
 ### CE-74. The type of a lazy view does not say that an element can be `Nothing`
 
