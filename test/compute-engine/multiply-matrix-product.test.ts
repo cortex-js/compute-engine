@@ -1653,3 +1653,177 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
     expect(() => r.run!({ L: [M, [1, 2]] } as never)).toThrow();
   });
 });
+
+// A lazy collection of vectors or matrices (`Scan`, `Reverse`) is the tensor
+// that its elements make, as the `List` of the same elements is (ROADMAP
+// CE-390). The interpreter read it as a plain collection and paired its
+// elements with the rows of a matrix beside it.
+describe('a lazy collection of vectors or matrices', () => {
+  const MATRICES = [
+    ['List', ['List', 1, 2], ['List', 3, 4]],
+    ['List', ['List', 1, 0], ['List', 0, 1]],
+  ];
+  const VECTORS = [
+    ['List', 1, 2],
+    ['List', 3, 4],
+  ];
+  /** The interpreter's value of `expr` with `L: type := ['List',
+   * ...elements]` and `M := [[0, 1], [1, 0]]`. */
+  function evaluate(type: string, elements: unknown[], expr: unknown): string {
+    const ce = new ComputeEngine();
+    ce.declare('L', type);
+    ce.declare('M', 'matrix<number>');
+    ce.assign('L', ce.box(['List', ...elements] as MathJsonExpression));
+    ce.assign('M', ce.box(['List', ['List', 0, 1], ['List', 1, 0]]));
+    return ce
+      .box(expr as MathJsonExpression)
+      .evaluate()
+      .toString();
+  }
+
+  it('a Scan of vectors times a matrix is the matrix product', () => {
+    // Scan(L, Add, 0) is [[1, 2], [4, 6]].
+    expect(
+      evaluate('list<vector<number>>', VECTORS, [
+        'Multiply',
+        ['Scan', 'L', 'Add', 0],
+        'M',
+      ])
+    ).toBe('[[2,1],[6,4]]');
+  });
+
+  it('a Reverse of vectors times a matrix is the matrix product', () => {
+    expect(
+      evaluate('list<vector<number>>', VECTORS, [
+        'Multiply',
+        ['Reverse', 'L'],
+        'M',
+      ])
+    ).toBe('[[4,3],[2,1]]');
+  });
+
+  it('a Scan of matrices beside a matrix stays unevaluated', () => {
+    // A tensor of rank 3 beside a matrix, as for the list literal
+    // [[[1, 2], [3, 4]], [[2, 2], [3, 5]]].
+    const scan = evaluate('list<matrix<number>>', MATRICES, [
+      'Multiply',
+      ['Scan', 'L', 'Add', 0],
+      'M',
+    ]);
+    const literal = evaluate('list<matrix<number>>', MATRICES, [
+      'Multiply',
+      [
+        'List',
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+        ['List', ['List', 2, 2], ['List', 3, 5]],
+      ],
+      'M',
+    ]);
+    expect(scan).toMatch(/\*/);
+    expect(literal).toMatch(/\*/);
+  });
+
+  // `Map(Reverse, L)` is typed `list<unknown>`, and its rows are `Reverse`
+  // views. Beside a matrix whose shape is known, the values decide, and a
+  // nested lazy row is read as a list. Two such Maps keep the product of
+  // each entry, as compiled code computes it: a list of unknown elements
+  // may hold points, and compiled code cannot tell a point from a row.
+  it('a Map whose values are a matrix', () => {
+    expect(
+      evaluate('list<vector<number>>', VECTORS, [
+        'Multiply',
+        ['Map', 'Reverse', 'L'],
+        'M',
+      ])
+    ).toBe('[[1,2],[3,4]]');
+    expect(
+      evaluate('list<vector<number>>', VECTORS, [
+        'Multiply',
+        ['Map', 'Reverse', 'L'],
+        ['Map', 'Reverse', 'L'],
+      ])
+    ).toBe('[[4,1],[16,9]]');
+  });
+
+  it('two Maps whose values are vectors stay the product of each entry', () => {
+    const double = ['Function', ['Multiply', 2, 'x'], 'x'];
+    expect(
+      evaluate(
+        'list<number>',
+        [1, 2],
+        ['Multiply', ['Map', double, 'L'], ['Map', double, 'L']]
+      )
+    ).toBe('[4,16]');
+  });
+
+  // A point is a cell: a lazy list of points beside a matrix scales the
+  // matrix by each point, as the list literal of the same points does.
+  it('a Reverse of points beside a matrix keeps the points', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<any>');
+    ce.declare('M', 'matrix<number>');
+    ce.assign('L', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    ce.assign('M', ce.box(['List', ['List', 0, 1], ['List', 1, 0]]));
+    expect(
+      ce
+        .box(['Multiply', ['Reverse', 'L'], 'M'])
+        .evaluate()
+        .toString()
+    ).toBe('[[(0, 0),(3, 4)],[(1, 2),(0, 0)]]');
+    expect(
+      ce
+        .box(['Multiply', ['Reverse', 'L'], ['Reverse', 'L']])
+        .evaluate()
+        .toString()
+    ).toMatch(/no-product-between-points/);
+  });
+
+  it('two Scans of matrices multiply each pair of matrices', () => {
+    expect(
+      evaluate('list<matrix<number>>', MATRICES, [
+        'Multiply',
+        ['Scan', 'L', 'Add', 0],
+        ['Scan', 'L', 'Add', 0],
+      ])
+    ).toBe('[[[7,10],[15,22]],[[10,14],[21,31]]]');
+  });
+
+  it('compiled code agrees', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<vector<number>>');
+    ce.declare('M', 'matrix<number>');
+    for (const [expr, value] of [
+      [
+        ['Multiply', ['Scan', 'L', 'Add', 0], 'M'],
+        [
+          [2, 1],
+          [6, 4],
+        ],
+      ],
+      [
+        ['Multiply', ['Reverse', 'L'], 'M'],
+        [
+          [4, 3],
+          [2, 1],
+        ],
+      ],
+    ] as const) {
+      const r = compile(ce.box(expr as MathJsonExpression), {
+        to: 'javascript',
+        fallback: false,
+      });
+      expect(
+        r.run!({
+          L: [
+            [1, 2],
+            [3, 4],
+          ],
+          M: [
+            [0, 1],
+            [1, 0],
+          ],
+        } as never)
+      ).toEqual(value);
+    }
+  });
+});

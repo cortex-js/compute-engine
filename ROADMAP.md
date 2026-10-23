@@ -552,20 +552,6 @@ assertions in seven files use the spelling
 (`grep -rn 'list<any> | number' test/compute-engine`). A change is its own
 commit, after a decision on the spelling.
 
-### CE-379. A nested function literal that captures a parameter reads it as a number
-
-**Status:** open; wrong type. The sub-item CE-25.1 of the signature change that
-landed on 2026-10-23.
-
-`x ↦ (() ↦ [x])` has the signature `(unknown) -> () -> vector<1>`: the inner
-literal's list reads the captured `x` as a number cell, while the outer
-signature says `list<unknown>` for `x ↦ [x]`. The signature derivation
-(`deriveSignatureResultType`, `boxed-expression/signature-result-type.ts`) does
-not read into a nested function literal, which has a type of its own. With
-`g := x ↦ (() ↦ [x])`, `g("a")()` is `["a"]`, which `vector<1>` does not hold.
-Probe:
-`ce.assign('g', ce.parse('x \\mapsto (() \\mapsto [x])')); ce.box('g').type.toString()`.
-
 ### CE-373. A point plus an operand of unknown type keeps the integer tier of the point
 
 **Status:** open; defect.
@@ -1911,24 +1897,6 @@ typing drops them somewhere else. Two effects:
 
 Expected: the literal has the dimensions of its shape whatever its cells hold
 (`matrix<(integer | missing)^(2x2)>`), and the two routes agree.
-
-### CE-390. The interpreter's `Multiply` of a lazy list of matrices and a matrix pairs their elements
-
-**Status:** open; wrong value.
-
-With `L: list<matrix<number>>` and `M: matrix<number>`, `Scan(L, Add, 0)`
-evaluates to a lazy `Scan` collection, not to a list. `Multiply` reads that
-collection as a plain collection and pairs its elements with the rows of `M`:
-with `L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`,
-`Scan(L, Add, 0)·M` is `[[2, 4], [2, 3]]` (`A[1]·M[1]`, `A[2]·M[2]`). The same
-value written as a literal, or held by a symbol declared `list<matrix<number>>`
-or `tensor<number>`, stays unevaluated beside `M`, by the rule that a tensor of
-rank 3 or more beside a matrix stays unevaluated (`mulTensors()`,
-`arithmetic-mul-div.ts`). Compiled code follows that rule: it throws for this
-product. A lazy `Scan` that gives a vector is multiplied correctly
-(`Scan(L, Add, 0)·M` with `L: list<number>` is the vector-matrix product).
-Expected: `mulTensors()` reads the shape of a lazy collection as it reads the
-shape of a list.
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 
@@ -6540,8 +6508,8 @@ run was on an idle machine under the box lock, and a second run gave the same
 numbers. Time per call, current ÷ 0.133.0:
 
 - Equation solving: `x^3 - x - 1 = 0` 4.9 ms against 2.0 ms (2.45×).
-  (`x^4 + x^2 - 1 = 0` was 2.37×; since 2026-10-23 its closed-form roots are
-  not substituted back, and it takes about half the time of 0.133.0.)
+  (`x^4 + x^2 - 1 = 0` was 2.37×; since 2026-10-23 its closed-form roots are not
+  substituted back, and it takes about half the time of 0.133.0.)
 - Limits and definite integrals: 1.5× to 2.3× (`∫_{-∞}^{∞} e^{-x^2} dx` 547 µs
   against 239 µs).
 - Antiderivatives 1.4× to 1.9×, derivatives 1.1× to 1.45×, simplification 1.0×
@@ -6566,31 +6534,31 @@ release, 2026-10-23), the time grows in five steps:
 The core operations are slower too, and the cost compounds through every
 symbolic algorithm. Measured interleaved in one process, minified bundles,
 current ÷ 0.133.0: boxing `x^3/3` 1.24×, evaluating it 1.27×, simplifying it
-1.33×, `D(x^3, x)` 1.27×, `Expand((x + 1)^3)` 1.34×, parsing `x^2+2x+1` 1.19×.
-A CPU profile of these small operations is flat: no function takes more than
-3% of the time on its own, the garbage collector takes 14%, and the type
-derivation of each new node takes about 25% (`broadcastLiftType` and the type
-handlers of the operators, for operands as simple as `x` and `3`).
+1.33×, `D(x^3, x)` 1.27×, `Expand((x + 1)^3)` 1.34×, parsing `x^2+2x+1` 1.19×. A
+CPU profile of these small operations is flat: no function takes more than 3% of
+the time on its own, the garbage collector takes 14%, and the type derivation of
+each new node takes about 25% (`broadcastLiftType` and the type handlers of the
+operators, for operands as simple as `x` and `3`).
 
-Where the time of an integral goes, `Integrate(1/(1 + x^2), x)` (2.3× the
-time of 0.133.0): boxing the input 18%, re-binding the integrand
-(`liftIntegrand` → `rebindEscaping` → `rewriteWithBinders`, which rebuilds each
-node above `x` with the canonical transforms) 15%, the type of the integrand's
-function literal read by `integrateListIntegrand` 7%,
-`definiteIntegralByResidues` 3% (for an indefinite integral), the antiderivative
-11%, the final `simplify()` of an indefinite result 7%. A definite integral
-also boxes the antiderivative into a new function literal and applies it at the
-bounds through `EvaluateAt` (about 20%).
+Where the time of an integral goes, `Integrate(1/(1 + x^2), x)` (2.3× the time
+of 0.133.0): boxing the input 18%, re-binding the integrand (`liftIntegrand` →
+`rebindEscaping` → `rewriteWithBinders`, which rebuilds each node above `x` with
+the canonical transforms) 15%, the type of the integrand's function literal read
+by `integrateListIntegrand` 7%, `definiteIntegralByResidues` 3% (for an
+indefinite integral), the antiderivative 11%, the final `simplify()` of an
+indefinite result 7%. A definite integral also boxes the antiderivative into a
+new function literal and applies it at the bounds through `EvaluateAt` (about
+20%).
 
 Measured dead ends, so they are not tried again:
 
 - Rebuilding the re-bound integrand without the canonical transforms is safe
   only when each re-bound symbol has the same type outside: the `x` of the
-  integral is typed `number` inside the function literal and `unknown`
-  outside, so the rebuild must canonicalize.
-- Skipping a type read does not save the work when the type is read later
-  anyway (the product sort, `sortProductOperands`, only moved the cost), and a
-  type read has side effects: it records a read before a declaration
+  integral is typed `number` inside the function literal and `unknown` outside,
+  so the rebuild must canonicalize.
+- Skipping a type read does not save the work when the type is read later anyway
+  (the product sort, `sortProductOperands`, only moved the cost), and a type
+  read has side effects: it records a read before a declaration
   (`_noteCollectionReadBeforeDeclaration`). Skipping the type read in
   `resultHoldsNoIncompleteWalk()` (`boxed-function.ts`) when no walk was
   recorded made `block-locals-per-run.test.ts` ("a closure created before a

@@ -29,6 +29,8 @@ import type {
 import { Complex } from 'complex.js';
 
 import { isSubtype } from '../../common/type/subtype.js';
+import { collectionElementType } from '../../common/type/utils.js';
+import type { Type } from '../../common/type/types.js';
 import {
   complexCellExpression,
   getExpressionDatatype,
@@ -37,7 +39,13 @@ import {
 } from '../tensor/tensor-fields.js';
 import { makeTensor } from '../tensor/tensors.js';
 
-import { isFunction, isNumber, isSymbol, isTensor } from './type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+  isTensor,
+} from './type-guards.js';
 
 /**
  * The value of a cell of a packed tensor (a value from `AbstractTensor.at()`
@@ -163,6 +171,113 @@ export function numericCollectionAsList(x: Expression): Expression | undefined {
 }
 
 /**
+ * The rank of a finite indexed collection `x` that is not a list literal (a
+ * lazy `Scan`, `Map`, `Take` or `Reverse` view) and whose elements are lists
+ * of numbers, read from the type of its elements without iterating: 2 for a
+ * collection of vectors or of lists of numbers, 3 for a collection of
+ * matrices, and so on. `undefined` when the rank is not 2 or more, or when
+ * the type does not give it (elements of unknown type, a `tensor<U>` element
+ * of unknown rank). A rank-1 collection of numbers is a vector source
+ * (`isNumericVectorSource()`).
+ */
+export function lazyCollectionRank(x: Expression): number | undefined {
+  if (isTensorValue(x) || isFunction(x, 'List')) return undefined;
+  if (x.isIndexedCollection !== true || x.isFiniteCollection !== true)
+    return undefined;
+  const t = x.type.type;
+  if (isSubtype(t, 'string') || isSubtype(t, 'tuple')) return undefined;
+  const elt = collectionElementType(t);
+  const rank = elt === undefined ? undefined : numericListRank(elt);
+  return rank !== undefined && rank >= 1 ? rank + 1 : undefined;
+}
+
+/**
+ * Whether `x` is a finite indexed collection that is not a list literal,
+ * and whose elements have no known type (`unknown` or `any`): the value of
+ * `Map(Reverse, L)` is typed `list<unknown>`. Its rank is known only from
+ * its values, so `mulTensors()` converts it into a list
+ * (`lazyCollectionAsList()`) when a matrix is beside it. This reads the type
+ * only.
+ */
+export function isLazyCollectionOfUnknownElements(x: Expression): boolean {
+  if (isTensorValue(x) || isFunction(x, 'List')) return false;
+  if (x.isIndexedCollection !== true || x.isFiniteCollection !== true)
+    return false;
+  const t = x.type.type;
+  if (isSubtype(t, 'string') || isSubtype(t, 'tuple')) return false;
+  const elt = collectionElementType(t);
+  return elt === 'unknown' || elt === 'any';
+}
+
+/** The rank of a list type whose cells are numbers: 0 for a number, the
+ * number of axes of a tensor type, and one more than the rank of the
+ * elements for a plain list. `undefined` for any other type. */
+function numericListRank(t: Type, depth = 0): number | undefined {
+  if (depth > 8) return undefined;
+  if (isSubtype(t, 'number')) return 0;
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  if (!isSubtype(t, 'list<any>')) return undefined;
+  if (t.dimensions === null) return undefined;
+  if (t.dimensions !== undefined)
+    return isSubtype(t.elements, 'number') ? t.dimensions.length : undefined;
+  const inner = numericListRank(t.elements, depth + 1);
+  return inner === undefined ? undefined : inner + 1;
+}
+
+/** The `List` literal with the elements of `x`, a collection with a
+ * `lazyCollectionRank()` or of unknown elements
+ * (`isLazyCollectionOfUnknownElements()`), when it has at most 100 000
+ * elements at all its levels; `undefined` otherwise. An element that is itself a lazy
+ * collection (the `Reverse` rows of `Map(L, Reverse)`) is converted too, at
+ * any depth, so the result is a nested `List` that is a tensor value as the
+ * same list literal is. This iterates over `x`: call it only once a tensor
+ * kernel is chosen. */
+export function lazyCollectionAsList(x: Expression): Expression | undefined {
+  if (
+    lazyCollectionRank(x) === undefined &&
+    !isLazyCollectionOfUnknownElements(x)
+  )
+    return undefined;
+  // A collection whose length is known to be over the limit is not read:
+  // the caller would read it again for its own broadcast.
+  if (x.count !== undefined && x.count > MAX_COLLECTION_AS_LIST)
+    return undefined;
+  let budget = MAX_COLLECTION_AS_LIST;
+  const asList = (c: Expression): Expression | undefined => {
+    if (isFunction(c, 'List')) {
+      budget -= c.nops;
+      if (budget < 0) return undefined;
+      const ops: Expression[] = [];
+      let changed = false;
+      for (const op of c.ops) {
+        const m = asList(op);
+        if (m === undefined) return undefined;
+        if (m !== op) changed = true;
+        ops.push(m);
+      }
+      return changed ? c.engine.function('List', ops) : c;
+    }
+    // A point (a tuple) and text are cells: a point is atomic in arithmetic,
+    // and two points have no product.
+    if (isFunction(c, 'Tuple') || isString(c)) return c;
+    // A cell: a number, or anything that is not a finite indexed
+    // collection, is kept as it is.
+    if (c.isIndexedCollection !== true || c.isFiniteCollection !== true)
+      return c;
+    const elements: Expression[] = [];
+    for (const e of c.each()) {
+      budget -= 1;
+      if (budget < 0) return undefined;
+      const m = asList(e);
+      if (m === undefined) return undefined;
+      elements.push(m);
+    }
+    return c.engine.function('List', elements);
+  };
+  return asList(x);
+}
+
+/**
  * Whether the product of the factors `xs` is a product of tensors that the
  * `Multiply` handler computes (`mulTensors()` in `arithmetic-mul-div.ts`)
  * rather than the product of each entry: two or more factors are `List`
@@ -194,6 +309,7 @@ export function isMatrixProductOfValues(
   let matrix = false;
   let belowRank3 = false;
   let vectorSources = 0;
+  let unknownSources = 0;
   for (const x of xs) {
     const v = isSymbol(x) ? x.value : x;
     if (v === undefined) continue;
@@ -203,6 +319,22 @@ export function isMatrixProductOfValues(
       // classified by its type, without iterating over it: the iteration is
       // left to the matrix kernel (`numericCollectionAsList()`).
       if (isNumericVectorSource(v)) vectorSources += 1;
+      // A lazy collection of vectors or matrices (`Scan(L, Add, 0)` with
+      // `L: list<matrix<number>>`) is a tensor of the rank its type gives.
+      // Read as a plain collection, the broadcast paired its elements with
+      // the rows of a matrix beside it, where the same value as a list
+      // literal is a tensor of rank 3 that `mulTensors()` leaves
+      // unevaluated.
+      const rank = lazyCollectionRank(v);
+      if (rank !== undefined) {
+        tensors += 1;
+        matrix = true;
+        if (rank < 3) belowRank3 = true;
+      }
+      // A lazy collection whose elements have no known type
+      // (`Map(Reverse, L)`, typed `list<unknown>`) may be a tensor: beside
+      // a matrix whose shape is known, `mulTensors()` reads its values.
+      else if (isLazyCollectionOfUnknownElements(v)) unknownSources += 1;
       continue;
     }
     tensors += 1;
@@ -213,6 +345,7 @@ export function isMatrixProductOfValues(
     tensors += vectorSources;
     belowRank3 = true;
   }
+  if (matrix) tensors += unknownSources;
   return matrix && belowRank3 && tensors >= 2;
 }
 

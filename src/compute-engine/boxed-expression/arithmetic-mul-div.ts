@@ -9,7 +9,10 @@ import {
   elementFloatMask,
   isMatrixProductOfValues,
   isTensorValue,
+  isLazyCollectionOfUnknownElements,
   isNumericVectorSource,
+  lazyCollectionAsList,
+  lazyCollectionRank,
   numericCollectionAsList,
   tensorShape,
   packTensor,
@@ -3756,11 +3759,45 @@ function mulTensors(
   const evaluated = xs.map((op) =>
     numericApproximation ? op.N() : op.evaluate()
   );
-  const hasMatrix = evaluated.some(
+  // The rank of each operand that is a lazy collection of vectors or
+  // matrices, read once from its type (`lazyCollectionRank()`).
+  const lazyRanks = evaluated.map((x) => lazyCollectionRank(x));
+  // A matrix whose shape is known: a matrix value, or a lazy collection of
+  // vectors or matrices.
+  const knownMatrix = evaluated.some(
+    (x, i) =>
+      (isTensorValue(x) && (tensorShape(x)?.length ?? 0) >= 2) ||
+      lazyRanks[i] !== undefined
+  );
+  // A lazy collection is read as the `List` of its elements, so the rules
+  // below apply to it as to the same list literal:
+  // - a collection of vectors or matrices (`Scan(L, Add, 0)` with
+  //   `L: list<matrix<number>>`), always. A tensor of rank 3 beside a matrix
+  //   then leaves the product unevaluated. Over the limit of
+  //   `lazyCollectionAsList()` the product stays unevaluated.
+  // - a collection whose elements have no known type (`Map(Reverse, L)`,
+  //   typed `list<unknown>`), only beside a matrix whose shape is known:
+  //   two such collections keep the product of each entry, as compiled code
+  //   computes it (a list that may hold points is not read as a matrix
+  //   there). Over the limit the collection is kept, and the caller
+  //   broadcasts over it as before.
+  const operands: Expression[] = [];
+  for (const [i, x] of evaluated.entries()) {
+    if (lazyRanks[i] !== undefined) {
+      const list = lazyCollectionAsList(x);
+      if (list === undefined) return ce._fn('Multiply', xs);
+      operands.push(list);
+    } else if (knownMatrix && isLazyCollectionOfUnknownElements(x))
+      operands.push(lazyCollectionAsList(x) ?? x);
+    else operands.push(x);
+  }
+  // The matrices once the lazy collections are read: a `Range` beside one
+  // is a vector.
+  const hasMatrix = operands.some(
     (x) => isTensorValue(x) && (tensorShape(x)?.length ?? 0) >= 2
   );
   for (const [i, _op] of xs.entries()) {
-    let x = evaluated[i];
+    let x = operands[i];
     if (hasMatrix && isNumericVectorSource(x)) {
       // A collection over the limit of `numericCollectionAsList()` is not
       // read as a vector, and is not broadcast either (that would change the

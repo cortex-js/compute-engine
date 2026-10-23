@@ -1,15 +1,32 @@
 ## [Unreleased]
 
+### New Features
+
+- **Factoring over a number field** (contributed by KingArth0r, #469).
+  `Factor(polynomial, variable, generator)` factors over the algebraic extension
+  of the rationals that `generator` selects. The generator can be an exact
+  radical (`√2`, `∛2`), `ImaginaryUnit`, or the new
+  `AlgebraicGenerator(List(c₀, c₁, …))`: a root of the irreducible polynomial
+  with these rational coefficients in ascending order, with no numerical
+  embedding chosen. `Factor(x^2 - 2, x, √2)` is `(x - √2)(x + √2)`; over the
+  rationals, `x^2 - 2` stays irreducible. The result is exact, also under
+  `.N()`. A request that the engine cannot answer within its limits (a
+  coefficient it cannot read, an unsupported generator, the operation budget)
+  stays unevaluated; it is never factored over the rationals instead, and an
+  unevaluated result is not a proof of irreducibility. The one- and two-argument
+  forms of `Factor` are unchanged. Examples and limits:
+  [number-field factoring](https://github.com/cortex-js/compute-engine/blob/main/docs/number-field-factoring.md).
+
 ### Performance
 
 - **`Solve` of a polynomial whose roots have closed forms is about 4 times
-  faster** (ROADMAP CE-385). `x^4 + x^2 - 1 = 0` takes 1.0 ms, where it took
-  4.1 ms in 0.162.0 and 1.9 ms in 0.133.0. The roots that the closed-form
-  formulas give for the equation itself (a quadratic, a pure power `a·xⁿ + b`,
-  or a polynomial in `xᵍ` that reduces to one of these) are exact by
-  construction, so they are no longer substituted back into the equation, and
-  repeated roots among them are found by comparing the expressions. Before,
-  each root was substituted and the residual, an exact constant such as
+  faster** (ROADMAP CE-385). `x^4 + x^2 - 1 = 0` takes 1.0 ms, where it took 4.1
+  ms in 0.162.0 and 1.9 ms in 0.133.0. The roots that the closed-form formulas
+  give for the equation itself (a quadratic, a pure power `a·xⁿ + b`, or a
+  polynomial in `xᵍ` that reduces to one of these) are exact by construction, so
+  they are no longer substituted back into the equation, and repeated roots
+  among them are found by comparing the expressions. Before, each root was
+  substituted and the residual, an exact constant such as
   `(-1/2 + √5/2)^2 + (-1/2 + √5/2) - 1`, was proved zero by refining it at
   increasing precision. The roots of every other route (squaring, a change of
   variable, the rational-root search, the numeric root finder) are still
@@ -17,18 +34,33 @@
 
 ### Resolved Issues
 
-- **`Solve` of a polynomial with large terms gave a root that is not a root,
-  or lost a root.** The rational-root search tested each candidate by the
-  value of the polynomial at 21 digits, and a candidate was taken for a root
-  when the terms were large: `x³ − 10¹²x² + 10¹² = 0` gave the root `10¹²`,
-  whose value is `10¹²`, and the true root next to it was then removed as its
-  duplicate, so the list held 2 of the 3 roots; `x⁹ − 1000x⁸ + 1000 = 0` held
-  8 of its 9 roots. A candidate is now an exact rational, tested with exact
-  arithmetic. A root found by the numeric root finder whose value is an
-  integer is now a float (`1000000000000.0`), not an exact integer, so the
-  exact check no longer rejects the root that it approximates. A rational
-  root of a polynomial of degree 3 or more is now exact: `2x³ − 3x² − 3x + 2 =
-  0` gives `−1`, `1/2` and `2` (it gave `0.5`).
+- **The signature of a function literal read a captured parameter as a number
+  cell in a nested literal** (ROADMAP CE-379). With `g := x ↦ (() ↦ [x])`, the
+  signature was `(unknown) -> () -> vector<1>`: the nested literal has a type of
+  its own, and its own typing read the captured `x` as a number cell, while
+  `x ↦ [x]` is `(unknown) -> list<unknown>` since 0.162.0. The value `["a"]` of
+  `g("a")()` does not fit a `vector<1>`. The derivation of a signature now types
+  a nested literal again with the parameters of the enclosing literals added to
+  its own: `g` is `(unknown) -> () -> list<unknown>`, `x ↦ (() ↦ [[x]])` is
+  `(unknown) -> () -> list<list<unknown>>`, and a parameter of the nested
+  literal that shadows the captured name is read as its own
+  (`x ↦ ((x: real) ↦ [x])` keeps `(real) -> vector<real^1>`). A use that narrows
+  the parameter keeps the number cell (`x ↦ (() ↦ [x + 1])` is
+  `(unknown) -> () -> vector<1>`). An ascribed result of the nested literal is
+  kept, and so are the arms of an early `Return` of its body; a call of the
+  nested literal inside the body is typed from the derived result.
+- **`Solve` of a polynomial with large terms gave a root that is not a root, or
+  lost a root.** The rational-root search tested each candidate by the value of
+  the polynomial at 21 digits, and a candidate was taken for a root when the
+  terms were large: `x³ − 10¹²x² + 10¹² = 0` gave the root `10¹²`, whose value
+  is `10¹²`, and the true root next to it was then removed as its duplicate, so
+  the list held 2 of the 3 roots; `x⁹ − 1000x⁸ + 1000 = 0` held 8 of its 9
+  roots. A candidate is now an exact rational, tested with exact arithmetic. A
+  root found by the numeric root finder whose value is an integer is now a float
+  (`1000000000000.0`), not an exact integer, so the exact check no longer
+  rejects the root that it approximates. A rational root of a polynomial of
+  degree 3 or more is now exact: `2x³ − 3x² − 3x + 2 = 0` gives `−1`, `1/2` and
+  `2` (it gave `0.5`).
 
 - **Compiled code declined a call of a user function whose argument is an
   untyped free input** (ROADMAP CE-377). With `g := t ↦ [t, 2]` and `x` free,
@@ -86,12 +118,11 @@
 - **`simplify()` gave `False` for a relation whose two sides are the same
   function call.** `f(a) = f(a)`, `sin(a) = sin(a)` and `g(x) + 1 = g(x) + 1`
   simplified to `False`, and `f(a) ≠ f(a)` to `True`; `evaluate()` gave the
-  correct values. The simplifier rewrote the relation as `f(a) - f(a) = 0`,
-  that is `0 = 0`, and the factoring step then divided both sides by their
-  common coefficient, 0, which gave `NaN = NaN`. Such a relation now stays as
-  it is, as `x = x` does, and `Factor(0 = 0)` is `0 = 0` (it was
-  `NaN = NaN`). The same error made `Equal(c, c)` `False` for a value `c` of
-  an extension head
+  correct values. The simplifier rewrote the relation as `f(a) - f(a) = 0`, that
+  is `0 = 0`, and the factoring step then divided both sides by their common
+  coefficient, 0, which gave `NaN = NaN`. Such a relation now stays as it is, as
+  `x = x` does, and `Factor(0 = 0)` is `0 = 0` (it was `NaN = NaN`). The same
+  error made `Equal(c, c)` `False` for a value `c` of an extension head
   ([#471](https://github.com/cortex-js/compute-engine/issues/471)).
 
 - **Compiled folds over elements of unknown type, absent elements, and
@@ -100,29 +131,28 @@
   the other statistics) disagreed with the interpreter:
   - With `L: list<unknown>`, `Sum(L) + 1` and `Product(L) · 2` did not compile,
     although `L` usually holds real numbers. They now compile, and a complex
-    entry of the fold is added as complex: over `[[1, 2], [i, 3]]`,
-    `Sum(L) + 1` is `[2 + i, 6]` and `Reduce(L, Add, 0) + 1` is `[2 + i, 6]`;
-    the second gave `["[object Object]1", 6]`. In the `complex` mode, the same
-    parents over `list<list<number>>` compile too, and a bare `list` is read as
-    a list whose cells may be complex, as `list<unknown>` is: `L + 1` over
-    `[i, 2]` gave `["[object Object]1", 3]`. In the default mode, a complex
-    entry in a list input that the code reads as real is still the host's
-    responsibility.
+    entry of the fold is added as complex: over `[[1, 2], [i, 3]]`, `Sum(L) + 1`
+    is `[2 + i, 6]` and `Reduce(L, Add, 0) + 1` is `[2 + i, 6]`; the second gave
+    `["[object Object]1", 6]`. In the `complex` mode, the same parents over
+    `list<list<number>>` compile too, and a bare `list` is read as a list whose
+    cells may be complex, as `list<unknown>` is: `L + 1` over `[i, 2]` gave
+    `["[object Object]1", 3]`. In the default mode, a complex entry in a list
+    input that the code reads as real is still the host's responsibility.
   - JavaScript reads `null` as 0 in `+`, `*` and `Math.min`. With
     `L: list<number | missing>` and `[2, null, 3]`, `Scan(L, Multiply, 1)` gave
     `[2, 0, 0]`, `Reduce(L, Add, 0)` gave `5` and `Reduce(L, Min)` gave `0`;
     `Reduce(L, Multiply, ImaginaryUnit)` threw. Each is now `NaN` from the
     absent element on, as in the interpreter (`[2, NaN, NaN]`, `NaN`). The
-    `Product` and `Sum` of rows with an absent entry (`[[2, null], [3, 4]]`)
-    are `[6, NaN]` and `[5, NaN]` (they were `[6, 0]` and `[5, 4]`), and a
-    matrix product reads an absent cell as `NaN`.
-  - The `Sum` and `Product` of a list of booleans or strings
-    (`list<boolean>`, `list<list<string>>`), the `Reduce` and `Scan` of a list
-    of booleans with `Add`, `Multiply`, `Min` or `Max`, and the `Max`, `Min`
-    and `Mean` of a list of booleans no longer compile; the interpreter gives an
-    `incompatible-type` error or leaves `Max(True, False)` unevaluated. The
-    compiled `Sum` of `[[true], [false]]` was `[1]`. With `fallback` (the
-    default), `compile()` runs the interpreter for these.
+    `Product` and `Sum` of rows with an absent entry (`[[2, null], [3, 4]]`) are
+    `[6, NaN]` and `[5, NaN]` (they were `[6, 0]` and `[5, 4]`), and a matrix
+    product reads an absent cell as `NaN`.
+  - The `Sum` and `Product` of a list of booleans or strings (`list<boolean>`,
+    `list<list<string>>`), the `Reduce` and `Scan` of a list of booleans with
+    `Add`, `Multiply`, `Min` or `Max`, and the `Max`, `Min` and `Mean` of a list
+    of booleans no longer compile; the interpreter gives an `incompatible-type`
+    error or leaves `Max(True, False)` unevaluated. The compiled `Sum` of
+    `[[true], [false]]` was `[1]`. With `fallback` (the default), `compile()`
+    runs the interpreter for these.
 
 - **Compiled `Multiply` of a fold and a matrix did not compile** (ROADMAP
   CE-388). With `M: matrix<number>` and `L: list<matrix<number>>` (or
@@ -132,11 +162,24 @@
   the values as in the interpreter: `Sum(L)·M` is `[[2, 2], [5, 3]]` for
   `L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`. With
   complex entries (`L: list<matrix<complex>>`, or an `At(P, 1)` of complex
-  matrices) the product is computed as complex; such products were refused
-  too. A factor that may hold points (`Sum(L)` over a list of lists of points,
-  or over `list<list<unknown>>`) beside a matrix is still refused: compiled code
-  holds a point as an array, and the interpreter scales the matrix by the
-  point.
+  matrices) the product is computed as complex; such products were refused too.
+  A factor that may hold points (`Sum(L)` over a list of lists of points, or
+  over `list<list<unknown>>`) beside a matrix is still refused: compiled code
+  holds a point as an array, and the interpreter scales the matrix by the point.
+
+- **`Multiply` of a lazy collection and a matrix paired their elements**
+  (ROADMAP CE-390). The value of `Scan`, `Reverse` or `Map` is a lazy
+  collection, and `Multiply` read it as a plain collection: beside a matrix, it
+  paired each element with a row of the matrix. With `L` holding the vectors
+  `[1, 2]` and `[3, 4]` and `M = [[0, 1], [1, 0]]`, `Reverse(L)·M` was
+  `[[0, 4], [1, 0]]`; it is now the matrix product `[[4, 3], [2, 1]]`, as for
+  the list literal `[[3, 4], [1, 2]]`. A lazy collection of vectors or matrices
+  is read as the tensor of its elements: `Scan(L, Add, 0)·M` over a list of
+  matrices now stays unevaluated (a tensor of rank 3 beside a matrix), as the
+  same list literal does, where it gave a value. A lazy collection whose
+  elements have no known type (`Map(Reverse, L)`) is read from its values when
+  a matrix is beside it; two such collections keep the product of each entry,
+  as compiled code computes it. A point in such a collection stays a point.
 
 ## 0.162.0 _2026-10-23_
 
