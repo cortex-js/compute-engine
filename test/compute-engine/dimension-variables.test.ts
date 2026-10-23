@@ -271,7 +271,7 @@ describe('DIMENSION VARIABLES — shapes and substitution into the result', () =
     expect(ce.box(['first', L('[1,2,3]')]).type.toString()).toBe('integer');
   });
 
-  test('a rank-2 actual at a rank-1 pattern is read as a list of its rows', () => {
+  test('a rank-2 actual at a rank-1 cell pattern is refused; the plain list<T> reads its rows', () => {
     // The `T` of `list<T^N>` and of `vector<T>` is the type of the CELLS of
     // a rank-1 tensor, and a matrix has rank 2, so a matrix is not a value
     // of either pattern and the call is an `incompatible-type` error, for a
