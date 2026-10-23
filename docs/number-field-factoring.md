@@ -65,8 +65,13 @@ This generator is abstract: it does not select a particular real or complex
 root, and numerical evaluation does not invent an approximation. Identical
 generator expressions denote the same generator, not independently chosen
 conjugates. Different descriptors are not automatically identified or embedded
-into one another. Relations are reduced by the explicit-field `Factor` path;
-general CE simplification is not upgraded to a global algebraic-number engine.
+into one another. Relations are reduced by the explicit-field `Factor` path,
+and a power α^k with deg m ≤ k ≤ 128 is reduced modulo the defining
+polynomial m wherever it is built (in canonical form, by `evaluate()`,
+`Expand` and `.N()`): for a root of t² - 2, α² is 2. A generator is reduced
+only when its polynomial is proved irreducible. Other relations are not
+reduced: a negative power stays as it is, and general CE simplification is not
+upgraded to a global algebraic-number engine.
 
 Numerical evaluation preserves the exact defining coefficient list. An enclosing
 `N` also leaves explicit-field factoring exact: it does not turn the generator

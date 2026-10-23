@@ -53,6 +53,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { reduceAlgebraicGeneratorPower } from './algebraic-generator.js';
 import {
   isProvablyScalar,
   isSquareMatrixTyped,
@@ -297,6 +298,14 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // and read `(c^{-1})^{-1}` as `c` when `c` has no inverse (see
   // `containsResidueClass()`).
   if (containsResidueClass(a) || containsResidueClass(b)) return unchanged();
+
+  // A power of an `AlgebraicGenerator` at or above the degree of its defining
+  // polynomial is reduced modulo that polynomial: for a root of t² - 2, α² is
+  // 2, as (√2)² is 2 (`reduceAlgebraicGeneratorPower()`).
+  if (a.operator === 'AlgebraicGenerator') {
+    const reduced = reduceAlgebraicGeneratorPower(a, b);
+    if (reduced) return reduced;
+  }
 
   if (isFunction(a, 'Power')) {
     const [base, aPow] = a.ops;
@@ -1286,6 +1295,13 @@ export function pow(
     (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
   )
     return x.engine._fn('Power', [x, x.engine.expr(exp)], { canonical: false });
+
+  // See `canonicalPower()`: a power of an `AlgebraicGenerator` is reduced
+  // modulo its defining polynomial.
+  if (x.operator === 'AlgebraicGenerator') {
+    const reduced = reduceAlgebraicGeneratorPower(x, exp);
+    if (reduced) return reduced;
+  }
 
   // A power with an `Indeterminate` operand is `Indeterminate` unless the
   // other operand is inexact (`nanOperandAnswer()`), and `NaN` under a

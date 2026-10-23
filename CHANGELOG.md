@@ -13,8 +13,11 @@
   `.N()`. A request that the engine cannot answer within its limits (a
   coefficient it cannot read, an unsupported generator, the operation budget)
   stays unevaluated; it is never factored over the rationals instead, and an
-  unevaluated result is not a proof of irreducibility. The one- and two-argument
-  forms of `Factor` are unchanged. Examples and limits:
+  unevaluated result is not a proof of irreducibility. A power of a generator
+  at or above the degree of its polynomial is reduced, as `(√2)^2` is 2: for
+  α a root of t² - 2, `α^2` is 2 and `Expand((x - α)(x + α))` is `x^2 - 2`.
+  The one- and two-argument forms of `Factor` are unchanged. Examples and
+  limits:
   [number-field factoring](https://github.com/cortex-js/compute-engine/blob/main/docs/number-field-factoring.md).
 
 ### Performance

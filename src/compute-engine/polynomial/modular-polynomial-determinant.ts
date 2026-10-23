@@ -1,5 +1,6 @@
 import {
   integerGcd,
+  PolynomialBudgetExceeded,
   rationalCoefficient as q,
   type PolynomialWork,
   type RationalCoefficient,
@@ -60,10 +61,12 @@ export function modularPolynomialDeterminant(
       if (isPrime) break;
       prime--;
     }
+    // The primes descend from 65521. The interpolation needs a prime above
+    // the degree, and a large bound consumes many primes, so a large enough
+    // input exhausts them. That is a limit of this method, not invalid
+    // input: callers report it as an incomplete result.
     if (prime <= degree || prime < 2)
-      throw new RangeError(
-        'Determinant interpolation degree exceeds prime range'
-      );
+      throw new PolynomialBudgetExceeded('determinant-prime-limit');
     const R = new SmallPrimePolynomials(prime, work),
       F = R.field;
     const reduced = integers.map((row) => row.map((p) => p.map(F.fromInteger)));

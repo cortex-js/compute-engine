@@ -76,6 +76,62 @@ function definingPolynomial(g: Expression): RationalCoefficient[] | undefined {
   ];
 }
 
+/**
+ * The fields whose defining polynomial was proved irreducible, by the text of
+ * that polynomial made monic (so `2t² - 4` and `t² - 2` share an entry). Each
+ * `AlgebraicGenerator` evaluation, each reduced power of a generator and each
+ * `Factor` call with a field argument needs the field, and the proof is a
+ * complete rational factorization of the polynomial. A `RationalNumberField`
+ * is immutable and does not depend on an engine, so one instance serves every
+ * call. Only a successful proof is kept; the oldest entry is removed when the
+ * cache is full. A call that finds its field here does not spend its own
+ * budget on the proof: the proof does not depend on the budget once it
+ * succeeded.
+ */
+const certifiedFields = new Map<string, RationalNumberField>();
+const MAX_CERTIFIED_FIELDS = 64;
+
+function certifiedField(
+  polynomial: readonly RationalCoefficient[],
+  options: NumberFieldFactorOptions
+): RationalNumberField {
+  const key = new FieldPolynomials(Q)
+    .monic(polynomial)
+    .map((c) => `${c.numerator}/${c.denominator}`)
+    .join(',');
+  const cached = certifiedFields.get(key);
+  if (cached) return cached;
+  const field = RationalNumberField.create(polynomial, options);
+  if (certifiedFields.size >= MAX_CERTIFIED_FIELDS)
+    certifiedFields.delete(certifiedFields.keys().next().value!);
+  certifiedFields.set(key, field);
+  return field;
+}
+
+/**
+ * The field of an `AlgebraicGenerator` whose defining polynomial is proved
+ * irreducible, or `undefined`: the descriptor is malformed or reducible, or
+ * the proof does not finish within the default budget. A cancellation by the
+ * deadline is not caught.
+ */
+export function certifiedGeneratorField(
+  g: Expression
+): RationalNumberField | undefined {
+  if (!isFunction(g, 'AlgebraicGenerator')) return undefined;
+  const polynomial = definingPolynomial(g);
+  if (!polynomial) return undefined;
+  const ce = g.engine;
+  try {
+    return certifiedField(polynomial, {
+      check: () => checkDeadlineEvery(ce._deadlineFrame, 0x3ff),
+    });
+  } catch (e) {
+    if (e instanceof PolynomialBudgetExceeded || e instanceof RangeError)
+      return undefined;
+    throw e;
+  }
+}
+
 /** Validate the abstract generator without choosing a complex embedding. */
 export function validateAlgebraicGenerator(
   g: Expression
@@ -85,7 +141,7 @@ export function validateAlgebraicGenerator(
   try {
     const polynomial = definingPolynomial(g);
     if (!polynomial) return ce.error('invalid-algebraic-generator');
-    RationalNumberField.create(polynomial, {
+    certifiedField(polynomial, {
       check: () => checkDeadlineEvery(ce._deadlineFrame, 0x3ff),
     });
   } catch (e) {
@@ -134,7 +190,7 @@ export function factorNumberFieldExpression(
   try {
     const modulus = definingPolynomial(generator);
     if (!modulus) return undefined;
-    const field = RationalNumberField.create(modulus, {
+    const field = certifiedField(modulus, {
       ...options,
       maxOperations,
       check,

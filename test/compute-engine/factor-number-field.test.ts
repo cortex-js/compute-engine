@@ -138,6 +138,71 @@ describe('Factor over an explicit number field', () => {
     ).toThrow(stop);
   });
 
+  describe('a power of a generator is reduced modulo its polynomial', () => {
+    // α is a root of t² - 2, β a root of t³ - t - 1.
+    const a = alpha([-2, 0, 1]);
+    const b = alpha([-1, -1, 0, 1]);
+    test.each([
+      [['Power', a, 2], 2],
+      [
+        ['Power', a, 3],
+        ['Multiply', 2, a],
+      ],
+      [
+        ['Power', b, 3],
+        ['Add', b, 1],
+      ],
+      [
+        ['Power', b, 4],
+        ['Add', ['Power', b, 2], b],
+      ],
+    ] as [MathJsonExpression, MathJsonExpression][])('%j', (power, reduced) => {
+      expect(ce.box(power).isSame(ce.box(reduced))).toBe(true);
+    });
+    test('in a product and in Expand', () => {
+      expect(ce.box(['Multiply', a, a]).evaluate().isSame(2)).toBe(true);
+      const factored = request(['Subtract', square, 2], a).evaluate();
+      expect(
+        ce
+          .box(['Expand', factored.json])
+          .evaluate()
+          .isSame(ce.box(['Subtract', square, 2]))
+      ).toBe(true);
+    });
+    test('below the degree, negative and large powers are kept', () => {
+      for (const k of [1, -2, 200])
+        expect(ce.box(['Power', b, k]).operator).toBe(
+          k === 1 ? 'AlgebraicGenerator' : 'Power'
+        );
+    });
+    test('a reducible or malformed generator is not reduced', () => {
+      // t² - 1 is reducible: the error of the generator is kept.
+      const power = ce.box(['Power', alpha([-1, 0, 1]), 2]);
+      expect(power.operator).toBe('Power');
+      expect(power.evaluate().isValid).toBe(false);
+    });
+    test('trailing zero coefficients do not change the degree', () => {
+      // [1, 0, 1, 0] is t² + 1, so α² = -1.
+      expect(ce.box(['Power', alpha([1, 0, 1, 0]), 2]).isSame(-1)).toBe(true);
+    });
+    test('the reduction is exact under N()', () => {
+      expect(
+        ce
+          .box(['Power', a, 3])
+          .N()
+          .isSame(ce.box(['Multiply', 2, a]))
+      ).toBe(true);
+    });
+    test('on the parse route', () => {
+      expect(
+        ce
+          .parse('\\operatorname{AlgebraicGenerator}([-2,0,1])^2')
+          .evaluate()
+          .isSame(2)
+      ).toBe(true);
+    });
+  });
+
   test('supports Apply and resolves stored polynomial operands', () => {
     const f: MathJsonExpression = ['Add', square, -2];
     ce.assign('p', f);

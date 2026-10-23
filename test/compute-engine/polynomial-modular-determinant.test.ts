@@ -1,5 +1,6 @@
 import {
   FieldPolynomials,
+  PolynomialBudgetExceeded,
   PolynomialWork,
   rationalCoefficient as q,
   rationalField as Q,
@@ -120,5 +121,12 @@ describe('Certified modular polynomial determinants', () => {
         })
       )
     ).toThrow(error);
+  });
+  test('running out of interpolation primes is a limit, not invalid input', () => {
+    // The primes descend from 65521: a degree above that has no prime left.
+    const p = [...Array<number>(65530).fill(0), 1];
+    expect(() => determinant([[poly(p)]], new PolynomialWork())).toThrow(
+      new PolynomialBudgetExceeded('determinant-prime-limit')
+    );
   });
 });
