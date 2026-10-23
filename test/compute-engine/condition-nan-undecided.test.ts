@@ -14,15 +14,17 @@ import { TEST_PYTHON } from './test-python';
  * and on the `javascript`, `python` and `interval-js` targets (on
  * `interval-js`, for an operand that is `empty` over the whole cell).
  *
- * `NotEqual` is not part of the decision: `NaN ≠ 0` evaluates to `True`
- * (IEEE), and a branch on it still selects no arm — the interpreter answers
- * `Missing`, its no-selection value, and the compiled JavaScript answers
- * `NaN`. `Missing` keeps its Kleene reading.
+ * User decision of 2026-10-23: `NotEqual` follows the same reading. `NaN ≠ 0`
+ * is `True` (IEEE), the negation of `NaN = 0`, in a branch condition as in a
+ * cell of an element-wise condition, so the `If`/`Which` takes its first arm
+ * on the interpreter and on the `javascript` and `python` targets. `Missing`
+ * keeps its Kleene reading.
  *
  * History: from 2026-09-03 to 2026-10-20 a NaN operand of any of the six
- * relations made the branch select no arm (ruled 2026-09-03). Before that
- * ruling the interpreter took the else arm while the compiled lane answered
- * `NaN`.
+ * relations made the branch select no arm (ruled 2026-09-03), and a
+ * `NotEqual` with a NaN operand kept that rule until 2026-10-23. Before the
+ * 2026-09-03 ruling the interpreter took the else arm while the compiled
+ * lane answered `NaN`.
  */
 
 const ce = new ComputeEngine();
@@ -43,19 +45,18 @@ const ORDERED_AND_EQUAL = [
 ];
 
 describe('a NaN operand of a branch condition', () => {
-  test('If: an ordered comparison or Equal takes the else arm, NotEqual no arm', () => {
+  test('If: an ordered comparison or Equal takes the else arm, NotEqual the first arm', () => {
     for (const head of ORDERED_AND_EQUAL) {
       expect(ce.box(['If', [head, 'NaN', 0], 1, -1]).evaluate().re).toBe(-1);
       expect(ce.box(['If', [head, 0, 'NaN'], 1, -1]).evaluate().re).toBe(-1);
       expect(compiled(['If', [head, 'x', 0], 1, -1], { x: NaN })).toBe(-1);
     }
-    expect(
-      ce.box(['If', ['NotEqual', 'NaN', 0], 1, -1]).evaluate().symbol
-    ).toBe('Missing');
-    expect(
-      ce.box(['If', ['NotEqual', 0, 'NaN'], 1, -1]).evaluate().symbol
-    ).toBe('Missing');
-    expect(compiled(['If', ['NotEqual', 'x', 0], 1, -1], { x: NaN })).toBeNaN();
+    expect(ce.box(['If', ['NotEqual', 'NaN', 0], 1, -1]).evaluate().re).toBe(1);
+    expect(ce.box(['If', ['NotEqual', 0, 'NaN'], 1, -1]).evaluate().re).toBe(1);
+    expect(compiled(['If', ['NotEqual', 'x', 0], 1, -1], { x: NaN })).toBe(1);
+    expect(compiled(['If', ['NotEqual', 0, 'x'], 1, -1], { x: NaN })).toBe(1);
+    // An unsupplied `x` is absent, not NaN: still no arm.
+    expect(compiled(['If', ['NotEqual', 'x', 0], 1, -1], {})).toBeNaN();
   });
 
   test('a symbol holding NaN is the same as the literal', () => {
@@ -66,9 +67,7 @@ describe('a NaN operand of a branch condition', () => {
     expect(e.box(['If', ['Greater', 'u', 0], 1]).evaluate().symbol).toBe(
       'Missing'
     );
-    expect(e.box(['If', ['NotEqual', 'u', 0], 1, -1]).evaluate().symbol).toBe(
-      'Missing'
-    );
+    expect(e.box(['If', ['NotEqual', 'u', 0], 1, -1]).evaluate().re).toBe(1);
   });
 
   test('the comparison itself keeps its IEEE value', () => {
@@ -77,7 +76,7 @@ describe('a NaN operand of a branch condition', () => {
     expect(ce.box(['NotEqual', 'NaN', 1]).evaluate().symbol).toBe('True');
   });
 
-  test('Which: a false NaN guard falls through; a NotEqual guard ends the selection', () => {
+  test('Which: a false NaN guard falls through; a NotEqual guard selects its clause', () => {
     const w = [
       'Which',
       ['Greater', 'NaN', 0],
@@ -94,13 +93,13 @@ describe('a NaN operand of a branch condition', () => {
         { x: NaN }
       )
     ).toBe(3);
-    // A reached `NotEqual` guard with a NaN operand selects no clause, and
-    // the selection does not fall through to a later one.
+    // A reached `NotEqual` guard with a NaN operand is `True`: it selects
+    // its clause.
     const n = ['Which', ['NotEqual', 'NaN', 0], 1, 'True', 3];
-    expect(ce.box(n).evaluate().symbol).toBe('Missing');
+    expect(ce.box(n).evaluate().re).toBe(1);
     expect(
       compiled(['Which', ['NotEqual', 'x', 0], 1, 'True', 3], { x: NaN })
-    ).toBeNaN();
+    ).toBe(1);
     // An earlier decided clause still selects before the NaN guard is reached.
     expect(
       ce
@@ -118,7 +117,7 @@ describe('a NaN operand of a branch condition', () => {
   });
 
   test('connectives combine three-valued, as the compiled lowering does', () => {
-    // `NaN > 0` is a decided `False`; `NaN ≠ 0` is undecided.
+    // `NaN > 0` is a decided `False`; `NaN ≠ 0` is a decided `True`.
     const gt = ['Greater', 'NaN', 0];
     const ne = ['NotEqual', 'NaN', 0];
     const cases: [any, unknown][] = [
@@ -126,11 +125,11 @@ describe('a NaN operand of a branch condition', () => {
       [['Or', gt, 'True'], 1],
       [['Or', gt, 'False'], -1],
       [['Not', gt], 1],
-      [['And', ne, 'True'], 'Missing'],
+      [['And', ne, 'True'], 1],
       [['And', ne, 'False'], -1],
       [['Or', ne, 'True'], 1],
-      [['Or', ne, 'False'], 'Missing'],
-      [['Not', ne], 'Missing'],
+      [['Or', ne, 'False'], 1],
+      [['Not', ne], -1],
       [['And', ['Greater', 2, 0], ['Less', 1, 2]], 1],
     ];
     for (const [cond, expected] of cases) {
@@ -145,14 +144,12 @@ describe('a NaN operand of a branch condition', () => {
     expect(compiled(['If', ['And', x, y], 1, -1], { x: NaN, y: 1 })).toBe(-1);
     expect(compiled(['If', ['Or', x, y], 1, -1], { x: NaN, y: 1 })).toBe(1);
     expect(compiled(['If', ['Not', x], 1, -1], { x: NaN })).toBe(1);
-    expect(
-      compiled(['If', ['And', xne, y], 1, -1], { x: NaN, y: 1 })
-    ).toBeNaN();
+    expect(compiled(['If', ['And', xne, y], 1, -1], { x: NaN, y: 1 })).toBe(1);
     expect(compiled(['If', ['And', xne, y], 1, -1], { x: NaN, y: -1 })).toBe(
       -1
     );
-    expect(compiled(['If', ['Or', xne, y], 1, -1], { x: NaN, y: 1 })).toBe(1);
-    expect(compiled(['If', ['Not', xne], 1, -1], { x: NaN })).toBeNaN();
+    expect(compiled(['If', ['Or', xne, y], 1, -1], { x: NaN, y: -1 })).toBe(1);
+    expect(compiled(['If', ['Not', xne], 1, -1], { x: NaN })).toBe(-1);
   });
 
   test('a free-variable condition is still held inert', () => {
@@ -166,31 +163,19 @@ describe('a NaN operand of a branch condition', () => {
         .box(['If', ['And', ['Greater', 'x', 0], ['Greater', 'NaN', 0]], 1, -1])
         .evaluate().re
     ).toBe(-1);
-    // `x > 0 ∧ NaN ≠ 0`: a later `x := -1` decides the `And` as `False`, so
-    // the application stays inert, spelled with the ORIGINAL sub-conditions
-    // (folding `NaN ≠ 0` to its IEEE `True` would decide it the wrong way).
-    const held = ce
-      .box(['If', ['And', ['Greater', 'x', 0], ['NotEqual', 'NaN', 0]], 1, -1])
-      .evaluate();
-    expect(held.operator).toBe('If');
-    expect(
-      held.op1.isSame(
-        ce.box(['And', ['Greater', 'x', 0], ['NotEqual', 'NaN', 0]])
-      )
-    ).toBe(true);
+    // `x > 0 ∧ NaN ≠ 0`: `NaN ≠ 0` is `True`, which does not decide the
+    // `And`, so the application stays inert until `x` is bound.
+    const ne = ['And', ['Greater', 'x', 0], ['NotEqual', 'NaN', 0]];
+    expect(ce.box(['If', ne, 1, -1]).evaluate().operator).toBe('If');
     // Once `x` is bound the held condition decides.
-    const e = new ComputeEngine();
-    e.assign('x', -1);
-    expect(
-      e
-        .box([
-          'If',
-          ['And', ['Greater', 'x', 0], ['NotEqual', 'NaN', 0]],
-          1,
-          -1,
-        ])
-        .evaluate().re
-    ).toBe(-1);
+    for (const [x, expected] of [
+      [-1, -1],
+      [2, 1],
+    ]) {
+      const e = new ComputeEngine();
+      e.assign('x', x);
+      expect(e.box(['If', ne, 1, -1]).evaluate().re).toBe(expected);
+    }
   });
 
   test('the connectives keep their short circuit and error propagation', () => {
@@ -232,22 +217,18 @@ describe('a NaN operand of a branch condition', () => {
     expect(ce.box(['If', ['Less', 0, 'NaN', 10], 1, -1]).evaluate().re).toBe(
       -1
     );
-    // `NaN ≠ 0` is undecided.
-    expect(ce.box(['If', ['Nand', ne, 'True'], 1, -1]).evaluate().symbol).toBe(
-      'Missing'
+    // `NaN ≠ 0` is `True`.
+    expect(ce.box(['If', ['Nand', ne, 'True'], 1, -1]).evaluate().re).toBe(-1);
+    expect(ce.box(['If', ['Nor', ne, 'False'], 1, -1]).evaluate().re).toBe(-1);
+    expect(ce.box(['If', ['Implies', ne, 'False'], 1, -1]).evaluate().re).toBe(
+      -1
     );
-    expect(ce.box(['If', ['Nor', ne, 'False'], 1, -1]).evaluate().symbol).toBe(
-      'Missing'
-    );
-    expect(
-      ce.box(['If', ['Implies', ne, 'False'], 1, -1]).evaluate().symbol
-    ).toBe('Missing');
     expect(ce.box(['If', ['Implies', ne, 'True'], 1, -1]).evaluate().re).toBe(
       1
     );
   });
 
-  test('statement form: a false condition runs the else branch, NotEqual neither', () => {
+  test('statement form: a false condition runs the else branch, NotEqual the then branch', () => {
     const block = (cond: any) =>
       new ComputeEngine()
         .box([
@@ -258,8 +239,28 @@ describe('a NaN operand of a branch condition', () => {
         ])
         .evaluate().re;
     expect(block(['Greater', 'NaN', 0])).toBe(2);
-    // Neither branch runs, and the block continues.
-    expect(block(['NotEqual', 'NaN', 0])).toBe(0);
+    expect(block(['NotEqual', 'NaN', 0])).toBe(1);
+  });
+
+  test('the scalar and the indexed element-wise NotEqual agree on a NaN operand', () => {
+    // `Which([a, b, c] ≠ 2, 1, True, 0)[2]` is rewritten to the scalar
+    // `Which(b ≠ 2, 1, True, 0)` by the compiler (`fixed-width-unroll.ts`), so
+    // the two must give the same answer: the cell `NaN ≠ 2` is `True`, and so
+    // is the scalar condition (user decision 2026-10-23).
+    const e = new ComputeEngine();
+    for (const s of ['a', 'b', 'c']) e.declare(s, 'number');
+    const vars = { a: 1, b: NaN, c: 3 };
+    const forms = [
+      ['At', ['Which', ['NotEqual', ['List', 'a', 'b', 'c'], 2], 1, 'True', 0], 2],
+      ['Which', ['NotEqual', 'b', 2], 1, 'True', 0],
+    ];
+    for (const form of forms) {
+      const r = compile(e.box(form), { fallback: false });
+      expect(r.run!(vars)).toBe(1);
+      const held = new ComputeEngine();
+      for (const [k, v] of Object.entries(vars)) held.assign(k, v);
+      expect(held.box(form).evaluate().re).toBe(1);
+    }
   });
 
   test('element-wise selection is unchanged: a NaN cell takes the else cell on both lanes', () => {
@@ -304,9 +305,9 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
       expect(c.success).toBe(true);
       expect(Number(c.run!({} as never))).toBe(0);
     }
-    // `≠` is not part of the decision: no value.
+    // `0/0 ≠ 0` is `True` (user decision 2026-10-23).
     const ne = ce.parse('\\left\\{\\frac{0}{0}\\ne0:1,0\\right\\}');
-    expect(ne.evaluate().symbol).toBe('Missing');
+    expect(ne.evaluate().re).toBe(1);
   });
 
   test('row 413: the comparison alone is False, and NaN ≠ 0 is True', () => {
@@ -345,10 +346,10 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
         ])
         .evaluate().re
     ).toBe(0);
-    // The `≠` control on both routes.
+    // `≠` takes the first arm on both routes.
     expect(
-      ce.box(['If', ['NotEqual', ['Divide', 0, 0], 0], 1, 0]).evaluate().symbol
-    ).toBe('Missing');
+      ce.box(['If', ['NotEqual', ['Divide', 0, 0], 0], 1, 0]).evaluate().re
+    ).toBe(1);
     expect(
       ce
         .function('If', [
@@ -356,8 +357,8 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
           ce.number(1),
           ce.number(0),
         ])
-        .evaluate().symbol
-    ).toBe('Missing');
+        .evaluate().re
+    ).toBe(1);
   });
 
   test('row 413: the javascript target takes the else arm at x = NaN', () => {
@@ -374,7 +375,7 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
       to: 'javascript',
       fallback: false,
     } as never);
-    expect(ne.run!({ x: NaN } as never)).toBeNaN();
+    expect(ne.run!({ x: NaN } as never)).toBe(1);
   });
 
   (TEST_PYTHON === undefined ? test.skip : test)(
@@ -390,7 +391,7 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
       };
       expect(run('\\left\\{x > 0: 1, 0\\right\\}')).toBe('0.0');
       expect(run('\\left\\{x = 0: 1, 0\\right\\}')).toBe('0.0');
-      expect(run('\\left\\{x \\ne 0: 1, 0\\right\\}')).toBe('nan');
+      expect(run('\\left\\{x \\ne 0: 1, 0\\right\\}')).toBe('1.0');
     }
   );
 

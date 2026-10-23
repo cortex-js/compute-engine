@@ -144,13 +144,15 @@ IEEE `false` and did not change.
 
 What the decision does NOT change:
 
-- **`≠` (`NotEqual`)** keeps its earlier behavior. `NaN ≠ 0` evaluates to
-  `True` (IEEE), and a branch on a `NotEqual` with a NaN operand still
-  takes no arm: the interpreter answers `Missing`, the `javascript` and
-  `python` targets answer `NaN` (the GPU targets take the then arm, as
-  before), and `interval-js` answers `'maybe'` for an `empty` operand.
-  So `If(NaN ≠ 0, a, b)` takes no arm, while `If(¬(NaN = 0), a, b)` takes
-  `a`.
+- **`≠` (`NotEqual`)** kept its earlier behavior until the user decision of
+  2026-10-23: a branch on a `NotEqual` with a NaN operand took no arm
+  (`Missing` in the interpreter, `NaN` on the `javascript` and `python`
+  targets). Since that decision `NaN ≠ 0` is `True` in a branch condition
+  too, as IEEE reads it and as the cell of an element-wise condition always
+  was, so `If(NaN ≠ 0, a, b)` takes `a` on the interpreter and on the
+  `javascript` and `python` targets, the same arm as `If(¬(NaN = 0), a, b)`.
+  The GPU targets took the then arm before and still do. `interval-js`
+  still answers `'maybe'` for `\sqrt{x} \ne 0` over an `empty` operand.
 - **`Missing`** keeps its Kleene reading: `Less(Missing, 1)` is `Missing`,
   and an `If` on it is the absent-condition error (§3.D); compiled, a
   `missing`-typed operand still makes the branch take no arm. On
@@ -204,11 +206,13 @@ What the decision does NOT change:
 
 History: from 2026-09-02 (compiled) and 2026-09-03 (interpreter) to
 2026-10-20, a NaN operand of any of these relations, `≠` included, made the
-branch take no arm — see the 2026-09-02 entry in §7. Implementation:
-`evaluateCondition` (`library/control-structures.ts`, which now flags only
-`NotEqual`), `BaseCompiler.conditionNode` (`compilation/base-compiler.ts`,
-the `nanTest` field of a relation test), and `hasEmptyOperand` and
-`holds` (`interval/comparison.ts`). Pinned in
+branch take no arm — see the 2026-09-02 entry in §7. From 2026-10-20 to
+2026-10-23 `≠` kept that rule. Implementation: `evaluateCondition`
+(`library/control-structures.ts`, which now flags only the `Missing` of an
+undecided whole-collection comparison), `BaseCompiler.conditionNode`
+(`compilation/base-compiler.ts`; the `nanTest` field of a relation test is
+true only for a link of a chain with an absent operand), and
+`hasEmptyOperand` and `holds` (`interval/comparison.ts`). Pinned in
 `test/compute-engine/condition-nan-undecided.test.ts`.
 
 #### Extension: a value with no order — user decision of 2026-10-21
@@ -2676,14 +2680,16 @@ document's history):
   `Indeterminate` operand decides them `False` in a branch as everywhere
   else, on the interpreter and the compiled lanes, so `If(NaN > 0, 1, -1)`
   is `-1` again and the two lanes now agree on the IEEE answer instead of
-  on no arm. `evaluateCondition` flags only `NotEqual`, and the compiled
-  operand test keeps its NaN conjunct only for `NotEqual` (for the other
-  relations it tests each variable the comparison reads for an unsupplied
-  value, so the 2026-09-02 rule for an unsupplied variable holds). Consequences
-  for the companion rulings above: `If(Random() > 0.5 ∧ x > 0, a, b)` at
-  `x = NaN` answers `b` (or `NaN` only through a `≠` leaf); a desugared
+  on no arm. REVERSED for `NotEqual` too on 2026-10-23 by the user: a NaN
+  operand decides it `True`, so `If(NaN ≠ 0, 1, -1)` is `1`. The compiled
+  operand test keeps no NaN conjunct (it tests each variable the comparison
+  reads for an unsupplied value, so the 2026-09-02 rule for an unsupplied
+  variable holds), except for a link of a chain with an absent operand.
+  Consequences for the companion rulings above:
+  `If(Random() > 0.5 ∧ x > 0, a, b)` at `x = NaN` answers `b`; a desugared
   `while` whose exit test compares a NaN with `<`, `≤`, `>`, `≥` or `=`
-  exits instead of running to the iteration cap. The table and the
+  exits instead of running to the iteration cap, and one whose exit test is
+  a `≠` with a NaN operand keeps running. The table and the
   exceptions are in the decision at the top of this document.
 - **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
   condition is refused at boxing.** The 2026-08-31 inertness ruling

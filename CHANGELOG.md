@@ -16,10 +16,11 @@
   a chain is read link by link, so `5 < 0 < w` is `false`. On GLSL and WGSL an
   absent number can only be `NaN`, and these comparisons compile as before, with
   the IEEE answer. A chained comparison with an operand that has an effect
-  (`0 < w < Random()`) and an operand that may be absent no longer compiles; with
-  `fallback` (the default) `compile()` runs the interpreter. One case compiled
-  numeric code cannot tell apart: a local variable that holds the `NaN` of an
-  `If` with no else branch is read as a value. Rule: `docs/ERROR-MODEL.md`.
+  (`0 < w < Random()`) and an operand that may be absent no longer compiles;
+  with `fallback` (the default) `compile()` runs the interpreter. One case
+  compiled numeric code cannot tell apart: a local variable that holds the `NaN`
+  of an `If` with no else branch is read as a value. Rule:
+  `docs/ERROR-MODEL.md`.
 
 ### New Features
 
@@ -66,8 +67,35 @@
   definite integrals, and the check of a function type is done once per type.
   The results are the same.
 
+### Behavior Changes
+
+- **A branch on `NaN ≠ x` takes its first arm** (ROADMAP CE-125). `NaN ≠ 2` is
+  `True`, but `If(NaN ≠ 2, 1, 0)` and, with `b` holding `NaN`,
+  `Which(b ≠ 2, 1, True, 0)` took no arm: `Missing` in the interpreter, `NaN` in
+  compiled JavaScript and Python. A statement-form `If` ran neither branch. The
+  element-wise form gave the IEEE answer, so `Which([1, b, 3] ≠ 2, 1, True, 0)`
+  was `[1, 1, 1]` and its second element did not match the scalar form. A
+  branch now uses the value `True` of a `≠` with a `NaN` operand, as it already
+  used the value `False` of `<`, `≤`, `>`, `≥` and `=`: the examples give `1` on
+  the interpreter, JavaScript and Python. An absent operand (`Missing`, an input
+  the caller leaves out) still leaves the branch without an arm. Rule:
+  `docs/ERROR-MODEL.md`.
+
 ### Resolved Issues
 
+- **A product over a list of elements of unknown type, or over rows, was typed
+  `unknown`** (ROADMAP CE-374). `Product(L)` of an operand that is not a list
+  literal becomes `Reduce(L, Multiply, 1)` at canonicalization, and the type of
+  a `Reduce` is the reducer's own result type, which is `unknown` for `Multiply`
+  over an element of unknown type: with `L: list<unknown>`, `Sum(Rest(L))` was a
+  `broadcastable<number>` and `Product(Rest(L))` was `unknown`; with
+  `V: list<vector<2>>`, `Product(Rest(V))` was `unknown` too. A seeded `Add` or
+  `Multiply` fold with the identity as its seed is now typed as `Sum` or
+  `Product` type the collection when the elements are of unknown type or are
+  numbers or rows: `Product(Rest(L))` is a `broadcastable<number>` and
+  `Product(Rest(V))` is `integer | vector<2>` (the seed for an empty list, or a
+  row). A tuple arm keeps the reducer's typing, and `Scan` keeps its running
+  values.
 - **Compiled `Equal` and `NotEqual` read a `NaN` operand as absent and answered
   `Missing` where the interpreter answers `False` or `True`** (ROADMAP CE-386).
   With `g := t ↦ [t, 2t]` and `x: any`, the element `g(x)[5]` at `x = 3` is
@@ -93,7 +121,11 @@
   (`5007912 ± 2900000`), and `NaN` for `∫₀^∞ x dx`. When the integrand has one
   sign on the interval and does not decay faster than `1/x` (or overflows) on
   the infinite tail, `.N()`, `NIntegrate` and a compiled integral now give `+∞`
-  or `−∞`. An integrand whose sign changes (`∫₀^∞ sin x dx`) still gives `NaN`.
+  or `−∞`. When the sign changes, `.N()` and `NIntegrate` take the answer of
+  the exact route, as compiled code already did with the closed form:
+  `∫₀^∞ (x − 1) dx` is `+∞` and `∫₀^∞ (eˣ − 5) dx` is `+∞` (it was a
+  Monte-Carlo value). An integral with no value (`∫₀^∞ sin x dx`,
+  `∫_{−∞}^∞ x dx`) still gives `NaN`.
 - **A definite integral over a half-infinite interval with a pole at its finite
   bound was `ComplexInfinity`** (ROADMAP CE-391). `∫₀^∞ (x − 1)/x³ dx` and
   `∫₀^∞ −1/x³ dx` gave `ComplexInfinity`, which is not the value of a real

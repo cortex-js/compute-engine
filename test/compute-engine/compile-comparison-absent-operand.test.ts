@@ -15,7 +15,8 @@
  * A NUMERIC operand that holds `NaN` keeps its IEEE comparison: a restricted
  * number is `NaN` when absent, and `Less(NaN, 1)` is `False` on both routes,
  * and so a branch over it takes the else arm (user decision 2026-10-20);
- * a branch over `NotEqual` with a NaN operand takes no arm.
+ * `NotEqual(NaN, 1)` is `True`, and a branch over it takes the then arm
+ * (user decision 2026-10-23).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -127,17 +128,13 @@ describe('a restricted NUMBER keeps its IEEE comparison', () => {
     const expected = h === 'NotEqual';
     expect(interpreted(json, 0)).toBe(expected ? 'True' : 'False');
     expect(run(json, 0)).toBe(expected);
-    // The masked number is `NaN`. A branch over an ordered comparison or an
-    // `Equal` with a NaN operand takes the else arm on both routes (user
-    // decision 2026-10-20, Tycho rows 411 and 413; before it, the branch
-    // took no arm). A branch over `NotEqual` still takes no arm.
-    if (expected) {
-      expect(interpreted(['If', json, 1, 2], 0)).toBe('Missing');
-      expect(run(['If', json, 1, 2], 0)).toBeNaN();
-    } else {
-      expect(interpreted(['If', json, 1, 2], 0)).toBe(2);
-      expect(run(['If', json, 1, 2], 0)).toBe(2);
-    }
+    // The masked number is `NaN`. A branch over a relation with a NaN
+    // operand takes the arm of the relation's IEEE value on both routes
+    // (user decisions 2026-10-20, Tycho rows 411 and 413, and 2026-10-23;
+    // before them, the branch took no arm).
+    const arm = expected ? 1 : 2;
+    expect(interpreted(['If', json, 1, 2], 0)).toBe(arm);
+    expect(run(['If', json, 1, 2], 0)).toBe(arm);
   });
 });
 

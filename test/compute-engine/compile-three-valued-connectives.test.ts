@@ -38,8 +38,10 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
  * UNSUPPLIED `x` (a key left out of the vars object). The JavaScript cases
  * below use an unsupplied variable as the undecided operand; before the
  * decision they used NaN. The Python target has no unsupplied variable, so its
- * cases build the conditions from `NotEqual`, whose NaN operand is still
- * undecided.
+ * cases read symbols declared `number | missing`, whose absent value (`None`,
+ * or NaN, the numeric spelling of the same marker) leaves a relation
+ * undecided. Until the user decision of 2026-10-23 they used a `NotEqual` with
+ * a NaN operand; that relation is now decided `true`.
  */
 
 /** `Greater(name, 0)`, the relation these suites build their conditions from. */
@@ -508,6 +510,8 @@ describe('COMPILE three-valued connectives — no new code on the common path', 
 describe('COMPILE three-valued connectives — Python target', () => {
   const ce = realEngine();
   ce.declare('b', 'boolean');
+  ce.declare('p', 'number | missing');
+  ce.declare('q', 'number | missing');
   const python = new PythonTarget();
   const code = (mathJson: unknown): string =>
     python.compile(ce.expr(mathJson as any)).code;
@@ -518,8 +522,13 @@ describe('COMPILE three-valued connectives — Python target', () => {
     `else ((${otherwise}) if isinstance(_CND, (bool, np.bool_)) ` +
     "else float('nan'))))";
 
-  /** `NotEqual(name, 0)`: a NaN operand leaves it undecided. */
+  /** `NotEqual(name, 0)`: an absent operand leaves it undecided. */
   const ne = (name: string): unknown[] => ['NotEqual', name, 0];
+
+  /** The three-valued leaf of `ne(name)` over a `number | missing` symbol. */
+  const neLeaf = (name: string, tv: string): string =>
+    `((((lambda ${tv}: (None if ((${tv} is None)) else (((${tv}) != (0)))))` +
+    `(${name})) if not (${name} is None) and ${name} == ${name} else None)`;
 
   it('keeps the plain conditional when every leaf is an ordered comparison', () => {
     // A NaN operand decides `x > 0` false (user decision 2026-10-20), and
@@ -531,31 +540,35 @@ describe('COMPILE three-valued connectives — Python target', () => {
   });
 
   it('spells the And table with lambdas, None and float NaN', () => {
-    expect(code(['If', ['And', ne('x'), ne('y')], 1, -1])).toBe(
+    expect(code(['If', ['And', ne('p'), ne('q')], 1, -1])).toBe(
       selection('1', '-1') +
-        '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
-        '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
-        '(False if _tv2 is not None and not _tv2 else None)))' +
-        '(((((y) != (0))) if y == y else None))))' +
-        '(((((x) != (0))) if x == x else None)))'
+        '((lambda _tv2: (False if _tv2 is not None and not _tv2 else ' +
+        '(lambda _tv4: (_tv4 if _tv2 is not None and _tv2 else ' +
+        '(False if _tv4 is not None and not _tv4 else None)))' +
+        neLeaf('q', '_tv3') +
+        ')))' +
+        neLeaf('p', '_tv1') +
+        '))'
     );
   });
 
   it('mirrors the Or table', () => {
-    expect(code(['If', ['Or', ne('x'), ne('y')], 1, -1])).toBe(
+    expect(code(['If', ['Or', ne('p'), ne('q')], 1, -1])).toBe(
       selection('1', '-1') +
-        '((lambda _tv1: (True if _tv1 is not None and _tv1 else ' +
-        '(lambda _tv2: (_tv2 if _tv1 is not None and not _tv1 else ' +
-        '(True if _tv2 is not None and _tv2 else None)))' +
-        '(((((y) != (0))) if y == y else None))))' +
-        '(((((x) != (0))) if x == x else None)))'
+        '((lambda _tv2: (True if _tv2 is not None and _tv2 else ' +
+        '(lambda _tv4: (_tv4 if _tv2 is not None and not _tv2 else ' +
+        '(True if _tv4 is not None and _tv4 else None)))' +
+        neLeaf('q', '_tv3') +
+        ')))' +
+        neLeaf('p', '_tv1') +
+        '))'
     );
   });
 
   it('negates only a decided value, never None', () => {
-    const source = code(['If', ['Not', ['And', ne('x'), ne('y')]], 1, -1]);
+    const source = code(['If', ['Not', ['And', ne('p'), ne('q')]], 1, -1]);
     expect(source).toContain(
-      '(lambda _tv3: (None if _tv3 is None else not _tv3))'
+      '(lambda _tv5: (None if _tv5 is None else not _tv5))'
     );
     expect(source).not.toContain('logical_not');
   });
@@ -566,20 +579,31 @@ describe('COMPILE three-valued connectives — Python target', () => {
   });
 
   it('keeps the second operand inside a lambda that may not be entered', () => {
-    // The guard idiom: `1 / x` sits in the argument of a `lambda` reached only
-    // when `x != 0` has not already answered `False`. Since the user decision
-    // of 2026-10-20 the second leaf takes no NaN test, so `1 / x` is no longer
-    // bound to a parameter of its own: it is the comparison `(1 < 1 / x)`.
+    // The guard idiom: `1 / p` sits in the argument of a `lambda` reached only
+    // when `p != 0` has not already answered `False`. Since the user decision
+    // of 2026-10-20 the second leaf takes no NaN test, so `1 / p` is no longer
+    // bound to a parameter of its own: it is the comparison `(1 < 1 / p)`.
     const source = code([
       'If',
-      ['And', ['NotEqual', 'x', 0], ['Greater', ['Divide', 1, 'x'], 1]],
+      ['And', ['NotEqual', 'p', 0], ['Greater', ['Divide', 1, 'p'], 1]],
       1,
       -1,
     ]);
-    expect(source).toContain('((1 < 1 / x))');
-    expect(source.indexOf('_tv1 is not None and not _tv1')).toBeLessThan(
-      source.indexOf('1 / x')
+    expect(source).toContain('((1 < 1 / p))');
+    expect(source.indexOf('_tv2 is not None and not _tv2')).toBeLessThan(
+      source.indexOf('1 / p')
     );
+    // Over a `real` symbol `NaN ≠ 0` is decided (`True`, user decision
+    // 2026-10-23), so the condition keeps the plain `and`, which
+    // short-circuits as well.
+    expect(
+      code([
+        'If',
+        ['And', ['NotEqual', 'x', 0], ['Greater', ['Divide', 1, 'x'], 1]],
+        1,
+        -1,
+      ])
+    ).toBe('((1) if (((x) != (0)) and 1 < 1 / x) else (-1))');
   });
 });
 
@@ -604,6 +628,8 @@ const describePython = venvHasNumpy() ? describe : describe.skip;
 
 describePython('COMPILE three-valued connectives — Python execution', () => {
   const ce = realEngine();
+  ce.declare('p', 'number | missing');
+  ce.declare('q', 'number | missing');
   const python = new PythonTarget();
 
   /** Run one emitted Python expression with `x`, `y` bound, and report it. */
@@ -620,27 +646,36 @@ describePython('COMPILE three-valued connectives — Python execution', () => {
     }).trim();
   }
 
-  // The conditions are built from `NotEqual`, whose NaN operand is still
-  // undecided (user decision 2026-10-20); an ordered comparison with a NaN
-  // operand is decided false, which the last case checks.
+  // The conditions read symbols declared `number | missing`: NaN is the
+  // numeric spelling of their absent value, which leaves a relation
+  // undecided. Over a `real` symbol a relation with a NaN operand is decided
+  // (user decisions 2026-10-20 and 2026-10-23), which the other cases check.
   const ne = (name: string): unknown[] => ['NotEqual', name, 0];
 
   it('matches the JavaScript answers for And', () => {
     const source = python.compile(
-      ce.expr(['If', ['And', ne('x'), ne('y')], 1, -1] as any)
+      ce.expr(['If', ['And', ne('p'), ne('q')], 1, -1] as any)
     ).code;
-    expect(runPython(source, { x: 1, y: NaN })).toBe('nan');
-    expect(runPython(source, { x: 0, y: NaN })).toBe('-1');
-    expect(runPython(source, { x: 1, y: 2 })).toBe('1');
+    expect(runPython(source, { p: 1, q: NaN })).toBe('nan');
+    expect(runPython(source, { p: 0, q: NaN })).toBe('-1');
+    expect(runPython(source, { p: 1, q: 2 })).toBe('1');
   });
 
   it('matches the JavaScript answers for Or', () => {
     const source = python.compile(
-      ce.expr(['If', ['Or', ne('x'), ne('y')], 1, -1] as any)
+      ce.expr(['If', ['Or', ne('p'), ne('q')], 1, -1] as any)
+    ).code;
+    expect(runPython(source, { p: 1, q: NaN })).toBe('1');
+    expect(runPython(source, { p: 0, q: NaN })).toBe('nan');
+    expect(runPython(source, { p: 0, q: 0 })).toBe('-1');
+  });
+
+  it('decides a NotEqual with a NaN operand true', () => {
+    const source = python.compile(
+      ce.expr(['If', ['And', ne('x'), ne('y')], 1, -1] as any)
     ).code;
     expect(runPython(source, { x: 1, y: NaN })).toBe('1');
-    expect(runPython(source, { x: 0, y: NaN })).toBe('nan');
-    expect(runPython(source, { x: 0, y: 0 })).toBe('-1');
+    expect(runPython(source, { x: 0, y: NaN })).toBe('-1');
   });
 
   it('decides an ordered comparison with a NaN operand false', () => {
@@ -667,8 +702,9 @@ describePython('COMPILE three-valued connectives — Python execution', () => {
     expect(runPython(source, { x: 0 })).toBe('-1');
     expect(runPython(source, { x: 0.5 })).toBe('1');
     expect(runPython(source, { x: 4 })).toBe('-1');
-    // `NaN ≠ 0` is undecided, so the second conjunct is reached, and
-    // `1 < 1/NaN` is decided false (user decision 2026-10-20): `And` is false.
+    // `NaN ≠ 0` is `True` (user decision 2026-10-23), so the second conjunct
+    // is reached, and `1 < 1/NaN` is decided false (user decision 2026-10-20):
+    // `And` is false.
     expect(runPython(source, { x: NaN })).toBe('-1');
   });
 });

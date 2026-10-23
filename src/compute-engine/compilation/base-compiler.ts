@@ -739,10 +739,13 @@ type ConditionTest =
    * operand list means the relation is decided by construction.
    *
    * `nanTest` is true when a NaN operand leaves the relation undecided, so
-   * each operand is tested for NaN. That is the case for `NotEqual` only. An
-   * ordered comparison or an `Equal` with a NaN operand is decidedly false
-   * (user decision 2026-10-20), so its operands are tested only for an
-   * absent value: a `missing`-typed operand and an unsupplied variable.
+   * each operand is tested for NaN. That is the case only for a link of a
+   * chain with an absent operand (the `nanUndecided` argument of
+   * `conditionNode`, passed by `compileAbsentRelation`). Elsewhere a relation
+   * with a NaN operand has its IEEE value — `false`, or `true` for
+   * `NotEqual` (user decisions 2026-10-20 and 2026-10-23) — so its operands
+   * are tested only for an absent value: a `missing`-typed operand and an
+   * unsupplied variable.
    */
   | {
       readonly kind: 'operands';
@@ -26084,11 +26087,11 @@ export class BaseCompiler {
   // evidence: an unset `b` is `undefined` and `"a"` is truthy, so
   // `If(b, 1, -1)` would give `-1` for the first and `1` for the second.
   //
-  // A NaN operand is not such a case for an ordered comparison or an
-  // `Equal`: `NaN > 0` is `false`, and `If(x > 0, 1, -1)` gives `-1` at
-  // `x = NaN`, as the interpreter and Desmos do (user decision 2026-10-20,
-  // Tycho rows 411 and 413; from 2026-09-02 to that date it gave NaN). Only
-  // `NotEqual` with a NaN operand stays undecided (`BRANCH_RELATIONS`).
+  // A NaN operand is not such a case: `NaN > 0` is `false` and `NaN ≠ 0` is
+  // `true`, so `If(x > 0, 1, -1)` gives `-1` and `If(x ≠ 0, 1, -1)` gives `1`
+  // at `x = NaN`, as the interpreter and Desmos do (user decisions
+  // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23; from
+  // 2026-09-02 to those dates both gave NaN).
   //
   // A condition built from the logical connectives is decided by the
   // three-valued (Kleene) tables, not by the emitted `&&`/`||`/`!`, which
@@ -26144,10 +26147,10 @@ export class BaseCompiler {
    * `NaN <= 0`, and the tolerant equality lowering (`Math.abs(a - b) <= tol`)
    * answers `false` for a NaN operand as well. Decidedness is therefore read
    * off the comparison's OPERANDS, which is what `conditionDecidability`
-   * returns for these heads. A NaN operand makes only `NotEqual` undecided:
-   * for the ordered comparisons and `Equal` the compiled `false` IS the
-   * answer (user decision 2026-10-20, Tycho rows 411 and 413), and only an
-   * absent operand leaves them undecided.
+   * returns for these heads. A NaN operand does not make them undecided:
+   * the compiled `false` (`true` for `NotEqual`) IS the answer (user
+   * decisions 2026-10-20, Tycho rows 411 and 413, and 2026-10-23), and only
+   * an absent operand leaves them undecided.
    */
   private static readonly BRANCH_RELATIONS = new Set([
     'Less',
@@ -26517,12 +26520,13 @@ export class BaseCompiler {
       if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
         return null;
     }
-    // An ordered comparison or an `Equal` with a NaN operand is decidedly
-    // false, as the compiled comparison already answers, so the branch takes
-    // its next arm (user decision 2026-10-20, Tycho rows 411 and 413). Only
-    // `NotEqual`, whose compiled value on a NaN operand is `true`, keeps the
-    // NaN test that makes the branch take no arm. The other relations test
-    // only for an ABSENT value: an operand typed with a `missing` arm
+    // A relation with a NaN operand is decided, with the value the compiled
+    // comparison already answers: `false`, so the branch takes its next arm,
+    // or `true` for `NotEqual`, so it takes its first arm (user decisions
+    // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23). Only a link of a
+    // chain with an absent operand keeps the NaN test (`nanUndecided`, passed
+    // by `compileAbsentRelation`). Otherwise the relation is tested only for
+    // an ABSENT value: an operand typed with a `missing` arm
     // (`operandMayBeAbsent`) is tested itself, and, on a target that reads
     // its variables off a vars object, every variable the operand reads on
     // every evaluation is tested for `undefined` (`operandInputNodes`,
@@ -26530,7 +26534,7 @@ export class BaseCompiler {
     // undecided whatever arithmetic surrounds it (ruled 2026-09-02). `2r > 0`
     // therefore tests `_.r !== undefined`, not the product, and a comparison
     // that reads no variable (`Random() < 0.5`) is decided by construction.
-    const nanTest = nanUndecided || h === 'NotEqual';
+    const nanTest = nanUndecided;
     const readsVarsObject = target?.varsObjectName !== undefined;
     const operands: Expression[] = [];
     for (const op of cond.ops) {
@@ -26748,9 +26752,10 @@ export class BaseCompiler {
    * fragment that is not a single token is parenthesized, because `===`
    * binds looser than most operators an operand may contain.
    *
-   * `nanTest` is false for a relation that a NaN operand decides false (every
-   * branch relation but `NotEqual`, user decision 2026-10-20): the NaN test
-   * is then left out, and only the absence tests remain. An operand that may
+   * `nanTest` is false for a relation that a NaN operand decides (every
+   * branch relation, user decisions 2026-10-20 and 2026-10-23, except a
+   * chain link under `nanUndecided`): the NaN test is then left out, and
+   * only the absence tests remain. An operand that may
    * be absent (`present` is given) keeps the NaN test whatever `nanTest`
    * says: in compiled numeric code NaN is also the absence marker of such an
    * operand. A nested else-less `If` or a default-less `Which` with a numeric

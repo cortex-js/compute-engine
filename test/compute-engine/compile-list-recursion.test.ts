@@ -198,25 +198,37 @@ describe('list-building recursion compiles to a loop', () => {
   });
 
   it('an undecided guard after a collected prefix throws the TypeError the nested spread threw', () => {
-    // The next argument `n / m` turns NaN when `m` is 0 after the first
-    // step, and `NaN ≠ 5` is undecided (a NaN operand leaves only `≠`
-    // undecided since the user decision of 2026-10-20; the case used the
-    // guard `n = 5` with the arms swapped before it). The recursive arrow
-    // then spread `undefined` into the collected prefix
-    // (`[...[n], ...undefined]`), a `TypeError`, and the loop keeps that
-    // outcome.
+    // The guard `n < 1 ∨ m ≠ 5` is decided `True` by its first disjunct at
+    // the first step, and undecided at the second when the caller leaves `m`
+    // out of the vars object. A NaN operand cannot leave a guard undecided
+    // any more: it decides every relation (user decisions 2026-10-20 and
+    // 2026-10-23; the case used `NaN ≠ 5` before). The recursive arrow then
+    // spread `undefined` into the collected prefix (`[...[n], ...undefined]`),
+    // a `TypeError`, and the loop keeps that outcome.
     const ce = new ComputeEngine();
     ce.declare('m', 'number');
     ce.declare('F', '(number) -> list<number>');
     ce.assign(
       'F',
-      ce.parse(
-        String.raw`n \mapsto \left\{n \ne 5:\left[n\right].\operatorname{join}\left(F(\frac{n}{m})\right), \left[n\right]\right\}`
-      )
+      ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Which',
+            ['Or', ['Less', 'n', 1], ['NotEqual', 'm', 5]],
+            ['Join', ['List', 'n'], ['F', ['Add', 'n', 1]]],
+            'True',
+            ['List', 'n'],
+          ],
+        ],
+        'n',
+      ])
     );
     const r = compile(ce.box(['F', 0]), { fallback: false });
     expect(String(r!.preamble)).toContain('_SYS.listRecursion');
-    expect(() => r!.run!({ m: 0 })).toThrow(TypeError);
+    expect(() => r!.run!({})).toThrow(TypeError);
+    expect(r!.run!({ m: 5 })).toEqual([0, 1]);
   });
 
   it('a call at a repetition site still reaches the loop definition', () => {

@@ -78,16 +78,16 @@ describe('a callback fed a literal-start range', () => {
   });
 
   test('a range with a symbolic start keeps the wrapper and its tests', () => {
-    // The relation is `NotEqual`, the one relation whose NaN operand still
-    // leaves a branch undecided (user decision 2026-10-20), so the NaN test
-    // on the parameter is the witness that `q` is not exempted.
+    // A relation with a NaN operand is decided (user decisions 2026-10-20
+    // and 2026-10-23), so the parameter takes no NaN test; the test that
+    // remains is the one on the unsupplied input `m`.
     const r = js([
       'Map',
       ['Function', ['If', ['NotEqual', 'q', 'm'], 0, 1], 'q'],
       ['Range', 'm', 5],
     ]);
     expect(r.code).toContain('bcastFn');
-    expect(r.code).toContain('q === q');
+    expect(r.code).toContain('_.m !== undefined');
     expect(r.run!({ m: 2 })).toEqual([1, 0, 0, 0]);
   });
 
@@ -142,12 +142,13 @@ describe('an Apply of a literal to scalar arguments', () => {
 // own, and a body that reassigns it reads the assigned value afterwards, so
 // such a parameter is neither a decided value nor a scalar in the body.
 describe('a parameter the body reassigns', () => {
-  test('a range-fed parameter assigned NaN keeps its NaN test', () => {
-    // `q ≠ 0` is undecided for NaN: the interpreter answers no value, and the
-    // compiled function answers NaN, not the `else` branch `2`. The relation
-    // is `NotEqual` because since the user decision of 2026-10-20 it is the
-    // only one whose NaN operand leaves the branch undecided; `q < 0` (the
-    // relation this case used before) now decides `false` and gives `2`.
+  test('a range-fed parameter assigned NaN compares as NaN', () => {
+    // The body reads the assigned NaN, not the range value. `q > 0` tells
+    // them apart: it is `True` for the range values `1, 2, 3` and `False` for
+    // NaN (user decision 2026-10-20), so the branch gives `2`. `q ≠ 0` is
+    // `True` for NaN (user decision 2026-10-23) and gives `1`. Until
+    // 2026-10-23 a NaN operand left a `NotEqual` branch undecided and this
+    // case pinned the NaN test on `q`.
     const body = (rel: string): unknown => [
       'Map',
       [
@@ -163,9 +164,8 @@ describe('a parameter the body reassigns', () => {
     ];
     const r = js(body('NotEqual'));
     expect(r.code).not.toContain('bcastFn');
-    expect(r.code).toContain('q === q');
-    expect(r.run!({})).toEqual([NaN, NaN, NaN]);
-    expect(js(body('Less')).run!({})).toEqual([2, 2, 2]);
+    expect(r.run!({})).toEqual([1, 1, 1]);
+    expect(js(body('Greater')).run!({})).toEqual([2, 2, 2]);
   });
 
   test('a parameter assigned a list is not read as a scalar', () => {

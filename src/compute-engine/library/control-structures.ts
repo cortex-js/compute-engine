@@ -1708,12 +1708,13 @@ function whenCollectionHandlers(): CollectionHandlers {
 /**
  * The relational heads whose operands a branch condition compares.
  *
- * An undefined numeric operand (`NaN`, `Indeterminate`) of an ordered
- * comparison (`Less`, `LessEqual`, `Greater`, `GreaterEqual`) or of `Equal`
- * makes the relation `False`, and a branch on it takes its next arm, as in
- * IEEE 754 and Desmos (user decision 2026-10-20, Tycho rows 411 and 413).
- * Only `NotEqual` (`NAN_UNDECIDED_RELATION`) keeps the earlier rule: IEEE 754
- * answers `True` for it, and a branch on it takes no arm.
+ * An undefined numeric operand (`NaN`, `Indeterminate`) of a relation gives
+ * the relation its IEEE 754 value, and a branch on it uses that value as it
+ * uses any other: an ordered comparison (`Less`, `LessEqual`, `Greater`,
+ * `GreaterEqual`) or an `Equal` is `False`, so the branch takes its next arm,
+ * as in Desmos (user decision 2026-10-20, Tycho rows 411 and 413); a
+ * `NotEqual` is `True`, so the branch takes its first arm (user decision
+ * 2026-10-23; from 2026-09-03 to that date it took no arm).
  */
 const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
   'Less',
@@ -1725,46 +1726,30 @@ const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The one relation of `BRANCH_RELATIONS` whose NaN operand leaves a branch
- * on it undecided (no arm). The user decision of 2026-10-20 that makes the
- * other relations decide `False` on an undefined operand does not cover it:
- * `NotEqual(NaN, 0)` evaluates to `True` (IEEE 754), and `If(NaN ≠ 0, a, b)`
- * still takes no arm, as it has since 2026-09-03.
- */
-const NAN_UNDECIDED_RELATION = 'NotEqual';
-
-/**
  * A branch condition after evaluation: `value` is what the condition
  * evaluates to — exactly what `cond.canonical.evaluate()` answers, errors,
  * element-wise lists and inert symbolic forms included — and `undecided` is
  * `true` when that value selects no arm although it is not symbolic.
  *
- * Two shapes carry the flag:
- * - a scalar `True`/`False` of a `NotEqual` that rests on a NaN operand;
- * - the absent marker `Missing` that a whole-collection comparison answers
- *   when its element recursion meets a pair with no answer (user ruling of
- *   2026-09-21). That marker reports an undecided comparison, not absent
- *   condition DATA, which is why it takes no arm instead of raising the
- *   absent-condition error a `Missing` condition otherwise raises. The
- *   marker survives `Not` and the connectives through their ordinary Kleene
- *   evaluation, so the flag has to survive them too.
+ * One shape carries the flag: the absent marker `Missing` that a
+ * whole-collection comparison answers when its element recursion meets a
+ * pair with no answer (user ruling of 2026-09-21). That marker reports an
+ * undecided comparison, not absent condition DATA, which is why it takes no
+ * arm instead of raising the absent-condition error a `Missing` condition
+ * otherwise raises. The marker survives `Not` and the connectives through
+ * their ordinary Kleene evaluation, so the flag has to survive them too.
  */
 type EvaluatedCondition = { value: Expression; undecided: boolean };
 
 /**
  * Evaluate the condition of an `If`/`Which` for branch selection.
  *
- * An ordered comparison or an `Equal` with an undefined numeric operand
- * (`NaN`, `Indeterminate`) is `False`, and the branch uses that value as it
- * uses any other `False`: `If(0/0 > 0, 1, 0)` is `0` (user decision
- * 2026-10-20, Tycho rows 411 and 413; from 2026-09-03 to that date such a
- * condition selected no arm). A `NotEqual` with a NaN operand still selects
- * no arm (`NAN_UNDECIDED_RELATION`; the compiled lanes answer their numeric
- * absence marker there, `BaseCompiler.conditionDecidability`). The
- * `NotEqual` itself keeps its IEEE value everywhere else — `NotEqual(NaN, 0)`
- * still evaluates to `True` — only the branch selection differs, which is
- * why the NaN evidence is read where it still exists, on the relation's
- * OPERANDS, and reported beside the value rather than in place of it.
+ * A relation with an undefined numeric operand (`NaN`, `Indeterminate`) has
+ * its IEEE 754 value, and the branch uses that value as it uses any other:
+ * `If(0/0 > 0, 1, 0)` is `0` and `If(0/0 ≠ 0, 1, 0)` is `1` (user decisions
+ * 2026-10-20, Tycho rows 411 and 413, and 2026-10-23; from
+ * 2026-09-03 to those dates such a condition selected no arm). The compiled
+ * lanes take the same arm (`BaseCompiler.conditionDecidability`).
  *
  * The walk reproduces the ordinary evaluation of the condition and adds
  * nothing but the flag:
@@ -1773,26 +1758,25 @@ type EvaluatedCondition = { value: Expression; undecided: boolean };
  *   it always did, and a collection-shaped operand gives the element-wise
  *   list the relation always gave (a NaN CELL then takes the else cell on
  *   both lanes, measured 2026-09-03 — `evaluateElementwiseSelection` owns
- *   that contract). Only a scalar `True`/`False` of a `NotEqual` over a NaN
- *   operand is flagged.
+ *   that contract). Only the `Missing` of a whole-collection comparison is
+ *   flagged.
  * - `And`/`Or` keep their short-circuit contract (`evaluateShortCircuit`,
  *   `library/logic.ts`): operands are evaluated left to right and the walk
  *   stops at the first decider (`False` for `And`, `True` for `Or`) or the
  *   first error, so an operand a decided one guards is never evaluated. A
- *   decider that itself rests on NaN does not stop the walk: it decides
- *   nothing. The survivors are then combined three-valued, as the compiled
- *   lowering does: a decided `False` decides an `And` whatever its siblings
- *   are, a decided `True` decides an `Or`; all-decided survivors fold with a
- *   flag if any of them rested on NaN; a survivor that is still symbolic (a
+ *   flagged operand does not stop the walk: it decides nothing. The
+ *   survivors are then combined three-valued, as the compiled lowering
+ *   does: a decided `False` decides an `And` whatever its siblings are, a
+ *   decided `True` decides an `Or`; all-decided survivors fold with a flag
+ *   if any of them was flagged; a survivor that is still symbolic (a
  *   relation with a free variable) keeps the whole connective inert, spelled
  *   with the ORIGINAL sub-conditions so that a later binding can still
- *   decide it and the NaN evidence is not folded away; a collection-shaped
+ *   decide it and the flagged evidence is not folded away; a collection-shaped
  *   survivor hands the connective to its ordinary element-wise evaluation.
  *   `Nand`, `Nor` and `Implies` are the same walk through their `And`/`Or`
  *   spelling, `Not` flips its operand and keeps the flag.
  * - Anything else evaluates as before, unflagged. `Xor` and the remaining
- *   heads are not three-valued here: a NaN evidence under them is lost as
- *   it was before the ruling.
+ *   heads are not three-valued here: a flag under them is lost.
  *
  * `numericApproximation` is the numeric request of the `If`/`Which` that
  * holds the condition. It is forwarded to every evaluation of the walk, so
@@ -1865,24 +1849,19 @@ function evaluateCondition(
     }
     const value = ce.function(op, relationOps).evaluate(options);
     const s = sym(value);
-    const decided = s === 'True' || s === 'False';
     // A whole-collection comparison (two or more collection operands) answers
     // the absent marker `Missing` when its element recursion meets a pair
     // with no answer — an absent cell on either side (user ruling of
     // 2026-09-21, `library/relational-operator.ts`). That marker reports an
     // UNDECIDED comparison, not absent condition DATA, so the branch takes no
-    // arm, the same way a `NotEqual` resting on a NaN operand takes none. A
-    // scalar `Missing` condition keeps its own answer, the catchable
+    // arm. A scalar `Missing` condition keeps its own answer, the catchable
     // absent-condition error: there the condition itself is the absent datum.
-    const absentCollectionPair =
-      s === 'Missing' && ops.filter((x) => x.isCollection).length >= 2;
+    // A NaN operand is not flagged: the relation's IEEE value (`True` for
+    // `NotEqual`, `False` for the others) selects the arm.
     return {
       value,
       undecided:
-        (op === NAN_UNDECIDED_RELATION &&
-          decided &&
-          ops.some((x) => x.isNaN === true)) ||
-        absentCollectionPair,
+        s === 'Missing' && ops.filter((x) => x.isCollection).length >= 2,
     };
   }
 
@@ -1974,8 +1953,8 @@ function evaluateConnective(
       undecided: false,
     };
   // A symbolic survivor keeps the connective inert, spelled with the
-  // original sub-conditions (a NaN-decided survivor folded to its IEEE
-  // value would decide the connective the wrong way).
+  // original sub-conditions (a flagged survivor folded to its value would
+  // decide the connective the wrong way).
   // A survivor that is already FLAGGED is not symbolic: its value is the
   // absent marker `Missing` of an undecided whole-collection comparison,
   // which the connective folds by the ordinary Kleene table (`And(Missing,
@@ -2009,8 +1988,8 @@ function evaluateConnective(
   )
     return { value: ce.symbol('Missing'), undecided: false };
   // Every survivor is the non-deciding value (`True` for `And`, `False`
-  // for `Or`), or a NaN-decided value: the connective folds to the
-  // non-deciding value, flagged if any survivor rested on NaN.
+  // for `Or`), or a flagged value: the connective folds to the
+  // non-deciding value, flagged if any survivor was flagged.
   return {
     value: ce.symbol(op === 'And' ? 'True' : 'False'),
     undecided: survivors.some((s) => s.result.undecided),
@@ -3045,8 +3024,7 @@ function evaluateIf(
   // as a host exception.
   const condError = errorValue(evaluated);
   if (condError !== undefined) return condError;
-  // A `NotEqual` condition decided by a NaN operand, or an undecided
-  // whole-collection comparison (`evaluateCondition`), selects
+  // An undecided whole-collection comparison (`evaluateCondition`) selects
   // no arm: the value is `Missing`, the position-preserving absent
   // datum that an else-less `If` and a `Which` with no selected clause
   // already answer (no-selection ruling 2026-08-27). The compiled
@@ -3233,10 +3211,9 @@ function evaluateWhich(
     // exception rather than as a value.
     const condError = errorValue(evaluated);
     if (condError !== undefined) return condError;
-    // A `NotEqual` guard decided by a NaN operand, or an undecided
-    // whole-collection comparison (`evaluateCondition`), selects no
-    // clause, and falling through to a later clause would decide what the
-    // NaN left undecided: the whole `Which` answers `Missing`, its
+    // An undecided whole-collection comparison (`evaluateCondition`)
+    // selects no clause, and falling through to a later clause would decide
+    // what the comparison left undecided: the whole `Which` answers `Missing`, its
     // no-selection value (see the `If` handler for the reasoning and the
     // compiled lanes' `NaN` spelling of it).
     if (undecided) return options.engine.Missing;

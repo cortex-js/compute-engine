@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-394.
+Next free reference: CE-397.
 
 **Entry format.**
 
@@ -549,17 +549,6 @@ commit, after a decision on the spelling.
 With `q = 0.5` the value is `(1.5, 2.5)`, which neither type holds. The point
 arithmetic route keeps the components of the point when the other operand's type
 is unknown; it must widen them to `number`, as the scalar and list routes do.
-
-### CE-374. A product over a list of unknown elements is typed `unknown`
-
-**Status:** open; imprecise type, not unsound.
-
-With `L: list<unknown>`, `Sum(Rest(L))` is typed `broadcastable<number>`, but
-`Product(Rest(L))` is typed `unknown`. `Product` of an operand that is not a
-list literal becomes `Reduce(Rest(L), Multiply, 1)` at canonicalization, and
-`Reduce` has no type handler: its type comes from its signature
-`(collection<T>, reducer, initial?) -> value where T`. A `Reduce` whose reducer
-is `Add` or `Multiply` should be typed as `Sum` and `Product` are.
 
 ### CE-365. A use of a function widens its inferred signature
 
@@ -1793,8 +1782,9 @@ An undefined numeric operand of `<`, `≤`, `>`, `≥`, `=` decides `False` insi
 branch condition on the interpreter, the `javascript` and `python` targets and
 `interval-js` (user decision 2026-10-20). An ordered comparison with
 `ComplexInfinity` or a non-real complex operand is `False` too, and `=` with
-`ComplexInfinity` is `False`; `≠` and `Missing` keep their reading (user
-decision 2026-10-21).
+`ComplexInfinity` is `False`; `Missing` keeps its reading (user decision
+2026-10-21), and a NaN operand of `≠` decides it `True` (user decision
+2026-10-23).
 
 Measured 2026-10-21: `Less(0, NaN, Missing)` is `Missing`, while
 `Less(0, i, Missing)` is `False`. `docs/ERROR-MODEL.md` says that an ordered
@@ -2298,29 +2288,6 @@ copies of an N-element list for each reference. At 500 elements the result was
 returns in about 0.2 s. Tycho's case (`conj`, Desmos's complex conjugate) now
 parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 `scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
-
-### CE-125. Element-wise `NotEqual` decides a NaN cell where the scalar branch takes no arm
-
-**Status:** open; defect. User decision 2026-10-23: `NaN ≠ 2` is `True` in a
-branch, as IEEE reads it and as the element-wise cell does (`a ≠ b` stays the
-negation of `a = b`). Change the scalar branch on the interpreter and the
-JavaScript and Python targets.
-
-The user decision of 2026-10-20 (Tycho rows 411 and 413) makes a NaN operand of
-`<`, `≤`, `>`, `≥` and `=` decide FALSE in a scalar branch condition on every
-route, so the scalar and element-wise forms of
-`Which([1, NaN, 3] < 2, 1, True, 0)` agree. `NotEqual` was not changed. The
-element-wise cell `NaN ≠ 2` is `True`, so `Which([a, b, c] ≠ 2, 1, True, 0)`
-with `b = NaN` is `[1, 1, 1]` and the indexed form is `1`. The scalar
-`Which(b ≠ 2, 1, True, 0)` takes no arm (`Missing` in the interpreter, `NaN` on
-the `javascript` and `python` targets; the GPU targets take the then arm). The
-pre-pass index push-through (`fixed-width-unroll.ts`, `indexedOperands`)
-rewrites the indexed element-wise form to the scalar form, so it can change the
-answer for a `NotEqual` condition.
-
-Fix: decide what `NaN ≠ 2` means in a branch (IEEE true, as the cell does, or no
-arm, as the scalar does) and align the other form. Then remove the pre-pass note
-on `indexedOperands`.
 
 ### CE-126. The capability registry has handlers for `console` and `entropy` only
 
@@ -3612,23 +3579,17 @@ of `(2t + i)/(t − 3i)`.
 - **CE-184.2** A function that decays to 0 gives a residue such as `−9e-46`, not
   `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
 
-### CE-391. Divergent integrals over an infinite bound: an integrand whose sign changes
+### CE-394. `.N()` of an integral with a sharp peak far from its finite bound is wrong, with a wrong error
 
-**Status:** open; defect, small. Found 2026-10-23 (session compute-engine-57).
+**Status:** open; defect. Found 2026-10-23 (session compute-engine-57).
 
-An integral over an infinite bound that diverges with an integrand of one sign
-is `±∞` under `.N()` and `NIntegrate`, as under `evaluate()`
-(`divergentTailSign`, `library/calculus.ts`, 2026-10-23). These cases remain:
-
-- **CE-391.1** An integrand whose sign changes on the interval keeps the answer
-  of the quadrature: ∫₀^∞ (x − 1) dx is `+∞` under `evaluate()` and `NaN` under
-  `.N()`. The tail test requires one sign on the whole interval so that a pole
-  of the other sign at the finite bound cannot cancel the divergence; a test of
-  the finite part (a pole there, or no pole) would let such an integrand take
-  the sign of its tail.
-- **CE-391.2** ∫₀^∞ (x − 1)/x³ dx (`−∞`) is `NaN` under `.N()`, for the same
-  reason as CE-391.1: the integrand changes sign. `evaluate()` gives `−∞`
-  (`halfLinePoleVerdict`, `library/calculus.ts`, 2026-10-23).
+`∫₀^∞ xⁿ·e⁻ˣ dx` is `n!`. Under `.N()` (`integrateRealPart`,
+`library/calculus.ts`): `n = 20` and `n = 50` are correct, `n = 100` gives
+`1.9·10¹¹² ± 1.8·10¹¹²` where the value is `9.3·10¹⁵⁷`, and `n = 150` gives
+`1.29·10¹⁷³ ± NaN` (`5.7·10²⁶²`). The integrand has its peak at `x = n`, and
+`xⁿ` overflows before `e⁻ˣ` brings the product back down (`x¹⁵⁰` at
+`x > 113`), so the quadrature samples `∞·0` or misses the peak; the error it
+reports is not an error bound. `evaluate()` leaves the integral unevaluated.
 
 ### CE-185. A numeric integral next to a singular bound: remaining cases
 
@@ -4162,6 +4123,35 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-395. Compiled Python arithmetic over an absent input raises `TypeError`
+
+**Status:** open; defect (host exception). Found 2026-10-23 while rewriting the
+tests of the `NotEqual` branch rule.
+
+With `p: number | missing`, the Python target compiles `p + 1` to `p + 1`, and
+`If(p ≠ 0 ∧ 1/p > 1, 1, -1)` with the second conjunct as `1 < 1 / p`. When the
+caller passes `p = None` (the Python spelling of `Missing`), the comparison leaf
+tests `p is None`, but the arithmetic raises
+`TypeError: unsupported operand type(s) for /: 'int' and 'NoneType'`.
+`np.sin(None)` raises too. The interpreter answers `NaN` for `Missing + 1`, and
+compiled JavaScript gives `NaN` (`undefined + 1`). Decide whether a `None` input
+in a numeric slot is admitted (then arithmetic over it must read it as `NaN`)
+or refused at the call boundary (then document that a numeric slot takes `nan`
+for an absent value).
+
+### CE-396. interval-js answers `'maybe'` for `≠` over an `empty` operand
+
+**Status:** open; question. Found 2026-10-23 while fixing the `NotEqual` branch
+rule.
+
+On `interval-js`, an ordered comparison or `=` with an operand that is `empty`
+over the whole cell gives `'false'` (user decision 2026-10-20, Tycho row 411).
+`\sqrt{x} \ne 0` over `x = [-1, -1]` still gives `'maybe'`, pinned in
+`test/compute-engine/condition-nan-undecided.test.ts`. The interpreter and the
+`javascript` and `python` targets answer `True` for `NaN ≠ 0`, in a branch too
+(user decision 2026-10-23). The IEEE reading on `interval-js` would be
+`'true'`. `'maybe'` is sound (an enclosure), only less precise.
 
 ### CE-393. A compiled input of a non-number value type is read as a number
 

@@ -1437,15 +1437,13 @@ function isSelectionScalar(op: Expression): boolean {
  *   when it is true the interpreter answers that arm WHOLE, a scalar the
  *   index would then reject. Every clause must be pure: the rewrite keeps
  *   one position and the interpreter evaluates every condition and every
- *   reached arm. The two forms agree on a NaN operand of an ordering
- *   relation or an `Equal`: with `b` NaN, `Which([a, b, c] < 2, 1, True,
- *   0)[2]` and the scalar `Which(b < 2, 1, True, 0)` are both `0`, because
- *   `NaN < 2` is `False` in a cell and in a scalar branch condition alike
- *   (user decision 2026-10-20; before it the scalar form answered
- *   `Missing`). A `NotEqual` condition can still change the answer: the
- *   cell `NaN ≠ 2` is `True`, so `Which([a, b, c] ≠ 2, 1, True, 0)[2]` is
- *   `1`, where the scalar `Which(b ≠ 2, 1, True, 0)` takes no arm and is
- *   `Missing` (the decision does not cover `NotEqual`). A selection
+ *   reached arm. The two forms agree on a NaN operand of every relation:
+ *   with `b` NaN, `Which([a, b, c] < 2, 1, True, 0)[2]` and the scalar
+ *   `Which(b < 2, 1, True, 0)` are both `0`, and `Which([a, b, c] ≠ 2, 1,
+ *   True, 0)[2]` and `Which(b ≠ 2, 1, True, 0)` are both `1`, because a
+ *   relation with a NaN operand has its IEEE value in a cell and in a scalar
+ *   branch condition alike (user decisions 2026-10-20 and 2026-10-23;
+ *   before them the scalar form answered `Missing`). A selection
  *   with NO default clause is walked too: a
  *   position no clause selects is `NaN` in the element-wise mode when every
  *   arm is numeric and `Missing` otherwise (`noMatchCell`,
