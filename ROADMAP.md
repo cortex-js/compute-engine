@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-380.
+Next free reference: CE-383.
 
 **Entry format.**
 
@@ -1881,31 +1881,44 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-98. `Multiply` of two matrices: a compiled fold that is still refused
+### CE-380. A compiled fold of complex values in a list of unknown type is joined as text by a parent `Add`
 
-**Status:** open; reachable refusal. User decision 2026-10-22: `Multiply` of two
-matrices is the matrix product however the factors are written; done 2026-10-23,
-and the compiled product of lists that are not rectangular and of tensors of
-rank 3 follows the interpreter (see CHANGELOG), except the sub-item below.
+**Status:** open; wrong value.
 
-- **CE-98.3** Compiled JavaScript refuses a `Multiply` fold over elements that
-  may be numbers or ragged lists. With `L: list<unknown>` and
-  `L = [2, [[1], [2, 3]], [[4], [5, 6]]]`, `Product(L)` is `[[8], [20, 36]]` in
-  the interpreter; `compile()` throws "a `Multiply` fold over elements of type
-  `integer | list<vector<integer^1> | vector<integer^2>>` has no compiled form".
-  The refusal is in `nestedElementCombiner`
-  (`compilation/javascript-target.ts`): it declines a list of lists without
-  dimensions because the element-wise combiner read a ragged list as a matrix.
-  When the run-time product follows the interpreter for a ragged factor (done
-  2026-10-23, `mulCollectionsWith` in `compilation/javascript-runtime.ts`), a
-  `Multiply` fold can admit such an arm. The same function also refuses a
-  `Multiply` fold over tensors of rank 3 of different lengths
-  (`L = [[M, M], [N, N, N]]`, "lists of several shapes"), where the interpreter
-  gives an `incompatible-dimensions` error and `_SYS.mulTensor` now gives `NaN`.
-  Do it after CE-25 is committed: CE-25 adds a refusal of the same kind in
-  `nestedElementCombiner` (a `Multiply` fold whose arms are lists with no
-  dimensions and cells typed `unknown` or `any`, the helper `hasOpenCells`);
-  remove both refusals in the same change.
+With `L: list<unknown>` and `L = [[1, 2], [i, 3]]`, compiled `Product(L)` gives
+`[{re: 0, im: 1}, 6]`, the interpreter's value. But compiled `Product(L) + 1`,
+`Reduce(L, Multiply, 1) + 1` and `Reduce(L, Add, 0) + 1` give the strings
+`["[object Object]1", "[object Object]1"]`; the interpreter gives `[1 + i, 7]`.
+The parent `Add` uses the real `+` because the type of the fold does not show
+complex cells. The convention that a lane not proved complex is real (user
+decision 2026-10-01, `mulTensorAny` in `compilation/javascript-runtime.ts`)
+allows `NaN` entries there, not text. Expected: the interpreter's value, or
+`NaN` entries, or a refusal when the code is compiled.
+
+### CE-381. A compiled `Multiply` fold reads an absent entry as 0
+
+**Status:** open; wrong value.
+
+JavaScript multiplies `null` as 0. With `L: list<number | missing>` and the
+input `[2, null, 3]`, compiled `Scan(L, Multiply, 1)` gives `[2, 0, 0]`; the
+interpreter gives `[2, NaN, NaN]`. With `L: list<list<number | missing>>` and
+`[[2, null], [3, 4]]`, compiled `Product(L)` gives `[6, 0]` (interpreter:
+`[6, NaN]`). `Reduce(L, Multiply, ImaginaryUnit)` over `[2, null, 3]` throws
+"Cannot read properties of null (reading 're')" (interpreter: `NaN`).
+`Product(L)` over `[2, null, 3]` already gives `NaN`. Expected: an absent entry
+is `NaN` in every step of the fold, as in the interpreter.
+
+### CE-382. Compiled `Product` and `Sum` of lists of strings or booleans give an array
+
+**Status:** open; wrong value.
+
+With `L: list<list<string>>` and the input `[["a"], ["b"]]`, compiled
+`Product(L)` gives `[null]`; with `L: list<list<boolean>>` and
+`[[true], [false]]`, compiled `Product(L)` gives `[0]` and `Sum(L)` gives `[1]`.
+The interpreter gives an `incompatible-type` error for each. `Reduce` and `Scan`
+with the same operands are refused when the code is compiled, as expected.
+Expected: the compiled `Product` and `Sum` refuse elements whose cells cannot be
+numbers.
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 
@@ -4183,11 +4196,11 @@ and so does `g(x)[1] + g(x)[2]` with `g := t ↦ [t, 2]`
 (`function-literal-unknown-param-signature.test.ts`). With `v := s ↦ [s, k]` and
 `k = i`, `Sum(1 + v(x)[2], k from 1 to 3)` declines on the JavaScript target in
 both modes, and the GLSL target refuses the index into a list with no known
-length (`gpu-point-complex-component.test.ts`). `Product(Rest(g(x)))` with
-`g := t ↦ [t, 2t]` and `Max(At(m(x), 1))` with `m := t ↦ [[t, 2t], [3t, 4t]]`
-decline because the elements may be rows (CE-98.3 and CE-362). Eight tests
-record the declines; before the change, the signature `vector<2>` or
-`matrix<2x2>` let them compile.
+length (`gpu-point-complex-component.test.ts`). `Max(At(m(x), 1))` with
+`m := t ↦ [[t, 2t], [3t, 4t]]` declines because the elements may be rows
+(CE-362; `Product(Rest(g(x)))` with `g := t ↦ [t, 2t]` declined for the same
+reason and compiles since 2026-10-23). Seven tests record the declines; before
+the change, the signature `vector<2>` or `matrix<2x2>` let them compile.
 
 The cause is the same in every case: the compiler cannot tell that `g(x)` holds
 numbers when `x` is a free input. The fix belongs in the compiler, not in the

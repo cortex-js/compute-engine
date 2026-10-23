@@ -11312,7 +11312,7 @@ function compileSumProduct(
       const reduce = `(${elements}).reduce(${elementwiseFoldCombiner(
         kind,
         mixedFoldLane(args[0]),
-        elementsMayDifferInShape(args[0])
+        kind === 'Sum' && elementsMayDifferInShape(args[0])
       )}, ${kind === 'Sum' ? '0' : '1'})`;
       // A parent reads the fold as a complex value `{re, im}` when
       // `isComplexValued` says so (`collection<complex>`), but the fold
@@ -12714,11 +12714,12 @@ function nestedElementCombiner(
   // `unknown`: the elements of `Rest(g(x))` for `g := t ↦ [t, 2t]` and
   // `x: any`) is folded by an `Add` fold as the compiled `Sum` folds it:
   // with the dispatching combiner, which adds entry by entry and checks the
-  // shapes when it runs. A `Multiply` fold takes that combiner for an
-  // element typed `unknown` or `any` only, not for a list of them: the
-  // combiner reads two values of rank 2 as matrices, and rows of different
-  // lengths (`t ↦ [[t], [t, t]]`) gave `null` where the interpreter
-  // multiplies entry by entry (ROADMAP CE-98.1). Such a fold declines.
+  // shapes when it runs. A `Multiply` fold takes any list whose cells are
+  // numbers (or typed `unknown` or `any`), at any depth and of any shape:
+  // each step is the run-time product (`_SYS.mulTensor`), which multiplies
+  // two values as the interpreter does (the matrix product for a matrix,
+  // the product of each pair of elements for a list whose rows have
+  // different lengths, `NaN` where the dimensions do not agree).
   const shapeUnknown = (arm: Type): boolean => {
     const a = resolveTypeForCompilation(arm);
     if (a === 'unknown' || a === 'any') return true;
@@ -12733,31 +12734,35 @@ function nestedElementCombiner(
     if (isSubtype(a, 'number')) return true;
     if (shapeUnknown(arm)) return true;
     if (typeof a === 'string' || a.kind !== 'list') return false;
+    if (op.symbol === 'Multiply') return hasNumericCells(a);
     // A dimension list, or `null` for a tensor of unknown rank: either way
     // the rows are uniform.
     if (a.dimensions !== undefined) return true;
     const e = collectionElementType(a);
     return e !== undefined && isSubtype(e, 'number');
   };
-  // Elements of several list shapes (`matrix<2x2> | vector<2>`) do not
-  // combine: the interpreter answers an `incompatible-dimensions` error.
-  // An `Add` fold checks the shapes when it runs (`checkShapes` of
-  // `elementwiseFoldCombiner`); another fold declines.
+  // Elements of several list shapes (`matrix<2x2> | vector<2>`): two lists of
+  // different shapes are an `incompatible-dimensions` error in a sum, and an
+  // `Add` fold checks the shapes when it runs (`checkShapes` of
+  // `elementwiseFoldCombiner`). A `Multiply` fold leaves them to the
+  // run-time product: a matrix times a row is the matrix product. Another
+  // fold declines.
   const severalShapes = hasSeveralListArms(elt);
-  if (severalShapes && op.symbol !== 'Add')
+  if (severalShapes && op.symbol !== 'Add' && op.symbol !== 'Multiply')
     throw new Error(
       `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
         `\`${typeToString(elt)}\`, lists of several shapes, has no compiled form. ` +
         `The interpreter evaluates it instead.`
     );
-  // Elements that may differ in shape (`elementsMayDifferInShape`): the
-  // fold checks the shapes when it runs. For an `Add` fold, an element of
-  // unknown type counts as such; a `Multiply` fold leaves two lists of
-  // different shapes to the run-time product, which is the matrix product
-  // of a matrix and a row (see `elementsMayDifferInShape`).
+  // Elements that may differ in shape (`elementsMayDifferInShape`), or whose
+  // type does not state a shape: an `Add` fold checks the shapes when it
+  // runs. A `Multiply` fold never does: it leaves two lists of different
+  // shapes to the run-time product, which is the matrix product of a matrix
+  // and a row.
   const checkShapes =
-    elementsMayDifferInShape(coll, op.symbol === 'Add') ||
-    (op.symbol === 'Add' && arms.some((arm) => shapeUnknown(arm)));
+    op.symbol === 'Add' &&
+    (elementsMayDifferInShape(coll, true) ||
+      arms.some((arm) => shapeUnknown(arm)));
   // Elements that may be numbers or lists (`number | vector<2>`): every
   // element is a number, or every element is a list, so an `Add` or
   // `Multiply` fold combines with the dispatching element-wise combiner,
@@ -12817,17 +12822,6 @@ function nestedElementCombiner(
   )
     throw new Error(
       `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
-        `\`${typeToString(elt)}\`, whose rows may have different lengths, has no compiled form. ` +
-        `The interpreter evaluates it instead.`
-    );
-  // A `Multiply` fold over lists whose cells are typed `unknown` or `any`
-  // (the rows of `nest(x)` for `nest := t ↦ [[t], [t, t]]` and `x: any`):
-  // the rows may have different lengths, and the element-wise combiner
-  // reads two values of rank 2 as matrices. It gave `null` where the
-  // interpreter multiplies entry by entry (ROADMAP CE-98.1).
-  if (op.symbol === 'Multiply' && arms.some((arm) => hasOpenCells(arm)))
-    throw new Error(
-      `Could not compile \`${operator}\`: a \`Multiply\` fold over elements of type ` +
         `\`${typeToString(elt)}\`, whose rows may have different lengths, has no compiled form. ` +
         `The interpreter evaluates it instead.`
     );
@@ -14231,20 +14225,13 @@ function emitCollectionReduce(
   const otherwise = typeContainsMissing(coll.type.type)
     ? `(_c === undefined ? NaN : _c)`
     : '_c';
-  // Elements of several list shapes: a sum checks the shapes when it runs,
-  // and a product declines (`requireShapedFold`).
-  const severalShapes = hasSeveralListArms(
-    BaseCompiler.collectionElementTypeOf(coll)
-  );
-  if (severalShapes && kind === 'Product')
-    throw new Error(
-      'Could not compile `Product`: the elements are lists of several ' +
-        'shapes, which the interpreter does not combine.'
-    );
+  // Elements of several list shapes: a sum checks the shapes when it runs.
+  // A product leaves them to the run-time product, which multiplies a
+  // matrix and a row as the interpreter does.
   const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(
     kind,
     mixedFoldLane(coll),
-    elementsMayDifferInShape(coll, kind === 'Sum')
+    kind === 'Sum' && elementsMayDifferInShape(coll, true)
   )}, ${identity}) : ${otherwise})(${code})`;
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
@@ -14269,19 +14256,6 @@ function emitCollectionReduce(
  */
 function requireShapedFold(kind: 'Sum' | 'Product', coll: Expression): void {
   if (!BaseCompiler.foldsCollectionElements(coll)) return;
-  // Elements of several list shapes (`matrix<2x2> | vector<2>`,
-  // `vector<1> | vector<2>`): two of different shapes do not combine (the
-  // interpreter answers an `incompatible-dimensions` error). A sum checks
-  // the shapes when it runs (`elementwiseFoldCombiner`, `checkShapes`); the
-  // product of a matrix and a row has no element-wise form, and declines.
-  if (
-    kind === 'Product' &&
-    hasSeveralListArms(BaseCompiler.collectionElementTypeOf(coll))
-  )
-    throw new Error(
-      `Could not compile \`${kind}\`: the elements are lists of several ` +
-        `shapes, which the interpreter does not combine.`
-    );
   const type = coll.engine.function(kind, [coll]).type;
   if (type.matches('number'))
     throw new Error(
@@ -14311,8 +14285,8 @@ function elementsMayDifferInShape(
   // `L = [[[1, 2], [3, 4]], [5, 6]]` the compiled `Sum(L)` broadcast the
   // row into the matrix and gave `[[6, 7], [9, 10]]`, where the interpreter
   // gives an `incompatible-dimensions` error. A `Multiply` fold does not
-  // pass it: the product of a matrix and a row is the matrix product
-  // (`[17, 39]` for that `L`), and the run-time product checks the
+  // check shapes at all: the product of a matrix and a row is the matrix
+  // product (`[17, 39]` for that `L`), and the run-time product checks the
   // dimensions itself (`_SYS.mulTensor`).
   const own = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
   if (unknownElementsDiffer) {
@@ -14351,19 +14325,22 @@ function elementsMayDifferInShape(
 }
 
 /**
- * True when `t` is a list with no dimensions whose cells are typed
- * `unknown` or `any`, through any number of such lists (`list<unknown>`,
- * `list<list<any>>`): its rows may have different lengths.
+ * True when every cell of the list type `t` can be a number, through any
+ * number of lists and unions of lists: `list<list<integer>>`,
+ * `list<vector<1> | vector<2>>` (rows of different lengths),
+ * `list<matrix<2x2> | vector<1>>`, and cells typed `unknown` or `any`. False
+ * for a list of points (tuples), strings or booleans. A `Multiply` fold over
+ * such elements is the run-time product of each step (`_SYS.mulTensor`).
  */
-function hasOpenCells(t: Type): boolean {
-  let r = resolveTypeForCompilation(t);
-  for (let depth = 0; depth < 8; depth++) {
-    if (typeof r === 'string' || r.kind !== 'list') return false;
-    if (r.dimensions !== undefined) return false;
-    const e = resolveTypeForCompilation(collectionElementType(r) ?? 'unknown');
-    if (e === 'unknown' || e === 'any') return true;
-    r = e;
-  }
+function hasNumericCells(t: Type, depth = 0): boolean {
+  if (depth > 8) return false;
+  const r = resolveTypeForCompilation(t);
+  if (r === 'unknown' || r === 'any') return true;
+  if (isSubtype(r, 'number')) return true;
+  if (typeof r === 'string') return false;
+  if (r.kind === 'union')
+    return r.types.every((arm) => hasNumericCells(arm, depth + 1));
+  if (r.kind === 'list') return hasNumericCells(r.elements, depth + 1);
   return false;
 }
 

@@ -1559,3 +1559,97 @@ describe('a compiled Product of tensors of rank 3', () => {
     expect(r.run!({} as never)).toEqual([MQ2, MQ2]);
   });
 });
+
+/**
+ * A compiled `Multiply` fold (`Product`, `Reduce(L, Multiply, 1)`, `Scan`)
+ * over elements of several shapes: numbers beside lists, a matrix beside a
+ * row, lists whose rows have different lengths. Each step is the run-time
+ * product, which multiplies two values as the interpreter does. Such a fold
+ * was refused ("lists of several shapes", "whose rows may have different
+ * lengths"), and a `Product` over `list<number | tensor<number>>` threw
+ * "the elements have incompatible dimensions" for a matrix beside a row
+ * (ROADMAP CE-98.3).
+ */
+describe('a compiled Multiply fold over elements of several shapes', () => {
+  const R: Value = [[1], [2, 3]];
+  const S: Value = [[4], [5, 6]];
+  // [label, elements, interpreter value, compiled value]
+  const cases: Array<[string, Value[], string, unknown]> = [
+    ['a number and ragged lists', [2, R, S], '[[8],[20,36]]', [[8], [20, 36]]],
+    ['a matrix and a row', [M, [1, 2]], '[5,11]', [5, 11]],
+    ['a row and a matrix', [[1, 2], M], '[7,10]', [7, 10]],
+    ['a number, a matrix and a row', [3, M, [1, 2]], '[15,33]', [15, 33]],
+    [
+      'a matrix and a row of the wrong length',
+      [M, [1, 2, 3]],
+      'Error("incompatible-dimensions", "2 vs 3")',
+      NaN,
+    ],
+    [
+      'tensors of rank 3 of different lengths',
+      [
+        [M, M],
+        [Q, Q, Q],
+      ],
+      'Error("incompatible-dimensions", "2 vs 3")',
+      NaN,
+    ],
+  ];
+
+  function engineWith(elements: Value[]): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<unknown>');
+    ce.assign('L', ce.box(toMathJson(elements)));
+    return ce;
+  }
+
+  it.each(cases)('%s: the interpreter', (_, elements, value) => {
+    const ce = engineWith(elements);
+    expect(ce.box(['Product', 'L']).evaluate().toString()).toBe(value);
+  });
+
+  it.each(cases)(
+    '%s: compiled Product, Reduce and Scan',
+    (_, elements, __, value) => {
+      const ce = engineWith(elements);
+      for (const expr of [
+        ['Product', 'L'],
+        ['Reduce', 'L', 'Multiply', 1],
+        ['Last', ['Scan', 'L', 'Multiply', 1]],
+      ] as MathJsonExpression[]) {
+        const r = compile(ce.box(expr), { to: 'javascript', fallback: false });
+        expect(r.run!({} as never)).toEqual(value);
+      }
+    }
+  );
+
+  it.each(cases)(
+    '%s: compiled Product of an input',
+    (_, elements, __, value) => {
+      for (const type of [
+        'list<unknown>',
+        'list<list<number>>',
+        'list<number | tensor<number>>',
+        'list<broadcastable<number>>',
+      ]) {
+        const ce = new ComputeEngine();
+        ce.declare('L', type);
+        const r = compile(ce.box(['Product', 'L']), {
+          to: 'javascript',
+          fallback: false,
+        });
+        expect(r.run!({ L: elements } as never)).toEqual(value);
+      }
+    }
+  );
+
+  it('a sum still checks the shapes of its elements', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number | tensor<number>>');
+    const r = compile(ce.box(['Sum', 'L']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(() => r.run!({ L: [M, [1, 2]] } as never)).toThrow();
+  });
+});

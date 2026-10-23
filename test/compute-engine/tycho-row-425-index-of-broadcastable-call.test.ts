@@ -499,19 +499,18 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     expectAgreement(result, 'compiles');
   });
 
-  test('Product(Rest(g(x))) declines', () => {
+  test('Product(Rest(g(x)))', () => {
     // The elements of `Rest(g(x))` are of unknown type and may be rows of
-    // different lengths; a `Multiply` fold over such rows is refused until
-    // the compiled product follows the interpreter for them (ROADMAP
-    // CE-98.3).
+    // different lengths. Each step of the compiled `Multiply` fold is the
+    // run-time product, which multiplies such rows as the interpreter does.
+    // The fold was refused before the run-time product did (ROADMAP CE-98.3).
     const ce = rowEngine();
-    expect(
-      compiledAndInterpreted(
-        ce,
-        ce.box(['Product', ['Rest', ['g', 'x']]]),
-        X_VALUES.slice(1)
-      )
-    ).toBe('declined');
+    const result = compiledAndInterpreted(
+      ce,
+      ce.box(['Product', ['Rest', ['g', 'x']]]),
+      X_VALUES.slice(1)
+    );
+    expectAgreement(result, 'compiles');
   });
 
   test('Repeat(0, g(x)[1]) throws where the interpreter answers an error', () => {
@@ -1012,7 +1011,7 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(absent.evaluate().type.matches(absentType)).toBe(true);
   });
 
-  test('a fold over rows of different depths is admitted, and declines to compile', () => {
+  test('a fold over rows of different depths is admitted and compiles', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'broadcastable<list<list<integer>>>');
     const product = ce.box(['Product', ['Rest', 'p']]);
@@ -1029,13 +1028,15 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
       ['Reduce', ['Rest', ['nest', 'x']], 'Multiply'],
       ['Fold', 'Multiply', 1, ['Rest', ['nest', 'x']]],
     ].map((json) => ce.box(json as any));
+    // The rows of `nest(x)` have different lengths. Each step of the
+    // compiled `Multiply` fold is the run-time product, which multiplies
+    // them as the interpreter does (ROADMAP CE-98.3).
     for (const expr of exprs) {
       expect(expr.isValid).toBe(true);
-      expect(compiledVsInterpreted(ce, expr, 'x', [])).toBe('declined');
+      expect(
+        compiledVsInterpreted(ce, expr, 'x', [[[1, 2, 3], L(1, 2, 3)]])
+      ).toEqual([['[[6],[6,6]]', '[[6],[6,6]]']]);
     }
-    ce.assign('x', ce.box(L(1, 2, 3) as any));
-    for (const expr of exprs)
-      expect(expr.evaluate().toString()).toBe('[[6],[6,6]]');
   });
 
   test('Repeat with a fractional count throws', () => {
@@ -1327,7 +1328,7 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(sum.evaluate().type.matches(type)).toBe(true);
   });
 
-  test('a sum over lists of several shapes checks the shapes when it runs', () => {
+  test('a sum over lists of several shapes checks the shapes when it runs; a product does not', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'list<matrix<2x2> | vector<2>>');
     const run = compile(ce.box(['Sum', 'p']), {
@@ -1345,12 +1346,23 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         ],
       } as never)
     ).toThrow();
-    expect(() =>
-      compile(ce.box(['Product', 'p']), {
-        to: 'javascript',
-        fallback: false,
+    // A product does not check the shapes: a matrix times a row is the
+    // matrix product, as in the interpreter (ROADMAP CE-98.3).
+    const product = compile(ce.box(['Product', 'p']), {
+      to: 'javascript',
+      fallback: false,
+    } as never).run!;
+    expect(
+      product({
+        p: [
+          [
+            [1, 2],
+            [3, 4],
+          ],
+          [10, 20],
+        ],
       } as never)
-    ).toThrow(/Could not compile/);
+    ).toEqual([50, 110]);
   });
 
   test.each([

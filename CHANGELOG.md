@@ -45,7 +45,12 @@
     interpreter (it threw, and a compiled `Product` gave `NaN` entries); a
     tensor of rank 3 beside a matrix or a vector throws when the code runs.
     Where the interpreter gives an `incompatible-dimensions` error, compiled
-    code gives `NaN`.
+    code gives `NaN`. A compiled `Multiply` fold (`Product`,
+    `Reduce(L, Multiply, 1)`, `Scan`) over elements of several shapes (numbers
+    beside lists, a matrix beside a row, rows of different lengths) compiles and
+    multiplies each step as the interpreter does; it was refused, or threw "the
+    elements have incompatible dimensions" for a matrix beside a row. A compiled
+    `Sum` still checks that its elements have one shape.
   - A product boxed while its symbols are `unknown` is still sorted: declare a
     matrix-capable type for the written order to be kept. `Divide(p, q)` of two
     matrices still divides each entry (`p·q^-1` is the matrix product).
