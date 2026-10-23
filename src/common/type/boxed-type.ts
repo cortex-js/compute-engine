@@ -57,6 +57,16 @@ function freezeResult(value: unknown): void {
   for (const child of Object.values(value)) freezeResult(child);
 }
 
+/**
+ * The interned types (`isInternedType`) that passed the checks of the
+ * `BoxedType` constructor for a type object: no optional parameter beside a
+ * variadic tail, not polymorphic, and no free type variable. The checks read
+ * only the structure of the type, and an interned type is shared and never
+ * changed, so each one is checked once, not at each `BoxedType` made from it
+ * (one per derived type of a new expression).
+ */
+const VALIDATED_CLOSED_TYPES = new WeakSet<object>();
+
 /** @category Type */
 export class BoxedType {
   static unknown = new BoxedType('unknown');
@@ -250,7 +260,11 @@ export class BoxedType {
     // nested at any depth (`list<T>`, `tuple<T, integer>`) is just as open, and
     // boxing it silently is what lets it escape into the algebra, whose helpers
     // assert on an open input.
-    if (typeof this.type === 'object' && typeof type !== 'string') {
+    if (
+      typeof this.type === 'object' &&
+      typeof type !== 'string' &&
+      !VALIDATED_CLOSED_TYPES.has(this.type)
+    ) {
       // The type-string grammar refuses a signature that combines optional
       // parameters with a variadic tail (see
       // `VARIADIC_WITH_OPTIONAL_MESSAGE`), and a hand-built `Type` object has
@@ -272,6 +286,8 @@ export class BoxedType {
           'unresolved-type-variable',
           `The type \`${typeToString(this.type)}\` refers to a type variable that is not quantified by a \`where\` clause: an open type is not declarable`
         );
+      else if (isInternedType(this.type))
+        VALIDATED_CLOSED_TYPES.add(this.type);
     }
   }
 

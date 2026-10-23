@@ -82,6 +82,7 @@ import {
   lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { divergentTailSign } from '../numerics/divergent-tail.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
@@ -1555,6 +1556,7 @@ function nIntegratePoleVerdict(
   }
 }
 
+
 /**
  * Integrate ONE real-valued part (`re` or `im`) of a one-limit integrand over
  * `[lower, upper]`. `Integrate(…).N()` and `NIntegrate` both call this
@@ -1594,7 +1596,7 @@ function integrateRealPart(
     /** The integrand holds an integral: each evaluation runs a quadrature. */
     nested?: boolean;
   }
-): { estimate: number; error: number; divergent?: true } {
+): { estimate: number; error: number; divergent?: true; infinite?: 1 | -1 } {
   // Semi-infinite interval: a conditionally-convergent oscillatory
   // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
   // importance sampling. Try the dedicated lobe-integration +
@@ -1662,15 +1664,29 @@ function integrateRealPart(
   // (`∫₀¹ sin(ln(1 − x))/(1 − x) dx`) is `NaN` with no sign: it is not
   // reported as `divergent`, so the caller does not look for the sign of a
   // pole at the bound (which gave `−∞` for that integral).
-  if (gk.divergent)
-    return gk.oscillates === true
-      ? { estimate: NaN, error: NaN }
-      : { estimate: NaN, error: NaN, divergent: true };
+  if (gk.divergent) {
+    if (gk.oscillates === true) return { estimate: NaN, error: NaN };
+    // Over an infinite bound, a divergence of the tail gives its sign
+    // (`divergentTailSign`): `∫₀^∞ x dx` is `+∞`.
+    const infinite = divergentTailSign(jsf, lower, upper);
+    return infinite === 0
+      ? { estimate: NaN, error: NaN, divergent: true }
+      : { estimate: NaN, error: NaN, divergent: true, infinite };
+  }
   // The integrand is `NaN` on a set that is not some isolated points (for
   // example, an integrand that has no real value on a part of the interval):
   // the integral has no value. The samples of Monte Carlo would also be
   // `NaN` there, and they cost up to `1e7` evaluations.
   if (gk.nanRegion === true) return { estimate: NaN, error: NaN };
+  // An integrand that overflows on the tail of an infinite interval
+  // (`∫₀^∞ eˣ dx`) gives a quadrature that is not a number and is not
+  // reported as divergent. The tail gives the sign of the divergence
+  // (`divergentTailSign`). Monte Carlo would give a finite mean of samples
+  // that changes at each run.
+  if (!Number.isFinite(gk.estimate) && (aInf || bInf)) {
+    const infinite = divergentTailSign(jsf, lower, upper);
+    if (infinite !== 0) return { estimate: NaN, error: NaN, infinite };
+  }
   if (
     (gk.converged || gk.extrapolated === true) &&
     Number.isFinite(gk.estimate)
@@ -5406,7 +5422,17 @@ volumes
               return numericApproximation ? value.N() : value;
             }
           }
-          if (variable && lo && hi) {
+          // An indefinite integral has the bounds `Nothing`, for which the
+          // residue method has no answer (it applies over `[0, ∞)`, `[0, π]`
+          // and `[0, 2π]`): it is not called, and the integrand is not lifted
+          // for it.
+          if (
+            variable &&
+            lo &&
+            hi &&
+            sym(lo) !== 'Nothing' &&
+            sym(hi) !== 'Nothing'
+          ) {
             let value = definiteIntegralByResidues(
               liftIntegrand(ops[0]),
               variable,
@@ -5608,6 +5634,10 @@ volumes
             });
 
           const re = integrateReal(integrand.re);
+          // A real integrand that diverges on an infinite tail with one sign
+          // (`∫₀^∞ x dx`, `∫₀^∞ eˣ dx`) is `+∞` or `−∞`, as on the exact route.
+          if (re.infinite !== undefined && !integrand.sawImaginary())
+            return re.infinite > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
           // The quadrature found a divergence, which has no sign. A pole AT
           // a bound (`∫₀¹ t⁻² dt`) gives the sign: the integral diverges with
           // the sign of the integrand next to that bound, inside the
@@ -6453,6 +6483,12 @@ volumes
           });
 
         const re = integrate(integrand.re);
+        // A real integrand that diverges on an infinite tail with one sign
+        // is `+∞` or `−∞` (see the `Integrate` numeric path).
+        if (re.infinite !== undefined && !integrand.sawImaginary())
+          return re.infinite > 0
+            ? engine.PositiveInfinity
+            : engine.NegativeInfinity;
         // A divergence found by the quadrature, with a pole AT a bound: the
         // sign of the integrand next to that bound gives the sign of the
         // divergence (see the `Integrate` numeric path).

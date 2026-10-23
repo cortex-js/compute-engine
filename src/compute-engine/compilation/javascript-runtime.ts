@@ -118,6 +118,7 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { divergentTailSign } from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import type { Rational } from '../numerics/types.js';
@@ -6017,13 +6018,25 @@ export const SYS_HELPERS = {
         singularEndpoints: true,
       });
       // A diagnosed divergence has no finite value, and sampling it would only
-      // launder the divergence into a plausible-looking number.
-      if (r.divergent) return NaN;
+      // launder the divergence into a plausible-looking number. On an
+      // infinite tail with an integrand of one sign, the divergence has a
+      // sign (`divergentTailSign`), as in the interpreter
+      // (`integrateRealPart`, library/calculus.ts): `∫₀^∞ x dx` is `+∞`.
+      if (r.divergent) {
+        const sign = divergentTailSign(f, a, b);
+        return sign === 0 ? NaN : sign * Infinity;
+      }
       // The integrand is `NaN` on a set that is not some isolated points (a
       // real function outside its real domain, or a complex sample, which
       // `realFn` reads as `NaN`): the integral has no value, and the
       // Monte-Carlo fallback would spend 1e7 samples to find `NaN` again.
       if (r.nanRegion === true) return NaN;
+      // An integrand that overflows on an infinite tail (`∫₀^∞ eˣ dx`): the
+      // tail gives the sign of the divergence, as in the interpreter.
+      if (!Number.isFinite(r.estimate)) {
+        const sign = divergentTailSign(f, a, b);
+        if (sign !== 0) return sign * Infinity;
+      }
       // The budget ran out somewhere below this level, so the panels this
       // quadrature accumulated rest on refused evaluations: the estimate is not
       // an estimate of anything. Answer `NaN` directly rather than falling

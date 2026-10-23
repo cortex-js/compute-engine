@@ -85,7 +85,11 @@ describe('Integrate(...).N() of an integrand that does not compile', () => {
   test('a divergent integrand answers NaN, not a Monte-Carlo mean', () => {
     // Before, Monte Carlo reported a finite value such as `10.9 ± 1.4`.
     expect(integrate(['Inv', 'x'], 0, 1).isNaN).toBe(true);
-    expect(integrate(['Inv', 'x'], 1, 'PositiveInfinity').isNaN).toBe(true);
+    // A divergence on an infinite tail, with an integrand of one sign, is
+    // `+∞` (ROADMAP CE-391; it was `NaN`).
+    expect(integrate(['Inv', 'x'], 1, 'PositiveInfinity').json).toEqual(
+      'PositiveInfinity'
+    );
   });
 
   test('the quadrature of an interpreted integrand has a bounded cost', () => {

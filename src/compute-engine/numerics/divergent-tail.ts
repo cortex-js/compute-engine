@@ -1,0 +1,97 @@
+/**
+ * The sign of the integral of `f` from `lower` to `upper`, with at least one
+ * infinite bound, when the integral diverges on an infinite tail: `1` for
+ * `+∞`, `-1` for `−∞`, `0` when this cannot be shown.
+ *
+ * `f` is read at points spaced by powers of two from each finite bound, on
+ * the side of the interval, and from `0` for a doubly infinite interval: at
+ * distances `2⁻⁵⁰` to `2⁶⁴` in steps of a factor 4, then up to `2¹⁰¹⁶` in
+ * steps of a factor 256. The points cover the whole range of doubles, which
+ * is also the range that the quadrature reads through its change of variable
+ * (`adaptiveQuadrature`, `gauss-kronrod.ts`). A change of sign beyond the
+ * largest double (`t·(1 − t/10³⁰⁹)`) cannot be seen by a numeric method, and
+ * is not seen here. The integral is infinite when:
+ * - every value is a number with one sign (zeros allowed), so no part of the
+ *   interval can cancel a divergence: a pole of the other sign at a finite
+ *   bound shows as values of that sign next to the bound, a change of sign
+ *   on the tail (`t·(1 − t/10²⁰)`) shows at the larger points, and an
+ *   interior pole is decided before the quadrature (`interiorPoleVerdict`,
+ *   `symbolic/interior-pole.ts`); and
+ * - on some infinite tail, `|f(x)|·|x|` does not decrease over the last
+ *   eight points that are not `0` (`f` decays no faster than `1/x`,
+ *   `∫₁^∞ dx/x` included), or a value is infinite (an overflow, `eˣ`).
+ *
+ * A caller asks only after the quadrature reported a divergence or an
+ * overflow. The quadrature does not report a slowly decaying convergent tail
+ * (`x^(−1.01)`) as divergent, and this test would not either. An integrand
+ * whose sign changes (`sin x`, `x − 1`) gives `0`, and the caller keeps the
+ * answer it had. Used by `integrateRealPart` (`library/calculus.ts`) and by
+ * the compiled `_SYS.integrate` (`compilation/javascript-runtime.ts`), so that
+ * both give the same answer.
+ */
+export function divergentTailSign(
+  f: (x: number) => number,
+  lower: number,
+  upper: number
+): 1 | -1 | 0 {
+  if (!(lower !== upper)) return 0;
+  const orientation = lower > upper ? -1 : 1;
+  const lo = Math.min(lower, upper);
+  const hi = Math.max(lower, upper);
+  if (Number.isFinite(lo) && Number.isFinite(hi)) return 0;
+
+  // The points at the distances above from `origin`, in order of distance.
+  const spread = (origin: number, direction: 1 | -1): number[] => {
+    const xs: number[] = [];
+    for (let k = -50; k <= 64; k += 2) xs.push(origin + direction * 2 ** k);
+    for (let k = 72; k <= 1016; k += 8) xs.push(origin + direction * 2 ** k);
+    return xs;
+  };
+
+  // Every point read for the sign, and the points of each infinite tail.
+  const points: number[] = [];
+  const tails: number[][] = [];
+  if (Number.isFinite(lo)) {
+    const xs = spread(lo, 1);
+    points.push(...xs);
+    tails.push(xs.filter((x) => x - lo >= 1));
+  } else if (Number.isFinite(hi)) {
+    const xs = spread(hi, -1);
+    points.push(...xs);
+    tails.push(xs.filter((x) => hi - x >= 1));
+  } else {
+    const right = spread(0, 1);
+    const left = spread(0, -1);
+    points.push(0, ...right, ...left);
+    tails.push(
+      right.filter((x) => x >= 1),
+      left.filter((x) => x <= -1)
+    );
+  }
+
+  const values = new Map<number, number>();
+  let positive = false;
+  let negative = false;
+  for (const x of points) {
+    const v = f(x);
+    if (Number.isNaN(v)) return 0;
+    values.set(x, v);
+    if (v > 0) positive = true;
+    else if (v < 0) negative = true;
+  }
+  if (positive === negative) return 0;
+
+  const diverges = tails.some((xs) => {
+    const weighted = xs
+      .map((x) => Math.abs(values.get(x)!) * Math.abs(x))
+      .filter((g) => g > 0);
+    if (weighted.some((g) => g === Infinity)) return true;
+    const last = weighted.slice(-8);
+    if (last.length < 8) return false;
+    for (let i = 1; i < last.length; i++)
+      if (last[i] < last[i - 1] * (1 - 1e-6)) return false;
+    return true;
+  });
+  if (!diverges) return 0;
+  return positive ? orientation : orientation === 1 ? -1 : 1;
+}

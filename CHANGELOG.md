@@ -37,15 +37,25 @@
 - **Symbolic operations are 10% to 30% faster** (ROADMAP CE-385). Compared with
   0.162.0: `D(x^3, x)` and `Expand((x + 1)^3)` take about 0.7 of the time,
   `evaluate()` and `simplify()` of small expressions about 0.8, and
-  antiderivatives and definite integrals 0.8 to 0.9. The type of a new
+  antiderivatives and definite integrals 0.7 to 0.8. The type of a new
   expression is derived with less work when its operands are numbers: the
   check for an element-wise application over a list is skipped, and fewer
   objects are created for each operand. A product with no sum, no `Negate`,
   no `Divide` and no matrix among its factors is built once instead of twice.
-  The results are the same.
+  An indefinite integral no longer prepares the residue method, which applies
+  only to some definite integrals, and the check of a function type is done
+  once per type. The results are the same.
 
 ### Resolved Issues
 
+- **`.N()` of an integral that diverges at an infinite bound gave a random
+  value or `NaN`** (ROADMAP CE-391). `evaluate()` gives `+∞` for
+  `∫₀^∞ eˣ dx`, but `.N()` gave a Monte-Carlo estimate that changed at each
+  run (`5007912 ± 2900000`), and `NaN` for `∫₀^∞ x dx`. When the integrand
+  has one sign on the interval and does not decay faster than `1/x` (or
+  overflows) on the infinite tail, `.N()`, `NIntegrate` and a compiled
+  integral now give `+∞` or `−∞`. An integrand whose sign changes
+  (`∫₀^∞ sin x dx`) still gives `NaN`.
 - **A function that receives itself as an argument and recurses through a
   lazy `Map` stayed unevaluated** (a regression in 0.160.0,
   [#470](https://github.com/cortex-js/compute-engine/issues/470), ROADMAP
