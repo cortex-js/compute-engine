@@ -181,7 +181,7 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     const IDENTITY: MathJsonExpression = ['Function', 'x', 'x'];
     expect(
       ce.box(['Map', IDENTITY, ['List', 1, 'Missing']]).type.toString()
-    ).toBe('list<integer | missing>');
+    ).toBe('list<integer | missing^2>');
     expect(ce.box(['Tuple', 1, 'Undefined']).type.toString()).toBe(
       'tuple<integer, missing>'
     );

@@ -26,6 +26,7 @@ import {
 } from '../../common/type/utils.js';
 import { ListType, Type } from '../../common/type/types.js';
 import {
+  absentCellsAsNaN,
   isTensorValue,
   packTensor,
   packStructural,
@@ -2823,7 +2824,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
+        // An absent cell of a matrix of numbers is `NaN` (`absentCellsAsNaN`):
+        // the determinant of `[[2, Missing], [3, 4]]` is `NaN`, and its trace,
+        // which reads the diagonal only, is 6.
+        const op1 = absentCellsAsNaN(ce, ops[0]);
 
         // Determinant of scalar (1x1 matrix) is the scalar itself
         if (op1.isNumber) return op1;
@@ -2904,7 +2908,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // (canonical form `MatrixPower(m, -2)`) have the same element type.
       type: ([m], context) => squareMatrixPowerType(m, 'integer', context),
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
-        const op1 = matrix;
+        // An absent cell of a matrix of numbers is `NaN` (`absentCellsAsNaN`).
+        const op1 = absentCellsAsNaN(ce, matrix);
 
         if (isTensorValue(op1)) {
           // §D2.3: exact evaluate → expression dtype; `.N()` → float64.
@@ -3171,7 +3176,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
+        // An absent cell of a matrix of numbers is `NaN` (`absentCellsAsNaN`):
+        // the determinant of `[[2, Missing], [3, 4]]` is `NaN`, and its trace,
+        // which reads the diagonal only, is 6.
+        const op1 = absentCellsAsNaN(ce, ops[0]);
 
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;

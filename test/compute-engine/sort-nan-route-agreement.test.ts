@@ -297,7 +297,7 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
   test.each([
     ['Sort', 'list<integer | missing>'],
     ['Ordering', 'list<integer>'],
-    ['Reverse', 'list<integer | missing>'],
+    ['Reverse', 'list<integer | missing^3>'],
     ['Rest', 'list<integer | missing>'],
     ['Unique', 'list<integer | missing>'],
   ])('%s of a list with an absent cell is typed %s', (op, type) => {

@@ -271,6 +271,7 @@ import {
   isUnorderedSet,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { isNumberThatMayBeAbsent } from '../boxed-expression/tensor-view.js';
 import { sortSetElements } from '../boxed-expression/order.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import { typeMembership } from './sets.js';
@@ -7425,12 +7426,17 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   // nested plain lists, one level per dimension. So is a union of cells
   // that is not a number type (`[[1, True], [2, False]]` is a
   // `list<list<boolean | integer>>`), except a union of tuples of one arity
-  // at rank 2 or more, which keeps the shape.
+  // at rank 2 or more, which keeps the shape. Numbers that may be absent
+  // (`[[2, Missing], [3, 4]]`) keep the shape too: the literal is a
+  // `matrix<(integer | missing)^(2x2)>`, and can be assigned to a symbol
+  // declared with that type. It was a `list<list<integer | missing>>`, which
+  // no such declaration admits.
   if (
     !mayCarryDimensions(widened) ||
     (typeof widened !== 'string' &&
       widened.kind === 'union' &&
       !isSubtype(widened, 'number') &&
+      !isNumberThatMayBeAbsent(widened.types) &&
       !(dims.length > 1 && isUnionOfTuplesOfOneArity(widened.types)))
   )
     return internType(nestedPlainListType(widened as Type, dims.length));

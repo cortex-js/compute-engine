@@ -1874,30 +1874,6 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-389. A list literal with an absent cell has no dimensions
-
-**Status:** open; defect.
-
-`[2, Missing]` is typed `list<integer | missing>` and `[[2, Missing], [3, 4]]`
-is typed `list<list<integer | missing>>`, while `[[2, 3], [3, 4]]` is typed
-`matrix<integer^(2x2)>`. The cell type `integer | missing` can carry dimensions
-(`cellTypeMayCarryDimensions`, `common/type/primitive.ts`), so the literal
-typing drops them somewhere else. Two effects:
-
-- `ce.assign('V', [2, Missing])` throws for `V: vector<(number | missing)^2>`,
-  and `ce.assign('M', [[2, Missing], [3, 4]])` throws for
-  `M: matrix<(number | missing)^(2x2)>`. The parser accepts these types, but no
-  literal value can be assigned to them.
-- The interpreter does not read such a literal as a matrix: the `Product` of
-  `[[2, Missing], [3, 4]]` and `[[1, 0], [0, 1]]` is the element-wise product
-  `[[2, NaN], [0, 4]]`, not the matrix product (`Multiply` of two matrices is
-  the matrix product, user decision 2026-10-22). Compiled code declared
-  `list<matrix<(number | missing)^(2x2)>>` gives the matrix product
-  `[[NaN, NaN], [3, 4]]`.
-
-Expected: the literal has the dimensions of its shape whatever its cells hold
-(`matrix<(integer | missing)^(2x2)>`), and the two routes agree.
-
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 
 **Status:** decision needed; defect.

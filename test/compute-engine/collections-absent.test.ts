@@ -92,7 +92,7 @@ describe('Rule A: positional operators keep an absent cell', () => {
           L(1, 'Missing', 3),
         ])
         .type.toString()
-    ).toBe('list<number>');
+    ).toBe('vector<3>');
     ce.declare('q', 'integer<1..3> | missing');
     expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe('number');
     expect(ce.box(['Add', 'q', 1]).type.toString()).toBe('number');

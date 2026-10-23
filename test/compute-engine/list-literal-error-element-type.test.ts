@@ -62,7 +62,7 @@ describe('A List literal skips an error element in its element join', () => {
   test('an absent cell beside an error keeps its arm', () => {
     // Before: list<missing | unknown>
     expect(typeOf(['List', 1, 'Missing', FAILED])).toBe(
-      'list<integer | missing>'
+      'list<integer | missing^3>'
     );
     // Before: list<missing | unknown>
     expect(typeOf(['List', FAILED, 'Missing'])).toBe('list<missing^2>');

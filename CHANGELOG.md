@@ -181,6 +181,23 @@
   a matrix is beside it; two such collections keep the product of each entry,
   as compiled code computes it. A point in such a collection stays a point.
 
+- **A list literal with an absent cell had no dimensions** (ROADMAP CE-389).
+  `[[2, Missing], [3, 4]]` was typed `list<list<integer | missing>>`, while
+  `[[2, 3], [3, 4]]` is a `matrix<integer^(2x2)>`. So it could not be assigned
+  to a symbol declared `matrix<(number | missing)^(2x2)>`, `Shape` and `Rank`
+  of it were `()` and `0`, `Multiply` of two such matrices paired their rows,
+  and `Determinant` and `Inverse` were an `incompatible-type` error. A literal
+  whose cells are numbers that may be absent now has the dimensions of its
+  shape (`matrix<(integer | missing)^(2x2)>`, `Shape` `(2, 2)`), and an
+  absent cell is read as `NaN` where a number is needed, as for an absent
+  operand: `[[2, Missing], [3, 4]]·[[1, 0], [0, 1]]` is `[[NaN, NaN], [3, 4]]`
+  (the value compiled code gives), its `Determinant` is `NaN`, and its
+  `Trace`, which reads the diagonal only, is `6`. `Transpose`, `Flatten` and
+  the other operators that move cells keep the absent cell. The type of such a
+  literal, and of a broadcast over it, now carries its length: `[1, Missing]`
+  is typed `list<(integer | missing)^2>`, and `Sin([Missing, 1])`
+  `vector<2>`.
+
 ## 0.162.0 _2026-10-23_
 
 ### Breaking Changes

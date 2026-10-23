@@ -396,8 +396,9 @@ describe('P2 — runtime gate: element level & short path (§3.E)', () => {
 
   test('Add([1, Missing], [10, 20]) = [11, NaN] (packing demotion)', () => {
     const e = ce.box(['Add', ['List', 1, 'Missing'], ['List', 10, 20]]);
-    // The (unevaluated) static type absorbs to a numeric list.
-    expect(e.type.toString()).toBe('list<number>');
+    // The (unevaluated) static type absorbs to a numeric vector of the
+    // length of the operands.
+    expect(e.type.toString()).toBe('vector<2>');
     const v = e.evaluate();
     expect(v.op1.re).toBe(11);
     expect(v.op2.isNaN).toBe(true);

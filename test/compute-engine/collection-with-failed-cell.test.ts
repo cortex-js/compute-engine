@@ -58,7 +58,7 @@ describe('A LIST LITERAL WITH A FAILED CELL IS TYPED AS A COLLECTION', () => {
     // The failed cell is in place of a row: the nested list gives the cell
     // type.
     expect(ce.box(['List', ERR, ['List', 1, 'Missing']]).type.toString()).toBe(
-      'list<list<integer | missing>>'
+      'matrix<integer | missing^(2x2)>'
     );
   });
 

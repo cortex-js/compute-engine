@@ -1827,3 +1827,135 @@ describe('a lazy collection of vectors or matrices', () => {
     }
   });
 });
+
+// A list literal whose cells are numbers that may be absent has the
+// dimensions of its shape (ROADMAP CE-389): `[[2, Missing], [3, 4]]` is a
+// `matrix<(integer | missing)^(2x2)>`. It was a
+// `list<list<integer | missing>>`, which no declared matrix type admits, and
+// the product of two such matrices paired their rows.
+describe('a matrix with an absent cell', () => {
+  const A: MathJsonExpression = [
+    'List',
+    ['List', 2, 'Missing'],
+    ['List', 3, 4],
+  ];
+  const I: MathJsonExpression = ['List', ['List', 1, 0], ['List', 0, 1]];
+
+  it('has the dimensions of its shape', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(A).type.toString()).toBe('matrix<integer | missing^(2x2)>');
+    expect(ce.box(['List', 2, 'Missing']).type.toString()).toBe(
+      'list<integer | missing^2>'
+    );
+  });
+
+  it('can be assigned to a symbol declared as such a matrix', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'matrix<(number | missing)^(2x2)>');
+    expect(() => ce.assign('M', ce.box(A))).not.toThrow();
+    ce.declare('V', 'vector<(number | missing)^2>');
+    expect(() => ce.assign('V', ce.box(['List', 2, 'Missing']))).not.toThrow();
+  });
+
+  it('the matrix product reads an absent cell as NaN', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Multiply', A, I]).evaluate().toString()).toBe(
+      '[[NaN,NaN],[3,4]]'
+    );
+    expect(ce.box(['Multiply', I, A]).evaluate().toString()).toBe(
+      '[[2,NaN],[3,NaN]]'
+    );
+    expect(ce.box(['Multiply', 2, A]).evaluate().toString()).toBe(
+      '[[4,NaN],[6,8]]'
+    );
+  });
+
+  it('Determinant, Trace and Inverse read an absent cell as NaN', () => {
+    const ce = new ComputeEngine();
+    // Before, the literal had no dimensions: Determinant and Inverse were
+    // an `incompatible-type` error, and Trace stayed unevaluated.
+    expect(ce.box(['Determinant', A]).evaluate().toString()).toBe('NaN');
+    // The trace reads the diagonal only.
+    expect(ce.box(['Trace', A]).evaluate().toString()).toBe('6');
+    expect(ce.box(['Inverse', A]).evaluate().toString()).toContain('NaN');
+    // A positional operator keeps the absent cell.
+    expect(ce.box(['Transpose', A]).evaluate().toString()).toBe(
+      '[[2,3],["Missing",4]]'
+    );
+    expect(ce.box(['Shape', A]).evaluate().toString()).toBe('(2, 2)');
+  });
+
+  // A lazy collection of such rows is read as the matrix of its rows.
+  it('a Reverse of rows with an absent cell times a matrix', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<vector<(number | missing)^2>>');
+    ce.declare('M', 'matrix<number>');
+    ce.assign('L', ce.box(['List', ['List', 1, 'Missing'], ['List', 3, 4]]));
+    ce.assign('M', ce.box(['List', ['List', 0, 1], ['List', 1, 0]]));
+    expect(
+      ce
+        .box(['Multiply', ['Reverse', 'L'], 'M'])
+        .evaluate()
+        .toString()
+    ).toBe('[[4,3],[NaN,NaN]]');
+  });
+
+  it('a Range beside it is a vector', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Multiply', A, ['Range', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,11]');
+  });
+
+  // Points that may be absent are not numbers: such a matrix keeps the
+  // tensor reading of the structural operators.
+  it('a matrix of points with an absent point can be reshaped', () => {
+    const ce = new ComputeEngine();
+    const P: MathJsonExpression = [
+      'List',
+      ['List', ['Tuple', 1, 2], 'Missing'],
+      ['List', ['Tuple', 3, 4], ['Tuple', 5, 6]],
+    ];
+    expect(
+      ce
+        .box(['Reshape', P, ['Tuple', 4]])
+        .evaluate()
+        .toString()
+    ).toBe('[(1, 2),"Missing",(3, 4),(5, 6)]');
+  });
+
+  it('the interpreter and compiled code agree on a Product', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<matrix<(number | missing)^(2x2)>>');
+    ce.assign('P', ce.box(['List', A, I]));
+    expect(ce.box(['Product', 'P']).evaluate().toString()).toBe(
+      '[[NaN,NaN],[3,4]]'
+    );
+    const ce2 = new ComputeEngine();
+    ce2.declare('P', 'list<matrix<(number | missing)^(2x2)>>');
+    const r = compile(ce2.box(['Product', 'P']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(
+      r.run!({
+        P: [
+          [
+            [2, null],
+            [3, 4],
+          ],
+          [
+            [1, 0],
+            [0, 1],
+          ],
+        ],
+      } as never)
+    ).toEqual([
+      [NaN, NaN],
+      [3, 4],
+    ]);
+  });
+});

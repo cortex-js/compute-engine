@@ -209,7 +209,7 @@ describe('Insert, ReplaceAt and Append over an absent collection', () => {
     // `Append([1], Undefined)` and `Append([1], NaN)` kept the cell.
     const appended = ce.box(['Append', ['List', 1], 'Missing']);
     expect(appended.isValid).toBe(true);
-    expect(appended.type.toString()).toBe('list<integer | missing>');
+    expect(appended.type.toString()).toBe('list<integer | missing^2>');
     expect(appended.evaluate().toString()).toBe('[1,"Missing"]');
     expect(
       ce
@@ -300,7 +300,7 @@ describe('a search finds an absent value where the same marker sits', () => {
     ],
     [
       ['Append', ['List', 1, 'Missing'], 2],
-      'list<integer | missing>',
+      'list<integer | missing^3>',
       '[1,"Missing",2]',
     ],
   ])('an absent element: %j', (json, type, expected) => {

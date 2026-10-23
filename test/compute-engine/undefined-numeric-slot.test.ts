@@ -129,17 +129,18 @@ describe('UNDEFINED in a numeric slot', () => {
         expect(withUndefined).toEqual(withMissing);
       }
       expect(ce.box(['List', 1, 'Undefined']).type.toString()).toBe(
-        'list<integer | missing>'
+        'list<integer | missing^2>'
       );
       expect(
         ce
           .box(['List', ['List', 1, 'Undefined'], ['List', 1, 2]])
           .type.toString()
-        // A list of rows keeps its level (since 2026-10-19; it was typed as a
-        // flat list, which did not describe the value).
-      ).toBe('list<list<integer | missing>>');
+        // A list of rows keeps its levels: since ROADMAP CE-389 it is a matrix
+        // whose cells may be absent (before, nested plain lists; and before
+        // 2026-10-19, a flat list, which did not describe the value).
+      ).toBe('matrix<integer | missing^(2x2)>');
       expect(ce.parse('[1, \\operatorname{Undefined}]').type.toString()).toBe(
-        'list<integer | missing>'
+        'list<integer | missing^2>'
       );
     });
 

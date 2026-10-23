@@ -219,7 +219,14 @@ function numericListRank(t: Type, depth = 0): number | undefined {
   if (!isSubtype(t, 'list<any>')) return undefined;
   if (t.dimensions === null) return undefined;
   if (t.dimensions !== undefined)
-    return isSubtype(t.elements, 'number') ? t.dimensions.length : undefined;
+    // Cells that are numbers, or numbers that may be absent (read as `NaN`
+    // by `mulTensors()`).
+    return isSubtype(t.elements, 'number') ||
+      (typeof t.elements !== 'string' &&
+        t.elements.kind === 'union' &&
+        isNumberThatMayBeAbsent(t.elements.types))
+      ? t.dimensions.length
+      : undefined;
   const inner = numericListRank(t.elements, depth + 1);
   return inner === undefined ? undefined : inner + 1;
 }
@@ -389,6 +396,7 @@ function structuralShapeOfOps(ops: ReadonlyArray<Expression>): number[] | null {
  */
 export function isTensorValue(x: Expression): boolean {
   if (!isTensor(x)) return false;
+  if (hasCellsThatMayBeAbsent(x)) return false;
   // A value with a zero extent (`[[], []]`, typed `matrix<never^(2x0)>`) has
   // no cell, so the tensor kernels have nothing to pack and decline it. The
   // consumers then take the route of a general collection: `Flatten([[],
@@ -406,9 +414,65 @@ export function tensorShape(x: Expression): number[] | null {
   // typed from its cells, so it never carries the `null` dimensions of a
   // tensor of unknown rank; a type with no dimension list has no shape to
   // pack.
-  if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
+  if (typeof t !== 'string' && t.kind === 'list' && t.dimensions) {
+    if (hasCellsThatMayBeAbsent(x)) return null;
     return [...t.dimensions];
+  }
   return null;
+}
+
+/**
+ * Whether the cells of the list `x` may be absent: its type has dimensions
+ * and its cell type has a `missing` arm (`[[2, Missing], [3, 4]]`, typed
+ * `matrix<(integer | missing)^(2x2)>`). Such a value has a shape in its
+ * type, but the packed kernels take number cells only, so it is not a
+ * tensor value (`isTensorValue()`), and the operators read it as a list, as
+ * they did before the literal was typed with its dimensions. `mulTensors()`
+ * reads each absent cell as `NaN` first, and so computes the matrix product.
+ */
+function hasCellsThatMayBeAbsent(x: Expression): boolean {
+  const t = x.type.type;
+  if (typeof t === 'string' || t.kind !== 'list' || !t.dimensions) return false;
+  const cells = t.elements;
+  return (
+    typeof cells !== 'string' &&
+    cells.kind === 'union' &&
+    isNumberThatMayBeAbsent(cells.types)
+  );
+}
+
+/** True when the arms `types` of a union are `missing` (an absent cell) and
+ * number types, with at least one of each: the cell type of a list literal
+ * that keeps its dimensions although a cell may be absent
+ * (`shapedListTypeD()` in `library/collections.ts`). */
+export function isNumberThatMayBeAbsent(types: ReadonlyArray<Type>): boolean {
+  return (
+    types.includes('missing') &&
+    types.some((t) => t !== 'missing') &&
+    types.every((t) => t === 'missing' || isSubtype(t, 'number'))
+  );
+}
+
+/**
+ * The value `x` with each absent cell (`Missing`, `Undefined`) read as `NaN`,
+ * when its cells are numbers that may be absent (`[[2, Missing], [3, 4]]`, a
+ * `matrix<(integer | missing)^(2x2)>`), and `x` itself otherwise. The
+ * absence marker of a numeric cell is `NaN` (`docs/ERROR-MODEL.md`, the
+ * codomain rule), and the packed kernels take number cells only. The result
+ * is a tensor value: the product of two such matrices is the matrix product
+ * with `NaN` where an absent cell takes part, and the determinant of such a
+ * matrix is `NaN`. A positional operator (`Transpose`, `Flatten`) keeps the
+ * absent cell instead, and does not call this.
+ */
+export function absentCellsAsNaN(ce: ComputeEngine, x: Expression): Expression {
+  if (!hasCellsThatMayBeAbsent(x)) return x;
+  const read = (v: Expression): Expression =>
+    isFunction(v, 'List')
+      ? ce.function('List', v.ops.map(read))
+      : isSymbol(v) && (v.symbol === 'Missing' || v.symbol === 'Undefined')
+        ? ce.NaN
+        : v;
+  return read(x);
 }
 
 /**

@@ -446,7 +446,7 @@ describe('a list that holds a restricted point or masked points', () => {
     test('a numeric list keeps NaN in the absent cell', () => {
       const ce = new ComputeEngine();
       const e = ce.box(['Sin', ['List', 'Missing', 1]]);
-      expect(e.type.toString()).toBe('list<number>');
+      expect(e.type.toString()).toBe('vector<2>');
       expect(e.evaluate().toString()).toBe('[NaN,sin(1)]');
       expect(e.N().ops![0].isNaN).toBe(true);
     });

@@ -10,6 +10,7 @@ import {
   isMatrixProductOfValues,
   isTensorValue,
   isLazyCollectionOfUnknownElements,
+  absentCellsAsNaN,
   isNumericVectorSource,
   lazyCollectionAsList,
   lazyCollectionRank,
@@ -3756,8 +3757,12 @@ function mulTensors(
   // Beside a matrix, a finite collection of numbers that is not a list (a
   // `Range`) is a vector: `M·Range(1, 2)` is the matrix-vector product, as
   // `M·[1, 2]` is, and not the product of each row.
+  // An absent cell of a matrix of numbers is read as `NaN` here, before the
+  // operands are classified: such a matrix is then a tensor value, and a
+  // `Range` beside it is read as a vector (`[[2, Missing], [3, 4]]·Range(1, 2)`
+  // is the matrix-vector product `[NaN, 11]`).
   const evaluated = xs.map((op) =>
-    numericApproximation ? op.N() : op.evaluate()
+    absentCellsAsNaN(ce, numericApproximation ? op.N() : op.evaluate())
   );
   // The rank of each operand that is a lazy collection of vectors or
   // matrices, read once from its type (`lazyCollectionRank()`).
@@ -3786,10 +3791,12 @@ function mulTensors(
     if (lazyRanks[i] !== undefined) {
       const list = lazyCollectionAsList(x);
       if (list === undefined) return ce._fn('Multiply', xs);
-      operands.push(list);
-    } else if (knownMatrix && isLazyCollectionOfUnknownElements(x))
-      operands.push(lazyCollectionAsList(x) ?? x);
-    else operands.push(x);
+      // The list can hold absent cells, read as `NaN` as above.
+      operands.push(absentCellsAsNaN(ce, list));
+    } else if (knownMatrix && isLazyCollectionOfUnknownElements(x)) {
+      const list = lazyCollectionAsList(x);
+      operands.push(list === undefined ? x : absentCellsAsNaN(ce, list));
+    } else operands.push(x);
   }
   // The matrices once the lazy collections are read: a `Range` beside one
   // is a vector.
