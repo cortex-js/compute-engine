@@ -15,7 +15,13 @@ import {
   fromCoefficients,
 } from '../boxed-expression/polynomials.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
+import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import {
   defaultUnknown,
   reduceTransformerOperand,
@@ -87,6 +93,54 @@ function storedValueVariable(ops: Expression[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Is `x` made of matrices and vectors (list literals) and the operators
+ * that combine them, with at least one list literal?
+ */
+function isTensorExpression(x: Expression): boolean {
+  if (isTensorValue(x)) return true;
+  if (
+    isFunction(x) &&
+    (x.operator === 'Multiply' ||
+      x.operator === 'Add' ||
+      x.operator === 'Negate' ||
+      x.operator === 'Power' ||
+      x.operator === 'MatrixPower')
+  )
+    return x.ops.some(isTensorExpression);
+  return false;
+}
+
+/**
+ * Is `x` made only of list literals, numbers and the operators that combine
+ * them (a sum, a product, a negation, a power), with at least one list literal?
+ */
+function isClosedTensorExpression(x: Expression): boolean {
+  const closed = (y: Expression): boolean =>
+    isTensorValue(y) ||
+    isNumber(y) ||
+    (isFunction(y) &&
+      (y.operator === 'Multiply' ||
+        y.operator === 'Add' ||
+        y.operator === 'Negate' ||
+        y.operator === 'Power' ||
+        y.operator === 'MatrixPower') &&
+      y.ops.every(closed));
+  return closed(x) && isTensorExpression(x);
+}
+
+/**
+ * The result of `Expand`, `Factor` or `Distribute` of an expression made of
+ * matrices. A product of matrices is the matrix product (and a power of a
+ * matrix its matrix power), so a result that is made only of list literals
+ * and numbers is evaluated, not returned as an unevaluated product or sum:
+ * `Expand(Q·M)` with two matrices is their matrix product. The operands
+ * are the values of the symbols (`reduceTransformerOperand()`).
+ */
+function evaluateTensorProduct(x: Expression): Expression {
+  return isClosedTensorExpression(x) ? x.evaluate() : x;
+}
+
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
     Expand: {
@@ -101,7 +155,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       // throw, result is the (still invalid) rewritten expression.
       inspectsErrors: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expand(reduceTransformerOperand(x.canonical)),
+      evaluate: ([x]) =>
+        evaluateTensorProduct(expand(reduceTransformerOperand(x.canonical))),
     },
 
     ExpandAll: {
@@ -110,7 +165,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
-      evaluate: ([x]) => expandAll(reduceTransformerOperand(x.canonical)),
+      evaluate: ([x]) =>
+        evaluateTensorProduct(expandAll(reduceTransformerOperand(x.canonical))),
     },
 
     Factor: {
@@ -130,14 +186,18 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         if (varExpr) {
           const variable = sym(varExpr.canonical);
           if (!variable) return reduceTransformerOperand(x.canonical);
-          return factorPolynomial(
-            reduceTransformerOperand(x.canonical, new Set([variable])),
-            variable
+          return evaluateTensorProduct(
+            factorPolynomial(
+              reduceTransformerOperand(x.canonical, new Set([variable])),
+              variable
+            )
           );
         }
 
         // Otherwise, try polynomial factoring without specific variable
-        return factorPolynomial(reduceTransformerOperand(x.canonical));
+        return evaluateTensorProduct(
+          factorPolynomial(reduceTransformerOperand(x.canonical))
+        );
       },
     },
 
@@ -163,7 +223,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
       evaluate: ([x]) =>
-        !x ? x : distribute(reduceTransformerOperand(x.canonical)),
+        !x
+          ? x
+          : evaluateTensorProduct(
+              distribute(reduceTransformerOperand(x.canonical))
+            ),
     },
 
     PolynomialDegree: {

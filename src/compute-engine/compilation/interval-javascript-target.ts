@@ -1712,6 +1712,20 @@ function tryIntervalBroadcast(
   );
   const hasPoint = points.some((x) => x);
   if (!hasPoint && !lists.some((x) => x)) return undefined;
+  // The product of two lists of which one may be a matrix is the matrix
+  // product in the interpreter (`mulTensors()`, user decision 2026-10-22),
+  // which the element-wise `_IA.bcast` does not compute: `p·q` with `p` and
+  // `q` typed `broadcastable<number>` and holding matrices. Such a product
+  // checks the shapes of the values when the code runs (`_IA.bcastProduct`):
+  // two vectors, or a number and a matrix, keep the product of each entry,
+  // as in the interpreter, and two lists of which one holds a list of lists
+  // have no value here. Beside a point, the product is refused (the scalar
+  // gate of the caller).
+  const checksMatrixShape =
+    id === 'Multiply' &&
+    lists.filter((x) => x).length >= 2 &&
+    args.some((a, i) => lists[i] && mayHoldNumericArrayOfRank(a.type.type, 2));
+  if (checksMatrixShape && hasPoint) return undefined;
   // The operand shapes the interpreter defines over points. A precise type
   // makes every other shape an error at canonicalization, but a union operand
   // (a point-or-point-list parameter beside the literal `1`) type-checks
@@ -1775,7 +1789,7 @@ function tryIntervalBroadcast(
   const kept = args.flatMap((_, i) => (literal[i] ? [] : [i]));
   const sources = kept.map((i) => source(args[i], i)).join(', ');
   if (!hasPoint)
-    return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources})`;
+    return `_IA.${checksMatrixShape ? 'bcastProduct' : 'bcast'}((${names.join(', ')}) => ${body}, ${sources})`;
   // `'p'`: the type or the literal proves exactly one point. `'q'`: a list
   // of points or a point-or-point-list union, which the helper decides at
   // the value. `'s'`: a number or a list of numbers.

@@ -436,6 +436,37 @@ export function bcastFn(
   return bcastWith(f, args);
 }
 
+/**
+ * `bcast` for a `Multiply` of which two arguments or more may be lists and
+ * one may be a matrix (a `broadcastable<number>`): the product of each entry
+ * when no argument holds a list of lists, and a run-time error when two
+ * arguments are arrays and one of them holds a list of lists.
+ *
+ * The interpreter takes the MATRIX product of two lists of which one is a
+ * matrix (`mulTensors()` in `boxed-expression/arithmetic-mul-div.ts`, user
+ * decision 2026-10-22), which this target does not compute. The error is an
+ * explicit refusal: the absence marker (`empty`) means "no value" on this
+ * target, and the matrix product has a value. A vector times a vector, and a
+ * number times a matrix, are the product of each entry in the interpreter
+ * too, and keep the element-wise value.
+ */
+export function bcastProduct(
+  f: (...operands: unknown[]) => unknown,
+  ...args: unknown[]
+): unknown {
+  const arrays = args.filter((a): a is unknown[] => Array.isArray(a));
+  if (
+    arrays.length >= 2 &&
+    arrays.some((a) => a.some((x) => Array.isArray(elementOperand(x))))
+  )
+    throw new Error(
+      'Multiply: a factor is a matrix beside another list. The product is ' +
+        'the matrix product, which interval arithmetic code does not ' +
+        'compute. Evaluate the expression instead.'
+    );
+  return bcastWith(f, args);
+}
+
 /** Shared implementation of `bcast` and `bcastFn`. */
 function bcastWith(
   f: (...operands: unknown[]) => unknown,

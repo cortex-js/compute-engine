@@ -198,5 +198,31 @@ originally answered `unexpected-argument` on a length mismatch; harmonized to
 literals — and the unit-carrying variant `[1,2,3] · ([1,2]·Meter)` — stayed
 inert-symbolic until 2026-07-27; the rank-1 fold in `mulTensors` now routes
 through `broadcastLengthMismatch` and errors like `Add`. The rank-2
-matrix-product mismatch stays inert: dimension compatibility there is
+matrix-product mismatch is the `incompatible-dimensions` error of
+`MatrixMultiply` since 2026-10-22: dimension compatibility there is
 `MatrixMultiply`'s question, not a broadcast length.)
+
+## `Multiply` of matrices (decision 2026-10-22)
+
+`Multiply` of two matrices is the matrix product (as `MatrixMultiply`),
+however the factors are written: literals, symbols that hold matrices, or
+computed factors. A vector or a plain list times a vector or a plain list is
+the product of each entry. A number times a matrix scales each entry.
+`HadamardProduct` is the product of each entry of two matrices.
+Compiled code follows the same rule where the type of the factors states
+that they are matrices; the interval-js target refuses a product of lists
+that may be matrices at run time (the code throws, and the runner answers
+`entire`, "cannot bound this") instead of answering `empty`, "no value".
+
+Two behaviors that differ on purpose, and that a reader may not expect:
+
+- `Divide(p, q)` of two matrices stays the quotient of each entry, while
+  `p·q^-1` is the matrix product with the inverse of `q`.
+- The order of the factors of a product is fixed when the product is boxed.
+  Factors whose types are known to be matrices (or may be: `tensor<number>`,
+  `any`, `broadcastable<number>`) keep the written order. Factors that are
+  still `unknown` at that time are sorted like numbers, because the product
+  of numbers commutes. If matrices are assigned to those symbols later, the
+  sorted order is not recovered: `q·p` boxed while `p` and `q` are `unknown`
+  is `p·q`. Declare the type (`ce.declare('p', 'matrix<number>')`) before
+  boxing the product.

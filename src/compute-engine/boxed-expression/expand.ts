@@ -10,6 +10,7 @@ import { isFunction, isNumber } from './type-guards.js';
 import { asSmallInteger } from './numerics.js';
 import { mul, expandProducts } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
+import { mayBeMatrixValued, typeMayHoldNumber } from './matrix-operand.js';
 import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
 
 const binomials = [
@@ -75,6 +76,30 @@ function isFloatLiteral(x: Expression): boolean {
   return isNumber(x) && !x.isExact;
 }
 
+/**
+ * Can the term `x` of a sum be a matrix with two axes? This is the case for
+ * a `Matrix` literal, an operand whose type admits a matrix
+ * (`typeMayHoldMatrix()`: `matrix`, `tensor<number>`, `any`, ...), and a
+ * product, a power or a negation of such an operand. A vector or a list of
+ * numbers is not (its product is element-wise, so it commutes), nor is a
+ * number or an operand of unknown type.
+ */
+function mayBeMatrixTerm(x: Expression): boolean {
+  if (mayBeMatrixValued(x)) return true;
+  if (isFunction(x, 'Negate')) return mayBeMatrixTerm(x.op1);
+  if (isFunction(x, 'Multiply')) return x.ops.some(mayBeMatrixTerm);
+  if (isFunction(x, 'Power')) return mayBeMatrixTerm(x.op1);
+  return false;
+}
+
+/**
+ * The most terms that the ordered expansion of a power of a sum of matrices
+ * produces (the sum has `n` terms, the power `k`: `n^k` terms before the like
+ * terms are combined). A power with more terms is left as it is: the
+ * expansion of `(A + B)^8` has 256 terms, that of `(A + B + C)^8` 6561.
+ */
+const MAX_ORDERED_EXPANSION_TERMS = 1024;
+
 /** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
  * The expression must be a power of a sum of terms.
  * The power must be a positive integer.
@@ -106,6 +131,35 @@ function expandPower(base: Expression, exp: number): Expression | null {
 
   // We can expand only if the expression is a power of a sum.
   if (!isFunction(base, 'Add')) return null;
+
+  // Terms that may be matrices do not commute: the product of two matrices
+  // is the matrix product. The multinomial theorem below assumes that they
+  // do (`(p + q)^2` is not `p^2 + 2p·q + q^2`), so the power is expanded as
+  // a product of `exp` copies of the sum, in order: `(p + q)^2` is
+  // `p^2 + p·q + q·p + q^2`. Vectors and lists of numbers are not matrices:
+  // their product is element-wise and commutes.
+  //
+  // A sum in which a term may be a matrix and another may be a number
+  // (`A + x`, `A + B` with `B: any`) is not expanded: the sum of a matrix and
+  // a number adds the number to every entry, so `(A + x)^2` is not
+  // `A^2 + 2xA + x^2`. Every term must be a matrix by its type. A power with
+  // more than `MAX_ORDERED_EXPANSION_TERMS` terms is not expanded either.
+  const matrixTerms = base.ops.filter(mayBeMatrixTerm).length;
+  if (matrixTerms >= 1) {
+    if (
+      matrixTerms < 2 ||
+      !base.ops.every((t) => mayBeMatrixTerm(t) && !typeMayHoldNumber(t))
+    )
+      return null;
+    if (base.ops.length ** exp > MAX_ORDERED_EXPANSION_TERMS) return null;
+    const deadline = ce._deadline;
+    let result: Expression = base;
+    for (let i = 1; i < exp; i += 1) {
+      checkDeadline(deadline);
+      result = expandProducts(ce, [result, base]) ?? result;
+    }
+    return result;
+  }
 
   // Apply the multinomial theorem
   // https://en.wikipedia.org/wiki/Multinomial_theorem

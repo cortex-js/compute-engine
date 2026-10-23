@@ -1,6 +1,8 @@
 import { apply } from '../function-utils.js';
 import { checkDeadlineEvery } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import { mayBeMatrixValued } from '../boxed-expression/matrix-operand.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
 import type {
   Expression,
   ExpressionInput,
@@ -235,6 +237,35 @@ function recordD(
  *
  * The arithmetic operations (add, mul, etc.) already produce canonical forms.
  */
+/**
+ * The product of `factors` with the factor at `index` replaced by `replacement`
+ * (its derivative), the other factors in their written order. The sort of
+ * `mul()` is not used for the factors: the derivative of a function that was
+ * declared to return `any` is typed `number`, and the sort would move it
+ * before the matrix factors. The numbers are multiplied together and placed
+ * first, as in a canonical product.
+ */
+function productWithFactorReplaced(
+  ce: Expression['engine'],
+  factors: ReadonlyArray<Expression>,
+  index: number,
+  replacement: Expression
+): Expression {
+  if (replacement.isSame(0)) return ce.Zero;
+  const parts = [...factors];
+  parts.splice(
+    index,
+    1,
+    ...(isFunction(replacement, 'Multiply') ? replacement.ops : [replacement])
+  );
+  const numbers = parts.filter((x) => isNumber(x));
+  const rest = parts.filter((x) => !isNumber(x));
+  const coefficient = numbers.length > 0 ? mul(...numbers) : ce.One;
+  if (coefficient.isSame(0)) return ce.Zero;
+  const items = coefficient.isSame(1) ? rest : [coefficient, ...rest];
+  return items.length === 1 ? items[0] : ce._fn('Multiply', items);
+}
+
 function simplifyDerivative(expr: Expression): Expression {
   return expr;
 }
@@ -2392,12 +2423,22 @@ function differentiateNode(
 
   // Product rule
   if (expr.operator === 'Multiply') {
+    // The product of two matrices does not commute, so the derivative of
+    // each factor replaces that factor IN PLACE: (f·g)' is f'·g + f·g', not
+    // f'·g + g'·f. A product with no factor that may be a matrix keeps the
+    // derivative first, as before.
+    const ordered = expr.ops.some(mayBeMatrixValued);
     recordD(trace, expr, v, 'derivative.product-rule', () => {
       const terms: Expression[] = [];
       expr.ops.forEach((op, i) => {
         const ph = dPlaceholder(op, v);
         if (ph.isSame(0)) return; // constant factor: term drops
         const others = expr.ops.slice();
+        if (ordered) {
+          others[i] = ph;
+          terms.push(ce.function('Multiply', others));
+          return;
+        }
         others.splice(i, 1);
         terms.push(
           ph.isSame(1)
@@ -2408,12 +2449,13 @@ function differentiateNode(
       return terms.length === 0 ? ce.Zero : ce.function('Add', terms);
     });
     const terms = expr.ops.map((op, i) => {
-      const otherTerms = expr.ops.slice();
-      otherTerms.splice(i, 1);
-      const otherProduct = mul(...otherTerms);
       const gPrime =
         differentiate(op, v, depth + 1, trace) ??
         ce._fn('D', [op, ce.symbol(v)]);
+      if (ordered) return productWithFactorReplaced(ce, expr.ops, i, gPrime);
+      const otherTerms = expr.ops.slice();
+      otherTerms.splice(i, 1);
+      const otherProduct = mul(...otherTerms);
       return gPrime.mul(otherProduct);
     });
     if (terms.some((term) => term === undefined)) return undefined;
@@ -2458,6 +2500,79 @@ function differentiateNode(
       ce._fn('D', [base, ce.symbol(v)]);
 
     return simplifyDerivative(exponent.mul(power).mul(basePrime));
+  }
+
+  // A positive integer power of a base that may be a matrix, `f^n`, is the
+  // product of `n` copies of `f`, and the product rule applies: (f^2)' is
+  // f'·f + f·f', not 2f·f' (the matrix product does not commute).
+  if (
+    (expr.operator === 'Power' || expr.operator === 'MatrixPower') &&
+    isFunction(expr) &&
+    mayBeMatrixValued(expr.op1) &&
+    dependsOnVariable(expr.op1, v) &&
+    !dependsOnVariable(expr.op2, v)
+  ) {
+    // Only an EXACT integer exponent is the matrix power. A float exponent
+    // (`f^2.0`) is the entry-wise power, which `D` leaves unevaluated here.
+    const n =
+      isNumber(expr.op2) && expr.op2.isExact ? asSmallInteger(expr.op2) : null;
+    // f^0 is the identity (constant) and f^1 is f.
+    if (n === 0) return ce.Zero;
+    if (n === 1) return differentiate(expr.op1, v, depth + 1, trace);
+    // A negative integer power: with g = f^-1, g' = -g·f'·g, and the product
+    // rule over the m = |n| copies of g gives
+    // (f^-m)' = -Σ f^-(i+1)·f'·f^-(m-i), i = 0..m-1.
+    if (n !== null && n <= -1 && n >= -8) {
+      const f = expr.op1;
+      const m = -n;
+      const inv = (k: number): Expression =>
+        ce.function('Power', [f, ce.number(-k)]);
+      const terms = (middle: Expression): Expression[] =>
+        Array.from({ length: m }, (_, i) =>
+          ce.function('Multiply', [
+            ce.NegativeOne,
+            inv(i + 1),
+            middle,
+            inv(m - i),
+          ])
+        );
+      recordD(trace, expr, v, 'derivative.product-rule', () =>
+        ce.function('Add', terms(dPlaceholder(f, v)))
+      );
+      const fPrime =
+        differentiate(f, v, depth + 1, trace) ?? ce._fn('D', [f, ce.symbol(v)]);
+      return simplifyDerivative(add(...terms(fPrime)));
+    }
+    // Any other exponent (a non-integer, or an integer of large size): the
+    // scalar power rule does not hold for a matrix, so `D` stays unevaluated.
+    if (n === null || n < -8 || n > 8) return undefined;
+    if (n >= 2 && n <= 8) {
+      const f = expr.op1;
+      const fPlaceholder = dPlaceholder(f, v);
+      const power = (k: number): Expression[] =>
+        k === 0 ? [] : [k === 1 ? f : ce.function('Power', [f, ce.number(k)])];
+      recordD(trace, expr, v, 'derivative.product-rule', () =>
+        ce.function(
+          'Add',
+          Array.from({ length: n }, (_, i) =>
+            ce.function('Multiply', [
+              ...power(i),
+              fPlaceholder,
+              ...power(n - 1 - i),
+            ])
+          )
+        )
+      );
+      const fPrime =
+        differentiate(f, v, depth + 1, trace) ?? ce._fn('D', [f, ce.symbol(v)]);
+      return simplifyDerivative(
+        add(
+          ...Array.from({ length: n }, (_, i) =>
+            ce.function('Multiply', [...power(i), fPrime, ...power(n - 1 - i)])
+          )
+        )
+      );
+    }
   }
 
   // Power rule

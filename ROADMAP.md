@@ -517,12 +517,13 @@ every threadable call, so it needs a full-suite measurement.
 ### CE-25. The inferred signature of a function literal reads an `unknown` parameter as a number
 
 **Status:** in progress; wrong value. User decision 2026-10-22: option (a), the
-signature says only what is known (`x ↦ [x]` is `(unknown) -> list`); reading a
-free-symbol call argument as a number (option (b)) is rejected. The defects that
-the new signature makes reachable from Tycho row 425 (`g := t ↦ [t, 2t]` with
-`x: any`) are fixed. A patch exists (signature part only,
-`deriveSignatureResultType`); with it, the five compile tests below decline
-instead of compiling, which is accepted.
+signature says only what is known (`x ↦ [x]` is `(unknown) -> list<unknown>`,
+spelling approved 2026-10-23: it keeps the nesting, `x ↦ [[x]]` is
+`(unknown) -> list<list<unknown>>`); reading a free-symbol call argument as a
+number (option (b)) is rejected. The defects that the new signature makes
+reachable from Tycho row 425 (`g := t ↦ [t, 2t]` with `x: any`) are fixed. A
+patch exists (signature part only, `deriveSignatureResultType`); with it, the
+five compile tests below decline instead of compiling, which is accepted.
 
 `g := x ↦ [x]` gets the signature `(unknown) -> vector<1>`, which says the
 element is a number. With `s: set<integer>` and `s := Set(1, 2)`, `g(s)`
@@ -1884,33 +1885,19 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-98. `Multiply` of two matrices must be the matrix product however the factors are written
+### CE-98. `Multiply` of two matrices: remaining case after the matrix-product change
 
-**Status:** open; defect. User decision 2026-10-22: `Multiply` of two matrices
-is the matrix product.
+**Status:** open; wrong value. User decision 2026-10-22: `Multiply` of two
+matrices is the matrix product however the factors are written; done
+2026-10-23 (see CHANGELOG, Breaking Changes) except the sub-item below.
 
-Today the interpreter's product of matrix factors that are all symbols is
-entry-wise (`p·p`, `p·q`, and `m·m` even for `m: matrix<number>`), while a
-product with a literal or computed matrix factor is the matrix product
-(`p·sin(p)`, `p·[[0, 1], [1, 0]]`), measured 2026-10-22 on `556ca8d7e`. So `p^2`
-(the matrix square) and `p·p` (the entry-wise square) disagree.
-
-The user decided, as SymPy, MATLAB and Julia do, and so that `Multiply` agrees
-with `Power`:
-
-1. `Multiply` of two matrices (two axes) is the matrix product, as
-   `MatrixMultiply`, however the factors are written.
-2. A vector or a plain list times a vector or a plain list stays entry-wise
-   (Desmos lists, Tycho's decoder).
-3. A number times a matrix stays a scaling of each entry.
-4. Compiled code follows the same rule: `matrix<…>` calls the matrix product;
-   `tensor<number>` and `list<list<number>>` dispatch on the shape of the value
-   when the code runs, as `Power` does; a type that may hold points (bare
-   `list`, `any`) keeps the entry-wise product.
-
-The entry-wise product stays available as `HadamardProduct`. A CHANGELOG
-Breaking Changes entry names `HadamardProduct` as the way to get the old result
-of `p·q` for two matrix symbols.
+- **CE-98.1** A ragged list is not a matrix. With `L: list<unknown>` and
+  `L = [[[1], [2, 3]], [[4], [5, 6]]]`, `Product(L)` and
+  `Reduce(L, Multiply, 1)` give `[[4], [10, 18]]` (entry by entry) in the
+  interpreter, and `null` in compiled JavaScript: `mulTensorWith`
+  (`compilation/javascript-runtime.ts`) sends every operand of rank 2 or more to
+  the matrix product. The shape dispatch of rule 4 must read a ragged value as a
+  list, not a matrix.
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 

@@ -147,6 +147,7 @@ import {
   isAbsentSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
+import { isPointListOperand } from '../boxed-expression/matrix-operand.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { sortOperands } from '../boxed-expression/order.js';
 import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
@@ -2204,8 +2205,7 @@ export function mayHoldNumericArrayOfRank(
       const dims = r.dimensions;
       // A tensor of unknown rank (`tensor<U>`) holds every rank.
       if (dims === null) return next(r.elements, 0);
-      if (dims !== undefined)
-        return dims.length >= rank && next(r.elements, 0);
+      if (dims !== undefined) return dims.length >= rank && next(r.elements, 0);
       return next(r.elements, rank - 1);
     }
     case 'set':
@@ -11572,6 +11572,25 @@ export class BaseCompiler {
       }
     }
 
+    // The product of two matrices is the matrix product, however the
+    // factors are written (user decision 2026-10-22): `evaluate()` reads the
+    // shapes of the values (`mulTensors()`), and the code does the same
+    // (`compileMatrixProduct`). A product of vectors, or of numbers and one
+    // matrix, keeps the element-wise code below.
+    if (
+      h === 'Multiply' &&
+      (target.language === 'javascript' || target.language === 'python')
+    ) {
+      const product = BaseCompiler.compileMatrixProduct(
+        engine,
+        args,
+        prec,
+        target,
+        node
+      );
+      if (product !== undefined) return product;
+    }
+
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
     // math) over one or more list-valued operands, for the JavaScript target.
     // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
@@ -15018,6 +15037,291 @@ export class BaseCompiler {
       : `((${params.join(', ')}) => ${body})(${values.join(', ')})`;
   }
 
+  /** The `Multiply` operand lists whose element-wise code
+   * `compileMatrixProduct` is emitting, so that this emission does not
+   * dispatch a second time. Keyed by the identity of the operand array. */
+  private static readonly _runtimeMatrixProducts = new Set<
+    ReadonlyArray<Expression>
+  >();
+
+  /** Is the operand typed as a matrix or a tensor (a list type with two
+   * dimensions or more, or a tensor of unknown rank)? A bare `list` and
+   * `any` are not. */
+  private static isTypedMatrixOperand(a: Expression): boolean {
+    if (isTensorValue(a)) return a.shape.length >= 2;
+    const t = resolveTypeAlias(a.type.type);
+    if (typeof t === 'string' || t.kind !== 'list') return false;
+    return t.dimensions === null || (t.dimensions?.length ?? 0) >= 2;
+  }
+
+  /**
+   * The dimensions of a `Multiply` operand that is a vector or a matrix of
+   * numbers by its type or its literal value (`[3]`, `[2, 3]`, `-1` for a
+   * dimension that is not known), or `undefined` when the type does not give
+   * a rank of 1 or 2 (`tensor<number>`, `list<list<number>>`, a union).
+   */
+  private static matrixProductDimensions(
+    a: Expression
+  ): ReadonlyArray<number> | undefined {
+    if (isTensorValue(a)) {
+      const shape = a.shape;
+      return shape.length === 1 || shape.length === 2 ? shape : undefined;
+    }
+    const t = resolveTypeAlias(a.type.type);
+    if (typeof t === 'string' || t.kind !== 'list') return undefined;
+    if (!isSubtype(t.elements, 'number')) return undefined;
+    if (t.dimensions === undefined) return [-1];
+    if (t.dimensions === null) return undefined;
+    return t.dimensions.length === 1 || t.dimensions.length === 2
+      ? t.dimensions
+      : undefined;
+  }
+
+  /**
+   * Whether the value of the `Multiply` operand `a` may hold a tuple (a
+   * point) at some level, for `compileMatrixProduct`. A symbol, a literal or
+   * a call is read by its type (`typeMayHoldTuple`). An application of an
+   * element-wise operator (`Add`, `Sin`, `Multiply`, …) has the shape of its
+   * operands, so its operands are read instead of its type: the type of
+   * `p + 1` for `p: list<number> | list<list<number>>` has a `list<any>` arm,
+   * which would read as a possible list of points.
+   */
+  private static mayHoldPoint(
+    engine: ComputeEngine,
+    a: Expression,
+    depth = 0
+  ): boolean {
+    if (
+      depth < 8 &&
+      isFunction(a) &&
+      a.operator !== 'List' &&
+      a.operator !== 'Tuple'
+    ) {
+      const def = engine.lookupDefinition(a.operator);
+      if (isOperatorDef(def) && def.operator.broadcastable === true)
+        return a.ops.some(
+          (x) =>
+            couldBeNumericTuple(x) ||
+            BaseCompiler.mayHoldPoint(engine, x, depth + 1)
+        );
+    }
+    return typeMayHoldTuple(a.type.type);
+  }
+
+  /**
+   * The JavaScript code of `Multiply(args)` when two operands or more are
+   * arrays and one may be a matrix, or `undefined` when the code that
+   * `compileExpr` emits otherwise is the answer.
+   *
+   * `evaluate()` computes the product of two matrices as the matrix product
+   * (`mulTensors()` in `arithmetic-mul-div.ts`, user decision 2026-10-22):
+   * the tensors are multiplied left to right, a step with a matrix is the
+   * matrix product, a step between two vectors is the product of each
+   * entry, and the numbers scale the result. The code does the same:
+   *
+   * - When the type of every array operand gives its rank (a `matrix`, a
+   *   `vector`, a `list<number>`, a literal) and one is a matrix, the code
+   *   calls `_SYS.mul` (`_SYS.cmul` for complex entries), which computes
+   *   that product. Two dimensions that are known and do not agree make the
+   *   compilation fail: `evaluate()` answers the `incompatible-dimensions`
+   *   error.
+   * - When the type of an operand does not give its rank (`tensor<number>`,
+   *   `list<list<number>>`), the code decides on the shape of the values, as
+   *   for `Power` (`compileRuntimeMatrixPower`): `_SYS.matrixProductShape`
+   *   answers the product when an operand holds a matrix, or `undefined`, in
+   *   which case the element-wise code runs. Each operand is evaluated once.
+   * - On the Python target, the first case is `np.matmul` (and `np.multiply`
+   *   for a step between two vectors). The second case answers `undefined`,
+   *   and `compileExpr` refuses the product, as for any arithmetic over a
+   *   list on that target.
+   *
+   * Nothing changes for an operand whose type may hold a tuple (a point):
+   * a bare `list`, `list<unknown>`, `any`, `list<tuple<…>>`. Compiled code
+   * holds a point as an array, so a list of two points and a 2×2 matrix are
+   * the same value at run time, and the hosts pass lists of points to
+   * compiled code: such a product keeps its element-wise code. Nothing
+   * changes either for an operand whose shape is not known at all (a
+   * `broadcastable<number>`, a call typed `unknown`): `tryCompileBroadcast`
+   * already emits `_SYS.mul` for it, which dispatches on the rank of the
+   * values.
+   */
+  private static compileMatrixProduct(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): string | undefined {
+    if (BaseCompiler._runtimeMatrixProducts.has(args)) return undefined;
+    // A caller's own `Multiply` lowering is not bypassed.
+    if (BaseCompiler.callerOverrides(target, 'Multiply')) return undefined;
+    const arrays = args.filter((a) => BaseCompiler.isArrayOperand(a, target));
+    if (arrays.length < 2) return undefined;
+    // Two factors typed as matrices beside a list of points: the interpreter
+    // multiplies the matrices first, `(m·n)·P`, and scales the points by the
+    // result. The element-wise code below pairs the factors one by one, so
+    // the product is refused rather than compiled to another value. A bare
+    // `list` or `any` factor is not typed as a matrix and keeps its code.
+    if (
+      arrays.some((a) => isPointListOperand(a)) &&
+      arrays.filter((a) => BaseCompiler.isTypedMatrixOperand(a)).length >= 2
+    )
+      throw new Error(
+        'Could not compile `Multiply`: two matrices beside a list of points are ' +
+          'multiplied together first, then scale the points. The compiled ' +
+          'code pairs the factors one by one. `evaluate()` computes the product.'
+      );
+    if (
+      args.some(
+        (a) =>
+          couldBeNumericTuple(a) ||
+          isBoundPossiblyCollectionTyped(a, target) ||
+          isGatedIndexedCollection(a)
+      )
+    )
+      return undefined;
+    if (arrays.some((a) => BaseCompiler.mayHoldPoint(engine, a)))
+      return undefined;
+    const mayBeMatrix = (a: Expression): boolean =>
+      isTensorValue(a)
+        ? a.shape.length === 2
+        : mayHoldNumericArrayOfRank(a.type.type, 2);
+    if (!arrays.some(mayBeMatrix)) return undefined;
+    // Every other operand must be a number: it scales the product.
+    if (args.some((a) => !arrays.includes(a) && !a.type.matches('number')))
+      return undefined;
+
+    const dims = arrays.map((a) => BaseCompiler.matrixProductDimensions(a));
+    if (
+      dims.every((d) => d !== undefined) &&
+      dims.some((d) => d!.length === 2)
+    ) {
+      // The rank of every array is known: check the dimensions, left to
+      // right, as `mulTensors()` multiplies them.
+      const agree = (a: number, b: number) => a < 0 || b < 0 || a === b;
+      let shape: ReadonlyArray<number> = dims[0]!;
+      for (const d of dims.slice(1) as ReadonlyArray<number>[]) {
+        const inner = shape.length === 2 ? shape[1] : shape[0];
+        if (!agree(inner, d[0]))
+          throw new Error(
+            'Could not compile `Multiply`: the product of these matrices is the matrix product, and their ' +
+              'dimensions do not agree. `evaluate()` answers the `incompatible-dimensions` error.'
+          );
+        shape =
+          shape.length === 1 && d.length === 1
+            ? shape
+            : shape.length === 2 && d.length === 2
+              ? [shape[0], d[1]]
+              : shape.length === 2
+                ? [shape[0]]
+                : [d[1]];
+      }
+      if (target.language === 'python') {
+        // NumPy computes with complex entries as with real ones. A step with
+        // a matrix is `np.matmul`, a step between two vectors is
+        // `np.multiply`, and the numbers scale the result (a NumPy array).
+        let product = BaseCompiler.compile(arrays[0], target);
+        let rank = dims[0]!.length;
+        for (const [i, a] of arrays.entries()) {
+          if (i === 0) continue;
+          const code = BaseCompiler.compile(a, target);
+          const r = dims[i]!.length;
+          product =
+            rank === 1 && r === 1
+              ? `np.multiply(${product}, ${code})`
+              : `np.matmul(${product}, ${code})`;
+          rank = rank === 2 && r === 2 ? 2 : 1;
+        }
+        // At the precedence of a product, so that a sum is in parentheses:
+        // `(x + 1)·p·q` is `(x + 1) * np.matmul(p, q)`.
+        const scalars = args
+          .filter((a) => !arrays.includes(a))
+          .map((a) => BaseCompiler.compile(a, target, 12));
+        return scalars.length === 0
+          ? product
+          : `(${[...scalars, product].join(' * ')})`;
+      }
+      const complex =
+        BaseCompiler.linearAlgebraLane(args) === 'complex' ||
+        args.some((a) => BaseCompiler.isComplexValued(a));
+      const helper = complex ? '_SYS.cmul' : '_SYS.mul';
+      return `${helper}(${args.map((a) => BaseCompiler.compile(a, target)).join(', ')})`;
+    }
+
+    // Python: a product whose ranks are known only at run time keeps the
+    // refusal below (`compileExpr`), as a `Power` of such a base does.
+    if (target.language !== 'javascript') return undefined;
+
+    // The rank of an operand is known only at run time: dispatch on the
+    // shape of the values. Each operand that cannot be repeated for free is
+    // bound to a parameter, which the element-wise code reads
+    // (`_codeAliases`), as in `compileRuntimeMatrixPower`.
+    //
+    // An alias is keyed by node, so each position needs its own node: when
+    // the same node is two factors (`f()·f()` with an impure `f`, evaluated
+    // once per position), the second position reads a copy of that node,
+    // aliased to its own parameter, as in `compileRuntimeMatrixPower`.
+    const operands: Expression[] = args.map((a, i) =>
+      args.indexOf(a) < i && isFunction(a)
+        ? engine._fn(a.operator, [...a.ops])
+        : a
+    );
+    const params: string[] = [];
+    const values: string[] = [];
+    const reads: string[] = [];
+    const bound: Array<[Expression, string]> = [];
+    for (const op of operands) {
+      const code = BaseCompiler.compile(op, target);
+      if (BaseCompiler.REPEATABLE_SOURCE.test(code)) {
+        reads.push(code);
+        continue;
+      }
+      const v = BaseCompiler.tempVar(target);
+      params.push(v);
+      values.push(code);
+      reads.push(v);
+      bound.push([op, v]);
+    }
+    const installed: Array<[Expression, string | undefined]> = [];
+    let elementwise: string;
+    try {
+      for (const [op, v] of bound) {
+        installed.push([op, BaseCompiler._codeAliases.get(op)]);
+        BaseCompiler._codeAliases.set(op, v);
+      }
+      BaseCompiler._runtimeMatrixProducts.add(operands);
+      try {
+        elementwise = BaseCompiler.compileExpr(
+          engine,
+          'Multiply',
+          operands,
+          prec,
+          target,
+          node
+        );
+      } catch (e) {
+        // The element-wise code is refused when an operand is a matrix by
+        // its type (`tryCompileBroadcast`). The helper then never answers
+        // `undefined`: it finds that matrix in the values, and computes the
+        // product or throws. So the element-wise branch is never run.
+        if (!(e instanceof Error) || e.name === 'CancellationError') throw e;
+        if (!dims.some((d) => d?.length === 2)) throw e;
+        elementwise = 'NaN';
+      } finally {
+        BaseCompiler._runtimeMatrixProducts.delete(operands);
+      }
+    } finally {
+      for (const [op, previous] of installed.reverse()) {
+        if (previous === undefined) BaseCompiler._codeAliases.delete(op);
+        else BaseCompiler._codeAliases.set(op, previous);
+      }
+    }
+    const body = `(_SYS.matrixProductShape(${reads.join(', ')}) ?? (${elementwise}))`;
+    return params.length === 0
+      ? body
+      : `((${params.join(', ')}) => ${body})(${values.join(', ')})`;
+  }
+
   /**
    * The number of elements an emitted source text holds when it is one array
    * LITERAL — `[a, b, c]` gives three — and `undefined` when the text is
@@ -15782,6 +16086,10 @@ export class BaseCompiler {
     // array at run time, so it participates in the ≥2-operand test and a
     // `matrix`-typed symbol fails closed like a literal matrix (compiling it
     // through `_SYS.bcast` would Hadamard where the interpreter contracts).
+    // The products of matrices that compiled code can compute are emitted
+    // before this method runs (`compileMatrixProduct`); a matrix reaches
+    // this point only beside an operand that may hold a point, or one that
+    // is gated.
     // Equal- or unknown-length typed vectors still compile: for symbol
     // operands the interpreter broadcasts element-wise too.
     //
@@ -15937,8 +16245,21 @@ export class BaseCompiler {
         // defer those to the fail-closed path. (With a point among the
         // operands this path is never taken: the point plan above either
         // admitted the shape or declined it.)
+        //
+        // Beside an operand whose type may hold points (a list of points, a
+        // bare `list`), `_SYS.mul` would read a list of points as a matrix
+        // and take a matrix product: `b·a` with `a` holding `[(1, 2), (3,
+        // 4)]` and `b` holding `[2, 3]` gave `[11, 16]`, where the interpreter
+        // scales each point, `[(2, 4), (9, 12)]`. The element-wise code below
+        // pairs each number with a point, as the interpreter does.
+        const pointHolder = collection.some(
+          (a) =>
+            !isBoundPossiblyCollectionTyped(a, target) &&
+            typeMayHoldTuple(a.type.type)
+        );
         if (
           atomicTuple === undefined &&
+          !pointHolder &&
           collection.some((a) => isBoundPossiblyCollectionTyped(a, target))
         ) {
           // `linearAlgebraLane` also reads an operand whose type is a union
@@ -15958,7 +16279,7 @@ export class BaseCompiler {
           const compiledArgs = args
             .map((a) => BaseCompiler.compile(a, target))
             .join(', ');
-          return `_SYS.mul(${compiledArgs})`;
+          return `_SYS.mulChecked(${compiledArgs})`;
         }
         // Statically-known mismatched rank-1 lengths: fail closed.
         const lengths = collection

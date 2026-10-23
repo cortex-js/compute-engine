@@ -7,7 +7,11 @@ import type {
 } from '../global-types.js';
 import {
   elementFloatMask,
+  isMatrixProductOfValues,
   isTensorValue,
+  isNumericVectorSource,
+  numericCollectionAsList,
+  tensorShape,
   packTensor,
   tensorCellExpression,
 } from './tensor-view.js';
@@ -21,6 +25,7 @@ import {
 import {
   isNumber,
   isFunction,
+  isString,
   isSymbol,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
@@ -87,7 +92,7 @@ import {
   sortProductOperands,
 } from './order.js';
 import { asRadical, isMatrixTyped } from './arithmetic-power.js';
-import { mayBeMatrixPowerBase } from './matrix-operand.js';
+import { mayBeMatrixPowerBase, typeMayHoldMatrix } from './matrix-operand.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
@@ -206,6 +211,23 @@ function exactRationalExponent(x: Expression): Rational | undefined {
  *      ]
  *
  */
+
+/**
+ * Is the factor `x` of a product a matrix or another collection, or can its
+ * value be a matrix by its type (`typeMayHoldMatrix()`: `any`,
+ * `broadcastable<number>`, `number | matrix`), or is it a power of such a
+ * factor? The matrix product does not commute, so a product with such a
+ * factor does not move a factor that may be a matrix past another one:
+ * `p·q·p` is not `p^2·q`.
+ */
+function isMatrixFactor(x: Expression): boolean {
+  if (hasCollectionShape(x) || typeMayHoldMatrix(x)) return true;
+  return (
+    isFunction(x, 'Power') &&
+    (hasCollectionShape(x.op1) || typeMayHoldMatrix(x.op1))
+  );
+}
+
 export class Product {
   engine: ComputeEngine;
 
@@ -294,11 +316,11 @@ export class Product {
   private hasMatrixFactor(): boolean {
     this._hasMatrix ??=
       this._matrixContext ||
-      this.terms.some((t) => hasCollectionShape(t.term)) ||
+      this.terms.some((t) => isMatrixFactor(t.term)) ||
       (this._operands ?? []).some(
         (x) =>
-          hasCollectionShape(x) ||
-          (isFunction(x, 'Multiply') && x.ops.some(hasCollectionShape))
+          isMatrixFactor(x) ||
+          (isFunction(x, 'Multiply') && x.ops.some(isMatrixFactor))
       );
     return this._hasMatrix;
   }
@@ -324,7 +346,7 @@ export class Product {
    */
   mul(term: Expression, exp?: Rational, inversePower = false) {
     console.assert(term.isCanonical || term.isStructural);
-    if (this._hasMatrix === false && hasCollectionShape(term))
+    if (this._hasMatrix === false && isMatrixFactor(term))
       this._hasMatrix = true;
     if (isInexactOperand(term) || isAbsentSymbol(term)) this._sawInexact = true;
     // Only a NUMBER LITERAL whose value is `NaN` makes the coefficient `NaN`.
@@ -2796,10 +2818,10 @@ function expandProduct(
 function hasMatrixPart(x: Expression): boolean {
   if (isFunction(x, 'Negate')) return hasMatrixPart(x.op1);
   if (isFunction(x, 'Divide')) return hasMatrixPart(x.op1);
-  if (hasCollectionShape(x)) return true;
+  if (hasCollectionShape(x) || typeMayHoldMatrix(x)) return true;
   return (
     (isFunction(x, 'Add') || isFunction(x, 'Multiply')) &&
-    x.ops.some(hasCollectionShape)
+    x.ops.some((t) => hasCollectionShape(t) || typeMayHoldMatrix(t))
   );
 }
 
@@ -2831,6 +2853,9 @@ function matrixSumTerms(x: Expression): Expression[] | undefined {
     const den = x.op2;
     return matrixSumTerms(x.op1)?.map((t) => t.div(den));
   }
+  // A term that only MAY be a matrix (`any`, `broadcastable<number>`) may be a
+  // number too: the sum of a matrix and a number adds the number to every
+  // entry, so such a sum is not distributed.
   if (isFunction(x, 'Add') && x.ops.every(hasCollectionShape))
     return [...x.ops];
   return undefined;
@@ -3072,8 +3097,13 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   }
 
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
-  // semantics rather than the scalar Product machinery.
-  if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
+  // semantics rather than the scalar Product machinery. A matrix held by a
+  // symbol is a matrix too (`isMatrixProductOfValues()`): the broadcast
+  // below would multiply each entry.
+  if (
+    !unresolvedFactor &&
+    (xs.some((x) => isTensorValue(x)) || isMatrixProductOfValues(xs))
+  ) {
     const r = mulTensors(ce, xs, false, expand);
     if (r) return r;
   }
@@ -3408,7 +3438,13 @@ export function mulNEvaluated(
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
     if (r) return r;
   }
-  if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
+  // The `Multiply` evaluate handler passes a symbol as it is here, so a
+  // matrix held by a symbol is read by `isMatrixProductOfValues()` (see
+  // `mulImpl`).
+  if (
+    !unresolvedFactor &&
+    (xs.some((x) => isTensorValue(x)) || isMatrixProductOfValues(xs))
+  ) {
     const r = mulTensors(ce, xs, true);
     if (r) return r;
   }
@@ -3682,8 +3718,11 @@ function mulTuples(
  *   relative order of the tensor operands, so `xs` is already in the order the
  *   user wrote.
  *
- * Returns an inert `Multiply` when the tensors have incompatible dimensions (so
- * the input is preserved rather than silently dropped).
+ * Returns the `incompatible-dimensions` error of `MatrixMultiply` when a
+ * matrix step has incompatible dimensions. Declines (`undefined`) for a
+ * product of tensors that all have rank 3 or more and the same length,
+ * which the caller broadcasts, and stays inert for a tensor of rank 3 or
+ * more beside a vector or a matrix.
  */
 function mulTensors(
   ce: ComputeEngine,
@@ -3707,14 +3746,40 @@ function mulTensors(
   // Separate evaluated operands into tensors and scalars, preserving order.
   const tensors: Expression[] = [];
   const scalars: Expression[] = [];
-  for (const op of xs) {
-    const x = numericApproximation ? op.N() : op.evaluate();
+  // The evaluated operands, in order, and whether one is a collection that
+  // is not a tensor value (a list of points, a `Range`).
+  const values: Expression[] = [];
+  let otherCollection = false;
+  // Beside a matrix, a finite collection of numbers that is not a list (a
+  // `Range`) is a vector: `M·Range(1, 2)` is the matrix-vector product, as
+  // `M·[1, 2]` is, and not the product of each row.
+  const evaluated = xs.map((op) =>
+    numericApproximation ? op.N() : op.evaluate()
+  );
+  const hasMatrix = evaluated.some(
+    (x) => isTensorValue(x) && (tensorShape(x)?.length ?? 0) >= 2
+  );
+  for (const [i, op] of xs.entries()) {
+    let x = evaluated[i];
+    if (hasMatrix && isNumericVectorSource(x)) {
+      // A collection over the limit of `numericCollectionAsList()` is not
+      // read as a vector, and is not broadcast either (that would change the
+      // operation): the product stays unevaluated.
+      const list = numericCollectionAsList(x);
+      if (list === undefined) return ce._fn('Multiply', xs);
+      x = list;
+    }
+    values.push(x);
     if (isTensorValue(x)) {
       // A tensor-valued operand that does not pack (e.g. a list of
       // non-kernel-admissible cells such as tuples/points) means the tensor
       // kernels do not apply — decline so the caller falls through to the
-      // generic broadcast / tuple path (behave as if not a tensor).
-      if (packTensor(ce, x) === undefined) return undefined;
+      // generic broadcast / tuple path (behave as if not a tensor), after
+      // the matrices beside it are multiplied (`otherCollection` below).
+      if (packTensor(ce, x) === undefined) {
+        otherCollection = true;
+        continue;
+      }
       tensors.push(x);
     } else {
       // A COLLECTION that is not a tensor value (a `Range`, or a `Filter`/
@@ -3734,7 +3799,10 @@ function mulTensors(
       // different reason: it would also move plain scalar·vector products off
       // the tensor path and change their result typing. Tuples are excluded —
       // they scale component-wise by design (`mulTuples`).
-      if (isBroadcastableCollection(x)) return undefined;
+      if (isBroadcastableCollection(x)) {
+        otherCollection = true;
+        continue;
+      }
       // An absent scalar factor (`Missing` or `Undefined`) is read as `NaN`:
       // every cell of a packed tensor is a number, and the absence marker of
       // a numeric cell is `NaN` (`docs/ERROR-MODEL.md`, the codomain rule).
@@ -3749,6 +3817,53 @@ function mulTensors(
   // No tensors survived evaluation: let the caller fall through to the generic
   // (broadcast / tuple / Product) path.
   if (tensors.length === 0) return undefined;
+
+  // A collection that is not a tensor value is broadcast by the caller. The
+  // vectors and matrices beside it are first multiplied together, in order,
+  // when one of them is a matrix: `m·m·P` with `P` a list of points is
+  // `(m·m)·P`, as `m^2·P` is. Without this, the broadcast multiplied each
+  // row of the first `m` by a row of the second one.
+  if (otherCollection) {
+    if (
+      tensors.length < 2 ||
+      !tensors.some((t) => t.shape.length === 2) ||
+      tensors.some((t) => t.shape.length > 2)
+    )
+      return undefined;
+    const product = mulTensors(ce, tensors, numericApproximation, expand);
+    if (product === undefined) return undefined;
+    if (isFunction(product, 'Error')) return product;
+    if (!isTensorValue(product)) return undefined;
+    const first = values.indexOf(tensors[0]);
+    const rest = values.filter((x) => !tensors.includes(x));
+    rest.splice(first, 0, product);
+    return multiply(...rest);
+  }
+
+  // Two tensors, one of rank 3 or more. When every tensor has rank 3 or more
+  // and they have the same length, decline, so that the caller broadcasts
+  // the product over the elements of the tensors: the product of two
+  // tensors of rank 3 is then the matrix product of each pair of matrices
+  // inside them, as `Power` gives the matrix power of each matrix inside
+  // such a tensor, and as the same product of two symbols that hold these
+  // tensors (`isMatrixProductOfValues()` leaves them to the broadcast).
+  // Beside a vector or a matrix, a tensor of rank 3 has no product: the
+  // broadcast would multiply each of its matrices by one row of the matrix.
+  // The product stays unevaluated, as `MatrixMultiply` refuses a tensor of
+  // rank 3.
+  if (tensors.length >= 2 && tensors.some((t) => t.shape.length >= 3)) {
+    if (tensors.every((t) => t.shape.length >= 3)) {
+      // Tensors of rank 3 or more with different lengths: the broadcast of
+      // the same symbols gives this error.
+      const other = tensors.find((t) => t.shape[0] !== tensors[0].shape[0]);
+      if (other === undefined) return undefined;
+      return ce.error(
+        'incompatible-dimensions',
+        `${tensors[0].shape[0]} vs ${other.shape[0]}`
+      );
+    }
+    return ce._fn('Multiply', xs);
+  }
 
   // Combine the scalar factors (these are commutative). Through `multiply`,
   // not the `.mul()` method: the method always distributes, which would
@@ -3813,8 +3928,19 @@ function mulTensors(
     const next = ce
       .function('MatrixMultiply', [product, nextTensor])
       .evaluate();
-    // Incompatible dimensions, or a partial fold that didn't reduce (e.g. a
-    // scalar dot-product result followed by another matrix): stay inert.
+    // Incompatible dimensions: the product of two matrices is the matrix
+    // product, so it is the error `MatrixMultiply` answers for the same
+    // operands (`incompatible-dimensions`), not an inert product. Another
+    // error (a tensor of rank 3, which `MatrixMultiply` refuses) keeps the
+    // inert product below.
+    if (
+      isFunction(next, 'Error') &&
+      isString(next.op1) &&
+      next.op1.string === 'incompatible-dimensions'
+    )
+      return next;
+    // A partial fold that didn't reduce (e.g. a scalar dot-product result
+    // followed by another matrix): stay inert.
     if (!next.isValid || next.operator === 'MatrixMultiply')
       return ce._fn('Multiply', xs);
     product = next;
@@ -3966,6 +4092,16 @@ function scaleTensor(
     return ce.function('List', rows);
   }
 
-  // Higher-rank tensors: leave the scaling inert.
+  // A tensor of rank 3 or more: scale each of its elements, a tensor of
+  // rank one less, so that every cell is scaled, as for a matrix.
+  if (isFunction(tensor, 'List'))
+    return ce.function(
+      'List',
+      tensor.ops.map((x) =>
+        isTensorValue(x)
+          ? scaleTensor(ce, x, scalar, multiply)
+          : multiply(scalar, x)
+      )
+    );
   return ce._fn('Multiply', [scalar, tensor]);
 }

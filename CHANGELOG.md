@@ -2,6 +2,49 @@
 
 ### Breaking Changes
 
+- **`Multiply` of two matrices is the matrix product, however the factors are
+  written** (user decision 2026-10-22, ROADMAP CE-98). A product of two matrix
+  values is now the matrix product, as `MatrixMultiply`, also when the factors
+  are symbols typed `tensor<number>`, `list<list<number>>`, `list`, `any`,
+  `broadcastable<number>` or `number | matrix`, and under `.N()`. Before, a
+  product of two such symbols multiplied each entry (and `.N()` did so even
+  for `matrix<number>` symbols), while a literal or computed factor gave the
+  matrix product; so `p·p` now equals `p^2`. **Migration:** use
+  `HadamardProduct(p, q)` for the product of each entry. Unchanged: a vector or
+  a plain list times a vector or a plain list multiplies each entry, and a
+  number times a matrix scales each entry. Related changes:
+  - The canonical form keeps the written order of factors that may be
+    matrices (`q·p` stays `q·p`; `p·q − q·p` is no longer 0), and `isSame()`
+    and the hash tell them apart. `simplify()`, `Expand`, `Factor` and `D` keep
+    that order: `(A·B)^2` is no longer `A^2·B^2`, the product rule of `D` keeps
+    each factor in place, and `D(f^n)` for a matrix-valued `f` uses the matrix
+    rules (`D(f^-1) = -f^-1·f'·f^-1`). A sum with a term that may be a number
+    beside a term that may be a matrix is not expanded, because a number added
+    to a matrix is added to each entry.
+  - Matrices whose dimensions do not agree give
+    `Error("incompatible-dimensions", …)` (the product stayed unevaluated), and
+    the result type of a product of matrices has the dimensions of the matrix
+    product (`matrix<2x3>·matrix<3x4>` is `matrix<2x4>`).
+  - Two tensors of rank 3 of the same length multiply each pair of matrices,
+    as `Power` does; a tensor of rank 3 beside a matrix or a vector stays
+    unevaluated; a number times a tensor of rank 3 scales every cell; a `Range`
+    beside a matrix is read as a vector.
+  - Compiled JavaScript: `matrix<…>` operands call the matrix product;
+    `tensor<number>`, `list<list<number>>` and `broadcastable<number>` choose
+    by the shape of the values when the code runs. Python uses `np.matmul` for
+    matrix types. interval-js throws (its result is then `entire`) for a list
+    of lists times another list. Types that may hold points (bare `list`,
+    `list<unknown>`, `any`, `list<tuple<…>>`) keep the product of each entry,
+    because compiled code stores a list of points and a matrix as the same
+    array (ROADMAP CE-216.1); their compiled operand order now follows the
+    written order.
+  - A product boxed while its symbols are `unknown` is still sorted: declare a
+    matrix-capable type for the written order to be kept. `Divide(p, q)` of two
+    matrices still divides each entry (`p·q^-1` is the matrix product).
+  - The `Derivative` of a function declared with codomain `any` keeps that
+    signature (it was typed `(any*) -> number`), so expressions built on it are
+    typed `any` too.
+
 - **`has()` on a dictionary is the symbol test; the key test is `hasKey()`.**
   `has(v)` asks whether the symbol (or function operator) `v` occurs in an
   expression, and a dictionary now answers that over the values of its entries,

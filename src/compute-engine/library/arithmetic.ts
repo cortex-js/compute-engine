@@ -3036,6 +3036,17 @@ function dimensionlessIndexedElementType(
   return undefined;
 }
 
+/** A union whose arms are all tensor types of numbers with known rank
+ * (`matrix<2x3> | matrix<3x4>`). */
+function isUnionOfTensorTypes(t0: Type): boolean {
+  const t = resolveTypeAlias(t0);
+  return (
+    typeof t !== 'string' &&
+    t.kind === 'union' &&
+    t.types.every((arm) => numericTensorElementType(arm) !== undefined)
+  );
+}
+
 /** Twin of `isBroadcastCollectionType`. */
 function isBroadcastCollectionTypeOf(t: Type): boolean {
   return dimensionlessIndexedElementType(t) !== undefined;
@@ -3051,6 +3062,112 @@ function numericTensorElementType(t0: Type): Type | undefined {
   // carry no dimension list, and are not read here.
   if (!t.dimensions) return undefined;
   return factsOf(t.elements).belowNumber ? t.elements : undefined;
+}
+
+/**
+ * The type of the product of the collection factors `types`, in their
+ * order, when each is a tensor of numbers with known rank (a list type with
+ * dimensions) and one has two axes or more; `'mismatch'` when two known
+ * dimensions do not agree, which makes the value the
+ * `incompatible-dimensions` error; `undefined` otherwise.
+ *
+ * The value of such a product is computed by `mulTensors()`
+ * (`arithmetic-mul-div.ts`):
+ *
+ * - Vectors and matrices are multiplied left to right: a step with a matrix
+ *   is the matrix product (`m×n · n×p` is `m×p`, `m×n · n` is `m`, `n · n×p`
+ *   is `p`), and a step between two vectors is the product of each entry.
+ * - Tensors that all have rank 3 or more and the same length are paired
+ *   element by element, down to the product of two matrices: `2×2×3 ·
+ *   2×3×4` is `2×2×4`.
+ * - A tensor of rank 3 or more beside a vector or a matrix has no product
+ *   (the value stays unevaluated): `undefined`.
+ *
+ * A dimension `-1` (not known) is kept as `-1`. A cell of the product is a
+ * sum of products of cells: its type is the join of the cell types, which
+ * the caller widens (`absorbScalarsIntoCells()` with `combinesCells`).
+ */
+function matrixProductType(
+  types: ReadonlyArray<Type>
+): ListType | 'mismatch' | undefined {
+  const cells: Type[] = [];
+  const shapes: number[][] = [];
+  for (const t0 of types) {
+    const cell = numericTensorElementType(t0);
+    if (cell === undefined) return undefined;
+    const d = (resolveTypeAlias(t0) as ListType).dimensions;
+    if (!d || d.length === 0) return undefined;
+    cells.push(stripNumericRanges(cell));
+    shapes.push([...d]);
+  }
+  const dims = matrixProductDimensions(shapes);
+  if (dims === undefined || dims === 'mismatch') return dims;
+  return { kind: 'list', elements: widen(...cells), dimensions: dims };
+}
+
+/**
+ * `matrixProductType()` for factors whose types may be unions (`matrix<2x3> |
+ * matrix<3x4>`): the product of every combination of the arms. The product
+ * types of the combinations whose dimensions agree are `products`, and
+ * `mismatch` says that some combination does not agree (its value is the
+ * `incompatible-dimensions` error). `undefined` when a combination has no
+ * product type, or there are more than 16 combinations.
+ */
+function matrixProductTypes(
+  types: ReadonlyArray<Type>
+): { products: ListType[]; mismatch: boolean } | undefined {
+  const arms = types.map((t) => {
+    const r = resolveTypeAlias(t);
+    return typeof r !== 'string' && r.kind === 'union' ? [...r.types] : [t];
+  });
+  let combinations = 1;
+  for (const a of arms) combinations *= a.length;
+  if (combinations > 16) return undefined;
+  const products: ListType[] = [];
+  let mismatch = false;
+  let combo: Type[][] = [[]];
+  for (const a of arms) combo = combo.flatMap((c) => a.map((t) => [...c, t]));
+  for (const c of combo) {
+    const product = matrixProductType(c);
+    if (product === undefined) return undefined;
+    if (product === 'mismatch') mismatch = true;
+    else products.push(product);
+  }
+  return { products, mismatch };
+}
+
+/** The dimensions of the product of tensors of the dimensions `shapes`
+ * (see `matrixProductType()`). */
+function matrixProductDimensions(
+  shapes: ReadonlyArray<ReadonlyArray<number>>
+): number[] | 'mismatch' | undefined {
+  const agree = (a: number, b: number) => a < 0 || b < 0 || a === b;
+  if (!shapes.some((d) => d.length >= 2)) return undefined;
+  if (shapes.some((d) => d.length >= 3)) {
+    if (!shapes.every((d) => d.length >= 3)) return undefined;
+    const n = shapes.find((d) => d[0] >= 0)?.[0] ?? -1;
+    if (!shapes.every((d) => agree(d[0], n))) return 'mismatch';
+    const inner = matrixProductDimensions(shapes.map((d) => d.slice(1)));
+    if (inner === undefined || inner === 'mismatch') return inner;
+    return [n, ...inner];
+  }
+  let dims = [...shapes[0]];
+  for (const d of shapes.slice(1)) {
+    if (dims.length === 1 && d.length === 1) {
+      if (!agree(dims[0], d[0])) return 'mismatch';
+      dims = [dims[0] >= 0 ? dims[0] : d[0]];
+    } else if (dims.length === 2 && d.length === 2) {
+      if (!agree(dims[1], d[0])) return 'mismatch';
+      dims = [dims[0], d[1]];
+    } else if (dims.length === 2) {
+      if (!agree(dims[1], d[0])) return 'mismatch';
+      dims = [dims[0]];
+    } else {
+      if (!agree(dims[0], d[0])) return 'mismatch';
+      dims = [d[1]];
+    }
+  }
+  return dims;
 }
 
 /** Twin of `isTensorValue`: a literal `List` whose type carries dimensions.
@@ -9351,14 +9468,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a collection the product is a collection whichever branch holds, and
         // `broadcastSiblingType` (used in the widen below) collapses the union
         // to the one collection type they share.
+        // A union of tensor types (`matrix<2x3> | matrix<3x4>`) is a
+        // collection whichever arm holds, but only beside a factor that is
+        // a collection too (or another such union): alone, it is typed as
+        // before, arm by arm.
+        const unionTensors = ops.filter((x) => isUnionOfTensorTypes(x.type));
         const definiteCollections = ops.filter((x) =>
           isLinearAlgebraCollectionType(x.type)
         );
         const collectionOps =
-          definiteCollections.length > 0
+          definiteCollections.length > 0 || unionTensors.length >= 2
             ? ops.filter(
                 (x) =>
                   isLinearAlgebraCollectionType(x.type) ||
+                  unionTensors.includes(x) ||
                   isBroadcastCollectionTypeOf(x.type)
               )
             : definiteCollections;
@@ -9514,6 +9637,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   ...scalarSiblings,
                   ...scalarTypes,
                 ])
+              ),
+              engine._typeResolver
+            );
+          // A product of vectors and matrices with a matrix factor is the
+          // matrix product, and its dimensions are those of the matrix
+          // product (`matrixProductType()`): `matrix<2x3> · matrix<3x2>` is
+          // `matrix<2x2>`, not the join `matrix<2x3> | matrix<3x2>`.
+          const matrixProduct = matrixProductTypes(
+            collectionOps.map((x) => x.type)
+          );
+          // Two known dimensions that do not agree: the value is the
+          // `incompatible-dimensions` error of the matrix product.
+          if (matrixProduct !== undefined)
+            return BoxedType.forResult(
+              widen(
+                ...matrixProduct.products.map((product) =>
+                  withFloatRationalCellsAsReal(
+                    ops,
+                    absorbScalarsIntoCells(product, scalarTypes, {
+                      combinesCells: true,
+                    })
+                  )
+                ),
+                ...(matrixProduct.mismatch ? (['error'] as Type[]) : [])
               ),
               engine._typeResolver
             );

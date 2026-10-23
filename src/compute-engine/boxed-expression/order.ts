@@ -17,15 +17,22 @@ import {
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
-import { mayBeTensorProductOperand } from './matrix-operand.js';
+import {
+  isPointListOperand,
+  mayBeTensorProductOperand,
+  typeMayHoldMatrix,
+} from './matrix-operand.js';
 
 export { mayBeTensorProductOperand };
 export { DEFAULT_COMPLEXITY };
 
 /**
  * Is this operand a matrix/vector (concrete tensor, `Matrix(…)` literal, or a
- * symbol *declared* matrix/vector)? Products of two or more such operands are
- * NOT commutative, so they must never be reordered by the canonical sort
+ * symbol *declared* matrix/vector), or an operand whose type admits a matrix
+ * value (`typeMayHoldMatrix()`: a symbol declared `tensor<number>`,
+ * `list<list<number>>`, `list` or `any`)? Products of two or more such
+ * operands are NOT commutative, because the product of two matrices is the
+ * matrix product, so they must never be reordered by the canonical sort
  * (`M·P ≠ P·M`; reordering made `M·P − P·M` collapse to 0 — see
  * CORRECTNESS_FINDINGS P0-26). The check is type-based: concrete tensors and
  * `Matrix` literals have matrix/vector types too, and scalar-typed or
@@ -34,7 +41,7 @@ export { DEFAULT_COMPLEXITY };
 export function isTensorProductOperand(x: Expression): boolean {
   if (isFunction(x, 'Matrix')) return true;
   const facts = x.type.facts;
-  return facts.matrix || facts.vector;
+  return facts.matrix || facts.vector || typeMayHoldMatrix(x);
 }
 
 /**
@@ -75,6 +82,23 @@ export function sortProductOperands(
   if (matrixContext || isTensor.some(Boolean)) {
     for (let i = 0; i < xs.length; i++)
       if (!isTensor[i]) isTensor[i] = mayBeTensorProductOperand(xs[i]);
+    // A list of points scales by numbers: it is not a matrix. Beside ONE
+    // other factor that is a matrix only by its type admitting one (`any`, a
+    // bare `list`, `tensor<number>`, `broadcastable<number>`), it is sorted
+    // with the scalars, as before the product of matrices was the matrix
+    // product. Beside a factor typed `matrix` or `vector`, beside two other
+    // factors that may be matrices, or alone, it keeps the written order.
+    const points = xs.map(isPointListOperand);
+    if (points.some(Boolean)) {
+      const others = xs.filter((_, i) => isTensor[i] && !points[i]);
+      if (
+        others.length === 1 &&
+        !others[0].type.facts.matrix &&
+        !others[0].type.facts.vector &&
+        !isFunction(others[0], 'Matrix')
+      )
+        for (let i = 0; i < xs.length; i++) if (points[i]) isTensor[i] = false;
+    }
   }
   if (isTensor.filter(Boolean).length >= 2) {
     const scalars = xs.filter((_, i) => !isTensor[i]).sort(order);

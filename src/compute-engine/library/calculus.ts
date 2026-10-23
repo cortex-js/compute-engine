@@ -3775,6 +3775,20 @@ volumes
         const result = t !== undefined ? functionResult(t) : undefined;
         if (result !== undefined && result !== 'any' && result !== 'unknown')
           return BoxedType.forResult(engine.type(t!), engine._typeResolver);
+        // A function declared with parameters and the codomain `any`
+        // (`(real) -> any`) says that its value can be anything, a matrix
+        // included: its derivative keeps that codomain, so that a product
+        // with the derivative keeps the order of its factors. A bare
+        // `function` has the variadic signature `(any*) -> any`, which says
+        // nothing and takes the number-valued fallback below.
+        if (
+          result === 'any' &&
+          t !== undefined &&
+          typeof t !== 'string' &&
+          t.kind === 'signature' &&
+          t.variadicArg === undefined
+        )
+          return BoxedType.forResult(engine.type(t), engine._typeResolver);
         // The DECLARED type is uninformative, but the symbol may nevertheless
         // hold a function literal whose codomain is known: a head declared as
         // a bare `function` and only then assigned `(t) ↦ (cos t, sin 2t, t)`

@@ -3320,6 +3320,75 @@ function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
 }
 
 /**
+ * The product of the factors `args`, of which the compiler does not know
+ * the rank of an array (a `tensor<number>`, a `list<list<number>>`),
+ * decided on the shapes of the values as the interpreter decides it, or
+ * `undefined` when that product is the element-wise product the caller
+ * emits itself.
+ *
+ * The interpreter computes the MATRIX product when two factors or more are
+ * arrays and one of them is a matrix (`isMatrixProductOfValues()` and
+ * `mulTensors()`): the arrays are multiplied left to right, a step with a
+ * matrix is the matrix product, a step between two vectors is the product
+ * of each entry, and the numbers scale the result (`mulTensor`). The
+ * product of vectors, or of numbers and one array, is the element-wise
+ * product, and this answers `undefined` for it.
+ *
+ * Any other shape throws: a tensor of rank 3 or more beside another array,
+ * or a matrix whose rows do not have the same length. The interpreter
+ * broadcasts such a product over the elements of the arrays and takes the
+ * matrix product of the matrices it meets, which the element-wise code does
+ * not compute.
+ *
+ * A complex entry (`{re, im}`) anywhere takes the complex product
+ * (`complexMulTensor`).
+ */
+function matrixProductShape(...args: unknown[]): unknown {
+  const arrays = args.filter((x): x is unknown[] => Array.isArray(x));
+  if (arrays.length < 2) return undefined;
+  const isVector = (v: unknown[]): boolean => !v.some((x) => Array.isArray(x));
+  const isMatrix = (v: unknown[]): boolean => {
+    const columns = Array.isArray(v[0]) ? (v[0] as unknown[]).length : -1;
+    return (
+      v.length > 0 &&
+      v.every(
+        (row) =>
+          Array.isArray(row) &&
+          row.length === columns &&
+          !row.some((x) => Array.isArray(x))
+      )
+    );
+  };
+  // The rank the interpreter reads first: the chain of first elements.
+  const hasMatrix = arrays.some(
+    (v) => Array.isArray(v[0]) && !Array.isArray((v[0] as unknown[])[0])
+  );
+  if (!hasMatrix && arrays.every(isVector)) return undefined;
+  if (!hasMatrix || !arrays.every((v) => isVector(v) || isMatrix(v)))
+    throw new Error(
+      'Multiply: a factor is a tensor of rank 3 or more, or a list of rows ' +
+        'of different lengths, beside another list. The interpreter takes ' +
+        'the matrix product of the matrices inside such a product, which ' +
+        'compiled code does not compute. Evaluate the expression instead.'
+    );
+  const isComplexEntry = (x: unknown): boolean =>
+    Array.isArray(x) ? x.some(isComplexEntry) : isComplexObject(x);
+  return args.some(isComplexEntry)
+    ? complexMulTensor(...(args as BcastValue[]))
+    : mulTensor(...(args as BcastValue[]));
+}
+
+/**
+ * `Multiply` over a mix of numbers and arrays whose rank the compiler does
+ * not know (a `broadcastable<number>`): the checked shape rule of
+ * `matrixProductShape` (a tensor of rank 3 or more beside another array
+ * throws), then the product by rank of `mulTensor`.
+ */
+function mulChecked(...args: unknown[]): unknown {
+  return matrixProductShape(...args) ?? mulTensor(...(args as BcastValue[]));
+}
+
+/**
  * The power `b^e` of a value whose rank the compiler does not know (a
  * `tensor<number>`, a `list<list<number>>`, a `broadcastable<number>`),
  * decided on the shape of the value as the interpreter decides it, or
@@ -4441,6 +4510,10 @@ export const SYS_HELPERS = {
   // power where the value holds square matrices, `undefined` otherwise
   // (`matrixPowerShape`).
   matrixPowerShape,
+  // `Multiply` over values whose rank the compiler does not know: the matrix
+  // product where a value is a matrix, `undefined` otherwise
+  // (`matrixProductShape`).
+  matrixProductShape,
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time
@@ -4774,6 +4847,7 @@ export const SYS_HELPERS = {
   // nested) real arrays whose collection-ness was not statically provable —
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
   mul: mulTensor,
+  mulChecked,
   cmul: complexMulTensor,
   mulAny: mulTensorAny,
   // Interpreter-faithful `Equal`/`NotEqual` over operands whose

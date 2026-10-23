@@ -545,10 +545,12 @@ describe('Multiply with tensors (matrix-product semantics)', () => {
     );
   });
 
-  // Incompatible dimensions: left inert (input preserved, not dropped)
-  it('stays inert on incompatible dimensions', () => {
+  // Incompatible dimensions: the product with a matrix is the matrix
+  // product, so it is the error `MatrixMultiply` gives for the same operands
+  // (user decision 2026-10-22; it was an unevaluated product before).
+  it('is the incompatible-dimensions error on incompatible dimensions', () => {
     expect(ev(['Multiply', ['List', 1, 2, 3], sq2_n])).toMatchInlineSnapshot(
-      `[1,2,3] * [[1,2],[3,4]]`
+      `Error("incompatible-dimensions", "3 vs 2")`
     );
   });
 

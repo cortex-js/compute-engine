@@ -205,7 +205,7 @@ import {
   resolveOverload,
   triStateSelect,
 } from './overload.js';
-import { candidateShape } from './tensor-view.js';
+import { candidateShape, isMatrixProductOfValues } from './tensor-view.js';
 import {
   actualOfOperand,
   instantiatedResultType,
@@ -5925,7 +5925,12 @@ export class BoxedFunction
       // never pay the O(cells) type computation per broadcast evaluation.
       // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
       // DECLINE non-qualified candidates back to the generic broadcast path.
-      const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
+      // A product of a matrix and another tensor held by SYMBOLS is the
+      // matrix product too (`isMatrixProductOfValues()`): the element-wise
+      // broadcast would multiply each entry.
+      const hasTensors =
+        this.ops!.some((x) => candidateShape(x) !== null) ||
+        (this.operator === 'Multiply' && isMatrixProductOfValues(this.ops!));
       // An operator whose handlers own evaluated-operand broadcasting defers
       // an unevaluated function operand to them (the veto described above).
       const hasRawOperand =
@@ -7239,7 +7244,10 @@ export class BoxedFunction
       // never pay the O(cells) type computation per broadcast evaluation.
       // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
       // DECLINE non-qualified candidates back to the generic broadcast path.
-      const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
+      // A product of matrices held by symbols: see the sync path.
+      const hasTensors =
+        this.ops!.some((x) => candidateShape(x) !== null) ||
+        (this.operator === 'Multiply' && isMatrixProductOfValues(this.ops!));
       // As on the sync path: an operator whose handlers own evaluated-operand
       // broadcasting defers an unevaluated function operand to them.
       const hasRawOperand =

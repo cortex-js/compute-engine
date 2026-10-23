@@ -53,7 +53,12 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
-import { mayBeMatrixPowerBase } from './matrix-operand.js';
+import {
+  isProvablyScalar,
+  isSquareMatrixTyped,
+  mayBeMatrixPowerBase,
+  mayBeMatrixValued,
+} from './matrix-operand.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -1797,7 +1802,31 @@ export function pow(
   if (isFunction(x, 'Multiply')) {
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
-    if (expIsInteger) {
+    // The factors of the product that may be matrices do not commute (the
+    // product of matrices is the matrix product): `(A·B)^2` is `A·B·A·B`,
+    // not `A^2·B^2`. With two such factors or more, the power is distributed
+    // only for the exponent −1, which reverses their order:
+    // `(A·B)^-1 = B^-1·A^-1`. Any other exponent stays a `Power`.
+    // A factor that is not provably a number (`h(x)`, a call typed
+    // `unknown`) may be a matrix too: it is moved with the matrices, never
+    // out of the product.
+    const matrixFactors =
+      expIsInteger && x.ops.some(mayBeMatrixValued)
+        ? x.ops.filter((t) => !isProvablyScalar(t))
+        : [];
+    if (matrixFactors.length >= 2) {
+      const isInverse = typeof exp === 'number' ? exp === -1 : exp.isSame(-1);
+      if (isInverse && matrixFactors.every(isSquareMatrixTyped)) {
+        const scalars = x.ops.filter((t) => !matrixFactors.includes(t));
+        const ops = [
+          ...scalars.map((t) => pow(t, exp, { numericApproximation })),
+          ...matrixFactors
+            .reverse()
+            .map((t) => pow(t, exp, { numericApproximation })),
+        ];
+        return ce._fn('Multiply', ops);
+      }
+    } else if (expIsInteger) {
       const ops = x.ops.map((x) => pow(x, exp, { numericApproximation }));
       // A canonical product can hold two number literals whose product is
       // not exact (`√1009·√1013`). Their powers can be exact again

@@ -37,7 +37,7 @@ import {
 } from '../tensor/tensor-fields.js';
 import { makeTensor } from '../tensor/tensors.js';
 
-import { isFunction, isNumber, isTensor } from './type-guards.js';
+import { isFunction, isNumber, isSymbol, isTensor } from './type-guards.js';
 
 /**
  * The value of a cell of a packed tensor (a value from `AbstractTensor.at()`
@@ -126,6 +126,94 @@ export function candidateShape(x: Expression): number[] | null {
     cur = cur.ops[0];
   }
   return dims;
+}
+
+/** The most elements of a finite collection that `numericCollectionAsList()`
+ * reads. */
+const MAX_COLLECTION_AS_LIST = 100_000;
+
+/**
+ * Is `x` a finite indexed collection of numbers that is not a list literal:
+ * a `Range`, or a `Filter`, `Take` or `Reverse` view? In a product with a
+ * matrix, such a collection is a vector, as the `List` of the same elements
+ * is (`M·Range(1, 2)` is `M·[1, 2]`, the matrix-vector product). This reads
+ * the type only and does not iterate.
+ */
+export function isNumericVectorSource(x: Expression): boolean {
+  if (isTensorValue(x) || isFunction(x, 'List')) return false;
+  if (x.isIndexedCollection !== true || x.isFiniteCollection !== true)
+    return false;
+  const t = x.type.type;
+  if (!isSubtype(t, 'indexed_collection<number>')) return false;
+  return !isSubtype(t, 'string') && !isSubtype(t, 'tuple');
+}
+
+/** The vector (a `List` literal) with the elements of `x` when
+ * `isNumericVectorSource(x)` and it has at most 100 000 elements;
+ * `undefined` otherwise. This iterates over `x`: call it only once a matrix
+ * kernel is chosen. */
+export function numericCollectionAsList(x: Expression): Expression | undefined {
+  if (!isNumericVectorSource(x)) return undefined;
+  const elements: Expression[] = [];
+  for (const e of x.each()) {
+    if (elements.length >= MAX_COLLECTION_AS_LIST) return undefined;
+    elements.push(e);
+  }
+  return x.engine.function('List', elements);
+}
+
+/**
+ * Whether the product of the factors `xs` is a product of tensors that the
+ * `Multiply` handler computes (`mulTensors()` in `arithmetic-mul-div.ts`)
+ * rather than the product of each entry: two or more factors are `List`
+ * values (a `List` literal, or a symbol that holds one), one of them has
+ * two axes or more, and they do not all have three axes or more.
+ *
+ * - With a matrix, the product is the matrix product.
+ * - A tensor of rank 3 or more beside a vector or a matrix has no product:
+ *   `mulTensors()` leaves it unevaluated, as for the same `List` literals.
+ * - Tensors that all have rank 3 or more answer `false`: the broadcast
+ *   pairs their elements, so two such tensors give the matrix product of
+ *   each pair of matrices inside them, as `Power` gives the matrix power of
+ *   each matrix inside such a tensor.
+ *
+ * The value that a symbol holds is read here, because the generic
+ * element-wise broadcast and the broadcast of `mul()` see a symbol that holds
+ * a list as a list, and multiplied two matrices entry by entry when they were
+ * held by symbols typed `tensor<number>`, `list<list<number>>`, `list` or
+ * `any`. A product of two vectors, or of a number and a matrix, answers
+ * `false`: it stays the product of each entry.
+ *
+ * O(rank) for each factor (`candidateShape()`), so a hot dispatch site may
+ * call it.
+ */
+export function isMatrixProductOfValues(
+  xs: ReadonlyArray<Expression>
+): boolean {
+  let tensors = 0;
+  let matrix = false;
+  let belowRank3 = false;
+  let vectorSources = 0;
+  for (const x of xs) {
+    const v = isSymbol(x) ? x.value : x;
+    if (v === undefined) continue;
+    const shape = candidateShape(v);
+    if (shape === null) {
+      // A `Range` or another finite collection of numbers is a vector. It is
+      // classified by its type, without iterating over it: the iteration is
+      // left to the matrix kernel (`numericCollectionAsList()`).
+      if (isNumericVectorSource(v)) vectorSources += 1;
+      continue;
+    }
+    tensors += 1;
+    if (shape.length >= 2) matrix = true;
+    if (shape.length < 3) belowRank3 = true;
+  }
+  if (matrix && vectorSources > 0) {
+    tensors += vectorSources;
+    belowRank3 = true;
+  }
+  return matrix && belowRank3 && tensors >= 2;
 }
 
 /**

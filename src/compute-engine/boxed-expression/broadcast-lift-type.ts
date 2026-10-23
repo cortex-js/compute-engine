@@ -1812,6 +1812,12 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   if (skipBroadcastForVectorOpsOnViews(def, hasTensors, views))
     return undefined;
 
+  // A handler that answers `error` for its operands (a `Multiply` of two
+  // tensors whose lengths do not agree) answers for the whole application:
+  // the value is the error, not a collection of errors.
+  if (sigResult === 'error' && input.sigResultIsPerElement !== true)
+    return undefined;
+
   // A handler declared with the `'collection-result'` exemption computes
   // its own collection typing (`matrix + scalar` is `matrix`); its
   // collection-bearing result is not re-wrapped.

@@ -9,6 +9,12 @@ import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import {
+  isProvablyScalar,
+  isSquareMatrixTyped,
+  mayBeMatrixValued,
+  typeMayHoldMatrix,
+} from '../boxed-expression/matrix-operand.js';
 
 /**
  * Denest a nested square root √(a + b√c) → √x + sign(b)·√y.
@@ -603,7 +609,13 @@ export function canCombineSameBase(
 ): boolean {
   if (base.isFinite === false) return false;
   if (exponents.some(isCollectionShaped)) return false;
-  if (!isCollectionShaped(base) && !factors.some(isCollectionShaped))
+  // A base whose type admits a matrix (`any`, `tensor<number>`) is treated
+  // as a collection: `p·p^-1` is the identity matrix, not the number 1.
+  if (
+    !isCollectionShaped(base) &&
+    !typeMayHoldMatrix(base) &&
+    !factors.some(isCollectionShaped)
+  )
     return true;
   if (kind === 'quotient') return false;
   return exponents.every(
@@ -1191,7 +1203,28 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // (a * b * ...)^n -> a^n * b^n * ... when n is an integer
     // Distribute exponent over product
-    if (isFunction(base, 'Multiply') && exp.isInteger === true) {
+    // Two factors or more that may be matrices do not commute: `(A·B)^2` is
+    // not `A^2·B^2`. Only the exponent −1 is distributed, in the reverse
+    // order: `(A·B)^-1 = B^-1·A^-1`. Another exponent stays a power.
+    const matrixFactors =
+      isFunction(base, 'Multiply') && exp.isInteger === true
+        ? base.ops.some(mayBeMatrixValued)
+          ? base.ops.filter((f) => !isProvablyScalar(f))
+          : []
+        : [];
+    if (matrixFactors.length >= 2 && isFunction(base, 'Multiply')) {
+      if (exp.isSame(-1) && matrixFactors.every(isSquareMatrixTyped)) {
+        const scalars = base.ops.filter((f) => !matrixFactors.includes(f));
+        return {
+          value: ce._fn('Multiply', [
+            ...scalars.map((f) => f.pow(exp)),
+            ...matrixFactors.reverse().map((f) => f.pow(exp)),
+          ]),
+          because: '(A*B)^-1 -> B^-1 * A^-1',
+          purpose: 'transform',
+        };
+      }
+    } else if (isFunction(base, 'Multiply') && exp.isInteger === true) {
       const newFactors = base.ops.map((factor) => factor.pow(exp));
       // Cost-gate exempt: distributing the exponent is the preferred form
       // (pinned by the POWER DISTRIBUTION GUARDS tests), but it is not the

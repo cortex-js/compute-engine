@@ -56,6 +56,7 @@ import {
   hasCollectionShape,
   mayBeTensorProductOperand,
 } from '../boxed-expression/order.js';
+import { typeMayHoldMatrix } from '../boxed-expression/matrix-operand.js';
 
 // Odd special functions of one argument: f(-x) = -f(x)
 const ODD_SPECIAL_FUNCTIONS = new Set([
@@ -1022,7 +1023,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     // declared, see `mayBeTensorProductOperand()`) is also a non-scalar term:
     // `A·g(x)·A` is not `A^2·g(x)`. In a product with no matrix, such a term
     // is a scalar, as before.
-    const hasMatrix = x.ops.some(hasCollectionShape);
+    // A term whose type admits a matrix value (`p: any`, `p:
+    // broadcastable<number>`, see `typeMayHoldMatrix()`) counts too: with
+    // two such terms the product may be a matrix product.
+    const hasMatrix = x.ops.some(
+      (t) =>
+        hasCollectionShape(t) ||
+        typeMayHoldMatrix(t) ||
+        (isFunction(t, 'Power') && typeMayHoldMatrix(t.op1))
+    );
     const mayBeMatrix = (t: Expression) =>
       hasMatrix && !hasCollectionShape(t) && mayBeTensorProductOperand(t);
 
