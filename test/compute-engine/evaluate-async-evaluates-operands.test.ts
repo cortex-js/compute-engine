@@ -690,6 +690,7 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
   // deciding which of the three routes it takes, and adding it here if none.
   const SYNCHRONOUS = new Set([
     'About',
+    'AlgebraicGenerator',
     'Apart',
     'AssertPresent',
     'Assign',

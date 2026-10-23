@@ -169,6 +169,18 @@
       ]
     },
     {
+      "name": "AlgebraicGenerator",
+      "category": "Polynomials",
+      "arity": "1",
+      "signature": "(list<number>) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected."
+    },
+    {
       "name": "All",
       "category": "Collections",
       "arity": "optional",
@@ -2967,13 +2979,13 @@
       "name": "Factor",
       "category": "Polynomials",
       "arity": "optional",
-      "signature": "(value, symbol?) -> value",
+      "signature": "(value, symbol?, value?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
+      "description": "Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
     },
     {
       "name": "Factorial",

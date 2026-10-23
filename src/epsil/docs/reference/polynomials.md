@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Polynomials
 
-The 17 definitions of the polynomials library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 18 definitions of the polynomials library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -20,6 +20,12 @@ it has none), with its signature in the engine's type syntax. The
 category.
 
 ## Definitions
+
+### algebraicGenerator
+
+MathJSON `AlgebraicGenerator` · `(list<number>) -> number`
+
+An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected.
 
 ### apart
 
@@ -65,9 +71,9 @@ Recursively expand out products and positive integer powers
 
 ### factor
 
-MathJSON `Factor` · `(value, symbol?) -> value`
+MathJSON `Factor` · `(value, symbol?, value?) -> value`
 
-Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²
+Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²
 
 ### partialFraction
 

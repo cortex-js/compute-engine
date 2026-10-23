@@ -64,12 +64,18 @@ describe('Certified abstract number fields and Trager factorization', () => {
     expect(r.factors).toHaveLength(2);
   });
   test('resource limits do not return spurious irreducibility', () => {
-    expect(factor(K, poly([-2, 0, 1]), { maxShifts: 0 }).status).toBe(
-      'incomplete'
-    );
-    expect(factor(K, poly([-2, 0, 1]), { maxNormDegree: 2 }).status).toBe(
-      'incomplete'
-    );
+    expect(
+      factor(K, poly([-2, 0, 1]), {
+        maxShifts: 0,
+        numberFieldStrategy: 'trager',
+      }).status
+    ).toBe('incomplete');
+    expect(
+      factor(K, poly([-2, 0, 1]), {
+        maxNormDegree: 2,
+        numberFieldStrategy: 'trager',
+      }).status
+    ).toBe('incomplete');
     expect(factor(K, poly([-2, 0, 1]), { maxOperations: 0 }).status).toBe(
       'incomplete'
     );

@@ -75,12 +75,51 @@ export function gradualLatticePartition(
       g.slice(1).map((c, j) => BigInt(j + 1) * c)
     );
   });
+  function* constraints(): Iterable<IndicatorConstraint> {
+    for (let j = 1; j < n; j++) {
+      choose = (choose * BigInt(n - j)) / BigInt(j);
+      yield {
+        bound: BigInt(n) * choose * norm,
+        coefficients: logarithms.map((g) => g[n - 1 - j] ?? 0n),
+      };
+    }
+  }
+  return gradualIndicatorPartition(
+    r,
+    modulus,
+    constraints(),
+    work,
+    (groups) => partitionDivides(f, factors, groups, R, work),
+    observe
+  );
+}
+
+/** Canonical residues of a linear form bounded on every true 0/1 indicator. */
+export interface IndicatorConstraint {
+  coefficients: readonly bigint[];
+  bound: bigint;
+}
+
+function gradualIndicatorPartition(
+  r: number,
+  modulus: bigint,
+  constraints: Iterable<IndicatorConstraint>,
+  work: PolynomialWork,
+  accept?: (groups: number[][]) => boolean,
+  observe?: (column: number, rank: number, operations: number) => void
+): number[][] | null {
   let basis: bigint[][] = Array.from({ length: r }, (_, i) =>
     Array.from({ length: r }, (_, j) => (i === j ? 1n : 0n))
   );
-  for (let j = 1; j < n; j++) {
-    choose = (choose * BigInt(n - j)) / BigInt(j);
-    const bound = BigInt(n) * choose * norm;
+  let column = 0;
+  for (const { bound, coefficients: residues } of constraints) {
+    column++;
+    if (
+      bound <= 0n ||
+      residues.length !== r ||
+      residues.some((c) => c < 0n || c >= modulus)
+    )
+      throw new PolynomialInvariantError('Invalid indicator constraint');
     const available = (modulus / bound).toString(2).length - 1;
     if (available < 8) continue;
     const squaredBound = BigInt(r + (r + 1) ** 2);
@@ -96,9 +135,7 @@ export function gradualLatticePartition(
     ) {
       const scale = 1n << BigInt(bits),
         ratio = scale / previousScale;
-      const coefficients = logarithms.map(
-        (g) => ((g[n - 1 - j] ?? 0n) * scale) / modulus
-      );
+      const coefficients = residues.map((c) => (c * scale) / modulus);
       const delta = coefficients.map((c, i) => c - ratio * previous[i]);
       // Increasing precision maps (e,z) to (e, ratio*z + e*delta).
       // The integer k in z=e*a-k*T is unchanged, so the true short vector
@@ -135,19 +172,50 @@ export function gradualLatticePartition(
       rows.map((row) => row.slice(0, r)),
       work
     );
-    observe?.(j, basis.length, work.operations);
+    observe?.(column, basis.length, work.operations);
     const groups = columnGroups(basis, r);
     // A span of block indicators needs no further constraints if those blocks
     // recover exactly. The caller checks every division before accepting it.
-    if (
-      groups.length < r &&
-      basis.length === groups.length &&
-      partitionDivides(f, factors, groups, R, work)
-    )
+    if (groups.length < r && basis.length === groups.length && accept?.(groups))
       return groups;
   }
   const groups = columnGroups(basis, r);
   return groups.length === r ? null : groups;
+}
+
+/** Bounded shared reducer; exhaustion is inconclusive and preserves caller budgets. */
+export function latticeIndicatorPartition(
+  count: number,
+  modulus: bigint,
+  constraints: (work: PolynomialWork) => Iterable<IndicatorConstraint>,
+  parent: PolynomialWork,
+  accept?: (groups: number[][]) => boolean,
+  observe?: (column: number, rank: number, operations: number) => void,
+  maxProbeOperations = 1_200_000
+): number[][] | null {
+  if (!Number.isSafeInteger(maxProbeOperations) || maxProbeOperations < 0)
+    throw new RangeError('Invalid lattice probe limit');
+  if (count < 2 || count > 64 || modulus < 2n) return null;
+  const work = new ProbeWork(
+    parent,
+    Math.min(
+      maxProbeOperations,
+      Math.max(0, Math.floor((15 * (parent.limit - parent.operations)) / 16))
+    )
+  );
+  try {
+    return gradualIndicatorPartition(
+      count,
+      modulus,
+      constraints(work),
+      work,
+      accept,
+      observe
+    );
+  } catch (e) {
+    if (e instanceof ProbeLimit) return null;
+    throw e;
+  }
 }
 
 function partitionDivides(

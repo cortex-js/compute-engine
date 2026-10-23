@@ -4,6 +4,11 @@ import {
   partialFraction,
 } from '../boxed-expression/factor.js';
 import { distribute } from '../symbolic/distribute.js';
+import { checkArity, checkType } from '../boxed-expression/validate.js';
+import {
+  factorNumberFieldExpression,
+  validateAlgebraicGenerator,
+} from '../polynomial/boxed-number-field.js';
 import { expand, expandAll } from '../boxed-expression/expand.js';
 import {
   polynomialDegree,
@@ -169,16 +174,70 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         evaluateTensorProduct(expandAll(reduceTransformerOperand(x.canonical))),
     },
 
+    AlgebraicGenerator: {
+      description:
+        'An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected.',
+      lazy: true,
+      signature: '(list<number>) -> number',
+      // The canonical list of coefficients is exact. It is also the form
+      // without parse sugar: `AlgebraicGenerator([-2, 0, 1])` parses to
+      // `AlgebraicGenerator(Delimiter(List(…)))`, and the generator is
+      // printed as written in each factor of a `Factor` result. A custom
+      // `canonical` handler bypasses the signature check, so the arity and
+      // the list operand are checked here: `AlgebraicGenerator(5)` is
+      // invalid at once, not a valid-looking `number`.
+      canonical: (ops, { engine }) =>
+        engine._fn('AlgebraicGenerator', [
+          ...checkArity(
+            engine,
+            ops.map((op) => op.canonical),
+            1
+          ).map((op) => checkType(engine, op, 'list')),
+        ]),
+      evaluate: (ops, { engine: ce, expression }) => {
+        // The defining relation is exact data, even under N(). The generic
+        // numeric operand walk may already have approximated list entries.
+        const generator = expression ?? ce.function('AlgebraicGenerator', ops);
+        return validateAlgebraicGenerator(generator) ?? generator;
+      },
+    },
+
     Factor: {
       description:
         'Factor a polynomial expression into a product of irreducible factors. ' +
-        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. ' +
+        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. ' +
         'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
       inspectsErrors: true, // see `Expand`
-      signature: '(value, symbol?) -> value',
-      evaluate: ([x, varExpr]) => {
+      signature: '(value, symbol?, value?) -> value',
+      evaluate: ([x, varExpr, generator], { expression }) => {
         if (!x) return x;
+
+        if (generator) {
+          // Explicit-field factoring reads the original exact expression,
+          // not numeric approximations supplied by an enclosing N().
+          if (expression && isFunction(expression))
+            [x, varExpr, generator] = expression.ops;
+          // A request that cannot be answered stays unevaluated. Its operands
+          // are held, so on the parse route they still carry parse sugar
+          // (`InvisibleOperator`, `Delimiter`): return their canonical forms.
+          const unevaluated = () =>
+            x.engine._fn('Factor', [
+              x.canonical,
+              varExpr.canonical,
+              generator.canonical,
+            ]);
+          const variable = sym(varExpr.canonical);
+          if (!variable) return unevaluated();
+          const protect = new Set([variable]);
+          return (
+            factorNumberFieldExpression(
+              reduceTransformerOperand(x.canonical, protect),
+              variable,
+              reduceTransformerOperand(generator.canonical, protect)
+            ) ?? unevaluated()
+          );
+        }
 
         // With a variable, factor in that variable. The variable is protected
         // from resolution: with `x := 5`, `Factor(x^2 - 1, x)` is a question

@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 707 functions and constants of the standard library, by category.
+The 708 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -33,7 +33,7 @@ To search the library by concept rather than by name, use
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
-- [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
+- [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 60 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
@@ -629,6 +629,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
+| `algebraicGenerator` | `AlgebraicGenerator` | `(list<number>) -> number` | An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. |
 | `apart` | `Apart` | `(value, symbol?) -> value` | Alias for PartialFraction. |
 | `cancel` | `Cancel` | `(value, symbol?) -> value` | Cancel common polynomial factors in the numerator and denominator of a rational expression. |
 | `coefficientList` | `CoefficientList` | `(value, symbol?) -> list<value>` | Return the list of coefficients of a polynomial, from highest to lowest degree. |
@@ -636,7 +637,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 | `distribute` | `Distribute` | `(value) -> value` | Distribute multiplication over addition |
 | `expand` | `Expand` | `(value) -> value` | Expand out products and positive integer powers |
 | `expandAll` | `ExpandAll` | `(value) -> value` | Recursively expand out products and positive integer powers |
-| `factor` | `Factor` | `(value, symbol?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
+| `factor` | `Factor` | `(value, symbol?, value?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
 | `partialFraction` | `PartialFraction` | `(value, symbol?) -> value` | Decompose a rational expression into partial fractions. |
 | `polynomial` | `Polynomial` | `(list<value>, symbol) -> value` | Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. |
 | `polynomialDegree` | `PolynomialDegree` | `(value, symbol?) -> integer` | Return the degree of a polynomial with respect to a variable. |

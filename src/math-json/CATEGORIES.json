@@ -633,6 +633,7 @@
   "Polynomials": {
     "description": "Polynomial algebra and polynomial analysis.",
     "operators": [
+      "AlgebraicGenerator",
       "Apart",
       "Cancel",
       "CoefficientList",
