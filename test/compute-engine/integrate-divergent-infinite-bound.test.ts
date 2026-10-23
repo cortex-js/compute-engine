@@ -85,4 +85,21 @@ describe('a divergent integral over an infinite bound', () => {
     expect(run('\\int_0^{\\infty} -x\\, dx')).toBe(-Infinity);
     expect(Number.isNaN(run('\\int_0^{\\infty} \\sin x\\, dx'))).toBe(true);
   });
+
+  test.each([
+    ['\\frac{x-1}{x^3}', 0, 'PositiveInfinity', 'NegativeInfinity'],
+    ['-\\frac{1}{x^3}', 0, 'PositiveInfinity', 'NegativeInfinity'],
+    ['\\frac{1}{x^3}', 'NegativeInfinity', 0, 'NegativeInfinity'],
+    ['\\frac{1}{x^3}', 0, 'NegativeInfinity', 'PositiveInfinity'],
+    ['-\\frac{1}{x^3}', 'PositiveInfinity', 0, 'PositiveInfinity'],
+    ['\\frac{x-1}{x^2}', 0, 'PositiveInfinity', 'Indeterminate'],
+  ])(
+    'evaluate() of ∫ %s from %s to %s, a pole at the finite bound, is %s',
+    (latex, lo, hi, expected) => {
+      // ROADMAP CE-391.2: the antiderivative difference is `~∞` (a pole at
+      // the finite bound), which was the answer. The sign of the pole and
+      // the value of the antiderivative at the infinite bound decide it.
+      expect(routes(latex as string, lo, hi).evaluate).toEqual(expected);
+    }
+  );
 });

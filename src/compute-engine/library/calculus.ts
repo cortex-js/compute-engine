@@ -175,6 +175,7 @@ import {
 } from '../boxed-expression/polynomials.js';
 import {
   endpointPoleVerdict,
+  halfLineEndpointPoleSign,
   isRealOnInterval,
   interiorPoleVerdict,
   symbolicExponentBaseZeros,
@@ -947,6 +948,60 @@ function measurementFromParts(
     ce.number(ce._inexactNumericValue({ re: re.estimate, im: im.estimate })),
     ce.number(Math.hypot(re.error, im.error)),
   ]);
+}
+
+/**
+ * The sign of a definite integral over a half-infinite interval whose
+ * antiderivative difference is not finite (`∫₀^∞ −dt/t³`, where
+ * `1/(2t²)` at `0` is `~∞`), or `undefined` when it cannot be decided.
+ *
+ * The integrand diverges at the finite bound (`halfLineEndpointPoleSign`,
+ * `symbolic/interior-pole.ts`). Poles strictly inside the interval are
+ * decided before (`interiorPoleVerdict`). The antiderivative at the infinite
+ * bound tells what the tail adds: a finite value adds nothing infinite, so
+ * the integral has the sign of the pole (`∫₀^∞ (t − 1)/t³ dt` is `−∞`); an
+ * infinite value of the same sign agrees with it; an infinite value of the
+ * other sign gives an integral with no value (`∫₀^∞ (t − 1)/t² dt`: `−∞`
+ * next to `0`, `+∞` on the tail), the verdict `mixed`. A value that is not
+ * a number (`t − ln|t|` at `∞`) leaves the integral undecided.
+ *
+ * The sign of each part is its contribution to `F(upper) − F(lower)`: the
+ * pole contributes the sign of the integrand next to it when the integral
+ * runs away from the finite bound toward `+∞` or toward the finite bound
+ * from `−∞`, and the opposite sign otherwise; the tail contributes `F(upper)`
+ * or `−F(lower)`.
+ */
+function halfLinePoleVerdict(
+  ce: ComputeEngine,
+  integrand: Expression,
+  antiderivative: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression
+): { sign: 'positive' | 'negative' | 'mixed' } | undefined {
+  const realInfinity = (b: Expression) =>
+    b.isInfinity === true && (b.sgn === 'positive' || b.sgn === 'negative');
+  const lowerInfinite = realInfinity(lower);
+  const upperInfinite = realInfinity(upper);
+  if (lowerInfinite === upperInfinite) return undefined;
+  const finite = lowerInfinite ? upper : lower;
+  const infinite = lowerInfinite ? lower : upper;
+  if (finite.isFinite !== true) return undefined;
+  // The direction from the finite bound into the interval.
+  const side: 1 | -1 = infinite.sgn === 'positive' ? 1 : -1;
+  const sign = halfLineEndpointPoleSign(integrand, variable, finite, side, ce);
+  if (sign === undefined) return undefined;
+  const flip = (s: 'positive' | 'negative') =>
+    s === 'positive' ? 'negative' : 'positive';
+  // `side` is `1` for `∫ₐ^∞` and `∫_∞^a`, `-1` for `∫ₐ^{−∞}` and `∫_{−∞}^a`.
+  const pole = (lowerInfinite ? -side : side) === 1 ? sign : flip(sign);
+  const atInfinity = antiderivative.subs({ [variable]: infinite }).evaluate();
+  if (atInfinity.isFinite === true) return { sign: pole };
+  if (atInfinity.isInfinity !== true) return undefined;
+  const s = atInfinity.sgn;
+  if (s !== 'positive' && s !== 'negative') return undefined;
+  const tail = upperInfinite ? s : flip(s);
+  return tail === pole ? { sign: pole } : { sign: 'mixed' };
 }
 
 /** The value of a definite integral with a proven pole strictly inside its
@@ -6260,13 +6315,22 @@ volumes
                 const integrandValue = withAssignedValues(ce, integrand, [
                   variable,
                 ]);
-                const endpoint = endpointPoleVerdict(
-                  integrandValue,
-                  variable,
-                  lower,
-                  upper,
-                  ce
-                );
+                const endpoint =
+                  endpointPoleVerdict(
+                    integrandValue,
+                    variable,
+                    lower,
+                    upper,
+                    ce
+                  ) ??
+                  halfLinePoleVerdict(
+                    ce,
+                    integrandValue,
+                    antideriv,
+                    variable,
+                    lower,
+                    upper
+                  );
                 if (endpoint?.sign === 'mixed')
                   noValue = noValueIntegral(ce, integrandValue, lower, upper);
                 else if (endpoint !== undefined)

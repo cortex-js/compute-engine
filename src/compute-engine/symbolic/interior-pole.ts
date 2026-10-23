@@ -104,9 +104,9 @@ const POLE_PHASE_TOLERANCE = 1e-6;
  * The real value of `expr`, or `null` when it is not a finite real number.
  *
  * Used for the integration bounds when the check needs a finite range
- * ({@link endpointPoleVerdict}, {@link isRealOnInterval}): a symbolic bound
- * (`∫₀^a`), an infinite one, or a complex one yields `null`, which switches
- * that check off.
+ * ({@link endpointPoleVerdict}, {@link halfLineEndpointPoleSign}): a
+ * symbolic bound (`∫₀^a`), an infinite one, or a complex one yields `null`,
+ * which switches that check off.
  */
 function finiteRealValue(expr: Expression | undefined): number | null {
   if (expr === undefined) return null;
@@ -120,9 +120,9 @@ function finiteRealValue(expr: Expression | undefined): number | null {
  * The real value of `expr`, `+Infinity` or `-Infinity` for a real infinity,
  * or `null` when it is not a real number or a real infinity.
  *
- * Used for the bounds of {@link interiorPoleVerdict}, which accepts an
- * infinite bound. A symbolic bound, a complex bound (`~∞` included) and
- * `NaN` give `null`.
+ * Used for the bounds of {@link interiorPoleVerdict} and
+ * {@link isRealOnInterval}, which accept an infinite bound. A symbolic bound,
+ * a complex bound (`~∞` included) and `NaN` give `null`.
  */
 function realBoundValue(expr: Expression | undefined): number | null {
   if (expr === undefined) return null;
@@ -1216,6 +1216,52 @@ export function endpointPoleVerdict(
 }
 
 /**
+ * The sign toward which `integrand` diverges next to the finite bound `bound`
+ * of a half-infinite interval, approached from inside the interval: `side` is
+ * `1` when the interval extends above the bound, `-1` when it extends below.
+ * `undefined` when the integrand has no pole at the bound, or when the
+ * divergence cannot be shown.
+ *
+ * This is {@link endpointPoleVerdict} for one bound, which needs two finite
+ * bounds: the poles are looked for over a window of length 1 on the side of
+ * the interval, and only a pole at `bound` counts. The answer is the sign of
+ * the integrand next to the bound, not the sign of the integral: the caller
+ * knows the orientation of the interval and the contribution of the infinite
+ * tail.
+ */
+export function halfLineEndpointPoleSign(
+  integrand: Expression,
+  variable: string,
+  bound: Expression | number,
+  side: 1 | -1,
+  ce: ComputeEngine
+): DivergenceSign | undefined {
+  const b = typeof bound === 'number' ? bound : finiteRealValue(bound);
+  if (b === null || !Number.isFinite(b)) return undefined;
+  const lo = side === 1 ? b : b - 1;
+  const hi = side === 1 ? b + 1 : b;
+  const slack = (x: number) => ROUNDING_SLACK * Math.max(1, Math.abs(x));
+  const scan = poleSites(
+    integrand,
+    variable,
+    lo - slack(lo),
+    hi + slack(hi),
+    ce
+  );
+  if (scan === null) return undefined;
+  const atBound = scan.sites.filter((site) => site.atBound(b));
+  if (atBound.length === 0) return undefined;
+  // Sample from the bound toward the inside of the interval, close enough to
+  // stay clear of every other candidate site in the window.
+  let reach = (hi - lo) / 100;
+  for (const other of scan.sites)
+    if (!atBound.includes(other))
+      reach = Math.min(reach, Math.abs(other.t - b) / 100);
+  if (!(reach > 0)) return undefined;
+  return endpointDivergesOnSide(integrand, variable, b, side, reach, ce);
+}
+
+/**
  * Whether the polynomial coefficient `c` has a value that depends on a symbol
  * with no value (`a` in `t − a`, `2a + π` in `t − 2a − π`).
  */
@@ -1941,8 +1987,12 @@ export function integrandHasInteriorPole(
 /**
  * Whether `integrand` takes real values on the interval between the bounds
  * `lower` and `upper`, as far as three samples tell: at a quarter, half and
- * three quarters of the interval, the integrand must evaluate to a real
- * number. A bound that is not a finite real number gives `false`.
+ * three quarters of a finite interval, the integrand must evaluate to a real
+ * number. A bound can be a real infinity: the three points are then at
+ * distances 1, 4 and 16 from the finite bound, or at −1, 0 and 1 for the
+ * whole line, a weaker check than over a finite interval. A bound that is not
+ * a real number or a real infinity (a symbolic bound, `~∞`), and an empty
+ * interval, give `false`.
  */
 export function isRealOnInterval(
   integrand: Expression,
@@ -1951,13 +2001,26 @@ export function isRealOnInterval(
   upper: Expression | number | undefined,
   ce: ComputeEngine
 ): boolean {
-  const a = typeof lower === 'number' ? lower : finiteRealValue(lower);
-  const b = typeof upper === 'number' ? upper : finiteRealValue(upper);
-  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b))
+  const a = typeof lower === 'number' ? lower : realBoundValue(lower);
+  const b = typeof upper === 'number' ? upper : realBoundValue(upper);
+  if (a === null || b === null || Number.isNaN(a) || Number.isNaN(b))
     return false;
+  if (a === b) return false;
   if (!integrand.isPure) return false;
-  for (const w of [0.25, 0.5, 0.75])
-    if (!Number.isFinite(valueAt(integrand, variable, a + w * (b - a), ce)))
-      return false;
+  // Three points inside the interval. Over an infinite interval they are
+  // taken at distances 1, 4 and 16 from the finite bound, or at −1, 0 and 1
+  // when both bounds are infinite.
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const points =
+    Number.isFinite(lo) && Number.isFinite(hi)
+      ? [0.25, 0.5, 0.75].map((w) => lo + w * (hi - lo))
+      : Number.isFinite(lo)
+        ? [1, 4, 16].map((d) => lo + d)
+        : Number.isFinite(hi)
+          ? [1, 4, 16].map((d) => hi - d)
+          : [-1, 0, 1];
+  for (const x of points)
+    if (!Number.isFinite(valueAt(integrand, variable, x, ce))) return false;
   return true;
 }
