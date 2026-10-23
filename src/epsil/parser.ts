@@ -7115,7 +7115,9 @@ export class Parser {
     // read it as its ASCII spelling, as `peekInfix` does for `×`.
     if (token.type === 'ERROR') {
       const mapped = this.fancyOperator(token);
-      return mapped === null ? null : (postfixOperatorForSymbol(mapped) ?? null);
+      return mapped === null
+        ? null
+        : (postfixOperatorForSymbol(mapped) ?? null);
     }
     if (token.type !== 'OPERATOR') return null;
     // NOTE: the lexer maximal-munches a run of operator characters into one

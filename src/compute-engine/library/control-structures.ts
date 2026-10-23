@@ -1406,9 +1406,7 @@ const FIXED_POINT_SUPPLY: CallbackSupply = {
  * only 10 correct digits of the 21 printed.
  */
 function fixedPointEpsilon(precision: number): number {
-  return precision <= MACHINE_PRECISION
-    ? 2 ** -46
-    : 10 ** -(precision - 2);
+  return precision <= MACHINE_PRECISION ? 2 ** -46 : 10 ** -(precision - 2);
 }
 
 /**
@@ -1469,8 +1467,7 @@ function isDivergingFixedPointStep(
   y: Expression,
   sizeBound: number
 ): boolean {
-  if (isNumber(y))
-    return y.isExact && y.toString().length > sizeBound;
+  if (isNumber(y)) return y.isExact && y.toString().length > sizeBound;
   if (!isFunction(y)) return false;
   return y.ops.some((op) => containsSubexpression(op, x));
 }

@@ -33,7 +33,6 @@ The message reads "expected \`T\`, got \`U\`": T is what the context requires, U
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see \`epsil doc runtime-error\`).`,
 
-
   'expected-present': `A presence assertion \`x?!\` (\`AssertPresent(x)\`) was evaluated on an absent value: \`missing\`, \`NaN\`, or an indeterminate form such as \`0/0\`. The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
 
 An absent value is a data state, not a bug in itself: an index out of range (\`xs[i]\`), a \`first(filter(…))\` that found nothing, a restricted value whose condition did not hold. Decide what the program should do when it happens. Write \`x ?? fallback\` to replace the absent value, test it with \`isMissing(x)\` and branch, or keep the assertion where absence really is a violated precondition and let the error propagate (\`if let v: !error = …\` catches it). \`Nothing\` is an omission marker, not an absent datum, and passes the assertion.`,

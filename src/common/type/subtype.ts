@@ -1121,10 +1121,7 @@ function typeCategory(t: Type): PrimitiveType | undefined {
  * each axis an open length (`-1`) or the same length. A tensor of unknown
  * rank (`null`) admits every shape.
  */
-function dimensionsCouldMatch(
-  a: number[] | null,
-  b: number[] | null
-): boolean {
+function dimensionsCouldMatch(a: number[] | null, b: number[] | null): boolean {
   if (a === null || b === null) return true;
   if (a.length !== b.length) return false;
   return a.every((d, i) => d === -1 || b[i] === -1 || d === b[i]);
@@ -1749,7 +1746,9 @@ function couldMatchStructure(a: Type, b: Type): boolean {
         // (`meetCollectionKinds`) is the list of the element meet, never
         // empty.
         const plainList = (t: Type): boolean =>
-          typeof t === 'object' && t.kind === 'list' && t.dimensions === undefined;
+          typeof t === 'object' &&
+          t.kind === 'list' &&
+          t.dimensions === undefined;
         if (plainList(a) || plainList(b)) return true;
         // The elements of a list are what one index returns
         // (`listElementType`): the rows of a matrix, not its cells.
@@ -2426,7 +2425,9 @@ function acceptsParameter(accepting: Type, supplied: Type): boolean {
   const others = arms.filter((a) => a !== 'unknown');
   const markerStated = (m: 'nothing' | 'missing' | 'error'): boolean =>
     !provablyAdmits(m, supplied) || others.some((o) => isSubtype(m, o));
-  return markerStated('nothing') && markerStated('missing') && markerStated('error');
+  return (
+    markerStated('nothing') && markerStated('missing') && markerStated('error')
+  );
 }
 
 /**

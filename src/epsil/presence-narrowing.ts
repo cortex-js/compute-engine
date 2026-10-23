@@ -64,9 +64,11 @@ function presentWhenTrue(cond: MathJsonExpression): Set<string> {
   const h = operator(cond);
   if (h === 'Not') {
     const inner = operands(cond)[0];
-    if (inner !== undefined) for (const s of presentWhenFalse(inner)) out.add(s);
+    if (inner !== undefined)
+      for (const s of presentWhenFalse(inner)) out.add(s);
   } else if (h === 'And') {
-    for (const c of operands(cond)) for (const s of presentWhenTrue(c)) out.add(s);
+    for (const c of operands(cond))
+      for (const s of presentWhenTrue(c)) out.add(s);
   }
   return out;
 }
@@ -248,12 +250,7 @@ function rewrite(
   // reassignment anywhere in it invalidates, on the next iteration, the
   // proof for the statements before it. So every name the node assigns
   // leaves the proof set before the node is entered.
-  if (
-    h === 'Loop' ||
-    h === 'Comprehension' ||
-    h === 'Sum' ||
-    h === 'Product'
-  ) {
+  if (h === 'Loop' || h === 'Comprehension' || h === 'Sum' || h === 'Product') {
     let known: ReadonlySet<string> = present;
     if (h === 'Loop' || h === 'Comprehension') {
       const assigned = new Set<string>();

@@ -1617,10 +1617,7 @@ export class Parser {
       }
       // `tensor<2x3x4>`: the lexer reads `x3x4` as an identifier after the
       // numeral `2`. Name the spelling to use rather than "invalid type".
-      if (
-        this.current.type === 'IDENTIFIER' &&
-        /^x/.test(this.current.value)
-      )
+      if (this.current.type === 'IDENTIFIER' && /^x/.test(this.current.value))
         this.error(
           'A tensor type has no leading shape',
           'Write the shape after the cell type: `tensor<number^(2x3x4)>`'

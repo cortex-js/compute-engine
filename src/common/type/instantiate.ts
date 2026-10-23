@@ -2305,10 +2305,11 @@ function expandLiftAliases(
     if (active.includes(decl)) return null;
     const body = aliasDefinitionAt(t);
     if (body === undefined) return t;
-    const expanded = expandLiftAliases(body, [...active, decl], [
-      ...bare,
-      decl,
-    ]);
+    const expanded = expandLiftAliases(
+      body,
+      [...active, decl],
+      [...bare, decl]
+    );
     if (expanded === undefined) return t;
     if (expanded !== null && !holdsMappedCollection(expanded)) return t;
     return expanded;

@@ -2739,8 +2739,7 @@ export function isPossiblyCollectionTyped(
   // top type (`topTypeBesideAbsence`): its present value may be a list.
   const resolved = resolveTypeAlias(expr.type.type);
   const t =
-    (isFunction(expr) ? topTypeBesideAbsence(resolved) : undefined) ??
-    resolved;
+    (isFunction(expr) ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
   // A `Block` local is read by the value assigned to it, also with
   // `declaredSymbols: false`: no host passes the value of a local.
   if (isTopTypedBlockLocal(expr)) return true;
@@ -3694,7 +3693,9 @@ function nestedPointCollection(
   const r = unfolded.type;
   if (typeof r === 'string') return false;
   if (!top && r.kind === 'union')
-    return r.types.every((arm) => nestedPointCollection(arm, false, unfolded.seen));
+    return r.types.every((arm) =>
+      nestedPointCollection(arm, false, unfolded.seen)
+    );
   if (r.kind !== 'list') return false;
   const dims = r.dimensions;
   if (dims !== undefined) {

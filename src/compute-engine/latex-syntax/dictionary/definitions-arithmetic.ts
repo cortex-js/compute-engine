@@ -1894,9 +1894,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         const base = operand(expr, 1);
         if (base && !isDiffSym(symbol(base)))
           vars.push(
-            symbol(base) === null
-              ? (parser.binderSymbol(base) ?? base)
-              : base
+            symbol(base) === null ? (parser.binderSymbol(base) ?? base) : base
           );
       }
     };

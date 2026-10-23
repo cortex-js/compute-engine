@@ -85,7 +85,6 @@ import {
   signatureArms,
   signatureEffects,
   stripMissingFromType,
-  topTypeBesideAbsence,
   typeContainsMissing,
   typeElementCount,
   unfoldAliasOnDescent,

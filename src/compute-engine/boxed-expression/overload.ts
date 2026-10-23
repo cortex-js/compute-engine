@@ -1356,8 +1356,7 @@ function takesByOverlap(
     // result is read at the bound of its variable (`undecidedResultOf`).
     if (isErrorTypedWithoutErrorValue(op)) {
       const r = resolveTypeAlias(param);
-      const arms =
-        typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+      const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
       if (arms.some((a) => resolveTypeAlias(a) === 'unknown')) return true;
     }
     return !op.type.matches(param);
@@ -1698,9 +1697,7 @@ function displayParamAt(
   const pattern = paramAt(declared, index);
   if (pattern === undefined) return ground;
   const displayBindings: Record<string, Type> = Object.fromEntries(
-    Object.entries(solution.bindings).filter(
-      ([v]) => !solution.unbound.has(v)
-    )
+    Object.entries(solution.bindings).filter(([v]) => !solution.unbound.has(v))
   );
   const t = substituteTypeVariables(pattern, displayBindings);
   return freeTypeVariables(t).size === 0 ? reduceType(t) : t;

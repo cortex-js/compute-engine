@@ -3033,7 +3033,11 @@ function hasTopLevelArm(t: Type, arm: 'missing' | 'nan'): boolean {
 
 /** Whether every arm of `t` other than `arm` is a subtype of `declared`. A
  * `t` that is `arm` alone has no other arm, and the answer is `true`. */
-function otherArmsFit(t: Type, arm: 'missing' | 'nan', declared: Type): boolean {
+function otherArmsFit(
+  t: Type,
+  arm: 'missing' | 'nan',
+  declared: Type
+): boolean {
   const r = resolveTypeAlias(t);
   if (typeof r === 'string' || r.kind !== 'union') return true;
   return r.types
@@ -3044,7 +3048,9 @@ function otherArmsFit(t: Type, arm: 'missing' | 'nan', declared: Type): boolean 
 /** Whether `value` is a literal whose static type is exactly its runtime
  * type: a number, a string, a boolean, an absence or omission symbol, or a
  * list, tuple or set literal of such values. */
-function isClosedLiteralValue(value: ReturnType<ComputeEngine['box']>): boolean {
+function isClosedLiteralValue(
+  value: ReturnType<ComputeEngine['box']>
+): boolean {
   if (
     isNumber(value) ||
     isString(value) ||
@@ -3055,7 +3061,11 @@ function isClosedLiteralValue(value: ReturnType<ComputeEngine['box']>): boolean 
     isSymbol(value, 'Nothing')
   )
     return true;
-  if (isFunction(value, 'List') || isFunction(value, 'Tuple') || isFunction(value, 'Set'))
+  if (
+    isFunction(value, 'List') ||
+    isFunction(value, 'Tuple') ||
+    isFunction(value, 'Set')
+  )
     return value.ops.every((op) => isClosedLiteralValue(op));
   return false;
 }

@@ -3759,7 +3759,7 @@ function mulTensors(
   const hasMatrix = evaluated.some(
     (x) => isTensorValue(x) && (tensorShape(x)?.length ?? 0) >= 2
   );
-  for (const [i, op] of xs.entries()) {
+  for (const [i, _op] of xs.entries()) {
     let x = evaluated[i];
     if (hasMatrix && isNumericVectorSource(x)) {
       // A collection over the limit of `numericCollectionAsList()` is not

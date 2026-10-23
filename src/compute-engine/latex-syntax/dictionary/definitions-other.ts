@@ -283,8 +283,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       // A variable spelled as a subscript on an indexed collection (`n_{0}`
       // when `n` is a list) in a subscript (`∂_{n_{0}}`) is the new name
       // `n_0`, not the element `At(n, 0)`, also in the operand.
-      const binderName = (v: MathJsonExpression) =>
-        parser.binderSymbol(v) ?? v;
+      const binderName = (v: MathJsonExpression) => parser.binderSymbol(v) ?? v;
       // The term after a bare `∂`. With `n` a list, the symbol parser reads
       // only the `n` of `∂n_{0}`: the subscript is then read as an index, as
       // elsewhere, and the marker keeps the element access `At(n, 0)`. A

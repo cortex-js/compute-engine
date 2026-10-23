@@ -10551,9 +10551,7 @@ function lambdaBroadcastType(
     // A literal over operands whose types are unions with an arm that the
     // broadcast does not map (a `set`, a tuple, a scalar, an abstract
     // `collection`) is typed arm by arm (`byArms`).
-    const byArm = byArms(
-      ops.flatMap((_x, i) => (participates(i) ? [i] : []))
-    );
+    const byArm = byArms(ops.flatMap((_x, i) => (participates(i) ? [i] : [])));
     if (byArm !== undefined) return byArm;
 
     // D10 (§4.4, re-ruled 2026-08-04): `perElementResult` is the

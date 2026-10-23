@@ -9578,7 +9578,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 (x.kind === 'list' && x.dimensions === null)
               )
                 return undefined;
-              rank += x.kind === 'list' && x.dimensions ? x.dimensions.length : 1;
+              rank +=
+                x.kind === 'list' && x.dimensions ? x.dimensions.length : 1;
               const element = resolveTypeAlias(x.elements);
               if (typeof element === 'object' && element.kind === 'tuple')
                 return rank;

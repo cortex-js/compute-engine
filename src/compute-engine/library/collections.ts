@@ -8799,8 +8799,7 @@ function pointComponentAt(
                   ce,
                   operator,
                   numericApproximation
-                ) ??
-                ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]))
+                ) ?? ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]))
               : pointComponentOf(e, position, ce);
           rows.push(row);
         }

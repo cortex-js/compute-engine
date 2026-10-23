@@ -2280,7 +2280,7 @@ function differentiateNode(
         ...expr.ops.slice(1),
       ])
     );
-    let dContainer = differentiate(expr.op1, v, depth + 1, trace);
+    const dContainer = differentiate(expr.op1, v, depth + 1, trace);
     if (dContainer === undefined || !dContainer.isValid) return undefined;
     if (dContainer.isSame(0)) {
       const zero = zeroOfConstantValue(expr.op1, false);

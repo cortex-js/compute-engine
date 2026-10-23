@@ -1566,8 +1566,7 @@ function collectSubexpressions(
   }
   if (!name || expr.operator === name) result.push(expr);
   if (isFunction(expr))
-    for (const op of expr.ops)
-      collectSubexpressions(op, name, result, visited);
+    for (const op of expr.ops) collectSubexpressions(op, name, result, visited);
   else if (isDictionary(expr))
     for (const value of expr.values)
       collectSubexpressions(value, name, result, visited);

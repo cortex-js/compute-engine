@@ -1,9 +1,6 @@
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
-import {
-  coalesceResultType,
-  presentType,
-} from '../../common/type/coalesce.js';
+import { coalesceResultType, presentType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
@@ -4870,7 +4867,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const v = x.evaluate({ numericApproximation });
         // The failure names the operand as written, not its value: the
         // value is the marker, which says nothing about where it came from.
-        if (isMissingValue(v)) return ce.error('expected-present', x.toString());
+        if (isMissingValue(v))
+          return ce.error('expected-present', x.toString());
         // A value whose type cannot be absent is present even when it still
         // carries free variables: a list, a tuple, a string, a dictionary or
         // a function literal stays that kind of value under any substitution

@@ -332,7 +332,10 @@ const IN_PROGRESS = Symbol('in-progress');
  * ends at its first repeat.
  */
 type FailedElementWalk = {
-  memo: Map<Expression, Map<string, Expression | undefined | typeof IN_PROGRESS>>;
+  memo: Map<
+    Expression,
+    Map<string, Expression | undefined | typeof IN_PROGRESS>
+  >;
   depth: number;
 };
 

@@ -75,7 +75,10 @@ export function resolvesToSystemBinding(
     engine as unknown as {
       contextStack?: ReadonlyArray<{
         lexicalScope: {
-          bindings: ReadonlyMap<string, { value?: unknown; operator?: unknown }>;
+          bindings: ReadonlyMap<
+            string,
+            { value?: unknown; operator?: unknown }
+          >;
         };
       }>;
     }

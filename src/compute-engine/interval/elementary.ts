@@ -255,8 +255,7 @@ function powIntervalRaw(
   // An absent operand stays absent (see `powRaw`): with a NaN exponent the
   // sign tests below would answer a present interval for a base whose
   // upper end is 0.
-  if (isNaNInterval(baseVal) || isNaNInterval(expVal))
-    return ok(NAN_INTERVAL);
+  if (isNaNInterval(baseVal) || isNaNInterval(expVal)) return ok(NAN_INTERVAL);
 
   // Special case: exponent is a point interval with an integer value.
   // For integer exponents, negative bases are well-defined (parity matters).

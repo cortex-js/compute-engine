@@ -282,7 +282,11 @@ function withCellType(
   r: ListType | CollectionType | BroadcastableType,
   cell: Type
 ): Type {
-  if (r.kind === 'list' && r.dimensions !== undefined && !mayCarryDimensions(cell))
+  if (
+    r.kind === 'list' &&
+    r.dimensions !== undefined &&
+    !mayCarryDimensions(cell)
+  )
     return shapedOrPlainListType(cell, r.dimensions);
   return { ...r, elements: cell };
 }
@@ -317,8 +321,7 @@ export function isPossiblyCollectionTypedView(
   if (v.topTypedBlockLocal) return true;
   const resolved = resolveTypeAlias(v.type);
   const t =
-    (v.isApplication ? topTypeBesideAbsence(resolved) : undefined) ??
-    resolved;
+    (v.isApplication ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
   if ((t === 'any' || t === 'value') && v.declaredTopSymbol) return true;
   if (t === 'unknown' || t === 'any' || t === 'value') return v.isApplication;
   if (typeof t === 'string') return false;

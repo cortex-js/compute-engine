@@ -3698,7 +3698,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const points = [a, b].map((d, i) =>
             listOfPoints[i] ? pointListElementDescriptor(d) : d
           );
-          if (points.every((d) => d !== undefined && isNumericTupleOperand(d))) {
+          if (
+            points.every((d) => d !== undefined && isNumericTupleOperand(d))
+          ) {
             const product =
               innerProductType(points[0]!, points[1]!, derive) ?? 'number';
             const list: Type = { kind: 'list', elements: product };
