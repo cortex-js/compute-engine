@@ -34,6 +34,8 @@ import {
   isValueDef,
 } from '../boxed-expression/utils.js';
 import {
+  isAbsentArithmeticOperand,
+  isExpression,
   isFunction,
   isNumber,
   indeterminateFormAnswer,
@@ -840,6 +842,16 @@ type IntegrandParts = {
    * operator name (`D`) used as a variable — has no numeric value, and the
    * integral must stay symbolic rather than answer `NaN`. */
   sawNumeric: () => boolean;
+  /** True when no sample produced a number, and every sample was a value
+   * with no number: the number `NaN` (compiled code, or a `NaN` literal), the
+   * absent marker (`Missing`, `Undefined`, a compiled `undefined`), or
+   * arithmetic built around it (`0.5·Missing`, which is `NaN`). The
+   * integrand then HAS a value at every sample, the undefined one, and so
+   * does the integral: `NaN` (user decision 2026-10-23), as `NIntegrate` and
+   * the compiled routes give for `∫₀¹ Which(t > 5, 1) dt`. A sample that is a
+   * symbolic expression (`0.5·D`) is not such a value: it means the integrand
+   * still holds a free symbol, and the integral stays symbolic. */
+  sawOnlyUndefinedValues: () => boolean;
   /** The same part (`re` or `im`) without the sample cache. Monte Carlo must
    * use it: its points are random and do not repeat, so each lookup misses,
    * and with 10⁷ samples the string keys and lookups cost much more than a
@@ -871,17 +883,34 @@ function numericIntegrandParts(
 ): IntegrandParts {
   let imaginary = false;
   let numeric = false;
+  let undefinedValue = false;
+  let symbolic = false;
   const parts = (v: unknown): [re: number, im: number] => {
     if (typeof v === 'number') {
       if (!Number.isNaN(v)) numeric = true;
+      else undefinedValue = true;
       return [v, 0];
     }
-    if (v !== null && typeof v === 'object') {
+    if (v === undefined || v === null) {
+      undefinedValue = true;
+      return [NaN, NaN];
+    }
+    if (typeof v === 'object') {
       const re = (v as { re?: unknown }).re;
       const im = (v as { im?: unknown }).im;
-      if (typeof re !== 'number') return [NaN, NaN];
+      if (typeof re !== 'number') {
+        symbolic = true;
+        return [NaN, NaN];
+      }
       const imN = typeof im === 'number' ? im : 0;
       if (!Number.isNaN(re)) numeric = true;
+      else if (
+        isExpression(v) &&
+        !(isNumber(v) && v.isNaN === true) &&
+        !isAbsentArithmeticOperand(v)
+      )
+        symbolic = true;
+      else undefinedValue = true;
       // Any non-zero imaginary component — a non-finite one included, so
       // that `re: 1, im: Infinity` is not mistaken for a real sample and the
       // non-finite part reaches the estimate — makes the integrand complex.
@@ -923,6 +952,7 @@ function numericIntegrandParts(
     im,
     sawImaginary: () => imaginary,
     sawNumeric: () => numeric,
+    sawOnlyUndefinedValues: () => undefinedValue && !numeric && !symbolic,
     uncached: (part) =>
       part === re ? reUncached : part === im ? imUncached : part,
   };
@@ -2646,7 +2676,8 @@ function nIntegrateMultiple(
   // `dependentPoleScan` has a proven pole: the integral may diverge, and the
   // quadrature result is not a value for it.
   if ((divergent || unconverged) && dependentPoles !== undefined) return ce.NaN;
-  if (Number.isNaN(r.estimate) && !integrand.sawNumeric()) return undefined;
+  if (Number.isNaN(r.estimate) && !integrand.sawNumeric())
+    return integrand.sawOnlyUndefinedValues() ? ce.NaN : undefined;
   if (!integrand.sawImaginary()) return measurementFromParts(ce, r);
   jsf = integrand.im;
   return measurementFromParts(ce, r, integrateDim(0));
@@ -2678,6 +2709,12 @@ function nIntegrateMultiple(
  *
  * `seen` (shared across the whole walk, keyed on the definition) terminates
  * recursive definitions and self-referential bindings.
+ *
+ * The absence symbols `Missing` and `Undefined` are not reported: `unknowns`
+ * lists them, as they have no value, but they are values here, not free
+ * variables waiting for one. Arithmetic with them is `NaN`, so `∫₀¹ t·Missing
+ * dt` is `NaN` under `.N()`, as an integrand with no value is
+ * (`sawOnlyUndefinedValues`).
  */
 function transitiveUnknowns(
   expr: Expression,
@@ -2686,7 +2723,8 @@ function transitiveUnknowns(
   const out = new Set<string>();
   const seen = new Set<object>();
   const collect = (root: Expression, names: ReadonlySet<string>): void => {
-    for (const s of root.unknowns) if (!names.has(s)) out.add(s);
+    for (const s of root.unknowns)
+      if (!names.has(s) && s !== 'Missing' && s !== 'Undefined') out.add(s);
     const visit = (node: Expression): void => {
       // An ASSIGNED value can itself hold a free symbol (`c` in `b = c + 1`):
       // `b` is known, so neither `unknowns` nor the compiler's fold reports
@@ -5875,9 +5913,11 @@ volumes
             if (exact !== undefined) return exact;
           }
           // No sample was a number: nothing was integrated. Stay symbolic
-          // (the closed form, when there is one, is then still reachable).
+          // (the closed form, when there is one, is then still reachable),
+          // unless every sample was the undefined value: the integral is
+          // then `NaN` (`sawOnlyUndefinedValues`).
           if (Number.isNaN(re.estimate) && !integrand.sawNumeric())
-            return undefined;
+            return integrand.sawOnlyUndefinedValues() ? ce.NaN : undefined;
           if (!integrand.sawImaginary()) return measurementFromParts(ce, re);
           return measurementFromParts(ce, re, integrateReal(integrand.im));
         }

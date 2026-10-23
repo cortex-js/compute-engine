@@ -36,6 +36,13 @@ declareNumeric('Inv', (x) => 1 / x);
 declareNumeric('SinInv', (x) => Math.sin(1 / x));
 declareNumeric('SinInvOverX', (x) => Math.sin(1 / x) / x);
 declareNumeric('Bad', () => NaN);
+// An operator whose value still holds a free symbol that the integrand, as
+// written, does not show: `Hidden(x)` evaluates to `x·y`.
+ce.declare('Hidden', {
+  signature: '(number) -> number',
+  evaluate: ([x], { engine }) =>
+    x.isNumberLiteral ? engine.box(['Multiply', x, 'y']) : undefined,
+});
 
 function integrate(body: unknown, lower: unknown, upper: unknown): Expression {
   calls = 0;
@@ -113,10 +120,17 @@ describe('Integrate(...).N() of an integrand that does not compile', () => {
     expect(calls).toBeGreaterThan(9660);
   });
 
-  test('an integrand that is NaN everywhere stays symbolic', () => {
-    // No sample is a number, so nothing was integrated: the `Integrate`
-    // expression is kept, as it was with Monte Carlo alone.
-    expect(integrate(['Bad', 'x'], 0, 1).operator).toBe('Integrate');
+  test('an integrand that is NaN everywhere gives NaN', () => {
+    // Every sample is the undefined value, so the integral has no value
+    // either: `NaN`, as `NIntegrate` gives (user decision 2026-10-23). Before
+    // the decision the `Integrate` expression was kept.
+    expect(integrate(['Bad', 'x'], 0, 1).isNaN).toBe(true);
+  });
+
+  test('an integrand whose samples are symbolic stays symbolic', () => {
+    // No sample is a number, and the samples are expressions in a free
+    // symbol: nothing was integrated, and the `Integrate` expression is kept.
+    expect(integrate(['Hidden', 'x'], 0, 1).operator).toBe('Integrate');
   });
 
   test('a compiled integrand is unchanged', () => {

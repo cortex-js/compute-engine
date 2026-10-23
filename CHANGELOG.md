@@ -131,6 +131,16 @@
   (`number | missing`) absent, `If(x < 0 < w, 1, 2)` gives `2`, where it gave
   `NaN`. Rule: `docs/ERROR-MODEL.md`.
 
+- **`.N()` of an integral whose integrand has no value is `NaN`** (ROADMAP
+  CE-177, Tycho row 411). `Integrate(Which(t > 5, 1), Limits(t, 0, 1)).N()`
+  stayed unevaluated: no sample of the integrand was a number, and the integral
+  was kept as if the integrand held an unknown symbol. `NIntegrate` and the
+  compiled routes gave `NaN`. When every sample is the undefined value (`NaN`, a
+  selection with no selected arm, arithmetic with `Missing`), the integral is
+  now `NaN` under `.N()`, also for a double integral; `∫₀¹ t·Missing dt` is
+  `NaN` too. An integrand that still holds a free symbol (`∫₀¹ t·D dt`, an
+  undeclared `g(t)`) stays symbolic.
+
 ### Resolved Issues
 
 - **A product over a list of elements of unknown type, or over rows, was typed

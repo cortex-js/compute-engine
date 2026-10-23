@@ -3317,16 +3317,6 @@ period π, but the grid records 2π, because `Cos` and `Sec` of another expressi
 are not part of that form. Question: should `Cos`, `Sec`, `Cosh` and `Sech`
 count as ancestors that halve the period? Such models are rare.
 
-### CE-177. Under `.N()`, an integral whose integrand has no value stays symbolic
-
-**Status:** open; defect. Tycho row 411. User decision 2026-10-23: such an
-integral is `NaN` under `.N()`, as `NIntegrate` and the compiled routes give.
-
-`Integrate(Which(t > 5, 1), Limits(t, 0, 1)).N()` stays unevaluated (the
-`sawNumeric` guard of `library/calculus.ts`, near line 2325). `NIntegrate` of
-the same integrand is `NaN`, and the compiled routes give `NaN`/`'false'`.
-Question: should such an integral be `NaN` under `.N()`?
-
 ### CE-178. A numeric integral whose tail overflows to NaN is slow and inaccurate
 
 **Status:** open; performance.
