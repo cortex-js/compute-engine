@@ -2933,6 +2933,35 @@ function hasDistributableSum(x: Expression): boolean {
   return isFunction(x, 'Add');
 }
 
+/**
+ * Whether the fold of {@link expandProducts} over the factors `ops` can give
+ * something other than the product of the factors. It changes a product
+ * through a factor it reads specially: a sum it distributes over, a `Negate`
+ * it takes out, a `Divide` whose numerator it multiplies, or a matrix (see
+ * `hasMatrixPart()`) that makes it keep the order of the factors. It also
+ * changes a product that has a power, a root or a square root of a sum: the
+ * product of two such factors can be the sum itself, which the next step of
+ * the fold distributes over (`2·√(x+1)·√(x+1)` is `2x + 2`). And it keeps an
+ * invalid factor as the result (`Error·1` is the `Error`), where
+ * `asRationalExpression()` divides it by `1`. Without such a factor, each
+ * step of the fold is `new Product(…).asExpression()`, the product of the
+ * factors that a caller can build once.
+ */
+export function expandProductsChanges(ops: ReadonlyArray<Expression>): boolean {
+  return ops.some(
+    (x) =>
+      !x.isValid ||
+      isFunction(x, 'Add') ||
+      isFunction(x, 'Negate') ||
+      isFunction(x, 'Divide') ||
+      ((isFunction(x, 'Power') ||
+        isFunction(x, 'Root') ||
+        isFunction(x, 'Sqrt')) &&
+        hasDistributableSum(x.op1)) ||
+      hasMatrixPart(x)
+  );
+}
+
 export function expandProducts(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
@@ -3212,6 +3241,26 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       ? ce.NaN
       : result;
   if (expand || !xs.some(hasDistributableSum)) {
+    // Without a factor that `expandProducts` reads specially
+    // (`expandProductsChanges`), its fold builds the product that
+    // `asRationalExpression` below builds again from its factors, so the
+    // product is built once. Only for a finite nonzero coefficient: for a
+    // zero, `NaN` or infinite coefficient, `asExpression()` (the fold) and
+    // `asRationalExpression()` give different answers (the fold keeps an
+    // `Error` factor of `0 · Sin((A, B))`, `asRationalExpression()` gives
+    // `0`), and the fold's answer is the one to keep.
+    if (!expandProductsChanges(xs)) {
+      const product = new Product(ce, xs);
+      const c = product.coefficient;
+      if (
+        !c.isZero &&
+        !c.isNaN &&
+        !c.isPositiveInfinity &&
+        !c.isNegativeInfinity &&
+        !c.isComplexInfinity
+      )
+        return floatContact(product.asRationalExpression());
+    }
     const exp = expandProducts(ce, xs);
     if (exp) {
       if (exp.operator !== 'Multiply') return floatContact(exp);

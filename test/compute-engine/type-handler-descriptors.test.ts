@@ -19,6 +19,20 @@ import {
 } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 
 let ce: ComputeEngine;
+
+/** The members of a number-literal structure view as a plain object. The
+ * view computes `tier` and `rational` on demand, with getters of its class,
+ * so `toEqual` on the view itself does not see them. A member that is
+ * absent or `undefined` is left out. */
+function numberStructure(s: unknown): Record<string, unknown> | undefined {
+  if (typeof s !== 'object' || s === null) return undefined;
+  const v = s as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of ['kind', 'tier', 'literal', 'rational'])
+    if (v[k] !== undefined) out[k] = v[k];
+  return out;
+}
+
 beforeEach(() => {
   ce = new ComputeEngine();
 });
@@ -31,7 +45,10 @@ describe('describe() on literals', () => {
     expect(d.facts.closed).toBe(true);
     expect(d.facts.collection).toBe(false);
     expect(d.facts.indexed).toBe(false);
-    expect(d.structureOf?.()).toEqual({ kind: 'number', tier: 'real' });
+    expect(numberStructure(d.structureOf?.())).toEqual({
+      kind: 'number',
+      tier: 'real',
+    });
   });
 
   test("an error operand's validity is a TYPE read — its type is 'error'", () => {
@@ -41,18 +58,22 @@ describe('describe() on literals', () => {
   });
 
   test('the literals 0 and 1 carry their structural tag', () => {
-    expect(describeOperand(ce.box(0)).structureOf?.()).toEqual({
-      kind: 'number',
-      tier: 'integer',
-      literal: 0,
-      rational: [0n, 1n],
-    });
-    expect(describeOperand(ce.box(1)).structureOf?.()).toEqual({
-      kind: 'number',
-      tier: 'integer',
-      literal: 1,
-      rational: [1n, 1n],
-    });
+    expect(numberStructure(describeOperand(ce.box(0)).structureOf?.())).toEqual(
+      {
+        kind: 'number',
+        tier: 'integer',
+        literal: 0,
+        rational: [0n, 1n],
+      }
+    );
+    expect(numberStructure(describeOperand(ce.box(1)).structureOf?.())).toEqual(
+      {
+        kind: 'number',
+        tier: 'integer',
+        literal: 1,
+        rational: [1n, 1n],
+      }
+    );
   });
 
   test('a rational literal carries its exact reduced terms', () => {

@@ -8,6 +8,8 @@ import { factsOf } from '../../common/type/facts.js';
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
+  FunctionInterface,
+  NumberLiteralInterface,
   OperandDescriptor,
   OperandFacts,
   OperandStructure,
@@ -280,6 +282,132 @@ function recordSource(op: Expression, st: OperandStructure): OperandStructure {
   return st;
 }
 
+// The structural views below are classes, not object literals with getters:
+// V8 creates an object literal that defines a getter on a slow path, about
+// 15 times slower than a class instance (150 ns against 10 ns, measured
+// 2026-10-23), and a type derivation builds one view per operand it reads
+// the structure of. The lazy members are getters on the prototype, so a
+// copy of a view made with a spread (`{ ...structure, children }`) keeps the
+// own members (`kind`, `head`, `callee`, `arity`, `shape`, `literal`) and
+// must state the lazy member it needs again, as the copies in the library
+// do. The private fields are not copied by a spread.
+
+/** The structural view of a number literal. The reduced fraction and the
+ * tier are read on demand: the fraction converts both terms to `bigint`,
+ * the tier reads the type of the numeric value (a reduced rational, a
+ * radical). The container handlers that read a literal's structure for its
+ * `tier` alone (`Tuple`, `List`, `Set`) never ask for the fraction, and a
+ * handler that reads it only for its value (`operandLiteralValue`) asks for
+ * neither. */
+class NumberLiteralStructure {
+  readonly kind = 'number';
+  /** `0` or `1` when the literal is that number; absent otherwise. */
+  declare readonly literal?: 0 | 1;
+  readonly #op: Expression & NumberLiteralInterface;
+  #tier: Type | undefined;
+  #rational: readonly [bigint, bigint] | undefined;
+  #rationalComputed = false;
+
+  constructor(op: Expression & NumberLiteralInterface) {
+    this.#op = op;
+    // `isSame` is strictly syntactic, so this reads the literal's own value
+    // and never a symbol's assigned one.
+    const literal = op.isSame(0) ? 0 : op.isSame(1) ? 1 : undefined;
+    if (literal !== undefined) this.literal = literal;
+  }
+
+  get tier(): Type {
+    return (this.#tier ??= numberLiteralTierType(this.#op));
+  }
+
+  get rational(): readonly [bigint, bigint] | undefined {
+    if (!this.#rationalComputed) {
+      this.#rationalComputed = true;
+      // A float has no exact value, even when it is an integer (`2.0`):
+      // `asRational` reads its value as `[2, 1]`.
+      const op = this.#op;
+      const r = op.isExact ? asRational(op) : undefined;
+      if (r !== undefined) this.#rational = [BigInt(r[0]), BigInt(r[1])];
+    }
+    return this.#rational;
+  }
+}
+
+// The operands of a compound are described on demand. A handler that reads
+// a compound's structure for its KIND alone (the `List` cell classifier asks
+// each cell "are you a number literal?" and a tuple cell answers no) must not
+// pay for one descriptor per operand of every tuple in a 5,000-point list.
+// The walk memo is kept, so a shared node is still described once per
+// derivation whenever the read happens.
+
+/** The structural view of a `Tuple`. */
+class TupleStructure {
+  readonly kind = 'tuple';
+  readonly arity: number;
+  readonly #ops: ReadonlyArray<Expression>;
+  readonly #memo: DescriptorMemo;
+  #elements: ReadonlyArray<OperandDescriptor> | undefined;
+
+  constructor(op: Expression & FunctionInterface, memo: DescriptorMemo) {
+    this.arity = op.nops;
+    this.#ops = op.ops;
+    this.#memo = memo;
+  }
+
+  get elements(): ReadonlyArray<OperandDescriptor> {
+    return (this.#elements ??= this.#ops.map((x) =>
+      describe(x, undefined, this.#memo)
+    ));
+  }
+}
+
+/** The structural view of a `List` literal. */
+class ListLiteralStructure {
+  readonly kind = 'list-literal';
+  readonly shape: readonly number[];
+  readonly #ops: ReadonlyArray<Expression>;
+  readonly #memo: DescriptorMemo;
+  #elements: ReadonlyArray<OperandDescriptor> | undefined;
+
+  constructor(op: Expression & FunctionInterface, memo: DescriptorMemo) {
+    this.shape = listLiteralShape(op);
+    this.#ops = op.ops;
+    this.#memo = memo;
+  }
+
+  get elements(): ReadonlyArray<OperandDescriptor> {
+    return (this.#elements ??= this.#ops.map((x) =>
+      describe(x, undefined, this.#memo)
+    ));
+  }
+}
+
+/** The structural view of any other function expression. */
+class ApplicationStructure {
+  readonly kind = 'application';
+  readonly head: string;
+  /** The callee's descriptor (`describeCallee`); absent when there is
+   * none. */
+  declare readonly callee?: OperandDescriptor;
+  readonly #ops: ReadonlyArray<Expression>;
+  readonly #memo: DescriptorMemo;
+  #children: ReadonlyArray<OperandDescriptor> | undefined;
+
+  constructor(op: Expression & FunctionInterface, memo: DescriptorMemo) {
+    this.head = op.operator;
+    this.#ops = op.ops;
+    this.#memo = memo;
+    const callee = describeCallee(op, memo);
+    if (callee !== undefined) this.callee = callee;
+  }
+
+  get children(): ReadonlyArray<OperandDescriptor> {
+    return (this.#children ??= this.#ops.map((x) =>
+      describe(x, undefined, this.#memo)
+    ));
+  }
+}
+
 function structureOfExpression(
   op: Expression,
   memo: DescriptorMemo
@@ -326,32 +454,7 @@ function structureOfExpression(
     return node;
   }
   if (isString(op)) return { kind: 'string', text: op.string };
-  if (isNumber(op)) {
-    // `isSame` is strictly syntactic, so this reads the literal's own value
-    // and never a symbol's assigned one.
-    const literal = op.isSame(0) ? 0 : op.isSame(1) ? 1 : undefined;
-    // The reduced fraction is read on demand: it converts both terms to
-    // `bigint`, and the container handlers that read a literal's structure
-    // for its `tier` alone (`Tuple`, `List`, `Set`) never ask for it.
-    let rational: readonly [bigint, bigint] | undefined;
-    let rationalComputed = false;
-    const node: OperandStructure = {
-      kind: 'number',
-      tier: numberLiteralTierType(op),
-      get rational(): readonly [bigint, bigint] | undefined {
-        if (!rationalComputed) {
-          rationalComputed = true;
-          // A float has no exact value, even when it is an integer (`2.0`):
-          // `asRational` reads its value as `[2, 1]`.
-          const r = op.isExact ? asRational(op) : undefined;
-          if (r !== undefined) rational = [BigInt(r[0]), BigInt(r[1])];
-        }
-        return rational;
-      },
-    };
-    if (literal !== undefined) node.literal = literal;
-    return node;
-  }
+  if (isNumber(op)) return new NumberLiteralStructure(op);
   if (isFunction(op, 'Function')) {
     const body = functionLiteralBody(op);
     const bodyStructure =
@@ -380,41 +483,10 @@ function structureOfExpression(
   // answers no — must not pay for one descriptor per operand of every
   // tuple in a 5,000-point list. The walk memo is captured, so a shared
   // node is still described once per derivation whenever the read happens.
-  if (isFunction(op, 'Tuple')) {
-    const ops = op.ops;
-    let elements: ReadonlyArray<OperandDescriptor> | undefined;
-    return {
-      kind: 'tuple',
-      arity: op.nops,
-      get elements(): ReadonlyArray<OperandDescriptor> {
-        return (elements ??= ops.map((x) => describe(x, undefined, memo)));
-      },
-    };
-  }
-  if (isFunction(op, 'List')) {
-    const ops = op.ops;
-    let elements: ReadonlyArray<OperandDescriptor> | undefined;
-    return {
-      kind: 'list-literal',
-      shape: listLiteralShape(op),
-      get elements(): ReadonlyArray<OperandDescriptor> {
-        return (elements ??= ops.map((x) => describe(x, undefined, memo)));
-      },
-    };
-  }
-  if (isFunction(op)) {
-    const ops = op.ops;
-    let children: ReadonlyArray<OperandDescriptor> | undefined;
-    const callee = describeCallee(op, memo);
-    return recordSource(op, {
-      kind: 'application',
-      head: op.operator,
-      ...(callee === undefined ? {} : { callee }),
-      get children(): ReadonlyArray<OperandDescriptor> {
-        return (children ??= ops.map((x) => describe(x, undefined, memo)));
-      },
-    });
-  }
+  if (isFunction(op, 'Tuple')) return new TupleStructure(op, memo);
+  if (isFunction(op, 'List')) return new ListLiteralStructure(op, memo);
+  if (isFunction(op))
+    return recordSource(op, new ApplicationStructure(op, memo));
   return undefined;
 }
 

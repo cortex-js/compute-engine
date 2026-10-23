@@ -1801,12 +1801,51 @@ export interface BroadcastLiftInput {
 }
 
 /**
+ * Whether an operand cannot make the broadcast lift apply: its type is a
+ * numeric scalar type (`integer`, `real`, a numeric range, a number literal
+ * type; `isNumericScalarType`) or a union of such types
+ * (`complex | +oo | -oo`), and it does not hold a collection now
+ * (`isCollection`, read only after the type).
+ *
+ * When every operand is such an operand, `broadcastLiftType` answers
+ * `undefined`, so a caller can skip the lift and the input it builds for it.
+ * Each arm declines for such operands: the type has no `missing` arm and no
+ * collection arm (no gated present part, no scalar-or-collection union), no
+ * tuple arm (the tuple arm finds no arity, the arm-by-arm typing has no
+ * tuple), and no top type or `broadcastable<T>` arm (the visible-collection
+ * arm and the possibly-a-collection arm find no trigger). The visible-collection arm also reads the value-level
+ * `finiteBroadcastParticipant`, which is `false` for an operand that is not
+ * a collection.
+ *
+ * `isCollection` is read instead of `finiteBroadcastParticipant` because it
+ * has no side effect: `isFiniteCollection` of a block-local symbol with no
+ * value records a read before the declaration
+ * (`_noteCollectionReadBeforeDeclaration` in `boxed-symbol.ts`), and a
+ * numeric scalar is not read as a collection. The operand's type is read
+ * first, as the lift reads it.
+ */
+export function isNumericScalarOperandView(v: BroadcastOperandView): boolean {
+  const t = resolveTypeAlias(v.type);
+  if (
+    !isNumericScalarType(t) &&
+    (typeof t === 'string' ||
+      t.kind !== 'union' ||
+      !t.types.every((arm) => isNumericScalarType(resolveTypeAlias(arm))))
+  )
+    return false;
+  return !v.isCollection;
+}
+
+/**
  * The broadcast-lifted result type of an application, or `undefined` when no
  * lift applies and the caller's per-element result stands. The caller has
  * already decided that the operator is broadcastable (or declares
  * `broadcastable<T>` slots) and is not a lambda.
  */
 export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
+  // Operands that are all numeric scalars make every arm decline
+  // (`isNumericScalarOperandView`).
+  if (input.views.every(isNumericScalarOperandView)) return undefined;
   const { def, sigResult, hasTensors } = input;
   // A gated collection operand (a restricted point or list) lifts as its
   // present part. The caller adds the `missing` arm back

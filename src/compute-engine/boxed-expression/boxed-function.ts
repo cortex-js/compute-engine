@@ -111,6 +111,7 @@ import {
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
   isPossiblyCollectionTypedView,
+  isNumericScalarOperandView,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells, producesKeyed } from './listed-element.js';
 import {
@@ -12093,10 +12094,15 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // (`declaredSlots` is computed above, next to the arm resolution.)
     // A call with a surplus operand evaluates to one error, so its value is
     // not a collection: it keeps the handler's type (`hasSurplusOperands`).
+    // Operands that are all numeric scalars make the lift decline
+    // (`isNumericScalarOperandView`), so it is not called and its input is
+    // not built. `broadcastLiftType` starts with the same test, for its
+    // other caller: the two must stay the same test.
     if (
       (def.broadcastable || declaredSlots) &&
       !isLambdaDef(def) &&
-      !hasSurplusOperands(def, expr.ops)
+      !hasSurplusOperands(def, expr.ops) &&
+      !expr.ops.every((x) => isNumericScalarOperandView(viewOfExpression(x)))
     ) {
       // The type handler called again with the operands in `cells` typed as
       // one cell of a broadcast (`cells[i]`), for the per-cell results the

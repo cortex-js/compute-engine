@@ -5470,6 +5470,17 @@ export function isTupleWithListCoordinate(x: Expression): boolean {
  * value that is not such a tuple.
  */
 export function isListCoordinateTupleType(type: Type): boolean {
+  // Stripping the `missing` arms changes a union only, and leaves the kind
+  // of any other type as it is: a type that is not a tuple, a union or a
+  // reference (`integer`, `real<0..>`, a literal type, a list) is answered
+  // before the strip.
+  if (
+    typeof type === 'string' ||
+    (type.kind !== 'tuple' &&
+      type.kind !== 'union' &&
+      type.kind !== 'reference')
+  )
+    return false;
   const stripped = stripMissingFromType(type);
   const t = resolveTypeReference(stripped) ?? stripped;
   if (typeof t === 'string' || t.kind !== 'tuple') return false;

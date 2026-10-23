@@ -3291,6 +3291,19 @@ function isDeclaredNumberListOperand(d: OperandDescriptor): boolean {
  * function expression, and a symbol node carries the inferred flag.
  */
 function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
+  // Every test below needs a top type (`unknown`, `any`, `value`), a union
+  // or a `broadcastable<T>`. Any other type (`integer`, `real<0..>`, a
+  // literal type) answers `false` from the type alone, before the operand's
+  // structure is built.
+  const resolved = resolveTypeAlias(d.type);
+  if (
+    resolved !== 'unknown' &&
+    resolved !== 'any' &&
+    resolved !== 'value' &&
+    (typeof resolved === 'string' ||
+      (resolved.kind !== 'union' && resolved.kind !== 'broadcastable'))
+  )
+    return false;
   // A `Block` local typed by a top type may hold a list, as the expression
   // predicate reads it (`isTopTypedBlockLocal`, `collection-utils.ts`).
   const structure = d.structureOf?.();
@@ -3303,7 +3316,6 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
   // An application typed by a top type beside absence markers only
   // (`missing | unknown`, an index into a `list<unknown>`) is read as that
   // top type (`topTypeBesideAbsence`), as the expression predicate reads it.
-  const resolved = resolveTypeAlias(d.type);
   const t =
     (operandChildren(d) !== undefined
       ? topTypeBesideAbsence(resolved)
