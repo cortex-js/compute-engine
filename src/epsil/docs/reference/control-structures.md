@@ -77,7 +77,8 @@ fixedPoint(cos, 1.0)
 
 `(expression, expression, expression?) -> any`
 
-Conditional branch: evaluate one of two expressions.
+`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is `Missing` when `c` is `False`. Only the selected expression is evaluated.
+When `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection.
 
 ### Loop
 
@@ -118,4 +119,9 @@ Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.
 
 `(expression+) -> unknown`
 
-Return the value for the first condition that is true.
+`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.
+Element-wise selection: when a condition is a list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.
+  - A condition that is not a list applies to every position.
+  - Every list must have the length of the condition, else the value is an `incompatible-dimensions` error.
+  - A position that no clause selects holds `NaN` when every expression is a number, `Missing` otherwise.
+  - A condition that is a list of lists (a comparison of a matrix) selects at every level; an expression with fewer levels than the condition is an `incompatible-dimensions` error, one with more levels is taken whole at each position.

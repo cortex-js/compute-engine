@@ -565,17 +565,18 @@ them.
 
 ### Defects found by the fix of Tycho row 426 (OPEN — found 2026-10-22)
 
-- **A lazy collection operator inside a function literal reads the original
-  argument after the parameter is reassigned** (wrong value, on `3799d01dd`
-  too). `Apply((a: list<real>) ↦ Block(Assign(a, [1, 2]), Map(p, a)),
-  [7, 8, 9])` evaluates to `[21, 24, 27]` (it should map `[1, 2]`), and
-  `Filter` returns `[7, 8, 9]` the same way, while `Reverse` reads `[1, 2]`.
-  The static types describe the reassigned value, so the type and the value
-  disagree.
 - **`D` reuses its variable name after a parameter of the same name.**
   `a ↦ (D(a^2, a), Reverse(a))` types its first slot `number`, but over a
   list the value is the unevaluated `2 * [1.5, -2, 0.25]` (on `3799d01dd`
   too).
+- **A literal's signature reads an unknown parameter as a number.** In
+  `(a, b) ↦ Map(u ↦ u·b, a)`, `b` can be a list, but the literal types `u·b`
+  as a number, so with `b = M` (`list<real>`) the value is a matrix that does
+  not fit the literal's type `collection<number>` (on `3799d01dd` too). Same
+  convention as the `x ↦ [x]` entry below.
+- **A `Return` inside a `Sum` body is left in the value**: the value is such as
+  `1 + 2Return("q")` (on `3799d01dd` too). Decide whether `Return` may appear
+  in a big-operator body (an error) or ends the enclosing function.
 - **`x ↦ [x]`** types `(unknown) -> vector<1>` whatever `x` is; applied to a
   set, a tuple, a record or a string the value does not fit. Same defect as
   the entry "`g := x ↦ [x]` gets the signature …" below (user decision owed
@@ -694,24 +695,6 @@ With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
   for the scalar and the cells from the same evidence, and dispatch on the
   value's shape when the code runs (found 2026-10-22 by the complex-mode fix
   for list inputs).
-- **The `complex` compile mode does not reach the cells of a list input.**
-  With `mode: 'complex'`, a scalar input declared `number` compiles on the
-  complex lane (`Add(p, 1)` gives `{re: 2, im: 1}` for `p = 1+i`), but a list
-  or tensor input declared `list<number>` or `tensor<number>` compiles
-  `Add(p, 1)` to `_SYS.bcast((a, b) => a + b, _.p, 1)`, so a cell `1+i` gives
-  the string `"[object Object]1"` (measured on `cc468eb4f` and with the fix of
-  row 425). `docs/COMPILATION-MODEL.md` ("Complex modes") says the `complex`
-  mode compiles wide numeric bindings through complex kernels. Fix: in the
-  `complex` mode, the broadcast lowering of `Add`/`Multiply` (and the other
-  cell functions) uses the complex-aware combiner (`_SYS.sadd`, as it already
-  does for `list<complex>`) when the cell type admits a complex value. Not a
-  defect in the `strict` and `auto` modes: there a complex value at an entry of
-  a list read on the real lane computes as plain JavaScript, as documented. A
-  symbol with an assigned value is not affected: its value is embedded in the
-  compiled code and its type read from the value (`vector<complex^3>`), so the
-  complex lane is chosen. Since the fix of row 425, `Add(Sum(Rest(p)), 1)` for
-  `p: tensor<number>` also goes through this lowering (its type is now
-  `number | tensor`).
 - **`Dot(p, p)` for `p: list<number>` at `p = []`**: the interpreter leaves
   `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0` (on
   `cc468eb4f` too).
@@ -1155,14 +1138,21 @@ dictionary). These remain, each measured with a fix and reverted:
   an absent point (`missing` beside tuples of one arity) is not applied to an
   absent number. Expected: the same rule for any cell type whose part without
   `missing` can carry dimensions.
-- **A list that holds an error value is typed `list<unknown>` (needs a
-  decision).** `Which([True, False], 1, Missing, 2)` is typed `vector<2>`, and
-  its value `[1, Error(…)]` is typed `list<unknown>`: the `List` literal joins
-  `integer` with the `error` cell to `unknown`. So the type of a value with an
-  error cell is never a subtype of the static type. `docs/ERROR-MODEL.md` §4
-  says a result type describes the successful values, which may make the
-  static type correct; the question is what the type of the value itself
-  should be (the join without the error cell, or a type with an `error` arm).
+- **A list literal that holds an error value is typed `list<unknown>` (needs a
+  decision).** The list `[1, 1/"a", 3]` holds an error in its second element
+  (`1/"a"` is `Error(incompatible-type)`), and its type is `list<unknown>`:
+  the `List` literal joins the element types `integer` and `error`, and that
+  join is `unknown`. Without the error, `[1, 2, 3]` is `vector<integer^3>`.
+  Two consequences: the type says nothing about the elements that are not
+  errors, and it is not a subtype of the type of any expression that produced
+  the list (`If([True, Missing, False], 1, 0)` is typed `list<integer>` and
+  evaluates to `[1, Error(…), 0]`, typed `list<unknown>`). The rule of
+  `docs/ERROR-MODEL.md` (§4, "a type describes the successes") says the
+  static type `list<integer>` is right; the question is the type of the list
+  value itself. Options: (a) skip an `error` element in the join, so
+  `[1, 1/"a", 3]` is `list<integer^3>` (or `vector<integer^3>`), consistent
+  with "a type describes the successes"; (b) keep the error visible,
+  `list<integer | error>`; (c) keep `list<unknown>`. Recommended: (a).
 - **`If`/`Which` with a condition whose type cannot be read keep the scalar
   type (soundness, found 2026-10-22).** `If(c, 1, 0)` with `c` of unknown type
   alone is typed `integer`, but when `c` holds a list at run time the value is
