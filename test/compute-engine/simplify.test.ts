@@ -2984,6 +2984,30 @@ describe('simplify() folds constants whatever the rule list (issue #306)', () =>
     // A relation with an unknown is not a truth value.
     expect(ce306.parse('x = x').simplify().toString()).toBe('x == x');
   });
+
+  // The two sides of `f(a) = f(a)` cancel. The relation was rewritten as
+  // `0 = 0`, and `factor()` then divided both sides by their common
+  // coefficient 0, which gave `NaN = NaN`, then `False`.
+  test.each([
+    ['f(a) = f(a)', 'f(a) == f(a)'],
+    ['f(a) \\ne f(a)', 'f(a) != f(a)'],
+    ['f(a) \\le f(a)', 'f(a) <= f(a)'],
+    ['\\sin(a) = \\sin(a)', 'sin(a) == sin(a)'],
+    ['g(x) + 1 = g(x) + 1', 'g(x) + 1 == g(x) + 1'],
+  ])('%s is not decided wrongly by simplify()', (input, expected) => {
+    expect(ce306.parse(input).simplify().toString()).toBe(expected);
+  });
+
+  test('Factor of a relation between two zeros keeps the zeros', () => {
+    expect(
+      ce306.box(['Factor', ['Equal', 0, 0]]).evaluate().toString()
+    ).toBe('0 == 0');
+  });
+
+  test('a relation of two equal residue classes simplifies to True', () => {
+    const rc = ['ResidueClass', 2, 7] as const;
+    expect(ce306.box(['Equal', rc, rc]).simplify().symbol).toBe('True');
+  });
 });
 
 // A float exponent is not a polynomial degree: the step

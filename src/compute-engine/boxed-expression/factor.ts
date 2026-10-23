@@ -1063,6 +1063,11 @@ function factorUncached(expr: Expression): Expression {
     let rhs = Product.from(expr.op2);
     const [coef, common] = commonTerms(lhs, rhs);
 
+    // When both sides are 0, the common coefficient is 0, and a division by
+    // it would make both sides NaN: `0 = 0` would become `NaN = NaN`, which
+    // is false. Such a relation has no factor to remove.
+    if (coef.isZero) return expr;
+
     let flip = coef.sgn() === -1;
 
     if (!coef.isOne) {

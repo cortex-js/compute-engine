@@ -83,6 +83,17 @@
   `nothing | number` for `Numerator` and `Denominator` and
   `nothing | tuple<number, number>` for `NumeratorDenominator`.
 
+- **`simplify()` gave `False` for a relation whose two sides are the same
+  function call.** `f(a) = f(a)`, `sin(a) = sin(a)` and `g(x) + 1 = g(x) + 1`
+  simplified to `False`, and `f(a) ≠ f(a)` to `True`; `evaluate()` gave the
+  correct values. The simplifier rewrote the relation as `f(a) - f(a) = 0`,
+  that is `0 = 0`, and the factoring step then divided both sides by their
+  common coefficient, 0, which gave `NaN = NaN`. Such a relation now stays as
+  it is, as `x = x` does, and `Factor(0 = 0)` is `0 = 0` (it was
+  `NaN = NaN`). The same error made `Equal(c, c)` `False` for a value `c` of
+  an extension head
+  ([#471](https://github.com/cortex-js/compute-engine/issues/471)).
+
 - **Compiled folds over elements of unknown type, absent elements, and
   booleans** (ROADMAP CE-380, CE-381, CE-382). Three kinds of compiled
   JavaScript folds (`Sum`, `Product`, `Reduce`, `Scan`, and `Max`, `Mean` and

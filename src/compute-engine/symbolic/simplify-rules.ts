@@ -1428,15 +1428,21 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   //   2x < 4t -> x < 2t
   //
   expr = factor(expr) ?? expr;
-  console.assert(isRelationalOperator(expr.operator));
+  // `factor()` folds a relation of two closed residue classes to its truth
+  // value (`residueFoldOrKeep()`): that value is the result.
+  if (!isRelationalOperator(expr.operator))
+    return { value: expr, because: 'simplify-relational-operator' };
   if (isFunction(expr) && expr.nops === 2) {
     // Try f(x) < g(x) -> f(x) - g(x) < 0
     if (!expr.op2.isSame(0)) {
-      const alt = factor(
-        ce._fn(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
-      );
-      // Pick the cheapest (simplest) of the two
-      if (ce.costFunction(alt) < ce.costFunction(expr)) expr = alt;
+      const difference = expr.op1.sub(expr.op2);
+      // Two sides that cancel (`f(a) = f(a)`) are kept as they are, as
+      // `x = x` is: the relation is not replaced by `0 = 0`.
+      if (!difference.isSame(0)) {
+        const alt = factor(ce._fn(expr.operator, [difference, ce.Zero]));
+        // Pick the cheapest (simplest) of the two
+        if (ce.costFunction(alt) < ce.costFunction(expr)) expr = alt;
+      }
     }
   }
 
