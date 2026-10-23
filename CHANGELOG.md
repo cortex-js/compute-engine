@@ -824,6 +824,22 @@
   integrates in two parts) and the compiled real value is `NaN`; that is not
   changed.
 
+- **A compiled numerical integral of a divergent integrand took 200 to 400 ms
+  and answered an arbitrary finite number** (Tycho row 427). The absolute
+  moment of the normal distribution
+  `\int_{-50}^{50}|t|^{x}\frac{1}{\sqrt{2\pi}}e^{-\frac{1}{2}t^2}dt` diverges
+  at t = 0 for x ≤ −1. The interpreter answered `+∞`, because it finds the pole
+  from the expression with the value of `x`, but the compiled function gave a
+  different number at each call (647, 708, 7249 at x = −1.5), and
+  `\int_{-1}^{2}\frac{1}{(t-x)^2}dt` at x = 0.3 gave `8.9e16`. The adaptive
+  quadrature looked for a divergence only at the two bounds. When its bisection
+  goes deep at a point inside the interval, it now finds the singular point and
+  splits the interval there, so that each half has the singularity at a bound.
+  The compiled function now answers `NaN` in under 5 ms for x = −1, −1.5 and
+  −2.5, and the interpreter still answers `+∞`. A convergent moment is also
+  more accurate: at x = −0.9 the error was `5.7e-10`, and it is now `2.6e-12`.
+  A smooth integrand, a kink, a jump and a narrow peak are not split.
+
 - **`D(PointY(h(u)), u)` took seconds, and was worked out again at each
   evaluation** (Tycho row 424). With `h` a path joined from 29 linear pieces,
   the derivative went through the generic chain rule, which reads `PointY` as an

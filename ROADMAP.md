@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-376.
+Next free reference: CE-377.
 
 **Entry format.**
 
@@ -3444,6 +3444,34 @@ region, as an overflowed tail is. Proposal for the interpreted route: evaluate
 the integrand at one NaN point with the engine's own arithmetic. An overflowed
 tail gives a tiny finite value; a region with no real value gives a complex
 value or NaN.
+
+### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
+
+**Status:** open; cause not located. Found 2026-10-23 while fixing Tycho row 427.
+
+The adaptive quadrature (`adaptiveQuadrature` with `singularEndpoints`,
+`numerics/gauss-kronrod.ts`) integrates an integrable singularity at an
+endpoint correctly when the endpoint is 0 or 1, and not when it is 1/3:
+
+| Integral                         | Result                       | True error |
+| -------------------------------- | ---------------------------- | ---------- |
+| `∫₀^(5/3) t^(−1/2) dt`           | converged, error `9.7e-12`   | `4.4e-16`  |
+| `∫₁² (t − 1)^(−1/2) dt`          | extrapolated, error `1.5e-13`| `1.3e-15`  |
+| `∫_(1/3)^2 (t − 1/3)^(−1/2) dt`  | converged, error `2.4e-10`   | `6.5e-9`   |
+
+The three integrals have the same value up to a translation. The missing part
+of the last one is about the integral over one spacing of the doubles next to
+1/3 (`2·√(5.5e-17)`), so the corner panel probably stops at that width with an
+error estimate that is too small, and the result is reported as `converged`
+instead of going to the extrapolation of the shells. A singularity inside the
+interval has the same error since Tycho row 427 was fixed, because the
+quadrature now splits the interval at the singularity and each half has it at
+an endpoint: `∫₋₁² |t − 1/3|^(−1/2) dt` reports `converged` with an error of
+`4.5e-10`, and its true error is `1.3e-8`. Before that fix, the true error was
+the same and the result was also reported as `converged`. The interpreter
+uses the same quadrature: `∫₋₁² |t − 0.3|^(−1/2) dt` evaluates to
+`4.88803179952 ± 0.00000000047`, and the value is `2·√1.3 + 2·√1.7 =
+4.888031812279`.
 
 ### CE-179. Under `.N()`, some uses of a parameter in a user-function body read the rounded argument
 

@@ -71,6 +71,14 @@ export interface GaussKronrodOutcome {
    * `adaptiveFinite`, `gauss-kronrod.ts`). `estimate` and `error` are then
    * `NaN`. */
   nanRegion?: true;
+  /** The deepest panel whose distance to each endpoint is more than twice
+   * its width, when the adaptive loop bisected it at least
+   * `INTERIOR_SITE_DEPTH` times (see `gauss-kronrod.ts`): the refinement
+   * went deep at a point inside the interval, which is the signature of a
+   * singularity there. The shells left by the bisection toward a singular
+   * endpoint are at a distance of one width from it, and are not such a
+   * panel. */
+  interiorSite?: { a: number; b: number };
   lo: CornerSeries;
   hi: CornerSeries;
 }

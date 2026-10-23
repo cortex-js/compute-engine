@@ -271,6 +271,44 @@ const NAN_BORDER_TESTS = 32;
 const ROUNDOFF_ULPS = 4;
 
 /**
+ * The smallest number of bisections of a panel far from both endpoints
+ * (`interiorSite` in `GaussKronrodOutcome`, `endpoint-quadrature.ts`) for
+ * `adaptiveQuadrature` to read the panel as the site of a singularity
+ * inside the interval, and to split the interval there
+ * (`interiorSingularPoint`).
+ *
+ * The endpoint analysis (`shellsDiverge`, `tailUnresolved` and the
+ * extrapolation of the shells, `resolveSingularEndpoints`) reads only the
+ * panels at the two endpoints. A singularity inside the interval was not
+ * analyzed: `∫₋₁² (t − 0.3)⁻² dt`, which diverges, gave `8.9e16`, and
+ * `∫₋₁² |t − 1/3|^(−1/2) dt` reported `converged` with an error of `4.9e-10`
+ * when its true error was `1.3e-8`. Measured with 16 starting panels: an
+ * algebraic singularity inside the interval is bisected 52 times or more (to
+ * the spacing of the doubles), and a logarithmic singularity, a kink, a jump
+ * and a peak of width `1e-6` at most 32 times. A split at a point where the
+ * integrand is smooth gives the same value, at the cost of a second
+ * quadrature.
+ */
+const INTERIOR_SITE_DEPTH = 40;
+
+/**
+ * A panel far from both endpoints is also the site of a singularity when its
+ * width is at most this number of spacings of the doubles at its position
+ * (`Number.EPSILON·|x|`). Far from 0, the spacing stops the bisection before
+ * `INTERIOR_SITE_DEPTH`: next to the pole of `(t − 1000000.3)⁻²` on
+ * `[999999, 1000002]`, the doubles are `1.2e-10` apart and a starting panel
+ * can be bisected about 31 times. Next to 1/3, 4096 spacings are a depth of
+ * about 39, the same reading as `INTERIOR_SITE_DEPTH`; a jump of `⌊t⌋` on
+ * `[0, 3.3]` (depth 30, width `2e-10`) is not a site.
+ */
+const INTERIOR_SITE_ULPS = 4096;
+
+/** The number of times `adaptiveQuadrature` splits an interval at a
+ * singularity inside it (see `INTERIOR_SITE_DEPTH`): a half can split again,
+ * at another singularity, up to this depth. */
+const MAX_INTERIOR_SPLITS = 3;
+
+/**
  * The per-level starting-panel count for a `dimensions`-deep iterated integral,
  * chosen so the floor stays ~`INITIAL_PANELS` for the WHOLE integral instead of
  * per level. Without this an iterated integral pays `INITIAL_PANELS^dimensions`
@@ -1244,6 +1282,24 @@ function adaptiveFinite(
   const valueMissing =
     badPanels > 0 &&
     panels.some((p) => panelIsBad(p) && p.a - a > corner && b - p.b > corner);
+  // The deepest panel inside the interval (see `interiorSite` in
+  // `GaussKronrodOutcome`). The bisection toward a singular endpoint leaves
+  // shells that touch neither endpoint, `[a + w, a + 2w]`, whose distance to
+  // the endpoint is their width: they belong to the endpoint analysis. A
+  // panel next to a singularity inside the interval is narrower than half
+  // its distance to each endpoint.
+  let site: Panel | undefined;
+  for (const p of panels) {
+    const w = p.b - p.a;
+    if (
+      p.a - a > 2 * w &&
+      b - p.b > 2 * w &&
+      ((p.depth ?? 0) >= INTERIOR_SITE_DEPTH ||
+        w <= INTERIOR_SITE_ULPS * Number.EPSILON * Math.abs(p.a + p.b) * 0.5) &&
+      (site === undefined || (p.depth ?? 0) > (site.depth ?? 0))
+    )
+      site = p;
+  }
   return {
     estimate: totalValue,
     error: valueMissing ? Number.POSITIVE_INFINITY : totalError,
@@ -1251,6 +1307,7 @@ function adaptiveFinite(
     divergent,
     unresolved,
     magnitude: Math.max(totalMagnitude, 0),
+    ...(site === undefined ? {} : { interiorSite: { a: site.a, b: site.b } }),
     ...corners,
   };
 }
@@ -1272,6 +1329,134 @@ let activeQuadratures = 0;
  */
 export function insideQuadrature(): boolean {
   return activeQuadratures > 0;
+}
+
+/** The result of `adaptiveQuadrature`. */
+type AdaptiveQuadratureResult = {
+  estimate: number;
+  error: number;
+  converged: boolean;
+  divergent: boolean;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  extrapolated?: boolean;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  oscillates?: true;
+  /** Set only with `singularEndpoints`: see `QuadratureResult` in
+   * `endpoint-quadrature.ts`. */
+  singularCorner?: true;
+  /** The integrand is `NaN` on a set that is not some isolated points, and
+   * `estimate` and `error` are `NaN`: the integral has no value. A caller
+   * must not sample the integrand (Monte Carlo), whose mean is then also
+   * `NaN`. See `GaussKronrodOutcome` in `endpoint-quadrature.ts`. */
+  nanRegion?: true;
+};
+
+/**
+ * The integral over `[a, c]` from its integrals over the two halves `[a, b]`
+ * and `[b, c]`. Neither half has `nanRegion`: the caller returns such a half
+ * directly, since the integral then has no value.
+ */
+function combineHalves(
+  left: AdaptiveQuadratureResult,
+  right: AdaptiveQuadratureResult,
+  rtol: number,
+  atol: number
+): AdaptiveQuadratureResult {
+  const estimate = left.estimate + right.estimate;
+  const error = left.error + right.error;
+  // Each half converged against a tolerance scaled to its OWN magnitude, so
+  // re-check the summed error on the combined result. The relative scale is
+  // the halves' combined magnitude, not `|estimate|`: for a cancelling
+  // integrand (halves ±M) the achievable absolute accuracy is `rtol·M` —
+  // demanding `rtol·|estimate|` (→ `atol` at exact cancellation) would
+  // reject correct results like ∫x·e^(−x²) = 0. The reported `error` is the
+  // true bound either way. The finiteness test also forces
+  // `converged: false` when the sum is NaN (e.g. ∞ + (−∞)); `estimate` is
+  // only meaningful when `converged` is true.
+  const scale = Math.abs(left.estimate) + Math.abs(right.estimate);
+  const converged =
+    left.converged &&
+    right.converged &&
+    Number.isFinite(estimate) &&
+    error <= Math.max(atol, rtol * scale);
+  // Either half diverging makes the whole integral divergent: a divergent
+  // half has no finite value, and the other half cannot cancel it (∞ − ∞ is
+  // not a value).
+  const divergent = left.divergent || right.divergent;
+  // A half that oscillates without a value makes the whole integral have no
+  // value, with no sign.
+  if (left.oscillates === true || right.oscillates === true)
+    return { estimate, error, converged, divergent, oscillates: true };
+  // The whole integral is extrapolated when each half converged or was
+  // extrapolated, and it did not converge.
+  const extrapolated =
+    !converged &&
+    (left.converged || left.extrapolated === true) &&
+    (right.converged || right.extrapolated === true);
+  if (extrapolated)
+    return { estimate, error, converged, divergent, extrapolated };
+  // A half with a singular corner that was not resolved makes the whole
+  // result one (see `QuadratureResult`, `endpoint-quadrature.ts`).
+  if (
+    !converged &&
+    !divergent &&
+    (left.singularCorner === true || right.singularCorner === true)
+  )
+    return { estimate, error, converged, divergent, singularCorner: true };
+  return { estimate, error, converged, divergent };
+}
+
+/**
+ * The point of `[lo, hi]` where the integrand `f` is singular, near the
+ * panel `site` that the adaptive loop bisected `INTERIOR_SITE_DEPTH` times
+ * or more, or `undefined` when that point is not strictly inside
+ * `(lo, hi)`.
+ *
+ * The singular point is in the panel or next to it: in a neighboring panel
+ * of the same width when it is a boundary of panels. A golden-section search
+ * for the largest `|f|` on the panel and its two neighbors finds it to the
+ * spacing of the doubles, since `|f|` grows without bound toward it. A
+ * sample that is `NaN` or infinite counts as the largest.
+ */
+function interiorSingularPoint(
+  f: (x: number) => number,
+  lo: number,
+  hi: number,
+  site: { a: number; b: number }
+): number | undefined {
+  const w = site.b - site.a;
+  let a = Math.max(lo, site.a - w);
+  let b = Math.min(hi, site.b + w);
+  const size = (x: number) => {
+    const y = Math.abs(f(x));
+    return Number.isNaN(y) ? Number.POSITIVE_INFINITY : y;
+  };
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  let x1 = b - ratio * (b - a);
+  let x2 = a + ratio * (b - a);
+  let f1 = size(x1);
+  let f2 = size(x2);
+  // Each step keeps 0.618 of the interval: 200 steps reduce any interval of
+  // doubles to its spacing, where `x1` and `x2` stop moving.
+  for (let i = 0; i < 200 && a < x1 && x1 < x2 && x2 < b; i++) {
+    if (f1 >= f2) {
+      b = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = b - ratio * (b - a);
+      f1 = size(x1);
+    } else {
+      a = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = a + ratio * (b - a);
+      f2 = size(x2);
+    }
+  }
+  const s = f1 >= f2 ? x1 : x2;
+  return s > lo && s < hi ? s : undefined;
 }
 
 /**
@@ -1346,27 +1531,13 @@ export function adaptiveQuadrature(
      * `2·maxIntervals` evaluations. The default, `false`, keeps the
      * Gauss–Kronrod result. */
     singularEndpoints?: boolean;
+    /** With `singularEndpoints`, the number of times the interval may still
+     * be split at a singularity inside it (default `MAX_INTERIOR_SPLITS`;
+     * see `INTERIOR_SITE_DEPTH`). The recursive calls on the two halves
+     * pass one less. */
+    interiorSplits?: number;
   }
-): {
-  estimate: number;
-  error: number;
-  converged: boolean;
-  divergent: boolean;
-  /** Set only with `singularEndpoints`: see `QuadratureResult` in
-   * `endpoint-quadrature.ts`. */
-  extrapolated?: boolean;
-  /** Set only with `singularEndpoints`: see `QuadratureResult` in
-   * `endpoint-quadrature.ts`. */
-  oscillates?: true;
-  /** Set only with `singularEndpoints`: see `QuadratureResult` in
-   * `endpoint-quadrature.ts`. */
-  singularCorner?: true;
-  /** The integrand is `NaN` on a set that is not some isolated points, and
-   * `estimate` and `error` are `NaN`: the integral has no value. A caller
-   * must not sample the integrand (Monte Carlo), whose mean is then also
-   * `NaN`. See `GaussKronrodOutcome` in `endpoint-quadrature.ts`. */
-  nanRegion?: true;
-} {
+): AdaptiveQuadratureResult {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
   const maxIntervals = options?.maxIntervals ?? 1500;
@@ -1419,48 +1590,7 @@ export function adaptiveQuadrature(
     if (left.nanRegion === true) return left;
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
     if (right.nanRegion === true) return right;
-    const estimate = left.estimate + right.estimate;
-    const error = left.error + right.error;
-    // Each half converged against a tolerance scaled to its OWN magnitude, so
-    // re-check the summed error on the combined result. The relative scale is
-    // the halves' combined magnitude, not `|estimate|`: for a cancelling
-    // integrand (halves ±M) the achievable absolute accuracy is `rtol·M` —
-    // demanding `rtol·|estimate|` (→ `atol` at exact cancellation) would
-    // reject correct results like ∫x·e^(−x²) = 0. The reported `error` is the
-    // true bound either way. The finiteness test also forces
-    // `converged: false` when the sum is NaN (e.g. ∞ + (−∞)); `estimate` is
-    // only meaningful when `converged` is true.
-    const scale = Math.abs(left.estimate) + Math.abs(right.estimate);
-    const converged =
-      left.converged &&
-      right.converged &&
-      Number.isFinite(estimate) &&
-      error <= Math.max(atol, rtol * scale);
-    // Either half diverging makes the whole integral divergent: the two halves
-    // are integrals of the same sign structure over disjoint ranges, so a
-    // divergent one cannot be cancelled by the other (∞ − ∞ is not a value).
-    const divergent = left.divergent || right.divergent;
-    // A half that oscillates without a value makes the whole integral have no
-    // value, with no sign.
-    if (left.oscillates === true || right.oscillates === true)
-      return { estimate, error, converged, divergent, oscillates: true };
-    // The whole integral is extrapolated when each half converged or was
-    // extrapolated, and it did not converge.
-    const extrapolated =
-      !converged &&
-      (left.converged || left.extrapolated === true) &&
-      (right.converged || right.extrapolated === true);
-    if (extrapolated)
-      return { estimate, error, converged, divergent, extrapolated };
-    // A half with a singular corner that was not resolved makes the whole
-    // result one (see `QuadratureResult`, `endpoint-quadrature.ts`).
-    if (
-      !converged &&
-      !divergent &&
-      (left.singularCorner === true || right.singularCorner === true)
-    )
-      return { estimate, error, converged, divergent, singularCorner: true };
-    return { estimate, error, converged, divergent };
+    return combineHalves(left, right, rtol, atol);
   } else if (bInf) {
     // [a, ∞): x = a + t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
     g = (t) => {
@@ -1550,8 +1680,8 @@ export function adaptiveQuadrature(
                 roundoff <= rtol * Math.max(Math.abs(q.estimate), r.magnitude),
             }
           : q;
-      if (options?.singularEndpoints === true)
-        return floored(
+      if (options?.singularEndpoints === true) {
+        const whole = floored(
           resolveSingularEndpoints(g, lo, hi, r, {
             rtol,
             atol,
@@ -1559,6 +1689,46 @@ export function adaptiveQuadrature(
             deadline,
           })
         );
+        // The refinement went deep at a point inside the interval (see
+        // `INTERIOR_SITE_DEPTH`): the interval is split there, so that the
+        // singularity is at an endpoint of each half, where the endpoint
+        // analysis reads it. Each half gets half the panel budget, as for
+        // the split of `(−∞, ∞)` above. The split result is kept, except
+        // when the whole interval converged and the split did not converge,
+        // was not extrapolated, did not diverge and does not oscillate. A
+        // divergent or oscillating split is kept in every case: it is what
+        // the whole interval could not see. A whole result that was only
+        // extrapolated is not kept against the split: its extrapolation
+        // corrects the endpoints, not the site inside the interval.
+        const splits = options.interiorSplits ?? MAX_INTERIOR_SPLITS;
+        if (whole.divergent || r.interiorSite === undefined || splits <= 0)
+          return whole;
+        const s = interiorSingularPoint(g, lo, hi, r.interiorSite);
+        if (s === undefined) return whole;
+        const halfOptions = {
+          rtol,
+          atol,
+          maxIntervals: Math.ceil(maxIntervals / 2),
+          initialPanels,
+          deadline,
+          singularEndpoints: true,
+          interiorSplits: splits - 1,
+        };
+        const left = adaptiveQuadrature(g, lo, s, halfOptions);
+        if (left.nanRegion === true) return left;
+        const right = adaptiveQuadrature(g, s, hi, halfOptions);
+        if (right.nanRegion === true) return right;
+        const split = combineHalves(left, right, rtol, atol);
+        if (
+          whole.converged &&
+          !split.converged &&
+          split.extrapolated !== true &&
+          !split.divergent &&
+          split.oscillates !== true
+        )
+          return whole;
+        return split;
+      }
       return floored({
         estimate: r.estimate,
         error: r.error,
