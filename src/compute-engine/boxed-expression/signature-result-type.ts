@@ -11,8 +11,13 @@ import {
   describeType,
   type DescriptorMemo,
 } from './operand-descriptor.js';
-import { functionLiteralBoundNames } from './function-literal.js';
+import {
+  functionLiteralBoundNames,
+  functionLiteralReturnMarker,
+  functionLiteralReturnType,
+} from './function-literal.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { reduceType } from '../../common/type/reduce.js';
 
 /**
  * For each body and each set of parameter names (sorted and joined), whether
@@ -51,35 +56,51 @@ const HAS_PARAMETER_CELL = new WeakMap<Expression, Map<string, boolean>>();
  * again in this way is typed `unknown`: an operator with its own scope
  * (`Sum`, `Loop`), an assignment or a declaration, and a statement of a
  * `Block` before the last one (it can give its value to a local variable
- * that the last statement reads, or return it). A nested function literal
- * and a `Typed` expression are not read: each has a type of its own. A
+ * that the last statement reads, or return it). A `Typed` expression is not
+ * read: it has a type of its own. A nested function literal has a type of
+ * its own too, but its body can read a parameter of the enclosing literal
+ * (`x ↦ (() ↦ [x])`), which its own typing read as a number cell: the
+ * nested literal is then typed again as a signature whose result is derived
+ * by this function, with the parameters of the enclosing literal added to
+ * its own (`captured`), so `x ↦ (() ↦ [x])` is
+ * `(unknown) -> () -> list<unknown>`, and `g("a")()` for that `g`, which is
+ * `["a"]`, fits it. A parameter of the nested literal that shadows a
+ * captured name is read as its own: `x ↦ ((x: real) ↦ [x])` keeps
+ * `(real) -> vector<1>`. An ascribed result of the nested literal is kept,
+ * and so are the arms of an early `Return` of its body; a call of the
+ * nested literal inside the body is typed from the derived result (the
+ * branch for `Function` in `walk` says why). A
  * call of a user function is typed from its operands as the expression is:
  * with `f(x) := (-x, x)`, the body `f([a, a])` of `h(a) := f([a, a])` is
  * typed with `[a, a]` a `list<unknown>`, and the call maps `f` over the
  * list, so `h` has the result `list<tuple<number, number>>`.
  *
  * `context` derives the type of an application from the descriptors of its
- * operands. Returns `bodyType` when the body has no such cell.
+ * operands. `captured` holds the names of the parameters of the enclosing
+ * literals, when `body` is the body of a nested literal typed by this
+ * function. Returns `bodyType` when the body has no such cell.
  */
 export function deriveSignatureResultType(
   body: Expression,
   params: ReadonlyArray<Expression>,
   bodyType: Type,
-  context: TypeHandlerContext
+  context: TypeHandlerContext,
+  captured?: ReadonlySet<string>
 ): Type {
   const names = new Set(functionLiteralBoundNames(params));
+  if (captured !== undefined) for (const name of captured) names.add(name);
   if (names.size === 0) return bodyType;
 
   // Whether `e` holds a list literal with a cell for which `isCell` is true,
   // with one entry in `seen` per node, for a body that shares a node between
-  // several places.
+  // several places. A nested function literal is read too: its body can
+  // hold such a cell.
   const holdsCell = (
     e: Expression,
     isCell: (op: Expression) => boolean,
     seen: Map<Expression, boolean>
   ): boolean => {
-    if (!isFunction(e) || e.operator === 'Function' || e.operator === 'Typed')
-      return false;
+    if (!isFunction(e) || e.operator === 'Typed') return false;
     let result = seen.get(e);
     if (result !== undefined) return result;
     result = e.ops.some(
@@ -144,6 +165,47 @@ export function deriveSignatureResultType(
             }
           : {}),
       };
+    } else if (isFunction(e, 'Function')) {
+      // A nested literal whose body reads a parameter of an enclosing
+      // literal as a cell. Its signature keeps its own parameters. An
+      // ascribed result is the author's contract and is kept, as the
+      // signature builder keeps it (`functionLiteralSignatureType`,
+      // `effects-inference.ts`). Otherwise the result is derived again,
+      // with the enclosing parameters added to its own, from the body the
+      // builder derives it from (the last statement under a return marker,
+      // else the whole body), and JOINED with the literal's own result: the
+      // own result holds the arms of an early `Return` of the body, which
+      // this derivation does not read (the builder joins them after it),
+      // and the join absorbs the number-cell reading of the captured
+      // parameter when the derived result covers it (`vector<1>` beside
+      // `list<unknown>` reduces to `list<unknown>`). The structure view of
+      // the literal is NOT kept on the new descriptor: a call of the
+      // literal in the body (`x ↦ ((y ↦ [x, y])(1))`) would type the body
+      // again from that view (`appliedLiteralResultType`), with the
+      // captured parameter read as a number cell, and give `vector<2>`;
+      // without it the call is typed from the derived result,
+      // `list<unknown>`. A nested literal with a type that is not a
+      // signature keeps its type.
+      const own = e.type.type;
+      if (
+        typeof own === 'object' &&
+        own.kind === 'signature' &&
+        functionLiteralReturnType(e) === undefined
+      ) {
+        const marker = functionLiteralReturnMarker(e);
+        const derived = deriveSignatureResultType(
+          marker === undefined ? e.op1 : marker.op1,
+          e.ops.slice(1),
+          own.result,
+          context,
+          names
+        );
+        const joined = reduceType({
+          kind: 'union',
+          types: [derived, own.result],
+        });
+        result = describeType({ ...own, result: joined });
+      } else result = describe(e, undefined, memo);
     } else if (isFunction(e, 'Block')) {
       const statements = e.ops;
       result =

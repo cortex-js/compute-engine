@@ -547,6 +547,15 @@ that the old one hid were found and fixed (`At` and `First` refused an operand
 typed `missing | unknown`, `PointX` of it was typed `missing`, and compiled
 folds over a `list<unknown>` gave `null` or a string).
 
+A nested function literal has a type of its own, and its body can read a
+parameter of the enclosing literal: in `x ↦ (() ↦ [x])`, the inner literal's
+own typing read the captured `x` as a number cell. The derivation types a
+nested literal again with the parameters of the enclosing literals added to
+its own, so the signature is `(unknown) -> () -> list<unknown>` (ROADMAP
+CE-379, landed 2026-10-23). A parameter of the nested literal that shadows the
+captured name is read as its own: `x ↦ ((x: real) ↦ [x])` keeps
+`(x: real) -> vector<real^1>`.
+
 The engine reads an operand of unknown type as a number in one place: where an
 operation demands a number. `x ↦ x + 1` is `(unknown) -> number` because `Add`
 accepts nothing else: a string argument fails anyway, so the type describes

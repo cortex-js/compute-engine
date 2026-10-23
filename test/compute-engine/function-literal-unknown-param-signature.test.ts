@@ -333,3 +333,95 @@ describe('A COMPILED CALL OF A FUNCTION THAT RETURNS A LIST', () => {
     });
   }
 });
+
+describe('A NESTED LITERAL THAT CAPTURES A PARAMETER (CE-379)', () => {
+  test('an ascribed result of the nested literal is kept', () => {
+    // The earlier statement holds the captured cell, which triggers the
+    // derivation; the ascribed `integer` is the author's contract.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Function', ['Block', ['List', 'x'], ['Typed', 1, "'integer'"]]],
+        'x',
+      ])
+    );
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> () -> integer');
+  });
+
+  test('the arms of an early Return of the nested body are kept', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        [
+          'Function',
+          ['Block', ['If', 'c', ['Return', "'early'"]], ['List', 'x']],
+          'c',
+        ],
+        'x',
+      ])
+    );
+    expect(ce.box('g').type.toString()).toMatch(/-> list<unknown> \| string$/);
+  });
+
+  test('a call of the nested literal in the body is typed from the derived result', () => {
+    // `(y ↦ [x, y])(1)` is `["a", 1]` at `x = "a"`: a `list<unknown>`, not
+    // the `vector<2>` that typing the body again from the literal's
+    // structure would give.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Apply', ['Function', ['List', 'x', 'y'], 'y'], 1],
+        'x',
+      ])
+    );
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> list<unknown>');
+    expect(ce.box(['g', "'a'"]).evaluate().toString()).toBe('["a",1]');
+  });
+
+  // A nested literal has a type of its own, and its own typing read a
+  // captured parameter of the enclosing literal as a number cell:
+  // `x ↦ (() ↦ [x])` was `(unknown) -> () -> vector<1>`, which the value
+  // `["a"]` of `g("a")()` does not fit. The signature derivation now types
+  // the nested literal again with the enclosing parameters added to its
+  // own (ROADMAP CE-379, landed 2026-10-23).
+  test.each([
+    ['x ↦ (() ↦ [x])', '(unknown) -> () -> list<unknown>'],
+    ['x ↦ (y ↦ [x, y])', '(unknown) -> (unknown) -> list<unknown>'],
+    ['x ↦ (() ↦ [[x]])', '(unknown) -> () -> list<list<unknown>>'],
+    ['x ↦ (() ↦ (() ↦ [x]))', '(unknown) -> () -> () -> list<unknown>'],
+    // A use that narrows the parameter keeps the number cell.
+    ['x ↦ (() ↦ [x + 1])', '(unknown) -> () -> vector<1>'],
+    // A parameter of the nested literal that shadows the captured name is
+    // read as its own.
+    ['x ↦ ((x: real) ↦ [x])', '(unknown) -> (x: real) -> vector<real^1>'],
+    // A nested literal that is a cell, not a reader of a cell.
+    ['x ↦ [x, (() ↦ x)]', '(unknown) -> list<unknown>'],
+  ])('%s is %s', (latex, expected) => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse(latex.replace(/↦/g, '\\mapsto')));
+    expect(ce.box('g').type.toString()).toBe(expected);
+  });
+
+  test('the value of the nested call fits the derived result', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('x \\mapsto (() \\mapsto [x])'));
+    const value = ce.box(['Apply', ['g', "'a'"]]).evaluate();
+    expect(value.toString()).toBe('["a"]');
+    expect(value.type.matches('list<unknown>')).toBe(true);
+  });
+
+  test('a free symbol in a top-level literal keeps the number cell', () => {
+    // The reading of a free symbol of type `unknown` as a number cell is
+    // the one the type of every list literal makes (user decision
+    // 2026-10-23, CE-375); only a parameter of an enclosing literal is a
+    // cell of unknown type.
+    const ce = new ComputeEngine();
+    expect(ce.parse('() \\mapsto [x]').type.toString()).toBe('() -> vector<1>');
+  });
+});

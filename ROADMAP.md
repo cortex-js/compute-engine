@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-391.
+Next free reference: CE-392.
 
 **Entry format.**
 
@@ -183,8 +183,7 @@ result must keep the possible nested broadcast result.
 
 ### CE-6. The signature of a function literal reads an `unknown` parameter as a number
 
-**Status:** decision needed; defect. Same defect as CE-15 (user decision owed
-there).
+**Status:** open; defect. CE-6.2 is fixed by CE-25 (`x ↦ [x]` is `(unknown) -> list<unknown>`, checked 2026-10-23). CE-6.1 needs no decision: by the rule of CE-25 (a signature says only what the body proves), `u·b` with an `unknown` `b` is not proved a number.
 
 - **CE-6.1** In `(a, b) ↦ Map(u ↦ u·b, a)`, `b` can be a list, but the literal
   types `u·b` as a number. With `b = M` (`list<real>`) the value is a matrix
@@ -235,7 +234,7 @@ assert `boolean`); no compile or Epsil test fails.
 
 ### CE-9. `tuple<integer>` is not a subtype of `broadcastable<integer>`, so subtyping is not transitive
 
-**Status:** decision needed; defect, small.
+**Status:** open; defect, small. User decision 2026-10-23: option B, remove `indexed_collection<T> <: broadcastable<T>` (it includes tuples and strings, which do not broadcast). Measured earlier: 14 tests fail in 8 suites, including Tycho item 332 compiled-program parity; review each one and report the count before landing.
 
 `tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`, but
 `tuple<integer>` is not `<: broadcastable<integer>`. A rule excludes tuples and
@@ -314,7 +313,7 @@ of different kinds, or keep the intersection when it cannot decide, instead of
 
 ### CE-13. `Mean` and the statistics functions accept a matrix when boxed and refuse it when evaluated
 
-**Status:** decision needed; defect.
+**Status:** open; defect. User decision 2026-10-23: option A, refuse a matrix when the expression is boxed: spell the data parameter of the statistics functions so that a matrix does not match it, and measure the tests that pass data whose elements are not typed `number`.
 
 Probe, from the repository root:
 `npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); const m = ce.box(['Mean', ['List', ['List', 1, 2], ['List', 3, 4]]]); console.log(m.isValid, m.type.toString(), m.evaluate().toString())"`
@@ -332,7 +331,7 @@ The signatures in `library/statistics.ts` spell the data parameter
 
 ### CE-14. A cell pattern `vector<T>` or `list<T^N>` refuses a matrix
 
-**Status:** decision needed; design.
+**Status:** open; docs. User decision 2026-10-23: the new behavior is confirmed. A rank-1 cell pattern (`list<T^N>`, `vector<T>`) refuses a matrix; `list<T>` binds `T` to the rows. Left: update the test that cites the 2026-10-21 decision, and the type guide.
 
 With `first: (x: list<T^N>) -> T where T, N`, `first([[1, 2], [3, 4]])` is now
 an `incompatible-type` error; on 0.161.0 it was typed `vector<integer^2>`, with
@@ -1797,7 +1796,7 @@ See also CE-312.
 
 ### CE-93. A comparison with a variable that may be `Missing` differs inside `If`
 
-**Status:** decision needed; defect. Tycho row 411.
+**Status:** open; defect. Tycho row 411. User decision 2026-10-23: absent in both. The standalone comparison `w > 0` gives `Missing` too, as the `If` condition, the compiled code and `interval-js` read it.
 
 With `x := 0.5` and `w` assigned `Which(x > 5, 1)`:
 
@@ -1814,7 +1813,7 @@ beside a number. The standalone comparison and the branch condition must agree.
 
 ### CE-94. `Less(0, NaN, Missing)` is `Missing`, but `Less(0, i, Missing)` is `False`
 
-**Status:** decision needed; defect. Tycho row 413.
+**Status:** open; defect. Tycho row 413. User decision 2026-10-23: `False`, as `docs/ERROR-MODEL.md` says. `Less(0, NaN, Missing)` is `False`: change the interpreter (`unorderedChainPair()`), the chain guard of the compiled code, and the test row.
 
 An undefined numeric operand of `<`, `≤`, `>`, `≥`, `=` decides `False` inside a
 branch condition on the interpreter, the `javascript` and `python` targets and
@@ -2320,7 +2319,7 @@ parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 
 ### CE-125. Element-wise `NotEqual` decides a NaN cell where the scalar branch takes no arm
 
-**Status:** decision needed; defect. Plan: docs/ERROR-MODEL.md.
+**Status:** open; defect. User decision 2026-10-23: `NaN ≠ 2` is `True` in a branch, as IEEE reads it and as the element-wise cell does (`a ≠ b` stays the negation of `a = b`). Change the scalar branch on the interpreter and the JavaScript and Python targets.
 
 The user decision of 2026-10-20 (Tycho rows 411 and 413) makes a NaN operand of
 `<`, `≤`, `>`, `≥` and `=` decide FALSE in a scalar branch condition on every
@@ -2523,22 +2522,31 @@ binder-aware canonicalization: at fusion time the canonicalizer has no scope of
 the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
-### CE-136. A residue class that only a function returns is not protected from number rules
+### CE-136. A residue class that the name check does not see is not protected from number rules
 
-**Status:** open; wrong value.
+**Status:** open; wrong value; design decision pending (option A, a flag on
+the operator definition, or option B, a type for residue classes; the user
+leans to B, 2026-10-23). Plan: `docs/plans/2026-10-23-residue-class-type.md`.
 
 An expression that holds a `ResidueClass` is folded only by the rules of its
 ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse. The
 engine finds the class by a walk through the expression and the values of its
-symbols (`containsResidueClass()` in `boxed-expression/residue-class.ts`). The
-walk does not look inside a function definition, so it does not see a class that
-only a function returns. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)`
-simplifies to `1`, although `g(2)` is `ResidueClass(2, 4)`, which has no
-inverse; `evaluate()` keeps the quotient. The same occurs for an application of
-a function with no definition, `f(c)/f(c)` (the engine treats every application
-of an unknown function as one value). A fix needs a type for a class that no
-ordinary expression has, so that the check can use the type of the application
-instead of a walk.
+symbols, which looks for an operator named `ResidueClass`
+(`containsResidueClass()` in `boxed-expression/residue-class.ts`, 38 call
+sites in 11 files).
+
+Measured 2026-10-23 on `be0cd42cd`: the two cases this entry first named are
+now protected. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to
+`ResidueClass(2, 4) / ResidueClass(2, 4)`, and `f(c)/f(c)` (no definition of
+`f`) is kept as it is. Two gaps remain:
+
+- A symbol declared `value` and boxed in a quotient before it holds a class:
+  with `w: value`, `w/w` is `1` when it is boxed, and stays `1` after
+  `w := ResidueClass(2, 4)`. The canonical form cancels it because the type
+  `value` does not exclude a number. Neither a flag nor a type for classes
+  closes this unless the cancellation asks for evidence that the operand is a
+  number.
+- `Max(c, x)` with a class `c` is typed `number`.
 
 The same gap applies to an extension head whose values are residue classes
 ([#471](https://github.com/cortex-js/compute-engine/issues/471)): the walk looks
@@ -3418,7 +3426,7 @@ count as ancestors that halve the period? Such models are rare.
 
 ### CE-177. Under `.N()`, an integral whose integrand has no value stays symbolic
 
-**Status:** decision needed; design. Tycho row 411.
+**Status:** open; defect. Tycho row 411. User decision 2026-10-23: such an integral is `NaN` under `.N()`, as `NIntegrate` and the compiled routes give.
 
 `Integrate(Which(t > 5, 1), Limits(t, 0, 1)).N()` stays unevaluated (the
 `sawNumeric` guard of `library/calculus.ts`, near line 2325). `NIntegrate` of
@@ -3624,6 +3632,24 @@ of `(2t + i)/(t − 3i)`.
   and could be told apart from one.
 - **CE-184.2** A function that decays to 0 gives a residue such as `−9e-46`, not
   `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
+
+### CE-391. Divergent integrals over an infinite bound: an integrand whose sign changes
+
+**Status:** open; defect, small. Found 2026-10-23 (session compute-engine-57).
+
+An integral over an infinite bound that diverges with an integrand of one
+sign is `±∞` under `.N()` and `NIntegrate`, as under `evaluate()`
+(`divergentTailSign`, `library/calculus.ts`, 2026-10-23). These cases remain:
+
+- **CE-391.1** An integrand whose sign changes on the interval keeps the
+  answer of the quadrature: ∫₀^∞ (x − 1) dx is `+∞` under `evaluate()` and
+  `NaN` under `.N()`. The tail test requires one sign on the whole interval so
+  that a pole of the other sign at the finite bound cannot cancel the
+  divergence; a test of the finite part (a pole there, or no pole) would let
+  such an integrand take the sign of its tail.
+- **CE-391.2** ∫₀^∞ (x − 1)/x³ dx is `ComplexInfinity` under `evaluate()`. The
+  integral is `−∞`: the integrand is `−1/x³` next to `0`, and the tail
+  converges. `.N()` gives `NaN`.
 
 ### CE-185. A numeric integral next to a singular bound: remaining cases
 
@@ -6524,6 +6550,17 @@ Measured dead ends, so they are not tried again:
   with no sum: `Expand` relies on that rebuild to combine like factors
   (`Expand(x·x)` is `x^2`, `Expand(√x·√x)` is `x`), and the integrator relies
   on it too.
+- The float roots of a cubic are checked at the engine precision, not in
+  machine precision (user decision 2026-10-23: keep the precision, accept the
+  cost). `x^3 - x - 1 = 0` is about 1.5 times slower since commit `cbf7f36e5`
+  (0.149.0 → 0.150.0, found by bisection), which made a cubic give its two
+  complex roots as well as the real one. `validateRoots()` (`solve.ts`, 32% of
+  the solve) substitutes each float root into the equation, and the complex
+  cube is computed with big decimals because the default precision (21
+  digits) is above machine precision. A residual in machine precision would
+  decide differently only for a borderline root. The step CE-385.2 (0.141.0 →
+  0.142.0) does not reproduce when the same cubic is timed with
+  `ce.box(…).solve('x')`, interleaved in one process (ratio 1.00).
 
 Round 2 (2026-10-23, uncommitted when written): the broadcast lift is skipped
 when every operand is typed by a number type and is not a collection
@@ -6539,21 +6576,6 @@ load high during the run): boxing 0.86×, `evaluate` 0.80×, `simplify` 0.81×,
 Against 0.133.0: core operations 1.0× to 1.23×, integrals 1.6× to 2.5×,
 `x^3 - x - 1 = 0` 2.1×, `x^4 + x^2 - 1 = 0` 0.5×. The type derivation went from
 29% to 22% of the small operations, the garbage collector from 8% to 3%.
-
-- **CE-385.6** `x^3 - x - 1 = 0` is about 1.5 times slower since commit
-  `cbf7f36e5` (0.149.0 → 0.150.0, found by bisection 2026-10-23), which made a
-  cubic give its three roots, the two complex ones included, instead of the
-  real root only. That is intended. The cost is in `validateRoots()`
-  (`solve.ts`, 32% of the solve): each float root of the numeric root finder
-  is substituted into the equation and evaluated, and the complex cube is
-  computed with big decimals because the default precision (21 digits) is
-  above machine precision. The roots are machine floats, so a residual in
-  machine precision (Horner on the coefficients) would decide the same in all
-  but borderline cases; this changes how `validateRoots()` decides, so it
-  needs a decision. The step CE-385.2 (0.141.0 → 0.142.0) does not reproduce
-  when the same cubic is timed with `ce.box(…).solve('x')`, interleaved in one
-  process (ratio 1.00, 2026-10-23); the step measured for the cubic is the one
-  at 0.150.0.
 
 Run every measurement under the box lock.
 
