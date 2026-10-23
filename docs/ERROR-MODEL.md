@@ -210,8 +210,7 @@ branch take no arm — see the 2026-09-02 entry in §7. From 2026-10-20 to
 2026-10-23 `≠` kept that rule. Implementation: `evaluateCondition`
 (`library/control-structures.ts`, which now flags only the `Missing` of an
 undecided whole-collection comparison), `BaseCompiler.conditionNode`
-(`compilation/base-compiler.ts`; the `nanTest` field of a relation test is
-true only for a link of a chain with an absent operand), and
+(`compilation/base-compiler.ts`, which reads a chain link by link), and
 `hasEmptyOperand` and `holds` (`interval/comparison.ts`). Pinned in
 `test/compute-engine/condition-nan-undecided.test.ts`.
 
@@ -262,7 +261,18 @@ What the extension does NOT change:
   Missing)`, which is `False ∧ Missing`, so `False`, and the operands after
   that pair are not evaluated. A pair with a `Missing` operand is not decided
   by the rule, so `Missing < 0 < i` is `False` too (the pair `0 < i`), as
-  `Missing < 2 < 1` is.
+  `Missing < 2 < 1` is. A pair with a `NaN` operand is `False` the same way
+  (user decision 2026-10-23): `0 < NaN < Missing` and `Missing < 0 < NaN` are
+  `False`, on the interpreter and the compiled targets; before, the absent
+  operand won and the chain was `Missing`. `NaN < Missing < 0` stays
+  `Missing`: each of its pairs has the absent operand. A branch over a chain
+  is decided link by link on the compiled targets too: with `x = 1` and `w`
+  absent, `If(x < 0 < w, 1, 2)` is `2`, where the compiled code answered
+  `NaN`. One case compiled numeric code cannot tell apart: for an operand
+  declared with a `missing` arm (`w: number | missing`), NaN is also the
+  numeric spelling of the absent value, so a link `0 < w` with `w = NaN` is
+  undecided on the compiled targets, where the interpreter, given the value
+  `NaN`, decides it `False`.
 
 The comparison stays inert only when no operand has a value with no order
 and every operand that is not a number is a free symbol or an unevaluated
@@ -2684,8 +2694,9 @@ document's history):
   operand decides it `True`, so `If(NaN ≠ 0, 1, -1)` is `1`. The compiled
   operand test keeps no NaN conjunct (it tests each variable the comparison
   reads for an unsupplied value, so the 2026-09-02 rule for an unsupplied
-  variable holds), except for a link of a chain with an absent operand.
-  Consequences for the companion rulings above:
+  variable holds). A link of a chain with an absent operand kept the NaN
+  conjunct until the user decision of 2026-10-23 that `Less(0, NaN,
+  Missing)` is `False`. Consequences for the companion rulings above:
   `If(Random() > 0.5 ∧ x > 0, a, b)` at `x = NaN` answers `b`; a desugared
   `while` whose exit test compares a NaN with `<`, `≤`, `>`, `≥` or `=`
   exits instead of running to the iteration cap, and one whose exit test is

@@ -626,16 +626,21 @@ const CHAIN_PAIR_IS_FALSE = {
 
 /**
  * True when the adjacent pair `(a, b)` of a chain is `False` because an
- * operand has a value with no order (`nonRealKind()`; with `only: 'pole'`,
- * only the pole, for `Equal`). This is the rule of the verdict
- * (`decideLess`, `decideLessEqual`, `decideEqual`) applied to one pair, so
- * that the chain stops there: `0 < i < Missing` is `False`, as
- * `(0 < i) ∧ (i < Missing)` is, and the operands after the pair are not
- * evaluated. A pair with a `Missing` operand is not decided here: the
- * verdict gives it the Kleene `Missing`, as it does for the pair alone
- * (`Less(i, Missing)` is `Missing`). With `approximate`, a constant
- * expression is approximated (`Ln(-1)`); the callers ask for it only when
- * the comparison methods did not decide the pair.
+ * operand is an undefined number (`NaN`, `Indeterminate`) or has a value
+ * with no order (`nonRealKind()`; with `only: 'pole'`, only the pole, for
+ * `Equal`). This is the rule of the verdict (`decideLess`,
+ * `decideLessEqual`, `decideEqual`) applied to one pair, so that the chain
+ * stops there: `0 < i < Missing` and `0 < NaN < Missing` are `False`, as
+ * `(0 < NaN) ∧ (NaN < Missing)` is `False ∧ Missing`, and the operands after
+ * the pair are not evaluated (user decision 2026-10-23; before it a NaN pair
+ * was left to the verdict over all the operands, where the absent operand
+ * made the chain `Missing`). A pair with a `Missing` operand is not decided
+ * here: the verdict gives it the Kleene `Missing`, as it does for the pair
+ * alone (`Less(i, Missing)` and `Less(NaN, Missing)` are `Missing`; the
+ * same for `Undefined`). With
+ * `approximate`, a constant expression is approximated (`Ln(-1)`); the
+ * callers ask for it only when the comparison methods did not decide the
+ * pair.
  */
 function unorderedChainPair(
   a: Expression,
@@ -643,7 +648,11 @@ function unorderedChainPair(
   approximate: boolean,
   only?: 'pole'
 ): boolean {
-  if (isSymbol(a, 'Missing') || isSymbol(b, 'Missing')) return false;
+  // `Undefined` is absent too (`readComparisonAbsence` reads it as
+  // `Missing`), so a pair with it is left to the verdict as well.
+  if (isAbsentScalarSymbol(a) || isAbsentScalarSymbol(b)) return false;
+  if (isNumber(a) && a.isNaN === true) return true;
+  if (isNumber(b) && b.isNaN === true) return true;
   return [a, b].some((x) => {
     const kind = nonRealKind(x, approximate);
     return kind !== undefined && (only === undefined || kind === only);

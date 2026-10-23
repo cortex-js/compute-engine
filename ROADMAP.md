@@ -1751,38 +1751,6 @@ declaration hoisting across the sequential runner, the whole-block interpreter
 and the compiler. Keep earlier bindings, declared signatures and constructors.
 See also CE-312.
 
-### CE-94. `Less(0, NaN, Missing)` is `Missing`, but `Less(0, i, Missing)` is `False`
-
-**Status:** open; defect. Tycho row 413. User decision 2026-10-23: `False`, as
-`docs/ERROR-MODEL.md` says. `Less(0, NaN, Missing)` is `False`: change the
-interpreter (`unorderedChainPair()`), the chain guard of the compiled code, and
-the test row.
-
-An undefined numeric operand of `<`, `≤`, `>`, `≥`, `=` decides `False` inside a
-branch condition on the interpreter, the `javascript` and `python` targets and
-`interval-js` (user decision 2026-10-20). An ordered comparison with
-`ComplexInfinity` or a non-real complex operand is `False` too, and `=` with
-`ComplexInfinity` is `False`; `Missing` keeps its reading (user decision
-2026-10-21), and a NaN operand of `≠` decides it `True` (user decision
-2026-10-23).
-
-Measured 2026-10-21: `Less(0, NaN, Missing)` is `Missing`, while
-`Less(0, i, Missing)` is `False`. `docs/ERROR-MODEL.md` says that an ordered
-comparison with an undefined numeric operand is `False` and that a chain stops
-at the first pair that is `False`, so it reads the `NaN` chain as `False`. But
-`test/compute-engine/compile-comparison-absent-operand.test.ts` (line 194,
-`Less(x, 0, Missing)` at `x = NaN`) pins `Missing` on the interpreter and
-`undefined` on the compiled route. The `javascript` target emits a deliberate
-guard (`_.x === _.x ? (_.x < 0) : undefined`) that makes a NaN pair undecided
-inside a chain. A prototype of the chain reading in `unorderedChainPair()`
-(`relational-operator.ts`) made the interpreter answer `False` for every variant
-and broke that test, while the compiled route still answered `undefined`.
-
-- Yes: change all three (the interpreter, the chain guard of the compiled code,
-  and that test row).
-- No: correct the chain sentence of `docs/ERROR-MODEL.md` to say that `Missing`
-  has priority over a NaN pair.
-
 ### CE-95. `x/0` with a symbolic numerator folds to `ComplexInfinity` before `x` has a value
 
 **Status:** open; defect. Tycho row 413. User decision 2026-10-23: the fold

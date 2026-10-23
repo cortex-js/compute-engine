@@ -2,6 +2,42 @@
 
 ### Breaking Changes
 
+- **Residue classes have a type of their own, `residue`** (ROADMAP CE-136,
+  [#471](https://github.com/cortex-js/compute-engine/issues/471)). A residue
+  class, an element of ℤ/nℤ, had the type `value`, and the engine kept the
+  number rules (`c/c` is 1, `c - c` is 0) away from it by looking for an
+  operator named `ResidueClass`. A head with another name got no protection:
+  with `MyMod` declared `(any, any) -> value`, `MyMod(2, 4)/MyMod(2, 4)`
+  simplified to `1`, although 2 has no inverse modulo 4. The type now does
+  what the name did:
+  - `ResidueClass(k, n)` is typed `residue`, arithmetic over classes too
+    (`c · [1, 2]` is a `list<residue^2>`, `NaN + c` is `nan | residue`), and
+    `ℤ/nℤ` is a `set<residue>`. `residue` is a value, not a number: it is
+    disjoint from every numeric type, `residue | integer` is a union, and a
+    symbol declared `residue` refuses an integer (`ce.assign('r', 2)` throws; an
+    integer is a representative of a class, not the class).
+  - The arithmetic operators that have residue arithmetic (`Add`, `Subtract`,
+    `Multiply`, `Divide`, `Negate`, `Power`, `Square`, `Sqrt`, `Root`) name
+    `residue` in their parameter types. Every other operator refuses a class at
+    boxing with an `incompatible-type` error: `Sin(c)`, `Floor(c)`, `Mod(c, 5)`
+    were admitted and stayed unevaluated. `Max(c, x)` and `Min(c, x)` refuse a
+    class too, as an operand, an element of a list or an element of `ℤ/nℤ`:
+    classes have no order (`Max(c, x)` was typed `number` and stayed
+    unevaluated).
+  - The protection reads the type: an operator declared to return `residue`
+    (`ce.declare('MyMod', { signature: '(any, any) -> residue' })`), a function
+    whose inferred signature returns it (`g := k ↦ ResidueClass(k, 4)` is
+    `(unknown) -> residue`), and a symbol declared `residue`, which is
+    protected before it has a value (`r/r` stays `r/r`). A head with another
+    name gets the admission and the protection, not the arithmetic of
+    `ResidueClass`: it defines its own. A symbol typed `value` or left
+    undeclared is still read as a possible number: `w/w` is `1` for it.
+  - A juxtaposed class is a product: `\overline{3}_{7}x` parses to
+    `Multiply`, not to a tuple. `compile()` declines an expression that holds
+    a class. The documentation lists the type in `doc/08-guide-types.md`, the
+    rules in `docs/TYPE-SYSTEM.md`, and how an operator declares it in
+    `doc/06-guide-augmenting.md`.
+
 - **A comparison with an absent number is absent** (ROADMAP CE-93, Tycho row
   411). With `w: number | missing` holding `Missing`, `w > 0` was `False`: a
   numeric slot read its absent value as `NaN`. But `If(w > 0, 1, 0)` had no
@@ -80,6 +116,20 @@
   the interpreter, JavaScript and Python. An absent operand (`Missing`, an input
   the caller leaves out) still leaves the branch without an arm. Rule:
   `docs/ERROR-MODEL.md`.
+
+- **A chained comparison with a `NaN` pair is `False`** (ROADMAP CE-94, Tycho
+  row 413). `0 < NaN < Missing` was `Missing`, while `0 < i < Missing` was
+  `False`: a pair with no order stopped the chain, but a `NaN` pair did not, and
+  the absent operand won. A pair with a `NaN` operand now makes the chain
+  `False`, wherever the absent operand sits (`Missing < 0 < NaN` is `False`
+  too), on the interpreter and in compiled JavaScript and Python, which gave
+  `undefined`/`None`. A chain whose every pair has the absent operand stays
+  absent: `NaN < Missing < 0` is `Missing`. `Undefined` is read as absent in a
+  chain as `Missing` is: `NaN < Undefined < 0` and `i < Undefined < 0` are
+  `Missing`, where they were `False`. Also fixed: compiled code decides a branch
+  over a chain link by link, as the interpreter does, so with `x = 1` and `w`
+  (`number | missing`) absent, `If(x < 0 < w, 1, 2)` gives `2`, where it gave
+  `NaN`. Rule: `docs/ERROR-MODEL.md`.
 
 ### Resolved Issues
 

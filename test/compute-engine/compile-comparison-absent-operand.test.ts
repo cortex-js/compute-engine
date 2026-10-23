@@ -188,7 +188,11 @@ describe('a chained comparison with an absent operand', () => {
     ['Less(x, 5, Missing)', undecided, 9, false, 'False'],
     ['LessEqual(Missing, x, 5)', leading, 1, undefined, 'Missing'],
     ['LessEqual(Missing, x, 5)', leading, 9, false, 'False'],
-    ['Less(x, 0, Missing)', decidedFalse, NaN, undefined, 'Missing'],
+    // A NaN link is `False` (user decision 2026-10-23): `NaN < 0` decides
+    // the chain, wherever the absent operand sits. Before, the absent operand
+    // won and the chain was `Missing`.
+    ['Less(x, 0, Missing)', decidedFalse, NaN, false, 'False'],
+    ['LessEqual(Missing, x, 5)', leading, NaN, false, 'False'],
   ])('%s at x = %p', (_l, json, x, compiled, interp) => {
     expect(interpretedAt(json, x)).toBe(interp);
     expect(run2(json, x)).toBe(compiled);
@@ -200,6 +204,8 @@ describe('a chained comparison with an absent operand', () => {
     ['Less(x, 5, Missing)', undecided, 9, 2],
     ['LessEqual(Missing, x, 5)', leading, 1, NaN],
     ['LessEqual(Missing, x, 5)', leading, 9, 2],
+    ['Less(x, 0, Missing)', decidedFalse, NaN, 2],
+    ['LessEqual(Missing, x, 5)', leading, NaN, 2],
   ])('If over %s at x = %p', (_l, json, x, expected) => {
     const r = run2(['If', json, 1, 2], x);
     if (Number.isNaN(expected)) expect(r).toBeNaN();
@@ -214,6 +220,7 @@ describe('a chained comparison with an absent operand', () => {
     ['Less(x, 5, Missing)', undecided, 1, NaN],
     ['LessEqual(Missing, x, 5)', leading, 1, NaN],
     ['LessEqual(Missing, x, 5)', leading, 9, 0],
+    ['Less(x, 0, Missing)', decidedFalse, NaN, 0],
   ])('Which over %s at x = %p', (_l, json, x, expected) => {
     const which = ['Which', json, 1, 'True', 0];
     const r = run2(which, x);
@@ -238,6 +245,18 @@ describe('a chained comparison with an absent operand', () => {
     }
   });
 
+  test.each([
+    [['Less', 0, 'NaN', 'Missing'], 'False'],
+    [['Less', 0, 'NaN', 'Undefined'], 'False'],
+    [['Less', 'Missing', 0, 'NaN'], 'False'],
+    // Every pair has the absent operand: the chain stays absent.
+    [['Less', 'NaN', 'Missing', 0], 'Missing'],
+    [['Less', 'NaN', 'Undefined', 0], 'Missing'],
+    [['Less', ['Complex', 0, 1], 'Undefined', 0], 'Missing'],
+  ])('the interpreter reads %j as %s', (json, expected) => {
+    expect(ce.box(json as never).evaluate().json).toBe(expected);
+  });
+
   test('a chain with an operand that has effects is declined', () => {
     const r = compile(
       ce.box(['Less', 'x', 0, 'Missing', ['Random']] as never),
@@ -245,6 +264,69 @@ describe('a chained comparison with an absent operand', () => {
     );
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/operand that has effects/);
+  });
+});
+
+describe('a branch over a chain with an input that may be absent', () => {
+  // The branch decides a chain link by link, as the interpreter does: one
+  // false link decides it, whatever an absent operand of another link holds.
+  // Before, the chain was tested for all its operands at once, and an absent
+  // `w` (or an input the caller leaves out) made the branch take no arm,
+  // where `If(And(x < 0, 0 < w), 1, 2)` already gave `2`.
+  const e = new ComputeEngine();
+  e.declare('x', 'number');
+  e.declare('y', 'number');
+  e.declare('w', 'number | missing');
+  const compiled = (json: unknown, vars: object): unknown => {
+    const r = compile(e.box(json as never), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(r.success).toBe(true);
+    return r.run!(vars as never);
+  };
+  const held = (json: unknown, x: number): unknown => {
+    const h = new ComputeEngine();
+    h.declare('w', 'number | missing');
+    h.assign('x', x);
+    h.assign('w', h.Missing);
+    return h.box(json as never).evaluate().json;
+  };
+
+  test.each([
+    [1, 2],
+    [NaN, 2],
+  ])('If(x < 0 < w, 1, 2) at x = %p and w absent is %p', (x, expected) => {
+    const json = ['If', ['Less', 'x', 0, 'w'], 1, 2];
+    expect(held(json, x)).toBe(expected);
+    expect(compiled(json, { x })).toBe(expected);
+  });
+
+  test('a link that the absent operand leaves undecided still takes no arm', () => {
+    const json = ['If', ['Less', 'x', 0, 'w'], 1, 2];
+    expect(compiled(json, { x: -1 })).toBeNaN();
+    expect(compiled(json, { x: -1, w: 5 })).toBe(1);
+  });
+
+  test('a chained Equal over lists is not split into links, and still declines', () => {
+    // `Equal([1, 2, 3], [1, 2, 3], 3)` is the scalar `False`, not the
+    // conjunction of its links, so the branch analysis keeps the chain whole
+    // and its lowering declines it.
+    const lists = new ComputeEngine();
+    for (const s of ['a', 'b', 'c']) lists.declare(s, 'list<number>');
+    expect(() =>
+      compile(lists.box(['If', ['Equal', 'a', 'b', 'c'], 1, 2] as never), {
+        to: 'javascript',
+        fallback: false,
+      } as never)
+    ).toThrow(/chained \(n-ary\) comparison/);
+  });
+
+  test('an unsupplied input in one link does not hide a false link', () => {
+    const json = ['If', ['Less', 'x', 0, 'y'], 1, 2];
+    expect(compiled(json, { x: 1 })).toBe(2);
+    expect(compiled(json, { x: -1 })).toBeNaN();
+    expect(compiled(json, { x: -1, y: 5 })).toBe(1);
   });
 });
 
