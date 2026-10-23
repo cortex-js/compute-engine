@@ -340,7 +340,7 @@ describe('compiled code', () => {
     expect(vectors.result).toEqual([3, 8]);
   });
 
-  it('a tensor of rank 3 beside another tensor throws when the code runs', () => {
+  it('two tensors of rank 3 give the matrix product of each pair of matrices', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'tensor<number>');
     ce.declare('q', 'tensor<number>');
@@ -348,7 +348,27 @@ describe('compiled code', () => {
       to: 'javascript',
       fallback: false,
     });
-    expect(() => r.run!({ p: [M, Q], q: [M, Q] } as never)).toThrow(/rank 3/);
+    expect(r.run!({ p: [M, Q], q: [M, Q] } as never)).toEqual([
+      MM,
+      [
+        [1, 0],
+        [0, 1],
+      ],
+    ]);
+    // Tensors of different lengths: the interpreter gives an
+    // `incompatible-dimensions` error.
+    expect(r.run!({ p: [M, Q], q: [M, Q, M] } as never)).toBeNaN();
+  });
+
+  it('a tensor of rank 3 beside a matrix throws when the code runs', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tensor<number>');
+    ce.declare('q', 'tensor<number>');
+    const r = compile(ce.box(['Multiply', 'p', 'q']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(() => r.run!({ p: [M, Q], q: M } as never)).toThrow(/rank 3/);
   });
 
   it('matrices whose dimensions do not agree do not compile', () => {
@@ -712,8 +732,16 @@ describe('second review round', () => {
     // Two matrices: the matrix product. Two vectors: each entry.
     expect(r.run!({ p: M, q: Q } as never)).toEqual(MQ);
     expect(r.run!({ p: [1, 2], q: [3, 4] } as never)).toEqual([3, 8]);
-    // Rank 3 beside rank 3: refused, not NaN cells.
-    expect(() => r.run!({ p: [M, Q], q: [M, Q] } as never)).toThrow();
+    // Rank 3 beside rank 3: the matrix product of each pair, not NaN
+    // cells. Rank 3 beside a matrix: refused.
+    expect(r.run!({ p: [M, Q], q: [M, Q] } as never)).toEqual([
+      MM,
+      [
+        [1, 0],
+        [0, 1],
+      ],
+    ]);
+    expect(() => r.run!({ p: [M, Q], q: M } as never)).toThrow(/rank 3/);
   });
 
   describe('3. Expand of a power of a sum', () => {
@@ -1276,3 +1304,258 @@ describe('fourth review round', () => {
 function MJ4(): MathJsonExpression {
   return toMathJson(M);
 }
+
+/**
+ * A list whose rows have different lengths, or that mixes numbers and lists
+ * (`[[1], [2, 3]]`, `[[1, 2], 3]`), is not a matrix. The interpreter
+ * multiplies it as a collection: the vectors and matrices beside it are first
+ * multiplied together when one of them is a matrix, then the elements of the
+ * arrays are paired and each pair is multiplied by the same rules. Compiled
+ * code read the first row only, took such a list for a matrix, and gave
+ * `null` or wrong values (ROADMAP CE-98.1). Compiled code has no error value:
+ * where the interpreter gives an `incompatible-dimensions` error, it gives
+ * `NaN`.
+ */
+describe('ragged lists', () => {
+  const R: Value = [[1], [2, 3]];
+  const S: Value = [[4], [5, 6]];
+  // [label, factors, interpreter value, compiled value]
+  const cases: Array<[string, Value[], string, unknown]> = [
+    ['two ragged lists', [R, S], '[[4],[10,18]]', [[4], [10, 18]]],
+    [
+      'a ragged list and a matrix',
+      [R, M],
+      '[Error("incompatible-dimensions", "1 vs 2"),[6,12]]',
+      [NaN, [6, 12]],
+    ],
+    [
+      'a matrix and a ragged list',
+      [M, R],
+      '[Error("incompatible-dimensions", "2 vs 1"),[6,12]]',
+      [NaN, [6, 12]],
+    ],
+    [
+      'a ragged list and a vector',
+      [R, [10, 20]],
+      '[[10],[40,60]]',
+      [[10], [40, 60]],
+    ],
+    [
+      'a list that mixes numbers and lists, and a matrix',
+      [[[1, 2], 3], M],
+      '[[1,4],[9,12]]',
+      [
+        [1, 4],
+        [9, 12],
+      ],
+    ],
+    [
+      'the matrices beside a ragged list are multiplied first',
+      [R, M, Q],
+      '[Error("incompatible-dimensions", "1 vs 2"),[8,9]]',
+      [NaN, [8, 9]],
+    ],
+    [
+      'a vector and a matrix beside a ragged list',
+      [R, [1, 2], M],
+      '[[7],[20,30]]',
+      [[7], [20, 30]],
+    ],
+    [
+      'a pair of matrices inside ragged lists',
+      [
+        [M, [5]],
+        [Q, [2]],
+      ],
+      '[[[2,1],[4,3]],[10]]',
+      [
+        [
+          [2, 1],
+          [4, 3],
+        ],
+        [10],
+      ],
+    ],
+    [
+      'ragged lists of different lengths',
+      [R, [[1], [2, 3], [4]]],
+      'Error("incompatible-dimensions", "2 vs 3")',
+      NaN,
+    ],
+    [
+      'tensors of rank 3 inside ragged lists',
+      [
+        [[M, M], [1]],
+        [[Q, Q], [2]],
+      ],
+      '[[[[2,1],[4,3]],[[2,1],[4,3]]],[2]]',
+      [
+        [
+          [
+            [2, 1],
+            [4, 3],
+          ],
+          [
+            [2, 1],
+            [4, 3],
+          ],
+        ],
+        [2],
+      ],
+    ],
+    [
+      'an empty list beside a matrix and a ragged list',
+      [M, [[], []], []],
+      'Error("incompatible-dimensions", "2 vs 0")',
+      NaN,
+    ],
+    [
+      'a matrix times a vector of the wrong length',
+      [M, [1, 2, 3]],
+      'Error("incompatible-dimensions", "2 vs 3")',
+      NaN,
+    ],
+    [
+      'a ragged list beside a product whose dimensions do not agree',
+      [R, M, [1, 2, 3]],
+      'Error("incompatible-dimensions", "2 vs 3")',
+      NaN,
+    ],
+    [
+      'an empty level',
+      [[[], []], M],
+      '[Error("incompatible-dimensions", "0 vs 2"),Error("incompatible-dimensions", "0 vs 2")]',
+      [NaN, NaN],
+    ],
+  ];
+
+  it.each(cases)('%s: the interpreter', (_, factors, value) => {
+    const ce = new ComputeEngine();
+    const names = factors.map((_, i) => `f${i}`);
+    factors.forEach((f, i) => {
+      ce.declare(names[i], 'list<unknown>');
+      ce.assign(names[i], ce.box(toMathJson(f)));
+    });
+    expect(
+      ce
+        .box(['Multiply', ...names])
+        .evaluate()
+        .toString()
+    ).toBe(value);
+  });
+
+  it.each(cases)('%s: compiled code', (_, factors, __, value) => {
+    const ce = new ComputeEngine();
+    const names = factors.map((_, i) => `f${i}`);
+    for (const n of names) ce.declare(n, 'list<list<number>>');
+    const r = compile(ce.box(['Multiply', ...names]), {
+      to: 'javascript',
+      fallback: false,
+    });
+    const inputs = Object.fromEntries(names.map((n, i) => [n, factors[i]]));
+    expect(r.run!(inputs as never)).toEqual(value);
+  });
+
+  it('a number scales each pair', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<list<number>>');
+    ce.declare('q', 'list<list<number>>');
+    const r = compile(ce.box(['Multiply', 2, 'p', 'q']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(r.run!({ p: R, q: S } as never)).toEqual([[8], [20, 36]]);
+  });
+
+  it('a complex entry takes the complex product', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<list<number>>');
+    ce.declare('q', 'list<list<number>>');
+    const r = compile(ce.box(['Multiply', 'p', 'q']), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(
+      r.run!({
+        p: R,
+        q: [
+          { re: 1, im: 1 },
+          { re: 2, im: 1 },
+        ],
+      } as never)
+    ).toEqual([
+      [{ re: 1, im: 1 }],
+      [
+        { re: 4, im: 2 },
+        { re: 6, im: 3 },
+      ],
+    ]);
+  });
+
+  it('Product of a list of ragged lists, interpreted and compiled', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<unknown>');
+    ce.assign('L', ce.box(toMathJson([R, S])));
+    const product = ce.box(['Product', 'L']);
+    expect(product.evaluate().toString()).toBe('[[4],[10,18]]');
+    const r = compile(product, { to: 'javascript', fallback: false });
+    expect(r.run!({} as never)).toEqual([[4], [10, 18]]);
+  });
+
+  // The elements of this list are typed `list<matrix<integer^(2x2)> |
+  // vector<integer^1>>`. The callback check of `Reduce` refused `Multiply`
+  // for them, and `Product(L)` was an `incompatible-type` error
+  // (ROADMAP CE-98.2).
+  it('Product of a list of ragged lists that hold matrices', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<unknown>');
+    ce.assign(
+      'L',
+      ce.box(
+        toMathJson([
+          [M, [5]],
+          [Q, [2]],
+        ])
+      )
+    );
+    const product = ce.box(['Product', 'L']);
+    expect(product.toString()).toBe('Reduce(L, "Multiply", 1)');
+    expect(product.evaluate().toString()).toBe('[[[2,1],[4,3]],[10]]');
+    const r = compile(product, { to: 'javascript', fallback: false });
+    expect(r.run!({} as never)).toEqual([
+      [
+        [2, 1],
+        [4, 3],
+      ],
+      [10],
+    ]);
+    const map = ce.box(['Map', 'Negate', 'L']);
+    expect(map.evaluate().toString()).toBe(
+      '[[[[-1,-2],[-3,-4]],[-5]],[[[0,-1],[-1,0]],[-2]]]'
+    );
+  });
+});
+
+describe('a compiled Product of tensors of rank 3', () => {
+  it('is the matrix product of each pair of matrices', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<unknown>');
+    ce.assign(
+      'L',
+      ce.box(
+        toMathJson([
+          [M, M],
+          [Q, Q],
+        ])
+      )
+    );
+    const product = ce.box(['Product', 'L']);
+    const MQ2 = [
+      [2, 1],
+      [4, 3],
+    ];
+    expect(product.evaluate().toString()).toBe('[[[2,1],[4,3]],[[2,1],[4,3]]]');
+    const r = compile(product, { to: 'javascript', fallback: false });
+    expect(r.run!({} as never)).toEqual([MQ2, MQ2]);
+  });
+});

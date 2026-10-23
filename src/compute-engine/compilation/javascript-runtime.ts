@@ -2935,6 +2935,17 @@ function mulTensorWith(
     }
   }
   if (tensors.length === 0) return scalar === undefined ? 1 : scalar;
+  if (tensors.length >= 2) {
+    const shapes = tensors.map(rectangularShape);
+    if (shapes.some((s) => s === null || s.length >= 3))
+      return mulCollectionsWith(product2, times, tensors, shapes, scalar);
+    // Dimensions that do not agree make the whole product `NaN`, where the
+    // interpreter gives one `incompatible-dimensions` error. The matrix
+    // kernel gives a `NaN` for each row of a matrix times a vector of the
+    // wrong length (`[NaN, NaN]`), which the steps that follow, and the
+    // pairing of a list that is not rectangular, would carry as a value.
+    if (!productDimensionsAgree(shapes as number[][])) return NaN;
+  }
   let product: BcastValue[] = tensors[0];
   for (let i = 1; i < tensors.length; i++) {
     const next = tensors[i];
@@ -2971,6 +2982,147 @@ function mulTensorWith(
       product
     ) as BcastValue[];
   return product;
+}
+
+/**
+ * Is `v` a rectangular array: a vector of entries that are not arrays, or an
+ * array whose elements are rectangular arrays of the same shape? An empty
+ * array is not, nor an array with an empty array inside (`[[], []]`). The
+ * interpreter reads only a rectangular value as a tensor (its
+ * `structuralShape()`, `boxed-expression/tensor-view.ts`, refuses an empty
+ * level), and multiplies any other list as a collection: beside a matrix and
+ * a ragged list, `[]` is not multiplied with the matrix first, and the
+ * different lengths give `NaN`.
+ */
+function isRectangularArray(v: unknown[]): boolean {
+  return rectangularShape(v) !== null;
+}
+
+function rectangularShape(v: unknown[]): number[] | null {
+  if (v.length === 0) return null;
+  let nested = 0;
+  for (const x of v) if (Array.isArray(x)) nested++;
+  if (nested === 0) return [v.length];
+  if (nested !== v.length) return null;
+  let first: number[] | null = null;
+  for (const x of v) {
+    const s = rectangularShape(x as unknown[]);
+    if (s === null) return null;
+    if (first === null) first = s;
+    else if (s.length !== first.length || s.some((d, i) => d !== first![i]))
+      return null;
+  }
+  return [v.length, ...first!];
+}
+
+/**
+ * Do the dimensions of vectors and matrices (`shapes`, each of rank 1 or 2)
+ * agree at each step of their product, taken left to right as
+ * `mulTensorWith` takes it? Two vectors must have the same length (the
+ * product of each entry). A matrix times a vector needs as many columns as
+ * the vector has entries and gives a vector with one entry for each row; a
+ * vector times a matrix needs as many entries as the matrix has rows and
+ * gives a vector with one entry for each column; a matrix times a matrix
+ * needs as many columns in the first as rows in the second.
+ */
+function productDimensionsAgree(shapes: number[][]): boolean {
+  let current = shapes[0];
+  for (let i = 1; i < shapes.length; i++) {
+    const next = shapes[i];
+    if (current.length === 1 && next.length === 1) {
+      if (current[0] !== next[0]) return false;
+    } else if (current.length === 2 && next.length === 1) {
+      if (current[1] !== next[0]) return false;
+      current = [current[0]];
+    } else if (current.length === 1) {
+      if (current[0] !== next[0]) return false;
+      current = [next[1]];
+    } else {
+      if (current[1] !== next[0]) return false;
+      current = [current[0], next[1]];
+    }
+  }
+  return true;
+}
+
+/** The error of a product of a tensor of rank 3 or more beside a vector or a
+ * matrix, which the interpreter leaves unevaluated. */
+function rankThreeProductError(): Error {
+  return new Error(
+    'Multiply: a factor is a tensor of rank 3 or more beside a vector or a ' +
+      'matrix. The interpreter leaves such a product unevaluated, and ' +
+      'compiled code has no value for it. Evaluate the expression instead.'
+  );
+}
+
+/**
+ * The product of two or more arrays (`tensors`, with their `shapes` from
+ * `rectangularShape`) when one of them is not rectangular, or has rank 3 or
+ * more. The interpreter (`mulTensors()`, `boxed-expression/arithmetic-mul-div.ts`)
+ * does not take the matrix product of such arrays:
+ *
+ * - A list that is not rectangular (its rows have different lengths, or it
+ *   mixes numbers and lists: `[[1], [2, 3]]`, `[[1, 2], 3]`) is not a matrix.
+ *   It is multiplied as a collection.
+ * - Two tensors of rank 3 or more give the product of each pair of their
+ *   elements, so the matrix product of each pair of matrices inside them,
+ *   as `Power` gives the matrix power of each matrix inside such a tensor.
+ * - A tensor of rank 3 or more beside a vector or a matrix, with no list
+ *   that is not rectangular, has no product: the interpreter leaves it
+ *   unevaluated. Compiled code has no value for it and throws.
+ *
+ * The product of a collection is computed in two steps:
+ *
+ * 1. When the rectangular arrays are two or more, one of them is a matrix
+ *    and none has rank 3 or more, they are first multiplied together, left
+ *    to right, and their product takes the place of the first of them. For
+ *    example, `R·M·N` is `R·(M·N)`.
+ * 2. Then the arrays are paired element by element (the broadcast), and each
+ *    pair is multiplied by the same rules, with the scalar factor. For
+ *    example, `[[1], [2, 3]]·[[4], [5, 6]]` is `[[1]·[4], [2, 3]·[5, 6]]`,
+ *    which is `[[4], [10, 18]]`; a pair of two matrices is the matrix
+ *    product.
+ *
+ * Arrays of different lengths give `NaN`, where the interpreter gives an
+ * `incompatible-dimensions` error. The same holds inside a pair: `[1]·[1, 2]`
+ * is `NaN`.
+ */
+function mulCollectionsWith(
+  product2: (a: any, b: any) => any,
+  times: (a: unknown, b: unknown) => number | ComplexResult,
+  tensors: BcastValue[][],
+  shapes: Array<number[] | null>,
+  scalar: BcastValue | undefined
+): BcastValue {
+  if (
+    shapes.every((s) => s !== null) &&
+    !shapes.every((s) => s !== null && s.length >= 3)
+  )
+    throw rankThreeProductError();
+  let arrays = tensors;
+  const regular = arrays.filter((_, i) => shapes[i] !== null);
+  if (
+    regular.length >= 2 &&
+    shapes.some((s) => s !== null && s.length === 2) &&
+    shapes.every((s) => s === null || s.length <= 2)
+  ) {
+    const p = mulTensorWith(product2, times, regular);
+    if (!Array.isArray(p)) return p;
+    const first = shapes.findIndex((s) => s !== null);
+    arrays = arrays.flatMap((a, i) =>
+      i === first ? [p] : shapes[i] === null ? [a] : []
+    );
+  }
+  const n = arrays[0].length;
+  if (arrays.some((a) => a.length !== n)) return NaN;
+  const rest: BcastValue[] = scalar === undefined ? [] : [scalar];
+  const out: BcastValue[] = new Array(n);
+  for (let k = 0; k < n; k++)
+    out[k] = mulTensorWith(product2, times, [
+      ...arrays.map((a) => a[k]),
+      ...rest,
+    ]);
+  return out;
 }
 
 /**
@@ -3334,11 +3486,14 @@ function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
  * product of vectors, or of numbers and one array, is the element-wise
  * product, and this answers `undefined` for it.
  *
- * Any other shape throws: a tensor of rank 3 or more beside another array,
- * or a matrix whose rows do not have the same length. The interpreter
- * broadcasts such a product over the elements of the arrays and takes the
- * matrix product of the matrices it meets, which the element-wise code does
- * not compute.
+ * A list that is not rectangular (rows of different lengths, numbers mixed
+ * with lists: `[[1], [2, 3]]`) is not a matrix. The product pairs the
+ * elements of the arrays, as the interpreter does (`mulCollectionsWith`).
+ *
+ * Tensors that all have rank 3 or more give the product of each pair of
+ * their elements, as in the interpreter (`mulCollectionsWith`). A tensor of
+ * rank 3 or more beside a vector or a matrix throws: the interpreter leaves
+ * that product unevaluated.
  *
  * A complex entry (`{re, im}`) anywhere takes the complex product
  * (`complexMulTensor`).
@@ -3364,13 +3519,22 @@ function matrixProductShape(...args: unknown[]): unknown {
     (v) => Array.isArray(v[0]) && !Array.isArray((v[0] as unknown[])[0])
   );
   if (!hasMatrix && arrays.every(isVector)) return undefined;
-  if (!hasMatrix || !arrays.every((v) => isVector(v) || isMatrix(v)))
-    throw new Error(
-      'Multiply: a factor is a tensor of rank 3 or more, or a list of rows ' +
-        'of different lengths, beside another list. The interpreter takes ' +
-        'the matrix product of the matrices inside such a product, which ' +
-        'compiled code does not compute. Evaluate the expression instead.'
-    );
+  // A list that is not rectangular (`[[1], [2, 3]]`) is not a matrix: the
+  // product pairs the elements of the arrays, as the interpreter does
+  // (`mulCollectionsWith`).
+  // Tensors that all have rank 3 or more: the product of each pair of their
+  // elements (`mulCollectionsWith`).
+  const ragged = arrays.some((v) => !isRectangularArray(v));
+  const allRankThree = arrays.every((v) => {
+    const s = rectangularShape(v);
+    return s !== null && s.length >= 3;
+  });
+  if (
+    !ragged &&
+    !allRankThree &&
+    (!hasMatrix || !arrays.every((v) => isVector(v) || isMatrix(v)))
+  )
+    throw rankThreeProductError();
   const isComplexEntry = (x: unknown): boolean =>
     Array.isArray(x) ? x.some(isComplexEntry) : isComplexObject(x);
   return args.some(isComplexEntry)
@@ -3381,8 +3545,8 @@ function matrixProductShape(...args: unknown[]): unknown {
 /**
  * `Multiply` over a mix of numbers and arrays whose rank the compiler does
  * not know (a `broadcastable<number>`): the checked shape rule of
- * `matrixProductShape` (a tensor of rank 3 or more beside another array
- * throws), then the product by rank of `mulTensor`.
+ * `matrixProductShape` (a tensor of rank 3 or more beside a vector or a
+ * matrix throws), then the product by rank of `mulTensor`.
  */
 function mulChecked(...args: unknown[]): unknown {
   return matrixProductShape(...args) ?? mulTensor(...(args as BcastValue[]));

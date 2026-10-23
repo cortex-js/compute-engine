@@ -348,20 +348,41 @@ export function broadcastAdmitsCollectionElement(
       return isFold || !!a.dimensions;
     return isSubtype(a, 'number');
   };
+  // The union may also be below one or more list levels of the element: the
+  // elements of a list of ragged lists, `[[M, v], [N, w]]` with `M`, `N`
+  // matrices and `v`, `w` vectors, are typed `list<matrix<integer^(2x2)> |
+  // vector<integer^1>>`. The broadcast descent stops at that union, because
+  // its arms have different depths (`unionElementType`). Each arm is then
+  // read inside the same list levels (`list<matrix<…>>`, `list<vector<…>>`).
+  // Without this, `Product` of such a list was an `incompatible-type` error
+  // for `Multiply`, while the product of its elements has a value.
+  const unionArms = (t: Type): Type[] | undefined => {
+    const u = resolveTypeAlias(t);
+    if (typeof u === 'string' || u.kind !== 'union') return undefined;
+    return u.types.every(isTensorOrNumber) ? u.types : undefined;
+  };
+  const armsAt = (t: Type): Type[] | undefined => {
+    const top = unionArms(t);
+    if (top !== undefined) return top;
+    const { leaf, rank } = broadcastLeafType(t);
+    if (rank === 0) return undefined;
+    const arms = unionArms(leaf);
+    if (arms === undefined) return undefined;
+    return arms.map((arm) => {
+      let wrapped = arm;
+      for (let i = 0; i < rank; i++)
+        wrapped = { kind: 'list', elements: wrapped } as ListType;
+      return wrapped;
+    });
+  };
+  let arms: Type[] | undefined;
   const unionAt = (supply.args ?? []).findIndex((arg, position) => {
     if (elementPositions !== undefined && elementPositions[position] !== true)
       return false;
-    const t = resolveTypeAlias(arg.type);
-    return (
-      typeof t !== 'string' &&
-      t.kind === 'union' &&
-      t.types.every(isTensorOrNumber)
-    );
+    arms = armsAt(arg.type);
+    return arms !== undefined;
   });
-  if (unionAt !== -1) {
-    const arms = (
-      resolveTypeAlias(supply.args![unionAt].type) as { types: Type[] }
-    ).types;
+  if (unionAt !== -1 && arms !== undefined) {
     return arms.every((arm) => {
       const args = supply.args!.map((arg, i) =>
         i === unionAt ? { ...arg, type: arm } : arg

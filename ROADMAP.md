@@ -1885,19 +1885,34 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-98. `Multiply` of two matrices: remaining case after the matrix-product change
+### CE-98. `Multiply` of two matrices: a compiled fold that is still refused
 
-**Status:** open; wrong value. User decision 2026-10-22: `Multiply` of two
-matrices is the matrix product however the factors are written; done
-2026-10-23 (see CHANGELOG, Breaking Changes) except the sub-item below.
+**Status:** open; reachable refusal. User decision 2026-10-22: `Multiply` of
+two matrices is the matrix product however the factors are written; done
+2026-10-23, and the compiled product of lists that are not rectangular and of
+tensors of rank 3 follows the interpreter (see CHANGELOG), except the sub-item
+below.
 
-- **CE-98.1** A ragged list is not a matrix. With `L: list<unknown>` and
-  `L = [[[1], [2, 3]], [[4], [5, 6]]]`, `Product(L)` and
-  `Reduce(L, Multiply, 1)` give `[[4], [10, 18]]` (entry by entry) in the
-  interpreter, and `null` in compiled JavaScript: `mulTensorWith`
-  (`compilation/javascript-runtime.ts`) sends every operand of rank 2 or more to
-  the matrix product. The shape dispatch of rule 4 must read a ragged value as a
-  list, not a matrix.
+- **CE-98.3** Compiled JavaScript refuses a `Multiply` fold over elements that
+  may be numbers or ragged lists. With `L: list<unknown>` and
+  `L = [2, [[1], [2, 3]], [[4], [5, 6]]]`, `Product(L)` is `[[8], [20, 36]]` in
+  the interpreter; `compile()` throws "a `Multiply` fold over elements of type
+  `integer | list<vector<integer^1> | vector<integer^2>>` has no compiled
+  form". The refusal is in `nestedElementCombiner`
+  (`compilation/javascript-target.ts`): it declines a list of lists without
+  dimensions because the element-wise combiner read a ragged list as a matrix.
+  When the run-time product follows the interpreter for a ragged factor
+  (done 2026-10-23, `mulCollectionsWith` in `compilation/javascript-runtime.ts`),
+  a `Multiply` fold can admit such an arm. The same function also refuses a
+  `Multiply` fold over tensors of rank 3 of different lengths
+  (`L = [[M, M], [N, N, N]]`, "lists of several shapes"), where the
+  interpreter gives an `incompatible-dimensions` error and `_SYS.mulTensor`
+  now gives `NaN`.
+  Do it after CE-25 is committed: CE-25 adds a refusal of the same kind in
+  `nestedElementCombiner` (a `Multiply` fold whose arms are lists with no
+  dimensions and cells typed `unknown` or `any`, the helper `hasOpenCells`);
+  remove both refusals in the same change.
+
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 

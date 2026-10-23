@@ -38,6 +38,15 @@
     because compiled code stores a list of points and a matrix as the same
     array (ROADMAP CE-216.1); their compiled operand order now follows the
     written order.
+    A list whose rows have different lengths, or that mixes numbers and
+    lists (`[[1], [2, 3]]`), is not a matrix: its elements are paired with
+    the elements of the other factors, as in the interpreter
+    (`[[1], [2, 3]]·[[4], [5, 6]]` is `[[4], [10, 18]]`; it was `null` or
+    wrong values). Two tensors of rank 3 multiply each pair of matrices, as
+    in the interpreter (it threw, and a compiled `Product` gave `NaN`
+    entries); a tensor of rank 3 beside a matrix or a vector throws when the
+    code runs. Where the interpreter gives an `incompatible-dimensions`
+    error, compiled code gives `NaN`.
   - A product boxed while its symbols are `unknown` is still sorted: declare a
     matrix-capable type for the written order to be kept. `Divide(p, q)` of two
     matrices still divides each entry (`p·q^-1` is the matrix product).
@@ -671,6 +680,16 @@
   engine tolerance makes more fits exact.
 
 ### Resolved Issues
+
+- **`Product`, `Reduce` and `Map` over a list of ragged lists that hold
+  matrices were an `incompatible-type` error.** With `L: list<unknown>` and
+  `L = [[M, [5]], [N, [2]]]` (`M`, `N` 2×2 matrices), the elements of `L` are
+  typed `list<matrix<integer^(2x2)> | vector<integer^1>>`, and the check of
+  the callback refused `Multiply` and `Negate` for them, so `Product(L)` was
+  `Reduce(L, Error(incompatible-type), 1)`, while the product of the two
+  elements written as `p·q` had a value. A union of tensors and numbers below
+  one or more list levels of an element is now read arm by arm, as a union at
+  the top of the element already was: `Product(L)` is `[M·N, [10]]`.
 
 - **An element of a `list<unknown>` result was read as a number.** With
   `g: (unknown) -> list<unknown>` and `x: any`, the element `g(x)[1]` is typed
