@@ -2555,12 +2555,10 @@ function isPositiveForRealArguments(e: Expression): boolean {
   if (isFunction(e, 'Sqrt') || isFunction(e, 'Abs'))
     return isPositiveForRealArguments(e.op1);
   if (isFunction(e, 'Exp')) return symbolsMayBeReal(e.op1);
-  if (isFunction(e, 'Multiply'))
-    return e.ops.every(isPositiveForRealArguments);
+  if (isFunction(e, 'Multiply')) return e.ops.every(isPositiveForRealArguments);
   if (isFunction(e, 'Divide'))
     return (
-      isPositiveForRealArguments(e.op1) &&
-      isNonNegativeForRealArguments(e.op2)
+      isPositiveForRealArguments(e.op1) && isNonNegativeForRealArguments(e.op2)
     );
   if (isFunction(e, 'Add'))
     return (
@@ -2608,7 +2606,8 @@ function gaussianCoefficientSign(a: Expression): -1 | 1 | null {
     if (isNumber(e)) return e.isNegative === true ? -1 : 1;
     if (isFunction(e, 'Multiply') || isFunction(e, 'Divide')) {
       let sign: -1 | 1 = 1;
-      for (const op of e.ops) if (written(op) === -1) sign = sign === 1 ? -1 : 1;
+      for (const op of e.ops)
+        if (written(op) === -1) sign = sign === 1 ? -1 : 1;
       return sign;
     }
     return 1;

@@ -384,8 +384,7 @@ function classifyErfEndpointLeak(
   if (split === null || split === 'unresolvable') return split;
   const { infSign, cofactor } = split;
   const erf = infSign; // Erf(c·(±∞)) for c > 0
-  const value =
-    node.operator === 'Erf' ? ce.number(erf) : ce.number(1 - erf); // Erfc
+  const value = node.operator === 'Erf' ? ce.number(erf) : ce.number(1 - erf); // Erfc
   const guard = ce.function('Greater', [cofactor, ce.Zero]);
   return { value, guard };
 }
