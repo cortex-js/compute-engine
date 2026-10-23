@@ -3529,7 +3529,10 @@ of `(2t + i)/(t − 3i)`.
 
 ### CE-394. `.N()` of an integral whose value is next to the largest double is `NaN`
 
-**Status:** open; defect, small. Found 2026-10-23 (session compute-engine-57).
+**Status:** open; defect, small; low priority (user decision 2026-10-23: later,
+because the result is an honest `NaN` and the fix changes
+`adaptiveQuadrature`, which every numeric integral uses). Found 2026-10-23
+(session compute-engine-57).
 
 `∫₀^∞ xⁿ·e⁻ˣ dx` is `n!`. A product that overflows against itself is computed
 again in log space at the samples where it is not finite
