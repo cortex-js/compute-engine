@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 const ce = new ComputeEngine();
 
@@ -415,5 +416,50 @@ describe("explain('solve') keeps a step that changes the exactness", () => {
   test('an exact equation is unchanged', () => {
     const ex = ce.parse('x^2 + 3x + 2 = 0').explain('solve');
     expect(ex.steps.map((s) => s.id)).toEqual(['solve.quadratic-formula']);
+  });
+});
+
+// Rational roots are tested exactly. A test of the value at the working
+// precision took a candidate for a root when the terms were large, and the
+// true root next to it was then removed as its duplicate. A numeric root
+// whose value is an integer is a float, so the exact check does not reject
+// the root that it approximates.
+describe('Solve of a polynomial with large terms', () => {
+  test('x³ − 10¹²x² + 10¹² = 0 has three roots, none of them exactly 10¹²', () => {
+    const solutions = ce.parse('x^3-10^{12}x^2+10^{12}=0').solve('x')!;
+    expect(solutions).toHaveLength(3);
+    const large = solutions.find((r) => r.N().re > 1e6)!;
+    expect(isNumber(large) && large.isExact).toBe(false);
+  });
+
+  test('x⁹ − 1000x⁸ + 1000 = 0 has nine roots, none of them exactly 1000', () => {
+    const solutions = ce.parse('x^9-1000x^8+1000=0').solve('x')!;
+    expect(solutions).toHaveLength(9);
+    const large = solutions.find((r) => r.N().re > 100)!;
+    expect(isNumber(large) && large.isExact).toBe(false);
+  });
+
+  test('a rational root is exact', () => {
+    expect(roots('3x^3-x^2+3x-1=0')).toEqual(['1/3', 'i', '-i']);
+    expect(roots('2x^3-3x^2-3x+2=0')).toEqual(['-1', '1/2', '2']);
+  });
+});
+
+// The roots that the closed-form formulas give for the polynomial itself
+// are exact by construction, and are not substituted back.
+describe('Solve of a polynomial in x² with closed-form roots', () => {
+  test('x⁴ + x² − 1 = 0 has four roots', () => {
+    expect(roots('x^4+x^2-1=0')).toEqual([
+      '-sqrt(-1/2 + sqrt(5)/2)',
+      'sqrt(-1/2 + sqrt(5)/2)',
+      'sqrt(-1/2 - sqrt(5)/2)',
+      '-sqrt(-1/2 - sqrt(5)/2)',
+    ]);
+    for (const r of residuals('x^4+x^2-1=0')) expect(r).toBeLessThan(1e-12);
+  });
+
+  test('a repeated root is listed once', () => {
+    expect(roots('x^2-2x+1=0')).toEqual(['1']);
+    expect(roots('x^4-2x^2+1=0')).toEqual(['-1', '1']);
   });
 });

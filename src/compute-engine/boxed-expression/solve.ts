@@ -4837,6 +4837,9 @@ export function findUnivariateRoots(
   ce.pushScope();
 
   let result: Expression[] = [];
+  // `result` holds the roots that the closed-form formulas gave for the
+  // original equation itself (`solvePolynomialByCoefficients()`).
+  let formulaRoots = false;
   // A strategy showed that the equation has no real root (an empty list from
   // `solveSingleExponential()` or `solveScaledAbsoluteValue()`), or no root
   // (an empty list from `solveScaledFloatPower()`).
@@ -4970,9 +4973,20 @@ export function findUnivariateRoots(
     ) {
       const polyStats = stats ?? childStats();
       const partialBefore = polyStats.partial === true;
-      result = solvePolynomialByCoefficients(polyExpr, x, trace, polyStats);
+      const provenance = { closedForm: false };
+      result = solvePolynomialByCoefficients(
+        polyExpr,
+        x,
+        trace,
+        polyStats,
+        provenance
+      );
       polynomialDeclined =
         result.length === 0 && !partialBefore && polyStats.partial === true;
+      // Roots of the original equation itself, all given by closed-form
+      // formulas: they are exact by construction (see `validateRoots()`).
+      formulaRoots =
+        result.length > 0 && polyExpr === originalExpr && provenance.closedForm;
     }
     // The polynomial came from squaring a square-root equation: its
     // complex roots are not solutions of the original equation.
@@ -5216,7 +5230,14 @@ export function findUnivariateRoots(
   // Validate the roots against the ORIGINAL expression (before clearing
   // denominators and harmonization). This filters out extraneous roots that
   // may have been introduced by algebraic transformations.
-  const validatedRoots = validateRoots(originalExpr, x, resolved, trace, stats);
+  const validatedRoots = validateRoots(
+    originalExpr,
+    x,
+    resolved,
+    trace,
+    stats,
+    formulaRoots
+  );
 
   // Filter solutions by the declared type of the variable
   return filterRootsByType(
@@ -5413,11 +5434,14 @@ function solvePolynomialByCoefficients(
   polyExpr: Expression,
   x: string,
   trace?: RuleSteps,
-  stats?: RootStats
+  stats?: RootStats,
+  provenance?: { closedForm: boolean }
 ): Expression[] {
   const ce = polyExpr.engine;
   const deg = polynomialDegree(polyExpr, x);
+  if (provenance) provenance.closedForm = false;
   if (deg === 2) {
+    if (provenance) provenance.closedForm = true;
     // The quadratic rules match the surface form `Multiply(__b, _x)` for the
     // middle term, but a negated symbolic/unit coefficient canonicalizes to
     // `Negate(Multiply(b, x))` (or `Negate(x)`), which that pattern misses — so
@@ -5459,6 +5483,7 @@ function solvePolynomialByCoefficients(
       coeffs.slice(1, degree).every((c) => c.isSame(0)) ||
       exponentGcd(coeffs) > 1
     ) {
+      if (provenance) provenance.closedForm = closedFormRoots(coeffs);
       const roots = sortRoots([
         ...result,
         ...rootsOfPolynomialFactor(coeffs, x, stats, realOnly),
@@ -5536,6 +5561,31 @@ function solvePolynomialByCoefficients(
     return sortRoots(result);
   }
   return [];
+}
+
+/**
+ * Whether `rootsOfPolynomialFactor()` gives every root of the polynomial with
+ * the coefficients `coeffs` (constant term first) by a closed form: a degree
+ * of 2 or less, a pure power `a·xⁿ + b`, or a polynomial in `xᵍ` whose
+ * reduced polynomial has closed-form roots. The roots are then exact by
+ * construction. The rational-root search and the numeric root finder are not
+ * closed forms: the first tests its candidates numerically, and the second
+ * boxes an integral float as an exact integer, so their roots are checked
+ * (`validateRoots()`).
+ */
+function closedFormRoots(
+  coeffs: ReadonlyArray<Expression>,
+  depth = 0
+): boolean {
+  const m = coeffs.length - 1;
+  if (m <= 2) return true;
+  if (coeffs.slice(1, m).every((c) => c.isSame(0))) return true;
+  const g = exponentGcd(coeffs);
+  if (g <= 1 || depth > 4) return false;
+  return closedFormRoots(
+    coeffs.filter((_, i) => i % g === 0),
+    depth + 1
+  );
 }
 
 /**
@@ -5925,10 +5975,18 @@ function numericPolynomialRoots(
       ...result,
       ...rootsOfPolynomialFactor(rest, x, stats, false, terms),
     ];
+  // A numeric root is a float, also when its value is an integer: boxed as a
+  // number, an integral double is an exact integer, and the exact check of
+  // `validateRoots()` then rejects it when it only approximates a root. The
+  // largest root of `x³ − 10¹²x² + 10¹² = 0` is `10¹² − 10⁻¹²`, the double
+  // `10¹²`, and the list lost that root. A decimal string with a point
+  // (`"1000000000000.0"`) boxes as an inexact value.
+  const inexact = (v: number): Expression =>
+    Number.isInteger(v) ? ce.number(`${BigInt(v)}.0`) : ce.number(v);
   for (const z of remaining)
     result.push(
       Math.abs(z.im) <= 1e-8 * (1 + Math.abs(z.re))
-        ? ce.number(z.re)
+        ? inexact(z.re)
         : ce.number(z)
     );
   return result;
@@ -6255,13 +6313,25 @@ function residualScale(
  * is given, `stats.undecided` is set to `true` when a root is dropped without
  * a decided check: its residual still has the unknown, or it has a free
  * parameter and cannot be proved zero.
+ *
+ * With `formulaRoots`, the roots are those that the closed-form formulas of a
+ * polynomial gave for `expr` itself (`solvePolynomialByCoefficients()`), not
+ * for an equation transformed by squaring or a change of variable. An exact
+ * such root is a root by construction and is not substituted back: the
+ * substitution leaves an exact constant such as
+ * `(-1/2 + √5/2)^2 + (-1/2 + √5/2) - 1`, and its proof of zero refines the
+ * constant at increasing precision (two exact numbers are compared exactly),
+ * which took about 60% of the time of `x^4 + x^2 - 1 = 0`. A root that holds
+ * a float (from the numeric root finder) is still checked (user decision
+ * 2026-10-23, ROADMAP CE-385).
  */
 function validateRoots(
   expr: Expression,
   x: string,
   roots: ReadonlyArray<Expression>,
   trace?: RuleSteps,
-  stats?: { undecided: boolean }
+  stats?: { undecided: boolean },
+  formulaRoots = false
 ): Expression[] {
   const ce = expr.engine;
   const validRoots = roots.filter((root) => {
@@ -6274,6 +6344,8 @@ function validateRoots(
     // An infinite value is never a root: `sin(1/x) = 0` gives the candidate
     // `+∞` (from `1/x = 0`), and `sin(1/∞)` evaluates to `0`.
     if (probe.isInfinity === true) return false;
+    if (formulaRoots && !isWhen && probe.isValid && isExactTree(probe))
+      return probe.isNaN !== true;
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: probe }).canonical.evaluate();
     if (value === null) return false;
@@ -6346,12 +6418,23 @@ function validateRoots(
     const isDuplicate = uniqueRoots.some(
       // Roots may be parametric (free variables left), so recognizing a
       // duplicate is an identity question: prover tier, not cheap `isEqual()`.
-      (existing) => existing.isSame(root) || existing.isIdenticallyEqual(root)
+      // Closed-form roots (`formulaRoots`) that are equal are the same
+      // expression (a zero discriminant gives `-b/(2a)` twice), and two
+      // different expressions are different roots, so `isSame()` decides:
+      // the prover refines two exact constants at increasing precision.
+      (existing) =>
+        existing.isSame(root) ||
+        (!formulaRoots && existing.isIdenticallyEqual(root))
     );
     if (!isDuplicate) uniqueRoots.push(root);
   }
 
   return uniqueRoots;
+}
+
+/** Whether every number literal in `e` is exact: `e` holds no float. */
+function isExactTree(e: Expression): boolean {
+  return isNumber(e) ? e.isExact : !isFunction(e) || e.ops.every(isExactTree);
 }
 
 /** Filter solutions by the declared type of the variable.
@@ -6501,7 +6584,13 @@ function solveQuadraticByCoefficients(
  * Given polynomial a_n*x^n + ... + a_1*x + a_0, the possible rational roots
  * are +/- (divisors of a_0) / (divisors of a_n).
  *
- * Each candidate is validated by substitution into the original expression.
+ * Each candidate is an exact rational, and it is validated by an exact
+ * substitution into the original expression: the polynomial is evaluated at
+ * the candidate with exact arithmetic, and the candidate is a root only when
+ * the value is exactly 0. A test of the value at the working precision
+ * (`.N()`, 21 digits) took a candidate for a root when the terms were large:
+ * `x³ − 10¹²x² + 10¹² = 0` gave the root `10¹²`, whose value is `10¹²`, and
+ * the true root next to it was then removed as its duplicate.
  */
 function findRationalRoots(
   expr: Expression,
@@ -6534,15 +6623,19 @@ function findRationalRoots(
 
   const pDivisors = divisors(constantInt);
   const qDivisors = divisors(leadingInt);
-  const candidates: number[] = [];
-  const seen = new Set<number>();
+  // Each candidate is a reduced fraction `[numerator, denominator]`.
+  const candidates: [number, number][] = [];
+  const seen = new Set<string>();
   for (const p of pDivisors) {
     for (const q of qDivisors) {
       for (const sign of [1, -1]) {
-        const val = (sign * p) / q;
-        if (!seen.has(val)) {
-          seen.add(val);
-          candidates.push(val);
+        const g = gcd2(p, q);
+        const num = (sign * p) / g;
+        const den = q / g;
+        const key = `${num}/${den}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          candidates.push([num, den]);
         }
       }
     }
@@ -6552,9 +6645,9 @@ function findRationalRoots(
   if (candidates.length > 100) return [];
 
   const roots: Expression[] = [];
-  for (const candidate of candidates) {
-    const root = ce.number(candidate);
-    const value = expr.subs({ [variable]: root }).N();
+  for (const [num, den] of candidates) {
+    const root = den === 1 ? ce.number(num) : ce.number([num, den]);
+    const value = expr.subs({ [variable]: root }).evaluate();
     if (value.isSame(0)) roots.push(root);
   }
   return roots;

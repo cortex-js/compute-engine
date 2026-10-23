@@ -1,7 +1,57 @@
 ## [Unreleased]
 
+### Performance
+
+- **`Solve` of a polynomial whose roots have closed forms is about 4 times
+  faster** (ROADMAP CE-385). `x^4 + x^2 - 1 = 0` takes 1.0 ms, where it took
+  4.1 ms in 0.162.0 and 1.9 ms in 0.133.0. The roots that the closed-form
+  formulas give for the equation itself (a quadratic, a pure power `a·xⁿ + b`,
+  or a polynomial in `xᵍ` that reduces to one of these) are exact by
+  construction, so they are no longer substituted back into the equation, and
+  repeated roots among them are found by comparing the expressions. Before,
+  each root was substituted and the residual, an exact constant such as
+  `(-1/2 + √5/2)^2 + (-1/2 + √5/2) - 1`, was proved zero by refining it at
+  increasing precision. The roots of every other route (squaring, a change of
+  variable, the rational-root search, the numeric root finder) are still
+  checked.
+
 ### Resolved Issues
 
+- **`Solve` of a polynomial with large terms gave a root that is not a root,
+  or lost a root.** The rational-root search tested each candidate by the
+  value of the polynomial at 21 digits, and a candidate was taken for a root
+  when the terms were large: `x³ − 10¹²x² + 10¹² = 0` gave the root `10¹²`,
+  whose value is `10¹²`, and the true root next to it was then removed as its
+  duplicate, so the list held 2 of the 3 roots; `x⁹ − 1000x⁸ + 1000 = 0` held
+  8 of its 9 roots. A candidate is now an exact rational, tested with exact
+  arithmetic. A root found by the numeric root finder whose value is an
+  integer is now a float (`1000000000000.0`), not an exact integer, so the
+  exact check no longer rejects the root that it approximates. A rational
+  root of a polynomial of degree 3 or more is now exact: `2x³ − 3x² − 3x + 2 =
+  0` gives `−1`, `1/2` and `2` (it gave `0.5`).
+
+- **Compiled code declined a call of a user function whose argument is an
+  untyped free input** (ROADMAP CE-377). With `g := t ↦ [t, 2]` and `x` free,
+  the signature of `g` is `(unknown) -> list<unknown>`, so the engine types
+  `g(x)[1]` as `unknown`, and the complex lane of the JavaScript target declined
+  `g(x)[1] + g(x)[2]` ("scalar arithmetic over a list-valued operand");
+  `Trace(m(x)) + 1` with `m := t ↦ [[t, 1], [2, 3]]` declined the same way, and
+  `Sum(1 + v(x)[2], k from 1 to 3)` with `v := s ↦ [s, k]` and `k = i` declined
+  in every mode. The emitted code reads an untyped free input as one scalar
+  (`x + 1` is `_.x + 1`), so the compiler now types an operand with each such
+  input read as a number, with the engine's own derivation: `g(x)` is a
+  `vector<2>`, `g(x)[1]` is a `number`, and the operand is a scalar. The three
+  expressions compile in every mode, with the interpreter's values; a call keeps
+  its run-time broadcast, so an input that holds a list at run time still maps
+  the call over it. The shader targets read the static length of such a call's
+  result the same way: `v(x)[2] + 1` with `v := s ↦ [s, 2s]` compiles to
+  `(_fn_v(x)).y + 1.0` on GLSL and WGSL, where it declined ("the base (type
+  `list<unknown>`) has no statically known length"); a list with a complex
+  element still has no shader value, and the decline now names that element. The
+  decline of an operand that only may be a list at run time, `h(x) + 1` with
+  `h: (unknown) -> unknown` and no body, names the operand and its type ("a
+  possibly list-valued operand (`h(x)`, of type `unknown`)"), where it said "a
+  list-valued operand".
 - **Compiled JavaScript gave `NaN` or `false` for an absent element where the
   interpreter gives `Missing`** (ROADMAP CE-368). With `g := t ↦ [t, 2t]` and
   `x: any`, the element `g(x)[5]` is absent at `x = [1, 2, 3]` (the index is
@@ -25,13 +75,43 @@
   `NumeratorDenominator` gave a tuple of errors**
   ([#467](https://github.com/cortex-js/compute-engine/issues/467), contributed
   by [enumeratio](https://github.com/enumeratio)). A call with an operand past
-  the declared arity is one `unexpected-argument` error when the surplus
-  operand is a tuple, as it is for a list: `Numerator(3/2, (1, 2))` was
-  `(Error, Error)`, a tuple of two errors, and is now the one error. The type
-  of the call is no longer lifted over a surplus list or tuple (it was
-  `list<…>` or `tuple<…>`): it keeps the declared result type of the
-  operator, `nothing | number` for `Numerator` and `Denominator` and
+  the declared arity is one `unexpected-argument` error when the surplus operand
+  is a tuple, as it is for a list: `Numerator(3/2, (1, 2))` was
+  `(Error, Error)`, a tuple of two errors, and is now the one error. The type of
+  the call is no longer lifted over a surplus list or tuple (it was `list<…>` or
+  `tuple<…>`): it keeps the declared result type of the operator,
+  `nothing | number` for `Numerator` and `Denominator` and
   `nothing | tuple<number, number>` for `NumeratorDenominator`.
+
+- **Compiled folds over elements of unknown type, absent elements, and
+  booleans** (ROADMAP CE-380, CE-381, CE-382). Three kinds of compiled
+  JavaScript folds (`Sum`, `Product`, `Reduce`, `Scan`, and `Max`, `Mean` and
+  the other statistics) disagreed with the interpreter:
+  - With `L: list<unknown>`, `Sum(L) + 1` and `Product(L) · 2` did not compile,
+    although `L` usually holds real numbers. They now compile, and a complex
+    entry of the fold is added as complex: over `[[1, 2], [i, 3]]`,
+    `Sum(L) + 1` is `[2 + i, 6]` and `Reduce(L, Add, 0) + 1` is `[2 + i, 6]`;
+    the second gave `["[object Object]1", 6]`. In the `complex` mode, the same
+    parents over `list<list<number>>` compile too, and a bare `list` is read as
+    a list whose cells may be complex, as `list<unknown>` is: `L + 1` over
+    `[i, 2]` gave `["[object Object]1", 3]`. In the default mode, a complex
+    entry in a list input that the code reads as real is still the host's
+    responsibility.
+  - JavaScript reads `null` as 0 in `+`, `*` and `Math.min`. With
+    `L: list<number | missing>` and `[2, null, 3]`, `Scan(L, Multiply, 1)` gave
+    `[2, 0, 0]`, `Reduce(L, Add, 0)` gave `5` and `Reduce(L, Min)` gave `0`;
+    `Reduce(L, Multiply, ImaginaryUnit)` threw. Each is now `NaN` from the
+    absent element on, as in the interpreter (`[2, NaN, NaN]`, `NaN`). The
+    `Product` and `Sum` of rows with an absent entry (`[[2, null], [3, 4]]`)
+    are `[6, NaN]` and `[5, NaN]` (they were `[6, 0]` and `[5, 4]`), and a
+    matrix product reads an absent cell as `NaN`.
+  - The `Sum` and `Product` of a list of booleans or strings
+    (`list<boolean>`, `list<list<string>>`), the `Reduce` and `Scan` of a list
+    of booleans with `Add`, `Multiply`, `Min` or `Max`, and the `Max`, `Min`
+    and `Mean` of a list of booleans no longer compile; the interpreter gives an
+    `incompatible-type` error or leaves `Max(True, False)` unevaluated. The
+    compiled `Sum` of `[[true], [false]]` was `[1]`. With `fallback` (the
+    default), `compile()` runs the interpreter for these.
 
 ## 0.162.0 _2026-10-23_
 

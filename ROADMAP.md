@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-387.
+Next free reference: CE-391.
 
 **Entry format.**
 
@@ -1888,44 +1888,64 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 - **CE-97.3** `Dot(p, p)` for `p: list<number>` at `p = []`: the interpreter
   leaves `MatrixMultiply([], [])`, typed `number`; the compiled code gives `0`.
 
-### CE-380. A compiled fold of complex values in a list of unknown type is joined as text by a parent `Add`
+### CE-388. Compiled `Multiply` of a fold result and a matrix is refused
+
+**Status:** open; a refusal that a program can reach.
+
+With `M: matrix<number>` and `L` declared `list<matrix<number>>`,
+`list<tensor<number>>`, `list<list<unknown>>` or `list<unknown>`,
+`Multiply(Sum(L), M)`, `Multiply(M, Reduce(L, Add, 0))` and
+`Multiply(Scan(L, Add, 0), M)` do not compile ("scalar arithmetic over a
+list-valued operand", or "a factor is a tensor of rank 3 or more" for `Scan`).
+With `L: list<unknown>`, `Multiply(Sum(L), Sum(L))` does not compile either,
+while `Multiply(Reduce(L, Add, 0), Reduce(L, Add, 0))` does. The interpreter
+gives the matrix product for each (`[[2, 2], [5, 3]]` for `Sum(L)·M` with
+`L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`). With
+`fallback` (the default), `compile()` then runs the interpreter. Expected: the
+compiled code dispatches on the run-time shape (`_SYS.mulTensor`), as it does
+for two fold results.
+
+### CE-389. A list literal with an absent cell has no dimensions
+
+**Status:** open; defect.
+
+`[2, Missing]` is typed `list<integer | missing>` and `[[2, Missing], [3, 4]]`
+is typed `list<list<integer | missing>>`, while `[[2, 3], [3, 4]]` is typed
+`matrix<integer^(2x2)>`. The cell type `integer | missing` can carry dimensions
+(`cellTypeMayCarryDimensions`, `common/type/primitive.ts`), so the literal
+typing drops them somewhere else. Two effects:
+
+- `ce.assign('V', [2, Missing])` throws for `V: vector<(number | missing)^2>`,
+  and `ce.assign('M', [[2, Missing], [3, 4]])` throws for
+  `M: matrix<(number | missing)^(2x2)>`. The parser accepts these types, but no
+  literal value can be assigned to them.
+- The interpreter does not read such a literal as a matrix: the `Product` of
+  `[[2, Missing], [3, 4]]` and `[[1, 0], [0, 1]]` is the element-wise product
+  `[[2, NaN], [0, 4]]`, not the matrix product (`Multiply` of two matrices is
+  the matrix product, user decision 2026-10-22). Compiled code declared
+  `list<matrix<(number | missing)^(2x2)>>` gives the matrix product
+  `[[NaN, NaN], [3, 4]]`.
+
+Expected: the literal has the dimensions of its shape whatever its cells hold
+(`matrix<(integer | missing)^(2x2)>`), and the two routes agree.
+
+### CE-390. The interpreter's `Multiply` of a lazy list of matrices and a matrix pairs their elements
 
 **Status:** open; wrong value.
 
-With `L: list<unknown>` and `L = [[1, 2], [i, 3]]`, compiled `Product(L)` gives
-`[{re: 0, im: 1}, 6]`, the interpreter's value. But compiled `Product(L) + 1`,
-`Reduce(L, Multiply, 1) + 1` and `Reduce(L, Add, 0) + 1` give the strings
-`["[object Object]1", "[object Object]1"]`; the interpreter gives `[1 + i, 7]`.
-The parent `Add` uses the real `+` because the type of the fold does not show
-complex cells. The convention that a lane not proved complex is real (user
-decision 2026-10-01, `mulTensorAny` in `compilation/javascript-runtime.ts`)
-allows `NaN` entries there, not text. Expected: the interpreter's value, or
-`NaN` entries, or a refusal when the code is compiled.
-
-### CE-381. A compiled `Multiply` fold reads an absent entry as 0
-
-**Status:** open; wrong value.
-
-JavaScript multiplies `null` as 0. With `L: list<number | missing>` and the
-input `[2, null, 3]`, compiled `Scan(L, Multiply, 1)` gives `[2, 0, 0]`; the
-interpreter gives `[2, NaN, NaN]`. With `L: list<list<number | missing>>` and
-`[[2, null], [3, 4]]`, compiled `Product(L)` gives `[6, 0]` (interpreter:
-`[6, NaN]`). `Reduce(L, Multiply, ImaginaryUnit)` over `[2, null, 3]` throws
-"Cannot read properties of null (reading 're')" (interpreter: `NaN`).
-`Product(L)` over `[2, null, 3]` already gives `NaN`. Expected: an absent entry
-is `NaN` in every step of the fold, as in the interpreter.
-
-### CE-382. Compiled `Product` and `Sum` of lists of strings or booleans give an array
-
-**Status:** open; wrong value.
-
-With `L: list<list<string>>` and the input `[["a"], ["b"]]`, compiled
-`Product(L)` gives `[null]`; with `L: list<list<boolean>>` and
-`[[true], [false]]`, compiled `Product(L)` gives `[0]` and `Sum(L)` gives `[1]`.
-The interpreter gives an `incompatible-type` error for each. `Reduce` and `Scan`
-with the same operands are refused when the code is compiled, as expected.
-Expected: the compiled `Product` and `Sum` refuse elements whose cells cannot be
-numbers.
+With `L: list<matrix<number>>` and `M: matrix<number>`, `Scan(L, Add, 0)`
+evaluates to a lazy `Scan` collection, not to a list. `Multiply` reads that
+collection as a plain collection and pairs its elements with the rows of `M`:
+with `L = [[[1, 2], [3, 4]], [[1, 0], [0, 1]]]` and `M = [[0, 1], [1, 0]]`,
+`Scan(L, Add, 0)·M` is `[[2, 4], [2, 3]]` (`A[1]·M[1]`, `A[2]·M[2]`). The same
+value written as a literal, or held by a symbol declared `list<matrix<number>>`
+or `tensor<number>`, stays unevaluated beside `M`, by the rule that a tensor of
+rank 3 or more beside a matrix stays unevaluated (`mulTensors()`,
+`arithmetic-mul-div.ts`). Compiled code follows that rule: it throws for this
+product. A lazy `Scan` that gives a vector is multiplied correctly
+(`Scan(L, Add, 0)·M` with `L: list<number>` is the vector-matrix product).
+Expected: `mulTensors()` reads the shape of a lazy collection as it reads the
+shape of a list.
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 
@@ -2513,6 +2533,30 @@ operator applications denote function values when raw?"). Fix options: a small
 table of operators that denote functions, or canonicalize the callback operand
 before the requirement.
 
+### CE-387. A function that recurses through itself as a parameter stays unevaluated inside `Map`
+
+**Status:** open; defect, regression in 0.160.0. Reported in
+[#470](https://github.com/cortex-js/compute-engine/issues/470) (bisected to
+`c43a44d41`).
+
+`G = (self, t) ↦ If(Length(t) = 0, 0, Max(Map(c ↦ self(self, c), t)) + 1)`, the
+height of a tree given as nested lists. `G(G, [[[], []]])` returns the
+`Apply(...)` unevaluated; 0.159.0 gave `2`. A tree with one leaf per level
+(`[[[[]]]]`) still gives `3`, and the same recursion through a named function
+(`h := t ↦ …h(c)…`) works. The failure needs a node with two or more children
+below the top level: the second call `self(self, [])` that `Max`, `Reduce` or
+`Total` reads from the lazy `Map` finds no value for the symbol `self` in the
+runtime scope (`_getSymbolValue('self')` is `undefined`). The callee is resolved
+by the lexical binding (`calleeValue()` calls `callableBindingInContext()`,
+`boxed-expression/boxed-function.ts`), which finds the parameter's function, but
+the operand `self` is evaluated in the runtime scope and stays a free symbol.
+The guard against symbolic recursion (`SymbolicRecursion`, `function-utils.ts`)
+then sees a re-entrant application with a free-symbol argument and abandons the
+outermost application. To do: find why the parameter `self` has no value when
+the second element of the lazy `Map` is read (the first leaf's application
+probably removes the value of the activation that encloses it), and make the
+operand read the same binding as the callee.
+
 ### CE-130. A pre-boxed operand applied twice through a raw name is not told apart from a binding
 
 **Status:** open; design. Contract: `docs/SCOPING-MODEL.md`.
@@ -2592,6 +2636,16 @@ a function with no definition, `f(c)/f(c)` (the engine treats every application
 of an unknown function as one value). A fix needs a type for a class that no
 ordinary expression has, so that the check can use the type of the application
 instead of a walk.
+
+The same gap applies to an extension head whose values are residue classes
+([#471](https://github.com/cortex-js/compute-engine/issues/471)): the walk looks
+for an operator named `ResidueClass`, so with a declared `MyMod`,
+`MyMod(2, 4)/MyMod(2, 4)` simplifies to `1`. The reporter asks for a way to
+declare that the values of a head are residue classes (a definition flag, or a
+type that a signature can name), so that the simplifier reads the type. Open
+questions: whether the residue fold applies to such values or only the
+protection from number rules, and whether extensions can name the type or only
+set a flag.
 
 ## Symbolic computation
 
@@ -4200,38 +4254,6 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
-
-### CE-377. Compiled code declines a call of a user function whose argument is an untyped free input
-
-**Status:** open; reachable decline. Found 2026-10-23 while landing the
-signature change (the former CE-25). User decision 2026-10-23: the declines are
-accepted until this entry is fixed.
-
-With `g := t ↦ [[t, 1], [2, 3]]` and a free input `x`, the signature of `g` is
-`(unknown) -> list<list<unknown>>`: its parameter has no use that narrows it, so
-the entries of `g(x)` are of unknown type. The complex lane of the JavaScript
-target then declines `Trace(g(x)) + 1` ("scalar arithmetic over a list-valued
-operand"), on the parse and the box routes
-(`test/compute-engine/compile-linear-algebra-lanes.test.ts`, "g undeclared"),
-and so does `g(x)[1] + g(x)[2]` with `g := t ↦ [t, 2]`
-(`function-literal-unknown-param-signature.test.ts`). With `v := s ↦ [s, k]` and
-`k = i`, `Sum(1 + v(x)[2], k from 1 to 3)` declines on the JavaScript target in
-both modes, and the GLSL target refuses the index into a list with no known
-length (`gpu-point-complex-component.test.ts`). `Max(At(m(x), 1))` with
-`m := t ↦ [[t, 2t], [3t, 4t]]` declines because the elements may be rows
-(CE-362; `Product(Rest(g(x)))` with `g := t ↦ [t, 2t]` declined for the same
-reason and compiles since 2026-10-23). Seven tests record the declines; before
-the change, the signature `vector<2>` or `matrix<2x2>` let them compile.
-
-The cause is the same in every case: the compiler cannot tell that `g(x)` holds
-numbers when `x` is a free input. The fix belongs in the compiler, not in the
-signature: the compiler already commits an untyped free input to the number lane
-wherever arithmetic reads it (`x + 1` compiles with `x` free), so when it types
-a call `g(x)` whose argument is such an input, it should instantiate the result
-of `g` at that lane (`number`), as `callResultType` instantiates a call at a
-typed argument. The decline message of the complex lane also misreads the
-operand: "a list-valued operand" for an operand of unknown type. Until the fix,
-the workaround is one declaration, `x: number` or `g: (number) -> matrix`.
 
 ### CE-386. Compiled `Equal` reads a `NaN` operand as absent and answers `Missing` where the interpreter answers `False`
 
@@ -6534,8 +6556,9 @@ published 0.133.0, the release of the last recorded benchmark (2026-09-23). The
 run was on an idle machine under the box lock, and a second run gave the same
 numbers. Time per call, current ÷ 0.133.0:
 
-- Equation solving: `x^3 - x - 1 = 0` 4.9 ms against 2.0 ms (2.45×),
-  `x^4 + x^2 - 1 = 0` 2.37×.
+- Equation solving: `x^3 - x - 1 = 0` 4.9 ms against 2.0 ms (2.45×).
+  (`x^4 + x^2 - 1 = 0` was 2.37×; since 2026-10-23 its closed-form roots are
+  not substituted back, and it takes about half the time of 0.133.0.)
 - Limits and definite integrals: 1.5× to 2.3× (`∫_{-∞}^{∞} e^{-x^2} dx` 547 µs
   against 239 µs).
 - Antiderivatives 1.4× to 1.9×, derivatives 1.1× to 1.45×, simplification 1.0×
@@ -6554,26 +6577,42 @@ release, 2026-10-23), the time grows in five steps:
   1.25× on every symbolic case. Candidates: `Solve` completeness proved with
   interval arithmetic (`cce09a8f4`), contour integration by residues
   (`21815f10b`), the complex error and sine integrals (`5a5f3d6ad`).
-- **CE-385.4** 0.149.0 → 0.150.0 (`d98ff96fc..d598e3fce`, 18 commits):
-  `x^4 + x^2 - 1 = 0` 1.57× → 2.63×. Part of the solve slowdown is more work,
-  not slower work: the current build returns the two complex roots
-  `±√(−1/2 − √5/2)` beside the two real ones, where 0.133.0 returned the real
-  roots only.
 - **CE-385.5** 0.157.0 → 0.158.0: derivatives and definite integrals about 1.2×
   (29 commits).
 
-A CPU profile of `Integrate(1/(1 + x^2), x)` (the unminified bundle, which runs
-about 3 times slower than the minified one, so its proportions are approximate)
-shows that `antiderivative()` takes about 15% of the call. About 70% goes to
-re-binding the integrand: `liftIntegrand` → `rebindEscaping` →
-`rewriteWithBinders` (`boxed-expression/binders.ts`) rebuilds every node above a
-re-bound symbol with `ce.function(…, { form: 'canonical' })`, which
-canonicalizes the node again. The minified bundles take 0.40 ms per call against
-0.19 ms for 0.133.0, for the same answer `arctan(x)`. A possible fix: rebuild a
-node whose operands are already canonical without running the canonical
-transforms again. This needs care: a re-bound symbol can have a different type
-in the outer scope, and some canonical forms depend on the type (`√(x²)` is
-`|x|` for a real `x`).
+The core operations are slower too, and the cost compounds through every
+symbolic algorithm. Measured interleaved in one process, minified bundles,
+current ÷ 0.133.0: boxing `x^3/3` 1.24×, evaluating it 1.27×, simplifying it
+1.33×, `D(x^3, x)` 1.27×, `Expand((x + 1)^3)` 1.34×, parsing `x^2+2x+1` 1.19×.
+A CPU profile of these small operations is flat: no function takes more than
+3% of the time on its own, the garbage collector takes 14%, and the type
+derivation of each new node takes about 25% (`broadcastLiftType` and the type
+handlers of the operators, for operands as simple as `x` and `3`).
+
+Where the time of an integral goes, `Integrate(1/(1 + x^2), x)` (2.3× the
+time of 0.133.0): boxing the input 18%, re-binding the integrand
+(`liftIntegrand` → `rebindEscaping` → `rewriteWithBinders`, which rebuilds each
+node above `x` with the canonical transforms) 15%, the type of the integrand's
+function literal read by `integrateListIntegrand` 7%,
+`definiteIntegralByResidues` 3% (for an indefinite integral), the antiderivative
+11%, the final `simplify()` of an indefinite result 7%. A definite integral
+also boxes the antiderivative into a new function literal and applies it at the
+bounds through `EvaluateAt` (about 20%).
+
+Measured dead ends, so they are not tried again:
+
+- Rebuilding the re-bound integrand without the canonical transforms is safe
+  only when each re-bound symbol has the same type outside: the `x` of the
+  integral is typed `number` inside the function literal and `unknown`
+  outside, so the rebuild must canonicalize.
+- Skipping a type read does not save the work when the type is read later
+  anyway (the product sort, `sortProductOperands`, only moved the cost), and a
+  type read has side effects: it records a read before a declaration
+  (`_noteCollectionReadBeforeDeclaration`). Skipping the type read in
+  `resultHoldsNoIncompleteWalk()` (`boxed-function.ts`) when no walk was
+  recorded made `block-locals-per-run.test.ts` ("a closure created before a
+  `let` of the same body", destructuring `let`) give `read-before-declaration`
+  errors.
 
 Run every measurement under the box lock.
 

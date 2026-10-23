@@ -3141,7 +3141,12 @@ function tryRadicalDerivative(
           ? rest[0]
           : ce.function('Multiply', rest);
 
-    const ratio = N.div(qPrime).simplify();
+    // The quotient must be free of `index`. `simplify()` cancels a common
+    // factor (`(2x + 3)/(2x + 3)`), but it costs far more than the division,
+    // so it runs only when the canonical quotient still mentions `index`:
+    // `x^2` gives `N = 1`, `Q′ = 1`, a constant at once.
+    const quotient = N.div(qPrime);
+    const ratio = quotient.has(index) ? quotient.simplify() : quotient;
     if (ratio.has(index) || ratio.isNaN === true || ratio.isFinite === false)
       continue;
 
