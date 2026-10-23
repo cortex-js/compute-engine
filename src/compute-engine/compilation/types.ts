@@ -739,6 +739,30 @@ export interface CompileTarget<Expr = unknown> {
   ) => boolean;
 
   /**
+   * A lowering of the real-only head `head` that accepts complex operands,
+   * or `undefined` when the target has none. In the `auto` and `complex`
+   * modes, an operand of a real-only head that may hold a complex value
+   * takes the run-time rule described at `isRealOnlyLowering` (the value is
+   * NaN where an operand is not real). When this hook gives a lowering for
+   * the head, that lowering is emitted instead, and computes the value for
+   * complex operands too.
+   *
+   * `complexResult` tells whether the value of that lowering may be complex
+   * (`{re, im}` on JavaScript): `true` for the mean of complex data, `false`
+   * for its variance, which is a real number.
+   *
+   * The JavaScript target gives one for `Mean`, `Variance`,
+   * `PopulationVariance`, `StandardDeviation` and
+   * `PopulationStandardDeviation`.
+   */
+  complexLowering?: (head: MathJsonSymbol) =>
+    | {
+        lowering: Exclude<CompiledFunction<Expr>, string>;
+        complexResult: boolean;
+      }
+    | undefined;
+
+  /**
    * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
    * that a non-boolean value (notably `NaN`) fails closed at run time, matching
    * the interpreter — which throws `Condition must evaluate to "True" or

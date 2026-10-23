@@ -57,18 +57,59 @@ export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
 // resolve.
 //
 
-/** Welford's running mean and sum of squared deviations over a stream. */
-function welford(values: Iterable<number>): { n: number; m2: number } {
+/**
+ * Welford's running mean and sum of squared deviations over a stream.
+ *
+ * The deviation `x − mean` of two finite numbers of opposite signs can
+ * overflow (`1e308 − (−1e308)`), and the update then gave an infinite mean
+ * and a NEGATIVE `M2`: the variance of `[1e308, −1e308]` was `−∞`. `M2`
+ * itself can overflow while the variance fits (the population variance of
+ * `[1e154, −1e154]` is `1e308`). From the first update that would overflow
+ * on, the update runs on the data divided by `scale`,
+ * the largest magnitude seen (the mean and `M2` are converted to those
+ * units, and again when a larger magnitude comes). `scale` is returned
+ * with `M2` (0 when the data never left the first branch), and the caller
+ * divides `M2` by the count before it multiplies by `scale²`, which gives
+ * `+∞` only when the variance itself is past the largest number. Data whose deviations do not overflow never leaves the first
+ * branch, so its result is the same as before, bit for bit.
+ */
+function welford(values: Iterable<number>): {
+  n: number;
+  m2: number;
+  scale: number;
+} {
   let n = 0;
   let mean = 0;
   let m2 = 0;
+  // 0 while the update runs on the data as it is; otherwise the unit that
+  // `mean` and `m2` are held in (`mean / scale`, `m2 / scale²`).
+  let scale = 0;
   for (const x of values) {
     n += 1;
-    const before = x - mean;
+    if (scale === 0) {
+      const before = x - mean;
+      const nextMean = mean + before / n;
+      const nextM2 = m2 + before * (x - nextMean);
+      if (Number.isFinite(nextM2) || !Number.isFinite(x)) {
+        mean = nextMean;
+        m2 = nextM2;
+        continue;
+      }
+      scale = Math.max(Math.abs(x), Math.abs(mean));
+      mean /= scale;
+      m2 = m2 / scale / scale;
+    } else if (Math.abs(x) > scale) {
+      const ratio = scale / Math.abs(x);
+      mean *= ratio;
+      m2 *= ratio * ratio;
+      scale = Math.abs(x);
+    }
+    const scaled = x / scale;
+    const before = scaled - mean;
     mean += before / n;
-    m2 += before * (x - mean);
+    m2 += before * (scaled - mean);
   }
-  return { n, m2 };
+  return { n, m2, scale };
 }
 
 function bigWelford(values: Iterable<BigDecimal>): {
@@ -87,10 +128,21 @@ function bigWelford(values: Iterable<BigDecimal>): {
   return { n, m2 };
 }
 
-function varImpl(values: Iterable<number>, population: boolean): number {
-  const { n, m2 } = welford(values);
+/**
+ * The variance (or, with `root`, the standard deviation) from `welford()`.
+ * The standard deviation of scaled data is `√(M2/d)·scale`, which fits where
+ * the variance does not (`[1e200, −1e200]`).
+ */
+function varImpl(
+  values: Iterable<number>,
+  population: boolean,
+  root = false
+): number {
+  const { n, m2, scale } = welford(values);
   if (n === 0) return NaN;
-  return m2 / (population ? n : n - 1);
+  const v = m2 / (population ? n : n - 1);
+  if (root) return scale === 0 ? Math.sqrt(v) : Math.sqrt(v) * scale;
+  return scale === 0 ? v : v * scale * scale;
 }
 
 function bigVarImpl(
@@ -121,7 +173,7 @@ export function bigPopulationVariance(
 }
 
 export function standardDeviation(values: Iterable<number>): number {
-  return Math.sqrt(variance(values));
+  return varImpl(values, false, true);
 }
 
 export function bigStandardDeviation(values: Iterable<BigDecimal>): BigDecimal {
@@ -129,7 +181,7 @@ export function bigStandardDeviation(values: Iterable<BigDecimal>): BigDecimal {
 }
 
 export function populationStandardDeviation(values: Iterable<number>): number {
-  return Math.sqrt(populationVariance(values));
+  return varImpl(values, true, true);
 }
 
 export function bigPopulationStandardDeviation(

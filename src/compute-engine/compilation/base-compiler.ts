@@ -2213,6 +2213,47 @@ export function mayHoldNumericArrayOfRank(
 }
 
 /**
+ * True when a value of type `t` may hold a tuple (a point) at any level: a
+ * tuple type, a collection whose elements may be tuples, or a type that
+ * states nothing (`unknown`, `any`, a bare `list`). A number type and a
+ * collection of numbers answer `false`.
+ */
+function typeMayHoldTuple(t: Type, depth = 0): boolean {
+  // The depth limit stops a self-referential alias.
+  if (depth > 16) return true;
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string')
+    return (
+      r === 'tuple' ||
+      r === 'unknown' ||
+      r === 'any' ||
+      r === 'value' ||
+      r === 'expression' ||
+      r === 'list' ||
+      r === 'set' ||
+      r === 'collection' ||
+      r === 'indexed_collection'
+    );
+  const next = (x: Type) => typeMayHoldTuple(x, depth + 1);
+  switch (r.kind) {
+    case 'tuple':
+      return true;
+    case 'union':
+      return r.types.some(next);
+    case 'intersection':
+      return r.types.every(next);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return next(r.elements);
+    default:
+      return false;
+  }
+}
+
+/**
  * A `Tuple` or `List` literal with a broadcasting component — a shape whose
  * norm does NOT reduce to one scalar, so `Norm`/`Abs` compile handlers use
  * this to fail closed and let the interpreter broadcast. Exported for
@@ -3299,6 +3340,8 @@ export class BaseCompiler {
     // operand's code replaced by the temporary's real projection.
     const override = BaseCompiler._codeOverrides.get(expr);
     if (override !== undefined) return override;
+    const alias = BaseCompiler._codeAliases.get(expr);
+    if (alias !== undefined) return alias;
     if (!expr.isValid) {
       throw new Error(
         `Could not compile invalid expression: "${expr.toString()}"`
@@ -4351,6 +4394,20 @@ export class BaseCompiler {
   private static readonly _codeOverrides = new Map<Expression, string>();
 
   /**
+   * Nodes whose value is already bound to a temporary, keyed by node
+   * identity: `compile()` emits the temporary's name for such a node. Unlike
+   * `_codeOverrides`, an alias is the value itself, not a real projection of
+   * it, so the analyses (the element lane, `isComplexValued`) still read the
+   * node as they would without the alias. Installed by
+   * `compileRuntimeMatrixPower` while it emits the element-wise power.
+   */
+  private static readonly _codeAliases = new Map<Expression, string>();
+
+  /** The `Power` nodes whose base `compileRuntimeMatrixPower` is emitting,
+   * so that its element-wise branch does not dispatch a second time. */
+  private static readonly _runtimeMatrixPowerBases = new Set<Expression>();
+
+  /**
    * The calls of a user function that a repetition site has rewritten to
    * call the function's INVARIANT-PREFIX VARIANT, keyed by the call node
    * (`hoistLoopInvariants` installs an entry, `tryCompileUserFunction` reads
@@ -4758,6 +4815,44 @@ export class BaseCompiler {
     const body = BaseCompiler.compile(engine._fn(h, presentArgs), inner);
     const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
     return target.bindExpr(bindings, `(${absent} ? ${marker} : ${body})`);
+  }
+
+  /**
+   * The lowering of the real-only head `h` for complex operands that the
+   * target gives (`CompileTarget.complexLowering`), in the modes that apply
+   * the run-time realness rule (`runtimeRealGuards`: `auto` and `complex`).
+   * In the `strict` mode a complex operand of a real-only head declines, as
+   * before.
+   */
+  private static complexLoweringOf(
+    target: CompileTarget<Expression>,
+    h: string
+  ):
+    | {
+        lowering: Exclude<CompiledFunction<Expression>, string>;
+        complexResult: boolean;
+      }
+    | undefined {
+    if (!BaseCompiler.runtimeRealGuards) return undefined;
+    if (target.complexLowering === undefined) return undefined;
+    if (BaseCompiler.callerOverrides(target, h)) return undefined;
+    return target.complexLowering(h);
+  }
+
+  /**
+   * Whether the real-only head of `expr` is emitted with the target's
+   * lowering for complex operands (`complexLoweringOf`), because an operand
+   * may be complex, and that lowering has a complex value. The emission
+   * gates of `compileExpr` make the same choice from the same predicates.
+   */
+  private static takesComplexResultLowering(expr: Expression): boolean {
+    const target = BaseCompiler._callSiteTarget;
+    if (target === undefined || !isFunction(expr)) return false;
+    const complex = BaseCompiler.complexLoweringOf(target, expr.operator);
+    if (complex === undefined || !complex.complexResult) return false;
+    return BaseCompiler.realOnlyGuardOperands(expr.operator, expr.ops).some(
+      (a) => BaseCompiler.realGuardCandidate(a, expr.engine, target)
+    );
   }
 
   /**
@@ -6705,7 +6800,13 @@ export class BaseCompiler {
    *   element type, or a complex whole-collection verdict — is `'mixed'`:
    *   the evidence cannot be attributed to individual elements. A rank-2
    *   list (a matrix) is treated the same way: its lowering is not the
-   *   element-wise closure this analysis describes.
+   *   element-wise closure this analysis describes;
+   * - in the `complex` mode (`complexDiscipline`), an array operand whose
+   *   cell type ADMITS a complex value (`list<number>`, `tensor<number>`,
+   *   `list<unknown>`) is `'mixed'` too: a scalar binding of such a type is
+   *   complex in that mode, and a cell of the list can hold a `{re, im}`
+   *   object as well. In the other modes such a cell is read on the real
+   *   lane, as documented, and the emitted closure stays the plain one.
    */
   private static operandElementLane(
     a: Expression,
@@ -6763,7 +6864,11 @@ export class BaseCompiler {
       return BaseCompiler.isComplexValued(a);
     }
     const complexEvidence =
-      BaseCompiler.typeHasComplexLeaf(t) ||
+      BaseCompiler.typeHasComplexLeaf(
+        t,
+        undefined,
+        BaseCompiler.complexDiscipline
+      ) ||
       BaseCompiler.hasAnyComplexElement(a) ||
       BaseCompiler.isComplexValued(a);
     if (!complexEvidence) return false;
@@ -6791,26 +6896,37 @@ export class BaseCompiler {
    * (`type alias json = integer | list<json>`) is met again at every level;
    * the descent guard (`unfoldAliasOnDescent`) stops the recursion when the
    * alias reaches itself, and that occurrence contributes no leaf.
+   *
+   * With `wide` set, a leaf of a WIDE numeric type (`wideNumericType`:
+   * `number`, `unknown`, `any`) counts as a complex leaf too: such a leaf
+   * admits a complex value, which the `complex` mode reads as complex.
    */
-  private static typeHasComplexLeaf(t: Type, seen?: AliasDescent): boolean {
+  private static typeHasComplexLeaf(
+    t: Type,
+    seen?: AliasDescent,
+    wide = false
+  ): boolean {
     const unfolded = unfoldAliasOnDescent(t, seen);
     if (unfolded === undefined) return false;
     const r = unfolded.type;
     seen = unfolded.seen;
     if (isNonRealNumber(r)) return true;
+    if (wide && BaseCompiler.wideNumericType(r)) return true;
     if (typeof r === 'string') return false;
     if (r.kind === 'tuple')
       return r.elements.some((e) =>
-        BaseCompiler.typeHasComplexLeaf(e.type, seen)
+        BaseCompiler.typeHasComplexLeaf(e.type, seen, wide)
       );
     if (r.kind === 'union')
-      return r.types.some((m) => BaseCompiler.typeHasComplexLeaf(m, seen));
+      return r.types.some((m) =>
+        BaseCompiler.typeHasComplexLeaf(m, seen, wide)
+      );
     // Toward the cells (`leafwardElementType`): the element of a tensor of
     // unknown rank contains the tensor itself, which would send the walk
     // round for ever.
     const elt = leafwardElementType(r);
     if (elt === undefined) return false;
-    return BaseCompiler.typeHasComplexLeaf(elt, seen);
+    return BaseCompiler.typeHasComplexLeaf(elt, seen, wide);
   }
 
   /**
@@ -11429,6 +11545,19 @@ export class BaseCompiler {
           'Could not compile `Power`: the base is a matrix that is not square, and an integer power of it ' +
             'is the `expected-square-matrix` error.'
         );
+      // A base whose type does not give its rank (`tensor<number>`) may hold
+      // a square matrix at run time, and `evaluate()` reads the value: the
+      // code then decides on the shape of the value.
+      if (matrixPower === false && target.language === 'javascript') {
+        const dispatched = BaseCompiler.compileRuntimeMatrixPower(
+          engine,
+          args,
+          prec,
+          target,
+          node
+        );
+        if (dispatched !== undefined) return dispatched;
+      }
     }
 
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
@@ -11467,6 +11596,13 @@ export class BaseCompiler {
             BaseCompiler.realGuardCandidate(a, engine, target)
           )
         ) {
+          const complex = BaseCompiler.complexLoweringOf(target, h);
+          if (complex !== undefined)
+            return complex.lowering(
+              args,
+              BaseCompiler.operandCompiler(node, target),
+              target
+            );
           const guarded = BaseCompiler.realOperandGuard(
             engine,
             h,
@@ -13927,6 +14063,16 @@ export class BaseCompiler {
           // the color constructors (`realOnlyResultKind`). An ARRAY operand
           // whose elements may be complex takes the element-wise form: the
           // real lowering broadcasts or reduces over the projected array.
+          // A head the target also lowers for complex operands
+          // (`complexLowering`: the mean and the variance of complex data)
+          // takes that lowering instead.
+          const complex = BaseCompiler.complexLoweringOf(target, h);
+          if (complex !== undefined)
+            return complex.lowering(
+              args,
+              BaseCompiler.operandCompiler(node, target),
+              target
+            );
           const guarded = BaseCompiler.realOperandGuard(
             engine,
             h,
@@ -14634,6 +14780,230 @@ export class BaseCompiler {
     if (BaseCompiler.REPEATABLE_SOURCE.test(code)) return body(code);
     const v = BaseCompiler.tempVar(target);
     return `((${v}) => ${body(v)})(${code})`;
+  }
+
+  /**
+   * Whether the caller of the compilation supplied its own lowering of the
+   * head `h` (a `functions` or `operators` entry). The built-in dispatches
+   * of this compiler that replace a head's lowering (the matrix power of
+   * `compileRuntimeMatrixPower`, the complex statistics of
+   * `complexLoweringOf`) stand aside for it. The compilation records the
+   * caller's names on its common-subexpression session, also when that
+   * pass is off; a compilation that recorded nothing (a direct custom
+   * target, whose lowerings are all the caller's) counts as overriding.
+   */
+  private static callerOverrides(
+    target: CompileTarget<Expression>,
+    h: string
+  ): boolean {
+    const provenance = target.cse?.harvestOptions;
+    return (
+      provenance === undefined || provenance.isOverriddenOperator?.(h) === true
+    );
+  }
+
+  /**
+   * Whether the value of the exponent `e` of a `Power` is EXACT in the
+   * interpreter, which takes the matrix power of a square matrix for an exact
+   * integer exponent only, and the power of each entry for a float, even one
+   * with an integer value (`squareMatrixPower()` in `boxed-function.ts`).
+   * Compiled code holds both as the same JavaScript number, so the compiler
+   * decides from the expression:
+   *
+   * - `'int'`: an exact integer literal, or an expression of type `integer`
+   *   (the interpreter takes the matrix power for such a type whatever its
+   *   value: `Floor(1.5x)`, `2^k`, `Length(L)`);
+   * - `'exact'`: an exact literal (a rational), a symbol (an input: a host
+   *   number for it is exact in the interpreter when it is an integer, as
+   *   `ce.box(2)` is, and a non-integer one gives the power of each entry on
+   *   both sides), or `+`, `−`, `×`, `/`, `√` of exact literals and
+   *   expressions of type `integer` (`n/2`), and an integer power of those
+   *   (`2^k`);
+   * - `'inexact'`: a float literal, or arithmetic with a float operand
+   *   (`1.5x` is the float `3` at `x = 2`, whose power is the power of each
+   *   entry), and a symbol whose assigned value is a float;
+   * - `'unknown'`: anything else — arithmetic on a symbol that is not an
+   *   integer (`2x` at the host float `x = 2.5` is the float `5`), a call of
+   *   a user function, a transcendental function.
+   */
+  private static exponentExactness(
+    e: Expression
+  ): 'int' | 'exact' | 'inexact' | 'unknown' {
+    if (isNumber(e))
+      return !e.isExact ? 'inexact' : e.isInteger === true ? 'int' : 'exact';
+    if (isSubtype(finitePartOfType(e.type.type), 'integer')) return 'int';
+    if (isSymbol(e)) {
+      const value = e.value;
+      if (value !== undefined && isNumber(value) && !value.isExact)
+        return 'inexact';
+      return 'exact';
+    }
+    if (!isFunction(e)) return 'unknown';
+    const parts = e.ops.map((op) => {
+      const c = BaseCompiler.exponentExactness(op);
+      // An operand that is a symbol may hold a non-integer float.
+      return c === 'exact' && isSymbol(op) ? 'unknown' : c;
+    });
+    // An integer power of an exact number is exact (`2^k`, typed `rational`
+    // for a `k` that may be negative).
+    const integerPower = e.operator === 'Power' && parts[1] === 'int';
+    if (!integerPower && !BaseCompiler.EXACT_EXPONENT_HEADS.has(e.operator))
+      return 'unknown';
+    if (parts.includes('inexact')) return 'inexact';
+    if (parts.every((c) => c === 'int' || c === 'exact')) return 'exact';
+    return 'unknown';
+  }
+
+  /** The heads `exponentExactness` reads through: their value is exact when
+   * every operand is exact, and a float when an operand is a float. */
+  private static readonly EXACT_EXPONENT_HEADS: ReadonlySet<string> = new Set([
+    'Add',
+    'Subtract',
+    'Negate',
+    'Multiply',
+    'Divide',
+    'Square',
+    'Sqrt',
+  ]);
+
+  /**
+   * The JavaScript code of `Power(base, exponent)` (the operands `args`) when
+   * the type of the base does not give its rank, so that the base may hold
+   * a square matrix at run time: a `tensor<number>`, a `list<list<number>>`,
+   * a `broadcastable<number>`. `undefined` when the element-wise power that
+   * `compileExpr` emits is the answer.
+   *
+   * `evaluate()` reads the VALUE of the base (`squareMatrixPower()` in
+   * `boxed-function.ts`): an integer power of a square matrix is the matrix
+   * power, also for each matrix inside a tensor of rank 3 or more, and any
+   * other shape takes the power of each entry. The code does the same on the
+   * shape of the value: `_SYS.matrixPowerShape` answers the matrix power, or
+   * `undefined`, in which case the element-wise power runs. The operands are
+   * evaluated once: an operand whose code cannot be repeated for free is
+   * bound to a parameter, and the element-wise power reads that parameter
+   * (`_codeAliases`).
+   *
+   * A collection exponent is paired with the base level by level, and the
+   * helper throws when that pairing meets a matrix with an integer exponent
+   * (`p^[1, 2]` for `p` of rank 3), a matrix power the code does not compute.
+   * An integer power of a matrix that is not square throws too, as the
+   * interpreter answers the `expected-square-matrix` error.
+   *
+   * Nothing changes for an exponent that is a number literal other than an
+   * exact integer (`p^0.5`, the power of each entry in every case), for a
+   * base whose rank is known (a vector, `list<number>`, and a `matrix`, which
+   * `isSquareMatrixPower()` decides), and for a scalar base.
+   *
+   * Nothing changes either for a base whose type may hold a tuple (a point):
+   * `list<unknown>`, a bare `list`, `any`, `list<tuple<…>>`. Compiled code
+   * holds a point as an array, so a list of two points `[(1, 2), (3, 4)]`,
+   * whose power is the power of each coordinate, and the matrix
+   * `[[1, 2], [3, 4]]`, whose power is the matrix power, are the same value
+   * at run time, and the hosts pass lists of points to compiled code. Such a
+   * base keeps the element-wise power.
+   */
+  private static compileRuntimeMatrixPower(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): string | undefined {
+    const [base, exponent] = args;
+    if (BaseCompiler._runtimeMatrixPowerBases.has(base)) return undefined;
+    // A caller's own `Power` lowering is not bypassed.
+    if (BaseCompiler.callerOverrides(target, 'Power')) return undefined;
+    const t = base.type.type;
+    if (base.type.matches('matrix')) return undefined;
+    if (
+      !base.type.matches('indexed_collection<any>') &&
+      !isBoundPossiblyCollectionTyped(base)
+    )
+      return undefined;
+    const r = resolveTypeAlias(t);
+    if (typeof r === 'string' || !mayHoldNumericArrayOfRank(r, 2))
+      return undefined;
+    // A base that may hold points keeps the element-wise power: compiled
+    // code holds a point as an array, so it cannot tell a list of points
+    // from a matrix by the shape of the value.
+    if (typeMayHoldTuple(t)) return undefined;
+    if (
+      isNumber(exponent) &&
+      (!exponent.isExact || exponent.isInteger !== true)
+    )
+      return undefined;
+    const exactness = BaseCompiler.exponentExactness(exponent);
+    if (exactness === 'inexact') return undefined;
+    const params: string[] = [];
+    const values: string[] = [];
+    const reads: string[] = [];
+    // Both operands are compiled first, with no alias in force: their code
+    // is evaluated as the arguments of the arrow function that binds the
+    // parameters, so it must not read one of them (an exponent `Length(b)`
+    // over the same computed base `b`, with the common-subexpression pass
+    // off, read the base's parameter outside its scope).
+    //
+    // An alias is keyed by node, so the two positions need two nodes: when
+    // the exponent is the very node of the base (`f()^f()` with an impure
+    // `f`, evaluated once per position), the element-wise power reads the
+    // exponent from a copy of that node, aliased to its own parameter.
+    const operands: Expression[] = [
+      base,
+      exponent === base && isFunction(exponent)
+        ? engine._fn(exponent.operator, [...exponent.ops])
+        : exponent,
+    ];
+    const bound: Array<[Expression, string]> = [];
+    for (const op of operands) {
+      const code = BaseCompiler.compile(op, target);
+      if (BaseCompiler.REPEATABLE_SOURCE.test(code)) {
+        reads.push(code);
+        continue;
+      }
+      const v = BaseCompiler.tempVar(target);
+      params.push(v);
+      values.push(code);
+      reads.push(v);
+      bound.push([op, v]);
+    }
+    // The aliases this call installs, with the alias each node had before
+    // (`undefined` for none), so that they are restored also when the
+    // emission throws: a lane mismatch in the strict attempt of `auto` is
+    // caught, and the complex retry compiles the same nodes again.
+    const installed: Array<[Expression, string | undefined]> = [];
+    let elementwise: string;
+    try {
+      for (const [op, v] of bound) {
+        installed.push([op, BaseCompiler._codeAliases.get(op)]);
+        BaseCompiler._codeAliases.set(op, v);
+      }
+      // The guard covers the element-wise emission of THIS power only, after
+      // both operands are compiled: an operand may hold another `Power` of
+      // the same base node (`p^(p^2)[1][1]`), which takes its own dispatch.
+      BaseCompiler._runtimeMatrixPowerBases.add(base);
+      try {
+        elementwise = BaseCompiler.compileExpr(
+          engine,
+          'Power',
+          operands,
+          prec,
+          target,
+          node
+        );
+      } finally {
+        BaseCompiler._runtimeMatrixPowerBases.delete(base);
+      }
+    } finally {
+      for (const [op, previous] of installed.reverse()) {
+        if (previous === undefined) BaseCompiler._codeAliases.delete(op);
+        else BaseCompiler._codeAliases.set(op, previous);
+      }
+    }
+    if (exactness === 'unknown') reads.push('true');
+    const body = `(_SYS.matrixPowerShape(${reads.join(', ')}) ?? (${elementwise}))`;
+    return params.length === 0
+      ? body
+      : `((${params.join(', ')}) => ${body})(${values.join(', ')})`;
   }
 
   /**
@@ -23089,7 +23459,12 @@ export class BaseCompiler {
     // the emitted value is never a `{re, im}` object, so a wide RESULT type
     // (`Max(a, b)` over wide `a`, `b`) must not report complex. See
     // `_realOnlyLowering` for the measured disagreement.
-    if (BaseCompiler.isRealOnlyLoweringHead(expr.operator)) return false;
+    // The exception is a head that the target also lowers for complex
+    // operands (`complexLowering`): when an operand may be complex, that
+    // lowering is emitted, and its value is complex when the lowering says so
+    // (the mean of complex data).
+    if (BaseCompiler.isRealOnlyLoweringHead(expr.operator))
+      return BaseCompiler.takesComplexResultLowering(expr);
     // A linear-algebra head answers from the lane of its collection
     // operands, the same answer that selects its target helper: a complex
     // lane emits the helper that returns complex values, and a real lane the

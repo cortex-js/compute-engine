@@ -288,7 +288,10 @@ converts it to a plain `Array` once, on its side (a typed array nested as a
 row is an entry, and is not read). A
 `{re, im}` object or a string at an entry of a list read on the real lane
 computes with that value, as it would in plain JavaScript; the interpreter
-is the route that validates. Any other value passes untouched and the
+is the route that validates. The `strict` mode, and the default `auto` mode
+when it does not escalate, read the entries of a `list<number>` on the real
+lane; the `complex` mode reads them on the complex lane (see "Complex
+modes"). Any other value passes untouched and the
 lowerings dispatch on its runtime shape: a scalar there is not an error,
 because a declared type is routinely wider than the value a caller binds and
 several lowerings project on the runtime shape — a `list`-typed summand of
@@ -405,12 +408,51 @@ document has at this position, are unaffected.
 
 `strict` preserves real-lane assumptions and declines on an incompatible
 complex boundary. `complex` compiles wide numeric bindings through complex
-kernels. `auto` first attempts strict mode and retries once in complex mode on
-a lane mismatch. The result records its effective mode, promotion, escalation,
+kernels. This includes the cells of a list or tensor input whose cell type
+admits a complex value (`list<number>`, `tensor<number>`, `list<unknown>`):
+the element-wise lowering of arithmetic and of the cell functions uses the
+complex-aware kernels (`_SYS.sadd`, `_SYS.smul`, `_SYS.csqrt`, …), as for
+`list<complex>`, while cells typed `real` or `integer` keep the real lane.
+`auto` first attempts strict mode and retries once in complex mode on a lane
+mismatch. The result records its effective mode, promotion, escalation,
 and diagnostic.
 
 Unknown-sign radical operations are the promotion trigger. Real-only kernels
-guard and project only where the model explicitly permits it.
+guard and project only where the model explicitly permits it. `Mean`,
+`Variance`, `StandardDeviation` and their population forms are the exception
+on JavaScript (`CompileTarget.complexLowering`): in the `auto` and `complex`
+modes, data that may hold a complex entry takes `_SYS.cmean`, `_SYS.cvariance`
+and the like, which compute the interpreter's value (`Mean([3, 4i])` is
+`1.5 + 2i`; the variance is the real sum of `|x − mean|²` over `n − 1`)
+instead of `NaN`. Real data gives the same bits as the real lowerings. A
+caller's own lowering of these heads is used as it is. The `strict` mode
+still declines such data.
+
+A `Power` whose base type does not give its rank and cannot hold a point
+(`tensor<number>`, `list<list<number>>`, `broadcastable<number>`) decides on
+the value at run time, as the interpreter does: `_SYS.matrixPowerShape` gives
+the matrix power for an integer power of a square matrix, and of each matrix
+of a tensor of rank 3, throws for an integer power other than 1 of a matrix
+that is not square (the interpreter's `expected-square-matrix` error; the
+`matrix<…>` lowering `_SYS.matpow` throws it too), and the element-wise power
+runs for any other shape. The interpreter takes the matrix power for an EXACT
+integer exponent only, so the compiler reads the exponent expression: one
+with a float in it (`1.5x`) keeps the element-wise code; an exact one (a
+symbol, an integer-typed expression, `n/2`, `2^k`) takes the matrix power at
+an integer value; and one whose exactness it cannot read (`2x` on a `real`
+input, a user function, `sin x`) throws where the value is a matrix and the
+exponent an integer other than 1. An exponent that is not an integer but
+within a relative `1e-12` of a nonzero integer throws too where the base holds
+a matrix: it is most likely an exact integer computed in floating point
+(`√n·√n` at `n = 2` is `2.0000000000000004`). `Inverse` and `m^-1` of a
+non-square `matrix<…>` throw the same error. A caller's own `Power` lowering
+(`functions`, `operators`) is used as it is, with no dispatch. A list exponent is paired with
+the base level by level, as in the interpreter; when that pairing meets a
+matrix with an integer entry (`p^[1, 2]` for `p` of rank 3), the code throws,
+since it does not compute that matrix power. A base whose type may hold a
+point (`list<unknown>`, a bare `list`, `list<tuple<…>>`) keeps the
+element-wise power: a point is an array at run time, so a list of points and
+a matrix have the same value there, and hosts pass lists of points.
 
 A declared real result is real on every mode. A function declared with a real
 result type (`p: (real) -> real`, also `-> finite_real` and `-> nan | real`)

@@ -1495,20 +1495,16 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       expect(r.success).toBe(true);
     });
 
-    // The STATISTICS reducers are real-only for the same reason: `_SYS.mean` &
-    // co. sum and compare plain numbers. Measured before the gate reached them:
-    // `Mean([i, 2i])` compiled to `NaN` where the interpreter answers the
+    // The STATISTICS reducers are real-only for the same reason: `_SYS.median`
+    // & co. sort and compare plain numbers. Measured before the gate reached
+    // them: `Mean([i, 2i])` compiled to `NaN` where the interpreter answers the
     // complex mean. `[i, 2i]` is uniformly non-real, so it is the compile-time
     // decline; over a list with a real or maybe-real element the reducers take
     // the element-wise runtime rule and answer `NaN` as soon as one element is
-    // complex at run time.
+    // complex at run time. `Mean` and the variance family have a complex
+    // lowering instead (below).
     test.each([
-      ['Mean'],
       ['Median'],
-      ['Variance'],
-      ['PopulationVariance'],
-      ['StandardDeviation'],
-      ['PopulationStandardDeviation'],
       ['Mode'],
       ['Kurtosis'],
       ['Skewness'],
@@ -1524,6 +1520,35 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
         { constantFold: false }
       );
       expect(r.success).toBe(false);
+    });
+
+    // `Mean` and the variance family compute the interpreter's value over
+    // complex data (`_SYS.cmean`, `_SYS.cvariance`, …): the mean of `[i, 2i]`
+    // is `1.5i`, and its variance is the real number `0.5` (the sum of
+    // `|x − mean|²` over `n − 1`).
+    test.each([
+      ['Mean'],
+      ['Variance'],
+      ['PopulationVariance'],
+      ['StandardDeviation'],
+      ['PopulationStandardDeviation'],
+    ])('%s over a complex-element list computes the complex statistic', (h) => {
+      const engine = new ComputeEngine();
+      const expr = engine.box([
+        h,
+        ['List', 'ImaginaryUnit', ['Multiply', 2, 'ImaginaryUnit']],
+      ] as any);
+      const r = compile(expr, { constantFold: false });
+      expect(r.success).toBe(true);
+      const value = r.run!({}) as number | { re: number; im: number };
+      const expected = expr.N();
+      if (typeof value === 'number') {
+        expect(value).toBeCloseTo(expected.re, 12);
+        expect(expected.im).toBe(0);
+      } else {
+        expect(value.re).toBeCloseTo(expected.re, 12);
+        expect(value.im).toBeCloseTo(expected.im, 12);
+      }
     });
 
     it('real statistics data is untouched', () => {
@@ -1617,25 +1642,24 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       expect(r.run!(AT_4 as any)).toBe(4);
     });
 
-    it('a single COMPLEX datum still never reaches the real reducer', () => {
+    it('a single COMPLEX datum never reaches the real reducer', () => {
       // The real-only gate runs ahead of the lowering, so widening the shape
-      // does not reopen the complex hole. A MAYBE-complex datum takes the
-      // D2/D6 runtime rule (compile-mode step 4, 2026-08-16) — `NaN`, since
-      // `x + (1+i)` is complex at every `x` — and a statically non-real one
-      // still declines at compile time.
+      // does not reopen the complex hole: a maybe-complex or a non-real datum
+      // takes the complex lowering of `Mean` (`_SYS.cmean`), and the mean of
+      // one datum is that datum, as in the interpreter.
       const engine = new ComputeEngine();
       const r = compile(
         engine.box(['Mean', ['Add', ['Complex', 1, 1], 'x']] as any),
         { constantFold: false }
       );
       expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.cisreal(');
-      expect(r.run!({ x: 0 } as any)).toBeNaN();
+      expect(r.code).toContain('_SYS.cmean(');
+      expect(r.run!({ x: 0 } as any)).toEqual({ re: 1, im: 1 });
       expect(
         compile(engine.box(['Mean', ['Complex', 1, 1]] as any), {
           constantFold: false,
-        }).success
-      ).toBe(false);
+        }).run!({})
+      ).toEqual({ re: 1, im: 1 });
     });
 
     it('a real LIST operand still broadcasts through these heads', () => {

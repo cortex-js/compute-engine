@@ -1587,6 +1587,177 @@ function listPosition(operator: string, n: number, i: unknown): number {
 }
 
 /**
+ * One pass over data whose entries may be `{re, im}` objects, for the
+ * complex statistics (`complexMean`, `complexVariance`): the number of data,
+ * the sum of the real and of the imaginary parts of the finite data (as
+ * `_SYS.mean` sums), and the sum of their squared deviations by Welford's
+ * update on each part (as `welford()` in `numerics/statistics.ts`), so that
+ * real data gives the same bits as the real reducers. An infinite datum is
+ * recorded, not accumulated: a real infinity by its sign, any other one (an
+ * infinite part beside a nonzero imaginary part, an infinite imaginary part)
+ * as `nonReal`.
+ *
+ * The real parts are divided by `scaleRe` and the imaginary parts by
+ * `scaleIm`: when a sum or a sum of squared deviations overflows
+ * (`[1e308, 1e308]`, `[1e154, −1e154]`), the callers take a second pass
+ * that scales the part that overflowed by its largest magnitude
+ * (`largestRe`, `largestIm`), and keep the first pass for the other part,
+ * which a common scale could underflow (`1e-100` beside `1e308`).
+ *
+ * `undefined` for absent data, as `oneDatumOk` reads it: an absent operand,
+ * and an entry that is absent, `NaN`, or not a number.
+ */
+function complexMoments(
+  values: unknown,
+  scaleRe = 1,
+  scaleIm = 1
+):
+  | {
+      n: number;
+      finite: number;
+      sumRe: number;
+      sumIm: number;
+      m2Re: number;
+      m2Im: number;
+      m2: number;
+      largestRe: number;
+      largestIm: number;
+      posInf: boolean;
+      negInf: boolean;
+      nonReal: boolean;
+    }
+  | undefined {
+  if (values === undefined || values === null) return undefined;
+  const items: unknown[] = Array.isArray(values) ? values : [values];
+  let n = 0;
+  let finite = 0;
+  let sumRe = 0;
+  let sumIm = 0;
+  let meanRe = 0;
+  let meanIm = 0;
+  let m2Re = 0;
+  let m2Im = 0;
+  let largestRe = 0;
+  let largestIm = 0;
+  let posInf = false;
+  let negInf = false;
+  let nonReal = false;
+  for (let i = 0; i < items.length; i++) {
+    const v = items[i];
+    let x: number;
+    let y: number;
+    if (typeof v === 'number') {
+      x = v;
+      y = 0;
+    } else if (isComplexObject(v)) {
+      x = v.re;
+      y = v.im;
+    } else return undefined;
+    if (Number.isNaN(x) || Number.isNaN(y)) return undefined;
+    n += 1;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      if (y !== 0) nonReal = true;
+      else if (x > 0) posInf = true;
+      else negInf = true;
+      continue;
+    }
+    largestRe = Math.max(largestRe, Math.abs(x));
+    largestIm = Math.max(largestIm, Math.abs(y));
+    if (scaleRe !== 1) x /= scaleRe;
+    if (scaleIm !== 1) y /= scaleIm;
+    finite += 1;
+    sumRe += x;
+    sumIm += y;
+    const dx = x - meanRe;
+    meanRe += dx / finite;
+    m2Re += dx * (x - meanRe);
+    const dy = y - meanIm;
+    meanIm += dy / finite;
+    m2Im += dy * (y - meanIm);
+  }
+  return {
+    n,
+    finite,
+    sumRe,
+    sumIm,
+    m2Re,
+    m2Im,
+    m2: m2Re + m2Im,
+    largestRe,
+    largestIm,
+    posInf,
+    negInf,
+    nonReal,
+  };
+}
+
+/**
+ * The mean of data whose entries may be `{re, im}` objects, as a `{re, im}`
+ * object, by the interpreter's rules (`Mean` in `library/statistics.ts`):
+ * `Mean([3, 4i])` is `1.5 + 2i`, where `_SYS.mean` sums plain numbers only.
+ * A real infinity gives the mean that `Add` gives for the sum, the real
+ * infinity (`Mean([1 + i, +∞])` is `+∞`); `+∞` beside `−∞`, any other
+ * infinite datum, no data and absent data give `NaN`. The mean is the sum
+ * divided by the count, as `_SYS.mean` computes it, and from a scaled
+ * second pass when a sum overflows.
+ */
+function complexMean(values: unknown): { re: number; im: number } {
+  const m = complexMoments(values);
+  if (m === undefined || m.n === 0 || m.nonReal || (m.posInf && m.negInf))
+    return { re: NaN, im: 0 };
+  if (m.posInf) return { re: Infinity, im: 0 };
+  if (m.negInf) return { re: -Infinity, im: 0 };
+  if (Number.isFinite(m.sumRe) && Number.isFinite(m.sumIm))
+    return { re: m.sumRe / m.finite, im: m.sumIm / m.finite };
+  // A second pass that scales the part whose sum overflowed only.
+  const sRe = Number.isFinite(m.sumRe) ? 1 : m.largestRe;
+  const sIm = Number.isFinite(m.sumIm) ? 1 : m.largestIm;
+  const scaled = complexMoments(values, sRe, sIm)!;
+  return {
+    re: sRe === 1 ? m.sumRe / m.finite : (scaled.sumRe / m.finite) * sRe,
+    im: sIm === 1 ? m.sumIm / m.finite : (scaled.sumIm / m.finite) * sIm,
+  };
+}
+
+/**
+ * The variance of data whose entries may be `{re, im}` objects, as the
+ * interpreter computes it: the sum of `|x − mean|²` divided by `n − 1`, or
+ * by `n` for the population variance. The value is a real number:
+ * `Variance([3, 4i, 1])` is `23/3`. `NaN` for no data, absent data, and
+ * data with an infinite datum (a deviation is then `∞ − ∞`). With `root`,
+ * the standard deviation.
+ *
+ * When the sum of squared deviations overflows, a second pass runs on the
+ * data divided by its largest magnitude `s`, and the variance is
+ * `(M2/d)·s²` (`+∞` only when the variance itself is past the largest
+ * number), the standard deviation `√(M2/d)·s`, as `welford()` does for real
+ * data.
+ */
+function complexVariance(
+  values: unknown,
+  population: boolean,
+  root = false
+): number {
+  const m = complexMoments(values);
+  if (m === undefined || m.n === 0 || m.posInf || m.negInf || m.nonReal)
+    return NaN;
+  const d = population ? m.n : m.n - 1;
+  if (Number.isFinite(m.m2)) return root ? Math.sqrt(m.m2 / d) : m.m2 / d;
+  // A second pass that scales the part whose sum of squared deviations
+  // overflowed only. Each part's variance is `u·s²`; they are added in the
+  // unit of the larger scale `S`, so that the standard deviation `√u·S`
+  // fits where the variance does not.
+  const sRe = Number.isFinite(m.m2Re) ? 1 : m.largestRe;
+  const sIm = Number.isFinite(m.m2Im) ? 1 : m.largestIm;
+  const scaled = complexMoments(values, sRe, sIm)!;
+  const uRe = (sRe === 1 ? m.m2Re : scaled.m2Re) / d;
+  const uIm = (sIm === 1 ? m.m2Im : scaled.m2Im) / d;
+  const S = Math.max(sRe, sIm);
+  const u = uRe * (sRe / S) * (sRe / S) + uIm * (sIm / S) * (sIm / S);
+  return root ? Math.sqrt(u) * S : u * S * S;
+}
+
+/**
  * Adapt a statistics reducer so a SINGLE DATUM is accepted, not just a
  * collection of them.
  *
@@ -3053,6 +3224,8 @@ function complexDetOrNaN(m: unknown): ComplexResult {
 }
 
 function complexInvOrNaN(m: unknown): ComplexResult[][] | number {
+  // A rectangular matrix that is not square throws, as for `inv`.
+  nonSquareMatrixPower(m, -1, complexEntry, 'Inverse');
   return isSquareMatrix(m) ? complexMatinv(m) : NaN;
 }
 
@@ -3087,11 +3260,45 @@ function complexCross(a: unknown, b: unknown): ComplexResult[] | number {
   ];
 }
 
+/**
+ * The power `m^p` of a RECTANGULAR matrix `m` that is not square (every row
+ * an array of the same length, other than the number of rows): the matrix
+ * itself, each entry passed through `entry`, for the exponent 1, and
+ * otherwise the interpreter's `expected-square-matrix` error, thrown, with
+ * the head `head` the compiled code lowers (`MatrixPower`, `Power`,
+ * `Inverse`) in its message.
+ * `undefined` when `m` is square or not a rectangular matrix (ragged rows,
+ * a vector, a scalar), which the callers answer as before.
+ */
+function nonSquareMatrixPower(
+  m: unknown,
+  p: number,
+  entry: (x: unknown) => unknown,
+  head: string
+): unknown[][] | undefined {
+  if (!Array.isArray(m) || m.length === 0 || !Array.isArray(m[0]))
+    return undefined;
+  const columns = (m[0] as unknown[]).length;
+  if (columns === m.length) return undefined;
+  if (m.some((row) => !Array.isArray(row) || row.length !== columns))
+    return undefined;
+  if (p === 1) return (m as unknown[][]).map((row) => row.map(entry));
+  throw new Error(
+    `${head}: expected a square matrix, but the matrix has ${m.length} rows ` +
+      `and ${columns} columns (expected-square-matrix).`
+  );
+}
+
 /** The complex form mirrors `matpow` step by step; the identity of `M^0` has
  * `{re, im}` entries too. */
 function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
+  const nonSquare = nonSquareMatrixPower(m, p, complexEntry, 'MatrixPower');
+  if (nonSquare !== undefined) return nonSquare as ComplexResult[][];
   if (!isSquareMatrix(m)) return NaN;
   const n = m.length;
+  // `M^1` is `M`, as in the interpreter: the product by the identity would
+  // turn an infinite entry into NaN (`∞·0`).
+  if (p === 1) return m.map((row) => row.map(complexEntry));
   if (!Number.isInteger(p)) return NaN;
   if (Math.abs(p) > MAX_MATRIX_POWER_EXPONENT) return NaN;
   let base: ComplexResult[][];
@@ -3110,6 +3317,139 @@ function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
     if (e > 1) base = complexMatmul(base, base);
   }
   return result;
+}
+
+/**
+ * The power `b^e` of a value whose rank the compiler does not know (a
+ * `tensor<number>`, a `list<list<number>>`, a `broadcastable<number>`),
+ * decided on the shape of the value as the interpreter decides it, or
+ * `undefined` when that power is the element-wise power the caller emits
+ * itself.
+ *
+ * The interpreter computes the MATRIX power for an integer power of a
+ * square matrix, and also for each matrix inside a tensor of rank 3 or more,
+ * since the power is broadcast over the outer levels down to the matrices.
+ * Any other shape (a scalar, a vector) takes the power of each entry. A
+ * non-integer exponent always takes the power of each entry. An integer
+ * power other than 1 of a matrix that is not square is the
+ * `expected-square-matrix` error in the interpreter, and throws here; the
+ * exponent 1 gives the matrix itself. An exponent `{re, im: 0}` (the complex
+ * mode lifts a `number` exponent to one) is read as its real part.
+ *
+ * `undefined` is answered for a non-integer exponent and for a value with no
+ * array entry (a scalar, a vector), after one scan of the top level. A
+ * matrix with a `{re, im}` entry takes the complex power, and so does an
+ * entry outside a matrix (`cpow`).
+ *
+ * A COLLECTION exponent is broadcast against the base level by level in the
+ * interpreter, and a matrix of the base that meets an integer entry of the
+ * exponent takes the matrix power: for `p` of rank 3, `p^[1, 2]` is the
+ * first matrix and the matrix square of the second one. The element-wise
+ * code of the caller squares each entry instead, so this throws when the
+ * pairing meets such a matrix, and answers `undefined` (the element-wise
+ * power, which is then the interpreter's value) otherwise.
+ *
+ * An exponent that is not an integer but within a relative `1e-12` of a
+ * nonzero integer throws when the base holds a matrix (`nearInteger`).
+ *
+ * `exactnessUnknown` is set when the compiler cannot tell whether the
+ * exponent's value is exact in the interpreter (a call of a user function,
+ * a transcendental function, arithmetic on a `real` input that may hold a
+ * float): the interpreter takes the matrix power for an EXACT integer only,
+ * and the power of each entry for a float with an integer value, so this
+ * throws where it would take the matrix power.
+ */
+function matrixPowerShape(
+  b: unknown,
+  e: unknown,
+  exactnessUnknown = false
+): unknown {
+  /** The integer value of an exponent, or `undefined`. */
+  const integerOf = (x: unknown): number | undefined => {
+    const v =
+      typeof x === 'number' ? x : isComplexObject(x) && x.im === 0 ? x.re : NaN;
+    return Number.isInteger(v) ? v : undefined;
+  };
+  /** Whether an exponent that is not an integer is within a relative
+   * `1e-12` of a nonzero integer. Such a value is most likely an exact
+   * integer of the interpreter computed in floating point (`√2·√2` is
+   * `2.0000000000000004`), whose power of a matrix is the matrix power: the
+   * code throws rather than take the power of each entry. `1e-12` is about
+   * 4500 units in the last place, well above the rounding of a few
+   * operations and well below the distance to the next integer of any
+   * exponent a host writes. */
+  const nearInteger = (x: unknown): boolean => {
+    const v =
+      typeof x === 'number' ? x : isComplexObject(x) && x.im === 0 ? x.re : NaN;
+    if (!Number.isFinite(v) || Number.isInteger(v)) return false;
+    const r = Math.round(v);
+    return r !== 0 && Math.abs(v - r) <= 1e-12 * Math.abs(r);
+  };
+  const isMatrix = (v: unknown[]): boolean => {
+    const columns = Array.isArray(v[0]) ? (v[0] as unknown[]).length : -1;
+    return (
+      v.length > 0 &&
+      v.every(
+        (row) =>
+          Array.isArray(row) &&
+          row.length === columns &&
+          !row.some((x) => Array.isArray(x))
+      )
+    );
+  };
+  const hasMatrix = (v: unknown): boolean =>
+    Array.isArray(v) && (isMatrix(v) || v.some(hasMatrix));
+  if (Array.isArray(e)) {
+    const meetsMatrix = (v: unknown, x: unknown): boolean =>
+      Array.isArray(x)
+        ? Array.isArray(v) &&
+          v.some((y, i) => i < x.length && meetsMatrix(y, x[i]))
+        : (integerOf(x) !== undefined || nearInteger(x)) && hasMatrix(v);
+    if (meetsMatrix(b, e))
+      throw new Error(
+        'Power: an integer entry of the exponent list applies to a matrix ' +
+          'of the base, whose power is the matrix power, which compiled ' +
+          'code does not compute for a list exponent. Evaluate the ' +
+          'expression instead.'
+      );
+    return undefined;
+  }
+  const n = integerOf(e);
+  if (n === undefined) {
+    if (nearInteger(e) && hasMatrix(b))
+      throw new Error(
+        'Power: the exponent is within 1e-12 of an integer, and the base ' +
+          'holds a matrix: the exponent may be an exact integer of the ' +
+          'interpreter computed in floating point, whose power is the ' +
+          'matrix power. Evaluate the expression instead.'
+      );
+    return undefined;
+  }
+  if (!Array.isArray(b) || !b.some((x) => Array.isArray(x))) return undefined;
+  const power = (v: unknown): unknown => {
+    if (!Array.isArray(v))
+      return typeof v === 'number'
+        ? SYS_HELPERS.pow(v, n)
+        : isComplexObject(v)
+          ? SYS_HELPERS.cpow(v, n)
+          : NaN;
+    if (!isMatrix(v)) return v.map(power);
+    // The exponent 1 gives the matrix under both readings.
+    if (exactnessUnknown && n !== 1)
+      throw new Error(
+        'Power: the base holds a matrix and the exponent is an integer, ' +
+          'but whether the exponent is exact (a matrix power) or a float ' +
+          '(the power of each entry) is not known to compiled code. ' +
+          'Evaluate the expression instead.'
+      );
+    const nonSquare = nonSquareMatrixPower(v, n, power, 'Power');
+    if (nonSquare !== undefined) return nonSquare;
+    const rows = v as unknown[][];
+    return rows.every((row) => row.every((x) => typeof x === 'number'))
+      ? matpow(rows as number[][], n)
+      : complexMatpow(rows, n);
+  };
+  return power(b);
 }
 
 /**
@@ -3151,15 +3491,22 @@ function diagonal(m: any): any {
  * Integer matrix power, mirroring the interpreter: `M^0` is the identity,
  * `M^n` is computed by exponentiation by squaring (O(log n) products, as
  * the interpreter does), and a negative power inverts first (`M^-n =
- * (M^-1)^n`). A non-square matrix, a singular matrix under a negative power,
+ * (M^-1)^n`). A matrix that is not square throws the interpreter's
+ * `expected-square-matrix` error, except for the exponent 1, which gives the
+ * matrix (`nonSquareMatrixPower`). A singular matrix under a negative power
  * or a non-integer exponent yields NaN (the interpreter errors / stays
  * inert), and so does an exponent past `MAX_MATRIX_POWER_EXPONENT`, where
  * the interpreter stays symbolic.
  */
 function matpow(m: number[][], p: number): number[][] | number {
+  const nonSquare = nonSquareMatrixPower(m, p, (x) => x, 'MatrixPower');
+  if (nonSquare !== undefined) return nonSquare as number[][];
   if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
   const n = m.length;
   if (m.some((r) => !Array.isArray(r) || r.length !== n)) return NaN;
+  // `M^1` is `M`, as in the interpreter: the product by the identity would
+  // turn an infinite entry into NaN (`∞·0`).
+  if (p === 1) return m.map((r) => r.slice());
   if (!Number.isInteger(p)) return NaN;
   if (Math.abs(p) > MAX_MATRIX_POWER_EXPONENT) return NaN;
   let base: number[][] = m.map((r) => r.slice());
@@ -3863,8 +4210,9 @@ export const SYS_HELPERS = {
   // `complexIsReal` hook of this target (`CompileTarget.complexIsReal`); the
   // test is exact because the transcendental kernels give an exact zero part
   // where the value has one (`kernelResult`).
+  // A value that is neither (an absent cell, `undefined`) is not real.
   cisreal: (x: unknown): boolean =>
-    typeof x === 'number' || (x as { im: number }).im === 0,
+    typeof x === 'number' || (isComplexObject(x) && x.im === 0),
   // The real part of a value that may be a plain number or a `{re, im}`
   // object, the imaginary part ignored — the interpreter's reading of a
   // complex bound, count or index. Anything else is NaN.
@@ -4089,6 +4437,10 @@ export const SYS_HELPERS = {
   pow3h: (x: number) => x * Math.sqrt(x),
   pow5h: (x: number) => x * x * Math.sqrt(x),
 
+  // `Power` over a value whose rank the compiler does not know: the matrix
+  // power where the value holds square matrices, `undefined` otherwise
+  // (`matrixPowerShape`).
+  matrixPowerShape,
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time
@@ -4674,7 +5026,14 @@ export const SYS_HELPERS = {
   },
   // Inverse by Gauss–Jordan with partial pivoting; a non-square or singular
   // input yields NaN (the interpreter stays inert for a singular matrix).
-  inv: matinv,
+  inv: (m: number[][]): number[][] | number => {
+    // The inverse (`Inverse(m)`, `m^-1`) of a rectangular matrix that is
+    // not square is the interpreter's `expected-square-matrix` error, as
+    // for the other powers (`nonSquareMatrixPower`); any other shape that
+    // is not a square matrix is NaN, as before.
+    nonSquareMatrixPower(m, -1, (x) => x, 'Inverse');
+    return matinv(m);
+  },
   // Conjugate transpose, diagonal (rank-dispatched), integer matrix power, and
   // reduced row echelon form — see the standalone helpers above.
   conjTranspose,
@@ -5422,6 +5781,17 @@ export const SYS_HELPERS = {
   populationVariance: oneDatumOk(populationVariance),
   standardDeviation: oneDatumOk(standardDeviation),
   populationStandardDeviation: oneDatumOk(populationStandardDeviation),
+  // The same statistics over data that may hold `{re, im}` entries, emitted
+  // where an entry of the data may be complex (`complexMean`,
+  // `complexVariance`).
+  cmean: complexMean,
+  cvariance: (values: unknown): number => complexVariance(values, false),
+  cpopulationVariance: (values: unknown): number =>
+    complexVariance(values, true),
+  cstandardDeviation: (values: unknown): number =>
+    complexVariance(values, false, true),
+  cpopulationStandardDeviation: (values: unknown): number =>
+    complexVariance(values, true, true),
   kurtosis: oneDatumOk(kurtosis),
   skewness: oneDatumOk(skewness),
   mode: oneDatumOk(mode),

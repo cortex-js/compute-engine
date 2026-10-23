@@ -86,9 +86,11 @@ import {
   median,
   mode,
   populationCovariance,
+  populationStandardDeviation,
   populationVariance,
   quartiles,
   skewness,
+  standardDeviation,
   variance,
 } from '../numerics/statistics.js';
 import type {
@@ -1130,7 +1132,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             engine,
             bignumPreferred(engine)
               ? bigVariance(bigScalarsOf(xs)).sqrt()
-              : Math.sqrt(variance(scalarsOf(xs)))
+              : standardDeviation(scalarsOf(xs))
           )
         );
       },
@@ -1223,7 +1225,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             engine,
             bignumPreferred(engine)
               ? bigPopulationVariance(bigScalarsOf(xs)).sqrt()
-              : Math.sqrt(populationVariance(scalarsOf(xs)))
+              : populationStandardDeviation(scalarsOf(xs))
           )
         );
       },

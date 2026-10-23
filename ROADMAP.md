@@ -1138,8 +1138,9 @@ dictionary). These remain, each measured with a fix and reverted:
   an absent point (`missing` beside tuples of one arity) is not applied to an
   absent number. Expected: the same rule for any cell type whose part without
   `missing` can carry dimensions.
-- **A list literal that holds an error value is typed `list<unknown>` (needs a
-  decision).** The list `[1, 1/"a", 3]` holds an error in its second element
+- **A list literal that holds an error value is typed `list<unknown>`
+  (decided 2026-10-22: option (a), skip an `error` element in the join; in
+  progress, session compute-engine-f4).** The list `[1, 1/"a", 3]` holds an error in its second element
   (`1/"a"` is `Error(incompatible-type)`), and its type is `list<unknown>`:
   the `List` literal joins the element types `integer` and `error`, and that
   join is `unknown`. Without the error, `[1, 2, 3]` is `vector<integer^3>`.

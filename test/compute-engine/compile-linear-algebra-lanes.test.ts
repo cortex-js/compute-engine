@@ -639,10 +639,11 @@ describe('PYTHON: STATISTICS AND TRACE OF COMPLEX VALUES', () => {
     });
   }
 
-  // The JavaScript reducers sum plain numbers: `Mean` keeps the run-time
-  // realness rule there.
-  it('JavaScript: Mean(L) keeps the run-time realness rule', () => {
+  // JavaScript has a complex lowering of `Mean` (`_SYS.cmean`), which sums
+  // `{re, im}` entries; before it, `Mean` took the run-time realness rule and
+  // answered NaN for complex data.
+  it('JavaScript: Mean(L) takes the complex lowering', () => {
     const r = js(engine().box(['Mean', 'L']), 'auto');
-    expect(r.code).toContain('_SYS.crealElements(');
+    expect(r.code).toContain('_SYS.cmean(');
   });
 });

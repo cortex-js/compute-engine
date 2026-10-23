@@ -314,6 +314,24 @@
 
 ### Behavior Changes
 
+- **Compiled `Power` of a value whose depth is not known follows the
+  interpreter's matrix power.** For a base typed `tensor<number>`, `tensor`,
+  `list<list<number>>` or `broadcastable<number>`, the compiled JavaScript
+  checks the value's shape when it runs: a square matrix with an exact
+  integer exponent gives the matrix power (`[[1, 2], [3, -4]]^2` is
+  `[[7, -6], [-9, 22]]`; it was `[[1, 4], [9, 16]]`), also for each matrix of
+  a tensor of rank 3 or more, and a vector or a float exponent keeps the power
+  of each entry. A non-square matrix to an integer power other than 1 throws
+  `expected-square-matrix`, as the interpreter answers; this now also holds
+  for `MatrixPower`, `Inverse` and `Power` over `matrix<…>`, which returned
+  `NaN`. When compiled code cannot tell whether the exponent is exact (for
+  example `p^(2x)` with `x: real`, or a float within 1e-12 of an integer, such
+  as `√n·√n`), it throws instead of guessing. A base that may hold points
+  (bare `list`, `list<unknown>`, `any`, `list<tuple<…>>`) keeps the power of
+  each entry, unchanged, because compiled code stores a list of points and a
+  matrix as the same array. A function the caller maps with `functions` takes
+  precedence, as before.
+
 - **An index into a `broadcastable<T>` whose `T` is a tuple, a string, a
   record or a dictionary is typed by what it can return.** With
   `p: broadcastable<tuple<number, number>>` holding `(1, 2)`, `At(p, 1)` is
@@ -544,6 +562,28 @@
   engine tolerance makes more fits exact.
 
 ### Resolved Issues
+
+- **The `complex` compile mode did not reach the cells of a list input.**
+  With `mode: 'complex'`, a scalar input declared `number` used complex
+  arithmetic, but a `list<number>`, `tensor<number>`, `matrix<number>` or
+  `list<unknown>` input did not: `Add(p, 1)` with a cell `1 + i` gave the
+  string `"[object Object]1"`. Element-wise arithmetic, cell functions and the
+  orderings over such inputs now use complex arithmetic in that mode (an
+  ordering of a non-real cell is `false`). The default and `strict` modes
+  emit the same code as before.
+
+- **Compiled statistics of complex data gave `NaN`.** Compiled `Mean`,
+  `Variance`, `StandardDeviation`, `PopulationVariance` and
+  `PopulationStandardDeviation` over complex data now give the interpreter's
+  values in the default and `complex` modes: `Mean([3, 4i])` is `1.5 + 2i`, and
+  the variance family is real. The `strict` mode still declines. Real data
+  gives the same bits as before in every mode.
+
+- **The variance of large values of opposite signs overflowed.** In compiled
+  code and in the interpreter at machine precision, `Variance([1e308, -1e308])`
+  was `-Infinity`; it is now `+Infinity`, and
+  `StandardDeviation([1e200, -1e200])` is `1.414e200` (it was `+Infinity`).
+  Ordinary data gives the same bits as before.
 
 - **Compiled folds and reads over elements that mix numbers and lists gave
   wrong values.** For a list whose elements may be numbers or vectors

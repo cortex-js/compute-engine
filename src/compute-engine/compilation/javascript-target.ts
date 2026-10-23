@@ -1657,10 +1657,24 @@ function compileJSCollectionBoolean(
     // the `bindExpr` temporaries the scalar chained path needs are unnecessary
     // here, since every operand is already an argument of the call.
     const params = args.map(() => BaseCompiler.tempVar(target));
+    // An ordering over an operand that may hold `{re, im}` objects (in the
+    // `complex` mode a `number` cell read out of a list is lifted to one)
+    // compares the real parts when every element is real, and is `false`
+    // otherwise, the run-time realness rule of a real-only head. A raw `<`
+    // on an object compares `NaN` and answered `false` for `0.5 < 1`.
+    const realness =
+      kind in JS_ORDERING_OPERATORS &&
+      args.some((a) => BaseCompiler.isComplexValued(a));
     const body = BaseCompiler.guardConnectiveAbsence(
       kind,
       params,
-      compileScalarBooleanBody(kind, params)
+      realness
+        ? `(${params.map((p) => `_SYS.cisreal(${p})`).join(' && ')} ? ` +
+            `${compileScalarBooleanBody(
+              kind,
+              params.map((p) => `_SYS.creal(${p})`)
+            )} : false)`
+        : compileScalarBooleanBody(kind, params)
     );
     const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
     return `_SYS.bcast((${params.join(', ')}) => ${body}, ${operands})`;
@@ -3814,6 +3828,44 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'StieltjesGamma',
   'ClausenCl',
 ]);
+
+/**
+ * The `_SYS` helpers that compute `Mean` and the variance family over data
+ * whose entries may be `{re, im}` objects. The real lowerings above
+ * (`_SYS.mean`, …) sum plain numbers, so without these the run-time realness
+ * rule answered NaN where the interpreter has a value: `Mean([3, 4i])` is
+ * `1.5 + 2i`, and `Variance([3, 4i, 1])` is the real number `23/3` (the sum
+ * of `|x − mean|²` over `n − 1`).
+ */
+const JS_COMPLEX_STATISTICS: ReadonlyMap<string, string> = new Map([
+  ['Mean', '_SYS.cmean'],
+  ['Variance', '_SYS.cvariance'],
+  ['PopulationVariance', '_SYS.cpopulationVariance'],
+  ['StandardDeviation', '_SYS.cstandardDeviation'],
+  ['PopulationStandardDeviation', '_SYS.cpopulationStandardDeviation'],
+]);
+
+/** `CompileTarget.complexLowering` of this target: the statistics of
+ * complex data (`JS_COMPLEX_STATISTICS`). The data is read as by the real
+ * lowerings: one operand is the data, several operands are the data items. */
+function jsComplexLowering(head: string):
+  | {
+      lowering: Exclude<CompiledFunction<Expression>, string>;
+      complexResult: boolean;
+    }
+  | undefined {
+  const helper = JS_COMPLEX_STATISTICS.get(head);
+  if (helper === undefined) return undefined;
+  return {
+    complexResult: head === 'Mean',
+    lowering: (args, compile) => {
+      if (args.length === 0) return 'NaN';
+      refuseNestedData(head, args);
+      if (args.length === 1) return `${helper}(${compile(args[0])})`;
+      return `${helper}([${args.map((x) => compile(x)).join(', ')}])`;
+    },
+  };
+}
 
 /** `CompileTarget.isRealOnlyLowering` of this target. */
 function jsIsRealOnlyLowering(
@@ -9965,6 +10017,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       constant: (id) => JAVASCRIPT_CONSTANTS[id],
       collectionAwareHeads: JS_COLLECTION_AWARE_HEADS,
       isRealOnlyLowering: jsIsRealOnlyLowering,
+      complexLowering: jsComplexLowering,
       // Free symbols read through the vars object bound to `_` (see the
       // `_.<id>` emissions below), so a lambda parameter spelled `_` must not
       // shadow it — see `CompileTarget.varsObjectName`.
@@ -10051,7 +10104,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // idempotent number → complex lift (`_SYS.cplx`) and the exact runtime
       // realness test. See `CompileTarget.supportedModes`.
       supportedModes: JS_SUPPORTED_MODES,
-      complexLift: (code) => `_SYS.cplx(${code})`,
+      // The lift is idempotent, so the lift of a lift of a name is that lift.
+      complexLift: (code) =>
+        /^_SYS\.cplx\([\w$.]+\)$/.test(code) ? code : `_SYS.cplx(${code})`,
       complexIsReal: (code) => `_SYS.cisreal(${code})`,
       complexReal: (code) => `_SYS.creal(${code})`,
       complexRealElements: (code) => `_SYS.crealElements(${code})`,
