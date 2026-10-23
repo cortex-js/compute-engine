@@ -231,26 +231,6 @@ the compile targets. Measured 2026-10-20: a type handler and the absent-cell
 pass-through make 6 rows of `tuple-argument-binding.test.ts` fail (those that
 assert `boolean`); no compile or Epsil test fails.
 
-### CE-9. `tuple<integer>` is not a subtype of `broadcastable<integer>`, so subtyping is not transitive
-
-**Status:** open; defect, small. User decision 2026-10-23: option B, remove
-`indexed_collection<T> <: broadcastable<T>` (it includes tuples and strings,
-which do not broadcast). Measured earlier: 14 tests fail in 8 suites, including
-Tycho item 332 compiled-program parity; review each one and report the count
-before landing.
-
-`tuple<integer> <: indexed_collection<integer> <: broadcastable<integer>`, but
-`tuple<integer>` is not `<: broadcastable<integer>`. A rule excludes tuples and
-strings from `broadcastable<T>`, and `broadcastable-type.test.ts` ("a tuple is
-excluded from the collection branch") and the type guide lock it.
-
-- Option A: accept tuples and strings in `broadcastable<T>`. 8 tests fail in 6
-  suites, including the locked test and the Dot-of-tuple-of-tuples compile
-  tests.
-- Option B: remove `indexed_collection<T> <: broadcastable<T>`. 14 tests fail in
-  8 suites, including Tycho item 332 compiled-program parity and the point-list
-  compile tests.
-
 ### CE-10. Subtype gaps: a record with an extra `any` field, and `couldMatch` with an empty type
 
 **Status:** open; defect, small. Plan:
@@ -3587,9 +3567,9 @@ of `(2t + i)/(t − 3i)`.
 `library/calculus.ts`): `n = 20` and `n = 50` are correct, `n = 100` gives
 `1.9·10¹¹² ± 1.8·10¹¹²` where the value is `9.3·10¹⁵⁷`, and `n = 150` gives
 `1.29·10¹⁷³ ± NaN` (`5.7·10²⁶²`). The integrand has its peak at `x = n`, and
-`xⁿ` overflows before `e⁻ˣ` brings the product back down (`x¹⁵⁰` at
-`x > 113`), so the quadrature samples `∞·0` or misses the peak; the error it
-reports is not an error bound. `evaluate()` leaves the integral unevaluated.
+`xⁿ` overflows before `e⁻ˣ` brings the product back down (`x¹⁵⁰` at `x > 113`),
+so the quadrature samples `∞·0` or misses the peak; the error it reports is not
+an error bound. `evaluate()` leaves the integral unevaluated.
 
 ### CE-185. A numeric integral next to a singular bound: remaining cases
 
@@ -4136,9 +4116,9 @@ tests `p is None`, but the arithmetic raises
 `TypeError: unsupported operand type(s) for /: 'int' and 'NoneType'`.
 `np.sin(None)` raises too. The interpreter answers `NaN` for `Missing + 1`, and
 compiled JavaScript gives `NaN` (`undefined + 1`). Decide whether a `None` input
-in a numeric slot is admitted (then arithmetic over it must read it as `NaN`)
-or refused at the call boundary (then document that a numeric slot takes `nan`
-for an absent value).
+in a numeric slot is admitted (then arithmetic over it must read it as `NaN`) or
+refused at the call boundary (then document that a numeric slot takes `nan` for
+an absent value).
 
 ### CE-396. interval-js answers `'maybe'` for `≠` over an `empty` operand
 
@@ -4150,8 +4130,8 @@ over the whole cell gives `'false'` (user decision 2026-10-20, Tycho row 411).
 `\sqrt{x} \ne 0` over `x = [-1, -1]` still gives `'maybe'`, pinned in
 `test/compute-engine/condition-nan-undecided.test.ts`. The interpreter and the
 `javascript` and `python` targets answer `True` for `NaN ≠ 0`, in a branch too
-(user decision 2026-10-23). The IEEE reading on `interval-js` would be
-`'true'`. `'maybe'` is sound (an enclosure), only less precise.
+(user decision 2026-10-23). The IEEE reading on `interval-js` would be `'true'`.
+`'maybe'` is sound (an enclosure), only less precise.
 
 ### CE-393. A compiled input of a non-number value type is read as a number
 

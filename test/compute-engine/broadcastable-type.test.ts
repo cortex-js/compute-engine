@@ -57,9 +57,9 @@ describe('broadcastable<T> — subsumption (positive)', () => {
     // `broadcastable<T>` is `T | list<T>`. A value typed only
     // `indexed_collection<T>` may be a tuple, which broadcast binds whole, so
     // it is not in the type.
-    expect(isSubtype('indexed_collection<integer>', 'broadcastable<number>')).toBe(
-      false
-    );
+    expect(
+      isSubtype('indexed_collection<integer>', 'broadcastable<number>')
+    ).toBe(false);
   });
 
   it('is covariant in the element type', () => {
@@ -135,10 +135,12 @@ describe('broadcastable<T> — subsumption (negative)', () => {
 
   it('broadcastable<T> is NOT <: list<T> / indexed_collection (it may be a scalar)', () => {
     expect(isSubtype('broadcastable<number>', 'list<number>')).toBe(false);
-    expect(isSubtype('broadcastable<number>', 'indexed_collection')).toBe(false);
-    expect(isSubtype('broadcastable<number>', 'indexed_collection<number>')).toBe(
+    expect(isSubtype('broadcastable<number>', 'indexed_collection')).toBe(
       false
     );
+    expect(
+      isSubtype('broadcastable<number>', 'indexed_collection<number>')
+    ).toBe(false);
   });
 
   it('a collection whose elements are not <: T is not broadcastable', () => {
@@ -217,5 +219,38 @@ describe('broadcastable<T> — BoxedType path', () => {
     expect(new BoxedType('integer').matches(bt)).toBe(true);
     expect(new BoxedType('list<integer>').matches(bt)).toBe(true);
     expect(bt.matches('number')).toBe(false);
+  });
+});
+
+describe('THE ABSTRACT INDEXED COLLECTION IS NOT BROADCASTABLE (CE-9)', () => {
+  // `tuple<integer>` is an `indexed_collection<integer>`, and neither is a
+  // `broadcastable<integer>`: the collection arm of `broadcastable<T>` is a
+  // tensor of `T` (or a plain list of `T` when `T` can hold a list), and a
+  // tuple, a string or the abstract `indexed_collection<T>` is not one. So
+  // the relation is transitive here (ROADMAP CE-9, user decision 2026-10-23,
+  // option B: in effect since the reading of a list by its elements of
+  // 2026-10-22; measured with no failing test).
+  it('indexed_collection<integer> is not a broadcastable<integer>', () => {
+    expect(isSubtype('tuple<integer>', 'indexed_collection<integer>')).toBe(
+      true
+    );
+    expect(
+      isSubtype('indexed_collection<integer>', 'broadcastable<integer>')
+    ).toBe(false);
+    expect(isSubtype('tuple<integer>', 'broadcastable<integer>')).toBe(false);
+    expect(isSubtype('collection<integer>', 'broadcastable<integer>')).toBe(
+      false
+    );
+    expect(isSubtype('list<integer>', 'broadcastable<integer>')).toBe(true);
+  });
+
+  it('a top element type admits every value through the scalar branch, on both sides', () => {
+    // `broadcastable<any>` is `any | list<any>`, and every type is an `any`:
+    // the chain is transitive because each step holds.
+    expect(isSubtype('indexed_collection<any>', 'broadcastable<any>')).toBe(
+      true
+    );
+    expect(isSubtype('tuple<integer>', 'broadcastable<any>')).toBe(true);
+    expect(isSubtype('set<integer>', 'broadcastable<any>')).toBe(true);
   });
 });
