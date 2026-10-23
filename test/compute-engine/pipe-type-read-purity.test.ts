@@ -116,7 +116,10 @@ describe('the derived type is unchanged', () => {
       ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1'], '_1'],
       ['List', 1, 2, 3],
     ]);
-    expect(pipe.type.toString()).toBe('collection<number>');
+    // The stage's body is typed with its parameter bound to the type of the
+    // piped list, as the call is (Tycho ledger row 426): the squares of
+    // `[1, 2, 3]`. It was the stage's result type, `collection<number>`.
+    expect(pipe.type.toString()).toBe('list<integer<0..>^3>');
     expect(pipe.type.toString()).toBe(call.type.toString());
     expect(pipe.evaluate().toString()).toBe(call.evaluate().toString());
     // The value is the lazy `Map` over the whole list, not a list of

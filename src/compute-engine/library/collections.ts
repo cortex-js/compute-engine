@@ -4037,14 +4037,22 @@ function mentionsParameter(
   d: OperandDescriptor,
   parameters: ReadonlyMap<string, number>
 ): boolean {
-  return structureMentionsParameter(d.structureOf?.(), parameters);
+  return structureMentionsParameter(d.structureOf?.(), parameters, new Set());
 }
 
+/** `checked` holds the structures already found not to mention a
+ * parameter: a structure shared by several operands is read once, so a body
+ * that is a DAG (a `Max(e, e)` tower) is not unfolded into its tree. */
 function structureMentionsParameter(
   s: OperandStructure | undefined,
-  parameters: ReadonlyMap<string, number>
+  parameters: ReadonlyMap<string, number>,
+  checked: Set<OperandStructure>
 ): boolean {
   if (s === undefined) return true;
+  if (checked.has(s)) return false;
+  const mentions = (c: OperandDescriptor) =>
+    structureMentionsParameter(c.structureOf?.(), parameters, checked);
+  let result: boolean;
   switch (s.kind) {
     case 'symbol':
       return parameters.has(s.name);
@@ -4052,13 +4060,18 @@ function structureMentionsParameter(
     case 'number':
       return false;
     case 'application':
-      return s.children.some((c) => mentionsParameter(c, parameters));
+      result = s.children.some(mentions);
+      break;
     case 'tuple':
     case 'list-literal':
-      return s.elements.some((c) => mentionsParameter(c, parameters));
+      result = s.elements.some(mentions);
+      break;
     case 'function-literal':
-      return structureMentionsParameter(s.body, parameters);
+      result = structureMentionsParameter(s.body, parameters, checked);
+      break;
   }
+  if (!result) checked.add(s);
+  return result;
 }
 
 /**
@@ -4133,7 +4146,20 @@ function bareMappingElementTypeD(
   // typed `vector<2>` for a list of points. The derived operand stands for
   // its derived type.
   let referenced = false;
+  // An application shared by several operands is derived once: a body that
+  // is a DAG (a `Max(e, e)` tower) is not unfolded into its tree.
+  const derived = new Map<object, Type | undefined>();
   const deriveApplication = (app: {
+    head: string;
+    callee?: OperandDescriptor;
+    children: ReadonlyArray<OperandDescriptor>;
+  }): Type | undefined => {
+    if (derived.has(app)) return derived.get(app);
+    const t = deriveApplicationOnce(app);
+    derived.set(app, t);
+    return t;
+  };
+  const deriveApplicationOnce = (app: {
     head: string;
     callee?: OperandDescriptor;
     children: ReadonlyArray<OperandDescriptor>;
@@ -5590,9 +5616,18 @@ function callbackResultTypeD(
 
 /**
  * True when the callback `op` is known to be a function whose result type is
- * not known (its type, or the declared type of the symbol, is the bare
- * `function`), or when it holds an error (type `error`). A symbol with no
- * definition is not such a callback: its type is not known at all.
+ * not known, or when it holds an error (type `error`):
+ * - its type, or the declared type of the symbol, is the bare `function`;
+ * - it is a function literal whose result is `unknown` (a body that could
+ *   not be typed, `u ↦ Q` with `Q` undeclared), other than the identity
+ *   `x ↦ x`, whose elements are the source's;
+ * - it is a symbol declared with a signature whose result is `unknown`
+ *   (`(unknown) -> unknown`).
+ * The elements of the mapped collection are then not known, and they are
+ * not the elements of the source: `Map(u ↦ Q, M)` over a `list<real>` was
+ * typed `list<real>`. A symbol with no definition is not such a callback:
+ * its type is not known at all. A library operator whose declared result
+ * says nothing (`Hold`) is not either: it keeps the type of the source.
  */
 function callbackHasUnknownResult(
   op: OperandDescriptor | undefined,
@@ -5601,23 +5636,31 @@ function callbackHasUnknownResult(
   if (op === undefined) return false;
   const known = (t: Type | undefined) => t === 'function' || t === 'error';
   if (known(op.type)) return true;
-  const literal = op.structureOf?.();
-  const hasOpaqueCall = (shape: OperandStructure): boolean =>
-    shape.kind === 'application' &&
-    (shape.callee?.type === 'function' ||
-      shape.children.some((d) => {
-        const child = d.structureOf?.();
-        return child !== undefined && hasOpaqueCall(child);
-      }));
-  if (
-    functionResult(op.type) === 'unknown' &&
-    literal?.kind === 'function-literal' &&
-    hasOpaqueCall(literal.body)
-  )
-    return true;
   const s = op.structureOf?.();
+  if (s?.kind === 'function-literal')
+    return functionResult(op.type) === 'unknown' && !isIdentityLiteral(s);
   if (s?.kind !== 'symbol' || s.lookupByName === false) return false;
-  return known(engine.lookupDefinition(s.name)?.value?.type?.type);
+  const declared = engine.lookupDefinition(s.name)?.value?.type?.type;
+  return (
+    known(declared) ||
+    (declared !== undefined && functionResult(declared) === 'unknown')
+  );
+}
+
+/** Whether a function literal is the identity of one parameter, `x ↦ x`
+ * (its body possibly a one-statement `Block`). */
+function isIdentityLiteral(
+  st: OperandStructure & { kind: 'function-literal' }
+): boolean {
+  if (st.parameters.length !== 1) return false;
+  let body: OperandStructure | undefined = st.body;
+  while (
+    body?.kind === 'application' &&
+    body.head === 'Block' &&
+    body.children.length === 1
+  )
+    body = body.children[0].structureOf?.();
+  return body?.kind === 'symbol' && body.name === st.parameters[0].name;
 }
 
 /**

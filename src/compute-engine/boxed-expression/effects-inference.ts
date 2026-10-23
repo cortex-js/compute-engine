@@ -1610,6 +1610,45 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   )
     bodyType = stripNumericRanges(bodyType);
 
+  // A `Return` before the last statement gives the function its operand's
+  // value, not the last statement's, so the result is the join of the two:
+  // `x ↦ Block(If(x > 1, Return((x, x))), x^2)` gives a pair for `x = 1.5`,
+  // and was typed `(unknown) -> number`. A returned value is widened by the
+  // rule above for the body (a finite numeric type is `number` when a
+  // parameter can bind a non-finite value). An `unknown` side stays
+  // `unknown`: the join would drop it. A `Return` with no operand gives
+  // `Nothing`, and the join absorbs `nothing` too, so that arm is added to
+  // the union after the join: `x ↦ Block(If(x > 1, Return()), 2x)` is
+  // `(unknown) -> nothing | number`.
+  if (ascribedReturn === undefined) {
+    const returned = earlyReturnTypes(derivedBodyExpr).map((t) =>
+      args !== undefined &&
+      isSubtype(t, 'complex') &&
+      args.some(
+        (a) =>
+          !provablyDisjoint(a.type, 'infinity') ||
+          !provablyDisjoint(a.type, 'nan')
+      )
+        ? ('number' as Type)
+        : stripNumericRanges(t)
+    );
+    // The `nothing` arm is kept whether it comes from a `Return()` or from
+    // the body itself, a fallthrough to an empty `Block()`:
+    // `(c: boolean) ↦ Block(If(c, Return(1)), Block())` is
+    // `-> integer | nothing`.
+    if (returned.length > 0) {
+      const all = [bodyType, ...returned];
+      const values = all.filter((t) => t !== 'nothing');
+      if (values.includes('unknown')) bodyType = 'unknown';
+      else {
+        const joined: Type = values.length === 0 ? 'nothing' : widenAll(values);
+        bodyType = all.some((t) => provablyAdmits('nothing', t))
+          ? reduceType({ kind: 'union', types: [joined, 'nothing'] })
+          : joined;
+      }
+    }
+  }
+
   // The effect specifier slot. An INFERRED empty set is written as an empty
   // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
   // and inference states nothing (`inferFunctionLiteralEffects` collapses a
@@ -1652,6 +1691,44 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     ...(effects !== undefined ? { effects } : {}),
     result: bodyType,
   };
+}
+
+/**
+ * Whether the call `e` applies a function value: its head is bound to a
+ * definition that holds a value or that declares a type. `Return` is not a
+ * library operator: its head is bound, if at all, to the definition that
+ * canonicalization infers for an unknown name, which holds no value and
+ * whose type is inferred.
+ */
+function isCallOfFunctionValue(e: Expression): boolean {
+  const own = e.valueDefinition;
+  return own !== undefined && (own.value !== undefined || !own.inferredType);
+}
+
+/**
+ * The types of the operands of the `Return` statements of a function body
+ * (`nothing` for a `Return` with no operand), outside a nested function
+ * literal (whose `Return` leaves that literal) and outside the operand of a
+ * quoting operator (`holdClass: 'quote'`, such as `Hold`), which is never
+ * run as part of the body.
+ */
+function earlyReturnTypes(body: Expression): Type[] {
+  const types: Type[] = [];
+  // A subexpression shared by several operands is visited once: a body can
+  // be a DAG whose tree has exponentially many paths.
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || e.operator === 'Function' || seen.has(e)) return;
+    seen.add(e);
+    if (e.operatorDefinition?.holdClass === 'quote') return;
+    // A call of a function value named `Return` (a parameter declared
+    // `() -> real`) is not the statement (`isCallOfFunctionValue`).
+    if (e.operator === 'Return' && !isCallOfFunctionValue(e))
+      types.push(e.nops === 0 ? 'nothing' : e.op1.type.type);
+    for (const op of e.ops) visit(op);
+  };
+  visit(body);
+  return types;
 }
 
 /** True when a full-signature marker carries a non-empty `where` clause. */

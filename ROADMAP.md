@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-360.
+Next free reference: CE-373.
 
 **Entry format.**
 
@@ -483,6 +483,18 @@ options were (b) `list<integer | error>` and (c) keep `list<unknown>`.
   `Missing`, but the type of the arms before the first mask does not add
   `missing`.
 
+### CE-367. A tuple that holds a failed element is typed `error` inside a list, and not alone
+
+**Status:** open; defect.
+
+With `E = ["Error", {str: "x"}]`, `ce.box(["Tuple", ["List", 1, E], 2]).type`
+is `tuple<list<unknown>, integer>` (a tuple whose first slot holds a list with a
+failed element), but inside a list,
+`ce.box(["List", ["Tuple", ["List", 1, E], 2]]).ops[0].type` is `error`: the
+same tuple gets a different type depending on where it is. The canonical form of
+the outer list types its element through a path that reads any nested error as
+a failure of the whole tuple. Expected: the same type in both places.
+
 ### CE-23. The empty tuple type prints as the bare `tuple`, which parses back wider
 
 **Status:** open; defect, small. Plan:
@@ -521,7 +533,13 @@ every threadable call, so it needs a full-suite measurement.
 
 ### CE-25. The inferred signature of a function literal reads an `unknown` parameter as a number
 
-**Status:** decision needed; wrong value.
+**Status:** in progress; wrong value. User decision 2026-10-22: option (a), the
+signature says only what is known (`x ↦ [x]` is `(unknown) -> list`); reading a
+free-symbol call argument as a number (option (b)) is rejected. Lands after
+CE-360, CE-361 and CE-363, which the new signature makes reachable from Tycho
+row 425 (`g := t ↦ [t, 2t]` with `x: any`). A patch exists (signature part only,
+`deriveSignatureResultType`); with it, the five compile tests below decline
+instead of compiling, which is accepted.
 
 `g := x ↦ [x]` gets the signature `(unknown) -> vector<1>`, which says the
 element is a number. With `s: set<integer>` and `s := Set(1, 2)`, `g(s)`
@@ -554,6 +572,60 @@ Options:
 
 Probe:
 `ce.assign('g', ce.box(['Function', ['List', 'x'], 'x'])); ce.box('g').type.toString()`.
+
+- **CE-25.1** A nested literal that captures a parameter keeps the fold:
+  `x ↦ (() ↦ [x])` has the result `() -> vector<1>`.
+
+### CE-361. `Sum` over elements of unknown type is typed `number`
+
+**Status:** in progress; defect.
+
+`ce.declare("g", "(unknown) -> list<unknown>")`,
+`ce.assign("g", ce.parse("t \\mapsto [t, 2t]"))`, `ce.declare("x", {type:
+"any"})`: `Sum(Rest(g(x)))` is typed `number`, but at `x = [1, 2]` it evaluates
+to `[2, 4]` (the elements of `g(x)` are lists when `x` is a list). The same with
+the declared result `list`. A sum of elements that may be lists must not be
+typed as a number: the result type should be the join of the element types
+(`number | list<…>`, or the broadcast form the `Sum` handler uses for a row).
+
+### CE-362. `list` and `list<unknown>` give different result types
+
+**Status:** open; defect.
+
+The two spellings denote one set of values, but with the setup of CE-361,
+`g(x)[1] + 1` is typed `any` when `g` is declared `(unknown) -> list` and
+`broadcastable<number> | missing` when it is declared
+`(unknown) -> list<unknown>`. A reader somewhere treats the bare name and the
+`<unknown>` form differently; both must give the same answer.
+
+### CE-363. The type of a call of a function literal over a list differs between the two derivation routes
+
+**Status:** in progress; defect.
+
+With `f(x) := (-x, x)`, `deriveApplicationType` (the route that types a call
+from operand descriptors) types `f` over a `list<unknown>` operand as
+`tuple<number, number>`, because the descriptor `lift()` returns early for a
+function literal, while the expression route types the same call
+`list<tuple<number, number>>` (evaluation maps over the list). The descriptor
+route must lift the call over a list operand as the expression route does.
+
+### CE-364. `Multiply` of a number and a list with a cell of unknown type claims real cells
+
+**Status:** open; defect.
+
+`ce.box(["Multiply", 2, ["List", "x"]])` is typed `vector<real^1>`, while `2x`
+alone is typed `number`. With `w := x ↦ 2·[x]`, `w(i)` is typed
+`vector<real^1>` and evaluates to `[2i]`. The cell type must be `number` (or the
+type of `2x`).
+
+### CE-365. A use of a function widens its inferred signature
+
+**Status:** open; defect, small.
+
+With `m := t ↦ [[t, 1], [2, 3]]`, after `Trace(m(2))` the signature of `m`
+reads `(unknown) -> list<list<unknown>> | number | tensor`. The union holds every
+value, but the result of `m` is always a list; a use should not widen the
+signature with the type of the expression that uses the call.
 
 ### CE-26. Collection results that can hold an absent element are typed imprecisely
 
@@ -4098,6 +4170,64 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-368. Compiled JavaScript gives `NaN` or `false` for an absent element where the interpreter gives `Missing`
+
+**Status:** open; wrong value.
+
+With `g := t ↦ [t, 2t]` (any of the signatures `(unknown) -> list<unknown>`,
+`(unknown) -> list` or the inferred one) and `x: any`, at `x = []`: compiled
+`g(x)[1] + 1` gives `NaN` (the interpreter gives `Missing`), compiled
+`g(x)[1] < 1` gives `false` (interpreter: `Missing`), and compiled
+`g(x)[5] * g(x)[1]` gives `NaN` (interpreter: `Missing`). Expected: the absence
+marker the interpreter gives.
+
+- **CE-368.1** `_SYS.bcastAbsent` makes the whole result absent beside a
+  present list: with the inferred signature, compiled `g(x)[5] + g(x)[1]` at
+  `x = [1, 2]` gives `undefined` (`Missing`), the interpreter `[NaN, NaN]` (a
+  present list gives the shape).
+
+### CE-369. Compiled `Power` of an element that holds a matrix squares each cell
+
+**Status:** open; wrong value.
+
+With the setup of CE-368, at `x = [[1, 2], [3]]` the element `g(x)[1]` is the
+matrix `[[1, 2], [2, 4]]`. Compiled `g(x)[1]^2` gives `[[1, 4], [4, 16]]` (each
+cell squared); the interpreter gives the matrix power `[[5, 10], [10, 20]]`.
+Expected: the compiled code gives the matrix power, or declines when an operand
+of `Power` may be a matrix.
+
+### CE-370. Compiled `Max` of a top-typed element and a number gives `NaN`
+
+**Status:** open; wrong value.
+
+With the setup of CE-368, `Max(g(x)[1], 1)` compiles to `Math.max(<array>, 1)`,
+which is `NaN`; the interpreter gives `2` at `x = [1, 2]` and `4` at
+`x = [[1, 2], [3]]`. With the inferred signature, `x = [1, 2]` is right and
+`x = [[1, 2], [3]]` gives `NaN`: the run-time projection of `compileExtremum`
+(`compilation/javascript-target.ts`) spreads one level only.
+
+### CE-371. An index into `broadcastable<vector<2>>` is typed one level deep
+
+**Status:** open; defect.
+
+With the inferred signature of `g := t ↦ [t, 2t]` and `x: any`, `g(x)[1]` is
+typed `missing | number | vector<2>`; at `x = [[1, 2], [3]]` its value is the
+matrix `[[1, 2], [2, 4]]`, which that type does not hold. `indexElementType`
+(`common/type/utils.ts`) reads one level of the broadcastable's collection
+option, which is a tensor of any rank.
+
+### CE-360. Compiled JavaScript adds a number to a list element of unknown type by string concatenation
+
+**Status:** in progress; wrong value.
+
+`ce.declare("g", "(unknown) -> list<unknown>")`,
+`ce.assign("g", ce.parse("t \\mapsto [t, 2t]"))`, `ce.declare("x", {type:
+"any"})`, then compile `g(x)[1] + 1` and run it at `x = [1, 2]`: it returns the
+string `"1,21"` (the array `[1, 2]` converted to a string and joined with `1`),
+where the interpreter gives `[2, 3]`. The element `g(x)[1]` may be a list, and
+the compiled `+` treats it as a scalar JavaScript value. Expected: the compiled
+code broadcasts as the interpreter does, or the compile declines (fail closed).
+
 ### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
 
 **Status:** open; defect. Part of CE-218.
@@ -4216,6 +4346,36 @@ keeps the entry-wise code, which plot code over point lists needs. Types that
 cannot hold a point (`tensor<number>`, `list<list<number>>`,
 `broadcastable<number>`) dispatch on the shape of the value. Fix: a compiled
 representation of points that differs from a row.
+
+- **CE-216.1** The same holds for `Multiply` since the change of CE-98: for
+  operands typed bare `list`, `list<unknown>` or `any`, compiled `p·q` keeps the
+  entry-wise product, while the interpreter gives the matrix product when both
+  values are matrices. The same representation fixes both.
+
+### CE-372. Evaluating a dictionary that shares its values is exponential
+
+**Status:** open; performance.
+
+A dictionary built in 30 levels, each level holding the previous one under two
+keys (`{p: d, q: d}`), has 31 distinct nodes, but
+`ReleaseHold(Hold(d)).evaluate()` does not finish in 25 s (measured
+2026-10-22 on `c5f2dc963`): evaluation walks each path to a shared value again.
+`has()`, `.subexpressions` and the assignment copy of row 426 visit a shared
+node once (`hasSymbolOrOperator`, `getSubexpressions`, `snapshotRunVariables`).
+Fix: memoize the evaluation of a dictionary's values by node within one
+evaluation.
+
+### CE-366. Compiled `p·q` with `p, q: any` holding lists gives `null`
+
+**Status:** open; wrong value.
+
+With `p` and `q` declared `any` and holding lists, `Multiply(p, q)` compiles to
+`_.p * _.q` (JavaScript `*` on two arrays), which gives `null`. The interpreter
+gives the matrix product of two matrices (CE-98) or the entry-wise product of
+two plain lists. Measured 2026-10-22 on `4916e3f7f`; the same before the
+`Multiply` change. Fix: an `any` operand that may hold a list goes through the
+same run-time shape dispatch as `tensor<number>` (`_SYS.matrixProductShape`),
+or declines; a type that may hold points keeps the entry-wise code (CE-216).
 
 ### CE-217. A compiled user function reads a free symbol of its body from the compile scope
 

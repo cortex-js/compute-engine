@@ -48,6 +48,7 @@ import type {
   BoxedDefinition,
   CollectionHandlers,
   ExpressionInput,
+  Scope,
   SymbolInterface,
 } from '../global-types.js';
 
@@ -599,6 +600,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // every call site is fire-and-forget, so declining is safe.
     if (this.engine._resolveOnlyDepth > 0) return false;
 
+    // A use of the variable of a binder operator (the index `k` of
+    // `Sum(2k, Limits(k, 1, 3))`) may reach this symbol while it still
+    // carries the binding of an enclosing scope with the same name, a
+    // parameter `k` of a function literal: on the `ce.box()` route the body
+    // of the literal is bound before the binder's own scope exists. The
+    // binder rebinds such an occurrence to its own variable afterwards
+    // (`bindBindingSites`, `box.ts`), so the use says nothing about the
+    // enclosing binding, and inferring a type on it there typed the
+    // parameter `k` from the index (`k ↦ (Sum(2k, Limits(k, 1, 3)), k)`
+    // gave `k` the type `number`).
+    if (this.isShadowedByBinder()) return false;
+
     // Everything below — the caller's type computation, the incumbent read,
     // the narrow/widen and the no-op comparison — runs with the assumptions
     // hidden: what this method writes is stored on a definition and must stay
@@ -606,6 +619,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine._withoutFacts(() =>
       this._inferWithoutFacts(t(), inferenceMode)
     );
+  }
+
+  /** True when the nearest scope of the current context that binds this
+   * symbol's name is the scope of a binder operator, with a binding of that
+   * name other than this symbol's (see `_infer`). */
+  private isShadowedByBinder(): boolean {
+    const name = this._id;
+    for (
+      let scope: Scope | null | undefined = this.engine.context?.lexicalScope;
+      scope;
+      scope = scope.parent
+    ) {
+      const binding = scope.bindings.get(name);
+      if (binding === undefined) continue;
+      return binding !== this._def && scope.binderNames?.has(name) === true;
+    }
+    return false;
   }
 
   private _inferWithoutFacts(

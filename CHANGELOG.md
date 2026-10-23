@@ -314,6 +314,41 @@
 
 ### Behavior Changes
 
+- **An applied function literal is typed by its body** (Tycho row 426).
+  `Apply(literal, args)`, and `xs |> literal` when the literal takes its
+  argument whole, are now typed as the body with each parameter set to the
+  argument's type, as a call of a named function already was: with
+  `M: list<real>` and `p(n) = s·n`, `Apply(a ↦ Map(p, a), M)` is `list<number>`
+  (it was `collection<unknown>`), and `'abc' |> (s ↦ s)` is `string`. The
+  derivation stops (and keeps the literal's own result type) for a body with
+  an early `Return`, a loop, an assignment that is not at the top of the body,
+  or a nested function that reads an outer parameter. A call of a named
+  function whose body passes an inline callback (`Map(u ↦ 2u, a)`) is also
+  refined. Other type changes in the same area:
+  - A function literal's result type includes its early `Return` values, and
+    `Nothing` when it can return nothing (`Return()`, or a final empty
+    `Block`): `x ↦ Block(If(x > 1, Return('big')), 2x)` is `-> number | string`.
+  - A `Sum` or `Product` index with the same name as a parameter no longer
+    sets that parameter's type.
+  - `Map` with a callback whose result type is `unknown` has elements of type
+    `unknown`: `Map(u ↦ Q, M)` is `list<unknown>` (it was `list<real>`).
+
+- **Inside a function or a `Block`, a stored value takes the current values of
+  the variables it names; a closure keeps the variable** (user decision
+  2026-10-22). When `Assign`, `Declare` with a value, or a destructuring stores
+  a value that names a parameter or a block local, those names are replaced by
+  their values at that moment: with
+  `f := x ↦ Block(Declare(r), Assign(r, If(x > y, x, 0)), Assign(x, 100), r)`,
+  `f(3)` is `If(y < 3, 3, 0)`, and a block local no longer escapes its block
+  unbound (it gave `If(y < 3, b, 0)`). A destructuring reads every variable as
+  it was before the statement. A function literal in the value is not changed:
+  it reads the variable when it is called, so a closure returned after a
+  parameter is reassigned sees the last value (`u ↦ u + 10`, it was
+  `u ↦ u + 3`), as closures over globals and block locals already did. When a
+  function reassigns a parameter, a result that still names it uses its last
+  value: `a ↦ Block(Assign(a, [7, 8]), Map(u ↦ 2u, a))` gives `[14, 16]` (it
+  mapped the original argument), and `Filter` likewise.
+
 - **Compiled `Power` of a value whose depth is not known follows the
   interpreter's matrix power.** For a base typed `tensor<number>`, `tensor`,
   `list<list<number>>` or `broadcastable<number>`, the compiled JavaScript

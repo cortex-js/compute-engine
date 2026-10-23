@@ -955,9 +955,12 @@ describe('Pipe — stage sugar (box route)', () => {
     // Each of these is an escape from the implicit `Map` — a non-collection
     // topic, a string topic, a bare function symbol, and a parameter
     // annotation claiming the whole collection — so none may be reported as a
-    // collection. They type from the stage's declared result as before,
-    // which for an unannotated lambda is `unknown`; what this pins is that
-    // the mapping path did NOT fire, so no collection type appears.
+    // list. What this pins is that the mapping path did NOT fire, so no list
+    // type appears. A stage that does not map is typed as `Apply(stage,
+    // topic)`: its body with the parameter bound to the topic's type (Tycho
+    // ledger row 426), so `'abc' |> (s ↦ s)` is a `string`. A string is a
+    // collection by type, which is why the test reads `list`, not
+    // `collection`.
     const scalars = [
       ce.box(['Pipe', 4, ['Function', ['Power', '_', 2]]]),
       ce.box(['Pipe', "'abc'", ['Function', 's', 's']]),
@@ -968,8 +971,13 @@ describe('Pipe — stage sugar (box route)', () => {
         ['Function', ['Length', 'l'], ['Typed', 'l', "'list<number>'"]],
       ]),
     ];
-    for (const s of scalars)
-      expect(s.type.matches('collection')).toBe(false);
+    for (const s of scalars) expect(s.type.matches('list')).toBe(false);
+    expect(scalars.map((s) => s.type.toString())).toEqual([
+      'number',
+      'string',
+      'integer',
+      'integer | signed_infinity',
+    ]);
   });
 
   // A stage written as a call that is missing an argument gets the piped

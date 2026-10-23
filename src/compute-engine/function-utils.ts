@@ -19,6 +19,7 @@ import {
   boundVariableNames,
   boundVariableNamesInOperand,
   shadowedKey,
+  withCallableBinding,
 } from './boxed-expression/binders.js';
 import {
   declaredBinders,
@@ -3080,6 +3081,200 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
   return walk(expr, false);
 }
 
+/**
+ * The value `value` that an `Assign` is about to store, with each symbol that
+ * reads a VARIABLE OF THE RUN — a parameter of a call being evaluated, or a
+ * local of a block being evaluated — replaced with the value that variable
+ * holds now.
+ *
+ * A plain value is copied at the assignment. An evaluated value can still
+ * name such a variable: a held operand (`If(x > y, x, 0)` with `y` free
+ * evaluates to `If(y < 3, x, 0)`, its condition read with `x = 3` and its
+ * branches held), a `Hold(x)`. When the variable is assigned again before
+ * the stored value is read, the stored value read the NEW value: with
+ * `r := If(x > y, x, 0); x := 100; r` inside `x ↦ …` called with `3`, the
+ * call gave `If(y < 3, 100, 0)`, the condition read with one value and the
+ * branch with the other. And a block local that the value names leaves the
+ * block with it, unbound (`If(y < 3, b, 0)`). The value stored now names
+ * the value instead: `If(y < 3, 3, 0)`.
+ *
+ * Not replaced:
+ * - A function literal, at the root or nested: a closure keeps the
+ *   variable, and reads its last value, as a closure over a global or a
+ *   block local of the enclosing scope does.
+ * - A lazy collection: `assignedValue` lists it, and a lazy collection that
+ *   leaves a block or a call has its locals replaced then
+ *   (`bindEscapingLocals`).
+ * - Inside an operator that binds names (`Sum`, `Product`, a `Block`), an
+ *   occurrence of a name that operator binds, in an operand where it is in
+ *   scope: there the name is the operator's own variable (`Sum(k·b, k =
+ *   1..3)` with a run variable `k` keeps its index `k`). The other names in
+ *   its operands are replaced, so `If(c, Sum(b·k, k = 1..3), 0)` stores the
+ *   value of `b`, and so is the index in the bounds of its own `Limits`
+ *   clause, which read the enclosing variable (`Sum(x, Limits(x, 1, x))`
+ *   stores the upper bound `3`). A name bound by a binder stays bound in
+ *   the binders nested in it.
+ * - The target of a storing operator (`Assign`, `Declare`): a name, not a
+ *   read, so `Hold(Assign(b, 4))` keeps `b`.
+ * - A variable with no value, and any other symbol (a global, a constant).
+ *
+ * The values of a dictionary are read like the operands of a list.
+ *
+ * `assignedValue` applies it, so every store of a plain value does: `Assign`
+ * to a name, each leaf of a destructuring `Assign` or `Declare`, and
+ * `Declare` with a value.
+ */
+export function snapshotRunVariables(
+  ce: ComputeEngine,
+  value: Expression
+): Expression {
+  if ((!isFunction(value) && !isDictionary(value)) || value.isLazyCollection)
+    return value;
+  // A variable of the run is a parameter activation of a call
+  // (`markActivation`), or a binding of the scope of a list of statements
+  // being run (`isStatementListScope`: a `Block`, a function body).
+  //
+  // The value of the variable of the run that `name` (bound to `own`, the
+  // definition the occurrence carries) reads now, or `undefined` when it does
+  // not read one.
+  // The occurrence was resolved to `binding` by the caller: a symbol by its
+  // data binding (`bindingInContext`), the head of a call by its callable
+  // binding (`callableBindingInContext`), which a later declaration of the
+  // same name that is not the one the call was bound to cannot shadow.
+  const runValue = (
+    name: string,
+    binding: BoxedDefinition | undefined
+  ): Expression | undefined => {
+    if (binding === undefined || !('value' in binding)) return undefined;
+    const def = binding.value as BoxedValueDefinition & {
+      _activationOf?: unknown;
+    };
+    if (def._activationOf === undefined) {
+      let scope: Scope | null = ce.context.lexicalScope;
+      while (scope && scope.bindings.get(name) !== binding)
+        scope = scope.parent;
+      if (!scope || !isStatementListScope(scope)) return undefined;
+    }
+    // A variable whose value names the variable itself (`t := t + 1` with
+    // `t` given no value first: its value is `t + 1`) is a symbol in that
+    // value, and the stored value already reads it as one: replacing it
+    // would add its value once more (`t + 2` would become `t + 3`).
+    const held = def.storedValue;
+    if (held === undefined || held.has(name)) return undefined;
+    return held;
+  };
+  const current = (s: Expression & { symbol: string }): Expression =>
+    runValue(
+      s.symbol,
+      bindingInContext(ce, s.symbol, s.valueDefinition ?? s.operatorDefinition)
+    ) ?? s;
+  // One memo entry per node and set of shadowed names: a subexpression
+  // shared by several operands is rewritten once per set.
+  const memo = new Map<Expression, Map<string, Expression>>();
+  const keyOf = (shadowed: ReadonlySet<string> | undefined) =>
+    shadowed === undefined ? '' : [...shadowed].sort().join('\u001f');
+  const walk = (
+    e: Expression,
+    shadowed: ReadonlySet<string> | undefined
+  ): Expression => {
+    if (isSymbol(e)) return shadowed?.has(e.symbol) ? e : current(e);
+    if (!isFunction(e) && !isDictionary(e)) return e;
+    if (isFunction(e)) {
+      if (e.operator === 'Function' || e.isLazyCollection) return e;
+      if (e._numericStore !== undefined) return e;
+    }
+    const key = keyOf(shadowed);
+    const hit = memo.get(e)?.get(key);
+    if (hit !== undefined) return hit;
+    if (isDictionary(e)) {
+      // The values of a dictionary are read like the operands of a list;
+      // its keys are strings. Memoized like an application: a dictionary
+      // shared under several keys is rewritten once.
+      let changed = false;
+      const entries = e.keys.map((k) => {
+        const v = e.get(k)!;
+        const next = walk(v, shadowed);
+        if (next !== v) changed = true;
+        return ce.function('KeyValuePair', [ce.string(k), next]);
+      });
+      const rebuilt = changed ? ce.function('Dictionary', entries) : e;
+      let entry = memo.get(e);
+      if (entry === undefined) memo.set(e, (entry = new Map()));
+      entry.set(key, rebuilt);
+      return rebuilt;
+    }
+    // The names this operator binds shadow each operand where they are in
+    // scope (`boundVariableNamesInOperand`), as in `rewriteWithBinders`: an
+    // iterator clause's index is not in scope in an earlier clause, and the
+    // bounds of a `Limits` clause (the collection of an `Element` clause)
+    // read the ENCLOSING binding of the index (`ownIndexClauseAt`).
+    const binds = boundVariableNames(e);
+    const binders = binds.length > 0 ? declaredBinders(e, 'post') : undefined;
+    const shadowedIn = (i: number): ReadonlySet<string> | undefined => {
+      if (binds.length === 0) return shadowed;
+      const here =
+        binders === undefined
+          ? binds
+          : boundVariableNamesInOperand(e, i, binders);
+      if (here.length === 0) return shadowed;
+      return new Set(shadowed ? [...shadowed, ...here] : here);
+    };
+    const ops = e.ops;
+    const next = ops.map((op, i) => {
+      // The target of a storing operator is a name, not a read: in
+      // `Hold(Assign(b, 4))` the `b` stays `b`.
+      if (i === 0 && (e.operator === 'Assign' || e.operator === 'Declare'))
+        return op;
+      const own = ownIndexClauseAt(e, i, binders);
+      if (own !== undefined)
+        return mapOwnIndexClause(op, own, shadowed, shadowedIn(i), (o, s) =>
+          walk(o, s)
+        );
+      return walk(op, shadowedIn(i));
+    });
+    const form = e.isCanonical
+      ? 'canonical'
+      : e.isStructural
+        ? 'structural'
+        : 'raw';
+    // A call whose HEAD reads a variable of the run that holds a function
+    // value (`f(1)` with `f` a parameter) is part of the plain value: the
+    // function held now is applied, `Apply(<value of f>, 1)`, so assigning
+    // another function to `f` later does not change the stored value. A
+    // head bound by an enclosing binder is that binder's variable.
+    const head = shadowed?.has(e.operator)
+      ? undefined
+      : runValue(
+          e.operator,
+          callableBindingInContext(
+            ce,
+            e.operator,
+            e.valueDefinition !== undefined
+              ? { value: e.valueDefinition }
+              : e.operatorDefinition !== undefined
+                ? { operator: e.operatorDefinition }
+                : undefined
+          )
+        );
+    const result =
+      head !== undefined && head.type.matches('function')
+        ? ce.function('Apply', [head, ...next], { form })
+        : next.every((op, i) => op === ops[i])
+          ? e
+          : // The rebuilt application keeps the callable its head was bound
+            // to: rebuilt in the current scope, `h(b)` would resolve `h` to a
+            // different, inner `h` (`withCallableBinding`).
+            withCallableBinding(e, () =>
+              ce.function(e.operator, next, { form, scope: e.localScope })
+            );
+    let entry = memo.get(e);
+    if (entry === undefined) memo.set(e, (entry = new Map()));
+    entry.set(key, result);
+    return result;
+  };
+  return walk(value, undefined);
+}
+
 /** Find a referenced name in a value, including the values of a dictionary.
  * `has()` walks the values of a dictionary (its keys are strings, not
  * symbols), with one visited set for the whole value. */
@@ -6036,14 +6231,25 @@ function makeLambda(
         // resolve to it, so this no longer has to enumerate the places a
         // parameter's binding can be found. The raw-occurrence case is still
         // name-keyed — a raw symbol carries no binding at all.
+        //
+        // The value substituted is the parameter's value when the call ends,
+        // which the frame holds: the body may have assigned the parameter
+        // (`a ↦ Block(Assign(a, [7, 8]), Map(u ↦ 2u, a))`), and the lazy
+        // `Map` it returns reads `[7, 8]`, as `Reverse(a)` in the same place
+        // does. The argument is the value only when the frame holds none.
         const subs: ParameterSub[] = [];
         for (const leaf of leaves) {
           if (!hasReferencedName(result, leaf.name)) continue;
+          const frame = freshScope.bindings.get(leaf.name);
+          const value =
+            (frame !== undefined && 'value' in frame
+              ? frame.value.storedValue
+              : undefined) ?? leaf.value;
           subs.push([
             staticParameterBinding(leaf.site, leaf.name, bodyScope),
             leaf.name,
-            leaf.value,
-            hasReferencedName(leaf.value, leaf.name),
+            value,
+            hasReferencedName(value, leaf.name),
           ]);
         }
         if (subs.length > 0) result = bindingKeyedSubs(result, subs);

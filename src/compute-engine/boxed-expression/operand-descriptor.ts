@@ -30,6 +30,7 @@ import {
   functionLiteralParameterType,
   isRestParameter,
 } from './function-literal.js';
+import { declaredBinderNamesOf } from './binding-sites.js';
 
 /** Derive an application without replacing a recorded lexical callee by an
  * ambient function with the same name. Shared by structural rewrite walks. */
@@ -269,6 +270,13 @@ function listLiteralShape(op: Expression): number[] {
  */
 export type DescriptorMemo = Map<Expression, OperandDescriptor>;
 
+/** Record `op` as the source of the structural view `st`
+ * (`STRUCTURE_SOURCES`) and return `st`. */
+function recordSource(op: Expression, st: OperandStructure): OperandStructure {
+  STRUCTURE_SOURCES.set(st, op);
+  return st;
+}
+
 function structureOfExpression(
   op: Expression,
   memo: DescriptorMemo
@@ -348,7 +356,7 @@ function structureOfExpression(
     // A literal whose body has no structural form yields no structure at
     // all, rather than a view with a hole where the body should be.
     if (bodyStructure === undefined) return undefined;
-    return {
+    return recordSource(op, {
       kind: 'function-literal',
       parameters: op.ops.slice(1).map((param) => {
         // The rest parameter is reported as such rather than as one more
@@ -361,7 +369,7 @@ function structureOfExpression(
         return type === undefined ? { name } : { name, annotated: type };
       }),
       body: bodyStructure,
-    };
+    });
   }
   // The operands of a compound are described on demand. A handler that
   // reads a compound's structure for its KIND alone — the `List` cell
@@ -395,14 +403,14 @@ function structureOfExpression(
     const ops = op.ops;
     let children: ReadonlyArray<OperandDescriptor> | undefined;
     const callee = describeCallee(op, memo);
-    return {
+    return recordSource(op, {
       kind: 'application',
       head: op.operator,
       ...(callee === undefined ? {} : { callee }),
       get children(): ReadonlyArray<OperandDescriptor> {
         return (children ??= ops.map((x) => describe(x, undefined, memo)));
       },
-    };
+    });
   }
   return undefined;
 }
@@ -446,6 +454,52 @@ export function describe(
   const descriptor = new ExpressionOperandDescriptor(op, typeOverride, walk);
   if (typeOverride === undefined) walk?.set(op, descriptor);
   return descriptor;
+}
+
+/**
+ * The expression that a structural view of an application or of a function
+ * literal was built from (`structureOfExpression`). The key is the view, which
+ * a descriptor memoizes and which a copy of the descriptor into a plain
+ * object shares (`describeCallee`, the missing-strip rewrap).
+ *
+ * Only the two readers below use this map. A `type` handler never receives
+ * an expression, and neither of them gives one back to it.
+ */
+const STRUCTURE_SOURCES = new WeakMap<OperandStructure, Expression>();
+
+/**
+ * The canonical function literal a descriptor was built from, or `undefined`
+ * when it was not built from one. For the derivation of the type of an
+ * application of that literal (`appliedLiteralResultType`,
+ * `call-result-type.ts`), which types the literal's body as the named
+ * route types the body of a user function. Do not call it from a `type`
+ * handler.
+ */
+export function describedFunctionLiteral(
+  d: OperandDescriptor
+): Expression | undefined {
+  const st = d.structureOf?.();
+  const op = st === undefined ? undefined : STRUCTURE_SOURCES.get(st);
+  return op !== undefined && op.isCanonical && isFunction(op, 'Function')
+    ? op
+    : undefined;
+}
+
+/**
+ * The names that the operator of the application `st` binds in its own
+ * operands: the index of a `Sum`, the variable of a `D`, as the operator's
+ * binding-site selector reports them (`declaredBinderNamesOf`). Empty when
+ * the operator binds no name, or when `st` was not built from an
+ * expression.
+ *
+ * A derivation that substitutes a type for a symbol by name must not
+ * substitute an occurrence of such a name inside that application: there it
+ * is the operator's own variable.
+ */
+export function namesBoundAt(st: OperandStructure): readonly string[] {
+  const op = STRUCTURE_SOURCES.get(st);
+  if (op === undefined || !isFunction(op)) return [];
+  return declaredBinderNamesOf(op.engine, op.operator, op.ops);
 }
 
 /**

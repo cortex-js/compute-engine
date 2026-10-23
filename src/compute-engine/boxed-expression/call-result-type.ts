@@ -6,6 +6,7 @@ import type {
   IComputeEngine,
   OperandDescriptor,
 } from '../global-types.js';
+import type { FunctionInterface } from '../types-expression.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
@@ -20,10 +21,12 @@ import {
   deriveApplicationOf,
   describe,
   describeCallee,
+  describedFunctionLiteral,
   describeType,
 } from './operand-descriptor.js';
 import {
   functionLiteralParameterName,
+  functionLiteralParameterNames,
   isRestParameter,
   isDestructuringParameter,
 } from './function-literal.js';
@@ -128,15 +131,7 @@ export function callResultType(
   ) => Type | undefined,
   binding?: BoxedDefinition
 ): Type | undefined {
-  // Scalar declarations already describe their result's representation. This
-  // analysis refines collection alternatives, not numeric domains.
-  if (
-    ['number', 'boolean', 'string'].some((t) =>
-      isSubtype(declared, t as 'number' | 'boolean' | 'string')
-    ) ||
-    declared === 'never'
-  )
-    return undefined;
+  if (isScalarResult(declared)) return undefined;
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
     binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
@@ -147,6 +142,140 @@ export function callResultType(
       !bindsArgumentsWhole(binding, literal))
   )
     return undefined;
+  return literalBodyResultType(engine, literal, args, declared, derive);
+}
+
+/** Scalar declarations already describe their result's representation. This
+ * analysis refines collection alternatives, not numeric domains. */
+function isScalarResult(declared: Type): boolean {
+  return (
+    ['number', 'boolean', 'string'].some((t) =>
+      isSubtype(declared, t as 'number' | 'boolean' | 'string')
+    ) || declared === 'never'
+  );
+}
+
+/**
+ * The type of `Apply(fn, …args)`, where `fn` is the descriptor of a function
+ * literal written in place (`x ↦ …`, not a name), derived from the literal's
+ * body as `callResultType` derives the result of a call of a user function:
+ * each parameter is typed as its argument, and the body is walked under the
+ * same rules (an early `Return` other than a last statement, a loop, an
+ * assignment to a name that is not a parameter or a local, and an operator
+ * that binds a variable other than `Sum`, `Product` and `Comprehension` stop
+ * the derivation; an assignment to a parameter retypes it). `declared` is the
+ * result type of the literal's signature, and the derived type is used only
+ * when it fits it.
+ *
+ * The literal's signature types a parameter from the uses in its body,
+ * before any argument is known: in `a ↦ Map(p, a)` the parameter is typed
+ * `collection<unknown>` by the signature of `Map`, and so is the result.
+ * Applied to a `list<real>`, the body is `Map(p, M)` with `M` a list of
+ * reals, a `list<number>` (Tycho ledger row 426).
+ *
+ * `undefined` (the caller keeps `declared`) when `fn` is not a canonical
+ * function literal, when its result is a scalar, when the signature is
+ * generic (its instantiation types the call), when the literal maps over a
+ * collection argument (its parameters are scalars: the mapping types the
+ * call), and when an argument does not fit the type of its parameter, the
+ * contract of the literal.
+ */
+export function appliedLiteralResultType(
+  fn: OperandDescriptor,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+): Type | undefined {
+  if (isScalarResult(declared)) return undefined;
+  const sig = fn.type;
+  if (
+    typeof sig !== 'object' ||
+    sig.kind !== 'signature' ||
+    sig.typeParams !== undefined
+  )
+    return undefined;
+  if (
+    args.some((x) => mayBroadcast(presentPart(x.type))) &&
+    signatureParamsAreScalar(sig)
+  )
+    return undefined;
+  const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+  for (let i = 0; i < args.length; i++) {
+    const slot = slots[i]?.type;
+    if (slot !== undefined && !isSubtype(presentPart(args[i].type), slot))
+      return undefined;
+  }
+  const literal = describedFunctionLiteral(fn);
+  if (!isFunction(literal, 'Function')) return undefined;
+  // An applied literal in the body of another is typed by this function
+  // again, and the walk of its body is not memoized across the different
+  // argument types it meets. Beyond a depth of 8 the result type of the
+  // literal is kept, which bounds the work.
+  if (appliedLiteralDepth >= 8) return undefined;
+  appliedLiteralDepth += 1;
+  try {
+    return literalBodyResultType(
+      literal.engine,
+      literal,
+      args,
+      declared,
+      derive
+    );
+  } finally {
+    appliedLiteralDepth -= 1;
+  }
+}
+
+/** The number of `appliedLiteralResultType` derivations in progress, one
+ * inside the body of the other. */
+let appliedLiteralDepth = 0;
+
+/**
+ * Whether the function literal `literal` reads a symbol named in `names`,
+ * other than one of its own parameters or the parameters of a literal
+ * nested in it.
+ */
+function readsAnyName(
+  literal: Expression & FunctionInterface,
+  names: ReadonlyMap<string, unknown>
+): boolean {
+  // A subexpression shared by several operands is visited once for each set
+  // of shadowed names, not once per path.
+  const seen = new Map<ReadonlySet<string>, Set<Expression>>();
+  const visit = (e: Expression, shadowed: ReadonlySet<string>): boolean => {
+    if (isSymbol(e)) return names.has(e.symbol) && !shadowed.has(e.symbol);
+    if (!isFunction(e)) return false;
+    let done = seen.get(shadowed);
+    if (done === undefined) seen.set(shadowed, (done = new Set()));
+    if (done.has(e)) return false;
+    done.add(e);
+    if (e.operator === 'Function') {
+      const inner = new Set(shadowed);
+      for (const p of e.ops.slice(1))
+        for (const n of functionLiteralParameterNames(p)) inner.add(n);
+      return visit(e.op1, inner);
+    }
+    return e.ops.some((op) => visit(op, shadowed));
+  };
+  return visit(literal, new Set());
+}
+
+/** The body walk shared by `callResultType` and `appliedLiteralResultType`. */
+function literalBodyResultType(
+  engine: IComputeEngine,
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+): Type | undefined {
+  // A number literal argument is typed by its tier (`integer`, `real`, …),
+  // not by its value: the result of `(x ↦ (2x, x))(3)` is a pair of
+  // integers, the type of the value it gives, and a call with another
+  // literal shares the cache entry.
+  args = args.map((a) => {
+    const s = a.structureOf?.();
+    return s?.kind === 'number' ? describeType(s.tier) : a;
+  });
   const params = literal.ops.slice(1);
   if (
     params.length !== args.length ||
@@ -313,17 +442,21 @@ export function callResultType(
         }
       }
       if (expr.operator === 'Typed') return walk(expr.op1);
+      // A nested function literal (the callback of `Map(u ↦ 2u, a)`) that
+      // reads no name of the walk (a parameter or a local of the outer
+      // literal) is an operand of its own type, its signature: its body runs
+      // when it is applied, and its `Return` statements and assignments are
+      // its own. One that reads such a name (`u ↦ At(b, 1)` with `b` a
+      // parameter) has a signature typed with that name at its declared or
+      // inferred type, not at the type of the argument, so its result says
+      // nothing about this call and the derivation stops.
+      if (expr.operator === 'Function')
+        return readsAnyName(expr, env) ? undefined : describe(expr);
       if (
         expr.operatorDefinition?.scoped ||
-        [
-          'Assign',
-          'Declare',
-          'Return',
-          'Loop',
-          'Break',
-          'Continue',
-          'Function',
-        ].includes(expr.operator)
+        ['Assign', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(
+          expr.operator
+        )
       )
         return undefined;
       // A call whose head is a parameter or a local of the literal (a

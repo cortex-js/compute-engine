@@ -32,10 +32,12 @@ import {
 } from '../boxed-expression/tuple-pattern.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
+import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import {
   deriveApplicationOf,
   describeBoundSymbol,
   describeType,
+  namesBoundAt,
   resolvesToSystemBinding,
 } from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
@@ -65,6 +67,7 @@ import {
   captureNestedLocals,
   exactArgumentSources,
   isStatementListScope,
+  snapshotRunVariables,
 } from '../function-utils.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
 import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
@@ -1366,14 +1369,22 @@ function pipeImplicitMapType(
   // list topic at every rank, binds a set, a tuple, a string or a
   // collection parameter whole, and keeps both shapes of a scalar-or-list
   // topic (`applyLiteralMapType`). `undefined` there means the topic binds
-  // whole: the pipe then takes the stage's result type.
+  // whole: as for `Apply`, the stage's body is then typed over the topic's
+  // type (`appliedLiteralResultType`), and the pipe takes the stage's result
+  // type when that gives nothing.
   const sig = stage.type;
-  if (typeof sig === 'object' && sig.kind === 'signature')
-    return applyLiteralMapType(
-      stage,
-      [describeType(heldOperandType(context, topic))],
-      context
+  if (typeof sig === 'object' && sig.kind === 'signature') {
+    const topicDescriptor = [describeType(heldOperandType(context, topic))];
+    return (
+      applyLiteralMapType(stage, topicDescriptor, context) ??
+      appliedLiteralResultType(
+        stage,
+        topicDescriptor,
+        functionResult(sig) ?? 'unknown',
+        context.derive
+      )
     );
+  }
 
   const topicType = heldOperandType(context, topic);
   if (isSubtype(topicType, 'string')) return undefined;
@@ -1644,6 +1655,15 @@ function collectPlaceholderNames(
  * neither an application, the parameter itself, a symbol with a declared
  * type, nor a tuple or list of such bodies. The caller then falls back on
  * the stage's declared result type.
+ *
+ * The derivation reads the body as an expression whose value is the value
+ * of its last statement, with the parameter holding the element. So it is
+ * `undefined` too for a body with a statement that breaks either reading
+ * (`hasControlStatement`): a `Return` gives the function a value that is
+ * not the last statement's, and an assignment can give the parameter, or a
+ * local the last statement reads, another value. It is also `undefined` for
+ * a body that is an operator binding a variable of the parameter's name,
+ * whose value does not depend on the parameter.
  */
 function pipeStageBodyType(
   context: TypeHandlerContext,
@@ -1651,6 +1671,7 @@ function pipeStageBodyType(
   param: string,
   elementType: Type
 ): Type | undefined {
+  if (hasControlStatement(body)) return undefined;
   if (body.kind === 'symbol') {
     if (body.name === param) return elementType;
     const t = context.engine.lookupDefinition(body.name)?.value?.type.type;
@@ -1679,13 +1700,54 @@ function pipeStageBodyType(
     if (inner !== undefined)
       return pipeStageBodyType(context, inner, param, elementType);
   }
+  if (namesBoundAt(body).includes(param)) return undefined;
+  const memo = new Map<OperandStructure, OperandDescriptor>();
   return deriveApplicationOf(
     body,
     body.children.map((c) =>
-      bindStageParameter(context, c, param, elementType)
+      bindStageParameter(context, c, param, elementType, memo)
     ),
     context
   );
+}
+
+/** The statements after which the value of a function body is not the
+ * value of its last statement with the parameters holding the arguments. */
+const CONTROL_STATEMENTS: ReadonlySet<string> = new Set([
+  'Return',
+  'Assign',
+  'Declare',
+  'Loop',
+  'Break',
+  'Continue',
+]);
+
+/**
+ * Whether a function body has a statement of `CONTROL_STATEMENTS`, outside a
+ * nested function literal (whose `Return` and assignments are its own).
+ */
+function hasControlStatement(st: OperandStructure | undefined): boolean {
+  // A structure shared by several operands (a descriptor walk describes a
+  // shared subexpression once) is visited once: a body can be a DAG whose
+  // tree has exponentially many paths.
+  const seen = new Set<OperandStructure>();
+  const visit = (s: OperandStructure | undefined): boolean => {
+    if (s === undefined || seen.has(s)) return false;
+    seen.add(s);
+    switch (s.kind) {
+      case 'application':
+        return (
+          CONTROL_STATEMENTS.has(s.head) ||
+          s.children.some((c) => visit(c.structureOf?.()))
+        );
+      case 'tuple':
+      case 'list-literal':
+        return s.elements.some((c) => visit(c.structureOf?.()));
+      default:
+        return false;
+    }
+  };
+  return visit(st);
 }
 
 /**
@@ -1717,7 +1779,10 @@ function bindStageParameter(
   context: TypeHandlerContext,
   d: OperandDescriptor,
   param: string,
-  elementType: Type
+  elementType: Type,
+  // An application shared by several operands is re-derived once: a body
+  // that is a DAG (a `Max(e, e)` tower) is not unfolded into its tree.
+  memo: Map<OperandStructure, OperandDescriptor> = new Map()
 ): OperandDescriptor {
   const s = d.structureOf?.();
   if (s?.kind === 'symbol')
@@ -1727,13 +1792,21 @@ function bindStageParameter(
         ? describeType(heldOperandType(context, d))
         : d;
   if (s?.kind === 'application') {
+    // An operator that binds a variable of the parameter's name (the index
+    // `k` of `Sum(2k, Limits(k, 1, 3))`) shadows the parameter in its
+    // operands: the application is independent of the parameter.
+    if (namesBoundAt(s).includes(param)) return d;
+    const hit = memo.get(s);
+    if (hit !== undefined) return hit;
     const children = s.children.map((c) =>
-      bindStageParameter(context, c, param, elementType)
+      bindStageParameter(context, c, param, elementType, memo)
     );
-    return describeDerived(
+    const result = describeDerived(
       deriveApplicationOf(s, children, context) ?? 'unknown',
       children
     );
+    memo.set(s, result);
+    return result;
   }
   return d;
 }
@@ -2794,8 +2867,18 @@ function randomListType(
  *
  * The host function `ce.assign()` is not changed: a host that defines one
  * name from another with an expression wants the live view.
+ *
+ * A variable of the run (a parameter of a call, a local of a block being
+ * run) that the stored value still names is read when the value is stored
+ * (`snapshotRunVariables`): a plain value is copied at the assignment.
  */
 function assignedValue(ce: ComputeEngine, value: Expression): Expression {
+  return snapshotRunVariables(ce, listedAssignedValue(ce, value));
+}
+
+/** `assignedValue` without the copy of the variables of the run: the lazy
+ * collections that read a variable listed. */
+function listedAssignedValue(ce: ComputeEngine, value: Expression): Expression {
   if (
     value.isValid &&
     (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
@@ -2803,7 +2886,7 @@ function assignedValue(ce: ComputeEngine, value: Expression): Expression {
     value._numericStore === undefined
   ) {
     const ops = value.ops;
-    const next = ops.map((op) => assignedValue(ce, op));
+    const next = ops.map((op) => listedAssignedValue(ce, op));
     if (next.every((op, i) => op === ops[i])) return value;
     return ce.function(value.operator, next);
   }
@@ -4224,13 +4307,18 @@ function anonymousApplicationType(
   // collection (`applyLiteralMapType`).
   const mapped = applyLiteralMapType(fn, args, context);
   if (mapped !== undefined) return mapped;
+  const instantiated = instantiatedResultTypeOverActuals(
+    t,
+    args.map(actualOfDescriptor),
+    { threadable: false, resolver: engine._typeResolver }
+  );
+  if (instantiated !== undefined) return instantiated;
+  // A function literal that binds its arguments whole is typed by its body
+  // over the types of the arguments, as a call of a user function is
+  // (`appliedLiteralResultType`).
+  const declared = functionResult(t) ?? 'unknown';
   return (
-    instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
-      threadable: false,
-      resolver: engine._typeResolver,
-    }) ??
-    functionResult(t) ??
-    'unknown'
+    appliedLiteralResultType(fn, args, declared, context.derive) ?? declared
   );
 }
 
@@ -6764,7 +6852,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the prior values (unlike `let`, where the names stay unbound).
         //
         if (isFunction(op1, 'Tuple')) {
-          const val = op2.evaluate();
+          // The whole right-hand side is prepared for storage
+          // (`assignedValue`) once, before any target is written: the
+          // assignment is simultaneous, so a leaf reads the variables of the
+          // run as they were before the statement. In `(x, r) := (100, If(x >
+          // y, x, 0))` the second leaf stores the old `x`, not `100`.
+          const val = assignedValue(ce, op2.evaluate());
           const err = bindTuplePattern(
             ce,
             op1,
@@ -6776,9 +6869,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               // reached for the residuals `assertAssignable` leaves to the
               // install (a function literal, an operator-slot target).
               try {
-                // Each leaf is stored as a plain assignment stores it
-                // (`assignedValue`).
-                ce.assign(name, assignedValue(ce, el));
+                // Each leaf is a part of the value prepared above.
+                ce.assign(name, el);
               } catch (e) {
                 if (isEffectContractError(e))
                   return effectContractErrorValue(ce, e);
@@ -7618,9 +7710,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 ops[0],
                 value!,
                 (name, el) => {
-                  // Each leaf is stored as a plain declaration stores it
-                  // (`assignedValue`).
-                  declareOne(name, assignedValue(ce, el));
+                  // Each leaf is a part of `value`, which was prepared for
+                  // storage as a whole (`assignedValue`) before any name was
+                  // declared: the declaration is simultaneous.
+                  declareOne(name, el);
                   return null;
                 },
                 validateOne
