@@ -1848,6 +1848,43 @@ function oneDatumOk<T>(
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
+): BcastValue | undefined {
+  // An absent element read out of a list whose element type is not known
+  // (`g(x)[5]` with `g := t ↦ [t, 2t]` and `x: any`, typed
+  // `missing | unknown`) is spelled `undefined` (`atWithValueMarker`).
+  // Beside scalars only, it makes the result absent, as the interpreter
+  // answers `Missing` for `g(x)[5] + 1`, `Sin(g(x)[5])` and `g(x)[5] < 1`
+  // (ROADMAP CE-368): `f` applied to `undefined` gave `NaN`, or `false` for
+  // a comparison. Beside an array, the array gives the shape and the absent
+  // operand is `NaN` in each cell (`g(x)[5] + [1, 2]` is `[NaN, NaN]` in
+  // the interpreter), which `bcastWith` gives as before.
+  if (absentBesideScalars(args)) return undefined;
+  return bcastWith(f, args);
+}
+
+/**
+ * True when an argument of a broadcast is the absent object `undefined`
+ * and no argument is a collection (an array, or a rotation view, which
+ * `bcastWith` reads as one): the result is then absent (see `bcast`).
+ * Beside a collection the absent argument is a `NaN` cell.
+ */
+function absentBesideScalars(args: ReadonlyArray<unknown>): boolean {
+  return (
+    args.some((a) => a === undefined) &&
+    !args.some((a) => Array.isArray(a) || a instanceof RotView)
+  );
+}
+
+/**
+ * `bcast` without the absence rule: an `undefined` argument reaches `f`.
+ * For a logical connective (`And`, `Or`, `Not`), whose closure reads an
+ * absent operand itself (`guardConnectiveAbsence`, `base-compiler.ts`): a
+ * decisive operand wins over an absent one, `And(absent, false)` is
+ * `false`, where the absence rule of `bcast` gave `undefined`.
+ */
+function bcastPlain(
+  f: (...xs: BcastValue[]) => BcastValue,
+  ...args: unknown[]
 ): BcastValue {
   return bcastWith(f, args);
 }
@@ -3549,6 +3586,10 @@ function matrixProductShape(...args: unknown[]): unknown {
  * matrix throws), then the product by rank of `mulTensor`.
  */
 function mulChecked(...args: unknown[]): unknown {
+  // An absent operand beside scalars only makes the product absent, as in
+  // `bcast` (ROADMAP CE-368): `g(x)[5] * g(x)[5]` is `Missing` in the
+  // interpreter when the element is absent.
+  if (absentBesideScalars(args)) return undefined;
   return matrixProductShape(...args) ?? mulTensor(...(args as BcastValue[]));
 }
 
@@ -4351,6 +4392,7 @@ export const SYS_HELPERS = {
   // The elements of an arithmetic `Range`, as an array.
   range: materializeRange,
   bcast,
+  bcastPlain,
   bcastAbsent,
   bcastFn,
   bcastColor,
@@ -4494,18 +4536,22 @@ export const SYS_HELPERS = {
   // addition; over (possibly nested) arrays it recurses element-wise. Used as
   // the `Sum` collection-reduce combiner on the possibly-collection path, where
   // the elements may themselves be vectors/matrices at run time.
+  // The three fold combiners below use `bcastWith`, not `bcast`: an absent
+  // element of the folded list is a numeric slot of the sum, `NaN`, as in
+  // the interpreter's `Sum([Missing, 1])`, where `bcast` makes a result with
+  // an absent scalar operand absent.
   add: (a: BcastValue, b: BcastValue): BcastValue =>
-    bcast((x, y) => (x as number) + (y as number), a, b),
+    bcastWith((x, y) => (x as number) + (y as number), [a, b]),
   // The complex form of `add`: every entry of the result is `{re, im}`, as
   // in the result of the other complex linear-algebra helpers. Chosen by
   // the compiler when the operands are complex (`elementwiseFoldCombiner`).
   cadd: (a: BcastValue, b: BcastValue): BcastValue =>
-    bcast((x, y) => cxAdd(complexEntry(x), complexEntry(y)), a, b),
+    bcastWith((x, y) => cxAdd(complexEntry(x), complexEntry(y)), [a, b]),
   // `add` for operands whose lane is not known when the code is compiled (a
   // function typed `unknown`, a `list<number>`): two numbers add as numbers
   // and a complex entry adds as complex, with one type test per entry.
   addAny: (a: BcastValue, b: BcastValue): BcastValue =>
-    bcast((x, y) => scalarAdd(x, y) as BcastValue, a, b),
+    bcastWith((x, y) => scalarAdd(x, y) as BcastValue, [a, b]),
   chop,
   // `x! = Γ(x+1)`, matching the interpreter's `Factorial` evaluate handler.
   // The shared `factorial()` helper is integer-only (it returns NaN for a

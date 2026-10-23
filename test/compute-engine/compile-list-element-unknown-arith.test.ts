@@ -28,9 +28,10 @@
  * signatures of `g` are `(unknown) -> list<unknown>`, `(unknown) -> list`
  * and no declaration (the inferred signature, `(unknown) -> vector<2>`).
  *
- * Not compared here: `x = []`. The element is then absent, and the
- * interpreter answers `Missing` where the compiled code gives `NaN` (or
- * `false` for a comparison), on every signature (ROADMAP CE-368).
+ * At `x = []` the element is absent, and both routes answer `Missing`: the
+ * compiled code gave `NaN` (or `false` for a comparison) there, on every
+ * signature, until the run-time broadcast made a result with an absent
+ * operand absent (ROADMAP CE-368).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -65,6 +66,9 @@ function toJS(e: Expression): unknown {
   if (isFunction(e) && e.operator === 'List') return e.ops.map(toJS);
   if (isSymbol(e) && e.symbol === 'True') return true;
   if (isSymbol(e) && e.symbol === 'False') return false;
+  // The absent value is `undefined` in compiled code (`e.re` of `Missing`
+  // is `NaN`, which would hide the divergence of ROADMAP CE-368).
+  if (isSymbol(e) && e.symbol === 'Missing') return undefined;
   return e.re;
 }
 
@@ -168,13 +172,24 @@ const X_VALUES: ReadonlyArray<Run> = [
     ['List', ['List', 1, 2], ['List', 3]],
   ],
   [[1, 2], ['List', 1, 2], false],
+  // An empty list: the element is absent (ROADMAP CE-368).
+  [[], ['List']],
 ];
+
+/** The cases that are not compared at `x = []`: the compiled `Equal` reads
+ * a `NaN` operand as absent and answers `Missing` where the interpreter
+ * answers `False` (ROADMAP CE-386). */
+const PRESENT_ONLY = new Set(['g(x)[1] = 1']);
 
 describe('CE-360: compiled operators over an element that may be a list', () => {
   for (const signature of SIGNATURES) {
-    test.each(CASES)(`${signature}: %s`, (_name, json) => {
+    test.each(CASES)(`${signature}: %s`, (name, json) => {
       expectAgreement(
-        compiledAndInterpreted(rowEngine(signature), json, X_VALUES)
+        compiledAndInterpreted(
+          rowEngine(signature),
+          json,
+          PRESENT_ONLY.has(name) ? X_VALUES.slice(0, -1) : X_VALUES
+        )
       );
     });
   }
@@ -272,6 +287,69 @@ describe('CE-360: a number x keeps compiling to the interpreted value', () => {
       );
     }
   }
+});
+
+describe('CE-368: the absence marker of an element follows its value', () => {
+  // The compiled `At` picks the marker of an index past the end from the
+  // value, as the interpreter does: `NaN` for a list of numbers, the absent
+  // object (`undefined`, the interpreter's `Missing`) for a list of lists
+  // or an empty list. The run-time broadcast keeps a `NaN` operand a `NaN`
+  // (a numeric slot) and makes the result absent for an absent operand.
+  test('g(x)[5] + 1 is NaN at x = 3 and Missing at x = [] on both routes', () => {
+    const ce = rowEngine('(unknown) -> list<unknown>');
+    const expr = ce.box(['Add', ['At', ['g', 'x'], 5], 1]);
+    const run = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+    } as never).run!;
+    ce.assign('x', ce.number(3));
+    expect(expr.evaluate().toString()).toBe('NaN');
+    expect(run({ x: 3 } as never)).toBeNaN();
+    ce.assign('x', ce.box(['List']));
+    expect(expr.evaluate().toString()).toBe('"Missing"');
+    expect(run({ x: [] } as never)).toBeUndefined();
+  });
+
+  test('a decisive operand of a connective wins over an absent one', () => {
+    // `And(g(x)[5] < 1, b)` at `x = []`: the comparison is absent, and
+    // `b = false` decides, as `And(Missing, False)` is `False` in the
+    // interpreter. The connectives take the broadcast without the absence
+    // rule (`_SYS.bcastPlain`), so their closure reads the absent operand:
+    // with `b = true` the result is the absent boolean, spelled `NaN` by
+    // the compiled connectives.
+    const ce = rowEngine('(unknown) -> list<unknown>');
+    ce.declare('b', 'boolean');
+    const expr = ce.box(['And', ['Less', ['At', ['g', 'x'], 5], 1], 'b']);
+    const run = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+    } as never).run!;
+    ce.assign('x', ce.box(['List']));
+    ce.assign('b', ce.False);
+    expect(expr.evaluate().toString()).toBe('"False"');
+    expect(run({ x: [], b: false } as never)).toBe(false);
+    ce.assign('b', ce.True);
+    expect(expr.evaluate().toString()).toBe('"Missing"');
+    expect(run({ x: [], b: true } as never)).toBeNaN();
+  });
+
+  test('an absent operand beside a rotation view is a NaN cell', () => {
+    // `g(x)[5] + RotateLeft(xs)` at `x = []`: the present list gives the
+    // shape, and the absent operand is `NaN` in each cell, as in the
+    // interpreter. The compiled `RotateLeft` may pass a rotation view, not
+    // an array, to the broadcast, which reads it as a collection.
+    const ce = rowEngine('(unknown) -> list<unknown>');
+    ce.declare('xs', 'list<number>');
+    const expr = ce.box(['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']]);
+    const run = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+    } as never).run!;
+    ce.assign('x', ce.box(['List']));
+    ce.assign('xs', ce.box(['List', 1, 2]));
+    expect(expr.evaluate().toString()).toBe('[NaN,NaN]');
+    expect(run({ x: [], xs: [1, 2] } as never)).toEqual([NaN, NaN]);
+  });
 });
 
 describe('CE-360: an element typed as a number stays scalar code', () => {

@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Compiled JavaScript gave `NaN` or `false` for an absent element where the
+  interpreter gives `Missing`** (ROADMAP CE-368). With `g := t ↦ [t, 2t]` and
+  `x: any`, the element `g(x)[5]` is absent at `x = [1, 2, 3]` (the index is
+  past the end) and at `x = []`, and the interpreter answers `Missing` for
+  `g(x)[5] + 1`, `Sin(g(x)[5])`, `-g(x)[5]`, `g(x)[5]·g(x)[5]` and
+  `g(x)[5] < 1`. The compiled code spelled the absent element `undefined` and
+  applied the scalar function to it: `NaN`, or `false` for the comparison. The
+  run-time broadcast (`_SYS.bcast`) and the checked product (`_SYS.mulChecked`)
+  now answer `undefined` when an operand is absent beside scalars only, and a
+  compiled comparison answers `undefined` for an absent cell. Beside a present
+  list the absent operand is still `NaN` in each cell (`g(x)[5] + [1, 2]` is
+  `[NaN, NaN]` on both routes, and so is `g(x)[5] + g(x)[1]` at `x = [1, 2]`),
+  and a comparison with a list answers an absent cell for each
+  (`g(x)[5] < [1, 2]` is `[Missing, Missing]`). The compiled `Sum` of a list
+  with an absent element is unchanged (`NaN`, a numeric slot, as in the
+  interpreter). The ten tests of
+  `tycho-row-425-index-of-broadcastable-call.test.ts` that recorded the
+  divergence are agreement checks again.
+
 ## 0.162.0 _2026-10-23_
 
 ### Breaking Changes
@@ -350,15 +373,15 @@
   symbols (`1/(2s²)`, `e^a`): `∫ e^{−a z²} dz` with a bare `a` stays
   unevaluated, because at `a < 0` the `Erf` form needs an imaginary argument,
   which the compile targets do not have, and so do `∫ e^{−s² z²} dz` and
-  `∫ e^{−|a| z²} dz`, whose closed form is `0/0` at `s = 0` or `a = 0` while
-  the integrand is 1. A symbol declared `complex` disqualifies the reading. A
-  definite integral with an infinite bound carries the condition
-  the way `∫₀^∞ e^{−cx} dx` is `1/c {0 < c}`: `∫_{−∞}^{∞} exp(−z²/(2s²)) dz` is
+  `∫ e^{−|a| z²} dz`, whose closed form is `0/0` at `s = 0` or `a = 0` while the
+  integrand is 1. A symbol declared `complex` disqualifies the reading. A
+  definite integral with an infinite bound carries the condition the way
+  `∫₀^∞ e^{−cx} dx` is `1/c {0 < c}`: `∫_{−∞}^{∞} exp(−z²/(2s²)) dz` is
   `√(2π)·√(s²) {0 < √(s⁻²)}`, and the normal distribution function
-  `1/(√(2π)s) ∫_{−∞}^{x} exp(−½ z²/s²) dz`, with or without a mean, is a
-  guarded closed form in `Erf`. Its compiled JavaScript calls `erf` instead of
-  running a numerical quadrature at every call: 2 469 calls take 2 ms instead
-  of 3.2 s, with the same values to 2e-15.
+  `1/(√(2π)s) ∫_{−∞}^{x} exp(−½ z²/s²) dz`, with or without a mean, is a guarded
+  closed form in `Erf`. Its compiled JavaScript calls `erf` instead of running a
+  numerical quadrature at every call: 2 469 calls take 2 ms instead of 3.2 s,
+  with the same values to 2e-15.
 
 - **More operators have a precise static result type.** A type handler now
   derives the result from the operand types, where the declared result was a
@@ -737,46 +760,45 @@
 ### Resolved Issues
 
 - **Collection fixes listed for 0.160.0 were not in the 0.160.0 and 0.161.0
-  packages.** A later change removed them before 0.160.0 was published, and
-  they are back in this release:
+  packages.** A later change removed them before 0.160.0 was published, and they
+  are back in this release:
   - `Dedup`, `Filter` and `TakeWhile` of a string held by a symbol of a wider
     type give a string: with `c: list<integer> | string` holding `"aab"`,
     `Dedup(c)` is `"ab"`, not `["a", "b"]`, and so is `Dedup(Filter(c, p))`.
   - `Filter` and `Dedup` over a dictionary give a `Dictionary`, not a `Set` of
-    entry tuples, also when the dictionary is an arm of a union type and
-    through nested `Filter` and `Dedup` views. A view over a dictionary of
-    more than five entries prints as written (`Dedup(d)`).
+    entry tuples, also when the dictionary is an arm of a union type and through
+    nested `Filter` and `Dedup` views. A view over a dictionary of more than
+    five entries prints as written (`Dedup(d)`).
   - The preview of `Map(x ↦ x + 10, c)`, with `c` declared
     `missing | list<integer>`, is the list `[11, 12]`, not `Set(11, 12)`.
   - `Map` of a function literal whose parameter is annotated as a scalar
-    (`(x: integer) ↦ x + 1`) over a list of lists is refused when it is
-    boxed; it was typed `list<integer>` and gave an error for each row.
+    (`(x: integer) ↦ x + 1`) over a list of lists is refused when it is boxed;
+    it was typed `list<integer>` and gave an error for each row.
   - `Map(Sqrt, [[1, 4], [9]])` is typed `list<vector<1> | vector<2>>`; it was
     `list<list<number>>`.
   - The types of `FlatMap` over a source with absent cells, of `Map` of an
-    operator whose declared result is `any` (`First`, `PointX`), of `Map`
-    over an alias of a tuple (`list<number>`, was `collection<number>`), and
-    of `Map` over a dictionary arm of a union hold their values again.
+    operator whose declared result is `any` (`First`, `PointX`), of `Map` over
+    an alias of a tuple (`list<number>`, was `collection<number>`), and of `Map`
+    over a dictionary arm of a union hold their values again.
 
 - **The type of a `Map` did not hold its value in two cases.**
-  `Map(x ↦ If(x = 1, "x", x), [1, 2])` was typed `list<integer | string^2>`,
-  and its value `["x", 2]` is a `list<integer | string>`: a list whose
-  elements are a union that is not a number type now states no length, as a
-  list literal does. `Map(First, [[], [3]])` was typed `list<integer | nan>`
-  for the value `["Missing", 3]`: `First([])` is `Missing`, since the element
-  `[]` states no element type, and the type is now
-  `list<integer | missing | nan>`.
+  `Map(x ↦ If(x = 1, "x", x), [1, 2])` was typed `list<integer | string^2>`, and
+  its value `["x", 2]` is a `list<integer | string>`: a list whose elements are
+  a union that is not a number type now states no length, as a list literal
+  does. `Map(First, [[], [3]])` was typed `list<integer | nan>` for the value
+  `["Missing", 3]`: `First([])` is `Missing`, since the element `[]` states no
+  element type, and the type is now `list<integer | missing | nan>`.
 
 - **A sum with an infinite term of unknown sign folded to that infinity.**
   `∞·c + 1` evaluated to `+∞` for a `c` with no known sign: the sum read the
   coefficient `∞` of the term and ignored `c`, although the sum is `−∞` at
-  `c < 0` and `0·∞` at `c = 0`. Such a term now stays in the sum, also beside
-  a pure infinity (`∞·c + ∞` is `∞ − ∞` at `c < 0`), `∞·c − ∞·c` is
+  `c < 0` and `0·∞` at `c = 0`. Such a term now stays in the sum, also beside a
+  pure infinity (`∞·c + ∞` is `∞ − ∞` at `c < 0`), `∞·c − ∞·c` is
   `Indeterminate`, and a term whose cofactor has a known sign still folds
   (`−∞·3 + 1` is `−∞`). Found while fixing Tycho row 428: the value of
-  `∫_{−∞}^{x} exp(−(z−m)²/(2s²)) dz` at its lower bound, `Erf(−∞·√(s⁻²) −
-  m·√(s⁻²))`, folded to `−1` and lost the condition `√(s⁻²) > 0` that the same
-  integral carries at `m = 0`.
+  `∫_{−∞}^{x} exp(−(z−m)²/(2s²)) dz` at its lower bound,
+  `Erf(−∞·√(s⁻²) − m·√(s⁻²))`, folded to `−1` and lost the condition
+  `√(s⁻²) > 0` that the same integral carries at `m = 0`.
 
 - **A use of a call at a typed parameter rewrote the signature of the called
   function.** With `g := t ↦ [[t, 1], [2, 3]]`, whose signature is

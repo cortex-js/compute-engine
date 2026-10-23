@@ -432,45 +432,36 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   // and `Product(g(x))`: they declined while they were typed `number`, and
   // compile since they are typed `number | vector<2>` (ROADMAP CE-361,
   // `test/compute-engine/sum-unknown-element-type.test.ts`).
-  // `absent-as-NaN`: the values agree, except that the compiled code gives
-  // `NaN` where the interpreter gives `Missing` (an index past the end, or
-  // into an empty list), ROADMAP CE-368. The case is recorded here so that
-  // the fix of CE-368 turns it back into an agreement check: the test asks
-  // for at least one such pair.
-  const cases: [string, unknown, 'compiles' | 'declined' | 'absent-as-NaN'][] =
-    [
-      ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
-      ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
-      ['Max(g(x))', ['Max', ['g', 'x']], 'declined'],
-      ['Min(g(x))', ['Min', ['g', 'x']], 'declined'],
-      ['Product(g(x))', ['Product', ['g', 'x']], 'compiles'],
-      ['Mean(g(x))', ['Mean', ['g', 'x']], 'declined'],
-      ['Median(g(x))', ['Median', ['g', 'x']], 'declined'],
-      ['Sum(Take(g(x), 1))', ['Sum', ['Take', ['g', 'x'], 1]], 'compiles'],
-      ['Max(Rest(g(x)))', ['Max', ['Rest', ['g', 'x']]], 'declined'],
-      ['Mean(Rest(g(x)))', ['Mean', ['Rest', ['g', 'x']]], 'declined'],
-      ['g(x)[5] + 1', ['Add', ['At', ['g', 'x'], 5], 1], 'absent-as-NaN'],
-      ['Sin(g(x)[5])', ['Sin', ['At', ['g', 'x'], 5]], 'absent-as-NaN'],
-      ['g(x)[5]', ['At', ['g', 'x'], 5], 'compiles'],
-      ['g(x)[1] + 1', ['Add', ['At', ['g', 'x'], 1], 1], 'absent-as-NaN'],
-      ['First(g(x))', ['First', ['g', 'x']], 'compiles'],
-      ['Last(g(x))', ['Last', ['g', 'x']], 'compiles'],
-    ];
+  // An absent element (an index past the end, or into an empty list) makes
+  // `g(x)[5] + 1` and `Sin(g(x)[5])` absent on both routes: the compiled
+  // code gave `NaN` where the interpreter gives `Missing` (ROADMAP CE-368,
+  // fixed in the run-time broadcast).
+  const cases: [string, unknown, 'compiles' | 'declined'][] = [
+    ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
+    ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
+    ['Max(g(x))', ['Max', ['g', 'x']], 'declined'],
+    ['Min(g(x))', ['Min', ['g', 'x']], 'declined'],
+    ['Product(g(x))', ['Product', ['g', 'x']], 'compiles'],
+    ['Mean(g(x))', ['Mean', ['g', 'x']], 'declined'],
+    ['Median(g(x))', ['Median', ['g', 'x']], 'declined'],
+    ['Sum(Take(g(x), 1))', ['Sum', ['Take', ['g', 'x'], 1]], 'compiles'],
+    ['Max(Rest(g(x)))', ['Max', ['Rest', ['g', 'x']]], 'declined'],
+    ['Mean(Rest(g(x)))', ['Mean', ['Rest', ['g', 'x']]], 'declined'],
+    ['g(x)[5] + 1', ['Add', ['At', ['g', 'x'], 5], 1], 'compiles'],
+    ['Sin(g(x)[5])', ['Sin', ['At', ['g', 'x'], 5]], 'compiles'],
+    ['g(x)[5]', ['At', ['g', 'x'], 5], 'compiles'],
+    ['g(x)[1] + 1', ['Add', ['At', ['g', 'x'], 1], 1], 'compiles'],
+    ['First(g(x))', ['First', ['g', 'x']], 'compiles'],
+    ['Last(g(x))', ['Last', ['g', 'x']], 'compiles'],
+  ];
 
   function expectAgreement(
     result: [string, string][] | 'declined',
-    expected: 'compiles' | 'absent-as-NaN'
+    _expected: 'compiles'
   ): void {
     expect(result).not.toBe('declined');
-    const pairs = result as [string, string][];
-    for (const [interpreted, compiled] of pairs)
-      expect(compiled).toBe(
-        expected === 'absent-as-NaN' && interpreted === 'Missing'
-          ? 'NaN'
-          : interpreted
-      );
-    if (expected === 'absent-as-NaN')
-      expect(pairs.some(([i, c]) => i === 'Missing' && c === 'NaN')).toBe(true);
+    for (const [interpreted, compiled] of result as [string, string][])
+      expect(compiled).toBe(interpreted);
   }
 
   test.each(cases)('%s', (_name, json, expected) => {
@@ -891,22 +882,12 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   const L = (...a: unknown[]) => ['List', ...a];
 
   /** Each compiled value is the interpreted value, or the compiled code
-   * throws where the interpreter answers an error, or it declines. With
-   * `absentAsNaN`, the compiled code gives `NaN` where the interpreter
-   * gives `Missing` (ROADMAP CE-368), and at least one pair must be such:
-   * the fix of CE-368 turns the test back into a parity check. */
-  function expectParity(
-    result: [string, string][] | 'declined',
-    absentAsNaN = false
-  ): void {
+   * throws where the interpreter answers an error, or it declines. */
+  function expectParity(result: [string, string][] | 'declined'): void {
     if (result === 'declined') return;
     for (const [interpreted, compiled] of result) {
       if (compiled === 'throws') {
         expect(interpreted).toMatch(/Error|incompatible|unexpected/);
-        continue;
-      }
-      if (absentAsNaN && interpreted === 'Missing') {
-        expect(compiled).toBe('NaN');
         continue;
       }
       expect([
@@ -914,10 +895,6 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         compiled === interpreted || approximatelyEqual(compiled, interpreted),
       ]).toEqual([interpreted, true]);
     }
-    if (absentAsNaN)
-      expect(result.some(([i, c]) => i === 'Missing' && c === 'NaN')).toBe(
-        true
-      );
   }
 
   test.each([
@@ -955,11 +932,12 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     }
   });
 
-  // An index into `m(x)` or `nest(x)` is of unknown type: the compiled
-  // `At` and `Last` give `NaN` for an absent element where the interpreter
-  // gives `Missing` (ROADMAP CE-368). `Max` over an element that may be a
-  // row declines (its compiled reduce read the rows as numbers and gave
-  // `NaN` where the interpreter gives 4).
+  // An index into `m(x)` or `nest(x)` is of unknown type: an absent
+  // element makes the read, and arithmetic on it, absent on both routes
+  // (the compiled code gave `NaN` where the interpreter gives `Missing`,
+  // ROADMAP CE-368). `Max` over an element that may be a row declines (its
+  // compiled reduce read the rows as numbers and gave `NaN` where the
+  // interpreter gives 4).
   test.each([
     ['At(At(m(x), 1), 1)', ['At', ['At', ['m', 'x'], 1], 1]],
     ['At(At(m(x), 7), 1)', ['At', ['At', ['m', 'x'], 7], 1]],
@@ -980,8 +958,7 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         [3, 3],
         [[1, 2, 3], L(1, 2, 3)],
         [[], L()],
-      ]),
-      true
+      ])
     );
   });
 

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-386.
+Next free reference: CE-387.
 
 **Entry format.**
 
@@ -1463,25 +1463,25 @@ Fix: include the uncombined seed in the result type, in a separate absence fix.
 
 ### CE-384. A union of collection types drops the `missing` arm of an element
 
-**Status:** open; capability. User decision 2026-10-23: the reduction stays
-for now (`collection-type-followups.test.ts`, "Map over a dictionary arm of a
+**Status:** open; capability. User decision 2026-10-23: the reduction stays for
+now (`collection-type-followups.test.ts`, "Map over a dictionary arm of a
 union", pins it).
 
 The union reducer (`reduceUnionType`, `src/common/type/reduce.ts`) keeps the
 supertype of two arms related by subtyping. Since every type is a subtype of
 `unknown`, `list<missing | unknown>` is a subtype of `collection<unknown>`, so
 `collection<unknown> | list<missing | unknown>` reduces to
-`collection<unknown>`. The set of values is the same, but `provablyAdmits`
-no longer finds the `missing` arm of the elements, so the Epsil static check
-cannot report a possibly absent element. Example: `Map(x ↦ x, v)` with
+`collection<unknown>`. The set of values is the same, but `provablyAdmits` no
+longer finds the `missing` arm of the elements, so the Epsil static check cannot
+report a possibly absent element. Example: `Map(x ↦ x, v)` with
 `v: tuple<integer, missing> | dictionary<integer>` is typed
 `collection<unknown>`. At the top of a union, decision D1
 (`docs/plans/2026-10-21-unknown-inference-marker.md`) keeps `missing | unknown`
 as two arms; this entry is the same rule one level down, for the elements of a
 collection. Fix: in `covers()` of `reduceUnionType`, do not let an arm whose
 elements state `missing` be absorbed by an arm whose elements do not. This
-changes the reduction of every such union: measure the test and snapshot
-changes in the full suite first.
+changes the reduction of every such union: measure the test and snapshot changes
+in the full suite first.
 
 ### CE-74. The type of a lazy view does not say that an element can be `Nothing`
 
@@ -2599,14 +2599,14 @@ instead of a walk.
 
 **Status:** open; defect, small. Found 2026-10-23 while fixing Tycho row 428.
 
-`∫₀^∞ xⁿ dx` evaluates to `0 {0 < n + 1 ∧ n + 1 < 0}`: the endpoint leak
-table of `Integrate` (`classifyEndpointLeak`, `library/calculus.ts`) resolves
+`∫₀^∞ xⁿ dx` evaluates to `0 {0 < n + 1 ∧ n + 1 < 0}`: the endpoint leak table
+of `Integrate` (`classifyEndpointLeak`, `library/calculus.ts`) resolves
 `0^(n+1)` to `0` under `n + 1 > 0` and `∞^(n+1)` to `0` under `n + 1 < 0`, and
 the two conditions are joined with `And`. The integral diverges for every `n`.
 The result has no value for any `n`, so it is not wrong, but a reader takes a
 `When` for a value that holds on some range. Proposed fix: when the guards of
-the leaks of one definite integral contradict each other (two comparisons of
-the same expression with `0` in opposite directions), return the integral
+the leaks of one definite integral contradict each other (two comparisons of the
+same expression with `0` in opposite directions), return the integral
 unevaluated, or `+∞` when the integrand is positive on the range.
 
 Two opt-in libraries extend coverage without changes to the core engine:
@@ -4233,51 +4233,47 @@ typed argument. The decline message of the complex lane also misreads the
 operand: "a list-valued operand" for an operand of unknown type. Until the fix,
 the workaround is one declaration, `x: number` or `g: (number) -> matrix`.
 
-### CE-368. Compiled JavaScript gives `NaN` or `false` for an absent element where the interpreter gives `Missing`
+### CE-386. Compiled `Equal` reads a `NaN` operand as absent and answers `Missing` where the interpreter answers `False`
 
-**Status:** open; wrong value.
+**Status:** open; wrong value. Found 2026-10-23 while fixing the former CE-368
+(compiled `NaN` or `false` for an absent element of unknown type, landed
+2026-10-23).
 
-With `g := t ↦ [t, 2t]` (any of the signatures `(unknown) -> list<unknown>`,
-`(unknown) -> list` or the inferred one) and `x: any`, at `x = []`: compiled
-`g(x)[1] + 1` gives `NaN` (the interpreter gives `Missing`), compiled
-`g(x)[1] < 1` gives `false` (interpreter: `Missing`), and compiled
-`g(x)[5] * g(x)[1]` gives `NaN` (interpreter: `Missing`). Expected: the absence
-marker the interpreter gives.
-
-Since the signature change of 2026-10-23 (the former CE-25), the interpreter
-types `g(x)[5]` as `missing | unknown` and gives `Missing` where the old
-signature `vector<2>` made it give `NaN` too, so the divergence is reachable
-from more expressions. Ten tests of
-`test/compute-engine/tycho-row-425-index-of-broadcastable-call.test.ts` record
-it (`g(x)[5] + 1`, `Sin(g(x)[5])`, `g(x)[1] + 1`, and the indexes into `m(x)`
-and `nest(x)` under "operands that are unions or may be absent"), with the
-marker `absent-as-NaN` or the flag `absentAsNaN`: each asks for at least one
-pair where the interpreter gives `Missing` and the compiled code `NaN`, so the
-fix of this entry makes them fail, and they then become agreement checks again.
-
-- **CE-368.1** `_SYS.bcastAbsent` makes the whole result absent beside a present
-  list: with the inferred signature, compiled `g(x)[5] + g(x)[1]` at
-  `x = [1, 2]` gives `undefined` (`Missing`), the interpreter `[NaN, NaN]` (a
-  present list gives the shape).
+With `g := t ↦ [t, 2t]` and `x: any`, at `x = 3` the element `g(x)[5]` is `NaN`
+(an index past the end of a list of numbers is a numeric absence), and the
+interpreter answers `False` for `g(x)[5] = 1`, as it does for `n = 1` with
+`n: number` holding `NaN`. The compiled `Equal` over an operand that may be
+absent,
+`((Number.isNaN(a ?? NaN) || Number.isNaN(b ?? NaN)) ? undefined : _SYS.eq(a, b))`,
+reads the `NaN` as the absent value and answers `undefined` (`Missing`). The
+compiled `n = 1` with `n: number` answers `false`, as the interpreter does. Same
+on the commit before the former CE-368 was fixed. Expected: a `NaN` operand
+compares as the interpreter compares it (`False`), and only `undefined` (an
+absent object) gives an absent result, as the orderings (`<`, `≤`, `>`, `≥`) do
+since that fix. The test
+`test/compute-engine/compile-list-element-unknown-arith.test.ts` excludes the
+case (`PRESENT_ONLY`) and names this entry.
 
 ### CE-369. Compiled `Power` of an element that holds a matrix squares each cell
 
 **Status:** open; wrong value.
 
-With the setup of CE-368, at `x = [[1, 2], [3]]` the element `g(x)[1]` is the
-matrix `[[1, 2], [2, 4]]`. Compiled `g(x)[1]^2` gives `[[1, 4], [4, 16]]` (each
-cell squared); the interpreter gives the matrix power `[[5, 10], [10, 20]]`.
-Expected: the compiled code gives the matrix power, or declines when an operand
-of `Power` may be a matrix.
+With `g := t ↦ [t, 2t]` and `x: any` (the setup of the former CE-368), at
+`x = [[1, 2], [3]]` the element `g(x)[1]` is the matrix `[[1, 2], [2, 4]]`.
+Compiled `g(x)[1]^2` gives `[[1, 4], [4, 16]]` (each cell squared); the
+interpreter gives the matrix power `[[5, 10], [10, 20]]`. Expected: the compiled
+code gives the matrix power, or declines when an operand of `Power` may be a
+matrix.
 
 ### CE-370. Compiled `Max` of a top-typed element and a number gives `NaN`
 
 **Status:** open; wrong value.
 
-With the setup of CE-368, `Max(g(x)[1], 1)` compiles to `Math.max(<array>, 1)`,
-which is `NaN`; the interpreter gives `2` at `x = [1, 2]` and `4` at
-`x = [[1, 2], [3]]`. With the inferred signature, `x = [1, 2]` is right and
-`x = [[1, 2], [3]]` gives `NaN`: the run-time projection of `compileExtremum`
+With `g := t ↦ [t, 2t]` and `x: any` (the setup of the former CE-368),
+`Max(g(x)[1], 1)` compiles to `Math.max(<array>, 1)`, which is `NaN`; the
+interpreter gives `2` at `x = [1, 2]` and `4` at `x = [[1, 2], [3]]`. With the
+inferred signature, `x = [1, 2]` is right and `x = [[1, 2], [3]]` gives `NaN`:
+the run-time projection of `compileExtremum`
 (`compilation/javascript-target.ts`) spreads one level only.
 
 ### CE-371. An index into `broadcastable<vector<2>>` is typed one level deep
@@ -6540,12 +6536,12 @@ numbers. Time per call, current ÷ 0.133.0:
 
 - Equation solving: `x^3 - x - 1 = 0` 4.9 ms against 2.0 ms (2.45×),
   `x^4 + x^2 - 1 = 0` 2.37×.
-- Limits and definite integrals: 1.5× to 2.3× (`∫_{-∞}^{∞} e^{-x^2} dx`
-  547 µs against 239 µs).
-- Antiderivatives 1.4× to 1.9×, derivatives 1.1× to 1.45×, simplification
-  1.0× to 1.5×.
-- 200-digit special functions (`ζ(3)`, `Γ(1/3)`, `ψ(1/3)`) 1.1×. The
-  elementary functions at 200 digits are 1.0× to 1.4× faster.
+- Limits and definite integrals: 1.5× to 2.3× (`∫_{-∞}^{∞} e^{-x^2} dx` 547 µs
+  against 239 µs).
+- Antiderivatives 1.4× to 1.9×, derivatives 1.1× to 1.45×, simplification 1.0×
+  to 1.5×.
+- 200-digit special functions (`ζ(3)`, `Γ(1/3)`, `ψ(1/3)`) 1.1×. The elementary
+  functions at 200 digits are 1.0× to 1.4× faster.
 
 There is no single cause. Measured release by release against 0.133.0
 (`benchmarks/runners/run_ce_rubi.mjs` with `CE_CURRENT_BUNDLE` set to the
@@ -6553,8 +6549,7 @@ There is no single cause. Measured release by release against 0.133.0
 release, 2026-10-23), the time grows in five steps:
 
 - **CE-385.1** 0.138.0 → 0.139.0: antiderivatives about 1.25× (11 commits).
-- **CE-385.2** 0.141.0 → 0.142.0: `x^3 - x - 1 = 0` 1.12× → 1.88× (61
-  commits).
+- **CE-385.2** 0.141.0 → 0.142.0: `x^3 - x - 1 = 0` 1.12× → 1.88× (61 commits).
 - **CE-385.3** 0.147.0 → 0.148.0 (`33444a04a..dfb4c620a`, 21 commits): about
   1.25× on every symbolic case. Candidates: `Solve` completeness proved with
   interval arithmetic (`cce09a8f4`), contour integration by residues
@@ -6564,21 +6559,21 @@ release, 2026-10-23), the time grows in five steps:
   not slower work: the current build returns the two complex roots
   `±√(−1/2 − √5/2)` beside the two real ones, where 0.133.0 returned the real
   roots only.
-- **CE-385.5** 0.157.0 → 0.158.0: derivatives and definite integrals about
-  1.2× (29 commits).
+- **CE-385.5** 0.157.0 → 0.158.0: derivatives and definite integrals about 1.2×
+  (29 commits).
 
-A CPU profile of `Integrate(1/(1 + x^2), x)` (the unminified bundle, which
-runs about 3 times slower than the minified one, so its proportions are
-approximate) shows that `antiderivative()` takes about 15% of the call. About
-70% goes to re-binding the integrand: `liftIntegrand` → `rebindEscaping` →
-`rewriteWithBinders` (`boxed-expression/binders.ts`) rebuilds every node above
-a re-bound symbol with `ce.function(…, { form: 'canonical' })`, which
-canonicalizes the node again. The minified bundles take 0.40 ms per call
-against 0.19 ms for 0.133.0, for the same answer `arctan(x)`. A possible fix:
-rebuild a node whose operands are already canonical without running the
-canonical transforms again. This needs care: a re-bound symbol can have a
-different type in the outer scope, and some canonical forms depend on the
-type (`√(x²)` is `|x|` for a real `x`).
+A CPU profile of `Integrate(1/(1 + x^2), x)` (the unminified bundle, which runs
+about 3 times slower than the minified one, so its proportions are approximate)
+shows that `antiderivative()` takes about 15% of the call. About 70% goes to
+re-binding the integrand: `liftIntegrand` → `rebindEscaping` →
+`rewriteWithBinders` (`boxed-expression/binders.ts`) rebuilds every node above a
+re-bound symbol with `ce.function(…, { form: 'canonical' })`, which
+canonicalizes the node again. The minified bundles take 0.40 ms per call against
+0.19 ms for 0.133.0, for the same answer `arctan(x)`. A possible fix: rebuild a
+node whose operands are already canonical without running the canonical
+transforms again. This needs care: a re-bound symbol can have a different type
+in the outer scope, and some canonical forms depend on the type (`√(x²)` is
+`|x|` for a real `x`).
 
 Run every measurement under the box lock.
 

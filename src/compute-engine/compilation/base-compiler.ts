@@ -85,6 +85,7 @@ import {
   signatureArms,
   signatureEffects,
   stripMissingFromType,
+  topTypeBesideAbsence,
   typeContainsMissing,
   typeElementCount,
   unfoldAliasOnDescent,
@@ -1782,6 +1783,16 @@ function numberOrGatedCollectionArms(raw: Type): Type[] | undefined {
   });
 }
 
+/** True when `t` is a union with a `missing` arm. */
+function hasMissingArm(t: Type): boolean {
+  const r = resolveTypeForCompilation(t);
+  return (
+    typeof r !== 'string' &&
+    r.kind === 'union' &&
+    r.types.some((b) => resolveTypeForCompilation(b) === 'missing')
+  );
+}
+
 /**
  * The array levels at which a value of type `raw` can hold an ABSENT OBJECT
  * (a point, a list, or another indexed collection that may be `undefined`
@@ -1806,9 +1817,22 @@ function numberOrGatedCollectionArms(raw: Type): Type[] | undefined {
  * operand with a level through `_SYS.bcastAbsent`, so that arithmetic on an
  * absent point answers `undefined` for the whole point, as the interpreter
  * answers `Missing` (`docs/ERROR-MODEL.md` §3).
+ *
+ * A top type beside a `missing` arm (`missing | unknown`, the type of an
+ * index into a `list<unknown>`) is a value of any kind that can be absent:
+ * level 0 (ROADMAP CE-368).
  */
 function objectAbsenceLevels(raw: Type, depth = 0): number {
   if (depth > 4 || BaseCompiler.isNominalAtomicType(raw)) return 0;
+  // A top type beside absence markers (`missing | unknown`, the type of an
+  // index into a `list<unknown>`: `g(x)[5]` with `g := t ↦ [t, 2t]` and
+  // `x: any`) is a value of any kind, or absent. The compiled `At` spells
+  // the absent element `undefined`, and the plain `bcast` applied the
+  // scalar function to it: `g(x)[5] + 1` gave `NaN` and `g(x)[5] < 1` gave
+  // `false`, where the interpreter answers `Missing` (ROADMAP CE-368). The
+  // value can be absent at level 0; its elements, when it is a list, are
+  // read by the rules of `bcast`.
+  if (topTypeBesideAbsence(raw) !== undefined && hasMissingArm(raw)) return 1;
   const arms =
     gatedCollectionArmsOfType(raw) ?? numberOrGatedCollectionArms(raw);
   if (arms !== undefined) {
@@ -17592,7 +17616,12 @@ export class BaseCompiler {
     body: string
   ): string {
     if (h !== 'And' && h !== 'Or' && h !== 'Not') return body;
-    const absent = params.map((p) => `${p} !== ${p}`).join(' || ');
+    // An absent operand is `NaN` (a numeric slot) or `undefined` (the
+    // absent object: an element of unknown type read out of a list, or an
+    // ordering on one, ROADMAP CE-368).
+    const absent = params
+      .map((p) => `(${p} !== ${p} || ${p} === undefined)`)
+      .join(' || ');
     if (h === 'Not') return `((${absent}) ? NaN : ${body})`;
     const dominant = h === 'And' ? 'false' : 'true';
     const wins = params.map((p) => `${p} === ${dominant}`).join(' || ');

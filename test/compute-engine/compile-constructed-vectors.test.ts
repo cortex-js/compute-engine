@@ -190,7 +190,9 @@ test('declared list inputs retain broadcasting and reduction guards', () => {
     [2, 3],
     [4, 5],
   ]);
-  expect(plus.run!({ W: undefined })).toBeNaN();
+  // An absent list operand makes the sum absent (`docs/ERROR-MODEL.md` §3;
+  // `_SYS.bcast` since ROADMAP CE-368). It answered `NaN` before.
+  expect(plus.run!({ W: undefined })).toBeUndefined();
 });
 
 test('list broadcasting cannot prove a nested coordinate scalar', () => {

@@ -1667,7 +1667,7 @@ function compileJSCollectionBoolean(
     const realness =
       kind in JS_ORDERING_OPERATORS &&
       args.some((a) => BaseCompiler.isComplexValued(a));
-    const body = BaseCompiler.guardConnectiveAbsence(
+    const scalarBody = BaseCompiler.guardConnectiveAbsence(
       kind,
       params,
       realness
@@ -1678,8 +1678,37 @@ function compileJSCollectionBoolean(
             )} : false)`
         : compileScalarBooleanBody(kind, params)
     );
+    // An operand of unknown type that may be absent (`g(x)[5]` with
+    // `g := t ↦ [t, 2t]` and `x: any`, typed `missing | unknown`) spells its
+    // absent value `undefined`, and an ordering on it is absent, as the
+    // interpreter answers `Missing` for `g(x)[5] < 1` and `[Missing,
+    // Missing]` for `g(x)[5] < [1, 2]` (ROADMAP CE-368): the JavaScript `<`
+    // on `undefined` gave `false`. The guard is emitted only for such an
+    // operand: an absent NUMERIC slot (an index past the end of a
+    // `list<number>`) is `NaN`, which the interpreter compares as `False`,
+    // and the JavaScript `<` gives `false` for it. A connective keeps its
+    // own absence rule (`guardConnectiveAbsence`).
+    const absentCells = args.map(
+      (a) => topTypeBesideAbsence(jsType(a)) !== undefined
+    );
+    const body =
+      kind in JS_ORDERING_OPERATORS && absentCells.some((c) => c)
+        ? `((${params
+            .filter((_p, i) => absentCells[i])
+            .map((p) => `${p} === undefined`)
+            .join(' || ')}) ? undefined : ${scalarBody})`
+        : scalarBody;
     const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
-    return `_SYS.bcast((${params.join(', ')}) => ${body}, ${operands})`;
+    // A connective reads an absent operand in its closure
+    // (`guardConnectiveAbsence`): a decisive operand wins over it,
+    // `And(absent, false)` is `false`. `_SYS.bcast` would make the result
+    // absent before the closure runs, so the connectives take the broadcast
+    // without the absence rule.
+    const helper =
+      kind === 'And' || kind === 'Or' || kind === 'Not'
+        ? '_SYS.bcastPlain'
+        : '_SYS.bcast';
+    return `${helper}((${params.join(', ')}) => ${body}, ${operands})`;
   }
   throw new Error(
     `Could not compile \`${kind}\`: a comparison or logical connective over an ` +
@@ -4908,6 +4937,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       !stringBase &&
       isUnionWithCollectionOrAbsentArm(jsType(coll))
     )
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
+    // A base whose elements are of unknown type (`At(m(x), 1)` with
+    // `m := t ↦ [[t, 2t], [3t, 4t]]` and `x: any`, typed
+    // `list<unknown> | missing`): the interpreter picks the marker of an
+    // index out of range from the value (`NaN` for `[3, 6]`, `Missing` for a
+    // list of lists), and an absent base is absent. The numeric read below
+    // gave `NaN` for both, where the interpreter gives `Missing` (ROADMAP
+    // CE-368).
+    if ((eltT === 'unknown' || eltT === 'any') && scalarIndex && !stringBase)
       return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
