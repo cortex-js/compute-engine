@@ -6259,21 +6259,31 @@ function withMissingElements(t: Type): Type {
 }
 
 /**
- * True when the elements of a collection of type `t` (read without its
- * top-level `missing` arm, `indexElementType`) are a union of number arms
- * and arms that are tensors (a list with dimensions or of unknown rank) or
- * lists of numbers (`number | vector<2>`, `number | matrix<2x2>`,
- * `number | tensor<number>`), with no tuple arm. Elements that are all
- * lists (the rows of a matrix) have no number arm, and are not read so.
+ * True when a seeded `Add` or `Multiply` fold over a collection of type `t`
+ * is typed as `Sum` or `Product` type it: its elements (read without the
+ * top-level `missing` arm, `indexElementType`, and without a `missing` arm
+ * of their own) are of unknown type (`unknown` or `any`), or every arm of
+ * their type is a number, `nan`, or a row (a list with dimensions or of
+ * unknown rank, or a list of numbers): `number | vector<2>`,
+ * `number | matrix<2x2>`, `number | tensor<number>`, `vector<2>`. A tuple
+ * arm, a string arm or a row of elements of unknown type
+ * (`list<list<unknown>>`) is refused: the reducer's own typing answers for
+ * those.
  */
-function elementsMayBeNumbersOrRows(t: Type): boolean {
+function elementsFoldAsBigOp(t: Type): boolean {
   const elt = indexElementType(t);
   if (elt === undefined) return false;
   const r = resolveTypeAlias(elt);
-  if (typeof r === 'string' || r.kind !== 'union') return false;
-  const arms = r.types
+  // The `missing` arm of the elements is dropped before the arms are read,
+  // so `unknown | missing` (an element of unknown type that may be absent)
+  // is read as `unknown`.
+  const arms = (
+    typeof r !== 'string' && r.kind === 'union' ? r.types : [r]
+  )
     .map((m) => resolveTypeAlias(m))
     .filter((m) => m !== 'missing');
+  if (arms.length === 0) return false;
+  const isTop = (m: Type) => m === 'unknown' || m === 'any';
   const isNumber = (m: Type) => isSubtype(m, 'number') || m === 'nan';
   const isRow = (m: Type) =>
     typeof m !== 'string' &&
@@ -6281,11 +6291,7 @@ function elementsMayBeNumbersOrRows(t: Type): boolean {
     (m.dimensions === null ||
       Array.isArray(m.dimensions) ||
       (m.dimensions === undefined && isSubtype(m.elements, 'number')));
-  return (
-    arms.some(isNumber) &&
-    arms.some(isRow) &&
-    arms.every((m) => isNumber(m) || isRow(m))
-  );
+  return arms.every((m) => isTop(m) || isNumber(m) || isRow(m));
 }
 
 /** Descriptor twin of {@link foldResultType}. `scan` is true for the
@@ -6342,18 +6348,22 @@ function foldResultTypeD(
     // `Product` types it (`bigOpResultType`), a number or a row. Typed
     // `unknown`, the fold was read as a number by an arithmetic parent:
     // `Reduce(p, Add, 0) + 1` compiled to the string `"4,61"` for
-    // `p = [[1, 2], [3, 4]]`. The rule is narrow on purpose: elements that
-    // are all rows (a matrix) keep their typing, a tuple arm (the sum of
-    // two points is an error) keeps it too, another seed would be added to
-    // each cell, and a `Scan` (`scan`) yields running values, not the sum
-    // of a possibly empty collection.
+    // `p = [[1, 2], [3, 4]]`. Elements of unknown type (`list<unknown>`:
+    // the fold is a `broadcastable<number>`, as `Sum(L)` is) and elements
+    // that are all rows (a matrix: the fold is a row, or the seed for an
+    // empty matrix) are typed the same way (ROADMAP CE-374: `Product(Rest(L))`
+    // is this form, and was typed `unknown` where `Sum(Rest(L))` was a
+    // `broadcastable<number>`). The rule stays narrow elsewhere: a tuple
+    // arm (the sum of two points is an error) keeps the reducer's typing,
+    // another seed would be added to each cell, and a `Scan` (`scan`)
+    // yields running values, not the sum of a possibly empty collection.
     if (
       !scan &&
       coll !== undefined &&
       init !== undefined &&
       descriptorLiteralValue(init) === (s.name === 'Add' ? 0 : 1) &&
       (s.name === 'Add' || s.name === 'Multiply') &&
-      elementsMayBeNumbersOrRows(coll.type)
+      elementsFoldAsBigOp(coll.type)
     ) {
       const shaped = bigOpResultType(
         [coll],
