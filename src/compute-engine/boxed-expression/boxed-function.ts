@@ -6023,7 +6023,8 @@ export class BoxedFunction
               ),
               normalizeLiftedAbsence(
                 this._ops![1],
-                exactIntegerOperand(this._ops![1], options)
+                exactIntegerOperand(this._ops![1], options),
+                this.operator
               ),
             ]
           : evaluateBroadcastLiftsOnce(this._ops!, options, this.operator);
@@ -7313,7 +7314,8 @@ export class BoxedFunction
               )),
               normalizeLiftedAbsence(
                 this._ops![1],
-                await exactIntegerOperandAsync(this._ops![1], options)
+                await exactIntegerOperandAsync(this._ops![1], options),
+                this.operator
               ),
             ]
           : await evaluateBroadcastLiftsOnceAsync(
@@ -9387,7 +9389,11 @@ function evaluateBroadcastLiftsOnce(
       ? literalMayEraseElement(op)
         ? erasingLiteralValue(op, erasing, options)
         : op
-      : normalizeLiftedAbsence(op, op.evaluate(operandOptions(options)) ?? op)
+      : normalizeLiftedAbsence(
+          op,
+          op.evaluate(operandOptions(options)) ?? op,
+          operator
+        )
   );
   // For a jump operator under `.N()`, a scalar lift that is an exact number
   // is put back exact as well (`withExactScalarOperands`): the cells are
@@ -9421,7 +9427,8 @@ async function evaluateBroadcastLiftsOnceAsync(
           : op
         : normalizeLiftedAbsence(
             op,
-            (await op.evaluateAsync(operandOptions(options))) ?? op
+            (await op.evaluateAsync(operandOptions(options))) ?? op,
+            operator
           )
     )
   );
@@ -9543,20 +9550,31 @@ function isExactJumpLift(
  * Carry a numeric slot's absence convention across the evaluate-once
  * substitution.
  *
- * Substituting a lifted operand with its VALUE erases the declared type the
- * comparison handlers' absence read keys on: an operand typed `number | missing`
- * that evaluates to the `Missing` symbol must be read as `NaN` (IEEE), because
- * `NaN` is that slot's honest absence value (I6 domain normalization). Without
- * this, the same operand answered `False` as a scalar (`Less(1, x)`) and
- * `Missing` under a broadcast (`Less([1,2], x)`) — Kleene where the scalar path
- * is IEEE. `readComparisonAbsence` in `library/relational-operator.ts` applies
- * the identical rule on the non-broadcast path.
+ * Substituting a lifted operand with its VALUE erases the declared type that
+ * the handlers read: in arithmetic, an operand typed `number | missing` that
+ * evaluates to the `Missing` symbol is read as `NaN`, because `NaN` is that
+ * slot's absence value (I6 domain normalization). A comparison is the
+ * exception (`operator`): it reads an absent operand as absent, in a numeric
+ * slot too (user decision 2026-10-23, ROADMAP CE-93), so the `Missing` symbol
+ * is kept, and `Less(1, x)` and `Less([1, 2], x)` with `x` absent agree
+ * (`Missing` and `[Missing, Missing]`), as `readComparisonAbsence` in
+ * `library/relational-operator.ts` reads them.
  */
 function normalizeLiftedAbsence(
   original: Expression,
-  evaluated: Expression
+  evaluated: Expression,
+  operator: string
 ): Expression {
   if (!isSymbol(evaluated, 'Missing')) return evaluated;
+  if (
+    operator === 'Less' ||
+    operator === 'LessEqual' ||
+    operator === 'Greater' ||
+    operator === 'GreaterEqual' ||
+    operator === 'Equal' ||
+    operator === 'NotEqual'
+  )
+    return evaluated;
   return numericMissingSlot(original.type.type)
     ? original.engine.NaN
     : evaluated;

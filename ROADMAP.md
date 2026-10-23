@@ -335,27 +335,6 @@ The signatures in `library/statistics.ts` spell the data parameter
   expression is invalid when it is boxed.
 - With no decision, a matrix is refused at evaluation only, as on 0.161.0.
 
-### CE-14. A cell pattern `vector<T>` or `list<T^N>` refuses a matrix
-
-**Status:** open; docs. User decision 2026-10-23: the new behavior is confirmed.
-A rank-1 cell pattern (`list<T^N>`, `vector<T>`) refuses a matrix; `list<T>`
-binds `T` to the rows. Left: update the test that cites the 2026-10-21 decision,
-and the type guide.
-
-With `first: (x: list<T^N>) -> T where T, N`, `first([[1, 2], [3, 4]])` is now
-an `incompatible-type` error; on 0.161.0 it was typed `vector<integer^2>`, with
-`T` bound to the rows. The `T` of these patterns is now the type of the cells of
-a tensor of rank 1, and a matrix has rank 2. The plain pattern `list<T>` still
-binds `T` to the rows. The test
-`test/compute-engine/dimension-variables.test.ts` ("a rank-2 actual at a rank-1
-pattern is read as a list of its rows") cited a user decision of 2026-10-21 that
-bound `T` to the rows; the reading of a list type by its elements replaces it.
-Files: `common/type/instantiate.ts` (`walkPattern()`),
-`common/type/conditional-conformance.ts` (`subjectFitsTensorPattern()`).
-
-Question: does the user confirm the new behavior, or ask that a rank-1 cell
-pattern bind `T` to the rows of a tensor of a higher rank?
-
 ### CE-15. A vector times a list of rows has a type arm that no value takes
 
 **Status:** open; defect, small.
@@ -1802,30 +1781,6 @@ Implement sticky evaluated results of unresolved calls together with function
 declaration hoisting across the sequential runner, the whole-block interpreter
 and the compiler. Keep earlier bindings, declared signatures and constructors.
 See also CE-312.
-
-### CE-93. A comparison with a variable that may be `Missing` differs inside `If`
-
-**Status:** open; defect. Tycho row 411. User decision 2026-10-23 (asked twice,
-the second time with the rule below): absent in both. This reverses, for
-comparisons, the rule that reads an absent value in a numeric slot
-(`number | missing`) as `NaN` (`readComparisonAbsence`, `numericMissingSlot`,
-`library/relational-operator.ts`): `w > 0` gives `Missing` and is typed
-`boolean | missing`; compiled code gives `undefined` when the operand is passed
-as `undefined` (a `NaN` passed by the host stays `false`); `If(w > 0, 1, 0)`
-keeps no value. Update `docs/ERROR-MODEL.md`.
-
-With `x := 0.5` and `w` assigned `Which(x > 5, 1)`:
-
-- `Block(w := Which(x > 5, 1); w > 0)` evaluates to `False`.
-  `readComparisonAbsence` reads `w` as a numeric slot that can hold `Missing`,
-  so the `Missing` counts as `NaN`.
-- `Block(w := Which(x > 5, 1); If(w > 0, 1, 0))` gives the absent-condition
-  error. `evaluateCondition` (`library/control-structures.ts`, near line 1610)
-  rebuilds the comparison from the evaluated operands and loses the slot type.
-
-The `javascript` target (`NaN`, no arm) and `interval-js` (`'maybe'`) agree with
-the `If` reading. Choose one reading for a variable whose type admits `Missing`
-beside a number. The standalone comparison and the branch condition must agree.
 
 ### CE-94. `Less(0, NaN, Missing)` is `Missing`, but `Less(0, i, Missing)` is `False`
 

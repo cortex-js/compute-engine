@@ -903,44 +903,64 @@ describe('P3 — compile discharge (§3.F)', () => {
     expect(e.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
   });
 
-  test('a numeric-domain missing arm does not widen a comparison result, and compiles on GPU', () => {
-    // GPU cleanup (2026-07-24, follow-up to the IEEE amendment): a
-    // `number | missing` slot's absence representation is `NaN` (I6), and an
-    // IEEE comparison of `NaN` is a plain boolean — so the `missing` arm never
-    // reaches the comparison result. Static type has no arm, the interpreter
-    // reads a numeric-slot `Missing` as `NaN` (IEEE False/True), and the
-    // comparison compiles guard-free on a float-only target.
+  test('a comparison with an absent numeric operand is absent, and compiles on GPU', () => {
+    // User decision 2026-10-23 (ROADMAP CE-93): a comparison with an absent
+    // operand is absent, in a numeric slot (`number | missing`) too, as the
+    // condition of an `If` reads it. Before, the slot read its absent value
+    // as `NaN` (I6), and `a < 1` was `False` while `If(a < 1, 1, 0)` had no
+    // value. On a GPU target an absent number is `NaN`, so the comparison
+    // still compiles there, guard-free, with the IEEE reading.
     const e = new ComputeEngine();
     e.declare('a', 'number | missing');
     e.declare('b', 'number | missing');
     e.declare('s', 'string | missing');
 
-    // Type: no missing arm from numeric-domain operands…
-    expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe('boolean');
-    expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean');
-    // …but an object-domain arm still widens (Kleene reachable).
+    expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe(
+      'boolean | missing'
+    );
+    expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean | missing');
     expect(e.box(['Equal', 's', { str: 'x' }]).type.toString()).toBe(
       'boolean | missing'
     );
 
-    // Interpreter: a Missing VALUE in a numeric-domain slot reads as NaN.
     e.assign('a', e.Missing);
-    expect(e.box(['Equal', 'a', 1]).evaluate().symbol).toBe('False');
-    expect(e.box(['NotEqual', 'a', 1]).evaluate().symbol).toBe('True');
-    expect(e.box(['Less', 'a', 1]).evaluate().symbol).toBe('False');
-    // An object-domain slot stays Kleene.
+    expect(e.box(['Equal', 'a', 1]).evaluate().symbol).toBe('Missing');
+    expect(e.box(['NotEqual', 'a', 1]).evaluate().symbol).toBe('Missing');
+    expect(e.box(['Less', 'a', 1]).evaluate().symbol).toBe('Missing');
     e.assign('s', e.Missing);
     expect(e.box(['Equal', 's', { str: 'x' }]).evaluate().symbol).toBe(
       'Missing'
     );
 
-    // GPU: compiles guard-free (previously failed closed on the result's arm).
-    const r = compile(e.box(['Equal', 'a', 'b']), {
-      to: 'glsl',
-      fallback: true,
+    // GPU: compiles guard-free.
+    for (const expr of [
+      ['Equal', 'a', 'b'],
+      ['Less', 'a', 1],
+      ['If', ['Less', 'a', 1], 1, 0],
+    ] as const) {
+      const r = compile(e.box(expr as any), { to: 'glsl', fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.code).not.toMatch(/isnan/);
+    }
+    // An object-domain absent value has no representation there.
+    expect(() =>
+      compile(e.box(['Equal', 's', { str: 'x' }]), {
+        to: 'glsl',
+        fallback: false,
+      })
+    ).toThrow(/Could not compile/);
+
+    // JavaScript: an absent operand (`undefined`) makes the comparison
+    // absent; a `NaN` is a value, and the comparison is `false`.
+    const ce2 = new ComputeEngine();
+    ce2.declare('a', 'number | missing');
+    const js = compile(ce2.box(['Less', 'a', 1]), {
+      to: 'javascript',
+      fallback: false,
     });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toMatch(/isnan/);
+    expect(js.run!({ a: undefined } as never)).toBeUndefined();
+    expect(js.run!({ a: 0.5 } as never)).toBe(true);
+    expect(js.run!({ a: NaN } as never)).toBe(false);
   });
 
   test('an object-domain (string|missing) Equal keeps the Kleene guard on JS', () => {

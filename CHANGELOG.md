@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A comparison with an absent number is absent** (ROADMAP CE-93, Tycho row
+  411). With `w: number | missing` holding `Missing`, `w > 0` was `False`: a
+  numeric slot read its absent value as `NaN`. But `If(w > 0, 1, 0)` had no
+  value (the absent-condition error), so the two forms disagreed. A comparison
+  (`<`, `≤`, `>`, `≥`, `=`, `≠`, chained or not) with an absent operand is now
+  `Missing`, in a numeric slot too, and it is typed `boolean | missing`. The
+  broadcast form agrees: `[1, 2] < w` is `[Missing, Missing]`. A `NaN` is a
+  value, and a comparison with it keeps the IEEE answer; arithmetic still reads
+  an absent number as `NaN` (`w + 1 < 2` is `False`). Compiled JavaScript and
+  Python give the absent value (`undefined`, `None`) when such an operand is
+  passed absent, where JavaScript gave `false` and Python raised a `TypeError`;
+  a chain is read link by link, so `5 < 0 < w` is `false`. On GLSL and WGSL an
+  absent number can only be `NaN`, and these comparisons compile as before, with
+  the IEEE answer. A chained comparison with an operand that has an effect
+  (`0 < w < Random()`) and an operand that may be absent no longer compiles; with
+  `fallback` (the default) `compile()` runs the interpreter. One case compiled
+  numeric code cannot tell apart: a local variable that holds the `NaN` of an
+  `If` with no else branch is read as a value. Rule: `docs/ERROR-MODEL.md`.
+
 ### New Features
 
 - **Factoring over a number field** (contributed by KingArth0r, #469).

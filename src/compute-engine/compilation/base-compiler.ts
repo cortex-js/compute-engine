@@ -90,6 +90,7 @@ import {
   stripMissingFromType,
   topTypeBesideAbsence,
   typeContainsMissing,
+  numericMissingSlot,
   typeElementCount,
   unfoldAliasOnDescent,
   widen,
@@ -3518,7 +3519,8 @@ export class BaseCompiler {
           !isSubtype(stripped, 'number') &&
           !numericShaped &&
           !numericCells &&
-          !inValueModel
+          !inValueModel &&
+          !BaseCompiler.absentOnlyThroughNumericSlots(expr)
         )
           throw new Error(
             `Could not compile an object-domain absent ('missing') position ` +
@@ -12030,6 +12032,16 @@ export class BaseCompiler {
       }
     }
 
+    // A comparison with an operand that may be absent (`w > 0` with
+    // `w: number | missing`) is absent when that operand is absent, on a
+    // target with object absence (ROADMAP CE-93, `absentComparisonGuard`).
+    {
+      const guarded = BaseCompiler.absentComparisonGuard(h, args, target, () =>
+        BaseCompiler.compileExpr(engine, h, args, prec, target, node)
+      );
+      if (guarded !== undefined) return guarded;
+    }
+
     // GPU shader targets: a comparison or logical connective over a non-scalar
     // operand must not lower through the scalar infix operators — GLSL rejects
     // `vecN < float` outright, and where an infix form IS legal it means the
@@ -17029,7 +17041,33 @@ export class BaseCompiler {
           ? BaseCompiler.rotationView(a, target, admission!)
           : undefined) ?? BaseCompiler.compile(a, target)
     );
-    const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
+    // A comparison with an operand that may be absent is absent at each
+    // position where that operand is the absent object (ROADMAP CE-93, the
+    // broadcast form of `absentComparisonGuard`): `[1, 2] < w` is
+    // `[Missing, Missing]` in the interpreter when `w` is absent.
+    const object = target.absence?.object;
+    const absentParams =
+      object !== undefined &&
+      (h === 'Less' ||
+        h === 'LessEqual' ||
+        h === 'Greater' ||
+        h === 'GreaterEqual' ||
+        h === 'Equal' ||
+        h === 'NotEqual')
+        ? params.filter((_p, i) => {
+            const t = compilationType(args[i]);
+            return typeContainsMissing(t) && numericMissingSlot(t);
+          })
+        : [];
+    const connectiveBody = BaseCompiler.guardConnectiveAbsence(
+      h,
+      params,
+      scalarBody
+    );
+    const body =
+      absentParams.length === 0
+        ? connectiveBody
+        : `((${absentParams.map((p) => object!.isAbsent(p)).join(' || ')}) ? ${object!.nullLiteral} : (${connectiveBody}))`;
     const closure = `(${params.join(', ')}) => ${body}`;
     // Every operand's width is known: emit one expression per component and
     // drop the run-time dispatch altogether. An operand whose compiled source
@@ -26814,6 +26852,176 @@ export class BaseCompiler {
     return types.every((type) => BaseCompiler.absentDomainIsObject(type))
       ? 'object'
       : 'numeric';
+  }
+
+  /**
+   * The lowering of a scalar comparison `h(args)` (`<`, `≤`, `>`, `≥`, `=`,
+   * `≠`, chained or not) with an operand that may be absent at run time, or
+   * `undefined` when no operand may be absent, or the target has no object
+   * absence (the GPU targets: there an absent number is `NaN`, and the
+   * comparison reads it with IEEE arithmetic).
+   *
+   * A comparison with an absent operand is absent (`Missing`) in the
+   * interpreter, in a numeric slot (`number | missing`) too (user decision
+   * 2026-10-23, ROADMAP CE-93). The host passes an absent value as the
+   * target's absent object (`undefined` in JavaScript, `None` in Python),
+   * where the comparison operators would answer `false` (JavaScript) or
+   * raise (Python). The operands are bound to temporaries, in operand order,
+   * so each is evaluated once, and the comparison is the absent object when
+   * one that may be absent is. Such an operand read from the host is absent
+   * when it is the absent object: a `NaN` there is a value, and keeps the
+   * IEEE reading (`false`), as in the interpreter (ROADMAP CE-386 reads it
+   * so in `Equal`). A computed one (a nested `If` with no else branch) is
+   * absent when it is `NaN`, the absence marker of compiled numeric code. A
+   * chain is the `And` of its links, each guarded, so a link that is `false`
+   * decides it, as in the interpreter; a chain with an impure operand keeps
+   * the ordinary lowering.
+   */
+  private static absentComparisonGuard(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    emit: () => string
+  ): string | undefined {
+    const object = target.absence?.object;
+    if (object === undefined || target.bindExpr === undefined) return undefined;
+    if (
+      h !== 'Less' &&
+      h !== 'LessEqual' &&
+      h !== 'Greater' &&
+      h !== 'GreaterEqual' &&
+      h !== 'Equal' &&
+      h !== 'NotEqual'
+    )
+      return undefined;
+    const mayBeAbsent = (a: Expression): boolean => {
+      if (BaseCompiler._codeAliases.has(a)) return false;
+      const t = compilationType(a);
+      return typeContainsMissing(t) && numericMissingSlot(t);
+    };
+    if (!args.some(mayBeAbsent)) return undefined;
+    // Scalar numbers only: a collection operand keeps its own lowering
+    // (element-wise, or the whole-collection equality of a chain).
+    if (
+      !args.every(
+        (a) => isNumber(a) || isSubtype(compilationType(a), 'number | missing')
+      )
+    )
+      return undefined;
+    // A chain (`0 < w < 2`) is the `And` of its links, each guarded on its
+    // own: the interpreter stops at the first link that is `False`, so
+    // `Less(5, 0, w)` is `False` with `w` absent, and the connective reads
+    // an absent link by the Kleene rule (`guardConnectiveAbsence`). An
+    // operand shared by two links is read twice, so the chain is compiled
+    // this way only when every operand is pure. With an impure operand the
+    // chain does not compile: the interpreter evaluates the operands in
+    // order and goes on past an absent link, which neither this form nor the
+    // ordinary lowering reproduces.
+    if (args.length > 2) {
+      if (args.some((a) => a.isPure !== true))
+        throw new Error(
+          `Could not compile \`${h}\`: a chained comparison with an operand ` +
+            `that may be absent and an operand with an effect. The ` +
+            `interpreter evaluates it instead.`
+        );
+      const ce = args[0].engine;
+      const links = args.slice(1).map((b, i) => ce._fn(h, [args[i], b]));
+      return BaseCompiler.compile(ce._fn('And', links), target);
+    }
+    // Every operand that is not a literal is bound, in operand order, so each
+    // is evaluated once and in the interpreter's order, also when another one
+    // is absent. The initializers are compiled before any alias is installed:
+    // an alias in scope while a later initializer compiles would name a
+    // temporary that the initializer cannot see. A node that is both
+    // operands (`w = w`) is bound once, which is right for a pure one. An
+    // impure one is evaluated each time it appears in the interpreter, and
+    // the temporary of a node cannot stand for two evaluations of it, so
+    // that comparison does not compile.
+    const operands: Expression[] = [];
+    for (const a of args) {
+      if (isNumber(a)) continue;
+      if (operands.includes(a)) {
+        if (a.isPure !== true)
+          throw new Error(
+            `Could not compile \`${h}\`: the same operand with an effect ` +
+              `appears twice beside an operand that may be absent. The ` +
+              `interpreter evaluates it instead.`
+          );
+        continue;
+      }
+      operands.push(a);
+    }
+    const codes = operands.map((a) =>
+      BaseCompiler.compileValueOperand(a, target)
+    );
+    const temps = operands.map(() => BaseCompiler.tempVar(target));
+    // A symbol (an input, a parameter, a local) is absent when it is the
+    // target's absent object (`undefined`, `None`): a `NaN` there is a
+    // value, and keeps the IEEE reading, as in the interpreter (ROADMAP
+    // CE-386 reads it so in `Equal`). A computed value that may be absent
+    // (an `If` with no else branch) is `NaN` in compiled numeric code when
+    // it is absent, so it is tested with the target's numeric absence test,
+    // as the condition of a branch tests it (`operandDecidedConjuncts`). A
+    // local that holds such a computed value is read as a symbol: that case
+    // is not told apart.
+    const tests = operands.flatMap((a, i) => {
+      if (!mayBeAbsent(a)) return [];
+      if (isSymbol(a)) return [object.isAbsent(temps[i])];
+      const numeric = target.absence?.numeric.isAbsent;
+      return [numeric ? numeric(temps[i]) : object.isAbsent(temps[i])];
+    });
+    try {
+      // An alias (not an override): the analyses still read the operand as
+      // it is, so a complex operand keeps the realness rule of the head.
+      operands.forEach((a, i) => BaseCompiler._codeAliases.set(a, temps[i]));
+      const body = emit();
+      const absent = tests.join(target.language === 'python' ? ' or ' : ' || ');
+      return target.bindExpr(
+        operands.map((_, i) => [temps[i], codes[i]] as [string, string]),
+        target.language === 'python'
+          ? `(${object.nullLiteral} if (${absent}) else (${body}))`
+          : `((${absent}) ? ${object.nullLiteral} : (${body}))`
+      );
+    } finally {
+      for (const a of operands) BaseCompiler._codeAliases.delete(a);
+    }
+  }
+
+  /**
+   * Is the `missing` arm of the type of `expr` there only because an operand
+   * is a number that may be absent (`number | missing`)? True for a
+   * comparison whose operands with a `missing` arm are all such numbers, and
+   * for `And`, `Or`, `Not` and `Xor` of operands that are each such a
+   * comparison or have no `missing` arm.
+   *
+   * A comparison with an absent operand is `Missing` in the interpreter
+   * (ROADMAP CE-93), so its type has a `missing` arm. On a target with no
+   * object domain (the GPU targets), an absent number IS `NaN`, and the
+   * comparison reads it with IEEE arithmetic (`false`), as it did before:
+   * such a comparison still compiles there, with no guard.
+   */
+  private static absentOnlyThroughNumericSlots(expr: Expression): boolean {
+    if (!isFunction(expr)) return false;
+    const h = expr.operator;
+    if (
+      h === 'Less' ||
+      h === 'LessEqual' ||
+      h === 'Greater' ||
+      h === 'GreaterEqual' ||
+      h === 'Equal' ||
+      h === 'NotEqual'
+    )
+      return expr.ops.every((op) => {
+        const t = compilationType(op);
+        return !typeContainsMissing(t) || numericMissingSlot(t);
+      });
+    if (h === 'And' || h === 'Or' || h === 'Not' || h === 'Xor')
+      return expr.ops.every(
+        (op) =>
+          !typeContainsMissing(compilationType(op)) ||
+          BaseCompiler.absentOnlyThroughNumericSlots(op)
+      );
+    return false;
   }
 
   /**

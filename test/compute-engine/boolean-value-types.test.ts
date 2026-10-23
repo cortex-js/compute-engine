@@ -80,8 +80,9 @@ describe('boolean value types — Equal soundness', () => {
     expect(typeOf(fn('Equal', [sym('n'), sym('n')]))).toBe('boolean');
   });
 
-  test('Equal(m, m) stays `boolean` when m may be missing', () => {
-    expect(typeOf(fn('Equal', [sym('m'), sym('m')]))).toBe('boolean');
+  // An absent `m` makes the comparison absent (ROADMAP CE-93).
+  test('Equal(m, m) is `boolean | missing` when m may be missing', () => {
+    expect(typeOf(fn('Equal', [sym('m'), sym('m')]))).toBe('boolean | missing');
   });
 
   test('Equal(True, False) makes no claim (both type the bare `boolean`)', () => {

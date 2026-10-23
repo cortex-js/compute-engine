@@ -327,21 +327,21 @@ describe('absence survives a composed connective', () => {
   });
 });
 
-describe('a numeric missing slot keeps its IEEE reading under a broadcast', () => {
-  // Substituting a lifted operand with its VALUE erases the declared type the
-  // comparison absence-read keys on, so `x: number | missing = Missing` was
-  // read as Kleene under a broadcast and IEEE as a scalar.
+describe('a numeric missing slot is read as absent by a comparison, also under a broadcast', () => {
+  // Substituting a lifted operand with its VALUE erases its declared type,
+  // so the broadcast must keep the `Missing` symbol for a comparison, as the
+  // scalar path does (user decision 2026-10-23, ROADMAP CE-93).
   const engine = new ComputeEngine();
   engine.declare('x', 'number | missing');
   engine.assign('x', engine.symbol('Missing'));
 
   test('scalar and broadcast agree', () => {
     expect(engine.box(['Less', 1, 'x'] as any).evaluate().toString()).toBe(
-      '"False"'
+      '"Missing"'
     );
     expect(
       engine.box(['Less', ['List', 1, 2], 'x'] as any).evaluate().toString()
-    ).toBe('["False","False"]');
+    ).toBe('["Missing","Missing"]');
   });
 });
 

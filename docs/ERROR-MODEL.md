@@ -999,6 +999,20 @@ normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
 survives only on data/object-domain results.
 
+The comparisons are the exception (user decision 2026-10-23, ROADMAP CE-93):
+a comparison with an absent operand is `Missing`, in a numeric slot too, as
+the condition of an `If` reads it. With `w: number | missing` holding
+`Missing`, `w > 0` is `Missing` (typed `boolean | missing`) and
+`If(w > 0, 1, 0)` has no value; before, the slot read its absent value as
+`NaN`, and `w > 0` was `False` while the `If` had no value. A `NaN` is a
+value, and a comparison with it keeps the IEEE answer. Compiled code reads
+the absent object the host passes (`undefined` in JavaScript, `None` in
+Python) the same way; on the GPU targets an absent number can only be `NaN`,
+so a comparison there keeps the IEEE answer. One case compiled numeric code
+cannot tell apart: a nested `If` with no else branch is `NaN` there and
+`Missing` in the interpreter, so a comparison on it is `false` in compiled
+code.
+
 The normalization is to the marker of the CODOMAIN, exactly as rule 4 of §2
 states. The codomain is read off the type of the application itself, with
 its `missing` arm stripped, not off the operator's declared result: the

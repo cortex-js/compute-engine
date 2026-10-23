@@ -41,7 +41,6 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   typeContainsMissing,
-  numericMissingSlot,
   resolveTypeAlias,
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
@@ -952,7 +951,7 @@ function decideEqual(
   // re-enters this handler on scalar cells, so the rule applies
   // element-wise too. A `Missing` read from a numeric-domain slot
   // (`number | missing`) is `NaN`, not Kleene (`readComparisonAbsence`).
-  const vals = readComparisonAbsence(ce, rawOps, ops);
+  const vals = readComparisonAbsence(ce, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // The pole `ComplexInfinity` (`1/0`) has no value, so an equality with it
@@ -1036,7 +1035,7 @@ function decideNotEqual(
   // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
   // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
   // reads as `NaN` (`readComparisonAbsence`).
-  const vals = readComparisonAbsence(ce, rawOps, ops);
+  const vals = readComparisonAbsence(ce, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
   let lhs: Expression | undefined = undefined;
@@ -1098,7 +1097,7 @@ function decideLess(
   // IEEE over `NaN` (unordered ⇒ `False`). Applies per-cell too (broadcast
   // re-enters this handler on scalar cells). A numeric-domain slot's
   // `Missing` reads as `NaN` (`readComparisonAbsence`).
-  const vals = readComparisonAbsence(ce, rawOps, ops);
+  const vals = readComparisonAbsence(ce, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // A value that is not a real number (the pole `1/0`, a complex number
@@ -1166,7 +1165,7 @@ function decideLessEqual(
   if (bc) return bc;
   // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
   // IEEE over `NaN` (unordered ⇒ `False`). See `Less`.
-  const vals = readComparisonAbsence(ce, rawOps, ops);
+  const vals = readComparisonAbsence(ce, ops);
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
   // A value that is not a real number has no order: `False`. See `Less`.
@@ -1431,7 +1430,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // `lazy` skips evaluating the arguments before this handler runs, so
       // evaluate them here (see the `Equal` handler).
       const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
-      const vals = readComparisonAbsence(ce, rawOps, ops);
+      const vals = readComparisonAbsence(ce, ops);
       if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
       if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
       let lhs: Expression | undefined = undefined;
@@ -1988,14 +1987,13 @@ export function operandAbsence(
 ): 'definite' | 'possible' | undefined {
   const t = op.type;
   if (t === 'missing') return 'definite';
-  // A NUMERIC-domain `missing` arm (`number | missing`) does NOT widen the
-  // result: that slot's absence representation is `NaN` (I6), and an IEEE
-  // comparison of `NaN` is a plain boolean. Only an OBJECT-domain arm — a
-  // slot that can hold the `Missing` symbol itself — makes the Kleene
-  // `Missing` result reachable. This is also what lets a comparison over
-  // `number | missing` operands compile guard-free on float-only targets
-  // (GPU): its result type has no `missing` arm to fail closed on.
-  if (typeContainsMissing(t) && !numericMissingSlot(t)) return 'possible';
+  // Any `missing` arm, a numeric one (`number | missing`) included, makes
+  // the Kleene `Missing` result reachable: a comparison with an absent
+  // operand is absent, in a numeric slot too (user decision 2026-10-23,
+  // ROADMAP CE-93). Before, a numeric slot read its absent value as `NaN`
+  // and the comparison was a plain boolean, so `w > 0` was `False` while
+  // `If(w > 0, 1, 0)` had no value.
+  if (typeContainsMissing(t)) return 'possible';
   // The library `Undefined` symbol is typed `unknown`, which has no
   // `missing` arm, but the evaluate handlers read it as an absent operand
   // (`readComparisonAbsence`): `Less(Undefined, 3)` evaluates to `Missing`.
@@ -2170,15 +2168,13 @@ function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
 }
 
 /**
- * Domain-directed absence read for comparison operands (§3.D + I6).
+ * Absence read for comparison operands (§3.D).
  *
- * An operand that EVALUATED to an absence symbol is Kleene — except when
- * the operand it evaluated from is typed with a numeric-domain `missing` arm
- * (`numericMissingSlot`): that slot's honest absence value is `NaN`, so the
- * comparison reads it as `NaN` and follows IEEE. Keeps the static type
- * (plain `boolean`, per `relationalAbsenceType`), the interpreter, and
- * compiled code (where the slot's absent value already IS `NaN` at the ABI)
- * in agreement.
+ * An operand that EVALUATED to an absence symbol is Kleene, whatever the
+ * type of the operand it evaluated from: in a numeric slot
+ * (`number | missing`) too, the comparison is `Missing` (user decision
+ * 2026-10-23, ROADMAP CE-93), as the condition of an `If` reads it. Before,
+ * such a slot read its absent value as `NaN`, and `w > 0` was `False`.
  *
  * An `Undefined` operand is normalized to the `Missing` symbol here, so that
  * the one test each caller makes afterwards — "is an operand the `Missing`
@@ -2186,15 +2182,10 @@ function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
  */
 function readComparisonAbsence(
   ce: ComputeEngine,
-  rawOps: ReadonlyArray<Expression>,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
   if (!ops.some(isAbsentScalarSymbol)) return ops;
-  return ops.map((op, i) => {
-    if (!isAbsentScalarSymbol(op)) return op;
-    if (numericMissingSlot(rawOps[i].type.type)) return ce.NaN;
-    return ce.Missing;
-  });
+  return ops.map((op) => (isAbsentScalarSymbol(op) ? ce.Missing : op));
 }
 
 /**
