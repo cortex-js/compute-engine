@@ -6322,8 +6322,9 @@ function residualScale(
  * `(-1/2 + √5/2)^2 + (-1/2 + √5/2) - 1`, and its proof of zero refines the
  * constant at increasing precision (two exact numbers are compared exactly),
  * which took about 60% of the time of `x^4 + x^2 - 1 = 0`. A root that holds
- * a float (from the numeric root finder) is still checked (user decision
- * 2026-10-23, ROADMAP CE-385).
+ * a float (from the numeric root finder) is still checked, at the engine
+ * precision (user decisions 2026-10-23: a check in machine precision would be
+ * faster, but could decide a borderline root differently).
  */
 function validateRoots(
   expr: Expression,
