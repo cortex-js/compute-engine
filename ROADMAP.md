@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-385.
+Next free reference: CE-386.
 
 **Entry format.**
 
@@ -6527,6 +6527,60 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-385. Symbolic operations are 1.2 to 2.5 times slower than in 0.133.0
+
+**Status:** open; performance. Found by the release benchmark of 2026-10-23.
+
+The capability benchmark (`benchmarks/report.mjs`, minified bundles, one warm
+process, median time per call) measured the build at `f6e5a8919` against the
+published 0.133.0, the release of the last recorded benchmark (2026-09-23). The
+run was on an idle machine under the box lock, and a second run gave the same
+numbers. Time per call, current ÷ 0.133.0:
+
+- Equation solving: `x^3 - x - 1 = 0` 4.9 ms against 2.0 ms (2.45×),
+  `x^4 + x^2 - 1 = 0` 2.37×.
+- Limits and definite integrals: 1.5× to 2.3× (`∫_{-∞}^{∞} e^{-x^2} dx`
+  547 µs against 239 µs).
+- Antiderivatives 1.4× to 1.9×, derivatives 1.1× to 1.45×, simplification
+  1.0× to 1.5×.
+- 200-digit special functions (`ζ(3)`, `Γ(1/3)`, `ψ(1/3)`) 1.1×. The
+  elementary functions at 200 digits are 1.0× to 1.4× faster.
+
+There is no single cause. Measured release by release against 0.133.0
+(`benchmarks/runners/run_ce_rubi.mjs` with `CE_CURRENT_BUNDLE` set to the
+0.133.0 bundle and `CE_PUBLISHED_BUNDLE` to the release, one warm process per
+release, 2026-10-23), the time grows in five steps:
+
+- **CE-385.1** 0.138.0 → 0.139.0: antiderivatives about 1.25× (11 commits).
+- **CE-385.2** 0.141.0 → 0.142.0: `x^3 - x - 1 = 0` 1.12× → 1.88× (61
+  commits).
+- **CE-385.3** 0.147.0 → 0.148.0 (`33444a04a..dfb4c620a`, 21 commits): about
+  1.25× on every symbolic case. Candidates: `Solve` completeness proved with
+  interval arithmetic (`cce09a8f4`), contour integration by residues
+  (`21815f10b`), the complex error and sine integrals (`5a5f3d6ad`).
+- **CE-385.4** 0.149.0 → 0.150.0 (`d98ff96fc..d598e3fce`, 18 commits):
+  `x^4 + x^2 - 1 = 0` 1.57× → 2.63×. Part of the solve slowdown is more work,
+  not slower work: the current build returns the two complex roots
+  `±√(−1/2 − √5/2)` beside the two real ones, where 0.133.0 returned the real
+  roots only.
+- **CE-385.5** 0.157.0 → 0.158.0: derivatives and definite integrals about
+  1.2× (29 commits).
+
+A CPU profile of `Integrate(1/(1 + x^2), x)` (the unminified bundle, which
+runs about 3 times slower than the minified one, so its proportions are
+approximate) shows that `antiderivative()` takes about 15% of the call. About
+70% goes to re-binding the integrand: `liftIntegrand` → `rebindEscaping` →
+`rewriteWithBinders` (`boxed-expression/binders.ts`) rebuilds every node above
+a re-bound symbol with `ce.function(…, { form: 'canonical' })`, which
+canonicalizes the node again. The minified bundles take 0.40 ms per call
+against 0.19 ms for 0.133.0, for the same answer `arctan(x)`. A possible fix:
+rebuild a node whose operands are already canonical without running the
+canonical transforms again. This needs care: a re-bound symbol can have a
+different type in the outer scope, and some canonical forms depend on the
+type (`√(x²)` is `|x|` for a real `x`).
+
+Run every measurement under the box lock.
 
 ### CE-313. Evaluating a closed form or a tuple parameter again rebuilds or re-evaluates its nodes
 
