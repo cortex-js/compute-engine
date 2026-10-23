@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-374.
+Next free reference: CE-376.
 
 **Entry format.**
 
@@ -451,7 +451,6 @@ for a union cell that is not a number type. Its exception for an absent point
 Expected: the same rule for any cell type whose part without `missing` can carry
 dimensions.
 
-
 ### CE-22. `If`/`Which` with a condition whose type cannot be read keep the scalar type
 
 **Status:** open; wrong value.
@@ -471,13 +470,13 @@ dimensions.
 
 **Status:** open; defect.
 
-With `E = ["Error", {str: "x"}]`, `ce.box(["Tuple", ["List", 1, E], 2]).type`
-is `tuple<list<unknown>, integer>` (a tuple whose first slot holds a list with a
+With `E = ["Error", {str: "x"}]`, `ce.box(["Tuple", ["List", 1, E], 2]).type` is
+`tuple<list<unknown>, integer>` (a tuple whose first slot holds a list with a
 failed element), but inside a list,
 `ce.box(["List", ["Tuple", ["List", 1, E], 2]]).ops[0].type` is `error`: the
 same tuple gets a different type depending on where it is. The canonical form of
-the outer list types its element through a path that reads any nested error as
-a failure of the whole tuple. Expected: the same type in both places.
+the outer list types its element through a path that reads any nested error as a
+failure of the whole tuple. Expected: the same type in both places.
 
 ### CE-23. The empty tuple type prints as the bare `tuple`, which parses back wider
 
@@ -519,9 +518,9 @@ every threadable call, so it needs a full-suite measurement.
 
 **Status:** in progress; wrong value. User decision 2026-10-22: option (a), the
 signature says only what is known (`x ↦ [x]` is `(unknown) -> list`); reading a
-free-symbol call argument as a number (option (b)) is rejected. Lands after
-CE-360, CE-361 and CE-363, which the new signature makes reachable from Tycho
-row 425 (`g := t ↦ [t, 2t]` with `x: any`). A patch exists (signature part only,
+free-symbol call argument as a number (option (b)) is rejected. The defects that
+the new signature makes reachable from Tycho row 425 (`g := t ↦ [t, 2t]` with
+`x: any`) are fixed. A patch exists (signature part only,
 `deriveSignatureResultType`); with it, the five compile tests below decline
 instead of compiling, which is accepted.
 
@@ -560,49 +559,15 @@ Probe:
 - **CE-25.1** A nested literal that captures a parameter keeps the fold:
   `x ↦ (() ↦ [x])` has the result `() -> vector<1>`.
 
-### CE-361. `Sum` over elements of unknown type is typed `number`
-
-**Status:** in progress; defect.
-
-`ce.declare("g", "(unknown) -> list<unknown>")`,
-`ce.assign("g", ce.parse("t \\mapsto [t, 2t]"))`, `ce.declare("x", {type:
-"any"})`: `Sum(Rest(g(x)))` is typed `number`, but at `x = [1, 2]` it evaluates
-to `[2, 4]` (the elements of `g(x)` are lists when `x` is a list). The same with
-the declared result `list`. A sum of elements that may be lists must not be
-typed as a number: the result type should be the join of the element types
-(`number | list<…>`, or the broadcast form the `Sum` handler uses for a row).
-
 ### CE-362. `list` and `list<unknown>` give different result types
 
 **Status:** open; defect.
 
-The two spellings denote one set of values, but with the setup of CE-361,
-`g(x)[1] + 1` is typed `any` when `g` is declared `(unknown) -> list` and
-`broadcastable<number> | missing` when it is declared
+The two spellings denote one set of values, but with `g := t ↦ [t, 2t]` and
+`x: any`, `g(x)[1] + 1` is typed `any` when `g` is declared `(unknown) -> list`
+and `broadcastable<number> | missing` when it is declared
 `(unknown) -> list<unknown>`. A reader somewhere treats the bare name and the
 `<unknown>` form differently; both must give the same answer.
-
-### CE-363. The type of a call of a function literal over a list differs between the two derivation routes
-
-**Status:** in progress; defect.
-
-With `f(x) := (-x, x)`, `deriveApplicationType` (the route that types a call
-from operand descriptors) types `f` over a `list<unknown>` operand as
-`tuple<number, number>`, because the descriptor `lift()` returns early for a
-function literal, while the expression route types the same call
-`list<tuple<number, number>>` (evaluation maps over the list). The descriptor
-route must lift the call over a list operand as the expression route does.
-
-### CE-364. `Multiply` of a number and a list with a cell of unknown type claims real cells
-
-**Status:** in progress; defect. Blocks CE-361 (its `Sum` typing reaches
-this `Multiply` in `tycho-item-336-nested-signature-derivation`).
-
-`ce.box(["Multiply", 2, ["List", "x"]])` is typed `vector<real^1>`, while `2x`
-alone is typed `number`. With `w := x ↦ 2·[x]`, `w(i)` is typed
-`vector<real^1>` and evaluates to `[2i]`. The cell type must be `number` (or the
-type of `2x`). The same class: `2 · u` with `u: broadcastable<unknown>` is typed
-`broadcastable<integer>`, and `0.9 · u` `broadcastable<real>`.
 
 ### CE-373. A point plus an operand of unknown type keeps the integer tier of the point
 
@@ -612,16 +577,51 @@ type of `2x`). The same class: `2 · u` with `u: broadcastable<unknown>` is type
 `p + u` with `p: broadcastable<tuple<integer, integer>>` and
 `u: broadcastable<unknown>` is typed `broadcastable<tuple<integer, integer>>`.
 With `q = 0.5` the value is `(1.5, 2.5)`, which neither type holds. The point
-arithmetic route keeps the components of the point when the other operand's
-type is unknown; it must widen them to `number`, as the scalar and list routes
-do (CE-364).
+arithmetic route keeps the components of the point when the other operand's type
+is unknown; it must widen them to `number`, as the scalar and list routes do.
+
+### CE-374. A product over a list of unknown elements is typed `unknown`
+
+**Status:** open; imprecise type, not unsound.
+
+With `L: list<unknown>`, `Sum(Rest(L))` is typed `broadcastable<number>`, but
+`Product(Rest(L))` is typed `unknown`. `Product` of an operand that is not a
+list literal becomes `Reduce(Rest(L), Multiply, 1)` at canonicalization, and
+`Reduce` has no type handler: its type comes from its signature
+`(collection<T>, reducer, initial?) -> value where T`. A `Reduce` whose reducer
+is `Add` or `Multiply` should be typed as `Sum` and `Product` are.
+
+### CE-375. Arithmetic over an operand of unknown type is typed as if the operand were not a point
+
+**Status:** open; question for the user.
+
+The convention: when an operand of `Add` or `Multiply` is typed `unknown`, the
+result is typed `broadcastable<number>`: a number, or a list of numbers of any
+depth. `Sum` and `Product` over a list of elements typed `unknown` use the same
+type. Example: with `f: (any) -> unknown`, `f(x) + f(y)` is typed
+`broadcastable<number>`. If `f` returns the point `(1, 2)`, the value is the
+point `(2, 4)`, which that type does not hold. A ragged list (`[1, [2, 3]]`) is
+not held either.
+
+Options:
+
+- (a) Keep `broadcastable<number>`: an operand of unknown type is read as a
+  number or a tensor of numbers, as a use of a valueless symbol narrows it to a
+  number. Points and ragged lists through an operand of unknown type stay
+  outside the type.
+- (b) Widen the result to a type that holds points and ragged lists too, for
+  example `number | list<any> | tuple`. Every result typed
+  `broadcastable<number>` today through an `unknown` operand changes; the number
+  of tests that change has not been measured.
+
+If nothing is decided, (a) stays.
 
 ### CE-365. A use of a function widens its inferred signature
 
 **Status:** open; defect, small.
 
-With `m := t ↦ [[t, 1], [2, 3]]`, after `Trace(m(2))` the signature of `m`
-reads `(unknown) -> list<list<unknown>> | number | tensor`. The union holds every
+With `m := t ↦ [[t, 1], [2, 3]]`, after `Trace(m(2))` the signature of `m` reads
+`(unknown) -> list<list<unknown>> | number | tensor`. The union holds every
 value, but the result of `m` is always a list; a use should not widen the
 signature with the type of the expression that uses the call.
 
@@ -4179,8 +4179,8 @@ With `g := t ↦ [t, 2t]` (any of the signatures `(unknown) -> list<unknown>`,
 `g(x)[5] * g(x)[1]` gives `NaN` (interpreter: `Missing`). Expected: the absence
 marker the interpreter gives.
 
-- **CE-368.1** `_SYS.bcastAbsent` makes the whole result absent beside a
-  present list: with the inferred signature, compiled `g(x)[5] + g(x)[1]` at
+- **CE-368.1** `_SYS.bcastAbsent` makes the whole result absent beside a present
+  list: with the inferred signature, compiled `g(x)[5] + g(x)[1]` at
   `x = [1, 2]` gives `undefined` (`Missing`), the interpreter `[NaN, NaN]` (a
   present list gives the shape).
 
@@ -4213,18 +4213,6 @@ typed `missing | number | vector<2>`; at `x = [[1, 2], [3]]` its value is the
 matrix `[[1, 2], [2, 4]]`, which that type does not hold. `indexElementType`
 (`common/type/utils.ts`) reads one level of the broadcastable's collection
 option, which is a tensor of any rank.
-
-### CE-360. Compiled JavaScript adds a number to a list element of unknown type by string concatenation
-
-**Status:** in progress; wrong value.
-
-`ce.declare("g", "(unknown) -> list<unknown>")`,
-`ce.assign("g", ce.parse("t \\mapsto [t, 2t]"))`, `ce.declare("x", {type:
-"any"})`, then compile `g(x)[1] + 1` and run it at `x = [1, 2]`: it returns the
-string `"1,21"` (the array `[1, 2]` converted to a string and joined with `1`),
-where the interpreter gives `[2, 3]`. The element `g(x)[1]` may be a list, and
-the compiled `+` treats it as a scalar JavaScript value. Expected: the compiled
-code broadcasts as the interpreter does, or the compile declines (fail closed).
 
 ### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
 
@@ -4356,12 +4344,11 @@ representation of points that differs from a row.
 
 A dictionary built in 30 levels, each level holding the previous one under two
 keys (`{p: d, q: d}`), has 31 distinct nodes, but
-`ReleaseHold(Hold(d)).evaluate()` does not finish in 25 s (measured
-2026-10-22 on `c5f2dc963`): evaluation walks each path to a shared value again.
-`has()`, `.subexpressions` and the assignment copy of row 426 visit a shared
-node once (`hasSymbolOrOperator`, `getSubexpressions`, `snapshotRunVariables`).
-Fix: memoize the evaluation of a dictionary's values by node within one
-evaluation.
+`ReleaseHold(Hold(d)).evaluate()` does not finish in 25 s (measured 2026-10-22
+on `c5f2dc963`): evaluation walks each path to a shared value again. `has()`,
+`.subexpressions` and the assignment copy of row 426 visit a shared node once
+(`hasSymbolOrOperator`, `getSubexpressions`, `snapshotRunVariables`). Fix:
+memoize the evaluation of a dictionary's values by node within one evaluation.
 
 ### CE-366. Compiled `p·q` with `p, q: any` holding lists gives `null`
 
@@ -4372,8 +4359,8 @@ With `p` and `q` declared `any` and holding lists, `Multiply(p, q)` compiles to
 gives the matrix product of two matrices (CE-98) or the entry-wise product of
 two plain lists. Measured 2026-10-22 on `4916e3f7f`; the same before the
 `Multiply` change. Fix: an `any` operand that may hold a list goes through the
-same run-time shape dispatch as `tensor<number>` (`_SYS.matrixProductShape`),
-or declines; a type that may hold points keeps the entry-wise code (CE-216).
+same run-time shape dispatch as `tensor<number>` (`_SYS.matrixProductShape`), or
+declines; a type that may hold points keeps the entry-wise code (CE-216).
 
 ### CE-217. A compiled user function reads a free symbol of its body from the compile scope
 

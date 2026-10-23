@@ -314,39 +314,37 @@
 
 ### Behavior Changes
 
-- **The type of a list or set literal that holds an error value describes
-  its other elements.** A type describes the successful values, so an
-  element whose type is `error` (an `Error` expression, or a failed
-  application such as `1/"a"`) is left out of the element type when another
-  element of the same level succeeded. `[1, 1/"a", 3]` is now typed
-  `vector<integer^3>`, as `[1, 2, 3]` is; it was `list<unknown>`.
-  `[[1, 1/"a"], [3, 4]]` is `matrix<integer^(2x2)>` (it was
-  `list<list<unknown>>`), and `Set(1, 1/"a")` is `set<integer>` (it was
-  `set<unknown>`). A level whose elements all failed keeps its type:
-  `[1/"a", 1/"a"]` is still `list<unknown>`, and a set whose elements all
-  failed is still `set<unknown>`. The error is still in the expression:
-  `isValid` is `false` and `errors` lists it. As a result, the value of an
-  element-wise `If` or `Which` with at least one successful cell matches the
-  static type of the expression: `If([True, Missing, False], 1, 0)` is typed
+- **The type of a list or set literal that holds an error value describes its
+  other elements.** A type describes the successful values, so an element whose
+  type is `error` (an `Error` expression, or a failed application such as
+  `1/"a"`) is left out of the element type when another element of the same
+  level succeeded. `[1, 1/"a", 3]` is now typed `vector<integer^3>`, as
+  `[1, 2, 3]` is; it was `list<unknown>`. `[[1, 1/"a"], [3, 4]]` is
+  `matrix<integer^(2x2)>` (it was `list<list<unknown>>`), and `Set(1, 1/"a")` is
+  `set<integer>` (it was `set<unknown>`). A level whose elements all failed
+  keeps its type: `[1/"a", 1/"a"]` is still `list<unknown>`, and a set whose
+  elements all failed is still `set<unknown>`. The error is still in the
+  expression: `isValid` is `false` and `errors` lists it. As a result, the value
+  of an element-wise `If` or `Which` with at least one successful cell matches
+  the static type of the expression: `If([True, Missing, False], 1, 0)` is typed
   `list<integer>` and evaluates to `[1, Error(…), 0]`, typed
   `vector<integer^3>`; that value was typed `list<unknown>`. A tuple is
   unchanged: `(1, 1/"a")` is still typed `error`.
 
-  A variable with a declared type still refuses a collection that holds an
-  error element, at any depth (also inside a tuple slot or a dictionary
-  value, and through a symbol that holds the collection), unless the
-  declared element type admits `error` (`any`, `unknown`, or an explicit
-  `error` arm). With `s: list<number>`, `s := [1, Error("oops")]` throws, and
-  the `Assign` and `Declare` operators give an `incompatible-type` error. The
-  message now names the failed element ("The value holds the failed element
-  `Error("oops")`…"), and it no longer states the type of the value when that
-  type matches the declared type. A declared union is read arm by arm:
-  `list<number> | set<any>` refuses `[1, Error("oops")]`. `list<number |
-  error>` now admits that value; it was refused, because the value was typed
-  `list<unknown>`. A parameter binding does not refuse it: a function whose
-  parameter is declared `list<number>` runs when called with
-  `[1, Error("oops")]`, as before. A symbol without a declared type takes the
-  value, as before.
+  A variable with a declared type still refuses a collection that holds an error
+  element, at any depth (also inside a tuple slot or a dictionary value, and
+  through a symbol that holds the collection), unless the declared element type
+  admits `error` (`any`, `unknown`, or an explicit `error` arm). With
+  `s: list<number>`, `s := [1, Error("oops")]` throws, and the `Assign` and
+  `Declare` operators give an `incompatible-type` error. The message now names
+  the failed element ("The value holds the failed element `Error("oops")`…"),
+  and it no longer states the type of the value when that type matches the
+  declared type. A declared union is read arm by arm: `list<number> | set<any>`
+  refuses `[1, Error("oops")]`. `list<number | error>` now admits that value; it
+  was refused, because the value was typed `list<unknown>`. A parameter binding
+  does not refuse it: a function whose parameter is declared `list<number>` runs
+  when called with `[1, Error("oops")]`, as before. A symbol without a declared
+  type takes the value, as before.
 
 - **An applied function literal is typed by its body** (Tycho row 426).
   `Apply(literal, args)`, and `xs |> literal` when the literal takes its
@@ -354,16 +352,16 @@
   argument's type, as a call of a named function already was: with
   `M: list<real>` and `p(n) = s·n`, `Apply(a ↦ Map(p, a), M)` is `list<number>`
   (it was `collection<unknown>`), and `'abc' |> (s ↦ s)` is `string`. The
-  derivation stops (and keeps the literal's own result type) for a body with
-  an early `Return`, a loop, an assignment that is not at the top of the body,
-  or a nested function that reads an outer parameter. A call of a named
-  function whose body passes an inline callback (`Map(u ↦ 2u, a)`) is also
-  refined. Other type changes in the same area:
+  derivation stops (and keeps the literal's own result type) for a body with an
+  early `Return`, a loop, an assignment that is not at the top of the body, or a
+  nested function that reads an outer parameter. A call of a named function
+  whose body passes an inline callback (`Map(u ↦ 2u, a)`) is also refined. Other
+  type changes in the same area:
   - A function literal's result type includes its early `Return` values, and
-    `Nothing` when it can return nothing (`Return()`, or a final empty
-    `Block`): `x ↦ Block(If(x > 1, Return('big')), 2x)` is `-> number | string`.
-  - A `Sum` or `Product` index with the same name as a parameter no longer
-    sets that parameter's type.
+    `Nothing` when it can return nothing (`Return()`, or a final empty `Block`):
+    `x ↦ Block(If(x > 1, Return('big')), 2x)` is `-> number | string`.
+  - A `Sum` or `Product` index with the same name as a parameter no longer sets
+    that parameter's type.
   - `Map` with a callback whose result type is `unknown` has elements of type
     `unknown`: `Map(u ↦ Q, M)` is `list<unknown>` (it was `list<real>`).
 
@@ -386,53 +384,52 @@
 - **Compiled `Power` of a value whose depth is not known follows the
   interpreter's matrix power.** For a base typed `tensor<number>`, `tensor`,
   `list<list<number>>` or `broadcastable<number>`, the compiled JavaScript
-  checks the value's shape when it runs: a square matrix with an exact
-  integer exponent gives the matrix power (`[[1, 2], [3, -4]]^2` is
-  `[[7, -6], [-9, 22]]`; it was `[[1, 4], [9, 16]]`), also for each matrix of
-  a tensor of rank 3 or more, and a vector or a float exponent keeps the power
-  of each entry. A non-square matrix to an integer power other than 1 throws
-  `expected-square-matrix`, as the interpreter answers; this now also holds
-  for `MatrixPower`, `Inverse` and `Power` over `matrix<…>`, which returned
-  `NaN`. When compiled code cannot tell whether the exponent is exact (for
-  example `p^(2x)` with `x: real`, or a float within 1e-12 of an integer, such
-  as `√n·√n`), it throws instead of guessing. A base that may hold points
-  (bare `list`, `list<unknown>`, `any`, `list<tuple<…>>`) keeps the power of
-  each entry, unchanged, because compiled code stores a list of points and a
-  matrix as the same array. A function the caller maps with `functions` takes
+  checks the value's shape when it runs: a square matrix with an exact integer
+  exponent gives the matrix power (`[[1, 2], [3, -4]]^2` is
+  `[[7, -6], [-9, 22]]`; it was `[[1, 4], [9, 16]]`), also for each matrix of a
+  tensor of rank 3 or more, and a vector or a float exponent keeps the power of
+  each entry. A non-square matrix to an integer power other than 1 throws
+  `expected-square-matrix`, as the interpreter answers; this now also holds for
+  `MatrixPower`, `Inverse` and `Power` over `matrix<…>`, which returned `NaN`.
+  When compiled code cannot tell whether the exponent is exact (for example
+  `p^(2x)` with `x: real`, or a float within 1e-12 of an integer, such as
+  `√n·√n`), it throws instead of guessing. A base that may hold points (bare
+  `list`, `list<unknown>`, `any`, `list<tuple<…>>`) keeps the power of each
+  entry, unchanged, because compiled code stores a list of points and a matrix
+  as the same array. A function the caller maps with `functions` takes
   precedence, as before.
 
-- **An index into a `broadcastable<T>` whose `T` is a tuple, a string, a
-  record or a dictionary is typed by what it can return.** With
-  `p: broadcastable<tuple<number, number>>` holding `(1, 2)`, `At(p, 1)` is
-  `1`, but it was typed
+- **An index into a `broadcastable<T>` whose `T` is a tuple, a string, a record
+  or a dictionary is typed by what it can return.** With
+  `p: broadcastable<tuple<number, number>>` holding `(1, 2)`, `At(p, 1)` is `1`,
+  but it was typed
   `missing | tensor<tuple<number, number>> | tuple<number, number>`, and
   `Take(p, 1)` is `[1]`, but it was typed `list<tuple<number, number>>`. With
-  `p: broadcastable<string>` holding `"abc"`, `At(p, 1)` is the character
-  `"a"`, but it was typed `missing | string | tensor<string>`. The element
-  readers (`At`, `First`, `Second`, `Third`, `Last`) and the selectors
-  (`Take`, `Drop`, `Rest`, `Most`, `Slice`) now also include what an index
-  into one value of `T` returns: the slots of a tuple (a `nothing` slot
-  included), `character` for a string, the field types of a record (an
-  `unknown` field included) and the value type of a dictionary, also for such
-  an arm of a union `T`. `At(p, 1)` is now typed
+  `p: broadcastable<string>` holding `"abc"`, `At(p, 1)` is the character `"a"`,
+  but it was typed `missing | string | tensor<string>`. The element readers
+  (`At`, `First`, `Second`, `Third`, `Last`) and the selectors (`Take`, `Drop`,
+  `Rest`, `Most`, `Slice`) now also include what an index into one value of `T`
+  returns: the slots of a tuple (a `nothing` slot included), `character` for a
+  string, the field types of a record (an `unknown` field included) and the
+  value type of a dictionary, also for such an arm of a union `T`. `At(p, 1)` is
+  now typed
   `missing | number | tensor<tuple<number, number>> | tuple<number, number>`,
   and a selector over `broadcastable<string>` is typed
-  `list<string | tensor<string>> | string`, which holds the rows of a 2-D
-  array of strings. A tuple and a string are still one cell for broadcasting,
-  and the aggregates (`Sum`, `Max`, `Reduce`) read the elements as before.
+  `list<string | tensor<string>> | string`, which holds the rows of a 2-D array
+  of strings. A tuple and a string are still one cell for broadcasting, and the
+  aggregates (`Sum`, `Max`, `Reduce`) read the elements as before.
 
   Compiled code: the JavaScript `At(p, 3)` of the one point `(1, 2)` gave
   `Missing`; it now gives `NaN`, as the interpreter does. The JavaScript and
   Python element readers and selectors of an operand that may be a string
-  without proof that it is a list (`broadcastable<string>`, a `broadcastable`
-  of one, an alias of one, `string | list<string>` on Python) now decline, so
-  the `fallback` option decides: they read a string by UTF-16 code unit or by
-  code point, so `At(p, 1)` of `"abc"` gave `undefined` (JavaScript) or `NaN`
-  (Python), and `First(p)` of `"😀b"` half of a surrogate pair. Such an
-  operand that holds a list of strings, which compiled correctly, now
-  declines too. JavaScript `First`, `Second` and `Third` of an operand typed
-  `any`, `value` or `broadcastable<any>` decline, as `At` and `Last` already
-  did.
+  without proof that it is a list (`broadcastable<string>`, a `broadcastable` of
+  one, an alias of one, `string | list<string>` on Python) now decline, so the
+  `fallback` option decides: they read a string by UTF-16 code unit or by code
+  point, so `At(p, 1)` of `"abc"` gave `undefined` (JavaScript) or `NaN`
+  (Python), and `First(p)` of `"😀b"` half of a surrogate pair. Such an operand
+  that holds a list of strings, which compiled correctly, now declines too.
+  JavaScript `First`, `Second` and `Third` of an operand typed `any`, `value` or
+  `broadcastable<any>` decline, as `At` and `Last` already did.
 
 - **An index into a `broadcastable<T>` value is typed by what it can return**
   (Tycho row 425). With `g(t) = [t, 2t]` and `x: any`, `g(x)` is typed
@@ -440,38 +437,38 @@
   vectors. `g(x)[1]` is now typed `missing | number | vector<2>` (it was
   `missing | vector<2>`, which does not hold the number that `g(3)[1]` gives),
   so `Repeat(0, g(x)[1])` is valid. The same reading applies to `First`,
-  `Second`, `Third`, `Last` and `At` with a list of indices, and to the
-  elements of `Take`, `Drop`, `Rest`, `Most` and `Slice` of such a value.
-  Other changes that follow:
+  `Second`, `Third`, `Last` and `At` with a list of indices, and to the elements
+  of `Take`, `Drop`, `Rest`, `Most` and `Slice` of such a value. Other changes
+  that follow:
   - `Sum`, `Product`, and `Reduce` with `Add` and 0 or `Multiply` and 1, over
     elements that may be numbers or rows are typed as a number or a row
     (`Sum(Rest(m(x)))` with `m(t) = [[t, 2t], [3t, 4t]]` is
     `integer | matrix<2x2> | vector<2>`; it was `number`), with `nan` when the
     operand may be absent.
-  - Arithmetic on a union of lists with dimensions maps over the list:
-    `2·vv` for `vv: vector<2> | vector<3>` is `list<number>` (it was `number`).
+  - Arithmetic on a union of lists with dimensions maps over the list: `2·vv`
+    for `vv: vector<2> | vector<3>` is `list<number>` (it was `number`).
   - `Product`, `Reduce` and `Fold` with `Multiply` over elements that are
     matrices or vectors are accepted (they were `incompatible-type`).
-  - `PointX`/`PointY` and `Dot` of a union of numbers and vectors are typed
-    from the vector arms; `PointX` of `string | list<string>` reads the
-    character or element at the position.
+  - `PointX`/`PointY` and `Dot` of a union of numbers and vectors are typed from
+    the vector arms; `PointX` of `string | list<string>` reads the character or
+    element at the position.
   - Compiled JavaScript `At`, `First`, `Second`, `Third` and `Last` over
-    elements that may be numbers or lists choose the out-of-range value from
-    the value read, as the interpreter does: `NaN` for a list of numbers,
-    `Missing` otherwise. `Last([])` of a list that is not of numbers (a matrix
-    included) is now `Missing` (it was `NaN`).
+    elements that may be numbers or lists choose the out-of-range value from the
+    value read, as the interpreter does: `NaN` for a list of numbers, `Missing`
+    otherwise. `Last([])` of a list that is not of numbers (a matrix included)
+    is now `Missing` (it was `NaN`).
   - Compiled `Sum` and `Reduce` with `Add` over elements that may differ in
     shape throw when two elements have different shapes, as the interpreter
     answers `incompatible-dimensions`; compiled `Product` over such elements
     declines.
-  - Compiled `Repeat` throws when its count is not an integer when the code
-    runs (it rounded the count, or returned `[]`).
+  - Compiled `Repeat` throws when its count is not an integer when the code runs
+    (it rounded the count, or returned `[]`).
   - Compiled JavaScript `Max`, `Min`, `Mean`, `Median` and `Variance` over
-    elements that may be numbers or lists, or over an operand that may be
-    absent and holds lists, decline (they gave `NaN`). Python `Mean`,
-    `Median` and `Variance` of a `tensor` or `broadcastable` operand check the
-    rank when the code runs and raise for a matrix; Python folds over a
-    `tensor<number>` decline.
+    elements that may be numbers or lists, or over an operand that may be absent
+    and holds lists, decline (they gave `NaN`). Python `Mean`, `Median` and
+    `Variance` of a `tensor` or `broadcastable` operand check the rank when the
+    code runs and raise for a matrix; Python folds over a `tensor<number>`
+    decline.
 
 - **Element-wise `If` and `Which` over a mask of any rank.** A condition that is
   a nested list of `True`/`False`/`Missing` now selects at every level. It
@@ -632,21 +629,90 @@
 
 ### Resolved Issues
 
-- **The `complex` compile mode did not reach the cells of a list input.**
-  With `mode: 'complex'`, a scalar input declared `number` used complex
-  arithmetic, but a `list<number>`, `tensor<number>`, `matrix<number>` or
-  `list<unknown>` input did not: `Add(p, 1)` with a cell `1 + i` gave the
-  string `"[object Object]1"`. Element-wise arithmetic, cell functions and the
+- **An element of a `list<unknown>` result was read as a number.** With
+  `g: (unknown) -> list<unknown>` and `x: any`, the element `g(x)[1]` is typed
+  `missing | unknown`, and it is a list when `x` is a list. Compiled
+  `g(x)[1] + 1` gave the string `"1,21"` at `x = [1, 2]`, a product gave `NaN`,
+  `g(x)[1] < 1` gave one `false`, and `Sin(g(x)[1])` was typed `number`, so
+  `Sin(g(x)[1]) + 1` also joined strings. A value typed by `unknown`, `any` or
+  `value` beside `missing` or `nothing` only is now read as that type, both when
+  typing and when compiling: `Sin(g(x)[1])` is typed
+  `broadcastable<number> | missing`, and compiled arithmetic, the cell functions
+  (`Sin`, `Sqrt`, `Abs`, `Floor`, …), the comparisons, an `If` that selects the
+  element, and a `Block` local that holds it broadcast at run time, as they
+  already did for a `g` declared `(unknown) -> list`. They give the
+  interpreter's values: `[2, 3]` and `[false, false]`. A `Block` local that
+  holds the element is read the same way, also inside a cell function:
+  `Block(Assign(y, g(x)[1]), Sin(y) + 1)` gave a string, and `Sin(y)` was typed
+  `number`. A symbol the user declared `any`, a global with an assigned value
+  and a free variable stay scalar code, as before. A number `x` gives the same
+  values as before. The cost: an index into a list whose elements are typed
+  `unknown | missing` (`L[i] + 1` with `L: list<unknown | missing>`) now
+  compiles to the run-time broadcast `_SYS.bcast`, as an index into a
+  `list<unknown>` or a `list<any>` already did. An index into a list of numbers
+  stays scalar code.
+- **A call of a function literal over a list had a different type inside the
+  body of another function.** With `f := x ↦ (-x, x)`, the call `f(L)` for a
+  list `L` evaluates to a list of pairs and is typed
+  `list<tuple<number, number>>`. The same call typed from the types of its
+  arguments, which is how the engine types a call in the body of another
+  function and how a custom `type` handler derives a call (`context.derive`),
+  was typed `tuple<number, number>`, the type of one element. Both now give the
+  same type, for a list, a matrix (each cell is mapped), a
+  `broadcastable<number>` argument and a function with a declared signature such
+  as `(real) -> real`; a scalar argument and a parameter typed as a collection
+  are not mapped, as before. A call with fewer arguments than parameters is now
+  typed as the function of the remaining parameters in both cases. Some inferred
+  types become narrower: with `h := a ↦ f([a, a])`, `h(1)` is typed
+  `list<tuple<integer, integer>>` (it was `list<tuple<number, number>>`), and
+  with `g: (T) -> T where T` (or `where T: number`), `Map(g, rows)` over a
+  `list<list<integer>>` is typed `list<list<integer>>`. A generic function whose
+  type variable has a bound no longer takes its result from a list element that
+  breaks the bound: with `g: (T) -> T where T: number` and a list of strings
+  `L`, `g(L)` was typed `list<string>`; each element of its value is an
+  `incompatible-type` error, and the call is now typed `list<number>`, and so is
+  the list option of an argument typed `number | list<string>` (the call is
+  typed `list<number> | number`).
+- **`Sum` of elements that may be lists was typed `number`.** With
+  `g(t) = [t, 2t]` declared `(unknown) -> list<unknown>` and `x` declared `any`,
+  `Sum(Rest(g(x)))` was typed `number`, but at `x = [1, 2]` it is `[2, 4]`.
+  `Sum` and `Product` now give a type that holds a list when their terms may be
+  lists: `broadcastable<number>` for terms typed `unknown` (the type `Add` gives
+  for such operands), as in `Sum(L)` for `L: list<unknown>` or `L: list`; `any`
+  for terms that have an `any` option, as with `g` declared `(unknown) -> list`;
+  `list<any> | number` for rows whose cells are not typed, as in `Sum(M)` for
+  `M: list<list<unknown>>`; and `number | vector<2>` for `Sum(g(x))` when `g(x)`
+  is typed `broadcastable<vector<2>>`. This applies to the `Sum(body, limits)`
+  form too: `Sum(L[k], k, 1, 2)`. Terms typed as numbers, points or rows of
+  numbers keep their type. A compiled `Sum(g(x))` or `Product(g(x))` over such a
+  `g` now compiles to the interpreter's value (it declined before), and a
+  compiled `Sum(L) + 1` for `L: list<unknown>` now declines (it gave `null` for
+  a list of rows).
+- **Arithmetic over a cell of unknown type took the tier of the other operand.**
+  With `u: broadcastable<unknown>`, `2 · u` and `2 + u` were typed
+  `broadcastable<integer>` and `0.9 · u` `broadcastable<real>`, although a cell
+  of `u` may be any number. They are now typed `broadcastable<number>`, and so
+  are `[1, 2] · u`, `[1, 2] + u` and `[1, 2] - u` (they were
+  `vector<integer^2>`, but `u` may hold a matrix). A free symbol in a list
+  literal is now narrowed to `number`, as the same symbol in a scalar product
+  is: `2 · [y]` is typed `vector<1>` and `y` is inferred `number` (they were
+  `vector<real^1>` and `real`). With `w := x ↦ 2 · [x]`, `w(i)` was typed
+  `vector<real^1>` with the value `[2i]`.
+- **The `complex` compile mode did not reach the cells of a list input.** With
+  `mode: 'complex'`, a scalar input declared `number` used complex arithmetic,
+  but a `list<number>`, `tensor<number>`, `matrix<number>` or `list<unknown>`
+  input did not: `Add(p, 1)` with a cell `1 + i` gave the string
+  `"[object Object]1"`. Element-wise arithmetic, cell functions and the
   orderings over such inputs now use complex arithmetic in that mode (an
-  ordering of a non-real cell is `false`). The default and `strict` modes
-  emit the same code as before.
+  ordering of a non-real cell is `false`). The default and `strict` modes emit
+  the same code as before.
 
 - **Compiled statistics of complex data gave `NaN`.** Compiled `Mean`,
   `Variance`, `StandardDeviation`, `PopulationVariance` and
   `PopulationStandardDeviation` over complex data now give the interpreter's
   values in the default and `complex` modes: `Mean([3, 4i])` is `1.5 + 2i`, and
-  the variance family is real. The `strict` mode still declines. Real data
-  gives the same bits as before in every mode.
+  the variance family is real. The `strict` mode still declines. Real data gives
+  the same bits as before in every mode.
 
 - **The variance of large values of opposite signs overflowed.** In compiled
   code and in the interpreter at machine precision, `Variance([1e308, -1e308])`
@@ -654,16 +720,16 @@
   `StandardDeviation([1e200, -1e200])` is `1.414e200` (it was `+Infinity`).
   Ordinary data gives the same bits as before.
 
-- **Compiled folds and reads over elements that mix numbers and lists gave
-  wrong values.** For a list whose elements may be numbers or vectors
+- **Compiled folds and reads over elements that mix numbers and lists gave wrong
+  values.** For a list whose elements may be numbers or vectors
   (`list<number | vector<2>>`, a `tensor`, or the selectors of a
   `broadcastable<vector<2>>`), compiled `Sum`, and `Reduce` with `Add` or
   `Multiply`, joined the rows as strings (`"01,22,43,6"`) or gave `NaN`; they
   now combine element by element, as the interpreter does. Compiled `Max`,
-  `Mean` and `Reduce(…, Max)` over such elements gave `NaN` or compared rows
-  as strings; they now decline. Python `Max`/`Min` of an operand that may be
-  absent or a list returned the operand itself; they now reduce it, and give
-  `NaN` for an absent or empty operand.
+  `Mean` and `Reduce(…, Max)` over such elements gave `NaN` or compared rows as
+  strings; they now decline. Python `Max`/`Min` of an operand that may be absent
+  or a list returned the operand itself; they now reduce it, and give `NaN` for
+  an absent or empty operand.
 
 - **`HadamardProduct`, and the element-wise sum, difference, quotient and power
   of two tensors, gave `undefined` cells when the two tensors had different data

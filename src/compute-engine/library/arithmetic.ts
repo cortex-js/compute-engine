@@ -241,6 +241,8 @@ import {
   stripNumericRanges,
   descendIntoConstructor,
   isBareCutOnDescent,
+  topTypeBesideAbsence,
+  blockLocalTypeMayHoldList,
   unfoldAliasOnDescent,
   widen,
   widenAll,
@@ -3172,7 +3174,23 @@ function isDeclaredNumberListOperand(d: OperandDescriptor): boolean {
  * function expression, and a symbol node carries the inferred flag.
  */
 function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
-  const t = resolveTypeAlias(d.type);
+  // A `Block` local typed by a top type may hold a list, as the expression
+  // predicate reads it (`isTopTypedBlockLocal`, `collection-utils.ts`).
+  const structure = d.structureOf?.();
+  if (
+    structure?.kind === 'symbol' &&
+    structure.local === true &&
+    blockLocalTypeMayHoldList(d.type)
+  )
+    return true;
+  // An application typed by a top type beside absence markers only
+  // (`missing | unknown`, an index into a `list<unknown>`) is read as that
+  // top type (`topTypeBesideAbsence`), as the expression predicate reads it.
+  const resolved = resolveTypeAlias(d.type);
+  const t =
+    (operandChildren(d) !== undefined
+      ? topTypeBesideAbsence(resolved)
+      : undefined) ?? resolved;
   if (unrefinedTopTypeOfOperand(d) !== undefined) return true;
   if (t === 'unknown' || t === 'any' || t === 'value')
     return operandChildren(d) !== undefined;
@@ -3248,6 +3266,25 @@ function unrefinedTopTypeOfOperands(
   return result;
 }
 
+/**
+ * Whether an operand is a `broadcastable` whose cells are of unknown type.
+ * Its shape is not known (a scalar, a vector or a matrix) and neither is the
+ * tier of its cells, so a sum or a product with it is typed by
+ * `broadcastableResultTypeOfOperands`, which widens the tier of the other
+ * operands to `number`. The branches for collections of a fixed shape read
+ * its cells as `unknown`, and the join ignores them: `[1, 2] · u` with
+ * `u: broadcastable<unknown>` was typed `vector<integer^2>`, while the value
+ * is a matrix when `u` holds one, and its cells may be any number.
+ */
+function hasUnknownBroadcastCells(d: OperandDescriptor): boolean {
+  const t = d.type;
+  return (
+    typeof t !== 'string' &&
+    t.kind === 'broadcastable' &&
+    t.elements === 'unknown'
+  );
+}
+
 /** The `broadcastable<T>` result of an element-wise operator over operand
  * descriptors of which one may be a collection
  * (`isPossiblyCollectionTypedOperand`); a top-typed operand makes it the bare
@@ -3255,16 +3292,35 @@ function unrefinedTopTypeOfOperands(
 function broadcastableResultTypeOfOperands(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type {
-  const contributions = ops.map((op): Type => {
+  // An operand whose cells are of unknown type, a scalar typed `unknown` (a
+  // call of an undeclared function) or a `broadcastable<unknown>`, may hold
+  // any number. It widens the numeric tier of every other contribution to
+  // `number`, cell by cell, and keeps its shape: a number combined with a
+  // vector cell gives a vector cell. The join alone is neutral in `unknown`,
+  // so without this `2 · u` with `u: broadcastable<unknown>` took the tier of
+  // the `2` and was typed `broadcastable<integer>`. An operand typed `any` or
+  // `value` may be a point or a matrix, and contributes its own type
+  // (`unrefinedTopTypeOfOperand`).
+  let unknownCells = false;
+  const known: Type[] = [];
+  for (const op of ops) {
     const t = op.type;
-    if (typeof t !== 'string' && t.kind === 'broadcastable') return t.elements;
-    // An `unknown`-typed operand (a call of an undeclared function) is read
-    // as a number; an operand typed `any` or `value` may be a point or a
-    // matrix, and contributes its own type (`unrefinedTopTypeOfOperand`).
-    if (t === 'unknown') return 'number';
-    if (t === 'any' || t === 'value') return t;
-    return broadcastElementType(t);
-  });
+    const cell =
+      typeof t !== 'string' && t.kind === 'broadcastable' ? t.elements : t;
+    if (cell === 'unknown') unknownCells = true;
+    else if (cell !== t) known.push(cell);
+    else if (t === 'any' || t === 'value') known.push(t);
+    else known.push(broadcastElementType(t));
+  }
+  const contributions: Type[] = !unknownCells
+    ? known
+    : known.length === 0
+      ? ['number']
+      : known.map(
+          (c) =>
+            mapProductCells(stripNumericRanges(c), (x) => widen(x, 'number')) ??
+            c
+        );
   // Neither a sum nor a product is closed over `imaginary` (`i · i = −1`):
   // each imaginary member of the join is `complex`.
   const element = closeImaginaryUnderArithmetic(
@@ -3596,6 +3652,11 @@ function addTypeOnTypes(
 ): Type {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
+  // A term with cells of unknown type and an unknown shape (see
+  // `hasUnknownBroadcastCells`): before the tuple, tensor and collection
+  // branches, which would fold it into the cells of a list as a scalar.
+  if (args.some(hasUnknownBroadcastCells))
+    return broadcastableResultTypeOfOperands(args);
   // Numeric tuples (points/vectors) add component-wise, preserving the tuple
   // type. Handled before the NaN/finiteness early-returns: a tuple is not a
   // finite number, which would otherwise collapse the result to `number`.
@@ -8828,6 +8889,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const topFactor = unrefinedTopTypeOfOperands(ops);
         if (topFactor !== undefined)
           return BoxedType.forResult(topFactor, engine._typeResolver);
+        // A factor with cells of unknown type and an unknown shape (see
+        // `hasUnknownBroadcastCells`): before the tensor and collection
+        // branches, which would fold it into the cells of a list as a scalar.
+        if (ops.some(hasUnknownBroadcastCells))
+          return BoxedType.forResult(
+            broadcastableResultTypeOfOperands(ops),
+            engine._typeResolver
+          );
         // A factor that is NaN or a number (`nan | real`, the type of an
         // element read `l[i]` whose index may fall outside the list): the
         // product is NaN when that factor is NaN, and otherwise the product

@@ -21,9 +21,12 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import {
   collectionElementType,
+  indexElementType,
   resolveTypeAlias,
   stripNumericRanges,
+  unfoldAliasOnDescent,
   widen,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { withoutNothing } from '../../common/type/omission.js';
@@ -1818,6 +1821,10 @@ const NUMBER_OR_NAN_TYPE = parseType('number | nan');
  * that are numbers or lists whose cells the type does not state. */
 const NUMBER_OR_LIST_OF_ANY_TYPE = parseType('number | list<any>');
 
+/** A number, or a list of numbers of any depth: the sum or the product of
+ * terms typed `unknown` (`listReductionType`). */
+const BROADCASTABLE_NUMBER_TYPE = parseType('broadcastable<number>');
+
 /**
  * The collection type of the operand of `Sum`/`Product`, when it is a list
  * or an abstract collection (`collection`, `indexed_collection`, `set`) of
@@ -2083,12 +2090,177 @@ function stripTopLevelMissing(t: Type): Type | undefined {
 }
 
 /**
+ * The type of a sum (or a product) of many values of type `t`, when `t` is
+ * not a number type but may hold a list; `undefined` otherwise.
+ *
+ * `Add` and `Multiply` map over a list, so the sum of values that may be
+ * lists may be a list: with `g(t) = [t, 2t]` and `x = [1, 2]`, the elements
+ * of `Rest(g(x))` are `[[2, 4]]` and their sum is `[2, 4]`. The type `number`
+ * does not hold that value.
+ *
+ * - When `t` is, or has an option that is, `any` or `value`, a term may be
+ *   a number, a list or a point, and the sum may be any of these: the
+ *   result is that type.
+ * - When `t` is, or has an option that is, `unknown`, the result is
+ *   `broadcastable<number>`, the type `Add` and `Multiply` give for
+ *   operands typed `unknown`: a number, or a list of numbers of any depth.
+ * - When every option of `t` is a number, `NaN`, an absent value, or a list
+ *   (with at least one list whose cells are not numbers), the result is
+ *   `number | list<any>`: the sum of lists is a list whose cells the type
+ *   does not state, and the sum of numbers is a number. An absent term
+ *   adds `NaN`.
+ * - Any other type (a string, a point) gives `undefined`, and the caller's
+ *   own answer applies.
+ */
+function listReductionType(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  const options = (
+    typeof r === 'object' && r.kind === 'union' ? r.types : [r]
+  ).map((m) => resolveTypeAlias(m));
+  const tops = options.filter((m) => m === 'any' || m === 'value');
+  if (tops.length > 0) return reduceType({ kind: 'union', types: tops });
+  if (options.includes('unknown'))
+    return options.includes('missing')
+      ? reduceType({ kind: 'union', types: [BROADCASTABLE_NUMBER_TYPE, 'nan'] })
+      : BROADCASTABLE_NUMBER_TYPE;
+  const isListOption = (m: Type): boolean =>
+    m === 'list' ||
+    (typeof m === 'object' &&
+      (m.kind === 'list' || m.kind === 'broadcastable'));
+  // A list of numbers is read by `shapedSumType` and `shapedProductType`.
+  // When they give no type for it (`Product` of matrices that are not
+  // square has no value and stays unevaluated), this reading does not give
+  // one either. So at least one list option must have cells that are not
+  // numbers (`list<unknown>`, a list of lists).
+  const hasUnreadCells = (m: Type): boolean =>
+    m === 'list' ||
+    (typeof m === 'object' &&
+      (m.kind === 'list' || m.kind === 'broadcastable') &&
+      !isSubtype(m.elements, NUMBER_OR_NAN_TYPE));
+  if (!options.some(hasUnreadCells)) return undefined;
+  if (
+    !options.every(
+      (m) =>
+        isListOption(m) ||
+        m === 'missing' ||
+        m === 'nothing' ||
+        isSubtype(m, NUMBER_OR_NAN_TYPE)
+    )
+  )
+    return undefined;
+  return options.includes('missing')
+    ? reduceType({ kind: 'union', types: [NUMBER_OR_LIST_OF_ANY_TYPE, 'nan'] })
+    : NUMBER_OR_LIST_OF_ANY_TYPE;
+}
+
+/**
+ * The type of `Sum(xs)` or `Product(xs)` when the elements of `xs` may be
+ * lists and the readings of `shapedSumType` and `shapedProductType` do not
+ * apply: the elements are typed `unknown` (`list<unknown>`, or a bare
+ * `list`, whose elements the type does not state), or are a union with an
+ * `unknown` option, or are lists whose cells are not numbers
+ * (`list<list<unknown>>`). See `listReductionType` for the result.
+ *
+ * An operand typed `unknown` may itself be a list of lists, so it is read
+ * as a list of elements typed `unknown`. An operand that may be absent as a
+ * whole adds `NaN` (`Sum(Missing)` is `NaN`).
+ *
+ * A symbol whose type was inferred does not count, as in `bigOpTopType`:
+ * its element type is a placeholder that a numeric use refines.
+ */
+function listElementReductionType(d: OperandDescriptor): Type | undefined {
+  const s = d.structureOf?.();
+  if (s?.kind === 'symbol' && s.inferred === true) return undefined;
+  if (isUnboundedProducer(d)) return undefined;
+  const elementsOf = (type: Type): Type | undefined => {
+    const t = resolveTypeAlias(type);
+    if (
+      t === 'unknown' ||
+      t === 'list' ||
+      t === 'set' ||
+      t === 'collection' ||
+      t === 'indexed_collection'
+    )
+      return 'unknown';
+    if (
+      typeof t === 'object' &&
+      (t.kind === 'list' ||
+        t.kind === 'set' ||
+        t.kind === 'collection' ||
+        t.kind === 'indexed_collection')
+    )
+      return t.elements;
+    return undefined;
+  };
+  const elements = elementsOf(d.type);
+  if (elements !== undefined) return listReductionType(elements);
+  const present = stripTopLevelMissing(d.type);
+  if (present === undefined) return undefined;
+  const presentElements = elementsOf(present);
+  if (presentElements === undefined) return undefined;
+  const reduced = listReductionType(presentElements);
+  return reduced === undefined
+    ? undefined
+    : reduceType({ kind: 'union', types: [reduced, 'nan'] });
+}
+
+/**
+ * The operand type `broadcastable<T>` read as a list, when `T` can hold a
+ * list; `undefined` otherwise.
+ *
+ * A `broadcastable<T>` value is a `T` or a tensor of `T`. When `T` can hold
+ * a list (`vector<2>`, `list<unknown>`), an element of the value is an
+ * element of `T` or a `T`: the call `g(x)` for `g(t) = [t, 2t]` and
+ * `x: any` is a vector of two numbers when `x` is a number, and a list of
+ * such vectors when `x` is a list. So the operand is read as a list of the
+ * elements that an index into it returns (`indexElementType`):
+ * `list<number | vector<2>>` for `broadcastable<vector<2>>`. Its sum is a
+ * number or a vector.
+ *
+ * When `T` cannot hold a list (`broadcastable<number>`), the operand is not
+ * read here, and the caller's answer applies.
+ */
+function broadcastableAsList(type: Type): ListType | undefined {
+  const t = resolveTypeAlias(type);
+  if (typeof t !== 'object' || t.kind !== 'broadcastable') return undefined;
+  // The walk recurses into union arms, so a self-referential alias
+  // (`type alias cyc = cyc | number`) would unfold again at each level and
+  // overflow the stack. The descent guard stops at the first repeat, and
+  // that arm holds no list.
+  const mayHoldList = (m: Type, seen?: AliasDescent): boolean => {
+    const unfolded = unfoldAliasOnDescent(m, seen);
+    if (unfolded === undefined) return false;
+    const r = unfolded.type;
+    if (typeof r === 'string')
+      return (
+        r === 'any' ||
+        r === 'value' ||
+        r === 'unknown' ||
+        r === 'list' ||
+        r === 'indexed_collection' ||
+        r === 'collection'
+      );
+    if (r.kind === 'union')
+      return r.types.some((x) => mayHoldList(x, unfolded.seen));
+    return r.kind === 'list' || r.kind === 'broadcastable';
+  };
+  if (!mayHoldList(t.elements)) return undefined;
+  const elements = indexElementType(t);
+  return elements === undefined ? undefined : { kind: 'list', elements };
+}
+
+/**
  * Result type of a big-op (`Sum`/`Product`) in its `(body, limits…)` form.
  * Elementwise accumulation over a collection-valued body yields the same
  * indexed-collection type: summing (or multiplying) a `vector<2>`-, `list<T>`-
  * or tuple-valued body gives that same collection type. A scalar body — or the
  * arity-1 reducer form `Sum(L)`, which sums a collection's elements to a
  * scalar — types as `number`.
+ *
+ * Terms whose type does not exclude a list (typed `unknown`, a union of
+ * numbers and lists, the elements of a `broadcastable<T>` whose `T` can hold
+ * a list) are not read as numbers: their sum may be a list, and the result
+ * type holds it (`listReductionType`, `broadcastableAsList`).
  *
  * The collection test is deliberately the TYPE test and not
  * `facts.indexed`: the fact also answers `true` from the operand's runtime
@@ -2126,6 +2298,21 @@ export function bigOpResultType(
       if (shapedPresent !== undefined)
         return reduceType({ kind: 'union', types: [shapedPresent, 'nan'] });
     }
+    const asList = broadcastableAsList(ops[0].type);
+    if (asList !== undefined) {
+      const d: OperandDescriptor = {
+        type: asList,
+        facts: ops[0].facts,
+        structureOf: ops[0].structureOf,
+      };
+      const shapedList =
+        operator === 'Sum' ? shapedSumType(d) : shapedProductType(d);
+      if (shapedList !== undefined) return shapedList;
+      const reducedList = listElementReductionType(d);
+      if (reducedList !== undefined) return reducedList;
+    }
+    const listReduced = listElementReductionType(ops[0]);
+    if (listReduced !== undefined) return listReduced;
   }
   const body = ops[0];
   if (ops.length > 1 && operator !== undefined && body !== undefined) {
@@ -2153,6 +2340,32 @@ export function bigOpResultType(
     bodyType.kind === 'broadcastable'
   )
     return bodyType;
+  // A body that may be a list and is not read above: a union of numbers and
+  // lists (`At(g(x), k)` for `g(t) = [t, 2t]` and `x: any` is
+  // `missing | number | vector<2>`), or a body typed `unknown` (`At(L, k)`
+  // for `L: list<unknown>`). The terms may be lists, and their sum is then a
+  // list. The terms are read as the elements of a list, as in the `Sum(L)`
+  // form (`shapedSumType`, then `listReductionType`); a domain may be empty,
+  // and so may a list with no length. A symbol whose type was inferred does
+  // not count, as in `bigOpTopType`.
+  const bodyStructure = body?.structureOf?.();
+  if (
+    ops.length > 1 &&
+    operator !== undefined &&
+    body !== undefined &&
+    bodyType !== undefined &&
+    !(bodyStructure?.kind === 'symbol' && bodyStructure.inferred === true)
+  ) {
+    const terms: OperandDescriptor = {
+      type: { kind: 'list', elements: bodyType },
+      facts: body.facts,
+    };
+    const shapedTerms =
+      operator === 'Sum' ? shapedSumType(terms) : shapedProductType(terms);
+    if (shapedTerms !== undefined) return shapedTerms;
+    const listReduced = listReductionType(bodyType);
+    if (listReduced !== undefined) return listReduced;
+  }
   return 'number';
 }
 

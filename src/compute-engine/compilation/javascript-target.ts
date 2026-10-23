@@ -89,6 +89,7 @@ import {
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
+  topTypeBesideAbsence,
   typeContainsMissing,
   unfoldAliasOnDescent,
   type AliasDescent,
@@ -513,6 +514,7 @@ import {
   shapeOperandRefusal,
   unfaithfulComparisonAggregate,
   unionAdmitsIndexedCollection,
+  isTopTypedLocalSymbol,
   type LoopInvariantBinding,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -2372,7 +2374,17 @@ export function isNumericIndexOperand(e: Expression): boolean {
  * the arithmetic broadcast path (see `isIndexedCollectionOperand`).
  */
 function isPossiblyCollectionTypedJS(e: Expression): boolean {
-  const t = jsType(e);
+  // An application typed by a top type beside absence markers only
+  // (`missing | unknown`, an index into a `list<unknown>`) is read as that
+  // top type (`topTypeBesideAbsence`), as `isPossiblyCollectionTyped` reads
+  // it: its present value may be a list. Read as a union, it took the scalar
+  // codegen, and `g(x)[1] < 1` compared an array with the JavaScript `<`.
+  const resolved = jsType(e);
+  const t =
+    (isFunction(e) ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
+  // A `Block` local typed by a top type may hold a list (see
+  // `isTopTypedBlockLocal`, `collection-utils.ts`).
+  if (isTopTypedLocalSymbol(e)) return true;
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types

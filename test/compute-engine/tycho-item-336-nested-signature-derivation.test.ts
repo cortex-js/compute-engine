@@ -67,6 +67,13 @@ const E_TYPE =
   '(list<tuple<number, number>> | tuple<number, number>) -> broadcastable<number>';
 const W_TYPE =
   '(unknown, list<tuple<number, number>> | tuple<number, number>) -> unknown';
+// The full body applies the undeclared `b` to a `Sum` whose summand may be a
+// list (the point argument may be a list of points), so the result is read as
+// a value or an array of values. `broadcastable<unknown>` holds every value,
+// as `unknown` does. It was `unknown` while `Sum` over elements that may be
+// lists was typed `number` (ROADMAP CE-361).
+const W_FULL_TYPE =
+  '(unknown, list<tuple<number, number>> | tuple<number, number>) -> broadcastable<unknown>';
 
 /** The reproduction of Tycho item 336. `W_1` … `W_depth` are declared
  * `(unknown, POINT) -> unknown` and assigned a body that applies the
@@ -129,7 +136,9 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
         counts[depth] = count;
         expect(ce.box('E').type.toString()).toBe(E_TYPE);
         for (let k = 1; k <= depth; k++)
-          expect(ce.box(`W_${k}`).type.toString()).toBe(W_TYPE);
+          expect(ce.box(`W_${k}`).type.toString()).toBe(
+            body === 'full' ? W_FULL_TYPE : W_TYPE
+          );
         // Measured 2026-09-29: about 20 ms at depth 6. Without the fix the
         // count limit above throws first. The time depends on the load of the
         // machine, so the limit is asserted only in a `CE_PERF=1` run. The

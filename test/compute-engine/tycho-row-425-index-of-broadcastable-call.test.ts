@@ -407,13 +407,16 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   // Each expression either does not compile, or compiles to the value the
   // interpreter gives (or throws where the interpreter answers an error),
   // at x = 3, x = [1, 2, 3] and x = []. The outcome of each aggregate is
-  // the outcome on the commit before this change.
+  // the outcome on the commit before this change, except for `Sum(g(x))`
+  // and `Product(g(x))`: they declined while they were typed `number`, and
+  // compile since they are typed `number | vector<2>` (ROADMAP CE-361,
+  // `test/compute-engine/sum-unknown-element-type.test.ts`).
   const cases: [string, unknown, 'compiles' | 'declined'][] = [
-    ['Sum(g(x))', ['Sum', ['g', 'x']], 'declined'],
+    ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
     ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
     ['Max(g(x))', ['Max', ['g', 'x']], 'declined'],
     ['Min(g(x))', ['Min', ['g', 'x']], 'declined'],
-    ['Product(g(x))', ['Product', ['g', 'x']], 'declined'],
+    ['Product(g(x))', ['Product', ['g', 'x']], 'compiles'],
     ['Mean(g(x))', ['Mean', ['g', 'x']], 'declined'],
     ['Median(g(x))', ['Median', ['g', 'x']], 'declined'],
     ['Sum(Take(g(x), 1))', ['Sum', ['Take', ['g', 'x'], 1]], 'compiles'],

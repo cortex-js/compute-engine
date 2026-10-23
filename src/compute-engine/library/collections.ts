@@ -177,6 +177,8 @@ import {
   stripNumericRanges,
   typeContainsMissing,
   typeCouldHoldMissing,
+  topTypeBesideAbsence,
+  blockLocalTypeMayHoldList,
   widen,
   widenAll,
   widenElementTypes,
@@ -5995,9 +5997,23 @@ function isTextAtomD(d: OperandDescriptor): boolean {
   return d.structureOf?.()?.kind === 'string' || isSubtype(d.type, 'string');
 }
 
-/** Descriptor twin of {@link isPossiblyCollectionTyped}. */
+/** Descriptor twin of {@link isPossiblyCollectionTyped}. An application
+ * typed by a top type beside absence markers only (`missing | unknown`) is
+ * read as that top type (`topTypeBesideAbsence`). */
 function isPossiblyCollectionTypedD(d: OperandDescriptor): boolean {
-  const t = resolveTypeAlias(d.type);
+  // A `Block` local typed by a top type may hold a list, as the expression
+  // predicate reads it (`isTopTypedBlockLocal`, `collection-utils.ts`).
+  const structure = d.structureOf?.();
+  if (
+    structure?.kind === 'symbol' &&
+    structure.local === true &&
+    blockLocalTypeMayHoldList(d.type)
+  )
+    return true;
+  const resolved = resolveTypeAlias(d.type);
+  const t =
+    (isApplicationOperand(d) ? topTypeBesideAbsence(resolved) : undefined) ??
+    resolved;
   if (t === 'unknown' || t === 'any' || t === 'value')
     return isApplicationOperand(d);
   if (typeof t === 'string') return false;

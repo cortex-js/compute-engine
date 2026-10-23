@@ -604,8 +604,12 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
         expect(signature(ce, 'h')).toBe(
           '(unknown) -> list<tuple<number, number>>'
         );
+        // The call `h(1)` is typed from the body `f([a, a])` with `a` typed
+        // `integer`, and the call of `f` over the list maps `f` over its
+        // elements, as `f([1, 1])` is typed.
         const h = ce.parse('h(1)');
-        expect(h.type.toString()).toBe('list<tuple<number, number>>');
+        expect(h.type.toString()).toBe('list<tuple<integer, integer>>');
+        expect(h.type.toString()).toBe(ce.parse('f([1, 1])').type.toString());
         expect(h.evaluate().toString()).toBe('[(-1, 1),(-1, 1)]');
         expect(ce.parse('f(1)').type.toString()).toBe(
           'tuple<integer, integer>'

@@ -95,6 +95,18 @@ export interface BroadcastLiftHooks {
   ) => boolean;
   /** A lambda-literal definition, typed by its own broadcast arm. */
   readonly isLambda: (def: BoxedOperatorDefinition) => boolean;
+  /** The type of a call of a user function literal, from the steps of the
+   * expression route that type such a call before the derivation from the
+   * body: a tuple at a declared scalar parameter, a partial application,
+   * and the broadcast over a collection operand
+   * (`lambdaCallTypeOverDescriptors`, `boxed-function.ts`). `undefined` when
+   * no step applies. */
+  readonly lambdaCallType: (
+    engine: ComputeEngine,
+    operator: string,
+    binding: BoxedDefinition,
+    operands: ReadonlyArray<OperandDescriptor>
+  ) => Type | undefined;
 }
 let broadcastLiftHooks: BroadcastLiftHooks | undefined;
 export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
@@ -301,7 +313,11 @@ export function runsLibraryCanonicalForm(
  * it is reported the same way); otherwise the declared signature's result
  * stands, with a polytype arm instantiated against the operands through
  * the same solver the expression route uses. An operand typed `never` (the
- * empty type) makes the application `never`, as at the call site.
+ * empty type) makes the application `never`, as at the call site. A call of
+ * a user function literal is typed first by the steps of the call site that
+ * type such a call (`BroadcastLiftHooks.lambdaCallType`): its map over a
+ * collection operand, a tuple at a declared scalar parameter, and a partial
+ * application.
  *
  * Absent operands are handled as at the call site: for a `propagate`
  * operator, an operand whose type carries a `missing` arm is handed to the
@@ -364,6 +380,19 @@ export function deriveApplicationType(
       if (typeof lt !== 'object' || lt.kind !== 'signature') return undefined;
       ft = lt;
     }
+    // A call of a function literal over a collection operand maps the
+    // literal over the collection, and is typed as the expression route
+    // types it, before the derivation from the body: that derivation binds
+    // the whole collection to the parameter, and its result describes one
+    // element of the value (`f := x ↦ (-x, x)` over a `list<integer>` is a
+    // `list<tuple<integer, integer>>`, not a `tuple<number, number>`).
+    const lambdaCall = broadcastLiftHooks?.lambdaCallType(
+      engine,
+      operator,
+      binding,
+      operands
+    );
+    if (lambdaCall !== undefined) return lambdaCall;
     const inferred = callResultType(
       engine,
       operator,
@@ -611,6 +640,15 @@ export function deriveApplicationType(
       );
   }
 
+  // A call of a function literal held by an operator definition, over a
+  // collection operand: as on the value-definition branch above.
+  const lambdaCall = broadcastLiftHooks?.lambdaCallType(
+    engine,
+    operator,
+    binding,
+    operands
+  );
+  if (lambdaCall !== undefined) return lambdaCall;
   const sig = def.signature.type;
   const inferred = callResultType(
     engine,

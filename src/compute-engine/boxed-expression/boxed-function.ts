@@ -38,6 +38,7 @@ import {
   expandAliasesForLift,
   isMappedActual,
   isPolymorphicType,
+  readTypeVariablesAsBounds,
 } from '../../common/type/instantiate.js';
 import { isWildcard } from './pattern-utils.js';
 import { isErrorTypedOperand } from './error-typed-operand.js';
@@ -79,6 +80,7 @@ import {
 } from './operand-descriptor.js';
 import { constantFieldLiteral } from './constant-field.js';
 import {
+  actualOfDescriptor,
   deriveApplicationType,
   installBroadcastLiftHooks,
   isNumericTupleArgumentType,
@@ -106,6 +108,9 @@ import {
   type BroadcastOperandView,
   broadcastableOf,
   topTypeOfTriggers,
+  viewOfDescriptor,
+  isBroadcastCollectionTypeOf,
+  isPossiblyCollectionTypedView,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells } from './listed-element.js';
 import {
@@ -152,6 +157,7 @@ import {
   collectionSourceOperands,
   viewOverListedSource,
   shapedBroadcastResultType,
+  isTopTypedBlockLocal,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -204,6 +210,7 @@ import {
   actualOfOperand,
   instantiatedResultType,
   instantiatedResultTypeOverActuals,
+  solveArmOverActuals,
   substituteDeclaredBounds,
   type ArmInferenceContext,
   type SolveActual,
@@ -440,7 +447,7 @@ let _effectsComputeCount = 0;
  */
 function curriedSignature(
   sig: Type,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<{ readonly operator: string }>
 ): Type | undefined {
   if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
   if (ops.some((x) => x.operator === 'Spread')) return undefined;
@@ -9584,6 +9591,9 @@ class ExpressionOperandView implements BroadcastOperandView {
     const t = resolveTypeAlias(this.x.type.type);
     return t === 'any' || t === 'value';
   }
+  get topTypedBlockLocal(): boolean {
+    return isTopTypedBlockLocal(this.x);
+  }
   get isCollection(): boolean {
     return this.x.isCollection;
   }
@@ -10187,6 +10197,73 @@ function isLambdaBroadcastParticipant(x: Expression): boolean {
 }
 
 /**
+ * The facts about one operand that the broadcast typing of a call of a
+ * function literal reads (`lambdaBroadcastType`). The expression route
+ * gives them from the operand expression (`LambdaCallOperandOfExpression`),
+ * and the descriptor route (`deriveApplicationType`) from an operand
+ * descriptor (`lambdaCallOperandOfDescriptor`), so that the two routes type
+ * a call with one rule.
+ */
+interface LambdaCallOperand {
+  /** The type of the operand. */
+  readonly type: Type;
+  /** The call maps the function literal over the operand
+   * (`isLambdaBroadcastParticipant`). */
+  readonly participates: boolean;
+  /** The operand may hold a collection, which the type does not show
+   * (`isPossiblyCollectionTyped`). */
+  readonly possiblyCollectionTyped: boolean;
+  /** The operand holds a collection now that is not indexed, such as a set
+   * (`holdsUnindexedCollection`): the call does not map over it. */
+  readonly holdsUnindexedCollection: boolean;
+}
+
+/** The facts of {@link LambdaCallOperand} read from an operand expression,
+ * with the same predicates as before the facts had an interface. Each fact
+ * is a getter, so that only the facts the typing asks for are computed. */
+class LambdaCallOperandOfExpression implements LambdaCallOperand {
+  constructor(private readonly x: Expression) {}
+  get type(): Type {
+    return this.x.type.type;
+  }
+  get participates(): boolean {
+    return isLambdaBroadcastParticipant(this.x);
+  }
+  get possiblyCollectionTyped(): boolean {
+    return isPossiblyCollectionTyped(this.x);
+  }
+  get holdsUnindexedCollection(): boolean {
+    return holdsUnindexedCollection(this.x);
+  }
+}
+
+/**
+ * The facts of {@link LambdaCallOperand} read from an operand descriptor.
+ * They are the facts of `isLambdaBroadcastParticipant` and
+ * `isPossiblyCollectionTyped` read from the type, the facts and the
+ * structure of the descriptor (`viewOfDescriptor`): a finite indexed
+ * collection that is not a tuple or a string, a type that is an unbounded
+ * list or an indexed collection (or a union with such an arm), or a list
+ * type with dimensions. A descriptor cannot show a symbol that holds a set
+ * now, so `holdsUnindexedCollection` is `false`, as in `viewOfDescriptor`.
+ */
+function lambdaCallOperandOfDescriptor(
+  d: OperandDescriptor
+): LambdaCallOperand {
+  const view = viewOfDescriptor(d);
+  const t = resolveTypeAlias(d.type);
+  return {
+    type: d.type,
+    participates:
+      view.finiteBroadcastParticipant ||
+      isBroadcastCollectionTypeOf(d.type) ||
+      (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions),
+    possiblyCollectionTyped: isPossiblyCollectionTypedView(view),
+    holdsUnindexedCollection: false,
+  };
+}
+
+/**
  * The type of a call of a function literal with an argument that may be
  * absent as a whole and is otherwise a numeric tuple, at a scalar or open
  * parameter (`isNumericTupleArgumentType`): `missing | tuple<integer,
@@ -10230,6 +10307,10 @@ function wholeAbsentTupleArgumentType(
  * (`ce.assign('g', x ↦ …)`), whether it resolves through an operator
  * definition or a value definition. Both routes in `type()` call this ONE
  * helper so the two spellings of the same assignment cannot drift apart.
+ * The descriptor route calls it too (`lambdaCallTypeOverDescriptors`), so
+ * a call typed from operand types gets the same lift as the call
+ * expression. `ops` holds the facts it reads about each operand
+ * (`LambdaCallOperand`).
  *
  * `perElementResult` is the already-instantiated signature result. For a
  * lambda application the per-element result IS the signature result
@@ -10248,7 +10329,7 @@ function wholeAbsentTupleArgumentType(
  * typing applies and the caller's scalar result stands.
  */
 function lambdaBroadcastType(
-  ops: ReadonlyArray<Expression>,
+  ops: ReadonlyArray<LambdaCallOperand>,
   perElementResult: Type,
   slots: ReturnType<typeof broadcastableParamSlots>,
   inferredResult: boolean,
@@ -10279,7 +10360,7 @@ function lambdaBroadcastType(
   // their value whole to the literal at each element of the mapped operands.
   wholeAt?: ReadonlyArray<boolean>
 ): Type | undefined {
-  const typeAt = (i: number): Type => operandTypes?.[i] ?? ops[i].type.type;
+  const typeAt = (i: number): Type => operandTypes?.[i] ?? ops[i].type;
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
   // never mapped), then the body's own arithmetic decides the shape:
   // `g := x ↦ 2x` gives `g((1,2)) = 2·(1,2) = (2,4)`, a tuple, while
@@ -10322,7 +10403,7 @@ function lambdaBroadcastType(
   const participates = (i: number) =>
     mappable(i) &&
     wholeAt?.[i] !== true &&
-    (operandTypes?.[i] !== undefined || isLambdaBroadcastParticipant(ops[i]));
+    (operandTypes?.[i] !== undefined || ops[i].participates);
   const mapped = ops.filter((_x, i) => participates(i));
   const mappedTypes = ops.flatMap((_x, i) =>
     participates(i) ? [typeAt(i)] : []
@@ -10586,9 +10667,9 @@ function lambdaBroadcastType(
   // not map over it.
   const triggers = ops.flatMap((x, i) =>
     mappable(i) &&
-    (isPossiblyCollectionTyped(x) ||
-      (abstractCollectionCell(x.type.type) !== undefined &&
-        !holdsUnindexedCollection(x)))
+    (x.possiblyCollectionTyped ||
+      (abstractCollectionCell(x.type) !== undefined &&
+        !x.holdsUnindexedCollection))
       ? [i]
       : []
   );
@@ -10610,9 +10691,9 @@ function lambdaBroadcastType(
     const top = topTypeOfTriggers(
       ops.flatMap((x, i) => {
         if (!mappable(i)) return [];
-        if (isPossiblyCollectionTyped(x)) return [{ type: x.type.type }];
-        const cell = abstractCollectionCell(x.type.type);
-        return cell !== undefined && !holdsUnindexedCollection(x)
+        if (x.possiblyCollectionTyped) return [{ type: x.type }];
+        const cell = abstractCollectionCell(x.type);
+        return cell !== undefined && !x.holdsUnindexedCollection
           ? [{ type: cell.cell }]
           : [];
       }),
@@ -10836,33 +10917,327 @@ function derivedBroadcastElementResult(
   // expression.
   operandTypes?: ReadonlyArray<Type | undefined>
 ): Type | undefined {
+  return derivedBroadcastElementResultOver(
+    expr.engine,
+    expr.operator,
+    expr.valueDefinition !== undefined
+      ? { value: expr.valueDefinition }
+      : expr.operatorDefinition !== undefined
+        ? { operator: expr.operatorDefinition }
+        : undefined,
+    expr.ops.length,
+    (i) => expr.ops[i].type.type,
+    (i) => describeOperand(expr.ops[i]),
+    mappedAt,
+    perElementResult,
+    oneRank,
+    operandTypes
+  );
+}
+
+/**
+ * `derivedBroadcastElementResult` for a call of `operator`, bound to
+ * `binding`, with `count` operands: `typeAt(i)` is the type of operand `i`,
+ * and `describeAt(i)` its descriptor. The expression route reads them from
+ * the operand expressions, and the descriptor route
+ * (`lambdaCallTypeOverDescriptors`) from the operand descriptors.
+ */
+function derivedBroadcastElementResultOver(
+  engine: ComputeEngine,
+  operator: string,
+  binding: BoxedDefinition | undefined,
+  count: number,
+  typeAt: (i: number) => Type,
+  describeAt: (i: number) => OperandDescriptor,
+  mappedAt: ReadonlyArray<boolean>,
+  perElementResult: Type,
+  oneRank: boolean,
+  operandTypes?: ReadonlyArray<Type | undefined>
+): Type | undefined {
   const args: OperandDescriptor[] = [];
   // By position, not by identity: one boxed expression may fill a mapped
   // slot and a slot that binds whole.
-  for (const [i, x] of expr.ops.entries()) {
+  for (let i = 0; i < count; i++) {
     const t = operandTypes?.[i];
     if (mappedAt[i]) {
       // A declared `broadcastable<T>` slot plan maps exactly one rank (a
       // nested row binds whole), so the cell is the element one rank down;
       // a scalar-parameter broadcast descends to the leaves.
       const cell = oneRank
-        ? collectionElementType(resolveTypeAlias(t ?? x.type.type))
-        : broadcastLeafType(t ?? x.type.type);
+        ? collectionElementType(resolveTypeAlias(t ?? typeAt(i)))
+        : broadcastLeafType(t ?? typeAt(i));
       if (cell === undefined) return undefined;
       args.push(describeType(cell));
-    } else args.push(t !== undefined ? describeType(t) : describeOperand(x));
+    } else args.push(t !== undefined ? describeType(t) : describeAt(i));
   }
   return callResultType(
-    expr.engine,
-    expr.operator,
+    engine,
+    operator,
     args,
     perElementResult,
-    (h, a) => deriveApplicationType(expr.engine, h, a),
-    expr.valueDefinition !== undefined
-      ? { value: expr.valueDefinition }
-      : expr.operatorDefinition !== undefined
-        ? { operator: expr.operatorDefinition }
-        : undefined
+    (h, a) => deriveApplicationType(engine, h, a),
+    binding
+  );
+}
+
+/**
+ * The result of the generic signature `sig` at a call that maps a function
+ * literal over its collection operands (`instantiated`, the result solved
+ * against `actuals` under `ctx`), with the type variables read at their
+ * declared bounds when the solve bound a variable to a type that breaks its
+ * bound.
+ *
+ * With `g: (T) -> T where T: number` and an operand of type `list<string>`,
+ * the solver binds `T` to the leaf type `string` and reports no failure: the
+ * bound of a lifted operand is checked for each element when the call is
+ * evaluated, and each element of the value is an `incompatible-type` error.
+ * The result `string` would say that the call maps each string to a string.
+ * An error is not part of a type (`docs/ERROR-MODEL.md` §4), so the result is
+ * read with `T` at its bound, `number`. `instantiated` is returned unchanged
+ * for a signature with no bounded type variable, and for a solve that keeps
+ * every bound.
+ */
+function liftedResultWithinBounds(
+  sig: Type | undefined,
+  actuals: () => ReadonlyArray<SolveActual>,
+  ctx: ArmInferenceContext,
+  instantiated: Type
+): Type {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return instantiated;
+  const bounded = sig.typeParams?.filter((p) => p.bound !== undefined);
+  if (bounded === undefined || bounded.length === 0) return instantiated;
+  const { bindings } = solveArmOverActuals(sig, actuals(), ctx);
+  const breaks = bounded.some((p) => {
+    const solution = bindings[p.name];
+    return solution !== undefined && !isSubtype(solution, p.bound!);
+  });
+  if (!breaks) return instantiated;
+  return functionResult(readTypeVariablesAsBounds(sig)) ?? instantiated;
+}
+
+/**
+ * The result of the generic signature `sig` solved against `actuals`, the
+ * operands of one option of a union operand, read at the declared bounds as
+ * `liftedResultWithinBounds` reads the result for the whole operand.
+ * `undefined` when the solve gives no result.
+ *
+ * The broadcast typing splits an operand typed `number | list<string>` into
+ * its options and solves the signature for each. With
+ * `g: (T) -> T where T: number`, the option `list<string>` binds `T` to
+ * `string`, as the whole operand `list<string>` does, and is read with `T`
+ * at its bound: the result is `number | list<number>`.
+ */
+function armResultWithinBounds(
+  sig: Type | undefined,
+  actuals: () => ReadonlyArray<SolveActual>,
+  ctx: ArmInferenceContext
+): Type | undefined {
+  const instantiated = instantiatedResultTypeOverActuals(sig, actuals(), ctx);
+  return instantiated === undefined
+    ? undefined
+    : liftedResultWithinBounds(sig, actuals, ctx, instantiated);
+}
+
+/**
+ * The type of a call of a user function literal over operands known by
+ * their descriptors, for the descriptor route (`deriveApplicationType`,
+ * which reaches it as `BroadcastLiftHooks.lambdaCallType`). It is the part
+ * of `type()` that types a call of a function literal, from the step that
+ * types a tuple at a declared scalar parameter (`declaredScalarTupleType`)
+ * and the step that types a partial application as the function of the
+ * remaining parameters (`curriedSignature`), to the broadcast typing
+ * (`lambdaBroadcastType`), read from the operand descriptors. `undefined`
+ * when no step applies, and the caller then types the call from the body or
+ * from the signature result.
+ *
+ * With `f := x ↦ (-x, x)` and an operand typed `list<integer>`, the call
+ * maps `f` over the list, and the call expression is typed
+ * `list<tuple<integer, integer>>`. Without this function the descriptor
+ * route typed the body with the parameter typed as the whole list, and
+ * answered `tuple<number, number>`, the type of one element of the value.
+ *
+ * The function literal is held by an operator definition (an assignment to
+ * an undeclared name) or by a value definition (a name declared `function`
+ * or with a signature), and the signature is read as on the expression
+ * route. The answer is `undefined` for two calls that the expression route
+ * types from facts that a descriptor does not carry: a call of an overload
+ * set (the arm is resolved from the operand expressions, `resolvedArm`), and
+ * a call of a function with a point parameter, whose map over a list of
+ * points reads the operand expressions (`pointListApplicationType`). It is
+ * also `undefined` for a call with a numeric-tuple operand, which the
+ * descriptor route types in its own order (see `hasNumericTupleOperand`
+ * below).
+ */
+function lambdaCallTypeOverDescriptors(
+  engine: ComputeEngine,
+  operator: string,
+  binding: BoxedDefinition,
+  operands: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  // Every library operator reaches this function through the descriptor
+  // route: an operator definition that does not hold a function literal is
+  // rejected before any operand is read.
+  if (isOperatorDef(binding) && !isLambdaDef(binding.operator))
+    return undefined;
+  const resolver = engine._typeResolver;
+  const actuals = operands.map(actualOfDescriptor);
+  // A numeric tuple (or a tuple that is one when its open components hold
+  // numbers) binds whole to a scalar parameter, and the body decides the
+  // shape of the value. The expression route then answers `any`
+  // (`lambdaBroadcastType`). The descriptor route first derives the type
+  // from the body with the parameter typed as the tuple (`callResultType`),
+  // and answers `any` only when that derivation declines
+  // (`deriveApplicationType`): with `p := x ↦ x`, the call `p((a, a))` in
+  // the body of `q := a ↦ p((a, a))` is a `tuple<integer, integer>` for
+  // `q(1)`. So the broadcast typing is not applied to such a call, and the
+  // caller keeps that order.
+  const hasNumericTupleOperand = operands.some(
+    (d) => isNumericTupleType(d.type) || mayBeNumericTupleType(d.type)
+  );
+  // A spread operand (`f(...L)`) has its own arity rule in
+  // `curriedSignature`.
+  const heads = operands.map((d) => {
+    const s = d.structureOf?.();
+    return { operator: s?.kind === 'application' ? s.head : '' };
+  });
+  const derive =
+    (perElementResult: Type, oneRank: boolean) =>
+    (
+      mappedAt: ReadonlyArray<boolean>,
+      operandTypes?: ReadonlyArray<Type | undefined>
+    ) =>
+      derivedBroadcastElementResultOver(
+        engine,
+        operator,
+        binding,
+        operands.length,
+        (i) => operands[i].type,
+        (i) => operands[i],
+        mappedAt,
+        perElementResult,
+        oneRank,
+        operandTypes
+      );
+  const instantiateWith =
+    (sig: Type) =>
+    (arms: ReadonlyArray<Type | undefined>): Type | undefined =>
+      armResultWithinBounds(sig, () => actualsWithArms(actuals, arms), {
+        threadable: true,
+        resolver,
+      });
+
+  if (isOperatorDef(binding)) {
+    const def = binding.operator;
+    const sig = def.signature.type;
+    if (overloadArms(sig) !== undefined) return undefined;
+    if (pointListParamSlots(def) !== undefined) return undefined;
+    // The signature result, as `declaredResultType()` in `type()` gives it
+    // for a ground signature, and the result of a generic signature solved
+    // against the operands.
+    const instantiated = instantiatedResultTypeOverActuals(sig, actuals, {
+      threadable: true,
+      resolver,
+    });
+    const sigResult = functionResult(sig) ?? 'unknown';
+    const isScalarParam = declaredScalarParams(
+      lambdaLiteralOf(def),
+      def.inferredSignature ? undefined : sig
+    );
+    const tupleType =
+      isScalarParam &&
+      declaredScalarTupleType(
+        isScalarParam,
+        operands.map((d) => d.type),
+        instantiated ?? sigResult,
+        paramsAreScalar(def)
+      );
+    if (tupleType) return tupleType;
+    const curried = curriedSignature(sig, heads);
+    if (curried !== undefined) return curried;
+    if (hasNumericTupleOperand) return undefined;
+    const declaredSlots = broadcastableParamSlots(def);
+    if (!(paramsAreScalar(def) || declaredSlots)) return undefined;
+    const lambdaResult =
+      instantiated === undefined
+        ? sigResult
+        : liftedResultWithinBounds(
+            sig,
+            () => actuals,
+            { threadable: true, resolver },
+            instantiated
+          );
+    return lambdaBroadcastType(
+      operands.map(lambdaCallOperandOfDescriptor),
+      lambdaResult,
+      declaredSlots,
+      def.inferredSignature,
+      instantiated !== undefined,
+      derive(lambdaResult, declaredSlots !== undefined),
+      lambdaLiteralOf(def),
+      instantiateWith(sig)
+    );
+  }
+
+  // A value definition: the signature is read as in the value-definition
+  // branch of `type()`.
+  const declaredType = binding.value.type.type;
+  const heldValue = binding.value.value;
+  const sig =
+    heldValue === undefined
+      ? declaredType
+      : isWildcardFunctionType(declaredType)
+        ? namedLiteralSignatureType(operator, heldValue)
+        : binding.value.inferredType
+          ? namedLiteralSignatureType(operator, heldValue, declaredType)
+          : declaredType;
+  if (overloadArms(sig) !== undefined) return undefined;
+  const curried = curriedSignature(sig, heads);
+  if (curried !== undefined) return curried;
+  if (pointListParamSlots(sig) !== undefined) return undefined;
+  const valueSlots = broadcastableParamSlots(sig);
+  const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
+  const solveContext: ArmInferenceContext = {
+    threadable:
+      valueSlots === undefined || paramsAreScalar(sig)
+        ? threadable
+        : (i: number) => valueSlots.at(i).mappable,
+    resolver,
+  };
+  const sigResult =
+    instantiatedResultTypeOverActuals(sig, actuals, solveContext) ??
+    functionResult(sig) ??
+    'unknown';
+  const inferredResult =
+    binding.value.inferredType || isWildcardFunctionType(declaredType);
+  const isScalarParam = declaredScalarParams(
+    heldValue ?? undefined,
+    inferredResult ? undefined : declaredType
+  );
+  const tupleType =
+    isScalarParam &&
+    declaredScalarTupleType(
+      isScalarParam,
+      operands.map((d) => d.type),
+      sigResult,
+      threadable
+    );
+  if (tupleType) return tupleType;
+  if (!threadable || hasNumericTupleOperand) return undefined;
+  const liftedResult = liftedResultWithinBounds(
+    sig,
+    () => actuals,
+    solveContext,
+    sigResult
+  );
+  return lambdaBroadcastType(
+    operands.map(lambdaCallOperandOfDescriptor),
+    liftedResult,
+    valueSlots,
+    inferredResult,
+    isPolymorphicType(sig),
+    derive(liftedResult, valueSlots !== undefined),
+    heldValue,
+    instantiateWith(sig)
   );
 }
 
@@ -10896,8 +11271,16 @@ function operandActualsWithArms(
   ops: ReadonlyArray<Expression>,
   arms: ReadonlyArray<Type | undefined>
 ): SolveActual[] {
-  return ops.map((x, i) => {
-    const actual = actualOfOperand(x);
+  return actualsWithArms(ops.map(actualOfOperand), arms);
+}
+
+/** The solver views `actuals`, with each one that has a type in `arms` read
+ * as having that type (one arm of the union type of its operand). */
+function actualsWithArms(
+  actuals: ReadonlyArray<SolveActual>,
+  arms: ReadonlyArray<Type | undefined>
+): SolveActual[] {
+  return actuals.map((actual, i) => {
     const arm = arms[i];
     if (arm === undefined) return actual;
     return {
@@ -11807,12 +12190,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
       const instantiated = instantiatedResultType(resolvedOf(), expr.ops, {
         threadable: true,
       });
-      const lambdaResult = instantiated ?? sigResult;
+      // A binding that breaks a declared bound is read at the bound
+      // (`liftedResultWithinBounds`).
+      const lambdaResult =
+        instantiated === undefined
+          ? sigResult
+          : liftedResultWithinBounds(
+              resolvedOf(),
+              () => expr.ops.map((x) => actualOfOperand(x)),
+              { threadable: true },
+              instantiated
+            );
       // The per-element result is derived from the body when it can be
       // (`derivedBroadcastElementResult`): the signature result types a
       // pass-through parameter `unknown`.
       const lifted = lambdaBroadcastType(
-        expr.ops,
+        expr.ops.map((x) => new LambdaCallOperandOfExpression(x)),
         lambdaResult,
         declaredSlots,
         def.inferredSignature,
@@ -11827,9 +12220,9 @@ function type(expr: BoxedFunction): Type | BoxedType {
           ),
         lambdaLiteralOf(def),
         (arms) =>
-          instantiatedResultTypeOverActuals(
+          armResultWithinBounds(
             resolvedOf(),
-            operandActualsWithArms(expr.ops, arms),
+            () => operandActualsWithArms(expr.ops, arms),
             { threadable: true }
           )
       );
@@ -11931,15 +12324,16 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // than the plain-scalar one it refines, while the value path now maps.
     const valueSlots = broadcastableParamSlots(sig);
     const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
+    const solveContext: ArmInferenceContext = {
+      // Per position when the signature declares `broadcastable<T>` slots —
+      // the same gate `box.ts` hands `validateArguments` (§4.5).
+      threadable:
+        valueSlots === undefined || paramsAreScalar(sig)
+          ? threadable
+          : (i: number) => valueSlots.at(i).mappable,
+    };
     const sigResult =
-      instantiatedResultType(sig, expr.ops, {
-        // Per position when the signature declares `broadcastable<T>` slots —
-        // the same gate `box.ts` hands `validateArguments` (§4.5).
-        threadable:
-          valueSlots === undefined || paramsAreScalar(sig)
-            ? threadable
-            : (i: number) => valueSlots.at(i).mappable,
-      }) ??
+      instantiatedResultType(sig, expr.ops, solveContext) ??
       functionResult(sig) ??
       'unknown';
     // A list of points at a parameter declared as a point: the application
@@ -11970,10 +12364,18 @@ function type(expr: BoxedFunction): Type | BoxedType {
     if (threadable) {
       // The shared broadcast typing (`lambdaBroadcastType`) is the same one
       // the operator-def lambda route above applies; `sigResult` is already
-      // the instantiated per-element result on this route.
+      // the instantiated per-element result on this route, with a binding
+      // that breaks a declared bound read at the bound
+      // (`liftedResultWithinBounds`).
+      const liftedResult = liftedResultWithinBounds(
+        sig,
+        () => expr.ops.map((x) => actualOfOperand(x)),
+        solveContext,
+        sigResult
+      );
       const lifted = lambdaBroadcastType(
-        expr.ops,
-        sigResult,
+        expr.ops.map((x) => new LambdaCallOperandOfExpression(x)),
+        liftedResult,
         valueSlots,
         // A bare `function` declaration gives no signature, so the signature
         // read above is the one inferred from the assigned literal, and its
@@ -11987,7 +12389,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
           derivedBroadcastElementResult(
             expr,
             mappedAt,
-            sigResult,
+            liftedResult,
             valueSlots !== undefined,
             operandTypes
           ),
@@ -11995,9 +12397,9 @@ function type(expr: BoxedFunction): Type | BoxedType {
         // Read only when the signature declares no `broadcastable<T>` slot,
         // where every position is threadable on this branch.
         (arms) =>
-          instantiatedResultTypeOverActuals(
+          armResultWithinBounds(
             sig,
-            operandActualsWithArms(expr.ops, arms),
+            () => operandActualsWithArms(expr.ops, arms),
             { threadable: true }
           )
       );
@@ -16530,6 +16932,7 @@ installBroadcastLiftHooks({
   // definition is kept out of the shared arms (it has its own broadcast arm
   // there); a user-defined operator goes through them.
   isLambda: (def) => isLambdaDef(def),
+  lambdaCallType: lambdaCallTypeOverDescriptors,
 });
 
 /**

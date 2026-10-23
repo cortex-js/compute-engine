@@ -71,6 +71,7 @@ import {
   isPointParameterType,
   leafwardElementType,
   pointCollectionElementType,
+  isTopTypedBlockLocal,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -84,6 +85,7 @@ import {
   signatureArms,
   signatureEffects,
   stripMissingFromType,
+  topTypeBesideAbsence,
   typeContainsMissing,
   typeElementCount,
   unfoldAliasOnDescent,
@@ -1984,6 +1986,16 @@ export function exactRationalDivisor(
  */
 function possiblyCollectionTypedForCompile(e: Expression): boolean {
   return isPossiblyCollectionTyped(e, { declaredSymbols: false });
+}
+
+/**
+ * `isTopTypedBlockLocal` (`collection-utils.ts`), for the JavaScript target,
+ * whose twin predicate cannot import that module: a `Block` local typed by
+ * a top type may hold a list, and the compiled code broadcasts over it. A
+ * symbol the user declared `any` is not a local, and stays scalar code.
+ */
+export function isTopTypedLocalSymbol(e: Expression): boolean {
+  return isTopTypedBlockLocal(e);
 }
 
 /**

@@ -9,6 +9,8 @@ import {
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
   stripMissingFromType,
+  topTypeBesideAbsence,
+  blockLocalTypeMayHoldList,
   isPointElementType,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
@@ -2656,6 +2658,21 @@ export type PossiblyCollectionTypedOptions = {
 };
 
 /**
+ * Is `expr` a `Block` local whose type is a top type, so that it may hold a
+ * list (`blockLocalTypeMayHoldList`)? A `Block` creates such a binding for a
+ * `let` or for an assignment that introduces a local (`_blockLocal`). A
+ * global with an assigned value, a free variable and a parameter are not
+ * locals, and are read by the rules of `isPossiblyCollectionTyped`.
+ */
+export function isTopTypedBlockLocal(expr: Expression): boolean {
+  return (
+    isSymbol(expr) &&
+    expr.valueDefinition?._blockLocal === true &&
+    blockLocalTypeMayHoldList(expr.type.type)
+  );
+}
+
+/**
  * True when `expr`'s collection-ness is **not statically visible**, so an
  * element-wise numeric operator (`Add`/`Multiply`) over it must produce a
  * `broadcastable<T>` result — the operand might broadcast at runtime (a
@@ -2717,7 +2734,16 @@ export function isPossiblyCollectionTyped(
 ): boolean {
   // Resolve a transparent alias BEFORE the top-type test, so an alias whose
   // body is a top type takes the application check like the bare spelling.
-  const t = resolveTypeAlias(expr.type.type);
+  // An application typed by a top type beside absence markers only
+  // (`missing | unknown`, an index into a `list<unknown>`) is read as that
+  // top type (`topTypeBesideAbsence`): its present value may be a list.
+  const resolved = resolveTypeAlias(expr.type.type);
+  const t =
+    (isFunction(expr) ? topTypeBesideAbsence(resolved) : undefined) ??
+    resolved;
+  // A `Block` local is read by the value assigned to it, also with
+  // `declaredSymbols: false`: no host passes the value of a local.
+  if (isTopTypedBlockLocal(expr)) return true;
   if ((t === 'any' || t === 'value') && isSymbol(expr))
     return (
       options?.declaredSymbols !== false &&

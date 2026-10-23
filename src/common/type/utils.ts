@@ -1248,6 +1248,54 @@ export function resolveTypeAlias(t: Readonly<Type>): Type {
 }
 
 /**
+ * The top type (`unknown`, `any` or `value`) of a union whose other branches
+ * are only the absence markers `missing` and `nothing`, or `undefined` for
+ * any other type. A transparent alias is unfolded, the union and each of its
+ * branches.
+ *
+ * An index into a list whose elements are typed `unknown` has such a type:
+ * with `g: (unknown) -> list<unknown>` and `x: any`, `g(x)[1]` is typed
+ * `missing | unknown`, and its value is a list when `x` is a list (the call
+ * maps over it). The absence branches do not change what a present value can
+ * be, so the readers that ask whether an operand may be a collection read
+ * such a type as its top type. Without this, they read the union only by its
+ * `broadcastable` branches, and took the element for a scalar: compiled
+ * `g(x)[1] + 1` added `1` to an array with the JavaScript `+` and gave the
+ * string `"1,21"` at `x = [1, 2]`.
+ */
+export function topTypeBesideAbsence(
+  t: Readonly<Type>
+): 'unknown' | 'any' | 'value' | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  let top: 'unknown' | 'any' | 'value' | undefined;
+  for (const branch of r.types) {
+    const b = resolveTypeAlias(branch);
+    if (b === 'unknown' || b === 'any' || b === 'value') top ??= b;
+    else if (b !== 'missing' && b !== 'nothing') return undefined;
+  }
+  return top;
+}
+
+/**
+ * Can a `Block` local of type `t` hold a list? A local takes its type from
+ * the value assigned to it, and that value may be a list when the type is
+ * `any` or `value`, or a top type beside absence markers only
+ * (`missing | unknown`, the type of an index into a `list<unknown>`). With
+ * `g := t ↦ [t, 2t]` and `x: any`, the local `y` of
+ * `Block(Assign(y, g(x)[1]), Sin(y) + 1)` is typed `missing | unknown` (or
+ * `any` when `g` is declared `(unknown) -> list`), and holds `[1, 2]` at
+ * `x = [1, 2]`.
+ *
+ * A local typed `unknown` alone is not one: it has no value yet, and the
+ * arithmetic around it infers its type, as for a free variable.
+ */
+export function blockLocalTypeMayHoldList(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t);
+  return r === 'any' || r === 'value' || topTypeBesideAbsence(r) !== undefined;
+}
+
+/**
  * True if `t` carries a `missing` arm at any nesting level (a scalar `missing`,
  * a `T | missing` union, or a `missing` cell nested inside a list/set/
  * collection/tuple/record/dictionary). Used to gate the missing-value strip

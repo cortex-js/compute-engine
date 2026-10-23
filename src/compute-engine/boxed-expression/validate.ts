@@ -236,9 +236,24 @@ export function inferNumericArgs(
   ops: ReadonlyArray<Expression>
 ): void {
   ce._withoutFacts(() => {
+    // The tier written onto a valueless operand: `real` when every operand,
+    // and every cell of an eager collection operand, is provably real, and
+    // `number` otherwise. The cells count because they are narrowed below:
+    // without them, `2·[y]` read only the two operands `2` and `[y]` (a list
+    // is not itself a non-real number) and wrote `real` onto `y`, so the
+    // product was typed `vector<real^1>` while `y` may be complex, where the
+    // scalar `2·y` narrows `y` to `number`.
+    const couldBeNonReal = (x: Expression): boolean => {
+      if (x.type.facts.couldBeNonReal) return true;
+      // Read the cells one at a time and stop at the first one that may be
+      // non-real; a lazy collection is not walked (see below).
+      if (isFiniteIndexedCollection(x) && !x.isLazyCollection)
+        for (const y of x.each()) if (y.type.facts.couldBeNonReal) return true;
+      return false;
+    };
     let inferredType: Type = 'real';
     for (const x of ops)
-      if (x.type.facts.couldBeNonReal) {
+      if (couldBeNonReal(x)) {
         inferredType = 'number';
         break;
       }

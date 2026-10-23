@@ -54,6 +54,8 @@ import {
   MAX_CELL_DEPTH,
   descendIntoConstructor,
   isBareCutOnDescent,
+  topTypeBesideAbsence,
+  blockLocalTypeMayHoldList,
   unfoldAliasOnDescent,
   type AliasDescent,
 } from '../../common/type/utils.js';
@@ -103,6 +105,9 @@ export interface BroadcastOperandView {
    * MAY be a collection, as a top-typed application may
    * (`isPossiblyCollectionTyped`, `collection-utils.ts`). */
   readonly declaredTopSymbol: boolean;
+  /** A `Block` local typed by a top type: it MAY be a collection
+   * (`isTopTypedBlockLocal`, `collection-utils.ts`). */
+  readonly topTypedBlockLocal: boolean;
   /** The value-level capability: the operand IS a collection. */
   readonly isCollection: boolean;
   /** A materialized finite indexed collection that is neither a tuple nor a
@@ -152,6 +157,10 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
       structure?.kind === 'symbol' &&
       structure.inferred !== true &&
       (resolved === 'any' || resolved === 'value'),
+    topTypedBlockLocal:
+      structure?.kind === 'symbol' &&
+      structure.local === true &&
+      blockLocalTypeMayHoldList(t),
     isCollection: d.facts.collection === true,
     finiteBroadcastParticipant: finiteIndexed && !tuple && !textAtom,
     tuple,
@@ -298,11 +307,18 @@ export function isLinearAlgebraCollectionTypeOf(t: Type): boolean {
 
 /** `isPossiblyCollectionTyped` on a view: a `broadcastable<T>`-typed operand
  * (or a union with such a branch), a top-typed APPLICATION, or a symbol
- * declared `any` or `value`. */
+ * declared `any` or `value`, or a `Block` local typed by a top type. An
+ * application typed by a top type beside absence markers only
+ * (`missing | unknown`, an index into a `list<unknown>`) is read as that
+ * top type (`topTypeBesideAbsence`). */
 export function isPossiblyCollectionTypedView(
   v: BroadcastOperandView
 ): boolean {
-  const t = resolveTypeAlias(v.type);
+  if (v.topTypedBlockLocal) return true;
+  const resolved = resolveTypeAlias(v.type);
+  const t =
+    (v.isApplication ? topTypeBesideAbsence(resolved) : undefined) ??
+    resolved;
   if ((t === 'any' || t === 'value') && v.declaredTopSymbol) return true;
   if (t === 'unknown' || t === 'any' || t === 'value') return v.isApplication;
   if (typeof t === 'string') return false;
@@ -528,6 +544,9 @@ function presentView(v: BroadcastOperandView): BroadcastOperandView {
     },
     get declaredTopSymbol() {
       return v.declaredTopSymbol;
+    },
+    get topTypedBlockLocal() {
+      return v.topTypedBlockLocal;
     },
     get isCollection() {
       return v.isCollection;
