@@ -2502,6 +2502,30 @@ function differentiateNode(
     return simplifyDerivative(exponent.mul(power).mul(basePrime));
   }
 
+  // The inverse of a matrix function, `Inverse(f)`: with g = f^-1,
+  // g' = -g·f'·g. `f^-1` canonicalizes to `Inverse(f)` when `f` is typed as
+  // a matrix (`arithmetic-power.ts`), so the rule for a negative power below
+  // does not see it: with `f: (real) -> tensor<number>` and
+  // `f := x ↦ [[1, x], [x, 2]]`, the call `f(x)` is typed `matrix<real^(2x2)>`
+  // and `D(f(x)^-1, x)` stayed an unevaluated derivative of `Inverse`.
+  if (
+    expr.operator === 'Inverse' &&
+    isFunction(expr) &&
+    expr.nops === 1 &&
+    dependsOnVariable(expr.op1, v)
+  ) {
+    const f = expr.op1;
+    const g = ce.function('Inverse', [f]);
+    recordD(trace, expr, v, 'derivative.product-rule', () =>
+      ce.function('Multiply', [ce.NegativeOne, g, dPlaceholder(f, v), g])
+    );
+    const fPrime =
+      differentiate(f, v, depth + 1, trace) ?? ce._fn('D', [f, ce.symbol(v)]);
+    return simplifyDerivative(
+      ce.function('Multiply', [ce.NegativeOne, g, fPrime, g])
+    );
+  }
+
   // A positive integer power of a base that may be a matrix, `f^n`, is the
   // product of `n` copies of `f`, and the product rule applies: (f^2)' is
   // f'·f + f·f', not 2f·f' (the matrix product does not commute).

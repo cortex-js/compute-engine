@@ -531,6 +531,60 @@ solutions. An inline lambda may be rebuilt with contextual parameter types at
 the application site; that inference is per application, not stored on the
 shared literal.
 
+### The inferred signature of a function literal
+
+The signature of a function literal says what its body proves about every
+call, and nothing more (user decision 2026-10-22, ROADMAP CE-25, landed
+2026-10-23). A parameter with no annotation and no use that narrows it has the
+type `unknown`, and it can receive any value, so a list literal that holds it
+is a list of elements of unknown type: `x ↦ [x]` is `(unknown) -> list<unknown>`
+and `x ↦ [[x]]` is `(unknown) -> list<list<unknown>>`. It was
+`(unknown) -> vector<1>`, which reads the parameter as a number: `g("a")` is
+`["a"]` and `g(Set(1, 2))` is `[Set(1, 2)]`, calls that succeed and that a
+`vector<1>` does not hold. A false type is worse than an imprecise one,
+because other code decides on it: with the honest signature, three defects
+that the old one hid were found and fixed (`At` and `First` refused an operand
+typed `missing | unknown`, `PointX` of it was typed `missing`, and compiled
+folds over a `list<unknown>` gave `null` or a string).
+
+The engine reads an operand of unknown type as a number in one place: where an
+operation demands a number. `x ↦ x + 1` is `(unknown) -> number` because `Add`
+accepts nothing else: a string argument fails anyway, so the type describes
+every call that succeeds (the rule of 2026-10-23 above, under "Lists, tensors
+and `broadcastable`"). That is inference from evidence. A list literal demands
+nothing of its cells, and a call site with a free symbol as its argument is no
+evidence either (`g(z)` is typed by the signature, not as `[z]`; reading a free
+symbol as a number was option (b) of CE-25, rejected). A call with a typed
+argument is typed from the body: `m := t ↦ [[t, 1], [2, 3]]` applied to `2` is
+a `matrix<integer^(2x2)>`, and applied to `r: real` a `matrix<real^(2x2)>`.
+
+A use of a call at a typed parameter may refine a result that the body leaves
+`unknown`: `k := x ↦ x` used in `k(1) + 2` gets the result `real`
+(`_inferWithoutFacts`, `boxed-expression/boxed-function.ts`). A result that
+the body states is kept when it may fit the parameter: `Trace(g(2))` with the
+`g` above, at a parameter typed `number | tensor`, leaves
+`list<list<unknown>>` as it is. The join of the two (the former behavior,
+`list<list<unknown>> | number | tensor`) is not a refinement, and it made
+`Determinant(g(x))` decline to compile.
+
+Where it is reasonable to require a declaration from the user, and where to
+guess, follows one principle: guess where a wrong guess is caught at run time,
+require information where a wrong guess corrupts a result silently.
+
+- The interpreter checks every operand at evaluation. An imprecise type there
+  costs precision, never correctness, so the interpreter does not require
+  declarations: an index into `g(x)` with `x: any` is `missing | unknown`, and
+  the value, a number or a list, is checked when it is read.
+- Compiled code commits each operand to a lane (a number, a complex number, a
+  list, a point) when it compiles, and a wrong lane produces wrong numbers with
+  no error. So a compile target may require a declaration, and a decline with
+  a message that names it is the right answer when the lane cannot be told:
+  `Trace(g(x)) + 1` in the complex lane, with `x` a free input, declines, and
+  `x: number` or `g: (number) -> matrix` makes it compile. A reachable decline
+  is still a defect to fix: the compiler already commits an untyped free input
+  to the number lane wherever arithmetic reads it, and it can make the same
+  commitment when it types a call with such an input (ROADMAP CE-377).
+
 ## First-class type values
 
 `type` is both the primitive type of type values and the result type of `Type`.

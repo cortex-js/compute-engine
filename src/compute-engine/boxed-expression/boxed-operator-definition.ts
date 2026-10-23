@@ -38,6 +38,7 @@ import {
   stripArrowEffects,
   refineDeclaredPlaceholders,
 } from './effects-inference.js';
+import { signatureResultType } from './callee-type-derivation.js';
 
 import type {
   OperatorDefinition,
@@ -2297,7 +2298,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
                 }
               : {}),
             ...restParameterSignatureTail(params),
-            result: body.type.type,
+            // A parameter of type `unknown` in a cell of a list literal is a
+            // cell of unknown type here, not a number, as in the literal's
+            // own arrow: `f(x) := [x]` has the result `list`
+            // (`signatureResultType`).
+            result: signatureResultType(body, params, body.type.type),
           };
           return new BoxedType(signature, this.engine._typeResolver);
         });

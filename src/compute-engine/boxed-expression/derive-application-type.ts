@@ -1,4 +1,8 @@
-import { installOperatorCalleeDerivation } from './callee-type-derivation.js';
+import {
+  installOperatorCalleeDerivation,
+  installSignatureResultDerivation,
+} from './callee-type-derivation.js';
+import { deriveSignatureResultType } from './signature-result-type.js';
 import { callResultType } from './call-result-type.js';
 import type {
   BoxedDefinition,
@@ -1047,4 +1051,12 @@ export function withCodomainForAbsentAnswer(
 
 installOperatorCalleeDerivation((engine, head, args, definition) =>
   deriveApplicationType(engine, head, args, { operator: definition })
+);
+installSignatureResultDerivation((body, params, bodyType) =>
+  deriveSignatureResultType(
+    body,
+    params,
+    bodyType,
+    typeHandlerContext(body.engine)
+  )
 );

@@ -83,7 +83,9 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'FlatMap',
     'flatMap(xs, x => [x, x])',
-    '(collection<unknown>) -> list<number>',
+    // The elements of `xs` can be any values, and so can the elements of
+    // the result.
+    '(collection<unknown>) -> list<unknown>',
     [LIST],
   ],
   [

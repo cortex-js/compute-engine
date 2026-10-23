@@ -213,6 +213,8 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
     expected: { re: number; im: number };
     // The `glsl` code, or the diagnostic when the shader target fails closed.
     glsl: string | RegExp;
+    // The diagnostic when the JavaScript target fails closed.
+    javascript?: RegExp;
   }> = [
     {
       name: 'parse route: \\sum_{k=1}^{3} h(x)',
@@ -274,18 +276,29 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
         ]),
       vars: { x: 2 },
       expected: { re: 3, im: 3 },
-      // The list `[x, k]` has a complex element, and a shader vector takes
-      // only scalar components.
-      glsl: /element 2 \(`k`\) is itself vector-valued/,
+      // The signature of `v` says `list<unknown>` (its parameter has no
+      // use that narrows it), so `v(x)[2]` is of unknown type when `x` is a
+      // free input, and the JavaScript target cannot read it as a scalar
+      // (ROADMAP CE-377: the compiler could commit a free input to the
+      // number lane, as it does for `x + 1`). The shader target refuses the
+      // base of the index, a list with no known length.
+      javascript: /scalar arithmetic over a list-valued operand/,
+      glsl: /the base \(type `list<unknown>`\) has no statically known length/,
     },
   ];
 
-  for (const { name, build, vars, expected, glsl } of CASES) {
+  for (const { name, build, vars, expected, glsl, javascript } of CASES) {
     for (const mode of ['strict', 'auto'] as const)
       it(`javascript ${mode}, ${name}`, () => {
         const ce = shadowEngine();
         const expr = build(ce);
         expect(interpreted(expr, vars)).toEqual(expected);
+        if (javascript !== undefined) {
+          expect(() =>
+            compile(expr, { to: 'javascript', mode, fallback: false } as any)
+          ).toThrow(javascript);
+          return;
+        }
         const result = compile(expr, { to: 'javascript', mode } as any) as any;
         expect(result.success).toBe(true);
         expect(result.run(vars)).toEqual(expected);

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-377.
+Next free reference: CE-380.
 
 **Entry format.**
 
@@ -514,52 +514,6 @@ either (a lifted call). Expected: refuse an operand whose type shares no value
 with the parameter, whole or by its elements. The fix changes the admission of
 every threadable call, so it needs a full-suite measurement.
 
-### CE-25. The inferred signature of a function literal reads an `unknown` parameter as a number
-
-**Status:** in progress; wrong value. User decision 2026-10-22: option (a), the
-signature says only what is known (`x ↦ [x]` is `(unknown) -> list<unknown>`,
-spelling approved 2026-10-23: it keeps the nesting, `x ↦ [[x]]` is
-`(unknown) -> list<list<unknown>>`); reading a free-symbol call argument as a
-number (option (b)) is rejected. The defects that the new signature makes
-reachable from Tycho row 425 (`g := t ↦ [t, 2t]` with `x: any`) are fixed. A
-patch exists (signature part only, `deriveSignatureResultType`); with it, the
-five compile tests below decline instead of compiling, which is accepted.
-
-`g := x ↦ [x]` gets the signature `(unknown) -> vector<1>`, which says the
-element is a number. With `s: set<integer>` and `s := Set(1, 2)`, `g(s)`
-evaluates to `[Set(1, 2)]` (type `list<set<integer>^1>`), which `vector<1>` does
-not hold. The same on 0.161.0. The cause is the fold of a generic symbol in
-`classifyCellD` (`library/collections.ts`): a bare symbol typed `unknown`, and a
-parameter of a function literal is one, counts as a number cell.
-`callResultType` (`boxed-expression/call-result-type.ts`) then keeps the
-inferred result, because it drops a type derived from the body when that type is
-not a subtype of the inferred one.
-
-A fix that stops the fold for parameters gives `(unknown) -> list<unknown>` and
-fixes `g(s)`, but measured on 2026-10-22 it makes five compile tests fail:
-`compile-linear-algebra-lanes` "A USER FUNCTION THAT RETURNS A MATRIX"
-(`t ↦ [[t, 1], [2, 3]]` under a declared `(real)`, complex mode, parse and box
-routes) and `gpu-point-complex-component` "Sum(1 + v(x)[2]…)" (`v := s ↦ [s, k]`
-called with a free `x`; JavaScript strict, JavaScript auto, GLSL), where `At`
-refuses a base with no known length. The compiler relies on the fold. Three
-other expectations change to sound answers with the fix:
-`placeholder-signature-refinement` (two `vector<2>` → `list<unknown>`) and the
-`FlatMap` case of `collection-operator-parameter-inference` (`list<number>` →
-`list<unknown>`).
-
-Options:
-
-- (a) The signature inference stops the fold, while the types of the body's
-  expressions keep it.
-- (b) `callResultType` reads an argument that is a free symbol as a generic
-  number.
-
-Probe:
-`ce.assign('g', ce.box(['Function', ['List', 'x'], 'x'])); ce.box('g').type.toString()`.
-
-- **CE-25.1** A nested literal that captures a parameter keeps the fold:
-  `x ↦ (() ↦ [x])` has the result `() -> vector<1>`.
-
 ### CE-362. `list` and `list<unknown>` give different result types
 
 **Status:** open; defect.
@@ -568,7 +522,49 @@ The two spellings denote one set of values, but with `g := t ↦ [t, 2t]` and
 `x: any`, `g(x)[1] + 1` is typed `any` when `g` is declared `(unknown) -> list`
 and `broadcastable<number> | missing` when it is declared
 `(unknown) -> list<unknown>`. A reader somewhere treats the bare name and the
-`<unknown>` form differently; both must give the same answer.
+`<unknown>` form differently; both must give the same answer. One reader was
+aligned on 2026-10-23: the compiled statistics (`Max`, `Mean`, …) refuse a
+`list<unknown>` operand as they refuse a bare `list` (`refuseNestedData`,
+`compilation/javascript-target.ts`); the compiled `Max` of `[[1, 2], [3, 4]]`
+under `list<unknown>` gave `NaN`.
+
+### CE-378. A numeric function over an element of unknown type spells its list arm `list<any>`
+
+**Status:** open; spelling to decide. Found 2026-10-23 while landing CE-25.
+
+With `L: list<unknown>`, `Sqrt(L)`, `Sin(L)` and `L^2` are typed
+`list<list<any> | number>`, `Floor(L)` is
+`list<infinity | integer | list<any> | nan>`, and `Sum(Rest(m(x)))` with
+`m := t ↦ [[t, 2t], [3t, 4t]]` and `x: any` is `list<any> | number`. The same on
+the commit before CE-25. The cell of unknown type is read as a number or a list
+of numbers of any depth, and the list arm is spelled `list<any>`.
+`docs/TYPE-SYSTEM.md` ("Lists, tensors and `broadcastable`") says that a numeric
+array of any rank is spelled `tensor`, never `list<number>`, and `list<any>` is
+wider still: it admits a list of strings, which no numeric function returns. The
+decision of 2026-10-23 for an operand typed `unknown` reads it as "a number or a
+tensor of numbers", so the consistent spelling is `list<number | tensor>` (and
+`number | tensor` for the sum). Two sites spell `list<any>`:
+`NUMBER_OR_LIST_OF_ANY_TYPE` (`library/type-handlers.ts`, the sum and the
+product of elements that may be lists) and the leaf mapping of a shaped operand
+of unknown depth (`broadcastShapedResultType()`, `common/type/utils.ts`, which
+`docs/TYPE-SYSTEM.md` documents with `Sin(xs)` for `xs: list<any>`). Twelve test
+assertions in seven files use the spelling
+(`grep -rn 'list<any> | number' test/compute-engine`). A change is its own
+commit, after a decision on the spelling.
+
+### CE-379. A nested function literal that captures a parameter reads it as a number
+
+**Status:** open; wrong type. The sub-item CE-25.1 of the signature change that
+landed on 2026-10-23.
+
+`x ↦ (() ↦ [x])` has the signature `(unknown) -> () -> vector<1>`: the inner
+literal's list reads the captured `x` as a number cell, while the outer
+signature says `list<unknown>` for `x ↦ [x]`. The signature derivation
+(`deriveSignatureResultType`, `boxed-expression/signature-result-type.ts`) does
+not read into a nested function literal, which has a type of its own. With
+`g := x ↦ (() ↦ [x])`, `g("a")()` is `["a"]`, which `vector<1>` does not hold.
+Probe:
+`ce.assign('g', ce.parse('x \\mapsto (() \\mapsto [x])')); ce.box('g').type.toString()`.
 
 ### CE-373. A point plus an operand of unknown type keeps the integer tier of the point
 
@@ -1887,32 +1883,29 @@ Reproduced on `cc468eb4f`. `g(t) = [t, 2t]`.
 
 ### CE-98. `Multiply` of two matrices: a compiled fold that is still refused
 
-**Status:** open; reachable refusal. User decision 2026-10-22: `Multiply` of
-two matrices is the matrix product however the factors are written; done
-2026-10-23, and the compiled product of lists that are not rectangular and of
-tensors of rank 3 follows the interpreter (see CHANGELOG), except the sub-item
-below.
+**Status:** open; reachable refusal. User decision 2026-10-22: `Multiply` of two
+matrices is the matrix product however the factors are written; done 2026-10-23,
+and the compiled product of lists that are not rectangular and of tensors of
+rank 3 follows the interpreter (see CHANGELOG), except the sub-item below.
 
 - **CE-98.3** Compiled JavaScript refuses a `Multiply` fold over elements that
   may be numbers or ragged lists. With `L: list<unknown>` and
   `L = [2, [[1], [2, 3]], [[4], [5, 6]]]`, `Product(L)` is `[[8], [20, 36]]` in
   the interpreter; `compile()` throws "a `Multiply` fold over elements of type
-  `integer | list<vector<integer^1> | vector<integer^2>>` has no compiled
-  form". The refusal is in `nestedElementCombiner`
+  `integer | list<vector<integer^1> | vector<integer^2>>` has no compiled form".
+  The refusal is in `nestedElementCombiner`
   (`compilation/javascript-target.ts`): it declines a list of lists without
   dimensions because the element-wise combiner read a ragged list as a matrix.
-  When the run-time product follows the interpreter for a ragged factor
-  (done 2026-10-23, `mulCollectionsWith` in `compilation/javascript-runtime.ts`),
-  a `Multiply` fold can admit such an arm. The same function also refuses a
+  When the run-time product follows the interpreter for a ragged factor (done
+  2026-10-23, `mulCollectionsWith` in `compilation/javascript-runtime.ts`), a
+  `Multiply` fold can admit such an arm. The same function also refuses a
   `Multiply` fold over tensors of rank 3 of different lengths
-  (`L = [[M, M], [N, N, N]]`, "lists of several shapes"), where the
-  interpreter gives an `incompatible-dimensions` error and `_SYS.mulTensor`
-  now gives `NaN`.
+  (`L = [[M, M], [N, N, N]]`, "lists of several shapes"), where the interpreter
+  gives an `incompatible-dimensions` error and `_SYS.mulTensor` now gives `NaN`.
   Do it after CE-25 is committed: CE-25 adds a refusal of the same kind in
   `nestedElementCombiner` (a `Multiply` fold whose arms are lists with no
   dimensions and cells typed `unknown` or `any`, the helper `hasOpenCells`);
   remove both refusals in the same change.
-
 
 ### CE-99. `isValid`, `.errors` and `has()` disagree for a dictionary and a `BoxedObject`
 
@@ -3462,31 +3455,32 @@ value or NaN.
 
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
-**Status:** open; cause not located. Found 2026-10-23 while fixing Tycho row 427.
+**Status:** open; cause not located. Found 2026-10-23 while fixing Tycho
+row 427.
 
 The adaptive quadrature (`adaptiveQuadrature` with `singularEndpoints`,
-`numerics/gauss-kronrod.ts`) integrates an integrable singularity at an
-endpoint correctly when the endpoint is 0 or 1, and not when it is 1/3:
+`numerics/gauss-kronrod.ts`) integrates an integrable singularity at an endpoint
+correctly when the endpoint is 0 or 1, and not when it is 1/3:
 
-| Integral                         | Result                       | True error |
-| -------------------------------- | ---------------------------- | ---------- |
-| `∫₀^(5/3) t^(−1/2) dt`           | converged, error `9.7e-12`   | `4.4e-16`  |
-| `∫₁² (t − 1)^(−1/2) dt`          | extrapolated, error `1.5e-13`| `1.3e-15`  |
-| `∫_(1/3)^2 (t − 1/3)^(−1/2) dt`  | converged, error `2.4e-10`   | `6.5e-9`   |
+| Integral                        | Result                        | True error |
+| ------------------------------- | ----------------------------- | ---------- |
+| `∫₀^(5/3) t^(−1/2) dt`          | converged, error `9.7e-12`    | `4.4e-16`  |
+| `∫₁² (t − 1)^(−1/2) dt`         | extrapolated, error `1.5e-13` | `1.3e-15`  |
+| `∫_(1/3)^2 (t − 1/3)^(−1/2) dt` | converged, error `2.4e-10`    | `6.5e-9`   |
 
-The three integrals have the same value up to a translation. The missing part
-of the last one is about the integral over one spacing of the doubles next to
-1/3 (`2·√(5.5e-17)`), so the corner panel probably stops at that width with an
-error estimate that is too small, and the result is reported as `converged`
-instead of going to the extrapolation of the shells. A singularity inside the
-interval has the same error since Tycho row 427 was fixed, because the
-quadrature now splits the interval at the singularity and each half has it at
-an endpoint: `∫₋₁² |t − 1/3|^(−1/2) dt` reports `converged` with an error of
-`4.5e-10`, and its true error is `1.3e-8`. Before that fix, the true error was
-the same and the result was also reported as `converged`. The interpreter
-uses the same quadrature: `∫₋₁² |t − 0.3|^(−1/2) dt` evaluates to
-`4.88803179952 ± 0.00000000047`, and the value is `2·√1.3 + 2·√1.7 =
-4.888031812279`.
+The three integrals have the same value up to a translation. The missing part of
+the last one is about the integral over one spacing of the doubles next to 1/3
+(`2·√(5.5e-17)`), so the corner panel probably stops at that width with an error
+estimate that is too small, and the result is reported as `converged` instead of
+going to the extrapolation of the shells. A singularity inside the interval has
+the same error since Tycho row 427 was fixed, because the quadrature now splits
+the interval at the singularity and each half has it at an endpoint:
+`∫₋₁² |t − 1/3|^(−1/2) dt` reports `converged` with an error of `4.5e-10`, and
+its true error is `1.3e-8`. Before that fix, the true error was the same and the
+result was also reported as `converged`. The interpreter uses the same
+quadrature: `∫₋₁² |t − 0.3|^(−1/2) dt` evaluates to
+`4.88803179952 ± 0.00000000047`, and the value is
+`2·√1.3 + 2·√1.7 = 4.888031812279`.
 
 ### CE-179. Under `.N()`, some uses of a parameter in a user-function body read the rounded argument
 
@@ -4173,6 +4167,38 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-377. Compiled code declines a call of a user function whose argument is an untyped free input
+
+**Status:** open; reachable decline. Found 2026-10-23 while landing the
+signature change (the former CE-25). User decision 2026-10-23: the declines are
+accepted until this entry is fixed.
+
+With `g := t ↦ [[t, 1], [2, 3]]` and a free input `x`, the signature of `g` is
+`(unknown) -> list<list<unknown>>`: its parameter has no use that narrows it, so
+the entries of `g(x)` are of unknown type. The complex lane of the JavaScript
+target then declines `Trace(g(x)) + 1` ("scalar arithmetic over a list-valued
+operand"), on the parse and the box routes
+(`test/compute-engine/compile-linear-algebra-lanes.test.ts`, "g undeclared"),
+and so does `g(x)[1] + g(x)[2]` with `g := t ↦ [t, 2]`
+(`function-literal-unknown-param-signature.test.ts`). With `v := s ↦ [s, k]` and
+`k = i`, `Sum(1 + v(x)[2], k from 1 to 3)` declines on the JavaScript target in
+both modes, and the GLSL target refuses the index into a list with no known
+length (`gpu-point-complex-component.test.ts`). `Product(Rest(g(x)))` with
+`g := t ↦ [t, 2t]` and `Max(At(m(x), 1))` with `m := t ↦ [[t, 2t], [3t, 4t]]`
+decline because the elements may be rows (CE-98.3 and CE-362). Eight tests
+record the declines; before the change, the signature `vector<2>` or
+`matrix<2x2>` let them compile.
+
+The cause is the same in every case: the compiler cannot tell that `g(x)` holds
+numbers when `x` is a free input. The fix belongs in the compiler, not in the
+signature: the compiler already commits an untyped free input to the number lane
+wherever arithmetic reads it (`x + 1` compiles with `x` free), so when it types
+a call `g(x)` whose argument is such an input, it should instantiate the result
+of `g` at that lane (`number`), as `callResultType` instantiates a call at a
+typed argument. The decline message of the complex lane also misreads the
+operand: "a list-valued operand" for an operand of unknown type. Until the fix,
+the workaround is one declaration, `x: number` or `g: (number) -> matrix`.
+
 ### CE-368. Compiled JavaScript gives `NaN` or `false` for an absent element where the interpreter gives `Missing`
 
 **Status:** open; wrong value.
@@ -4183,6 +4209,17 @@ With `g := t ↦ [t, 2t]` (any of the signatures `(unknown) -> list<unknown>`,
 `g(x)[1] < 1` gives `false` (interpreter: `Missing`), and compiled
 `g(x)[5] * g(x)[1]` gives `NaN` (interpreter: `Missing`). Expected: the absence
 marker the interpreter gives.
+
+Since the signature change of 2026-10-23 (the former CE-25), the interpreter
+types `g(x)[5]` as `missing | unknown` and gives `Missing` where the old
+signature `vector<2>` made it give `NaN` too, so the divergence is reachable
+from more expressions. Ten tests of
+`test/compute-engine/tycho-row-425-index-of-broadcastable-call.test.ts` record
+it (`g(x)[5] + 1`, `Sin(g(x)[5])`, `g(x)[1] + 1`, and the indexes into `m(x)`
+and `nest(x)` under "operands that are unions or may be absent"), with the
+marker `absent-as-NaN` or the flag `absentAsNaN`: each asks for at least one
+pair where the interpreter gives `Missing` and the compiled code `NaN`, so the
+fix of this entry makes them fail, and they then become agreement checks again.
 
 - **CE-368.1** `_SYS.bcastAbsent` makes the whole result absent beside a present
   list: with the inferred signature, compiled `g(x)[5] + g(x)[1]` at

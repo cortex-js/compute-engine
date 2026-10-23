@@ -7,46 +7,45 @@
   values is now the matrix product, as `MatrixMultiply`, also when the factors
   are symbols typed `tensor<number>`, `list<list<number>>`, `list`, `any`,
   `broadcastable<number>` or `number | matrix`, and under `.N()`. Before, a
-  product of two such symbols multiplied each entry (and `.N()` did so even
-  for `matrix<number>` symbols), while a literal or computed factor gave the
-  matrix product; so `p·p` now equals `p^2`. **Migration:** use
-  `HadamardProduct(p, q)` for the product of each entry. Unchanged: a vector or
-  a plain list times a vector or a plain list multiplies each entry, and a
-  number times a matrix scales each entry. Related changes:
-  - The canonical form keeps the written order of factors that may be
-    matrices (`q·p` stays `q·p`; `p·q − q·p` is no longer 0), and `isSame()`
-    and the hash tell them apart. `simplify()`, `Expand`, `Factor` and `D` keep
-    that order: `(A·B)^2` is no longer `A^2·B^2`, the product rule of `D` keeps
-    each factor in place, and `D(f^n)` for a matrix-valued `f` uses the matrix
-    rules (`D(f^-1) = -f^-1·f'·f^-1`). A sum with a term that may be a number
-    beside a term that may be a matrix is not expanded, because a number added
-    to a matrix is added to each entry.
+  product of two such symbols multiplied each entry (and `.N()` did so even for
+  `matrix<number>` symbols), while a literal or computed factor gave the matrix
+  product; so `p·p` now equals `p^2`. **Migration:** use `HadamardProduct(p, q)`
+  for the product of each entry. Unchanged: a vector or a plain list times a
+  vector or a plain list multiplies each entry, and a number times a matrix
+  scales each entry. Related changes:
+  - The canonical form keeps the written order of factors that may be matrices
+    (`q·p` stays `q·p`; `p·q − q·p` is no longer 0), and `isSame()` and the hash
+    tell them apart. `simplify()`, `Expand`, `Factor` and `D` keep that order:
+    `(A·B)^2` is no longer `A^2·B^2`, the product rule of `D` keeps each factor
+    in place, and `D(f^n)` for a matrix-valued `f` uses the matrix rules
+    (`D(f^-1) = -f^-1·f'·f^-1`). A sum with a term that may be a number beside a
+    term that may be a matrix is not expanded, because a number added to a
+    matrix is added to each entry.
   - Matrices whose dimensions do not agree give
     `Error("incompatible-dimensions", …)` (the product stayed unevaluated), and
     the result type of a product of matrices has the dimensions of the matrix
     product (`matrix<2x3>·matrix<3x4>` is `matrix<2x4>`).
-  - Two tensors of rank 3 of the same length multiply each pair of matrices,
-    as `Power` does; a tensor of rank 3 beside a matrix or a vector stays
+  - Two tensors of rank 3 of the same length multiply each pair of matrices, as
+    `Power` does; a tensor of rank 3 beside a matrix or a vector stays
     unevaluated; a number times a tensor of rank 3 scales every cell; a `Range`
     beside a matrix is read as a vector.
   - Compiled JavaScript: `matrix<…>` operands call the matrix product;
-    `tensor<number>`, `list<list<number>>` and `broadcastable<number>` choose
-    by the shape of the values when the code runs. Python uses `np.matmul` for
-    matrix types. interval-js throws (its result is then `entire`) for a list
-    of lists times another list. Types that may hold points (bare `list`,
+    `tensor<number>`, `list<list<number>>` and `broadcastable<number>` choose by
+    the shape of the values when the code runs. Python uses `np.matmul` for
+    matrix types. interval-js throws (its result is then `entire`) for a list of
+    lists times another list. Types that may hold points (bare `list`,
     `list<unknown>`, `any`, `list<tuple<…>>`) keep the product of each entry,
-    because compiled code stores a list of points and a matrix as the same
-    array (ROADMAP CE-216.1); their compiled operand order now follows the
-    written order.
-    A list whose rows have different lengths, or that mixes numbers and
-    lists (`[[1], [2, 3]]`), is not a matrix: its elements are paired with
-    the elements of the other factors, as in the interpreter
-    (`[[1], [2, 3]]·[[4], [5, 6]]` is `[[4], [10, 18]]`; it was `null` or
-    wrong values). Two tensors of rank 3 multiply each pair of matrices, as
-    in the interpreter (it threw, and a compiled `Product` gave `NaN`
-    entries); a tensor of rank 3 beside a matrix or a vector throws when the
-    code runs. Where the interpreter gives an `incompatible-dimensions`
-    error, compiled code gives `NaN`.
+    because compiled code stores a list of points and a matrix as the same array
+    (ROADMAP CE-216.1); their compiled operand order now follows the written
+    order. A list whose rows have different lengths, or that mixes numbers and
+    lists (`[[1], [2, 3]]`), is not a matrix: its elements are paired with the
+    elements of the other factors, as in the interpreter
+    (`[[1], [2, 3]]·[[4], [5, 6]]` is `[[4], [10, 18]]`; it was `null` or wrong
+    values). Two tensors of rank 3 multiply each pair of matrices, as in the
+    interpreter (it threw, and a compiled `Product` gave `NaN` entries); a
+    tensor of rank 3 beside a matrix or a vector throws when the code runs.
+    Where the interpreter gives an `incompatible-dimensions` error, compiled
+    code gives `NaN`.
   - A product boxed while its symbols are `unknown` is still sorted: declare a
     matrix-capable type for the written order to be kept. `Divide(p, q)` of two
     matrices still divides each entry (`p·q^-1` is the matrix product).
@@ -366,6 +365,38 @@
 
 ### Behavior Changes
 
+- **The signature of a function literal says only what its body proves about a
+  parameter of unknown type.** `g := x ↦ [x]` had the signature
+  `(unknown) -> vector<1>`, which says that the element is a number, but
+  `g(Set(1, 2))` is `[Set(1, 2)]` and `g("a")` is `["a"]`. The signature is now
+  `(unknown) -> list<unknown>`: `x ↦ [x, 1]` and `(x, y) ↦ [x, y]` give
+  `list<unknown>`, and `x ↦ [[x]]` gives `list<list<unknown>>`. A parameter that
+  a use types as a number (`x ↦ [x + 1]`) and an annotated parameter
+  (`(x: real) ↦ [x]`) keep the shape of the list. A call with a typed argument
+  is typed from the body: with `m := t ↦ [[t, 1], [2, 3]]`, `m(2)` is a
+  `matrix<integer^(2x2)>` and `m(r)` with `r: real` a `matrix<real^(2x2)>`; a
+  call with a free symbol is typed by the signature, `list<list<unknown>>`. The
+  reading of an operand typed `unknown` as a number stays where an operation
+  demands a number: `x ↦ x + 1` is still `(unknown) -> number`. Consequences for
+  a function with such a signature called with a free or an `any`-typed
+  argument: an index into the call is typed `missing | unknown` (it was
+  `missing | number | vector<2>`), a sum of its elements
+  `broadcastable<number>`, and `Dot` of such an index the wide
+  `missing | value`; the values are unchanged, and each type holds its value.
+  With `f(x) := (-x, x)`, `h(a) := f([a, a])` is typed
+  `(unknown) -> list<tuple<number, number>>` as before (the call maps `f` over
+  the list), and an integral over a list integrand keeps its shape
+  (`∫₀¹ [x, 2x] dx` is a `vector<2>`: the integration variable is a real).
+  Compiled code that cannot tell whether an element of unknown type is a number
+  declines in eight cases that compiled before: `Trace(g(x)) + 1` with
+  `g := t ↦ [[t, 1], [2, 3]]` and a free `x` in the complex lane,
+  `Sum(1 + v(x)[2], …)` with `v := s ↦ [s, k]` on the JavaScript and GLSL
+  targets, `Product(Rest(g(x)))` and `Max(At(m(x), 1))`. The workaround is a
+  declaration, `x: number` or `g: (number) -> matrix`; ROADMAP CE-377 records
+  the compiler change that removes the declines. ROADMAP CE-25, user decision
+  2026-10-22; the rationale is in `docs/TYPE-SYSTEM.md`, "The inferred signature
+  of a function literal".
+
 - **The type of a list or set literal that holds an error value describes its
   other elements.** A type describes the successful values, so an element whose
   type is `error` (an `Error` expression, or a failed application such as
@@ -681,11 +712,56 @@
 
 ### Resolved Issues
 
-- **`Product`, `Reduce` and `Map` over a list of ragged lists that hold
-  matrices were an `incompatible-type` error.** With `L: list<unknown>` and
+- **A use of a call at a typed parameter rewrote the signature of the called
+  function.** With `g := t ↦ [[t, 1], [2, 3]]`, whose signature is
+  `(unknown) -> list<list<unknown>>`, boxing `Trace(g(2))` (the parameter of
+  `Trace` is `number | tensor`) widened the result of `g` to
+  `list<list<unknown>> | number | tensor`, and `Determinant(g(x)) + 1` then
+  declined to compile ("operand is not an indexed collection"). A use now
+  refines only a result that the body leaves `unknown` (`k := x ↦ x` used in
+  `k(1) + 2` gets the result `real`, as before); a result that the body states,
+  and that may fit the parameter, is kept.
+
+- **`D` of the inverse of a matrix function stayed unevaluated.** With
+  `f: (real) -> tensor<number>` and `f := x ↦ [[1, x], [x, 2]]`, the call `f(x)`
+  is now typed `matrix<real^(2x2)>` from the body, so `f(x)^{-1}` canonicalizes
+  to `Inverse(f(x))`, and `D(f(x)^{-1}, x)` was an unevaluated derivative of
+  `Inverse` (it was differentiated as a negative matrix power while the call was
+  typed `tensor`). `D(Inverse(f), x)` is now `-Inverse(f) · f' · Inverse(f)`,
+  and agrees with a finite difference.
+
+- **`At` and `First` refused an operand that may be absent or of unknown type,
+  and `PointX` of such an operand was typed `missing`.** With
+  `g: (unknown) -> list<unknown>` and `x: any`, `g(x)[1][2]` was an
+  `incompatible-type` error (at `x = [1, 2]` its value is `2`), and
+  `PointX(g(x)[1])` was typed `missing`, as if always absent; it is
+  `missing | unknown`.
+
+- **Compiled `Sum`, `Product` and `Reduce` over a list of elements of unknown
+  type gave `null` or a string when the elements are lists.** With
+  `L: list<unknown>` and `L = [[0, 1], [2, 3], [4]]`, the compiled `Sum(L)` was
+  the string `"01,23,4"` (the interpreter gives an `incompatible-dimensions`
+  error: the rows have different lengths), and with `L = [[1, 2], [3, 4]]` the
+  compiled `Product(L)` was `null` (the interpreter gives `[3, 8]`). The fold
+  now dispatches on each element: `Sum(L)` is `[6, 9]` for
+  `[[0, 1], [2, 3], [4, 5]]` and throws for rows of different shapes, and
+  `Product(L)` is the product of the elements, `[3, 8]`, `[17, 39]` for a matrix
+  beside a row (the matrix product), and `[[4], [10, 18]]` for ragged rows. A
+  `Multiply` fold over elements typed as lists of cells of unknown type
+  (`list<unknown> | unknown`, the elements of `Rest(g(x))`) still declines
+  (ROADMAP CE-98.3).
+
+- **The compiled statistics over a `list<unknown>` read each row as a number.**
+  With `L: list<unknown>` and `L = [[1, 2], [3, 4]]`, the compiled `Max(L)` was
+  `NaN` (the interpreter gives 4). `Max`, `Min`, `Mean`, `Median` and the other
+  statistics now decline such an operand, as they decline a bare `list` and a
+  `list<any>`, and the interpreter evaluates it.
+
+- **`Product`, `Reduce` and `Map` over a list of ragged lists that hold matrices
+  were an `incompatible-type` error.** With `L: list<unknown>` and
   `L = [[M, [5]], [N, [2]]]` (`M`, `N` 2×2 matrices), the elements of `L` are
-  typed `list<matrix<integer^(2x2)> | vector<integer^1>>`, and the check of
-  the callback refused `Multiply` and `Negate` for them, so `Product(L)` was
+  typed `list<matrix<integer^(2x2)> | vector<integer^1>>`, and the check of the
+  callback refused `Multiply` and `Negate` for them, so `Product(L)` was
   `Reduce(L, Error(incompatible-type), 1)`, while the product of the two
   elements written as `p·q` had a value. A union of tensors and numbers below
   one or more list levels of an element is now read arm by arm, as a union at
@@ -844,10 +920,10 @@
   changed.
 
 - **A compiled numerical integral of a divergent integrand took 200 to 400 ms
-  and answered an arbitrary finite number** (Tycho row 427). The absolute
-  moment of the normal distribution
-  `\int_{-50}^{50}|t|^{x}\frac{1}{\sqrt{2\pi}}e^{-\frac{1}{2}t^2}dt` diverges
-  at t = 0 for x ≤ −1. The interpreter answered `+∞`, because it finds the pole
+  and answered an arbitrary finite number** (Tycho row 427). The absolute moment
+  of the normal distribution
+  `\int_{-50}^{50}|t|^{x}\frac{1}{\sqrt{2\pi}}e^{-\frac{1}{2}t^2}dt` diverges at
+  t = 0 for x ≤ −1. The interpreter answered `+∞`, because it finds the pole
   from the expression with the value of `x`, but the compiled function gave a
   different number at each call (647, 708, 7249 at x = −1.5), and
   `\int_{-1}^{2}\frac{1}{(t-x)^2}dt` at x = 0.3 gave `8.9e16`. The adaptive
@@ -855,9 +931,9 @@
   goes deep at a point inside the interval, it now finds the singular point and
   splits the interval there, so that each half has the singularity at a bound.
   The compiled function now answers `NaN` in under 5 ms for x = −1, −1.5 and
-  −2.5, and the interpreter still answers `+∞`. A convergent moment is also
-  more accurate: at x = −0.9 the error was `5.7e-10`, and it is now `2.6e-12`.
-  A smooth integrand, a kink, a jump and a narrow peak are not split.
+  −2.5, and the interpreter still answers `+∞`. A convergent moment is also more
+  accurate: at x = −0.9 the error was `5.7e-10`, and it is now `2.6e-12`. A
+  smooth integrand, a kink, a jump and a narrow peak are not split.
 
 - **`D(PointY(h(u)), u)` took seconds, and was worked out again at each
   evaluation** (Tycho row 424). With `h` a path joined from 29 linear pieces,

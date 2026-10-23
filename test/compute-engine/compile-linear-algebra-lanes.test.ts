@@ -54,7 +54,10 @@ describe('THE WRITTEN-OUT INNER PRODUCT FOLLOWS THE LANE OF ITS OPERANDS', () =>
       const result = js(expr, 'complex');
       expect(result.code).toContain('_SYS.complexMatmul(');
       const expected = expr
-        .subs({ p: ce.parse('(\\imaginaryI, 1)'), q: ce.parse('(\\imaginaryI, 1)') })
+        .subs({
+          p: ce.parse('(\\imaginaryI, 1)'),
+          q: ce.parse('(\\imaginaryI, 1)'),
+        })
         .N();
       // i·i + 1·1 + 1 = 1
       expect(parts(expected)).toEqual([1, 0]);
@@ -116,7 +119,11 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
       'Determinant(f(x)) + 1',
       (ce) => ce.parse('\\operatorname{Determinant}(f(x)) + 1'),
     ],
-    ['box', 'Trace(f(x)) + 1', (ce) => ce.box(['Add', ['Trace', ['f', 'x']], 1])],
+    [
+      'box',
+      'Trace(f(x)) + 1',
+      (ce) => ce.box(['Add', ['Trace', ['f', 'x']], 1]),
+    ],
     [
       'box',
       'Determinant(f(x)) + 1',
@@ -129,7 +136,9 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
         const ce = declared('(real) -> matrix<real>', REAL_BODY);
         const expr = build(ce);
         const result = js(expr, mode);
-        expect(result.preamble).toContain('const _fn_f = (t) => [[t, 1], [2, 3]];');
+        expect(result.preamble).toContain(
+          'const _fn_f = (t) => [[t, 1], [2, 3]];'
+        );
         expectValue(result.run({ x: 2 }), expr.subs({ x: 2 }).N());
       });
 
@@ -178,13 +187,21 @@ describe('A USER FUNCTION THAT RETURNS A MATRIX', () => {
       it(`${mode}, ${route} route: Trace(g(x)) + 1 and Determinant(g(x)) + 1, g undeclared`, () => {
         const ce = new ComputeEngine();
         assign(ce);
-        for (const expr of [
-          ce.box(['Add', ['Trace', ['g', 'x']], 1]),
-          ce.parse('\\operatorname{Determinant}(g(x)) + 1'),
-        ]) {
-          const result = js(expr, mode);
-          expectValue(result.run({ x: 2 }), expr.subs({ x: 2 }).N());
-        }
+        const trace = ce.box(['Add', ['Trace', ['g', 'x']], 1]);
+        const det = ce.parse('\\operatorname{Determinant}(g(x)) + 1');
+        // The signature of `g` says `(unknown) -> list<list<unknown>>` (its
+        // parameter has no use that narrows it), so with a free `x` the
+        // entries of `g(x)` are of unknown type. The complex lane cannot
+        // read `Trace(g(x))` as a scalar and declines (ROADMAP CE-377: the
+        // compiler could commit a free input to the number lane, as it
+        // does for `x + 1`). The real lanes read the entries from the body.
+        if (mode === 'complex')
+          expect(() => js(trace, mode)).toThrow(
+            /scalar arithmetic over a list-valued operand/
+          );
+        else
+          expectValue(js(trace, mode).run({ x: 2 }), trace.subs({ x: 2 }).N());
+        expectValue(js(det, mode).run({ x: 2 }), det.subs({ x: 2 }).N());
       });
 });
 
@@ -241,7 +258,10 @@ describe('THE LANE OF A NESTED LINEAR-ALGEBRA HEAD', () => {
           const result = js(expr, mode);
           expect(result.code).toBe(code);
           const expected = expr
-            .subs({ A: ce.parse('[[1, 2], [3, 4]]'), u: ce.parse('[1, -2, 3]') })
+            .subs({
+              A: ce.parse('[[1, 2], [3, 4]]'),
+              u: ce.parse('[1, -2, 3]'),
+            })
             .N();
           expectValue(result.run(VARS), expected);
         });
@@ -279,17 +299,20 @@ describe('A `Power` WHOSE BASE IS A MATRIX ONLY AFTER THE PARSE', () => {
     ['B^{3}', '[[37,54],[81,118]]'],
     ['B^{0}', '[[1,0],[0,1]]'],
     ['B^{-2}', '[[5.5,-2.5],[-3.75,1.75]]'],
-  ])('javascript: %s of a square matrix is the matrix power', (latex, value) => {
-    const expr = assignedAfterParse(latex, '[[1, 2], [3, 4]]');
-    expect(expr.N().toString()).toBe(value);
-    const result = js(expr, 'strict');
-    expect(result.code).toContain('_SYS.matpow(_val_B, ');
-    // The inverse in `B^{-2}` has rounding errors in floating point.
-    const actual = result.run();
-    for (const [i, row] of JSON.parse(value).entries())
-      for (const [j, x] of row.entries())
-        expect(actual[i][j]).toBeCloseTo(x, 12);
-  });
+  ])(
+    'javascript: %s of a square matrix is the matrix power',
+    (latex, value) => {
+      const expr = assignedAfterParse(latex, '[[1, 2], [3, 4]]');
+      expect(expr.N().toString()).toBe(value);
+      const result = js(expr, 'strict');
+      expect(result.code).toContain('_SYS.matpow(_val_B, ');
+      // The inverse in `B^{-2}` has rounding errors in floating point.
+      const actual = result.run();
+      for (const [i, row] of JSON.parse(value).entries())
+        for (const [j, x] of row.entries())
+          expect(actual[i][j]).toBeCloseTo(x, 12);
+    }
+  );
 
   it('javascript: the structural `Power` of a square matrix literal', () => {
     const ce = new ComputeEngine();
@@ -487,9 +510,11 @@ function runPython(r: any, setup: string): [number, number] {
   const out = execFileSync(PYTHON!, ['-c', program], {
     encoding: 'utf8',
   }).trim();
-  return out.split(/\s+/).map((t) =>
-    t === 'inf' ? Infinity : t === '-inf' ? -Infinity : Number(t)
-  ) as [number, number];
+  return out
+    .split(/\s+/)
+    .map((t) =>
+      t === 'inf' ? Infinity : t === '-inf' ? -Infinity : Number(t)
+    ) as [number, number];
 }
 
 describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
@@ -521,22 +546,25 @@ describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
       expect(r.code).toBe(code);
     });
 
-  (PYTHON === undefined ? it.skip : it)('the values agree with the interpreter', () => {
-    const ce = engine();
-    for (const [json] of CASES) {
-      const expr = ce.box(json);
-      const r = compile(expr, { to: 'python', fallback: false } as any);
-      const actual = runPython(r, 'x = 0.5\ny = -1.5\nz = complex(0.25, 2)');
-      const expected = expr
-        .subs({ x: 0.5, y: -1.5, z: ce.parse('0.25 + 2\\imaginaryI') })
-        .N();
-      expect([JSON.stringify(json), ...actual]).toEqual([
-        JSON.stringify(json),
-        expect.closeTo(expected.re, 9),
-        expect.closeTo(expected.im, 9),
-      ]);
+  (PYTHON === undefined ? it.skip : it)(
+    'the values agree with the interpreter',
+    () => {
+      const ce = engine();
+      for (const [json] of CASES) {
+        const expr = ce.box(json);
+        const r = compile(expr, { to: 'python', fallback: false } as any);
+        const actual = runPython(r, 'x = 0.5\ny = -1.5\nz = complex(0.25, 2)');
+        const expected = expr
+          .subs({ x: 0.5, y: -1.5, z: ce.parse('0.25 + 2\\imaginaryI') })
+          .N();
+        expect([JSON.stringify(json), ...actual]).toEqual([
+          JSON.stringify(json),
+          expect.closeTo(expected.re, 9),
+          expect.closeTo(expected.im, 9),
+        ]);
+      }
     }
-  });
+  );
 });
 
 describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
@@ -578,21 +606,31 @@ describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
     'Log2',
     'Log10',
   ])
-    (PYTHON === undefined ? it.skip : it)(`${head}(x + iy) agrees with the interpreter`, () => {
-      const ce = engine();
-      const expr = ce.box([head, Z]);
-      const r = compile(expr, { to: 'python', fallback: false } as any) as any;
-      expect(r.code).not.toContain('_ce_cisreal');
-      for (const [x, y] of POINTS) {
-        const [re, im] = runPython(r, `x = ${x}\ny = ${y}`);
-        const expected = expr.subs({ x, y }).N();
-        const same = (a: number, b: number) =>
-          a === b || Math.abs(a - b) <= 1e-9 * (1 + Math.abs(b));
-        expect([head, x, y, same(re, expected.re), same(im, expected.im)]).toEqual(
-          [head, x, y, true, true]
-        );
+    (PYTHON === undefined ? it.skip : it)(
+      `${head}(x + iy) agrees with the interpreter`,
+      () => {
+        const ce = engine();
+        const expr = ce.box([head, Z]);
+        const r = compile(expr, {
+          to: 'python',
+          fallback: false,
+        } as any) as any;
+        expect(r.code).not.toContain('_ce_cisreal');
+        for (const [x, y] of POINTS) {
+          const [re, im] = runPython(r, `x = ${x}\ny = ${y}`);
+          const expected = expr.subs({ x, y }).N();
+          const same = (a: number, b: number) =>
+            a === b || Math.abs(a - b) <= 1e-9 * (1 + Math.abs(b));
+          expect([
+            head,
+            x,
+            y,
+            same(re, expected.re),
+            same(im, expected.im),
+          ]).toEqual([head, x, y, true, true]);
+        }
       }
-    });
+    );
 });
 
 describe('PYTHON: STATISTICS AND TRACE OF COMPLEX VALUES', () => {
@@ -619,24 +657,29 @@ describe('PYTHON: STATISTICS AND TRACE OF COMPLEX VALUES', () => {
       const r = compile(engine().box(json), { to: 'python' } as any) as any;
       expect(r.code).toBe(code);
     });
-    (PYTHON === undefined ? it.skip : it)(`${name}: the value agrees with the interpreter`, () => {
-      const ce = engine();
-      const expr = ce.box(json);
-      const r = compile(expr, { to: 'python', fallback: false } as any);
-      const actual = runPython(
-        r,
-        'L = [complex(1, 1), 2, complex(0, 3)]\n' +
-          'M = [[complex(1, 1), 2], [complex(0, -1), complex(3, 2)]]'
-      );
-      const expected = expr
-        .subs({
-          L: ce.parse('[1+\\imaginaryI, 2, 3\\imaginaryI]'),
-          M: ce.parse('[[1+\\imaginaryI, 2], [-\\imaginaryI, 3+2\\imaginaryI]]'),
-        })
-        .N();
-      expect(actual[0]).toBeCloseTo(expected.re, 9);
-      expect(actual[1]).toBeCloseTo(expected.im, 9);
-    });
+    (PYTHON === undefined ? it.skip : it)(
+      `${name}: the value agrees with the interpreter`,
+      () => {
+        const ce = engine();
+        const expr = ce.box(json);
+        const r = compile(expr, { to: 'python', fallback: false } as any);
+        const actual = runPython(
+          r,
+          'L = [complex(1, 1), 2, complex(0, 3)]\n' +
+            'M = [[complex(1, 1), 2], [complex(0, -1), complex(3, 2)]]'
+        );
+        const expected = expr
+          .subs({
+            L: ce.parse('[1+\\imaginaryI, 2, 3\\imaginaryI]'),
+            M: ce.parse(
+              '[[1+\\imaginaryI, 2], [-\\imaginaryI, 3+2\\imaginaryI]]'
+            ),
+          })
+          .N();
+        expect(actual[0]).toBeCloseTo(expected.re, 9);
+        expect(actual[1]).toBeCloseTo(expected.im, 9);
+      }
+    );
   }
 
   // JavaScript has a complex lowering of `Mean` (`_SYS.cmean`), which sums

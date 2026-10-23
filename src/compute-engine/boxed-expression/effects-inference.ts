@@ -91,6 +91,7 @@ import {
   restParameterIndex,
   restParameterSignatureTail,
 } from './function-literal.js';
+import { signatureResultType } from './callee-type-derivation.js';
 
 /**
  * # The `Function`-literal construction seam (`docs/EFFECTS-MODEL.md`, "Inference")
@@ -1576,6 +1577,21 @@ export function functionLiteralSignatureType(expr: Expression): Type {
         })
       : undefined;
 
+  // A derived result reads a parameter of type `unknown` in a cell of a list
+  // literal as a cell of unknown type, not as a number: `x ↦ [x]` has the
+  // result `list`, not `vector<1>`, since `x` can receive any value
+  // (`signatureResultType`). An ascribed result is the author's contract and
+  // is kept.
+  const sourceType = bodyType;
+  if (ascribedReturn === undefined)
+    bodyType = signatureResultType(
+      declaredSignature === undefined
+        ? body
+        : functionLiteralReturnMarker(expr)!.op1,
+      paramOps,
+      bodyType
+    );
+
   // The parameters of a bare function literal have unknown type, so a
   // finite-numeric body claim is unsound: the lambda may later be applied to
   // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
@@ -1597,7 +1613,9 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   if (
     ascribedReturn === undefined &&
     args !== undefined &&
-    bodyTypeSource.matches('complex') &&
+    (bodyType === sourceType
+      ? bodyTypeSource.matches('complex')
+      : isSubtype(bodyType, 'complex')) &&
     args.some(
       (a) =>
         !provablyDisjoint(a.type, 'infinity') ||

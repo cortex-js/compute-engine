@@ -7054,7 +7054,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const runtimeShape = isBroadcastablePointType(jsType(args[0]));
     if (
       runtimeShape &&
-      !(pointOperandCoordinateTypes(args[0]) ?? []).every(isNumberCoordinateType)
+      !(pointOperandCoordinateTypes(args[0]) ?? []).every(
+        isNumberCoordinateType
+      )
     )
       throw new Error(
         'Could not compile `Norm`: the operand is a point or a list of ' +
@@ -11284,6 +11286,12 @@ function compileSumProduct(
         element.kind === 'broadcastable'
       )
         return emitCollectionReduce(kind, args[0], target, true);
+      // An element typed `unknown` or `any` (the elements of
+      // `L: list<unknown>`, `list<any>` or a bare `list`) may be a list at run
+      // time, and takes the guarded fold too. The scalar fold gave `null` for
+      // `L = [[1, 2], [3, 4]]`, where the interpreter answers `[4, 6]`.
+      if (element === 'unknown' || element === 'any')
+        return emitCollectionReduce(kind, args[0], target, true);
       return emitCollectionReduce(kind, args[0], target, false);
     }
     if (isPossiblyCollectionTypedJS(args[0])) {
@@ -12677,7 +12685,23 @@ function nestedElementCombiner(
   init?: Expression | null
 ): string | undefined {
   if (!isSymbol(op)) return undefined;
-  const elt = BaseCompiler.collectionElementTypeOf(coll);
+  // `collectionElementTypeOf` gives no element type for a list whose
+  // elements are typed `unknown` or `any` (`L: list<unknown>`), or are
+  // lists of such elements (the rows of `nest(x)` for
+  // `nest := t ↦ [[t], [t, t]]`); the type of the collection itself gives
+  // it, as for the compiled `Sum`. Without it the fold took the scalar
+  // combiner, which reads two arrays as numbers and gave `null`.
+  const ownElement = collectionElementType(
+    resolveTypeForCompilation(jsType(coll))
+  );
+  const elt =
+    BaseCompiler.collectionElementTypeOf(coll) ??
+    (ownElement !== undefined &&
+    (ownElement === 'unknown' ||
+      ownElement === 'any' ||
+      isDefinitelyCollectionType(ownElement))
+      ? ownElement
+      : undefined);
   if (elt === undefined) return undefined;
   const r = resolveTypeForCompilation(elt);
   const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
@@ -12686,9 +12710,28 @@ function nestedElementCombiner(
   // numbers. A list of lists with no dimensions may be ragged
   // (`[[2], [2, 2]]`, the rows of `nest(x)` for `nest(t) = [[t], [t, t]]`),
   // which the combiner would read as a matrix: such an arm is declined.
+  // An arm whose shape the type does not state (`unknown`, or a list of
+  // `unknown`: the elements of `Rest(g(x))` for `g := t ↦ [t, 2t]` and
+  // `x: any`) is folded by an `Add` fold as the compiled `Sum` folds it:
+  // with the dispatching combiner, which adds entry by entry and checks the
+  // shapes when it runs. A `Multiply` fold takes that combiner for an
+  // element typed `unknown` or `any` only, not for a list of them: the
+  // combiner reads two values of rank 2 as matrices, and rows of different
+  // lengths (`t ↦ [[t], [t, t]]`) gave `null` where the interpreter
+  // multiplies entry by entry (ROADMAP CE-98.1). Such a fold declines.
+  const shapeUnknown = (arm: Type): boolean => {
+    const a = resolveTypeForCompilation(arm);
+    if (a === 'unknown' || a === 'any') return true;
+    if (op.symbol !== 'Add') return false;
+    if (typeof a === 'string' || a.kind !== 'list') return false;
+    if (a.dimensions !== undefined) return false;
+    const e = collectionElementType(a);
+    return e === 'unknown' || e === 'any';
+  };
   const foldable = (arm: Type): boolean => {
     const a = resolveTypeForCompilation(arm);
     if (isSubtype(a, 'number')) return true;
+    if (shapeUnknown(arm)) return true;
     if (typeof a === 'string' || a.kind !== 'list') return false;
     // A dimension list, or `null` for a tensor of unknown rank: either way
     // the rows are uniform.
@@ -12708,8 +12751,13 @@ function nestedElementCombiner(
         `The interpreter evaluates it instead.`
     );
   // Elements that may differ in shape (`elementsMayDifferInShape`): the
-  // fold checks the shapes when it runs.
-  const checkShapes = elementsMayDifferInShape(coll);
+  // fold checks the shapes when it runs. For an `Add` fold, an element of
+  // unknown type counts as such; a `Multiply` fold leaves two lists of
+  // different shapes to the run-time product, which is the matrix product
+  // of a matrix and a row (see `elementsMayDifferInShape`).
+  const checkShapes =
+    elementsMayDifferInShape(coll, op.symbol === 'Add') ||
+    (op.symbol === 'Add' && arms.some((arm) => shapeUnknown(arm)));
   // Elements that may be numbers or lists (`number | vector<2>`): every
   // element is a number, or every element is a list, so an `Add` or
   // `Multiply` fold combines with the dispatching element-wise combiner,
@@ -12721,7 +12769,11 @@ function nestedElementCombiner(
   // A complex seed (`Reduce(p, Multiply, ImaginaryUnit)`) makes the
   // accumulator complex from the first step, so it also takes the complex
   // helpers, as for the definite collections below.
-  if (mayBeCollectionType(elt)) {
+  // Elements typed `unknown` or `any` (`Reduce(L, Add, 0)` with
+  // `L: list<unknown>`) may be lists too, and an `Add` fold over them takes
+  // the dispatching combiner. The scalar combiner joined two arrays as a
+  // string: `"01,23,4"` for `L = [[1, 2], [3, 4]]`.
+  if (mayBeCollectionType(elt) || shapeUnknown(elt)) {
     if (
       (op.symbol === 'Add' || op.symbol === 'Multiply') &&
       arms.every(foldable)
@@ -12765,6 +12817,17 @@ function nestedElementCombiner(
   )
     throw new Error(
       `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
+        `\`${typeToString(elt)}\`, whose rows may have different lengths, has no compiled form. ` +
+        `The interpreter evaluates it instead.`
+    );
+  // A `Multiply` fold over lists whose cells are typed `unknown` or `any`
+  // (the rows of `nest(x)` for `nest := t ↦ [[t], [t, t]]` and `x: any`):
+  // the rows may have different lengths, and the element-wise combiner
+  // reads two values of rank 2 as matrices. It gave `null` where the
+  // interpreter multiplies entry by entry (ROADMAP CE-98.1).
+  if (op.symbol === 'Multiply' && arms.some((arm) => hasOpenCells(arm)))
+    throw new Error(
+      `Could not compile \`${operator}\`: a \`Multiply\` fold over elements of type ` +
         `\`${typeToString(elt)}\`, whose rows may have different lengths, has no compiled form. ` +
         `The interpreter evaluates it instead.`
     );
@@ -13133,10 +13196,30 @@ function refuseNestedData(
   // is refused: the compiled `Max` of `[[2, 4], [3, 6]]` was `NaN`. A
   // tensor of unknown rank and a `broadcastable<T>` operand are read by the
   // rule above.
+  // An element of unknown type (`list<unknown>`, the elements of a call of
+  // `t ↦ [[t, 2t], [3t, 4t]]` with a free argument, whose signature is
+  // `(unknown) -> list<list<unknown>>`) may be a row too: the compiled
+  // `Max` of `[[1, 2], [3, 4]]` under that type was `NaN` where the
+  // interpreter gives 4. A bare `list` and a `list<any>` are refused above
+  // this gate (`possible 'Nothing' elements`); the three spellings denote
+  // one set of values, and are refused alike.
+  const hasElementsOfUnknownType = (t: Type, depth = 0): boolean => {
+    if (depth > 8) return false;
+    const present = resolveTypeForCompilation(stripMissingFromType(t));
+    if (typeof present !== 'string' && present.kind === 'union')
+      return present.types.some((arm) =>
+        hasElementsOfUnknownType(arm, depth + 1)
+      );
+    const elt = collectionElementType(present);
+    if (elt === undefined) return false;
+    const r = resolveTypeForCompilation(elt);
+    return r === 'unknown' || r === 'any';
+  };
   const hasCollectionElements = (a: Expression | undefined): boolean =>
     a !== undefined &&
     (elementsMayBeCollections(a.type.type) ||
-      mayBeTensorOfUnknownRank(a.type.type));
+      mayBeTensorOfUnknownRank(a.type.type) ||
+      hasElementsOfUnknownType(a.type.type));
   // With one operand, the data is its elements. With several, a lowering
   // that spreads each list operand into the data (`compileExtremum`, so
   // `Max(w, 5)` over a list `w` compiles) is refused only for an operand
@@ -14161,7 +14244,7 @@ function emitCollectionReduce(
   const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(
     kind,
     mixedFoldLane(coll),
-    elementsMayDifferInShape(coll)
+    elementsMayDifferInShape(coll, kind === 'Sum')
   )}, ${identity}) : ${otherwise})(${code})`;
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
@@ -14217,11 +14300,32 @@ function requireShapedFold(kind: 'Sum' | 'Product', coll: Expression): void {
  * `list<vector<3>>` have one shape, and so have the elements of one tensor
  * (a `tensor<number>`, a `broadcastable<number>`): they are not checked.
  */
-function elementsMayDifferInShape(coll: Expression): boolean {
+function elementsMayDifferInShape(
+  coll: Expression,
+  unknownElementsDiffer = false
+): boolean {
+  // An element of unknown type (`L: list<unknown>`, for which
+  // `collectionElementTypeOf` gives no element) may be a list of any shape
+  // beside another. With `unknownElementsDiffer`, the fold checks the
+  // shapes when it runs: an `Add` fold passes it, since with
+  // `L = [[[1, 2], [3, 4]], [5, 6]]` the compiled `Sum(L)` broadcast the
+  // row into the matrix and gave `[[6, 7], [9, 10]]`, where the interpreter
+  // gives an `incompatible-dimensions` error. A `Multiply` fold does not
+  // pass it: the product of a matrix and a row is the matrix product
+  // (`[17, 39]` for that `L`), and the run-time product checks the
+  // dimensions itself (`_SYS.mulTensor`).
+  const own = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  if (unknownElementsDiffer) {
+    const ownElement = collectionElementType(own);
+    const cells =
+      ownElement === undefined
+        ? undefined
+        : resolveTypeForCompilation(ownElement);
+    if (cells === 'unknown' || cells === 'any') return true;
+  }
   const elt = BaseCompiler.collectionElementTypeOf(coll);
   if (elt === undefined) return false;
   if (hasSeveralListArms(elt)) return true;
-  const own = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
   if (
     typeof own !== 'string' &&
     (own.kind === 'broadcastable' ||
@@ -14244,6 +14348,23 @@ function elementsMayDifferInShape(coll: Expression): boolean {
       (a.dimensions === undefined || a.dimensions === null)
     );
   });
+}
+
+/**
+ * True when `t` is a list with no dimensions whose cells are typed
+ * `unknown` or `any`, through any number of such lists (`list<unknown>`,
+ * `list<list<any>>`): its rows may have different lengths.
+ */
+function hasOpenCells(t: Type): boolean {
+  let r = resolveTypeForCompilation(t);
+  for (let depth = 0; depth < 8; depth++) {
+    if (typeof r === 'string' || r.kind !== 'list') return false;
+    if (r.dimensions !== undefined) return false;
+    const e = resolveTypeForCompilation(collectionElementType(r) ?? 'unknown');
+    if (e === 'unknown' || e === 'any') return true;
+    r = e;
+  }
+  return false;
 }
 
 /**

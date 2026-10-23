@@ -228,7 +228,10 @@ describe('the refined signature follows the body', () => {
     ce.assign('f', ce.parse('(x) \\mapsto x + 1'));
     expect(ce.box('f').type.toString()).toBe('(unknown) -> number');
     ce.assign('f', ce.parse('(x) \\mapsto [x, x]'));
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> vector<2>');
+    // `x` can receive any value, so the signature says only that the result
+    // is a list: `f(Set(1))` is `[Set(1), Set(1)]`, which `vector<2>` does
+    // not hold.
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> list<unknown>');
     expect(ce.box(['f', 2]).evaluate().toString()).toBe('[2,2]');
   });
 
@@ -316,8 +319,11 @@ describe('the refined signature follows the body', () => {
     expect(ce.box(['k', 'x']).type.toString()).toBe('broadcastable<number>');
     ce.assign('c', ce.parse('(i) \\mapsto 2i'));
     expect(ce.box(['k', 'x']).type.toString()).toBe('number');
+    // No use narrows `x`, so the signature says `list<unknown>`: a call
+    // with a free `x` is a list of two elements of unknown type (ROADMAP
+    // CE-25, user decision 2026-10-22).
     ce.assign('k', ce.parse('(x) \\mapsto [x, x]'));
-    expect(ce.box(['k', 'x']).type.toString()).toBe('vector<2>');
+    expect(ce.box(['k', 'x']).type.toString()).toBe('list<unknown>');
   });
 });
 

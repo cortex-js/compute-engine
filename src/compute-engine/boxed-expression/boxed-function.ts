@@ -229,6 +229,7 @@ import {
   couldMatch,
   isSubtype,
   provablyAdmits,
+  provablyDisjoint,
   resolveTypeReference,
 } from '../../common/type/subtype.js';
 import {
@@ -1498,6 +1499,25 @@ export class BoxedFunction
       // constraint. Keep the precise type. (Narrowing is authoritative and is
       // left untouched.)
       if (inferenceMode !== 'narrow' && isSubtype(oldSig.result, t))
+        return true;
+      // A result that the body states, and that MAY fit the constraint, is
+      // kept too. The widen refines a result that the body leaves `unknown`
+      // (`g := x ↦ x` used in `g(1) + 2` gets the result `number`: the join
+      // is neutral in `unknown`), but for a stated result it would add the
+      // constraint as a possibility. With `g := t ↦ [[t, 1], [2, 3]]`, whose
+      // signature is `(unknown) -> list<list<unknown>>` (the cells are of
+      // unknown type, so the result does not provably fit `number | tensor`),
+      // the use `Trace(g(2))` widened the result to
+      // `list<list<unknown>> | number | tensor`, and `Determinant(g(x))`
+      // then declined to compile ("operand is not an indexed collection").
+      // A generic signature keeps its variables out of the disjointness
+      // test, which takes ground types only.
+      if (
+        inferenceMode !== 'narrow' &&
+        oldSig.result !== 'unknown' &&
+        oldSig.typeParams === undefined &&
+        !provablyDisjoint(oldSig.result, t)
+      )
         return true;
       const nextSig: FunctionSignature = {
         kind: 'signature',

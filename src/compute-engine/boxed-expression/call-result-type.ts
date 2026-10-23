@@ -540,7 +540,27 @@ function literalBodyResultType(
               binding
             ) ?? t;
       }
-      const result = t === undefined ? undefined : describeType(t);
+      // A list literal keeps its structure, with the descriptors of its
+      // elements as derived here: the type of an enclosing list literal
+      // then reads its rows, and `[[t, 1], [2, 3]]` with `t: integer` is a
+      // `matrix<integer^(2x2)>`, not a `list<vector<integer^2>>`.
+      const shape =
+        t !== undefined && expr.operator === 'List'
+          ? describe(expr).structureOf?.()
+          : undefined;
+      const result =
+        t === undefined
+          ? undefined
+          : shape?.kind === 'list-literal'
+            ? {
+                ...describeType(t),
+                structureOf: () => ({
+                  kind: 'list-literal' as const,
+                  shape: shape.shape,
+                  elements: operands,
+                }),
+              }
+            : describeType(t);
       memo.set(expr, result);
       return result;
     };

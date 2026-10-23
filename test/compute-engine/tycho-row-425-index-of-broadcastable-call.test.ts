@@ -52,6 +52,19 @@
  *
  * Each test reads the static type BEFORE `x` or `p` is assigned: an
  * assigned value narrows the type, and the check would then prove nothing.
+ *
+ * Since ROADMAP CE-25 (user decision 2026-10-22), the signature of `g` says
+ * only what its body proves: `(unknown) -> list<unknown>`, not
+ * `(unknown) -> vector<2>`, since a parameter with no annotation can
+ * receive any value (`g("a")` is `["a", 2 "a"]`). So `g(x)` is a
+ * `broadcastable<list<unknown>>`, an index into it is `missing | unknown`,
+ * and the readers below give the types of the elements of a
+ * `list<unknown>`. The checks that the type holds the value are unchanged.
+ * Two consequences are recorded here, not accepted: compiled code that
+ * cannot tell the lane of an element of unknown type declines (ROADMAP
+ * CE-377), and the compiled `NaN` for an absent element where the
+ * interpreter gives `Missing` (ROADMAP CE-368) is reachable from more
+ * expressions.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -131,10 +144,10 @@ const X_VALUES = [
 describe('Tycho row 425: the instrument', () => {
   test('with x: any, an index into g(x) holds the scalar case', () => {
     const ce = rowEngine();
-    expect(ce.parse('g(x)').type.toString()).toBe('broadcastable<vector<2>>');
-    expect(ce.parse('g(x)[1]').type.toString()).toBe(
-      'missing | number | vector<2>'
+    expect(ce.parse('g(x)').type.toString()).toBe(
+      'broadcastable<list<unknown>>'
     );
+    expect(ce.parse('g(x)[1]').type.toString()).toBe('missing | unknown');
   });
 
   test('with x: any, Repeat(0, g(x)[1]) boxes', () => {
@@ -153,17 +166,18 @@ describe('Tycho row 425: the instrument', () => {
     }
   );
 
-  test('with x: real and x: unknown, the index is a number', () => {
+  test('with x: real the index is a real; with x: unknown it is unknown', () => {
     expect(rowEngine('real').parse('g(x)[1]').type.toString()).toBe('real');
+    // `x` has no type yet, so neither has the element `t` of `g(x)`.
     expect(rowEngine('unknown').parse('g(x)[1]').type.toString()).toBe(
-      'number'
+      'unknown'
     );
   });
 });
 
 describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
-  const INDEX = 'missing | number | vector<2>';
-  const LIST = 'list<number | vector<2>>';
+  const INDEX = 'missing | unknown';
+  const LIST = 'list<list<unknown> | unknown>';
   const readers: [string, unknown, string, string, string][] = [
     // name, expression, static type, value for x = 3, value for x = [1, 2, 3]
     ['At', ['At', ['g', 'x'], 1], INDEX, '3', '[1,2]'],
@@ -178,21 +192,23 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     [
       'Reverse',
       ['Reverse', ['g', 'x']],
-      'broadcastable<vector<2>>',
+      'broadcastable<list<unknown>>',
       '[6,3]',
       '[[3,6],[2,4],[1,2]]',
     ],
   ];
 
-  test('Sum of Rest is a number or a list', () => {
+  test('Sum of Rest is a number or a tensor', () => {
     // Only for a list `x`: for `x = 3` the interpreter leaves
     // `Sum(Rest(g(x)))` unevaluated (as on the commit before this change).
+    // The elements of `Rest(g(x))` are of unknown type, and a sum of such
+    // elements is a number or a tensor of numbers (ROADMAP CE-361).
     const ce = rowEngine();
     expect(
       staticTypeAndValues(ce, ce.box(['Sum', ['Rest', ['g', 'x']]]), 'x', [
         LIST_X,
       ])
-    ).toEqual({ type: 'number | vector<2>', values: [['[5,10]', true]] });
+    ).toEqual({ type: 'broadcastable<number>', values: [['[5,10]', true]] });
   });
 
   test.each(readers)('%s', (_name, json, type, ofNumber, ofList) => {
@@ -215,18 +231,23 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     const ce = rowEngine();
     const expr = ce.box(json as any);
     const { type, values } = staticTypeAndValues(ce, expr, 'x', [LIST_X]);
-    expect(type).toBe('number');
+    // The accessor keeps the unknown type of its operand, and its `missing`
+    // arm (an index past the end is absent).
+    expect(type).toBe('missing | unknown');
     expect(values).toEqual([['1', true]]);
     // The accessor of a number is an error, which no type holds.
     ce.assign('x', NUMBER_X);
     expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
   });
 
-  test('Dot(g(x)[1], [1, 1]) is a number', () => {
+  test('Dot(g(x)[1], [1, 1]) holds its value', () => {
     const ce = rowEngine();
     const expr = ce.box(['Dot', ['At', ['g', 'x'], 1], ['List', 1, 1]]);
+    // `Dot` claims a number only for two operands that are provably rank-1
+    // numeric; an operand of unknown type gets the wide `value` of its
+    // signature, with the `missing` arm of the index.
     expect(staticTypeAndValues(ce, expr, 'x', [LIST_X])).toEqual({
-      type: 'number',
+      type: 'missing | value',
       values: [['3', true]],
     });
   });
@@ -411,24 +432,46 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   // and `Product(g(x))`: they declined while they were typed `number`, and
   // compile since they are typed `number | vector<2>` (ROADMAP CE-361,
   // `test/compute-engine/sum-unknown-element-type.test.ts`).
-  const cases: [string, unknown, 'compiles' | 'declined'][] = [
-    ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
-    ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
-    ['Max(g(x))', ['Max', ['g', 'x']], 'declined'],
-    ['Min(g(x))', ['Min', ['g', 'x']], 'declined'],
-    ['Product(g(x))', ['Product', ['g', 'x']], 'compiles'],
-    ['Mean(g(x))', ['Mean', ['g', 'x']], 'declined'],
-    ['Median(g(x))', ['Median', ['g', 'x']], 'declined'],
-    ['Sum(Take(g(x), 1))', ['Sum', ['Take', ['g', 'x'], 1]], 'compiles'],
-    ['Max(Rest(g(x)))', ['Max', ['Rest', ['g', 'x']]], 'declined'],
-    ['Mean(Rest(g(x)))', ['Mean', ['Rest', ['g', 'x']]], 'declined'],
-    ['g(x)[5] + 1', ['Add', ['At', ['g', 'x'], 5], 1], 'compiles'],
-    ['Sin(g(x)[5])', ['Sin', ['At', ['g', 'x'], 5]], 'compiles'],
-    ['g(x)[5]', ['At', ['g', 'x'], 5], 'compiles'],
-    ['g(x)[1] + 1', ['Add', ['At', ['g', 'x'], 1], 1], 'compiles'],
-    ['First(g(x))', ['First', ['g', 'x']], 'compiles'],
-    ['Last(g(x))', ['Last', ['g', 'x']], 'compiles'],
-  ];
+  // `absent-as-NaN`: the values agree, except that the compiled code gives
+  // `NaN` where the interpreter gives `Missing` (an index past the end, or
+  // into an empty list), ROADMAP CE-368. The case is recorded here so that
+  // the fix of CE-368 turns it back into an agreement check: the test asks
+  // for at least one such pair.
+  const cases: [string, unknown, 'compiles' | 'declined' | 'absent-as-NaN'][] =
+    [
+      ['Sum(g(x))', ['Sum', ['g', 'x']], 'compiles'],
+      ['Reduce(g(x), Add, 0)', ['Reduce', ['g', 'x'], 'Add', 0], 'compiles'],
+      ['Max(g(x))', ['Max', ['g', 'x']], 'declined'],
+      ['Min(g(x))', ['Min', ['g', 'x']], 'declined'],
+      ['Product(g(x))', ['Product', ['g', 'x']], 'compiles'],
+      ['Mean(g(x))', ['Mean', ['g', 'x']], 'declined'],
+      ['Median(g(x))', ['Median', ['g', 'x']], 'declined'],
+      ['Sum(Take(g(x), 1))', ['Sum', ['Take', ['g', 'x'], 1]], 'compiles'],
+      ['Max(Rest(g(x)))', ['Max', ['Rest', ['g', 'x']]], 'declined'],
+      ['Mean(Rest(g(x)))', ['Mean', ['Rest', ['g', 'x']]], 'declined'],
+      ['g(x)[5] + 1', ['Add', ['At', ['g', 'x'], 5], 1], 'absent-as-NaN'],
+      ['Sin(g(x)[5])', ['Sin', ['At', ['g', 'x'], 5]], 'absent-as-NaN'],
+      ['g(x)[5]', ['At', ['g', 'x'], 5], 'compiles'],
+      ['g(x)[1] + 1', ['Add', ['At', ['g', 'x'], 1], 1], 'absent-as-NaN'],
+      ['First(g(x))', ['First', ['g', 'x']], 'compiles'],
+      ['Last(g(x))', ['Last', ['g', 'x']], 'compiles'],
+    ];
+
+  function expectAgreement(
+    result: [string, string][] | 'declined',
+    expected: 'compiles' | 'absent-as-NaN'
+  ): void {
+    expect(result).not.toBe('declined');
+    const pairs = result as [string, string][];
+    for (const [interpreted, compiled] of pairs)
+      expect(compiled).toBe(
+        expected === 'absent-as-NaN' && interpreted === 'Missing'
+          ? 'NaN'
+          : interpreted
+      );
+    if (expected === 'absent-as-NaN')
+      expect(pairs.some(([i, c]) => i === 'Missing' && c === 'NaN')).toBe(true);
+  }
 
   test.each(cases)('%s', (_name, json, expected) => {
     const ce = rowEngine();
@@ -437,9 +480,7 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
       expect(result).toBe('declined');
       return;
     }
-    expect(result).not.toBe('declined');
-    for (const [interpreted, compiled] of result as [string, string][])
-      expect(compiled).toBe(interpreted);
+    expectAgreement(result, expected);
   });
 
   // For `x = 3` the interpreter leaves these unevaluated (as on the commit
@@ -447,7 +488,6 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
   // collection), so they are compared at a list `x` and at `[]`.
   test.each([
     ['Sum(Rest(g(x)))', ['Sum', ['Rest', ['g', 'x']]]],
-    ['Product(Rest(g(x)))', ['Product', ['Rest', ['g', 'x']]]],
     ['Reduce(Rest(g(x)), Add, 0)', ['Reduce', ['Rest', ['g', 'x']], 'Add', 0]],
   ])('%s', (_name, json) => {
     const ce = rowEngine();
@@ -456,9 +496,22 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
       ce.box(json as any),
       X_VALUES.slice(1)
     );
-    expect(result).not.toBe('declined');
-    for (const [interpreted, compiled] of result as [string, string][])
-      expect(compiled).toBe(interpreted);
+    expectAgreement(result, 'compiles');
+  });
+
+  test('Product(Rest(g(x))) declines', () => {
+    // The elements of `Rest(g(x))` are of unknown type and may be rows of
+    // different lengths; a `Multiply` fold over such rows is refused until
+    // the compiled product follows the interpreter for them (ROADMAP
+    // CE-98.3).
+    const ce = rowEngine();
+    expect(
+      compiledAndInterpreted(
+        ce,
+        ce.box(['Product', ['Rest', ['g', 'x']]]),
+        X_VALUES.slice(1)
+      )
+    ).toBe('declined');
   });
 
   test('Repeat(0, g(x)[1]) throws where the interpreter answers an error', () => {
@@ -576,19 +629,20 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
     [[], ['List']],
   ] as const;
 
+  // The signature of `m` is `(unknown) -> list<list<unknown>>`, so an
+  // element of `m(x)` is a `list<unknown>`. A numeric function over its
+  // cells of unknown type gives a number or a list for each (ROADMAP
+  // CE-378 records the spelling `list<any>` of that list arm, where the
+  // rules of `docs/TYPE-SYSTEM.md` say `tensor`).
   test.each([
-    [
-      'm(x)[1]',
-      '\\operatorname{At}(m(x), 1)',
-      'matrix<2x2> | missing | vector<2>',
-    ],
-    ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'missing | tensor'],
-    ['2 m(x)[1]', '2 m(x)[1]', 'missing | tensor'],
-    ['sin(m(x)[1])', '\\sin(m(x)[1])', 'missing | tensor'],
+    ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<unknown> | missing'],
+    ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'list<list<any> | number> | missing'],
+    ['2 m(x)[1]', '2 m(x)[1]', 'list<unknown> | missing'],
+    ['sin(m(x)[1])', '\\sin(m(x)[1])', 'list<list<any> | number> | missing'],
     [
       'floor(m(x)[1])',
       '\\lfloor m(x)[1] \\rfloor',
-      'missing | tensor<infinity | integer | nan>',
+      'list<infinity | integer | list<any> | nan> | missing',
     ],
   ])('%s', (_name, latex, type) => {
     const ce = matrixEngine();
@@ -618,7 +672,10 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
   test('the sum of Rest(m(x)) is a row or a matrix', () => {
     const ce = matrixEngine();
     const expr = ce.parse('\\sum \\operatorname{Rest}(m(x))');
-    expect(expr.type.toString()).toBe('integer | matrix<2x2> | vector<2>');
+    // The elements of `Rest(m(x))` are of unknown type: their sum is a
+    // number (the sum of no elements is 0) or a list (ROADMAP CE-378 for
+    // the spelling of the list arm).
+    expect(expr.type.toString()).toBe('list<any> | number');
     // At x = 3 the interpreter leaves the sum of `Rest(m(3))` unevaluated.
     const result = compiledVsInterpreted(ce, expr, 'x', VALUES.slice(1));
     expect(result).toEqual([
@@ -776,10 +833,16 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
       expect(compiled).toBe(interpreted);
   });
 
+  // A `list<unknown>` is refused as a bare `list` and a `list<any>` are: the
+  // three spellings denote one set of values. Its compiled `Max` read each
+  // row of `[[1, 2], [3, 4]]` as a number and gave `NaN` (the interpreter
+  // gives 4).
   test.each([
     'list<number | vector<2>> | missing',
     'broadcastable<vector<2>> | missing',
     'list<vector<2>> | missing',
+    'list<unknown>',
+    'list<unknown> | missing',
   ])('the statistics decline over %s', (type) => {
     // The interpreter answers 4 for `Max`, 1 for `Min` and an error for
     // `Mean` and `Median`; the compiled code read each row as a number.
@@ -801,10 +864,15 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
     ).toBe('declined');
   });
 
-  test('a chained index into g(x) is a number', () => {
+  test('a chained index into g(x) is of unknown type, and arithmetic on it is numeric', () => {
     const ce = rowEngine();
-    expect(ce.parse('g(x)[1][2]').type.toString()).toBe('number');
-    expect(ce.parse('g(x)[1][2] + 1').type.toString()).toBe('number');
+    // `g(x)[1]` is `missing | unknown`; an index into it is `unknown`,
+    // which `At` admits (an operand of unknown type is assumed to be
+    // valid), and `Add` reads as a number or a tensor of numbers.
+    expect(ce.parse('g(x)[1][2]').type.toString()).toBe('unknown');
+    expect(ce.parse('g(x)[1][2] + 1').type.toString()).toBe(
+      'broadcastable<number>'
+    );
   });
 
   test('Repeat with a NaN count throws, as the interpreter answers an error', () => {
@@ -824,12 +892,22 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   const L = (...a: unknown[]) => ['List', ...a];
 
   /** Each compiled value is the interpreted value, or the compiled code
-   * throws where the interpreter answers an error, or it declines. */
-  function expectParity(result: [string, string][] | 'declined'): void {
+   * throws where the interpreter answers an error, or it declines. With
+   * `absentAsNaN`, the compiled code gives `NaN` where the interpreter
+   * gives `Missing` (ROADMAP CE-368), and at least one pair must be such:
+   * the fix of CE-368 turns the test back into a parity check. */
+  function expectParity(
+    result: [string, string][] | 'declined',
+    absentAsNaN = false
+  ): void {
     if (result === 'declined') return;
     for (const [interpreted, compiled] of result) {
       if (compiled === 'throws') {
         expect(interpreted).toMatch(/Error|incompatible|unexpected/);
+        continue;
+      }
+      if (absentAsNaN && interpreted === 'Missing') {
+        expect(compiled).toBe('NaN');
         continue;
       }
       expect([
@@ -837,6 +915,10 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         compiled === interpreted || approximatelyEqual(compiled, interpreted),
       ]).toEqual([interpreted, true]);
     }
+    if (absentAsNaN)
+      expect(result.some(([i, c]) => i === 'Missing' && c === 'NaN')).toBe(
+        true
+      );
   }
 
   test.each([
@@ -874,13 +956,17 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     }
   });
 
+  // An index into `m(x)` or `nest(x)` is of unknown type: the compiled
+  // `At` and `Last` give `NaN` for an absent element where the interpreter
+  // gives `Missing` (ROADMAP CE-368). `Max` over an element that may be a
+  // row declines (its compiled reduce read the rows as numbers and gave
+  // `NaN` where the interpreter gives 4).
   test.each([
     ['At(At(m(x), 1), 1)', ['At', ['At', ['m', 'x'], 1], 1]],
     ['At(At(m(x), 7), 1)', ['At', ['At', ['m', 'x'], 7], 1]],
     ['At(At(m(x), 1), 5)', ['At', ['At', ['m', 'x'], 1], 5]],
     ['Last(At(m(x), 1))', ['Last', ['At', ['m', 'x'], 1]]],
     ['At(At(m(x), 1), 5) + 1', ['Add', ['At', ['At', ['m', 'x'], 1], 5], 1]],
-    ['Max(At(m(x), 1))', ['Max', ['At', ['m', 'x'], 1]]],
     ['At(At(nest(x), 1), 5)', ['At', ['At', ['nest', 'x'], 1], 5]],
     ['Last(At(nest(x), 2))', ['Last', ['At', ['nest', 'x'], 2]]],
   ])('%s', (_name, json) => {
@@ -895,8 +981,19 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
         [3, 3],
         [[1, 2, 3], L(1, 2, 3)],
         [[], L()],
-      ])
+      ]),
+      true
     );
+  });
+
+  test('Max(At(m(x), 1)) declines', () => {
+    const ce = new ComputeEngine();
+    ce.declare('m', 'function');
+    ce.assign('m', ce.parse('t \\mapsto [[t, 2t], [3t, 4t]]'));
+    ce.declare('x', 'any');
+    expect(
+      compiledVsInterpreted(ce, ce.box(['Max', ['At', ['m', 'x'], 1]]), 'x', [])
+    ).toBe('declined');
   });
 
   test('the sum of numbers and rows is a row of the sums', () => {

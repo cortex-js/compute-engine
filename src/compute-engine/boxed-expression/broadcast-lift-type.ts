@@ -1026,11 +1026,25 @@ export function absorbOperandAbsence(
     absentCellsStayMissing &&
     !isSubtype(result, COLLECTION_SHAPE_TYPE)
   )
-    result = widen('missing', result);
+    result = withMissingArm(result);
   if (!whole) return result;
   if (isSubtype(stripMissingFromType(result), 'number'))
     return absorbNumericAbsence(result);
-  return widen('missing', result);
+  return withMissingArm(result);
+}
+
+/**
+ * `t` with a `missing` arm. The general join `widen` ignores an `unknown`
+ * operand (`widen('unknown', 'integer')` is `integer`), so
+ * `widen('missing', 'unknown')` is `missing`, which says that the value is
+ * always absent. For a result typed `unknown` the union is kept as it is:
+ * `PointX(q)` with `q: missing | unknown` is typed `missing | unknown`, and
+ * its value is a coordinate when `q` holds a point.
+ */
+function withMissingArm(t: Type): Type {
+  return resolveTypeAlias(t) === 'unknown'
+    ? reduceType({ kind: 'union', types: ['missing', t] })
+    : widen('missing', t);
 }
 
 /** Whether `t` has a `missing` arm that can stand for a whole value or a

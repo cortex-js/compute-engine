@@ -1,4 +1,8 @@
-import { deriveApplicationOf } from '../boxed-expression/operand-descriptor.js';
+import {
+  deriveApplicationOf,
+  describeType,
+} from '../boxed-expression/operand-descriptor.js';
+import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   BoxedValueDefinition,
@@ -4860,10 +4864,35 @@ volumes
       // integrated coordinate by coordinate, and gives a tuple, or a list of
       // tuples when a bound is a list (`integrateTupleIntegrand`). The
       // signature's `tuple` and `list<tuple>` admit these results.
-      type: (ops, { engine }) => {
+      type: (ops, context) => {
+        const { engine } = context;
         // The integrand is a function literal: its result type is the type
-        // of the integrand's value.
-        const listType = integralTypeOf(functionResult(ops[0]?.type));
+        // of the integrand's value. Its parameters are the integration
+        // variables, which are real numbers, so the result is derived from
+        // the body with each parameter of unknown type read as `real`: the
+        // signature alone types the body `[x, 2x]` of `∫₀¹ [x, 2x] dx` as a
+        // `list<unknown>`, since a parameter with no annotation can receive
+        // any value, and the shape `vector<2>` of the integrand would be
+        // lost. An annotated or narrowed parameter keeps its type.
+        const integrand = ops[0];
+        const declared = functionResult(integrand?.type);
+        const sig = integrand?.type;
+        const parameters =
+          typeof sig === 'object' && sig.kind === 'signature'
+            ? (sig.args ?? []).map((arg) =>
+                describeType(arg.type === 'unknown' ? 'real' : arg.type)
+              )
+            : [];
+        const derived =
+          integrand !== undefined && declared !== undefined
+            ? appliedLiteralResultType(
+                integrand,
+                parameters,
+                declared,
+                context.derive
+              )
+            : undefined;
+        const listType = integralTypeOf(derived ?? declared);
         const hasListBound = ops.slice(1).some((op) => {
           const limit = op.structureOf?.();
           return (

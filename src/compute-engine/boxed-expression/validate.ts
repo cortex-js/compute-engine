@@ -537,7 +537,12 @@ function presentArmsMatch(t: Type, type: Type): boolean {
   const arms = r.types.map((a) => resolveTypeAlias(a));
   const present = arms.filter((a) => a !== 'missing');
   if (present.length === arms.length || present.length === 0) return false;
-  return present.every((a) => isSubtype(a, type));
+  // A top-type arm is admitted, as an operand typed `unknown`, `any` or
+  // `value` is (above): `missing | unknown` is the type of an index into a
+  // `list<unknown>`, and its present value may be a collection.
+  return present.every(
+    (a) => a === 'unknown' || a === 'any' || a === 'value' || isSubtype(a, type)
+  );
 }
 
 /**
@@ -2564,6 +2569,12 @@ function strippedMatchesParam(
   if (!hasMissing && anyAsValue === t) return false;
   const stripped = stripMissingFromType(anyAsValue);
   if (stripped === 'never' || isSubtype(stripped, param)) return true;
+  // What remains is a top type: the operand is admitted as an operand typed
+  // `unknown` or `any` is at every parameter ("assumed to be valid" in
+  // `validateArguments`). `missing | unknown` is the type of an index into a
+  // `list<unknown>`: with `g: (unknown) -> list<unknown>`, `g(x)[1][2]` was an
+  // `incompatible-type` error, although `g(x)[1]` is a list when `x` is.
+  if (stripped === 'unknown' || stripped === 'any') return true;
   // A rank-free list of scalars whose length the VALUE knows is the vector
   // of that length. A list holding a restricted cell, `[1{c}, 2{c}]`, and a
   // restricted list, `[1,2]{c}`, are both typed `list<integer | missing>`

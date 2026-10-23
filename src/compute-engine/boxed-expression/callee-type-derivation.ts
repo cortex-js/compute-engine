@@ -1,5 +1,6 @@
 import type {
   BoxedOperatorDefinition,
+  Expression,
   IComputeEngine,
   OperandDescriptor,
   TypeHandlerContext,
@@ -43,6 +44,44 @@ export function installAnonymousCalleeDerivation(
   fn: NonNullable<typeof deriveAnonymous>
 ): void {
   deriveAnonymous = fn;
+}
+
+let deriveSignatureResult:
+  | ((
+      body: Expression,
+      params: ReadonlyArray<Expression>,
+      bodyType: Type
+    ) => Type)
+  | undefined;
+
+// Installed by `derive-application-type.ts` when it loads. The modules that
+// derive the signature of a function literal (`effects-inference.ts`,
+// `boxed-operator-definition.ts`) cannot import the derivation: it reads
+// operand descriptors, and an import of `operand-descriptor.ts` from them
+// closes a cycle of imports.
+export function installSignatureResultDerivation(
+  fn: NonNullable<typeof deriveSignatureResult>
+): void {
+  deriveSignatureResult = fn;
+}
+
+/**
+ * The result type that the signature of a function literal states, from
+ * `body`, the expression whose type is the result, `params`, the parameter
+ * operands of the literal, and `bodyType`, the type of `body`. A parameter
+ * of type `unknown` in a cell of a list literal is a cell of unknown type,
+ * not a number: `x ↦ [x]` has the result `list`, not `vector<1>`
+ * (`deriveSignatureResultType`, `signature-result-type.ts`).
+ *
+ * Before the derivation is installed (only while the modules load), the
+ * result is `bodyType`.
+ */
+export function signatureResultType(
+  body: Expression,
+  params: ReadonlyArray<Expression>,
+  bodyType: Type
+): Type {
+  return deriveSignatureResult?.(body, params, bodyType) ?? bodyType;
 }
 export function retainOperatorCallee(
   descriptor: OperandDescriptor,
