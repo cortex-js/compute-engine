@@ -79,7 +79,9 @@ describe('a generic literal rebuilt at its ground bound still shares its body', 
     for (const r of [generic, plain]) {
       expect(r.success).toBe(true);
       expect(r.code!.split('Math.min(').length - 1).toBe(1);
-      expect(r.code).toMatch(/const (_cse\d+) = .*reduce.*Math\.min.*\(xs\); return 3 \* \1 \+ Math\.sin\(\1\) \+ _SYS\.pow2\(\1\);/);
+      expect(r.code).toMatch(
+        /const (_cse\d+) = .*reduce.*Math\.min.*\(xs\); return 3 \* \1 \+ Math\.sin\(\1\) \+ _SYS\.pow2\(\1\);/
+      );
       expect(r.run!({})).toBeCloseTo(1 + 3 + Math.sin(1), 12);
     }
   });
@@ -95,12 +97,16 @@ describe('an integrand computes its loop invariants once', () => {
     const fn = compile(ce.parse(latex), { to: 'javascript' });
     expect(fn.success).toBe(true);
     const code = fn.code!;
-    expect(code.split('_SYS.gamma(').length - 1).toBe(1);
+    // Once in the bindings of the integrand, and once in those of its
+    // log-space form (`_SYS.finiteOr`, ROADMAP CE-394), which computes its
+    // constant factors on its own first call.
+    expect(code.split('_SYS.gamma(').length - 1).toBe(2);
+    expect(code).toContain('_SYS.finiteOr');
     // The lambda the quadrature calls tests a flag and reads the bindings;
     // the held body reads them by name.
     expect(code).toMatch(/let (_tv\d+) = false; let _tv\d+/);
     expect(code).toMatch(
-      /const _tv\d+ = \(y\) => \(.*_SYS\.pow\(y, _tv\d+\)\) \/ _tv\d+\)/
+      /const _tv\d+ = \(y\) => \(_SYS\.finiteOr\(.*_SYS\.pow\(y, _tv\d+\)\) \/ _tv\d+, _tv\d+, y\)\)/
     );
     const value = fn.run!({ x: 2, k: 5 }) as number;
     const plain = compile(ce.parse(latex), { to: 'javascript', cse: false });

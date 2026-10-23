@@ -70,6 +70,8 @@ import {
 } from './provable-kind.js';
 import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
+import { logSpaceProduct } from '../symbolic/log-space-product.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   tryGetConstant,
   negativeBaseRealPow,
@@ -15476,7 +15478,57 @@ function compileIntegrate(
   // nothing, so leave it off and keep the emitted call as it was.
   const panelArg =
     isMC || panels === initialPanelsForDimensions(1) ? '' : `, ${panels}`;
+  // A product that overflows against itself (`x¹⁰⁰·e⁻ˣ` is `∞·0 = NaN` past
+  // `x ≈ 1200`) is computed again in log space at the samples where it is
+  // not finite (`logSpaceProduct`, `_SYS.finiteOr`), as the interpreter does
+  // (`withLogSpaceFallback`, library/calculus.ts). The alternative is a
+  // lambda of the innermost variable, built once per call of the innermost
+  // integral (`logSpaceLambda`), not one closure per sample, with its own
+  // hoisted invariants. It is not used when the integrand has an
+  // effect (it is evaluated again), when a node of the integrand or of the
+  // log-space form is mapped by the caller or reads an opaque `vars` entry
+  // (the rewrite assumes the built-in `Ln`, `Exp`, `Power`, … — see
+  // `logSpaceOpaque`), or when the compiler has no harvest options to tell.
   let code = f;
+  let logSpaceLambda: { name: string; source: string } | undefined;
+  const logSpace = logSpaceProduct(bodyExpr, lambdaVars);
+  if (
+    logSpace !== undefined &&
+    isTransitivelyPure(bodyExpr) &&
+    !logSpaceOpaque(bodyExpr, target) &&
+    !logSpaceOpaque(logSpace, target)
+  ) {
+    try {
+      // The alternative hoists its own loop invariants (the constant factors
+      // kept out of its exponential, `1/Γ(k/2)`), assigned on its first call,
+      // as the integrand does.
+      const innermost = lambdaVars[lambdaVars.length - 1];
+      const hoisted = BaseCompiler.hoistLoopInvariants(
+        logSpace,
+        lambdaVars,
+        bodyTarget,
+        () => BaseCompiler.compile(logSpace, bodyTarget)
+      );
+      const plainAlternative = `(${innermost}) => (${hoisted.result})`;
+      const name = BaseCompiler.tempVar(target);
+      logSpaceLambda = {
+        name,
+        source:
+          hoisted.bindings.length > 0
+            ? firstCallBoundLambda(
+                plainAlternative,
+                1,
+                hoisted.bindings,
+                target
+              )
+            : plainAlternative,
+      };
+      code = `_SYS.finiteOr(${f}, ${name}, ${innermost})`;
+    } catch (e) {
+      // A head that does not lower: the integrand is used as it is.
+      throwIfCallerCancellation(e, bodyExpr.engine._deadlineFrame);
+    }
+  }
   for (let d = limits.length - 1; d >= 0; d--) {
     const outer = lambdaVars.slice(0, d);
     const boundTarget = outer.length > 0 ? scoped(outer) : sized;
@@ -15493,8 +15545,33 @@ function compileIntegrate(
         ? firstCallBoundLambda(plain, 1, bindings, target)
         : plain;
     code = `${fn}(${lambda}, ${lo}, ${hi}${panelArg})`;
+    if (d === limits.length - 1 && logSpaceLambda !== undefined)
+      code = `((${logSpaceLambda.name}) => ${code})(${logSpaceLambda.source})`;
   }
   return code;
+}
+
+/**
+ * Whether the log-space rewrite of an integrand (`logSpaceProduct`) cannot be
+ * compiled with the built-in meaning of its operators: a node of `expr` is
+ * mapped by the caller (`isCallerMapped`: a `functions`/`operators` entry or
+ * a per-operator `compile` handler), or a symbol of `expr` reads an opaque
+ * `vars` entry (`isStringVar`), or the target has no harvest options to tell
+ * (then nothing is known, and the rewrite is not used).
+ */
+function logSpaceOpaque(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  const options = target.cse?.harvestOptions;
+  if (options === undefined) return true;
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e)) return options.isStringVar?.(e.symbol) === true;
+    if (!isFunction(e)) return false;
+    if (isCallerMapped(e, options)) return true;
+    return e.ops.some(visit);
+  };
+  return visit(expr);
 }
 
 /**

@@ -96,6 +96,40 @@ export function divergentTailSign(
   return positive ? orientation : orientation === 1 ? -1 : 1;
 }
 
+/** The points of the infinite tails of the interval from `lower` to `upper`,
+ * at distances `1` to `2¹⁰¹⁶` from the finite bound (or from `0`), in steps of
+ * a factor 256. Empty when both bounds are finite. */
+function tailPoints(lower: number, upper: number): number[] {
+  const lo = Math.min(lower, upper);
+  const hi = Math.max(lower, upper);
+  const far: number[] = [];
+  for (let k = 0; k <= 1016; k += 8) far.push(2 ** k);
+  const points: number[] = [];
+  if (hi === Infinity)
+    for (const d of far) points.push((Number.isFinite(lo) ? lo : 0) + d);
+  if (lo === -Infinity)
+    for (const d of far) points.push((Number.isFinite(hi) ? hi : 0) - d);
+  return points;
+}
+
+/**
+ * Whether `f` is a finite number at every point of the infinite tails of the
+ * interval from `lower` to `upper` (the points of `tailReachesInfinity`).
+ * When the quadrature of such an integrand is not a number, the overflow is
+ * in the size of the integral or of its change of variable, not in the
+ * integrand (`∫₀^∞ x¹⁷⁰·e⁻ˣ dx = 170! ≈ 7·10³⁰⁶`, next to the largest double),
+ * and Monte Carlo cannot give the value either. `false` when both bounds are
+ * finite.
+ */
+export function tailIsFinite(
+  f: (x: number) => number,
+  lower: number,
+  upper: number
+): boolean {
+  const points = tailPoints(lower, upper);
+  return points.length > 0 && points.every((x) => Number.isFinite(f(x)));
+}
+
 /**
  * Whether `f` is `+∞` or `−∞` at some point of an infinite tail of the
  * interval from `lower` to `upper` (the points of {@link divergentTailSign}).
@@ -111,16 +145,7 @@ export function tailReachesInfinity(
   lower: number,
   upper: number
 ): boolean {
-  const lo = Math.min(lower, upper);
-  const hi = Math.max(lower, upper);
-  const far: number[] = [];
-  for (let k = 0; k <= 1016; k += 8) far.push(2 ** k);
-  const points: number[] = [];
-  if (hi === Infinity)
-    for (const d of far) points.push((Number.isFinite(lo) ? lo : 0) + d);
-  if (lo === -Infinity)
-    for (const d of far) points.push((Number.isFinite(hi) ? hi : 0) - d);
-  return points.some((x) => {
+  return tailPoints(lower, upper).some((x) => {
     const v = f(x);
     return v === Infinity || v === -Infinity;
   });

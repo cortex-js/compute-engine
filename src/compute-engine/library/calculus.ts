@@ -84,8 +84,10 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import {
   divergentTailSign,
+  tailIsFinite,
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
+import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
@@ -1069,6 +1071,60 @@ function exactDivergenceValue(
   return undefined;
 }
 
+/**
+ * The compiled integrand `run` of the function literal `fn`, with each sample
+ * where it is `NaN` or an infinity computed again in log space
+ * (`logSpaceProduct`, `symbolic/log-space-product.ts`), when `fn` is a
+ * product that has such a form. `x¹⁰⁰·e⁻ˣ` is `∞·0 = NaN` past `x ≈ 1200`,
+ * where `exp(100·ln x − x)` is a number, and the quadrature of the `NaN`
+ * tail did not converge: `∫₀^∞ x¹⁰⁰·e⁻ˣ dx` gave a Monte-Carlo value about
+ * `10¹¹²` (`100! ≈ 9.3·10¹⁵⁷`). A finite sample is not changed. The log-space
+ * value replaces a sample that is not finite when it is finite, or when the
+ * sample is `NaN` and it is an infinity. `run` itself is returned when there
+ * is no such form, or when the integrand is not transitively pure (it is
+ * evaluated again at such a sample). The form is compiled at the first
+ * sample that is not finite; when it does not compile, `run`'s value
+ * stands. The compiled
+ * `_SYS.integrate` does the same (`_SYS.finiteOr`, `compileIntegrate` in
+ * `compilation/javascript-target.ts`).
+ */
+function withLogSpaceFallback<A extends number[]>(
+  ce: ComputeEngine,
+  fn: Expression,
+  run: (...args: A) => unknown
+): (...args: A) => unknown {
+  if (!isFunction(fn, 'Function')) return run;
+  // The integrand is evaluated a second time at such a sample: an effect
+  // (`Random()`) would run again, and the log-space form reads a factor
+  // twice (for its sign and its magnitude).
+  if (!isTransitivelyPure(fn)) return run;
+  const parameters = fn.ops.slice(1);
+  const names = parameters.map((p) => sym(p));
+  if (names.some((n) => n === undefined)) return run;
+  const body = logSpaceProduct(fn.op1, names as string[]);
+  if (body === undefined) return run;
+  // Compiled at the first sample that is not finite: most integrands have
+  // none.
+  let alternative: ((...args: A) => unknown) | null | undefined;
+  return (...args: A) => {
+    const v = run(...args);
+    if (typeof v !== 'number' || Number.isFinite(v)) return v;
+    if (alternative === undefined) {
+      const compiled = implicitCompile(
+        ce,
+        ce.function('Function', [body, ...parameters])
+      );
+      alternative = compiled?.success
+        ? (compiled.run as (...args: A) => unknown)
+        : null;
+    }
+    if (alternative === null) return v;
+    const w = alternative(...args);
+    if (typeof w !== 'number') return v;
+    return Number.isFinite(w) || (Number.isNaN(v) && !Number.isNaN(w)) ? w : v;
+  };
+}
+
 /** The value of a definite integral with a proven pole strictly inside its
  * bounds: `+∞`/`−∞` when the integrand keeps one sign across every pole,
  * `NaN` when it changes sign (no value, not even an infinite one). */
@@ -1818,6 +1874,10 @@ function integrateRealPart(
     if (infinite !== 0) return { estimate: NaN, error: NaN, infinite };
     if (tailReachesInfinity(jsf, lower, upper))
       return { estimate: NaN, error: NaN, overflow: true };
+    // Every sample of the tail is finite: the quadrature overflowed in the
+    // size of the integral (`tailIsFinite`), and the integral has no value
+    // in double precision. Monte Carlo would give a random finite value.
+    if (tailIsFinite(jsf, lower, upper)) return { estimate: NaN, error: NaN };
   }
   if (
     (gk.converged || gk.extrapolated === true) &&
@@ -2402,7 +2462,12 @@ function nIntegrateMultiple(
 
   const compiled = implicitCompile(ce, fnExpr);
   let raw: (...args: number[]) => unknown;
-  if (compiled?.success) raw = compiled.run as (...args: number[]) => unknown;
+  if (compiled?.success)
+    raw = withLogSpaceFallback(
+      ce,
+      fnExpr,
+      compiled.run as (...args: number[]) => unknown
+    );
   else {
     const app = applicable(fnExpr);
     raw = (...args: number[]) => app(args.map((x) => ce.number(x)));
@@ -5742,7 +5807,13 @@ volumes
             implicitCompile(ce, fnExpr)
           );
           const raw: (x: number) => unknown = compiled?.success
-            ? (compiled.run as (x: number) => unknown)
+            ? withValueShield(ce, intVarNames, () =>
+                withLogSpaceFallback(
+                  ce,
+                  fnExpr,
+                  compiled.run as (x: number) => unknown
+                )
+              )
             : (
                 (app) => (x: number) =>
                   app([ce.number(x)])
@@ -6618,7 +6689,11 @@ volumes
         // its imaginary part too when a sample carried one (see
         // `numericIntegrandParts` and the `Integrate` numeric path).
         const raw: (x: number) => unknown = compiled?.success
-          ? (compiled.run as (x: number) => unknown)
+          ? withLogSpaceFallback(
+              engine,
+              fn,
+              compiled.run as (x: number) => unknown
+            )
           : (
               (app) => (x: number) =>
                 app([engine.number(x)])

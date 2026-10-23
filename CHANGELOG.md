@@ -176,6 +176,15 @@
   `∫₀^∞ (x − 1) dx` is `+∞` and `∫₀^∞ (eˣ − 5) dx` is `+∞` (it was a
   Monte-Carlo value). An integral with no value (`∫₀^∞ sin x dx`,
   `∫_{−∞}^∞ x dx`) still gives `NaN`.
+- **`.N()` of `∫₀^∞ x¹⁰⁰·e⁻ˣ dx` was wrong by 45 orders of magnitude** (ROADMAP
+  CE-394). It gave `1.9·10¹¹² ± 1.8·10¹¹²`; the value is `100! ≈ 9.3·10¹⁵⁷`.
+  In double precision `x¹⁰⁰` is `∞` and `e⁻ˣ` is `0` past `x ≈ 1200`, so the
+  integrand was `NaN` on the tail, the quadrature did not converge, and Monte
+  Carlo missed the peak. Where a product of powers and exponentials is not
+  finite, it is now computed again as `exp(100·ln x − x)`, on `.N()`,
+  `NIntegrate` and compiled code: the result is `100!` to 10 digits. An
+  integral too large for the change of variable of the quadrature (`170!`) is
+  `NaN`, not a random value.
 - **A definite integral over a half-infinite interval with a pole at its finite
   bound was `ComplexInfinity`** (ROADMAP CE-391). `∫₀^∞ (x − 1)/x³ dx` and
   `∫₀^∞ −1/x³ dx` gave `ComplexInfinity`, which is not the value of a real

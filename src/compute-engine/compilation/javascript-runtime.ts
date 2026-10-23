@@ -120,6 +120,7 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import {
   divergentTailSign,
+  tailIsFinite,
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
@@ -5962,6 +5963,24 @@ export const SYS_HELPERS = {
     }
     return sawNumber ? NaN : undefined;
   },
+  // The value `v` of an integrand sample, or, when `v` is `NaN` or an
+  // infinity, the value at `args` of the same product in log space
+  // (`alternative`, a lambda built once per integral call, see
+  // `logSpaceProduct` in symbolic/log-space-product.ts): `x¹⁰⁰·e⁻ˣ` is
+  // `∞·0 = NaN` past `x ≈ 1200`, where `exp(100·ln x − x)` is a number. The
+  // log-space value is taken when it is finite, or when `v` is `NaN` and it
+  // is an infinity. Emitted by `compileIntegrate` around the integrand, as
+  // the interpreter does (`withLogSpaceFallback`, library/calculus.ts).
+  finiteOr: (
+    v: unknown,
+    alternative: (...args: number[]) => unknown,
+    ...args: number[]
+  ): unknown => {
+    if (typeof v !== 'number' || Number.isFinite(v)) return v;
+    const w = alternative(...args);
+    if (typeof w !== 'number') return v;
+    return Number.isFinite(w) || (Number.isNaN(v) && !Number.isNaN(w)) ? w : v;
+  },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
   // (pathological integrand), fall back to the Monte-Carlo estimator — but only
@@ -6044,6 +6063,9 @@ export const SYS_HELPERS = {
         const sign = divergentTailSign(f, a, b);
         if (sign !== 0) return sign * Infinity;
         if (tailReachesInfinity(f, a, b)) return NaN;
+        // Every sample of the tail is finite: the integral overflows double
+        // precision (`tailIsFinite`), as in the interpreter.
+        if (tailIsFinite(f, a, b)) return NaN;
       }
       // The budget ran out somewhere below this level, so the panels this
       // quadrature accumulated rest on refused evaluations: the estimate is not

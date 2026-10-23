@@ -3527,17 +3527,21 @@ of `(2t + i)/(t − 3i)`.
 - **CE-184.2** A function that decays to 0 gives a residue such as `−9e-46`, not
   `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
 
-### CE-394. `.N()` of an integral with a sharp peak far from its finite bound is wrong, with a wrong error
+### CE-394. `.N()` of an integral whose value is next to the largest double is `NaN`
 
-**Status:** open; defect. Found 2026-10-23 (session compute-engine-57).
+**Status:** open; defect, small. Found 2026-10-23 (session compute-engine-57).
 
-`∫₀^∞ xⁿ·e⁻ˣ dx` is `n!`. Under `.N()` (`integrateRealPart`,
-`library/calculus.ts`): `n = 20` and `n = 50` are correct, `n = 100` gives
-`1.9·10¹¹² ± 1.8·10¹¹²` where the value is `9.3·10¹⁵⁷`, and `n = 150` gives
-`1.29·10¹⁷³ ± NaN` (`5.7·10²⁶²`). The integrand has its peak at `x = n`, and
-`xⁿ` overflows before `e⁻ˣ` brings the product back down (`x¹⁵⁰` at `x > 113`),
-so the quadrature samples `∞·0` or misses the peak; the error it reports is not
-an error bound. `evaluate()` leaves the integral unevaluated.
+`∫₀^∞ xⁿ·e⁻ˣ dx` is `n!`. A product that overflows against itself is computed
+again in log space at the samples where it is not finite
+(`withLogSpaceFallback`, `library/calculus.ts`; `_SYS.finiteOr` in compiled
+code), and `.N()`, `NIntegrate` and compiled code give `n!` to 10 digits for
+`n = 100` and `n = 150`. For `n = 170` (`170! ≈ 7.3·10³⁰⁶`) the change of
+variable of the quadrature (`adaptiveQuadrature`, `numerics/gauss-kronrod.ts`)
+multiplies the peak past the largest double, and the result is `NaN`
+(`tailIsFinite`, `numerics/divergent-tail.ts`). A scaled quadrature (the
+integrand divided by its largest sample) would give the value. Compiled code
+with a caller mapping of `Ln`, `Exp`, `Abs`, `Sign` or the arithmetic does not
+use the log-space form (`logSpaceOpaque`, `compilation/javascript-target.ts`).
 
 ### CE-185. A numeric integral next to a singular bound: remaining cases
 
