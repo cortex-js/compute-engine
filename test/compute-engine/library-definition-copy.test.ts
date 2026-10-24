@@ -353,9 +353,12 @@ describe('a copy under another name keeps its head', () => {
 
   test('a library node in an operand keeps its name', () => {
     const ce = engineWithRenamedCopy('NotEqual', 'MyNotEqual');
+    // A comparison nested in a comparison is an operand, not a chain link
+    // (ROADMAP CE-411): the copy compares the truth value of `a ≠ b` with
+    // `c`, and the inner node keeps its library name.
     expect(
       JSON.stringify(ce.box(['MyNotEqual', ['NotEqual', 'a', 'b'], 'c']).json)
-    ).toBe('["And",["NotEqual","a","b"],["MyNotEqual","b","c"]]');
+    ).toBe('["MyNotEqual",["NotEqual","a","b"],"c"]');
   });
 
   // `DeclareType` is lazy: its handler does not canonicalize the expression

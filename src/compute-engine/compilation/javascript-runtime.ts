@@ -184,6 +184,7 @@ import { JET_HELPERS } from './jet-helpers.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
+  type BroadcastBatchBody,
   type BroadcastSlice,
 } from './broadcast.js';
 import type {
@@ -192,6 +193,7 @@ import type {
   CompiledColor,
   CompiledColorSpace,
   ComplexResult,
+  StoredBatchBody,
   StoredEntryPlan,
 } from './types.js';
 
@@ -5859,6 +5861,26 @@ export const SYS_HELPERS = {
         `with the interpreter.`
     );
   },
+  // The read `At(arr, i)` of a shared list in the `broadcast()` batch body,
+  // for an index whose static type does not prove an integer of 1 or more
+  // (`batchListRead` in `javascript-target.ts`). The batch has checked
+  // `arr` once, before its cell loop: a plain array whose elements are all
+  // numbers, or a `Float64Array`. So the read needs no test of the array or
+  // of the element, and gives the value `atNumeric` gives for the same
+  // index: the index rules of `at` (a complex index is read through its real
+  // part, a negative index counts from the end, zero, a fraction, `NaN` and
+  // an index out of range read `NaN`). An index that is an array at run time
+  // (a gather) is read by `at`, on a plain copy of a typed array.
+  atChecked: (arr: ArrayLike<number>, i: unknown): number | unknown[] => {
+    if (Array.isArray(i))
+      return SYS_HELPERS.at(Array.isArray(arr) ? arr : Array.from(arr), i);
+    const iv = typeof i === 'number' ? i : indexValue(i);
+    if (!Number.isInteger(iv)) return NaN;
+    const n = arr.length;
+    const idx = iv > 0 ? iv - 1 : n + iv;
+    if (iv === 0 || idx < 0 || idx >= n) return NaN;
+    return arr[idx];
+  },
   // Positional access WITHOUT the from-the-end convention: the index must be
   // an integer in `1..length`, and every other index — zero, negative,
   // fractional, past the end, a non-number — reads the collection's absence
@@ -6994,7 +7016,130 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
   sys.integrate = (fn, a, b, initialPanels) =>
     SYS_HELPERS.integrate(fn, a, b, initialPanels, draw);
   sys.integrateMC = (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw);
+  sys.atNumeric = ownAtNumeric();
+  sys.atChecked = ownAtChecked();
   return sys;
+}
+
+/**
+ * The helpers of `sys` with an `atNumeric` and an `atChecked` of their own:
+ * the helpers of one compiled function loaded from stored code (see
+ * `ownAtNumeric` and `ownAtChecked`).
+ */
+function withOwnAtNumeric(sys: SysHelpers): SysHelpers {
+  const own = Object.create(sys) as SysHelpers;
+  own.atNumeric = ownAtNumeric();
+  own.atChecked = ownAtChecked();
+  return own;
+}
+
+/** A number in the source of each `ownAtChecked` function, so that no two of
+ * them have the same source. */
+let atCheckedSerial = 0;
+
+/**
+ * A new `atChecked` function (see `SYS_HELPERS.atChecked`) for the helpers of
+ * one compiled function, for the same reason as `ownAtNumeric`: V8 keeps one
+ * set of type feedback per function source, so a helper shared by every
+ * compiled function sees plain arrays and `Float64Array`s from all of them,
+ * and its reads go through one polymorphic cache. The fast case, an integer
+ * index in `1..length`, returns the element with no other work; every other
+ * index calls `SYS_HELPERS.atChecked`, which gives the same value. A
+ * `broadcast()` kernel that read a shared list twice per cell through the
+ * shared helper took about 2.1 ms per 250 000 cells (measured 2026-10-24,
+ * ROADMAP CE-410).
+ *
+ * When the host refuses `new Function` (a content security policy), the
+ * shared `SYS_HELPERS.atChecked` is returned.
+ */
+function ownAtChecked(): SysHelpers['atChecked'] {
+  const source = `"use strict";
+// atChecked ${atCheckedSerial++}
+return function atChecked(arr, i) {
+  if (typeof i === "number" && i >= 1 && i <= arr.length && Number.isInteger(i))
+    return arr[i - 1];
+  return slow.full(arr, i);
+};`;
+  try {
+    return new Function('slow', source)({
+      full: SYS_HELPERS.atChecked,
+    }) as SysHelpers['atChecked'];
+  } catch {
+    return SYS_HELPERS.atChecked;
+  }
+}
+
+/** A number in the source of each `ownAtNumeric` function, so that no two of
+ * them have the same source. */
+let atNumericSerial = 0;
+
+/**
+ * A new `atNumeric` function (see `SYS_HELPERS.atNumeric`) for the helpers
+ * of one compiled function, with a fast case: a number element at a scalar
+ * integer index in `1..length` of an array is returned with no other work.
+ * Every other read (a negative, zero, fractional or out-of-range index, a
+ * gather or mask index, a base that is not an array, an element that is not
+ * a number) calls `SYS_HELPERS.atNumeric`, which gives the same value as
+ * before. The values are the values of `SYS_HELPERS.atNumeric` for every
+ * argument, with one exception given below.
+ *
+ * Why a new function for each compiled function, made by `new Function`
+ * from a source that differs each time (`atNumericSerial`): V8 keeps one set
+ * of type feedback per function source, and inlines the helper into the
+ * compiled body with that feedback. When the full form has never been
+ * called through this copy, V8 compiles the fast case alone, and the number
+ * read stays an unboxed float. After one call of the full form (an index out
+ * of range, for example), each read returns a boxed number, which costs about
+ * 2 ns more per read. With one shared helper, one such read in any compiled
+ * function made every other one pay that cost, and the element reads of all
+ * of them went through one polymorphic cache. A `broadcast()` kernel that
+ * reads a shared list twice per cell spent 2.2 ms per 250 000 cells with the
+ * shared helper and 1.1 ms with its own copy (measured 2026-10-24, ROADMAP
+ * CE-410).
+ *
+ * The fast case tests `arr.constructor === Array`, not `Array.isArray(arr)`:
+ * V8 does not reduce `Array.isArray` of a value read from the vars object to
+ * a type check, and the call it keeps cost about 4 ns per read. The element
+ * test is `typeof e === "number"`, for the same reason. The exception: an
+ * object that is not an array but has `Array` as its `constructor` (made with
+ * `Object.create(Array.prototype)`, for example) and an own `length` is read
+ * as an array, where `SYS_HELPERS.atNumeric` gives `NaN`. Neither the engine
+ * nor a JSON value makes such an object. A subclass of `Array`, an array of
+ * another realm and a typed array have another `constructor` and take the
+ * full form.
+ *
+ * The full form is reached through a property of an object (`slow.full`),
+ * not through a variable: V8 then compiles no call to it until the call has
+ * run, which keeps the fast case unboxed.
+ *
+ * When the host refuses `new Function` (a content security policy), the
+ * shared `SYS_HELPERS.atNumeric` is returned.
+ */
+function ownAtNumeric(): SysHelpers['atNumeric'] {
+  const source = `"use strict";
+// atNumeric ${atNumericSerial++}
+return function atNumeric(arr, i, elementType) {
+  if (
+    arr !== undefined &&
+    arr !== null &&
+    arr.constructor === Array &&
+    typeof i === "number" &&
+    i >= 1 &&
+    i <= arr.length &&
+    Number.isInteger(i)
+  ) {
+    const e = arr[i - 1];
+    if (typeof e === "number") return e;
+  }
+  return slow.full(arr, i, elementType);
+};`;
+  try {
+    return new Function('slow', source)({
+      full: SYS_HELPERS.atNumeric,
+    }) as SysHelpers['atNumeric'];
+  } catch {
+    return SYS_HELPERS.atNumeric;
+  }
 }
 
 export const isComplexObject = (v: unknown): v is ComplexResult =>
@@ -7476,6 +7621,11 @@ export type StoredJavaScript = {
    * `loadBroadcastSlice()` write when the `outputs` option is absent: the
    * arity of a tuple-of-numbers expression. Absent means 1. */
   broadcastOutputs?: number;
+  /** The batch body that `loadBroadcast()` and `loadBroadcastSlice()` run
+   * in place of `code` when its shared lists pass the per-batch check
+   * (`StoredBatchBody`). Read only by the runtime of the same version
+   * (`runtimeVersion`). */
+  batch?: StoredBatchBody;
   /** Required by `load()`. */
   runtimeVersion?: string;
 };
@@ -7684,19 +7834,23 @@ export function createSysRuntime(
         inputs: BroadcastInputs,
         options?: BroadcastOptions
       ) => Float64Array) => {
-        const { fn, plan, digits, outputs } = storedExpressionRunner(
+        const { fn, plan, digits, outputs, batch } = storedExpressionRunner(
           sys,
           stored
         );
+        // One function for every batch: `broadcastNumbers` keeps the cell
+        // loop it makes for a compiled body by that function (`cellLoopFor`).
+        const call = (vars: Record<string, unknown>): unknown => fn(vars);
         return (inputs, options) => {
           const previous = setReconstructionDigits(digits);
           try {
             return broadcastNumbers(
-              (vars) => fn(vars),
+              call,
               plan,
               inputs,
               options,
-              outputs
+              outputs,
+              batch
             );
           } finally {
             setReconstructionDigits(previous);
@@ -7713,21 +7867,24 @@ export function createSysRuntime(
         out: Float64Array,
         slice: BroadcastSlice
       ) => number) => {
-        const { fn, plan, digits, outputs } = storedExpressionRunner(
+        const { fn, plan, digits, outputs, batch } = storedExpressionRunner(
           sys,
           stored
         );
+        // One function for every slice (see `loadBroadcast`).
+        const call = (vars: Record<string, unknown>): unknown => fn(vars);
         return (inputs, options, out, slice) => {
           const previous = setReconstructionDigits(digits);
           try {
             return broadcastNumbersSlice(
-              (vars) => fn(vars),
+              call,
               plan,
               inputs,
               options,
               out,
               slice,
-              outputs
+              outputs,
+              batch
             );
           } finally {
             setReconstructionDigits(previous);
@@ -7746,7 +7903,8 @@ export function createSysRuntime(
  * to the stored count), without the per-call entry check and result
  * normalization that `broadcastNumbers` applies itself. A lambda (positional
  * arguments) has no batch form. `outputs` is the stored default count of
- * values per cell (`broadcastOutputs`), or `undefined` for one.
+ * values per cell (`broadcastOutputs`), or `undefined` for one. `batch` is
+ * the stored batch body, built over the same helpers (`loadBatchBody`).
  */
 function storedExpressionRunner(
   sys: SysHelpers,
@@ -7756,6 +7914,7 @@ function storedExpressionRunner(
   plan: EntryPlan | undefined;
   digits: number;
   outputs: number | undefined;
+  batch: BroadcastBatchBody | undefined;
 } {
   if (stored.calling === 'lambda')
     throw new Error(
@@ -7787,15 +7946,77 @@ function storedExpressionRunner(
   const perCall = split ? stored.preamblePerCall : stored.preamble;
   const previous = setReconstructionDigits(digits);
   try {
+    // The batch loaders give each kernel its own `atNumeric` (see
+    // `ownAtNumeric`), as each compiled function has on the main thread.
+    const own = withOwnAtNumeric(sys);
     const fn = twoStageRunner(
-      sys,
+      own,
       stored.preambleOnce ?? '',
       ['_'],
       `${perCall ?? ''}\nreturn ${stored.code};`
     );
-    return { fn, plan: plan || undefined, digits, outputs };
+    return {
+      fn,
+      plan: plan || undefined,
+      digits,
+      outputs,
+      batch: loadBatchBody(own, stored.batch),
+    };
   } finally {
     setReconstructionDigits(previous);
+  }
+}
+
+/**
+ * The batch body of a compilation result (`StoredBatchBody`), ready for
+ * `broadcastNumbers` (`BroadcastBatchBody`): its function built over the
+ * helpers `sys`, the definitions of `preambleOnce` evaluated once, here.
+ * The caller sets the reconstruction digits of the code around this call,
+ * as for the ordinary body.
+ *
+ * `undefined` when there is no batch body, and when the stored one cannot be
+ * built: a stored result is plain data that a host can change, so a
+ * parameter that is not an identifier, or code that does not compile, gives
+ * no batch body, and every batch runs the ordinary body. The batch body is
+ * read only by the runtime of the version that wrote it: the caller has
+ * checked `runtimeVersion`.
+ */
+export function loadBatchBody(
+  sys: SysHelpers,
+  batch: StoredBatchBody | undefined
+): BroadcastBatchBody | undefined {
+  if (batch === undefined || batch === null) return undefined;
+  if (typeof batch.code !== 'string' || !Array.isArray(batch.params))
+    return undefined;
+  const params: StoredBatchBody['params'] = [];
+  for (const p of batch.params as unknown[]) {
+    if (typeof p !== 'object' || p === null) return undefined;
+    const { name, local, direct, minLength } = p as Record<string, unknown>;
+    if (
+      typeof name !== 'string' ||
+      typeof local !== 'string' ||
+      !/^[A-Za-z_$][\w$]*$/.test(local) ||
+      (minLength !== undefined &&
+        !(typeof minLength === 'number' && Number.isSafeInteger(minLength)))
+    )
+      return undefined;
+    params.push({
+      name,
+      local,
+      ...(direct === true ? { direct: true } : {}),
+      ...(typeof minLength === 'number' ? { minLength } : {}),
+    });
+  }
+  try {
+    const call = twoStageRunner(
+      sys,
+      typeof batch.preambleOnce === 'string' ? batch.preambleOnce : '',
+      params.map((p) => p.local),
+      `${typeof batch.preamblePerCall === 'string' ? batch.preamblePerCall : ''}\nreturn ${batch.code};`
+    );
+    return { call, params, checked: new WeakMap() };
+  } catch {
+    return undefined;
   }
 }
 

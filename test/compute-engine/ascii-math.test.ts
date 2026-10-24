@@ -292,6 +292,17 @@ describe('PRECEDENCE', () => {
       `a < (b <= c) && d < (b <= c)`
     );
   });
+
+  it('should parenthesize a comparison operand of an equality', () => {
+    // Without the parentheses, the output reads as a chain of comparisons.
+    expect(
+      check(['Equal', ['Less', 'x', 'y'], ['Less', 'y', 'x']])
+    ).toMatchInlineSnapshot(`(x < y) == (y < x)`);
+    expect(
+      check(['NotEqual', ['LessEqual', 'a', 0], 'b'])
+    ).toMatchInlineSnapshot(`(a <= 0) != b`);
+    expect(check(['Less', 'a', 'b', 'c'])).toMatchInlineSnapshot(`a < b < c`);
+  });
 });
 
 describe('FUNCTIONS', () => {

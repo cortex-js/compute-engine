@@ -50,6 +50,7 @@ import {
 } from './operators.js';
 import { HARD_RESERVED_WORDS, LITERAL_WORDS } from './reserved-words.js';
 import { SourceSpan, Token, TokenType } from './tokens.js';
+import { CHAINABLE_COMPARISONS } from '../compute-engine/latex-syntax/comparison-chain.js';
 
 /** Precedence of the prefix operators (`-`, `!`, and fancy aliases). Read from
  * the shared table so it can never drift. */
@@ -618,6 +619,23 @@ export class Parser {
    * With nested groups, `((a))`, the outer group is recorded last and wins.
    */
   private readonly parenthesizedSpans = new WeakMap<object, [number, number]>();
+
+  /**
+   * The `And` nodes that {@link extendComparisonChain} made for a chain of
+   * comparisons that mixes operators (`a < b <= c`). The next comparison
+   * operator extends such a node instead of comparing its truth value. An
+   * `And` written with `&&` is not in this set.
+   */
+  private readonly comparisonChains = new WeakSet<object>();
+
+  /**
+   * The relation nodes that {@link combineInfix} made from an infix operator
+   * (`a < b`, `a == b`). Only such a node is a link that the next relational
+   * operator can extend. A call written with its name,
+   * `IdenticallyEqual(1, 1) == true`, is an operand: the result compares its
+   * truth value.
+   */
+  private readonly infixRelations = new WeakSet<object>();
 
   /** Set by {@link recoverAtStatementBoundary}: the statement that just
    * returned `null` has ALREADY emitted its diagnostic and resynchronized to
@@ -7324,6 +7342,67 @@ export class Parser {
     return this.wrap(['Function', operand] as MathJsonExpression[], start, end);
   }
 
+  /**
+   * Extend a chain of comparisons that mixes operators: `a < b <= c` is
+   * `And(Less(a, b), LessEqual(b, c))`, where adjacent links share their
+   * boundary term. `left` is the chain read so far, written without
+   * parentheses: a comparison with another operator than `name`, or a chain
+   * that this function made. Return `null` when `left` is neither: a run of
+   * the same operator becomes one n-ary node in `combineInfix`.
+   *
+   * The engine reads a comparison nested in another as a comparison of truth
+   * values (`Equal(LessEqual(a, 0), LessEqual(b, 0))`), so the chain must not
+   * be written as a nested tree. The LaTeX parser follows the same rule
+   * (`chainComparison()` in `src/compute-engine/latex-syntax/comparison-chain.ts`).
+   */
+  private extendComparisonChain(
+    name: string,
+    left: MathJsonExpression,
+    right: MathJsonExpression,
+    end: number
+  ): MathJsonExpression | null {
+    let links: MathJsonExpression[];
+    if (
+      typeof left === 'object' &&
+      left !== null &&
+      this.comparisonChains.has(left)
+    )
+      links = [...operands(left)];
+    else {
+      const op = operator(left);
+      if (op === name || !CHAINABLE_COMPARISONS.has(op)) return null;
+      if (typeof left !== 'object' || left === null) return null;
+      if (!this.infixRelations.has(left)) return null;
+      links = [left];
+    }
+    const last = links[links.length - 1];
+    const lastTerms = operands(last);
+    const boundary = lastTerms[lastTerms.length - 1];
+    const linkStart = this.outerStart(last) ?? 0;
+    if (operator(last) === name)
+      links[links.length - 1] = this.wrap(
+        [name, ...lastTerms, right] as MathJsonExpression[],
+        linkStart,
+        end
+      );
+    else
+      links.push(
+        this.wrap(
+          [name, boundary, right] as MathJsonExpression[],
+          this.outerStart(boundary) ?? linkStart,
+          end
+        )
+      );
+    const chain = this.wrap(
+      ['And', ...links] as MathJsonExpression[],
+      this.outerStart(left) ?? 0,
+      end
+    );
+    if (typeof chain === 'object' && chain !== null)
+      this.comparisonChains.add(chain);
+    return chain;
+  }
+
   private combineInfix(
     def: OperatorDef,
     left: MathJsonExpression,
@@ -7361,23 +7440,49 @@ export class Parser {
 
     if (def.name === 'Assign') this.checkAssignTarget(left);
 
-    if (
-      def.relational &&
+    // A parenthesized comparison is an operand, never a link of a chain:
+    // `(a < b) <= c` compares the truth value of `a < b` with `c`.
+    const leftIsGroup =
       typeof left === 'object' &&
       left !== null &&
+      this.parenthesizedSpans.has(left);
+
+    if (CHAINABLE_COMPARISONS.has(def.name) && !leftIsGroup) {
+      const chain = this.extendComparisonChain(def.name, left, right, end);
+      if (chain !== null) return chain;
+    }
+
+    if (
+      def.relational &&
+      !leftIsGroup &&
+      typeof left === 'object' &&
+      left !== null &&
+      this.infixRelations.has(left) &&
       'fn' in left &&
       Array.isArray((left as { fn: MathJsonExpression[] }).fn) &&
       (left as { fn: MathJsonExpression[] }).fn[0] === def.name
     ) {
       const fn = (left as unknown as { fn: MathJsonExpression[] }).fn;
-      return this.wrap([...fn, right] as MathJsonExpression[], start, end);
+      return this.markInfixRelation(
+        def,
+        this.wrap([...fn, right] as MathJsonExpression[], start, end)
+      );
     }
 
-    return this.wrap(
-      [def.name, left, right] as MathJsonExpression[],
-      start,
-      end
+    return this.markInfixRelation(
+      def,
+      this.wrap([def.name, left, right] as MathJsonExpression[], start, end)
     );
+  }
+
+  /** Record `node` in {@link infixRelations} when `def` is a relation. */
+  private markInfixRelation(
+    def: OperatorDef,
+    node: MathJsonExpression
+  ): MathJsonExpression {
+    if (def.relational && typeof node === 'object' && node !== null)
+      this.infixRelations.add(node);
+    return node;
   }
 
   /**

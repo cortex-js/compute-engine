@@ -546,8 +546,18 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
     test('mixed chains and LaTeX chains are unchanged', () => {
       expect(raw('0.1 \\le M \\le 5')).toEqual(['LessEqual', 0.1, 'M', 5]);
-      expect(raw('a < b <= c')).toEqual(['LessEqual', ['Less', 'a', 'b'], 'c']);
-      expect(raw('a <= b < c')).toEqual(['LessEqual', 'a', ['Less', 'b', 'c']]);
+      // A chain that mixes operators is an `And` of its links (CE-411): a
+      // comparison nested in another compares truth values.
+      expect(raw('a < b <= c')).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['LessEqual', 'b', 'c'],
+      ]);
+      expect(raw('a <= b < c')).toEqual([
+        'And',
+        ['LessEqual', 'a', 'b'],
+        ['Less', 'b', 'c'],
+      ]);
       expect(raw('a < b < c')).toEqual(['Less', 'a', 'b', 'c']);
     });
   });

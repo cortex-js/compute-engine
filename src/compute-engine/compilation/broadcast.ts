@@ -31,10 +31,12 @@
  * or that `options.shared` names, is bound once for the whole batch: the code
  * reads it by index (`F_{i+1}` with `i` the per-cell variable). Its value is
  * a plain array of numbers or a `Float64Array`. It is not a column of the
- * `cells` layout and not an axis of the `grid` layout. The compiled code reads
- * plain arrays only (its `at` helper gives `NaN` for a typed array), so a
- * `Float64Array` is copied into a plain array once, before the cell loop. A
- * plain array for any other variable throws.
+ * `cells` layout and not an axis of the `grid` layout. The ordinary compiled
+ * body reads plain arrays only (its `at` helper gives `NaN` for a typed
+ * array), so for it a `Float64Array` is copied into a plain array once,
+ * before the cell loop. The batch body of the result (see
+ * `BroadcastBatchBody`) reads a `Float64Array` in place. A plain array for
+ * any other variable throws.
  *
  * **Output.** `javascript`: `outputs` values per cell (`options.outputs`, or
  * the default the result gives: the arity of an expression whose type is a
@@ -62,9 +64,42 @@
  * conversions. Tycho's parity tests rely on this.
  */
 
-import type { BroadcastInputs, BroadcastOptions } from './types.js';
+import type {
+  BroadcastInputs,
+  BroadcastOptions,
+  StoredBatchBody,
+} from './types.js';
 
 export type { BroadcastInputs, BroadcastOptions } from './types.js';
+
+/**
+ * The batch body of a `javascript` result, ready to run (ROADMAP CE-410):
+ * the function of a `StoredBatchBody` and its parameters.
+ *
+ * The ordinary body reads each input from the vars object, and reads a
+ * shared list with `_SYS.atNumeric`, which tests the array, the index and
+ * the element at every read. The batch body takes its inputs as arguments,
+ * and reads a shared list marked `direct` with no test of the array: the
+ * batch checks such a list once, before the cell loop (a `Float64Array`, or
+ * a plain array whose elements are all numbers, at least `minLength` long).
+ * When a check fails, the whole batch runs the ordinary body, so the values
+ * are those of the ordinary body for every input.
+ *
+ * `checked` holds the plain arrays that passed the check, with their length
+ * then, so that the slices of one batch (a worker task, a `broadcastAsync`
+ * slice, a `loadBroadcastSlice` call) do not scan the same array again: an
+ * array of the same length is not scanned again. An element that the host
+ * changes to a value that is not a number after the check breaks the
+ * declared type of the list, and the result of the cells that read it is
+ * then undefined, as for any input that does not respect its declared type
+ * (no exception escapes the batch: each cell catches its own).
+ */
+export interface BroadcastBatchBody {
+  /** The body: one argument per entry of `params`, in order. */
+  call: (...args: unknown[]) => unknown;
+  params: StoredBatchBody['params'];
+  checked: WeakMap<object, number>;
+}
 
 /**
  * What `broadcastNumbers` reads of a `javascript` result's entry plan (the
@@ -337,18 +372,31 @@ function numberOf(r: unknown): number {
  * symbol the plan reads as a list is a shared input, bound once for the
  * batch. `defaultOutputs` is the count of values per cell when
  * `options.outputs` is absent (the `broadcastOutputs` of the result).
+ * `batch` is the batch body of the result, when it has one.
  */
 export function broadcastNumbers(
   call: (vars: Record<string, unknown>) => unknown,
   entry: BroadcastEntryPlan | undefined,
   inputs: BroadcastInputs,
   options?: BroadcastOptions,
-  defaultOutputs?: number
+  defaultOutputs?: number,
+  batch?: BroadcastBatchBody
 ): Float64Array {
   const shape = readShape(inputs, options, 1, listsOf(entry));
   const stride = broadcastStride(options, defaultOutputs);
   const out = outputArray(options?.out, stride * shape.count);
-  broadcastNumbersRange(call, entry, shape, out, 0, shape.count, stride);
+  broadcastNumbersRange(
+    call,
+    entry,
+    shape,
+    out,
+    0,
+    shape.count,
+    stride,
+    undefined,
+    undefined,
+    batch
+  );
   return out;
 }
 
@@ -375,7 +423,8 @@ export interface BroadcastSlice {
   stop?: () => boolean;
 }
 
-/** Cells between two deadline checks. */
+/** Cells between two deadline checks. A multiple of `STOP_CHECK_EVERY`
+ * (`cellLoopFor` checks both between blocks of `STOP_CHECK_EVERY` cells). */
 const DEADLINE_CHECK_EVERY = 1024;
 
 /** Cells between two `stop` checks: a call and a read of shared memory are
@@ -406,7 +455,8 @@ export function broadcastCellCount(
  * loop a worker thread runs for one task. A caller that runs several slices
  * of one batch passes its `Float64Array` shared inputs already copied into
  * plain arrays (`plainSharedArray`), so that the copy is made once per batch
- * instead of once per slice.
+ * instead of once per slice, except those that the batch body reads in place
+ * (`sharedInputsReadInPlace`).
  */
 export function broadcastNumbersSlice(
   call: (vars: Record<string, unknown>) => unknown,
@@ -415,7 +465,8 @@ export function broadcastNumbersSlice(
   options: BroadcastOptions | undefined,
   out: Float64Array,
   slice: BroadcastSlice,
-  defaultOutputs?: number
+  defaultOutputs?: number,
+  batch?: BroadcastBatchBody
 ): number {
   const shape = readShape(inputs, options, 1, listsOf(entry));
   return broadcastNumbersRange(
@@ -427,8 +478,28 @@ export function broadcastNumbersSlice(
     slice.to,
     broadcastStride(options, defaultOutputs),
     slice.deadline,
-    slice.stop
+    slice.stop,
+    batch
   );
+}
+
+/**
+ * The names of the shared inputs that the batch body with the parameters
+ * `params` reads in place and only in place (marked `direct`, and read by no
+ * other parameter). A caller that runs several slices of one batch (a kernel
+ * worker, `broadcastAsync`) passes these as they are given, and copies only
+ * the other `Float64Array` shared inputs into plain arrays.
+ */
+export function sharedInputsReadInPlace(
+  params: StoredBatchBody['params'] | undefined
+): Set<string> {
+  const names = new Set<string>();
+  // A stored result is plain data that a host can change: anything but an
+  // array of parameters reads nothing in place.
+  if (!Array.isArray(params)) return names;
+  for (const p of params) if (p?.direct === true) names.add(p.name);
+  for (const p of params) if (p?.direct !== true) names.delete(p?.name);
+  return names;
 }
 
 /**
@@ -455,6 +526,263 @@ function unaliasedInputs(
   );
 }
 
+/**
+ * The cell loop of `broadcastNumbersRange`, written for one compiled body
+ * and one shape of inputs. Its arguments: the vars object, the input arrays
+ * (`null` for a scalar), the complex slot of each name (`null` for a real),
+ * the output, the cells `[from, to)`, the deadline, the stop function and
+ * the grid strides (`BroadcastShape.grid`). For a batch body, the vars
+ * object is unused, and `args` holds the argument of each parameter that does
+ * not change from cell to cell (see `batchArguments`).
+ * Returns the number of cells written.
+ */
+type CellLoop = (
+  vars: Record<string, unknown>,
+  arrays: (Float64Array | null)[],
+  slots: ({ re: number; im: number } | null)[],
+  out: Float64Array,
+  from: number,
+  to: number,
+  deadline: number | undefined,
+  stop: (() => boolean) | undefined,
+  grid: BroadcastShape['grid'],
+  args?: unknown[]
+) => number;
+
+/** The cell loops made so far, by compiled body, then by the key that
+ * `cellLoopFor` builds from the shape. A body that is no longer used releases
+ * its loops. */
+const cellLoops = new WeakMap<object, Map<string, CellLoop>>();
+
+/** Set to false when the host refuses `new Function` (a content security
+ * policy): every batch then runs the generic loop. */
+let cellLoopsAvailable = true;
+
+/** A number in the source of each cell loop, so that no two loops have the
+ * same source. */
+let cellLoopSerial = 0;
+
+/** The most values per cell for which the cell loop writes each value with
+ * its own statement; a larger count is written by a loop. */
+const UNROLLED_OUTPUTS = 32;
+
+/**
+ * A cell loop for the compiled body `call` and this shape of inputs, or
+ * `undefined` when the host refuses `new Function`.
+ *
+ * The generic loop of `broadcastNumbersRange` is one function shared by
+ * every compiled body, so V8 sees many targets at its `call(vars)` site and
+ * does not inline the body: each cell pays a call, a new array for a tuple
+ * result, and a store of each input by a key that changes. A loop made here
+ * from its own source text has its own type feedback in V8: the call site
+ * has one target, the body is inlined, and the array of a tuple result,
+ * read and converted inside the same `try` block, is removed by V8's escape
+ * analysis. The source differs for each loop (`cellLoopSerial`) because V8
+ * shares the type feedback of two `new Function` results with the same
+ * source. The input stores use a constant key, and the deadline and `stop`
+ * checks run between blocks of `STOP_CHECK_EVERY` cells, outside the inner
+ * loop (with the checks in the inner loop, even when both are `undefined`, a
+ * cheap kernel took about 1.5 times as long). A kernel that computes two sines and returns a tuple of
+ * two numbers took 5.8 ms for 250 000 cells in the generic loop and 3.4 ms in
+ * its own loop, against 2.85 ms for the same arithmetic written in
+ * JavaScript (measured 2026-10-24, ROADMAP CE-410).
+ *
+ * The values written are the values of the generic loop: each value is
+ * converted by `numberOf`, an element past the end of an array answer is
+ * `NaN`, any other answer with more than one output per cell is `NaN` in
+ * every slot, and a cell that throws is `NaN` in every slot. One difference
+ * is not observable from compiled code: the conversion runs inside the
+ * `try` block, so a conversion that throws (a getter of an answer object)
+ * gives `NaN` where the generic loop would throw. The deadline and `stop`
+ * are checked before the same cells as in the generic loop, because
+ * `DEADLINE_CHECK_EVERY` is a multiple of `STOP_CHECK_EVERY`.
+ *
+ * With `params`, the parameters of a batch body (`BroadcastBatchBody`), the
+ * loop calls `call` with one argument per parameter instead of a vars
+ * object: the value of the cell for a real input given as an array, read
+ * from the array in the call itself, and otherwise the argument from `args`
+ * that the batch computed before the loop (a scalar, the reused complex slot
+ * of a complex input, a shared input, or `undefined`).
+ */
+function cellLoopFor(
+  call: (...args: never[]) => unknown,
+  shape: BroadcastShape,
+  slots: ({ re: number; im: number } | null)[],
+  stride: number,
+  params?: StoredBatchBody['params']
+): CellLoop | undefined {
+  if (!cellLoopsAvailable) return undefined;
+  // What the source depends on: the stride, the layout, for each name its
+  // spelling and whether it is a scalar, a real array or a complex array,
+  // and the parameters of a batch body.
+  const kinds = shape.names.map((_, k) =>
+    shape.arrays[k] === null ? 's' : slots[k] !== null ? 'c' : 'a'
+  );
+  const grid = shape.grid;
+  const key = JSON.stringify([
+    stride,
+    grid !== null,
+    shape.names,
+    kinds,
+    params ?? null,
+  ]);
+  let byKey = cellLoops.get(call);
+  const known = byKey?.get(key);
+  if (known !== undefined) return known;
+  const setup: string[] = [];
+  const reads: string[] = [];
+  // The index into the array of axis `k` (see `axisIndex`).
+  const indexOf = (k: number): string =>
+    grid === null ? 'i' : `Math.floor(i / t${k}) % n${k}`;
+  shape.names.forEach((name, k) => {
+    if (kinds[k] === 's') return;
+    setup.push(`const a${k} = arrays[${k}];`);
+    if (kinds[k] === 'c') setup.push(`const s${k} = slots[${k}];`);
+    if (grid !== null)
+      setup.push(`const t${k} = grid[${k}].stride, n${k} = grid[${k}].length;`);
+    if (kinds[k] === 'c') reads.push(`s${k}.re = a${k}[${indexOf(k)}];`);
+    else if (params === undefined)
+      reads.push(`vars[${JSON.stringify(name)}] = a${k}[${indexOf(k)}];`);
+  });
+  // The call: with the vars object, or with one argument per parameter of
+  // a batch body.
+  let callCode = 'call(vars)';
+  if (params !== undefined) {
+    const argCodes = params.map((p, j) => {
+      const k = p.direct === true ? -1 : shape.names.indexOf(p.name);
+      if (k >= 0 && kinds[k] === 'a') return `a${k}[${indexOf(k)}]`;
+      setup.push(`const d${j} = args[${j}];`);
+      return `d${j}`;
+    });
+    callCode = `call(${argCodes.join(', ')})`;
+  }
+  const nanSlots =
+    stride <= UNROLLED_OUTPUTS
+      ? Array.from({ length: stride }, (_, k) => `out[o + ${k}] = NaN;`).join(
+          ' '
+        )
+      : `out.fill(NaN, o, o + ${stride});`;
+  let write: string;
+  if (stride === 1) write = 'out[o] = typeof r === "number" ? r : numberOf(r);';
+  else {
+    const each: string[] = [];
+    if (stride <= UNROLLED_OUTPUTS) {
+      for (let k = 0; k < stride; k++)
+        each.push(
+          `const e${k} = r[${k}]; out[o + ${k}] = typeof e${k} === "number" ? e${k} : numberOf(e${k});`
+        );
+    } else
+      each.push(
+        `for (let k = 0; k < ${stride}; k++) { const e = r[k]; out[o + k] = typeof e === "number" ? e : numberOf(e); }`
+      );
+    // An index past the end of the array reads `undefined`, which
+    // `numberOf` converts to `NaN`.
+    write = `if (Array.isArray(r)) { ${each.join(' ')} } else { ${nanSlots} }`;
+  }
+  const source = `"use strict";
+// broadcast cell loop ${cellLoopSerial++}
+return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args) {
+  ${setup.join('\n  ')}
+  for (let start = from; start < to; start += ${STOP_CHECK_EVERY}) {
+    if (deadline !== undefined && (start - from) % ${DEADLINE_CHECK_EVERY} === 0 && Date.now() > deadline) return start - from;
+    if (stop !== undefined && stop()) return start - from;
+    const end = start + ${STOP_CHECK_EVERY} < to ? start + ${STOP_CHECK_EVERY} : to;
+    for (let i = start; i < end; i++) {
+      ${reads.join('\n      ')}
+      const o = ${stride} * (i - from);
+      try {
+        const r = ${callCode};
+        ${write}
+      } catch {
+        ${nanSlots}
+      }
+    }
+  }
+  return to - from;
+};`;
+  let loop: CellLoop;
+  try {
+    loop = new Function('call', 'numberOf', source)(call, numberOf) as CellLoop;
+  } catch {
+    cellLoopsAvailable = false;
+    return undefined;
+  }
+  if (byKey === undefined) {
+    byKey = new Map();
+    cellLoops.set(call, byKey);
+  }
+  byKey.set(key, loop);
+  return loop;
+}
+
+/**
+ * Whether the shared input `value` can be read with no per-read test of the
+ * array by a batch body: a `Float64Array`, or a plain array whose elements
+ * are all numbers, of at least `minLength` elements. A plain array that
+ * passed is recorded in `checked` with its length, and is not scanned again
+ * while its length is the same (see `BroadcastBatchBody`).
+ */
+function checkedSharedList(
+  value: Float64Array | readonly number[],
+  minLength: number,
+  checked: WeakMap<object, number>
+): boolean {
+  if (value instanceof Float64Array) return value.length >= minLength;
+  if (!Array.isArray(value) || value.length < minLength) return false;
+  if (checked.get(value) === value.length) return true;
+  for (let k = 0; k < value.length; k++)
+    if (typeof value[k] !== 'number') return false;
+  checked.set(value, value.length);
+  return true;
+}
+
+/**
+ * The arguments of the batch body `batch` for this batch, in the order of
+ * its parameters, or `undefined` when a shared input that it reads directly
+ * fails the per-batch check (`checkedSharedList`) or is not a shared input
+ * of the batch: the batch then runs the ordinary body.
+ *
+ * A parameter that is not `direct` receives what the ordinary body reads on
+ * the vars object for its name: the complex slot of a complex input, the
+ * number of a scalar input (for a real input given as an array, the cell
+ * loop reads the cell's value instead), the plain array of a shared input,
+ * or `undefined` when the inputs do not name it. A `direct` parameter
+ * receives the shared input as given, except a `Float64Array` that shares
+ * its memory with `out`: the loop writes `out` while later cells read the
+ * input, so that input is copied first, as the ordinary body copies it.
+ */
+function batchArguments(
+  batch: BroadcastBatchBody,
+  shape: BroadcastShape,
+  complexSlots: ({ re: number; im: number } | null)[],
+  out: Float64Array,
+  plainOf: (s: BroadcastShape['shared'][number]) => readonly number[]
+): unknown[] | undefined {
+  const args: unknown[] = [];
+  for (const p of batch.params) {
+    const shared = shape.shared.find((s) => s.name === p.name);
+    if (p.direct === true) {
+      if (
+        shared === undefined ||
+        !checkedSharedList(shared.value, p.minLength ?? 0, batch.checked)
+      )
+        return undefined;
+      const v = shared.value;
+      args.push(
+        v instanceof Float64Array && v.buffer === out.buffer ? v.slice() : v
+      );
+      continue;
+    }
+    if (shared !== undefined) {
+      args.push(plainOf(shared));
+      continue;
+    }
+    const k = shape.names.indexOf(p.name);
+    args.push(k < 0 ? undefined : (complexSlots[k] ?? shape.scalars[k]));
+  }
+  return args;
+}
+
 function broadcastNumbersRange(
   call: (vars: Record<string, unknown>) => unknown,
   entry: BroadcastEntryPlan | undefined,
@@ -464,30 +792,79 @@ function broadcastNumbersRange(
   to: number,
   stride: number,
   deadline?: number,
-  stop?: () => boolean
+  stop?: () => boolean,
+  batch?: BroadcastBatchBody
 ): number {
   if (out.length < stride * (to - from))
     throw new TypeError(
       `broadcast: the output array holds ${out.length} values, ${stride * (to - from)} are needed`
     );
-  const vars: Record<string, unknown> = Object.create(null);
-  // The shared inputs are bound once; the cell loop below never writes them.
-  for (const { name, value } of shape.shared)
-    vars[name] = plainSharedArray(value);
-  const complexSlots: ({ re: number; im: number } | null)[] = [];
   const complexNames =
     entry?.kind === 'vars' ? new Set(entry.complex) : new Set<string>();
-  shape.names.forEach((name, k) => {
-    if (complexNames.has(name)) {
-      const slot = { re: shape.scalars[k], im: 0 };
-      complexSlots.push(slot);
-      vars[name] = slot;
-    } else {
-      complexSlots.push(null);
-      vars[name] = shape.scalars[k];
-    }
-  });
+  // The `{ re, im }` slot that each complex input reads, reused from cell to
+  // cell; `null` for a real input.
+  const complexSlots: ({ re: number; im: number } | null)[] = shape.names.map(
+    (name, k) =>
+      complexNames.has(name) ? { re: shape.scalars[k], im: 0 } : null
+  );
   const arrays = unaliasedInputs(shape.arrays, out);
+  // The plain array of each shared input, made at most once per call.
+  const plain = new Map<string, readonly number[]>();
+  const plainOf = (s: BroadcastShape['shared'][number]): readonly number[] => {
+    let p = plain.get(s.name);
+    if (p === undefined) {
+      p = plainSharedArray(s.value);
+      plain.set(s.name, p);
+    }
+    return p;
+  };
+  if (batch !== undefined) {
+    const args = batchArguments(batch, shape, complexSlots, out, plainOf);
+    const loop =
+      args === undefined
+        ? undefined
+        : cellLoopFor(batch.call, shape, complexSlots, stride, batch.params);
+    if (loop !== undefined)
+      return loop(
+        Object.create(null),
+        arrays,
+        complexSlots,
+        out,
+        from,
+        to,
+        deadline,
+        stop,
+        shape.grid,
+        args
+      );
+  }
+  // The vars object has no prototype, so that a free variable that `inputs`
+  // does not name (`toString`, `constructor`) reads as `undefined`, and a key
+  // `__proto__` is an own property. It is built as an ordinary object whose
+  // prototype is then removed: `Object.create(null)` gives V8 an object in
+  // dictionary mode, where each `_.x` read of the compiled body is a hash
+  // lookup (about 2 ns per cell, measured 2026-10-24, ROADMAP CE-410), and an
+  // ordinary object keeps its fast properties when its prototype is set to
+  // `null`.
+  const vars: Record<string, unknown> = Object.setPrototypeOf({}, null);
+  // The shared inputs are bound once; the cell loop below never writes them.
+  for (const s of shape.shared) vars[s.name] = plainOf(s);
+  shape.names.forEach((name, k) => {
+    vars[name] = complexSlots[k] ?? shape.scalars[k];
+  });
+  const loop = cellLoopFor(call, shape, complexSlots, stride);
+  if (loop !== undefined)
+    return loop(
+      vars,
+      arrays,
+      complexSlots,
+      out,
+      from,
+      to,
+      deadline,
+      stop,
+      shape.grid
+    );
   for (let i = from; i < to; i++) {
     // Checked at the first cell too, so that a slice that starts after the
     // deadline (one queued behind another) computes nothing.

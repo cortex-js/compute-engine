@@ -27355,9 +27355,32 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     dialect: ConditionDialect = CONDITION_DIALECT_JS
   ): TargetSource {
+    return BaseCompiler.kleeneConditionParts(node, target, dialect).code;
+  }
+
+  /**
+   * `kleeneCondition`, and whether its value is always decided: `true` or
+   * `false`, never the undecided value. A relation leaf whose operands need
+   * no decidedness test is always decided (its compiled value is a genuine
+   * boolean, see `ConditionTest`), and so is a connective whose operands are
+   * all always decided. A value leaf is never known to be decided.
+   */
+  private static kleeneConditionParts(
+    node: ConditionNode,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect
+  ): { code: TargetSource; decided: boolean } {
     const t = node.test;
     if (t.kind === 'value')
-      return BaseCompiler.kleeneValueLeaf(t.expr, node.negate, target, dialect);
+      return {
+        code: BaseCompiler.kleeneValueLeaf(
+          t.expr,
+          node.negate,
+          target,
+          dialect
+        ),
+        decided: false,
+      };
     if (t.kind === 'operands')
       return BaseCompiler.kleeneRelationLeaf(t, node.negate, target, dialect);
     return BaseCompiler.kleeneConnective(t, node.negate, target, dialect);
@@ -27413,7 +27436,7 @@ export class BaseCompiler {
     negate: boolean,
     target: CompileTarget<Expression>,
     dialect: ConditionDialect
-  ): TargetSource {
+  ): { code: TargetSource; decided: boolean } {
     const params: string[] = [];
     const args: TargetSource[] = [];
     const installed: Expression[] = [];
@@ -27464,7 +27487,10 @@ export class BaseCompiler {
               value,
               dialect.undecided
             );
-      return params.length === 0 ? body : dialect.bind(params, body, args);
+      return {
+        code: params.length === 0 ? body : dialect.bind(params, body, args),
+        decided: conjuncts.length === 0,
+      };
     } finally {
       for (const op of installed) BaseCompiler._codeOverrides.delete(op);
     }
@@ -27494,16 +27520,44 @@ export class BaseCompiler {
     negate: boolean,
     target: CompileTarget<Expression>,
     dialect: ConditionDialect
-  ): TargetSource {
+  ): { code: TargetSource; decided: boolean } {
     const settled = test.op === 'And' ? dialect.falseValue : dialect.trueValue;
     const settles = test.op === 'And' ? dialect.isFalse : dialect.isTrue;
     const decidedOther = test.op === 'And' ? dialect.isTrue : dialect.isFalse;
-    let value = BaseCompiler.kleeneCondition(test.operands[0], target, dialect);
+    const first = BaseCompiler.kleeneConditionParts(
+      test.operands[0],
+      target,
+      dialect
+    );
+    let value = first.code;
+    // When every operand is always decided (each value is `true` or
+    // `false`), the connective is the plain two-valued one, written as a
+    // conditional: `a ? b : false` for an `And`, `a ? true : b` for an `Or`.
+    // It evaluates the operands in the same order and stops at the same
+    // operand as the three-valued form, and gives the same value, with no
+    // function per operand. A `broadcast()` kernel spent several ns per cell
+    // in the three-valued form (measured 2026-10-24, ROADMAP CE-410).
+    let decided = first.decided;
+    let plain = first.code;
     for (let i = 1; i < test.operands.length; i++) {
       const soFar = BaseCompiler.tempVar(target);
-      const next = BaseCompiler.withCseOperand(test.expr, i, target, () =>
-        BaseCompiler.kleeneCondition(test.operands[i], target, dialect)
-      );
+      // The CSE region may wrap the operand's code in bindings; its value,
+      // and so whether it is always decided, is the operand's.
+      let nextDecided = false;
+      const next = BaseCompiler.withCseOperand(test.expr, i, target, () => {
+        const parts = BaseCompiler.kleeneConditionParts(
+          test.operands[i],
+          target,
+          dialect
+        );
+        nextDecided = parts.decided;
+        return parts.code;
+      });
+      decided = decided && nextDecided;
+      plain =
+        test.op === 'And'
+          ? dialect.ternary(plain, next, dialect.falseValue)
+          : dialect.ternary(plain, dialect.trueValue, next);
       const nextName = BaseCompiler.tempVar(target);
       // The value so far is decided the other way: the answer is the next
       // operand's. It is undecided: the answer is `false` for an `And` when
@@ -27523,19 +27577,27 @@ export class BaseCompiler {
         [value]
       );
     }
-    if (!negate) return value;
+    if (decided)
+      return {
+        code: negate ? `${dialect.not}(${plain})` : plain,
+        decided: true,
+      };
+    if (!negate) return { code: value, decided: false };
     // A `Not` leaves an undecided value undecided; the emitted negation runs
     // only on a decided one.
     const name = BaseCompiler.tempVar(target);
-    return dialect.bind(
-      [name],
-      dialect.ternary(
-        dialect.isUndecided(name),
-        dialect.undecided,
-        `${dialect.not}${name}`
+    return {
+      code: dialect.bind(
+        [name],
+        dialect.ternary(
+          dialect.isUndecided(name),
+          dialect.undecided,
+          `${dialect.not}${name}`
+        ),
+        [value]
       ),
-      [value]
-    );
+      decided: false,
+    };
   }
 
   /**
@@ -27694,13 +27756,21 @@ export class BaseCompiler {
     // the same shape a value-tested condition takes, so no new one is
     // introduced. The negation, and every binding the lowering needs, are
     // inside that value.
-    if (decidability.test.kind === 'connective')
+    // A connective whose value is always decided is selected on directly,
+    // like a relation that needs no decidedness test (`conjuncts` empty).
+    if (decidability.test.kind === 'connective') {
+      const { code, decided } = BaseCompiler.kleeneConditionParts(
+        decidability,
+        target,
+        CONDITION_DIALECT_JS
+      );
       return {
-        code: BaseCompiler.kleeneCondition(decidability, target),
-        conjuncts: 'value',
+        code,
+        conjuncts: decided ? [] : 'value',
         bindings: [],
         negate: false,
       };
+    }
     const { value, bindings } = BaseCompiler.withConditionOperands(
       decidability.test.operands,
       target,
@@ -30417,7 +30487,8 @@ export class BaseCompiler {
       engine,
       h,
       args,
-      BaseCompiler.provablyScalarArg
+      BaseCompiler.provablyScalarArg,
+      target
     );
 
     // The complex lanes are a JavaScript-convention matter (`{re, im}`
@@ -31306,9 +31377,28 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
-    const params = args.map((_a, i) =>
-      BaseCompiler.userFunctionParamType(engine, h, i)
-    );
+    // A parameter declared `broadcastable<P>`, with `P` a point type, maps
+    // to the cells of its argument, and a point is a cell: a tuple is not a
+    // list (user decision 2026-10-24, ROADMAP CE-405). So over a list of
+    // points such a call is the same one-call-per-point map as for a
+    // parameter declared `P`, and it is compiled here with the parameter
+    // read as `P`. `cells[i]` marks such a parameter: the interpreter maps
+    // it at every depth (`[[(1, 2)], [(3, 4)]]` gives a list of lists), so
+    // an argument whose rank the type does not give is mapped recursively
+    // (see `dispatch` below). ROADMAP CE-412.
+    const cells: boolean[] = [];
+    const params = args.map((_a, i) => {
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      const r = pt === undefined ? undefined : resolveTypeForCompilation(pt);
+      cells[i] =
+        r !== undefined &&
+        typeof r !== 'string' &&
+        r.kind === 'broadcastable' &&
+        isPointParameterType(r.elements);
+      return cells[i] && typeof r !== 'string' && r?.kind === 'broadcastable'
+        ? r.elements
+        : pt;
+    });
     // An argument typed as ONE point or a list of points
     // (`tuple<…> | list<tuple<…>>`, `broadcastable<tuple<…>>`): the
     // interpreter maps the call only when the value is a list, so the
@@ -31335,43 +31425,163 @@ export class BaseCompiler {
     let at = mapped.indexOf(true);
     const dispatch = at < 0 && maybe.includes(true);
     if (dispatch) at = maybe.indexOf(true);
+    // A list at a SCALAR parameter of a function that has a point
+    // parameter: the interpreter maps the call over the list
+    // (`pointListParamSlots`, ROADMAP CE-414). `scalarLists[i]` is `'list'`
+    // when argument `i` is surely such a list, `'maybe'` when its type has a
+    // list arm and another arm.
+    const scalarLists = BaseCompiler.scalarSlotListArgs(args, params, cells);
     // The type of one point of the list, when the list is at a parameter
     // with no declared type.
     let untypedElement: Type | undefined;
+    let scalarList = false;
+    // The index of an argument the interpreter pairs with the list of points
+    // only when its value is a list (see the `'untyped'` case below), or -1.
+    let untypedSlot = -1;
     if (at < 0) {
       at = args.findIndex(
         (a, i) =>
           BaseCompiler.untypedPointListElement(engine, h, a, params[i]) !==
           undefined
       );
-      if (at < 0) return undefined;
-      // Only the plain form is handled: every other argument is a scalar.
-      // Other calls keep their ordinary route (another list argument is
-      // paired with this one by the interpreter's broadcast).
-      if (args.some((a, i) => i !== at && !BaseCompiler.provablyScalarArg(a)))
-        return undefined;
-      untypedElement = BaseCompiler.untypedPointListElement(
-        engine,
-        h,
-        args[at],
-        params[at]
-      );
+      if (at >= 0) {
+        // Only the plain form is handled: every other argument is a
+        // scalar. Other calls keep their ordinary route (another list
+        // argument is paired with this one by the interpreter's broadcast).
+        if (args.some((a, i) => i !== at && !BaseCompiler.provablyScalarArg(a)))
+          return undefined;
+        untypedElement = BaseCompiler.untypedPointListElement(
+          engine,
+          h,
+          args[at],
+          params[at]
+        );
+      } else {
+        if (!scalarLists.some((s) => s !== false)) return undefined;
+        if (!scalarLists.some((s) => s === 'list' || s === 'maybe'))
+          return BaseCompiler.compileUntypedScalarSlotCall(
+            engine,
+            h,
+            args,
+            params,
+            scalarLists,
+            target
+          );
+        at = scalarLists.indexOf('list');
+        scalarList = true;
+      }
     }
-    const reason =
-      `Could not compile a call of \`${h}\`: argument ${at + 1} is a list ` +
-      `of points at a parameter ` +
-      (untypedElement === undefined
-        ? `declared as a point`
-        : `with no declared type`) +
-      `, and the call maps over the points.`;
+    const reason = scalarList
+      ? `Could not compile a call of \`${h}\`: ` +
+        (at < 0
+          ? `an argument may be a list`
+          : `argument ${at + 1} is a list`) +
+        ` at a scalar parameter of a function with a point parameter, and ` +
+        `the call maps over the list.`
+      : `Could not compile a call of \`${h}\`: argument ${at + 1} is a list ` +
+        `of points at a parameter ` +
+        (untypedElement === undefined
+          ? `declared as a point`
+          : `with no declared type`) +
+        `, and the call maps over the points.`;
     if (target.language !== 'javascript' || target.userFunctions?.lowering)
       throw new Error(
-        `${reason} A list of points is not a value the ` +
-          `'${target.language ?? 'unknown'}' target can map a function over.`
+        `${reason} A list ${scalarList ? '' : 'of points '}is not a value ` +
+          `the '${target.language ?? 'unknown'}' target can map a function ` +
+          `over.`
       );
+    if (scalarList) {
+      if (at < 0 || scalarLists.filter((s) => s !== false).length > 1)
+        throw new Error(
+          `${reason} The type does not say whether the argument is a list, ` +
+            `or more than one argument is a list, and the compiled call ` +
+            `maps over one list only.`
+        );
+      // The compiled map goes one rank down, so each element must be a
+      // number, a boolean or a string. The interpreter maps a nested list
+      // to the cells, and binds an absent element to the parameter. It also
+      // checks each element against the parameter's type (an
+      // `incompatible-type` error for `0` at a `boolean` parameter, or for
+      // `0.5` at an `integer` one), and the compiled map does not, so the
+      // element type must be a subtype of the parameter's type.
+      const listType = resolveTypeForCompilation(args[at].type.type);
+      const element =
+        typeof listType === 'string'
+          ? undefined
+          : collectionElementType(listType);
+      const slotType = BaseCompiler.scalarSlotElementType(params, cells, at);
+      if (
+        element === undefined ||
+        typeContainsMissing(args[at].type.type) ||
+        !(
+          isSubtype(element, 'real') ||
+          isSubtype(element, 'boolean') ||
+          isSubtype(element, 'string')
+        )
+      )
+        throw new Error(
+          `${reason} The elements of the list, typed ` +
+            `\`${typeToString(element ?? 'unknown')}\`, are not all ` +
+            `present real numbers, booleans or strings.`
+        );
+      if (
+        slotType === undefined ||
+        !isSubtype(element, resolveTypeForCompilation(slotType))
+      )
+        throw new Error(
+          `${reason} The elements of the list, typed ` +
+            `\`${typeToString(element)}\`, may not fit the parameter type ` +
+            `\`${typeToString(slotType ?? 'unknown')}\`, and the compiled ` +
+            `map does not check them.`
+        );
+    } else if (scalarLists.some((s) => s !== false)) {
+      // One other argument at a parameter typed `unknown`, whose own type
+      // does not say whether its value is a list (`'untyped'`): the
+      // interpreter pairs it with the list of points when its value is a
+      // list, and passes it whole to each call otherwise (user decision
+      // 2026-10-24, ROADMAP CE-414.2). The compiled call tests the value at
+      // run time (see `untypedSlot` below). This is not done when a
+      // parameter is declared `broadcastable<…>` (the interpreter then uses
+      // another slot plan), or when the list argument may also be one point.
+      const declaredPlan = args.some((_a, i) => {
+        const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+        const r = pt === undefined ? undefined : resolveTypeForCompilation(pt);
+        return (
+          r !== undefined && typeof r !== 'string' && r.kind === 'broadcastable'
+        );
+      });
+      if (
+        !dispatch &&
+        !declaredPlan &&
+        untypedElement === undefined &&
+        scalarLists.filter((s) => s !== false).length === 1 &&
+        scalarLists.indexOf('untyped') >= 0
+      )
+        untypedSlot = scalarLists.indexOf('untyped');
+      else
+        throw new Error(
+          `Could not compile a call of \`${h}\`: argument ${at + 1} is a ` +
+            `list of points, and another argument is or may be a list at a ` +
+            `scalar parameter. The interpreter pairs the two lists, and the ` +
+            `compiled call maps over one list only.`
+        );
+    }
+    // An argument at another `broadcastable<P>` parameter (`cells[i]`) is
+    // passed whole to each call of the map, so it must be one point. The
+    // interpreter maps a list there too, of any rank (`[[(1, 2)], [(3, 4)]]`
+    // gives a list of lists), and pairs it with the mapped list, so such an
+    // argument that may be a list counts as another list of points.
+    const anotherCellsList = args.some(
+      (a, i) =>
+        i !== at &&
+        cells[i] &&
+        !isTuple(a) &&
+        !typeCannotHoldAList(resolveTypeForCompilation(a.type.type))
+    );
     if (
       untypedElement === undefined &&
-      args.filter((_a, i) => mapped[i] || maybe[i]).length > 1
+      (anotherCellsList ||
+        args.filter((_a, i) => mapped[i] || maybe[i]).length > 1)
     )
       throw new Error(
         `${reason} More than one argument is a list of points, and the ` +
@@ -31467,6 +31677,35 @@ export class BaseCompiler {
     // `undefined`, and the interpreter answers `Missing` for an absent list
     // and for the cell of an absent point, so the map does the same.
     const absent = typeContainsMissing(args[at].type.type);
+    // At a `broadcastable<P>` parameter (`cells[at]`) too, the interpreter
+    // answers `Missing` for an absent point, at any depth, and for a list of
+    // points that is absent as a whole, as for a parameter declared `P`
+    // (user decision 2026-10-24, ROADMAP CE-420): the map gives `undefined`
+    // for each.
+    //
+    // An argument at ANOTHER `broadcastable<P>` parameter is passed whole to
+    // each call. When it may be absent (`P | missing`), the interpreter binds
+    // the absent value to the parameter, which is an `incompatible-type`
+    // error, as for a parameter declared `P`, so the call fails closed, as
+    // the check of an absent argument does for a parameter declared `P`.
+    const mayBeAbsentWhole = (t: Type): boolean => {
+      const r = resolveTypeForCompilation(t);
+      return (
+        r === 'missing' ||
+        (typeof r !== 'string' &&
+          r.kind === 'union' &&
+          r.types.some((x) => resolveTypeForCompilation(x) === 'missing'))
+      );
+    };
+    const absentPoint = args.findIndex(
+      (a, i) => i !== at && cells[i] && mayBeAbsentWhole(a.type.type)
+    );
+    if (absentPoint >= 0)
+      throw new Error(
+        `${reason} Argument ${absentPoint + 1} may be absent, and the ` +
+          `parameter, declared \`broadcastable<…>\`, refuses an absent point ` +
+          `passed whole.`
+      );
     const listGuard = absent ? `${temps[at]} === undefined ? undefined : ` : '';
     const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
     // A `broadcastable<tuple<…>>` value can also be a tensor of points of
@@ -31479,6 +31718,7 @@ export class BaseCompiler {
     );
     const nestedGuard =
       dispatch &&
+      !cells[at] &&
       typeof argType !== 'string' &&
       argType.kind === 'broadcastable'
         ? `Array.isArray(${point}?.[0]) ? (() => { throw new TypeError(` +
@@ -31491,6 +31731,35 @@ export class BaseCompiler {
       `${temps[at]}.map((${point}) => ` +
       `${pointGuard}${nestedGuard}${name}(${callArgs.join(', ')}))`;
     const head = `(${temps.join(', ')}) => ${listGuard}`;
+    if (untypedSlot >= 0) {
+      // When the value of the `unknown` argument is an array, point `i` is
+      // paired with its element `i`, and an element that is itself a list
+      // maps the call again (`_SYS.bcastFn`), as the interpreter does for
+      // an `unknown` slot. A length mismatch is the interpreter's
+      // `incompatible-dimensions` error, which the compiled broadcast gives
+      // as `NaN` (`bcastWith` in `javascript-runtime.ts`). Any other value
+      // is passed whole to each call of the map.
+      const u = temps[untypedSlot];
+      const idx = BaseCompiler.tempVar(target);
+      const el = BaseCompiler.tempVar(target);
+      const pairArgs = temps.map((t, i) =>
+        i === at
+          ? point
+          : BaseCompiler.presentCheckedCode(
+              i === untypedSlot ? el : t,
+              checks[i]
+            )
+      );
+      const paired =
+        `(${u}.length !== ${temps[at]}.length ? NaN : ` +
+        `${temps[at]}.map((${point}, ${idx}) => ${pointGuard}` +
+        `_SYS.bcastFn((${el}) => ${name}(${pairArgs.join(', ')}), ` +
+        `${u}[${idx}])))`;
+      return (
+        `(${head}Array.isArray(${u}) ? ${paired} : ${map})` +
+        `(${codes.join(', ')})`
+      );
+    }
     if (!dispatch) return `(${head}${map})(${codes.join(', ')})`;
     // One point or a list of points: an empty array, or an array whose first
     // element is an array, is a list of points (see the coordinate check
@@ -31504,13 +31773,228 @@ export class BaseCompiler {
     // absent is a list too: a point has at least one coordinate, and its
     // coordinates are typed as present values.
     const e = BaseCompiler.tempVar(target);
-    const isList =
-      `Array.isArray(${v}) && ((${e}) => ${e} === undefined || ` +
-      `Array.isArray(${e}))(${v}.find((${e}) => ${e} !== undefined))`;
+    const isListOf = (x: string) =>
+      `Array.isArray(${x}) && ((${e}) => ${e} === undefined || ` +
+      `Array.isArray(${e}))(${x}.find((${e}) => ${e} !== undefined))`;
+    const isList = isListOf(v);
+    if (cells[at]) {
+      // A `broadcastable<P>` parameter maps to the cells at every depth: a
+      // named function expression applies the same test to each element,
+      // maps again over a list, and calls the function on a point.
+      const go = BaseCompiler.tempVar(target);
+      const p = BaseCompiler.tempVar(target);
+      const pointArgs = onePointArgs.map((c, i) =>
+        i === at ? BaseCompiler.presentCheckedCode(p, checks[at]) : c
+      );
+      return (
+        `(${head}(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
+        `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
+        `${name}(${pointArgs.join(', ')}); })(${v}))(${codes.join(', ')})`
+      );
+    }
     return (
       `(${head}(${isList}) ? ${map} : ` +
       `${name}(${onePointArgs.join(', ')}))(${codes.join(', ')})`
     );
+  }
+
+  /**
+   * For each argument of a call of a user function whose declared parameter
+   * types are `params`: whether it is a LIST at a SCALAR parameter of a
+   * function that also has a parameter declared as a point. The interpreter
+   * maps such a call over the list (`pointListParamSlots`, ROADMAP CE-414):
+   * `h := (P, t) ↦ P.x + t` declared `(tuple<number, number>, real)` gives
+   * `[1, 2, 3]` for `h((1, 2), [0, 1, 2])`.
+   *
+   * `'list'`: the argument is not a tuple and its type is surely a list (not
+   * a string). `'maybe'`: its type is a union with a list arm and an arm
+   * that is not a list (`real | list<real>`). `'untyped'`: the parameter's
+   * type can hold a list (`unknown`), and the argument's type can hold one
+   * but has no list arm (`unknown`, `any`), so only the value says whether
+   * the interpreter maps the call (see `compileUntypedScalarSlotCall`).
+   * `false` otherwise, and for every argument when no parameter is declared
+   * as a point.
+   *
+   * Which parameters take part follows the interpreter's slot plan (see
+   * `scalarSlotElementType`). `cells[i]` marks a parameter declared
+   * `broadcastable<P>` and read as the point `P`: it counts as a point
+   * parameter.
+   */
+  private static scalarSlotListArgs(
+    args: ReadonlyArray<Expression>,
+    params: ReadonlyArray<Type | undefined>,
+    cells: ReadonlyArray<boolean>
+  ): Array<'list' | 'maybe' | 'untyped' | false> {
+    const none = args.map((): false => false);
+    if (!params.some((pt) => pt !== undefined && isPointParameterType(pt)))
+      return none;
+    const isList = (t: Type): boolean => {
+      const r = resolveTypeForCompilation(t);
+      return (
+        isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleShapedType(r) &&
+        !isSubtype(r, 'string')
+      );
+    };
+    return args.map((a, i) => {
+      const slotType = BaseCompiler.scalarSlotElementType(params, cells, i);
+      if (isTuple(a) || slotType === undefined) return false;
+      const t = stripMissingFromType(a.type.type);
+      if (isList(t)) return 'list';
+      const r = resolveTypeForCompilation(t);
+      if (
+        typeof r !== 'string' &&
+        r.kind === 'union' &&
+        r.types.some((arm) => isList(arm))
+      )
+        return 'maybe';
+      if (
+        !typeCannotHoldAList(resolveTypeForCompilation(slotType)) &&
+        !typeCannotHoldAList(r)
+      )
+        return 'untyped';
+      return false;
+    });
+  }
+
+  /**
+   * Compile a call of user function `h`, which has a point parameter, when
+   * the only arguments that may be lists are the ones `scalarLists` marks
+   * `'untyped'` (see `scalarSlotListArgs`): each is at a parameter typed
+   * `unknown`, and its own type does not say whether its value is a list.
+   *
+   * The interpreter maps the call over such an argument when its value is a
+   * list, at every depth, and binds the value whole otherwise, as for the
+   * parameter of a one-parameter function (user decision 2026-10-24,
+   * ROADMAP CE-414.2). The compiled call decides at run time in the same way
+   * with `_SYS.bcastFn`, which a one-parameter function uses too
+   * (`g := t ↦ (t, 1)` declared `(unknown) -> unknown` compiles `g(x)` to
+   * `_SYS.bcastFn(_fn_g, x)`). Every other argument is evaluated once and
+   * passed whole to each call, so it must be a tuple (one point) or provably
+   * not a list.
+   *
+   * The call fails closed on a target other than JavaScript, when another
+   * argument may be a list, when a parameter is declared `broadcastable<…>`
+   * (the interpreter then maps an `unknown` slot one rank down, not to the
+   * cells), and when another argument is bound to a complex-typed parameter.
+   */
+  private static compileUntypedScalarSlotCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    params: ReadonlyArray<Type | undefined>,
+    scalarLists: ReadonlyArray<'list' | 'maybe' | 'untyped' | false>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const at = scalarLists.indexOf('untyped');
+    const reason =
+      `Could not compile a call of \`${h}\`: argument ${at + 1} may be a ` +
+      `list at a parameter typed \`unknown\` of a function with a point ` +
+      `parameter, and the call maps over it when it is a list.`;
+    if (target.language !== 'javascript' || target.userFunctions?.lowering)
+      throw new Error(
+        `${reason} A list is not a value the ` +
+          `'${target.language ?? 'unknown'}' target can map a function over.`
+      );
+    const declaredPlan = args.some((_a, i) => {
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      const r = pt === undefined ? undefined : resolveTypeForCompilation(pt);
+      return (
+        r !== undefined && typeof r !== 'string' && r.kind === 'broadcastable'
+      );
+    });
+    if (declaredPlan)
+      throw new Error(
+        `${reason} A parameter is declared \`broadcastable<…>\`, and the ` +
+          `interpreter then maps the list one rank down, which the compiled ` +
+          `call does not do.`
+      );
+    if (
+      args.some(
+        (a, i) =>
+          scalarLists[i] !== 'untyped' &&
+          !isTuple(a) &&
+          !BaseCompiler.provablyScalarArg(a)
+      )
+    )
+      throw new Error(
+        `${reason} Another argument may be a list, and the compiled call ` +
+          `maps over the arguments typed \`unknown\` only.`
+      );
+    if (params.some((pt) => pt !== undefined && isNonRealNumber(pt)))
+      throw new Error(
+        `${reason} An argument is bound to a complex-typed parameter, which ` +
+          `the compiled call does not convert.`
+      );
+    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    if (name === undefined) return undefined;
+    const checks = BaseCompiler.absentArgumentChecks(
+      h,
+      BaseCompiler.userFunctionLiteral(engine, h),
+      args,
+      target
+    );
+    const codes = args.map((a) => BaseCompiler.compileValueOperand(a, target));
+    const temps = args.map(() => BaseCompiler.tempVar(target));
+    const elements = args.map((_a, i) =>
+      scalarLists[i] === 'untyped' ? BaseCompiler.tempVar(target) : undefined
+    );
+    const callArgs = temps.map((t, i) =>
+      BaseCompiler.presentCheckedCode(elements[i] ?? t, checks[i])
+    );
+    const elementParams = elements.filter((e): e is string => e !== undefined);
+    const sources = temps.filter((_t, i) => elements[i] !== undefined);
+    return (
+      `((${temps.join(', ')}) => _SYS.bcastFn((${elementParams.join(', ')}) => ` +
+      `${name}(${callArgs.join(', ')}), ${sources.join(', ')}))` +
+      `(${codes.join(', ')})`
+    );
+  }
+
+  /**
+   * The element type of SCALAR parameter `i` of a user function whose
+   * declared parameter types are `params` (see `scalarSlotListArgs`): the
+   * type each element of a list argument at that parameter is bound to when
+   * the interpreter maps the call over the list. `undefined` when the
+   * parameter is a point parameter, or when the interpreter binds a list
+   * argument whole there.
+   *
+   * The interpreter has two slot plans, and this follows the one it uses.
+   * When a parameter is declared `broadcastable<…>` (`cells[i]` marks one
+   * read as a point), it uses the `broadcastable<T>` plan
+   * (`broadcastableParamSlots`): another `broadcastable<U>` parameter maps
+   * with `U` as the element type, and a parameter that `isScalarType`
+   * accepts maps with its own type. Otherwise it uses the point-list plan
+   * (`pointListParamSlots`): a parameter maps when `isScalarType` accepts
+   * its type, refined from the body of the assigned function (`real`,
+   * `boolean`, and also `unknown`, as for a one-parameter function: user
+   * decision 2026-10-24, ROADMAP CE-414.2).
+   */
+  private static scalarSlotElementType(
+    params: ReadonlyArray<Type | undefined>,
+    cells: ReadonlyArray<boolean>,
+    i: number
+  ): Type | undefined {
+    const pt = params[i];
+    if (pt === undefined || cells[i] || isPointParameterType(pt))
+      return undefined;
+    const broadcastableOf = (t: Type | undefined): Type | undefined => {
+      if (t === undefined) return undefined;
+      const r = resolveTypeForCompilation(t);
+      return typeof r !== 'string' && r.kind === 'broadcastable'
+        ? r.elements
+        : undefined;
+    };
+    const declaredPlan =
+      cells.some((c) => c) ||
+      params.some((t) => broadcastableOf(t) !== undefined);
+    if (declaredPlan) {
+      const elements = broadcastableOf(pt);
+      if (elements !== undefined) return elements;
+      if (isSubtype(pt, 'function')) return undefined;
+      return isScalarType(pt) ? pt : undefined;
+    }
+    return isScalarType(pt) ? pt : undefined;
   }
 
   /**
@@ -33025,7 +33509,8 @@ export class BaseCompiler {
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
-    provablyScalarArg: (a: Expression) => boolean
+    provablyScalarArg: (a: Expression) => boolean,
+    target?: CompileTarget<Expression>
   ): void {
     BaseCompiler.checkDeclaredBroadcastAgainst(
       h,
@@ -33033,8 +33518,35 @@ export class BaseCompiler {
       provablyScalarArg,
       BaseCompiler.userFunctionBroadcastPlan(engine, h),
       () => BaseCompiler.userFunctionHasBroadcastableParam(engine, h),
-      () => BaseCompiler.userFunctionParamsAreScalar(engine, h)
+      () => BaseCompiler.userFunctionParamsAreScalar(engine, h),
+      target === undefined
+        ? undefined
+        : (a) => BaseCompiler.bakedTupleValueType(a, target)
     );
+  }
+
+  /**
+   * The type of the tuple value held by symbol `a`, when the compiled code
+   * bakes that value: `a` is a symbol whose own type is not a tuple type
+   * (`Q: broadcastable<tuple<number, number>>`), its held value is a tuple
+   * (`Q := (1, 2)`), and it is not a live input of the compile (`vars`), so
+   * `tryFoldKnownSymbol` emits the value in its place. Otherwise
+   * `undefined`.
+   *
+   * `isTuple(a)` already reads the held value, so such an argument binds
+   * whole, as one point. Its declared type is not a subtype of the point
+   * type, while the value it compiles to is: the value's type is the one to
+   * check against the parameter (ROADMAP CE-415).
+   */
+  private static bakedTupleValueType(
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): Type | undefined {
+    if (!isSymbol(a) || isTupleShapedType(a.type.type)) return undefined;
+    if (target.varsKeys?.has(a.symbol) === true) return undefined;
+    const value = a.value;
+    if (value === undefined || isSymbol(value)) return undefined;
+    return isTupleShapedType(value.type.type) ? value.type.type : undefined;
   }
 
   /**
@@ -33061,7 +33573,10 @@ export class BaseCompiler {
     // element-wise call (`_SYS.bcastFn`), which maps to the cells as the
     // interpreter does for such a slot (user decision 2026-10-24, ROADMAP
     // CE-405).
-    compilesAsScalarParams: () => boolean = () => false
+    compilesAsScalarParams: () => boolean = () => false,
+    // The type of the value the compiled code bakes for an argument that is
+    // a tuple only by its held value (`bakedTupleValueType`), or `undefined`.
+    heldTupleType: (a: Expression) => Type | undefined = () => undefined
   ): void {
     if (args.length === 0) return;
     const scalarParams = plan !== undefined && compilesAsScalarParams();
@@ -33076,10 +33591,13 @@ export class BaseCompiler {
             // contract actually admits it. Without the second clause this
             // gate would contradict the call-site carve-out below: it would
             // decline the very applications that carve-out proves atomic.
-            if (isTuple(a) || BaseCompiler.isNominalAtomicArg(a))
-              return !(
-                slot.elements === undefined || a.type.matches(slot.elements)
-              );
+            if (isTuple(a) || BaseCompiler.isNominalAtomicArg(a)) {
+              if (slot.elements === undefined) return false;
+              const held = heldTupleType(a);
+              return held !== undefined
+                ? !isSubtype(held, slot.elements)
+                : !a.type.matches(slot.elements);
+            }
             // A function that compiles with scalar parameters is called
             // through the element-wise call, which maps to the cells as the
             // declaration now does (`compilesAsScalarParams`).

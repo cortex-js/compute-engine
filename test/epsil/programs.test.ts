@@ -786,6 +786,27 @@ let y = 5
     expect(text).toBe('("True", "False")');
   });
 
+  test('a comparison of two parenthesized comparisons compares truth values', () => {
+    // CE-411: `(a <= 0) == (b <= 0)` is true when both conditions have the
+    // same truth value; it is not the chain `a <= 0 == b <= 0`.
+    const { text, diagnostics } = run(`
+let a = 1
+let b = 1
+let c = -1
+((a <= 0) == (b <= 0), (a <= 0) == (c <= 0), (a <= 0) != (c <= 0))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("True", "False", "True")');
+  });
+
+  test('a comparison written as a call is an operand of the next comparison', () => {
+    // `Less(2, 1) == false` compares the truth value of `Less(2, 1)` with
+    // `false`; it is not the chain `Less(2, 1) && 1 == false`.
+    const { text, diagnostics } = run(`
+(Less(2, 1) == false, IdenticallyEqual(1, 1) == true)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('("True", "True")');
+  });
+
   test('a truth table for logical AND, as a Map over pairs', () => {
     const { text, diagnostics } = run(`
 Map(p => p[1] && p[2],

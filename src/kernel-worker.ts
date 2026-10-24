@@ -48,6 +48,7 @@ import type {
 } from './compute-engine/compilation/types.js';
 import {
   plainSharedArray,
+  sharedInputsReadInPlace,
   type BroadcastSlice,
 } from './compute-engine/compilation/broadcast.js';
 import type {
@@ -79,6 +80,10 @@ interface Kernel {
   ) => number;
   interval: boolean;
   perCellOut: number;
+  /** The shared inputs that the batch body of the kernel reads in place
+   * and only in place (`sharedInputsReadInPlace`): a `Float64Array` is
+   * passed as it is, not copied. */
+  inPlace: Set<string>;
 }
 
 /** The two ends of the message channel, in a browser worker or a Node
@@ -138,6 +143,7 @@ function loadKernel(kernel: StoredKernel): Kernel {
       slice: intervalRuntime.loadBroadcastSlice(kernel),
       interval: true,
       perCellOut: 3,
+      inPlace: new Set(),
     };
   return {
     // `loadBroadcastSlice` refuses a stored `broadcastOutputs` that is not a
@@ -150,12 +156,21 @@ function loadKernel(kernel: StoredKernel): Kernel {
     }),
     interval: false,
     perCellOut: kernel.broadcastOutputs ?? 1,
+    inPlace: sharedInputsReadInPlace(kernel.batch?.params),
   };
 }
 
-/** The shared inputs of each batch this worker was sent, as plain arrays,
- * by batch id, until `release`. */
-const batches = new Map<number, Map<string, readonly number[]>>();
+/** The shared inputs of each batch this worker was sent, by batch id, until
+ * `release`: each as it was sent (`raw`), and its copy into a plain array,
+ * made once per batch the first time a kernel that does not read it in
+ * place needs it (`plain`). */
+const batches = new Map<
+  number,
+  Map<
+    string,
+    { raw: Float64Array | readonly number[]; plain?: readonly number[] }
+  >
+>();
 
 const fits = new Map<number, FitScanProblem>();
 
@@ -308,13 +323,17 @@ port.on((m) => {
     case 'run': {
       // The shared inputs are kept first, before the kernel is checked, so
       // that the later tasks of the batch find them even when this one
-      // fails. Each is copied into a plain array once per batch: the
-      // compiled code reads plain arrays only.
+      // fails. Each is kept as it was sent; the ordinary compiled body reads
+      // plain arrays only, so a `Float64Array` is copied into one once per
+      // batch, when a kernel that does not read it in place first needs it.
       const wireShared = m.shared;
       if (m.batch !== undefined && wireShared !== undefined) {
-        const kept = new Map<string, readonly number[]>();
+        const kept = new Map<
+          string,
+          { raw: Float64Array | readonly number[]; plain?: readonly number[] }
+        >();
         wireShared.names.forEach((name, k) =>
-          kept.set(name, plainSharedArray(wireShared.values[k]))
+          kept.set(name, { raw: wireShared.values[k] })
         );
         batches.set(m.batch, kept);
       }
@@ -347,7 +366,10 @@ port.on((m) => {
           (name, k) => (inputs[name] = m.inputs.values[k])
         );
         if (shared !== undefined)
-          for (const [name, value] of shared) inputs[name] = value;
+          for (const [name, entry] of shared)
+            inputs[name] = kernel.inPlace.has(name)
+              ? entry.raw
+              : (entry.plain ??= plainSharedArray(entry.raw));
         const perCellOut = kernel.interval
           ? kernel.perCellOut
           : (m.outputs ?? kernel.perCellOut);

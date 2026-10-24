@@ -7,6 +7,7 @@ import type { BigDecimal } from '../../big-decimal/index.js';
 
 import { machineValue } from '../../math-json/utils.js';
 import { isRational } from '../numerics/rationals.js';
+import { CHAINABLE_COMPARISONS } from '../latex-syntax/comparison-chain.js';
 import {
   roundToSignificant,
   roundToDecimalPlace,
@@ -754,7 +755,7 @@ const FUNCTIONS: Record<
     return `(${serialize(f)})|_(${args.map((x) => serialize(x)).join(', ')})`;
   },
 
-  Function: (expr_: Expression, serialize) => {
+  Function: (expr_: Expression, serialize, options) => {
     const expr = expr_ as FnExpr;
     const args = expr.ops.slice(1);
 
@@ -773,12 +774,19 @@ const FUNCTIONS: Record<
         // unless the body already mentions `_`: an enclosing literal's
         // parameter, which the rename would make indistinguishable from this
         // one (`(_) => Apply((_) => _ + _, 2)` for an inner `_1 + _`).
+        // The rename is a spelling of the printer (`options.symbols`), not a
+        // substitution: `subs({ _1: '_' })` boxed the symbol `_` in the
+        // current scope, so printing the literal declared `_` in the caller's
+        // scope (ROADMAP CE-416).
         if (
           args.length === 1 &&
           isSymbol(args[0], '_1') &&
           !expr.op1.symbols.includes('_')
         ) {
-          return `(_) => ${serialize(unwrap(expr.op1.op1).subs({ _1: '_' }))}`;
+          return `(_) => ${toAsciiMath(unwrap(expr.op1.op1), {
+            ...options,
+            symbols: { ...options?.symbols, _1: '_' },
+          })}`;
         }
         return `(${serializedArgs()}) => ${serialize(unwrap(expr.op1.op1))}`;
       }
@@ -1186,9 +1194,19 @@ export function toAsciiMath(
           precedence_
         );
 
+      // A comparison operand of a comparison is parenthesized: without the
+      // parentheses, `(x < y) == (y < x)` prints `x < y == y < x`, which
+      // reads as the chain `x < y && y == y && y < x`, not as a comparison
+      // of two truth values. The LaTeX and Epsil serializers use the same
+      // rule.
+      const chaining = CHAINABLE_COMPARISONS.has(expr.operator);
       result =
         fnExpr.ops
-          .map((x) => serialize(x, precedence_ + 1))
+          .map((x) =>
+            chaining && CHAINABLE_COMPARISONS.has(x.operator)
+              ? `(${serialize(x)})`
+              : serialize(x, precedence_ + 1)
+          )
           .join(` ${operator} `) ?? '';
     }
     return wrap(result, precedence, precedence_);

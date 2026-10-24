@@ -19,6 +19,7 @@ import {
 import type { MathJsonExpression } from '../../../math-json.js';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
 import { isRelationalOperator } from '../utils.js';
+import { chainComparison } from '../comparison-chain.js';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 //
@@ -148,7 +149,8 @@ function parseModulusAnnotation(
 function parseEquivalent(
   parser: Parser,
   lhs: MathJsonExpression,
-  terminator: Readonly<Terminator>
+  terminator: Readonly<Terminator>,
+  negated = false
 ): MathJsonExpression {
   // Stop the rhs before a parenthesized `(mod n)` annotation so juxtaposition
   // does not absorb it as an invisible-multiplication factor. A congruence
@@ -170,20 +172,27 @@ function parseEquivalent(
   if (modulus !== null) {
     // Chained congruence — `a ≡ b (mod m) ≡ c (mod m)` asserts each adjacent
     // step: fold to a conjunction, comparing against the previous rhs.
-    if (operator(lhs) === 'Congruent')
-      return [
-        'And',
-        lhs,
-        [
-          'Congruent',
-          missingIfEmpty(operand(lhs, 2)),
-          missingIfEmpty(rhs),
-          modulus,
-        ],
-      ];
-    return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+    const congruence: MathJsonExpression =
+      operator(lhs) === 'Congruent'
+        ? [
+            'And',
+            lhs,
+            [
+              'Congruent',
+              missingIfEmpty(operand(lhs, 2)),
+              missingIfEmpty(rhs),
+              modulus,
+            ],
+          ]
+        : ['Congruent', lhs, missingIfEmpty(rhs), modulus];
+    // There is no `NotCongruent` head: a negated congruence is the `Not` of
+    // the congruence.
+    return negated ? ['Not', congruence] : congruence;
   }
-  return ['IdenticallyEqual', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+  // `a \equiv b \equiv c` and `a = b \equiv c` are chains: see
+  // `chainComparison()`. A negated relation negates only its own link:
+  // `a < b \not\equiv c` is `a < b \land \lnot(b \equiv c)`.
+  return chainComparison('IdenticallyEqual', lhs, missingIfEmpty(rhs), negated);
 }
 
 export const DEFINITIONS_LOGIC: LatexDictionary = [
@@ -453,15 +462,17 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   {
     // `\not\equiv` (and `\not≡`) negates the congruence/equivalence: it reuses
     // `parseEquivalent` (so a trailing `\pmod n` still folds into a
-    // `Congruent(a, b, n)`) and wraps the result in `Not`. There is no
+    // `Congruent(a, b, n)`) and wraps the congruence in `Not`. There is no
     // `NotCongruent` head, so the `Not`-wrap is the canonical form:
     // `2019^8 \not\equiv -1 \pmod{17}` → `Not(Congruent(2019^8, -1, 17))`.
+    // Without a modulus, only the link is negated: `a < b \not\equiv c` is
+    // `And(Less(a, b), Not(IdenticallyEqual(b, c)))`.
     latexTrigger: ['\\not', '\\equiv'],
     kind: 'infix',
     associativity: 'right',
     precedence: COMPARISON_PRECEDENCE,
     parse: (parser, lhs, terminator) =>
-      ['Not', parseEquivalent(parser, lhs, terminator)] as MathJsonExpression,
+      parseEquivalent(parser, lhs, terminator, true),
   } as InfixEntry,
   {
     // Unicode ≢ (U+2262 NOT IDENTICAL TO): literal-glyph spelling of
@@ -471,7 +482,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     precedence: COMPARISON_PRECEDENCE,
     parse: (parser, lhs, terminator) =>
-      ['Not', parseEquivalent(parser, lhs, terminator)] as MathJsonExpression,
+      parseEquivalent(parser, lhs, terminator, true),
   } as InfixEntry,
 
   // Bare `\pmod` following an expression (no `\equiv`) is a residue

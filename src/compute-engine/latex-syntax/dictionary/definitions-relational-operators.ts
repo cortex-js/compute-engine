@@ -1,12 +1,15 @@
 import type { Parser, Terminator } from '../types.js';
 import { LatexDictionaryEntry, COMPARISON_PRECEDENCE } from '../types.js';
 import type { MathJsonExpression } from '../../../math-json.js';
-import { missingIfEmpty } from '../../../math-json/utils.js';
+import { missingIfEmpty, operator } from '../../../math-json/utils.js';
+import { chainComparison, isComparisonChainLink } from '../comparison-chain.js';
 
 /**
  * Parse handler for a `\not`-prefixed relation that has no dedicated negated
  * head: parse the right-hand side at `precedence` and wrap the positive
- * relation in `Not` (e.g. `a \not\le b` → `Not(LessEqual(a, b))`).
+ * relation in `Not` (e.g. `a \not\le b` → `Not(LessEqual(a, b))`). In a chain
+ * only the link is negated: `a < b \not\le c` is
+ * `And(Less(a, b), Not(LessEqual(b, c)))` (see `chainComparison()`).
  */
 function negatedRelation(head: string, precedence: number) {
   return (
@@ -16,7 +19,7 @@ function negatedRelation(head: string, precedence: number) {
   ): MathJsonExpression | null => {
     const rhs = parser.parseExpression({ ...terminator, minPrec: precedence });
     if (rhs === null) return null;
-    return ['Not', [head, lhs, rhs]] as MathJsonExpression;
+    return chainComparison(head, lhs, rhs, true);
   };
 }
 
@@ -79,12 +82,17 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     precedence: 241,
     parse: (parser, lhs, until) => {
       if (parser.options.strict !== false) return null;
-      const rhs = parser.parseExpression({ ...until, minPrec: 242 });
-      return parser._appendAssociativeOperand(
-        'LessEqual',
-        lhs,
-        missingIfEmpty(rhs)
+      const rhs = missingIfEmpty(
+        parser.parseExpression({ ...until, minPrec: 242 })
       );
+      // A chain with another comparison operator (`a < b =< c`) is written
+      // without nesting: see `chainComparison()`.
+      if (
+        isComparisonChainLink(rhs) ||
+        (operator(lhs) !== 'LessEqual' && isComparisonChainLink(lhs))
+      )
+        return chainComparison('LessEqual', lhs, rhs);
+      return parser._appendAssociativeOperand('LessEqual', lhs, rhs);
     },
   },
   {
@@ -314,7 +322,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     parse: (parser, lhs, until) => {
       if (parser.options.strict !== false) return null;
       const rhs = parser.parseExpression({ ...until, minPrec: 255 });
-      return ['NotEqual', lhs, missingIfEmpty(rhs)];
+      return chainComparison('NotEqual', lhs, missingIfEmpty(rhs));
     },
   },
   {
@@ -346,6 +354,52 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     associativity: 'right',
     precedence: 242,
     parse: negatedRelation('GreaterEqual', 242),
+  },
+  {
+    // `\nleq` / `\nleqslant` (amssymb ≰): the same relation as `\not\le`.
+    latexTrigger: ['\\nleq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 241,
+    parse: negatedRelation('LessEqual', 241),
+  },
+  {
+    latexTrigger: ['\\nleqslant'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 241,
+    parse: negatedRelation('LessEqual', 241),
+  },
+  {
+    // `\ngeq` / `\ngeqslant` (amssymb ≱): the same relation as `\not\ge`.
+    latexTrigger: ['\\ngeq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 242,
+    parse: negatedRelation('GreaterEqual', 242),
+  },
+  {
+    latexTrigger: ['\\ngeqslant'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 242,
+    parse: negatedRelation('GreaterEqual', 242),
+  },
+  {
+    // `\not\lt`: the same relation as `\not<`.
+    latexTrigger: ['\\not', '\\lt'],
+    kind: 'infix',
+    associativity: 'any',
+    precedence: 246,
+    parse: 'NotLess',
+  },
+  {
+    // `\not\gt`: the same relation as `\not>`.
+    latexTrigger: ['\\not', '\\gt'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 244,
+    parse: 'NotGreater',
   },
   {
     // `!=` is the input-only loose spelling of `\neq` and parses

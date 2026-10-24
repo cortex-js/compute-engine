@@ -423,10 +423,12 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
     // expression, so the math form does not claim the clause (§3.1).
     const [expr, diags] = parseEpsil('f<T>(x) = x');
     expect(diags ?? []).toEqual([]);
+    // A chain of comparisons is an `And` of its links (CE-411).
     expect(strip(expr)).toEqual([
-      'Equal',
-      ['Greater', ['Less', 'f', 'T'], 'x'],
-      'x',
+      'And',
+      ['Less', 'f', 'T'],
+      ['Greater', 'T', 'x'],
+      ['Equal', 'x', 'x'],
     ]);
   });
 });

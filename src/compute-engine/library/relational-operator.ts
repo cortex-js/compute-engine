@@ -663,8 +663,7 @@ function unorderedChainPair(
  * Keep an undecidable comparison inert — but over the *evaluated* operands
  * rather than the raw ones.
  *
- * `Equal`/`NotEqual`/`Less`/`LessEqual` are `lazy` (their `canonical` handlers
- * need raw, direction-intact operands for chain decomposition), so each
+ * `Equal`/`NotEqual`/`Less`/`LessEqual` are `lazy`, so each
  * evaluates its operands itself at the top of the handler. Returning
  * `undefined` from there means "unchanged", which makes the framework keep the
  * ORIGINAL expression and throw that operand evaluation away: `d/dx x^2 > 0`
@@ -837,11 +836,10 @@ function trueOrderedRelation(
  * The `evaluate` and `evaluateAsync` handlers of a chainable relation
  * (`Equal`, `NotEqual`, `Less`, `LessEqual`).
  *
- * These operators are `lazy`: their `canonical` handler needs the raw,
- * direction-intact operands to decompose a chain (`a < b ≤ c`), and `lazy`
- * also skips evaluating the arguments before the handler runs. So the
- * handler evaluates them itself — otherwise a compound operand such as
- * `Im(𝑖)` or `R^2` (with `R = [1,2,3]`) never folds — and a chain stops at
+ * These operators are `lazy`, which skips evaluating the arguments before
+ * the handler runs. So the handler evaluates them itself — otherwise a
+ * compound operand such as `Im(𝑖)` or `R^2` (with `R = [1,2,3]`) never
+ * folds — and a chain stops at
  * the first adjacent pair that is `False` (`evaluateChainOperands`). The
  * asynchronous twin awaits each operand with `evaluateAsync`, in order and
  * with the same stop, so that a long operand (`Σ 1/k²` over many terms)
@@ -1412,8 +1410,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     signature: '(any, any) -> boolean',
 
-    // `lazy` for the same reason as `Equal`: the `canonical` handler needs the
-    // raw, direction-intact operands to decompose a chain (`a ≡ b ≡ c`).
+    // `lazy` like `Equal`: the handlers evaluate the operands themselves.
     lazy: true,
     evaluatesOperands: true,
 
@@ -1554,9 +1551,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     broadcastExemptions: ['whole-collection-compare'],
 
-    // `lazy` so the `canonical` handler receives raw, direction-intact operands
-    // for chain decomposition (see `canonicalComparisonChain`); a chained
-    // `a ≠ b ≠ c` becomes `And(a ≠ b, b ≠ c)`.
+    // `lazy` like `Equal`. The `canonical` handler makes the n-ary
+    // `a ≠ b ≠ c` the conjunction `And(a ≠ b, b ≠ c)` (see
+    // `canonicalComparisonChain`).
     lazy: true,
 
     canonical: (args, { engine: ce }) =>
@@ -2633,10 +2630,9 @@ function evaluateApproxChain(
   return ce.True;
 }
 
-// The comparison operators that participate in mixed-direction chains. These
-// are declared `lazy` so their `canonical` handler receives the *raw* operands
-// (with the written direction still intact), which is required to decompose a
-// chain like `a ≤ b > c` correctly. See `canonicalComparisonChain`.
+// The comparison operators whose n-ary form is canonicalized by
+// `canonicalComparisonChain`. The LaTeX parser chains the same operators
+// (`CHAINABLE_COMPARISONS` in `latex-syntax/comparison-chain.ts`).
 const CHAINABLE_COMPARISON = new Set([
   'Less',
   'LessEqual',
@@ -2677,37 +2673,6 @@ function canonicalRelational(
   return ce._fn('And', [ce._fn(operator, newOps), ...nestedRelational]);
 }
 
-/**
- * Flatten a (possibly nested) chain of comparison operators into an ordered
- * list of `terms` and the `links` (operators) between them, in *reading*
- * order. `terms.length === links.length + 1`.
- *
- * The parser nests mixed-operator chains, e.g. `a ≤ b > c` parses as
- * `LessEqual(a, Greater(b, c))`, and same-operator chains are already n-ary,
- * e.g. `Less(1, 2, 3)`. Because the comparison operators are `lazy`, the nested
- * operands still carry their *original* direction here (a nested `>` is a
- * `Greater`, not a reversed `Less`), so the chain can be reconstructed exactly
- * as written.
- */
-function flattenComparisonChain(
-  operator: string,
-  ops: ReadonlyArray<Expression>
-): { terms: Expression[]; links: string[] } {
-  const terms: Expression[] = [];
-  const links: string[] = [];
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    const sub =
-      isFunction(op) && CHAINABLE_COMPARISON.has(op.operator)
-        ? flattenComparisonChain(op.operator, op.ops)
-        : { terms: [op], links: [] as string[] };
-    if (i > 0) links.push(operator);
-    terms.push(...sub.terms);
-    links.push(...sub.links);
-  }
-  return { terms, links };
-}
-
 /** Build a single (n-ary) canonical comparison, normalizing the direction:
  *  `Greater`→`Less` and `GreaterEqual`→`LessEqual` (with the terms reversed). */
 function buildComparison(
@@ -2722,44 +2687,35 @@ function buildComparison(
 }
 
 /**
- * Canonicalize a chain of comparison operators.
+ * Canonicalize an n-ary comparison.
  *
- * A same-operator chain stays n-ary (`1 < 2 < 3` → `Less(1, 2, 3)`). A chain
- * that mixes operators — whether same-direction (`a ≤ b < c`) or opposite
- * direction (`a ≤ b > c`) — is decomposed into an explicit `And` of pairwise
- * (or n-ary same-operator) links that all share their boundary terms, e.g.
- * `a ≤ b > c` → `And(a ≤ b, b > c)` = `And(LessEqual(a, b), Less(c, b))`.
+ * A same-operator chain stays n-ary (`1 < 2 < 3` → `Less(1, 2, 3)`), except
+ * `NotEqual`, which is decomposed into an `And` of its adjacent pairs. A
+ * chain that mixes operators (`a ≤ b > c`) reaches this function already
+ * split by the parser into an `And` of its links, so each link is
+ * canonicalized on its own. An operand that is itself a comparison is a
+ * term, not a continuation of the chain:
+ * `Equal(LessEqual(a, 0), LessEqual(b, 0))` compares the truth values of the
+ * two conditions (see `chainComparison()` in
+ * `latex-syntax/comparison-chain.ts`).
  */
 function canonicalComparisonChain(
   ce: ComputeEngine,
   operator: string,
   ops: ReadonlyArray<Expression>
 ): Expression {
-  const { terms: rawTerms, links } = flattenComparisonChain(operator, ops);
-  const terms = rawTerms.map((t) => t.canonical);
+  const terms = ops.map((t) => t.canonical);
 
-  // Degenerate cases (fewer than two terms): nothing to chain.
-  if (links.length === 0) return buildComparison(ce, operator, terms);
+  // `NotEqual` is not transitive: `a ≠ b ≠ c` means `a ≠ b ∧ b ≠ c`
+  // (adjacent pairs), NOT the n-ary "all distinct". Decompose it into an
+  // `And` of its adjacent pairs.
+  if (operator === 'NotEqual' && terms.length > 2)
+    return ce.function(
+      'And',
+      terms.slice(1).map((t, i) => buildComparison(ce, operator, [terms[i], t]))
+    );
 
-  // Group maximal runs of the *same* operator into n-ary segments, then `And`
-  // the segments together. Segment `i..j` (inclusive links) spans the terms
-  // `i..j+1`.
-  const segments: Expression[] = [];
-  let i = 0;
-  while (i < links.length) {
-    let j = i;
-    // Group maximal runs of the same operator into one n-ary segment — EXCEPT
-    // `NotEqual`, which is not transitive: `a ≠ b ≠ c` means `a ≠ b ∧ b ≠ c`
-    // (adjacent pairs), NOT the n-ary "all distinct". Keep each `NotEqual` link
-    // as its own pairwise segment so the chain decomposes into an `And`.
-    if (links[i] !== 'NotEqual')
-      while (j + 1 < links.length && links[j + 1] === links[i]) j++;
-    segments.push(buildComparison(ce, links[i], terms.slice(i, j + 2)));
-    i = j + 1;
-  }
-
-  if (segments.length === 1) return segments[0];
-  return ce.function('And', segments);
+  return buildComparison(ce, operator, terms);
 }
 
 function inequalityEq(

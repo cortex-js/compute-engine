@@ -401,6 +401,269 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
   });
 });
 
+// CE-411 (Tycho row 433): a comparison whose operands are comparisons
+// compares their truth values. Only the LaTeX parser makes a chain, from
+// comparisons written one after the other without parentheses.
+describe('Equal / NotEqual of two relations compare truth values (CE-411)', () => {
+  const SIGNS: [number, number][] = [
+    [1, 1],
+    [-1, -1],
+    [-1, 1],
+    [1, -1],
+  ];
+  const values = (expr: ReturnType<typeof ce.parse>) =>
+    SIGNS.map(([a, b]) => expr.subs({ a, b }).evaluate().json);
+
+  it('the box route keeps Equal of the two relations', () => {
+    const expr = ce.box([
+      'Equal',
+      ['LessEqual', 'a', 0],
+      ['LessEqual', 'b', 0],
+    ]);
+    expect(expr.json).toEqual([
+      'Equal',
+      ['LessEqual', 'a', 0],
+      ['LessEqual', 'b', 0],
+    ]);
+    expect(values(expr)).toEqual(['True', 'True', 'False', 'False']);
+  });
+
+  it('the parse route compares the truth values', () => {
+    const expr = ce.parse('(a\\le0)=(b\\le0)');
+    expect(expr.json).toEqual([
+      'Equal',
+      ['LessEqual', 'a', 0],
+      ['LessEqual', 'b', 0],
+    ]);
+    expect(values(expr)).toEqual(['True', 'True', 'False', 'False']);
+  });
+
+  it('NotEqual of two relations compares the truth values', () => {
+    const boxed = ce.box([
+      'NotEqual',
+      ['LessEqual', 'a', 0],
+      ['LessEqual', 'b', 0],
+    ]);
+    expect(boxed.json).toEqual([
+      'NotEqual',
+      ['LessEqual', 'a', 0],
+      ['LessEqual', 'b', 0],
+    ]);
+    expect(values(boxed)).toEqual(['False', 'False', 'True', 'True']);
+    expect(values(ce.parse('(a\\le0)\\ne(b\\le0)'))).toEqual([
+      'False',
+      'False',
+      'True',
+      'True',
+    ]);
+  });
+
+  it('a nested comparison in MathJSON is not a chain', () => {
+    expect(ce.box(['LessEqual', ['Less', 'a', 'b'], 'c']).json).toEqual([
+      'LessEqual',
+      ['Less', 'a', 'b'],
+      'c',
+    ]);
+    expect(ce.box(['Equal', 'a', ['Equal', 'b', 'c']]).json).toEqual([
+      'Equal',
+      'a',
+      ['Equal', 'b', 'c'],
+    ]);
+  });
+
+  it('the LaTeX of a nested comparison keeps its parentheses', () => {
+    for (const json of [
+      ['Equal', ['LessEqual', 'a', 0], ['LessEqual', 'b', 0]],
+      ['LessEqual', ['Less', 'a', 'b'], 'c'],
+      ['Equal', 'a', ['Equal', 'b', 'c']],
+    ]) {
+      const expr = ce.box(json as never);
+      expect(ce.parse(expr.latex).json).toEqual(expr.json);
+    }
+  });
+
+  it('a flat LaTeX chain is still a chain', () => {
+    expect(ce.parse('a \\le 0 = b').json).toEqual([
+      'And',
+      ['LessEqual', 'a', 0],
+      ['Equal', 0, 'b'],
+    ]);
+    expect(ce.parse('a \\le 0 = b', { form: 'raw' }).json).toEqual([
+      'And',
+      ['LessEqual', 'a', 0],
+      ['Equal', 0, 'b'],
+    ]);
+    expect(ce.parse('a = b = c').json).toEqual(['Equal', 'a', 'b', 'c']);
+    expect(ce.parse('a \\le 0 = b \\le 0').json).toEqual([
+      'And',
+      ['LessEqual', 'a', 0],
+      ['Equal', 0, 'b'],
+      ['LessEqual', 'b', 0],
+    ]);
+    // A chain that a substitution re-canonicalizes stays the chain.
+    expect(ce.parse('a \\le 0 = b').subs({ a: -1, b: 0 }).evaluate().json).toBe(
+      'True'
+    );
+    expect(
+      ce.parse('a \\le 0 = b').subs({ a: -1, b: -1 }).evaluate().json
+    ).toBe('False');
+  });
+
+  it('a negated relation in a chain negates only its link', () => {
+    const negatedLe = [
+      'And',
+      ['Less', 'a', 'b'],
+      ['Not', ['LessEqual', 'b', 'c']],
+    ];
+    for (const latex of [
+      'a < b \\not\\le c',
+      'a < b \\not\\leq c',
+      'a < b \\nleq c',
+      'a < b \\nleqslant c',
+    ]) {
+      expect(ce.parse(latex, { form: 'raw' }).json).toEqual(negatedLe);
+      expect(ce.parse(latex).json).toEqual(negatedLe);
+    }
+    expect(ce.parse('a \\not\\le b < c').json).toEqual([
+      'And',
+      ['Not', ['LessEqual', 'a', 'b']],
+      ['Less', 'b', 'c'],
+    ]);
+    for (const latex of [
+      'a < b \\not\\ge c',
+      'a < b \\not\\geq c',
+      'a < b \\ngeq c',
+      'a < b \\ngeqslant c',
+    ]) {
+      expect(ce.parse(latex, { form: 'raw' }).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['Not', ['GreaterEqual', 'b', 'c']],
+      ]);
+      expect(ce.parse(latex).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['Not', ['LessEqual', 'c', 'b']],
+      ]);
+    }
+    // The negated relations with their own head chain the same way.
+    for (const latex of [
+      'a < b \\nless c',
+      'a < b \\not< c',
+      'a < b \\not\\lt c',
+    ])
+      expect(ce.parse(latex).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['Not', ['Less', 'b', 'c']],
+      ]);
+    for (const latex of [
+      'a < b \\ngtr c',
+      'a < b \\not> c',
+      'a < b \\not\\gt c',
+    ])
+      expect(ce.parse(latex).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['Not', ['Less', 'c', 'b']],
+      ]);
+    expect(ce.parse('a < b \\nleqq c').json).toEqual(negatedLe);
+    expect(ce.parse('a < b \\ngeqq c').json).toEqual([
+      'And',
+      ['Less', 'a', 'b'],
+      ['Not', ['LessEqual', 'c', 'b']],
+    ]);
+    // A run of a negated relation negates each pair, not the whole run.
+    expect(ce.parse('a \\nless b \\nless c', { form: 'raw' }).json).toEqual([
+      'And',
+      ['NotLess', 'a', 'b'],
+      ['NotLess', 'b', 'c'],
+    ]);
+    expect(ce.parse('a \\not\\le b \\not\\le c').json).toEqual([
+      'And',
+      ['Not', ['LessEqual', 'a', 'b']],
+      ['Not', ['LessEqual', 'b', 'c']],
+    ]);
+    // `\ne` in a chain is a link like the others.
+    for (const latex of ['a < b \\ne c', 'a < b \\neq c', 'a < b \\not= c'])
+      expect(ce.parse(latex).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['NotEqual', 'b', 'c'],
+      ]);
+    // `\not\equiv` (and `≢`) negates only its link, except for a congruence
+    // with a modulus, which has no negated head.
+    expect(ce.parse('a \\not\\equiv b').json).toEqual([
+      'Not',
+      ['IdenticallyEqual', 'a', 'b'],
+    ]);
+    for (const latex of ['a < b \\not\\equiv c', 'a < b ≢ c'])
+      expect(ce.parse(latex).json).toEqual([
+        'And',
+        ['Less', 'a', 'b'],
+        ['Not', ['IdenticallyEqual', 'b', 'c']],
+      ]);
+    expect(ce.parse('a \\not\\equiv b < c').json).toEqual([
+      'And',
+      ['Not', ['IdenticallyEqual', 'a', 'b']],
+      ['Less', 'b', 'c'],
+    ]);
+    expect(ce.parse('a \\not\\equiv b \\pmod{7}').json).toEqual([
+      'Not',
+      ['Congruent', 'a', 'b', 7],
+    ]);
+    // A `Not` that the person wrote stays an operand.
+    expect(ce.parse('\\lnot(a \\le b) < c').json).toEqual([
+      'Less',
+      ['Not', ['LessEqual', 'a', 'b']],
+      'c',
+    ]);
+    // Values
+    expect(ce.parse('1 < 2 \\not\\le 3').evaluate().json).toBe('False');
+    expect(ce.parse('1 < 2 \\not\\le 1').evaluate().json).toBe('True');
+    expect(ce.parse('1 \\nless 2 \\nless 3').evaluate().json).toBe('False');
+    expect(ce.parse('3 \\nless 2 \\nless 1').evaluate().json).toBe('True');
+  });
+
+  it('a negated chain keeps its meaning through a LaTeX round trip', () => {
+    for (const latex of [
+      'a < b \\not\\le c',
+      'a \\not\\le b < c',
+      'a < b \\not\\ge c',
+      'a < b \\nless c',
+      'a < b \\ngtr c',
+      'a \\nless b \\nless c',
+      'a < b \\ne c',
+      '\\lnot(a \\le b) < c',
+    ]) {
+      const expr = ce.parse(latex);
+      expect(ce.parse(expr.latex).json).toEqual(expr.json);
+    }
+    // A nested negated comparison in MathJSON keeps its parentheses.
+    const nested = ce.box(['NotLess', ['Less', 'a', 'b'], 'c'], {
+      form: 'raw',
+    });
+    expect(ce.parse(nested.latex, { form: 'raw' }).json).toEqual([
+      'NotLess',
+      ['Delimiter', ['Less', 'a', 'b']],
+      'c',
+    ]);
+  });
+
+  it('Equal of two boolean symbols is unchanged', () => {
+    const local = new ComputeEngine();
+    local.declare('P', 'boolean');
+    local.declare('Q', 'boolean');
+    const expr = local.box(['Equal', 'P', 'Q']);
+    expect(expr.json).toEqual(['Equal', 'P', 'Q']);
+    const at = (p: string, q: string) =>
+      expr.subs({ P: p, Q: q }).evaluate().json;
+    expect(at('True', 'True')).toBe('True');
+    expect(at('False', 'False')).toBe('True');
+    expect(at('True', 'False')).toBe('False');
+  });
+});
+
 describe('Equal / NotEqual broadcast over a named list operand (Tycho)', () => {
   // A symbol bound to a list must broadcast the same whether it appears bare
   // (`R`) or inside a function (`R^2`, which evaluates to a list). `Equal` and

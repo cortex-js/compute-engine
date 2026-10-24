@@ -14,6 +14,13 @@ import { ErrorSignal, WarningSignal } from '../../../common/signals.js';
 import { SYMBOLS } from './definitions-symbols.js';
 
 import {
+  NEGATED_COMPARISONS,
+  chainComparison,
+  isChainingComparison,
+  isComparisonChainLink,
+} from '../comparison-chain.js';
+
+import {
   countTokens,
   joinLatex,
   tokenize,
@@ -783,10 +790,17 @@ function makeSerializeHandler(
         const n = nops(expr);
         if (n === 0) return '';
         const prec = fields.precedence ?? 10000;
+        // A comparison operand of a comparison is always wrapped:
+        // `LessEqual(Less(a, b), c)` is `(a\lt b)\le c`, since `a\lt b\le c`
+        // re-parses as a chain (see `chainComparison()`).
+        const isComparison = isChainingComparison(operator(expr));
         // Insert the operator (latex) between each argument
         return joinLatex(
           operands(expr).flatMap((val, i) => {
-            const arg = serializer.wrap(val, prec + 1);
+            const arg =
+              isComparison && isChainingComparison(operator(val))
+                ? serializer.wrap(val, Infinity)
+                : serializer.wrap(val, prec + 1);
             return i < n - 1 ? [arg, latex!] : [arg];
           })
         );
@@ -1007,6 +1021,8 @@ function makeParseHandler(
             parser.parseExpression({ ...until, minPrec: prec })
           );
           if (typeof h !== 'string') return [h, lhs, rhs];
+          // `a = b = c` and `a = b \le c` are chains: see `chainComparison()`.
+          if (isChainingComparison(h)) return chainComparison(h, lhs, rhs);
           return [h, lhs, rhs];
         };
       }
@@ -1029,6 +1045,17 @@ function makeParseHandler(
           parser.parseExpression({ ...until, minPrec: prec + 1 })
         );
         if (typeof h !== 'string') return [h, lhs, rhs];
+        // A chain that mixes comparison operators (`a \le b < c`) is written
+        // without nesting: see `chainComparison()`. A run of the same
+        // operator keeps the in-place append below, except a negated
+        // operator (`a \nless b \nless c`), whose links stay pairs.
+        if (
+          isChainingComparison(h) &&
+          (NEGATED_COMPARISONS.has(h) ||
+            isComparisonChainLink(rhs) ||
+            (operator(lhs) !== h && isComparisonChainLink(lhs)))
+        )
+          return chainComparison(h, lhs, rhs);
         return parser._appendAssociativeOperand(h, lhs, rhs);
       };
     }

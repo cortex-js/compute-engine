@@ -4,6 +4,7 @@ import {
   makeSysHelpers,
   normalizeRunResult,
   twoStageRunner,
+  loadBatchBody,
   checkEntry,
   namedEntryError,
   storeEntryPlan,
@@ -533,6 +534,7 @@ import { compileDiagnosticOf } from './diagnostics.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
+  type BroadcastBatchBody,
   type BroadcastInputs,
   type BroadcastOptions,
 } from './broadcast.js';
@@ -553,8 +555,24 @@ import type {
   CompiledValue,
   ComplexResult,
   OperandCompiler,
+  StoredBatchBody,
   TargetSource,
 } from './types.js';
+
+/**
+ * The state of the compilation of a `broadcast()` batch body
+ * (`JavaScriptTarget.compileBatchBody`): the shared lists read directly
+ * (`names`), and, filled during the compilation, the parameter of the body
+ * that receives each free symbol (`locals`), the parameter that receives
+ * each checked shared list (`direct`), and the least length the reads of
+ * each list with no conversion need (`minLength`).
+ */
+interface BatchCompileState {
+  names: ReadonlySet<string>;
+  locals: Map<string, string>;
+  direct: Map<string, string>;
+  minLength: Map<string, number>;
+}
 
 /**
  * JavaScript operator mappings
@@ -587,6 +605,133 @@ import type {
  * emitted only for the colliding names, so ordinary symbols keep the bare
  * access.
  */
+/** An integer that is 1 or more: the index type that proves a read of a list
+ * at that index needs no sign, zero or integer test. */
+const POSITIVE_INTEGER_TYPE: Type = {
+  kind: 'numeric',
+  type: 'integer',
+  lower: 1,
+};
+
+/**
+ * Whether `coll` is a free input that the entry plan of the compiled code
+ * reads as a list of numbers (a symbol declared with a list type, read off the
+ * vars object), so that `broadcast()` binds it once per batch as a shared
+ * input. A symbol bound by an enclosing function or loop, or mapped by the
+ * `vars` option, is not such an input.
+ */
+function isBatchListInput(
+  coll: Expression,
+  target: CompileTarget<Expression>
+): coll is Expression & { symbol: string } {
+  if (!isSymbol(coll)) return false;
+  const name = coll.symbol;
+  if (target.boundVars?.has(name) || target.varsKeys?.has(name)) return false;
+  if (coll.engine._getSymbolValue(name) !== undefined) return false;
+  const declared = coll.type.type;
+  return isListEntryType(declared);
+}
+
+/**
+ * The read `At(coll, index)` of a shared list in the `broadcast()` batch body
+ * (ROADMAP CE-410), or `undefined` to emit the ordinary `_SYS.atNumeric` read.
+ * The caller has established that the elements are numbers by their static
+ * type, that the index is a scalar and that `coll` is not text.
+ *
+ * On the ordinary compilation, this records `coll` as a candidate for a
+ * direct read (`CompileTarget.batchReads.candidates`) and returns
+ * `undefined`.
+ *
+ * On the batch compilation, the batch checks the list once per batch before
+ * the body runs: a plain array whose elements are all numbers, or a
+ * `Float64Array`. When the check fails, the batch runs the ordinary body
+ * instead. So the body reads an array of numbers, and the read depends only
+ * on the index:
+ *
+ * - When the static type of the index proves an integer of 1 or more (an
+ *   input declared `integer<0..>` plus 1, for example), the read is
+ *   `F[index - 1]`. A declared type of a value that the host passes is the
+ *   host's promise, so the compiled code does not test it again. An index
+ *   past the end reads `undefined`, which `?? NaN` converts to `NaN`, the
+ *   value `_SYS.atNumeric` gives past the end. The conversion is made at the
+ *   read, so that no `undefined` reaches a comparison, an arithmetic
+ *   operation or the result. When the index type also has an upper bound no
+ *   greater than the length the list type declares (`list<number^5>`), the
+ *   read cannot be past the end, and the conversion is left out: the
+ *   per-batch check then also refuses an array shorter than that length.
+ * - Otherwise, the read is `_SYS.atChecked(F, index)`, which applies the
+ *   index rules of `_SYS.at` (a negative index counts from the end; zero, a
+ *   fraction or an index out of range reads `NaN`) to an array or a
+ *   `Float64Array`, with no element test.
+ *
+ * The direct read of a list that is a `Float64Array` reads it in place: a
+ * typed array holds only numbers. Any other use of the same symbol in the
+ * batch body reads the copy that the ordinary body reads (a plain array).
+ */
+function batchListRead(
+  coll: Expression,
+  index: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const reads = target.batchReads;
+  if (reads === undefined || !isBatchListInput(coll, target)) return undefined;
+  const name = coll.symbol;
+  if (reads.direct === undefined) {
+    reads.candidates?.add(name);
+    return undefined;
+  }
+  const local = reads.direct.get(name);
+  if (local === undefined) return undefined;
+  const indexType = index.type.type;
+  if (!isSubtype(indexType, POSITIVE_INTEGER_TYPE))
+    return `_SYS.atChecked(${local}, ${compile(index)})`;
+  // The offset `index - 1`. For an index `a + n` with `n` an integer
+  // literal, it is `a + (n - 1)`, one operation fewer per read (V8 does not
+  // fold `(a + n) - 1` on floats): the two forms give the same number for
+  // every value below 2^53, and an index of 2^53 or more is past the end of
+  // any array either way.
+  const offset = ((): string => {
+    if (isFunction(index, 'Add') && index.nops === 2) {
+      const [a, b] = isNumber(index.op1)
+        ? [index.op2, index.op1]
+        : [index.op1, index.op2];
+      if (isNumber(b) && !b.isComplex && Number.isSafeInteger(b.re)) {
+        const n = b.re - 1;
+        const code = compile(a);
+        return n === 0 ? code : `(${code}) + ${n}`;
+      }
+    }
+    return `(${compile(index)}) - 1`;
+  })();
+  // The length the list type declares, `N` in `list<number^N>`.
+  const listType = resolveTypeForCompilation(coll.type.type);
+  const dims =
+    typeof listType !== 'string' && listType.kind === 'list'
+      ? listType.dimensions
+      : undefined;
+  const length =
+    Array.isArray(dims) && dims.length === 1 && Number.isSafeInteger(dims[0])
+      ? dims[0]
+      : undefined;
+  if (
+    length !== undefined &&
+    length >= 1 &&
+    isSubtype(indexType, {
+      kind: 'numeric',
+      type: 'integer',
+      lower: 1,
+      upper: length,
+    })
+  ) {
+    const minLength = reads.minLength;
+    if (minLength !== undefined)
+      minLength.set(name, Math.max(minLength.get(name) ?? 0, length));
+    return `${local}[${offset}]`;
+  }
+  return `(${local}[${offset}] ?? NaN)`;
+}
+
 function varsObjectAccess(id: string): string {
   if (!Object.hasOwn(Object.prototype, id)) return `_.${id}`;
   // `Object.prototype.hasOwnProperty.call`, not `Object.hasOwn`: this text
@@ -5011,8 +5156,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       typeof baseType !== 'string' &&
       baseType.kind === 'tuple' &&
       !(isSymbol(coll) && coll.valueDefinition?.inferredType === true);
-    if (numericElement && !tupleBase && coll.unknowns.length > 0)
+    if (numericElement && !tupleBase && coll.unknowns.length > 0) {
+      // The batch body of `broadcast()` reads a checked shared list with no
+      // per-read test of the array (`batchListRead`).
+      const batchRead =
+        !stringBase && scalarIndex && checkedBase === undefined
+          ? batchListRead(coll, index, compile, target)
+          : undefined;
+      if (batchRead !== undefined) return batchRead;
       return `_SYS.atNumeric(${stringBase ? `_SYS.chars(${collCode()})` : collCode()}, ${compile(index)}, ${JSON.stringify(typeToString(eltT!))})`;
+    }
     return base;
   },
   // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
@@ -9969,11 +10122,19 @@ export class ComputeEngineFunction extends Function {
       }
     }
     // `this` is the function itself here, not the proxy returned below, so
-    // the call does not go through the `apply` trap.
-    this.rawCall = (vars: unknown): unknown =>
+    // the call does not go through the `apply` trap. The function is called
+    // directly, not through `Function.prototype.call.call(this, …)`: V8 does
+    // not inline that form, and it cost about 4 ns per call of a
+    // `broadcast()` cell (measured 2026-10-24, ROADMAP CE-410).
+    const sys = this.SYS;
+    const body_ = this as unknown as (
+      sys: SysHelpers,
+      vars: unknown
+    ) => unknown;
+    this.rawCall =
       inner !== undefined
-        ? inner(vars)
-        : Function.prototype.call.call(this, undefined, this.SYS, vars);
+        ? (vars: unknown): unknown => inner(vars)
+        : (vars: unknown): unknown => body_(sys, vars);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
         const previous = setReconstructionDigits(reconstructionDigits);
@@ -10327,6 +10488,103 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    const prepared = this.prepareCompilation(expr, options);
+    const result = compileToTarget(
+      prepared.expr,
+      prepared.target,
+      options.entryChecks !== false,
+      (names) => this.compileBatchBody(expr, options, names)
+    );
+    return BaseCompiler.withReferences(
+      result,
+      prepared.expr,
+      prepared.target,
+      options.vars ? new Set(Object.keys(options.vars)) : undefined
+    );
+  }
+
+  /**
+   * The source of the `broadcast()` batch body of `expr` (ROADMAP CE-410):
+   * a second compilation with the same options, in which each free symbol
+   * is read from a parameter of the body instead of the vars object, and
+   * each read of a shared list of `names` at a scalar index is a direct
+   * read of the checked array (`batchListRead`). `undefined` when the body
+   * would read the vars object anyway (a definition that reads it by its own
+   * spelling), writes an input, draws random numbers, or names an
+   * identifier of the host: the batch then runs the ordinary body. Called by
+   * `compileToTarget` after the ordinary compilation of the same
+   * expression, with the same engine state, so both bodies fold the same
+   * values.
+   */
+  private compileBatchBody(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    names: ReadonlySet<string>
+  ): StoredBatchBody | undefined {
+    const state: BatchCompileState = {
+      names,
+      locals: new Map(),
+      direct: new Map(),
+      minLength: new Map(),
+    };
+    const { expr: rewritten, target } = this.prepareCompilation(
+      expr,
+      options,
+      state
+    );
+    if (target.hostNames === true) return undefined;
+    const js = BaseCompiler.compileCseRoot(rewritten, target);
+    if (BaseCompiler.localVarsObjectStatement(target)) return undefined;
+    // No last-call memo (`memoizeSharedDefinitions`): its key holds the
+    // vars-object reads of a definition, and a definition here reads the
+    // parameters of the body instead. A memo changes no value.
+    if (target.userFunctions)
+      BaseCompiler.pruneUnreferencedVariantBases(target.userFunctions, js);
+    const locals = [...state.locals.values(), ...state.direct.values()];
+    const split = target.userFunctions
+      ? splitPreambleDefs(target.userFunctions, locals, true)
+      : { hoisted: '', perCall: '' };
+    const perCall = target.preamble
+      ? `${target.preamble}\n${split.perCall}`
+      : split.perCall;
+    const text = `${split.hoisted}\n${perCall}\n${js}`;
+    if (VARS_OBJECT_READ.test(text) || !isShippableCode(text)) return undefined;
+    // A parameter that the text does not name is left out: the lowering of
+    // a node may read a symbol and then not emit the read (the direct read
+    // of a shared list does not emit its plain array), and a parameter that
+    // receives a shared input as a plain array copies a `Float64Array`.
+    const params: StoredBatchBody['params'] = [];
+    for (const [name, local] of state.locals)
+      if (identifierPattern(local).test(text)) params.push({ name, local });
+    for (const [name, local] of state.direct) {
+      if (!identifierPattern(local).test(text)) continue;
+      const minLength = state.minLength.get(name);
+      params.push({
+        name,
+        local,
+        direct: true,
+        ...(minLength !== undefined ? { minLength } : {}),
+      });
+    }
+    if (!params.some((p) => p.direct === true)) return undefined;
+    return {
+      code: js,
+      params,
+      ...(split.hoisted ? { preambleOnce: split.hoisted } : {}),
+      ...(perCall ? { preamblePerCall: perCall } : {}),
+    };
+  }
+
+  /**
+   * The expression as the emitters walk it and the target of one
+   * compilation, with its CSE session open. With `batch`, the target of the
+   * `broadcast()` batch body (`compileBatchBody`).
+   */
+  private prepareCompilation(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    batch?: BatchCompileState
+  ): { expr: Expression; target: CompileTarget<Expression> } {
     // Compiled code is radian-based: reproduce the engine's `angularUnit`
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().
@@ -10448,6 +10706,19 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     const constantFold =
       typeof operators === 'function' ? false : options.constantFold;
 
+    // The read of a free symbol: off the vars object, or in the batch body,
+    // from the parameter of the body that receives it (created on its first
+    // read). `target` is read when the function runs, during the compilation.
+    const readInput = (id: string): string => {
+      if (batch === undefined) return varsObjectAccess(id);
+      let local = batch.locals.get(id);
+      if (local === undefined) {
+        local = BaseCompiler.tempVar(target);
+        batch.locals.set(id, local);
+      }
+      return local;
+    };
+
     const target = this.createTarget({
       constantFold,
       complexPromotion: options.complexPromotion,
@@ -10507,7 +10778,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           return result;
         if (unknowns.includes(id)) {
           varsObjectRefs.add(id);
-          return varsObjectAccess(id);
+          return readInput(id);
         }
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (the way evaluate() does) rather than emitting a
@@ -10518,12 +10789,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // the surface expression — can miss it. Emit the vars-object lookup
         // anyway, not a bare global. (`freeSymbols` on the result lists it.)
         varsObjectRefs.add(id);
-        return varsObjectAccess(id);
+        return readInput(id);
       },
       preamble: (preamble ?? '') + preambleImports,
       iterationBudget,
       quadrature,
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      // See `CompileTarget.batchReads`.
+      batchReads:
+        batch === undefined
+          ? { candidates: new Set() }
+          : { direct: batch.direct, minLength: batch.minLength },
       // Opt in to compiling calls to user-defined function literals (`f(x) :=
       // …`) as named local functions collected into the preamble.
       userFunctions: { defs: new Map(), compiling: new Set() },
@@ -10547,6 +10823,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // never against whichever nested target requested the emission (see
     // `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
+    // The parameter of the batch body that receives each shared list read
+    // directly.
+    if (batch !== undefined)
+      for (const name of batch.names)
+        batch.direct.set(name, BaseCompiler.tempVar(target));
     // Whether the emitted code names identifiers that exist only here (see
     // `CompileTarget.hostNames`): a function given by name, a `vars` mapping
     // to anything but a read of the vars object, a caller preamble. A
@@ -10584,13 +10865,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
 
-    const result = compileToTarget(expr, target, options.entryChecks !== false);
-    return BaseCompiler.withReferences(
-      result,
-      expr,
-      target,
-      vars ? new Set(Object.keys(vars)) : undefined
-    );
+    return { expr, target };
   }
 }
 
@@ -10840,7 +11115,8 @@ function broadcastStrideOfType(t: Type): number {
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
-  entryChecks = true
+  entryChecks = true,
+  batchBody?: (names: ReadonlySet<string>) => StoredBatchBody | undefined
 ): CompilationResult<'javascript'> {
   // The discipline this compilation runs under, for the D3 entry plans built
   // after the compilation proper (when `BaseCompiler.mode` is restored).
@@ -11048,6 +11324,36 @@ function compileToTarget(
       : statementBody,
     reconstructionDigits
   );
+  // The batch body of `broadcast()` (ROADMAP CE-410), compiled when the body
+  // reads a shared list of numbers at a scalar index
+  // (`CompileTarget.batchReads`). A failure of its compilation leaves the
+  // result without one; the batches then run the ordinary body.
+  const candidates = target.batchReads?.candidates;
+  let batch: StoredBatchBody | undefined;
+  let batchRunner: BroadcastBatchBody | undefined;
+  if (
+    batchBody !== undefined &&
+    candidates !== undefined &&
+    candidates.size > 0 &&
+    !localVars &&
+    target.hostNames !== true
+  ) {
+    try {
+      batch = batchBody(candidates);
+    } catch (e) {
+      throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+      batch = undefined;
+    }
+    if (batch !== undefined) {
+      const previous = setReconstructionDigits(reconstructionDigits);
+      try {
+        batchRunner = loadBatchBody(fn.SYS, batch);
+      } finally {
+        setReconstructionDigits(previous);
+      }
+      if (batchRunner === undefined) batch = undefined;
+    }
+  }
   const result: CompilationResult<'javascript'> = {
     target: 'javascript' as const,
     success: true,
@@ -11066,6 +11372,9 @@ function compileToTarget(
     // The default count of values per cell of `broadcast()`, stored so that
     // a runtime that rebuilds the result applies the same default.
     ...(broadcastOutputs > 1 ? { broadcastOutputs } : {}),
+    // The batch body, stored so that a runtime that rebuilds the result runs
+    // it too.
+    ...(batch !== undefined ? { batch } : {}),
     run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
     // The whole batch runs inside one reconstruction-digit frame, as each
     // `run()` call does (see the constructor of `ComputeEngineFunction`).
@@ -11077,7 +11386,8 @@ function compileToTarget(
           entryPlan,
           inputs,
           options,
-          result.broadcastOutputs
+          result.broadcastOutputs,
+          batchRunner
         );
       } finally {
         setReconstructionDigits(previous);
@@ -11108,7 +11418,8 @@ function compileToTarget(
           options,
           out,
           slice,
-          result.broadcastOutputs
+          result.broadcastOutputs,
+          batchRunner
         );
       } finally {
         setReconstructionDigits(previous);

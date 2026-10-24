@@ -64,6 +64,7 @@ import {
   broadcastSharedNames,
   broadcastStride,
   plainSharedArray,
+  sharedInputsReadInPlace,
   type BroadcastSlice,
 } from './compilation/broadcast.js';
 import { RUNTIME_VERSION } from './compilation/javascript-runtime.js';
@@ -868,6 +869,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         entryPlan: task.stored.entryPlan,
         reconstructionDigits: task.stored.reconstructionDigits,
         broadcastOutputs: task.stored.broadcastOutputs,
+        batch: task.stored.batch,
       };
       slot.worker.postMessage({
         type: 'load',
@@ -1150,6 +1152,21 @@ export function makeBroadcastAsync(
       throw new TypeError(
         `broadcast: the output array holds ${out.length} values, ${needed} are needed`
       );
+    // A `Float64Array` input, per-cell or shared, that shares its memory
+    // with `out` is copied once, before the first slice. The slices write
+    // `out` one after the other, so a later slice that read such an input,
+    // directly or through a copy made for that slice, would read the values
+    // that earlier slices wrote, not the values given. The synchronous
+    // `broadcast()` runs one slice and copies such an input before its cell
+    // loop.
+    let callInputs = inputs;
+    for (const name of Object.keys(inputs)) {
+      const v = inputs[name];
+      if (v instanceof Float64Array && v.buffer === out.buffer) {
+        if (callInputs === inputs) callInputs = { ...inputs };
+        callInputs[name] = v.slice();
+      }
+    }
     const chunkOption = positiveInteger(options?.chunk, 'chunk');
     if (
       options?.deadline !== undefined &&
@@ -1179,17 +1196,21 @@ export function makeBroadcastAsync(
     const pastDeadline = (): boolean =>
       deadline !== undefined && Date.now() > deadline;
 
-    // The inputs of the inline slices: the compiled code reads plain arrays
-    // only, so a `Float64Array` shared input is copied into one once for the
-    // whole call, not once per slice. Built on the first inline slice.
+    // The inputs of the inline slices: the ordinary compiled body reads
+    // plain arrays only, so a `Float64Array` shared input is copied into one
+    // once for the whole call, not once per slice. A shared input that the
+    // batch body of the result reads in place, and only in place, is not
+    // copied (`sharedInputsReadInPlace`). Built on the first inline slice.
     let inlineInputs: BroadcastInputs | undefined;
     const plainInputs = (): BroadcastInputs => {
       if (inlineInputs !== undefined) return inlineInputs;
-      if (sharedNames.length === 0) return (inlineInputs = inputs);
-      const copy: BroadcastInputs = { ...inputs };
+      if (sharedNames.length === 0) return (inlineInputs = callInputs);
+      const inPlace = sharedInputsReadInPlace(spec.stored.batch?.params);
+      const copy: BroadcastInputs = { ...callInputs };
       for (const name of sharedNames) {
-        const v = inputs[name];
-        if (typeof v !== 'number') copy[name] = plainSharedArray(v);
+        const v = callInputs[name];
+        if (typeof v !== 'number' && !inPlace.has(name))
+          copy[name] = plainSharedArray(v);
       }
       return (inlineInputs = copy);
     };
@@ -1253,7 +1274,7 @@ export function makeBroadcastAsync(
         pool.runSlice(
           spec.kind,
           spec.stored,
-          inputs,
+          callInputs,
           layoutOptions,
           slice,
           iterationLimit,

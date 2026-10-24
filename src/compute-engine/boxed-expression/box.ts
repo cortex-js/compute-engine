@@ -73,6 +73,7 @@ import {
   BoxedFunction,
   broadcastableParamSlots,
   paramsAreScalar,
+  pointListParamSlots,
 } from './boxed-function.js';
 import type { CallbackSlot, Threadable } from './generic-instantiation.js';
 import {
@@ -122,7 +123,10 @@ import {
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isOperatorDef, isValueDef, withOwnHead } from './utils.js';
-import { isCardinalityOperand } from '../collection-utils.js';
+import {
+  isCardinalityOperand,
+  isPointParameterType,
+} from '../collection-utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -1742,7 +1746,22 @@ function candidateParamsAt(valueType: Type, idx: number): Type[] {
  */
 function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
   const plan = broadcastableParamSlots(sig);
-  if (plan === undefined) return whenUndeclared;
+  if (plan === undefined) {
+    // A signature with a point parameter maps a list at a scalar sibling
+    // slot (`pointListParamSlots`, ROADMAP CE-414), so such a slot is
+    // threadable. A point slot is not: its list of points is admitted by
+    // `mapsPointLists`, which checks that the elements are points.
+    const points = whenUndeclared ? undefined : pointListParamSlots(sig);
+    if (points === undefined) return whenUndeclared;
+    return (i: number) => {
+      const slot = points.at(i);
+      return (
+        slot.mappable &&
+        slot.elements !== undefined &&
+        !isPointParameterType(slot.elements)
+      );
+    };
+  }
   // A `broadcastable: true` OPERATOR (an arithmetic builtin) threads
   // everywhere it always did; the plan only ever adds slots.
   return whenUndeclared ? true : (i: number) => plan.at(i).mappable;

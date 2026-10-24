@@ -110,7 +110,12 @@ describe('A list argument at an untyped parameter is specialized', () => {
     expect(r.run!({ a: 3, b: 4 })).toEqual([42, 42]);
   });
 
-  test('a declared point parameter binds the list whole', () => {
+  test('a declared point parameter maps a list at an untyped parameter', () => {
+    // The untyped parameter `x` follows the rule of a one-parameter
+    // function: it stays `unknown` in the refined signature, so the call
+    // maps over the list (user decision 2026-10-24, ROADMAP CE-414.2).
+    // Before, a declared point parameter made `x` bind the list whole, and
+    // the call gave `42`.
     const ce = new ComputeEngine();
     ce.assign(
       'k',
@@ -122,10 +127,9 @@ describe('A list argument at an untyped parameter is specialized', () => {
       ] as any)
     );
     const expr = ce.box(['k', ['Tuple', 1, 2], ['List', 3, 4]]);
-    expect(expr.evaluate().toString()).toBe('42');
+    expect(expr.evaluate().toString()).toBe('[42,42]');
     const r = compile(expr, { fallback: false });
-    expect(r.code).not.toContain('_SYS.bcastFn(');
-    expect(r.run!({})).toBe(42);
+    expect(r.run!({})).toEqual([42, 42]);
   });
 
   test('a declared list symbol at the untyped parameter', () => {

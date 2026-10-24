@@ -5731,8 +5731,27 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
   const element = pointCollectionElementType(a);
   if (element === undefined) return false;
   const e = stripMissingFromType(element);
-  if (e === 'never') return false;
+  if (e === 'never') return hasOnlyAbsentElements(arg);
   return isSubtype(e, param);
+}
+
+/**
+ * Whether `arg` is the type of a non-empty list whose elements are all
+ * absent (`list<missing^2>`, the type of `[Missing, Missing]`), with or
+ * without a `missing` arm of its own. At a parameter declared as a point,
+ * such a list is a list of absent points: each element of the result is
+ * `Missing`, as for a list where only some of the points are absent (user
+ * decision 2026-10-24, ROADMAP CE-420). Before, the list was refused with an
+ * `incompatible-type` error.
+ */
+function hasOnlyAbsentElements(arg: Type): boolean {
+  const r = resolveTypeReference(arg) ?? arg;
+  if (typeof r === 'string') return false;
+  if (r.kind === 'union') {
+    const arms = r.types.filter((x) => x !== 'missing');
+    return arms.length > 0 && arms.every((x) => hasOnlyAbsentElements(x));
+  }
+  return r.kind === 'list' && r.elements === 'missing';
 }
 
 /**

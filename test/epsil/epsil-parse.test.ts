@@ -1783,10 +1783,38 @@ describe('EPSIL PARSING OPERATORS', () => {
     expect(validEpsil('0 >= -1')).toStrictEqual(['GreaterEqual', 0, -1]);
     // A run of the same relational operator flattens to an n-ary node.
     expect(validEpsil('a < b < c')).toStrictEqual(['Less', 'a', 'b', 'c']);
-    // A mix of relational operators nests left-associatively.
+    // A mix of relational operators is an `And` of its links, which share
+    // their boundary terms (CE-411). A nested comparison compares truth
+    // values, so it needs parentheses.
     expect(validEpsil('a < b <= c')).toStrictEqual([
+      'And',
+      ['Less', 'a', 'b'],
+      ['LessEqual', 'b', 'c'],
+    ]);
+    expect(validEpsil('(a < b) <= c')).toStrictEqual([
       'LessEqual',
       ['Less', 'a', 'b'],
+      'c',
+    ]);
+    expect(validEpsil('(a < b) < c')).toStrictEqual([
+      'Less',
+      ['Less', 'a', 'b'],
+      'c',
+    ]);
+    // A comparison written as a call is an operand, not a link of a chain.
+    expect(validEpsil('IdenticallyEqual(1, 1) == true')).toStrictEqual([
+      'Equal',
+      ['IdenticallyEqual', 1, 1],
+      'True',
+    ]);
+    expect(validEpsil('Less(a, b) <= c')).toStrictEqual([
+      'LessEqual',
+      ['Less', 'a', 'b'],
+      'c',
+    ]);
+    expect(validEpsil('Equal(a, b) == c')).toStrictEqual([
+      'Equal',
+      ['Equal', 'a', 'b'],
       'c',
     ]);
   });

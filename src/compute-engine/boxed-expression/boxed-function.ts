@@ -243,6 +243,7 @@ import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
+  cellTypeMayCarryDimensions,
 } from '../../common/type/primitive.js';
 import { numericStoreTiers } from './literal-tier.js';
 import {
@@ -6276,7 +6277,7 @@ export class BoxedFunction
       // (broadcast-wins): a collection argument maps even when `T` would admit
       // it whole. Rule 2 (one rank down) lives in `declaredBroadcastElement`.
       //
-      const declaredPlan = broadcastableParamSlots(def);
+      const declaredPlan = declaredPlanWithPointSlots(def);
       const declaredLiteral = declaredPlan && lambdaLiteralOf(def);
       if (
         declaredPlan &&
@@ -6315,7 +6316,8 @@ export class BoxedFunction
           declaredPlan,
           declaredOps,
           (x) => isFiniteBroadcastParticipant(x),
-          options
+          options,
+          this.ops
         );
         if (mapped) return mapped;
       }
@@ -6978,7 +6980,8 @@ export class BoxedFunction
           declaredPlan,
           tail,
           isPostEvalBroadcastOperand,
-          options
+          options,
+          tail.length === this.ops.length ? this.ops : undefined
         );
         if (mapped) return mapped;
       }
@@ -7566,7 +7569,7 @@ export class BoxedFunction
       // 2b-decl/ Broadcast over the slots a DECLARED `broadcastable<T>`
       // signature marks elementwise — mirrors the sync step 2c.
       //
-      const declaredPlan = broadcastableParamSlots(def);
+      const declaredPlan = declaredPlanWithPointSlots(def);
       const declaredLiteral = declaredPlan && lambdaLiteralOf(def);
       if (
         declaredPlan &&
@@ -7591,7 +7594,8 @@ export class BoxedFunction
           declaredPlan,
           declaredOps,
           (x) => isFiniteBroadcastParticipant(x),
-          options
+          options,
+          this.ops
         );
         if (mapped) return mapped;
       }
@@ -8204,7 +8208,8 @@ export class BoxedFunction
           declaredPlan,
           tail,
           isPostEvalBroadcastOperand,
-          options
+          options,
+          tail.length === this.ops.length ? this.ops : undefined
         );
         if (mapped) return mapped;
       }
@@ -10447,6 +10452,36 @@ function lambdaBroadcastType(
   // their value whole to the literal at each element of the mapped operands.
   wholeAt?: ReadonlyArray<boolean>
 ): Type | undefined {
+  // An operand at a slot declared `broadcastable<P>`, with `P` a point
+  // type, may hold absent points: the call answers `Missing` for each
+  // (ROADMAP CE-420). The call is typed with the absent points removed from
+  // the operand, and a `missing` arm is added to the result at their depths
+  // (`declaredPointAbsence`).
+  if (slots !== undefined && operandTypes === undefined) {
+    const absence = declaredPointAbsence(
+      slots,
+      ops.map((x) => x.type)
+    );
+    if (absence !== undefined) {
+      const present = lambdaBroadcastType(
+        ops,
+        perElementResult,
+        slots,
+        inferredResult,
+        generic,
+        derive,
+        literal,
+        instantiateWith,
+        absence.types,
+        // An operand given a type here takes part in the broadcast unless
+        // `wholeAt` marks it: keep the participation it had.
+        ops.map((x, i) => absence.types[i] !== undefined && !x.participates)
+      );
+      return present === undefined
+        ? undefined
+        : withMissingAtDepths(present, absence.depths, 0, absence.whole);
+    }
+  }
   const typeAt = (i: number): Type => operandTypes?.[i] ?? ops[i].type;
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
   // never mapped), then the body's own arithmetic decides the shape:
@@ -12299,7 +12334,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
       const pointType = pointListApplicationType(
         pointListParamSlots(def),
         expr.ops,
-        sigResult
+        sigResult,
+        broadcastableParamSlots(def)
       );
       if (pointType !== undefined) return applyContractB(pointType);
       // A tuple at a parameter declared as a scalar: the application maps
@@ -12502,7 +12538,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
     const pointType = pointListApplicationType(
       pointListParamSlots(sig),
       expr.ops,
-      sigResult
+      sigResult,
+      valueSlots
     );
     if (pointType !== undefined) return pointType;
     // A tuple at a parameter declared as a scalar, as on the
@@ -13456,6 +13493,20 @@ function applyFunctionLiteralWith(
   // checked by the maps, so it is checked here: the verdict for a scalar
   // slot must not depend on the shape of the other arguments. Collection
   // arguments are left to the maps (`mapsCollections`).
+  //
+  // An argument absent as a whole at a `broadcastable<tuple<…>>` slot that
+  // stands for a list of points answers `Missing` (`declaredWholeAbsence`,
+  // ROADMAP CE-420); the check of the scalars would refuse it first.
+  const wholePlan = declaredPlanWithPointSlots(broadcastGateType);
+  if (
+    wholePlan &&
+    declaredWholeAbsence(
+      wholePlan,
+      ops,
+      ops.length === expr.ops.length ? expr.ops : undefined
+    )
+  )
+    return expr.engine.Missing;
   const scalarBesideMap = scalarConformance(ops, true);
   if (scalarBesideMap !== undefined) return scalarBesideMap;
 
@@ -13522,7 +13573,7 @@ function applyFunctionLiteralWith(
     }
     return applyWhole();
   };
-  const declaredPlan = broadcastableParamSlots(broadcastGateType);
+  const declaredPlan = declaredPlanWithPointSlots(broadcastGateType);
   if (declaredPlan) {
     if (awaitBody)
       return declaredBroadcastAsync(
@@ -13532,7 +13583,8 @@ function applyFunctionLiteralWith(
         declaredPlan,
         ops,
         (x) => isFiniteBroadcastParticipant(x),
-        options
+        options,
+        ops.length === expr.ops.length ? expr.ops : undefined
       ).then(
         (mapped) =>
           mapped ??
@@ -13545,7 +13597,8 @@ function applyFunctionLiteralWith(
       declaredPlan,
       ops,
       (x) => isFiniteBroadcastParticipant(x),
-      options
+      options,
+      ops.length === expr.ops.length ? expr.ops : undefined
     );
     if (mapped) return mapped;
   }
@@ -14071,6 +14124,16 @@ type BroadcastSlot = {
   mappable: boolean;
   elements?: Type;
   declared?: boolean;
+  /** This slot is a parameter declared as a point (a bare `tuple<…>`) in a
+   * signature that also declares a `broadcastable<T>` parameter
+   * (`declaredPlanWithPointSlots`). It maps only a list of points
+   * (`mapsAsPointList`); any other argument binds whole. */
+  pointList?: boolean;
+  /** This slot maps to the cells even when its element type can hold a
+   * list: a scalar slot of the point-list plan (`pointListParamSlots`)
+   * typed `unknown` maps a list of lists at every depth, as the parameter of
+   * a one-parameter function does (see `slotMapsOneRank`). */
+  cells?: boolean;
 };
 
 /** The per-slot broadcast plan of a signature: `at(i)` describes argument
@@ -14199,19 +14262,100 @@ export function pointListParamSlots(
   const cached = POINT_SLOT_PLANS.get(sigType);
   if (cached !== undefined) return cached ?? undefined;
 
+  // A SCALAR sibling slot whose type cannot hold a list (`real`, `number`,
+  // `nan | real | signed_infinity`, `boolean`, `string`) maps a list
+  // argument as well, element by element, with the slot's own type as the
+  // element contract. This is what a function whose parameters are all
+  // scalar does: `g := t ↦ t + 1` maps `g([0, 1, 2])`, so
+  // `h := (P, t) ↦ P.x + t` maps `h((1, 2), [0, 1, 2])` to `[1, 2, 3]`
+  // (ROADMAP CE-414.1). Before, a list at such a slot was an
+  // `incompatible-type` error.
+  //
+  // A slot whose type can hold a list but that `isScalarType` accepts
+  // (`unknown`, `any`, no annotation) follows the same rule as the
+  // parameter of a one-parameter function: the signature here is the one
+  // refined from the body of the assigned function, so a parameter the body
+  // uses as a collection is typed `collection` and binds a list whole
+  // (`(P, L) ↦ Length(L)`), and a parameter that stays `unknown` maps a
+  // list: `f := (P, t) ↦ (P.x + t, P.y)` declared
+  // `(tuple<number, number>, unknown) -> unknown` gives
+  // `[(1, 2), (2, 2), (3, 2)]` for `f((1, 2), [0, 1, 2])` (user decision
+  // 2026-10-24, ROADMAP CE-414.2). Before, every slot whose type can hold a
+  // list bound its argument whole beside a point parameter. A union with a
+  // list arm is not a scalar type, and still binds whole.
   const slots = [...(sigType.args ?? []), ...(sigType.optArgs ?? [])].map(
     (arg): BroadcastSlot => {
       const t = substituteDeclaredBounds(sigType.typeParams, arg.type);
-      return isPointParameterType(t)
-        ? { mappable: true, elements: t }
+      if (isPointParameterType(t)) return { mappable: true, elements: t };
+      return isScalarType(t)
+        ? { mappable: true, elements: t, cells: true }
         : WHOLE_SLOT;
     }
   );
-  const plan = slots.some((s) => s.mappable)
+  // Only a POINT slot puts a signature on this plan: a signature whose
+  // parameters are all scalar keeps the `paramsAreScalar` route.
+  const plan = slots.some(
+    (s) => s.elements !== undefined && isPointParameterType(s.elements)
+  )
     ? { at: (i: number) => slots[i] ?? WHOLE_SLOT }
     : null;
   POINT_SLOT_PLANS.set(sigType, plan);
   return plan ?? undefined;
+}
+
+/** Memoized per SIGNATURE TYPE object, as `BROADCAST_SLOT_PLANS`. */
+const DECLARED_POINT_SLOT_PLANS = new WeakMap<object, BroadcastSlotPlan>();
+
+/**
+ * The plan of the evaluation of a DECLARED-`broadcastable<T>` application
+ * (`broadcastableParamSlots`), with each parameter declared as a point (a
+ * bare `tuple<…>`) made a `pointList` slot: that slot maps a list of points,
+ * one point per call, and binds any other argument whole.
+ *
+ * Without this, a signature such as
+ * `(broadcastable<tuple<number, number>>, tuple<number, number>)` mapped the
+ * first slot and bound a list of points at the second slot whole, which is
+ * an `incompatible-type` error. With both parameters bare `tuple<…>` (the
+ * point-list plan, `pointListParamSlots`) or both `broadcastable<…>`, the
+ * same call pairs the two lists (ROADMAP CE-418). The two plans can not be
+ * run one after the other: the declared map runs first and binds the second
+ * list whole in each call.
+ *
+ * Only the evaluation reads this plan. The typing reads the point-list plan
+ * and, for the operand of each declared `broadcastable<P>` slot, the same
+ * map to the cells (`pointListApplicationType` with `broadcastableParamSlots`
+ * as `declared`): a list of points there types the call `list<R>`, and a
+ * list of lists of points `list<list<R>>`. The other consumers of
+ * `broadcastableParamSlots` (the argument check, the compile gate) keep
+ * reading a point slot as whole.
+ */
+function declaredPlanWithPointSlots(
+  source: BoxedOperatorDefinition | Type | undefined
+): BroadcastSlotPlan | undefined {
+  const declared = broadcastableParamSlots(source);
+  if (declared === undefined) return undefined;
+  const points = pointListParamSlots(source);
+  if (source === undefined) return declared;
+  const sigType = isOperatorDefinition(source)
+    ? source.signature?.type
+    : source;
+  if (points === undefined || !sigType || typeof sigType === 'string')
+    return declared;
+  const cached = DECLARED_POINT_SLOT_PLANS.get(sigType);
+  if (cached !== undefined) return cached;
+  const plan: BroadcastSlotPlan = {
+    at: (i: number) => {
+      const slot = declared.at(i);
+      if (slot.mappable) return slot;
+      const point = points.at(i);
+      return point.elements !== undefined &&
+        isPointParameterType(point.elements)
+        ? { mappable: true, elements: point.elements, pointList: true }
+        : slot;
+    },
+  };
+  DECLARED_POINT_SLOT_PLANS.set(sigType, plan);
+  return plan;
 }
 
 /**
@@ -14239,7 +14383,28 @@ function mapsAsPointList(
   if (!slot.mappable || slot.elements === undefined) return false;
   if (isTuple(x)) return false;
   if (finite && isFunction(x, 'List') && x.nops === 0) return true;
-  if (finite && !isFiniteBroadcastParticipant(x)) return false;
+  // A collection whose length is not known yet (a lazy `Map` over
+  // `Range(0, n)` with `n` unbound) is mapped too: the map is then lazy
+  // (`lazyBroadcastMapIfNeeded` in `setupDeclaredBroadcast`), as for a
+  // declared `broadcastable<tuple<…>>` parameter. Before, the call fell
+  // through to the argument check, which refused the list (ROADMAP CE-413).
+  if (
+    finite &&
+    !isFiniteBroadcastParticipant(x) &&
+    !isUnknownLengthBroadcast(x)
+  )
+    return false;
+  // A scalar slot (see `pointListParamSlots`) maps any list, as a function
+  // whose parameters are all scalar does; each element is checked against
+  // the slot's type where it is bound. The typing (`finite` false) asks for
+  // a type that is surely a list: not a tuple and not a string. A string is
+  // not mapped on either branch.
+  if (!isPointParameterType(slot.elements)) {
+    const t = x.type.type;
+    if (isSubtype(t, 'string')) return false;
+    if (finite) return true;
+    return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) && !isTupleShapedType(t);
+  }
   return isPointListArgumentType(x.type.type, slot.elements);
 }
 
@@ -14265,22 +14430,260 @@ function mapsAsPointList(
 function pointListApplicationType(
   plan: BroadcastSlotPlan | undefined,
   ops: ReadonlyArray<Expression>,
-  result: Type
+  result: Type,
+  declared?: BroadcastSlotPlan
 ): Type | undefined {
   if (plan === undefined) return undefined;
-  const maybe = ops.filter((x, i) => mapsAsPointOrPointList(plan, i, x));
-  const mapped = ops.filter(
-    (x, i) =>
-      !mapsAsPointOrPointList(plan, i, x) && mapsAsPointList(plan, i, x, false)
-  );
-  if (mapped.length === 0 && maybe.length === 0) return undefined;
-  const listType = pointListMapType([...mapped, ...maybe], result);
-  if (mapped.length > 0) return listType;
-  const listArms =
-    typeof listType !== 'string' && listType.kind === 'union'
-      ? listType.types
-      : [listType];
-  return { kind: 'union', types: [result, ...listArms] };
+  // The shape of the map (`MapShape`): each operand that maps adds its own
+  // shape, and the shapes are combined as the map pairs the operands
+  // (`combineMapShapes`). A list of points at a point slot is one list level;
+  // an operand that is one point or a list of points
+  // (`mapsAsPointOrPointList`) may be one list level or none.
+  //
+  // A list at a scalar slot maps to the cells, as a function whose
+  // parameters are all scalar does, so its shape follows its type at every
+  // depth (`operandMapShape`): a list of lists gives a list of lists of
+  // results, `real | list<list<real>>` gives `R | list<list<R>>`, and a
+  // ragged `list<real | list<real>>` gives `list<R | list<R>>`. Before, the
+  // type read one depth and one "may be a list" flag, and so it typed
+  // `h((1, 2), U)` with `U: real | list<list<real>>` as `R | list<R>`, while
+  // the value of a matrix `U` is a `list<list<R>>`.
+  let shape: MapShape = 'cell';
+  ops.forEach((x, i) => {
+    const slot = plan.at(i);
+    if (!slot.mappable || slot.elements === undefined) return;
+    if (isPointParameterType(slot.elements)) {
+      if (mapsAsPointOrPointList(plan, i, x))
+        shape = combineMapShapes(
+          shape,
+          mapShapeUnion(['cell', { list: 'cell' }])
+        );
+      else if (mapsAsPointList(plan, i, x, false))
+        shape = combineMapShapes(shape, { list: 'cell' });
+      return;
+    }
+    if (!isTuple(x))
+      shape = combineMapShapes(shape, operandMapShape(x.type.type));
+  });
+  if (shape === 'cell') return undefined;
+  // A DECLARED `broadcastable<P>` slot whose `P` cannot hold a list (a
+  // point, a number) maps its argument to the cells too, paired with the
+  // point-list map (`declaredPlanWithPointSlots`): with
+  // `(broadcastable<tuple<…>>, tuple<…>)`, `f([[(1,2)],[(3,4)]],
+  // [(10,20),(30,40)])` is `[[(11,22)],[(33,44)]]`, a `list<list<R>>`.
+  // Before, only the point slot was read and the call was typed `list<R>`.
+  //
+  // An absent point at such a slot, or an operand there that is absent as a
+  // whole, is a `Missing` element at its depth, or the value of the call
+  // (ROADMAP CE-420), as at a point slot. The shape is read without those
+  // absences (`declaredPointAbsence`), and they are added to the type below.
+  const absence =
+    declared === undefined
+      ? undefined
+      : declaredPointAbsence(
+          declared,
+          ops.map((x) => x.type.type),
+          (i) => plan.at(i).mappable || isTuple(ops[i])
+        );
+  if (declared !== undefined)
+    ops.forEach((x, i) => {
+      if (plan.at(i).mappable || isTuple(x)) return;
+      const slot = declared.at(i);
+      if (
+        slot.mappable &&
+        slot.declared === true &&
+        slot.elements !== undefined &&
+        cannotHoldAList(slot.elements)
+      )
+        shape = combineMapShapes(
+          shape,
+          operandMapShape(absence?.types[i] ?? x.type.type)
+        );
+    });
+  // The evaluation maps every slot one rank down, and binds each element
+  // whole, when a mapped slot of the declared plan has an element type that
+  // can hold a list (`slotMapsOneRank`, `mapsToCells`): a slot typed
+  // `unknown` beside a `broadcastable<tuple<…>>` parameter is such a slot.
+  // The shape then stops after one list level (`oneRankMapShape`). Before,
+  // the shape always went down to the cells, and with
+  // `f: (broadcastable<tuple<real, real>>, tuple<real, real>, unknown) -> real`,
+  // `f((0, 0), (1, 2), [[1], [2]])` was typed `list<list<real>>` while its
+  // value is `[42, 42]`. An operand that may or may not be a list there
+  // gives both shapes.
+  if (declared !== undefined) {
+    let surely = false;
+    let maybe = false;
+    ops.forEach((x, i) => {
+      if (isTuple(x) || !slotMapsOneRank(declared, i)) return;
+      const s = operandMapShape(x.type.type);
+      if (s === 'cell') return;
+      if (typeof s !== 'string' && 'union' in s && s.union.includes('cell'))
+        maybe = true;
+      else surely = true;
+    });
+    if (surely) shape = oneRankMapShape(shape);
+    else if (maybe) shape = mapShapeUnion([shape, oneRankMapShape(shape)]);
+  }
+  // Only an operand at a POINT slot adds its absences to the type (see
+  // `pointListAbsence`): an absent element at a scalar slot is bound to the
+  // parameter, and the function's value is kept.
+  const pointOps = ops.filter((x, i) => {
+    const slot = plan.at(i);
+    return (
+      slot.elements !== undefined &&
+      isPointParameterType(slot.elements) &&
+      (mapsAsPointOrPointList(plan, i, x) || mapsAsPointList(plan, i, x, false))
+    );
+  });
+  const mapType = mapShapeType(shape, result, pointOps);
+  return absence === undefined
+    ? mapType
+    : withMissingAtDepths(mapType, absence.depths, 0, absence.whole);
+}
+
+/**
+ * The shape of the result of a map to the cells, read from the types of its
+ * operands (see `pointListApplicationType`): `'cell'` is one value of the
+ * function, `{ list }` a list of the inner shape, `{ union }` one of the
+ * arms, `'tensor'` a tensor of unknown rank, and `'list'` a list whose
+ * elements are not known (an element type that can hold a list, such as
+ * `unknown`, or a type too deep to read).
+ */
+type MapShape =
+  'cell' | 'tensor' | 'list' | { list: MapShape } | { union: MapShape[] };
+
+/** The union of the shapes `arms`, without repeated arms and without nested
+ * unions; one arm is returned as is. */
+function mapShapeUnion(arms: ReadonlyArray<MapShape>): MapShape {
+  const flat: MapShape[] = [];
+  const seen = new Set<string>();
+  const add = (s: MapShape): void => {
+    if (typeof s !== 'string' && 'union' in s) {
+      s.union.forEach(add);
+      return;
+    }
+    const key = JSON.stringify(s);
+    if (seen.has(key)) return;
+    seen.add(key);
+    flat.push(s);
+  };
+  arms.forEach(add);
+  // A shape with too many arms is read as "one value or a list".
+  if (flat.length > 32) return { union: ['cell', 'list'] };
+  return flat.length === 1 ? flat[0] : { union: flat };
+}
+
+/**
+ * The shape of the map over two operands of shapes `a` and `b`. The map
+ * pairs the operands: at a level where one operand is a list, a value of
+ * the other is passed to each element (a `'cell'` adds nothing), and two
+ * lists are paired element by element. A union pairs each of its arms.
+ */
+function combineMapShapes(a: MapShape, b: MapShape): MapShape {
+  if (a === 'cell') return b;
+  if (b === 'cell') return a;
+  if (typeof a !== 'string' && 'union' in a)
+    return mapShapeUnion(a.union.map((x) => combineMapShapes(x, b)));
+  if (typeof b !== 'string' && 'union' in b)
+    return mapShapeUnion(b.union.map((x) => combineMapShapes(a, x)));
+  if (a === 'list' || b === 'list') return 'list';
+  if (a === 'tensor' || b === 'tensor') return 'tensor';
+  return { list: combineMapShapes(a.list, b.list) };
+}
+
+/**
+ * The shape of the map over an operand of type `t` at a slot that maps to
+ * the cells, arm by arm: an arm that is surely a list (not a tuple, not a
+ * string) gives a list of the shape of its elements, a tensor of unknown
+ * rank (`tensor<real>`) gives `'tensor'`, a `broadcastable<T>` gives the
+ * shape of `T` or `'tensor'`, and any other arm gives `'cell'`. Below the
+ * top level, an element type that is not surely a list but can hold one
+ * (`unknown`, `any`) gives `'cell'` or `'list'`: the map enters such an
+ * element when its value is a list.
+ */
+function operandMapShape(t: Type, depth = 0): MapShape {
+  const r = resolveTypeReference(t) ?? t;
+  if (typeof r !== 'string' && r.kind === 'union')
+    return mapShapeUnion(r.types.map((arm) => operandMapShape(arm, depth)));
+  if (typeof r !== 'string' && r.kind === 'broadcastable')
+    return mapShapeUnion([operandMapShape(r.elements, depth), 'tensor']);
+  const surelyList =
+    isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isTupleShapedType(r) &&
+    !isSubtype(r, 'string');
+  if (!surelyList)
+    return depth > 0 && !cannotHoldAList(r)
+      ? mapShapeUnion(['cell', 'list'])
+      : 'cell';
+  if (typeof r !== 'string' && r.kind === 'list' && r.dimensions === null)
+    return 'tensor';
+  if (depth >= 8) return 'list';
+  const element = collectionElementType(r);
+  if (element === undefined) return 'list';
+  return { list: operandMapShape(element, depth + 1) };
+}
+
+/** The shape `s` cut after its first list level: the shape of a map that
+ * binds each element of its operands whole (one rank down). */
+function oneRankMapShape(s: MapShape): MapShape {
+  if (s === 'cell') return s;
+  if (typeof s !== 'string' && 'union' in s)
+    return mapShapeUnion(s.union.map(oneRankMapShape));
+  return { list: 'cell' };
+}
+
+/** The type of a tensor of unknown rank of the values `result`:
+ * `tensor<R>` when `R` can be a cell, else a list whose elements are not
+ * known. */
+function unknownRankMapType(result: Type): Type {
+  return cellTypeMayCarryDimensions(result)
+    ? { kind: 'list', elements: result, dimensions: null }
+    : 'list';
+}
+
+/** The type of the shape `shape` for the values `result`, without the
+ * absences of the points (see `mapShapeType`). */
+function mapShapeInnerType(shape: MapShape, result: Type): Type {
+  if (shape === 'cell') return result;
+  if (shape === 'tensor') return unknownRankMapType(result);
+  if (shape === 'list') return 'list';
+  if ('union' in shape)
+    return {
+      kind: 'union',
+      types: shape.union.map((s) => mapShapeInnerType(s, result)),
+    };
+  return { kind: 'list', elements: mapShapeInnerType(shape.list, result) };
+}
+
+/**
+ * The type of the map of shape `shape` for the values `result`, with the
+ * absences of the operands `pointOps` at point slots (`pointListMapType`)
+ * added to each arm that is a list.
+ *
+ * An arm that is a tensor of unknown rank is the whole map, and keeps the
+ * absences of the points too: before, with `Ps` a list of points with an
+ * absent point and `T: tensor<real>`, `h(Ps, T)` was typed `tensor<real>`
+ * while its value has a `Missing` element (ROADMAP CE-419).
+ */
+function mapShapeType(
+  shape: MapShape,
+  result: Type,
+  pointOps: ReadonlyArray<Expression>
+): Type {
+  if (shape === 'cell') return result;
+  if (shape === 'tensor')
+    return pointListMapType(pointOps, unknownRankMapType(result), true);
+  if (shape === 'list') return pointListMapType(pointOps, 'list', true);
+  if ('union' in shape) {
+    const types: Type[] = [];
+    for (const s of shape.union) {
+      const t = mapShapeType(s, result, pointOps);
+      if (typeof t !== 'string' && t.kind === 'union') types.push(...t.types);
+      else types.push(t);
+    }
+    return { kind: 'union', types };
+  }
+  return pointListMapType(pointOps, mapShapeInnerType(shape.list, result));
 }
 
 /**
@@ -14303,7 +14706,8 @@ function mapsAsPointOrPointList(
  * the absences they may carry (see `pointListApplicationType`). */
 function pointListMapType(
   mapped: ReadonlyArray<Expression>,
-  result: Type
+  result: Type,
+  unknownRank = false
 ): Type {
   let wholeAbsent = false;
   let cellAbsent = false;
@@ -14327,12 +14731,27 @@ function pointListMapType(
         cellAbsent = true;
     }
   }
-  const list: Type = {
-    kind: 'list',
-    elements: cellAbsent
-      ? { kind: 'union', types: [result, 'missing'] }
-      : result,
-  };
+  // With `unknownRank`, `result` is already the type of the whole map: a
+  // tensor of unknown rank (`tensor<R>`, whose elements are `R | tensor<R>`)
+  // or a bare `list`. An absent point gives a `Missing` element of the top
+  // list, so the element type of the tensor gets a `missing` arm. A bare
+  // `list` admits a `Missing` element already.
+  const list: Type = unknownRank
+    ? cellAbsent && typeof result !== 'string' && result.kind === 'list'
+      ? {
+          kind: 'list',
+          elements: {
+            kind: 'union',
+            types: [result.elements, result, 'missing'],
+          },
+        }
+      : result
+    : {
+        kind: 'list',
+        elements: cellAbsent
+          ? { kind: 'union', types: [result, 'missing'] }
+          : result,
+      };
   return wholeAbsent ? { kind: 'union', types: [list, 'missing'] } : list;
 }
 
@@ -14371,6 +14790,10 @@ function pointListAbsence(
   ops.forEach((x, i) => {
     const slot = plan.at(i);
     if (!slot.mappable || slot.elements === undefined) return;
+    // Only a POINT slot absorbs absences. A scalar slot binds each element,
+    // an absent one included, to its parameter, which may admit `Missing`
+    // (`real | missing`): the function runs, and its value is kept.
+    if (!isPointParameterType(slot.elements)) return;
     if (isAbsentScalarSymbol(x)) {
       const c = canonicalOps?.[i];
       // An absent operand typed as one point or a list of points
@@ -14548,7 +14971,11 @@ function someMappableCollection(
   isCollection: (x: Expression) => boolean
 ): boolean {
   return ops.some(
-    (x, i) => plan.at(i).mappable && isCollection(x) && !isTuple(x)
+    (x, i) =>
+      plan.at(i).mappable &&
+      isCollection(x) &&
+      !isTuple(x) &&
+      (!plan.at(i).pointList || mapsAsPointList(plan, i, x, true))
   );
 }
 
@@ -14581,8 +15008,13 @@ function setupDeclaredBroadcast(
       mask: boolean[];
     }
   | undefined {
+  // A `pointList` slot (`declaredPlanWithPointSlots`) maps a list of points
+  // only; any other argument there binds whole.
   const mask = ops.map(
-    (x, i) => plan.at(i).mappable && isBroadcastOperand(x, i)
+    (x, i) =>
+      plan.at(i).mappable &&
+      isBroadcastOperand(x, i) &&
+      (!plan.at(i).pointList || mapsAsPointList(plan, i, x, true))
   );
   if (!mask.some((m) => m)) return undefined;
 
@@ -14637,14 +15069,13 @@ function setupDeclaredBroadcast(
     // left out): applied to an element that is itself a collection, it maps
     // it again, as the eager loop does (`mapsToCells`), and applied to an
     // element that is not a `T`, it is the same `incompatible-type`.
-    mask.every((m, i) => !m || !slotMapsOneRank(plan, i))
-      ? { strictLengths: false }
-      : {
-          strictLengths: false,
-          callee: literal,
-          paramTypes: (i: number) =>
-            mask[i] ? plan.at(i).elements : undefined,
-        }
+    //
+    // A slot that answers `Missing` for an absent point
+    // (`absorbsAbsentPoint`) gets the same rule in the element function
+    // (`absentPointGuard`), as the eager loop has it (`hasAbsentPoint`). Its
+    // parameter annotation admits `missing`, so the absent point reaches the
+    // test.
+    lazyElementFunction(ce, operator, literal, plan, ops, mask)
   );
   if (lazy) return { value: lazy };
 
@@ -14663,6 +15094,103 @@ function setupDeclaredBroadcast(
   return { rows, mapped, mask };
 }
 
+/** The options of the lazy map of `setupDeclaredBroadcast`: its element
+ * function, and the parameter types of the slots it maps (`mask`). */
+function lazyElementFunction(
+  ce: Expression['engine'],
+  operator: string,
+  literal: Expression,
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>,
+  mask: ReadonlyArray<boolean>
+): {
+  strictLengths: boolean;
+  callee?: Expression;
+  paramTypes?: (i: number) => Type | undefined;
+} {
+  const toCells = mask.every((m, i) => !m || !slotMapsOneRank(plan, i));
+  const absorbing = ops.map((_, i) => mask[i] && absorbsAbsentPoint(plan, i));
+  if (!absorbing.some((a) => a))
+    return toCells
+      ? { strictLengths: false }
+      : {
+          strictLengths: false,
+          callee: literal,
+          paramTypes: (i: number) =>
+            mask[i] ? plan.at(i).elements : undefined,
+        };
+  const callee = absentPointGuard(
+    ce,
+    operator,
+    toCells ? undefined : literal,
+    absorbing
+  );
+  if (toCells) return { strictLengths: false, callee };
+  return {
+    strictLengths: false,
+    callee,
+    paramTypes: (i: number) => {
+      if (!mask[i]) return undefined;
+      const t = plan.at(i).elements;
+      return absorbing[i] && t !== undefined
+        ? { kind: 'union', types: [t, 'missing'] }
+        : t;
+    },
+  };
+}
+
+/**
+ * The element function of a lazy map whose slots `absorbing` answer
+ * `Missing` for an absent point (`absorbsAbsentPoint`): a function literal
+ * of one parameter per operand that answers `Missing` when the argument at
+ * an absorbing slot is absent, and otherwise applies `literal` to its
+ * arguments whole (`ApplyWhole`, the one-rank map) or, with no `literal`,
+ * calls `operator` by name (the map to the cells). The lazy map applies it
+ * with `ApplyWhole`, so each argument reaches it as one element.
+ *
+ * The test is `Contains([Missing, Undefined], p)`, which is true only for
+ * the two absence symbols, as `isAbsentScalarSymbol` in the eager loops
+ * (`hasAbsentPoint`). `IsMissing` is not used: it is also true for `NaN`
+ * and `Indeterminate`, and a declared `broadcastable<tuple<…>>` slot maps
+ * any list, so a `NaN` element gave `Missing` on the lazy map and an
+ * `incompatible-type` error on the eager loop. `IsSame` is not used either:
+ * it holds its operands, and so compares the parameter symbol, not its
+ * value.
+ */
+function absentPointGuard(
+  ce: Expression['engine'],
+  operator: string,
+  literal: Expression | undefined,
+  absorbing: ReadonlyArray<boolean>
+): Expression {
+  const avoid = new Set<string>([operator, ...(literal?.symbols ?? [])]);
+  let k = 0;
+  const params = absorbing.map(() => {
+    let name: string;
+    do {
+      k += 1;
+      name = `_p${k}`;
+    } while (avoid.has(name));
+    return ce.symbol(name, { canonical: false });
+  });
+  const call =
+    literal !== undefined
+      ? ce._fn('ApplyWhole', [literal, ...params], { canonical: false })
+      : ce._fn(operator, params, { canonical: false });
+  const absentValues = ce._fn('List', [ce.Missing, ce.symbol('Undefined')], {
+    canonical: false,
+  });
+  const tests = params
+    .filter((_, i) => absorbing[i])
+    .map((p) => ce._fn('Contains', [absentValues, p], { canonical: false }));
+  const absent =
+    tests.length === 1 ? tests[0] : ce._fn('Or', tests, { canonical: false });
+  return ce.function('Function', [
+    ce._fn('If', [absent, ce.Missing, call], { canonical: false }),
+    ...params,
+  ]);
+}
+
 /**
  * Run the DECLARED-`broadcastable<T>` element-wise map (Option A) for one
  * application, or return `undefined` when no slot maps (the caller falls
@@ -14679,8 +15207,10 @@ function declaredBroadcast(
   plan: BroadcastSlotPlan,
   ops: ReadonlyArray<Expression>,
   isBroadcastOperand: (x: Expression, i: number) => boolean,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  canonicalOps?: ReadonlyArray<Expression>
 ): Expression | undefined {
+  if (declaredWholeAbsence(plan, ops, canonicalOps)) return ce.Missing;
   const setup = setupDeclaredBroadcast(
     ce,
     operator,
@@ -14700,6 +15230,10 @@ function declaredBroadcast(
     while (true) {
       const { done, value } = setup.rows.next();
       if (done) break;
+      if (hasAbsentPoint(plan, value, setup.mask)) {
+        results.push(ce.Missing);
+        continue;
+      }
       if (mapsToCells(plan, value, setup.mask, isBroadcastOperand)) {
         const error = declaredElementError(
           ce,
@@ -14755,6 +15289,209 @@ function declaredBroadcast(
   );
 }
 
+/**
+ * Whether slot `i` of `plan` answers `Missing` for an absent point
+ * (`Missing` or `Undefined`) of the list of points it maps, without calling
+ * the function: a point slot of the point-list plan (`pointListParamSlots`),
+ * a `pointList` slot of the declared plan (`declaredPlanWithPointSlots`),
+ * and a slot declared `broadcastable<tuple<…>>`. A parameter declared
+ * `tuple<…>` and one declared `broadcastable<tuple<…>>` both take one point
+ * per call, so both answer `Missing` for an absent point (user decision
+ * 2026-10-24, ROADMAP CE-420). Before, the `broadcastable<…>` slot bound the
+ * absent point to the parameter, which is an `incompatible-type` error.
+ */
+function absorbsAbsentPoint(plan: BroadcastSlotPlan, i: number): boolean {
+  const slot = plan.at(i);
+  return (
+    slot.mappable &&
+    slot.elements !== undefined &&
+    isPointParameterType(slot.elements)
+  );
+}
+
+/**
+ * Whether the row `row` of a map over the slots `mask` holds an absent
+ * point at a slot that answers `Missing` for it (`absorbsAbsentPoint`).
+ * The cell of the row is then `Missing`, as the point-list map answers for
+ * a parameter declared as a point (`pointListAbsence`): with
+ * `(broadcastable<tuple<…>>, tuple<…>)`, `f([(1,2),(3,4)], [(10,20), Missing])`
+ * is `[(11,22), Missing]`, as with two bare `tuple<…>` parameters. The eager
+ * loops test each row, and the lazy map applies the same test in its
+ * element function (`absentPointGuard`), so the answer does not depend on
+ * the length of the lists. Before, a list longer than the eager threshold,
+ * or of unknown length, bound the absent point to the parameter, which is
+ * an `incompatible-type` error.
+ */
+function hasAbsentPoint(
+  plan: BroadcastSlotPlan,
+  row: ReadonlyArray<Expression>,
+  mask: ReadonlyArray<boolean>
+): boolean {
+  for (let i = 0; i < row.length; i++)
+    if (mask[i] && absorbsAbsentPoint(plan, i) && isAbsentScalarSymbol(row[i]))
+      return true;
+  return false;
+}
+
+/**
+ * Whether an operand of a declared-`broadcastable<T>` map is absent as a
+ * whole (`Missing` or `Undefined` after evaluation) at a slot that answers
+ * `Missing` for an absent point (`absorbsAbsentPoint`), when the canonical
+ * operand `canonicalOps[i]` is typed as a list of points or as a point or a
+ * list of points (`list<tuple<…>> | missing`, `broadcastable<tuple<…>> |
+ * missing`). There is no list to map over, and the call answers `Missing`,
+ * as the point-list map does for a parameter declared `tuple<…>`
+ * (`pointListAbsence`): user decision 2026-10-24, ROADMAP CE-420. Before, a
+ * parameter declared `broadcastable<tuple<…>>` was bound to the absent
+ * value, which is an `incompatible-type` error. An operand typed as one
+ * point that may be absent (`tuple<…> | missing`) is not read here, at
+ * either declaration. `canonicalOps` is `undefined` when the operands do not
+ * line up with the canonical ones; nothing is then read.
+ */
+function declaredWholeAbsence(
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>,
+  canonicalOps: ReadonlyArray<Expression> | undefined
+): boolean {
+  if (canonicalOps === undefined || canonicalOps.length !== ops.length)
+    return false;
+  return ops.some((x, i) => {
+    if (!absorbsAbsentPoint(plan, i) || !isAbsentScalarSymbol(x)) return false;
+    const c = canonicalOps[i];
+    const point = plan.at(i).elements!;
+    return (
+      !isTuple(c) &&
+      (isPointListArgumentType(c.type.type, point) ||
+        isPointOrPointListArgumentType(c.type.type, point))
+    );
+  });
+}
+
+/**
+ * The absent points of the operands at the slots of `slots` declared
+ * `broadcastable<P>` with `P` a point type, read from the operand types
+ * `types`, or `undefined` when no such operand can hold an absent point.
+ * `skip(i)` leaves operand `i` out.
+ *
+ * Such a slot maps to the points, and an absent point gives a `Missing`
+ * element of the result at the same depth (`hasAbsentPoint`, user decision
+ * 2026-10-24, ROADMAP CE-420). `depths` holds the depths where the operand
+ * can hold an absent element (0: an element of the top list, 1: an element
+ * of a row, and `-1` for a tensor of unknown rank, any depth). `types` is
+ * `types` with those `missing` arms removed: the function is typed for a
+ * present point, and a list whose elements are all absent
+ * (`list<missing^2>`) is read as a list of `P`.
+ *
+ * `whole` says that an operand typed as a list of points, or as a point or
+ * a list of points, may be absent as a whole (`list<P> | missing`): the
+ * call then answers `Missing` (`declaredWholeAbsence`). Its top-level
+ * `missing` arm is removed in `types` too, and the caller adds a `missing`
+ * arm to the type of the call. The `missing` arm of an operand typed as one
+ * point (`P | missing`) is kept: such an absent point is refused, at either
+ * declaration.
+ */
+function declaredPointAbsence(
+  slots: BroadcastSlotPlan,
+  types: ReadonlyArray<Type>,
+  skip: (i: number) => boolean = () => false
+):
+  | { depths: Set<number>; whole: boolean; types: Array<Type | undefined> }
+  | undefined {
+  const depths = new Set<number>();
+  let whole = false;
+  const stripped: Array<Type | undefined> = types.map(() => undefined);
+  const strip = (t: Type, point: Type, d: number): Type => {
+    const r = resolveTypeReference(t) ?? t;
+    if (typeof r === 'string') return t;
+    if (r.kind === 'union') {
+      const arms = r.types.map((a) => strip(a, point, d));
+      return arms.every((a, k) => a === r.types[k])
+        ? t
+        : { kind: 'union', types: arms };
+    }
+    if (r.kind !== 'list') return t;
+    const rank =
+      r.dimensions === null ? undefined : (r.dimensions?.length ?? 1);
+    const at = rank === undefined ? -1 : d + rank - 1;
+    let elements = r.elements;
+    const present = withoutTopLevelMissing(elements);
+    if (present !== elements || present === 'missing') {
+      depths.add(at);
+      elements = present === 'never' || present === 'missing' ? point : present;
+    }
+    elements = rank === undefined ? elements : strip(elements, point, at + 1);
+    return elements === r.elements ? t : { ...r, elements };
+  };
+  types.forEach((t, i) => {
+    if (skip(i)) return;
+    const slot = slots.at(i);
+    if (
+      slot.declared !== true ||
+      !slot.mappable ||
+      slot.elements === undefined ||
+      !isPointParameterType(slot.elements)
+    )
+      return;
+    let present = t;
+    if (
+      isPointListArgumentType(t, slot.elements) ||
+      isPointOrPointListArgumentType(t, slot.elements)
+    ) {
+      present = withoutTopLevelMissing(t);
+      if (present !== t) whole = true;
+    }
+    const s = strip(present, slot.elements, 0);
+    if (s !== t) stripped[i] = s;
+  });
+  return depths.size === 0 && !whole
+    ? undefined
+    : { depths, whole, types: stripped };
+}
+
+/**
+ * `t`, the type of a map to the points, with a `missing` arm added to the
+ * elements of each list level at a depth of `depths` (see
+ * `declaredPointAbsence`; `-1` adds it at every level). A dimensioned list
+ * (`matrix<…>`) gets the arm on its cells when one of its levels is in
+ * `depths`. With `whole`, the type itself gets a `missing` arm too.
+ */
+function withMissingAtDepths(
+  t: Type,
+  depths: ReadonlySet<number>,
+  d = 0,
+  whole = false
+): Type {
+  if (whole)
+    return {
+      kind: 'union',
+      types: [withMissingAtDepths(t, depths, d), 'missing'],
+    };
+  const r = resolveTypeReference(t) ?? t;
+  if (typeof r === 'string') return t;
+  if (r.kind === 'union')
+    return {
+      kind: 'union',
+      types: r.types.map((a) => withMissingAtDepths(a, depths, d)),
+    };
+  if (r.kind !== 'list') return t;
+  const rank = r.dimensions === null ? undefined : (r.dimensions?.length ?? 1);
+  const absentHere =
+    depths.has(-1) ||
+    (rank === undefined
+      ? depths.size > 0
+      : Array.from({ length: rank }, (_, k) => d + k).some((k) =>
+          depths.has(k)
+        ));
+  const inner =
+    rank === undefined
+      ? r.elements
+      : withMissingAtDepths(r.elements, depths, d + rank);
+  return {
+    ...r,
+    elements: absentHere ? { kind: 'union', types: [inner, 'missing'] } : inner,
+  };
+}
+
 /** The asynchronous twin of {@link declaredBroadcast}. */
 async function declaredBroadcastAsync(
   ce: Expression['engine'],
@@ -14763,8 +15500,10 @@ async function declaredBroadcastAsync(
   plan: BroadcastSlotPlan,
   ops: ReadonlyArray<Expression>,
   isBroadcastOperand: (x: Expression, i: number) => boolean,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  canonicalOps?: ReadonlyArray<Expression>
 ): Promise<Expression | undefined> {
+  if (declaredWholeAbsence(plan, ops, canonicalOps)) return ce.Missing;
   const setup = setupDeclaredBroadcast(
     ce,
     operator,
@@ -14784,6 +15523,10 @@ async function declaredBroadcastAsync(
     // As in the async step 2b: `Promise.all` cannot attribute a rejection to a
     // slot, but each promise is created in a KNOWN one.
     const index = results.length + 1;
+    if (hasAbsentPoint(plan, value, setup.mask)) {
+      results.push(Promise.resolve(ce.Missing));
+      continue;
+    }
     const toCells = mapsToCells(plan, value, setup.mask, isBroadcastOperand);
     const error = toCells
       ? declaredElementError(ce, plan, value, setup.mask, isBroadcastOperand)
@@ -14852,13 +15595,16 @@ async function declaredBroadcastAsync(
  * element type can hold a list (`broadcastable<value>`), so an element binds
  * whole (rule 2 of the 2026-08-08 decision). A slot whose element type
  * cannot hold a list maps to the cells (`mapsToCells`), and so does every
- * slot of a call with no declared plan. */
+ * slot of a call with no declared plan, and a scalar slot of the point-list
+ * plan (`cells`). */
 function slotMapsOneRank(
   slots: BroadcastSlotPlan | undefined,
   i: number
 ): boolean {
   if (slots === undefined) return false;
-  const t = slots.at(i).elements;
+  const slot = slots.at(i);
+  if (slot.cells === true) return false;
+  const t = slot.elements;
   return t !== undefined && !cannotHoldAList(t);
 }
 

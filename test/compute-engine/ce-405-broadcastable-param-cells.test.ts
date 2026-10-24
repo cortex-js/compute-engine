@@ -96,12 +96,25 @@ describe('CE-405: COMPILED', () => {
       [4, 5],
     ]);
   });
-  test('a list of points still declines', () => {
+  test('a list of points compiles one call per point (ROADMAP CE-412)', () => {
     const ce = engine();
     ce.declare('P', `list<${POINT}>`);
-    expect(() =>
-      compile(ce.box(['g', 'P']), { to: 'javascript', fallback: false } as any)
-    ).toThrow(/broadcastable<T>/);
+    const r = compile(ce.box(['g', 'P']), {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(
+      r.run({
+        P: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
   });
 });
 

@@ -1,3 +1,122 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **A parsed comparison chain is no longer a nested tree** (ROADMAP CE-411,
+  Tycho row 433). The LaTeX and Epsil parsers wrote `a < b \le c` as
+  `LessEqual(Less(a, b), c)`, and `a = b = c` as `Equal(a, Equal(b, c))`. A
+  run of one operator is now one n-ary node, `Equal(a, b, c)`, and a run of
+  mixed operators is an `And` of links that share their boundary term:
+  `a < b \le c` is `And(Less(a, b), LessEqual(b, c))`, in the raw form too.
+  MathJSON input that nests a comparison inside another comparison, such as
+  `["Less", "a", ["Less", "b", "c"]]`, now means a comparison of the inner
+  truth value, not a chain. The serializers put parentheses around a
+  comparison inside a comparison.
+
+### Behavior Changes
+
+- **A declared type of a batch input is trusted** (ROADMAP CE-410, user
+  decision 2026-10-24). In the batch body, a read `At(F, i)` whose index type
+  proves an integer of at least 1 (for example `i + 1` with `i` declared
+  `integer<0..>`) is a direct read with no run-time test; a read past the end
+  still gives `NaN`. When an input breaks its declared type (a fractional `i`
+  for `integer`, a string in a list declared `list<number>`), the result is
+  not defined. A plain array that passed the check once is not checked again
+  while its length is unchanged.
+
+- **A list at an untyped parameter beside a point parameter maps** (ROADMAP
+  CE-414.2, user decision 2026-10-24). A parameter with no type (`unknown`,
+  `any`, no annotation) of a function that also has a point parameter now
+  follows the rule of a one-parameter function: its type is refined from the
+  body, and it maps a list unless the body uses it as a collection. With
+  `f := (P, t) ↦ (P.x + t, P.y)` declared
+  `(tuple<number, number>, unknown) -> unknown`, `f((1, 2), [0, 1, 2])` is
+  `[(1, 2), (2, 2), (3, 2)]`, typed `list<tuple<number, number>>`; it was
+  `([1, 2, 3], 2)`. With `(P, L) ↦ Length(L)`, `L` is refined to
+  `collection` and the list is still taken whole. Compiled JavaScript gives
+  the same values.
+
+- **An absent point at a `broadcastable<tuple<…>>` parameter gives
+  `Missing`** (ROADMAP CE-420, user decision 2026-10-24), as at a
+  `tuple<…>` parameter. With `f := (a, b) ↦ (a.x + b.x, a.y + b.y)`,
+  `f([(1, 2), (3, 4)], [(10, 20), Missing])` is `[(11, 22), Missing]` for
+  every mix of the two declarations; with `broadcastable<…>` parameters the
+  second element was an `incompatible-type` error. A list of only absent
+  points, `[Missing, Missing]`, now gives `[Missing, Missing]` for every
+  declaration; at a `tuple<…>` parameter the call was an `incompatible-type`
+  error. A list of points that is absent as a whole (`P: list<tuple<…>> |
+  missing` holding `Missing`) now gives `Missing` at a
+  `broadcastable<tuple<…>>` parameter too, and the call's type has the
+  `missing` option; it was an `incompatible-type` error. Compiled JavaScript
+  gives `undefined` for an absent point, and for an absent list, at a
+  `broadcastable<tuple<…>>` parameter; it declined.
+
+### Bug Fixes
+
+- **`Equal` and `NotEqual` of two relations compare their truth values**
+  (ROADMAP CE-411, Tycho row 433). `["Equal", ["LessEqual", "a", 0],
+  ["LessEqual", "b", 0]]` was boxed as the chain `a ≤ 0 = b ≤ 0`, and the
+  LaTeX `(a\le0)=(b\le0)` evaluated as that chain after a substitution: both
+  gave `False` for `a = b = 1`. Both now give `True` when the two conditions
+  are both true or both false.
+
+- **A negated relation in a comparison chain negates only its own link**
+  (ROADMAP CE-411). `a < b \not\le c` is `And(Less(a, b), Not(LessEqual(b, c)))`;
+  it was `Not(And(Less(a, b), LessEqual(b, c)))`. The LaTeX commands
+  `\nleq`, `\nleqslant`, `\ngeq`, `\ngeqslant`, `\not\lt` and `\not\gt` are
+  now parsed; they gave an `unexpected-command` error.
+
+- **A call of a function with a `broadcastable<tuple<…>>` parameter over a
+  list of points compiles** (ROADMAP CE-412, Tycho row 437). With
+  `f := a ↦ (a.x + 1, a.y + 1)` and `P` a list of points, or a point or a list
+  of points, `compile(f(P))` declined. It now compiles to one call per point,
+  as a bare `tuple<…>` parameter does, and gives the interpreter's values.
+
+- **A bare `tuple<…>` parameter maps a list of points of unknown length**
+  (ROADMAP CE-413, Tycho row 438). With `n` unbound, a call over
+  `Map((u, v) ↦ (u, v), \frac{1}{n}[0...n], \frac{1}{n}[0...n])` was an
+  `incompatible-type` error. It now maps one point per call, lazily, as for a
+  list of known length.
+
+- **A list in a scalar slot beside a point parameter maps** (ROADMAP CE-414,
+  Tycho row 439). With `h := (P, t) ↦ P.x + t` and `t` declared `real`,
+  `h((1, 2), [0, 1, 2])` was an `incompatible-type` error. It is now
+  `[1, 2, 3]`, typed as a list, in the interpreter and in compiled
+  JavaScript. This applies when the slot's type cannot hold a list (`real`,
+  `number`, `boolean`, `string`); for a slot typed `unknown`, see Behavior
+  Changes.
+
+- **A compiled call with an argument declared `broadcastable<tuple<…>>` that
+  holds one point compiles** (ROADMAP CE-415). It declined; it now gives the
+  interpreter's value.
+
+- **Printing a function whose parameter is `_1` no longer defines `_`**
+  (ROADMAP CE-416). `toString()` renamed the parameter with a substitution
+  that created the symbol `_` in the engine's scope, so a later lazy `Map`
+  printed `Error(incompatible-type …)` in place of a call.
+
+- **`broadcastAsync` reads an input that shares memory with `out` as it was
+  given.** When an input array was a view of the output buffer, each slice
+  read it after earlier slices had written their results there: with
+  `Tuple(x + 1, 10x)`, `x = [1, 2, 3, 4]` in the first half of `out` and
+  `chunk: 1`, the result was `[2, 10, 11, 100, 12, 110, 101, 1000]` instead
+  of `[2, 10, 3, 20, 4, 30, 5, 40]`. `broadcast` was correct. Such inputs are
+  now copied once before the first slice.
+
+### Performance
+
+- **A `broadcast` kernel runs up to 15 times faster** (ROADMAP CE-410, Tycho
+  row 432). For a kernel that reads two values of a shared `list<number>` and
+  returns a tuple, 250 000 cells take about 0.55 ms instead of 8.3 ms when the
+  index is declared `integer<0..>`, and about 0.95 ms when it is declared
+  `integer`. A kernel that reads a shared list gets a second compiled body
+  for batches: the list is checked once per batch (a `Float64Array`, or a
+  plain array of numbers) and then read directly, and the inputs are passed
+  as arguments. A shared `Float64Array` is read in place; it was copied into
+  a plain array on every batch. The cell loop is generated for each compiled
+  body, `And`/`Or` of plain comparisons compile to a conditional, and the
+  per-cell call is direct.
+
 ## 0.165.0 _2026-10-24_
 
 ### Breaking Changes

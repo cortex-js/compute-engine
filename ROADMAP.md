@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-410.
+Next free reference: CE-424.
 
 **Entry format.**
 
@@ -73,6 +73,22 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Tycho ledger asks
+
+### CE-421. An index variable for each axis of the `grid` layout of `broadcast`
+
+**Status:** deprioritized; capability. Tycho row 440 (filed 2026-10-24, user
+decision: low priority). No instrument yet; Tycho writes it against the option
+CE names.
+
+Tycho's march kernel receives its cell indexes `ci`, `cj`, `ck` as input
+columns (an array 0…N−1 per axis), built by the host and sent to the workers.
+Ask: a way to bind a name to the cell's index along each `grid` axis (an option
+that names each axis's index variable, or an axis given as a count instead of
+a column), so the kernel declares `ci: integer<0..>` and receives no column
+for it. The index is then an integer in range by construction, so the CE-410
+direct read needs no test of it. Measured gain about 10% on the CE-410 probe
+kernel (2026-10-24). READY when the row 432 march kernel gives the same values
+with the indexes taken from the loop. Related: CE-1, CE-410.
 
 ### CE-1. A `window` option of the `grid` layout of `broadcast`
 
@@ -1232,6 +1248,19 @@ No case is known for any of these.
   with the oracle by construction but is not tested on real cases.
 
 ## Collections, absence and broadcasting
+
+### CE-422. A point that may be absent at a `broadcastable<tuple<…>>` parameter is typed `tuple<missing, missing> | tuple<…>`
+
+**Status:** open; defect, small. Found 2026-10-24 while implementing CE-420
+(already on 0.165.0).
+
+With `f: (broadcastable<tuple<number, number>>) -> unknown` and an argument
+declared `tuple<number, number> | missing`, the call is typed
+`tuple<missing, missing> | tuple<number, number>`. The value, when the
+argument is absent, is `Error(incompatible-type, …)`, as at a bare
+`tuple<…>` parameter, so only the type is wrong: no value of type
+`tuple<missing, missing>` can occur. Expected: the type of the call over
+one point (`tuple<number, number>`), as the bare declaration gives.
 
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
@@ -5251,6 +5280,18 @@ supported by the compiler. Custom accumulator delivery policies are unchanged.
 
 ## LaTeX parsing and serialization
 
+### CE-417. The LaTeX of a function whose parameter is `_1` shows an empty parameter list
+
+**Status:** open; defect, small. Found 2026-10-24 while fixing CE-416.
+
+With `n: integer` unbound, `\frac{1}{n}\cdot[0...n]` evaluates to
+`["Map", ["Function", ["Block", ["Multiply", "_1", ["Divide", 1, "n"]]], "_1"], ["Range", 0, "n"]]`,
+whose `.latex` is `\mathrm{Map}(()\mapsto\frac{\operatorname{\_1}}{n}, 0..n)`.
+Parsing that LaTeX gives back the same function (the parameter `_1` is
+restored), so values are not affected, but the text shows a function with no
+parameter that uses `\_1`. Expected: print the parameter, for example
+`(\_1)\mapsto` or `(\_)\mapsto` as `toString()` does (`(_) => _ * 1 / n`).
+
 ### CE-291. `\int dx` is a parse error, and the `d` of `\int \frac{dx}{x}` is reported undeclared
 
 **Status:** open; defect. No decision needed (checked 2026-10-23): `\int dx`
@@ -5689,6 +5730,22 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-423. The batch body of a compiled kernel adds 35 to 48% to the compile time of an expression that reads a shared list
+
+**Status:** open; performance. Found 2026-10-24 in the review of CE-410.
+
+Since CE-410, `compile()` of an expression that reads a free list at a scalar
+index also compiles a batch body for `broadcast` (a second full compilation),
+also when the caller only uses `run()`. Measured: 35 to 48% more compile time
+(Tycho's march kernel 1.40 to 1.68 ms, of which 0.65 to 0.78 ms is the batch
+body). Building it lazily on the first `broadcast` is not safe: the
+compilation reads the engine state (assigned values, declarations, angular
+unit, precision) and module globals (`BigDecimal.precision`, reconstruction
+digits) while it generates code, so a later build could fold other values; a
+guard on the engine version would almost never let the lazy build run.
+Options: an option of `compile()` that asks for the batch body, or one
+compilation pass that emits both bodies.
 
 ### CE-313. Evaluating a closed form or a tuple parameter again rebuilds or re-evaluates its nodes
 

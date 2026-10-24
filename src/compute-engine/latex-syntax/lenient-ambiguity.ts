@@ -646,9 +646,9 @@ function reportArrow(
 
 /**
  * `ambiguous-equal-chain`: more than one `=` in a chain (`x = x = x`) is
- * read as nested equations, and a person can mean an assignment to several
- * names, or a chain of equal values. The span is from the first `=` to the
- * last `=` of the chain.
+ * read as a chain of equal values (`["Equal", "x", "x", "x"]`), and a person
+ * can mean an assignment to several names. The span is from the first `=` to
+ * the last `=` of the chain.
  */
 function reportEqualChain(
   tokens: readonly string[],
@@ -660,7 +660,8 @@ function reportEqualChain(
     expr,
     (x) =>
       operator(x) === 'Equal' &&
-      operands(x).some((y) => operator(y) === 'Equal')
+      (operands(x).length > 2 ||
+        operands(x).some((y) => operator(y) === 'Equal'))
   );
   if (!nested) return;
   const equals: number[] = [];

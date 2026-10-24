@@ -32,6 +32,7 @@ import {
 import { effectSetToString } from '../common/type/effects.js';
 import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types.js';
 import { MathJsonExpression } from '../math-json/types.js';
+import { CHAINABLE_COMPARISONS } from '../compute-engine/latex-syntax/comparison-chain.js';
 import {
   serializeHexFloat,
   serializeNumber,
@@ -476,6 +477,15 @@ export function serializeEpsil(
       if (argOp.precedence < op.precedence) return true;
       if (argOp.precedence === op.precedence) {
         if (argHead === opName && ASSOCIATIVE_HEADS.has(opName)) return false;
+        // A comparison operand of a comparison is parenthesized on either
+        // side: without the parentheses, `a < b <= c` re-parses as the chain
+        // `a < b && b <= c`, not as a comparison of the truth value of
+        // `a < b` with `c`.
+        if (
+          CHAINABLE_COMPARISONS.has(opName) &&
+          CHAINABLE_COMPARISONS.has(argHead)
+        )
+          return true;
         return side !== op.assoc;
       }
       return false;

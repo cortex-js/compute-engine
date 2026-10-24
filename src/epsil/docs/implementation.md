@@ -1009,15 +1009,20 @@ A run of the *same* relational operator lowers to a single n-ary node:
 a < b < c     // ["Less", "a", "b", "c"]
 ```
 
-A *mix* of relational operators initially lowers as a left-associated tree:
+A *mix* of relational operators lowers to the conjunction of its links,
+where adjacent links share their boundary term:
 
 ```epsil
-a < b <= c    // ["LessEqual", ["Less", "a", "b"], "c"]
+a < b <= c    // ["And", ["Less", "a", "b"], ["LessEqual", "b", "c"]]
 ```
 
-When that tree is boxed by the engine, it is canonicalized to the pairwise
-conjunction `a < b && b <= c`, which is why evaluating a mixed chain has the
-usual mathematical chained-comparison semantics.
+A parenthesized comparison is an operand, not a link. The engine reads a
+comparison nested in another as a comparison of truth values:
+
+```epsil
+(a < b) <= c          // ["LessEqual", ["Less", "a", "b"], "c"]
+(a <= 0) == (b <= 0)  // True when both conditions are true or both false
+```
 
 ### Errors
 

@@ -25,6 +25,7 @@
  */
 
 import type { FitScanProblemOf } from './fit-scan.js';
+import type { StoredBatchBody } from './compilation/types.js';
 
 export type KernelKind = 'javascript' | 'interval-js';
 
@@ -48,6 +49,9 @@ export interface StoredKernel {
    * arity of a tuple-of-numbers expression), as the result carries it;
    * absent means 1. */
   broadcastOutputs?: number;
+  /** The batch body of a `javascript` result, as the result carries it
+   * (`StoredBatchBody`). */
+  batch?: StoredBatchBody;
 }
 
 /** The inputs of a batch in wire form: the names and, in the same order, a

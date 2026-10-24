@@ -958,6 +958,30 @@ export interface CompileTarget<Expr = unknown> {
   varsKeys?: ReadonlySet<string>;
 
   /**
+   * The JavaScript target only: the state of the `broadcast()` batch body
+   * (ROADMAP CE-410). The batch body is a second compilation of the same
+   * expression that a batch runs in place of the ordinary body, when each
+   * shared list it reads directly passes a check made once per batch (a plain
+   * array of numbers, or a `Float64Array`).
+   *
+   * - `candidates`: set on the ordinary compilation. The `At` lowering adds
+   *   the name of each free list symbol, declared as a list of numbers, that
+   *   it reads with `_SYS.atNumeric` at a scalar index. A non-empty set after
+   *   the compilation asks for the batch body.
+   * - `direct`: set on the batch compilation. For each such name, the local
+   *   variable that holds the checked array. The `At` lowering reads it with
+   *   no per-read test of the array.
+   * - `minLength`: filled by the batch compilation. For each name, the least
+   *   length that its reads with no conversion of `undefined` need (see the
+   *   `At` lowering); the per-batch check refuses a shorter array.
+   */
+  batchReads?: {
+    candidates?: Set<string>;
+    direct?: ReadonlyMap<string, string>;
+    minLength?: Map<string, number>;
+  };
+
+  /**
    * Per-compilation memo for `BaseCompiler.reachesExcludedName`: for a symbol
    * name, whether its assigned value or its user-function body reaches a
    * `vars`-mapped input or a caller-overridden operator (`foldExcludedOps`).
@@ -2745,6 +2769,44 @@ export interface BroadcastAsyncResult {
 }
 
 /**
+ * The batch body of a `javascript` result (`CompilationResult.batch`), as
+ * plain data. `broadcast()` runs it in place of the ordinary body for a whole
+ * batch when each shared input marked `direct` passes a check made once per
+ * batch: a `Float64Array`, or a plain array whose elements are all numbers,
+ * in both cases at least `minLength` long. Otherwise the batch runs the
+ * ordinary body. The two bodies give the same value for every input that
+ * respects its declared type.
+ *
+ * The body is the function `(<local>, …) => code`, with one parameter per
+ * entry of `params`, in order, after the definitions of `preambleOnce`
+ * (evaluated once, when the body is loaded) and before those of
+ * `preamblePerCall` (evaluated on every call). It reads its inputs from its
+ * parameters, not from a vars object. The helpers it calls are those of the
+ * runtime of the same version.
+ */
+export type StoredBatchBody = {
+  /** The body, an expression over the parameters. */
+  code: string;
+  /**
+   * The parameters of the body. `name` is the input it receives and `local`
+   * its spelling in `code`. With `direct`, the input is a shared list that
+   * the body reads with no per-read test of the array, passed as it is given
+   * (a `Float64Array` is not copied). Without it, the parameter receives the
+   * value the ordinary body reads for `name`: a number, the complex value of
+   * a complex input, a shared input as a plain array, or `undefined` when
+   * the inputs do not name it.
+   */
+  params: {
+    name: string;
+    local: string;
+    direct?: boolean;
+    minLength?: number;
+  }[];
+  preambleOnce?: string;
+  preamblePerCall?: string;
+};
+
+/**
  * Result of compiling an expression.
  *
  * Three type parameters control the shape:
@@ -3073,6 +3135,16 @@ export type CompilationResult<
    * default. `BroadcastOptions.outputs` overrides it.
    */
   broadcastOutputs?: number;
+
+  /**
+   * JavaScript only, on a result called with a vars object that reads a
+   * shared list of numbers at a scalar index. A second body that
+   * `broadcast()` runs in place of `code` when each shared list it reads
+   * directly passes a check made once per batch. Stored with the result so
+   * that a runtime that rebuilds it (`loadBroadcast()`, a kernel worker) runs
+   * the same body. See {@link StoredBatchBody}.
+   */
+  batch?: StoredBatchBody;
 
   /**
    * Evaluate the compiled function at many points in one call. Present on a
