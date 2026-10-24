@@ -2263,9 +2263,7 @@ export function meetListTypes(
         // the empty list, which it does when its length is open.
         const row = typeof cells === 'string' ? undefined : cells;
         if (row === undefined || row.kind === 'list')
-          return dims![0] > 0
-            ? 'never'
-            : { kind: 'list', elements: 'never' };
+          return dims![0] > 0 ? 'never' : { kind: 'list', elements: 'never' };
         // A union or an intersection that mixes list arms: keep as written.
         return 'keep';
       }

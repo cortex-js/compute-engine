@@ -3097,7 +3097,7 @@ function solveByMultipleAngleTrig(
         : ce.function('Power', [sinX, ce.number(t.s - s)]),
     ])
   );
-  let rest: Expression = expand(ce.function('Add', quotient));
+  const rest: Expression = expand(ce.function('Add', quotient));
   const bases: Expression[] = [];
   if (s > 0) bases.push(sinX);
   if (c > 0) bases.push(cosX);

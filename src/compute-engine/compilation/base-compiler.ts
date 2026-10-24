@@ -26114,9 +26114,10 @@ export class BaseCompiler {
    * emitted, so it must not decide the lane of the node either (CE-230.5): a
    * dead complex arm would put a real result on the complex lane.
    */
-  static liveSelectionArms(
-    expr: { readonly operator: string; readonly ops: ReadonlyArray<Expression> }
-  ): ReadonlyArray<Expression> {
+  static liveSelectionArms(expr: {
+    readonly operator: string;
+    readonly ops: ReadonlyArray<Expression>;
+  }): ReadonlyArray<Expression> {
     const ops = expr.ops;
     if (expr.operator === 'If') {
       const claim = BaseCompiler.booleanClaim(ops[0]);

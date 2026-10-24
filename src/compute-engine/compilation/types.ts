@@ -2023,10 +2023,7 @@ export interface LanguageTarget<
  * the type-definition layer from importing `interval/`; `compilation/` may.
  */
 export type IntervalValue =
-  | IntervalResult
-  | BoolInterval
-  | Interval
-  | IntervalValue[];
+  IntervalResult | BoolInterval | Interval | IntervalValue[];
 
 /**
  * What a compiled `interval-js` runner accepts for each variable: a plain

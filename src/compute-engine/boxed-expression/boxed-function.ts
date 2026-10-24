@@ -12269,7 +12269,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
             !absentElsewhere &&
             expr.ops.some(
               (x) =>
-                !x.type.facts.containsMissing && isSubtype('missing', x.type.type)
+                !x.type.facts.containsMissing &&
+                isSubtype('missing', x.type.type)
             )
           )
             absentElsewhere = true;
