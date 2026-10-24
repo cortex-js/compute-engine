@@ -1,6 +1,29 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `IntervalValue` type includes the answer strings of a comparison**
+  (ROADMAP CE-210, Tycho row 411). A compiled `interval-js` runner returns
+  `'true'`, `'false'` or `'maybe'` for a boolean expression, but the public
+  type `IntervalValue` was `IntervalResult | Interval | IntervalValue[]`. It
+  is now `IntervalResult | BoolInterval | Interval | IntervalValue[]`. Code
+  that narrows an `IntervalValue` with a check on `kind` must first test for
+  a string.
+
 ### Behavior Changes
+
+- **The `interval-js` fallback answers a comparison, and does not read a
+  wide input as its midpoint** (ROADMAP CE-210). When the target cannot
+  compile an expression (`Greater(Fibonacci(x), 0)`: `Fibonacci` has no
+  interval lowering), the result runs the interpreter at the midpoint of each
+  interval input. A boolean value was `{ kind: 'entire' }`; it is now the
+  answer string, `'true'` or `'false'`, as compiled code gives it. When an
+  input is wider than a point, the value at its midpoint does not bound the
+  values over it, and was returned as if it did: `Fibonacci(x)` over
+  `[1, 10]` was `{ kind: 'empty' }` (no value at 5.5), although it takes the
+  values 1 to 55 there. Over such an input a boolean expression is now
+  `'maybe'` and a number is `{ kind: 'entire' }`. At a point the answers are
+  exact, as before.
 
 - **A declared collection that shares only the empty collection with a
   collection parameter is refused when the expression is boxed** (ROADMAP
@@ -12,6 +35,228 @@
   match, so `Mean(R)`, `Mean(B)` and `Mean([Missing, "a"])` are refused when
   they are boxed. A collection whose elements are not known yet (`list`,
   `list<any>`, `set<unknown>`, `tensor`) is still admitted.
+
+### Resolved Issues
+
+- **The LaTeX serialization of `Reduce` and `Fold` keeps the initial value**
+  (ROADMAP CE-292). `Reduce([1, 2], Add, 10)` serialized as `\sum` of the list
+  without the seed, so the LaTeX parsed back as an expression whose value is
+  `3`, not `13`. A seeded reduction now writes its third operand, and the
+  `\sum`/`\prod` shorthand is used only when there is no seed.
+
+- **A symbol declared with the type `error` parses** (ROADMAP CE-294). With
+  `w: error`, `w`, `w+1` and `\int_0^1 w\,dw` gave an `unexpected-symbol`
+  error. They now parse as terms. A symbol of type `never` also parses now.
+
+- **In lenient mode, `ab√x..5` reports `ambiguous-radical`** (ROADMAP CE-298),
+  as `ab√x` and `5..ab√x` already did. The line-level ambiguity checks now
+  read the tree after the range-precedence repair.
+
+- **`Declare` with a type string that does not parse returns an error**
+  (ROADMAP CE-101). `["Declare", "r", {str: "integer<<"}]` threw when it was
+  evaluated. It now gives `Error("invalid-type-declaration", …)` with the
+  message of the type parser.
+
+- **`Hold` around a `Function` with no body does not throw** (ROADMAP CE-106).
+  Reading the type of `Hold(Function())`, or evaluating it, threw from the
+  signature of the function literal. The bodyless function literal is now
+  typed `error`.
+
+- **A `ce.declare()` of a value that is refused leaves no placeholder**
+  (ROADMAP CE-116, issue #394). When the value does not fit its type, a new
+  name stays undeclared and a redeclaration keeps its previous binding, as the
+  operator route already did.
+
+- **More boolean identities fold beside an unknown** (ROADMAP CE-119).
+  `Nand(True, A)`, `Nor(False, A)`, `Nand(A, A)` and `Nor(A, A)` evaluate to
+  `¬A`, `Implies(True, A)` to `A`, `Implies(A, False)` to `¬A`, and
+  `Implies(A, A)` and `Equivalent(A, A)` to `True`. An absent operand gives
+  the same results as before.
+
+- **`isEqual()` of a symbol reads the bounds that pin it to a value**
+  (ROADMAP CE-104). With `b ≥ 0` and `b ≤ 0` assumed, `b.isEqual(0)` is
+  `true`; it was `undefined`, and `ce.number(0).isEqual(b)` agrees. The
+  `Equal` operator does not read bounds.
+
+- **`Limit` of a function whose body is `Return(v)`** (ROADMAP CE-400) gives
+  the limit of `v`. It gave a `Return` expression as its value. A `Return`
+  inside a statement block or a branch leaves the limit unevaluated.
+
+- **A divergent improper integral with a symbolic exponent stays
+  unevaluated** (ROADMAP CE-383). `∫₀^∞ xⁿ dx` gave a value under the
+  condition `0 < n ∧ n < 0`, which no `n` satisfies.
+
+- **The limit at infinity of a ratio of logarithms** (ROADMAP CE-147).
+  `ln(3x)/ln(x)` and `ln(3x)/ln(x^π)` give `1` and `1/π`; they stayed
+  unevaluated. A ratio that is not an indeterminate form, such as
+  `(2 + sin x)/(3 + sin x)`, still has no limit.
+
+- **`Determinant` and `CharacteristicPolynomial` of a matrix with float
+  entries fold their constants** (ROADMAP CE-145). `Determinant([[x + 1.5, 1],
+  [1, 2]])` is `2x + 2`; it was `2x - 1 + 3`.
+
+- **A telescoping sum with an infinite bound and a parameter** (ROADMAP
+  CE-142). `\sum_{k=1}^\infty ((x+k+1)^2-(x+k)^2)` is `+oo`; it was
+  `(x + 1 + oo)^2 - (x + 1)^2`. The product `\prod_{k=1}^\infty (x+k+1)/(x+k)`,
+  whose sign depends on `x`, stays unevaluated. A sum whose term at the finite
+  bound is a pole stays unevaluated.
+
+- **Reducers over a `Range` held by a symbol use the closed form** (ROADMAP
+  CE-80). With `r := Range(1, 10^20)`, `Sum(r)`, `Mean(r)`, `Median(r)`,
+  `Variance(r)`, `Max(r)` and `Min(r)` return at once; they walked every
+  element.
+
+- **`Dot` of two empty lists** (ROADMAP CE-220) is `0` for two numeric
+  vectors and `[]` for two lists of points, as the compiled code gives. It
+  stayed unevaluated.
+
+- **Compiled `Max`, `Min` and the ordering comparisons decline an operand of
+  type `color`, `regexp` or `object`** (ROADMAP CE-393). The compiled code
+  read such a value as a number, while the interpreter leaves the call
+  unevaluated. With a `fallback`, the interpreter now runs. A custom compile
+  handler of the operator still takes precedence.
+
+- **The WGSL `Mod` keeps the sign of the divisor when the quotient
+  underflows** (ROADMAP CE-246). `floor(r / b)` gave `-0` for a tiny remainder
+  of the opposite sign, so the divisor was not added.
+
+- **`NLimit` of a function that rises before it decays** (ROADMAP CE-184).
+  `NLimit(t ↦ 7t/(t² + 9), ∞)` is about `0` (`−2e-22`); it was `NaN`. The
+  numeric limit retries from a start closer to the target when the first
+  extrapolation is rejected.
+
+- **`narrow()` of two collection types of different kinds that share values**
+  (ROADMAP CE-12). `matrix<number>` and `collection<vector<integer>>` narrow to
+  `matrix<integer>`; the result was `never`. A pair that cannot be reduced is
+  kept as an intersection.
+
+- **The empty tuple type prints as `tuple<>`** (ROADMAP CE-23), which parses
+  back to the empty tuple. It printed as the bare `tuple`, which means a tuple
+  of any length.
+
+- **`Abs` of a list or a matrix of numbers is typed from its cells** (ROADMAP
+  CE-18). `Abs([1, 2])` is typed `list<integer<0..>^2>`; the type had a
+  `signed_infinity` arm that the value cannot take.
+
+- **Epsil: the hint of a type error in an annotation is shown** (ROADMAP
+  CE-307). `let v: vector<integer^(2x3)>` now says to write `matrix<…>` for
+  two dimensions.
+
+- **Epsil: an error in the body of a `match` case is underlined on that
+  case** (ROADMAP CE-308), not on the whole statement. The error frame names
+  the case (`in Match argument 3`).
+
+- **Epsil: a loop over a range whose bound is an unassigned local reports the
+  error** (ROADMAP CE-309). In a function, `for k in 1..t { t = 2 }` gives
+  `read-before-declaration`, as compiled code does; it ran zero times. A
+  lambda in a pipe stage that assigns a new name,
+  `(1..3) |> map((k) => do { t = k * 2; t })`, no longer needs the `scope`
+  effect.
+
+- **Faster type checks and set operations** (ROADMAP CE-315, CE-316).
+  `isSubtype` on a union whose arms are the same type node took exponential
+  time in the nesting depth. Duplicate removal in a set comprehension, in
+  `Intersection` and in `SymmetricDifference` compares an element only with
+  the elements of the same hash: 3,604 comparisons in place of 812,704 for a
+  comprehension over `Range(1, 900)`.
+
+- **The structural hash of a deeply nested expression does not repeat**
+  (ROADMAP CE-318). The hash of a function expression, and of a dictionary,
+  repeated every 32 or 64 levels of nesting, so different deep expressions
+  fell into one hash bucket. Hash values of all function expressions change.
+
+- **Compiled code: seven more corrections** (ROADMAP CE-224, CE-226, CE-230,
+  CE-243, CE-251, CE-262, CE-282).
+  - GLSL and WGSL decline a point component typed `indexed_collection` or
+    `collection`, as they decline a list; such a value was put in a `vecN`.
+  - A comprehension whose term assigns its own index declines to compile, and
+    the interpreter runs it. The compiled code threw "Assignment to constant
+    variable".
+  - A branch of `If` or `Which` behind a condition that is constant by its
+    type no longer moves the compiled result to the complex lane:
+    `x + Which(1 > 0, y, True, √(y − 1))` compiles to real code.
+  - The GLSL and WGSL integer-power helpers of a vector give `+∞`, not `NaN`,
+    for a zero component under a negative odd exponent, as the scalar helper
+    does.
+  - A one-operand `Add`, `Multiply`, `And` or `Or`, and `Power(x, 1)`, from
+    non-canonical input compile with correct grouping on JavaScript and the
+    GPU targets. `3·(x+1)^1` compiled as `3·x + 1`.
+  - Compiled JavaScript `\arg(x − iy)` is `π` at `y = 0` and a negative `x`,
+    as the interpreter gives; it was `−π`.
+  - `compileShader` on GLSL and WGSL converts the arguments and results of
+    trigonometric functions in degree, grad and turn modes, as `compile` does.
+
+- **Evaluation: six corrections** (ROADMAP CE-99, CE-105, CE-108, CE-115,
+  CE-121, CE-129).
+  - A dictionary that holds an `Error` value reports `isValid === false`, as a
+    list and a tuple do, and `has()` of an object reads its field values.
+  - A symbol that holds an error gives that error when it is called: `w(1)`,
+    `Apply(w, 1)` and `Pipe(3, w)` stayed unevaluated, while `Map(w, …)` gave
+    the error.
+  - An error passed to a function declared with a typed signature carries the
+    frame of that call.
+  - `Sum` and `Product` with several `Limits` clauses, where a bound depends
+    on another index, evaluate in either clause order:
+    `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))` is `220`.
+  - The `.mul()` method no longer stores the current value of a variable in a
+    point or a list: with `w := 4`, `2·(w, 2)` keeps `(2w, 4)` and follows a
+    later assignment of `w`.
+  - A callback written `InverseFunction(f)` or `Derivative(f, n)` is accepted
+    by the lazy collection operators: `Map(InverseFunction(Sin), xs)`.
+
+- **Numeric evaluation: more values and better accuracy** (ROADMAP CE-180,
+  CE-185, CE-189, CE-192, CE-197).
+  - `.N()` of a divergent integral next to a singular bound, `∫₀¹ t⁻³⁰⁰ dt`,
+    is `+oo`; it was a `Measurement` of `+oo` with a `NaN` error.
+  - A `Measurement` whose error is below `1e-100` prints in exponential
+    notation; it printed the text of a `RangeError`.
+  - `Gamma` and `Factorial` at an argument whose value is past the exponent
+    range stay unevaluated, and no longer give `0` to internal callers.
+  - `Arcoth`, `Arcosh` and the other inverse functions with a branch point at
+    ±1 read an exact sum next to ±1 (`1 + 10⁻¹⁰`) exactly at machine precision:
+    `Arcoth(1 + 10⁻¹⁰)` is `11.8594990552752`; it was `11.8594990139`, the
+    value at the double.
+  - The complex `Gamma` is about 100 times more accurate for an argument with
+    `Re z` above 2 (relative error 1.6e-15 on the real axis, it was 2e-13), so
+    `Hypergeometric2F1` with a complex `z` is more accurate too.
+  - `PolyGamma(m, z)` of an order from 100 to 400 close to a half-integer on
+    the real axis has a value: `PolyGamma(120, -1/2 + 10⁻⁵i)`.
+  - `GammaRegularized(n, z)` for an integer `n` up to 200 and a negative `z`
+    has a value under `.N()`.
+
+- **More precise static types** (ROADMAP CE-17, CE-44).
+  - The meet of a fixed-length list with a plain list of lists is `never` (the
+    empty list for an open length). It was a type such as `list<list^3>`,
+    which the type parser refuses.
+  - An element-wise comparison over a list that can be absent as a whole,
+    `L < 3` with `L: list<integer> | missing`, is typed
+    `list<boolean> | missing`; it was `list<boolean | missing>`.
+
+- **Symbolic computation: nine corrections and capabilities** (ROADMAP CE-137,
+  CE-138, CE-141, CE-152, CE-154, CE-155, CE-156, CE-157, CE-158).
+  - `Solve` finds the roots of equations with sines and cosines of multiples
+    of the unknown: `sin x + sin 2x = 0`, `cos 2x + cos x = 0`,
+    `sin 2x = cos x`.
+  - `D` and `Integrate` over a parameter of a user function use the argument
+    of the call: with `g(f) := \frac{d}{dx} f`, `g(x^2)` is `2x`; it was `0`.
+    This also holds when a global symbol has the name of the parameter, and
+    for an argument that holds it: with `g(f) := \int f\,dx`, `g(f + x)` is
+    `f·x + x²/2`.
+  - The definite integral of `sin(x − Round(x))/(x − Round(x))` is no longer
+    evaluated through an antiderivative that ignores the jumps of `Round`; it
+    gave `0`. `.N()` gives `63.1177…` on `[0, 64]`.
+  - A definite integral of `|u|` or `sgn(u)` with a quadratic `u` is split at
+    the real roots of `u`: `\int_{-1}^{1} |x^2 - 1/4|\,dx` is `1/2`.
+  - `TrigReduce` reduces each element of a list and each side of an equation
+    (it rewrote them in exponential form), and `TrigReduce(Missing)` stays
+    `Missing`.
+  - `Sum` and `Product` over `Element(j, Range(1, k))` read the value of `k`,
+    as `Limits` does.
+  - `simplify()` rationalizes a quotient by a constant inside a sum or a
+    product: `1/(2−√2) − 1/(2+√2)` is `√2`.
+  - `simplify()` reads a negative imaginary literal as a negation, so
+    `sin(−i) + sin(i)` is `0`, and simplifies the numerator of a quotient as a
+    term of a sum: `(Si(1) − Si(−1))/y` is `2Si(1)/y`.
 
 ## 0.164.0 _2026-10-23_
 

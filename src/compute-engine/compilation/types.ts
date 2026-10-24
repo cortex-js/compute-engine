@@ -1,6 +1,10 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Type } from '../../common/type/types.js';
-import type { Interval, IntervalResult } from '../interval/types.js';
+import type {
+  BoolInterval,
+  Interval,
+  IntervalResult,
+} from '../interval/types.js';
 
 /**
  * Source code in the target language
@@ -2003,8 +2007,10 @@ export interface LanguageTarget<
 
 /**
  * What a compiled `interval-js` runner returns: an `IntervalResult` for a
- * scalar expression, and for a collection-valued one (a comprehension, a
- * list of points) an ARRAY of these, nested as the collection is. The runner
+ * scalar expression, a `BoolInterval` (`'true'`, `'false'` or `'maybe'`) for
+ * a comparison or another boolean expression, and for a collection-valued
+ * one (a comprehension, a list of points) an ARRAY of these, nested as the
+ * collection is. The runner
  * never returns a bare `Interval`: it wraps the bare enclosure of a constant
  * or of a bare variable as `{ kind: 'interval', value }`. The `Interval`
  * member stays in this union so that the code of a caller that also accepts
@@ -2016,7 +2022,11 @@ export interface LanguageTarget<
  * Defined here (not in a `types-*.ts` file) because the layering rules forbid
  * the type-definition layer from importing `interval/`; `compilation/` may.
  */
-export type IntervalValue = IntervalResult | Interval | IntervalValue[];
+export type IntervalValue =
+  | IntervalResult
+  | BoolInterval
+  | Interval
+  | IntervalValue[];
 
 /**
  * What a compiled `interval-js` runner accepts for each variable: a plain

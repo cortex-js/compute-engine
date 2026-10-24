@@ -5289,15 +5289,35 @@ export class ComputeEngineIntervalFunction extends Function {
 
 /**
  * Wrap an interpreter fallback result as a value honoring the interval-js
- * `run` contract (`IntervalValue`). A number becomes the interval result of
- * the degenerate interval, `{ kind: 'interval', value: { lo: v, hi: v } }`;
- * a collection (materialized to an array, possibly
- * nested) becomes the array of its elements' wrappings — the same shape a
- * compiled comprehension returns; any other value (a boolean, text) has no
- * interval reading and is reported as `entire`, the same "cannot bound"
- * signal the runtime proxy uses.
+ * `run` contract (`IntervalValue`). When every interval input is a point
+ * (`wide` is false):
+ * - a number becomes the interval result of the degenerate interval,
+ *   `{ kind: 'interval', value: { lo: v, hi: v } }`;
+ * - a boolean becomes the answer string `'true'` or `'false'`;
+ * - an absent value becomes `empty`;
+ * - a collection (materialized to an array, possibly nested) becomes the
+ *   array of its elements' wrappings, the same shape a compiled
+ *   comprehension returns.
+ *
+ * When an input is wider than a point (`wide`), a number, an absent value
+ * and a collection are `entire`, and a boolean is `'maybe'`. Any other value
+ * (text) has no interval reading and is `entire`, the "cannot bound" signal
+ * the runtime proxy uses.
  */
-function toIntervalValue(value: unknown): IntervalValue {
+function toIntervalValue(value: unknown, wide = false): IntervalValue {
+  // The interpreter computed the value at the midpoint of each interval input
+  // (`collapseIntervalInput`). When every input is a point, that is the value
+  // over the whole input. When an input is wider than a point (`wide`), the
+  // value at one sample does not bound the values over the input: a number
+  // is `entire` and a boolean is `'maybe'`, the answers of this target that
+  // mean "cannot bound". Without this, `Fibonacci(x)` over `[1, 10]` was
+  // `empty` (the value at 5.5), although it takes the values 1 to 55 there.
+  //
+  // A boolean is the answer string of a comparison, as compiled code of this
+  // target gives it (user decision of 2026-10-23, ROADMAP CE-210). Before,
+  // `Fibonacci(x) > 0` at `x = 5` was `entire`.
+  if (value === true || value === false)
+    return wide ? 'maybe' : value ? 'true' : 'false';
   // An ABSENT value is `empty`, the value the compiled code of this target
   // gives where there is no value at run time: a restriction whose condition
   // fails (`_IA.restrict`) and a real function outside its domain both answer
@@ -5312,14 +5332,31 @@ function toIntervalValue(value: unknown): IntervalValue {
   // already decided by the interpreter, so no code of this target reads the
   // flag of this value.
   if (value === undefined || (typeof value === 'number' && Number.isNaN(value)))
-    return { kind: 'empty' };
+    return wide ? { kind: 'entire' } : { kind: 'empty' };
   // A present number is the interval result of a point, the value compiled
   // code of this target gives for a computed number (`_IA.add(_.t, _k1)`
   // answers `{ kind: 'interval', value: { lo, hi } }`).
   if (typeof value === 'number')
-    return { kind: 'interval', value: { lo: value, hi: value } };
-  if (Array.isArray(value)) return value.map(toIntervalValue);
+    return wide
+      ? { kind: 'entire' }
+      : { kind: 'interval', value: { lo: value, hi: value } };
+  // Over a wide input the collection at the midpoint does not bound the
+  // collections over the input: its length and its nesting can differ at
+  // another point (`If(x > 0, [Fibonacci(x), 1], [2])` over `[-1, 1]`), so
+  // the whole collection is `entire`.
+  if (Array.isArray(value))
+    return wide ? { kind: 'entire' } : value.map((x) => toIntervalValue(x));
   return { kind: 'entire' };
+}
+
+/** Whether an interval-shaped input, or one nested in a collection or a
+ * variables object, has bounds that differ: the interpreter fallback then
+ * samples it at its midpoint, which does not bound the values over it. */
+function hasWideIntervalInput(value: unknown): boolean {
+  if (hasIntervalBounds(value)) return Number(value.lo) !== Number(value.hi);
+  if (Array.isArray(value)) return value.some(hasWideIntervalInput);
+  if (isRecord(value)) return Object.values(value).some(hasWideIntervalInput);
+  return false;
 }
 
 /**
@@ -5588,15 +5625,16 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
    * an interpreter-backed `run` whose results honor the interval contract.
    *
    * `BaseCompiler.buildInterpreterFallback` produces a runner that returns plain
-   * numbers (and nested arrays for collections), so its scalar output is wrapped
-   * as the interval result of a degenerate interval
-   * (`{ kind: 'interval', value: { lo: v, hi: v } }`), an absent value as
-   * `{ kind: 'empty' }` (`toIntervalValue`), and interval-shaped *inputs*
-   * (`{ lo, hi }`) are collapsed to their midpoint before interpretation. A
-   * non-scalar result cannot be bounded as a single interval, so it is reported
-   * as `{ kind: 'entire' }` — the same "cannot bound" signal the runtime proxy
-   * uses. Returning a properly interval-typed `run` lets the result carry the
-   * target's real value type without a force cast.
+   * numbers, booleans and nested arrays for collections. Interval-shaped
+   * *inputs* (`{ lo, hi }`) are collapsed to their midpoint before
+   * interpretation, and the output is wrapped by `toIntervalValue`: at a point
+   * input, a number is the interval result of a degenerate interval, a boolean
+   * is `'true'` or `'false'` and an absent value is `empty`; over an input
+   * wider than a point, the value at the midpoint does not bound the values
+   * over the input, so a boolean expression is `'maybe'` and anything else is
+   * `entire`, the "cannot bound" signal the runtime proxy uses. Returning a
+   * properly interval-typed `run` lets the result carry the target's real
+   * value type without a force cast.
    */
   private buildIntervalFallback(
     expr: Expression,
@@ -5623,10 +5661,20 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     const interpreterRun = base.run as unknown as (
       ...args: unknown[]
     ) => unknown;
+    // A boolean expression over an input wider than a point is `'maybe'`,
+    // whatever the sample at the midpoint gives: the sample can be absent
+    // (`Fibonacci(5.5) > 0`) or decided, and neither bounds the answer over
+    // the input. The interpreter still runs, so that the effects of the
+    // expression (an `Assign`) happen once per call, as on every route.
+    const isBoolean = expr.type.matches('boolean');
     const run: CompiledRunner<IntervalValue, IntervalInput> = (
       ...args: unknown[]
-    ): IntervalValue =>
-      toIntervalValue(interpreterRun(...args.map(collapseIntervalInput)));
+    ): IntervalValue => {
+      const wide = args.some(hasWideIntervalInput);
+      const value = interpreterRun(...args.map(collapseIntervalInput));
+      if (wide && isBoolean) return 'maybe';
+      return toIntervalValue(value, wide);
+    };
     return { ...base, run };
   }
 
