@@ -2,6 +2,17 @@
 
 ### Behavior Changes
 
+- **The structural form of `ce.parse()` leaves out a spacing command
+  between the operands of a juxtaposition** (ROADMAP CE-403, Tycho row 431).
+  `ce.parse("\\,d=2", { form: "structural" })` was
+  `["Equal", ["InvisibleOperator", ["HorizontalSpacing", 3], "d"], 2]`, a
+  product of a space and `d` on the left side, while `d=\,2` was
+  `["Equal", "d", 2]`: the shape depended on where the space was. It is now
+  `["Equal", "d", 2]`, as `d\,=2`, `\quad d=2` and `x\,+\,y` (`["Add", "x",
+  "y"]`) are. The canonical form already left the spacing out. The raw form
+  keeps it, and so does the `structural` property of a raw expression. A
+  space still separates two tokens: `x\,.75e2` is `x` times `75`.
+
 - **`Mean` and the other statistics refuse a matrix when the expression is
   boxed** (ROADMAP CE-13). `Mean([[1, 2], [3, 4]])` was a valid expression
   that failed only when it was evaluated. The data parameter of `Mean`,

@@ -9,6 +9,7 @@ import {
   TypeString,
 } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import { dropSpacingOperands } from './latex-syntax/drop-spacing-operands.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
 
 import type { OneOf } from '../common/one-of.js';
@@ -3880,6 +3881,12 @@ export class ComputeEngine implements IComputeEngine {
    * bindings refer to the discarded scope, so do not retain, evaluate, or
    * compare it against later expressions. Mutually exclusive with `scope`.
    *
+   * With `form: 'structural'`, a spacing command between the operands of a
+   * juxtaposition (`\,`, `\;`, `\quad`, …) is left out, as the canonical form
+   * leaves it out: `\,d=2` is `["Equal", "d", 2]`, the same as `d=2`. The
+   * raw form keeps it (`["InvisibleOperator", ["HorizontalSpacing", 3],
+   * "d"]`), and so does the `structural` property of a raw expression.
+   *
    * @throws Only in edge cases:
    * - the argument is neither a string nor `null`/`undefined`;
    * - both `speculative` and `scope` are passed;
@@ -4161,10 +4168,13 @@ export class ComputeEngine implements IComputeEngine {
           const def = parseScope!.bindings.get(id);
           if (def !== undefined) markExternalFact(def, parseScope!);
         }
+        const internal = optionsToInternal({ form, canonical, structural });
+        // The structural form leaves out the spacing commands between the
+        // operands of a juxtaposition (`dropSpacingOperands()`).
         return box(
           this,
-          result,
-          optionsToInternal({ form, canonical, structural })
+          internal.structural ? dropSpacingOperands(result) : result,
+          internal
         );
       });
 
