@@ -154,8 +154,6 @@ describe('CONSUMERS THAT WALK OR INDEX BEHAVE AS BEFORE', () => {
 
   test.each([
     ['Sum', ['Sum', bigRing]],
-    ['Max', ['Max', bigRing]],
-    ['Min', ['Min', bigRing]],
     ['Mean', ['Mean', bigRing]],
     ['Median', ['Median', bigRing]],
     ['Total', ['Total', bigRing]],
@@ -166,6 +164,18 @@ describe('CONSUMERS THAT WALK OR INDEX BEHAVE AS BEFORE', () => {
     ['Random', ['Random', bigRing]],
   ])('%s stays unevaluated', (_name, json) => {
     unevaluated(json);
+  });
+
+  // A residue class has no order, so `Max` and `Min` of a ring are errors
+  // before the ring is walked (`docs/plans/2026-10-23-residue-class-type.md`,
+  // section 4.7); before the type `residue`, they stayed unevaluated.
+  test.each([
+    ['Max', ['Max', bigRing]],
+    ['Min', ['Min', bigRing]],
+  ])('%s is an incompatible-type error: a class has no order', (_name, json) => {
+    const result = evaluate(json);
+    expect(result.operator).toBe('Error');
+    expect(JSON.stringify(result.json)).toContain('incompatible-type');
   });
 
   test('Product stays unevaluated (as for a non-enumerable Linspace)', () => {

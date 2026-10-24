@@ -617,7 +617,7 @@ Euclidean distance between two points, broadcasting over a list of points.
 
 ### Divide
 
-`(complex | infinity, (complex | infinity)+) -> number`
+`(complex | infinity | residue, (complex | infinity | residue)+) -> number`
 
 Quotient of a numerator and one or more denominators.
 
@@ -1094,7 +1094,7 @@ Modulo: the remainder of the floored division of x by y. The sign of the result 
 
 ### Multiply
 
-`(number*) -> number`
+`((number | residue)*) -> number`
 
 Product of two or more values.
 
@@ -1116,7 +1116,7 @@ Not a Number, the result of a floating-point operation that is undefined or unre
 
 ### Negate
 
-`(complex | infinity) -> number`
+`(complex | infinity | residue) -> number`
 
 Additive Inverse
 
@@ -1193,7 +1193,7 @@ Positive infinity (+∞).
 
 ### Power
 
-`(complex | infinity, complex | signed_infinity) -> number`
+`(complex | infinity | residue, complex | residue | signed_infinity) -> number`
 
 Exponentiation: raise a base to a power.
 
@@ -1302,7 +1302,7 @@ IEEE remainder: the signed remainder after dividing x by y, with the quotient ro
 
 ### root
 
-MathJSON `Root` · `(complex | infinity, complex | infinity) -> number`
+MathJSON `Root` · `(complex | infinity | residue, complex | infinity | residue) -> number`
 
 n-th root of a value.
 
@@ -1335,7 +1335,7 @@ Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle 
 
 ### sqrt
 
-MathJSON `Sqrt` · `(complex | infinity) -> complex | infinity`
+MathJSON `Sqrt` · `(complex | infinity | residue) -> complex | infinity`
 
 Square Root
 
@@ -1346,7 +1346,7 @@ Square Root
 
 ### Square
 
-`(number) -> number`
+`(number | residue) -> number`
 
 Square of a number: x^2.
 
@@ -1357,7 +1357,7 @@ Square of a number: x^2.
 
 ### Subtract
 
-`(number+) -> number`
+`((number | residue)+) -> number`
 
 Difference between two or more values.
 

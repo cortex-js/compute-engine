@@ -1,4 +1,5 @@
 import { noteScopeDeclaration } from './scope-declaration-count.js';
+import { noteResidueDeclaration } from './boxed-expression/residue-class.js';
 import { noteScratchBinding, scratchRootOf } from './scratch-scopes.js';
 import type {
   DeclarationOrigin,
@@ -602,6 +603,12 @@ export function declareSymbolValue(
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   noteScratchDeclaration(ce, scope, boxedDef);
   updateDef(ce, name, boxedDef, def, scope, fresh);
+  // A symbol declared with a type that can hold a residue class (`r:
+  // residue`, `f: (integer) -> residue`) lets an expression of the engine
+  // hold a class before any class is made: the engine joins the set that
+  // enables the test for classes (`residue-class.ts`).
+  if (isValueDef(boxedDef))
+    noteResidueDeclaration(ce, boxedDef.value.type.type);
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -717,6 +724,12 @@ export function declareSymbolOperator(
     }
     throw e;
   }
+
+  // An operator declared to return a residue class (`MyMod: (any, any) ->
+  // residue`) lets an expression of the engine hold a class before any call
+  // of it is made: see `declareSymbolValue` above.
+  if (isOperatorDef(boxedDef))
+    noteResidueDeclaration(ce, boxedDef.operator.signature.type);
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({

@@ -96,6 +96,14 @@ export type PrimitiveType =
   // `docs/STRING_ROADMAP.md` (D1).
   | 'regexp'
   | 'color'
+  // A residue class, an element of ℤ/nℤ: the value of `ResidueClass(k, n)`,
+  // and of any head whose signature returns this type. An OPAQUE value like
+  // `regexp` and `color`: not a `scalar`, not a `collection`, disjoint from
+  // every numeric type. The type is what keeps the number rules (`c/c` is 1,
+  // `c - c` is 0) away from a class, and what the arithmetic operators name
+  // in their signatures to admit one. See
+  // `docs/plans/2026-10-23-residue-class-type.md`.
+  | 'residue'
   // A type value: a type expression reified as a first-class runtime value
   // (`TypeFrom("list<integer>")`). An OPAQUE value like `regexp` and `color`:
   // not a `scalar`, not a `collection`, no hidden element type. In TYPE-STRING

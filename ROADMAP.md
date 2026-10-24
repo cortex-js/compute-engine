@@ -2422,46 +2422,6 @@ binder-aware canonicalization: at fusion time the canonicalizer has no scope of
 the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
-### CE-136. A residue class that the name check does not see is not protected from number rules
-
-**Status:** open; wrong value; design decided (user, 2026-10-23): a primitive
-type `residue` that the arithmetic operators admit explicitly and that the
-protection reads, not a flag on the operator definition. Plan, revised after a
-dual design review: `docs/plans/2026-10-23-residue-class-type.md`.
-
-An expression that holds a `ResidueClass` is folded only by the rules of its
-ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse. The
-engine finds the class by a walk through the expression and the values of its
-symbols, which looks for an operator named `ResidueClass`
-(`containsResidueClass()` in `boxed-expression/residue-class.ts`, 38 call sites
-in 11 files).
-
-Measured 2026-10-23 on `be0cd42cd`: the two cases this entry first named are now
-protected. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to
-`ResidueClass(2, 4) / ResidueClass(2, 4)`, and `f(c)/f(c)` (no definition of
-`f`) is kept as it is. Two gaps remain:
-
-- A symbol declared `value` and boxed in a quotient before it holds a class:
-  with `w: value`, `w/w` is `1` when it is boxed, and stays `1` after
-  `w := ResidueClass(2, 4)`. The canonical form cancels it because the type
-  `value` does not exclude a number, as it cancels `x/x` for an undeclared `x`.
-  User decision 2026-10-23: no rule waits for proof of a number before it
-  cancels; a symbol that will hold a class is declared `residue`, which the plan
-  protects with or without a value. After the work lands, this entry keeps only
-  that documentation point.
-- `Max(c, x)` with a class `c` is typed `number`. User decision 2026-10-23: an
-  `incompatible-type` error.
-
-The same gap applies to an extension head whose values are residue classes
-([#471](https://github.com/cortex-js/compute-engine/issues/471)): the walk looks
-for an operator named `ResidueClass`, so with a declared `MyMod`,
-`MyMod(2, 4)/MyMod(2, 4)` simplifies to `1`. The reporter asks for a way to
-declare that the values of a head are residue classes (a definition flag, or a
-type that a signature can name), so that the simplifier reads the type. Open
-questions: whether the residue fold applies to such values or only the
-protection from number rules, and whether extensions can name the type or only
-set a flag.
-
 ## Symbolic computation
 
 ### CE-383. A divergent improper integral with a parameter is a value under a condition that nothing satisfies

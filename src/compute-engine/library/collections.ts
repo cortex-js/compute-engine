@@ -184,6 +184,7 @@ import {
   widenElementTypes,
   unfoldAliasOnDescent,
   isCutOnDescent,
+  withoutResidueArm,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -4440,9 +4441,14 @@ function broadcastingCallbackElementTypeD(
   const parameters = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
   for (let i = 0; i < sources.length; i++) {
     const parameter = (parameters[i] ?? sig.variadicArg)?.type;
+    // A parameter that admits a residue class beside its numbers (the
+    // arithmetic operators) is a scalar parameter here (`withoutResidueArm`).
     if (
       parameter === undefined ||
-      !(isSubtype(parameter, 'number') || isSubtype(parameter, 'boolean'))
+      !(
+        isSubtype(withoutResidueArm(parameter), 'number') ||
+        isSubtype(parameter, 'boolean')
+      )
     )
       return undefined;
   }

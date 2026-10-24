@@ -613,6 +613,56 @@ An unannotated function literal is deliberately excluded from definitive
 runtime type membership while its signature can still be inference-widened.
 Such a test stays symbolic rather than returning a false negative.
 
+## Residue classes: the type `residue`
+
+`residue` is the primitive type of a residue class, an element of ℤ/nℤ: the
+value of `ResidueClass(k, n)`, and of any head whose signature returns it
+(user decision 2026-10-23, `plans/2026-10-23-residue-class-type.md`). It is
+an opaque value like `regexp`, `color` and `type`:
+
+- `residue <: value <: expression <: any`; it is disjoint from every numeric
+  type, from `boolean`, `string`, `character`, and every collection type.
+  `narrow('residue', 'number')` is `never`.
+- A join with a number type is the union: `widen('residue', 'integer')` is
+  `integer | residue`, not `value`. The join with `unknown` is `residue`.
+- A list of classes is read by its cells, as a list of booleans is: `[c, d]`
+  is a `list<residue^2>`, and `ℤ/nℤ` (`QuotientRing(Integers, n)`) is a
+  `set<residue>`. A `residue` cell cannot hold a number, so such a list is
+  never a `vector` or a `tensor`.
+- A symbol declared `residue` accepts a class and refuses an integer: an
+  integer is a representative of a class, not the class (`Element(7, ℤ/5ℤ)` is
+  `False`).
+
+The type does two things that the name `ResidueClass` did before:
+
+- **Admission.** The arithmetic operators that have residue arithmetic
+  (`Add`, `Subtract`, `Multiply`, `Divide`, `Negate`, `Power`, `Square`,
+  `Sqrt`, `Root`) name `residue` in their parameter types, and their numeric
+  argument checks (`checkNumericArgs`, `validate.ts`) admit it. Every other
+  operator refuses a class through its declared parameter type: `Sin(c)`,
+  `Floor(c)`, `Mod(c, 5)` are `incompatible-type` errors at boxing. `Max`
+  and `Min` refuse a class in their canonical handlers, because classes have
+  no order and no parameter type can spell "a value that is not a class".
+- **Protection.** The rules of canonicalization, evaluation and
+  simplification that are wrong for a class (`c/c` is not 1 when `c` has no
+  inverse, `c - c` is the class 0, `c + ∞` is not `∞`) ask
+  `containsResidueClass()` (`boxed-expression/residue-class.ts`) first. Its
+  evidence is the name `ResidueClass` at any depth, the result type of a
+  callee's signature (an operator declared `(any, any) -> residue`, a
+  function value whose inferred signature returns `residue`, the callee of
+  an `Apply`), and the declared type of a symbol (`r: residue` is protected
+  before `r` has a value). The type of the expression itself is not read:
+  computing it for every expression a rule looks at costs more than the
+  rules. The arithmetic of `ResidueClass` (the residue fold) stays keyed on
+  the name: a head with another name gets the admission and the protection,
+  and defines its own arithmetic.
+
+A symbol typed `value` or `unknown` can hold a class without saying so, and
+the number rules still apply to it: with `w: value`, `w/w` is `1` when it is
+boxed, as `x/x` is for an undeclared `x`. A symbol that will hold a class is
+declared `residue`. The compiled targets decline an expression that holds a
+class.
+
 ## Protocols, sums, and objects
 
 Protocols are global nominal contracts. Conformance may be conditional on type

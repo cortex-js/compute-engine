@@ -111,6 +111,7 @@ import {
   resolveTypeForCompilation as resolveType,
   placeholderSlotsAs,
   signatureArms,
+  withoutResidueArm,
 } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -1212,7 +1213,13 @@ function allParamsNumeric(signature: Type): boolean {
     ...(signature.optArgs ?? []),
     ...(signature.variadicArg ? [signature.variadicArg] : []),
   ];
-  return params.length > 0 && params.every((p) => isSubtype(p.type, 'number'));
+  // A parameter that admits a residue class beside its numbers (the
+  // arithmetic operators) is numeric here: a free argument of `x / 2` is
+  // inferred a number, as before the `residue` arm.
+  return (
+    params.length > 0 &&
+    params.every((p) => isSubtype(withoutResidueArm(p.type), 'number'))
+  );
 }
 
 const EMPTY_FRESHLY_INFERRED: ReadonlySet<BoxedValueDefinition> = new Set();
@@ -2349,6 +2356,9 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   // `type` (a reified type expression) is another such leaf: a callback over
   // a `list<type>` deserves the same contextual element stamp.
   'type',
+  // `residue` (a residue class) is another such leaf: a callback over the
+  // elements of `ℤ/nℤ`, a `set<residue>`, deserves the stamp too.
+  'residue',
 ]);
 
 /**

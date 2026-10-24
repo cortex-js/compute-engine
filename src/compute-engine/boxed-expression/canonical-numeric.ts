@@ -347,15 +347,13 @@ export function canonicalNumericOperator(
   metadata?: Metadata
 ): Expression | null {
   let ops: ReadonlyArray<Expression> = [];
+  // `residue: true` for the operators that have residue arithmetic (a
+  // residue class is admitted as an operand); `Exp`, `Ln` and `Log` do not.
   if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, canonicalOps, { flatten: name });
-  else if (
-    name === 'Negate' ||
-    name === 'Square' ||
-    name === 'Sqrt' ||
-    name === 'Exp'
-  )
-    ops = checkNumericArgs(ce, canonicalOps, 1);
+    ops = checkNumericArgs(ce, canonicalOps, { flatten: name, residue: true });
+  else if (name === 'Negate' || name === 'Square' || name === 'Sqrt')
+    ops = checkNumericArgs(ce, canonicalOps, { count: 1, residue: true });
+  else if (name === 'Exp') ops = checkNumericArgs(ce, canonicalOps, 1);
   else if (name === 'Ln' || name === 'Log') {
     ops = checkNumericArgs(ce, canonicalOps);
     if (ops.length === 0) ops = [ce.error('missing')];
@@ -367,12 +365,12 @@ export function canonicalNumericOperator(
     // is `Log(8, 2, 3)`). Evaluation reads only the first two operands.
     else if (ops.length > 2 && ce.strict) ops = checkArity(ce, ops, 2);
   } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, canonicalOps, 2);
+    ops = checkNumericArgs(ce, canonicalOps, { count: 2, residue: true });
   else if (name === 'Divide') {
     // Note: Divide can have more than one argument, i.e.
     // Divide(a, b, c) = a / b / c
     // But it needs at least two arguments
-    ops = checkNumericArgs(ce, canonicalOps);
+    ops = checkNumericArgs(ce, canonicalOps, { residue: true });
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;

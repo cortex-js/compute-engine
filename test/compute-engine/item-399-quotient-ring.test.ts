@@ -50,12 +50,12 @@ describe('QuotientRing(Integers, n) is a finite collection (#399)', () => {
 });
 
 describe('QuotientRing element type (#399)', () => {
-  test('the element type is value: an element is a residue class', () => {
+  test('the element type is residue: an element is a residue class', () => {
     expect(ce.parse('\\mathbb{Z}/5\\mathbb{Z}').type.toString()).toBe(
-      'set<value>'
+      'set<residue>'
     );
     expect(ce.box(['QuotientRing', 'Integers', 'n']).type.toString()).toBe(
-      'set<value>'
+      'set<residue>'
     );
   });
   test('a base other than Integers has no class value: unknown', () => {

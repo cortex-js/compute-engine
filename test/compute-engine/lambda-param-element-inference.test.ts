@@ -933,7 +933,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     // the lowered lambda route now keeps an Error result as the cell's
     // value, as the general route has since 2026-09-03.
     expect(value?.toString()).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
     );
   });
 

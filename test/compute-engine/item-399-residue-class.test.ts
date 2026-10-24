@@ -55,8 +55,8 @@ describe('ResidueClass: canonical form (#399)', () => {
     );
   });
 
-  test('a class has type value', () => {
-    expect(ce.box(RC(7, 5) as Expression).type.toString()).toBe('value');
+  test('a class has type residue', () => {
+    expect(ce.box(RC(7, 5) as Expression).type.toString()).toBe('residue');
   });
 
   test('evaluate() re-reduces a class whose operands became literals', () => {
@@ -215,9 +215,13 @@ describe('ResidueClass: integers combine with a class (#399)', () => {
 
   test('Mod stays the remainder and does not take a class', () => {
     expect(evaluated(['Mod', 7, 5])).toBe(2);
-    expect(ce.box(['Mod', RC(2, 7), 5] as Expression).evaluate().operator).toBe(
-      'Mod'
-    );
+    // `Mod` has no residue arithmetic, so a class is refused at boxing by
+    // its numeric parameter type: a class has the type `residue`, which is
+    // not a number. (Before the type, the call was admitted and stayed
+    // unevaluated.)
+    const call = ce.box(['Mod', RC(2, 7), 5] as Expression);
+    expect(call.isValid).toBe(false);
+    expect(call.op1.operator).toBe('Error');
   });
 
   test('a class is not ordered', () => {
@@ -273,14 +277,14 @@ describe('ResidueClass: classes of different moduli stay unevaluated (#399)', ()
 
 describe('ResidueClass: type (#399)', () => {
   const cases: [string, unknown, string][] = [
-    ['a class', RC(2, 5), 'value'],
+    ['a class', RC(2, 5), 'residue'],
     // `broadcastable<value>` is `value | indexed_collection<value>`, which
     // is `value`: the lift answers the bare top type (2026-10-17).
-    ['a sum with a class', ['Add', RC(2, 5), 'x'], 'value'],
-    ['a product with a class', ['Multiply', RC(2, 5), 'x'], 'value'],
-    ['a power of a class', ['Power', RC(2, 5), 'x'], 'value'],
-    ['ℤ/5ℤ has classes of type value', Z(5), 'set<value>'],
-    ['ℤ/nℤ, n symbolic', Z('n'), 'set<value>'],
+    ['a sum with a class', ['Add', RC(2, 5), 'x'], 'residue'],
+    ['a product with a class', ['Multiply', RC(2, 5), 'x'], 'residue'],
+    ['a power of a class', ['Power', RC(2, 5), 'x'], 'residue'],
+    ['ℤ/5ℤ has classes of type residue', Z(5), 'set<residue>'],
+    ['ℤ/nℤ, n symbolic', Z('n'), 'set<residue>'],
     [
       'ℚ/5ℚ has no class type',
       ['QuotientRing', 'RationalNumbers', 5],
@@ -293,9 +297,9 @@ describe('ResidueClass: type (#399)', () => {
     });
   }
 
-  test('the parsed ℤ/5ℤ has the element type value', () => {
+  test('the parsed ℤ/5ℤ has the element type residue', () => {
     expect(ce.parse('\\mathbb{Z}/5\\mathbb{Z}').type.toString()).toBe(
-      'set<value>'
+      'set<residue>'
     );
   });
 });

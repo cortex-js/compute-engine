@@ -318,7 +318,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `reduce` | `Reduce` | `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value. |
 | `repeat` | `Repeat` | `(value: any, count: integer?) -> list` | Produce a sequence by repeating a single value. |
 | `replaceAt` | `ReplaceAt` | `(indexed_collection<T>, integer, T) -> list<T> where T: any` | Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`. |
-| `residueClass` | `ResidueClass` | `(any, any) -> value` | An element of ℤ/nℤ: the class of the integer `k` modulo `n`. |
+| `residueClass` | `ResidueClass` | `(any, any) -> residue` | An element of ℤ/nℤ: the class of the integer `k` modulo `n`. |
 | `rest` | `Rest` | `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T: any)` | Return the collection without the first element. |
 | `reverse` | `Reverse` | `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T: any)` | Reverse the order of the elements of an indexed collection. |
 | `rotateLeft` | `RotateLeft` | `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T: any)` | Rotate the elements of the collection to the left by n positions. |
@@ -460,7 +460,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `dirichletBeta` | `DirichletBeta` | `(complex \| infinity) -> number` | Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1. |
 | `dirichletEta` | `DirichletEta` | `(complex \| infinity) -> number` | Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1. |
 | `distance` | `Distance` | `(list<list<number>> \| list<number> \| list<tuple> \| tuple, list<list<number>> \| list<number> \| list<tuple> \| tuple) -> number` | Euclidean distance between two points, broadcasting over a list of points. |
-| — | `Divide` | `(complex \| infinity, (complex \| infinity)+) -> number` | Quotient of a numerator and one or more denominators. |
+| — | `Divide` | `(complex \| infinity \| residue, (complex \| infinity \| residue)+) -> number` | Quotient of a numerator and one or more denominators. |
 | `elementMax` | `ElementMax` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `elementMin` | `ElementMin` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `eulerGamma` | `EulerGamma` | constant `real<0.5772156649015328..0.5772156649015329>` = `0.577215664901532860607` | The Euler–Mascheroni constant γ ≈ 0.5772. |
@@ -502,16 +502,16 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `measurement` | `Measurement` | `(value, value) -> value` | A nominal value carrying a 1σ absolute uncertainty. |
 | `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers. |
 | — | `Mod` | `(real, real) -> real` | Modulo: the remainder of the floored division of x by y. |
-| — | `Multiply` | `(number*) -> number` | Product of two or more values. |
+| — | `Multiply` | `((number \| residue)*) -> number` | Product of two or more values. |
 | — | `NaN` | constant `number` = `NaN` | Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. |
-| — | `Negate` | `(complex \| infinity) -> number` | Additive Inverse |
+| — | `Negate` | `(complex \| infinity \| residue) -> number` | Additive Inverse |
 | `negativeInfinity` | `NegativeInfinity` | constant `-oo` = `-oo` | Negative infinity (−∞). |
 | `numerator` | `Numerator` | `(number) -> nothing \| number` | Numerator of an expression |
 | `numeratorDenominator` | `NumeratorDenominator` | `(number) -> nothing \| tuple<number, number>` | Sequence of Numerator and Denominator of an expression |
 | — | `PlusMinus` | `(T, U) -> tuple<T, U> where T: value, U: value` | Plus or Minus |
 | `polyGamma` | `PolyGamma` | `(order: integer, complex \| infinity) -> number` | Polygamma function, the n-th derivative of the digamma function |
 | `positiveInfinity` | `PositiveInfinity` | constant `+oo` = `+oo` | Positive infinity (+∞). |
-| — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
+| — | `Power` | `(complex \| infinity \| residue, complex \| residue \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
 | `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b`. |
@@ -520,12 +520,12 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `re` | `Re` | `(complex \| infinity) -> number` | `Re` is an alias for `Real`, which is the preferred name. |
 | `real` | `Real` | `(complex \| infinity) -> number` | Real part of a complex number. |
 | `remainder` | `Remainder` | `(T, T) -> T where T: number` | IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`) |
-| `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
+| `root` | `Root` | `(complex \| infinity \| residue, complex \| infinity \| residue) -> number` | n-th root of a value. |
 | `round` | `Round` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number to the nearest integer, or with a step to the nearest multiple of the step. |
 | `sign` | `Sign` | `(complex \| signed_infinity \| ~oo) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
-| `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
-| — | `Square` | `(number) -> number` | Square of a number: x^2. |
-| — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
+| `sqrt` | `Sqrt` | `(complex \| infinity \| residue) -> complex \| infinity` | Square Root |
+| — | `Square` | `(number \| residue) -> number` | Square of a number: x^2. |
+| — | `Subtract` | `((number \| residue)+) -> number` | Difference between two or more values. |
 | `sum` | `Sum` | `(any, tuple*) -> number` | `Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. |
 | `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets. |
 | `trigamma` | `Trigamma` | `(complex \| infinity) -> number` | Trigamma function, the derivative of the digamma function |

@@ -79,6 +79,7 @@ import {
   broadcastCellType,
   functionResult,
   signatureArms,
+  withoutResidueArm,
 } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
@@ -227,7 +228,10 @@ function signatureParamsPropagateAbsence(signature: Type): boolean {
     typeof t !== 'string' &&
     (t.kind === 'signature' ||
       (t.kind === 'union' && t.types.every((x) => isFunctionLike(x))));
-  const isNumeric = (t: Type) => isSubtype(t, 'number');
+  // A parameter that admits a residue class beside its numbers
+  // (`complex | infinity | residue`, the arithmetic operators) is numeric
+  // here: a class beside an absent operand gives `NaN`, as a number does.
+  const isNumeric = (t: Type) => isSubtype(withoutResidueArm(t), 'number');
   const isCollection = (t: Type) =>
     isSubtype(t, COLLECTION_SHAPE_TYPE) && !isSubtype(t, 'string');
   return arms.some((arm) => {

@@ -226,7 +226,7 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
         .evaluate()
         .toString()
     ).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
     );
     // Union source with a narrower predicate: admitted (partial overlap).
     expect(

@@ -1377,7 +1377,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         return cannotBeResidueClass(x) ? false : undefined;
       },
       elttype: (expr) =>
-        integerQuotientModulus(expr) === undefined ? undefined : 'value',
+        integerQuotientModulus(expr) === undefined ? undefined : 'residue',
     },
   },
 
@@ -1400,7 +1400,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `QuotientRing` does, and a free `k` or `n` is not inferred an integer.
     // A fraction `k` with a unit denominator reads as `u · v⁻¹`, so
     // `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`.
-    signature: '(any, any) -> value',
+    signature: '(any, any) -> residue',
     // Lazy, so that `.N()` does not approximate the operands first: a class
     // is exact, and `ResidueClass(q, 7)` with `q = 1/3` is
     // `ResidueClass(5, 7)` under `.N()` as under `evaluate()`.

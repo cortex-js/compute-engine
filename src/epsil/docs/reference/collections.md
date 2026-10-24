@@ -1468,7 +1468,7 @@ replaceAt([1, 2, 3], 2, 20)
 
 ### residueClass
 
-MathJSON `ResidueClass` · `(any, any) -> value`
+MathJSON `ResidueClass` · `(any, any) -> residue`
 
 An element of ℤ/nℤ: the class of the integer `k` modulo `n`.
 

@@ -1322,6 +1322,111 @@ export function typeContainsMissing(
 }
 
 /**
+ * True when a value of type `t` can be a residue class: `t` is `residue`, or
+ * has a `residue` arm at some nesting level (`integer | residue`,
+ * `list<residue>`, `residue | missing`), read through transparent aliases
+ * as {@link typeContainsMissing} reads them. `value`, `unknown` and `any`
+ * answer false: they can hold a class, but they do not say so, and the
+ * arithmetic operators read them as possible numbers (`validate.ts`).
+ *
+ * The test that admits a class in a numeric position and that recognizes a
+ * class by its type (`residue-class.ts`): a class is protected from the
+ * number rules by its type, not by the name of the head that made it
+ * (`docs/plans/2026-10-23-residue-class-type.md`).
+ */
+export function hasResidueArm(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): boolean {
+  return containsPrimitive(t, (p) => p === 'residue', seen);
+}
+
+/**
+ * `t` without its `residue` arm, at the top level only: `residue` is
+ * `never`, `complex | infinity | residue` is `complex | infinity`, any other
+ * type is itself. For a predicate that asks whether a PARAMETER is numeric
+ * (the propagation of an absent operand, `boxed-operator-definition.ts`; the
+ * numeric inference of free arguments, `box.ts`): the arithmetic operators
+ * admit a residue class beside their numbers, and a class beside an absent
+ * operand gives `NaN` as a number does, so the `residue` arm does not change
+ * what those predicates decide.
+ */
+export function withoutResidueArm(t: Readonly<Type>): Type {
+  if (t === 'residue') return 'never';
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  if (!t.types.includes('residue')) return t;
+  const rest = t.types.filter((x) => x !== 'residue');
+  if (rest.length === 0) return 'never';
+  if (rest.length === 1) return rest[0];
+  return { kind: 'union', types: rest };
+}
+
+/**
+ * `t` without its `residue` arms at every level: the top level
+ * ({@link withoutResidueArm}), the cells of a list, a set or a collection
+ * (`list<integer | residue>` is `list<integer>`, `list<residue>` is
+ * `list<never>`), the components of a tuple, and the arms of a union of
+ * them. For the type handlers of the arithmetic operators, which type the
+ * numeric answer over the operands read without their classes
+ * (`library/arithmetic.ts`).
+ */
+export function withoutResidueArmDeep(t: Readonly<Type>): Type {
+  const top = withoutResidueArm(t);
+  if (typeof top === 'string') return top;
+  switch (top.kind) {
+    case 'union':
+      return { ...top, types: top.types.map(withoutResidueArmDeep) };
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = withoutResidueArmDeep(top.elements);
+      return elements === top.elements ? top : { ...top, elements };
+    }
+    case 'tuple':
+      return {
+        ...top,
+        elements: top.elements.map((e) => ({
+          ...e,
+          type: withoutResidueArmDeep(e.type),
+        })),
+      };
+    default:
+      return top;
+  }
+}
+
+/**
+ * Whether no value of type `t` is left once its `residue` arms are removed
+ * ({@link withoutResidueArmDeep}): `t` is `never` or `nan`, or a collection
+ * or a tuple with such a cell. The values of such a type are residue
+ * classes, or collections of them, for certain.
+ */
+export function isUninhabitedWithoutResidue(t: Readonly<Type>): boolean {
+  const rest = withoutResidueArmDeep(t);
+  const uninhabited = (x: Readonly<Type>): boolean => {
+    if (x === 'never' || x === 'nan') return true;
+    if (typeof x === 'string') return false;
+    switch (x.kind) {
+      case 'union':
+        return x.types.every(uninhabited);
+      case 'list':
+      case 'set':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+        return uninhabited(x.elements);
+      case 'tuple':
+        return x.elements.some((e) => uninhabited(e.type));
+      default:
+        return false;
+    }
+  };
+  return uninhabited(rest);
+}
+
+/**
  * True if a value of type `t` can hold the absence marker `Missing` at some
  * nesting level: `t` has a `missing` arm ({@link typeContainsMissing}), or
  * `any` at some position, because `any` admits the absence markers. A value
@@ -1357,14 +1462,27 @@ export function typeCouldHoldMissing(
 }
 
 /** Whether `t` has, at some nesting level, a primitive type that `leaf`
- * accepts. The walk is the one of {@link typeContainsMissing}. */
+ * accepts. The walk is the one of {@link typeContainsMissing}.
+ *
+ * `memo` holds the answer for each alias unfolded in this walk, by name: an
+ * alias that two arms of a union name (`list<A^2> | list<A^3>`) is walked
+ * once, not once per arm, so a chain of such aliases costs its depth and not
+ * two to the power of its depth (a chain of depth 32 took minutes without
+ * it, measured 2026-10-23 on `declareType()`, which asks this question for
+ * every declaration through `hasResidueArm`). The registry does not change
+ * during one walk, so the memo is sound for the walk; it is not kept
+ * between walks. A reference with type arguments (an applied nominal type)
+ * is not unfolded here, so only an alias name is a key.
+ */
 function containsPrimitive(
   t: Readonly<Type>,
   leaf: (p: string) => boolean,
-  seen?: AliasDescent
+  seen?: AliasDescent,
+  memo: Map<string, boolean> = new Map()
 ): boolean {
   if (typeof t === 'string') return leaf(t);
-  const contains = (x: Readonly<Type>) => containsPrimitive(x, leaf, seen);
+  const contains = (x: Readonly<Type>) =>
+    containsPrimitive(x, leaf, seen, memo);
   switch (t.kind) {
     case 'union':
     case 'intersection':
@@ -1383,9 +1501,29 @@ function containsPrimitive(
     case 'object':
       return Object.values(t.elements).some(contains);
     case 'reference': {
+      const key = t.args === undefined ? t.name : undefined;
+      if (key !== undefined) {
+        const known = memo.get(key);
+        if (known !== undefined) return known;
+      }
       const unfolded = unfoldAliasOnDescent(t, seen);
+      // A cut of the descent guard (the alias is already being unfolded
+      // further up) answers `false` for this occurrence only: the answer for
+      // the alias is set by the occurrence that unfolds it.
+      //
+      // An answer computed below a cut is kept too. With `A = B | residue`
+      // and `B = list<A>`, `B` reached through `A` sees `A` cut and is kept
+      // as `false`, which is wrong for `B` on its own. It does not change
+      // the answer of the walk: the walk joins its answers with "or", so a
+      // kept `false` is wrong only when the cut alias (`A`) ends `true`, and
+      // that `true` reaches the top of the walk at once, before any later
+      // occurrence of `B` is read. Not keeping an answer computed below a
+      // cut made a chain of 32 aliases with a self-recursive arm
+      // exponential again (measured 2026-10-23).
       if (unfolded === undefined || unfolded.type === t) return false;
-      return containsPrimitive(unfolded.type, leaf, unfolded.seen);
+      const result = containsPrimitive(unfolded.type, leaf, unfolded.seen, memo);
+      if (key !== undefined) memo.set(key, result);
+      return result;
     }
     default:
       return false;

@@ -246,6 +246,10 @@ import {
   unfoldAliasOnDescent,
   widen,
   widenAll,
+  hasResidueArm,
+  withoutResidueArm,
+  withoutResidueArmDeep,
+  isUninhabitedWithoutResidue,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -398,6 +402,8 @@ import {
 import { usesExpressionArithmetic } from './units.js';
 import {
   containsResidueClass,
+  residueResultType,
+  typeIsResidueForCertain,
   isResidueClass,
   isResidueClassOperand,
   residueArithmetic,
@@ -4003,6 +4009,120 @@ function closeImaginaryPointComponents(t: Type): Type {
   return elements.every((e, i) => e === t.elements[i]) ? t : { ...t, elements };
 }
 
+/**
+ * The result type of an arithmetic operator whose operand holds a residue
+ * class, with the shape of a collection operand: `residue` for `c + d`,
+ * `list<residue^2>` for `c · [1, 2]`, `tuple<residue, residue>` for
+ * `c + (1, 2)`, `nan | residue` cells when an operand is provably `NaN`
+ * (`residueResultType`). The arithmetic handlers compute the shape of a
+ * collection result themselves (they are exempt from the generic broadcast
+ * lift, `broadcastExemptions: ['collection-result']`), so the shape is read
+ * from the operator's own derivation (`numericType`: the type handler of the
+ * operator, or `context.derive`) over the operands with each class read as
+ * an integer cell: a class scales a list or a point cell by cell, as a
+ * number does.
+ */
+function residueShapedResultType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  numericType: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined
+): Type {
+  const cell = residueResultType(ops);
+  // The shape comes from the operator's own derivation over the operands
+  // with each class read as an integer cell: `c · (1, 2)` is a tuple of
+  // classes because `Multiply` scales a point, where `Add` of a scalar and
+  // a point is an error.
+  const placeholders = ops.map((x) =>
+    isResidueClassOperand(x, engine)
+      ? describeType(
+          hasResidueArm(x.type) ? residueAsInteger(x.type) : 'integer'
+        )
+      : x
+  );
+  const shaped = withResidueCells(numericType(placeholders) ?? cell, cell);
+  // An operand that IS a class (typed `residue`, or holding a `ResidueClass`
+  // call in its structure) makes the result a class. An operand that MAY be
+  // one (`number | residue`: a parameter typed from a signature that admits
+  // a class beside its numbers) may be a number too, and so may the result:
+  // the operator's numeric answer over the operands without their `residue`
+  // arm is joined in (`u / 2` with `u: integer | residue` is
+  // `rational | residue`, not `integer | residue`).
+  if (ops.some((x) => isCertainlyResidueClass(x, engine))) return shaped;
+  const numeric = ops.map((x) =>
+    hasResidueArm(x.type) ? describeType(withoutResidueArmDeep(x.type)) : x
+  );
+  const alternative = numericType(numeric);
+  return alternative === undefined ? shaped : widen(shaped, alternative);
+}
+
+/**
+ * Whether the operand is a residue class for certain: its type is `residue`
+ * (an absent or `NaN` arm beside it aside), or its structure holds a
+ * `ResidueClass` call or a symbol whose value holds one
+ * (`isResidueClassOperand` with a type that does not say `residue`).
+ */
+function isCertainlyResidueClass(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  if (!hasResidueArm(d.type)) return isResidueClassOperand(d, engine);
+  // `residue`, `nan | residue`, `list<residue^2>`: nothing but classes.
+  return isUninhabitedWithoutResidue(stripMissingFromType(d.type));
+}
+
+/** `t` with `residue` read as `integer` at every level (`list<residue^2>`
+ * is `list<integer^2>`, `integer | residue` is `integer`): the operand of
+ * the operator's own derivation, which gives the shape of the result. */
+function residueAsInteger(t: Type): Type {
+  if (t === 'residue') return 'integer';
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'union':
+      return reduceType({ ...t, types: t.types.map(residueAsInteger) });
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return { ...t, elements: residueAsInteger(t.elements) };
+    case 'tuple':
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: residueAsInteger(e.type),
+        })),
+      };
+    default:
+      return t;
+  }
+}
+
+/** `shape` with every cell replaced by `cell`: a list, a tuple or a union
+ * of them keeps its structure, anything else is the cell itself. */
+function withResidueCells(shape: Type, cell: Type): Type {
+  if (typeof shape === 'string') return cell;
+  switch (shape.kind) {
+    case 'list':
+      return { ...shape, elements: withResidueCells(shape.elements, cell) };
+    case 'tuple':
+      return {
+        ...shape,
+        elements: shape.elements.map((e) => ({
+          ...e,
+          type: withResidueCells(e.type, cell),
+        })),
+      };
+    case 'union':
+      return reduceType({
+        kind: 'union',
+        types: shape.types.map((t) => withResidueCells(t, cell)),
+      });
+    default:
+      return cell;
+  }
+}
+
 /** The type handler of `Add`, also used by `Subtract`
  * (`subtractTypeHandler`). */
 function addTypeHandler(
@@ -4011,7 +4131,9 @@ function addTypeHandler(
 ): BoxedType | undefined {
   return BoxedType.forResult(
     ops.some((x) => isResidueClassOperand(x, context.engine))
-      ? 'value'
+      ? residueShapedResultType(ops, context.engine, (o) =>
+          addTypeOnTypes(o, context.engine)
+        )
       : signedInfinitySum(
           ops,
           addTypeOnTypes(ops.map(withoutNonArithmeticArms), context.engine)
@@ -4040,7 +4162,12 @@ function subtractTypeHandler(
 ): BoxedType | undefined {
   if (ops.length < 2) return undefined;
   if (ops.some((x) => isResidueClassOperand(x, context.engine)))
-    return BoxedType.forResult('value', context.engine._typeResolver);
+    return BoxedType.forResult(
+      residueShapedResultType(ops, context.engine, (o) =>
+        context.derive('Subtract', o)
+      ),
+      context.engine._typeResolver
+    );
   const terms: OperandDescriptor[] = [ops[0]];
   for (const x of ops.slice(1)) {
     const t = context.derive('Negate', [x]);
@@ -6446,7 +6573,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-      signature: '(complex | infinity, (complex | infinity)+) -> number',
+      signature:
+        '(complex | infinity | residue, (complex | infinity | residue)+) -> number',
       examples: ['[6 / 4, x / 2]'],
       nanBehavior: 'propagate',
       type: (ops, context) => {
@@ -6468,7 +6596,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A quotient that holds a residue class is not a number: it is a
         // class, or it stays unevaluated (see the `evaluate` handler).
         if (ops.some((x) => isResidueClassOperand(x, context.engine)))
-          return BoxedType.forResult('value', context.engine._typeResolver);
+          return BoxedType.forResult(
+            residueShapedResultType(ops, context.engine, (o) =>
+              context.derive('Divide', o)
+            ),
+            context.engine._typeResolver
+          );
         if (operandLiteralValueOnTypes(den) === 1)
           return BoxedType.forResult(num.type, context.engine._typeResolver);
         // A numerator or a denominator typed `any` or `value` (a declared
@@ -9000,13 +9133,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Multiply'),
-      signature: '(number*) -> number',
+      signature:
+        '((number | residue)*) -> number',
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
         if (ops.some((x) => isResidueClassOperand(x, engine)))
-          return BoxedType.forResult('value', engine._typeResolver);
+          return BoxedType.forResult(
+            residueShapedResultType(ops, engine, (o) =>
+              derive('Multiply', o)
+            ),
+            engine._typeResolver
+          );
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
         // A factor typed `any` or `value` (a declared symbol, a call typed
@@ -10021,7 +10160,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforcement seam is being bypassed, the folded literal types more
       // sharply than the unfolded node, and the folded value is exactly
       // what the gate would answer.
-      signature: '(complex | infinity) -> number',
+      signature:
+        '(complex | infinity | residue) -> number',
       examples: ['-(x - 1)'],
       nanBehavior: 'propagate',
       partiality: 'total',
@@ -10230,7 +10370,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // discipline relies on it (`resultIsComplexValued`,
       // javascript-target.ts), and the per-call sharpness lives in the
       // type handler below.
-      signature: '(complex | infinity, complex | signed_infinity) -> number',
+      signature:
+        '(complex | infinity | residue, complex | signed_infinity | residue) -> number',
       examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -10242,7 +10383,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // A power that holds a residue class, in its base or in its
             // exponent, is not a number.
             if (ops.some((x) => isResidueClassOperand(x, context.engine)))
-              return BoxedType.forResult('value', context.engine._typeResolver);
+              return BoxedType.forResult(
+                residueShapedResultType(ops, context.engine, (o) =>
+                  context.derive('Power', o)
+                ),
+                context.engine._typeResolver
+              );
             // A proven-NaN operand: decline, so the framework's proven-NaN arm
             // answers the sharp `nan` from the propagate policy (the
             // `Sqrt`/`Erf` precedent).
@@ -10889,7 +11035,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex`, so the policy derived from the signature would be
       // `reject`). The values are folded by `root()` (arithmetic-power.ts),
       // which delegates the non-finite cases to `pow`.
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature:
+        '(complex | infinity | residue, complex | infinity | residue) -> number',
       examples: ['[Root(8, 3), N(Root(2, 3))]'],
       nanBehavior: 'propagate',
       requires: ([, n]) => {
@@ -10903,7 +11050,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           isResidueClassOperand(base, context.engine) ||
           isResidueClassOperand(exp, context.engine)
         )
-          return BoxedType.forResult('value', context.engine._typeResolver);
+          return BoxedType.forResult(
+            residueShapedResultType([base, exp], context.engine, (o) =>
+              context.derive('Root', o)
+            ),
+            context.engine._typeResolver
+          );
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the `Sqrt` precedent).
         if (provablyNaNOperand(base) || provablyNaNOperand(exp))
@@ -11452,7 +11604,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // live in `BoxedNumber.sqrt()`, which both routes call. The result
       // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
       // which the signed pair excludes.
-      signature: '(complex | infinity) -> complex | infinity',
+      signature:
+        '(complex | infinity | residue) -> complex | infinity',
       examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
@@ -11460,7 +11613,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x], context) => {
         // A root of a residue class is not a number (it stays unevaluated).
         if (isResidueClassOperand(x, context.engine))
-          return BoxedType.forResult('value', context.engine._typeResolver);
+          return BoxedType.forResult(
+            residueShapedResultType([x], context.engine, (o) =>
+              context.derive('Sqrt', o)
+            ),
+            context.engine._typeResolver
+          );
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the propagated value's own type).
         if (provablyNaNOperand(x)) return undefined;
@@ -11640,7 +11798,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Square(±∞) = +∞`, and `Square(~oo) = ~oo` (a positive power of
       // `~oo` is `~oo` in every direction of approach). A precise carrier
       // declared here would be a claim nothing consults.
-      signature: '(number) -> number',
+      signature:
+        '(number | residue) -> number',
       examples: ['[Square(3), Square(x + 1)]'],
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
@@ -11682,11 +11841,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastExemptions: ['tuples', 'collection-result'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
-      signature: '(number+) -> number',
+      signature:
+        '((number | residue)+) -> number',
       examples: ['5 - 3 - x'],
       type: subtractTypeHandler,
       canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args);
+        args = checkNumericArgs(engine, args, { residue: true });
         if (args.length === 0) return engine.error('missing');
         // Unary `Subtract(x)` folds to `x` through `canonicalAdd`, erasing
         // the operator before the arithmetic evaluate guard can examine the
@@ -12453,7 +12613,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumTypeOnTypes(ops, 'max'),
+          // A residue class has no order: the call is an error
+          // (`residueExtremumError`).
+          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'max'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -12491,7 +12653,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumTypeOnTypes(ops, 'min'),
+          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'min'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -14590,6 +14752,14 @@ function processMinMaxItem(
   // nested collections, an absent datum at any depth is found.
   if (isAbsentValue(item)) return [ce.NaN, []];
 
+  // A residue class has no order, so it is not a datum of an extremum: an
+  // operand, an element of ℤ/nℤ, in a list or a lazy source, or a value a
+  // `value`-typed operand turned out to hold, is an `incompatible-type`
+  // error, as a dictionary is. (A call with an operand typed `residue` is
+  // typed `error` when it is boxed, `residueExtremumError`.)
+  if (isResidueClass(item) || typeIsResidueForCertain(item.type.type))
+    return [ce.typeError('number', item.type, item), []];
+
   // An interval is continuous
   if (isFunction(item, 'Interval')) {
     let b = upper ? item.op2 : item.op1;
@@ -15135,6 +15305,31 @@ function linspaceHasInexactSample(list: Expression): boolean {
   }
   for (const sample of list.each()) if (isInexactOperand(sample)) return true;
   return false;
+}
+
+/**
+ * The type of `Max(…)` or `Min(…)` when an operand is typed as a residue
+ * class for certain (`residue`, `set<residue>`): `error`. A residue class has no order, so it is not an
+ * operand of an extremum (user decision 2026-10-23,
+ * `docs/plans/2026-10-23-residue-class-type.md`, section 4.7); the call
+ * evaluates to an `incompatible-type` error (`processMinMaxItem`), and an
+ * expression typed `error` is one that evaluates to an error of its own. The
+ * parameters stay declared `value`, so that a collection (`Max([3, 7, 2])`)
+ * and an omitted `Nothing` are accepted and a free symbol is inferred from
+ * them as before; no parameter type can spell "a value that is not a class",
+ * and a `canonical` handler that refused the class skipped that inference.
+ * A class that an operand holds without saying so in its type (a
+ * `value`-typed symbol) is refused when the call is evaluated only.
+ */
+function residueExtremumError(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  // The strict reading: an operand typed `integer | residue` may be a
+  // number, and the call is typed as if it were one; a class among its
+  // values is refused when the call is evaluated (`processMinMaxItem`).
+  return ops.some((x) => typeIsResidueForCertain(x.type))
+    ? 'error'
+    : undefined;
 }
 
 function evaluateMinMax(

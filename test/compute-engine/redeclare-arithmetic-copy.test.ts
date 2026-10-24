@@ -362,7 +362,7 @@ describe('a copy that changes what canonicalization depends on', () => {
     const ce = new ComputeEngine();
     ce.declare('Sqrt', {
       ...ce.lookupDefinition('Sqrt')!.operator!,
-      signature: '(complex | infinity) -> complex | infinity',
+      signature: '(complex | infinity | residue) -> complex | infinity',
     });
     expect(ce.box(['Sqrt', 8]).toString()).toBe('2sqrt(2)');
   });

@@ -97,6 +97,10 @@ import {
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
+  holdsResidueClassForCertain,
+  typeIsResidueForCertain,
+} from '../boxed-expression/residue-class.js';
+import {
   couldMatch,
   isSubtype,
   provablyAdmits,
@@ -3417,6 +3421,28 @@ export class BaseCompiler {
       throw new Error(
         `Could not compile a type value (type 'type') to target ` +
           `'${target.language ?? 'unknown'}': a reified type expression has ` +
+          `no compiled representation.`
+      );
+    // A residue class (an element of ℤ/nℤ, type `residue`) has no compiled
+    // representation either: the targets compute over numbers, and the
+    // arithmetic of a class is the arithmetic of its ring. The test is the
+    // engine's own (`containsResidueClass`): a `ResidueClass(…)` call, a call
+    // of a head declared `-> residue`, a symbol declared `residue` or holding
+    // a class, at any depth; or a result that is a class for certain. Read at
+    // the compile boundary once, so that a class in an operand position
+    // (`Equal(r, r)` with `r: residue`) is refused as a class in the result
+    // is. A result that MAY be a class (`number | residue`, the sum of a
+    // parameter typed from a signature that admits a class) is not refused:
+    // the compiled code computes the number it is given.
+    if (
+      BaseCompiler._compileDepth === 0 &&
+      (typeIsResidueForCertain(expr.type.type) ||
+        holdsResidueClassForCertain(expr))
+    )
+      throw new Error(
+        `Could not compile an expression that holds a residue class (type ` +
+          `'residue') to target '${target.language ?? 'unknown'}': the ` +
+          `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
           `no compiled representation.`
       );
     if (

@@ -46,8 +46,10 @@ describe('TYPE VARIABLES / arithmetic — declared signatures', () => {
     expect(sig('Remainder')).toBe('(T, T) -> T where T: number');
     // NOT converted to a `where` signature — see the file header. Its
     // carrier moved with the Contract B arithmetic-core flip (Phase F
-    // batch 11): the extended complex plane, on which negation is total.
-    expect(sig('Negate')).toBe('(complex | infinity) -> number');
+    // batch 11): the extended complex plane, on which negation is total,
+    // plus a residue class, which `Negate` has arithmetic for
+    // (`docs/plans/2026-10-23-residue-class-type.md`).
+    expect(sig('Negate')).toBe('(complex | infinity | residue) -> number');
   });
 });
 

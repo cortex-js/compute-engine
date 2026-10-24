@@ -8,8 +8,8 @@
   number rules (`c/c` is 1, `c - c` is 0) away from it by looking for an
   operator named `ResidueClass`. A head with another name got no protection:
   with `MyMod` declared `(any, any) -> value`, `MyMod(2, 4)/MyMod(2, 4)`
-  simplified to `1`, although 2 has no inverse modulo 4. The type now does
-  what the name did:
+  simplified to `1`, although 2 has no inverse modulo 4. The type now does what
+  the name did:
   - `ResidueClass(k, n)` is typed `residue`, arithmetic over classes too
     (`c · [1, 2]` is a `list<residue^2>`, `NaN + c` is `nan | residue`), and
     `ℤ/nℤ` is a `set<residue>`. `residue` is a value, not a number: it is
@@ -20,22 +20,28 @@
     `Multiply`, `Divide`, `Negate`, `Power`, `Square`, `Sqrt`, `Root`) name
     `residue` in their parameter types. Every other operator refuses a class at
     boxing with an `incompatible-type` error: `Sin(c)`, `Floor(c)`, `Mod(c, 5)`
-    were admitted and stayed unevaluated. `Max(c, x)` and `Min(c, x)` refuse a
-    class too, as an operand, an element of a list or an element of `ℤ/nℤ`:
-    classes have no order (`Max(c, x)` was typed `number` and stayed
+    were admitted and stayed unevaluated. The `incompatible-type` error of these
+    nine operators names the new parameter type: `Sqrt("banana")` reports
+    "expected `complex | infinity | residue`", where it reported
+    `complex | infinity`. `Max(c, x)` and `Min(c, x)` refuse a class too, as an
+    operand, an element of a list or an element of `ℤ/nℤ`: classes have no
+    order. The call is typed `error` when it is boxed and evaluates to an
+    `incompatible-type` error (`Max(c, x)` was typed `number` and stayed
     unevaluated).
   - The protection reads the type: an operator declared to return `residue`
     (`ce.declare('MyMod', { signature: '(any, any) -> residue' })`), a function
     whose inferred signature returns it (`g := k ↦ ResidueClass(k, 4)` is
-    `(unknown) -> residue`), and a symbol declared `residue`, which is
-    protected before it has a value (`r/r` stays `r/r`). A head with another
-    name gets the admission and the protection, not the arithmetic of
-    `ResidueClass`: it defines its own. A symbol typed `value` or left
-    undeclared is still read as a possible number: `w/w` is `1` for it.
-  - A juxtaposed class is a product: `\overline{3}_{7}x` parses to
-    `Multiply`, not to a tuple. `compile()` declines an expression that holds
-    a class. The documentation lists the type in `doc/08-guide-types.md`, the
-    rules in `docs/TYPE-SYSTEM.md`, and how an operator declares it in
+    `(unknown) -> residue`), and a symbol declared `residue`, which is protected
+    before it has a value (`r/r` stays `r/r`). A head with another name gets the
+    admission and the protection, not the arithmetic of `ResidueClass`: it
+    defines its own. A symbol typed `value` or left undeclared is still read as
+    a possible number: `w/w` is `1` for it.
+  - A juxtaposed class is a product: `\overline{3}_{7}x` parses to `Multiply`,
+    not to a tuple. `compile()` declines an expression typed `residue` or one
+    that holds a class; an expression that only may hold one (a parameter
+    typed `number | residue`) compiles. The documentation lists the type in
+    `doc/08-guide-types.md`, the rules in
+    `docs/TYPE-SYSTEM.md`, and how an operator declares it in
     `doc/06-guide-augmenting.md`.
 
 - **A comparison with an absent number is absent** (ROADMAP CE-93, Tycho row
@@ -110,11 +116,11 @@
   `Which(b ≠ 2, 1, True, 0)` took no arm: `Missing` in the interpreter, `NaN` in
   compiled JavaScript and Python. A statement-form `If` ran neither branch. The
   element-wise form gave the IEEE answer, so `Which([1, b, 3] ≠ 2, 1, True, 0)`
-  was `[1, 1, 1]` and its second element did not match the scalar form. A
-  branch now uses the value `True` of a `≠` with a `NaN` operand, as it already
-  used the value `False` of `<`, `≤`, `>`, `≥` and `=`: the examples give `1` on
-  the interpreter, JavaScript and Python. An absent operand (`Missing`, an input
-  the caller leaves out) still leaves the branch without an arm. Rule:
+  was `[1, 1, 1]` and its second element did not match the scalar form. A branch
+  now uses the value `True` of a `≠` with a `NaN` operand, as it already used
+  the value `False` of `<`, `≤`, `>`, `≥` and `=`: the examples give `1` on the
+  interpreter, JavaScript and Python. An absent operand (`Missing`, an input the
+  caller leaves out) still leaves the branch without an arm. Rule:
   `docs/ERROR-MODEL.md`.
 
 - **A chained comparison with a `NaN` pair is `False`** (ROADMAP CE-94, Tycho
@@ -181,20 +187,20 @@
   (`5007912 ± 2900000`), and `NaN` for `∫₀^∞ x dx`. When the integrand has one
   sign on the interval and does not decay faster than `1/x` (or overflows) on
   the infinite tail, `.N()`, `NIntegrate` and a compiled integral now give `+∞`
-  or `−∞`. When the sign changes, `.N()` and `NIntegrate` take the answer of
-  the exact route, as compiled code already did with the closed form:
-  `∫₀^∞ (x − 1) dx` is `+∞` and `∫₀^∞ (eˣ − 5) dx` is `+∞` (it was a
-  Monte-Carlo value). An integral with no value (`∫₀^∞ sin x dx`,
-  `∫_{−∞}^∞ x dx`) still gives `NaN`.
+  or `−∞`. When the sign changes, `.N()` and `NIntegrate` take the answer of the
+  exact route, as compiled code already did with the closed form:
+  `∫₀^∞ (x − 1) dx` is `+∞` and `∫₀^∞ (eˣ − 5) dx` is `+∞` (it was a Monte-Carlo
+  value). An integral with no value (`∫₀^∞ sin x dx`, `∫_{−∞}^∞ x dx`) still
+  gives `NaN`.
 - **`.N()` of `∫₀^∞ x¹⁰⁰·e⁻ˣ dx` was wrong by 45 orders of magnitude** (ROADMAP
-  CE-394). It gave `1.9·10¹¹² ± 1.8·10¹¹²`; the value is `100! ≈ 9.3·10¹⁵⁷`.
-  In double precision `x¹⁰⁰` is `∞` and `e⁻ˣ` is `0` past `x ≈ 1200`, so the
+  CE-394). It gave `1.9·10¹¹² ± 1.8·10¹¹²`; the value is `100! ≈ 9.3·10¹⁵⁷`. In
+  double precision `x¹⁰⁰` is `∞` and `e⁻ˣ` is `0` past `x ≈ 1200`, so the
   integrand was `NaN` on the tail, the quadrature did not converge, and Monte
   Carlo missed the peak. Where a product of powers and exponentials is not
   finite, it is now computed again as `exp(100·ln x − x)`, on `.N()`,
-  `NIntegrate` and compiled code: the result is `100!` to 10 digits. An
-  integral too large for the change of variable of the quadrature (`170!`) is
-  `NaN`, not a random value.
+  `NIntegrate` and compiled code: the result is `100!` to 10 digits. An integral
+  too large for the change of variable of the quadrature (`170!`) is `NaN`, not
+  a random value.
 - **A definite integral over a half-infinite interval with a pole at its finite
   bound was `ComplexInfinity`** (ROADMAP CE-391). `∫₀^∞ (x − 1)/x³ dx` and
   `∫₀^∞ −1/x³ dx` gave `ComplexInfinity`, which is not the value of a real

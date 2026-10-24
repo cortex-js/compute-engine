@@ -272,6 +272,7 @@ import {
   signatureSlotType,
   signatureArms,
   staticCollectionDims,
+  withoutResidueArm,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -12555,9 +12556,11 @@ function declaredScalarConformance(
     if (i < args.length + opt.length) return opt[i - args.length].type;
     return declared.variadicArg?.type;
   };
+  // A parameter that admits a residue class beside its numbers (the
+  // arithmetic operators) is numeric here (`withoutResidueArm`).
   const isNumericParam = (i: number): boolean => {
     const p = paramAt(i);
-    return p !== undefined && isSubtype(p, 'number');
+    return p !== undefined && isSubtype(withoutResidueArm(p), 'number');
   };
   for (let i = 0; i < ops.length; i++) {
     if (!isAbsentScalarSymbol(ops[i])) continue;
@@ -12565,7 +12568,7 @@ function declaredScalarConformance(
     if (
       p === undefined ||
       runtimeCheckExemptParam(p) ||
-      isSubtype(p, 'number') ||
+      isSubtype(withoutResidueArm(p), 'number') ||
       provablyAdmits('missing', p)
     )
       continue;
@@ -14796,7 +14799,10 @@ function unindexedOperandBroadcast(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    if (param === undefined || isSubtype(param, 'number')) return 'veto';
+    // A parameter that admits a residue class beside its numbers (the
+    // arithmetic operators) is a numeric slot here (`withoutResidueArm`).
+    if (param === undefined || isSubtype(withoutResidueArm(param), 'number'))
+      return 'veto';
   }
   return 'lift';
 }
@@ -14880,7 +14886,8 @@ function unindexedCollectionOperandError(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    if (param === undefined || !isSubtype(param, 'number')) continue;
+    if (param === undefined || !isSubtype(withoutResidueArm(param), 'number'))
+      continue;
     const err = nonNumericOperandError(ce, [ops[i]]);
     if (err !== undefined) return err;
   }
@@ -15500,7 +15507,8 @@ function heldEagerSources(
       return [];
     ops.forEach((x, index) => {
       const slot = signatureSlotType(signature, index);
-      if (slot === undefined || !isSubtype(slot, 'number')) return;
+      if (slot === undefined || !isSubtype(withoutResidueArm(slot), 'number'))
+        return;
       if (isHeldEagerSource(x) && isTypedAsCollection(x))
         sources.push({ index, source: x, expected: undefined });
     });

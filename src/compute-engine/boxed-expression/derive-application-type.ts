@@ -40,6 +40,7 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
+  withoutResidueArm,
 } from '../../common/type/utils.js';
 import { describeType, guardedTypeHandlerCall } from './operand-descriptor.js';
 import {
@@ -244,7 +245,9 @@ function parameterAdmitsTuple(ft: Type, i: number): boolean {
     ft.variadicArg?.type;
   if (param === undefined || param === 'unknown' || param === 'any')
     return false;
-  if (isSubtype(param, 'number')) return false;
+  // A parameter that admits a residue class beside its numbers (the
+  // arithmetic operators) binds a tuple as a scalar parameter does.
+  if (isSubtype(withoutResidueArm(param), 'number')) return false;
   return true;
 }
 

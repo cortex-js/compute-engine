@@ -160,6 +160,10 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // expansion `string`/`range` get in `isSubtype` — it has no element type to
   // expand to.
   regexp: [],
+  // A residue class (an element of ℤ/nℤ): an atom with no subtypes, listed by
+  // no entry but `value` (through `VALUE_TYPES`) and so disjoint from every
+  // numeric type, which is what keeps the number rules away from a class.
+  residue: [],
   // A type value: an atom with no subtypes, like `regexp` — a reified type
   // expression is not text, not a number, and not a collection of anything.
   type: [],

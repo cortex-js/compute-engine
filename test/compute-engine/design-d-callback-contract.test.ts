@@ -360,7 +360,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
         .evaluate()
         .toString()
     ).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
     );
   });
 

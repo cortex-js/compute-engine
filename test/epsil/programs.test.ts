@@ -521,7 +521,7 @@ let inputs = [16, -4, "banana", 81]
 Map(x => Sqrt(x), inputs)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
     );
   });
 });

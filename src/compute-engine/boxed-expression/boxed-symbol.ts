@@ -1,4 +1,5 @@
 import { isScratchBinding } from '../scratch-scopes.js';
+import { noteResidueDeclaration } from './residue-class.js';
 import type {
   MathJsonExpression,
   MathJsonSymbol,
@@ -1199,6 +1200,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       throw new Error(
         `The type of the wildcard "${this._id}" cannot be changed`
       );
+
+    // A type that can hold a residue class (`r.type = 'residue'`) lets an
+    // expression of the engine hold a class: the engine joins the set that
+    // enables the test for classes, as a declaration does
+    // (`engine-declarations.ts`, `residue-class.ts`).
+    noteResidueDeclaration(this.engine, this.engine.type(t).type);
 
     // Clear assumptions about this symbol.
     //

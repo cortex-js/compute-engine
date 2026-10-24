@@ -214,6 +214,13 @@ export const VALUE_TYPES: PrimitiveType[] = [
   // machinery entirely (`walkPattern`, `mapResultType`, `liftedElementTypeOf`
   // — the sites where a hidden element type is easy to forget).
   'regexp',
+  // `residue` (an element of ℤ/nℤ, the value of `ResidueClass(k, n)`) sits
+  // here for the same reasons as `regexp`: an opaque value with no numeric or
+  // boolean reading and no hidden element type. It is disjoint from every
+  // numeric type, which is what protects a class from the number rules; the
+  // arithmetic operators that have residue arithmetic name it in their
+  // signatures (`library/arithmetic.ts`).
+  'residue',
   // `type` (a reified type expression, the value `TypeFrom(...)` constructs)
   // sits beside `regexp` for the same reasons: an opaque value with no
   // numeric/boolean reading and no hidden element type, clear of the

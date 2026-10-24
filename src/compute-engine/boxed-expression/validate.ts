@@ -39,6 +39,8 @@ import {
   stripMissingFromType,
   stripMissingFromElements,
   typeContainsMissing,
+  hasResidueArm,
+  withoutResidueArm,
   unfoldAliasOnDescent,
   type AliasDescent,
   signatureSlotType,
@@ -148,7 +150,13 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
  * by broadcast.
  */
 function excludedFromScalarInference(op: Expression): boolean {
-  return op.isCollection || typeCouldBeCollection(op.type.type);
+  // A residue class is admitted in a numeric position (`hasResidueArm`) but
+  // it is not a number: no numeric type is inferred onto it.
+  return (
+    op.isCollection ||
+    typeCouldBeCollection(op.type.type) ||
+    hasResidueArm(op.type.type)
+  );
 }
 
 /**
@@ -160,8 +168,15 @@ function excludedFromScalarInference(op: Expression): boolean {
  * first so that it cannot mask a non-numeric carrier: the absence admission
  * (`typeContainsMissing`) is decided on what is left.
  */
-function collectionCellsProvablyNonNumeric(t: Type): boolean {
-  const carrier = stripMissingFromType(t);
+function collectionCellsProvablyNonNumeric(
+  t: Type,
+  admitsResidue = false
+): boolean {
+  let carrier = stripMissingFromType(t);
+  // For an operator with residue arithmetic a residue class is a cell like a
+  // number (`[c, d] + 1` is a list of classes): the `residue` arm of the
+  // cells does not make them non-numeric.
+  if (admitsResidue) carrier = withoutResidueCells(carrier);
   if (
     typeof carrier !== 'string' &&
     'elements' in carrier &&
@@ -169,6 +184,39 @@ function collectionCellsProvablyNonNumeric(t: Type): boolean {
   )
     return false;
   return typeIsProvablyNonNumericCollection(carrier);
+}
+
+/**
+ * Whether an operand of an operator with residue arithmetic is admitted as a
+ * class: its type is `residue` (an absent arm aside), or a union of `residue`
+ * with numeric arms only (`integer | residue`). A union with an arm that is
+ * not a number (`string | residue`) is not: the operand may be a string, and
+ * the operator refuses it as it refuses a string.
+ */
+function admitsResidueClassOperand(t: Type): boolean {
+  const carrier = stripMissingFromType(t);
+  if (!hasResidueArm(carrier)) return false;
+  const rest = withoutResidueArm(carrier);
+  return rest === 'never' || isSubtype(rest, 'number');
+}
+
+/**
+ * `t` with the `residue` arm removed from the cells of a collection type
+ * (`list<integer | residue>` is `list<integer>`, `list<residue>` is
+ * `list<never>`), at the first level of cells; any other type is itself.
+ */
+function withoutResidueCells(t: Type): Type {
+  if (typeof t === 'string') return t;
+  if (
+    t.kind === 'list' ||
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  ) {
+    const elements = withoutResidueArm(t.elements);
+    return elements === t.elements ? t : { ...t, elements };
+  }
+  return t;
 }
 
 /**
@@ -840,11 +888,18 @@ function devolveUnappliedOperator(
 export function checkNumericArgs(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  options?: number | { count?: number; flatten?: string }
+  options?: number | { count?: number; flatten?: string; residue?: boolean }
 ): ReadonlyArray<Expression> {
   let count = typeof options === 'number' ? options : options?.count;
   const flattenHead =
     typeof options === 'number' ? undefined : options?.flatten;
+  // `residue: true`: the operator has residue arithmetic (`Add`, `Subtract`,
+  // `Multiply`, `Divide`, `Negate`, `Power`, `Square`, `Sqrt`, `Root`), and
+  // a residue class is admitted as an operand. The other operators that
+  // check their operands here (`Exp`, `Ln`, `Log`, `Exp2`, `PlusMinus`)
+  // refuse a class, as their declared parameter types do.
+  const admitsResidue =
+    typeof options === 'object' && options?.residue === true;
 
   // Ellipsis fold barrier: when a direct `ContinuationPlaceholder` operand is
   // present (a notational sum/product like `2 · 4 · … · 2n`), do not lift
@@ -946,7 +1001,21 @@ export function checkNumericArgs(
     } else if (op.type.isUnknown || op.type.type === 'any') {
       // Unknown or any type. Keep it that way, infer later
       xs.push(op);
-    } else if (collectionCellsProvablyNonNumeric(op.type.type)) {
+    } else if (admitsResidue && admitsResidueClassOperand(op.type.type)) {
+      // A residue class (`ResidueClass(2, 4)`, a symbol declared `residue`, a
+      // call of a head whose signature returns `residue`), or a value that may
+      // be one beside numbers (`integer | residue`). The operator has residue
+      // arithmetic (`admitsResidue`), so the class is admitted. It is not a
+      // number: it is admitted before the branches below, which read the
+      // operand as a numeric collection, a tuple or a number, and it is not
+      // given an inferred numeric type at the end of this function
+      // (`excludedFromScalarInference`). A class beside an absent value
+      // (`residue | missing`) is admitted the same way: the absence gives
+      // `NaN`, as for a number. A value that may be a class beside something
+      // that is not a number (`string | residue`) is not admitted here, and
+      // the branches below refuse it as they refuse `string`.
+      xs.push(op);
+    } else if (collectionCellsProvablyNonNumeric(op.type.type, admitsResidue)) {
       // The static element type is concrete and provably non-numeric
       // (`list<string^2>`, `set<boolean>`, `list<string | missing>`). The
       // element type already disproves numericity, so reject WITHOUT
@@ -1169,8 +1238,12 @@ export function checkNumericArgs(
  */
 // Parsed once: the guard runs for every operand of every numeric
 // evaluation, so it must not re-resolve the type string per call.
+// `residue` is exempt too: a residue class is admitted by the arithmetic
+// operators that have residue arithmetic (`library/arithmetic.ts`), and their
+// `evaluate` handlers route a class to the `residue*` functions
+// (`residue-class.ts`) before this guard runs for the other operands.
 const NON_NUMERIC_EXEMPT_TYPE: Type = parseType(
-  'number | indexed_collection<number> | missing | nothing | function | error'
+  'number | indexed_collection<number> | missing | nothing | function | error | residue'
 );
 export function nonNumericOperandError(
   ce: ComputeEngine,

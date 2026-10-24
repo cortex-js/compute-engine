@@ -21,6 +21,7 @@ import {
   noteProvisionalCall,
 } from './provisional-application.js';
 import {
+  hasResidueArm,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
@@ -641,6 +642,11 @@ function canonicalJuxtaposition(
       // `isIndexedCollection` below.
       t.type === 'value' ||
       t.matches('number') ||
+      // A residue class (`\overline{3}_{7}x`, a symbol declared `residue`)
+      // multiplies: the arithmetic operators admit a class in their
+      // signatures (`library/arithmetic.ts`), and a class beside a symbol or
+      // a number is a product, never a silent `Tuple`.
+      hasResidueArm(t.type) ||
       // A `broadcastable<…>`-typed operand — arithmetic over an
       // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
       // unknown` — is a number OR an indexed collection of numbers

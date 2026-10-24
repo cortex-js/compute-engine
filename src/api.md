@@ -19375,6 +19375,7 @@ type PrimitiveType =
   | "character"
   | "regexp"
   | "color"
+  | "residue"
   | "type"
   | "expression"
   | "unknown"
