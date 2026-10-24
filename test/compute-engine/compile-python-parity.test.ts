@@ -1356,10 +1356,13 @@ describeMaybe('PYTHON EXECUTION PARITY — ReplaceAt / DeleteAt / Insert (venv)'
       fs.unlinkSync(file);
     }
     expect(out.trim()).toBe('TypeError');
+    // A statistic of a list of lists is refused when it is boxed: its data
+    // parameter is a collection of numbers (ROADMAP CE-13, CE-402), so the
+    // compiler refuses an invalid expression.
     e.declare('m', 'list<list<integer>>');
     for (const head of ['Mean', 'Median', 'Variance'])
       expect(() => python.compileFunction(e.box([head, 'm']), 'fn_stat', ['m'])).toThrow(
-        new RegExp(`Could not compile \`${head}\``)
+        /Could not compile invalid expression: .*incompatible-type/
       );
     // Python's `+` joins two lists, so a built-in fold over rows does not
     // compile; nor does a step typed for numbers (`Mean(acc)`) over rows.

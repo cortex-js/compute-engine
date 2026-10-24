@@ -17,7 +17,9 @@ import {
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import {
+  couldMatchNonEmpty,
   isSubtype,
+  nonEmptyQuestionArms,
   provablyAdmits,
   provablyDisjoint,
   widenAll,
@@ -2149,7 +2151,37 @@ function overlapAdmission(op: Expression, param: Type): boolean {
         : op.engine._staticAssignmentEvidence?.get(def);
     if (evidence !== undefined && !isSubtype(evidence, param)) return false;
   }
-  return typesOverlap(op.type.type, param);
+  // A collection operand overlaps a collection parameter through the empty
+  // collection alone when their element types are disjoint: the empty list
+  // is a `list<list<number>>` and a `collection<number>`. Such an operand
+  // is not admitted: `Mean(R)` with `R: list<list<number>>` is refused when
+  // it is boxed, as `Histogram(R, 2)` is by `overlapsForDeferredValidation`
+  // and as the matrix literal is (ROADMAP CE-402, after CE-13).
+  // `couldMatchNonEmpty` (`common/type/subtype.ts`) reads the arms of both
+  // types and requires two collection arms to match on their elements.
+  // The test applies when an arm of the operand is a collection: the arms of
+  // a union and the definition of a transparent alias are read the same way
+  // (`nonEmptyQuestionArms`), so `list<list<number>> | list<string>` and an
+  // alias of `list<list<number>>` are refused too. An operand with a scalar
+  // arm that can match (`list<number> | number`) is still admitted.
+  const opType = op.type.type;
+  if (
+    nonEmptyQuestionArms(opType).some(isCollectionTypeNode) &&
+    !couldMatchNonEmpty(opType, param)
+  )
+    return false;
+  return typesOverlap(opType, param);
+}
+
+/** Whether `t` is a list, set or abstract collection type node. */
+function isCollectionTypeNode(t: Type): boolean {
+  return (
+    typeof t !== 'string' &&
+    (t.kind === 'list' ||
+      t.kind === 'set' ||
+      t.kind === 'collection' ||
+      t.kind === 'indexed_collection')
+  );
 }
 
 export function checkType(

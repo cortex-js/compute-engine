@@ -154,7 +154,15 @@ describe('Whole-collection parameter: Epsil route', () => {
           new ComputeEngine(),
           `let xs = ${arg}\n${body}`
         );
-        expect(viaFunction).toBe(direct);
+        // A statistics operator refuses data that is not a collection of
+        // numbers when the expression is boxed (ROADMAP CE-13, CE-402), so
+        // the direct call over a list of rows is the `incompatible-type` error
+        // of the signature. The call through `h` admits the argument at the
+        // `value` arm of its slot and gives the `incompatible-type` error of
+        // the evaluation: the same error, with different messages.
+        if (direct.startsWith('Error(ErrorCode("incompatible-type"'))
+          expect(viaFunction).toMatch(/^Error\(ErrorCode\("incompatible-type"/);
+        else expect(viaFunction).toBe(direct);
       });
     }
   }

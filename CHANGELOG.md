@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **A declared collection that shares only the empty collection with a
+  collection parameter is refused when the expression is boxed** (ROADMAP
+  CE-402). With `R: list<list<number>>` or `B: list<boolean>`, `Mean(R)` and
+  `Mean(B)` were valid and were refused only when evaluated, while
+  `Histogram(R, 2)` was refused when boxed: the empty list is both a
+  `list<list<number>>` and a `collection<number>`. A collection argument is
+  now admitted at a collection parameter only when their element types can
+  match, so `Mean(R)`, `Mean(B)` and `Mean([Missing, "a"])` are refused when
+  they are boxed. A collection whose elements are not known yet (`list`,
+  `list<any>`, `set<unknown>`, `tensor`) is still admitted.
+
 ## 0.164.0 _2026-10-23_
 
 ### Behavior Changes

@@ -131,31 +131,6 @@ problem does not occur on its installed release). Report:
 
 ## Types and type inference
 
-### CE-402. A declared nested list is admitted by `Mean` and refused by `Histogram`
-
-**Status:** open; defect, small. Found 2026-10-23 while fixing CE-13.
-
-With `R: list<list<number>>` (or `B: list<boolean>`), `Histogram(R, 2)` is
-invalid when it is boxed, but `Mean(R)` is valid and is checked only when it
-is evaluated. Both data parameters are `collection<nothing | number>`. The
-validation of the required parameter of `Histogram` refuses an argument whose
-immediate elements must be lists (`overlapsDeferred()` in
-`common/type/utils.ts`). The data of `Mean` is a variadic parameter, and its
-last admission, `overlapAdmission()` in `boxed-expression/validate.ts`,
-admits a declared type that shares a value with the parameter: the empty
-list is a `list<list<number>>` and a `collection<number>`, and `Mean([])` is
-`NaN`. Both answers are sound, but the two parameters disagree. Decide
-whether a declared type that shares only the empty list with the parameter is
-admitted (and change the required parameter) or refused (and make the overlap
-admission ignore the empty list, as the opt-in `couldMatch(…, { nonEmpty:
-true })` of CE-397 does). For the second answer, `couldMatchNonEmpty(a, b)`
-(`common/type/subtype.ts`, added by CE-397) reads unions, `broadcastable<T>`
-and aliases arm by arm, and requires two collection arms to match on their
-element types too, so `couldMatchNonEmpty(list<list<number>>, list<number>)`
-is false; `overlapAdmission()` would call it in place of the plain overlap
-test for a collection parameter. Pinned in
-`test/compute-engine/statistics-data-parameter.test.ts`.
-
 ### CE-3. `unknown` as an inference marker: what the migration left open
 
 **Status:** open; defect, small. Plan:

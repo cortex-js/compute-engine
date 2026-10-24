@@ -1529,8 +1529,9 @@ export function couldMatchNonEmpty(a: Type, b: Type): boolean {
 
 /** The arms of `t` for `couldMatchNonEmpty`: the arms of a union, the two
  * arms of a `broadcastable<T>` (`T` and its collection arm), and the
- * definition of a transparent alias, read to a bounded depth. */
-function nonEmptyQuestionArms(t: Type, depth = 0): Type[] {
+ * definition of a transparent alias, read to a bounded depth. A bare
+ * collection name is read as its `<any>` form. */
+export function nonEmptyQuestionArms(t: Type, depth = 0): Type[] {
   if (depth > 8) return [t];
   if (isTransparentAliasReference(t)) {
     const def = aliasDefinitionAt(t);

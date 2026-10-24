@@ -59,10 +59,6 @@ function appliedType(ce: ComputeEngine, expr: any): string {
  * parameter, `collection<nothing | number>` or the bivariate
  * `collection<nothing | number | tuple>`. */
 const NON_NUMERIC = /incompatible-type", "collection<nothing \| number/;
-/** A datum that is not a number, beside an absent one: the absent cell lets
- * the collection through the signature (strip-before-validate, §3.B), and the
- * handler refuses the datum when the expression is evaluated. */
-const NON_NUMERIC_AT_EVALUATION = /incompatible-type", "number"/;
 const NON_REAL = /incompatible-type", "real"/;
 
 describe('Mean', () => {
@@ -469,12 +465,15 @@ describe('a refused datum outranks an absent one', () => {
   // The two checks used to run in that order — the absence gate first, the
   // data walk after — so `Mean([Missing, "a"])` answered `NaN` and the string
   // was never reported. One walk now decides both (`collectData`), which also
-  // keeps the enumeration count at one per datum (ruling B8).
+  // keeps the enumeration count at one per datum (ruling B8). Since ROADMAP
+  // CE-402 the signature refuses such a literal before the walk, when the
+  // expression is boxed: `list<missing | string>` shares only the empty
+  // collection with the data parameter `collection<nothing | number>`.
   const ce = new ComputeEngine();
 
   test('Mean of a Missing beside a string', () => {
     expect(evaluated(ce, ['Mean', ['List', 'Missing', { str: 'a' }]])).toMatch(
-      NON_NUMERIC_AT_EVALUATION
+      NON_NUMERIC
     );
   });
 
@@ -486,7 +485,7 @@ describe('a refused datum outranks an absent one', () => {
 
   test('Variance of a Missing beside a boolean', () => {
     expect(evaluated(ce, ['Variance', ['List', 'Missing', 'True']])).toMatch(
-      NON_NUMERIC_AT_EVALUATION
+      NON_NUMERIC
     );
   });
 

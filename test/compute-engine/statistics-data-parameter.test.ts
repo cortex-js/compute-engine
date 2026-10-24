@@ -92,18 +92,36 @@ describe('data of every supported shape is accepted', () => {
     expect(valid(ce, ['Mean', 'U'])).toBe(true);
   });
 
-  test('a declared type that holds the empty list is checked at evaluation by Mean', () => {
-    // `Mean` takes its data through a variadic parameter, where the overlap
-    // admission (`overlapAdmission()`, `boxed-expression/validate.ts`)
-    // admits a declared type that shares a value with the parameter and
-    // leaves the check to evaluation. `list<list<number>>` and
-    // `list<boolean>` share the empty list with the parameter, and `Mean([])`
-    // is `NaN`. `Histogram`, whose data parameter is not variadic, refuses
-    // the same declared type when it is boxed (ROADMAP CE-402).
+  test('a declared type that shares only the empty list with the data is refused', () => {
+    // `list<list<number>>` and `list<boolean>` share the empty list with
+    // `collection<nothing | number>`, and nothing else. The variadic data
+    // parameter of `Mean` (the overlap admission, `overlapAdmission()` in
+    // `boxed-expression/validate.ts`) refuses them, as the required data
+    // parameter of `Histogram` does (ROADMAP CE-402).
     const ce = new ComputeEngine();
     ce.declare('R', 'list<list<number>>');
     ce.declare('B', 'list<boolean>');
-    expect(valid(ce, ['Mean', 'R'])).toBe(true);
-    expect(valid(ce, ['Mean', 'B'])).toBe(true);
+    expect(valid(ce, ['Mean', 'R'])).toBe(false);
+    expect(valid(ce, ['Mean', 'B'])).toBe(false);
+    expect(valid(ce, ['Histogram', 'R', 2])).toBe(false);
+  });
+
+  test('the arms of a union and a transparent alias are read too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('U1', 'list<list<number>> | list<string>');
+    ce.declare('U2', 'list<list<number>> | string');
+    ce.declare('U3', 'list<number> | number');
+    ce.declare('U4', 'list<number> | list<string>');
+    ce.declareType('rows', 'list<list<number>>', { alias: true });
+    ce.declare('A', 'rows');
+    ce.declareType('nums', 'list<number>', { alias: true });
+    ce.declare('N', 'nums');
+    expect(valid(ce, ['Mean', 'U1'])).toBe(false);
+    expect(valid(ce, ['Mean', 'U2'])).toBe(false);
+    expect(valid(ce, ['Mean', 'A'])).toBe(false);
+    // An arm that can hold numbers admits the operand.
+    expect(valid(ce, ['Mean', 'U3'])).toBe(true);
+    expect(valid(ce, ['Mean', 'U4'])).toBe(true);
+    expect(valid(ce, ['Mean', 'N'])).toBe(true);
   });
 });
