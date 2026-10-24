@@ -19,10 +19,13 @@
  *    and one a value contradicts is worse than the bare `number` these heads
  *    used to claim.
  *
- * The operand carrier of all fourteen stays `collection<any>` — the
- * absence-admitting top — because §3.C requires `[1, Missing, 3]` to REACH
- * the handler: the bare spelling `collection` is the values-only
- * `collection<unknown>`, which `list<integer | missing>` does not match.
+ * The operand carrier of all fourteen is `collection<nothing | number>`
+ * (`collection<nothing | number | tuple>` for the first operand of the
+ * bivariate statistics, which also takes a collection of pairs). It holds
+ * number elements, so a matrix, whose elements are rows, and data that is
+ * not numeric are refused when the expression is boxed (ROADMAP CE-13).
+ * `[1, Missing, 3]` still REACHES the handler, as §3.C requires: an
+ * operand that may hold absent cells is admitted at a numeric collection.
  *
  * Each describe builds its own engine: symbol inference leaks across a shared
  * one, and several of these pins declare symbols.
@@ -51,7 +54,15 @@ function appliedType(ce: ComputeEngine, expr: any): string {
   return ce.box(expr).type.toString();
 }
 
-const NON_NUMERIC = /incompatible-type", "number"/;
+/** A datum that is not a number: the signature refuses its collection when
+ * the expression is boxed (ROADMAP CE-13), and the error names the data
+ * parameter, `collection<nothing | number>` or the bivariate
+ * `collection<nothing | number | tuple>`. */
+const NON_NUMERIC = /incompatible-type", "collection<nothing \| number/;
+/** A datum that is not a number, beside an absent one: the absent cell lets
+ * the collection through the signature (strip-before-validate, §3.B), and the
+ * handler refuses the datum when the expression is evaluated. */
+const NON_NUMERIC_AT_EVALUATION = /incompatible-type", "number"/;
 const NON_REAL = /incompatible-type", "real"/;
 
 describe('Mean', () => {
@@ -59,7 +70,7 @@ describe('Mean', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mean')).toBe(
-      '((collection<any> | distribution | number)+) -> number'
+      '((collection<nothing | number> | distribution | number)+) -> number'
     );
     expect(policiesOf(ce, 'Mean')).toBe('nan=handle missing=handle');
   });
@@ -114,7 +125,7 @@ describe('Median', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Median')).toBe(
-      '((collection<any> | number)+) -> nan | real | signed_infinity'
+      '((collection<nothing | number> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Median')).toBe('nan=handle missing=handle');
   });
@@ -168,7 +179,7 @@ describe('the variance family', () => {
     for (const h of HEADS) {
       const distribution = h.startsWith('Population') ? '' : 'distribution | ';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: ((collection<any> | ${distribution}number)+) -> nan | real<0..>`
+        `${h}: ((collection<nothing | number> | ${distribution}number)+) -> nan | real<0..>`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -275,7 +286,7 @@ describe('Kurtosis and Skewness', () => {
   test('declaration', () => {
     for (const h of ['Kurtosis', 'Skewness']) {
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: ((collection<any> | number)+) -> nan | real`
+        `${h}: ((collection<nothing | number> | number)+) -> nan | real`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -330,7 +341,7 @@ describe('Mode', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mode')).toBe(
-      '((collection<any> | number)+) -> nan | real | signed_infinity'
+      '((collection<nothing | number> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Mode')).toBe('nan=handle missing=handle');
   });
@@ -358,7 +369,7 @@ describe('Quartiles', () => {
     // They used to read `mid, lower, upper` against a handler that built
     // `(Q1, Q2, Q3)`, so every name was attached to the wrong component.
     expect(signatureOf(ce, 'Quartiles')).toBe(
-      '((collection<any> | number)+) -> ' +
+      '((collection<nothing | number> | number)+) -> ' +
         'tuple<lower: nan | real | signed_infinity, ' +
         'mid: nan | real | signed_infinity, ' +
         'upper: nan | real | signed_infinity>'
@@ -404,7 +415,7 @@ describe('InterquartileRange', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'InterquartileRange')).toBe(
-      '((collection<any> | number)+) -> +oo | nan | real<0..>'
+      '((collection<nothing | number> | number)+) -> +oo | nan | real<0..>'
     );
     expect(policiesOf(ce, 'InterquartileRange')).toBe(
       'nan=handle missing=handle'
@@ -463,7 +474,7 @@ describe('a refused datum outranks an absent one', () => {
 
   test('Mean of a Missing beside a string', () => {
     expect(evaluated(ce, ['Mean', ['List', 'Missing', { str: 'a' }]])).toMatch(
-      NON_NUMERIC
+      NON_NUMERIC_AT_EVALUATION
     );
   });
 
@@ -475,7 +486,7 @@ describe('a refused datum outranks an absent one', () => {
 
   test('Variance of a Missing beside a boolean', () => {
     expect(evaluated(ce, ['Variance', ['List', 'Missing', 'True']])).toMatch(
-      NON_NUMERIC
+      NON_NUMERIC_AT_EVALUATION
     );
   });
 
@@ -498,7 +509,7 @@ describe('the bivariate statistics', () => {
       // precision, so `Correlation` alone declares the range.
       const real = h === 'Correlation' ? 'real<-1..1>' : 'real';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (collection<any>, collection<any>?) -> nan | ${real}`
+        `${h}: (collection<nothing | number | tuple>, collection<nothing | number>?) -> nan | ${real}`
       );
       // The DERIVED policies here are `reject` (a `collection` slot) and
       // `pass-through`; neither describes a head that answers `NaN` for a

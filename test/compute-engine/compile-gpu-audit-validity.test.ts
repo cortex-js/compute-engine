@@ -18,13 +18,18 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
             const ce = new ComputeEngine();
             ce.declare('N', 'real');
             const expr = ce.expr([head, body, ['Limits', 'j', 1, upper]]);
-            expect(expr.isValid).toBe(true);
-            const r = compile(expr, { to, constantFold: false, cse });
+            // A `Return` term is the `return-in-expression-body` error when
+            // the expression is boxed (ROADMAP CE-96), so the compiler refuses
+            // an invalid expression.
             if (Array.isArray(body) && body[0] === 'Return') {
+              expect(expr.isValid).toBe(false);
+              const r = compile(expr, { to, constantFold: false, cse });
               expect(r.success).toBe(false);
-              expect(r.error).toMatch(/cannot be used as a sub-expression/);
+              expect(r.error).toMatch(/return-in-expression-body/);
               continue;
             }
+            expect(expr.isValid).toBe(true);
+            const r = compile(expr, { to, constantFold: false, cse });
             expect(r.success).toBe(true);
             const code = source(r);
             // No statement spliced into a value position, no `return` in a

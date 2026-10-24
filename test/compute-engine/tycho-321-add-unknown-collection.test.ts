@@ -77,8 +77,8 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     ce1.box(['Histogram', ['Add', 'P_0', 0.5], ['Divide', 1, 100]]);
     const ce2 = freshEngine();
     ce2.box(['Histogram', ['Multiply', 2, 'P_0'], ['Divide', 1, 100]]);
-    expect(ce1.expr('P_0').type.toString()).toBe('matrix');
-    expect(ce2.expr('P_0').type.toString()).toBe('matrix');
+    expect(ce1.expr('P_0').type.toString()).toBe('list<number>');
+    expect(ce2.expr('P_0').type.toString()).toBe('list<number>');
   });
 
   // Only a CONSTANT term of a sum is taken as a scalar. A term with a free
@@ -101,7 +101,7 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
       2,
     ]);
     expect(expr.isValid).toBe(true);
-    expect(ce.expr('P_0').type.toString()).toBe('matrix');
+    expect(ce.expr('P_0').type.toString()).toBe('list<number>');
   });
 
   test('a matrix-consuming operator gets the same repair: Determinant(A + 1)', () => {

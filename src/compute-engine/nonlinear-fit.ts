@@ -903,6 +903,10 @@ function sinCosPeriod(
   return absolute || (p + q) % 2 === 0 ? Math.PI : 2 * Math.PI;
 }
 
+/** The even functions, `f(−u) = f(u)`, that `composedPeriod()` reads as an
+ * outer function of a periodic expression. */
+const EVEN_FUNCTIONS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);
+
 /**
  * The period, in its argument `θ`, of the expression that a periodic function
  * node `node` is part of: the smallest period over the node and those of its
@@ -914,9 +918,12 @@ function sinCosPeriod(
  * The node alone gives the period of its function: π for `Tan` and `Cot`, 2π
  * for the others. An ancestor can have a shorter period: `cos(θ)²`,
  * `|cos(θ)|`, `sin(θ) cos(θ)`, `sin(θ) / cos(θ)` have the period π and
- * `(sin(θ) cos(θ))²` has π/2, while `tan(θ)²` keeps π and `cos(θ)³` keeps
- * 2π. The residual of a fit of `a cos(b x + c)²` has basins in `b` half as
- * wide as those of `a cos(b x + c)`, and the grid must be twice as fine.
+ * `(sin(θ) cos(θ))²` has π/2, an even outer function (`Cos`, `Sec`, `Cosh`,
+ * `Sech`) of an expression that changes sign when `θ` moves by half its
+ * period halves it (`cos(cos(θ))` has π, `cos(sin(θ) cos(θ))` has π/2),
+ * while `tan(θ)²` keeps π and `cos(θ)³` keeps 2π. The residual of a fit of
+ * `a cos(b x + c)²` has basins in `b` half as wide as those of
+ * `a cos(b x + c)`, and the grid must be twice as fine.
  */
 function composedPeriod(
   node: Expression,
@@ -932,6 +939,25 @@ function composedPeriod(
     period = Math.min(period, sinCosPeriod(e, false) ?? Infinity);
     if (i === 0) break;
     const parent = ancestors[i - 1];
+    if (
+      isFunction(parent) &&
+      EVEN_FUNCTIONS.has(parent.operator) &&
+      parent.nops === 1
+    ) {
+      // An even function of `M` keeps its value when `M` changes sign. If
+      // moving `θ` by half the period of `M` negates `M`, the even function
+      // of `M` has that half period. The sign changes when `p ≠ q` and
+      // `p + q` is odd (the shift is π, `cos θ`, `sin θ cos² θ`), or when
+      // `p = q` is odd (the shift is π/2, `sin θ cos θ`). A sum such as
+      // `sin θ + 1` is not of the form, so `cos(sin θ + 1)` keeps 2π.
+      const own = sinCosPeriod(e, false);
+      if (
+        own !== undefined &&
+        (e[0] === e[1] ? e[1] % 2 !== 0 : (e[0] + e[1]) % 2 !== 0)
+      )
+        period = Math.min(period, own / 2);
+      break;
+    }
     if (isFunction(parent) && parent.operator === 'Abs') {
       period = Math.min(period, sinCosPeriod(e, true) ?? Infinity);
       break;

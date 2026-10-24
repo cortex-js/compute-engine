@@ -668,7 +668,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Mean: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number|distribution)+) -> number',
+      signature:
+        '((collection<number | nothing> | number | distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
       // because every arm of the wide type is reachable. An absent datum or
@@ -678,8 +679,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // Three named arms would be needed to say less, so the base type says
       // it in one token.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       // Data on the extended real line has a mean on it too, or NaN: typed
@@ -769,7 +773,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Median: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real | signed_infinity | nan',
+      signature:
+        '((collection<number | nothing> | number)+) -> real | signed_infinity | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -780,8 +785,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       description:
@@ -853,7 +861,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
+      signature:
+        '((collection<number | nothing> | number | distribution)+) -> real<0..> | nan',
       // The variance is a mean of SQUARED deviations, so it is real and
       // non-negative even for complex data (`Variance([1, 1+2i, 3])` is
       // `8/3` — see `complexVariance`), and infinite data has no variance at
@@ -877,8 +886,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `real | infinity | nan`); its VALUE is non-negative for every legal
       // parameter, which is what the declaration describes.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -948,7 +960,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real<0..> | nan',
+      signature:
+        '((collection<number | nothing> | number)+) -> real<0..> | nan',
       // The population variance is the same mean of SQUARED deviations the
       // sample variance is, over the divisor `n`: real and non-negative even
       // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
@@ -969,8 +982,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1043,7 +1059,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Sample Standard Deviation of a collection of numbers.' +
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       keywords: ['stdev', 'std'],
-      signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
+      signature:
+        '((collection<number | nothing> | number | distribution)+) -> real<0..> | nan',
       // The standard deviation is the square root of a mean of SQUARED
       // deviations, so it is real and non-negative even for complex data
       // (`StandardDeviation([1, 1+2i, 3])` is `2/3·√6` — see
@@ -1069,8 +1086,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // while its VALUE is non-negative for every legal parameter — which is
       // what the declaration describes.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1144,7 +1164,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Population Standard Deviation of a collection of numbers.' +
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
-      signature: '((collection<any>|number)+) -> real<0..> | nan',
+      signature:
+        '((collection<number | nothing> | number)+) -> real<0..> | nan',
       // The population standard deviation is the square root of a mean of
       // SQUARED deviations over the divisor `n`, so it is real and
       // non-negative even for complex data
@@ -1166,8 +1187,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // does not (`Exp(1000)` settles it — ruling L6(a),
       // `docs/SIGNATURE-GUIDELINES.md` §2.4).
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1237,7 +1261,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real | nan',
+      signature: '((collection<number | nothing> | number)+) -> real | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1250,8 +1274,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1288,7 +1315,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real | nan',
+      signature: '((collection<number | nothing> | number)+) -> real | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1301,8 +1328,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // that already admits `nan` is `inert`, which would leave unsaid that
       // this head ANSWERS `NaN` for absent data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1340,7 +1370,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real | signed_infinity | nan',
+      signature:
+        '((collection<number | nothing> | number)+) -> real | signed_infinity | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1351,8 +1382,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy for a carrier that already admits `nan` is `inert`, which
       // would leave unsaid that this head ANSWERS `NaN` for absent data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -1406,10 +1440,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // wrong component and `Quartiles([1,2,3,4]).mid` read the LOWER
       // quartile.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       signature:
-        '((collection<any>|number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
+        '((collection<number | nothing> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
@@ -1471,7 +1508,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> real<0..> | +oo | nan',
+      signature:
+        '((collection<number | nothing> | number)+) -> real<0..> | +oo | nan',
       // Complex data is REJECTED here (`nonRealUnivariateError`) and a
       // non-numeric datum with it (`collectData`); an `Error(...)` has a type
       // outside the numeric lattice, so it neither confirms nor contradicts
@@ -1486,8 +1524,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `inert`, which would leave unsaid that this head ANSWERS `NaN` for
       // absent data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
 
@@ -1540,7 +1581,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // (`computeBinning` returns undefined) — width semantics are the
       // importer's to translate (e.g. to explicit bin edges).
       signature:
-        '(collection<any>, number | list<number>) -> list<tuple<number, integer>>',
+        '(collection<number | nothing>, number | list<number>) -> list<tuple<number, integer>>',
       examples: [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
@@ -1574,7 +1615,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Count the number of elements falling into each bin.',
       complexity: 8200,
       // Same widened bin spec as Histogram (non-integer counts stay inert).
-      signature: '(collection<any>, number | list<number>) -> list<number>',
+      signature:
+        '(collection<number | nothing>, number | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       // Decline-only, same `computeBinning` precondition as `Histogram`.
       canEnumerate: canEnumerateFiniteSource,
@@ -1676,7 +1718,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> real | nan',
+      signature:
+        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan',
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1685,8 +1728,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>
@@ -1708,7 +1754,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> real | nan',
+      signature:
+        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan',
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1717,8 +1764,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>
@@ -1740,7 +1790,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Raw source lengths must match before omission; all terms use the same retained observations.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> real<-1..1> | nan',
+      signature:
+        '(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real<-1..1> | nan',
       // Pearson's r lies in [−1, 1], and the kernel keeps it there at every
       // precision: two-pass centered sums, then a clip of the rounding
       // residue (`correlation`, `numerics/statistics.ts`). The one-pass
@@ -1755,8 +1806,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // policy `pass-through`, neither of which describes a head that ANSWERS
       // `NaN` for such data.
       //
-      // The unrestricted collection carrier admits Missing data so the
-      // handler can apply the §3.C absent-data rule.
+      // The data carrier `collection<number | nothing>` holds number
+      // elements (a `Nothing` element is an omitted datum), so a matrix,
+      // whose elements are rows, is refused when the expression is boxed
+      // (ROADMAP CE-13). A collection that may hold Missing cells is still
+      // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       type: (ops, context) =>
@@ -2871,7 +2925,8 @@ function shapeError(
     if (isString(op)) return dataConstraintError(ce, name, op, 'number');
   // Only the ELEMENTS are scanned. An OPERAND of a bivariate statistic is a
   // container, not a datum: its own type (`list<integer>`, or the
-  // `collection<any>` a bare symbol is inferred to hold) is disjoint from
+  // `collection<number | nothing>` a bare symbol is inferred to hold
+  // from the signature) is disjoint from
   // `number`, so scanning it would refuse every well-formed input and turn
   // `Covariance(xs, ys)` over undeclared symbols into a type error.
   const nonNumeric = walked.find(isNonNumericDatum);

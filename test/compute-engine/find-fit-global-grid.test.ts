@@ -746,6 +746,40 @@ describe('FindFit global grid: the phase rate of a parameter', () => {
     ).toEqual([Math.PI, Math.PI]);
   });
 
+  test('an even outer function of an odd-symmetric expression halves the period', () => {
+    // cos(cos(θ + π)) = cos(−cos θ) = cos(cos θ), and likewise for `Sec`,
+    // `Cosh` and `Sech`; cos(sin θ cos θ) has the period π/2 because
+    // sin θ cos θ changes sign when θ moves by π/2.
+    const arg = ['Add', ['Multiply', 'b', 'x'], 'c'];
+    const period = (model: any) =>
+      shape(model, ['x'], ['a', 'b', 'c']).periodicRates.map((r) => r.period);
+    expect(period(['Cos', ['Cos', arg]])).toEqual([Math.PI]);
+    expect(period(['Sec', ['Sin', arg]])).toEqual([Math.PI]);
+    expect(period(['Cosh', ['Sin', arg]])).toEqual([Math.PI]);
+    expect(period(['Sech', ['Cos', arg]])).toEqual([Math.PI]);
+    expect(
+      period(['Multiply', 'a', ['Cos', ['Negate', ['Sin', arg]]]])
+    ).toEqual([Math.PI]);
+    expect(period(['Cos', ['Multiply', ['Sin', arg], ['Cos', arg]]])).toEqual([
+      Math.PI / 2,
+      Math.PI / 2,
+    ]);
+  });
+
+  test('an even outer function keeps the period when the inner expression does not change sign', () => {
+    const arg = ['Add', ['Multiply', 'b', 'x'], 'c'];
+    const period = (model: any) =>
+      shape(model, ['x'], ['a', 'b', 'c']).periodicRates.map((r) => r.period);
+    // sin θ + 1 is not negated by a shift of π
+    expect(period(['Cos', ['Add', ['Sin', arg], 1]])).toEqual([2 * Math.PI]);
+    // sin(θ)² has the period π and does not change sign
+    expect(period(['Cos', ['Power', ['Sin', arg], 2]])).toEqual([Math.PI]);
+    // tan θ has the period π and tan(θ + π/2) = −cot θ is not −tan θ
+    expect(period(['Cos', ['Tan', arg]])).toEqual([Math.PI]);
+    // an odd function of the inner expression is not even
+    expect(period(['Sin', ['Cos', arg]])).toEqual([2 * Math.PI]);
+  });
+
   test('(sin θ cos θ)² and |sin θ cos θ| record the period π/2', () => {
     // sin(θ + π/2) cos(θ + π/2) = −cos θ sin θ
     const f = (t: number) => (Math.sin(t) * Math.cos(t)) ** 2;

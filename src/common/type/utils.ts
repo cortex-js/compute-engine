@@ -2239,6 +2239,43 @@ export function staticCollectionDims(
 }
 
 /**
+ * The rank of an abstract collection type, `collection<T>` or
+ * `indexed_collection<T>`, when it is known: `[-1]` (rank 1, any length)
+ * when its elements `T` cannot be lists, `null` otherwise. A collection
+ * type holds ELEMENTS (the list-element reading of 2026-10-21), so a
+ * `collection<number>` is a collection of numbers: a matrix, whose elements
+ * are rows, is not one. The data parameter of `Mean` and the other
+ * statistics is spelled this way, and a matrix argument is refused when the
+ * expression is boxed (ROADMAP CE-13).
+ * `staticCollectionDims()` answers only for a `list` type, so the deferral
+ * check of `overlapsDeferred()` reads this as the rank of such a parameter.
+ */
+function abstractCollectionDims(t: Readonly<Type>): number[] | null {
+  if (typeof t === 'string') return null;
+  if (t.kind !== 'collection' && t.kind !== 'indexed_collection') return null;
+  return elementCanBeList(t.elements) ? null : [-1];
+}
+
+/**
+ * The type of the immediate elements of a list without dimensions, a set or
+ * an abstract collection; `undefined` for any other type, and for a list
+ * with dimensions, whose rank the rank refutation of `overlapsDeferred()`
+ * reads instead.
+ */
+function immediateElementType(t: Readonly<Type>): Type | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'list')
+    return t.dimensions === undefined ? t.elements : undefined;
+  if (
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  )
+    return t.elements;
+  return undefined;
+}
+
+/**
  * Whether a value of the element type `el` of a plain list could itself be
  * a list: a top type, a bare collection name, a name that `list` is below
  * (`value`, `expression`), a list or abstract collection type, a
@@ -3269,14 +3306,47 @@ function overlapsDeferred(
       (t.kind === 'list' ||
         t.kind === 'collection' ||
         t.kind === 'indexed_collection' ||
-        t.kind === 'broadcastable'));
+        t.kind === 'broadcastable' ||
+        // A set is collection-like at a `collection<T>` parameter of rank 1
+        // only: `set<unknown>` at `collection<number>` is decided when the
+        // set has elements. A set is not indexed, so it never defers at an
+        // `indexed_collection<T>` parameter. `collectionLeafType` does not
+        // read a set, so its elements are compared by the element check
+        // below.
+        (t.kind === 'set' &&
+          typeof param !== 'string' &&
+          param.kind === 'collection' &&
+          abstractCollectionDims(param) !== null)));
   if (!isCollectionLike) return false;
+
+  // Element refutation at an abstract collection parameter of rank 1
+  // (`collection<number>`, `abstractCollectionDims`). Its elements are
+  // not lists, so an operand whose immediate elements must be lists
+  // (`list<list<number>>`, rows of unknown length) is refused, as is one
+  // whose elements cannot be of the element type (`set<boolean>` at
+  // `collection<number>`). The leaf refutation below reads the innermost
+  // cells, so it compares `number` with `number` for nested rows. An
+  // element type that is not known yet (`unknown`, `any`) is deferred.
+  if (abstractCollectionDims(param) !== null) {
+    const paramElement = immediateElementType(param);
+    const opElement = immediateElementType(t);
+    if (
+      paramElement !== undefined &&
+      opElement !== undefined &&
+      opElement !== 'unknown' &&
+      opElement !== 'any'
+    ) {
+      if (isSubtype(opElement, LIST_OF_ANY)) return false;
+      if (provablyDisjoint(opElement, paramElement)) return false;
+    }
+  }
 
   // Rank refutation — only when both ranks are statically known. A
   // `broadcastable` operand has open rank (never refuted on rank).
   if (typeof t !== 'string' && t.kind === 'list') {
     const opDims = staticCollectionDims(t);
-    const paramDims = staticCollectionDims(param);
+    const paramDims =
+      staticCollectionDims(param) ?? abstractCollectionDims(param);
     if (opDims !== null && paramDims !== null) {
       if (opDims.length !== paramDims.length) return false;
       for (let i = 0; i < opDims.length; i++)

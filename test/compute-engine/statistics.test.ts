@@ -285,7 +285,12 @@ describe('Bivariate statistics reject non-real data', () => {
       .box(['Covariance', L([1, { str: 'a' }]), L([2, 3])] as any)
       .evaluate();
     expect(r.isValid).toBe(false);
-    expect(r.toString()).toMatch(/incompatible-type", "number", "string"/);
+    // The signature refuses a collection that holds a string when the
+    // expression is boxed (ROADMAP CE-13), and the error names the data
+    // parameter and the operand type.
+    expect(r.toString()).toMatch(
+      /incompatible-type", "collection<nothing \| number \| tuple>", "list<integer \| string>"/
+    );
     // The least-squares fits share `shapeError`, so they gained the same
     // diagnosis.
     const lr = ce

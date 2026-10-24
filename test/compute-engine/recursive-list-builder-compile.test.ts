@@ -95,7 +95,7 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       'function r(xs, n) { if n <= 0 { mean(xs) } else { r(xs, n - 1) } }\nr([1, 2, 3], 2)'
     );
     expect(signatureOf(expr, 'r')).toBe(
-      '(xs: collection<any> | value, unknown) any -> number'
+      '(xs: collection<nothing | number> | value, unknown) any -> number'
     );
     expect(expr.evaluate().toString()).toBe('2');
   });

@@ -46,6 +46,10 @@ Juxtaposition, \`\\cdot\` and \`\\times\` all parse to the same multiplication, 
 
 If you meant to scale by the reciprocal of one component, index it: \`p / q[1]\`. If you meant a component-wise quotient, build it explicitly from the components.`,
 
+  'return-in-expression-body': `A \`Return\` appears in an operand of \`Sum\`, \`Product\`, \`Integrate\`, \`D\`, \`ND\`, \`NIntegrate\`, \`Limit\` or \`NLimit\` (the operator is named in the error): in the body, a bound or a variable. These operands are expressions, computed once per index value or integration point, not statement blocks of the enclosing function, so a \`Return\` there has no function to end. Before, it stayed in the value: \`Sum(1 + Return("q"), (k, 1, 2))\` was \`2 + 2Return("q")\`.
+
+To leave a function early, test the condition outside the operator and return from the function body. A \`Return\` inside a function literal in the body (\`Sum(Apply(x ↦ { return 2x }, k), (k, 1, 3))\`) ends that function and is allowed.`,
+
   'missing': `A function was called with fewer arguments than its signature requires; the error marks the position of the argument that was not provided.
 
 Check the signature with \`epsil doc <FunctionName>\`. Optional parameters never produce this error — only required ones do.`,

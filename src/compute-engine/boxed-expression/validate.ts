@@ -4605,16 +4605,28 @@ export function validateArguments(
 }
 
 /**
- * Would a `matrix` argument satisfy this parameter? The repair below rewrites
- * its operands to `matrix`, so this — not "is the parameter type itself a
- * matrix" — is its entry gate. The direction matters for a UNION parameter
+ * The collection type that the repair below gives its symbols for this
+ * parameter, or `undefined` when the repair does not apply. It is `matrix`
+ * when a `matrix` argument satisfies the parameter. Otherwise it is
+ * `list<number>` when a list of numbers satisfies it: the data parameter of
+ * the statistics operators (`list<number> | set<number> | tuple`) refuses a
+ * matrix (ROADMAP CE-13), and the symbol in `Histogram(P + 0.5, 1/100)` is a
+ * list of data (Tycho item 321).
+ *
+ * The test is "would an argument of that type satisfy the parameter", not
+ * "is the parameter that type". The direction matters for a UNION parameter
  * (`LinearSolve`'s `matrix | vector`): a union is assignable to `R` only when
  * EVERY arm is, so `matrix | vector` does not match `matrix`, while `matrix`
  * *is* assignable to `matrix | vector`. The reversed spelling silently
  * declined the repair for every union-typed parameter.
  */
-function acceptsMatrix(ce: ComputeEngine, expected: Type): boolean {
-  return ce.type('matrix').matches(expected);
+function freshInferenceTarget(
+  ce: ComputeEngine,
+  expected: Type
+): 'matrix' | 'list<number>' | undefined {
+  if (ce.type('matrix').matches(expected)) return 'matrix';
+  if (ce.type('list<number>').matches(expected)) return 'list<number>';
+  return undefined;
 }
 
 /**
@@ -4638,7 +4650,7 @@ function couldRepairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): boolean {
-  if (!freshlyInferred || !acceptsMatrix(ce, expected)) return false;
+  if (!freshlyInferred || !freshInferenceTarget(ce, expected)) return false;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
@@ -4691,7 +4703,8 @@ function repairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): Expression | null {
-  if (!freshlyInferred || !acceptsMatrix(ce, expected)) return null;
+  const targetType = freshInferenceTarget(ce, expected);
+  if (!freshlyInferred || !targetType) return null;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
@@ -4806,7 +4819,7 @@ function repairFreshMatrixInference(
       const slots = target._typeSlotSnapshot();
       frame.record({ undo: () => target._restoreTypeSlots(slots) });
     }
-    def.value._setType(() => ce.type('matrix'));
+    def.value._setType(() => ce.type(targetType));
     // Freeze the contextual assignment during re-canonicalization so the
     // numeric fast path cannot immediately narrow it back to `real`.
     def.value.inferredType = false;

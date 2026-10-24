@@ -202,7 +202,11 @@ import { evalDenseRows } from '../numerics/differential-equations.js';
 import { hasNonRealConstant, symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
-import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
+import {
+  canonicalLimits,
+  canonicalLimitsSequence,
+  canonicalWithEscapingReturn,
+} from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { containsResidueClass } from '../boxed-expression/residue-class.js';
 import {
@@ -4602,6 +4606,10 @@ volumes
         // `ops[0].canonical` below.
         if (!ops[0]) return null;
 
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        const returnError = canonicalWithEscapingReturn(ce, 'D', ops);
+        if (returnError) return returnError;
+
         // Mathematica-style higher-order spec: `D(f, {x, n})` → the n-th
         // derivative with respect to `x` (`D(f, x, x, …, x)`, n repetitions).
         // POSITIONAL — only a raw held `{symbol, integer}` pair in the
@@ -4853,6 +4861,9 @@ volumes
         return BoxedType.forResult(engine.type(type), engine._typeResolver);
       },
       canonical: (ops, { engine }) => {
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        const returnError = canonicalWithEscapingReturn(engine, 'ND', ops);
+        if (returnError) return returnError;
         const fn = canonicalFunctionLiteral(ops[0]);
         if (!fn) return null;
         const x = checkType(engine, ops[1]?.canonical, 'number');
@@ -5250,6 +5261,13 @@ volumes
       },
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
+
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        // The integrand is read before it becomes the body of a function
+        // literal below, where it would look like the `Return` of that
+        // function.
+        const returnError = canonicalWithEscapingReturn(ce, 'Integrate', ops);
+        if (returnError) return returnError;
 
         const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
 
@@ -6683,6 +6701,13 @@ volumes
       lazy: true,
       signature: '(function, lower:number, upper:number) -> number',
       canonical: (ops, { engine }) => {
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        const returnError = canonicalWithEscapingReturn(
+          engine,
+          'NIntegrate',
+          ops
+        );
+        if (returnError) return returnError;
         const [body, lower, upper] = ops;
         const fn = canonicalFunctionLiteral(body);
         if (!fn) return null;
@@ -7010,6 +7035,10 @@ volumes
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
       canonical: (ops, { engine }) => {
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        const returnError = canonicalWithEscapingReturn(engine, 'Limit', ops);
+        if (returnError) return returnError;
+
         // Rule-arrow form `Limit(expr, x -> x0)`: the second operand is a held
         // (raw) `To(var, point)`. Rewrite to the Wolfram-style form
         // `Limit(expr, var, point[, direction])` handled below. A `^+`/`^-`
@@ -7169,7 +7198,11 @@ volumes
 
       lazy: true,
       signature: '(function, point:number, direction:number?) -> number',
-      canonical: ([f, x, dir], { engine }) => {
+      canonical: (ops, { engine }) => {
+        // A `Return` in an operand has no function to end (ROADMAP CE-96).
+        const returnError = canonicalWithEscapingReturn(engine, 'NLimit', ops);
+        if (returnError) return returnError;
+        const [f, x, dir] = ops;
         const fn = canonicalFunctionLiteral(f);
         if (!fn || !x) return null;
         if (dir === undefined) return engine._fn('NLimit', [fn, x.canonical]);

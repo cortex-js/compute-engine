@@ -36,37 +36,37 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Mean',
     'mean(xs)',
-    '(collection<any> | value) -> number',
+    '(collection<nothing | number> | value) -> number',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Median',
     'median(xs)',
-    '(collection<any> | value) -> nan | real | signed_infinity',
+    '(collection<nothing | number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Variance',
     'variance(xs)',
-    '(collection<any> | value) -> nan | real<0..>',
+    '(collection<nothing | number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'StandardDeviation',
     'standardDeviation(xs)',
-    '(collection<any> | value) -> nan | real<0..>',
+    '(collection<nothing | number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Mode',
     'mode(xs)',
-    '(collection<any> | value) -> nan | real | signed_infinity',
+    '(collection<nothing | number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Quartiles',
     'quartiles(xs)',
-    '(collection<any> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
+    '(collection<nothing | number> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
     [LIST, NESTED, SCALAR],
   ],
   [
@@ -122,10 +122,15 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     'mixed use',
     'mean(xs) + xs',
     // The sum of a scalar and the parameter is element-wise over a
-    // parameter that may hold a list (since 2026-09-29); the parameter may
-    // also hold a point, so the result is the bare `any` (`broadcastable<any>`
-    // is `any`; user decision 2026-10-17, Tycho ledger row 379).
-    '(collection<any> | value) -> any',
+    // parameter that may hold a list (since 2026-09-29). The result was the
+    // bare `any` while the slot was `collection<any> | value` (user decision
+    // 2026-10-17, Tycho ledger row 379). Since the data parameter of `Mean`
+    // is `collection<nothing | number>` (ROADMAP CE-13), the elements of the
+    // collection arm are numbers, and the sum is typed by them and by the
+    // `value` arm. A point argument does not reach the result: `mean` of a
+    // point is a number, and a number plus a point is an `incompatible-type`
+    // error, as it was before.
+    '(collection<nothing | number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | nothing | number>',
     [LIST, NESTED, SCALAR],
   ],
 ];
@@ -212,16 +217,24 @@ describe('Whole-collection parameter: Epsil route', () => {
 
 // [row, body over `xs`, expected parameter type of the function literal]
 const BOX_CASES: [string, MathJsonExpression, string][] = [
-  ['Mean', ['Mean', 'xs'], 'collection<any> | value'],
-  ['Median', ['Median', 'xs'], 'collection<any> | value'],
-  ['Variance', ['Variance', 'xs'], 'collection<any> | value'],
-  ['StandardDeviation', ['StandardDeviation', 'xs'], 'collection<any> | value'],
-  ['Mode', ['Mode', 'xs'], 'collection<any> | value'],
-  ['Quartiles', ['Quartiles', 'xs'], 'collection<any> | value'],
+  ['Mean', ['Mean', 'xs'], 'collection<nothing | number> | value'],
+  ['Median', ['Median', 'xs'], 'collection<nothing | number> | value'],
+  ['Variance', ['Variance', 'xs'], 'collection<nothing | number> | value'],
+  [
+    'StandardDeviation',
+    ['StandardDeviation', 'xs'],
+    'collection<nothing | number> | value',
+  ],
+  ['Mode', ['Mode', 'xs'], 'collection<nothing | number> | value'],
+  ['Quartiles', ['Quartiles', 'xs'], 'collection<nothing | number> | value'],
   ['Flatten', ['Flatten', 'xs'], 'collection<any> | value'],
   ['SetFrom', ['SetFrom', 'xs'], 'collection<any> | value'],
   ['TupleFrom', ['TupleFrom', 'xs'], 'collection<any> | value'],
-  ['mixed use', ['Add', ['Mean', 'xs'], 'xs'], 'collection<any> | value'],
+  [
+    'mixed use',
+    ['Add', ['Mean', 'xs'], 'xs'],
+    'collection<nothing | number> | value',
+  ],
 ];
 
 function substitute(
@@ -254,15 +267,24 @@ describe('Whole-collection parameter: box route', () => {
       for (const arg of args) {
         const viaFunction = ce.box(['h', arg]).evaluate().toString();
         const direct = ce.box(substitute(body, arg)).evaluate().toString();
-        expect(viaFunction).toBe(direct);
+        // A statistics operator refuses data that is not a collection of
+        // numbers when the expression is boxed (ROADMAP CE-13), so the direct
+        // call is the `incompatible-type` error of the signature. The call
+        // through `h` admits the argument at the `value` arm of its slot and
+        // gives the `incompatible-type` error of the evaluation. Both are the
+        // same error, with different messages.
+        if (direct.startsWith('Error(ErrorCode("incompatible-type"'))
+          expect(viaFunction).toMatch(/^Error\(ErrorCode\("incompatible-type"/);
+        else expect(viaFunction).toBe(direct);
       }
     });
   }
 
   test('the lifted slot accepts every argument the unlifted slot accepted', () => {
-    // The slot is `collection<any> | value`, not the type the body's uses
-    // infer for the parameter: a point, a complex number and a string reach
-    // the body, and the call gives what `Mean` gives on that argument.
+    // The slot is `collection<nothing | number> | value`, not the type the
+    // body's uses infer for the parameter: a point, a complex number and a
+    // string reach the body, and the call gives what `Mean` gives on that
+    // argument. `Mean` refuses the string by its signature (ROADMAP CE-13).
     const ce = new ComputeEngine();
     ce.assign('h', ce.box(['Function', ['Mean', 'xs'], 'xs']));
     const point: MathJsonExpression = ['Tuple', 1, 2];
@@ -277,7 +299,7 @@ describe('Whole-collection parameter: box route', () => {
     expect(results).toEqual([
       '3/2',
       '(1 + 2i)',
-      'Error(ErrorCode("incompatible-type", "number", "string"), "Mean: \\"ab\\"")',
+      'Error(ErrorCode("incompatible-type", "collection<nothing | number> | distribution | number", "string"), "ab")',
     ]);
   });
 
@@ -586,7 +608,7 @@ describe('Limitations of the rule, as they behave today', () => {
       epsilValue(ce, 'function h(xs) { let ys = xs\nmean(ys) }\nh([1, 2, 3])')
     ).toBe('2');
     expect(ce.symbol('h').type.toString()).toBe(
-      '(collection<any> | value) -> number'
+      '(collection<nothing | number> | value) -> number'
     );
   });
 
@@ -608,7 +630,7 @@ describe('Limitations of the rule, as they behave today', () => {
       const ce = new ComputeEngine();
       expect(epsilValue(ce, `${source}\nk([1, 2, 3])`)).toBe('2');
       expect(ce.symbol('k').type.toString()).toBe(
-        '(collection<any> | value) -> number'
+        '(collection<nothing | number> | value) -> number'
       );
     }
     // The box route, `k` assigned before `h`.
@@ -636,7 +658,7 @@ describe('Limitations of the rule, as they behave today', () => {
     // clause's `number`; it was the broadcast guess `broadcastable<unknown>`
     // that a bare `function` callee gives over a collection argument.
     expect(ce.symbol('r').type.toString()).toBe(
-      '(collection<any> | value, unknown) -> number'
+      '(collection<nothing | number> | value, unknown) -> number'
     );
   });
 });

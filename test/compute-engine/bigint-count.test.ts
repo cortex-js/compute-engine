@@ -154,8 +154,6 @@ describe('CONSUMERS THAT WALK OR INDEX BEHAVE AS BEFORE', () => {
 
   test.each([
     ['Sum', ['Sum', bigRing]],
-    ['Mean', ['Mean', bigRing]],
-    ['Median', ['Median', bigRing]],
     ['Total', ['Total', bigRing]],
     ['Unique', ['Unique', bigRing]],
     ['Tally', ['Tally', bigRing]],
@@ -173,6 +171,19 @@ describe('CONSUMERS THAT WALK OR INDEX BEHAVE AS BEFORE', () => {
     ['Max', ['Max', bigRing]],
     ['Min', ['Min', bigRing]],
   ])('%s is an incompatible-type error: a class has no order', (_name, json) => {
+    const result = evaluate(json);
+    expect(result.operator).toBe('Error');
+    expect(JSON.stringify(result.json)).toContain('incompatible-type');
+  });
+
+  // The data parameter of `Mean` and `Median` is a collection of numbers
+  // (ROADMAP CE-13), and a ring holds residue classes, so the signature
+  // refuses the ring when the expression is boxed, as for a small ring, and
+  // the ring is not walked.
+  test.each([
+    ['Mean', ['Mean', bigRing]],
+    ['Median', ['Median', bigRing]],
+  ])('%s is an incompatible-type error: a class is not a number', (_name, json) => {
     const result = evaluate(json);
     expect(result.operator).toBe('Error');
     expect(JSON.stringify(result.json)).toContain('incompatible-type');

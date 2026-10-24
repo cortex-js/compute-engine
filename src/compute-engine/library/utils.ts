@@ -54,7 +54,10 @@ import {
   sameBindingDef,
 } from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
-import { isValueDef } from '../boxed-expression/definition-guards.js';
+import {
+  isOperatorDef,
+  isValueDef,
+} from '../boxed-expression/definition-guards.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
@@ -3436,12 +3439,29 @@ export function canonicalBigop(
     bindings: new Map(),
   };
 
+  // The body is an expression evaluated once per index value, not a
+  // statement block of the enclosing function, so a `Return` in it, or in a
+  // bound, has no function to end. Evaluated, it stayed in the value:
+  // `Sum(1 + Return("q"), (k, 1, 2))` was `2 + 2Return("q")`. It is an error
+  // (user decision of 2026-10-23, ROADMAP CE-96). The operands are read
+  // before they are canonicalized, which can fold a `Return` away
+  // (`0·2·Return(k)` is 0). See `hasEscapingReturn()`.
+  const returnError = ce.error(['return-in-expression-body', bigOp]);
+  if (body !== undefined && hasEscapingReturn(body)) body = returnError;
+  indexingSets = indexingSets.map((x) =>
+    hasEscapingReturn(x) ? returnError : x
+  );
+
   // Canonicalize indexes first: `canonicalIndexingSet` still declares an index
   // the hook did not see (a reshaped operand), and the body may reference it.
   const indexes: Expression[] = indexingSets.map(
-    (x) => canonicalIndexingSet(x) ?? ce.error('missing')
+    (x) =>
+      canonicalIndexingSet(x) ?? (x === returnError ? x : ce.error('missing'))
   );
   body = body?.canonical ?? ce.error('missing');
+  // The canonical body is read too: a parse form that holds no `Return`
+  // node before it is canonicalized can hold one after.
+  if (hasEscapingReturn(body)) body = returnError;
 
   // A function-literal body (e.g. `Sum(n ↦ n, (n, 1, 3))`) is not a valid
   // summand/factor: reducing lambdas produces a mistyped `k·λ`. Reject it with
@@ -3505,6 +3525,80 @@ export function canonicalBigop(
   if (usedIndexes.length === 0 && indexes.length > 0) return body;
 
   return ce._fn(bigOp, [body, ...usedIndexes], { scope: bigOpScope });
+}
+
+/**
+ * Whether `e` holds a `Return` statement that has no function to end in an
+ * operand of `Sum`, `Product`, `Integrate`, `D`, `ND`, `NIntegrate`,
+ * `Limit` or `NLimit`. Their operands are expressions, not statement blocks
+ * of the enclosing function, so these operators report the
+ * `return-in-expression-body` error (ROADMAP CE-96).
+ *
+ * `e` may be canonical or not: the canonical handlers read their operands
+ * before they canonicalize them. So the definitions are found by name in
+ * the current scope, not read from the bindings of `e`. The walk does not
+ * enter:
+ * - a function literal (`Function`), whose `Return` ends that function;
+ * - the operand of a quoting operator (`holdClass: 'quote'`, such as
+ *   `Hold`), which is data and is not run.
+ *
+ * A call of a function value named `Return` (a parameter declared
+ * `() -> real`) is not the statement, as in `earlyReturnTypes()`
+ * (`boxed-expression/effects-inference.ts`): the name is bound to a value,
+ * or to a definition with a declared type.
+ */
+export function hasEscapingReturn(e: Expression): boolean {
+  const ce = e.engine;
+  // A subexpression shared by several operands is visited once.
+  const seen = new Set<Expression>();
+  const visit = (x: Expression): boolean => {
+    if (!isFunction(x) || x.operator === 'Function' || seen.has(x))
+      return false;
+    seen.add(x);
+    const def = ce.lookupDefinition(x.operator);
+    if (isOperatorDef(def) && def.operator.holdClass === 'quote') return false;
+    // The LaTeX parser reads `\operatorname{Return}(k)` as
+    // `InvisibleOperator(Return, Delimiter(k))`, which becomes `Return(k)`
+    // only when it is canonicalized.
+    const isReturnCall =
+      x.operator === 'Return' ||
+      (x.operator === 'InvisibleOperator' &&
+        x.nops === 2 &&
+        isSymbol(x.op1, 'Return') &&
+        isFunction(x.op2, 'Delimiter'));
+    if (isReturnCall) {
+      const returnDef = ce.lookupDefinition('Return');
+      const callsValue =
+        isValueDef(returnDef) &&
+        (returnDef.value.value !== undefined || !returnDef.value.inferredType);
+      if (!callsValue) return true;
+    }
+    return x.ops.some(visit);
+  };
+  return visit(e);
+}
+
+/**
+ * The canonical form of `name(...ops)` when an operand holds a `Return`
+ * that has no function to end (`hasEscapingReturn()`): that operand is
+ * replaced by the `return-in-expression-body` error, so the expression is
+ * invalid. `undefined` when no operand holds one. A canonical handler calls
+ * it first, on its operands as it receives them.
+ */
+export function canonicalWithEscapingReturn(
+  ce: ComputeEngine,
+  name: string,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!ops.some(hasEscapingReturn)) return undefined;
+  return ce._fn(
+    name,
+    ops.map((op) =>
+      hasEscapingReturn(op)
+        ? ce.error(['return-in-expression-body', name])
+        : op.canonical
+    )
+  );
 }
 
 /**
