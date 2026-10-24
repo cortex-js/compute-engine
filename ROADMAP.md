@@ -3955,33 +3955,6 @@ body writes.) Fix: the compiled assignment to a typed parameter fails closed (a
 compile-time refusal when the written value's type contradicts the parameter's
 type, as the declared-result-type rule does).
 
-### CE-229. The compiled body of a user function gives `NaN` for a coordinate of an absent point
-
-**Status:** open; defect, small. User decision 2026-10-23: keep it absent. The
-compiled accessor gives `undefined` when the coordinate is not provably a
-number, so both routes give a point of three absent coordinates.
-
-With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of
-two points, the interpreter returns a present tuple of three `Missing`
-coordinates for `W(L[5], 2)`. Inside the body `PointX(p)` is not provably
-numeric (the parameter is inferred `collection<any> | tuple`), so each
-coordinate keeps `Missing`. The JavaScript target compiles the accessor as
-`undefined[idx]` guarded to `NaN` (the top-level `PointX(Missing)` reading), so
-it returns `[NaN, NaN, NaN]`.
-
-Options: the compiled accessor keeps `undefined` when its written type is not
-provably numeric, or the interpreter body contract changes explicitly. Do not
-normalize every unknown result to `NaN`: it was tried and reverted, because a
-product over a `-> unknown` result must keep `Missing`
-(`absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN` point and a
-hole alike, so no consumer reading is known to differ.
-
-Keeping `undefined` in the accessor is not enough: the body compiles
-`s * coordinate` to `_SYS.bcast(...)`, and `2 * undefined` is `NaN` there too
-(`_SYS.pointComponent` returns `NaN` for a non-array). A fix needs a static
-"not provably numeric" flag passed into the accessor helper and a
-multiplication in `bcast` that keeps an absent operand.
-
 ### CE-230. Cases where a compiled user function with a real result still leaves the real lane
 
 **Status:** open; defect, small.

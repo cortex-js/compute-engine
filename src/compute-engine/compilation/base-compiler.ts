@@ -16945,8 +16945,35 @@ export class BaseCompiler {
     // Each entry is a bit set of levels (`objectAbsenceLevels`); `0` is an
     // operand that cannot hold an absent object.
     let absentLevels = args.map((a) => objectAbsenceLevels(a.type.type));
+    // The type of the application, computed once and only when a test below
+    // reads it: building the application to type it is not free.
+    let resultType: Type | undefined;
+    const applicationType = (): Type =>
+      (resultType ??=
+        node?.type.type ?? engine.function(h, [...args]).type.type);
+    // An operand whose type states nothing (`any` or `unknown`: a coordinate
+    // read off an operand whose shape is not known, the result of a function
+    // declared `-> unknown`) can be absent, spelled `undefined`. The
+    // interpreter answers the marker of the application's codomain for an
+    // absent operand: `NaN` when the application is provably a number, and
+    // `Missing` otherwise (`absentScalarMarker`, the missing-value gate of
+    // `BoxedFunction`). So when the application is not provably a number,
+    // such an operand keeps `undefined` through the arithmetic:
+    // `s·PointX(p)` with `p` absent is absent, as in the interpreter (ROADMAP
+    // CE-229, user decision 2026-10-23), unless an operand is a collection at
+    // run time (`scalarAbsent` below).
+    const statesNothing = (t: Type): boolean => {
+      const r = resolveTypeForCompilation(t);
+      return r === 'any' || r === 'unknown';
+    };
+    const unknownAbsent =
+      BaseCompiler.NAN_PROPAGATING_BROADCAST_HEADS.has(h) &&
+      args.some((a) => statesNothing(a.type.type)) &&
+      !isSubtype(resolveTypeForCompilation(applicationType()), 'number')
+        ? args.map((a) => statesNothing(a.type.type))
+        : args.map(() => false);
     if (absentLevels.some((d) => d !== 0)) {
-      const result = node?.type.type ?? engine.function(h, [...args]).type.type;
+      const result = applicationType();
       const resolved = resolveTypeForCompilation(result);
       const elt =
         typeof resolved !== 'string' && resolved.kind === 'list'
@@ -16964,6 +16991,15 @@ export class BaseCompiler {
         absentLevels = absentLevels.map(() => 0);
     }
     const absentMode = absentLevels.some((d) => d !== 0);
+    // The scalar absences of `unknownAbsent` are decided at run time
+    // (`_SYS.bcastScalarAbsent`): the interpreter's gate stands aside when an
+    // operand is a collection, and broadcasts the absence into its cells
+    // (`[1, 2] + PointX(p)` with `p` absent is `[NaN, NaN]`). An operand
+    // typed `any` or `unknown` may be a list or a number, so only the value
+    // says which. When an operand may hold an absent object, the
+    // object rules above (`_SYS.bcastAbsent`) apply instead.
+    const scalarAbsent =
+      !absentMode && unknownAbsent.some((x) => x) ? unknownAbsent : undefined;
     /** A `_SYS.bcast` call, or `_SYS.bcastAbsent` when one of the level sets
      * in `levels` is not empty. */
     const bcastCall = (
@@ -16975,7 +17011,7 @@ export class BaseCompiler {
         ? `_SYS.bcastAbsent([${levels.join(', ')}], ${fnText}, ${sources.join(', ')})`
         : `_SYS.bcast(${fnText}, ${sources.join(', ')})`;
     const componentWidth =
-      atomicTuple === undefined && !absentMode
+      atomicTuple === undefined && !absentMode && scalarAbsent === undefined
         ? BaseCompiler.staticBroadcastWidth(h, args, isArrayOperand)
         : undefined;
 
@@ -17111,6 +17147,7 @@ export class BaseCompiler {
     const viewsAllowed =
       componentWidth === undefined &&
       !absentMode &&
+      scalarAbsent === undefined &&
       admission !== undefined &&
       admission.isOverriddenOperator?.(h) !== true &&
       args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
@@ -17378,6 +17415,8 @@ export class BaseCompiler {
     // (`isCallerMapped`: an emitter this compiler does not see may hand a
     // mutable array on) — the admission the rotation views ask for.
     if (absentMode) return bcastCall(closure, absentLevels, compiledArgs);
+    if (scalarAbsent !== undefined)
+      return `_SYS.bcastScalarAbsent([${scalarAbsent.map((x) => (x ? 1 : 0)).join(', ')}], ${closure}, ${compiledArgs.join(', ')})`;
     const fusionAllowed =
       admission !== undefined &&
       args.every((a) => a.isPure === true && !isCallerMapped(a, admission));

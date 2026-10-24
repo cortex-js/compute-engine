@@ -1895,6 +1895,29 @@ function bcastPlain(
 }
 
 /**
+ * `bcast` for an operation whose type is not provably a number, over operands
+ * whose type states nothing (`any` or `unknown`; `flags[j]` is 1 for such an
+ * operand). The interpreter answers the marker of the operation's codomain
+ * for an absent operand, `Missing` here, but only when no operand is a
+ * collection: beside a collection the absence lands in each cell, as `NaN`
+ * (ROADMAP CE-229). So when a flagged operand is `undefined` (the spelling of
+ * `Missing`) and no operand is an array, the result is `undefined`; otherwise
+ * the rules of `bcast` apply unchanged.
+ */
+function bcastScalarAbsent(
+  flags: ReadonlyArray<number>,
+  f: (...xs: BcastValue[]) => BcastValue,
+  ...args: unknown[]
+): BcastValue | undefined {
+  if (
+    args.some((a, j) => flags[j] === 1 && a === undefined) &&
+    !args.some((a) => Array.isArray(a))
+  )
+    return undefined;
+  return bcastWith(f, args);
+}
+
+/**
  * `bcast` for operands that may hold an ABSENT OBJECT: a restricted point or
  * list (`When((0, 1), c)` is `undefined` when `c` fails), or a list whose
  * elements may be absent points.
@@ -4441,6 +4464,7 @@ export const SYS_HELPERS = {
   bcast,
   bcastPlain,
   bcastAbsent,
+  bcastScalarAbsent,
   bcastFn,
   bcastColor,
   // `At` with a scalar index over elements that may be numbers or lists: the
@@ -5462,16 +5486,23 @@ export const SYS_HELPERS = {
    *    reading too, since a zero-component point is not a shape any compiled
    *    producer builds;
    *  - an absent coordinate otherwise, and a non-array value (the
-   *    interpreter's `incompatible-type` error) answer `NaN`.
+   *    interpreter's `incompatible-type` error) answer `NaN`;
+   *  - an absent operand (`undefined` or `null`) answers `undefined` when the
+   *    caller states that the coordinate is not provably a number
+   *    (`keepsAbsence`): the interpreter then keeps the absence, `Missing`,
+   *    and answers `NaN` only for a coordinate that is a number (ROADMAP
+   *    CE-229).
    */
   pointComponent: (
     v: unknown,
     k: number,
     emptyBroadcasts = true,
     nested = false,
-    undecidedNesting = false
+    undecidedNesting = false,
+    keepsAbsence = false
   ): unknown => {
-    if (!Array.isArray(v)) return NaN;
+    if (!Array.isArray(v))
+      return keepsAbsence && (v === undefined || v === null) ? undefined : NaN;
     if (v.length === 0) return emptyBroadcasts ? [] : NaN;
     // The element that decides the reading is the first one that is not an
     // empty array, as in the interpreter (`firstDecidingElement`): an empty

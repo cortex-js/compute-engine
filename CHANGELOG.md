@@ -12,6 +12,22 @@
 
 ### Behavior Changes
 
+- **Compiled JavaScript keeps an absent value whose type is not known
+  through a point accessor and arithmetic** (ROADMAP CE-229). With
+  `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of two
+  points, the interpreter gives `(Missing, Missing, Missing)` for `W(L[5], 2)`,
+  and compiled JavaScript gave `[NaN, NaN, NaN]`. The interpreter answers the
+  marker of the codomain for an absent operand: `NaN` when the operation is
+  provably a number, `Missing` otherwise. Compiled code now does the same: a
+  coordinate accessor whose type is `any` or `unknown` gives `undefined` (the
+  compiled spelling of `Missing`) for an absent point, and an element-wise
+  `Add`, `Multiply` (and the other arithmetic) whose type is not provably a
+  number keeps an `undefined` operand of type `any` or `unknown`. `W(L[5], 2)`
+  compiles to `[undefined, undefined, undefined]`. Beside an operand that is
+  a list at run time the absence lands in each cell, as in the interpreter:
+  `[1, 2] + PointX(p)` with `p` absent is `[NaN, NaN]`. A numeric operation,
+  such as `2·x` with `x` absent, is still `NaN`.
+
 - **A parameter declared `broadcastable<T>` maps to the cells when `T`
   cannot hold a list** (ROADMAP CE-405, Tycho row 434; user decision
   2026-10-24). With `f: (broadcastable<number>) -> number` and

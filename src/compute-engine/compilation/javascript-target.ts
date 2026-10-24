@@ -2909,11 +2909,25 @@ function compilePointComponent(
     // into the helper. The broadcast reading is the helper's default, and is
     // left unspoken to keep the emitted call short.
     const emptyBroadcasts = elementTypeBroadcastsWhenEmpty(eltType);
-    const options = undecidedNesting
-      ? `, ${emptyBroadcasts}, false, true`
-      : emptyBroadcasts
-        ? ''
-        : ', false';
+    // An absent operand (`undefined`) has no coordinate. When nothing is
+    // known about the coordinate (the accessor is typed `any` or `unknown`,
+    // as over `collection<any> | tuple`, the parameter type a function
+    // literal infers from a `PointX(p)` use), the interpreter keeps the
+    // absence, `Missing`, and the helper answers `undefined` (its sixth
+    // argument). A coordinate typed a number, or a number or a list of
+    // numbers, answers `NaN`, as `PointX(Missing)` does at the top level
+    // (ROADMAP CE-229).
+    const accessor = (['PointX', 'PointY', 'PointZ'] as const)[idx];
+    const keepsAbsence =
+      accessor !== undefined &&
+      isTopTypeForAbsence(arg.engine.function(accessor, [arg]).type.type);
+    const options = keepsAbsence
+      ? `, ${emptyBroadcasts}, false, ${undecidedNesting}, true`
+      : undecidedNesting
+        ? `, ${emptyBroadcasts}, false, true`
+        : emptyBroadcasts
+          ? ''
+          : ', false';
     return `_SYS.pointComponent(${compiled()}, ${idx}${options})`;
   }
   const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
@@ -3060,6 +3074,14 @@ export function mayBePointList(t: Type): boolean {
 export function tupleElementType(t: Type, idx: number): Type | undefined {
   if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
   return t.elements[idx]?.type;
+}
+
+/** Whether `t` states nothing about a value (`any` or `unknown`): an absent
+ * value of such a type keeps its absence through a coordinate accessor and
+ * through arithmetic, as in the interpreter (ROADMAP CE-229). */
+export function isTopTypeForAbsence(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  return r === 'any' || r === 'unknown';
 }
 
 /**
