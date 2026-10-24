@@ -5791,6 +5791,24 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 - **CE-314.1** The Epsil asynchronous route. Epsil has no keyword for parallel
   execution: the engine decides from purity, compilability and size, as it does
   for compilation (design section 5.7).
+  Tycho row 441 (filed 2026-10-24, Tycho commit `aa31fffac`) asks for it: a
+  notebook Epsil cell runs through `executeEpsil` on the main thread under a
+  2 s limit, so one large batch of independent values (a map over 100 000
+  elements, a large sum, a grid of samples) cannot finish. Ask: run such a
+  batch on `ce.workers` with the same result as on the calling thread, and an
+  asynchronous run of the program with an abort signal. READY when an Epsil
+  cell that maps a costly function over 100 000 elements runs on the pool
+  from an engine inside a worker, with the same values and faster than on one
+  thread.
+- **CE-314.3** A pool for an engine inside a dedicated worker (Tycho row 441,
+  part 2). The engine creates no worker itself; the host code inside the
+  worker can call `createKernelPool()` with a factory that starts nested
+  workers and set `ce.workers` (the pool reads `navigator.hardwareConcurrency`,
+  which workers have, and uses `requestIdleCallback` only when present). Not
+  tested by CE, and it depends on the browser allowing nested dedicated
+  workers. A pool on the page that serves an engine in a worker would need a
+  protocol between the two threads; it does not exist. Task: test the nested
+  pool in Node and in a browser, and document it.
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24:
   "one formula, many points"; `runMany` says less).
 
