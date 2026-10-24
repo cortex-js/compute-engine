@@ -87,6 +87,7 @@ import {
   functionLiteralReturnMarker,
   functionLiteralReturnType,
   isDestructuringParameter,
+  isFunctionLiteralParameter,
   isScalarType,
   mentionsQuantifiedVariable,
   restParameterIndex,
@@ -1750,6 +1751,13 @@ function isCallOfFunctionValue(e: Expression): boolean {
  * literal (whose `Return` leaves that literal) and outside the operand of a
  * quoting operator (`holdClass: 'quote'`, such as `Hold`), which is never
  * run as part of the body.
+ *
+ * A call of a function-literal parameter named `Return` is not the
+ * statement, also when the parameter has no type, and also when it is a
+ * parameter of an enclosing literal: the parameter shadows `Return`, and
+ * evaluation calls it (`isFunctionLiteralParameter()`). Without this,
+ * `Return ↦ 1 + Return()` was typed
+ * `(unknown) -> broadcastable<number> | nothing`.
  */
 function earlyReturnTypes(body: Expression): Type[] {
   const types: Type[] = [];
@@ -1762,7 +1770,11 @@ function earlyReturnTypes(body: Expression): Type[] {
     if (e.operatorDefinition?.holdClass === 'quote') return;
     // A call of a function value named `Return` (a parameter declared
     // `() -> real`) is not the statement (`isCallOfFunctionValue`).
-    if (e.operator === 'Return' && !isCallOfFunctionValue(e))
+    if (
+      e.operator === 'Return' &&
+      !isCallOfFunctionValue(e) &&
+      !isFunctionLiteralParameter(e.valueDefinition)
+    )
       types.push(e.nops === 0 ? 'nothing' : e.op1.type.type);
     for (const op of e.ops) visit(op);
   };

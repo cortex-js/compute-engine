@@ -117,6 +117,94 @@ describe('a Return in the body of an operator that takes an expression', () => {
     );
   });
 
+  // ROADMAP CE-401. While the body of a function literal is canonicalized,
+  // its parameters are not declared in a scope yet, and a parameter named
+  // `Return` was read as the statement.
+  test('a call of a parameter named Return is allowed', () => {
+    const sumOfCall = ['Sum', ['Return'], ['Limits', 'k', 1, 3]];
+    for (const param of [['Typed', 'Return', '() -> real'], 'Return']) {
+      const f = ce.box(['Function', sumOfCall, param] as never);
+      expect(f.isValid).toBe(true);
+      expect(
+        ce
+          .box(['Apply', f, ['Function', 2]] as never)
+          .evaluate()
+          .toString()
+      ).toBe('6');
+    }
+    expect(
+      ce.box([
+        'Function',
+        ['Integrate', ['Return'], ['Limits', 'x', 0, 1]],
+        ['Typed', 'Return', '() -> real'],
+      ]).isValid
+    ).toBe(true);
+  });
+
+  test('a call of a parameter named Return of an enclosing literal is allowed', () => {
+    const f = ce.box([
+      'Function',
+      ['Function', ['Sum', ['Return'], ['Limits', 'k', 1, 3]], 'x'],
+      ['Typed', 'Return', '() -> real'],
+    ]);
+    expect(f.isValid).toBe(true);
+  });
+
+  test('a parameter with another name does not hide the Return statement', () => {
+    expect(
+      ce.box([
+        'Function',
+        ['Sum', ['Return', 'k'], ['Limits', 'k', 1, 3]],
+        ['Typed', 'g', '() -> real'],
+      ]).isValid
+    ).toBe(false);
+  });
+
+  test('a call of a parameter named Return gives no `nothing` result', () => {
+    expect(
+      ce.box(['Function', ['Add', 1, ['Return']], 'Return']).type.toString()
+    ).toBe('(unknown) -> broadcastable<number>');
+    // The call is in a nested literal, and calls the parameter of the
+    // enclosing one.
+    expect(
+      ce
+        .box([
+          'Function',
+          ['Function', ['Add', 1, ['Return']], 'x'],
+          'Return',
+        ])
+        .type.toString()
+    ).toBe('(unknown) -> (unknown) any -> broadcastable<number>');
+    // In an `Apply`, the type of the nested literal is computed while the
+    // body of the enclosing literal is canonicalized, and is cached.
+    expect(
+      ce
+        .box([
+          'Function',
+          ['Apply', ['Function', ['Add', 1, ['Return']], 'x'], 5],
+          'Return',
+        ])
+        .type.toString()
+    ).toBe('(unknown) any -> broadcastable<number>');
+  });
+
+  test('a checkpoint restore keeps the Return statement of a block', () => {
+    // The literal adopts the binding of `Return` from the scope of the
+    // canonical block `b` as its parameter. After the restore, `b` holds the
+    // statement again, so a `Sum` over it is invalid.
+    const engine = new ComputeEngine();
+    const b = engine.box(['Block', ['Return', 1]]);
+    const cp = engine.checkpoint();
+    engine.function('Function', [b, engine.symbol('Return', { canonical: false })]);
+    engine.restore(cp);
+    expect(
+      engine.function('Sum', [
+        b,
+        engine.box(['Limits', 'k', 1, 2], { form: 'raw' }),
+      ]).isValid
+    ).toBe(false);
+  });
+
   test('the parse route gives the same error', () => {
     expect(ce.parse('\\sum_{k=1}^{3} \\operatorname{Return}(k)').isValid).toBe(
       false

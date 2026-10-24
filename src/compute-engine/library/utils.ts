@@ -58,6 +58,7 @@ import {
   isOperatorDef,
   isValueDef,
 } from '../boxed-expression/definition-guards.js';
+import { isFunctionLiteralParameter } from '../boxed-expression/function-literal.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
@@ -3673,10 +3674,17 @@ export function canonicalBigop(
  * - the operand of a quoting operator (`holdClass: 'quote'`, such as
  *   `Hold`), which is data and is not run.
  *
- * A call of a function value named `Return` (a parameter declared
- * `() -> real`) is not the statement, as in `earlyReturnTypes()`
- * (`boxed-expression/effects-inference.ts`): the name is bound to a value,
- * or to a definition with a declared type.
+ * A call of a function value named `Return` is not the statement, as in
+ * `earlyReturnTypes()` (`boxed-expression/effects-inference.ts`): the name
+ * is bound to a value, or to a definition with a declared type
+ * (`ce.declare("Return", "() -> real")`). A parameter of an enclosing
+ * function literal named `Return`, with or without a type, is not the
+ * statement either: the parameter shadows `Return`, and evaluation calls
+ * it. While the body of the literal is canonicalized, the parameter is not
+ * yet declared in a scope: its name is only on the stack of shadowed
+ * parameters of the engine (`_isShadowedParameter()`), which is read here.
+ * In a canonical operand, the call is bound to the definition of the
+ * parameter, which `isFunctionLiteralParameter()` recognizes.
  */
 export function hasEscapingReturn(e: Expression): boolean {
   const ce = e.engine;
@@ -3697,7 +3705,11 @@ export function hasEscapingReturn(e: Expression): boolean {
         x.nops === 2 &&
         isSymbol(x.op1, 'Return') &&
         isFunction(x.op2, 'Delimiter'));
-    if (isReturnCall) {
+    if (
+      isReturnCall &&
+      !ce._isShadowedParameter('Return') &&
+      !isFunctionLiteralParameter(x.valueDefinition)
+    ) {
       const returnDef = ce.lookupDefinition('Return');
       const callsValue =
         isValueDef(returnDef) &&

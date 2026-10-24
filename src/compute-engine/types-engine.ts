@@ -2216,12 +2216,17 @@ export interface IComputeEngine {
    * declares the names (`_shadowedParameterBoundary`). By default it is the
    * current lexical scope, which is correct when the frame is pushed before
    * the construct's own scope is entered.
+   * Optional `functionLiteral` is true when the names are the parameters of a
+   * function literal (false for the locals of a `Block`): the binding of each
+   * one is then recorded as a parameter binding when it is cached
+   * (`markFunctionLiteralParameter()`, `boxed-expression/function-literal.ts`).
    * @internal */
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
     types?: ReadonlyMap<string, Type>,
     inferredTypes?: ReadonlyMap<string, Type>,
-    boundary?: Scope
+    boundary?: Scope,
+    functionLiteral?: boolean
   ): void;
   /** The inferred type a caller supplied for an active bare shadowed
    * parameter, if any. @internal */

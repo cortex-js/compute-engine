@@ -223,6 +223,7 @@ import {
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
+import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
 import {
   declareProtocolImpl,
   declareProtocolImplementationImpl,
@@ -3208,6 +3209,11 @@ export class ComputeEngine implements IComputeEngine {
      * such a binding belongs to the enclosing context, and the parameter (or
      * block local) shadows it. */
     boundary: Scope;
+    /** True when the names are the parameters of a function literal, false
+     * when they are the locals of a `Block`. The binding of a parameter is
+     * recorded as a parameter binding when it is cached
+     * (`markFunctionLiteralParameter()`). */
+    functionLiteral: boolean;
   }[] = [];
 
   /** @internal */
@@ -3215,7 +3221,8 @@ export class ComputeEngine implements IComputeEngine {
     names: ReadonlyArray<string>,
     types?: ReadonlyMap<string, Type>,
     inferredTypes?: ReadonlyMap<string, Type>,
-    boundary?: Scope
+    boundary?: Scope,
+    functionLiteral = false
   ): void {
     this._shadowedParameterStack.push({
       names: new Set(names),
@@ -3223,6 +3230,7 @@ export class ComputeEngine implements IComputeEngine {
       inferredTypes,
       defs: new Map(),
       boundary: boundary ?? this.context.lexicalScope,
+      functionLiteral,
     });
   }
 
@@ -3299,6 +3307,11 @@ export class ComputeEngine implements IComputeEngine {
     for (let i = stack.length - 1; i >= 0; i--)
       if (stack[i].names.has(name)) {
         stack[i].defs.set(name, def);
+        // Marked now, not only when the literal is complete: a nested
+        // literal in the body can compute its type before that, and the
+        // type is then cached.
+        if (stack[i].functionLiteral && 'value' in def)
+          markFunctionLiteralParameter(this, def.value);
         return;
       }
   }

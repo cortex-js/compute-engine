@@ -231,6 +231,55 @@ export function functionLiteralParameterNames(param: Expression): string[] {
 }
 
 /**
+ * The value definitions of the parameters of the canonical function
+ * literals. A parameter binding is added when it is created while the body
+ * is canonicalized (`_setShadowedParameterDef()` in `index.ts`), so that a
+ * nested literal whose type is computed before the enclosing literal is
+ * complete sees it. `canonicalFunctionLiteralArguments()`
+ * (`function-utils.ts`) adds the other parameter bindings when it declares
+ * the parameters.
+ *
+ * A reader uses it to know that a call is a call of a parameter, also when
+ * the parameter has no type and no value yet, and also from a nested
+ * literal that captures the parameter. The scope of the body cannot answer
+ * this: an inferred binding with no value there may be an auto-declared
+ * local, and while the literal is applied the parameter bindings are
+ * removed from that scope (`hideBodyScopeParams()`). The reader that needs
+ * it is the reading of a call named `Return`: a call of a parameter named
+ * `Return` is not the `Return` statement (`hasEscapingReturn()` in
+ * `library/utils.ts`, `earlyReturnTypes()` in `effects-inference.ts`).
+ *
+ * A binding that existed before the literal can become a parameter binding
+ * (the body was canonical before the literal was made, and its scope already
+ * held the name). So a mark made while a checkpoint is open is journaled,
+ * and a restore removes it, as it removes the binding from the scope.
+ */
+const FUNCTION_LITERAL_PARAMETERS = new WeakMap<object, true>();
+
+/** Record `def` as the value definition of a function-literal parameter
+ * (`FUNCTION_LITERAL_PARAMETERS`). `ce` is the engine of the literal: its
+ * open checkpoint, if any, journals the mark. */
+export function markFunctionLiteralParameter(
+  ce: Expression['engine'],
+  def: object
+): void {
+  if (FUNCTION_LITERAL_PARAMETERS.has(def)) return;
+  journalCheckpointMemoEntry(
+    ce,
+    FUNCTION_LITERAL_PARAMETERS,
+    def,
+    'function-literal-parameter'
+  );
+  FUNCTION_LITERAL_PARAMETERS.set(def, true);
+}
+
+/** True when `def` is the value definition of a parameter of a canonical
+ * function literal (`FUNCTION_LITERAL_PARAMETERS`). */
+export function isFunctionLiteralParameter(def: object | undefined): boolean {
+  return def !== undefined && FUNCTION_LITERAL_PARAMETERS.has(def);
+}
+
+/**
  * The type a destructuring parameter's argument must have: a tuple whose
  * arity is the pattern's, with a nested tuple type at each nested pattern
  * position and `unknown` everywhere else.

@@ -64,6 +64,7 @@ import {
   freeAnonymousSlots,
   isDestructuringParameter,
   isRestParameter,
+  markFunctionLiteralParameter,
   mentionsQuantifiedVariable,
   restParameterIndex,
   restParameterSymbol,
@@ -844,7 +845,9 @@ export function canonicalFunctionLiteralArguments(
     shadowTypes.size > 0 ? shadowTypes : undefined,
     inferredHints !== undefined && inferredHints.size > 0
       ? inferredHints
-      : undefined
+      : undefined,
+    undefined,
+    true
   );
   // Collect the juxtapositions the body reads as multiplication only because
   // their leading symbol has no function definition yet — see
@@ -1007,6 +1010,15 @@ export function canonicalFunctionLiteralArguments(
     journalCheckpointMapEntry(ce, blockScope.bindings, name, name, 'declare');
     blockScope.bindings.set(name, binding);
   }
+  // Record the binding of each parameter as a parameter binding
+  // (`markFunctionLiteralParameter()`): a call of a parameter named `Return`
+  // is then not read as the `Return` statement.
+  for (const param of params)
+    for (const name of functionLiteralParameterNames(param)) {
+      const binding = blockScope.bindings.get(name);
+      if (binding !== undefined && 'value' in binding)
+        markFunctionLiteralParameter(ce, binding.value);
+    }
   let literal: Expression;
   try {
     block = rebindParameters(block, params);

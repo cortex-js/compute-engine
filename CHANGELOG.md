@@ -81,6 +81,20 @@
 
 ### Resolved Issues
 
+- **A parameter named `Return` can be called in the body of `Sum`,
+  `Integrate` and the other operators that take an expression** (ROADMAP
+  CE-401). Since 0.164.0 a `Return` statement in such a body is the error
+  `return-in-expression-body`. The check also refused a call of a parameter
+  of the enclosing function literal named `Return`:
+  `["Function", ["Sum", ["Return"], ["Limits", "k", 1, 3]], ["Typed", "Return", "() -> real"]]`
+  was invalid. The call is now allowed, with or without a type on the
+  parameter, and the function applied to `() ↦ 2` gives 6. A `Return` that
+  calls a bare parameter, of the function or of an enclosing function, also
+  no longer adds `nothing` to the result type of the function:
+  `Return ↦ 1 + Return()` is typed
+  `(unknown) -> broadcastable<number>`, not
+  `(unknown) -> broadcastable<number> | nothing`.
+
 - **The result of a function whose parameter is declared `broadcastable<T>`
   was typed for a whole collection** (ROADMAP CE-408, Tycho row 436). With
   `l: (broadcastable<tuple<number, number>>) -> unknown` and

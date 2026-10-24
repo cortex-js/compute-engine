@@ -2115,22 +2115,6 @@ corpus uses it).
 
 ## Symbolic computation
 
-### CE-401. A function parameter named `Return` cannot be called in the body of `Sum`
-
-**Status:** open; defect, small. Found 2026-10-23 while fixing CE-96.
-
-With the CE-96 check, `["Function", ["Sum", ["Return"], ["Limits", "k", 1, 3]],
-["Typed", "Return", "() -> real"]]` is invalid
-(`return-in-expression-body`), although `Return()` there is a call of the
-parameter, not the statement. A `Return` declared in the scope of the engine
-(`ce.declare("Return", "() -> real")`) is read as a call. The check
-(`hasEscapingReturn()` in `library/utils.ts`) runs in the canonical handler
-of `Sum`, before the parameters of the enclosing function literal are bound,
-so it cannot find the parameter. Fix: run the check when the body is bound
-(read `e.valueDefinition` as `earlyReturnTypes()` in
-`boxed-expression/effects-inference.ts` does), or pass the names of the
-parameters in scope to the canonical handlers. Such a parameter name is rare.
-
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
 **Status:** open; defect, small. Tycho row 412.
