@@ -29,7 +29,7 @@ Regularized incomplete beta function I_x(a, b)
 
 ### binCounts
 
-MathJSON `BinCounts` · `(collection<any>, list<number> | number) -> list<number>`
+MathJSON `BinCounts` · `(collection<nothing | number>, list<number> | number) -> list<number>`
 
 Count the number of elements falling into each bin.
 
@@ -52,13 +52,13 @@ Cumulative distribution function P(X ≤ x) of a distribution.
 
 ### correlation
 
-MathJSON `Correlation` · `(collection<any>, collection<any>?) -> nan | real<-1..1>`
+MathJSON `Correlation` · `(collection<nothing | number | tuple>, collection<nothing | number>?) -> nan | real<-1..1>`
 
 Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
 ### covariance
 
-MathJSON `Covariance` · `(collection<any>, collection<any>?) -> nan | real`
+MathJSON `Covariance` · `(collection<nothing | number | tuple>, collection<nothing | number>?) -> nan | real`
 
 Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
@@ -106,7 +106,7 @@ Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)
 
 ### histogram
 
-MathJSON `Histogram` · `(collection<any>, list<number> | number) -> list<tuple<number, integer>>`
+MathJSON `Histogram` · `(collection<nothing | number>, list<number> | number) -> list<tuple<number, integer>>`
 
 Compute a histogram of the values in a collection. Returns a list of (bin start, count) tuples.
 
@@ -117,13 +117,13 @@ histogram([1, 2, 2, 3], 3)
 
 ### interquartileRange
 
-MathJSON `InterquartileRange` · `((collection<any> | number)+) -> +oo | nan | real<0..>`
+MathJSON `InterquartileRange` · `((collection<nothing | number> | number)+) -> +oo | nan | real<0..>`
 
 Interquartile range (Q3 - Q1) of a collection. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### kurtosis
 
-MathJSON `Kurtosis` · `((collection<any> | number)+) -> nan | real`
+MathJSON `Kurtosis` · `((collection<nothing | number> | number)+) -> nan | real`
 
 Kurtosis of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -135,13 +135,13 @@ Least-squares linear fit b0 + b1·x. Returns Tuple(b0, b1), or the fitted expres
 
 ### mean
 
-MathJSON `Mean` · `((collection<any> | distribution | number)+) -> number`
+MathJSON `Mean` · `((collection<nothing | number> | distribution | number)+) -> number`
 
 Arithmetic mean (average) of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### median
 
-MathJSON `Median` · `((collection<any> | number)+) -> nan | real | signed_infinity`
+MathJSON `Median` · `((collection<nothing | number> | number)+) -> nan | real | signed_infinity`
 
 Median of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -152,7 +152,7 @@ median([3, 1, 4, 2])
 
 ### mode
 
-MathJSON `Mode` · `((collection<any> | number)+) -> nan | real | signed_infinity`
+MathJSON `Mode` · `((collection<nothing | number> | number)+) -> nan | real | signed_infinity`
 
 Most frequently occurring value in a collection. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -187,19 +187,19 @@ Least-squares polynomial fit of the given degree. Returns the ascending coeffici
 
 ### populationCovariance
 
-MathJSON `PopulationCovariance` · `(collection<any>, collection<any>?) -> nan | real`
+MathJSON `PopulationCovariance` · `(collection<nothing | number | tuple>, collection<nothing | number>?) -> nan | real`
 
 Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. An observation is skipped if either coordinate (or the whole row) is Nothing. Raw source lengths must match before omission; all terms use the same retained observations.
 
 ### populationStandardDeviation
 
-MathJSON `PopulationStandardDeviation` · `((collection<any> | number)+) -> nan | real<0..>`
+MathJSON `PopulationStandardDeviation` · `((collection<nothing | number> | number)+) -> nan | real<0..>`
 
 Population Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
 ### populationVariance
 
-MathJSON `PopulationVariance` · `((collection<any> | number)+) -> nan | real<0..>`
+MathJSON `PopulationVariance` · `((collection<nothing | number> | number)+) -> nan | real<0..>`
 
 Population variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -211,7 +211,7 @@ Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. The firs
 
 ### quartiles
 
-MathJSON `Quartiles` · `((collection<any> | number)+) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>`
+MathJSON `Quartiles` · `((collection<nothing | number> | number)+) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>`
 
 Lower quartile, median, and upper quartile of a collection. Uses the Moore–McCabe (exclusive-hinges) convention: the sample is split at its median, and Q1/Q3 are the medians of the lower/upper halves with the overall median excluded from both halves when the sample size is odd. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -228,7 +228,7 @@ RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`
 
 ### skewness
 
-MathJSON `Skewness` · `((collection<any> | number)+) -> nan | real`
+MathJSON `Skewness` · `((collection<nothing | number> | number)+) -> nan | real`
 
 Skewness of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -250,7 +250,7 @@ slidingWindow("abcd", 2)
 
 ### standardDeviation
 
-MathJSON `StandardDeviation` · `((collection<any> | distribution | number)+) -> nan | real<0..>`
+MathJSON `StandardDeviation` · `((collection<nothing | number> | distribution | number)+) -> nan | real<0..>`
 
 Sample Standard Deviation of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.
 
@@ -262,6 +262,6 @@ Continuous uniform distribution on the interval [a, b].
 
 ### variance
 
-MathJSON `Variance` · `((collection<any> | distribution | number)+) -> nan | real<0..>`
+MathJSON `Variance` · `((collection<nothing | number> | distribution | number)+) -> nan | real<0..>`
 
 Sample variance of a collection of numbers. Immediate Nothing data are omitted; sample sizes count retained data.

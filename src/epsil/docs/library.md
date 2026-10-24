@@ -816,11 +816,11 @@ The [Statistics reference](/epsil/reference/statistics/) has the full descriptio
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `betaRegularized` | `BetaRegularized` | `(complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Regularized incomplete beta function I_x(a, b) |
-| `binCounts` | `BinCounts` | `(collection<any>, list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
+| `binCounts` | `BinCounts` | `(collection<nothing \| number>, list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
 | `binomialDistribution` | `BinomialDistribution` | `(integer<0..>, real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
 | `cdf` | `CDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..1>` | Cumulative distribution function P(X ≤ x) of a distribution. |
-| `correlation` | `Correlation` | `(collection<any>, collection<any>?) -> nan \| real<-1..1>` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
-| `covariance` | `Covariance` | `(collection<any>, collection<any>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `correlation` | `Correlation` | `(collection<nothing \| number \| tuple>, collection<nothing \| number>?) -> nan \| real<-1..1>` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `covariance` | `Covariance` | `(collection<nothing \| number \| tuple>, collection<nothing \| number>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `erf` | `Erf` | `(complex \| signed_infinity) -> complex` | Gauss error function |
 | `erfInv` | `ErfInv` | `(complex \| infinity) -> number` | Inverse of the error function |
 | `erfc` | `Erfc` | `(complex \| signed_infinity) -> complex` | Complementary error function: 1 - Erf(x) |
@@ -828,28 +828,28 @@ The [Statistics reference](/epsil/reference/statistics/) has the full descriptio
 | `exponentialDistribution` | `ExponentialDistribution` | `(real<0<..>) -> expression<ExponentialDistribution>` | Exponential distribution with rate parameter λ. |
 | `findFit` | `FindFit` | `(any, any, any, any, dictionary?) -> dictionary` | Nonlinear least-squares fit of a model to data. |
 | `gammaRegularized` | `GammaRegularized` | `(complex \| infinity, complex \| infinity) -> number` | Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a) |
-| `histogram` | `Histogram` | `(collection<any>, list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
-| `interquartileRange` | `InterquartileRange` | `((collection<any> \| number)+) -> +oo \| nan \| real<0..>` | Interquartile range (Q3 - Q1) of a collection. |
-| `kurtosis` | `Kurtosis` | `((collection<any> \| number)+) -> nan \| real` | Kurtosis of a collection of numbers. |
+| `histogram` | `Histogram` | `(collection<nothing \| number>, list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
+| `interquartileRange` | `InterquartileRange` | `((collection<nothing \| number> \| number)+) -> +oo \| nan \| real<0..>` | Interquartile range (Q3 - Q1) of a collection. |
+| `kurtosis` | `Kurtosis` | `((collection<nothing \| number> \| number)+) -> nan \| real` | Kurtosis of a collection of numbers. |
 | `linearRegression` | `LinearRegression` | `(any+) -> tuple<number, number>` | Least-squares linear fit b0 + b1·x. |
-| `mean` | `Mean` | `((collection<any> \| distribution \| number)+) -> number` | Arithmetic mean (average) of a collection of numbers. |
-| `median` | `Median` | `((collection<any> \| number)+) -> nan \| real \| signed_infinity` | Median of a collection of numbers. |
-| `mode` | `Mode` | `((collection<any> \| number)+) -> nan \| real \| signed_infinity` | Most frequently occurring value in a collection. |
+| `mean` | `Mean` | `((collection<nothing \| number> \| distribution \| number)+) -> number` | Arithmetic mean (average) of a collection of numbers. |
+| `median` | `Median` | `((collection<nothing \| number> \| number)+) -> nan \| real \| signed_infinity` | Median of a collection of numbers. |
+| `mode` | `Mode` | `((collection<nothing \| number> \| number)+) -> nan \| real \| signed_infinity` | Most frequently occurring value in a collection. |
 | `normalDistribution` | `NormalDistribution` | `(real, real<0<..>) -> expression<NormalDistribution>` | Normal (Gaussian) distribution with mean μ and standard deviation σ. |
 | `pdf` | `PDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..>` | Probability density (continuous) or mass (discrete) function of a distribution, evaluated at x. |
 | `poissonDistribution` | `PoissonDistribution` | `(real<0<..>) -> expression<PoissonDistribution>` | Poisson distribution with rate parameter λ. |
 | `polynomialFit` | `PolynomialFit` | `(any+) -> list<number>` | Least-squares polynomial fit of the given degree. |
-| `populationCovariance` | `PopulationCovariance` | `(collection<any>, collection<any>?) -> nan \| real` | Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
-| `populationStandardDeviation` | `PopulationStandardDeviation` | `((collection<any> \| number)+) -> nan \| real<0..>` | Population Standard Deviation of a collection of numbers. |
-| `populationVariance` | `PopulationVariance` | `((collection<any> \| number)+) -> nan \| real<0..>` | Population variance of a collection of numbers. |
+| `populationCovariance` | `PopulationCovariance` | `(collection<nothing \| number \| tuple>, collection<nothing \| number>?) -> nan \| real` | Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
+| `populationStandardDeviation` | `PopulationStandardDeviation` | `((collection<nothing \| number> \| number)+) -> nan \| real<0..>` | Population Standard Deviation of a collection of numbers. |
+| `populationVariance` | `PopulationVariance` | `((collection<nothing \| number> \| number)+) -> nan \| real<0..>` | Population variance of a collection of numbers. |
 | `quantile` | `Quantile` | `(collection<any> \| distribution, real<0..1>) -> nan \| real \| signed_infinity` | Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. |
-| `quartiles` | `Quartiles` | `((collection<any> \| number)+) -> tuple<lower: nan \| real \| signed_infinity, mid: nan \| real \| signed_infinity, upper: nan \| real \| signed_infinity>` | Lower quartile, median, and upper quartile of a collection. |
+| `quartiles` | `Quartiles` | `((collection<nothing \| number> \| number)+) -> tuple<lower: nan \| real \| signed_infinity, mid: nan \| real \| signed_infinity, upper: nan \| real \| signed_infinity>` | Lower quartile, median, and upper quartile of a collection. |
 | `randomSample` | `RandomSample` | `((T, number) random -> T where T: string) & ((indexed_collection, number) random -> list)` | RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`, without replacement. "Without replacement" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return [1, 1]. |
-| `skewness` | `Skewness` | `((collection<any> \| number)+) -> nan \| real` | Skewness of a collection of numbers. |
+| `skewness` | `Skewness` | `((collection<nothing \| number> \| number)+) -> nan \| real` | Skewness of a collection of numbers. |
 | `slidingWindow` | `SlidingWindow` | `((S, integer, integer?) -> list<string> where S: string) & ((collection, integer, integer?) -> list<list>)` | Return overlapping sliding windows of fixed size over the collection. |
-| `standardDeviation` | `StandardDeviation` | `((collection<any> \| distribution \| number)+) -> nan \| real<0..>` | Sample Standard Deviation of a collection of numbers. |
+| `standardDeviation` | `StandardDeviation` | `((collection<nothing \| number> \| distribution \| number)+) -> nan \| real<0..>` | Sample Standard Deviation of a collection of numbers. |
 | `uniformDistribution` | `UniformDistribution` | `(real, real) -> expression<UniformDistribution>` | Continuous uniform distribution on the interval [a, b]. |
-| `variance` | `Variance` | `((collection<any> \| distribution \| number)+) -> nan \| real<0..>` | Sample variance of a collection of numbers. |
+| `variance` | `Variance` | `((collection<nothing \| number> \| distribution \| number)+) -> nan \| real<0..>` | Sample variance of a collection of numbers. |
 
 ## Units
 
