@@ -767,8 +767,12 @@ enclosing span preempts this limit; use the label and
 `finally`, so a `Promise`-returning (`async`) callback hands control back
 at its first `await` while the span is still open: work that resumes after
 that point runs **outside** the deadline and is never cancelled (see
-`docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
-`expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+`docs/TIMEOUT-MODEL.md` §6.4). An `expr.evaluateAsync()` call that `fn`
+makes before its first `await` is the exception: the evaluation keeps
+the span's deadline until it ends
+(`ce.withTimeLimit(20, () => { p = expr.evaluateAsync(); })`). For
+cancellation that is not a time limit, use
+`expr.evaluateAsync({ signal })` with an `AbortSignal`.
 
 • T
 
@@ -12144,8 +12148,12 @@ enclosing span preempts this limit; use the label and
 `finally`, so a `Promise`-returning (`async`) callback hands control back
 at its first `await` while the span is still open: work that resumes after
 that point runs **outside** the deadline and is never cancelled (see
-`docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
-`expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+`docs/TIMEOUT-MODEL.md` §6.4). An `expr.evaluateAsync()` call that `fn`
+makes before its first `await` is the exception: the evaluation keeps
+the span's deadline until it ends
+(`ce.withTimeLimit(20, () => { p = expr.evaluateAsync(); })`). For
+cancellation that is not a time limit, use
+`expr.evaluateAsync({ signal })` with an `AbortSignal`.
 
 • T
 
@@ -16047,6 +16055,19 @@ Asynchronous version of `evaluate()`.
 
 The `options` argument can include a `signal` property, which is an
 `AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
+
+A call made inside a
+[`ComputeEngine.withTimeLimit`](#withtimelimit)
+(or `withStepBudget`) span keeps the span's limit for the whole
+evaluation, the parts that run after an `await` included: the limit is
+read when `evaluateAsync()` is called, not when the span closes. A
+limit that expires is reported as it is by `evaluate()`.
+A span around a nested `evaluateAsync(options)` call (from an
+asynchronous handler, with the options it received) applies to that
+call until it ends, when it ends sooner than the limit of the
+evaluation or adds a step budget; the other parts of the evaluation
+keep their own limit. Nested limits combine: the earlier time limit
+applies, and a step counts against every step budget in force.
 
 ####### options?
 
