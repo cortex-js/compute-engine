@@ -229,6 +229,7 @@ import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
+  cannotHoldAList,
   couldMatch,
   isSubtype,
   provablyAdmits,
@@ -10655,8 +10656,8 @@ function lambdaBroadcastType(
         ));
     // One list level per rank the broadcast descends: a nested list is
     // mapped at its leaves (`nestedBroadcastResultType`). A declared
-    // `broadcastable<T>` slot plan (`slots`) maps exactly one rank, and
-    // takes one level. A GENERIC signature takes the shape-aware typing
+    // `broadcastable<T>` slot plan that maps one rank took one level above.
+    // A GENERIC signature takes the shape-aware typing
     // below: the call maps the literal over the leaves of its operand, so
     // the value has the operand's rank (`g := (x: T) -> tuple<T, T>` over
     // `[[1, 2], [3, 4]]` is `[[(1, 1), (2, 2)], [(3, 3), (4, 4)]]`, a
@@ -10669,7 +10670,19 @@ function lambdaBroadcastType(
     // level the solver removed, as before. An operand with rows of
     // different lengths gives a value whose rows differ in length, and the
     // result is wrapped in plain lists, one for each level of the operand.
-    const shapeAwareGeneric = generic && slots === undefined;
+    // How the declared slots that take part map: when every one has an
+    // element type that cannot hold a list, the call maps to the cells, as a
+    // call with no declaration does (user decision 2026-10-24, ROADMAP
+    // CE-405), and it is typed the same way. Otherwise every slot maps
+    // exactly one rank (`mapsToCells`), and the value has one list level
+    // around the result: `m := x ↦ (x, x)` declared
+    // `(broadcastable<value>) -> value` over `[[1, 2], [3, 4, 5]]` is a list
+    // of two pairs of rows, a `list<value>`.
+    const oneRankCall = ops.some(
+      (_x, i) => participates(i) && slotMapsOneRank(slots, i)
+    );
+    if (oneRankCall) return broadcastResultType(perElementResult);
+    const shapeAwareGeneric = generic;
     if (shapeAwareGeneric) {
       const levels = genericLiftLevels(mappedTypes);
       if (levels === 'nested')
@@ -10688,24 +10701,19 @@ function lambdaBroadcastType(
       }
     }
     if (collectionValued && !shapeAwareGeneric)
-      return generic || slots !== undefined
-        ? broadcastResultType(perElementResult)
-        : nestedBroadcastResultType(mappedTypes, perElementResult);
+      return nestedBroadcastResultType(mappedTypes, perElementResult);
     // Shape-aware (§D6.1): the map preserves the source's structure. When
     // the mapped operands have different ranks (a matrix beside a list),
     // the shape-aware form gives one plain list level, but the value is
     // mapped to the DEEPEST rank (`[[1,2],[3,4]]` beside `[5,6]` gives a
     // matrix), so the nested form, which wraps one level per rank of the
-    // deepest operand, is the one the value is a member of. A declared slot
-    // plan keeps the shape-aware form, for the reason given above (one rank
-    // is its whole lift).
+    // deepest operand, is the one the value is a member of.
     const types = mappedTypes;
     // The source's shape is kept when the per-element result may carry
     // dimensions (a result that cannot be a list: a number, a boolean, a
     // tuple), and spelled as nested plain lists otherwise
     // (`shapedBroadcastResultType`).
     const shaped = shapedBroadcastResultType(types, perElementResult);
-    if (slots !== undefined) return shaped;
     const nested = nestedBroadcastResultType(types, perElementResult);
     const result = listRank(nested) > listRank(shaped) ? nested : shaped;
     // A generic literal over an operand whose rank is not known (a
@@ -10992,7 +11000,7 @@ function derivedBroadcastElementResult(
   expr: BoxedFunction,
   mappedAt: ReadonlyArray<boolean>,
   perElementResult: Type,
-  oneRank: boolean,
+  oneRank: (i: number) => boolean,
   // The type to read for each operand in place of the type of the operand
   // expression (one arm of its union type), or `undefined` to read the
   // expression.
@@ -11032,19 +11040,23 @@ function derivedBroadcastElementResultOver(
   describeAt: (i: number) => OperandDescriptor,
   mappedAt: ReadonlyArray<boolean>,
   perElementResult: Type,
-  oneRank: boolean,
+  oneRank: (i: number) => boolean,
   operandTypes?: ReadonlyArray<Type | undefined>
 ): Type | undefined {
   const args: OperandDescriptor[] = [];
+  // A call that maps a slot one rank maps every slot one rank
+  // (`mapsToCells`), so each mapped operand is then read one rank down.
+  const oneRankCall = mappedAt.some((m, j) => m && oneRank(j));
   // By position, not by identity: one boxed expression may fill a mapped
   // slot and a slot that binds whole.
   for (let i = 0; i < count; i++) {
     const t = operandTypes?.[i];
     if (mappedAt[i]) {
-      // A declared `broadcastable<T>` slot plan maps exactly one rank (a
-      // nested row binds whole), so the cell is the element one rank down;
-      // a scalar-parameter broadcast descends to the leaves.
-      const cell = oneRank
+      // A declared `broadcastable<T>` slot whose `T` can hold a list maps
+      // exactly one rank (a nested row binds whole), so the cell is the
+      // element one rank down (`slotMapsOneRank`); another slot, and a
+      // scalar-parameter broadcast, descend to the leaves.
+      const cell = oneRankCall
         ? collectionElementType(resolveTypeAlias(t ?? typeAt(i)))
         : broadcastLeafType(t ?? typeAt(i));
       if (cell === undefined) return undefined;
@@ -11182,7 +11194,7 @@ function lambdaCallTypeOverDescriptors(
     return { operator: s?.kind === 'application' ? s.head : '' };
   });
   const derive =
-    (perElementResult: Type, oneRank: boolean) =>
+    (perElementResult: Type, oneRank: (i: number) => boolean) =>
     (
       mappedAt: ReadonlyArray<boolean>,
       operandTypes?: ReadonlyArray<Type | undefined>
@@ -11253,7 +11265,7 @@ function lambdaCallTypeOverDescriptors(
       declaredSlots,
       def.inferredSignature,
       instantiated !== undefined,
-      derive(lambdaResult, declaredSlots !== undefined),
+      derive(lambdaResult, (i) => slotMapsOneRank(declaredSlots, i)),
       lambdaLiteralOf(def),
       instantiateWith(sig)
     );
@@ -11316,7 +11328,7 @@ function lambdaCallTypeOverDescriptors(
     valueSlots,
     inferredResult,
     isPolymorphicType(sig),
-    derive(liftedResult, valueSlots !== undefined),
+    derive(liftedResult, (i) => slotMapsOneRank(valueSlots, i)),
     heldValue,
     instantiateWith(sig)
   );
@@ -12360,7 +12372,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
             expr,
             mappedAt,
             lambdaResult,
-            declaredSlots !== undefined,
+            (i) => slotMapsOneRank(declaredSlots, i),
             operandTypes
           ),
         lambdaLiteralOf(def),
@@ -12535,7 +12547,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
             expr,
             mappedAt,
             liftedResult,
-            valueSlots !== undefined,
+            (i) => slotMapsOneRank(valueSlots, i),
             operandTypes
           ),
         heldValue,
@@ -14541,11 +14553,21 @@ function setupDeclaredBroadcast(
     // `incompatible-type` the eager loop's `declaredBroadcastElement` produces
     // — instead of silently re-broadcasting a nested element through the body.
     // Semantics must not depend on the source's SIZE.
-    {
-      strictLengths: false,
-      callee: literal,
-      paramTypes: (i: number) => (mask[i] ? plan.at(i).elements : undefined),
-    }
+    //
+    // When every mapped slot maps to the cells (`slotMapsOneRank` is false
+    // for each: user decision 2026-10-24, ROADMAP CE-405), the element
+    // function is the named function instead (`callee` and `paramTypes`
+    // left out): applied to an element that is itself a collection, it maps
+    // it again, as the eager loop does (`mapsToCells`), and applied to an
+    // element that is not a `T`, it is the same `incompatible-type`.
+    mask.every((m, i) => !m || !slotMapsOneRank(plan, i))
+      ? { strictLengths: false }
+      : {
+          strictLengths: false,
+          callee: literal,
+          paramTypes: (i: number) =>
+            mask[i] ? plan.at(i).elements : undefined,
+        }
   );
   if (lazy) return { value: lazy };
 
@@ -14601,6 +14623,38 @@ function declaredBroadcast(
     while (true) {
       const { done, value } = setup.rows.next();
       if (done) break;
+      if (mapsToCells(plan, value, setup.mask, isBroadcastOperand)) {
+        const error = declaredElementError(
+          ce,
+          plan,
+          value,
+          setup.mask,
+          isBroadcastOperand
+        );
+        if (error !== undefined) {
+          results.push(error);
+          continue;
+        }
+        results.push(
+          declaredBroadcast(
+            ce,
+            operator,
+            literal,
+            plan,
+            value,
+            isBroadcastOperand,
+            options
+          ) ??
+            declaredBroadcastElement(
+              ce,
+              literal,
+              plan,
+              value,
+              setup.mask
+            ).evaluate(options)
+        );
+        continue;
+      }
       results.push(
         declaredBroadcastElement(ce, literal, plan, value, setup.mask).evaluate(
           options
@@ -14653,12 +14707,48 @@ async function declaredBroadcastAsync(
     // As in the async step 2b: `Promise.all` cannot attribute a rejection to a
     // slot, but each promise is created in a KNOWN one.
     const index = results.length + 1;
+    const toCells = mapsToCells(plan, value, setup.mask, isBroadcastOperand);
+    const error = toCells
+      ? declaredElementError(ce, plan, value, setup.mask, isBroadcastOperand)
+      : undefined;
+    if (error !== undefined) {
+      results.push(Promise.resolve(error));
+      continue;
+    }
+    const cells = toCells
+      ? declaredBroadcastAsync(
+          ce,
+          operator,
+          literal,
+          plan,
+          value,
+          isBroadcastOperand,
+          options
+        )
+      : undefined;
     results.push(
-      declaredBroadcastElement(ce, literal, plan, value, setup.mask)
-        .evaluateAsync(options)
-        .catch((e) => {
-          throw withBroadcastThrowContext(e, operator, setup.mapped, index);
-        })
+      (cells !== undefined
+        ? cells.then(
+            (x) =>
+              x ??
+              declaredBroadcastElement(
+                ce,
+                literal,
+                plan,
+                value,
+                setup.mask
+              ).evaluateAsync(options)
+          )
+        : declaredBroadcastElement(
+            ce,
+            literal,
+            plan,
+            value,
+            setup.mask
+          ).evaluateAsync(options)
+      ).catch((e) => {
+        throw withBroadcastThrowContext(e, operator, setup.mapped, index);
+      })
     );
   }
   // The listing of the cells evaluates synchronously after the `await`, so
@@ -14679,6 +14769,102 @@ async function declaredBroadcastAsync(
       throw withBroadcastThrowContext(e, operator, setup.mapped);
     }
   );
+}
+
+/** Whether slot `i` of the declared plan `slots` maps exactly one rank: its
+ * element type can hold a list (`broadcastable<value>`), so an element binds
+ * whole (rule 2 of the 2026-08-08 decision). A slot whose element type
+ * cannot hold a list maps to the cells (`mapsToCells`), and so does every
+ * slot of a call with no declared plan. */
+function slotMapsOneRank(
+  slots: BroadcastSlotPlan | undefined,
+  i: number
+): boolean {
+  if (slots === undefined) return false;
+  const t = slots.at(i).elements;
+  return t !== undefined && !cannotHoldAList(t);
+}
+
+/**
+ * Whether the row `row` of a declared-`broadcastable<T>` map is mapped again
+ * instead of applied: a mapped element is itself a collection the map
+ * accepts (`isBroadcastOperand`), and every mapped slot has an element type
+ * that cannot hold a list (`cannotHoldAList`: a number, a boolean, a
+ * string, a tuple).
+ *
+ * Such a slot maps to the cells (user decision 2026-10-24, ROADMAP CE-405,
+ * Tycho row 434): since 0.162.0 `broadcastable<T>` is `T | tensor<T>`, so a
+ * `broadcastable<number>` parameter called with a matrix maps to its numbers,
+ * as an undeclared function and the compile targets do:
+ * `f([[1, 2], [3, 4]])` is `[[f(1), f(2)], [f(3), f(4)]]`. Before, the map
+ * stopped one rank down and each row was an `incompatible-type` error. A
+ * tuple is not a collection the map enters, so a list of points maps one
+ * point per call. A slot whose element type can hold a list
+ * (`broadcastable<value>`) keeps the one-rank rule of 2026-08-08: each
+ * element binds whole (`declaredBroadcastElement`). A call that maps such a
+ * slot keeps the one-rank rule for every slot: mapping some operands to the
+ * cells and others one rank down gave results that depended on the size of
+ * the source (the lazy route has one element function for the whole call).
+ */
+function mapsToCells(
+  plan: BroadcastSlotPlan,
+  row: ReadonlyArray<Expression>,
+  mask: ReadonlyArray<boolean>,
+  isBroadcastOperand: (x: Expression, i: number) => boolean
+): boolean {
+  let nested = false;
+  for (let i = 0; i < row.length; i++) {
+    if (!mask[i]) continue;
+    if (slotMapsOneRank(plan, i)) return false;
+    if (isBroadcastOperand(row[i], i)) nested = true;
+  }
+  return nested;
+}
+
+/**
+ * The `incompatible-type` error of the row `row` of a declared-
+ * `broadcastable<T>` map, or `undefined`: a mapped element that is not a
+ * collection the map enters (`isBroadcastOperand`), whose type provably is
+ * not the slot's element type. An element of unknown type is not an error,
+ * as `validateArguments` defers a provisional type. Checked before a row is
+ * mapped again (`mapsToCells`): the operands of the next level that are not
+ * collections are scalar lifts there, which are not checked.
+ */
+function declaredElementError(
+  ce: Expression['engine'],
+  plan: BroadcastSlotPlan,
+  row: ReadonlyArray<Expression>,
+  mask: ReadonlyArray<boolean>,
+  isBroadcastOperand: (x: Expression, i: number) => boolean
+): Expression | undefined {
+  for (let i = 0; i < row.length; i++) {
+    if (!mask[i]) continue;
+    const t = plan.at(i).elements;
+    if (t === undefined) continue;
+    const el = row[i];
+    if (isBroadcastOperand(el, i)) continue;
+    if (el.type.isUnknown || el.type.matches(t)) continue;
+    return ce.typeError(declaredSlotType(plan, i, t, mask), el.type, el);
+  }
+  return undefined;
+}
+
+/** The type an `incompatible-type` error of slot `i` names, in a call that
+ * maps the slots `mask`: the declared `broadcastable<T>` for a declared slot
+ * when the call maps to the cells (no mapped slot maps one rank), as the
+ * named function does on the lazy route (`setupDeclaredBroadcast`), so the
+ * error does not depend on the size of the source; the element type `t`
+ * otherwise, as the lazy route's parameter annotation does. */
+function declaredSlotType(
+  plan: BroadcastSlotPlan,
+  i: number,
+  t: Type,
+  mask: ReadonlyArray<boolean>
+): Type {
+  return plan.at(i).declared === true &&
+    !mask.some((m, j) => m && slotMapsOneRank(plan, j))
+    ? { kind: 'broadcastable', elements: t }
+    : t;
 }
 
 /**
@@ -14717,7 +14903,7 @@ function declaredBroadcastElement(
     // and `typeError` recovers the precise one by re-reading the operand it
     // is given here (`createTypeErrorExpression`). A string `where` carries
     // no type to re-read.
-    return ce.typeError(t, el.type, el);
+    return ce.typeError(declaredSlotType(plan, i, t, mask), el.type, el);
   }
   // The element binds whole: a collection element is not mapped again
   // (`ApplyWhole`; `Apply` maps a scalar-parameter literal over it).

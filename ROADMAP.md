@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-405.
+Next free reference: CE-410.
 
 **Entry format.**
 
@@ -128,6 +128,40 @@ problem does not occur on its installed release). Report:
 - Not CE's: the inline `At` lambda (Tycho's own override), the "Unknown
   operator" declines (importer binding), and the 2× re-compile of every declined
   row.
+
+### CE-407. A compiled call of a user function over a point-or-point-list argument reports success and returns a wrong value (Tycho row 435)
+
+**Status:** open; defect, small. Tycho row 435, filed 2026-10-24 on 0.164.0;
+measured again on CE main 2026-10-24: still present.
+
+With `f: (tuple<number, number>) -> tuple<number, number>`,
+`f := a ↦ (a.x + 1, a.y + 1)` and
+`L: tuple<number, number> | list<tuple<number, number>>` holding
+`[(1, 2), (3, 4)]`, the interpreter maps `f` over the points:
+`f(L)` is `[(2, 3), (4, 5)]`. The static type of `f(L)` is
+`tuple<number, number>`, and compiled JavaScript is `_fn_f(_.L)` with no map:
+it adds 1 to an array, gives `["1,21", "3,41"]`, and reports
+`success: true`. Controls: `L` declared `list<tuple<…>>` compiles to a map
+over the points and is correct; a point argument is correct. Expected: type
+the call as possibly a list (`tuple<…> | list<tuple<…>>`) and map at run
+time, or decline the compilation. Instrument:
+`~/dev/tycho/scripts/repros/2026-10-24-ce435-union-argument-to-tuple-param-compile-repro.mts`.
+
+### CE-409. A generic declared `broadcastable<T>` parameter with a number bound refuses a matrix when boxed
+
+**Status:** open; defect, small. Found 2026-10-24 while fixing CE-405 (the
+same on 0.164.0).
+
+With `w: (x: broadcastable<T>) -> list<T> where T: number` and
+`w := x ↦ [x]`, `w([[1, 2], [3, 4]])` is invalid when it is boxed:
+`Error(incompatible-type, broadcastable<number>, matrix<integer^(2x2)>)`.
+`w([1, 2])` is `[[1], [2]]`. The same declaration without a type variable,
+`(broadcastable<number>) -> …`, admits the matrix and maps to the cells
+(user decision 2026-10-24, CE-405), and so does compiled code for the
+generic one (`compile-generic-monomorphization.test.ts`). Expected: the
+validation of a generic declared slot reads its bound as the non-generic
+slot does, admits a tensor of the bound, and the call maps to the cells
+with one list level per rank of the argument.
 
 ## Types and type inference
 

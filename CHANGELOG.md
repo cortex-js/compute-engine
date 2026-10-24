@@ -12,6 +12,33 @@
 
 ### Behavior Changes
 
+- **A parameter declared `broadcastable<T>` maps to the cells when `T`
+  cannot hold a list** (ROADMAP CE-405, Tycho row 434; user decision
+  2026-10-24). With `f: (broadcastable<number>) -> number` and
+  `f := x ↦ x + 1`, `f([[1, 2], [3, 4]])` is `[[2, 3], [4, 5]]`, typed
+  `matrix<2x2>`. It was a list of two `incompatible-type` errors, one for each
+  row, while the call was typed `matrix<2x2>`: the declared parameter mapped
+  exactly one level down and checked each row against `number`. Since 0.162.0
+  `broadcastable<T>` is `T | tensor<T>`, and an undeclared function and the
+  compiled targets already map to the cells. This applies when `T` is a
+  number, a boolean, a string or a tuple; a tuple is not mapped into, so a
+  list of points maps one point per call. A parameter declared
+  `broadcastable<value>` keeps the one-level rule, and so does a call that
+  maps such a parameter. An element that is neither a `T` nor a collection is
+  an `incompatible-type` error that names `broadcastable<T>`. Such a function
+  now compiles to JavaScript through the element-wise call, with each cell
+  checked against `T`, where it declined. A call that maps a
+  `broadcastable<value>` parameter is typed with one list level around the
+  result (`list<value>`; it was typed from the whole shape of the argument).
+
+- **Every result of the MCP server says which engine computed it** (ROADMAP
+  CE-406). A server loads the engine when it starts and keeps it, so after an
+  upgrade a running server answered with the old engine, and nothing in its
+  results showed it. A JSON result now has `engineVersion`, and an error
+  message ends with a line `Engine version: …`. When the package installed on
+  disk has another version, the result also has an `engineWarning` (or a line
+  in an error message) that says to restart the server.
+
 - **The `interval-js` fallback answers a comparison, and does not read a
   wide input as its midpoint** (ROADMAP CE-210). When the target cannot
   compile an expression (`Greater(Fibonacci(x), 0)`: `Fibonacci` has no
@@ -37,6 +64,15 @@
   `list<any>`, `set<unknown>`, `tensor`) is still admitted.
 
 ### Resolved Issues
+
+- **The result of a function whose parameter is declared `broadcastable<T>`
+  was typed for a whole collection** (ROADMAP CE-408, Tycho row 436). With
+  `l: (broadcastable<tuple<number, number>>) -> unknown` and
+  `l := A ↦ √(A.x² + A.y²)`, the signature was refined to
+  `-> broadcastable<number>`, so `l(P)` over a list of points was typed
+  `list<broadcastable<number>>` and `P / l(P)` had a `tensor` arm. Each call
+  of the body receives one `T`, so the result is now typed with the parameter
+  read as `T`: `-> number`, and `l(P)` is `list<number> | number`.
 
 - **The LaTeX serialization of `Reduce` and `Fold` keeps the initial value**
   (ROADMAP CE-292). `Reduce([1, 2], Add, 10)` serialized as `\sum` of the list

@@ -100,6 +100,15 @@ if (responses[0].result?.serverInfo?.name !== 'epsil')
 const evaluated = JSON.parse(responses[1].result?.content?.[0]?.text ?? '{}');
 if (evaluated.value !== '3/2')
   fail(`mcp evaluate returned ${evaluated.value}, expected 3/2`);
+// Each tool result names the engine that computed it (ROADMAP CE-406). The
+// bundle reads the installed version from the package.json three levels up;
+// a server whose engine is the installed one has no warning.
+if (evaluated.engineVersion !== PACKAGE_VERSION)
+  fail(
+    `mcp evaluate engineVersion ${evaluated.engineVersion}, expected ${PACKAGE_VERSION}`
+  );
+if (evaluated.engineWarning !== undefined)
+  fail(`mcp evaluate has an unexpected warning: ${evaluated.engineWarning}`);
 if (!responses[2].result?.contents?.[0]?.text?.includes('Epsil'))
   fail(`mcp language card resource missing:\n${mcp.stdout}`);
 if (

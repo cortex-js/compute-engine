@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 import { parseMcpArguments, CliUsageError } from '../../src/cli/arguments';
 import { main, type CliIo } from '../../src/cli/main';
-import { createMcpHttpServer } from '../../src/cli/mcp';
+import { createMcpHttpServer, staleEngineWarning } from '../../src/cli/mcp';
+import { version } from '../../src/epsil';
 
 /** Run `epsil mcp` over a scripted stdin and return the JSON responses. */
 async function runServer(
@@ -451,7 +452,10 @@ describe('MCP server tools', () => {
         format: 'latex',
       }),
     ]);
-    expect(payload(response)).toEqual({ latex: '\\frac{1}{\\sqrt{x}}' });
+    expect(payload(response)).toEqual({
+      latex: '\\frac{1}{\\sqrt{x}}',
+      engineVersion: version,
+    });
   });
 
   test('an unknown format is refused as a tool error', async () => {
@@ -581,7 +585,8 @@ describe('MCP server compile tool', () => {
     // be declared in the global scope, as on the host route.
     expect(constant.result.isError).toBe(true);
     expect(constant.result.content[0].text).toBe(
-      'Cannot declare "Pi" as "real": Cannot declare "Pi" in the global scope: it is a library constant (declare it in a nested scope)'
+      'Cannot declare "Pi" as "real": Cannot declare "Pi" in the global scope: it is a library constant (declare it in a nested scope)' +
+        `\n\nEngine version: ${version}`
     );
   });
 
@@ -929,5 +934,81 @@ describe('MCP server arguments', () => {
       ])
     ).toThrow(CliUsageError);
     expect(() => parseMcpArguments(['--port', '8000'])).toThrow(CliUsageError);
+  });
+});
+
+/**
+ * ROADMAP CE-406: a server loads the engine when it starts and keeps it, so
+ * after a new package is installed it answers with the old engine. Each
+ * result says which version answered, and warns when the installed package
+ * has another version.
+ */
+describe('MCP server engine version', () => {
+  test('a JSON result carries the engine version', async () => {
+    const [, response] = await runServer([
+      request(1, 'initialize', { protocolVersion: '2025-06-18' }),
+      callTool(2, 'parse', { source: '1 + 2' }),
+    ]);
+    expect(payload(response).engineVersion).toBe(version);
+  });
+
+  test('an error result names the engine version on its last line', async () => {
+    const [, response] = await runServer([
+      request(1, 'initialize', { protocolVersion: '2025-06-18' }),
+      callTool(2, 'parse', {}),
+    ]);
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toMatch(
+      new RegExp(`\\n\\nEngine version: ${version.replace(/[{}]/g, '\\$&')}$`)
+    );
+  });
+
+  test('a running server whose engine is not the installed one warns', async () => {
+    const options = parseMcpArguments([
+      '--transport',
+      'streamable-http',
+      '--port',
+      '0',
+    ]);
+    const server = createMcpHttpServer(
+      options,
+      async () => '# Epsil card fixture',
+      () => '0.164.0',
+      '0.162.0'
+    );
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port, options.host, resolve);
+    });
+    try {
+      const address = server.address() as AddressInfo;
+      const endpoint = `http://${options.host}:${address.port}${options.path}`;
+      const warning =
+        'This server runs Compute Engine 0.162.0, which it loaded when it started, but version 0.164.0 is installed. Restart the MCP server to use the installed version.';
+      const ok = await (
+        await postMcp(endpoint, callTool(1, 'parse', { source: '1 + 2' }))
+      ).json();
+      expect(payload(ok).engineVersion).toBe('0.162.0');
+      expect(payload(ok).engineWarning).toBe(warning);
+      const failed = await (
+        await postMcp(endpoint, callTool(2, 'parse', {}))
+      ).json();
+      expect(failed.result.isError).toBe(true);
+      expect(failed.result.content[0].text).toMatch(
+        /\n\nEngine version: 0\.162\.0\nThis server runs Compute Engine 0\.162\.0/
+      );
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  test('a newer installed package gives a warning', () => {
+    expect(staleEngineWarning('0.162.0', '0.164.0')).toBe(
+      'This server runs Compute Engine 0.162.0, which it loaded when it started, but version 0.164.0 is installed. Restart the MCP server to use the installed version.'
+    );
+    expect(staleEngineWarning('0.164.0', '0.164.0')).toBeUndefined();
+    expect(staleEngineWarning('0.164.0', undefined)).toBeUndefined();
+    // A source build has no version number.
+    expect(staleEngineWarning('{{SDK_VERSION}}', '0.164.0')).toBeUndefined();
   });
 });

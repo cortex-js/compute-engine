@@ -324,7 +324,11 @@ export async function runMcp(
     return 2;
   }
 
-  const server = new McpServer(options.timeLimit, io.loadCard);
+  const server = new McpServer(
+    options.timeLimit,
+    io.loadCard,
+    io.installedVersion
+  );
   if (options.transport === 'streamable-http')
     return runMcpHttp(server, options, io);
   return runMcpStdio(server, io);
@@ -395,10 +399,12 @@ async function runMcpHttp(
  */
 export function createMcpHttpServer(
   options: McpOptions,
-  loadCard?: (card: AgentCard) => Promise<string>
+  loadCard?: (card: AgentCard) => Promise<string>,
+  installedVersion?: () => string | undefined,
+  loadedVersion?: string
 ): Server {
   return createMcpHttpServerForDispatcher(
-    new McpServer(options.timeLimit, loadCard),
+    new McpServer(options.timeLimit, loadCard, installedVersion, loadedVersion),
     options
   );
 }
@@ -512,7 +518,12 @@ class HttpTransportError extends Error {
 class McpServer {
   constructor(
     private timeLimit: number,
-    private loadCard?: (card: AgentCard) => Promise<string>
+    private loadCard?: (card: AgentCard) => Promise<string>,
+    private installedVersion?: () => string | undefined,
+    /** The version of the engine this server runs: the `version` of the
+     * bundle it loaded. A test passes another one, since a source build has
+     * the placeholder of the version constant. */
+    private loadedVersion: string = version
   ) {}
 
   /** Handle one incoming message (or batch) and return the responses. */
@@ -606,6 +617,68 @@ class McpServer {
   }
 
   private callTool(params: Record<string, unknown>): unknown {
+    return this.withEngineVersion(this.runTool(params));
+  }
+
+  /**
+   * `result` with the version of the engine that computed it. A server loads
+   * the engine when it starts and keeps it while it runs, so after a new
+   * package is installed it still answers with the old engine; the version
+   * in each result shows which one answered. When the package on disk has
+   * another version, the result also carries a warning that says to restart
+   * the server. The JSON payload of a result (`toolResult()`) gets the
+   * fields `engineVersion` and `engineWarning`; an error result (`isError`),
+   * whose text is a message, gets a last line. (ROADMAP CE-406.)
+   */
+  private withEngineVersion(result: unknown): unknown {
+    const loaded = this.loadedVersion;
+    let installed: string | undefined;
+    try {
+      installed = this.installedVersion?.();
+    } catch {
+      // A version that cannot be read is not known: there is no warning.
+      installed = undefined;
+    }
+    const warning = staleEngineWarning(loaded, installed);
+    const content = (result as { content?: unknown }).content;
+    if (!Array.isArray(content) || content.length === 0) return result;
+    const first = content[0] as { type?: unknown; text?: unknown };
+    if (first.type !== 'text' || typeof first.text !== 'string') return result;
+    let text: string;
+    if ((result as { isError?: unknown }).isError === true)
+      text = `${first.text}\n\nEngine version: ${loaded}${
+        warning === undefined ? '' : `\n${warning}`
+      }`;
+    else {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(first.text);
+      } catch {
+        return result;
+      }
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        Array.isArray(payload)
+      )
+        return result;
+      text = JSON.stringify(
+        {
+          ...payload,
+          engineVersion: loaded,
+          ...(warning === undefined ? {} : { engineWarning: warning }),
+        },
+        null,
+        2
+      );
+    }
+    return {
+      ...(result as object),
+      content: [{ ...first, text }, ...content.slice(1)],
+    };
+  }
+
+  private runTool(params: Record<string, unknown>): unknown {
     const name = params.name;
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     if (!TOOLS.some((tool) => tool.name === name))
@@ -989,6 +1062,25 @@ function optionalBoolean(args: Record<string, unknown>, key: string): boolean {
   if (typeof value !== 'boolean')
     throw new Error(`Expected a "${key}" boolean argument.`);
   return value;
+}
+
+/**
+ * The warning for a server whose engine (`loaded`, the version it loaded at
+ * start) is not the one installed on disk (`installed`), or `undefined` when
+ * they agree or one is not known. A source build has no version number (the
+ * placeholder of the version constant), and is not compared.
+ */
+export function staleEngineWarning(
+  loaded: string,
+  installed: string | undefined
+): string | undefined {
+  if (loaded.startsWith('{{')) return undefined;
+  if (installed === undefined || installed === loaded) return undefined;
+  return (
+    `This server runs Compute Engine ${loaded}, which it loaded when it ` +
+    `started, but version ${installed} is installed. Restart the MCP ` +
+    `server to use the installed version.`
+  );
 }
 
 function toolResult(payload: unknown): unknown {

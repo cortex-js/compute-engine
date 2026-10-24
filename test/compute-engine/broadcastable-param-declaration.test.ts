@@ -91,9 +91,11 @@ describe('DECLARED broadcastable<T> — application-site typing (Tycho 157(1))',
     // a scalar the bare `R`. A concrete call, scalar or list, additionally
     // refines the tuple elements from the body with the parameter typed as
     // the argument (or, under the lift, as its element), without changing
-    // the broad declaration.
+    // the broad declaration. The declared parameter is read as its element
+    // type, `number`, when the result is refined: each call of the body
+    // receives one number (ROADMAP CE-408).
     expect(ce.box('vf').type.toString()).toBe(
-      '(broadcastable<number>) -> tuple<unknown, unknown>'
+      '(broadcastable<number>) -> tuple<number, number>'
     );
     expect(ce.box(['vf', 'L']).type.toString()).toBe(
       'list<tuple<number, number>>'
@@ -196,17 +198,26 @@ describe('DECLARED broadcastable<T> — the elementwise map (rules 1 and 2)', ()
 //
 
 describe('DECLARED broadcastable<T> — the per-element `T` check (rule 3)', () => {
-  test('`broadcastable<number>` over `[[1,2],3]` errors on the offending ELEMENT', () => {
+  // A `T` that cannot hold a list maps to the cells (user decision
+  // 2026-10-24, ROADMAP CE-405): a nested list is mapped again, and only an
+  // element that is neither a `T` nor a collection is an error.
+  test('`broadcastable<number>` over `[[1,2],3]` maps to the cells', () => {
     const ce = new ComputeEngine();
     assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
     const value = ce.box(['bump', ['List', ['List', 1, 2], 3]]).evaluate();
+    expect(value.toString()).toBe('[[2,3],4]');
+  });
+
+  test('`broadcastable<number>` over `["a", 3]` errors on the offending ELEMENT', () => {
+    const ce = new ComputeEngine();
+    assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
+    const value = ce.box(['bump', ['List', "'a'", 3]]).evaluate();
     expect(value.operator).toBe('List');
     expect(value.nops).toBe(2);
-    // Loud: an `incompatible-type` against the ELEMENT type, never a silent
-    // further descent (`broadcastable<number>` would itself admit `[1,2]`).
+    // Loud: an `incompatible-type` against the declared type.
     expect(value.op1.isValid).toBe(false);
     expect(value.op1.toString()).toContain('incompatible-type');
-    expect(value.op1.toString()).toContain('"number"');
+    expect(value.op1.toString()).toContain('"broadcastable<number>"');
     // The sibling element is unaffected.
     expect(value.ops![1].toString()).toBe('4');
   });
@@ -214,7 +225,7 @@ describe('DECLARED broadcastable<T> — the per-element `T` check (rule 3)', () 
   test('the failing element carries the `ErrorBroadcast` breadcrumb (test 7)', () => {
     const ce = new ComputeEngine();
     assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
-    const value = ce.box(['bump', ['List', ['List', 1, 2], 3]]).evaluate();
+    const value = ce.box(['bump', ['List', "'a'", 3]]).evaluate();
     expect(broadcastFrames(value.op1)).toEqual([
       { operator: 'bump', index: 1, length: 2 },
     ]);
@@ -787,10 +798,10 @@ describe('DECLARED broadcastable<T> — broadcast operands are evaluated ONCE (f
 
 describe('DECLARED broadcastable<T> — the lazy route checks `T` too (finding 5)', () => {
   /** A source past `MAX_SIZE_EAGER_COLLECTION` whose FIRST element violates
-   * `number` (it is itself a list); every other element conforms. */
+   * `number` (it is a string); every other element conforms. */
   const violatingSource = (): unknown[] => [
     'List',
-    ...Array.from({ length: 150 }, (_, i) => (i === 0 ? ['List', 1, 2] : i)),
+    ...Array.from({ length: 150 }, (_, i) => (i === 0 ? "'a'" : i)),
   ];
 
   test('a violating element is LOUD past the eager threshold, not silently descended', () => {
@@ -802,7 +813,7 @@ describe('DECLARED broadcastable<T> — the lazy route checks `T` too (finding 5
     const first = value.at(1)!;
     expect(first.isValid).toBe(false);
     expect(first.toString()).toContain('incompatible-type');
-    expect(first.toString()).toContain('"number"');
+    expect(first.toString()).toContain('"broadcastable<number>"');
     // The conforming siblings are unaffected.
     expect(value.at(2)?.toString()).toBe('2');
   });
@@ -810,10 +821,40 @@ describe('DECLARED broadcastable<T> — the lazy route checks `T` too (finding 5
   test('the eager twin of the same shape agrees (semantics do not depend on SIZE)', () => {
     const ce = new ComputeEngine();
     assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
-    const value = ce.box(['bump', ['List', ['List', 1, 2], 3]]).evaluate();
+    const value = ce.box(['bump', ['List', "'a'", 3]]).evaluate();
+    // The same error code on both routes (the eager loop also adds the
+    // breadcrumb of the element).
+    const code =
+      'ErrorCode("incompatible-type", "broadcastable<number>", "string")';
     expect(value.op1.isValid).toBe(false);
-    expect(value.op1.toString()).toContain('incompatible-type');
+    expect(value.op1.toString()).toContain(code);
+    expect(
+      ce
+        .box(['bump', violatingSource() as any])
+        .evaluate()
+        .at(1)!
+        .toString()
+    ).toContain(code);
     expect(value.ops![1].toString()).toBe('4');
+  });
+
+  test('a nested list past the eager threshold maps to the cells, as the eager loop does', () => {
+    const ce = new ComputeEngine();
+    assignTyped(ce, 'bump', ['Add', 'x', 1], 'broadcastable<number>');
+    const value = ce
+      .box([
+        'bump',
+        [
+          'List',
+          ...Array.from({ length: 150 }, (_, i) =>
+            i === 0 ? ['List', 1, 2] : i
+          ),
+        ] as any,
+      ])
+      .evaluate();
+    expect(value.operator).toBe('Map');
+    expect(value.at(1)?.toString()).toBe('[2,3]');
+    expect(value.at(2)?.toString()).toBe('2');
   });
 
   test('a CONFORMING lazy source is untouched — no spurious element errors', () => {

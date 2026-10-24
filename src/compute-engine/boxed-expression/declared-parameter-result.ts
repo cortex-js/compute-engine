@@ -5,6 +5,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionResult, returnTypeText } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { functionLiteralParameterType } from './function-literal.js';
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
 
@@ -47,8 +48,19 @@ function homeScopeOf(literal: Expression) {
  *
  * A parameter is stamped with the rules of `ascribeDeclaredParameterTypes`,
  * scalars included: a plain symbol parameter whose declared type is not
- * `unknown`, `any` or `broadcastable<T>` (a declaration-level contract,
- * not a parameter type). An already typed parameter keeps its own type.
+ * `unknown` or `any`. An already typed parameter keeps its own type.
+ *
+ * A parameter declared `broadcastable<T>` (in the declaration, or in the
+ * literal's own annotation) is stamped with `T`: the call maps the function
+ * over a collection argument (to the cells when `T` cannot hold a list, one
+ * rank down otherwise), so the body receives one `T` at each call, and the
+ * signature result is the result for one element. With
+ * `l: (broadcastable<tuple<number, number>>) -> unknown` and
+ * `l := (A: broadcastable<tuple<number, number>>) ↦ √(A.x² + A.y²)`, the
+ * result is `number`, not `broadcastable<number>`, which a call over a list
+ * of points wrapped again (`list<broadcastable<number>>`). (ROADMAP CE-408,
+ * Tycho row 436.) The literal's own signature is not changed: an overload
+ * clause reads it, and an overload set binds a collection argument whole.
  */
 export function resultUnderDeclaredParameters(
   ce: IComputeEngine,
@@ -77,8 +89,28 @@ export function resultUnderDeclaredParameters(
   let changed = false;
   const stamped = params.map((p, i): MathJsonExpression => {
     const t = args[i].type;
+    // The element type of a `broadcastable<T>` parameter, declared or
+    // annotated on the literal.
+    const own = isFunction(p, 'Typed')
+      ? functionLiteralParameterType(p)
+      : undefined;
+    const element =
+      typeof t === 'object' && t.kind === 'broadcastable'
+        ? t.elements
+        : typeof own === 'object' && own.kind === 'broadcastable'
+          ? own.elements
+          : undefined;
+    if (element !== undefined) {
+      const name = isFunction(p, 'Typed') ? p.op1 : p;
+      if (!isSymbol(name)) return p.json;
+      changed = true;
+      return [
+        'Typed',
+        name.json,
+        `'${returnTypeText(element)}'`,
+      ] as MathJsonExpression;
+    }
     if (!isSymbol(p) || t === 'unknown' || t === 'any') return p.json;
-    if (typeof t === 'object' && t.kind === 'broadcastable') return p.json;
     changed = true;
     return ['Typed', p.json, `'${returnTypeText(t)}'`] as MathJsonExpression;
   });

@@ -101,6 +101,7 @@ import {
   typeIsResidueForCertain,
 } from '../boxed-expression/residue-class.js';
 import {
+  cannotHoldAList as typeCannotHoldAList,
   couldMatch,
   isSubtype,
   provablyAdmits,
@@ -30745,8 +30746,17 @@ export class BaseCompiler {
     if (target.language !== 'javascript') return undefined;
     if (BaseCompiler.userFunctionLiteral(engine, h) === undefined)
       return undefined;
-    const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+    let declared = BaseCompiler.userFunctionParamType(engine, h, i);
     if (declared === undefined) return undefined;
+    // A parameter declared `broadcastable<T>` whose `T` cannot hold a list
+    // maps to the cells (ROADMAP CE-405): each cell reaches the body, so it
+    // is checked against `T`, as the interpreter checks it.
+    if (
+      typeof declared === 'object' &&
+      declared.kind === 'broadcastable' &&
+      typeCannotHoldAList(declared.elements)
+    )
+      declared = declared.elements;
     if (declared === 'number' || isNonRealNumber(declared)) return undefined;
     const test = BaseCompiler.jsClauseParamGuard(declared, '_$v');
     return test === null || test === undefined ? undefined : declared;
@@ -32527,6 +32537,34 @@ export class BaseCompiler {
     });
   }
 
+  /**
+   * The signature `sig` with each parameter declared `broadcastable<T>` whose
+   * `T` cannot hold a list (a number, a boolean, a string, a tuple) read as
+   * `T`. Such a parameter maps to the cells (user decision 2026-10-24,
+   * ROADMAP CE-405), as a scalar parameter does in the compiled code
+   * (`_SYS.bcastFn`), so a signature whose every parameter is then scalar
+   * compiles as one with scalar parameters. A parameter declared
+   * `broadcastable<value>` maps one rank, which no compiled form expresses,
+   * and is kept.
+   */
+  private static withCellSlotsAsElements(sig: Type): Type {
+    if (typeof sig !== 'object' || sig.kind !== 'signature') return sig;
+    const read = <A extends { type: Type }>(arg: A): A => {
+      const t = arg.type;
+      return typeof t === 'object' &&
+        t.kind === 'broadcastable' &&
+        typeCannotHoldAList(t.elements)
+        ? { ...arg, type: t.elements }
+        : arg;
+    };
+    return {
+      ...sig,
+      ...(sig.args ? { args: sig.args.map(read) } : {}),
+      ...(sig.optArgs ? { optArgs: sig.optArgs.map(read) } : {}),
+      ...(sig.variadicArg ? { variadicArg: read(sig.variadicArg) } : {}),
+    };
+  }
+
   private static userFunctionParamsAreScalar(
     engine: ComputeEngine,
     h: string
@@ -32545,7 +32583,9 @@ export class BaseCompiler {
       // `ensureUserFunctionEmitted`), and answering `true` would silently
       // claim scalar parameters for a signature nothing was emitted for.
       const ground = BaseCompiler.groundSignature(declared);
-      return ground === undefined ? false : paramsAreScalar(ground);
+      return ground === undefined
+        ? false
+        : paramsAreScalar(BaseCompiler.withCellSlotsAsElements(ground));
     }
     const literal = def.value.value?.type?.type;
     if (literal === undefined) return true;
@@ -32602,10 +32642,14 @@ export class BaseCompiler {
    * Fail closed rather than emit code for an application the DECLARED
    * `broadcastable<T>` contract would evaluate element-wise.
    *
-   * A declared `broadcastable<T>` parameter is an ELEMENTWISE contract that
-   * maps exactly ONE rank down (Option A, ratified 2026-08-08 —
-   * `docs/plans/2026-08-08-broadcastable-param-semantics.md`). Neither emitted
-   * form expresses it:
+   * A declared `broadcastable<T>` parameter whose `T` can hold a list
+   * (`broadcastable<value>`) is an ELEMENTWISE contract that maps exactly ONE
+   * rank down (Option A, ratified 2026-08-08 —
+   * `docs/plans/2026-08-08-broadcastable-param-semantics.md`). A `T` that
+   * cannot hold a list maps to the cells (amendment of 2026-10-24, ROADMAP
+   * CE-405), which the element-wise call expresses: a callee whose every
+   * parameter is then scalar (`compilesAsScalarParams`) is not declined.
+   * Neither emitted form expresses the one-rank map:
    *   - a direct scalar call hands the callee the whole array (`_fn_g([1,2,3])`
    *     computes the JS string `"1,2,31"` for `x + 1`);
    *   - `_SYS.bcastFn` recurses into NESTED arrays — that is the unannotated
@@ -32809,7 +32853,8 @@ export class BaseCompiler {
       args,
       provablyScalarArg,
       BaseCompiler.userFunctionBroadcastPlan(engine, h),
-      () => BaseCompiler.userFunctionHasBroadcastableParam(engine, h)
+      () => BaseCompiler.userFunctionHasBroadcastableParam(engine, h),
+      () => BaseCompiler.userFunctionParamsAreScalar(engine, h)
     );
   }
 
@@ -32830,9 +32875,17 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     provablyScalarArg: (a: Expression) => boolean,
     plan: BroadcastSlotPlan | undefined,
-    hasBroadcastableParam: () => boolean
+    hasBroadcastableParam: () => boolean,
+    // Whether the callee compiles as a function of scalar parameters, each
+    // `broadcastable<T>` slot whose `T` cannot hold a list read as `T`
+    // (`withCellSlotsAsElements`): its calls are then emitted through the
+    // element-wise call (`_SYS.bcastFn`), which maps to the cells as the
+    // interpreter does for such a slot (user decision 2026-10-24, ROADMAP
+    // CE-405).
+    compilesAsScalarParams: () => boolean = () => false
   ): void {
     if (args.length === 0) return;
+    const scalarParams = plan !== undefined && compilesAsScalarParams();
     const risky =
       plan !== undefined
         ? args.some((a, i) => {
@@ -32848,7 +32901,10 @@ export class BaseCompiler {
               return !(
                 slot.elements === undefined || a.type.matches(slot.elements)
               );
-            return true;
+            // A function that compiles with scalar parameters is called
+            // through the element-wise call, which maps to the cells as the
+            // declaration now does (`compilesAsScalarParams`).
+            return !scalarParams;
           })
         : // An OVERLOAD set has no single plan — which arm binds is a runtime
           // question — so answer conservatively over the whole argument list.

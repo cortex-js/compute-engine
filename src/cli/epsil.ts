@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
 import type { AgentCard } from './io.js';
@@ -29,5 +30,24 @@ process.exitCode = await main(process.argv.slice(2), {
       }
     }
     throw new Error(`The ${card} card for agents was not found.`);
+  },
+  installedVersion: () => {
+    // The package root is three levels above the bundle (`dist/*/cli/`) and
+    // two above the source (`src/cli/`).
+    for (const candidate of ['../../../package.json', '../../package.json']) {
+      try {
+        const manifest = JSON.parse(
+          readFileSync(new URL(candidate, import.meta.url), 'utf8')
+        ) as { name?: unknown; version?: unknown };
+        if (
+          manifest.name === '@cortex-js/compute-engine' &&
+          typeof manifest.version === 'string'
+        )
+          return manifest.version;
+      } catch {
+        // Try the next location.
+      }
+    }
+    return undefined;
   },
 });

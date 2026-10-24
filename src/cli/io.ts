@@ -16,6 +16,13 @@ export interface CliIo {
    * (`import.meta` — unavailable in modules jest compiles, so the loader is
    * injected here rather than defined in `mcp.ts`). */
   loadCard?: (card: AgentCard) => Promise<string>;
+  /** Return the version in the `package.json` of the package that holds the
+   * CLI, read from disk when it is called, or `undefined` when it cannot be
+   * read. `epsil mcp` compares it with the engine it loaded at start: a
+   * server keeps that engine while it runs, so after a new package is
+   * installed it answers with the old one. Injected for the same reason as
+   * `loadCard`. */
+  installedVersion?: () => string | undefined;
 }
 
 export async function readSource(

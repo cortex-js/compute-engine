@@ -210,6 +210,18 @@ library defines, such as `Pi`, replaces that definition, and the result has a
 `warnings` entry that says so. A compilation has the same deadline as an
 evaluation (`timeLimit`).
 
+## Engine Version
+
+Every tool result says which version of the Compute Engine computed it:
+`engineVersion` in a JSON result, and a last line `Engine version: …` in an
+error message. The server loads the engine when it starts and keeps it while
+it runs, so after you install a new version of the package, a server that was
+already running still answers with the old one. When the version installed
+on disk is not the one the server loaded, the result also has an
+`engineWarning` (or a line in an error message) that says to restart the
+server. Restart the MCP server, or the client that started it, after an
+upgrade.
+
 ## Trying It Out
 
 Ask your assistant something that benefits from exact computation, and

@@ -3,6 +3,26 @@
 **Status: RATIFIED 2026-08-08 (user decision, in-session; responds to Tycho
 item 157). Implementation in progress.**
 
+## Amendment (user decision 2026-10-24, ROADMAP CE-405, Tycho row 434)
+
+Rules 2 and 3 below now apply only when `T` can hold a list
+(`broadcastable<value>`, `broadcastable<any>`). When `T` cannot hold a list
+(a number, a boolean, a string, a tuple: `cannotHoldAList`), the declared
+parameter maps to the cells: since 0.162.0 `broadcastable<T>` is
+`T | tensor<T>`, so a `broadcastable<number>` parameter called with a matrix
+maps to its numbers, as an undeclared function and the compiled targets do.
+`f := x ↦ x + 1` declared `(broadcastable<number>) -> number` gives
+`f([[1, 2], [3, 4]]) = [[2, 3], [4, 5]]`, typed `matrix<2x2>`; it was a
+list of two `incompatible-type` errors (one per row) typed `matrix<2x2>`. A
+tuple is not mapped into, so a list of points still maps one point per
+call. An element that is neither a `T` nor a collection is still a loud
+`incompatible-type` error, which names the declared type
+(`broadcastable<number>`). A function whose every parameter is then scalar
+compiles through the element-wise call (`_SYS.bcastFn`). The body of such a
+function is typed with the parameter read as `T` (ROADMAP CE-408, Tycho row
+436). Code: `mapsToCells` and `slotMapsOneRank` in
+`src/compute-engine/boxed-expression/boxed-function.ts`.
+
 ## The ruling
 
 A parameter **declared** `broadcastable<T>` is an **elementwise contract**:

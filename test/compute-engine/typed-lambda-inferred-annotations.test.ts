@@ -141,18 +141,20 @@ describe('inferred parameter annotations are not printed', () => {
   });
 
   test('the annotations a broadcast over a declared parameter synthesizes are not printed either', () => {
-    // A `broadcastable<number>` parameter applied to a large range answers a
+    // A `broadcastable<value>` parameter applied to a large range answers a
     // lazy `Map` whose element function the engine synthesizes with typed
     // `_1` parameters; those annotations are the engine's, not an author's.
+    // (A `broadcastable<number>` parameter maps to the cells, and its lazy
+    // `Map` applies the named function, with no annotation: ROADMAP CE-405.)
     const ce = new ComputeEngine();
-    ce.declare('f', '(broadcastable<number>) -> number');
+    ce.declare('f', '(broadcastable<value>) -> value');
     ce.assign('f', ce.parse('x\\mapsto x+1'));
     const r = ce.box(['f', ['Range', 1, 100000]]).evaluate();
     expect(r.isLazyCollection).toBe(true);
     expect(JSON.stringify(r.json)).not.toContain('Typed');
     expect(
       JSON.stringify(r.toMathJson({ inferredAnnotations: true }))
-    ).toContain('["Typed","_1","\'number\'"]');
+    ).toContain('["Typed","_1","\'value\'"]');
   });
 
   test('a shared named literal is never rewritten, so nothing changes for it', () => {

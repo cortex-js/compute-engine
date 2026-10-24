@@ -177,10 +177,24 @@ describe('G3 lift — what still declines', () => {
     ).toThrow(/gd/);
   });
 
-  test('a declared `broadcastable<T>` parameter still fails closed', () => {
-    // The elementwise contract maps exactly one rank down, which no emitted
-    // call form expresses — the bound reading does not change that.
+  test('a declared `broadcastable<T>` parameter with a number bound maps to the cells', () => {
+    // Read at its bound, `T` is a number, which cannot hold a list, so the
+    // declared parameter maps to the cells (ROADMAP CE-405), as the
+    // element-wise call of the compiled code does.
     const ce = doubler('(x: broadcastable<T>) -> T where T: number');
+    ce.declare('zs', 'list<number>');
+    const r = compile(ce.box(['gd', 'zs'] as any), {
+      constantFold: false,
+      fallback: false,
+    } as any);
+    expect(r.code).toBe('_SYS.bcastFn(_fn_gd, _.zs)');
+    expect(r.run!({ zs: [1, 2, 3] } as never)).toEqual([2, 4, 6]);
+  });
+
+  test('a declared `broadcastable<value>` parameter still fails closed', () => {
+    // A `T` that can hold a list maps exactly one rank down, which no
+    // emitted call form expresses.
+    const ce = doubler('(x: broadcastable<value>) -> value');
     ce.declare('zs', 'list<number>');
     expect(() =>
       compile(ce.box(['gd', 'zs'] as any), {
