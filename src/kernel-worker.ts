@@ -373,10 +373,12 @@ port.on((m) => {
         const perCellOut = kernel.interval
           ? kernel.perCellOut
           : (m.outputs ?? kernel.perCellOut);
+        const indexes = m.indexes !== undefined ? { indexes: m.indexes } : {};
         const options: BroadcastOptions = kernel.interval
-          ? { layout: m.layout }
+          ? { layout: m.layout, ...indexes }
           : {
               layout: m.layout,
+              ...indexes,
               outputs: perCellOut,
               ...(shared !== undefined ? { shared: [...shared.keys()] } : {}),
             };

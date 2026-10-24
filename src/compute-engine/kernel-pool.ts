@@ -983,6 +983,9 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           ...(task.options?.outputs !== undefined
             ? { outputs: task.options.outputs }
             : {}),
+          ...(task.options?.indexes !== undefined
+            ? { indexes: [...task.options.indexes] }
+            : {}),
           ...(batch !== undefined ? { batch: batch.id } : {}),
           ...(shared !== undefined ? { shared } : {}),
           ...(slot.cancel !== undefined ? { cancel: slot.cancel } : {}),
@@ -1194,12 +1197,15 @@ export function makeBroadcastAsync(
     // The options of each slice: the layout, and for `javascript` the
     // resolved stride and the shared names, so that the main thread and a
     // worker lay the cells out the same way.
+    const indexOptions =
+      options?.indexes !== undefined ? { indexes: options.indexes } : {};
     const layoutOptions: BroadcastOptions | undefined = isInterval
       ? options?.layout !== undefined
-        ? { layout: options.layout }
+        ? { layout: options.layout, ...indexOptions }
         : undefined
       : {
           ...(options?.layout !== undefined ? { layout: options.layout } : {}),
+          ...indexOptions,
           outputs: perCellOut,
           ...(sharedNames.length > 0 ? { shared: sharedNames } : {}),
         };

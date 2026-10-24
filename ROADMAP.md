@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-430.
+Next free reference: CE-431.
 
 **Entry format.**
 
@@ -73,22 +73,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Tycho ledger asks
-
-### CE-421. An index variable for each axis of the `grid` layout of `broadcast`
-
-**Status:** deprioritized; capability. Tycho row 440 (filed 2026-10-24, user
-decision: low priority). No instrument yet; Tycho writes it against the option
-CE names.
-
-Tycho's march kernel receives its cell indexes `ci`, `cj`, `ck` as input
-columns (an array 0…N−1 per axis), built by the host and sent to the workers.
-Ask: a way to bind a name to the cell's index along each `grid` axis (an option
-that names each axis's index variable, or an axis given as a count instead of
-a column), so the kernel declares `ci: integer<0..>` and receives no column
-for it. The index is then an integer in range by construction, so the CE-410
-direct read needs no test of it. Measured gain about 10% on the CE-410 probe
-kernel (2026-10-24). READY when the row 432 march kernel gives the same values
-with the indexes taken from the loop. Related: CE-1, CE-410.
 
 ### CE-1. A `window` option of the `grid` layout of `broadcast`
 
@@ -5770,7 +5754,7 @@ written (2026-10-24, Tycho commit `74eea7228`,
 on CE 0.164.0 and `broadcastAsync()` on CE 0.165.0). Its asks (a time limit
 and event-loop turns on the asynchronous routes, `inline: false`,
 `willUsePool()`, `shippable`, and the `route` of a batch or a fit) are done;
-CE-429 is what remains of them.
+CE-430 is what remains of them.
 Plan: `docs/plans/2026-10-20-worker-kernel-pool.md`,
 `docs/plans/2026-10-20-findfit-global-grid.md`.
 
@@ -5800,28 +5784,32 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   cell that maps a costly function over 100 000 elements runs on the pool
   from an engine inside a worker, with the same values and faster than on one
   thread.
-- **CE-314.3** A pool for an engine inside a dedicated worker (Tycho row 441,
-  part 2). The engine creates no worker itself; the host code inside the
-  worker can call `createKernelPool()` with a factory that starts nested
-  workers and set `ce.workers` (the pool reads `navigator.hardwareConcurrency`,
-  which workers have, and uses `requestIdleCallback` only when present). Not
-  tested by CE, and it depends on the browser allowing nested dedicated
-  workers. A pool on the page that serves an engine in a worker would need a
-  protocol between the two threads; it does not exist. Task: test the nested
-  pool in Node and in a browser, and document it.
+  Measured 2026-10-24: `sum(map(x => N(sin(x) + x^2), 1..100000))` takes
+  4.3 s on one thread with the default precision, because the marked tier of
+  the `Map` auto-compilation (`map-auto-compile.ts`) declines when the engine
+  prefers bignums; with `ce.precision = 'machine'` every element runs compiled
+  and the program takes 0.2 s. The pool route must answer which precision it
+  runs at. Part 2 of row 441 (a pool for an engine inside a dedicated
+  worker) needed no change: tested in Node and in three browsers on
+  2026-10-24 (`test/compute-engine/ce-314-3-nested-pool.test.ts`,
+  `benchmarks/workers/nested-pool-browser-probe.mjs`) and documented in
+  `doc/13-guide-compile.md`.
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24:
   "one formula, many points"; `runMany` says less).
 
-### CE-429. Two steps of `FindFit.evaluateAsync()` still block the calling thread
+### CE-430. The data operand of `FindFit.evaluateAsync()` is prepared in one block
 
-**Status:** open; performance, small. Found 2026-10-24 while fixing CE-425
-(the asynchronous route now gives the event loop a turn about every 8 ms).
+**Status:** open; performance. Found 2026-10-24 while fixing CE-429.
 
-Two steps run as one block on the calling thread: the setup of the asynchronous
-evaluation (about 15 ms on 1000 rows, 30 ms for a first interpreted model) and
-one grid point of the separable scan (up to 17 ms on an interpreted model).
-Splitting the setup needs a per-unit setup; splitting a grid point needs a
-change in `fit-scan.ts`, which the workers share.
+The asynchronous route of `FindFit` (`findFitAsync`, `nonlinear-fit.ts`)
+computes the canonical form of the data operand and evaluates it with
+`evaluateAsync()` before the setup, and neither gives the event loop a turn:
+about 15 ms for 1,000 rows, and 480 ms for 20,000 rows (measured 2026-10-24,
+so more than linear in the count of rows). An abort or a timer cannot run
+during that time. The setup and the search after it give the event loop a
+turn about every 8 ms (CE-425, CE-429). The fix is in the engine, not in
+`FindFit`: the canonical form and the asynchronous evaluation of a large list
+literal. Measure first where the time of the 20,000-row case goes.
 
 ### CE-317. An operator with only `evaluateAsync` walks the body at each asynchronous application
 

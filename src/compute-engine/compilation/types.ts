@@ -2715,6 +2715,16 @@ export interface BroadcastOptions {
    */
   layout?: 'cells' | 'grid';
   /**
+   * `grid` layout only. The inputs that are index axes: the input of each is
+   * the axis length `n`, a non-negative integer, and the variable takes the
+   * cell's position along that axis, `0, 1, …, n − 1` (for `interval-js`,
+   * the point interval of that value). The axis has its place in key order
+   * of `inputs`, as a column `0 … n − 1` would, and no column is sent or
+   * read. Each name must be a key of `inputs` and not a shared input; with
+   * the `cells` layout the option throws.
+   */
+  indexes?: readonly string[];
+  /**
    * A caller-owned output array, filled and returned instead of a new one. It
    * must hold at least `outputs` values per cell (`javascript`) or three
    * (`interval-js`); a longer array is filled from the start.

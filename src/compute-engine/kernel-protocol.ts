@@ -121,6 +121,10 @@ export type MainToWorkerMessage =
       /** `javascript` only: the count of values written per cell. Absent
        * means the kernel's `broadcastOutputs`, or 1. */
       outputs?: number;
+      /** `grid` layout: the inputs that are index axes (the
+       * `indexes` option of `broadcast`); each value in `inputs` is the
+       * axis length. */
+      indexes?: string[];
       /** The batch whose shared inputs the cells read, when the batch has
        * shared inputs. The worker keeps them under this id until `release`. */
       batch?: number;

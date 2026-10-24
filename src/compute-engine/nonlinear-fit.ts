@@ -66,6 +66,7 @@ import {
 } from './fit-executor.js';
 import {
   linearScanSolve,
+  linearScanSolveSteps,
   sumOfSquares,
   wrapPhase,
   type FitScanProblem,
@@ -550,10 +551,20 @@ function parseFitOptions(
 // Data extraction
 //
 
+/** How many data rows the setup reads between two steps
+ * (`extractDatasetSteps`): about a third of a millisecond. */
+const SETUP_ROWS_PER_STEP = 32;
+
 /** Extract a single dataset of `(x…, y)` rows. `nvars` is the arity of the
  * independent variables. A plain list of `y` values (only when `nvars === 1`)
- * binds `x = 1, 2, …`. Returns `null` (→ inert) on any non-numeric datum. */
-function extractDataset(dataExpr: Expression, nvars: number): DataRow[] | null {
+ * binds `x = 1, 2, …`. Returns `null` (→ inert) on any non-numeric datum.
+ * A step function: it yields every `SETUP_ROWS_PER_STEP` rows, so that the
+ * asynchronous route can give the event loop a turn while it reads a large
+ * dataset. */
+function* extractDatasetSteps(
+  dataExpr: Expression,
+  nvars: number
+): Steps<DataRow[] | null> {
   if (!dataExpr.isFiniteCollection) return null;
   const elements = [...dataExpr.each()] as Expression[];
   if (elements.length === 0) return null;
@@ -561,6 +572,7 @@ function extractDataset(dataExpr: Expression, nvars: number): DataRow[] | null {
   const rows: DataRow[] = [];
   const tupleForm = elements[0].isFiniteCollection;
   for (let i = 0; i < elements.length; i++) {
+    if (i > 0 && i % SETUP_ROWS_PER_STEP === 0) yield;
     const el = elements[i];
     if (tupleForm) {
       if (!el.isFiniteCollection) return null;
@@ -583,17 +595,17 @@ function extractDataset(dataExpr: Expression, nvars: number): DataRow[] | null {
 
 /** Detect the joint form where `dataExpr` is a list of `k` datasets (one per
  * model). Returns the per-model datasets, or `null` to broadcast a single
- * shared dataset. */
-function extractDatasetList(
+ * shared dataset. A step function, as `extractDatasetSteps`. */
+function* extractDatasetListSteps(
   dataExpr: Expression,
   k: number,
   nvars: number
-): DataRow[][] | null {
+): Steps<DataRow[][] | null> {
   if (!isFunction(dataExpr, 'List') || dataExpr.nops !== k) return null;
   // Per-model when every element is itself a dataset: either a collection of
   // point rows (its first element is a tuple/collection), or — for a single
   // independent variable — an all-scalar plain-`y` list (analogous to the
-  // plain-`y` branch of `extractDataset`). Without the plain-`y` acceptance a
+  // plain-`y` branch of `extractDatasetSteps`). Without the plain-`y` acceptance a
   // joint fit over per-model y-lists falls through and, at two elements per
   // list, is silently misread as (x, y) rows of a shared dataset.
   for (const el of dataExpr.ops) {
@@ -609,7 +621,7 @@ function extractDatasetList(
   }
   const result: DataRow[][] = [];
   for (const el of dataExpr.ops) {
-    const ds = extractDataset(el, nvars);
+    const ds = yield* extractDatasetSteps(el, nvars);
     if (!ds) return null;
     result.push(ds);
   }
@@ -709,8 +721,13 @@ function storedKernel(
  *
  * Returns `undefined` when the model carries an unresolved symbol beyond
  * `vars`/`params` (→ inert per § 3.4).
+ *
+ * A step function: it yields after the compilation of the model and after
+ * each derivative (a derivative and its compilation can take several
+ * milliseconds), so that the asynchronous route can give the event loop a
+ * turn during the setup.
  */
-function prepareUnit(
+function* prepareUnitSteps(
   ce: IComputeEngine,
   modelExpr: Expression,
   rows: DataRow[],
@@ -719,7 +736,7 @@ function prepareUnit(
   paramNames: string[],
   paramFresh: string[],
   analyzeGlobal = false
-): FitUnit | undefined {
+): Steps<FitUnit | undefined> {
   const rename: Record<string, Expression> = {};
   varNames.forEach((n, k) => (rename[n] = ce.symbol(varFresh[k])));
   paramNames.forEach((n, j) => (rename[n] = ce.symbol(paramFresh[j])));
@@ -731,6 +748,7 @@ function prepareUnit(
 
   const freeNames = [...varFresh, ...paramFresh];
   const { fn, stored } = makeNumericFn(ce, renamed, freeNames);
+  yield;
 
   const deriv: (NumFn | null)[] = [];
   const derivStored: (StoredKernel | undefined)[] = [];
@@ -768,6 +786,7 @@ function prepareUnit(
         d.isSame(0) && renamed.has(pf) && !occursOnlyUnderZero(renamed, pf)
       );
     }
+    yield;
   }
 
   const shape = analyzeGlobal
@@ -2377,6 +2396,10 @@ function prepareGlobalSearch(
    * re-scoring of the best sampled points) every row. */
   const linearSolveAt = (point: number[], allRows: boolean) =>
     linearScanSolve(scanProblem, point, allRows, scanDeadline);
+  // The same solve as a step function that can yield between rows (the
+  // asynchronous route).
+  const linearSolveAtSteps = (point: number[], allRows: boolean) =>
+    linearScanSolveSteps(scanProblem, point, allRows, scanDeadline, true);
 
   // The pure-number operations of a task (`fit-executor.ts`): the plan below
   // decides which tasks to run, the executor runs them, on this thread
@@ -2473,6 +2496,7 @@ function prepareGlobalSearch(
   };
   const kernel: FitKernel = {
     linearSolveAt,
+    linearSolveAtSteps,
     startRss: (theta0) => sumOfSquares(cb.residual(theta0)),
     startRssSteps: function* (theta0) {
       return sumOfSquares(yield* cb.residualSteps(theta0));
@@ -2624,7 +2648,7 @@ function withSetupDeadline(
   }
 }
 
-/** The prepared problem of a lowering (`findFitSetup`, `findRootSetup`):
+/** The prepared problem of a lowering (`findFitSetupSteps`, `findRootSetupSteps`):
  * the answer when there is nothing to solve (an inert call, an error), or
  * the units, the parameter specs and the global scans. */
 type FitSetup =
@@ -2651,7 +2675,7 @@ export function findFit(
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
   return withSetupDeadline(ce, 'FindFit', (ctx) =>
-    solveSetup(ce, findFitSetup(ce, ops, ctx), 'FindFit')
+    solveSetup(ce, runStepsSync(findFitSetupSteps(ce, ops, ctx)), 'FindFit')
   );
 }
 
@@ -2702,7 +2726,7 @@ export async function findFitAsync(
     checkAborted(options.signal);
     if (ops.length >= 4) {
       // The specs are parsed before the data is evaluated, as on the
-      // synchronous route (`findFitSetup`): a malformed spec is an error
+      // synchronous route (`findFitSetupSteps`): a malformed spec is an error
       // before any data is read, and a deadline that fires while the data
       // is evaluated reports the parameters at their starts
       // (`timeoutRecord`), not an empty `parameters` record. The setup
@@ -2721,7 +2745,7 @@ export async function findFitAsync(
     });
   }
   return solveSetupAsync(ce, route, (ctx) =>
-    findFitSetup(ce, ops, ctx, {
+    findFitSetupSteps(ce, ops, ctx, {
       data,
       deadlineFrame: route.deadlineFrame,
       specs,
@@ -2748,7 +2772,7 @@ export async function findRootAsync(
     return route.timeoutOrThrow(e);
   }
   return solveSetupAsync(ce, route, (ctx) =>
-    findRootSetup(ce, ops, ctx, route.deadlineFrame)
+    findRootSetupSteps(ce, ops, ctx, route.deadlineFrame)
   );
 }
 
@@ -2770,6 +2794,11 @@ interface AsyncRoute {
   /** A cancellation that the solver read as a timeout (the signal's reason
    * was `'timeout'`) ended the fit early: the signal still rejects. */
   answer: (value: Expression | undefined) => Expression | undefined;
+  /** Gives the event loop a turn about every 8 ms. Made when the call
+   * starts, so that its first slice counts the work on the data operand
+   * before the setup: the setup then yields at its first step when that
+   * work took a slice. */
+  pacer: EventLoopPacer;
 }
 
 function asyncRoute(
@@ -2806,6 +2835,7 @@ function asyncRoute(
       checkAborted(signal);
       return value;
     },
+    pacer: new EventLoopPacer(),
   };
 }
 
@@ -2877,17 +2907,20 @@ function withRoute(
  * The work on this thread gives the event loop a turn about every 8 ms
  * (`EventLoopPacer`): between the setup and the search, between two grid
  * points or solver starts, between two iterations of a solver run, and
- * inside a residual or Jacobian evaluation (`MS_PER_STEP`). A timer
+ * inside a residual or Jacobian evaluation (`MS_PER_STEP`), inside one
+ * grid point of the separable scan (`linearScanSolveSteps()`), and in the
+ * setup between blocks of data rows, after the compilation of the model
+ * and after each derivative (`setup` is a step function). A timer
  * can then run during a long search (an abort of the signal by a timer
- * stops it at the next check), and a page stays responsive. A step longer
- * than a slice still runs in one piece: the setup (the data, the
- * derivatives, the compilation), and one grid point of the separable scan
- * (`linearScanSolve()`, shared with the workers).
+ * stops it at the next check), and a page stays responsive. What still
+ * runs in one piece: the canonical form and the evaluation of the data
+ * operand, before the setup (about 8 ms each for 1,000 rows), and one
+ * derivative with its compilation.
  */
 async function solveSetupAsync(
   ce: IComputeEngine,
   route: AsyncRoute,
-  setup: (ctx: SetupContext) => FitSetup
+  setup: (ctx: SetupContext) => Steps<FitSetup>
 ): Promise<Expression | undefined> {
   const { signal, frame, deadlineFrame, ctx, inContext, timeoutOrThrow } =
     route;
@@ -2908,7 +2941,7 @@ async function solveSetupAsync(
   // each check to the budget: with a step budget the scan stays here, so
   // that the budget bounds it.
   const stepBudget = (frame?.budgets?.length ?? 0) > 0;
-  const pacer = new EventLoopPacer();
+  const pacer = route.pacer;
   const onThisThread = (
     reason: Extract<FitRoute, { route: 'calling-thread' }>['reason']
   ): FitRoute => ({ route: 'calling-thread', reason });
@@ -2918,7 +2951,12 @@ async function solveSetupAsync(
     withRoute(ce, timeoutOrThrow(e), onThisThread('setup-timeout'));
   let search: GlobalSearch;
   try {
-    const prepared0 = inContext(() => setup(ctx));
+    // The signal is checked before each step of the setup: an abort that a
+    // timer made while the setup gave the event loop a turn stops it there.
+    const prepared0 = await runStepsAsync(setup(ctx), pacer, (f) => {
+      checkAborted(signal);
+      return inContext(f);
+    });
     if ('done' in prepared0) return answer(prepared0.done);
     const { units, specs, scans } = prepared0;
     if (scans.length === 0) {
@@ -2933,8 +2971,7 @@ async function solveSetupAsync(
         onThisThread(noPool ?? 'no-global-search')
       );
     }
-    // The setup (the data, the derivatives, the compilation) ran in one
-    // piece: give the event loop a turn before the search.
+    // Give the event loop a turn before the search when the slice is over.
     await pacer.pace();
     const prepared = inContext(() =>
       prepareGlobalSearch(
@@ -3024,7 +3061,7 @@ async function solveSetupAsync(
  * data operand, which it evaluated with `evaluateAsync()`, and the deadline
  * frame it captured at the call, which the final deadline check reads.
  */
-function findFitSetup(
+function* findFitSetupSteps(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>,
   ctx: SetupContext,
@@ -3036,7 +3073,7 @@ function findFitSetup(
      * evaluated once, as on the synchronous route. */
     specs?: ParamSpec[];
   }
-): FitSetup {
+): Steps<FitSetup> {
   const done = (value: Expression | undefined) => ({ done: value });
   if (ops.length < 4) return done(undefined);
   // The operator is `lazy`, so the operands arrive held and UNBOUND (raw box
@@ -3044,7 +3081,6 @@ function findFitSetup(
   // (`InvisibleOperator` juxtaposition → `Multiply`) and bind collections —
   // canonicalization does NOT substitute seeded parameter/variable values, so
   // the lazy protection is preserved.
-  const dataOp = ops[0].canonical;
   const modelOp = ops[1].canonical;
   const paramsOp = ops[2].canonical;
   const varsOp = ops[3].canonical;
@@ -3068,20 +3104,23 @@ function findFitSetup(
   if (k === 0)
     return done(ce.error('unexpected-argument', 'FindFit: empty model list'));
 
-  const data = evaluated?.data ?? dataOp.evaluate();
+  // The asynchronous route gives the data it evaluated; the canonical form
+  // of the data operand is then not computed a second time (about 8 ms for
+  // 1,000 rows).
+  const data = evaluated?.data ?? ops[0].canonical.evaluate();
 
   // Datasets: one per model (joint), or a single shared/broadcast dataset.
   let datasets: DataRow[][];
   if (k > 1) {
-    const perModel = extractDatasetList(data, k, nvars);
+    const perModel = yield* extractDatasetListSteps(data, k, nvars);
     if (perModel) datasets = perModel;
     else {
-      const shared = extractDataset(data, nvars);
+      const shared = yield* extractDatasetSteps(data, nvars);
       if (!shared) return done(undefined);
       datasets = models.map(() => shared);
     }
   } else {
-    const ds = extractDataset(data, nvars);
+    const ds = yield* extractDatasetSteps(data, nvars);
     if (!ds) return done(undefined);
     datasets = [ds];
   }
@@ -3094,7 +3133,7 @@ function findFitSetup(
 
   const units: FitUnitWithParams[] = [];
   for (let i = 0; i < models.length; i++) {
-    const unit = prepareUnit(
+    const unit = yield* prepareUnitSteps(
       ce,
       models[i],
       datasets[i],
@@ -3123,7 +3162,7 @@ export function findRoot(
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
   return withSetupDeadline(ce, 'FindRoot', (ctx) =>
-    solveSetup(ce, findRootSetup(ce, ops, ctx), 'FindRoot')
+    solveSetup(ce, runStepsSync(findRootSetupSteps(ce, ops, ctx)), 'FindRoot')
   );
 }
 
@@ -3137,12 +3176,12 @@ export function findRoot(
  * equations (`3.22` in `cos(3.22 b + c)`) give the basin width of the
  * grid, as the span of a variable does for a fit (`basinWidth`).
  */
-function findRootSetup(
+function* findRootSetupSteps(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>,
   ctx: SetupContext,
   deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame
-): FitSetup {
+): Steps<FitSetup> {
   const done = (value: Expression | undefined) => ({ done: value });
   if (ops.length < 2) return done(undefined);
   // See `findFit`: the operands arrive held and unbound, so canonicalize them
@@ -3187,7 +3226,7 @@ function findRootSetup(
 
   const units: FitUnitWithParams[] = [];
   for (const r of residuals) {
-    const unit = prepareUnit(
+    const unit = yield* prepareUnitSteps(
       ce,
       r,
       [{ x: [], y: 0 }],

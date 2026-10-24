@@ -127,6 +127,13 @@ export interface FitBatchResult {
  */
 export interface FitKernel {
   linearSolveAt: (point: number[], allRows: boolean) => LinearScanSolution;
+  /** `linearSolveAt` as a step function that can yield between rows
+   * (`linearScanSolveSteps()` in `fit-scan.ts`), so that an asynchronous
+   * executor can give the event loop a turn inside one grid point. */
+  linearSolveAtSteps?: (
+    point: number[],
+    allRows: boolean
+  ) => Steps<LinearScanSolution>;
   startRss: (theta0: number[]) => number;
   lm: (theta0: number[]) => LMResult;
   /** `lm` as a step function that yields between two iterations of the
@@ -153,11 +160,11 @@ export class InlineFitExecutor implements FitExecutor {
 
   /**
    * `run` as a step function: it yields after each task. With `stepped`
-   * (the default), it uses the kernel's `lmSteps` and `startRssSteps` when
-   * it has them, and so also yields inside a solver run and between rows.
-   * `run` passes `false`: it runs to the end without stopping, and the
-   * plain `lm` and `startRss` avoid the cost of resuming the generators
-   * every few rows. The tasks that run and their results do not depend on
+   * (the default), it uses the kernel's `linearSolveAtSteps`, `lmSteps` and
+   * `startRssSteps` when it has them, and so also yields inside a grid
+   * point, inside a solver run and between rows. `run` passes `false`: it
+   * runs to the end without stopping, and the plain functions avoid the cost
+   * of resuming the generators every few rows. The tasks that run and their results do not depend on
    * how it is run.
    */
   *runSteps(tasks: FitTask[], stepped = true): Steps<FitBatchResult> {
@@ -168,10 +175,13 @@ export class InlineFitExecutor implements FitExecutor {
       first = false;
       try {
         if (task.kind === 'linear') {
-          const solved = this.kernel.linearSolveAt(
-            task.point,
-            task.allRows === true
-          );
+          const solved =
+            stepped && this.kernel.linearSolveAtSteps !== undefined
+              ? yield* this.kernel.linearSolveAtSteps(
+                  task.point,
+                  task.allRows === true
+                )
+              : this.kernel.linearSolveAt(task.point, task.allRows === true);
           results.push({ kind: 'linear', index: task.index, solved });
           // The structural test was wrong about this model: the plan falls
           // back to a multi-start, and the points after this one would be

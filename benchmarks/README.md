@@ -32,6 +32,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Scalar block accumulation** | `scalar-accumulator.ts [baseline-entry.ts]` | CE baseline · CE current | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
+| **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
 worth adopting but not yet wired in (WolframMark, SageMath's tour of

@@ -18,6 +18,7 @@
  */
 
 import { solveWithInflation } from './numerics/levenberg-marquardt.js';
+import { runStepsSync, type Steps } from '../common/cooperative-steps.js';
 
 /**
  * The result of a separable-scan point: the full parameter vector and its
@@ -137,6 +138,10 @@ const clamp = (x: number, lo: number, hi: number): number =>
  * `checkDeadline` is called once per row of each pass over the rows, and
  * throws when the time is up: the main thread passes the check of the
  * engine's deadline, a worker a check of the deadline it was sent.
+ *
+ * A worker and the synchronous route run this function. The asynchronous
+ * route on the calling thread runs its step form, `linearScanSolveSteps()`,
+ * which gives the same result.
  */
 export function linearScanSolve(
   problem: FitScanProblem,
@@ -144,6 +149,47 @@ export function linearScanSolve(
   allRows: boolean,
   checkDeadline: () => void
 ): LinearScanSolution {
+  return runStepsSync(
+    linearScanSolveSteps(problem, point, allRows, checkDeadline, false)
+  );
+}
+
+/** How many rows the step form of the scan solve walks between two checks
+ * of the time. */
+const SCAN_ROWS_PER_STEP = 8;
+
+/** The step form of the scan solve yields at a check of the time only when
+ * at least this many milliseconds passed since it started or last yielded:
+ * for a compiled model, a yield every few rows would cost more than the
+ * rows. */
+const SCAN_MS_PER_STEP = 1;
+
+/**
+ * `linearScanSolve()` as a step function. With `rowSteps`, it can yield
+ * inside each pass over the rows (every `SCAN_ROWS_PER_STEP` rows, when
+ * `SCAN_MS_PER_STEP` milliseconds passed), so that the asynchronous route
+ * gives the event loop a turn inside one grid point of an interpreted model
+ * (one point of a model with 200 rows took about 110 ms, ROADMAP CE-429).
+ * Without `rowSteps` it never yields. The result does not depend on
+ * `rowSteps`: the record of the functions is local to the call.
+ */
+export function* linearScanSolveSteps(
+  problem: FitScanProblem,
+  point: ArrayLike<number>,
+  allRows: boolean,
+  checkDeadline: () => void,
+  rowSteps: boolean
+): Steps<LinearScanSolution> {
+  let rowCount = 0;
+  let last = rowSteps ? Date.now() : 0;
+  /** True when the walk should yield before the next row. */
+  const due = (): boolean => {
+    if (!rowSteps || ++rowCount % SCAN_ROWS_PER_STEP !== 0) return false;
+    const now = Date.now();
+    if (now - last < SCAN_MS_PER_STEP) return false;
+    last = now;
+    return true;
+  };
   const { units, paramFresh, linearIdx, gridIdx, lo, hi, phases } = problem;
   const p = paramFresh.length;
   const theta = problem.start.slice();
@@ -186,6 +232,7 @@ export function linearScanSolve(
     const nv = unit.varFresh.length;
     const n = rows.y.length;
     for (let i = 0; i < n; i++) {
+      if (due()) yield;
       checkDeadline();
       for (let k = 0; k < nv; k++) record[unit.varFresh[k]] = rows.x[k][i];
       const offset = unit.model(record);
@@ -322,6 +369,7 @@ export function linearScanSolve(
     const nv = unit.varFresh.length;
     const n = rows.y.length;
     for (let i = 0; i < n; i++) {
+      if (due()) yield;
       checkDeadline();
       for (let k = 0; k < nv; k++) record[unit.varFresh[k]] = rows.x[k][i];
       residuals.push(unit.model(record) - rows.y[i]);

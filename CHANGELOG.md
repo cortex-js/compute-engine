@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### New Features
+
+- **Index axes in the `grid` layout of `broadcast`** (ROADMAP CE-421, Tycho
+  row 440). The `indexes` option names the inputs that are index axes: the
+  input of each is the axis length `n`, and at each cell the variable is the
+  cell's position along that axis, `0` to `n − 1`.
+  `f.broadcast({ m: 64, n: 64, F }, { layout: 'grid', indexes: ['m', 'n'] })`
+  gives the values of the same grid with the columns `0 … 63`, with no column
+  to build, send to a worker or read. On a marching kernel that reads eight
+  values of a shared list per cell, a 64 × 64 × 64 grid takes 3.5 ms instead
+  of 4.05 ms.
+
 ## 0.166.0 _2026-10-24_
 
 ### Breaking Changes

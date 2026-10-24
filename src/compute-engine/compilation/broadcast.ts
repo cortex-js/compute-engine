@@ -26,6 +26,14 @@
  * key order of `inputs` varying fastest, and nothing is expanded on the
  * caller's side.
  *
+ * **Index axes** (`grid` layout only). A variable that `options.indexes`
+ * names is an axis of the grid whose value is the cell's position along
+ * that axis: its input is the axis length `n`, a non-negative integer, and
+ * the variable takes the values `0, 1, …, n − 1` (for `interval-js`, the
+ * point intervals of these values). It is the same axis as a column
+ * `Float64Array.from({ length: n }, (_, j) => j)` at the same place in key
+ * order, with no column to send or read (ROADMAP CE-421).
+ *
  * **Shared inputs** (`javascript` only). A variable that the compiled code
  * reads as a list (the `lists` of the entry plan, from a declared list type),
  * or that `options.shared` names, is bound once for the whole batch: the code
@@ -153,10 +161,14 @@ export type IntervalKindCode =
 interface BroadcastShape {
   /** The per-cell and per-batch scalar variables; not the shared inputs. */
   names: string[];
-  /** The array of each name, or `null` for a scalar. */
+  /** The array of each name, or `null` for a scalar or an index axis. */
   arrays: (Float64Array | null)[];
-  /** The scalar of each name (`NaN` for an array). */
+  /** The scalar of each name (`NaN` for an array or an index axis). */
   scalars: number[];
+  /** Whether each name is an index axis of the `grid` layout (see
+   * `BroadcastOptions.indexes`): its value at a cell is the cell's position
+   * along the axis. Its length is in `grid`. */
+  indexes: boolean[];
   count: number;
   /** `grid` layout: the number of cells one step along each array axis
    * spans (1 for the first axis), and the axis length; `null` for `cells`. */
@@ -201,6 +213,41 @@ export function broadcastSharedNames(
   if (lists !== undefined) for (const name of lists) wanted.add(name);
   if (wanted.size === 0) return [];
   return Object.keys(inputs).filter((name) => wanted.has(name));
+}
+
+/**
+ * The names of the index axes of a batch (`options.indexes`). The option
+ * must be an array of strings, each a key of `inputs` that is not a shared
+ * input, and it is accepted only with the `grid` layout: otherwise it
+ * throws. The values are checked by `readShape`.
+ */
+function broadcastIndexNames(
+  inputs: BroadcastInputs,
+  options: BroadcastOptions | undefined,
+  layout: string,
+  sharedNames: ReadonlySet<string>
+): Set<string> {
+  const named = options?.indexes;
+  if (named === undefined) return new Set();
+  if (!Array.isArray(named) || named.some((name) => typeof name !== 'string'))
+    throw new TypeError(
+      'broadcast: `indexes` must be an array of variable names'
+    );
+  if (layout !== 'grid')
+    throw new TypeError(
+      'broadcast: the `indexes` option needs the `grid` layout'
+    );
+  for (const name of named) {
+    if (!hasOwn(inputs, name))
+      throw new TypeError(
+        `broadcast: the index axis "${name}" is not a key of the inputs`
+      );
+    if (sharedNames.has(name))
+      throw new TypeError(
+        `broadcast: "${name}" cannot be both a shared input and an index axis`
+      );
+  }
+  return new Set(named);
 }
 
 /**
@@ -253,12 +300,26 @@ function readShape(
   const sharedNames = new Set(
     perCell === 1 ? broadcastSharedNames(lists, inputs, options) : []
   );
+  const layout = options?.layout ?? 'cells';
+  const indexNames = broadcastIndexNames(inputs, options, layout, sharedNames);
   const names: string[] = [];
   const arrays: (Float64Array | null)[] = [];
   const scalars: number[] = [];
+  const indexes: boolean[] = [];
   const shared: BroadcastShape['shared'] = [];
   for (const name of Object.keys(inputs)) {
     const v = inputs[name];
+    if (indexNames.has(name)) {
+      if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0)
+        throw new TypeError(
+          `broadcast: the index axis "${name}" must be given its length, a non-negative integer`
+        );
+      names.push(name);
+      arrays.push(null);
+      scalars.push(NaN);
+      indexes.push(true);
+      continue;
+    }
     if (sharedNames.has(name)) {
       if (!(v instanceof Float64Array) && !Array.isArray(v))
         throw new TypeError(
@@ -271,6 +332,7 @@ function readShape(
       names.push(name);
       arrays.push(null);
       scalars.push(v);
+      indexes.push(false);
     } else if (v instanceof Float64Array) {
       if (v.length % perCell !== 0)
         throw new TypeError(
@@ -279,6 +341,7 @@ function readShape(
       names.push(name);
       arrays.push(v);
       scalars.push(NaN);
+      indexes.push(false);
     } else if (Array.isArray(v))
       throw new TypeError(
         perCell === 2
@@ -290,20 +353,27 @@ function readShape(
         `broadcast: the input for "${name}" must be a Float64Array or a number`
       );
   }
-  const layout = options?.layout ?? 'cells';
   if (layout === 'grid') {
     const grid: { stride: number; length: number }[] = [];
     let stride = 1;
-    for (const a of arrays) {
-      if (a === null) {
+    arrays.forEach((a, k) => {
+      if (a === null && !indexes[k]) {
         grid.push({ stride: 0, length: 1 });
-        continue;
+        return;
       }
-      const length = a.length / perCell;
+      const length =
+        a === null ? (inputs[names[k]] as number) : a.length / perCell;
       grid.push({ stride, length });
       stride *= length;
-    }
-    return { names, arrays, scalars, count: stride, grid, shared };
+    });
+    // An index axis is given by its length alone, so the product of the
+    // lengths is not bounded by memory the caller already holds: refuse a
+    // count that is not an exact integer, before any output is allocated.
+    if (!Number.isSafeInteger(stride))
+      throw new TypeError(
+        `broadcast: the grid has too many cells (${stride}); the product of the axis lengths must be a safe integer`
+      );
+    return { names, arrays, scalars, indexes, count: stride, grid, shared };
   }
   if (layout !== 'cells')
     throw new TypeError(`broadcast: unknown layout "${String(layout)}"`);
@@ -323,6 +393,7 @@ function readShape(
     names,
     arrays,
     scalars,
+    indexes,
     count: count === -1 ? 1 : count,
     grid: null,
     shared,
@@ -615,8 +686,18 @@ function cellLoopFor(
   // What the source depends on: the stride, the layout, for each name its
   // spelling and whether it is a scalar, a real array or a complex array,
   // and the parameters of a batch body.
+  // An index axis is `x` (real) or `y` (complex): its value is the
+  // index into the axis, with no array read.
   const kinds = shape.names.map((_, k) =>
-    shape.arrays[k] === null ? 's' : slots[k] !== null ? 'c' : 'a'
+    shape.indexes[k]
+      ? slots[k] !== null
+        ? 'y'
+        : 'x'
+      : shape.arrays[k] === null
+        ? 's'
+        : slots[k] !== null
+          ? 'c'
+          : 'a'
   );
   const grid = shape.grid;
   const key = JSON.stringify([
@@ -634,15 +715,24 @@ function cellLoopFor(
   // The index into the array of axis `k` (see `axisIndex`).
   const indexOf = (k: number): string =>
     grid === null ? 'i' : `Math.floor(i / t${k}) % n${k}`;
+  // The value of name `k` at cell `i`: the index itself for an index
+  // axis, else the element of its array.
+  const valueOf = (k: number): string =>
+    kinds[k] === 'x' || kinds[k] === 'y'
+      ? `(${indexOf(k)})`
+      : `a${k}[${indexOf(k)}]`;
   shape.names.forEach((name, k) => {
     if (kinds[k] === 's') return;
-    setup.push(`const a${k} = arrays[${k}];`);
-    if (kinds[k] === 'c') setup.push(`const s${k} = slots[${k}];`);
+    if (kinds[k] === 'a' || kinds[k] === 'c')
+      setup.push(`const a${k} = arrays[${k}];`);
+    if (kinds[k] === 'c' || kinds[k] === 'y')
+      setup.push(`const s${k} = slots[${k}];`);
     if (grid !== null)
       setup.push(`const t${k} = grid[${k}].stride, n${k} = grid[${k}].length;`);
-    if (kinds[k] === 'c') reads.push(`s${k}.re = a${k}[${indexOf(k)}];`);
+    if (kinds[k] === 'c' || kinds[k] === 'y')
+      reads.push(`s${k}.re = ${valueOf(k)};`);
     else if (params === undefined)
-      reads.push(`vars[${JSON.stringify(name)}] = a${k}[${indexOf(k)}];`);
+      reads.push(`vars[${JSON.stringify(name)}] = ${valueOf(k)};`);
   });
   // The call: with the vars object, or with one argument per parameter of
   // a batch body.
@@ -650,7 +740,7 @@ function cellLoopFor(
   if (params !== undefined) {
     const argCodes = params.map((p, j) => {
       const k = p.direct === true ? -1 : shape.names.indexOf(p.name);
-      if (k >= 0 && kinds[k] === 'a') return `a${k}[${indexOf(k)}]`;
+      if (k >= 0 && (kinds[k] === 'a' || kinds[k] === 'x')) return valueOf(k);
       setup.push(`const d${j} = args[${j}];`);
       return `d${j}`;
     });
@@ -878,8 +968,8 @@ function broadcastNumbersRange(
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
       const a = arrays[k];
-      if (a === null) continue;
-      const v = a[axisIndex(shape, k, i)];
+      if (a === null && !shape.indexes[k]) continue;
+      const v = a === null ? axisIndex(shape, k, i) : a[axisIndex(shape, k, i)];
       const slot = complexSlots[k];
       if (slot !== null) slot.re = v;
       else vars[shape.names[k]] = v;
@@ -1080,7 +1170,13 @@ function broadcastIntervalsRange(
       return i - from;
     for (let k = 0; k < shape.names.length; k++) {
       const a = arrays[k];
-      if (a === null) continue;
+      if (a === null) {
+        if (!shape.indexes[k]) continue;
+        const j = axisIndex(shape, k, i);
+        slots[k].lo = j;
+        slots[k].hi = j;
+        continue;
+      }
       const j = 2 * axisIndex(shape, k, i);
       slots[k].lo = a[j];
       slots[k].hi = a[j + 1];
