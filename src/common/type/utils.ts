@@ -2301,12 +2301,24 @@ const LIST_OF_ANY: Type = Object.freeze({ kind: 'list', elements: 'any' });
  * of different ranks whose rows are not all uniform,
  * `list<integer> | list<list<integer>>`), or when a row has that property:
  * neither one depth nor a tensor describes it (`unionOperandShape`).
+ *
+ * `'tensor rows'` is the answer for a plain list whose elements are each a
+ * cell or a tensor of unknown rank (`list<tensor<number>>`,
+ * `list<broadcastable<number>>`). Each element is rectangular, but two
+ * elements can have different ranks (`[1, [2, 3], [[4]]]`), so the value is
+ * not a tensor. It is a list of rank 1 whose elements are tensors of the
+ * cells, and a broadcast keeps that reading (`broadcastShapedResultType`).
  */
 function broadcastOperandShape(
   t: Readonly<Type>,
   seen?: AliasDescent,
   depth = 0
-): { dims: number[]; uniform: boolean } | 'unknown rank' | 'mixed rank' | null {
+):
+  | { dims: number[]; uniform: boolean }
+  | 'unknown rank'
+  | 'mixed rank'
+  | 'tensor rows'
+  | null {
   if (depth > MAX_CELL_DEPTH) return null;
   const unfolded = unfoldAliasOnDescent(t, seen);
   if (unfolded === undefined) return null;
@@ -2319,9 +2331,22 @@ function broadcastOperandShape(
   if (outer.dimensions === null) return 'unknown rank';
   if (outer.dimensions !== undefined)
     return { dims: [...outer.dimensions], uniform: true };
+  const element = unfoldAliasOnDescent(
+    outer.elements,
+    descendIntoConstructor(unfolded.seen)
+  );
+  if (
+    element !== undefined &&
+    typeof element.type !== 'string' &&
+    element.type.kind === 'broadcastable' &&
+    cannotHoldAList(element.type.elements)
+  )
+    return 'tensor rows';
   const row = broadcastRowShape(outer.elements, unfolded.seen, depth);
-  if (row === null || row === 'unknown rank' || row === 'mixed rank')
-    return row;
+  // Rows that are tensors of unknown rank can have different ranks, so the
+  // list is not one tensor of unknown rank.
+  if (row === 'unknown rank') return 'tensor rows';
+  if (row === null || row === 'mixed rank') return row;
   if (row === 'leaf') return { dims: [-1], uniform: true };
   return { dims: [-1, ...row.dims], uniform: row.uniform };
 }
@@ -2355,6 +2380,9 @@ function unionOperandShape(
   let mixedRanks = false;
   for (const arm of arms) {
     const s = broadcastOperandShape(arm, seen, depth + 1);
+    // An arm whose elements are tensors of different ranks is a nested list
+    // whose depth is not one number.
+    if (s === 'tensor rows') return 'mixed rank';
     if (s === null || s === 'unknown rank' || s === 'mixed rank') return s;
     if (shape === undefined) shape = { dims: [...s.dims], uniform: s.uniform };
     else if (shape.dims.length !== s.dims.length) {
@@ -2413,7 +2441,7 @@ function unknownShapeOperandDepth(
     // arm only.
     const shape = broadcastOperandShape(r, unfolded.seen, depth + 1);
     if (shape === 'unknown rank') return 'tensor';
-    if (shape === 'mixed rank') return 'any depth';
+    if (shape === 'mixed rank' || shape === 'tensor rows') return 'any depth';
     if (shape !== null) {
       if (!shape.uniform) return 'any depth';
       return shape.dims.length > 1 ? 'tensor' : undefined;
@@ -2462,6 +2490,9 @@ function broadcastRowShape(
   if (typeof el === 'string') return elementCanBeList(el) ? null : 'leaf';
   if (el.kind === 'list') {
     const s = broadcastOperandShape(el, element.seen, depth + 1);
+    // A row whose own elements are tensors of different ranks: the rows of
+    // the outer list do not have one depth.
+    if (s === 'tensor rows') return 'mixed rank';
     if (s === null || s === 'unknown rank' || s === 'mixed rank') return s;
     return { dims: s.dims, uniform: s.uniform && s.dims.every((n) => n >= 0) };
   }
@@ -2556,6 +2587,11 @@ export function broadcastShapedResultType(
   let uniform = true;
   let mixedRanks = false;
   let unknownRank = false;
+  let tensorRows = false;
+  let rankOneAbstract = false;
+  // Whether some operand of a known rank of 3 or more has rows that may
+  // differ in length: an element of such an operand may be a ragged list.
+  let raggedDeepRows = false;
   let maxRank = 0;
   for (const t of operandTypes) {
     const shape = broadcastOperandShape(t);
@@ -2571,7 +2607,11 @@ export function broadcastShapedResultType(
         unknownRank = true;
         continue;
       }
-      return broadcastResultType(elementType);
+      // A scalar or a list of rank 1 (a `range`): the answer is the plain
+      // `list<R>` below, unless another operand is a list of tensors, which
+      // makes the elements of the value tensors too.
+      rankOneAbstract = true;
+      continue;
     }
     // The rank of this operand is not known: the loop goes on, so that the
     // uniformity of the other operands is known before the answer.
@@ -2582,8 +2622,15 @@ export function broadcastShapedResultType(
     // A value of this operand can be a nested list of any depth whose rows
     // differ in length: no tensor describes the result.
     if (shape === 'mixed rank') return anyDepth();
+    // A list whose elements are tensors of different ranks: the loop goes
+    // on, so that the shapes of the other operands are known.
+    if (shape === 'tensor rows') {
+      tensorRows = true;
+      continue;
+    }
     const d = shape.dims;
     if (!shape.uniform) uniform = false;
+    if (!shape.uniform && d.length > 2) raggedDeepRows = true;
     maxRank = Math.max(maxRank, d.length);
     if (dims === null) {
       dims = d;
@@ -2596,6 +2643,28 @@ export function broadcastShapedResultType(
       // Same rank: keep provably-identical entries, open the rest.
       for (let i = 0; i < dims.length; i++) if (dims[i] !== d[i]) dims[i] = -1;
     }
+  }
+  if (rankOneAbstract && !tensorRows) return broadcastResultType(elementType);
+  if (tensorRows) {
+    // An operand is a list whose elements are each a cell or a tensor
+    // (`list<broadcastable<number>>`). The broadcast pairs the elements of
+    // the operands by index, so element `i` of the value is the broadcast of
+    // element `i` of every operand. When each of those is a cell or a tensor
+    // (a scalar operand, a tensor of any rank, a list of rank 1 or 2, a list
+    // of tensors), and the result for one cell, `R`, cannot be a list,
+    // element `i` is a cell or a tensor of `R` cells, and the value is
+    // `list<broadcastable<R>>`: `[1, [2, 3], [[4]]] + 1` is
+    // `[2, [3, 4], [[5]]]`. When `R` can be a list (a function whose result
+    // for one cell is a `broadcastable<number>`), element `i` is a nested
+    // list whose rows can differ in length, and the depth of the value is
+    // not known. `R` is the result for one CELL: the caller asks the
+    // handler again with each operand typed as its cell
+    // (`broadcastLiftType`).
+    if (raggedDeepRows || !cannotHoldAList(cells)) return anyDepth();
+    return {
+      kind: 'list',
+      elements: { kind: 'broadcastable', elements: cells },
+    };
   }
   if (unknownRank || mixedRanks) {
     // Every operand is a tensor (its rows are uniform), so the value is a

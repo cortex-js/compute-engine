@@ -1147,9 +1147,30 @@ describe('STATIC SHAPE READERS', () => {
     expect(str(broadcastShapedResultType([t('tensor')], 'real'))).toBe(
       'tensor<real>'
     );
+    // A list of tensors is not one tensor: its elements can have different
+    // ranks (`[[1, 2], [[3]]]`). Each element of the result is a cell or a
+    // tensor of cells.
     expect(str(broadcastShapedResultType([t('list<tensor>')], 'real'))).toBe(
-      'tensor<real>'
+      'list<broadcastable<real>>'
     );
+    expect(
+      str(
+        broadcastShapedResultType(
+          [t('list<broadcastable<number>>'), t('vector<real^3>')],
+          'number'
+        )
+      )
+    ).toBe('list<broadcastable<number>>');
+    // A result for one cell that may itself be a tensor gives elements whose
+    // rows can differ in length: the depth of the value is not known.
+    expect(
+      str(
+        broadcastShapedResultType(
+          [t('list<broadcastable<number>>')],
+          t('broadcastable<number>')
+        )
+      )
+    ).toBe('list<broadcastable<number> | list<any>>');
     expect(str(broadcastShapedResultType([t('list<number>')], 'real'))).toBe(
       'list<real>'
     );

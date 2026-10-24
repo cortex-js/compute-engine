@@ -19074,7 +19074,7 @@ Throws if `other` is a string that is not a valid type.
 ##### BoxedType.couldMatch() {#couldmatch}
 
 ```ts
-couldMatch(other): boolean
+couldMatch(other, options?): boolean
 ```
 
 True when *some* value inhabits both this type and `other` — "could a
@@ -19097,7 +19097,23 @@ be a `list<tuple<number, number>>`, witness `[(1,2)]`.
 
 Symmetric, and decisive for the composite shapes it models: a
 `tuple<number, number>` could not be a `list<tuple<number, number>>`, and
-`list<integer>` could not be a `list<string>`. Shapes it does not model
+`list<integer^2>` could not be a `list<string^2>`. Two list types with no
+dimensions could always match, whatever their elements, because the empty
+list is a value of both: `list<integer>` could be a `list<string>`,
+witness `[]`. To ask whether a NON-EMPTY value could be both, pass
+`{ nonEmpty: true }`: a non-empty collection of both types has elements
+of both element types, so the element types are compared too.
+
+```ts
+const t = ce.type('list<number>');
+t.couldMatch('list<tuple<number, number>>');                     // true
+t.couldMatch('list<tuple<number, number>>', { nonEmpty: true }); // false
+t.couldMatch('list<integer>', { nonEmpty: true });               // true
+```
+
+Only the outer collection must be non-empty: `[[]]` is a value of both
+`list<list<number>>` and `list<list<string>>`. For a type that is not a
+collection, the option changes nothing. Shapes it does not model
 fall back to assignability in either direction, so the answer is never
 narrower than `matches()` — with one deliberate exception: `never` is
 uninhabited, so nothing could be a `never`.
@@ -19128,6 +19144,12 @@ Throws if `other` is a string that is not a valid type.
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
+
+####### options?
+
+####### nonEmpty?
+
+`boolean`
 
 </MemberCard>
 

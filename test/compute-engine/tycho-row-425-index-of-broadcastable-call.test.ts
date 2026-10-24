@@ -1095,6 +1095,8 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   });
 
   test.each([
+    // A row of 3 beside a matrix of 2 rows: the shapes do not nest. A row
+    // of 2 would be added to the rows (ROADMAP CE-399).
     [
       'list<real | tensor<real>>',
       [
@@ -1102,7 +1104,7 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
           [1, 2],
           [3, 4],
         ],
-        [10, 20],
+        [10, 20, 30],
       ],
     ],
     ['list<number | list<number>>', [[1, 2], [3]]],
@@ -1313,7 +1315,9 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
       to: 'javascript',
       fallback: false,
     } as never).run!;
-    expect(() =>
+    // A row of 2 beside a 2 by 2 matrix: element `i` of the row is added to
+    // row `i` of the matrix (ROADMAP CE-399), as in the interpreter.
+    expect(
       run({
         p: [
           [
@@ -1321,6 +1325,24 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
             [3, 4],
           ],
           [10, 20],
+        ],
+      } as never)
+    ).toEqual([
+      [11, 12],
+      [23, 24],
+    ]);
+    // Rows of different lengths do not add.
+    expect(() =>
+      run({
+        p: [
+          [
+            [1, 2],
+            [3, 4],
+          ],
+          [
+            [1, 2, 3],
+            [4, 5, 6],
+          ],
         ],
       } as never)
     ).toThrow();

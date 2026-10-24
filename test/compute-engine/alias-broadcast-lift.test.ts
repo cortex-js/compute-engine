@@ -102,11 +102,9 @@ survey(
     ['Sin(L)', ['Sin', 'L'], 'matrix<2x2>'],
     ['Mod(L, 2)', ['Mod', 'L', 2], 'matrix<nan | real^(2x2)>'],
     ['Multiply(2, L)', ['Multiply', 2, 'L'], 'matrix<2x2>'],
-    [
-      'Add([1,2], L)',
-      ['Add', ['List', 1, 2], 'L'],
-      'matrix<2x2> | vector<integer^2>',
-    ],
+    // A vector plus a matrix adds element `i` of the vector to row `i` of
+    // the matrix (ROADMAP CE-399): the sum has the shape of the matrix.
+    ['Add([1,2], L)', ['Add', ['List', 1, 2], 'L'], 'matrix<2x2>'],
     ['Negate(L)', ['Negate', 'L'], 'matrix<2x2>'],
     ['f(L)', ['f', 'L'], 'matrix<2x2>'],
   ]

@@ -392,21 +392,25 @@ describe('ABSTRACT COLLECTION: A COMPARISON OVER AN ELEMENT-WISE APPLICATION', (
   // element-wise over two lists, so beside the list literal `[1, 2]` the
   // result is never a scalar: it is a list of two booleans, or an error value
   // when the lengths do not agree (`[5, 6, 7]` against `[1, 2]`) or when
-  // `Sin` does not apply (a set). An error value is outside every value type,
-  // so `list<boolean^2>` admits every value that is not an error.
+  // `Sin` does not apply (a set). An error value is outside every value type.
+  // `Sin(P)` is typed `broadcastable<number>`, which also admits a matrix,
+  // and a matrix compared with `[1, 2]` is a matrix of booleans (each row is
+  // compared with one number of the list). So the static type is
+  // `tensor<boolean>`, a list of booleans of some rank, and not
+  // `list<boolean^2>`.
   const S = ['Sin', 'P'];
   const L = ['List', 1, 2];
   const COMPARISONS: Record<string, [unknown, string]> = {
     'Sin(P) = [1, 2]': [['Equal', S, L], 'broadcastable<boolean>'],
     'Sin(P) != [1, 2]': [['NotEqual', S, L], 'broadcastable<boolean>'],
-    'Sin(P) < [1, 2]': [['Less', S, L], 'list<boolean^2>'],
-    'Sin(P) <= [1, 2]': [['LessEqual', S, L], 'list<boolean^2>'],
-    'Sin(P) > [1, 2]': [['Greater', S, L], 'list<boolean^2>'],
-    'Sin(P) >= [1, 2]': [['GreaterEqual', S, L], 'list<boolean^2>'],
-    '[1, 2] < Sin(P)': [['Less', L, S], 'list<boolean^2>'],
+    'Sin(P) < [1, 2]': [['Less', S, L], 'tensor<boolean>'],
+    'Sin(P) <= [1, 2]': [['LessEqual', S, L], 'tensor<boolean>'],
+    'Sin(P) > [1, 2]': [['Greater', S, L], 'tensor<boolean>'],
+    'Sin(P) >= [1, 2]': [['GreaterEqual', S, L], 'tensor<boolean>'],
+    '[1, 2] < Sin(P)': [['Less', L, S], 'tensor<boolean>'],
     '[1, 2] = Sin(P)': [['Equal', L, S], 'broadcastable<boolean>'],
-    '0 < Sin(P) < [1, 2]': [['Less', 0, S, L], 'list<boolean^2>'],
-    '0 <= Sin(P) <= [1, 2]': [['LessEqual', 0, S, L], 'list<boolean^2>'],
+    '0 < Sin(P) < [1, 2]': [['Less', 0, S, L], 'tensor<boolean>'],
+    '0 <= Sin(P) <= [1, 2]': [['LessEqual', 0, S, L], 'tensor<boolean>'],
     'Sin(P) < Cos(P)': [['Less', S, ['Cos', 'P']], 'broadcastable<boolean>'],
     'Sin(P) = Cos(P)': [['Equal', S, ['Cos', 'P']], 'broadcastable<boolean>'],
     'Sin(P) < 1': [['Less', S, 1], 'broadcastable<boolean>'],
@@ -416,10 +420,10 @@ describe('ABSTRACT COLLECTION: A COMPARISON OVER AN ELEMENT-WISE APPLICATION', (
       'broadcastable<boolean>',
     ],
     'not Sin(P) < 1': [['Not', ['Less', S, 1]], 'broadcastable<boolean>'],
-    'not Sin(P) < [1, 2]': [['Not', ['Less', S, L]], 'list<boolean^2>'],
+    'not Sin(P) < [1, 2]': [['Not', ['Less', S, L]], 'tensor<boolean>'],
     'Sin(P) < [1, 2] or Sin(P) > 0': [
       ['Or', ['Less', S, L], ['Greater', S, 0]],
-      'list<boolean^2>',
+      'tensor<boolean>',
     ],
   };
 

@@ -1497,6 +1497,88 @@ export function couldMatch(a: Type, b: Type): boolean {
   }
 }
 
+/**
+ * Whether some value of `a` that is not an empty collection is also a value
+ * of `b`: the `nonEmpty` option of `BoxedType.couldMatch()`.
+ *
+ * `couldMatch(a, b)` answers `true` for two list types with no dimensions
+ * whatever their elements, because the empty list is a value of both
+ * (`list<number>` and `list<tuple<number, number>>`). A non-empty
+ * collection that is a value of both types has elements that are values of
+ * both element types, so for two collection types the answer is
+ * `couldMatch(a, b)` and `couldMatch` of their element types. Only the
+ * outer collection is required to be non-empty: `[[]]` is a value of both
+ * `list<list<number>>` and `list<list<string>>`. A union, a
+ * `broadcastable<T>` and a transparent alias are read arm by arm first; a
+ * pair of arms that are not both collections is answered by `couldMatch`.
+ */
+export function couldMatchNonEmpty(a: Type, b: Type): boolean {
+  const armsA = nonEmptyQuestionArms(a);
+  const armsB = nonEmptyQuestionArms(b);
+  return armsA.some((x) =>
+    armsB.some((y) => {
+      if (onlyEmptyCollection(x) || onlyEmptyCollection(y)) return false;
+      if (!couldMatch(x, y)) return false;
+      const ex = collectionElementsForNonEmpty(x);
+      const ey = collectionElementsForNonEmpty(y);
+      if (ex === undefined || ey === undefined) return true;
+      return couldMatch(ex, ey);
+    })
+  );
+}
+
+/** The arms of `t` for `couldMatchNonEmpty`: the arms of a union, the two
+ * arms of a `broadcastable<T>` (`T` and its collection arm), and the
+ * definition of a transparent alias, read to a bounded depth. */
+function nonEmptyQuestionArms(t: Type, depth = 0): Type[] {
+  if (depth > 8) return [t];
+  if (isTransparentAliasReference(t)) {
+    const def = aliasDefinitionAt(t);
+    return def === undefined ? [t] : nonEmptyQuestionArms(def, depth + 1);
+  }
+  if (typeof t === 'string')
+    return t in BARE_COLLECTION_EXPANSIONS
+      ? [BARE_COLLECTION_EXPANSIONS[t]!]
+      : [t];
+  if (t.kind === 'union')
+    return t.types.flatMap((x) => nonEmptyQuestionArms(x, depth + 1));
+  if (t.kind === 'broadcastable')
+    return [
+      ...nonEmptyQuestionArms(t.elements, depth + 1),
+      broadcastCollectionArm(t.elements),
+    ];
+  return [t];
+}
+
+/** Whether every value of `t` is an empty collection: a tensor whose first
+ * axis has the length 0 (`vector<integer^0>`). */
+function onlyEmptyCollection(t: Type): boolean {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'list' &&
+    Array.isArray(t.dimensions) &&
+    t.dimensions[0] === 0
+  );
+}
+
+/** The type of the elements of a collection type, as one index or one
+ * iteration step returns them (the values of a dictionary), or `undefined`
+ * for a type that is not a collection type. A record is not read: a record
+ * with a required field is never empty, and `couldMatch` compares its
+ * fields. */
+function collectionElementsForNonEmpty(t: Type): Type | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'list') return listElementType(t);
+  if (t.kind === 'dictionary') return t.values;
+  if (
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  )
+    return t.elements;
+  return undefined;
+}
+
 /** Whether `t` is a reference to a transparent alias with a definition. */
 function isTransparentAliasReference(t: Type | TypeString): t is TypeReference {
   return (

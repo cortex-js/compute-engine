@@ -1650,7 +1650,14 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
       to: 'javascript',
       fallback: false,
     });
-    expect(() => r.run!({ L: [M, [1, 2]] } as never)).toThrow();
+    // A row of 3 beside a matrix of 2 rows: the shapes do not nest.
+    expect(() => r.run!({ L: [M, [1, 2, 3]] } as never)).toThrow();
+    // A row of 2 adds element `i` to row `i` of the matrix (ROADMAP
+    // CE-399), as in the interpreter.
+    expect(r.run!({ L: [M, [1, 2]] } as never)).toEqual([
+      [2, 3],
+      [5, 6],
+    ]);
   });
 });
 

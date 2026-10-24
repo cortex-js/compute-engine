@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-400.
+Next free reference: CE-403.
 
 **Entry format.**
 
@@ -129,50 +129,32 @@ problem does not occur on its installed release). Report:
   operator" declines (importer binding), and the 2× re-compile of every declined
   row.
 
-### CE-397. A predicate for "could a non-empty value have both types?" (Tycho row 429)
-
-**Status:** open; capability, small. Needs a user decision: a `couldMatch`
-option or a second method. Tycho row 429, filed 2026-10-23 on 0.162.0; still
-NOT READY on 0.163.0 (instrument run 2026-10-23).
-
-Since 0.162.0 `couldMatch()` answers `true` for two list types with no
-dimensions, whatever their elements, because the empty list is a value of both.
-This is the intended reading (CHANGELOG 0.162.0, "A list type with no dimensions
-is read by its elements"). Example: `ce.type('list<number>').couldMatch('list<tuple<number, number>>')`
-is `true` (it was `false` on 0.161.0). The same occurs for `collection<color>`,
-`list<string>`, `indexed_collection<boolean>`, `tensor<number>` and
-`broadcastable<number>` against a list of points. Tycho asks "could this row be
-a point list, a colour list, a boolean mask?" with `couldMatch`, so it now
-compares the element types itself (`couldMatchNonEmpty` in Tycho's
-`src/plot-core/ce-type-guards.ts`). Ask: an engine predicate that answers for a
-non-empty value. The `couldMatch` docstring (`src/common/type/boxed-type.ts`)
-said `list<integer>` could not be a `list<string>`; it was corrected on
-2026-10-23. Instrument:
-`~/dev/tycho/scripts/repros/2026-10-23-ce429-couldmatch-empty-list-overlap-repro.mts`
-(READY when every listed pair reads `false` and the three controls `true`; with
-a new predicate, Tycho changes the instrument to read it).
-
-### CE-398. The sum of a vector of reals and a list of `broadcastable<number>` has a `list<any>` element arm (Tycho row 430)
-
-**Status:** open; defect, small. Tycho row 430, filed 2026-10-23 on 0.162.0;
-still NOT READY on 0.163.0 (instrument run 2026-10-23).
-
-With `U: vector<real^3>` and `M: list<broadcastable<number>>`, `U + M` is typed
-`list<broadcastable<number> | list<any>>` (0.161.0:
-`list<broadcastable<number>>`). The `list<any>` arm says nothing true about the
-value: each element of `M` is a number or an array of numbers, and adding a
-real keeps that. Controls: `u + m` with `u: real`, `m: broadcastable<number>` is
-`broadcastable<number>`; `U + L` with `L: list<real>` is `list<real>`. Effect on
-Tycho: the compiled firing lane has no layout for `list<any>` ("unshaped type …
-has no CompiledValue layout"), so an action step `U \to U + \operatorname{Map}(r, N)`
-runs on the interpreter. Expected: `list<broadcastable<number>>`. Tycho also
-asks whether a type can spell a list of known length whose elements are not
-known to be scalars (`list<broadcastable<number>^3>` is a parse error since
-0.162.0). Instrument:
-`~/dev/tycho/scripts/repros/2026-10-23-ce430-add-broadcastable-list-type-repro.mts`
-(READY when the sum has no `list<any>` arm and the control does not change).
-
 ## Types and type inference
+
+### CE-402. A declared nested list is admitted by `Mean` and refused by `Histogram`
+
+**Status:** open; defect, small. Found 2026-10-23 while fixing CE-13.
+
+With `R: list<list<number>>` (or `B: list<boolean>`), `Histogram(R, 2)` is
+invalid when it is boxed, but `Mean(R)` is valid and is checked only when it
+is evaluated. Both data parameters are `collection<nothing | number>`. The
+validation of the required parameter of `Histogram` refuses an argument whose
+immediate elements must be lists (`overlapsDeferred()` in
+`common/type/utils.ts`). The data of `Mean` is a variadic parameter, and its
+last admission, `overlapAdmission()` in `boxed-expression/validate.ts`,
+admits a declared type that shares a value with the parameter: the empty
+list is a `list<list<number>>` and a `collection<number>`, and `Mean([])` is
+`NaN`. Both answers are sound, but the two parameters disagree. Decide
+whether a declared type that shares only the empty list with the parameter is
+admitted (and change the required parameter) or refused (and make the overlap
+admission ignore the empty list, as the opt-in `couldMatch(…, { nonEmpty:
+true })` of CE-397 does). For the second answer, `couldMatchNonEmpty(a, b)`
+(`common/type/subtype.ts`, added by CE-397) reads unions, `broadcastable<T>`
+and aliases arm by arm, and requires two collection arms to match on their
+element types too, so `couldMatchNonEmpty(list<list<number>>, list<number>)`
+is false; `overlapAdmission()` would call it in place of the plain overlap
+test for a collection parameter. Pinned in
+`test/compute-engine/statistics-data-parameter.test.ts`.
 
 ### CE-3. `unknown` as an inference marker: what the migration left open
 
@@ -336,27 +318,6 @@ prints `never matrix<integer>`.
 Fix: make `narrow()` answer the reducer's result for a pair of collection types
 of different kinds, or keep the intersection when it cannot decide, instead of
 `never`. Measure the tests that pin a `never` before landing it.
-
-### CE-13. `Mean` and the statistics functions accept a matrix when boxed and refuse it when evaluated
-
-**Status:** open; defect. User decision 2026-10-23: option A, refuse a matrix
-when the expression is boxed: spell the data parameter of the statistics
-functions so that a matrix does not match it, and measure the tests that pass
-data whose elements are not typed `number`.
-
-Probe, from the repository root:
-`npx tsx -e "import {ComputeEngine} from './src/compute-engine'; const ce = new ComputeEngine(); const m = ce.box(['Mean', ['List', ['List', 1, 2], ['List', 3, 4]]]); console.log(m.isValid, m.type.toString(), m.evaluate().toString())"`
-prints
-`true number Error(ErrorCode("incompatible-type", "number", "vector<integer^2>"), "Mean: [1,2]")`.
-The signatures in `library/statistics.ts` spell the data parameter
-`collection<any>`, and `collectData()` refuses a row at run time.
-
-- Option A: spell the data parameter so that a matrix does not match it (for
-  example `collection<number>`, or a union with `distribution`), and measure the
-  tests that pass a list of data whose elements are not typed `number`.
-- Option B: keep the signature and add a check to the canonical handler, so the
-  expression is invalid when it is boxed.
-- With no decision, a matrix is refused at evaluation only, as on 0.161.0.
 
 ### CE-15. A vector times a list of rows has a type arm that no value takes
 
@@ -1408,32 +1369,6 @@ No case is known for any of these.
 
 ## Collections, absence and broadcasting
 
-### CE-399. A vector plus a matrix is an error on one route and a row-by-row broadcast on another
-
-**Status:** open; defect, small. Needs a user decision: which of the two
-values is correct. Found 2026-10-23 while fixing CE-398.
-
-With `M32 = [[1, 2], [3, 4], [5, 6]]` (3 rows of 2):
-
-- `ce.box(['Add', ['List', 1, 2, 3], M32]).evaluate()` is
-  `Error("incompatible-dimensions", "3 vs 3x2")`. The same error occurs when
-  the matrix is a symbol declared `matrix<number>` (`U + C`), or when the list
-  is a literal and the matrix is a symbol declared `broadcastable<number>`.
-- With `U: vector<real^3>` (or `list<number>`) holding `[1, 2, 3]` and
-  `B: broadcastable<number>` holding `M32`, `U + B` evaluates to
-  `[[2, 3], [5, 6], [8, 9]]`: element `i` of `U` is added to row `i` of `B`.
-- `Less(B, [1, 2])` with `B` a 2 by 3 matrix is a 2 by 3 matrix of booleans
-  (row `i` compared with element `i`), while `Add(B, [1, 2])` is an
-  `incompatible-dimensions` error.
-
-The static type of `U + C` is `matrix | vector<real^3>`, which says that the
-sum has a value. The type code of the element-wise broadcast
-(`broadcastShapedResultType` in `src/common/type/utils.ts`) describes the
-row-by-row reading ("a vector against a matrix broadcasts the vector over the
-rows"). Decide one meaning for every route, then align the value code and the
-types (CE-398 types the sum as a `tensor`, which holds both the matrix and the
-error).
-
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
 **Status:** open; defect, small. Plan:
@@ -1819,16 +1754,6 @@ Implement sticky evaluated results of unresolved calls together with function
 declaration hoisting across the sequential runner, the whole-block interpreter
 and the compiler. Keep earlier bindings, declared signatures and constructors.
 See also CE-312.
-
-### CE-96. A `Return` inside a `Sum` body stays in the value
-
-**Status:** open; defect. User decision 2026-10-23: a `Return` in the body of
-`Sum`, `Product` or another big operator is an error with a clear message (the
-body is an expression, not a statement block).
-
-A `Return` inside the body of a `Sum` is left in the value, such as
-`1 + 2Return("q")` (reproduced on `3799d01dd`). Decide whether `Return` in the
-body of a big operator is an error or ends the enclosing function.
 
 ### CE-97. The interpreter leaves some collection reductions unevaluated that compiled code computes
 
@@ -2479,6 +2404,39 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
+
+### CE-400. `Limit` of a function literal whose body uses `Return` gives a `Return` as its value
+
+**Status:** open; defect, small. Found 2026-10-23 while fixing CE-96.
+
+`Limit(x ↦ Return(x), 0)` (MathJSON
+`["Limit", ["Function", ["Return", "x"], "x"], 0]`) evaluates to `Return(0)`.
+The `Return` ends the function literal, so the function is `x ↦ x` and the
+limit is 0. The limit code substitutes the point into the body of the literal
+(`substituteAtFinitePoint()` in `symbolic/limit.ts`) and never runs the
+function, so the `Return` stays. The LaTeX route reaches the same case:
+`\lim_{x\to 0} \operatorname{Return}(x)` is parsed as a `Limit` of a function
+literal, so the CE-96 check does not refuse it. Fix: before the limit
+strategies, rewrite a function body whose value is given by `Return`
+statements (a `Return` at the end of the body, or in each branch) to that
+value, or decline (stay unevaluated) when the body is a statement block that
+the limit code cannot read.
+
+### CE-401. A function parameter named `Return` cannot be called in the body of `Sum`
+
+**Status:** open; defect, small. Found 2026-10-23 while fixing CE-96.
+
+With the CE-96 check, `["Function", ["Sum", ["Return"], ["Limits", "k", 1, 3]],
+["Typed", "Return", "() -> real"]]` is invalid
+(`return-in-expression-body`), although `Return()` there is a call of the
+parameter, not the statement. A `Return` declared in the scope of the engine
+(`ce.declare("Return", "() -> real")`) is read as a call. The check
+(`hasEscapingReturn()` in `library/utils.ts`) runs in the canonical handler
+of `Sum`, before the parameters of the enclosing function literal are bound,
+so it cannot find the parameter. Fix: run the check when the body is bound
+(read `e.valueDefinition` as `earlyReturnTypes()` in
+`boxed-expression/effects-inference.ts` does), or pass the names of the
+parameters in scope to the canonical handlers. Such a parameter name is rare.
 
 ### CE-383. A divergent improper integral with a parameter is a value under a condition that nothing satisfies
 
@@ -3314,24 +3272,6 @@ enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
-
-### CE-176. `FindFit` grid: should an even outer function (`cos(cos θ)`) halve the period?
-
-**Status:** open; design, small. Tycho row 407. Plan:
-docs/plans/2026-10-20-findfit-global-grid.md. User decision 2026-10-23: yes,
-`Cos`, `Sec`, `Cosh` and `Sech` of another expression halve the period in
-`composedPeriod()`.
-
-The `global` grid of `FindFit` spaces a searched parameter by the width of its
-basin, which depends on the period of the periodic function around it.
-`composedPeriod()` in `nonlinear-fit.ts` reads the expression around the
-periodic node as `k · sin(θ)^p · cos(θ)^q`. So a square, an absolute value or a
-product of periodic functions of one argument gets the period π or π/2.
-
-An even function applied on the outside (`cos(cos θ)`, `sec(sin θ)`) has the
-period π, but the grid records 2π, because `Cos` and `Sec` of another expression
-are not part of that form. Question: should `Cos`, `Sec`, `Cosh` and `Sech`
-count as ancestors that halve the period? Such models are rare.
 
 ### CE-178. A numeric integral whose tail overflows to NaN is slow and inaccurate
 

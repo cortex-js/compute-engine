@@ -1153,6 +1153,23 @@ function addTensors(
   // Get the reference shape from the first tensor
   const referenceShape = tensors[0].shape;
 
+  // Tensors of different ranks whose shapes nest (the shape of each one is a
+  // prefix of the shape of the deepest) add element by element along the
+  // first axes: element `i` of a vector is added to row `i` of a matrix, so
+  // `[1, 2] + [[1, 2, 3], [4, 5, 6]]` is `[[2, 3, 4], [6, 7, 8]]`. That is the
+  // element-wise broadcast, which the caller applies when this kernel
+  // declines. The same sum of symbols that hold these values took that route
+  // already (user decision 2026-10-23, ROADMAP CE-399). Shapes that do not
+  // nest (`[3]` against `[2, 2]`) are an error below.
+  const deepest = tensors.reduce((a, t) =>
+    t.shape.length > a.shape.length ? t : a
+  ).shape;
+  if (
+    tensors.some((t) => t.shape.length !== deepest.length) &&
+    tensors.every((t) => t.shape.every((dim, j) => dim === deepest[j]))
+  )
+    return undefined;
+
   // Validate all tensors have the same shape
   for (let i = 1; i < tensors.length; i++) {
     const shape = tensors[i].shape;

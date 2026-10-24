@@ -14630,10 +14630,11 @@ function elementwiseFoldCombiner(
   // real-only form.
   lane: 'real' | 'complex' | 'wide' = 'wide',
   // The elements may be lists of several shapes (`matrix<2x2> | vector<2>`,
-  // `hasSeveralListArms`): two lists of different shapes are an
-  // `incompatible-dimensions` error in the interpreter, so the combiner
-  // throws for them (`_SYS.requireSameShape`) instead of broadcasting one
-  // over the other.
+  // `hasSeveralListArms`): two lists whose shapes do not nest (rows of
+  // different lengths) are an `incompatible-dimensions` error in the
+  // interpreter, so the combiner throws for them (`_SYS.requireSameShape`)
+  // instead of pairing the rows. Shapes that nest add element by element
+  // along the first axes, as in the interpreter (ROADMAP CE-399).
   checkShapes = false
 ): string {
   const tensor =

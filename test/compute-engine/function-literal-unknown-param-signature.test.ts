@@ -200,9 +200,11 @@ describe('COMPILED FOLDS OVER ELEMENTS OF UNKNOWN TYPE', () => {
   // fold read two lists as numbers: the compiled `Sum(L)` was the string
   // `"01,23,4"` and the compiled `Product(L)` was `null` for a list of
   // rows. The fold now dispatches on each element, and checks the shapes
-  // of two lists when it runs, as the interpreter does: a row beside a
-  // matrix is an `incompatible-dimensions` error there, and the compiled
-  // code throws.
+  // of two lists when it runs, as the interpreter does: two lists whose
+  // shapes do not nest (a 2 by 2 and a 2 by 3 matrix) are an
+  // `incompatible-dimensions` error there, and the compiled code throws. A
+  // row beside a matrix adds element `i` of the row to row `i` of the matrix
+  // on both routes (ROADMAP CE-399).
   const toJson = (v: unknown): unknown =>
     Array.isArray(v) ? ['List', ...v.map(toJson)] : v;
   function both(
@@ -241,12 +243,24 @@ describe('COMPILED FOLDS OVER ELEMENTS OF UNKNOWN TYPE', () => {
       interpreted: '[6,9]',
       compiled: '[6,9]',
     });
+    expect(
+      both(json, [
+        [
+          [1, 2],
+          [3, 4],
+        ],
+        [5, 6],
+      ])
+    ).toEqual({ interpreted: '[[6,7],[9,10]]', compiled: '[[6,7],[9,10]]' });
     const mismatch = both(json, [
       [
         [1, 2],
         [3, 4],
       ],
-      [5, 6],
+      [
+        [1, 2, 3],
+        [4, 5, 6],
+      ],
     ]);
     expect(mismatch.interpreted).toMatch(/incompatible-dimensions/);
     expect(mismatch.compiled).toBe('throws');

@@ -1476,21 +1476,21 @@ function atWithValueMarker(arr: unknown, i: unknown): unknown {
 }
 
 /**
- * Throw when `a` and `b` are both arrays of different shapes: one is longer,
- * or an entry is an array in one and not in the other. The interpreter's
- * `Add` of two lists of different shapes (a matrix and a row) is an
- * `incompatible-dimensions` error; the element-wise helpers would broadcast
- * the row over the matrix. A number beside an array is not checked: it
- * broadcasts in the interpreter too.
+ * Throw when `a` and `b` are both arrays whose shapes do not nest: at some
+ * depth, two arrays paired by index have different lengths. The
+ * interpreter's `Add` of two such lists (`[[1, 2], [3, 4]]` and
+ * `[[1, 2, 3], [4, 5, 6]]`) is an `incompatible-dimensions` error; the
+ * element-wise helpers would pair the shorter rows with the longer ones.
+ * Shapes that nest add element by element along the first axes, in the
+ * interpreter (user decision 2026-10-23, ROADMAP CE-399) as in the helpers:
+ * element `i` of `[1, 2]` is added to row `i` of a 2 by 3 matrix. So an
+ * entry that is an array in one and a number in the other is not checked,
+ * and neither is a number beside an array.
  */
 function requireSameShape(a: unknown, b: unknown): void {
   const same = (x: unknown, y: unknown): boolean => {
-    const xa = Array.isArray(x);
-    const ya = Array.isArray(y);
-    if (!xa || !ya) return xa === ya;
-    const xs = x as unknown[];
-    const ys = y as unknown[];
-    return xs.length === ys.length && xs.every((e, i) => same(e, ys[i]));
+    if (!Array.isArray(x) || !Array.isArray(y)) return true;
+    return x.length === y.length && x.every((e, i) => same(e, y[i]));
   };
   if (Array.isArray(a) && Array.isArray(b) && !same(a, b))
     throw new RangeError('the elements have incompatible dimensions');
@@ -4446,8 +4446,8 @@ export const SYS_HELPERS = {
   // `At` with a scalar index over elements that may be numbers or lists: the
   // absence marker is picked from the value (`atWithValueMarker`).
   atWithValueMarker,
-  // A `Sum` fold over lists of several shapes: two lists of different
-  // shapes do not add (`requireSameShape`).
+  // A `Sum` fold over lists of several shapes: two lists whose shapes do
+  // not nest do not add (`requireSameShape`).
   requireSameShape,
   // Establish the representation used by the fused numeric selection loop.
   // Scan every cell: a declaration alone cannot exclude nested or absent cells.

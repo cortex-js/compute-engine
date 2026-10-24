@@ -23,9 +23,7 @@ describe('BoxedType.couldMatch', () => {
 
   it('distributes over a union nested inside a parameter', () => {
     // A heterogeneous list literal produces exactly this type.
-    const t = ce.type(
-      'list<integer | tuple<integer, integer>>'
-    );
+    const t = ce.type('list<integer | tuple<integer, integer>>');
     expect(t.couldMatch(POINT_LIST)).toBe(true);
 
     // The witness: a value that inhabits both.
@@ -36,9 +34,9 @@ describe('BoxedType.couldMatch', () => {
 
   it('is decisive for shapes that cannot coincide', () => {
     // A bare point is not a list of points, either way round.
-    expect(
-      ce.type('tuple<integer, integer>').couldMatch(POINT_LIST)
-    ).toBe(false);
+    expect(ce.type('tuple<integer, integer>').couldMatch(POINT_LIST)).toBe(
+      false
+    );
     // Element types that cannot coincide: two lists with no dimensions
     // still share the empty list, a fixed-length list does not.
     expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(true);
@@ -50,9 +48,7 @@ describe('BoxedType.couldMatch', () => {
   it('accepts an arm narrower OR wider than the target', () => {
     // Narrower: forward assignability carries it.
     expect(
-      ce
-        .type('list<tuple<integer, integer>>')
-        .couldMatch(POINT_LIST)
+      ce.type('list<tuple<integer, integer>>').couldMatch(POINT_LIST)
     ).toBe(true);
     // Wider: the evaluated type widens the element to a bare `tuple`.
     expect(ce.type('list<tuple>').couldMatch(POINT_LIST)).toBe(true);
@@ -102,9 +98,9 @@ describe('BoxedType.couldMatch', () => {
     expect(ce.type('broadcastable<number>').couldMatch('collection<any>')).toBe(
       true
     );
-    expect(ce.type('collection<number>').couldMatch('broadcastable<number>')).toBe(
-      true
-    );
+    expect(
+      ce.type('collection<number>').couldMatch('broadcastable<number>')
+    ).toBe(true);
     // The scalar arm is visible too, and disjoint types stay refused.
     expect(ce.type('broadcastable<number>').couldMatch('integer')).toBe(true);
     expect(ce.type('broadcastable<number>').couldMatch('string')).toBe(false);
@@ -214,5 +210,78 @@ describe('BoxedType.unionMembers', () => {
     expect(t.unionMembers.map((x) => x.toString())).toEqual([
       'list<integer | string>',
     ]);
+  });
+});
+
+/**
+ * `couldMatch(other, { nonEmpty: true })` (ROADMAP CE-397, Tycho row 429):
+ * could a value that is not an empty collection have both types? Without the
+ * option, two list types with no dimensions always overlap through the empty
+ * list, so the answer cannot tell a list of numbers from a list of points.
+ */
+describe('BoxedType.couldMatch with nonEmpty', () => {
+  const nonEmpty = { nonEmpty: true };
+  test.each([
+    ['list<number>', POINT_LIST],
+    ['list<number>', 'collection<color>'],
+    ['list<number>', 'list<string>'],
+    ['list<string>', 'list<tuple>'],
+    ['indexed_collection<number>', POINT_LIST],
+    ['list<number>', 'indexed_collection<boolean>'],
+    ['tensor<number>', POINT_LIST],
+    ['broadcastable<number>', POINT_LIST],
+    ['number | list<number>', 'list<string>'],
+    // `list<never>` holds only the empty list.
+    ['list<never>', POINT_LIST],
+  ])('%s and %s: no non-empty value has both types', (a, b) => {
+    expect(ce.type(a).couldMatch(b)).toBe(true);
+    expect(ce.type(a).couldMatch(b, nonEmpty)).toBe(false);
+    expect(ce.type(b).couldMatch(a, nonEmpty)).toBe(false);
+  });
+
+  test.each([
+    ['list<integer | tuple<number, number>>', POINT_LIST],
+    ['list<boolean>', 'indexed_collection<boolean>'],
+    ['list<integer>', 'list<number>'],
+    ['matrix<integer>', 'list<list<integer>>'],
+    // Only the outer list must be non-empty: `[[]]` has both types.
+    ['list<list<number>>', 'list<list<string>>'],
+    // A type that is not a collection: the option changes nothing.
+    ['number', 'integer'],
+    ['broadcastable<number>', 'number'],
+  ])('%s and %s: a non-empty value has both types', (a, b) => {
+    expect(ce.type(a).couldMatch(b, nonEmpty)).toBe(true);
+    expect(ce.type(b).couldMatch(a, nonEmpty)).toBe(true);
+  });
+
+  test('a tensor whose first axis has the length 0 holds only the empty value', () => {
+    expect(
+      ce.type('vector<integer^0>').couldMatch('vector<integer^0>', nonEmpty)
+    ).toBe(false);
+    expect(
+      ce.type('vector<integer^0>').couldMatch('list<integer>', nonEmpty)
+    ).toBe(false);
+    // Two empty rows: the outer list is not empty.
+    expect(
+      ce
+        .type('matrix<integer^(2x0)>')
+        .couldMatch('list<list<integer>>', nonEmpty)
+    ).toBe(true);
+  });
+
+  test('a dictionary is read by its values', () => {
+    expect(
+      ce.type('dictionary<number>').couldMatch('dictionary<integer>', nonEmpty)
+    ).toBe(true);
+    expect(
+      ce.type('dictionary<number>').couldMatch('dictionary<string>', nonEmpty)
+    ).toBe(false);
+  });
+
+  test('a pair that does not overlap at all stays false', () => {
+    expect(ce.type('set<number>').couldMatch('list<number>', nonEmpty)).toBe(
+      false
+    );
+    expect(ce.type('list<number>').couldMatch(POINT, nonEmpty)).toBe(false);
   });
 });

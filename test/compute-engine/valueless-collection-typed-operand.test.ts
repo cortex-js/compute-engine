@@ -931,19 +931,26 @@ describe('the element type of a held broadcast over a union-typed operand', () =
   });
 
   // `broadcastable<T>` is the other spelling of "scalar or collection,
-  // undecided". It is a co-operand that folds INTO the cells, so it
-  // contributes its element `T` there; the wrapper itself nested inside the
-  // list (`list<broadcastable<number>^2>`) is a type no value has. The length
-  // stays 2 because a broadcastable operand of a different length is an
-  // `incompatible-dimensions` error, not a wider result.
+  // undecided". Beside a list literal in a sum, it is a co-operand that folds
+  // INTO the cells, so it contributes its element `T` there; the wrapper
+  // itself nested inside the list (`list<broadcastable<number>^2>`) is a type
+  // no value has. The length stays 2 because a broadcastable operand of
+  // another shape is an `incompatible-dimensions` error, not a wider result.
+  // A product is different: `b` may hold a matrix, and a list times a matrix
+  // is the matrix product (`[1, 2]·[[1, 2, 3], [4, 5, 6]]` is
+  // `[9, 12, 15]`), so the product is `broadcastable<number>`.
   it('unwraps a broadcastable operand instead of nesting it in the cells', () => {
     const ce = new ComputeEngine();
     ce.declare('b', 'broadcastable<number>');
-    for (const operator of ['Add', 'Multiply']) {
-      const t = ce.box([operator, ['List', 1, 2], 'b']).evaluate().type;
-      expect(t.toString()).toBe('vector<2>'); // = list<number^2>
-      expect(t.matches('list<number>')).toBe(true);
-    }
+    const sum = ce.box(['Add', ['List', 1, 2], 'b']).evaluate().type;
+    expect(sum.toString()).toBe('vector<2>'); // = list<number^2>
+    expect(sum.matches('list<number>')).toBe(true);
+    const product = ce.box(['Multiply', ['List', 1, 2], 'b']);
+    expect(product.evaluate().type.toString()).toBe('broadcastable<number>');
+    ce.assign('b', ce.box(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]));
+    const value = product.evaluate();
+    expect(value.toString()).toBe('[9,12,15]');
+    expect(value.type.matches(ce.type('broadcastable<number>'))).toBe(true);
   });
 
   // The union genuinely widens the cells here: the scalar branch `integer` and

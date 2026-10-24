@@ -3419,6 +3419,19 @@ function hasUnknownBroadcastCells(d: OperandDescriptor): boolean {
   );
 }
 
+/** Whether the type of an operand is `broadcastable<E>`, or a union with
+ * such an arm: the operand may be a scalar or a tensor. */
+function hasBroadcastableArm(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  if (t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    return typeof b !== 'string' && b.kind === 'broadcastable';
+  });
+}
+
 /** The `broadcastable<T>` result of an element-wise operator over operand
  * descriptors of which one may be a collection
  * (`isPossiblyCollectionTypedOperand`); a top-typed operand makes it the bare
@@ -3780,6 +3793,48 @@ function signedInfinitySum(
   return reshape(resolveTypeAlias(result));
 }
 
+/**
+ * The type of a sum of tensors of different ranks whose shapes nest, or
+ * `undefined` when the types are not all tensors with a dimension list, have
+ * one rank, or have shapes that do not nest.
+ *
+ * Such a sum adds element by element along the first axes (element `i` of a
+ * vector to row `i` of a matrix: `[1, 2] + [[1, 2, 3], [4, 5, 6]]` is
+ * `[[2, 3, 4], [6, 7, 8]]`), so the value has the shape of the deepest
+ * tensor, and its cells join the cells of every tensor. An open length
+ * (`-1`) takes the length that another tensor states on the same axis,
+ * since a value with another length is an `incompatible-dimensions` error.
+ * The join of the types (`vector<integer^2> | matrix<integer^(2x3)>`)
+ * holds the value but says less.
+ */
+function nestedTensorSumType(types: ReadonlyArray<Type>): Type | undefined {
+  const tensors: ListType[] = [];
+  for (const t of types) {
+    const r = resolveTypeAlias(t);
+    if (typeof r !== 'object' || r.kind !== 'list' || !r.dimensions)
+      return undefined;
+    tensors.push(r);
+  }
+  const rank = Math.max(...tensors.map((t) => t.dimensions!.length));
+  if (tensors.every((t) => t.dimensions!.length === rank)) return undefined;
+  const dims: number[] = [];
+  for (let j = 0; j < rank; j++) {
+    let n = -1;
+    for (const t of tensors) {
+      const d = t.dimensions![j];
+      if (d === undefined || d < 0) continue;
+      if (n >= 0 && n !== d) return undefined;
+      n = d;
+    }
+    dims.push(n);
+  }
+  return {
+    kind: 'list',
+    elements: widenAll(tensors.map((t) => t.elements)) as Type,
+    dimensions: dims,
+  };
+}
+
 function addTypeOnTypes(
   args: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView
@@ -3915,9 +3970,11 @@ function addTypeOnTypes(
       shaped.length > 0 &&
       args.every((x) => isBroadcastShaped(x) || factsOf(x.type).belowNumber)
     ) {
-      const collected = widenAll(
-        shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
+      const siblings = shaped.map((x) =>
+        stripNumericRanges(broadcastSiblingType(x.type))
       );
+      const collected =
+        nestedTensorSumType(siblings) ?? (widenAll(siblings) as Type);
       const scalars = args.filter((x) => !isBroadcastShaped(x));
       // Two or more collections are added cell by cell (`[i] + [-i]` is
       // `[0]`), so their joined cells are closed like a cell and a scalar.
@@ -9557,6 +9614,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // tuple it names (the alias policy of the broadcast lift).
           return BoxedType.forResult(
             resolveTypeAlias(tupleOps[0].type),
+            engine._typeResolver
+          );
+        }
+        // A factor typed `broadcastable<E>` beside a collection: the factor
+        // may be a scalar or a tensor of any rank, so the product is not
+        // known to have the shape of the collection, and its cells take the
+        // tier of `E`. With `U: vector<real^3>` and `B: broadcastable<number>`
+        // holding `i`, `U·B` is `[i, 2i, 3i]`. The branches below read such a
+        // factor as a scalar and echoed the type of `U`, whose cells are
+        // `real`. This also applies to a matrix beside the factor: `M·B` is
+        // a matrix when `B` is a number, but a matrix product of another
+        // shape when `B` holds a matrix or a vector, so its type is not the
+        // type of `M` either. As in the tensor branch below, a float literal
+        // that holds an integer makes a rational cell `real`. Each other
+        // factor contributes its cells (`broadcastCellType`), not its
+        // elements: the elements of `L: list<list<integer>>` are lists, and
+        // `M·L·B` is a tensor of numbers (or an error when `L` is ragged,
+        // since the matrix product needs rectangular operands), not a
+        // `broadcastable<real | list<integer>>`.
+        if (
+          ops.some(hasBroadcastableArm) &&
+          ops.some(
+            (x) =>
+              isTensorOperand(x) ||
+              isLinearAlgebraCollectionType(x.type) ||
+              isBroadcastCollectionTypeOf(x.type)
+          )
+        ) {
+          const lifted = broadcastableResultTypeOfOperands(
+            ops.map((x) => {
+              if (hasBroadcastableArm(x)) return x;
+              const cell = broadcastCellType(x.type);
+              return cell === x.type ? x : { ...x, type: cell };
+            })
+          );
+          return BoxedType.forResult(
+            typeof lifted === 'object' && lifted.kind === 'broadcastable'
+              ? {
+                  kind: 'broadcastable',
+                  elements: withFloatRationalCellsAsReal(ops, lifted.elements),
+                }
+              : lifted,
             engine._typeResolver
           );
         }

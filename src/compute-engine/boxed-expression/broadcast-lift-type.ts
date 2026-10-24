@@ -61,6 +61,7 @@ import {
 } from '../../common/type/utils.js';
 import {
   broadcastCollectionArm,
+  cannotHoldAList,
   isSubtype,
   provablyAdmits,
   widen,
@@ -2266,12 +2267,27 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     // (`list<list<R> | R>`) instead of a cell of the marker.
     const propagates = def.resolvedMissingBehavior === 'propagate';
     const absentCells = types.some((t) => typeContainsMissing(t));
-    const shapeTypes =
-      propagates && absentCells
+    // An operand typed `broadcastable<E>` is not a trigger (it may be a
+    // scalar), but it may also hold a tensor of any rank, and the broadcast
+    // then maps the other operands against it: with `U: vector<real^3>` and
+    // `B: broadcastable<number>` holding a 3 by 2 matrix, `U + B` is a 3 by
+    // 2 matrix, not a `vector<3>`. Such an operand takes part in the shape
+    // as its collection arm (`tensor<E>`), so the result is a tensor of
+    // unknown rank. A union of such a type with scalars
+    // (`broadcastable<real> | integer`) takes part in the same way.
+    const possibleTensors = views.flatMap((v, i) => {
+      if (!mappable(i) || broadcasting.includes(v)) return [];
+      const cell = possibleTensorCell(v.type);
+      return cell === undefined ? [] : [broadcastCollectionArm(cell) as Type];
+    });
+    const shapeTypes = [
+      ...(propagates && absentCells
         ? types.map((t) =>
             typeContainsMissing(t) ? stripMissingFromType(t, 'keep') : t
           )
-        : types;
+        : types),
+      ...possibleTensors,
+    ];
     // For an operator that does not propagate absence, the result for an
     // absent cell is what its handler answers for a `missing` cell: `Missing`
     // for `Less` (`Less(Missing, 2)` is `Missing`), a boolean for `And`
@@ -2307,11 +2323,56 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       }
     }
 
+    // A handler answer `broadcastable<S>` over a list whose elements may be
+    // tensors (`U + M` with `M: list<broadcastable<number>>`) is the answer
+    // for one ELEMENT of the list, which may be a tensor, not for one cell.
+    // The shape typing reads its per-element type as the result for one
+    // cell, so the handler is asked again with each trigger typed as its
+    // cell and each possible tensor (`possibleTensors`) typed as its element
+    // type, and a scalar answer of that call is the result for one cell. A
+    // declared per-element result (`sigResultIsPerElement`, a function whose
+    // result for one number is a `broadcastable<number>`) is the result for
+    // one cell already, and stays. So does the answer when an operand that
+    // may be a collection cannot be typed as its cell (an application typed
+    // `unknown`): the shape typing does not see that operand.
+    let cellComponent = perComponent;
+    if (
+      elementCollection === undefined &&
+      input.sigResultIsPerElement !== true &&
+      broadcastableElementsOf(perComponent) !== undefined &&
+      !views.some(
+        (v, i) =>
+          mappable(i) &&
+          !broadcasting.includes(v) &&
+          !isFixedShapeCollectionTypeOf(v.type) &&
+          isPossiblyCollectionTypedView(v) &&
+          possibleTensorCell(v.type) === undefined
+      )
+    ) {
+      const answer = input.abstractCellResult?.(
+        views.map((v, i) => {
+          if (!mappable(i)) return undefined;
+          // A collection of a fixed shape is not a trigger under a handler
+          // that owns its collection typing (`deferToHandler`), but it is
+          // mapped cell by cell all the same (`U` in `U + M`).
+          if (broadcasting.includes(v) || isFixedShapeCollectionTypeOf(v.type))
+            return broadcastCellTypeOf(v.type);
+          return possibleTensorCell(v.type);
+        })
+      );
+      if (
+        answer !== undefined &&
+        answer !== 'error' &&
+        answer !== 'never' &&
+        cannotHoldAList(answer)
+      )
+        cellComponent = answer;
+    }
     // The operands' shape is kept when the per-element result may carry
     // dimensions, that is, when it cannot be a list (`Sin(M)` is a
     // `matrix<2x2>`, `M < 3` is a `matrix<boolean^(2x2)>`), and spelled as
     // nested plain lists otherwise.
-    return shapedBroadcastResultType(shapeTypes, perComponent, absentCell);
+    return shapedBroadcastResultType(shapeTypes, cellComponent, absentCell);
   }
 
   // Arm 2 (possibly a collection): the operand's collection-ness is not
@@ -2523,6 +2584,26 @@ function hasTupleCell(t: Type, seen?: AliasDescent): boolean {
   if (typeof r !== 'string' && r.kind === 'union')
     return r.types.some((m) => hasTupleCell(m, unfolded.seen));
   return hasTupleArm(r, unfolded.seen);
+}
+
+/** The cell type `E` of an operand that may be a scalar or a tensor of `E`
+ * cells: a `broadcastable<E>`, or a union of such types and of scalar types
+ * (`broadcastable<real> | integer` gives `real`), when no value of `E` is a
+ * list (`cannotHoldAList`). `undefined` for any other type. */
+function possibleTensorCell(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  const arms =
+    typeof r !== 'string' && r.kind === 'union' ? r.types : [r as Type];
+  let broadcastable = false;
+  const cells: Type[] = [];
+  for (const arm of arms) {
+    const elements = broadcastableElementsOf(arm);
+    if (elements !== undefined) broadcastable = true;
+    cells.push(elements ?? resolveTypeAlias(arm));
+  }
+  if (!broadcastable) return undefined;
+  const cell = reduceType({ kind: 'union', types: cells });
+  return cannotHoldAList(cell) ? cell : undefined;
 }
 
 /** The element type of a `broadcastable<E>` type, `undefined` for any other

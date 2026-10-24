@@ -2,6 +2,42 @@
 
 ### Behavior Changes
 
+- **`Mean` and the other statistics refuse a matrix when the expression is
+  boxed** (ROADMAP CE-13). `Mean([[1, 2], [3, 4]])` was a valid expression
+  that failed only when it was evaluated. The data parameter of `Mean`,
+  `Median`, `Mode`, `Variance`, `PopulationVariance`, `StandardDeviation`,
+  `PopulationStandardDeviation`, `Kurtosis`, `Skewness`, `Quartiles`,
+  `InterquartileRange`, `Histogram`, `BinCounts`, `Covariance`,
+  `PopulationCovariance` and `Correlation` is now a collection of numbers,
+  `collection<nothing | number>` (`collection<nothing | number | tuple>` for
+  the first operand of the bivariate statistics, which also take a collection
+  of `(x, y)` pairs), in place of `collection<any>`. A matrix, a symbol
+  declared `matrix`, a ragged list, a collection of booleans, strings or
+  residue classes, and a dictionary are now invalid when they are boxed, with
+  an `incompatible-type` error that names the data parameter. Vectors, sets,
+  ranges, tuples, data with `Missing` or `Nothing` cells, measurements and
+  symbolic data are accepted as before. The validation now reads the rank of
+  a `collection<T>` parameter whose elements cannot be lists as 1, so any
+  operator with such a parameter refuses an argument of rank 2 or more.
+  Related changes:
+  - A symbol with no value used as statistics data (`Mean(q)`) is inferred
+    `collection<nothing | number> | distribution | number`.
+  - In `Histogram(P + 0.5, 1/100)` with `P` of unknown type, `P` is inferred
+    `list<number>` (it was `matrix`).
+  - The inferred parameter of a user function `xs ↦ Mean(xs)` is
+    `collection<nothing | number> | value`.
+
+- **A `Return` in an operand of `Sum`, `Product`, `Integrate`, `D`, `ND`,
+  `NIntegrate`, `Limit` or `NLimit` is an error** (ROADMAP CE-96). These
+  operands (the body, a bound, a variable) are expressions, computed once per
+  index value or integration point, not statement blocks of the enclosing
+  function, so a `Return` there has no function to end. It stayed in the
+  value: `Sum(1 + Return("q"), (k, 1, 2))` was `2 + 2Return("q")`, and
+  `D(Return(x^2), x)` was `2x·Apply(Derivative("Return", 1), x^2)`. The
+  expression is now invalid, with the error `return-in-expression-body` naming
+  the operator. A `Return` inside a function literal in the body ends that
+  function, as before, and a `Return` inside `Hold` is data.
+
 - **`x/0` waits for the value of `x`** (ROADMAP CE-95, Tycho row 413). With
   `x: real` and no value, `x/0` was canonicalized to `ComplexInfinity`, so
   `\{x/0 > 0: 1, 0\}` compiled to `(0 < Infinity) ? 1 : 0` and gave 1 at every
@@ -15,6 +51,75 @@
   is boxed, so the answer follows a later assignment. The compiled branch above
   now gives 0 at `x = 0`. A limit does not take such a quotient as its value:
   `lim_{x→a⁺} x/(x−a)` with no assumption on `a` stays unevaluated.
+
+- **A vector plus a matrix adds the vector to the rows** (ROADMAP CE-399). A
+  sum of tensors whose shapes nest (the shape of each one is the start of the
+  shape of the deepest) adds element `i` of the vector to row `i` of the
+  matrix: `[1, 2] + [[1, 2, 3], [4, 5, 6]]` is `[[2, 3, 4], [6, 7, 8]]`, typed
+  `matrix<integer^(2x3)>`. It was `Error("incompatible-dimensions", "2 vs
+  2x3")` for two list literals, while the same sum of symbols that held these
+  values gave the matrix, as compiled JavaScript and `Less` did. The value is
+  now the same on every route; a compiled `Sum` over a list that holds a
+  matrix and a row gives it too, where it threw. Shapes that do not nest
+  (`[1, 2, 3] + [[1, 2], [3, 4]]`, a 2 by 2 plus a 2 by 3 matrix) are still
+  an `incompatible-dimensions` error. A product is not changed: a vector times
+  a matrix is the matrix product.
+
+### New Features
+
+- **`couldMatch(other, { nonEmpty: true })`** (ROADMAP CE-397, Tycho row 429).
+  `couldMatch()` answers `true` for two list types with no dimensions whatever
+  their elements, because the empty list is a value of both. With the option,
+  it answers whether a value that is not an empty collection has both types,
+  so it tells a list of numbers from a list of points:
+  `ce.type('list<number>').couldMatch('list<tuple<number, number>>', { nonEmpty: true })`
+  is `false`, and `couldMatch('list<integer>', { nonEmpty: true })` is `true`.
+  Only the outer collection must be non-empty: `[[]]` is a value of both
+  `list<list<number>>` and `list<list<string>>`. The `couldMatch` documentation
+  no longer says that `list<integer>` could not be a `list<string>`.
+
+### Resolved Issues
+
+- **`FindFit` with `global: true` searches an even function of a periodic
+  term on a fine enough grid** (ROADMAP CE-176, Tycho row 407). The grid spaces
+  a searched frequency by the period of the expression around the periodic
+  function. An even outer function (`Cos`, `Sec`, `Cosh`, `Sech`) of a term
+  that changes sign under a half-period shift has half the period of the term:
+  `cos(cos θ)` and `sec(sin θ)` have the period π, `cos(sin θ cos θ)` has
+  π/2. The grid recorded 2π (or π), so it was twice as coarse as the basins of
+  the residual. `cos(sin θ + 1)`, `cos(sin² θ)` and `sin(cos θ)` keep their
+  period.
+
+- **The type of an element-wise operation over a list of tensors or a
+  `broadcastable` operand** (ROADMAP CE-398, Tycho row 430). Three kinds of
+  static type did not hold the value, or said less than they could:
+  - A list whose elements are each a number or a tensor
+    (`list<broadcastable<number>>`, `list<tensor<number>>`) is not one tensor,
+    because two elements can have different ranks (`[1, [2, 3], [[4]]]`). An
+    element-wise operation over it is now typed `list<broadcastable<…>>`: with
+    `U: vector<real^3>` and `M: list<broadcastable<number>>`, `U + M` is
+    `list<broadcastable<number>>`. It was
+    `list<broadcastable<number> | list<any>>`, an arm with no layout on the
+    compiled routes. `Sin(T)` with `T: list<tensor<number>>` was typed
+    `tensor`, which `[[sin 1, sin 2], [[sin 3]]]` is not.
+  - An operand declared `broadcastable<number>` may hold a matrix. Beside a
+    vector, the result was typed as if the operand was a number: with
+    `B: broadcastable<number>` holding a 3 by 2 matrix, `U + B`, `U^B` and
+    `U < B` evaluate to 3 by 2 matrices, but were typed `vector<3>` and
+    `list<boolean^3>`. They are now typed `tensor` and `tensor<boolean>`. A
+    union with a `broadcastable` arm (`broadcastable<real> | integer`) is read
+    the same way.
+  - `U·B` was typed `broadcastable<real>`, the cells of `U`: with `B = i` it is
+    `[i, 2i, 3i]`. A product with a `broadcastable<E>` factor beside a
+    collection now takes the tier of `E` (`tensor` here). A product of a list
+    literal and such a factor (`[1, 2]·b`) is `broadcastable<number>`, not
+    `vector<2>`: when `b` holds a matrix the product is a matrix product
+    (`[1, 2]·[[1, 2, 3], [4, 5, 6]]` is `[9, 12, 15]`).
+
+  A comparison of an element-wise application over an abstract collection
+  with a list (`Sin(P) < [1, 2]` with `P: collection<number>`) is now typed
+  `tensor<boolean>`, not `list<boolean^2>`: `Sin(P)` is typed
+  `broadcastable<number>`, which admits a matrix.
 
 ## 0.163.0 _2026-10-23_
 

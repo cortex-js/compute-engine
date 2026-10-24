@@ -1,5 +1,10 @@
 import type { EffectSet, Type, TypeResolver, TypeString } from './types.js';
-import { couldMatch, isSubtype, provablyDisjoint } from './subtype.js';
+import {
+  couldMatch,
+  couldMatchNonEmpty,
+  isSubtype,
+  provablyDisjoint,
+} from './subtype.js';
 import { typeToString } from './serialize.js';
 import { parseType } from './parse.js';
 import { narrow, signatureEffects, widen } from './utils.js';
@@ -405,7 +410,23 @@ export class BoxedType {
    *
    * Symmetric, and decisive for the composite shapes it models: a
    * `tuple<number, number>` could not be a `list<tuple<number, number>>`, and
-   * `list<integer>` could not be a `list<string>`. Shapes it does not model
+   * `list<integer^2>` could not be a `list<string^2>`. Two list types with no
+   * dimensions could always match, whatever their elements, because the empty
+   * list is a value of both: `list<integer>` could be a `list<string>`,
+   * witness `[]`. To ask whether a NON-EMPTY value could be both, pass
+   * `{ nonEmpty: true }`: a non-empty collection of both types has elements
+   * of both element types, so the element types are compared too.
+   *
+   * ```ts
+   * const t = ce.type('list<number>');
+   * t.couldMatch('list<tuple<number, number>>');                     // true
+   * t.couldMatch('list<tuple<number, number>>', { nonEmpty: true }); // false
+   * t.couldMatch('list<integer>', { nonEmpty: true });               // true
+   * ```
+   *
+   * Only the outer collection must be non-empty: `[[]]` is a value of both
+   * `list<list<number>>` and `list<list<string>>`. For a type that is not a
+   * collection, the option changes nothing. Shapes it does not model
    * fall back to assignability in either direction, so the answer is never
    * narrower than `matches()` — with one deliberate exception: `never` is
    * uninhabited, so nothing could be a `never`.
@@ -415,19 +436,23 @@ export class BoxedType {
    *
    * Throws if `other` is a string that is not a valid type.
    */
-  couldMatch(other: Type | TypeString | BoxedType): boolean {
+  couldMatch(
+    other: Type | TypeString | BoxedType,
+    options?: { nonEmpty?: boolean }
+  ): boolean {
     const pattern = this._resolve(other);
+    const test = options?.nonEmpty === true ? couldMatchNonEmpty : couldMatch;
     // D6 bound-reading, on BOTH sides: each free variable occurrence reads as
     // its declared bound (`any` when unbounded), a wildcard with no
     // cross-occurrence consistency. Kept for `couldMatch` (and the
     // subject-less `at`-handler check) even though pattern-side `matches` went
     // existential under D12 — the two predicates are pinned separately.
     if (this.isPolymorphic || isPolymorphicType(pattern))
-      return couldMatch(
+      return test(
         readTypeVariablesAsBounds(this.type),
         readTypeVariablesAsBounds(pattern)
       );
-    return couldMatch(this.type, pattern);
+    return test(this.type, pattern);
   }
 
   /**
