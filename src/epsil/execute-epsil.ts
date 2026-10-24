@@ -10,6 +10,7 @@ import {
 import { isLiteralParamName } from '../math-json/symbols.js';
 import {
   budgetCauseOf,
+  CancellationError,
   checkDeadline,
   isTimeoutCancellation,
   type CancellationCause,
@@ -72,6 +73,15 @@ export interface ExecuteEpsilOptions {
   parseLatex?: (latex: string) => MathJsonExpression;
   /** Opt into the host-state pragmas `#env`/`#navigator` (default `false`). */
   allowHostPragmas?: boolean;
+}
+
+export interface ExecuteEpsilAsyncOptions extends ExecuteEpsilOptions {
+  /** An abort of this signal stops the program: the promise of
+   * `executeEpsilAsync` rejects with a `CancellationError` whose `cause` is
+   * the signal's reason, as every asynchronous evaluation of the engine
+   * does. The signal is given to the `evaluateAsync()` of each statement
+   * and read again between two statements. */
+  signal?: AbortSignal;
 }
 
 export interface ExecuteEpsilResult {
@@ -146,6 +156,126 @@ export function executeEpsil(
   source: string,
   options?: ExecuteEpsilOptions
 ): ExecuteEpsilResult {
+  const steps = executeEpsilRun(ce, source, options);
+  let step = steps.next();
+  while (!step.done) {
+    // An exception of `evaluate()` goes back into the run, at the statement
+    // that yielded: its `catch` makes the error the value of the statement.
+    let value: BoxedExpression;
+    try {
+      value = step.value.evaluate();
+    } catch (e) {
+      step = steps.throw(e);
+      continue;
+    }
+    step = steps.next(value);
+  }
+  return step.value;
+}
+
+/**
+ * Parse and execute an Epsil program as `executeEpsil` does, with each
+ * top-level statement evaluated by `evaluateAsync()`: an operator that has
+ * an asynchronous handler (a `FindFit` whose scan runs on the engine's
+ * worker pool, an operator with only an `evaluateAsync` handler) runs on its
+ * asynchronous route, and the caller can wait for the program without
+ * blocking its thread for the whole run. The result is the result of
+ * `executeEpsil` for the same program (ROADMAP CE-314.1).
+ *
+ * The time limit of an enclosing `ce.withTimeLimit()` span applies to the
+ * whole program, as on the synchronous route, although the span closes when
+ * this function returns its promise: the deadline frame is read when the
+ * call starts and put back in place for each part of the run.
+ *
+ * Between two statements, the run waits for the statement's evaluation. The
+ * engine fields that the run sets (the batch id, the nested-statement hook,
+ * the declaration-route marker) stay in place while it waits, because the
+ * asynchronous parts of the statement read them after their own waits (a
+ * nested statement of a block reports its error through the hook). The
+ * deadline frame is the exception: the frame of the host's span is put back
+ * only for the parts of the run, since other work on the engine during the
+ * wait must not see a span that has closed (the evaluation of the statement
+ * keeps the frame it read when it started).
+ *
+ * So, until the promise settles, run no other evaluation or declaration on
+ * this engine, and no second program: that work would see the fields of
+ * this run (a declaration would be stamped as a statement of this program,
+ * the error of a nested statement would be reported in its diagnostics),
+ * and it would share the engine's current scope, in which the program runs
+ * as on the synchronous route.
+ */
+export async function executeEpsilAsync(
+  ce: ComputeEngine,
+  source: string,
+  options?: ExecuteEpsilAsyncOptions
+): Promise<ExecuteEpsilResult> {
+  const signal = options?.signal;
+  const aborted = (): CancellationError =>
+    new CancellationError({ cause: signal?.reason });
+  if (signal?.aborted) throw aborted();
+  // The deadline frame of the run (the frame of the span around the call,
+  // if any), and the frame the engine has outside the run: when the call
+  // starts, then when the run resumes after each wait (the host may have
+  // closed the span since).
+  const runFrame = ce._deadlineFrame;
+  let outsideFrame = runFrame;
+  // The frame outside the run is put back on every exit, an exception
+  // included: the span around the call has closed, and its frame must not
+  // stay on the engine.
+  try {
+    const steps = executeEpsilRun(ce, source, options);
+    // The parts of the run between two statements are synchronous; each ends
+    // when the generator yields the next statement to evaluate.
+    let step = steps.next();
+    while (!step.done) {
+      // The evaluation starts here, with the fields of the run in place: it
+      // reads the deadline frame when it starts.
+      let pending: Promise<BoxedExpression>;
+      try {
+        pending = step.value.evaluateAsync({ signal });
+      } catch (e) {
+        step = steps.throw(e);
+        continue;
+      }
+      ce._deadlineFrame = outsideFrame;
+      let value: BoxedExpression | undefined;
+      let failure: { error: unknown } | undefined;
+      try {
+        value = await pending;
+      } catch (e) {
+        failure = { error: e };
+      }
+      outsideFrame = ce._deadlineFrame;
+      ce._deadlineFrame = runFrame;
+      if (signal?.aborted) {
+        // The `finally` blocks of the run restore what it changed.
+        steps.return(undefined as never);
+        throw failure?.error instanceof CancellationError
+          ? failure.error
+          : aborted();
+      }
+      // A statement whose evaluation rejects is handled as a statement whose
+      // `evaluate()` throws: its error becomes the value of the statement.
+      step =
+        failure !== undefined ? steps.throw(failure.error) : steps.next(value!);
+    }
+    return step.value;
+  } finally {
+    ce._deadlineFrame = outsideFrame;
+  }
+}
+
+/**
+ * The run of a program, shared by `executeEpsil` and `executeEpsilAsync`: a
+ * generator that yields each top-level statement to evaluate and receives
+ * its value. The synchronous driver evaluates it with `evaluate()`, the
+ * asynchronous one with `evaluateAsync()`; everything else is this code.
+ */
+function* executeEpsilRun(
+  ce: ComputeEngine,
+  source: string,
+  options: ExecuteEpsilOptions | undefined
+): Generator<BoxedExpression, ExecuteEpsilResult, BoxedExpression> {
   // The BATCH (ruling P47): everything below — the static pre-pass and the
   // evaluation loop alike — runs under one id, which the protocol registry
   // stamps on the implementations it installs so that a second implementation
@@ -176,7 +306,7 @@ export function executeEpsil(
     // the lifted limit after the run, so that a lazy collection the program
     // returns can be enumerated by the host in full.
     ce._liftDefaultIterationLimit();
-    return executeEpsilBatch(ce, source, options, laterDeclarations);
+    return yield* executeEpsilSteps(ce, source, options, laterDeclarations);
   } finally {
     ce._epsilBatchId = enclosingBatch;
     ce._epsilStatementResultHook = enclosingStatementHook;
@@ -221,12 +351,12 @@ function reachLaterDeclarations(later: LaterDeclarations, i: number): void {
   }
 }
 
-function executeEpsilBatch(
+function* executeEpsilSteps(
   ce: ComputeEngine,
   source: string,
   options: ExecuteEpsilOptions | undefined,
   laterDeclarations: LaterDeclarations
-): ExecuteEpsilResult {
+): Generator<BoxedExpression, ExecuteEpsilResult, BoxedExpression> {
   const diagnostics: ParsingDiagnostic[] = [];
 
   let ast: MathJsonExpression;
@@ -483,7 +613,9 @@ function executeEpsilBatch(
         // installed) is not boxed a second time: it is evaluated here, at its
         // own turn.
         boxedStmt = prepared.preboxed.get(i) ?? ce.box(stmt);
-        value = boxedStmt.evaluate();
+        // The driver evaluates the statement: `evaluate()` in
+        // `executeEpsil`, `evaluateAsync()` in `executeEpsilAsync`.
+        value = yield boxedStmt;
       } else value = ce.error(['variable-redeclaration', redeclared]);
       // An error value narrows the anchor to its breadcrumb's innermost
       // source-mapped frame, so a host that reports the error points at the
@@ -1860,7 +1992,7 @@ function isSameStatement(
  * after each nested statement written in the source evaluates.
  *
  * A top-level statement whose value is discarded (any statement but the
- * last) and holds an error is reported by the loop of `executeEpsilBatch`.
+ * last) and holds an error is reported by the loop of `executeEpsilSteps`.
  * The same problem in a nested statement would vanish too: a loop or a
  * block stops only on a value whose operator is `Error`, and a value that
  * only HOLDS an error (a list built in a loop with one failed cell,

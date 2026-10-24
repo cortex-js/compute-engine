@@ -1,4 +1,9 @@
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
+import {
+  runOperandSteps,
+  runOperandStepsAsync,
+  type OperandSteps,
+} from './operand-steps.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { coalesceResultType, presentType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
@@ -104,7 +109,8 @@ import {
   fieldAssignmentVerdict,
   fieldStoreRefusal,
   objectLayoutOwnsField,
-  objectFieldStore,
+  objectFieldStoreTarget,
+  storeObjectField,
   literalRange,
   joinCharacters,
   range,
@@ -6614,467 +6620,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         return result;
       },
-      evaluate: ([op1, op2], { engine: ce, numericApproximation }) => {
-        // Every name the assignment binds: the symbol target, each leaf of a
-        // destructuring tuple (`(a, Missing) := t`), and the base of a
-        // sequence definition (`Missing_0 := 1`).
-        const boundNames = isFunction(op1, 'Tuple')
-          ? tuplePatternNames(op1)
-          : isFunction(op1, 'Subscript')
-            ? [sym(op1.op1)]
-            : [sym(op1)];
-        for (const name of boundNames) {
-          const refused = absenceMarkerBindingError(ce, name);
-          if (refused !== undefined) return refused;
-        }
-        // A write to a block local before its `let` or `const` has run in
-        // this run of the block is refused before the value is evaluated
-        // (`writeBeforeDeclarationError`). A sequence definition
-        // (`a_0 := 1`) writes no binding of the base name.
-        if (!isFunction(op1, 'Subscript'))
-          for (const name of boundNames) {
-            const refused = writeBeforeDeclarationError(ce, name);
-            if (refused !== undefined) return refused;
-          }
-        //
-        // Check for Subscript LHS (sequence definition)
-        // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
-        // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
-        //
-        if (isFunction(op1, 'Subscript') && sym(op1.op1)) {
-          const seqName = sym(op1.op1)!;
-          const subscript = op1.op2;
-
-          // Declared-name precedence governs the Assign LHS too (user ruling
-          // 2026-08-15, second half of the subscripted-assignment round): a
-          // subscripted LHS whose JOINED name is declared assigns to THAT
-          // symbol — `declare('l_P')` then `l_{P} := P²+1` binds `l_P`, and
-          // must NOT define a family on the base letter `l` (documents use
-          // `f` and `f_x` as unrelated names; the Desmos importer measured a
-          // real base-letter clobber from the family reading). This mirrors
-          // the expression-position rule pinned in
-          // `subscript-declared-name-precedence.test.ts`: declaration
-          // presence is the disambiguator. It also resolves the
-          // lambda-assignment ambiguity handled below — with a declaration
-          // present the author's intent is stated, so a function-literal RHS
-          // binds the declared symbol here instead of erroring. Sequence
-          // recurrences are unaffected: defining `a_1 := 1` or
-          // `a_n := a_{n-1}+1` registers NO `a_1`/`a_n` symbol definitions
-          // (verified), so re-running those rows never trips this branch.
-          const joinedName = isSymbol(subscript)
-            ? `${seqName}_${subscript.symbol}`
-            : isNumber(subscript) && Number.isInteger(subscript.re)
-              ? `${seqName}_${subscript.re}`
-              : undefined;
-          if (
-            joinedName !== undefined &&
-            ce.lookupDefinition(joinedName) != null
-          ) {
-            const val = op2.evaluate();
-            // Errors surface as VALUES on this route, exactly as on the
-            // regular symbol-assignment path below.
-            try {
-              ce.assign(joinedName, val);
-            } catch (e) {
-              if (isEffectContractError(e))
-                return effectContractErrorValue(ce, e);
-              if (isTypeCompatibilityError(e))
-                return typeCompatibilityErrorValue(ce, e);
-              throw e;
-            }
-            return val;
-          }
-
-          // A FUNCTION LITERAL on the right of a subscripted-name assignment
-          // is refused outright (user ruling 2026-08-15, option (d) of the
-          // subscripted-lambda entry in ROADMAP.md; the declared-name check
-          // above already took the unambiguous cases, so this is the
-          // UNDECLARED joined name only). The notation is
-          // genuinely ambiguous — `l_P := P ↦ body` reads either as defining
-          // a function NAMED `l_P` (Desmos treats the subscript as pure
-          // spelling, and documents routinely use `f` and `f_x` as unrelated
-          // names) or as defining a FAMILY `l` whose P-th member is the
-          // lambda (`T_n := x ↦ cos(n·arccos x)`) — and before this check
-          // every reading fell into the sequence-definition machinery below,
-          // which defined nothing usable and reported nothing: the
-          // assignment silently vanished. Field-verified corpus-safe: the
-          // Desmos importer only ever emits head-application assignments
-          // (`l_P(P) := …`), never this spelling. The error names both
-          // working spellings so the author can say which they meant.
-          if (isFunction(op2, 'Function')) {
-            return ce.error(
-              [
-                'ambiguous-assignment',
-                `Assigning a function literal to the subscripted name ` +
-                  `"${seqName}_${subscript.toString()}" is ambiguous. To ` +
-                  `define a function named "${seqName}_${subscript.toString()}", ` +
-                  `write "${seqName}_${subscript.toString()}(…) := ⟨body⟩". To ` +
-                  `define a family of functions indexed by ` +
-                  `"${subscript.toString()}", assign an expression in ` +
-                  `"${subscript.toString()}" instead of a function literal.`,
-              ],
-              op2.toString()
-            );
-          }
-
-          //
-          // Check for multi-index subscript: P_{n,k}
-          // Parser produces: Subscript(P, Sequence(n, k))
-          // When non-canonical, it may be wrapped in Delimiter:
-          //   Subscript(P, Delimiter(Sequence(n, k), ","))
-          //
-          let multiSub = subscript;
-          if (isFunction(multiSub, 'Delimiter')) multiSub = multiSub.op1;
-          if (isFunction(multiSub, 'Sequence')) {
-            const subscript = multiSub;
-            const indices = subscript.ops;
-
-            // Case M1: All numeric → multi-index base case
-            // e.g., P_{0,0} := 1
-            if (
-              indices.every((op) => isNumber(op) && Number.isInteger(op.re))
-            ) {
-              const key = indices.map((op) => op.re).join(',');
-              addMultiIndexBaseCase(ce, seqName, key, op2.evaluate());
-              return ce.Nothing;
-            }
-
-            // Extract variable names from indices
-            // For symbols: use the symbol name
-            // For numbers: use the number as string
-            // For expressions: try to extract the variable
-            const indexVars: string[] = [];
-            let hasSymbols = false;
-            let allValid = true;
-
-            for (const idx of indices) {
-              if (isSymbol(idx)) {
-                indexVars.push(idx.symbol);
-                hasSymbols = true;
-              } else if (isNumber(idx) && Number.isInteger(idx.re)) {
-                indexVars.push(String(idx.re));
-              } else {
-                // Complex expression - try to extract variable
-                const v = extractIndexVariable(idx);
-                if (v) {
-                  indexVars.push(v);
-                  hasSymbols = true;
-                } else {
-                  allValid = false;
-                  break;
-                }
-              }
-            }
-
-            if (allValid && indexVars.length === indices.length) {
-              if (containsSelfReference(op2, seqName)) {
-                // Case M2: Recurrence with self-reference
-                // e.g., P_{n,k} := P_{n-1,k-1} + P_{n-1,k}
-                // Only use symbol variables for the recurrence
-                const recurrenceVars = indices
-                  .map((idx) => sym(idx))
-                  .filter((s): s is string => s !== undefined);
-
-                if (recurrenceVars.length > 0) {
-                  addMultiIndexRecurrence(ce, seqName, recurrenceVars, op2);
-                  return ce.Nothing;
-                }
-              } else if (hasSymbols) {
-                // Case M3: Pattern base case (no self-reference)
-                // e.g., P_{n,0} := 1 or P_{n,n} := 1
-                const key = indexVars.join(',');
-                addMultiIndexBaseCase(ce, seqName, key, op2.evaluate());
-                return ce.Nothing;
-              }
-            }
-
-            // Fallback for multi-index: if we couldn't handle it, continue
-          }
-
-          // Case 1: Numeric subscript → base case
-          // e.g., L_0 := 1, F_1 := 1
-          if (isNumber(subscript) && Number.isInteger(subscript.re)) {
-            const index = subscript.re;
-            const value = op2.evaluate();
-            addSequenceBaseCase(ce, seqName, index, value);
-            return ce.Nothing;
-          }
-
-          // Case 2: Symbol subscript → check for self-reference
-          // e.g., a_n := a_{n-1} + 1  vs  f_n := 2*n + 1
-          if (isSymbol(subscript)) {
-            const indexVar = subscript.symbol;
-
-            if (containsSelfReference(op2, seqName)) {
-              // Sequence recurrence definition
-              addSequenceRecurrence(ce, seqName, indexVar, op2);
-              return ce.Nothing;
-            } else {
-              // Function definition (no self-reference)
-              // Convert to: f(n) := expr
-              const fnDef = ce.function('Function', [op2, ce.symbol(indexVar)]);
-              ce.assign(seqName, fnDef);
-              return ce.Nothing;
-            }
-          }
-
-          // Case 3: Complex subscript → check for self-reference
-          // e.g., a_{n+1} := a_n + 1
-          if (containsSelfReference(op2, seqName)) {
-            const indexVar = extractIndexVariable(subscript!);
-            if (indexVar) {
-              addSequenceRecurrence(ce, seqName, indexVar, op2);
-              return ce.Nothing;
-            }
-          }
-
-          // Fallback: treat as regular assignment to compound symbol
-          // This shouldn't normally happen with well-formed input
-        }
-
-        //
-        // `Assign((x, y), v)` — a destructuring assignment (`(x, y) := v`).
-        // The same pattern grammar as the destructuring `let` (a raw Tuple of
-        // bare symbols, `_` to skip a position, nested tuple patterns), but it
-        // WRITES the targets rather than declaring them, so an existing
-        // binding keeps its identity and its declared type.
-        //
-        // The RHS is evaluated ONCE, up front, before any target is written —
-        // that is what makes the swap `(a, b) := (b, a)` mean what it reads.
-        //
-        // The write is ATOMIC, like the destructuring `let`'s: every leaf is
-        // pre-validated against its target's existing binding (`assertAssignable`
-        // — a `const` target, a value that does not fit a declared type) in a
-        // read-only pass over the whole pattern, so a rejection on a LATER leaf
-        // no longer leaves an earlier one written. Assignment failure preserves
-        // the prior values (unlike `let`, where the names stay unbound).
-        //
-        if (isFunction(op1, 'Tuple')) {
-          // The whole right-hand side is prepared for storage
-          // (`assignedValue`) once, before any target is written: the
-          // assignment is simultaneous, so a leaf reads the variables of the
-          // run as they were before the statement. In `(x, r) := (100, If(x >
-          // y, x, 0))` the second leaf stores the old `x`, not `100`.
-          const val = assignedValue(ce, op2.evaluate());
-          const err = bindTuplePattern(
-            ce,
-            op1,
-            val,
-            (name, el) => {
-              // As in the scalar path below: a violated effect contract or a
-              // declared-type mismatch is not installed and surfaces as an
-              // error VALUE, even though the host `ce.assign` throws. Still
-              // reached for the residuals `assertAssignable` leaves to the
-              // install (a function literal, an operator-slot target).
-              try {
-                // Each leaf is a part of the value prepared above.
-                ce.assign(name, el);
-              } catch (e) {
-                if (isEffectContractError(e))
-                  return effectContractErrorValue(ce, e);
-                if (isTypeCompatibilityError(e))
-                  return typeCompatibilityErrorValue(ce, e);
-                throw e;
-              }
-              return null;
-            },
-            (name, el) => {
-              try {
-                assertAssignable(ce, name, el);
-              } catch (e) {
-                if (isEffectContractError(e))
-                  return effectContractErrorValue(ce, e);
-                if (isTypeCompatibilityError(e))
-                  return typeCompatibilityErrorValue(ce, e);
-                // Any other rejection — the `const` target's plain `Error` —
-                // propagates exactly as the sequential write's did, but now
-                // before any target was written.
-                throw e;
-              }
-              return null;
-            }
-          );
-          return err ?? val;
-        }
-
-        //
-        // A `Field` LHS that reached evaluation: a store into the object's own
-        // layout, a store through a protocol's `set` accessor, or a refusal.
-        //
-        //
-        // A `ProtocolProperty` LHS: the QUALIFIED property write
-        // `p.(Nameable.name) = v`, a store restricted to the protocol named.
-        //
-        if (isFunction(op1, 'ProtocolProperty') && op1.ops.length === 3) {
-          const parts = qualifiedWriteOperands(op1);
-          if (parts === undefined) return undefined;
-          // The receiver is evaluated exactly once, and BEFORE the value:
-          // ruling B8's left-to-right order, and the guarantee that a receiver
-          // carrying effects fires them once however the write resolves.
-          const receiver = parts.base.evaluate();
-          if (!receiver.isValid) return receiver;
-          // Everything that can refuse the write WITHOUT looking at the value
-          // is asked here, so a refused write costs the right-hand side
-          // nothing: `p.(P.name) = bump()` on a `readonly` property, or on a
-          // receiver nothing can be stored into, never calls `bump()`.
-          const refused =
-            protocolNamedPropertyRefusal(ce, parts.protocol, parts.name) ??
-            protocolPropertyWriteRefusal(
-              ce,
-              receiver,
-              parts.name,
-              ce._protocolRegistry[parts.protocol]
-            );
-          if (refused !== undefined) return refused;
-          const rhs = op2.evaluate();
-          if (!rhs.isValid) return rhs;
-          // The write itself is the four-operand operator, applied to operands
-          // that are already evaluated — so nothing fires twice — and it owns
-          // every remaining verdict (a missing implementation, ambiguity, the
-          // value-fit check, and staying symbolic for a receiver whose value is
-          // not an object yet).
-          return ce
-            .function('ProtocolProperty', [
-              ce.string(parts.protocol),
-              ce.string(parts.name),
-              receiver,
-              rhs,
-            ])
-            .evaluate({ numericApproximation });
-        }
-
-        if (isFunction(op1, 'Field')) {
-          // The RECEIVER is evaluated exactly once, here, and the same value is
-          // handed to every route tried below. A receiver is an arbitrary
-          // expression and may carry effects (`nextItem().field = v`), so each
-          // route deriving it from `op1` for itself would fire them once per
-          // route — including on the refusal path, which merely needs its type
-          // to phrase the error. Evaluating it BEFORE the value is also ruling
-          // B8's left-to-right order.
-          const receiver = op1.ops[0]?.evaluate();
-
-          // The property STORE comes first: an object's own stored fields are
-          // its layout's, and a name in the layout is a store even if some
-          // protocol also declares a property by that name. `objectFieldStore`
-          // evaluates the value only once it is committed to storing, so a
-          // decline (`undefined`) costs the RHS nothing and leaves the protocol
-          // route below to evaluate it exactly once itself.
-          const stored = objectFieldStore(ce, op1, op2, receiver);
-          if (stored !== undefined) return stored;
-
-          // REFUSE BEFORE EVALUATING THE VALUE where the refusal is already
-          // certain. The store route has declined, so the only remaining
-          // candidate is a protocol property — and if no protocol declares
-          // this name at all, none ever will. Asking that cheap question here
-          // keeps the promise the store route makes one line above: a target
-          // no route can serve costs the right-hand side nothing, so
-          // `n.x = bump()` on a number does not fire `bump()` before reporting
-          // that `n` cannot be stored into. (The full resolution below cannot
-          // stand in for this check: it needs the CONCRETE value, so asking it
-          // first would be the very evaluation being avoided.)
-          const fieldName = isString(op1.ops[1])
-            ? op1.ops[1].string
-            : undefined;
-          if (
-            fieldName !== undefined &&
-            protocolsWithProperty(ce, fieldName).length === 0
-          )
-            return fieldStoreRefusal(ce, op1, receiver);
-
-          // The COMPUTED property route: a name the object's layout has no slot
-          // for, answered by a protocol's `set` accessor.
-          //
-          // A refusal that does NOT depend on the value comes first, so it
-          // keeps the promise the store route makes above — a target no route
-          // can serve costs the right-hand side nothing. Writing a `readonly`
-          // property is that refusal: `b.name = bump()` must report it without
-          // firing `bump()`.
-          if (fieldName !== undefined && receiver !== undefined) {
-            const refused = protocolPropertyWriteRefusal(
-              ce,
-              receiver,
-              fieldName
-            );
-            if (refused !== undefined) return refused;
-          }
-
-          // Now the value, because the value-fit check inside
-          // `protocolPropertyStore` must see the CONCRETE value. The static type
-          // of a raw RHS is often wider than the property's declared type
-          // (`10 * i` in a loop body types `number` against an `integer`
-          // property), and the false refusal it produced was DISCARDED in
-          // statement position — a silent no-op write, diverging from the
-          // compiled tier, which performs it.
-          const rhs = op2.evaluate();
-          if (!rhs.isValid) return rhs;
-          if (fieldName !== undefined && receiver !== undefined) {
-            const set = protocolPropertyStore(ce, receiver, fieldName, rhs, {
-              numericApproximation,
-            });
-            if (set !== undefined) return set;
-          }
-
-          // Every route has declined: the receiver did not evaluate to an
-          // object, or it did and no protocol property of that name applies to
-          // it. The target cannot be stored into, and that is the value of the
-          // statement — falling through would evaluate the `Field` and return
-          // `undefined`, swallowing the refusal entirely.
-          return fieldStoreRefusal(ce, op1, receiver);
-        }
-
-        // Regular symbol assignment
-        // The LHS is held RAW on purpose: it is a NAME, not a reference. Read
-        // the name directly; `evaluate()` is only the fallback for a non-symbol
-        // LHS that computes one. (A raw symbol now evaluates through its
-        // canonical form — see `BoxedSymbol._canonicalToEvaluate()` — so
-        // evaluating a symbol LHS would read its VALUE and the assignment would
-        // silently vanish.)
-        const symbol = isSymbol(op1) ? op1 : op1.evaluate();
-        const symbolName = sym(symbol);
-        if (!symbolName) return undefined;
-        // `c = "a"` where `c` was declared `character` — see
-        // `narrowDeclaredCharacter`. The narrowed character IS the assigned
-        // value, so it replaces the evaluation of the operand. The `isString`
-        // test is repeated here so that the scope-chain walk
-        // `declaredTypeOfSymbol` performs is skipped for every assignment
-        // whose right-hand side is not a literal string, which is nearly all
-        // of them (`x = x + 1` in a loop body).
-        const val =
-          (isString(op2)
-            ? narrowDeclaredCharacter(
-                ce,
-                declaredTypeOfSymbol(ce, symbolName),
-                op2
-              )
-            : undefined) ?? assignedValue(ce, op2.evaluate());
-        // A property write in VALUE position — `x = ProtocolProperty(P, "n",
-        // p, v)`, which a hand-built expression can spell — that was REFUSED
-        // (a readonly property, a non-object receiver, a missing
-        // implementation) must not be stored under `x`: the error is the value
-        // of the statement, exactly as on the field-target route above.
-        if (!val.isValid && isFunction(op2, 'ProtocolProperty')) return val;
-        // A violated definition-annotation contract (an explicit effect
-        // annotation the body's inferred effects do not fit) is not installed
-        // and surfaces as an `incompatible-type` error VALUE — the same shape
-        // and channel as the call-boundary type check. See "Definition-
-        // annotation check" in `docs/EFFECTS-MODEL.md`.
-        //
-        // A declared-TYPE mismatch (and the minted-constructor guard) takes
-        // the same channel: errors are values for a program, even though the
-        // host `ce.assign` keeps throwing.
-        try {
-          ce.assign(symbolName, val);
-        } catch (e) {
-          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
-          if (isTypeCompatibilityError(e))
-            return typeCompatibilityErrorValue(ce, e);
-          // As in `DefineFunction`: the assignment is installed, but a
-          // definition that waited on this name could not be rebuilt.
-          if (isDependentRebuildError(e)) return e.errorValue;
-          throw e;
-        }
-        return val;
-      },
+      // The handler is a generator that yields the value operand to evaluate
+      // (`operand-steps.ts`): `evaluate()` on the synchronous route,
+      // `evaluateAsync()` on the asynchronous one, so that `x = findFit(…)`
+      // runs the asynchronous handler of its value (ROADMAP CE-314.1).
+      evaluate: ([op1, op2], { engine: ce, numericApproximation }) =>
+        runOperandSteps(assignSteps(ce, op1, op2, numericApproximation)),
+      evaluateAsync: ([op1, op2], options) =>
+        runOperandStepsAsync(
+          assignSteps(options.engine, op1, op2, options.numericApproximation),
+          options
+        ),
     },
 
     Assume: {
@@ -7228,541 +6784,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         return null;
       },
-      evaluate: (ops, { engine: ce }) => {
-        for (const name of isFunction(ops[0], 'Tuple')
-          ? tuplePatternNames(ops[0])
-          : [sym(ops[0])]) {
-          const refused = absenceMarkerBindingError(ce, name);
-          if (refused !== undefined) return refused;
-        }
-        // Separate an optional trailing attributes dictionary. When the last
-        // operand (with arity ≥ 2) is a `Dictionary`, it carries definition
-        // attributes (`type`, `value`, `constant`, `holdUntil`); the
-        // remaining operands after the symbol are the positional
-        // `[type?, value?]`.
-        const rest = ops.slice(1);
-        let attrs: DictionaryInterface | undefined;
-        const last = rest[rest.length - 1];
-        if (last !== undefined && isDictionary(last)) {
-          attrs = last;
-          rest.pop();
-        }
-        const typeOp = rest[0];
-        const valueOp = rest[1];
-
-        // Resolve the effective type spec: a positional type wins over the
-        // attributes `type`.
-        const typeSource = typeOp ?? attrs?.get('type');
-        const hasType = typeSource !== undefined;
-        let type: Type | undefined;
-        // Effects-axis provenance (`docs/EFFECTS-MODEL.md`, "Annotation
-        // provenance"): the statement is in the TYPE — a non-empty specifier,
-        // or the stated-empty `effects: []` that `pure` builds.
-        let effectsDeclared = false;
-        if (hasType) {
-          const t = typeSource!.canonical.evaluate();
-          const source =
-            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined;
-          if (source === undefined) return undefined;
-          // Parse WITH the resolver: the source is user-supplied and may name
-          // a user-declared type (`ce.declareType()` / `DeclareType`).
-          // A type string that does not parse gives an error value, not an
-          // exception: the host may be evaluating user input (CE-101).
-          let parsed: Type;
-          try {
-            parsed = parseType(source, ce._typeResolver);
-          } catch (e) {
-            return ce.error(
-              [
-                'invalid-type-declaration',
-                e instanceof Error ? e.message : String(e),
-              ],
-              sym(ops[0]) ?? undefined
-            );
-          }
-          if (!isValidType(parsed)) return undefined;
-          type = parsed;
-          effectsDeclared = signatureEffects(parsed) !== undefined;
-        }
-
-        // A binding this statement created on a PREVIOUS run of its block —
-        // a loop body on its second turn, a re-run program — is HIDDEN while
-        // the initializer is evaluated, so `let t = t * 2` reads the OUTER
-        // `t`, as it did on the first run, and not its own stale value
-        // (measured: `let t = 1; for k in 1..3 { let t = t * 2; xs =
-        // Append(xs, t) }` collected 2, 4, 8 where every turn computes 2).
-        // The binding is put back once the initializer has a value, and the
-        // statement-redeclare path of `declareOne` below replaces it only
-        // when the declaration succeeds: a declaration that then fails — a
-        // destructuring shape mismatch, a declared-type mismatch — leaves the
-        // previous binding in place, as it did before. Both map writes are
-        // journaled for `checkpoint()`/`restore()`.
-        const currentScopeBindings = ce.context.lexicalScope.bindings;
-        type Binding = NonNullable<ReturnType<typeof currentScopeBindings.get>>;
-        const hiddenStatementBindings: [string, Binding][] = [];
-        const hideStaleStatementBinding = (symbolName: string): void => {
-          const existing = currentScopeBindings.get(symbolName);
-          if (
-            existing === undefined ||
-            (existing as { _declaredByStatement?: boolean })
-              ._declaredByStatement !== true
-          )
-            return;
-          journalCheckpointMapEntry(
-            ce,
-            currentScopeBindings,
-            symbolName,
-            symbolName,
-            'declare'
-          );
-          currentScopeBindings.delete(symbolName);
-          hiddenStatementBindings.push([symbolName, existing]);
-        };
-        if (isFunction(ops[0], 'Tuple'))
-          for (const leaf of tuplePatternNames(ops[0]))
-            hideStaleStatementBinding(leaf);
-        else if (isSymbol(ops[0])) hideStaleStatementBinding(ops[0].symbol);
-
-        // Resolve the effective value: a positional value wins over the
-        // attributes `value`.
-        const valueSource = valueOp ?? attrs?.get('value');
-        const hasValue = valueSource !== undefined;
-        // `let c: character = "a"` — see `narrowDeclaredCharacter`. The
-        // narrowed character IS the declared value, so it replaces the
-        // evaluation of the operand rather than being applied after it.
-        let value: Expression | undefined;
-        try {
-          // A lazy collection that reads a variable is stored as the list
-          // of its elements (`assignedValue`).
-          value =
-            narrowDeclaredCharacter(ce, type, valueSource) ??
-            (hasValue ? assignedValue(ce, valueSource!.evaluate()) : undefined);
-        } finally {
-          for (const [symbolName, def] of hiddenStatementBindings) {
-            journalCheckpointMapEntry(
-              ce,
-              currentScopeBindings,
-              symbolName,
-              symbolName,
-              'declare'
-            );
-            currentScopeBindings.set(symbolName, def);
-          }
-        }
-
-        // Resolve the remaining attributes. Both flags are read in EITHER
-        // encoding, as `declareTypeStatement` reads `alias`: the `{dict: …}`
-        // shorthand boxes an unquoted `True`/`never` as a STRING, the operator
-        // `Dictionary` form carries the SYMBOL.
-        const constantOp = attrs?.get('constant');
-        const isConstant =
-          constantOp !== undefined &&
-          (isString(constantOp) ? constantOp.string : sym(constantOp)) ===
-            'True';
-        const holdOp = attrs?.get('holdUntil')?.evaluate();
-        const holdUntil = (
-          holdOp
-            ? ((isString(holdOp) ? holdOp.string : sym(holdOp)) ?? undefined)
-            : undefined
-        ) as 'never' | 'evaluate' | 'N' | undefined;
-
-        // Declare ONE name with the resolved type/constant/holdUntil.
-        //
-        // A symbol may already exist in the current scope as an *inferred*
-        // binding with no value — typically because the block's canonical
-        // pass hoisted it (see `canonicalBlock`), or an earlier statement in
-        // this Block (e.g. `Assign(x, ...)`) auto-declared it during the
-        // canonical pass. In that case, `ce.declare(...)` would throw
-        // "already declared in this scope." Treat that case as an upgrade
-        // instead: keep the binding, clear the inferred flag, and (if a
-        // type is provided) tighten the type.
-        //
-        // Bindings that carry a value — e.g. function-argument bindings,
-        // or an outer explicit declaration — are NOT upgraded; the
-        // original "already declared" error is preserved for them.
-        //
-        // Exception: a binding this handler itself created or upgraded on a
-        // *previous* evaluation (marked `_declaredByStatement`). A scope is
-        // re-entered whenever the same Block expression is re-evaluated — a
-        // Loop body on its second iteration, or a warmed engine re-running a
-        // program — and re-executing the Declare must reset the local, not
-        // conflict with its own earlier run.
-        const declareOne = (
-          symbolName: string,
-          boundValue: Expression | undefined
-        ): void => {
-          const boundHasValue = boundValue !== undefined;
-          const currentScope = ce.context.lexicalScope;
-          let existing = currentScope.bindings.get(symbolName);
-          // The binding that the block created for this local when its run
-          // started (`createBlockLocals`, `function-utils.ts`). It is
-          // replaced below like the binding of a previous run, and once the
-          // declaration succeeds it takes the new definition and is put
-          // back in the scope (`initializeBlockLocal`), because a closure
-          // created earlier in the run may hold it.
-          const uninitialized =
-            existing !== undefined &&
-            (existing as { _uninitialized?: boolean })._uninitialized === true
-              ? existing
-              : undefined;
-          // The installs of clauses that the `DefineFunction` canonical
-          // handler made ahead onto the binding dropped below, if any.
-          let installsAhead: ReadonlyArray<ClauseInstalledAhead> | undefined;
-          if (
-            existing &&
-            (existing as { _declaredByStatement?: boolean })
-              ._declaredByStatement === true
-          ) {
-            // A program run again on the same engine: the `DefineFunction`
-            // canonical handler installed the clause of a later statement
-            // ahead onto the binding of the previous run. Install it again
-            // under this declaration, as on the first run, unless it comes
-            // from another program (`installsOfThisRun()`). On a later run
-            // of a list of statements, the binding is the new local of the
-            // run (`uninitialized`), and the installs are those that this
-            // statement made on an earlier run (`BLOCK_REINSTALLS`).
-            const aheadOnExisting = CLAUSE_INSTALLED_AHEAD.has(existing);
-            installsAhead = aheadOnExisting
-              ? installsOfThisRun(ce, CLAUSE_INSTALLED_AHEAD.get(existing))
-              : uninitialized !== undefined
-                ? BLOCK_REINSTALLS.get(reinstallScopeKey(ce))?.get(symbolName)
-                : undefined;
-            // Checkpoint journal (funnel 4): the statement-redeclare path
-            // drops the previous statement-scoped binding by direct map
-            // surgery.
-            journalCheckpointMapEntry(
-              ce,
-              currentScope.bindings,
-              symbolName,
-              symbolName,
-              'declare'
-            );
-            currentScope.bindings.delete(symbolName);
-            // The dropped binding holds a clause installed ahead, which an
-            // expression boxed before this declaration holds by identity (a
-            // recursive call in the body of that clause). It is retired as
-            // in the branch below, so that such a call reads the clause
-            // installed under this declaration, and not the clause checked
-            // against the signature that the previous run declared.
-            if (uninitialized === undefined && aheadOnExisting)
-              retireBindingRecord(ce, currentScope, symbolName, existing);
-            existing = undefined;
-          } else if (
-            existing &&
-            isOperatorDef(existing) &&
-            CLAUSE_INSTALLED_AHEAD.has(existing)
-          ) {
-            // The binding holds the clause of a later `DefineFunction`
-            // statement of this scope, installed when that statement was
-            // canonicalized, before this declaration ran. That clause was
-            // installed without the signature this declaration gives, so drop
-            // the binding and declare the name fresh. `ce.declare()` alone
-            // refuses to replace an operator that holds a definition
-            // (`isReplaceableOperatorShell()`). When the declaration has no
-            // value, the clause is then installed again at once under the
-            // declared signature (`reinstallClausesAhead()`, at the end of
-            // this function), and the `DefineFunction` statement installs it
-            // again when it runs.
-            journalCheckpointMapEntry(
-              ce,
-              currentScope.bindings,
-              symbolName,
-              symbolName,
-              'declare'
-            );
-            currentScope.bindings.delete(symbolName);
-            // An expression canonicalized before this declaration ran holds
-            // the dropped record by identity: the call `g(1.5)` of a later
-            // statement of the same block. The record is retired as
-            // `ce.undeclare()` retires a removed record
-            // (`retireBindingRecord()`, `engine-declarations.ts`): it gets an
-            // empty value definition in place of the clause and is marked as
-            // retired to this scope, the scope counts a declaration, and the
-            // state events advance the versions that the type and effect
-            // caches of existing expressions key on. So such an expression
-            // reads the definition the scope holds when it is evaluated,
-            // which is the clause installed again under this declaration,
-            // and not the clause that was installed without it. Unlike
-            // `ce.undeclare()`, the removal of the binding from the scope
-            // records no undo step on a rollback frame of an inference
-            // trial, as for the statement-scoped binding dropped above.
-            // Without this, `let g: (integer) -> integer`, then
-            // `function g(k) { 2k }`, then `g(1.5)` in one block answered
-            // `3`: the call ran the clause of the dropped record, which had
-            // no declared parameter type to check `1.5` against.
-            installsAhead = installsOfThisRun(
-              ce,
-              CLAUSE_INSTALLED_AHEAD.get(existing)
-            );
-            retireBindingRecord(ce, currentScope, symbolName, existing);
-            existing = undefined;
-          }
-          const existingValueDef =
-            existing && isValueDef(existing) ? existing : undefined;
-          const isAutoDeclareHere =
-            !!existingValueDef &&
-            existingValueDef.value.inferredType &&
-            existingValueDef.value.value === undefined;
-          // A constant whose value is a function literal is not upgraded in
-          // place. The upgrade assigns the value, and assigning a function
-          // literal turns the binding into an operator definition, which has
-          // no value half to make constant: `g(1)` then
-          // `const g = (x) => 2 * x` threw "Cannot set properties of
-          // undefined". The auto-declared binding is removed and the fresh
-          // declaration below makes a constant value definition that holds
-          // the literal, as for a first declaration of the name.
-          const upgradesInPlace =
-            isAutoDeclareHere &&
-            !(
-              isConstant &&
-              boundHasValue &&
-              isFunction(boundValue, 'Function')
-            );
-          if (isAutoDeclareHere && !upgradesInPlace) {
-            journalCheckpointMapEntry(
-              ce,
-              currentScope.bindings,
-              symbolName,
-              symbolName,
-              'declare'
-            );
-            currentScope.bindings.delete(symbolName);
-          }
-
-          if (upgradesInPlace && existingValueDef) {
-            // Checkpoint journal (funnel 5): this branch rewrites the record
-            // in place — `holdUntil`, `_isConstant` and, when the declaration
-            // is untyped, nothing that goes through a journaled setter. One
-            // whole-record snapshot covers every field it can touch.
-            journalDefinitionRecord(ce, existingValueDef.value, 'declare');
-            // `_declaredByStatement` lives on the BINDING record, not on
-            // either half, so it needs its own entry.
-            journalCheckpointField(
-              ce,
-              existingValueDef as { _declaredByStatement?: boolean },
-              '_declaredByStatement',
-              (existingValueDef as { _declaredByStatement?: boolean })
-                ._declaredByStatement,
-              'declare'
-            );
-            // Upgrade the existing auto-declared binding in place.
-            (
-              existingValueDef as { _declaredByStatement?: boolean }
-            )._declaredByStatement = true;
-            if (hasType) {
-              // State event (§2c): a typed `let` with no initializer has no
-              // accompanying value write, so the retype must emit its own
-              // zero-mask `type-write`.
-              ce._noteStateEvent({
-                kind: 'type-write',
-                callableBefore: containsSignatureArm(
-                  existingValueDef.value.type?.type
-                ),
-                callableAfter: containsSignatureArm(parseType(type!)),
-              });
-              // Effects-axis provenance (W3 of
-              // `docs/EFFECTS-MODEL.md`): the
-              // upgrade can turn the effects annotation into a CONTRACT
-              // (`let f: (n) pure -> n` over an auto-declared `f`); a bare
-              // typed `let` moves nothing (false→false, same spelling) and
-              // records nothing.
-              const effectsBefore = effectsContractStateOf(
-                existingValueDef.value
-              );
-              existingValueDef.value._setType(() => ce.type(type!));
-              existingValueDef.value.inferredType = false;
-              existingValueDef.value.effectsDeclared = effectsDeclared;
-              recordEffectsTransition(
-                ce,
-                existingValueDef.value,
-                effectsBefore,
-                effectsContractStateOf(existingValueDef.value),
-                existingValueDef.value.type,
-                ce._inferenceCause?.expr ?? undefined
-              );
-            }
-            if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
-            if (boundHasValue) ce.assign(symbolName, boundValue!); // assign while mutable
-            if (isConstant)
-              // Freeze AFTER assigning the value. There is no public setter to
-              // turn an existing definition into a constant, so set the backing
-              // flag directly. This is safe here: the value was just assigned
-              // (so the binding holds a concrete `_value`), and the config-change
-              // listener / `_defValue` recomputation that the constructor sets up
-              // is only needed for precision-dependent constants (`Pi`), which
-              // cannot be expressed through `Declare`.
-              (
-                existingValueDef.value as unknown as {
-                  _isConstant: boolean;
-                }
-              )._isConstant = true;
-          } else {
-            // Fresh declaration.
-            const def: Partial<ValueDefinition> = {};
-            if (hasType) {
-              def.type = type;
-              // Only ever set it TRUE: `ce.declare` reads a non-empty
-              // specifier off the type itself, and an explicit `false` here
-              // would suppress that.
-              if (effectsDeclared)
-                (def as { effectsDeclared?: boolean }).effectsDeclared = true;
-            } else if (!boundHasValue) {
-              // Preserve the bare-declare default (inferred `unknown`). When a
-              // value is present without a type, leave the type unset so
-              // `ce.declare` infers it from the value.
-              def.inferred = true;
-              def.type = 'unknown';
-            }
-            if (boundHasValue) def.value = boundValue;
-            if (holdUntil) def.holdUntil = holdUntil;
-            if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
-            ce.declare(symbolName, def);
-            const created = ce.context.lexicalScope.bindings.get(symbolName);
-            if (created)
-              (
-                created as { _declaredByStatement?: boolean }
-              )._declaredByStatement = true;
-          }
-          const declared = currentScope.bindings.get(symbolName);
-          if (uninitialized !== undefined && declared !== undefined)
-            initializeBlockLocal(
-              ce,
-              currentScope.bindings,
-              symbolName,
-              uninitialized,
-              declared
-            );
-          // Install again, under the signature declared above, the clauses
-          // that were installed ahead onto the dropped binding, so that a
-          // call in a statement between this declaration and the
-          // `DefineFunction` statement finds them: `let g: (integer) ->
-          // integer`, `let a = String(g(2))`, `function g(k) { 2k }` gives
-          // `a` the value `"4"`. Not after a declaration with a value
-          // (`let g = 5`): the name holds that value until the
-          // `DefineFunction` statement runs.
-          if (installsAhead !== undefined && !boundHasValue)
-            reinstallClausesAhead(ce, symbolName, installsAhead);
-        };
-
-        // Would declaring `symbolName` with `boundValue` be rejected by the
-        // positional type? Answered WITHOUT writing anything, so a
-        // destructuring pattern can validate every leaf before it declares the
-        // first one.
-        //
-        // The verdict is the one both `declareOne` branches ultimately reach —
-        // the per-axis `matchesDeclaredTypeAxes` (the fresh branch through the
-        // value-definition constructor, the upgrade branch through
-        // `ce.assign`) — with the same arguments and the same error value, so
-        // the diagnostic is unchanged: same code, same blamed name.
-        const validateOne = (
-          symbolName: string,
-          boundValue: Expression
-        ): Expression | null => {
-          if (!hasType) return null;
-          const declaredType = ce.type(type!);
-          // Both install branches skip the check for an unknown declared type
-          // — and `"unknown"` is exactly the filler the positional-value form
-          // puts in the type slot when there is no annotation, so this is the
-          // untyped path.
-          if (declaredType.isUnknown) return null;
-          // A `Function` literal is RECONCILED against a declared signature
-          // before being checked (`ce.declare()` ascribes the declared return
-          // type onto a literal that lacks one). Checking it here, ahead of
-          // that, could reject a value the install path accepts, so leave
-          // literals to the install path.
-          if (isFunction(boundValue, 'Function')) return null;
-          if (
-            matchesDeclaredTypeAxes(
-              ce,
-              boundValue.type,
-              declaredType,
-              effectsDeclared,
-              boundValue,
-              symbolName
-            )
-          )
-            return null;
-          return typeCompatibilityErrorValue(
-            ce,
-            declaredTypeError(symbolName, boundValue, declaredType)
-          );
-        };
-
-        //
-        // `Declare((x, y), {value -> t})` — a destructuring declaration
-        // (`let (x, y) = t`). The pattern is a raw Tuple of symbols (`_`
-        // skips a position) or nested tuple patterns — irrefutable in FORM;
-        // a runtime shape mismatch is an Error value. Requires a value. Each
-        // name declares in the current scope (constant for `const`);
-        // evaluates to the tuple value.
-        //
-        // The value is the one resolved above — the POSITIONAL operand
-        // (`Declare((x, y), "unknown", t)`) or the attributes `value`, with
-        // the same precedence as for a symbol name. The two forms read the
-        // operands through the single resolution above so they cannot drift:
-        // the positional value used to be invisible here, and the
-        // declaration silently bound nothing.
-        //
-        // A positional type is passed through to each name, as it is for a
-        // symbol name (`declareOne` closes over it). The Epsil surface has no
-        // spelling for it — a `:` annotation on a destructuring `let` is a
-        // parse diagnostic, and `"unknown"` is the no-annotation filler the
-        // positional value form needs in the type slot.
-        //
-        if (isFunction(ops[0], 'Tuple')) {
-          if (!hasValue) return undefined;
-          // A per-name failure surfaces as an error value, exactly as it does
-          // for a symbol name below — but it must not leave the pattern half
-          // declared: a leaf value that does not fit the positional type is
-          // rejected in a read-only pre-pass over EVERY position (see
-          // `bindTuplePattern`), so nothing is installed, exactly as for a
-          // shape mismatch. Without it,
-          // `Declare((x, y), "integer", (3, 4.5))` bound `x` and then errored
-          // on `y`.
-          try {
-            return (
-              bindTuplePattern(
-                ce,
-                ops[0],
-                value!,
-                (name, el) => {
-                  // Each leaf is a part of `value`, which was prepared for
-                  // storage as a whole (`assignedValue`) before any name was
-                  // declared: the declaration is simultaneous.
-                  declareOne(name, el);
-                  return null;
-                },
-                validateOne
-              ) ?? value!
-            );
-          } catch (e) {
-            if (isEffectContractError(e))
-              return effectContractErrorValue(ce, e);
-            if (isTypeCompatibilityError(e))
-              return typeCompatibilityErrorValue(ce, e);
-            throw e;
-          }
-        }
-
-        // As in `Assign`: the declared operand is a NAME held raw, so read it
-        // directly rather than evaluating it (which would resolve it to a
-        // value and make the declaration vanish).
-        const symbolName = sym(isSymbol(ops[0]) ? ops[0] : ops[0].evaluate());
-        if (!symbolName) return undefined;
-
-        // See the `Assign` handler: a violated definition-annotation contract
-        // — or a declared-type mismatch — is not installed and surfaces as an
-        // `incompatible-type` error value.
-        try {
-          declareOne(symbolName, hasValue ? value : undefined);
-        } catch (e) {
-          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
-          if (isTypeCompatibilityError(e))
-            return typeCompatibilityErrorValue(ce, e);
-          throw e;
-        }
-        return hasValue ? value : ce.Nothing;
-      },
+      // As for `Assign`: a generator that yields the value operand to
+      // evaluate, driven by `evaluate()` or by `evaluateAsync()`.
+      evaluate: (ops, { engine: ce }) => runOperandSteps(declareSteps(ce, ops)),
+      evaluateAsync: (ops, options) =>
+        runOperandStepsAsync(declareSteps(options.engine, ops), options),
     },
 
     DeclareType: {
@@ -12974,4 +12000,991 @@ async function evaluateNAsync(
     window
   );
   return slice(() => followEnginePrecision(ce, result));
+}
+
+/**
+ * The evaluation of `Assign(target, value)`, as a generator that yields the
+ * held value operand each time it needs it evaluated (`OperandSteps`). The
+ * `evaluate` and `evaluateAsync` handlers of `Assign` drive it.
+ */
+function* assignSteps(
+  ce: ComputeEngine,
+  op1: Expression,
+  op2: Expression,
+  numericApproximation: boolean | undefined
+): OperandSteps<Expression | undefined> {
+  // Every name the assignment binds: the symbol target, each leaf of a
+  // destructuring tuple (`(a, Missing) := t`), and the base of a
+  // sequence definition (`Missing_0 := 1`).
+  const boundNames = isFunction(op1, 'Tuple')
+    ? tuplePatternNames(op1)
+    : isFunction(op1, 'Subscript')
+      ? [sym(op1.op1)]
+      : [sym(op1)];
+  for (const name of boundNames) {
+    const refused = absenceMarkerBindingError(ce, name);
+    if (refused !== undefined) return refused;
+  }
+  // A write to a block local before its `let` or `const` has run in
+  // this run of the block is refused before the value is evaluated
+  // (`writeBeforeDeclarationError`). A sequence definition
+  // (`a_0 := 1`) writes no binding of the base name.
+  if (!isFunction(op1, 'Subscript'))
+    for (const name of boundNames) {
+      const refused = writeBeforeDeclarationError(ce, name);
+      if (refused !== undefined) return refused;
+    }
+  //
+  // Check for Subscript LHS (sequence definition)
+  // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
+  // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
+  //
+  if (isFunction(op1, 'Subscript') && sym(op1.op1)) {
+    const seqName = sym(op1.op1)!;
+    const subscript = op1.op2;
+
+    // Declared-name precedence governs the Assign LHS too (user ruling
+    // 2026-08-15, second half of the subscripted-assignment round): a
+    // subscripted LHS whose JOINED name is declared assigns to THAT
+    // symbol — `declare('l_P')` then `l_{P} := P²+1` binds `l_P`, and
+    // must NOT define a family on the base letter `l` (documents use
+    // `f` and `f_x` as unrelated names; the Desmos importer measured a
+    // real base-letter clobber from the family reading). This mirrors
+    // the expression-position rule pinned in
+    // `subscript-declared-name-precedence.test.ts`: declaration
+    // presence is the disambiguator. It also resolves the
+    // lambda-assignment ambiguity handled below — with a declaration
+    // present the author's intent is stated, so a function-literal RHS
+    // binds the declared symbol here instead of erroring. Sequence
+    // recurrences are unaffected: defining `a_1 := 1` or
+    // `a_n := a_{n-1}+1` registers NO `a_1`/`a_n` symbol definitions
+    // (verified), so re-running those rows never trips this branch.
+    const joinedName = isSymbol(subscript)
+      ? `${seqName}_${subscript.symbol}`
+      : isNumber(subscript) && Number.isInteger(subscript.re)
+        ? `${seqName}_${subscript.re}`
+        : undefined;
+    if (joinedName !== undefined && ce.lookupDefinition(joinedName) != null) {
+      const val = yield op2;
+      // Errors surface as VALUES on this route, exactly as on the
+      // regular symbol-assignment path below.
+      try {
+        ce.assign(joinedName, val);
+      } catch (e) {
+        if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+        if (isTypeCompatibilityError(e))
+          return typeCompatibilityErrorValue(ce, e);
+        throw e;
+      }
+      return val;
+    }
+
+    // A FUNCTION LITERAL on the right of a subscripted-name assignment
+    // is refused outright (user ruling 2026-08-15, option (d) of the
+    // subscripted-lambda entry in ROADMAP.md; the declared-name check
+    // above already took the unambiguous cases, so this is the
+    // UNDECLARED joined name only). The notation is
+    // genuinely ambiguous — `l_P := P ↦ body` reads either as defining
+    // a function NAMED `l_P` (Desmos treats the subscript as pure
+    // spelling, and documents routinely use `f` and `f_x` as unrelated
+    // names) or as defining a FAMILY `l` whose P-th member is the
+    // lambda (`T_n := x ↦ cos(n·arccos x)`) — and before this check
+    // every reading fell into the sequence-definition machinery below,
+    // which defined nothing usable and reported nothing: the
+    // assignment silently vanished. Field-verified corpus-safe: the
+    // Desmos importer only ever emits head-application assignments
+    // (`l_P(P) := …`), never this spelling. The error names both
+    // working spellings so the author can say which they meant.
+    if (isFunction(op2, 'Function')) {
+      return ce.error(
+        [
+          'ambiguous-assignment',
+          `Assigning a function literal to the subscripted name ` +
+            `"${seqName}_${subscript.toString()}" is ambiguous. To ` +
+            `define a function named "${seqName}_${subscript.toString()}", ` +
+            `write "${seqName}_${subscript.toString()}(…) := ⟨body⟩". To ` +
+            `define a family of functions indexed by ` +
+            `"${subscript.toString()}", assign an expression in ` +
+            `"${subscript.toString()}" instead of a function literal.`,
+        ],
+        op2.toString()
+      );
+    }
+
+    //
+    // Check for multi-index subscript: P_{n,k}
+    // Parser produces: Subscript(P, Sequence(n, k))
+    // When non-canonical, it may be wrapped in Delimiter:
+    //   Subscript(P, Delimiter(Sequence(n, k), ","))
+    //
+    let multiSub = subscript;
+    if (isFunction(multiSub, 'Delimiter')) multiSub = multiSub.op1;
+    if (isFunction(multiSub, 'Sequence')) {
+      const subscript = multiSub;
+      const indices = subscript.ops;
+
+      // Case M1: All numeric → multi-index base case
+      // e.g., P_{0,0} := 1
+      if (indices.every((op) => isNumber(op) && Number.isInteger(op.re))) {
+        const key = indices.map((op) => op.re).join(',');
+        addMultiIndexBaseCase(ce, seqName, key, yield op2);
+        return ce.Nothing;
+      }
+
+      // Extract variable names from indices
+      // For symbols: use the symbol name
+      // For numbers: use the number as string
+      // For expressions: try to extract the variable
+      const indexVars: string[] = [];
+      let hasSymbols = false;
+      let allValid = true;
+
+      for (const idx of indices) {
+        if (isSymbol(idx)) {
+          indexVars.push(idx.symbol);
+          hasSymbols = true;
+        } else if (isNumber(idx) && Number.isInteger(idx.re)) {
+          indexVars.push(String(idx.re));
+        } else {
+          // Complex expression - try to extract variable
+          const v = extractIndexVariable(idx);
+          if (v) {
+            indexVars.push(v);
+            hasSymbols = true;
+          } else {
+            allValid = false;
+            break;
+          }
+        }
+      }
+
+      if (allValid && indexVars.length === indices.length) {
+        if (containsSelfReference(op2, seqName)) {
+          // Case M2: Recurrence with self-reference
+          // e.g., P_{n,k} := P_{n-1,k-1} + P_{n-1,k}
+          // Only use symbol variables for the recurrence
+          const recurrenceVars = indices
+            .map((idx) => sym(idx))
+            .filter((s): s is string => s !== undefined);
+
+          if (recurrenceVars.length > 0) {
+            addMultiIndexRecurrence(ce, seqName, recurrenceVars, op2);
+            return ce.Nothing;
+          }
+        } else if (hasSymbols) {
+          // Case M3: Pattern base case (no self-reference)
+          // e.g., P_{n,0} := 1 or P_{n,n} := 1
+          const key = indexVars.join(',');
+          addMultiIndexBaseCase(ce, seqName, key, yield op2);
+          return ce.Nothing;
+        }
+      }
+
+      // Fallback for multi-index: if we couldn't handle it, continue
+    }
+
+    // Case 1: Numeric subscript → base case
+    // e.g., L_0 := 1, F_1 := 1
+    if (isNumber(subscript) && Number.isInteger(subscript.re)) {
+      const index = subscript.re;
+      const value = yield op2;
+      addSequenceBaseCase(ce, seqName, index, value);
+      return ce.Nothing;
+    }
+
+    // Case 2: Symbol subscript → check for self-reference
+    // e.g., a_n := a_{n-1} + 1  vs  f_n := 2*n + 1
+    if (isSymbol(subscript)) {
+      const indexVar = subscript.symbol;
+
+      if (containsSelfReference(op2, seqName)) {
+        // Sequence recurrence definition
+        addSequenceRecurrence(ce, seqName, indexVar, op2);
+        return ce.Nothing;
+      } else {
+        // Function definition (no self-reference)
+        // Convert to: f(n) := expr
+        const fnDef = ce.function('Function', [op2, ce.symbol(indexVar)]);
+        ce.assign(seqName, fnDef);
+        return ce.Nothing;
+      }
+    }
+
+    // Case 3: Complex subscript → check for self-reference
+    // e.g., a_{n+1} := a_n + 1
+    if (containsSelfReference(op2, seqName)) {
+      const indexVar = extractIndexVariable(subscript!);
+      if (indexVar) {
+        addSequenceRecurrence(ce, seqName, indexVar, op2);
+        return ce.Nothing;
+      }
+    }
+
+    // Fallback: treat as regular assignment to compound symbol
+    // This shouldn't normally happen with well-formed input
+  }
+
+  //
+  // `Assign((x, y), v)` — a destructuring assignment (`(x, y) := v`).
+  // The same pattern grammar as the destructuring `let` (a raw Tuple of
+  // bare symbols, `_` to skip a position, nested tuple patterns), but it
+  // WRITES the targets rather than declaring them, so an existing
+  // binding keeps its identity and its declared type.
+  //
+  // The RHS is evaluated ONCE, up front, before any target is written —
+  // that is what makes the swap `(a, b) := (b, a)` mean what it reads.
+  //
+  // The write is ATOMIC, like the destructuring `let`'s: every leaf is
+  // pre-validated against its target's existing binding (`assertAssignable`
+  // — a `const` target, a value that does not fit a declared type) in a
+  // read-only pass over the whole pattern, so a rejection on a LATER leaf
+  // no longer leaves an earlier one written. Assignment failure preserves
+  // the prior values (unlike `let`, where the names stay unbound).
+  //
+  if (isFunction(op1, 'Tuple')) {
+    // The whole right-hand side is prepared for storage
+    // (`assignedValue`) once, before any target is written: the
+    // assignment is simultaneous, so a leaf reads the variables of the
+    // run as they were before the statement. In `(x, r) := (100, If(x >
+    // y, x, 0))` the second leaf stores the old `x`, not `100`.
+    const val = assignedValue(ce, yield op2);
+    const err = bindTuplePattern(
+      ce,
+      op1,
+      val,
+      (name, el) => {
+        // As in the scalar path below: a violated effect contract or a
+        // declared-type mismatch is not installed and surfaces as an
+        // error VALUE, even though the host `ce.assign` throws. Still
+        // reached for the residuals `assertAssignable` leaves to the
+        // install (a function literal, an operator-slot target).
+        try {
+          // Each leaf is a part of the value prepared above.
+          ce.assign(name, el);
+        } catch (e) {
+          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          if (isTypeCompatibilityError(e))
+            return typeCompatibilityErrorValue(ce, e);
+          throw e;
+        }
+        return null;
+      },
+      (name, el) => {
+        try {
+          assertAssignable(ce, name, el);
+        } catch (e) {
+          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          if (isTypeCompatibilityError(e))
+            return typeCompatibilityErrorValue(ce, e);
+          // Any other rejection — the `const` target's plain `Error` —
+          // propagates exactly as the sequential write's did, but now
+          // before any target was written.
+          throw e;
+        }
+        return null;
+      }
+    );
+    return err ?? val;
+  }
+
+  //
+  // A `Field` LHS that reached evaluation: a store into the object's own
+  // layout, a store through a protocol's `set` accessor, or a refusal.
+  //
+  //
+  // A `ProtocolProperty` LHS: the QUALIFIED property write
+  // `p.(Nameable.name) = v`, a store restricted to the protocol named.
+  //
+  if (isFunction(op1, 'ProtocolProperty') && op1.ops.length === 3) {
+    const parts = qualifiedWriteOperands(op1);
+    if (parts === undefined) return undefined;
+    // The receiver is evaluated exactly once, and BEFORE the value:
+    // ruling B8's left-to-right order, and the guarantee that a receiver
+    // carrying effects fires them once however the write resolves.
+    const receiver = parts.base.evaluate();
+    if (!receiver.isValid) return receiver;
+    // Everything that can refuse the write WITHOUT looking at the value
+    // is asked here, so a refused write costs the right-hand side
+    // nothing: `p.(P.name) = bump()` on a `readonly` property, or on a
+    // receiver nothing can be stored into, never calls `bump()`.
+    const refused =
+      protocolNamedPropertyRefusal(ce, parts.protocol, parts.name) ??
+      protocolPropertyWriteRefusal(
+        ce,
+        receiver,
+        parts.name,
+        ce._protocolRegistry[parts.protocol]
+      );
+    if (refused !== undefined) return refused;
+    const rhs = yield op2;
+    if (!rhs.isValid) return rhs;
+    // The write itself is the four-operand operator, applied to operands
+    // that are already evaluated — so nothing fires twice — and it owns
+    // every remaining verdict (a missing implementation, ambiguity, the
+    // value-fit check, and staying symbolic for a receiver whose value is
+    // not an object yet).
+    return ce
+      .function('ProtocolProperty', [
+        ce.string(parts.protocol),
+        ce.string(parts.name),
+        receiver,
+        rhs,
+      ])
+      .evaluate({ numericApproximation });
+  }
+
+  if (isFunction(op1, 'Field')) {
+    // The RECEIVER is evaluated exactly once, here, and the same value is
+    // handed to every route tried below. A receiver is an arbitrary
+    // expression and may carry effects (`nextItem().field = v`), so each
+    // route deriving it from `op1` for itself would fire them once per
+    // route — including on the refusal path, which merely needs its type
+    // to phrase the error. Evaluating it BEFORE the value is also ruling
+    // B8's left-to-right order.
+    const receiver = op1.ops[0]?.evaluate();
+
+    // The property STORE comes first: an object's own stored fields are
+    // its layout's, and a name in the layout is a store even if some
+    // protocol also declares a property by that name. The value is
+    // evaluated only once the store route is committed, so a decline
+    // (`undefined`) costs the RHS nothing and leaves the protocol route below
+    // to evaluate it exactly once itself.
+    const target = objectFieldStoreTarget(op1, receiver);
+    if (target !== undefined) return storeObjectField(ce, target, yield op2);
+
+    // REFUSE BEFORE EVALUATING THE VALUE where the refusal is already
+    // certain. The store route has declined, so the only remaining
+    // candidate is a protocol property — and if no protocol declares
+    // this name at all, none ever will. Asking that cheap question here
+    // keeps the promise the store route makes one line above: a target
+    // no route can serve costs the right-hand side nothing, so
+    // `n.x = bump()` on a number does not fire `bump()` before reporting
+    // that `n` cannot be stored into. (The full resolution below cannot
+    // stand in for this check: it needs the CONCRETE value, so asking it
+    // first would be the very evaluation being avoided.)
+    const fieldName = isString(op1.ops[1]) ? op1.ops[1].string : undefined;
+    if (
+      fieldName !== undefined &&
+      protocolsWithProperty(ce, fieldName).length === 0
+    )
+      return fieldStoreRefusal(ce, op1, receiver);
+
+    // The COMPUTED property route: a name the object's layout has no slot
+    // for, answered by a protocol's `set` accessor.
+    //
+    // A refusal that does NOT depend on the value comes first, so it
+    // keeps the promise the store route makes above — a target no route
+    // can serve costs the right-hand side nothing. Writing a `readonly`
+    // property is that refusal: `b.name = bump()` must report it without
+    // firing `bump()`.
+    if (fieldName !== undefined && receiver !== undefined) {
+      const refused = protocolPropertyWriteRefusal(ce, receiver, fieldName);
+      if (refused !== undefined) return refused;
+    }
+
+    // Now the value, because the value-fit check inside
+    // `protocolPropertyStore` must see the CONCRETE value. The static type
+    // of a raw RHS is often wider than the property's declared type
+    // (`10 * i` in a loop body types `number` against an `integer`
+    // property), and the false refusal it produced was DISCARDED in
+    // statement position — a silent no-op write, diverging from the
+    // compiled tier, which performs it.
+    const rhs = yield op2;
+    if (!rhs.isValid) return rhs;
+    if (fieldName !== undefined && receiver !== undefined) {
+      const set = protocolPropertyStore(ce, receiver, fieldName, rhs, {
+        numericApproximation,
+      });
+      if (set !== undefined) return set;
+    }
+
+    // Every route has declined: the receiver did not evaluate to an
+    // object, or it did and no protocol property of that name applies to
+    // it. The target cannot be stored into, and that is the value of the
+    // statement — falling through would evaluate the `Field` and return
+    // `undefined`, swallowing the refusal entirely.
+    return fieldStoreRefusal(ce, op1, receiver);
+  }
+
+  // Regular symbol assignment
+  // The LHS is held RAW on purpose: it is a NAME, not a reference. Read
+  // the name directly; `evaluate()` is only the fallback for a non-symbol
+  // LHS that computes one. (A raw symbol now evaluates through its
+  // canonical form — see `BoxedSymbol._canonicalToEvaluate()` — so
+  // evaluating a symbol LHS would read its VALUE and the assignment would
+  // silently vanish.)
+  const symbol = isSymbol(op1) ? op1 : op1.evaluate();
+  const symbolName = sym(symbol);
+  if (!symbolName) return undefined;
+  // `c = "a"` where `c` was declared `character` — see
+  // `narrowDeclaredCharacter`. The narrowed character IS the assigned
+  // value, so it replaces the evaluation of the operand. The `isString`
+  // test is repeated here so that the scope-chain walk
+  // `declaredTypeOfSymbol` performs is skipped for every assignment
+  // whose right-hand side is not a literal string, which is nearly all
+  // of them (`x = x + 1` in a loop body).
+  const val =
+    (isString(op2)
+      ? narrowDeclaredCharacter(ce, declaredTypeOfSymbol(ce, symbolName), op2)
+      : undefined) ?? assignedValue(ce, yield op2);
+  // A property write in VALUE position — `x = ProtocolProperty(P, "n",
+  // p, v)`, which a hand-built expression can spell — that was REFUSED
+  // (a readonly property, a non-object receiver, a missing
+  // implementation) must not be stored under `x`: the error is the value
+  // of the statement, exactly as on the field-target route above.
+  if (!val.isValid && isFunction(op2, 'ProtocolProperty')) return val;
+  // A violated definition-annotation contract (an explicit effect
+  // annotation the body's inferred effects do not fit) is not installed
+  // and surfaces as an `incompatible-type` error VALUE — the same shape
+  // and channel as the call-boundary type check. See "Definition-
+  // annotation check" in `docs/EFFECTS-MODEL.md`.
+  //
+  // A declared-TYPE mismatch (and the minted-constructor guard) takes
+  // the same channel: errors are values for a program, even though the
+  // host `ce.assign` keeps throwing.
+  try {
+    ce.assign(symbolName, val);
+  } catch (e) {
+    if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+    if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e);
+    // As in `DefineFunction`: the assignment is installed, but a
+    // definition that waited on this name could not be rebuilt.
+    if (isDependentRebuildError(e)) return e.errorValue;
+    throw e;
+  }
+  return val;
+}
+
+/**
+ * The evaluation of `Declare(name, …)`, as a generator that yields the held
+ * value operand to evaluate (`OperandSteps`). The stale binding of a
+ * previous run stays hidden while the value is evaluated, on both routes.
+ * The `evaluate` and `evaluateAsync` handlers of `Declare` drive it.
+ */
+function* declareSteps(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): OperandSteps<Expression | undefined> {
+  for (const name of isFunction(ops[0], 'Tuple')
+    ? tuplePatternNames(ops[0])
+    : [sym(ops[0])]) {
+    const refused = absenceMarkerBindingError(ce, name);
+    if (refused !== undefined) return refused;
+  }
+  // Separate an optional trailing attributes dictionary. When the last
+  // operand (with arity ≥ 2) is a `Dictionary`, it carries definition
+  // attributes (`type`, `value`, `constant`, `holdUntil`); the
+  // remaining operands after the symbol are the positional
+  // `[type?, value?]`.
+  const rest = ops.slice(1);
+  let attrs: DictionaryInterface | undefined;
+  const last = rest[rest.length - 1];
+  if (last !== undefined && isDictionary(last)) {
+    attrs = last;
+    rest.pop();
+  }
+  const typeOp = rest[0];
+  const valueOp = rest[1];
+
+  // Resolve the effective type spec: a positional type wins over the
+  // attributes `type`.
+  const typeSource = typeOp ?? attrs?.get('type');
+  const hasType = typeSource !== undefined;
+  let type: Type | undefined;
+  // Effects-axis provenance (`docs/EFFECTS-MODEL.md`, "Annotation
+  // provenance"): the statement is in the TYPE — a non-empty specifier,
+  // or the stated-empty `effects: []` that `pure` builds.
+  let effectsDeclared = false;
+  if (hasType) {
+    const t = typeSource!.canonical.evaluate();
+    const source = (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined;
+    if (source === undefined) return undefined;
+    // Parse WITH the resolver: the source is user-supplied and may name
+    // a user-declared type (`ce.declareType()` / `DeclareType`).
+    // A type string that does not parse gives an error value, not an
+    // exception: the host may be evaluating user input (CE-101).
+    let parsed: Type;
+    try {
+      parsed = parseType(source, ce._typeResolver);
+    } catch (e) {
+      return ce.error(
+        [
+          'invalid-type-declaration',
+          e instanceof Error ? e.message : String(e),
+        ],
+        sym(ops[0]) ?? undefined
+      );
+    }
+    if (!isValidType(parsed)) return undefined;
+    type = parsed;
+    effectsDeclared = signatureEffects(parsed) !== undefined;
+  }
+
+  // A binding this statement created on a PREVIOUS run of its block —
+  // a loop body on its second turn, a re-run program — is HIDDEN while
+  // the initializer is evaluated, so `let t = t * 2` reads the OUTER
+  // `t`, as it did on the first run, and not its own stale value
+  // (measured: `let t = 1; for k in 1..3 { let t = t * 2; xs =
+  // Append(xs, t) }` collected 2, 4, 8 where every turn computes 2).
+  // The binding is put back once the initializer has a value, and the
+  // statement-redeclare path of `declareOne` below replaces it only
+  // when the declaration succeeds: a declaration that then fails — a
+  // destructuring shape mismatch, a declared-type mismatch — leaves the
+  // previous binding in place, as it did before. Both map writes are
+  // journaled for `checkpoint()`/`restore()`.
+  const currentScopeBindings = ce.context.lexicalScope.bindings;
+  type Binding = NonNullable<ReturnType<typeof currentScopeBindings.get>>;
+  const hiddenStatementBindings: [string, Binding][] = [];
+  const hideStaleStatementBinding = (symbolName: string): void => {
+    const existing = currentScopeBindings.get(symbolName);
+    if (
+      existing === undefined ||
+      (existing as { _declaredByStatement?: boolean })._declaredByStatement !==
+        true
+    )
+      return;
+    journalCheckpointMapEntry(
+      ce,
+      currentScopeBindings,
+      symbolName,
+      symbolName,
+      'declare'
+    );
+    currentScopeBindings.delete(symbolName);
+    hiddenStatementBindings.push([symbolName, existing]);
+  };
+  if (isFunction(ops[0], 'Tuple'))
+    for (const leaf of tuplePatternNames(ops[0]))
+      hideStaleStatementBinding(leaf);
+  else if (isSymbol(ops[0])) hideStaleStatementBinding(ops[0].symbol);
+
+  // Resolve the effective value: a positional value wins over the
+  // attributes `value`.
+  const valueSource = valueOp ?? attrs?.get('value');
+  const hasValue = valueSource !== undefined;
+  // `let c: character = "a"` — see `narrowDeclaredCharacter`. The
+  // narrowed character IS the declared value, so it replaces the
+  // evaluation of the operand rather than being applied after it.
+  let value: Expression | undefined;
+  try {
+    // A lazy collection that reads a variable is stored as the list
+    // of its elements (`assignedValue`).
+    value =
+      narrowDeclaredCharacter(ce, type, valueSource) ??
+      (hasValue ? assignedValue(ce, yield valueSource!) : undefined);
+  } finally {
+    for (const [symbolName, def] of hiddenStatementBindings) {
+      journalCheckpointMapEntry(
+        ce,
+        currentScopeBindings,
+        symbolName,
+        symbolName,
+        'declare'
+      );
+      currentScopeBindings.set(symbolName, def);
+    }
+  }
+
+  // Resolve the remaining attributes. Both flags are read in EITHER
+  // encoding, as `declareTypeStatement` reads `alias`: the `{dict: …}`
+  // shorthand boxes an unquoted `True`/`never` as a STRING, the operator
+  // `Dictionary` form carries the SYMBOL.
+  const constantOp = attrs?.get('constant');
+  const isConstant =
+    constantOp !== undefined &&
+    (isString(constantOp) ? constantOp.string : sym(constantOp)) === 'True';
+  const holdOp = attrs?.get('holdUntil')?.evaluate();
+  const holdUntil = (
+    holdOp
+      ? ((isString(holdOp) ? holdOp.string : sym(holdOp)) ?? undefined)
+      : undefined
+  ) as 'never' | 'evaluate' | 'N' | undefined;
+
+  // Declare ONE name with the resolved type/constant/holdUntil.
+  //
+  // A symbol may already exist in the current scope as an *inferred*
+  // binding with no value — typically because the block's canonical
+  // pass hoisted it (see `canonicalBlock`), or an earlier statement in
+  // this Block (e.g. `Assign(x, ...)`) auto-declared it during the
+  // canonical pass. In that case, `ce.declare(...)` would throw
+  // "already declared in this scope." Treat that case as an upgrade
+  // instead: keep the binding, clear the inferred flag, and (if a
+  // type is provided) tighten the type.
+  //
+  // Bindings that carry a value — e.g. function-argument bindings,
+  // or an outer explicit declaration — are NOT upgraded; the
+  // original "already declared" error is preserved for them.
+  //
+  // Exception: a binding this handler itself created or upgraded on a
+  // *previous* evaluation (marked `_declaredByStatement`). A scope is
+  // re-entered whenever the same Block expression is re-evaluated — a
+  // Loop body on its second iteration, or a warmed engine re-running a
+  // program — and re-executing the Declare must reset the local, not
+  // conflict with its own earlier run.
+  const declareOne = (
+    symbolName: string,
+    boundValue: Expression | undefined
+  ): void => {
+    const boundHasValue = boundValue !== undefined;
+    const currentScope = ce.context.lexicalScope;
+    let existing = currentScope.bindings.get(symbolName);
+    // The binding that the block created for this local when its run
+    // started (`createBlockLocals`, `function-utils.ts`). It is
+    // replaced below like the binding of a previous run, and once the
+    // declaration succeeds it takes the new definition and is put
+    // back in the scope (`initializeBlockLocal`), because a closure
+    // created earlier in the run may hold it.
+    const uninitialized =
+      existing !== undefined &&
+      (existing as { _uninitialized?: boolean })._uninitialized === true
+        ? existing
+        : undefined;
+    // The installs of clauses that the `DefineFunction` canonical
+    // handler made ahead onto the binding dropped below, if any.
+    let installsAhead: ReadonlyArray<ClauseInstalledAhead> | undefined;
+    if (
+      existing &&
+      (existing as { _declaredByStatement?: boolean })._declaredByStatement ===
+        true
+    ) {
+      // A program run again on the same engine: the `DefineFunction`
+      // canonical handler installed the clause of a later statement
+      // ahead onto the binding of the previous run. Install it again
+      // under this declaration, as on the first run, unless it comes
+      // from another program (`installsOfThisRun()`). On a later run
+      // of a list of statements, the binding is the new local of the
+      // run (`uninitialized`), and the installs are those that this
+      // statement made on an earlier run (`BLOCK_REINSTALLS`).
+      const aheadOnExisting = CLAUSE_INSTALLED_AHEAD.has(existing);
+      installsAhead = aheadOnExisting
+        ? installsOfThisRun(ce, CLAUSE_INSTALLED_AHEAD.get(existing))
+        : uninitialized !== undefined
+          ? BLOCK_REINSTALLS.get(reinstallScopeKey(ce))?.get(symbolName)
+          : undefined;
+      // Checkpoint journal (funnel 4): the statement-redeclare path
+      // drops the previous statement-scoped binding by direct map
+      // surgery.
+      journalCheckpointMapEntry(
+        ce,
+        currentScope.bindings,
+        symbolName,
+        symbolName,
+        'declare'
+      );
+      currentScope.bindings.delete(symbolName);
+      // The dropped binding holds a clause installed ahead, which an
+      // expression boxed before this declaration holds by identity (a
+      // recursive call in the body of that clause). It is retired as
+      // in the branch below, so that such a call reads the clause
+      // installed under this declaration, and not the clause checked
+      // against the signature that the previous run declared.
+      if (uninitialized === undefined && aheadOnExisting)
+        retireBindingRecord(ce, currentScope, symbolName, existing);
+      existing = undefined;
+    } else if (
+      existing &&
+      isOperatorDef(existing) &&
+      CLAUSE_INSTALLED_AHEAD.has(existing)
+    ) {
+      // The binding holds the clause of a later `DefineFunction`
+      // statement of this scope, installed when that statement was
+      // canonicalized, before this declaration ran. That clause was
+      // installed without the signature this declaration gives, so drop
+      // the binding and declare the name fresh. `ce.declare()` alone
+      // refuses to replace an operator that holds a definition
+      // (`isReplaceableOperatorShell()`). When the declaration has no
+      // value, the clause is then installed again at once under the
+      // declared signature (`reinstallClausesAhead()`, at the end of
+      // this function), and the `DefineFunction` statement installs it
+      // again when it runs.
+      journalCheckpointMapEntry(
+        ce,
+        currentScope.bindings,
+        symbolName,
+        symbolName,
+        'declare'
+      );
+      currentScope.bindings.delete(symbolName);
+      // An expression canonicalized before this declaration ran holds
+      // the dropped record by identity: the call `g(1.5)` of a later
+      // statement of the same block. The record is retired as
+      // `ce.undeclare()` retires a removed record
+      // (`retireBindingRecord()`, `engine-declarations.ts`): it gets an
+      // empty value definition in place of the clause and is marked as
+      // retired to this scope, the scope counts a declaration, and the
+      // state events advance the versions that the type and effect
+      // caches of existing expressions key on. So such an expression
+      // reads the definition the scope holds when it is evaluated,
+      // which is the clause installed again under this declaration,
+      // and not the clause that was installed without it. Unlike
+      // `ce.undeclare()`, the removal of the binding from the scope
+      // records no undo step on a rollback frame of an inference
+      // trial, as for the statement-scoped binding dropped above.
+      // Without this, `let g: (integer) -> integer`, then
+      // `function g(k) { 2k }`, then `g(1.5)` in one block answered
+      // `3`: the call ran the clause of the dropped record, which had
+      // no declared parameter type to check `1.5` against.
+      installsAhead = installsOfThisRun(
+        ce,
+        CLAUSE_INSTALLED_AHEAD.get(existing)
+      );
+      retireBindingRecord(ce, currentScope, symbolName, existing);
+      existing = undefined;
+    }
+    const existingValueDef =
+      existing && isValueDef(existing) ? existing : undefined;
+    const isAutoDeclareHere =
+      !!existingValueDef &&
+      existingValueDef.value.inferredType &&
+      existingValueDef.value.value === undefined;
+    // A constant whose value is a function literal is not upgraded in
+    // place. The upgrade assigns the value, and assigning a function
+    // literal turns the binding into an operator definition, which has
+    // no value half to make constant: `g(1)` then
+    // `const g = (x) => 2 * x` threw "Cannot set properties of
+    // undefined". The auto-declared binding is removed and the fresh
+    // declaration below makes a constant value definition that holds
+    // the literal, as for a first declaration of the name.
+    const upgradesInPlace =
+      isAutoDeclareHere &&
+      !(isConstant && boundHasValue && isFunction(boundValue, 'Function'));
+    if (isAutoDeclareHere && !upgradesInPlace) {
+      journalCheckpointMapEntry(
+        ce,
+        currentScope.bindings,
+        symbolName,
+        symbolName,
+        'declare'
+      );
+      currentScope.bindings.delete(symbolName);
+    }
+
+    if (upgradesInPlace && existingValueDef) {
+      // Checkpoint journal (funnel 5): this branch rewrites the record
+      // in place — `holdUntil`, `_isConstant` and, when the declaration
+      // is untyped, nothing that goes through a journaled setter. One
+      // whole-record snapshot covers every field it can touch.
+      journalDefinitionRecord(ce, existingValueDef.value, 'declare');
+      // `_declaredByStatement` lives on the BINDING record, not on
+      // either half, so it needs its own entry.
+      journalCheckpointField(
+        ce,
+        existingValueDef as { _declaredByStatement?: boolean },
+        '_declaredByStatement',
+        (existingValueDef as { _declaredByStatement?: boolean })
+          ._declaredByStatement,
+        'declare'
+      );
+      // Upgrade the existing auto-declared binding in place.
+      (
+        existingValueDef as { _declaredByStatement?: boolean }
+      )._declaredByStatement = true;
+      if (hasType) {
+        // State event (§2c): a typed `let` with no initializer has no
+        // accompanying value write, so the retype must emit its own
+        // zero-mask `type-write`.
+        ce._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: containsSignatureArm(
+            existingValueDef.value.type?.type
+          ),
+          callableAfter: containsSignatureArm(parseType(type!)),
+        });
+        // Effects-axis provenance (W3 of
+        // `docs/EFFECTS-MODEL.md`): the
+        // upgrade can turn the effects annotation into a CONTRACT
+        // (`let f: (n) pure -> n` over an auto-declared `f`); a bare
+        // typed `let` moves nothing (false→false, same spelling) and
+        // records nothing.
+        const effectsBefore = effectsContractStateOf(existingValueDef.value);
+        existingValueDef.value._setType(() => ce.type(type!));
+        existingValueDef.value.inferredType = false;
+        existingValueDef.value.effectsDeclared = effectsDeclared;
+        recordEffectsTransition(
+          ce,
+          existingValueDef.value,
+          effectsBefore,
+          effectsContractStateOf(existingValueDef.value),
+          existingValueDef.value.type,
+          ce._inferenceCause?.expr ?? undefined
+        );
+      }
+      if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
+      if (boundHasValue) ce.assign(symbolName, boundValue!); // assign while mutable
+      if (isConstant)
+        // Freeze AFTER assigning the value. There is no public setter to
+        // turn an existing definition into a constant, so set the backing
+        // flag directly. This is safe here: the value was just assigned
+        // (so the binding holds a concrete `_value`), and the config-change
+        // listener / `_defValue` recomputation that the constructor sets up
+        // is only needed for precision-dependent constants (`Pi`), which
+        // cannot be expressed through `Declare`.
+        (
+          existingValueDef.value as unknown as {
+            _isConstant: boolean;
+          }
+        )._isConstant = true;
+    } else {
+      // Fresh declaration.
+      const def: Partial<ValueDefinition> = {};
+      if (hasType) {
+        def.type = type;
+        // Only ever set it TRUE: `ce.declare` reads a non-empty
+        // specifier off the type itself, and an explicit `false` here
+        // would suppress that.
+        if (effectsDeclared)
+          (def as { effectsDeclared?: boolean }).effectsDeclared = true;
+      } else if (!boundHasValue) {
+        // Preserve the bare-declare default (inferred `unknown`). When a
+        // value is present without a type, leave the type unset so
+        // `ce.declare` infers it from the value.
+        def.inferred = true;
+        def.type = 'unknown';
+      }
+      if (boundHasValue) def.value = boundValue;
+      if (holdUntil) def.holdUntil = holdUntil;
+      if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
+      ce.declare(symbolName, def);
+      const created = ce.context.lexicalScope.bindings.get(symbolName);
+      if (created)
+        (created as { _declaredByStatement?: boolean })._declaredByStatement =
+          true;
+    }
+    const declared = currentScope.bindings.get(symbolName);
+    if (uninitialized !== undefined && declared !== undefined)
+      initializeBlockLocal(
+        ce,
+        currentScope.bindings,
+        symbolName,
+        uninitialized,
+        declared
+      );
+    // Install again, under the signature declared above, the clauses
+    // that were installed ahead onto the dropped binding, so that a
+    // call in a statement between this declaration and the
+    // `DefineFunction` statement finds them: `let g: (integer) ->
+    // integer`, `let a = String(g(2))`, `function g(k) { 2k }` gives
+    // `a` the value `"4"`. Not after a declaration with a value
+    // (`let g = 5`): the name holds that value until the
+    // `DefineFunction` statement runs.
+    if (installsAhead !== undefined && !boundHasValue)
+      reinstallClausesAhead(ce, symbolName, installsAhead);
+  };
+
+  // Would declaring `symbolName` with `boundValue` be rejected by the
+  // positional type? Answered WITHOUT writing anything, so a
+  // destructuring pattern can validate every leaf before it declares the
+  // first one.
+  //
+  // The verdict is the one both `declareOne` branches ultimately reach —
+  // the per-axis `matchesDeclaredTypeAxes` (the fresh branch through the
+  // value-definition constructor, the upgrade branch through
+  // `ce.assign`) — with the same arguments and the same error value, so
+  // the diagnostic is unchanged: same code, same blamed name.
+  const validateOne = (
+    symbolName: string,
+    boundValue: Expression
+  ): Expression | null => {
+    if (!hasType) return null;
+    const declaredType = ce.type(type!);
+    // Both install branches skip the check for an unknown declared type
+    // — and `"unknown"` is exactly the filler the positional-value form
+    // puts in the type slot when there is no annotation, so this is the
+    // untyped path.
+    if (declaredType.isUnknown) return null;
+    // A `Function` literal is RECONCILED against a declared signature
+    // before being checked (`ce.declare()` ascribes the declared return
+    // type onto a literal that lacks one). Checking it here, ahead of
+    // that, could reject a value the install path accepts, so leave
+    // literals to the install path.
+    if (isFunction(boundValue, 'Function')) return null;
+    if (
+      matchesDeclaredTypeAxes(
+        ce,
+        boundValue.type,
+        declaredType,
+        effectsDeclared,
+        boundValue,
+        symbolName
+      )
+    )
+      return null;
+    return typeCompatibilityErrorValue(
+      ce,
+      declaredTypeError(symbolName, boundValue, declaredType)
+    );
+  };
+
+  //
+  // `Declare((x, y), {value -> t})` — a destructuring declaration
+  // (`let (x, y) = t`). The pattern is a raw Tuple of symbols (`_`
+  // skips a position) or nested tuple patterns — irrefutable in FORM;
+  // a runtime shape mismatch is an Error value. Requires a value. Each
+  // name declares in the current scope (constant for `const`);
+  // evaluates to the tuple value.
+  //
+  // The value is the one resolved above — the POSITIONAL operand
+  // (`Declare((x, y), "unknown", t)`) or the attributes `value`, with
+  // the same precedence as for a symbol name. The two forms read the
+  // operands through the single resolution above so they cannot drift:
+  // the positional value used to be invisible here, and the
+  // declaration silently bound nothing.
+  //
+  // A positional type is passed through to each name, as it is for a
+  // symbol name (`declareOne` closes over it). The Epsil surface has no
+  // spelling for it — a `:` annotation on a destructuring `let` is a
+  // parse diagnostic, and `"unknown"` is the no-annotation filler the
+  // positional value form needs in the type slot.
+  //
+  if (isFunction(ops[0], 'Tuple')) {
+    if (!hasValue) return undefined;
+    // A per-name failure surfaces as an error value, exactly as it does
+    // for a symbol name below — but it must not leave the pattern half
+    // declared: a leaf value that does not fit the positional type is
+    // rejected in a read-only pre-pass over EVERY position (see
+    // `bindTuplePattern`), so nothing is installed, exactly as for a
+    // shape mismatch. Without it,
+    // `Declare((x, y), "integer", (3, 4.5))` bound `x` and then errored
+    // on `y`.
+    try {
+      return (
+        bindTuplePattern(
+          ce,
+          ops[0],
+          value!,
+          (name, el) => {
+            // Each leaf is a part of `value`, which was prepared for
+            // storage as a whole (`assignedValue`) before any name was
+            // declared: the declaration is simultaneous.
+            declareOne(name, el);
+            return null;
+          },
+          validateOne
+        ) ?? value!
+      );
+    } catch (e) {
+      if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+      if (isTypeCompatibilityError(e))
+        return typeCompatibilityErrorValue(ce, e);
+      throw e;
+    }
+  }
+
+  // As in `Assign`: the declared operand is a NAME held raw, so read it
+  // directly rather than evaluating it (which would resolve it to a
+  // value and make the declaration vanish).
+  const symbolName = sym(isSymbol(ops[0]) ? ops[0] : ops[0].evaluate());
+  if (!symbolName) return undefined;
+
+  // See the `Assign` handler: a violated definition-annotation contract
+  // — or a declared-type mismatch — is not installed and surfaces as an
+  // `incompatible-type` error value.
+  try {
+    declareOne(symbolName, hasValue ? value : undefined);
+  } catch (e) {
+    if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+    if (isTypeCompatibilityError(e)) return typeCompatibilityErrorValue(ce, e);
+    throw e;
+  }
+  return hasValue ? value : ce.Nothing;
 }

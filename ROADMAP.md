@@ -5789,7 +5789,28 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   the `Map` auto-compilation (`map-auto-compile.ts`) declines when the engine
   prefers bignums; with `ce.precision = 'machine'` every element runs compiled
   and the program takes 0.2 s. The pool route must answer which precision it
-  runs at. Part 2 of row 441 (a pool for an engine inside a dedicated
+  runs at.
+  Done 2026-10-24 (first step): `executeEpsilAsync(ce, source, { signal })`
+  (`src/epsil/execute-epsil.ts`), and `evaluateAsync` handlers for `Assign`
+  and `Declare`, so that `let fit = findFit(…)` takes the asynchronous route
+  of its value. Left: (a) the pool route of a large `Map`/`Sum` drain, which
+  WAITS FOR A USER DECISION: on an engine with the default (bignum)
+  precision, a float64 batch on the pool gives different digits than the
+  interpreter (the sum above ends in `…001.847777` with bignums and in
+  `…002.2` at machine precision), so the choice is between running the pool
+  route only at machine precision (the rule of the marked tier today), or
+  also at the default precision with float64 values; (b) the `--workers N`
+  option of the `epsil` command, the REPL and the MCP server (section 5.7 of
+  the plan), and their use of the asynchronous executor.
+  (c) While `executeEpsilAsync` waits on a statement, the engine keeps the
+  fields of the run (`_epsilBatchId`, `_epsilStatementResultHook`,
+  `_epsilDeclarationRoute`), because the asynchronous parts of the statement
+  read them after their own waits; other work on the engine during the wait
+  would see them, so the documentation forbids it. Lifting the limit means
+  carrying the three fields with the asynchronous evaluation, as its context
+  stack carries the deadline frame (`deadlineFrameOf()`,
+  `evaluation-epoch.ts`).
+  Part 2 of row 441 (a pool for an engine inside a dedicated
   worker) needed no change: tested in Node and in three browsers on
   2026-10-24 (`test/compute-engine/ce-314-3-nested-pool.test.ts`,
   `benchmarks/workers/nested-pool-browser-probe.mjs`) and documented in

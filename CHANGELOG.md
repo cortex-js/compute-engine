@@ -12,6 +12,31 @@
   values of a shared list per cell, a 64 × 64 × 64 grid takes 3.5 ms instead
   of 4.05 ms.
 
+- **`executeEpsilAsync()`** (ROADMAP CE-314.1, Tycho row 441). Runs an Epsil
+  program as `executeEpsil()` does and returns a promise of the same result.
+  Each top-level statement is evaluated with `evaluateAsync()`, so a
+  `findFit` whose search runs on the worker pool, or an operator with only an
+  `evaluateAsync` handler, takes its asynchronous route. The `signal` option
+  stops the program: the promise rejects with a `CancellationError`. A
+  `withTimeLimit()` span around the call applies to the whole program.
+
+### Bug Fixes
+
+- **`Assign` and `Declare` evaluate their value on the asynchronous route.**
+  With `evaluateAsync()`, `x = FindFit(…)` and `let x = FindFit(…)` ran the
+  synchronous `FindFit`, and an operator with only an `evaluateAsync` handler
+  stayed unevaluated in the value. Both now await the asynchronous evaluation
+  of the value; the results of the synchronous route do not change.
+
+### Performance
+
+- **`FindFit.evaluateAsync()` no longer blocks the calling thread for long**
+  (ROADMAP CE-429). One grid point of the separable scan and the setup (the
+  data rows, the compilation of the model and of its derivatives) now give
+  the event loop a turn, about every 8 ms, and an abort during the setup
+  stops it. For an interpreted model over 200 rows, the longest block went
+  from about 110 ms to 12 ms; the results do not change.
+
 ## 0.166.0 _2026-10-24_
 
 ### Breaking Changes

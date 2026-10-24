@@ -5663,7 +5663,7 @@ export function protocolPropertyResultType(
   if (record === undefined) return 'error';
   // A SET evaluates to the value ASSIGNED, not to whatever the `set` handler
   // returns (which is discarded) and not to the receiver — the same answer
-  // `objectFieldStore()` in `library/collections.ts` gives for a stored field.
+  // `storeObjectField()` in `library/collections.ts` gives for a stored field.
   // So its type is the VALUE's own type, exactly as `Assign`'s type handler
   // reports the type of its right-hand side: `p.(P.value) = 1` types `integer`,
   // not the `number` the property is declared as. (The value still has to FIT
@@ -5834,7 +5834,7 @@ export function evaluateProtocolPropertyOperator(
   );
 
   // The handler's result is DISCARDED: a store evaluates to the value assigned,
-  // exactly as `objectFieldStore()` (`library/collections.ts`) answers for a
+  // exactly as `storeObjectField()` (`library/collections.ts`) answers for a
   // stored field, and `protocolPropertyResultType` types this application that
   // way. Two results are not discarded: a FAILED handler still has something to
   // say, and an implementation that DECLINED (`undefined` — an expression
@@ -5938,7 +5938,7 @@ function missingPropertyError(
  *
  * The handler's own result is DISCARDED. It used to rebind the receiver, and
  * that is what retired: the assignment stores, and its value is the value
- * assigned — the same answer `objectFieldStore()` gives for a stored field.
+ * assigned — the same answer `storeObjectField()` gives for a stored field.
  *
  * `undefined` means "no protocol property answers here"; every other outcome
  * is the expression the assignment evaluates to.

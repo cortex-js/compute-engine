@@ -239,8 +239,16 @@ describe('a pool that cannot take the batch (CE-428)', () => {
     expect(res.reason).toBe('pool-declined');
     expect(res.out[1]).toBe(xs[1] ** 2);
     // With `inline: false`, the cells the workers did not do stay undone.
+    // A result of its own: the inline run above can record a calibration of
+    // `r` (when its 30,000 cells took 2 ms or more, on a loaded machine),
+    // which raises the threshold of `r` above 30,000 cells, and the call
+    // then stays off the pool as `below-threshold`.
+    const fresh = compile(own.parse('x^2'));
     const out = new Float64Array(30_000).fill(-7);
-    const refused = await r.broadcastAsync!({ x: xs }, { inline: false, out });
+    const refused = await fresh.broadcastAsync!(
+      { x: xs },
+      { inline: false, out }
+    );
     expect(refused.done).toBe(0);
     expect(refused.route).toBe('pool');
     expect(refused.reason).toBe('pool-declined');

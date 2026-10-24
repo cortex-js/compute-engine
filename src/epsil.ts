@@ -15,7 +15,7 @@ export { ComputeEngine } from './compute-engine.js';
 //
 export { parseEpsil } from './epsil/parse-epsil.js';
 export { serializeEpsil } from './epsil/serialize-epsil.js';
-export { executeEpsil } from './epsil/execute-epsil.js';
+export { executeEpsil, executeEpsilAsync } from './epsil/execute-epsil.js';
 export { resolveLibraryNames } from './epsil/resolve-library-names.js';
 export {
   canonicalLibraryName,
@@ -24,6 +24,7 @@ export {
 } from './epsil/library-names.js';
 export type {
   ExecuteEpsilOptions,
+  ExecuteEpsilAsyncOptions,
   ExecuteEpsilResult,
 } from './epsil/execute-epsil.js';
 export type { CancellationCause } from './common/interruptible.js';

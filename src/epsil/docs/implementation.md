@@ -126,6 +126,45 @@ When the budget expires the program stops: `result.value` is the
 See [Evaluation](/epsil/evaluation/#interruptibility) for the rest of the
 cancellation model.
 
+### Asynchronous execution
+
+`executeEpsilAsync(ce, source, options?)` runs a program as `executeEpsil`
+does and returns a promise of the same result. Each top-level statement is
+evaluated with `evaluateAsync()`, so an operator that has an asynchronous
+route takes it: a `findFit` whose global search runs on the engine's worker
+pool (`ce.workers`), or an operator that a host declared with only an
+`evaluateAsync` handler. This includes the value of a `let` or of an
+assignment: `let fit = findFit(…)` runs the asynchronous `findFit`.
+
+```ts
+const controller = new AbortController();
+const result = await executeEpsilAsync(ce, source, {
+  parseLatex,
+  signal: controller.signal,
+});
+```
+
+An abort of `signal` stops the program: the promise rejects with a
+`CancellationError` whose `cause` is the signal's reason, and no later
+statement runs. A `withTimeLimit()` span around the call is one deadline for
+the whole program, as with `executeEpsil`, although the span closes when the
+call returns its promise:
+
+```ts
+let pending;
+ce.withTimeLimit({ ms: 2000, label: "epsil-cell" }, () => {
+  pending = executeEpsilAsync(ce, source);
+});
+const result = await pending;
+```
+
+The program runs in the current scope of `ce`, as with `executeEpsil`. Until
+the promise settles, run no other evaluation, declaration or program on the
+same engine: that work would run in the scope of the program and would be
+taken as part of it (a declaration counted as a statement of the program, an
+error reported in its diagnostics). Use another engine for work that must
+run at the same time.
+
 ### Serialization
 
 `serializeEpsil(expression, options?)` converts MathJSON back to Epsil:

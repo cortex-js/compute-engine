@@ -233,6 +233,7 @@ import type {
   TypeHandlerContext,
   OperatorTypeHandlerOnTypes,
   IComputeEngine as ComputeEngine,
+  ObjectInterface,
   Scope,
 } from '../global-types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
@@ -7897,12 +7898,12 @@ export function fieldStoreRefusal(
 }
 
 /**
- * Perform `Assign(Field(base, name), value)` as a store, from `Assign`'s
- * EVALUATE handler — the route where a real receiver is in hand.
- *
- * `undefined` means the receiver did not evaluate to an object and this is not
- * a store; every other outcome is the expression the assignment evaluates to
- * (the stored value on success, an error value otherwise).
+ * The store target of `Assign(Field(base, name), value)`, for `Assign`'s
+ * evaluate handlers — the route where a real receiver is in hand: the field
+ * name and its declared type, or `undefined` when this is not a store (the
+ * receiver did not evaluate to an object, or its layout has no field of that
+ * name). Nothing is evaluated here; `storeObjectField()` stores the value
+ * once the caller has evaluated it.
  *
  * `base` is the receiver ALREADY EVALUATED by the caller — evaluated rather
  * than canonicalized-and-read, because the target of a store is a *reference*
@@ -7912,20 +7913,24 @@ export function fieldStoreRefusal(
  * route it tries, so a receiver carrying effects fires them exactly once
  * however the assignment is ultimately resolved.
  *
- * The RHS is evaluated here, and only once this function is committed to
- * storing — that is both ruling B8's left-to-right order (receiver, then
+ * The caller evaluates the RHS only once this function returns a target — that is both ruling B8's left-to-right order (receiver, then
  * value) and the guarantee that a declined route costs the RHS nothing. It is
  * evaluated at the exact tier (never `.N()`) and
  * the EVALUATED result is what lands in the slot — the rule that makes a field
  * read a pure load and the object's version counter a sufficient cache
  * dependency (Appendix B, "A store writes the evaluated value").
  */
-export function objectFieldStore(
-  ce: ComputeEngine,
+/** A field of an object that an assignment stores into. */
+export type ObjectFieldTarget = {
+  base: Expression & ObjectInterface;
+  name: string;
+  declared: Type;
+};
+
+export function objectFieldStoreTarget(
   lhs: Expression,
-  rhs: Expression,
   base: Expression | undefined
-): Expression | undefined {
+): ObjectFieldTarget | undefined {
   if (!isFunction(lhs, 'Field')) return undefined;
   if (!isString(lhs.ops[1])) return undefined;
   const name = lhs.ops[1].string;
@@ -7950,8 +7955,20 @@ export function objectFieldStore(
   // error, when no route answers at all, is `fieldStoreRefusal`'s to make.
   const declared = base._fieldType(name);
   if (declared === undefined) return undefined;
+  return { base, name, declared };
+}
 
-  const value = rhs.evaluate();
+/**
+ * Store `value`, the evaluated right-hand side, into the field `target` that
+ * `objectFieldStoreTarget()` gave. Returns the stored value, or an error
+ * value when `value` is invalid or does not fit the declared field type.
+ */
+export function storeObjectField(
+  ce: ComputeEngine,
+  target: ObjectFieldTarget,
+  value: Expression
+): Expression {
+  const { base, name, declared } = target;
   if (!value.isValid) return value;
 
   // The declared field type is a contract the store must keep: a slot holds
