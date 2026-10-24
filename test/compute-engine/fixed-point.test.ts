@@ -145,6 +145,50 @@ describe('FixedPoint stop test', () => {
     expect(value(['FixedPoint', 'Cos', 1, 1])).toBe('cos(1)');
   });
 
+  test('the default limit reached without converging stays unevaluated', () => {
+    // A 2-cycle and a slow drift: neither grows, so the divergence guard
+    // does not catch them, and neither is a fixed point.
+    const cycle = ['FixedPoint', ['Function', ['Subtract', 1, 'x'], 'x'], 0.3];
+    for (const mode of ['evaluate', 'N'] as const) {
+      const r = ce.box(cycle)[mode]();
+      expect(r.operator).toBe('FixedPoint');
+    }
+    const drift = [
+      'FixedPoint',
+      ['Function', ['Add', 'x', { num: '0.001' }], 'x'],
+      FLOAT_ONE,
+    ];
+    expect(ce.box(drift).evaluate().operator).toBe('FixedPoint');
+  });
+
+  test('an explicit maximum reached returns the last iterate', () => {
+    const f = ['Function', ['Subtract', 1, 'x'], 'x'];
+    expect(
+      ce.box(['FixedPoint', f, { num: '0.3' }, 3]).evaluate().re
+    ).toBeCloseTo(0.7, 12);
+    expect(
+      ce.box(['FixedPoint', f, { num: '0.3' }, 4]).evaluate().re
+    ).toBeCloseTo(0.3, 12);
+  });
+
+  test('a raised ce.iterationLimit lets a slow iteration converge', () => {
+    // x ↦ 0.99x + 0.01 from 2.0 closes on 1 by 1% a step: about 3700 steps to
+    // the working precision, more than the default limit.
+    const slow = [
+      'FixedPoint',
+      ['Function', ['Add', ['Multiply', 0.99, 'x'], 0.01], 'x'],
+      { num: '2.0' },
+    ];
+    const saved = ce.iterationLimit;
+    try {
+      expect(ce.box(slow).evaluate().operator).toBe('FixedPoint');
+      ce.iterationLimit = 100_000;
+      expect(ce.box(slow).evaluate().re).toBeCloseTo(1, 12);
+    } finally {
+      ce.iterationLimit = saved;
+    }
+  });
+
   test('an explicit function of no parameter is accepted', () => {
     // A function of no parameter ignores its arguments.
     expect(value(['FixedPoint', ['Function', 42], 0])).toBe('42');

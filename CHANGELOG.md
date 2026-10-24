@@ -1,3 +1,17 @@
+## Unreleased
+
+### Behavior Changes
+
+- **`FixedPoint(f, x)` stays unevaluated when the default iteration limit is
+  reached without converging.** `FixedPoint(x ↦ 1 - x, 0.3)` cycles between
+  `0.3` and `0.7`, and used to return whichever it held after `ce.iterationLimit`
+  applications, a value that is not a fixed point. The call now stays
+  unevaluated, as the divergence guards of `FixedPoint` and `Any` over an
+  unbounded source already do; a larger `ce.iterationLimit` lets a slow
+  iteration converge. With an explicit maximum, the last value is still
+  returned, as in Wolfram's `FixedPoint[f, x, n]` (#474, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.165.0 _2026-10-24_
 
 ### Breaking Changes
