@@ -286,8 +286,7 @@ export class BoxedType {
           'unresolved-type-variable',
           `The type \`${typeToString(this.type)}\` refers to a type variable that is not quantified by a \`where\` clause: an open type is not declarable`
         );
-      else if (isInternedType(this.type))
-        VALIDATED_CLOSED_TYPES.add(this.type);
+      else if (isInternedType(this.type)) VALIDATED_CLOSED_TYPES.add(this.type);
     }
   }
 

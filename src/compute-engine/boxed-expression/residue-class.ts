@@ -254,9 +254,7 @@ const enginesWithResidueDeclarations = new WeakSet<object>();
  * a scalar and lifts the per-cell answer (`BoxedFunction.type`).
  */
 export function residueResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  const nan = ops.some(
-    (d) => d.type !== 'never' && isSubtype(d.type, 'nan')
-  );
+  const nan = ops.some((d) => d.type !== 'never' && isSubtype(d.type, 'nan'));
   return nan ? { kind: 'union', types: ['nan', 'residue'] } : 'residue';
 }
 
@@ -339,10 +337,7 @@ function holds(
  * operator) has an arm whose result can be a residue class: `(any, any) ->
  * residue`, `(integer) -> integer | residue`.
  */
-export function signatureReturnsResidue(
-  type: Type,
-  certain = false
-): boolean {
+export function signatureReturnsResidue(type: Type, certain = false): boolean {
   if (typeof type === 'string') return false;
   // Kept per type OBJECT: a type is immutable, and an inferred signature that
   // changes is a new object (`_inferWithoutFacts()` replaces the signature of

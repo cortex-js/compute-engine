@@ -1334,10 +1334,7 @@ export function typeContainsMissing(
  * number rules by its type, not by the name of the head that made it
  * (`docs/plans/2026-10-23-residue-class-type.md`).
  */
-export function hasResidueArm(
-  t: Readonly<Type>,
-  seen?: AliasDescent
-): boolean {
+export function hasResidueArm(t: Readonly<Type>, seen?: AliasDescent): boolean {
   return containsPrimitive(t, (p) => p === 'residue', seen);
 }
 
@@ -1521,7 +1518,12 @@ function containsPrimitive(
       // cut made a chain of 32 aliases with a self-recursive arm
       // exponential again (measured 2026-10-23).
       if (unfolded === undefined || unfolded.type === t) return false;
-      const result = containsPrimitive(unfolded.type, leaf, unfolded.seen, memo);
+      const result = containsPrimitive(
+        unfolded.type,
+        leaf,
+        unfolded.seen,
+        memo
+      );
       if (key !== undefined) memo.set(key, result);
       return result;
     }

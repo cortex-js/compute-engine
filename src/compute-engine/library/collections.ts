@@ -6283,9 +6283,7 @@ function elementsFoldAsBigOp(t: Type): boolean {
   // The `missing` arm of the elements is dropped before the arms are read,
   // so `unknown | missing` (an element of unknown type that may be absent)
   // is read as `unknown`.
-  const arms = (
-    typeof r !== 'string' && r.kind === 'union' ? r.types : [r]
-  )
+  const arms = (typeof r !== 'string' && r.kind === 'union' ? r.types : [r])
     .map((m) => resolveTypeAlias(m))
     .filter((m) => m !== 'missing');
   if (arms.length === 0) return false;

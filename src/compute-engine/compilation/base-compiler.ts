@@ -33782,7 +33782,9 @@ export class BaseCompiler {
     const r = resolveTypeForCompilation(stripMissingFromType(t));
     if (r === 'never') return false;
     return (
-      isSubtype(r, 'number') || isSubtype(r, 'boolean') || isSubtype(r, 'string')
+      isSubtype(r, 'number') ||
+      isSubtype(r, 'boolean') ||
+      isSubtype(r, 'string')
     );
   }
 

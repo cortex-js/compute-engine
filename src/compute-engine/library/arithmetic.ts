@@ -247,7 +247,6 @@ import {
   widen,
   widenAll,
   hasResidueArm,
-  withoutResidueArm,
   withoutResidueArmDeep,
   isUninhabitedWithoutResidue,
   type AliasDescent,
@@ -9133,17 +9132,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Multiply'),
-      signature:
-        '((number | residue)*) -> number',
+      signature: '((number | residue)*) -> number',
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
         if (ops.some((x) => isResidueClassOperand(x, engine)))
           return BoxedType.forResult(
-            residueShapedResultType(ops, engine, (o) =>
-              derive('Multiply', o)
-            ),
+            residueShapedResultType(ops, engine, (o) => derive('Multiply', o)),
             engine._typeResolver
           );
         if (ops.length === 1)
@@ -10160,8 +10156,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforcement seam is being bypassed, the folded literal types more
       // sharply than the unfolded node, and the folded value is exactly
       // what the gate would answer.
-      signature:
-        '(complex | infinity | residue) -> number',
+      signature: '(complex | infinity | residue) -> number',
       examples: ['-(x - 1)'],
       nanBehavior: 'propagate',
       partiality: 'total',
@@ -11604,8 +11599,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // live in `BoxedNumber.sqrt()`, which both routes call. The result
       // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
       // which the signed pair excludes.
-      signature:
-        '(complex | infinity | residue) -> complex | infinity',
+      signature: '(complex | infinity | residue) -> complex | infinity',
       examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
@@ -11798,8 +11792,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Square(±∞) = +∞`, and `Square(~oo) = ~oo` (a positive power of
       // `~oo` is `~oo` in every direction of approach). A precise carrier
       // declared here would be a claim nothing consults.
-      signature:
-        '(number | residue) -> number',
+      signature: '(number | residue) -> number',
       examples: ['[Square(3), Square(x + 1)]'],
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
@@ -11841,8 +11834,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastExemptions: ['tuples', 'collection-result'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
-      signature:
-        '((number | residue)+) -> number',
+      signature: '((number | residue)+) -> number',
       examples: ['5 - 3 - x'],
       type: subtractTypeHandler,
       canonical: (args, { engine }) => {
@@ -15327,9 +15319,7 @@ function residueExtremumError(
   // The strict reading: an operand typed `integer | residue` may be a
   // number, and the call is typed as if it were one; a class among its
   // values is refused when the call is evaluated (`processMinMaxItem`).
-  return ops.some((x) => typeIsResidueForCertain(x.type))
-    ? 'error'
-    : undefined;
+  return ops.some((x) => typeIsResidueForCertain(x.type)) ? 'error' : undefined;
 }
 
 function evaluateMinMax(
