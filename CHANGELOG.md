@@ -81,6 +81,42 @@
 
 ### Resolved Issues
 
+- **A compiled call with an argument that is one point or a list of points
+  gave a wrong value** (ROADMAP CE-407, Tycho row 435). With
+  `f: (tuple<number, number>) -> tuple<number, number>`,
+  `f := a ↦ (a.x + 1, a.y + 1)` and
+  `L: tuple<number, number> | list<tuple<number, number>>`, the interpreter
+  maps `f(L)` over the points when `L` holds a list, and gives one point when
+  `L` holds a point. The call was typed `tuple<number, number>`, and compiled
+  JavaScript called `f` once on the whole list: for `[(1, 2), (3, 4)]` it gave
+  `["1,21", "3,41"]` and reported success. The call is now typed
+  `list<tuple<number, number>> | tuple<number, number>`, and compiled
+  JavaScript tests the value at run time: it maps over a list of points and
+  gives a point whole. The same applies to an argument declared
+  `broadcastable<tuple<number, number>>`, which was typed and compiled as a
+  list of points only, so compiled code read one point as a list; a matrix
+  of points there throws at run time, as the interpreter gives an
+  `incompatible-type` error. An absent argument of such a type
+  (`… | missing`) gives `Missing`, as an absent list of points does; it was an
+  `incompatible-type` error. A union that also admits another collection
+  (`… | list<list<tuple<…>>>`, `… | list`), and a parameter with a
+  coordinate that is not a number, a boolean or a string
+  (`tuple<list<number>, number>`), are now declined by the compiler: a point
+  and a list of points cannot be told apart at run time there.
+
+- **A generic parameter declared `broadcastable<T>` with a number bound
+  refused a matrix** (ROADMAP CE-409). With
+  `w: (x: broadcastable<T>) -> list<T> where T: number` and `w := x ↦ [x]`,
+  `w([[1, 2], [3, 4]])` was the error `incompatible-type` when boxed, while
+  the same declaration without a type variable, `broadcastable<number>`, maps
+  to the cells (ROADMAP CE-405). The type solver read the matrix one level
+  down and bound `T` to the rows. It now binds `T` to the cells when the bound
+  cannot hold a list, also for a list with rows of different lengths:
+  `w([[1, 2], [3, 4]])` is `[[[1], [2]], [[3], [4]]]`, typed
+  `list<list<list<integer>>>`, and compiled code gives the same value. A type
+  variable with no bound (`where T`) now maps each row whole, as
+  `where T: value` does; each row was an `incompatible-type` error naming `T`.
+
 - **A parameter named `Return` can be called in the body of `Sum`,
   `Integrate` and the other operators that take an expression** (ROADMAP
   CE-401). Since 0.164.0 a `Return` statement in such a body is the error

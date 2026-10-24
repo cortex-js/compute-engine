@@ -1,0 +1,204 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/**
+ * A call of a user function whose parameter is declared as a point
+ * (`tuple<number, number>`), with an argument whose type says it is ONE
+ * point OR a list of points: `tuple<number, number> | list<tuple<number,
+ * number>>`, or `broadcastable<tuple<number, number>>`.
+ *
+ * The interpreter decides at the value: it binds a point whole and maps the
+ * call over a list of points. So the call is typed `R | list<R>`, and the
+ * compiled JavaScript tests the value at run time. Before the fix, the call
+ * of the union was typed `R` and compiled to one call of the function on the
+ * whole list (`x + 1` of an array is a string: `["1,21", "3,41"]`), and the
+ * call of `broadcastable<…>` was typed `list<R>` and compiled to a map, which
+ * read a single point as a list.
+ *
+ * ROADMAP CE-407, Tycho row 435
+ * (`~/dev/tycho/scripts/repros/2026-10-24-ce435-union-argument-to-tuple-param-compile-repro.mts`).
+ */
+
+const POINT = 'tuple<number, number>';
+const UNION = `${POINT} | list<${POINT}>`;
+const BROADCASTABLE = `broadcastable<${POINT}>`;
+
+function engine(argType: string, param = POINT): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('f', { signature: `(${param}) -> ${POINT}` });
+  ce.assign('f', ce.parse('a \\mapsto (a.x+1, a.y+1)'));
+  ce.declare('L', argType);
+  return ce;
+}
+
+function run(ce: ComputeEngine, value: unknown): unknown {
+  const result = compile(ce.parse('f(L)'), { fallback: false } as never) as {
+    success: boolean;
+    run?: (vars: Record<string, unknown>) => unknown;
+  };
+  expect(result.success).toBe(true);
+  return result.run!({ L: value });
+}
+
+describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
+  test('the union: the call is typed as a point or a list of points', () => {
+    const ce = engine(UNION);
+    expect(ce.parse('f(L)').type.toString()).toBe(
+      'list<tuple<number, number>> | tuple<number, number>'
+    );
+  });
+
+  test('the union: compiled, a list of points is mapped', () => {
+    expect(
+      run(engine(UNION), [
+        [1, 2],
+        [3, 4],
+      ])
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+  });
+
+  test('the union: compiled, one point is given whole', () => {
+    expect(run(engine(UNION), [1, 2])).toEqual([2, 3]);
+  });
+
+  test('the union: compiled, an empty list is an empty list', () => {
+    expect(run(engine(UNION), [])).toEqual([]);
+  });
+
+  test('the union: the interpreter agrees', () => {
+    const ce = engine(UNION);
+    ce.assign('L', ce.parse('[(1,2),(3,4)]'));
+    expect(ce.parse('f(L)').evaluate().toString()).toBe('[(2, 3),(4, 5)]');
+    ce.assign('L', ce.parse('(1,2)'));
+    expect(ce.parse('f(L)').evaluate().toString()).toBe('(2, 3)');
+  });
+
+  test('the union with a list of integer points', () => {
+    const ce = engine(`${POINT} | list<tuple<integer, integer>>`);
+    expect(
+      run(ce, [
+        [1, 2],
+        [3, 4],
+      ])
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+  });
+
+  test('the union with `missing`: an absent argument answers `Missing`', () => {
+    const ce = engine(`${UNION} | missing`);
+    expect(ce.parse('f(L)').type.toString()).toBe(
+      'list<tuple<number, number>> | missing | tuple<number, number>'
+    );
+    expect(run(ce, undefined)).toBeUndefined();
+    expect(run(ce, [1, 2])).toEqual([2, 3]);
+    ce.assign('L', ce.Missing);
+    expect(ce.parse('f(L)').evaluate().json).toBe('Missing');
+  });
+
+  test('`broadcastable<tuple<…>>`: typed as a point or a list of points', () => {
+    const ce = engine(BROADCASTABLE);
+    expect(ce.parse('f(L)').type.toString()).toBe(
+      'list<tuple<number, number>> | tuple<number, number>'
+    );
+  });
+
+  test('`broadcastable<tuple<…>>`: compiled, a point and a list of points', () => {
+    expect(run(engine(BROADCASTABLE), [1, 2])).toEqual([2, 3]);
+    expect(
+      run(engine(BROADCASTABLE), [
+        [1, 2],
+        [3, 4],
+      ])
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+  });
+
+  test('`broadcastable<tuple<…>>`: a matrix of points throws, as the interpreter errors', () => {
+    expect(() => run(engine(BROADCASTABLE), [[[1, 2]], [[3, 4]]])).toThrow(
+      /not a point/
+    );
+    const ce = engine(BROADCASTABLE);
+    ce.assign('L', ce.parse('[[(1,2)],[(3,4)]]'));
+    expect(ce.parse('f(L)').evaluate().toString()).toMatch(/incompatible-type/);
+  });
+
+  test('a union with another collection arm is declined', () => {
+    const ce = engine(`${UNION} | list<list<${POINT}>>`);
+    expect(() =>
+      compile(ce.parse('f(L)'), { fallback: false } as never)
+    ).toThrow(/admits a collection that is not a list of points/);
+  });
+
+  test('a parameter whose coordinate can hold a list is declined', () => {
+    const param = 'tuple<list<number>, number>';
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: `(${param}) -> number` });
+    ce.assign('f', ce.parse('a \\mapsto a.y+1'));
+    ce.declare('L', `${param} | list<${param}>`);
+    expect(() =>
+      compile(ce.parse('f(L)'), { fallback: false } as never)
+    ).toThrow(/cannot tell one point from a list of points/);
+  });
+
+  test('a parameter with a tuple coordinate is declined', () => {
+    // A tuple compiles to an array, so the point `[[1, 2], 3]` looks like a
+    // list of points at run time.
+    const param = 'tuple<tuple<number, number>, number>';
+    const ce = new ComputeEngine();
+    ce.declare('f', { signature: `(${param}) -> number` });
+    ce.assign('f', ce.parse('a \\mapsto 7'));
+    ce.declare('L', `${param} | list<${param}>`);
+    expect(() =>
+      compile(ce.parse('f(L)'), { fallback: false } as never)
+    ).toThrow(/cannot tell one point from a list of points/);
+  });
+
+  test('a list whose first point is absent is still mapped', () => {
+    const ce = engine(`${POINT} | list<missing | ${POINT}>`);
+    expect(ce.parse('f(L)').type.toString()).toBe(
+      'list<missing | tuple<number, number>> | tuple<number, number>'
+    );
+    expect(run(ce, [undefined, [3, 4]])).toEqual([undefined, [4, 5]]);
+    expect(run(ce, [undefined])).toEqual([undefined]);
+    expect(run(ce, [1, 2])).toEqual([2, 3]);
+    ce.assign('L', ce.box(['List', 'Missing', ['Tuple', 3, 4]]));
+    expect(ce.parse('f(L)').evaluate().json).toEqual([
+      'List',
+      'Missing',
+      ['Tuple', 4, 5],
+    ]);
+  });
+
+  test('a union with a bare `list` arm is declined', () => {
+    const ce = engine(`${POINT} | list`);
+    expect(() =>
+      compile(ce.parse('f(L)'), { fallback: false } as never)
+    ).toThrow(/admits a collection that is not a list of points/);
+  });
+
+  test('controls: a list of points and a point keep their typing and code', () => {
+    const list = engine(`list<${POINT}>`);
+    expect(list.parse('f(L)').type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    expect(
+      run(list, [
+        [1, 2],
+        [3, 4],
+      ])
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+    const point = engine(POINT);
+    expect(point.parse('f(L)').type.toString()).toBe('tuple<number, number>');
+    expect(run(point, [1, 2])).toEqual([2, 3]);
+  });
+});

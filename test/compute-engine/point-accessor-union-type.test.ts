@@ -384,11 +384,13 @@ describe('a broadcastable point is read as a point or a list of points', () => {
     expect(ce.box(['PointX', 'P']).evaluate().toString()).toBe('[]');
   });
 
-  test('a function of a point maps over a broadcastable point list', () => {
+  test('a function of a point maps over a broadcastable point list, or takes one point', () => {
+    // The call maps only when the value is a list of points, so its type is
+    // `R | list<R>` (ROADMAP CE-407).
     const ce = new ComputeEngine();
     ce.declare('P', POINT);
     ce.declare('g', '(tuple<real, real>) -> real');
-    expect(ce.box(['g', 'P']).type.toString()).toBe('list<real>');
+    expect(ce.box(['g', 'P']).type.toString()).toBe('list<real> | real');
   });
 
   test('PointList refuses a broadcastable point component, as a list of points', () => {

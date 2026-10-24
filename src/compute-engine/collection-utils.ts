@@ -5736,6 +5736,53 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
 }
 
 /**
+ * Whether an argument of type `arg` is ONE POINT OR A LIST OF POINTS at a
+ * user-function parameter declared as the point type `param`, and the type
+ * does not say which. Two spellings give such a type:
+ *
+ * - a union whose arms are points (tuple types that are subtypes of
+ *   `param`) and lists of points (`isPointListArgumentType`), with at least
+ *   one arm of each kind: `tuple<number, number> | list<tuple<number,
+ *   number>>`;
+ * - `broadcastable<P>` with `P` a subtype of `param`. It is `P` or a tensor
+ *   of `P` cells.
+ *
+ * The interpreter decides at the value: it binds a point whole and maps the
+ * call over a list of points. So the call is typed `R | list<R>` for the
+ * declared result `R`, and a compiled call must test the value at run time.
+ * `isPointListArgumentType` also answers `true` for `broadcastable<P>`
+ * (it reads such a type by its `P`), so a site that must tell a list of
+ * points from this case asks this predicate first.
+ *
+ * A `missing` arm is removed from `arg` first, as in
+ * `isPointListArgumentType`.
+ */
+export function isPointOrPointListArgumentType(
+  arg: Type,
+  param: Type
+): boolean {
+  if (!isPointParameterType(param)) return false;
+  const stripped = stripMissingFromType(arg);
+  const a = resolveTypeReference(stripped) ?? stripped;
+  if (typeof a === 'string') return false;
+  if (a.kind === 'broadcastable') {
+    const e = stripMissingFromType(a.elements);
+    return e !== 'never' && isSubtype(e, param);
+  }
+  if (a.kind !== 'union') return false;
+  let point = false;
+  let list = false;
+  for (const arm of a.types) {
+    const r = resolveTypeReference(arm) ?? arm;
+    if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
+      point = true;
+    else if (isPointListArgumentType(r, param)) list = true;
+    else return false;
+  }
+  return point && list;
+}
+
+/**
  * True when `x` is a conditional value (`When`, `Which`, `If`), or a `List`,
  * `Tuple` or `Set` that holds one at any depth.
  *

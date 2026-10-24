@@ -4738,4 +4738,9 @@ export function assertGroundType(who: string, t: Type): void {
 // already depends on `instantiate.ts` and the reverse import would be a cycle
 // (zero-cycle budget, CLAUDE.md). Anything that can reach `isSubtype` has
 // therefore loaded this module and armed the solver.
-_setTypeAlgebra({ isSubtype, widen: widen as (...t: Type[]) => Type, narrow });
+_setTypeAlgebra({
+  isSubtype,
+  widen: widen as (...t: Type[]) => Type,
+  narrow,
+  cannotHoldAList,
+});

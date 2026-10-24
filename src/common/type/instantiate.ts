@@ -1084,6 +1084,9 @@ export interface TypeAlgebra {
   isSubtype: (a: Type, b: Type) => boolean;
   widen: (...types: Type[]) => Type;
   narrow: (...types: Type[]) => Type;
+  /** Whether no value of the type is a list (`cannotHoldAList` in
+   * `subtype.ts`). */
+  cannotHoldAList: (t: Type) => boolean;
 }
 
 let _algebra: TypeAlgebra | undefined;
@@ -2095,6 +2098,36 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
 }
 
 /**
+ * Whether the element pattern `pattern` of a `broadcastable<…>` parameter
+ * cannot hold a list once each of its variables is read at its declared
+ * bound: `T` with `T: number` cannot, `T` with no bound or `T: value` can.
+ * A variable that is not declared in the signature being solved, or a
+ * pattern that keeps a free variable, answers `false`.
+ */
+function elementPatternCannotHoldAList(s: SolverState, pattern: Type): boolean {
+  const bounds: Record<string, Type> = {};
+  for (const name of freeTypeVariables(pattern)) {
+    const bound = s.declared.get(name);
+    if (bound === undefined) return false;
+    bounds[name] = bound;
+  }
+  const ground = substituteTypeVariables(pattern, bounds);
+  if (freeTypeVariables(ground).size > 0) return false;
+  return algebra().cannotHoldAList(ground);
+}
+
+/** Whether `t` is a list, a tensor or an indexed collection: a type whose
+ * element a `broadcastable<…>` parameter reads one level down. A tuple is
+ * not one. */
+function isListLikeType(t: Type): boolean {
+  if (t === 'list' || t === 'indexed_collection') return true;
+  return (
+    typeof t === 'object' &&
+    (t.kind === 'list' || t.kind === 'indexed_collection')
+  );
+}
+
+/**
  * The element type ONE index into `actual` yields.
  *
  * Mirrors `collectionElementType` (`common/type/utils.ts`) EXACTLY — including
@@ -2610,19 +2643,43 @@ function walkPattern(
       // except a tensor of unknown rank, `tensor<S>`, which binds `T ≥ S`
       // (its cells), since `tensor<S>` is the collection arm of
       // `broadcastable<S>`.
-      const inner =
-        typeof actual === 'object' &&
-        actual.kind === 'list' &&
-        actual.dimensions === null
-          ? actual.elements
-          : typeof actual === 'object' &&
-              (actual.kind === 'broadcastable' ||
-                actual.kind === 'list' ||
-                actual.kind === 'indexed_collection')
-            ? elementTypeOf(actual)!
-            : actual === 'list' || actual === 'indexed_collection'
-              ? elementTypeOf(actual)!
-              : actual;
+      const descend = (t: Type): Type =>
+        typeof t === 'object' && t.kind === 'list' && t.dimensions === null
+          ? t.elements
+          : typeof t === 'object' &&
+              (t.kind === 'broadcastable' ||
+                t.kind === 'list' ||
+                t.kind === 'indexed_collection')
+            ? elementTypeOf(t)!
+            : t === 'list' || t === 'indexed_collection'
+              ? elementTypeOf(t)!
+              : t;
+      let inner = descend(actual);
+      // When the element pattern, read at the declared bounds of its
+      // variables, cannot hold a list (`broadcastable<T> where T: number`),
+      // the call maps to the cells of a nested collection, as a declared
+      // `broadcastable<number>` slot does (user decision 2026-10-24, ROADMAP
+      // CE-405): `T` binds to the cells. Reading one level only bound `T` to
+      // the rows of a matrix (`vector<integer^2>`), which fails the bound
+      // `T: number`, so the call was refused (ROADMAP CE-409). An element
+      // pattern that can hold a list (no bound, `T: value`) keeps the
+      // one-level reading: such a slot maps exactly one rank.
+      // A union whose arms are all lists (the rows of a ragged list,
+      // `vector<integer^2> | vector<integer^3>`) descends arm by arm, and
+      // the elements of the arms are joined.
+      if (elementPatternCannotHoldAList(s, pattern.elements))
+        for (;;) {
+          let next: Type | undefined;
+          if (isListLikeType(inner)) next = descend(inner);
+          else if (
+            typeof inner === 'object' &&
+            inner.kind === 'union' &&
+            inner.types.every(isListLikeType)
+          )
+            next = algebra().widen(...inner.types.map(descend));
+          if (next === undefined || next === inner) break;
+          inner = next;
+        }
       return walkPattern(
         s,
         pattern.elements,

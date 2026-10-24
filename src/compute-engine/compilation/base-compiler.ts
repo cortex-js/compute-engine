@@ -71,6 +71,7 @@ import {
   isTupleShapedType,
   isTupleWithListCoordinate,
   isPointListArgumentType,
+  isPointOrPointListArgumentType,
   isPointParameterType,
   leafwardElementType,
   pointCollectionElementType,
@@ -30407,6 +30408,7 @@ export class BaseCompiler {
     if (pointList !== undefined) return pointList;
     BaseCompiler.checkListCoordinateTupleArgs(engine, h, args);
     BaseCompiler.checkPointListAtMatrixUnionArgs(engine, h, args);
+    BaseCompiler.checkPointParamCollectionUnionArgs(engine, h, args);
 
     // Fail closed BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
@@ -31307,15 +31309,32 @@ export class BaseCompiler {
     const params = args.map((_a, i) =>
       BaseCompiler.userFunctionParamType(engine, h, i)
     );
+    // An argument typed as ONE point or a list of points
+    // (`tuple<…> | list<tuple<…>>`, `broadcastable<tuple<…>>`): the
+    // interpreter maps the call only when the value is a list, so the
+    // compiled call tests the value at run time (`dispatch` below).
+    // `isPointListArgumentType` also accepts `broadcastable<…>`, so this
+    // test is asked first.
+    const maybe = args.map((a, i) => {
+      const pt = params[i];
+      return (
+        pt !== undefined &&
+        !isTuple(a) &&
+        isPointOrPointListArgumentType(a.type.type, pt)
+      );
+    });
     const mapped = args.map((a, i) => {
       const pt = params[i];
       return (
         pt !== undefined &&
+        !maybe[i] &&
         !isTuple(a) &&
         isPointListArgumentType(a.type.type, pt)
       );
     });
     let at = mapped.indexOf(true);
+    const dispatch = at < 0 && maybe.includes(true);
+    if (dispatch) at = maybe.indexOf(true);
     // The type of one point of the list, when the list is at a parameter
     // with no declared type.
     let untypedElement: Type | undefined;
@@ -31350,11 +31369,42 @@ export class BaseCompiler {
         `${reason} A list of points is not a value the ` +
           `'${target.language ?? 'unknown'}' target can map a function over.`
       );
-    if (untypedElement === undefined && mapped.lastIndexOf(true) !== at)
+    if (
+      untypedElement === undefined &&
+      args.filter((_a, i) => mapped[i] || maybe[i]).length > 1
+    )
       throw new Error(
         `${reason} More than one argument is a list of points, and the ` +
           `compiled call maps over one list only.`
       );
+    // The run-time test reads a value as a list of points when it is an
+    // array whose first present element is an array. A point whose
+    // coordinates are numbers, booleans or strings (`tuple<number, number>`)
+    // is an array of coordinates that are not arrays, so the test tells the
+    // two apart. Any other coordinate can be an array on JavaScript: a list
+    // (`tuple<list<real>, real>`, `tuple<any, any>`), and also a tuple
+    // (`tuple<tuple<number, number>, number>`), which is not a list but
+    // compiles to an array. Then a point and a list of points look the same.
+    if (dispatch) {
+      const pt = resolveTypeForCompilation(params[at]!);
+      if (
+        typeof pt === 'string' ||
+        pt.kind !== 'tuple' ||
+        pt.elements.length === 0 ||
+        !pt.elements.every(
+          (e) =>
+            isSubtype(e.type, 'number') ||
+            isSubtype(e.type, 'boolean') ||
+            isSubtype(e.type, 'string')
+        )
+      )
+        throw new Error(
+          `${reason} The argument may also be one point, and a coordinate ` +
+            `of the parameter type \`${typeToString(params[at]!)}\` is not ` +
+            `a number, a boolean or a string, so the compiled call cannot ` +
+            `tell one point from a list of points at run time.`
+        );
+    }
     if (
       params.some(
         (pt, i) => i !== at && pt !== undefined && isNonRealNumber(pt)
@@ -31419,9 +31469,47 @@ export class BaseCompiler {
     const absent = typeContainsMissing(args[at].type.type);
     const listGuard = absent ? `${temps[at]} === undefined ? undefined : ` : '';
     const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
+    // A `broadcastable<tuple<…>>` value can also be a tensor of points of
+    // rank 2 or more (`[[(1, 2)], [(3, 4)]]`). The interpreter answers an
+    // `incompatible-type` error for it: an element of the outer list is not
+    // a point. The compiled map throws for an element whose first coordinate
+    // is an array, rather than give that element to the function.
+    const argType = resolveTypeForCompilation(
+      stripMissingFromType(args[at].type.type)
+    );
+    const nestedGuard =
+      dispatch &&
+      typeof argType !== 'string' &&
+      argType.kind === 'broadcastable'
+        ? `Array.isArray(${point}?.[0]) ? (() => { throw new TypeError(` +
+          `${JSON.stringify(
+            `\`${h}\` maps over a list of points, and an element of the ` +
+              `list is not a point (a tensor of points of rank 2 or more)`
+          )}); })() : `
+        : '';
+    const map =
+      `${temps[at]}.map((${point}) => ` +
+      `${pointGuard}${nestedGuard}${name}(${callArgs.join(', ')}))`;
+    const head = `(${temps.join(', ')}) => ${listGuard}`;
+    if (!dispatch) return `(${head}${map})(${codes.join(', ')})`;
+    // One point or a list of points: an empty array, or an array whose first
+    // element is an array, is a list of points (see the coordinate check
+    // above); any other value is one point, given whole to the function.
+    const onePointArgs = temps.map((t, i) =>
+      BaseCompiler.presentCheckedCode(t, checks[i])
+    );
+    const v = temps[at];
+    // An absent point lowers to `undefined` (`[undefined, [3, 4]]`), so the
+    // test reads the first PRESENT element. A list whose points are all
+    // absent is a list too: a point has at least one coordinate, and its
+    // coordinates are typed as present values.
+    const e = BaseCompiler.tempVar(target);
+    const isList =
+      `Array.isArray(${v}) && ((${e}) => ${e} === undefined || ` +
+      `Array.isArray(${e}))(${v}.find((${e}) => ${e} !== undefined))`;
     return (
-      `((${temps.join(', ')}) => ${listGuard}${temps[at]}.map((${point}) => ` +
-      `${pointGuard}${name}(${callArgs.join(', ')})))(${codes.join(', ')})`
+      `(${head}(${isList}) ? ${map} : ` +
+      `${name}(${onePointArgs.join(', ')}))(${codes.join(', ')})`
     );
   }
 
@@ -31502,6 +31590,57 @@ export class BaseCompiler {
           `of points at a parameter of type \`${typeToString(pt)}\`, which ` +
           `also admits a matrix. The compiled definition cannot tell a list ` +
           `of points from a matrix at run time.`
+      );
+    });
+  }
+
+  /**
+   * Fail closed for a call of user function `h` with an argument whose type
+   * is a UNION with a collection arm (a list, not a tuple) at a parameter
+   * declared as a point (`isPointParameterType`), when the point-list route
+   * (`tryCompilePointListCall`) did not take the call. Example: the
+   * parameter is `tuple<number, number>` and the argument is
+   * `tuple<number, number> | list<list<tuple<number, number>>>`.
+   *
+   * The interpreter decides at the value: it binds a point whole, maps the
+   * call over a list of points, and answers an `incompatible-type` error for
+   * any other collection. The ordinary compiled call gives the whole value
+   * to a definition compiled for one point, which computes with an array as
+   * if it were a coordinate: `x + 1` of an array is a string on JavaScript.
+   * The call is declined rather than compiled to a different value.
+   */
+  private static checkPointParamCollectionUnionArgs(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    args.forEach((a, i) => {
+      if (isTuple(a)) return;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (pt === undefined || !isPointParameterType(pt)) return;
+      const r = resolveTypeForCompilation(stripMissingFromType(a.type.type));
+      if (typeof r === 'string' || r.kind !== 'union') return;
+      // A bare name counts too (`list`, `range`, `matrix`), except `string`
+      // and `tuple`: neither is a collection the call maps over.
+      const collectionArm = r.types.some((arm) => {
+        const x = resolveTypeForCompilation(arm);
+        if (typeof x === 'string')
+          return (
+            x !== 'string' &&
+            x !== 'tuple' &&
+            isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
+          );
+        return (
+          x.kind !== 'tuple' && isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
+        );
+      });
+      if (!collectionArm) return;
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${i + 1} has the ` +
+          `type \`${typeToString(a.type.type)}\`, which admits a collection ` +
+          `that is not a list of points, at a parameter declared as the ` +
+          `point \`${typeToString(pt)}\`. The compiled call cannot tell its ` +
+          `values apart at run time.`
       );
     });
   }

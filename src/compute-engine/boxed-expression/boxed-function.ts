@@ -36,9 +36,11 @@ import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { callResultType } from './call-result-type.js';
 import {
   expandAliasesForLift,
+  freeTypeVariables,
   isMappedActual,
   isPolymorphicType,
   readTypeVariablesAsBounds,
+  substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import { isWildcard } from './pattern-utils.js';
 import { isErrorTypedOperand } from './error-typed-operand.js';
@@ -132,6 +134,7 @@ import {
   isFiniteIndexedCollection,
   isFiniteBroadcastParticipant,
   isPointListArgumentType,
+  isPointOrPointListArgumentType,
   isPointParameterType,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
@@ -14112,8 +14115,21 @@ export function broadcastableParamSlots(
 
   const slotOf = (t: Type): BroadcastSlot => {
     const s = substituteDeclaredBounds(sigType.typeParams, t);
-    if (typeof s !== 'string' && s.kind === 'broadcastable')
-      return { mappable: true, elements: s.elements, declared: true };
+    if (typeof s !== 'string' && s.kind === 'broadcastable') {
+      // A type variable with no declared bound (`broadcastable<T> where T`)
+      // admits any value, so the element contract reads it as `any`: the
+      // slot maps one rank (`any` can hold a list) and each element binds
+      // whole. Left as the variable `T`, every element of a matrix was an
+      // `incompatible-type` error naming `T`, while `where T: value` mapped
+      // the rows.
+      const unbounded: Record<string, Type> = {};
+      for (const name of freeTypeVariables(s.elements)) unbounded[name] = 'any';
+      return {
+        mappable: true,
+        elements: substituteTypeVariables(s.elements, unbounded),
+        declared: true,
+      };
+    }
     // A function-typed slot is a higher-order callback: bind whole. Same
     // reading as `paramsAreScalar`'s exemption — it never vetoes the OTHER
     // slots, which per-slot gating gives for free.
@@ -14237,6 +14253,14 @@ function mapsAsPointList(
  * operand that may be absent as a whole (`list<tuple<…>> | missing`) adds
  * `missing` to the result, and one whose points may be absent
  * (`list<missing | tuple<…>>`) adds `missing` to the result's element type.
+ *
+ * An operand whose type says it is one point OR a list of points
+ * (`tuple<…> | list<tuple<…>>`, `broadcastable<tuple<…>>`, see
+ * `isPointOrPointListArgumentType`) is mapped only when its value is a
+ * list. When no operand is surely a list of points, the type is
+ * `R | list<R>`: before this, the call was typed `R` for the union and
+ * `list<R>` for `broadcastable<…>`, and each was wrong for one of the two
+ * values.
  */
 function pointListApplicationType(
   plan: BroadcastSlotPlan | undefined,
@@ -14244,18 +14268,64 @@ function pointListApplicationType(
   result: Type
 ): Type | undefined {
   if (plan === undefined) return undefined;
-  const mapped = ops.filter((x, i) => mapsAsPointList(plan, i, x, false));
-  if (mapped.length === 0) return undefined;
+  const maybe = ops.filter((x, i) => mapsAsPointOrPointList(plan, i, x));
+  const mapped = ops.filter(
+    (x, i) =>
+      !mapsAsPointOrPointList(plan, i, x) && mapsAsPointList(plan, i, x, false)
+  );
+  if (mapped.length === 0 && maybe.length === 0) return undefined;
+  const listType = pointListMapType([...mapped, ...maybe], result);
+  if (mapped.length > 0) return listType;
+  const listArms =
+    typeof listType !== 'string' && listType.kind === 'union'
+      ? listType.types
+      : [listType];
+  return { kind: 'union', types: [result, ...listArms] };
+}
+
+/**
+ * Whether operand `x`, at a slot of the point-list plan `plan`, is typed as
+ * one point or a list of points (`isPointOrPointListArgumentType`): the
+ * application maps over it only when its value is a list.
+ */
+function mapsAsPointOrPointList(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: Expression
+): boolean {
+  const slot = plan.at(i);
+  if (!slot.mappable || slot.elements === undefined) return false;
+  if (isTuple(x)) return false;
+  return isPointOrPointListArgumentType(x.type.type, slot.elements);
+}
+
+/** The type `list<R>` of the point-list map over the operands `mapped`, with
+ * the absences they may carry (see `pointListApplicationType`). */
+function pointListMapType(
+  mapped: ReadonlyArray<Expression>,
+  result: Type
+): Type {
   let wholeAbsent = false;
   let cellAbsent = false;
   for (const x of mapped) {
     const present = withoutTopLevelMissing(x.type.type);
     if (present !== x.type.type) wholeAbsent = true;
-    const element = collectionElementType(
-      resolveTypeReference(present) ?? present
-    );
-    if (element !== undefined && typeContainsMissing(element))
-      cellAbsent = true;
+    // A union that holds one point or a list of points
+    // (`tuple<…> | list<missing | tuple<…>>`) is read arm by arm:
+    // `collectionElementType` of the union is `undefined`, and the point arm
+    // has no cells.
+    const resolved = resolveTypeReference(present) ?? present;
+    const arms =
+      typeof resolved !== 'string' && resolved.kind === 'union'
+        ? resolved.types
+        : [resolved];
+    for (const arm of arms) {
+      const r = resolveTypeReference(arm) ?? arm;
+      if (typeof r !== 'string' && r.kind === 'tuple') continue;
+      const element = collectionElementType(r);
+      if (element !== undefined && typeContainsMissing(element))
+        cellAbsent = true;
+    }
   }
   const list: Type = {
     kind: 'list',
@@ -14303,10 +14373,16 @@ function pointListAbsence(
     if (!slot.mappable || slot.elements === undefined) return;
     if (isAbsentScalarSymbol(x)) {
       const c = canonicalOps?.[i];
+      // An absent operand typed as one point or a list of points
+      // (`tuple<…> | list<tuple<…>> | missing`) answers `Missing` too:
+      // `isPointListArgumentType` covers that case for `broadcastable<…>`
+      // only, and the call is typed with the `missing` arm either way
+      // (`pointListApplicationType`).
       if (
         c !== undefined &&
         !isTuple(c) &&
-        isPointListArgumentType(c.type.type, slot.elements)
+        (isPointListArgumentType(c.type.type, slot.elements) ||
+          isPointOrPointListArgumentType(c.type.type, slot.elements))
       )
         whole = true;
       return;
