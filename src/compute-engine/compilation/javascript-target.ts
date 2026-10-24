@@ -538,7 +538,12 @@ import {
   type BroadcastInputs,
   type BroadcastOptions,
 } from './broadcast.js';
-import { makeBroadcastAsync, isShippableCode } from '../kernel-pool.js';
+import {
+  makeBroadcastAsync,
+  makeWillUsePool,
+  isShippableCode,
+  type BroadcastAsyncSpec,
+} from '../kernel-pool.js';
 import { literalParamsMap } from '../library/core.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
@@ -11398,7 +11403,7 @@ function compileToTarget(
   // plan, default stride and version) to the engine's worker pool, and runs
   // slices here when there is none (`kernel-pool.ts`).
   const engine = expr.engine;
-  result.broadcastAsync = makeBroadcastAsync({
+  const asyncSpec: BroadcastAsyncSpec = {
     kind: 'javascript',
     stored: result,
     lists: entryPlan?.kind === 'vars' ? entryPlan.lists : undefined,
@@ -11426,7 +11431,10 @@ function compileToTarget(
       }
     },
     workers: () => engine.workers,
-  });
+  };
+  result.broadcastAsync = makeBroadcastAsync(asyncSpec);
+  result.shippable = asyncSpec.shippable;
+  result.willUsePool = makeWillUsePool(asyncSpec);
   return result;
 }
 

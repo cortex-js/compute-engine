@@ -2755,17 +2755,73 @@ export interface BroadcastAsyncOptions extends BroadcastOptions {
    * least 1024), or 16 384 inline.
    */
   chunk?: number;
+  /**
+   * `false` refuses the calling thread: when the batch would not go to the
+   * worker pool (see `BroadcastAsyncResult.reason`), the call resolves at
+   * once with `done: 0` and evaluates no cell; when a worker fails during
+   * the batch, the call resolves with the cells that the workers finished,
+   * and does not complete the rest on the calling thread. A refused batch
+   * does not change the inline threshold, which the engine measures only on
+   * batches that run on the calling thread. `CompilationResult.willUsePool`
+   * gives the decision before the call. Default: `true`.
+   */
+  inline?: boolean;
 }
+
+/**
+ * Where `broadcastAsync()` evaluated a batch: `'pool'` when the workers of
+ * the engine's pool (`ce.workers`) evaluated the cells, `'calling-thread'`
+ * when the engine chose the calling thread for the batch, or completed it
+ * there after a worker failed.
+ */
+export type BroadcastAsyncRoute = 'pool' | 'calling-thread';
+
+/**
+ * Why the worker pool did not take a batch of `broadcastAsync()`:
+ * - `'no-pool'`: the engine has no pool (`ce.workers` is not set, or is not
+ *   a pool from `createKernelPool()`).
+ * - `'pool-unusable'`: the workers of the pool run another version of the
+ *   compiled-code runtime than this engine, so the pool takes no task.
+ * - `'not-shippable'`: the compiled result cannot run on a worker
+ *   (`CompilationResult.shippable` is `false`).
+ * - `'below-threshold'`: the batch has too few cells to pay for the
+ *   transfer to the workers (`CompilationResult.willUsePool` is `false` for
+ *   its cell count).
+ * - `'pool-declined'`: the batch went to the pool, and a worker refused or
+ *   failed a task (for example a disposed pool, or an input that cannot be
+ *   copied to a worker).
+ */
+export type BroadcastAsyncReason =
+  | 'no-pool'
+  | 'pool-unusable'
+  | 'not-shippable'
+  | 'below-threshold'
+  | 'pool-declined';
 
 export interface BroadcastAsyncResult {
   /** The output array (`options.out` when given). */
   out: Float64Array;
   /**
    * The number of leading cells that are valid: every cell, or fewer when
-   * `deadline` or `signal` stopped the batch; the cells after `done` are
-   * untouched.
+   * `deadline` or `signal` stopped the batch, when `inline: false` refused
+   * the calling thread, or when a worker failed under `inline: false`; the
+   * cells after `done` are untouched.
    */
   done: number;
+  /**
+   * Where the batch was evaluated. `'calling-thread'` with `inline: false`
+   * means that no cell was evaluated on the calling thread: the batch was
+   * refused (`done` is 0).
+   */
+  route: BroadcastAsyncRoute;
+  /**
+   * Present when the pool did not take the whole batch: the first reason
+   * that applies, in the order of {@link BroadcastAsyncReason}. With
+   * `route: 'pool'` it is always `'pool-declined'`: a worker failed, and
+   * the rest of the batch was not completed on the calling thread
+   * (`inline: false`, or the `signal` or `deadline` stopped it).
+   */
+  reason?: BroadcastAsyncReason;
 }
 
 /**
@@ -3170,11 +3226,40 @@ export type CompilationResult<
    * batch is small. Takes the same inputs, plus a `signal`, a `deadline` and
    * a `chunk` size, and resolves to the output and the count of leading cells
    * that are valid. Present where `broadcast` is. See `kernel-pool.ts`.
+   *
+   * Every cell is evaluated after the call returns: on the calling thread,
+   * the batch yields to the event loop (a macrotask turn) before its first
+   * slice and between two slices. The result also says where the batch ran
+   * (`route`) and, when the pool did not take it, why (`reason`). The
+   * option `inline: false` refuses the calling thread.
    */
   broadcastAsync?: (
     inputs: BroadcastInputs,
     options?: BroadcastAsyncOptions
   ) => Promise<BroadcastAsyncResult>;
+
+  /**
+   * Whether `broadcastAsync()` can send this result to a worker of the pool:
+   * `false` when the compiled code depends on the thread that compiled it (a
+   * random draw, which follows the engine's random stream and entropy
+   * handler; a function or variable given by the name of a host global; a
+   * caller `preamble`). A result that is not shippable always runs on the
+   * calling thread. Present where `broadcastAsync` is.
+   */
+  shippable?: boolean;
+
+  /**
+   * Whether `broadcastAsync()` would send a batch of `cells` cells to the
+   * engine's worker pool now, or keep it on the calling thread. It reads the
+   * pool (`ce.workers`) and the inline threshold at the time of the call:
+   * the threshold is 20 000 cells until the result has run a batch on the
+   * calling thread, then the count of cells that take about 10 ms there. For
+   * an `interval-js` result, `cells` is the count of intervals, not the
+   * length of the input array. `true` is the decision for the batch, not a
+   * promise of its route: a worker can still fail during it
+   * (`reason: 'pool-declined'`). Present where `broadcastAsync` is.
+   */
+  willUsePool?: (cells: number) => boolean;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

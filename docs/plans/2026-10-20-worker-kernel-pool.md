@@ -315,6 +315,19 @@ is under a threshold runs inline: the pool calibrates the threshold per kernel
 from the first inline batch, with a default of 20 000 cells (about 10 ms for
 the medium expression of section 3.3).
 
+Amendment 2026-10-24 (Tycho's feedback on CE 0.165.0, ROADMAP CE-425.2 to
+CE-428). The inline route yields a macrotask turn before each slice, the
+first one included, so no cell runs before the call returns. The option
+`inline: false` refuses the calling thread: a batch that would not go to the
+pool resolves at once with `done: 0`, and a batch whose worker fails keeps
+the cells the workers did. The result is `{ out, done, route, reason? }`:
+`route` is `'pool'` or `'calling-thread'`, and `reason` (`'no-pool'`,
+`'pool-unusable'`, `'not-shippable'`, `'below-threshold'`,
+`'pool-declined'`) says why the pool did not take the whole batch. A compiled
+result has `shippable` (whether its code can run on a worker) and
+`willUsePool(cells)` (whether a batch of that many cells would go to the pool
+now).
+
 **The pool object.** `createKernelPool({ create, size, prewarm })` returns a
 pool that an engine takes as `new ComputeEngine({ workers: pool })`, or that
 is set later with `ce.workers = pool`. One pool serves several engines (Tycho
@@ -440,6 +453,14 @@ writes a `lo, hi, kind` triple per cell and its code reads no list.
    The new worker is sent each kernel, fit problem and shared input again
    with the first task that needs it, and the tasks that waited for the old
    worker go to the new one.
+5. Tycho's feedback on CE 0.164.0 (2026-10-24, ROADMAP CE-424, CE-425.1,
+   CE-428): a `withTimeLimit` span around `evaluateAsync()` did not reach
+   the handler, the work on the calling thread never gave the event loop a
+   turn, and nothing said whether the pool took the scan. Now the deadline
+   frame travels with the asynchronous evaluation, the calling-thread work
+   waits for a macrotask about every 8 ms, and the record has `route` and
+   `reason`. Details: `docs/plans/2026-10-20-findfit-global-grid.md`,
+   section 4.3.
 
 ### 5.6 Later kernels
 

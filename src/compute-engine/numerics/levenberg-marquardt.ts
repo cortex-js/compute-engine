@@ -16,6 +16,7 @@
  */
 
 import { isTimeoutCancellation } from '../../common/interruptible.js';
+import { runStepsSync, type Steps } from '../../common/cooperative-steps.js';
 
 export interface LMResult {
   theta: number[];
@@ -144,6 +145,15 @@ export interface LMOptions {
    * here aborts the solve and the exception propagates to the caller.
    */
   onIteration?: (iter: number) => void;
+  /**
+   * `residual` and `jacobian` as step functions that yield between rows
+   * (`makeCallbacks` in `nonlinear-fit.ts`), with the same results. When
+   * given, `levenbergMarquardtSteps` uses them for the evaluations of its
+   * main loop, so that a run driven in slices can stop inside a long
+   * evaluation (many rows of an interpreted model).
+   */
+  residualSteps?: (theta: number[]) => Steps<number[]>;
+  jacobianSteps?: (theta: number[]) => Steps<number[][]>;
 }
 
 const clampScalar = (x: number, lo: number, hi: number): number =>
@@ -234,12 +244,33 @@ export function solveWithInflation(
   return null;
 }
 
+/** Run the Levenberg–Marquardt solve to its end (see
+ * `levenbergMarquardtSteps`). */
 export function levenbergMarquardt(
   residual: (theta: number[]) => number[],
   jacobian: (theta: number[]) => number[][],
   theta0: number[],
   options: LMOptions = {}
 ): LMResult {
+  return runStepsSync(
+    levenbergMarquardtSteps(residual, jacobian, theta0, options)
+  );
+}
+
+/**
+ * The Levenberg–Marquardt solve as a step function: it yields at the top of
+ * each iteration, before `onIteration` is called, and returns the result.
+ * `levenbergMarquardt` runs it without stopping; the asynchronous route of
+ * `FindFit` runs it in slices and gives the event loop a turn between two of
+ * them (`runStepsAsync()` in `common/cooperative-steps.ts`). The work and
+ * the result do not depend on how it is run.
+ */
+export function* levenbergMarquardtSteps(
+  residual: (theta: number[]) => number[],
+  jacobian: (theta: number[]) => number[][],
+  theta0: number[],
+  options: LMOptions = {}
+): Steps<LMResult> {
   const p = theta0.length;
   const lo = options.lo ?? new Array(p).fill(-Infinity);
   const hi = options.hi ?? new Array(p).fill(Infinity);
@@ -448,8 +479,19 @@ export function levenbergMarquardt(
       ? withinTolerance(rr, JJ, t) && (!stat || zeroWithinReach(rr, JJ, t))
       : stat || withinTolerance(rr, JJ, t);
 
+  // The evaluations of the main loop, as steps when the caller gave the
+  // step forms.
+  const residualSteps = options.residualSteps;
+  const jacobianSteps = options.jacobianSteps;
+  const residualAt = function* (t: number[]): Steps<number[]> {
+    return residualSteps ? yield* residualSteps(t) : residual(t);
+  };
+  const jacobianAt = function* (t: number[]): Steps<number[][]> {
+    return jacobianSteps ? yield* jacobianSteps(t) : jacobian(t);
+  };
+
   let theta = clampVec(theta0.slice());
-  let r = residual(theta);
+  let r = yield* residualAt(theta);
   const cost = (rr: number[]): number => {
     let s = 0;
     for (let i = 0; i < rr.length; i++) s += rr[i] * rr[i];
@@ -513,7 +555,7 @@ export function levenbergMarquardt(
   // `instanceof` (cross-bundle identity hazard).
   try {
     // Jacobian, gradient g = Jᵀr, and normal matrix A = JᵀJ.
-    let J = jacobian(theta);
+    let J = yield* jacobianAt(theta);
     let g = gradient(J, r);
     let A = normalMatrix(J);
 
@@ -536,6 +578,7 @@ export function levenbergMarquardt(
     // one more step reaches 0.002). Without a tolerance `converged` is
     // `stationary`, so the condition is the plain one.
     while (!(converged && stationary) && iterations < maxIterations) {
+      yield;
       if (onIteration) onIteration(iterations);
       iterations++;
 
@@ -623,7 +666,7 @@ export function levenbergMarquardt(
           (s, j) => Math.abs(s) <= tolerance * Math.max(1, Math.abs(theta[j]))
         );
 
-      const rNew = residual(thetaNew);
+      const rNew = yield* residualAt(thetaNew);
       const FNew = cost(rNew);
 
       // Predicted reduction of the quadratic model at the (projected) step:
@@ -650,7 +693,7 @@ export function levenbergMarquardt(
         theta = thetaNew;
         r = rNew;
         F = FNew;
-        J = jacobian(theta);
+        J = yield* jacobianAt(theta);
         g = gradient(J, r);
         A = normalMatrix(J);
         stationary = false;

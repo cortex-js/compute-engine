@@ -33,10 +33,17 @@
  * serial implementation, so the synchronous `evaluate()` route gives the same
  * record as before this module existed.
  *
+ * `AsyncInlineFitExecutor` runs the same tasks in the same order on the
+ * calling thread for `FindFit`'s `evaluateAsync()`, and gives the event loop
+ * a turn every few milliseconds: between two tasks, and between two
+ * iterations of a solver run (`runSteps`, `runStepsAsync()` in
+ * `common/cooperative-steps.ts`).
+ *
  * `PoolFitExecutor` is the asynchronous executor of `FindFit`'s
- * `evaluateAsync()`: it sends the separable-scan points of a batch to the
- * workers of a kernel pool, in one slice per worker, and runs the solver
- * starts on the calling thread. `runFitPlanAsync` drives a plan on it.
+ * `evaluateAsync()` when the engine has a kernel pool: it sends the
+ * separable-scan points of a batch to the workers of the pool, in one slice
+ * per worker, and runs the solver starts on the calling thread.
+ * `runFitPlanAsync` drives a plan on either asynchronous executor.
  */
 
 import {
@@ -44,6 +51,12 @@ import {
   isTimeoutCancellation,
 } from '../common/interruptible.js';
 import type { LMResult } from './numerics/levenberg-marquardt.js';
+import {
+  runStepsAsync,
+  runStepsSync,
+  type EventLoopPacer,
+  type Steps,
+} from '../common/cooperative-steps.js';
 import {
   readScanSolution,
   scanResultWidth,
@@ -116,6 +129,13 @@ export interface FitKernel {
   linearSolveAt: (point: number[], allRows: boolean) => LinearScanSolution;
   startRss: (theta0: number[]) => number;
   lm: (theta0: number[]) => LMResult;
+  /** `lm` as a step function that yields between two iterations of the
+   * solver (`levenbergMarquardtSteps`), so that an asynchronous executor
+   * can give the event loop a turn inside a long run. Without it, a run is
+   * one step. */
+  lmSteps?: (theta0: number[]) => Steps<LMResult>;
+  /** `startRss` as a step function that yields between rows. */
+  startRssSteps?: (theta0: number[]) => Steps<number>;
 }
 
 export interface FitExecutor {
@@ -128,8 +148,24 @@ export class InlineFitExecutor implements FitExecutor {
   constructor(private readonly kernel: FitKernel) {}
 
   run(tasks: FitTask[]): FitBatchResult {
+    return runStepsSync(this.runSteps(tasks, false));
+  }
+
+  /**
+   * `run` as a step function: it yields after each task. With `stepped`
+   * (the default), it uses the kernel's `lmSteps` and `startRssSteps` when
+   * it has them, and so also yields inside a solver run and between rows.
+   * `run` passes `false`: it runs to the end without stopping, and the
+   * plain `lm` and `startRss` avoid the cost of resuming the generators
+   * every few rows. The tasks that run and their results do not depend on
+   * how it is run.
+   */
+  *runSteps(tasks: FitTask[], stepped = true): Steps<FitBatchResult> {
     const results: FitTaskResult[] = [];
+    let first = true;
     for (const task of tasks) {
+      if (!first) yield;
+      first = false;
       try {
         if (task.kind === 'linear') {
           const solved = this.kernel.linearSolveAt(
@@ -145,7 +181,10 @@ export class InlineFitExecutor implements FitExecutor {
         }
         let startRss = NaN;
         if (task.checkStart) {
-          startRss = this.kernel.startRss(task.theta0);
+          startRss =
+            stepped && this.kernel.startRssSteps !== undefined
+              ? yield* this.kernel.startRssSteps(task.theta0)
+              : this.kernel.startRss(task.theta0);
           if (!Number.isFinite(startRss)) {
             results.push({ kind: 'start', index: task.index, startRss });
             continue;
@@ -153,7 +192,10 @@ export class InlineFitExecutor implements FitExecutor {
         }
         let lm: LMResult | undefined;
         try {
-          lm = this.kernel.lm(task.theta0);
+          lm =
+            stepped && this.kernel.lmSteps !== undefined
+              ? yield* this.kernel.lmSteps(task.theta0)
+              : this.kernel.lm(task.theta0);
         } catch (e) {
           // The deadline expired before the solver produced anything (a
           // later expiry is caught inside the solver, which returns its best
@@ -194,6 +236,30 @@ export function runFitPlanSync<T>(
 export interface AsyncFitExecutor {
   /** Run a batch. May stop early (see the module comment). */
   run: (tasks: FitTask[]) => Promise<FitBatchResult>;
+}
+
+/**
+ * Runs each task on the calling thread, in order, as `InlineFitExecutor`
+ * does, and waits for a macrotask turn of the event loop whenever the slice
+ * of `pacer` is over: between two tasks, and between two iterations of a
+ * solver run. A timer, and an abort of a signal by a timer, can then run
+ * during a long search, and a page stays responsive. `inStep` wraps each
+ * step of the work (see `runStepsAsync()`).
+ */
+export class AsyncInlineFitExecutor implements AsyncFitExecutor {
+  private readonly inline: InlineFitExecutor;
+
+  constructor(
+    kernel: FitKernel,
+    private readonly pacer: EventLoopPacer,
+    private readonly inStep: <R>(f: () => R) => R = (f) => f()
+  ) {
+    this.inline = new InlineFitExecutor(kernel);
+  }
+
+  run(tasks: FitTask[]): Promise<FitBatchResult> {
+    return runStepsAsync(this.inline.runSteps(tasks), this.pacer, this.inStep);
+  }
 }
 
 /**
@@ -264,21 +330,36 @@ export interface FitSlicePool {
  * `deadline` is a `Date.now()` time sent to the workers; the kernel's own
  * functions check the deadline (and the signal) on this thread.
  * `iterationLimit` is the engine's iteration limit, sent to the workers.
+ * With `pacer`, the work on this thread gives the event loop a turn as
+ * `AsyncInlineFitExecutor` does; `inStep` wraps each step of that work.
+ *
+ * `slicesOnPool` and `slicesDeclined` count the slices a worker solved and
+ * the slices the pool could not take (solved here instead): the record of
+ * the fit reads them to say which route the scan took.
  */
 export class PoolFitExecutor implements AsyncFitExecutor {
-  private readonly inline: InlineFitExecutor;
+  private readonly inline: InlineFitExecutor | AsyncInlineFitExecutor;
+  /** The slices that a worker solved (all or a prefix of their points). */
+  slicesOnPool = 0;
+  /** The slices that the pool rejected, solved on this thread. */
+  slicesDeclined = 0;
 
   constructor(
-    private readonly kernel: FitKernel,
+    kernel: FitKernel,
     private readonly pool: FitSlicePool,
     private readonly problem: WireFitProblem,
     private readonly options: {
       deadline?: number;
       iterationLimit?: number;
       signal?: AbortSignal;
+      pacer?: EventLoopPacer;
+      inStep?: <R>(f: () => R) => R;
     } = {}
   ) {
-    this.inline = new InlineFitExecutor(kernel);
+    this.inline =
+      options.pacer !== undefined
+        ? new AsyncInlineFitExecutor(kernel, options.pacer, options.inStep)
+        : new InlineFitExecutor(kernel);
   }
 
   async run(tasks: FitTask[]): Promise<FitBatchResult> {
@@ -296,7 +377,7 @@ export class PoolFitExecutor implements AsyncFitExecutor {
     }
     this.throwIfAborted();
     if (starts.length > 0 && !timedOut) {
-      const batch = this.inline.run(starts);
+      const batch = await this.inline.run(starts);
       results.push(...batch.results);
       timedOut = batch.timedOut;
     }
@@ -314,7 +395,7 @@ export class PoolFitExecutor implements AsyncFitExecutor {
     // A point with no value to ship, or a batch that mixes the sample and
     // every row (the plan never yields one), runs here.
     if (width === 0 || tasks.some((t) => (t.allRows === true) !== allRows))
-      return this.inline.run(tasks);
+      return await this.inline.run(tasks);
     const p = this.problem.start.length;
     const stride = scanResultWidth(p);
     const count = Math.min(Math.max(1, this.pool.size), tasks.length);
@@ -346,6 +427,7 @@ export class PoolFitExecutor implements AsyncFitExecutor {
       const slice = slices[s];
       const r = settled[s];
       if (r.status === 'fulfilled') {
+        this.slicesOnPool += 1;
         const { out, done } = r.value;
         let last: LinearScanSolution | undefined;
         for (let i = 0; i < done; i++) {
@@ -364,8 +446,9 @@ export class PoolFitExecutor implements AsyncFitExecutor {
       // The pool could not solve this slice: solve it here, with the same
       // stops as the inline executor. After a deadline, or after a
       // nonlinear point at a lower index, the plan reads no result of it.
+      this.slicesDeclined += 1;
       if (timedOut || nonlinear) continue;
-      const inline = this.inline.run(slice);
+      const inline = await this.inline.run(slice);
       results.push(...inline.results);
       if (inline.timedOut) timedOut = true;
       if (

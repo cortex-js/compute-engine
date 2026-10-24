@@ -127,7 +127,12 @@ import {
   type BroadcastInputs,
   type BroadcastOptions,
 } from './broadcast.js';
-import { makeBroadcastAsync, isShippableCode } from '../kernel-pool.js';
+import {
+  makeBroadcastAsync,
+  makeWillUsePool,
+  isShippableCode,
+  type BroadcastAsyncSpec,
+} from '../kernel-pool.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { interval } from '../numerics/interval.js';
@@ -6077,7 +6082,7 @@ function compileToIntervalTarget(
   // version) to the engine's worker pool, and runs slices here when there is
   // none (`kernel-pool.ts`).
   const engine = expr.engine;
-  result.broadcastAsync = makeBroadcastAsync({
+  const asyncSpec: BroadcastAsyncSpec = {
     kind: 'interval-js',
     stored: result,
     // A worker has no engine: code that names a host identifier or draws
@@ -6088,6 +6093,9 @@ function compileToIntervalTarget(
     slice: (inputs, options, out, slice) =>
       broadcastIntervalsSlice(fn.rawCall, inputs, options, out, slice),
     workers: () => engine.workers,
-  });
+  };
+  result.broadcastAsync = makeBroadcastAsync(asyncSpec);
+  result.shippable = asyncSpec.shippable;
+  result.willUsePool = makeWillUsePool(asyncSpec);
   return result;
 }

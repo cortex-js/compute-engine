@@ -43,11 +43,18 @@ import { differentiate } from './symbolic/derivative.js';
 import { angularChainFactor } from './symbolic/angular-unit.js';
 import { implicitCompileNumericResult } from './implicit-compile.js';
 import {
-  levenbergMarquardt,
+  levenbergMarquardtSteps,
   type LMOptions,
   type LMResult,
 } from './numerics/levenberg-marquardt.js';
 import {
+  EventLoopPacer,
+  runStepsAsync,
+  runStepsSync,
+  type Steps,
+} from '../common/cooperative-steps.js';
+import {
+  AsyncInlineFitExecutor,
   InlineFitExecutor,
   PoolFitExecutor,
   runFitPlanAsync,
@@ -64,7 +71,7 @@ import {
   type FitScanProblem,
   type FitScanRows,
 } from './fit-scan.js';
-import { fitSlicePool, isShippableCode } from './kernel-pool.js';
+import { fitSlicePool, isKernelPool, isShippableCode } from './kernel-pool.js';
 import type { StoredKernel, WireFitProblem } from './kernel-protocol.js';
 
 type NumFn = (vars: Record<string, number>) => number;
@@ -1253,7 +1260,23 @@ interface FitCallbacks {
   ) => void;
   residual: (theta: number[]) => number[];
   jacobian: (theta: number[]) => number[][];
+  /** `residual` and `jacobian` as step functions that can yield every
+   * `ROWS_PER_STEP` rows, with the same results (`LMOptions.residualSteps`). */
+  residualSteps: (theta: number[]) => Steps<number[]>;
+  jacobianSteps: (theta: number[]) => Steps<number[][]>;
 }
+
+/** How many rows the step forms of the residual and the Jacobian
+ * (`FitCallbacks.residualSteps`) walk between two checks of the time. */
+const ROWS_PER_STEP = 8;
+
+/** The step forms of the residual and the Jacobian yield at a check of the
+ * time (every `ROWS_PER_STEP` rows) only when at least this many
+ * milliseconds passed since the walk started or last yielded. A yield
+ * resumes several nested generators and asks the pacer for the time: for a
+ * cheap model (a compiled one), a yield every few rows made a fit over
+ * 200,000 rows about 50% slower. */
+const MS_PER_STEP = 1;
 
 /**
  * Throw when `signal` was aborted: the `CancellationError` whose `cause` is
@@ -1311,50 +1334,112 @@ function makeCallbacks(
     }
   };
 
+  // `eachRow` as a step function: every `ROWS_PER_STEP` rows, it yields when
+  // `MS_PER_STEP` milliseconds passed since it started or last yielded. The
+  // parameter values are written again after each yield, since the record
+  // is shared by every walk of this fit.
+  const eachRowSteps = function* (
+    theta: number[],
+    visit: (unit: FitUnit, row: DataRow, record: Record<string, number>) => void
+  ): Steps<void> {
+    for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
+    let n = 0;
+    let last = Date.now();
+    for (const unit of units) {
+      for (const row of unit.rows) {
+        if (++n % ROWS_PER_STEP === 0 && Date.now() - last >= MS_PER_STEP) {
+          yield;
+          last = Date.now();
+          for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
+        }
+        checkDeadline(deadlineFrame());
+        checkAborted(signal);
+        for (let k = 0; k < unit.varFresh.length; k++)
+          record[unit.varFresh[k]] = row.x[k];
+        visit(unit, row, record);
+      }
+    }
+  };
+
   const residual = (theta: number[]): number[] => {
     const out: number[] = [];
     eachRow(theta, (unit, row, rec) => out.push(unit.fn(rec) - row.y));
     return out;
   };
 
+  const residualSteps = function* (theta: number[]): Steps<number[]> {
+    const out: number[] = [];
+    yield* eachRowSteps(theta, (unit, row, rec) =>
+      out.push(unit.fn(rec) - row.y)
+    );
+    return out;
+  };
+
   const jacobian = (theta: number[]): number[][] => {
     const rowsJ: number[][] = [];
-    eachRow(theta, (unit, _row, rec) => {
-      const base = unit.fn(rec);
-      const jr = new Array(p).fill(0);
-      for (let j = 0; j < p; j++) {
-        const d = unit.deriv[j];
-        if (d) {
-          jr[j] = d(rec);
-        } else {
-          // Finite difference for this column only. The step is scaled to
-          // the parameter magnitude (no underflow near θⱼ = 0), and the
-          // probe stays inside `[lo, hi]`: forward unless that overshoots
-          // `hi[j]`, and if the first probe is non-finite (a box-guarded
-          // model can NaN at an infeasible point) retry the other direction.
-          const t = theta[j];
-          const h = Math.sqrt(Number.EPSILON) * Math.max(1, Math.abs(t));
-          let step = t + h <= hi[j] ? h : -h;
-          rec[pFresh[j]] = t + step;
-          let probe = unit.fn(rec);
-          if (!Number.isFinite(probe)) {
-            const alt = -step;
-            if (t + alt <= hi[j] && t + alt >= lo[j]) {
-              step = alt;
-              rec[pFresh[j]] = t + step;
-              probe = unit.fn(rec);
-            }
-          }
-          rec[pFresh[j]] = t;
-          jr[j] = (probe - base) / step;
-        }
-      }
-      rowsJ.push(jr);
-    });
+    eachRow(theta, (unit, _row, rec) =>
+      rowsJ.push(jacobianRow(theta, unit, rec))
+    );
     return rowsJ;
   };
 
-  return { pFresh, lo, hi, eachRow, residual, jacobian };
+  const jacobianSteps = function* (theta: number[]): Steps<number[][]> {
+    const rowsJ: number[][] = [];
+    yield* eachRowSteps(theta, (unit, _row, rec) =>
+      rowsJ.push(jacobianRow(theta, unit, rec))
+    );
+    return rowsJ;
+  };
+
+  // The row of the Jacobian at `theta` for the row whose values are in
+  // `rec`.
+  function jacobianRow(
+    theta: number[],
+    unit: FitUnit,
+    rec: Record<string, number>
+  ): number[] {
+    const base = unit.fn(rec);
+    const jr = new Array(p).fill(0);
+    for (let j = 0; j < p; j++) {
+      const d = unit.deriv[j];
+      if (d) {
+        jr[j] = d(rec);
+      } else {
+        // Finite difference for this column only. The step is scaled to
+        // the parameter magnitude (no underflow near θⱼ = 0), and the
+        // probe stays inside `[lo, hi]`: forward unless that overshoots
+        // `hi[j]`, and if the first probe is non-finite (a box-guarded
+        // model can NaN at an infeasible point) retry the other direction.
+        const t = theta[j];
+        const h = Math.sqrt(Number.EPSILON) * Math.max(1, Math.abs(t));
+        let step = t + h <= hi[j] ? h : -h;
+        rec[pFresh[j]] = t + step;
+        let probe = unit.fn(rec);
+        if (!Number.isFinite(probe)) {
+          const alt = -step;
+          if (t + alt <= hi[j] && t + alt >= lo[j]) {
+            step = alt;
+            rec[pFresh[j]] = t + step;
+            probe = unit.fn(rec);
+          }
+        }
+        rec[pFresh[j]] = t;
+        jr[j] = (probe - base) / step;
+      }
+    }
+    return jr;
+  }
+
+  return {
+    pFresh,
+    lo,
+    hi,
+    eachRow,
+    residual,
+    jacobian,
+    residualSteps,
+    jacobianSteps,
+  };
 }
 
 /** Run LM from the single start of the specs and report the record.
@@ -1367,6 +1452,27 @@ function solve(
   deadlineFrame: () => DeadlineFrame | undefined = () => ce._deadlineFrame,
   signal?: AbortSignal
 ): Expression | undefined {
+  return runStepsSync(
+    solveSteps(ce, units, specs, operator, deadlineFrame, signal, false)
+  );
+}
+
+/** `solve` as a step function: it yields between two iterations of the
+ * solver (`levenbergMarquardtSteps`), so that the asynchronous route can
+ * give the event loop a turn during a long solve. With `rowSteps`, it can
+ * also yield inside a residual or Jacobian evaluation (`MS_PER_STEP`).
+ * The synchronous route runs without `rowSteps`: the row steps give the same
+ * results, but resuming the generators every few rows makes a fit over many
+ * rows slower. */
+function* solveSteps(
+  ce: IComputeEngine,
+  units: FitUnit[],
+  specs: ParamSpec[],
+  operator: FitOperator,
+  deadlineFrame: () => DeadlineFrame | undefined,
+  signal: AbortSignal | undefined,
+  rowSteps: boolean
+): Steps<Expression | undefined> {
   // Defensive: an empty model/equation list yields zero units; `units[0]`
   // in `makeCallbacks` would otherwise throw (see the guards in
   // `findFit`/`findRoot`).
@@ -1374,13 +1480,8 @@ function solve(
     return ce.error('unexpected-argument', 'no residual units');
 
   const theta0 = specs.map((s) => s.start);
-  const { lo, hi, residual, jacobian } = makeCallbacks(
-    ce,
-    units,
-    specs,
-    deadlineFrame,
-    signal
-  );
+  const { lo, hi, residual, jacobian, residualSteps, jacobianSteps } =
+    makeCallbacks(ce, units, specs, deadlineFrame, signal);
   const solverTolerance = solverToleranceOf(ce, operator);
 
   // A deadline expiring during the starting-point evaluation or the solver's
@@ -1392,14 +1493,16 @@ function solve(
   let result: LMResult;
   try {
     // NaN at the starting point is a hard failure (§ 3.3).
-    const r0 = residual(theta0.map((v, j) => clamp(v, lo[j], hi[j])));
+    const start = theta0.map((v, j) => clamp(v, lo[j], hi[j]));
+    const r0 = rowSteps ? yield* residualSteps(start) : residual(start);
     if (r0.some((v) => !Number.isFinite(v)))
       return ce.error('unexpected-argument', 'starting point is not finite');
 
-    result = levenbergMarquardt(residual, jacobian, theta0, {
+    result = yield* levenbergMarquardtSteps(residual, jacobian, theta0, {
       lo,
       hi,
       ...solverTolerance,
+      ...(rowSteps ? { residualSteps, jacobianSteps } : {}),
       onIteration: () => {
         checkDeadline(deadlineFrame());
         checkAborted(signal);
@@ -2282,11 +2385,20 @@ function prepareGlobalSearch(
   // section 5.5). The scan of `linearSolveAt` may run on a sample of the
   // rows; the solver runs always use every row.
   const onIteration = scanDeadline;
-  const boundedLM = (theta0: number[]): LMResult =>
-    levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+  // With `rowSteps`, a solver run can also yield inside an evaluation
+  // (`MS_PER_STEP`; the asynchronous route). The synchronous route runs
+  // without them: same results, without the cost of resuming the generators
+  // every few rows.
+  const rowStepsOf = (rowSteps: boolean): Partial<LMOptions> =>
+    rowSteps
+      ? { residualSteps: cb.residualSteps, jacobianSteps: cb.jacobianSteps }
+      : {};
+  const boundedLM = (theta0: number[], rowSteps: boolean): Steps<LMResult> =>
+    levenbergMarquardtSteps(cb.residual, cb.jacobian, theta0, {
       lo,
       hi,
       ...solverTolerance,
+      ...rowStepsOf(rowSteps),
       onIteration,
     });
   // A phase that the scan solves by least squares is refined UNBOUNDED. The
@@ -2307,12 +2419,18 @@ function prepareGlobalSearch(
     phaseLo[ph.phase] = -Infinity;
     phaseHi[ph.phase] = Infinity;
   }
-  const lm = (theta0: number[]): LMResult => {
-    if (phases.length === 0) return boundedLM(theta0);
-    const r = levenbergMarquardt(cb.residual, cb.jacobian, theta0, {
+  // A step function: it yields between two iterations of each solver run
+  // (`FitKernel.lmSteps`).
+  const lmRun = function* (
+    theta0: number[],
+    rowSteps: boolean
+  ): Steps<LMResult> {
+    if (phases.length === 0) return yield* boundedLM(theta0, rowSteps);
+    const r = yield* levenbergMarquardtSteps(cb.residual, cb.jacobian, theta0, {
       lo: phaseLo,
       hi: phaseHi,
       ...solverTolerance,
+      ...rowStepsOf(rowSteps),
       onIteration,
     });
     const theta = r.theta.slice();
@@ -2340,7 +2458,7 @@ function prepareGlobalSearch(
     if (Math.abs(norm - r.residualNorm) <= 1e-8 * (1 + r.residualNorm))
       return { ...r, theta, residualNorm: norm };
     try {
-      const again = boundedLM(theta);
+      const again = yield* boundedLM(theta, rowSteps);
       return { ...again, iterations: r.iterations + again.iterations };
     } catch (e) {
       if (!isTimeoutCancellation(e)) throw e;
@@ -2356,7 +2474,11 @@ function prepareGlobalSearch(
   const kernel: FitKernel = {
     linearSolveAt,
     startRss: (theta0) => sumOfSquares(cb.residual(theta0)),
-    lm,
+    startRssSteps: function* (theta0) {
+      return sumOfSquares(yield* cb.residualSteps(theta0));
+    },
+    lm: (theta0) => runStepsSync(lmRun(theta0, false)),
+    lmSteps: (theta0) => lmRun(theta0, true),
   };
   const plan = () =>
     globalSearchPlan(separable, scans, thetaAt, {
@@ -2593,7 +2715,10 @@ export async function findFitAsync(
       data = await ops[0].canonical.evaluateAsync(options);
     }
   } catch (e) {
-    return route.timeoutOrThrow(e);
+    return withRoute(ce, route.timeoutOrThrow(e), {
+      route: 'calling-thread',
+      reason: 'setup-timeout',
+    });
   }
   return solveSetupAsync(ce, route, (ctx) =>
     findFitSetup(ce, ops, ctx, {
@@ -2685,11 +2810,79 @@ function asyncRoute(
 }
 
 /**
+ * Which route the global search of a lowering took on the asynchronous
+ * route, reported in the record as the `route` entry: `'pool'` when the
+ * workers of the engine's kernel pool solved the points of the separable
+ * scan (all of them, or some when a worker failed), `'calling-thread'`
+ * when everything ran on this thread. With `'calling-thread'`, `reason`
+ * says why the pool did not take the search:
+ *
+ * - `'no-pool'`: the engine has no kernel pool (`ce.workers`).
+ * - `'no-global-search'`: the call has no `global` option; the single
+ *   solver run is never sent to the pool.
+ * - `'not-separable'`: the model is not linear in the parameters that are
+ *   not searched, so the search is a multi-start: every grid point is a
+ *   solver run, which runs on this thread.
+ * - `'not-compilable'`: a function of the scan (the model, or its derivative
+ *   in a linear parameter) did not compile to code a worker can run.
+ * - `'pool-declined'`: the pool rejected every slice it was sent (a worker
+ *   that failed or refused the problem); the points were solved here.
+ * - `'no-points-to-ship'`: the scan had no grid values to send (each
+ *   searched parameter is a phase that the scan solves by least squares).
+ * - `'pool-unusable'`: the engine's kernel pool is unusable: its workers
+ *   hold another runtime version.
+ * - `'step-budget'`: a `withStepBudget` span encloses the call. A worker
+ *   does not count the steps of the span, so the scan stays on this thread,
+ *   where each check is charged to the budget.
+ * - `'setup-timeout'`: the time limit expired before the search started.
+ */
+type FitRoute =
+  | { route: 'pool' }
+  | {
+      route: 'calling-thread';
+      reason:
+        | 'no-pool'
+        | 'pool-unusable'
+        | 'no-global-search'
+        | 'not-separable'
+        | 'not-compilable'
+        | 'pool-declined'
+        | 'no-points-to-ship'
+        | 'step-budget'
+        | 'setup-timeout';
+    };
+
+/** The record `value` with the `route` (and `reason`) entries of `route`
+ * added; any other answer (an error, an inert call) as it is. */
+function withRoute(
+  ce: IComputeEngine,
+  value: Expression | undefined,
+  route: FitRoute
+): Expression | undefined {
+  if (value === undefined || !isDictionary(value)) return value;
+  const entries = value.keys.map((k) => ce.tuple(ce.string(k), value.get(k)!));
+  entries.push(ce.tuple(ce.string('route'), ce.string(route.route)));
+  if (route.route === 'calling-thread')
+    entries.push(ce.tuple(ce.string('reason'), ce.string(route.reason)));
+  return ce.function('Dictionary', entries);
+}
+
+/**
  * The solve of the asynchronous route, shared by `findFitAsync` and
  * `findRootAsync`: `setup` prepares the problem with the evaluation's
  * effects; a global search whose separable scan compiled to code a worker
  * can run goes to the engine's kernel pool, everything else runs on this
- * thread.
+ * thread. The record says which (`FitRoute`).
+ *
+ * The work on this thread gives the event loop a turn about every 8 ms
+ * (`EventLoopPacer`): between the setup and the search, between two grid
+ * points or solver starts, between two iterations of a solver run, and
+ * inside a residual or Jacobian evaluation (`MS_PER_STEP`). A timer
+ * can then run during a long search (an abort of the signal by a timer
+ * stops it at the next check), and a page stays responsive. A step longer
+ * than a slice still runs in one piece: the setup (the data, the
+ * derivatives, the compilation), and one grid point of the separable scan
+ * (`linearScanSolve()`, shared with the workers).
  */
 async function solveSetupAsync(
   ce: IComputeEngine,
@@ -2701,22 +2894,50 @@ async function solveSetupAsync(
   const { answer } = route;
   const operator = ctx.operator;
   const pool = fitSlicePool(ce.workers);
-  type Pooled = {
-    search: GlobalSearch;
-    pool: NonNullable<typeof pool>;
-    wire: WireFitProblem;
-  };
-  let pooled: Pooled;
+  // Why no work of this call can go to the pool, whatever the problem: the
+  // engine has no pool, or its pool is unusable (its workers hold another
+  // runtime version).
+  const noPool =
+    pool !== undefined
+      ? undefined
+      : isKernelPool(ce.workers)
+        ? 'pool-unusable'
+        : 'no-pool';
+  // A worker does not count the steps of a `withStepBudget` span (it gets
+  // only the time of the deadline), while the scan on this thread charges
+  // each check to the budget: with a step budget the scan stays here, so
+  // that the budget bounds it.
+  const stepBudget = (frame?.budgets?.length ?? 0) > 0;
+  const pacer = new EventLoopPacer();
+  const onThisThread = (
+    reason: Extract<FitRoute, { route: 'calling-thread' }>['reason']
+  ): FitRoute => ({ route: 'calling-thread', reason });
+  // A timeout reported in band before the search started (or, with no
+  // `global` option, one that escaped the solver run).
+  const setupTimeout = (e: unknown): Expression | undefined =>
+    withRoute(ce, timeoutOrThrow(e), onThisThread('setup-timeout'));
+  let search: GlobalSearch;
   try {
-    const inline = inContext((): { value: Expression | undefined } | Pooled => {
-      const prepared0 = setup(ctx);
-      if ('done' in prepared0) return { value: prepared0.done };
-      const { units, specs, scans } = prepared0;
-      if (scans.length === 0)
-        return {
-          value: solve(ce, units, specs, operator, deadlineFrame, signal),
-        };
-      const prepared = prepareGlobalSearch(
+    const prepared0 = inContext(() => setup(ctx));
+    if ('done' in prepared0) return answer(prepared0.done);
+    const { units, specs, scans } = prepared0;
+    if (scans.length === 0) {
+      const value = await runStepsAsync(
+        solveSteps(ce, units, specs, operator, deadlineFrame, signal, true),
+        pacer,
+        inContext
+      );
+      return withRoute(
+        ce,
+        answer(value),
+        onThisThread(noPool ?? 'no-global-search')
+      );
+    }
+    // The setup (the data, the derivatives, the compilation) ran in one
+    // piece: give the event loop a turn before the search.
+    await pacer.pace();
+    const prepared = inContext(() =>
+      prepareGlobalSearch(
         ce,
         units,
         specs,
@@ -2724,56 +2945,72 @@ async function solveSetupAsync(
         operator,
         deadlineFrame,
         signal
-      );
-      if ('done' in prepared) return { value: prepared.done };
-      if (
-        pool === undefined ||
-        !prepared.separable ||
-        prepared.wire === undefined
       )
-        return {
-          value: prepared.finish(
-            runFitPlanSync(
-              prepared.plan(),
-              new InlineFitExecutor(prepared.kernel)
-            )
-          ),
-        };
-      return { search: prepared, pool, wire: prepared.wire };
-    });
-    if ('value' in inline) return answer(inline.value);
-    pooled = inline;
-  } catch (e) {
-    return timeoutOrThrow(e);
-  }
-  const { search, pool: fitPool, wire } = pooled;
-  // The kernel's work on this thread (the refinements, the multi-start, a
-  // slice that the pool could not take) runs after an `await`: with the
-  // evaluation's registry and context stack, for a model that is
-  // interpreted.
-  const kernel: FitKernel = {
-    linearSolveAt: (point, allRows) =>
-      inContext(() => search.kernel.linearSolveAt(point, allRows)),
-    startRss: (theta0) => inContext(() => search.kernel.startRss(theta0)),
-    lm: (theta0) => inContext(() => search.kernel.lm(theta0)),
-  };
-  try {
-    const outcome = await runFitPlanAsync(
-      search.plan(),
-      new PoolFitExecutor(kernel, fitPool, wire, {
-        deadline: frame?.at,
-        iterationLimit: ce.iterationLimit,
-        signal,
-      })
     );
-    return answer(inContext(() => search.finish(outcome)));
+    if ('done' in prepared) return answer(prepared.done);
+    search = prepared;
+  } catch (e) {
+    return setupTimeout(e);
+  }
+  if (
+    pool === undefined ||
+    !search.separable ||
+    search.wire === undefined ||
+    stepBudget
+  ) {
+    const reason =
+      noPool ??
+      (!search.separable
+        ? 'not-separable'
+        : search.wire === undefined
+          ? 'not-compilable'
+          : 'step-budget');
+    try {
+      const outcome = await runFitPlanAsync(
+        search.plan(),
+        new AsyncInlineFitExecutor(search.kernel, pacer, inContext)
+      );
+      return withRoute(
+        ce,
+        answer(inContext(() => search.finish(outcome))),
+        onThisThread(reason)
+      );
+    } catch (e) {
+      return withRoute(ce, timeoutOrThrow(e), onThisThread(reason));
+    }
+  }
+  const wire = search.wire;
+  // The kernel's work on this thread (the refinements, the multi-start, a
+  // slice that the pool could not take) runs after an `await`: each step of
+  // it runs with the evaluation's registry and context stack (`inStep`),
+  // for a model that is interpreted.
+  const executor = new PoolFitExecutor(search.kernel, pool, wire, {
+    deadline: frame?.at,
+    iterationLimit: ce.iterationLimit,
+    signal,
+    pacer,
+    inStep: inContext,
+  });
+  const routeTaken = (): FitRoute =>
+    executor.slicesOnPool > 0
+      ? { route: 'pool' }
+      : onThisThread(
+          executor.slicesDeclined > 0 ? 'pool-declined' : 'no-points-to-ship'
+        );
+  try {
+    const outcome = await runFitPlanAsync(search.plan(), executor);
+    return withRoute(
+      ce,
+      answer(inContext(() => search.finish(outcome))),
+      routeTaken()
+    );
   } catch (e) {
     // The executors catch the deadline in the tasks; this is the net for
     // one that escapes between them, reported as the synchronous route
     // reports a timeout in the solve.
-    return timeoutOrThrow(e);
+    return withRoute(ce, timeoutOrThrow(e), routeTaken());
   } finally {
-    fitPool.releaseFit(wire);
+    pool.releaseFit(wire);
   }
 }
 

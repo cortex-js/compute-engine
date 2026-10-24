@@ -2528,6 +2528,19 @@ export interface Expression {
    * The `options` argument can include a `signal` property, which is an
    * `AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
    *
+   * A call made inside a
+   * {@linkcode IComputeEngine.withTimeLimit | ComputeEngine.withTimeLimit}
+   * (or `withStepBudget`) span keeps the span's limit for the whole
+   * evaluation, the parts that run after an `await` included: the limit is
+   * read when `evaluateAsync()` is called, not when the span closes. A
+   * limit that expires is reported as it is by `evaluate()`.
+   * A span around a nested `evaluateAsync(options)` call (from an
+   * asynchronous handler, with the options it received) applies to that
+   * call until it ends, when it ends sooner than the limit of the
+   * evaluation or adds a step budget; the other parts of the evaluation
+   * keep their own limit. Nested limits combine: the earlier time limit
+   * applies, and a step counts against every step budget in force.
+   *
    */
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression>;
 

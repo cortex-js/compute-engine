@@ -21,6 +21,7 @@ import {
   beginAsyncEvaluation,
   beginTopLevelEvaluation,
   copyContextStack,
+  joinAsyncEvaluation,
   topLevelEvaluationEpoch,
 } from './evaluation-epoch.js';
 import {
@@ -4110,6 +4111,12 @@ export class BoxedFunction
     // evaluation that pushes a frame it holds across an `await` (a scoped
     // operator, step 4 of the asynchronous driver) pushes it on a copy of
     // its own stack, which carries the same number (`copyContextStack`).
+    //
+    // A call that joins a pending evaluation from inside a
+    // `ce.withTimeLimit()` span shorter than the evaluation's time limit
+    // gets a copy of the stack that carries the shorter limit
+    // (`joinAsyncEvaluation`), so the limit applies to this call after its
+    // first `await`, and not to the other parts of the evaluation.
     let evaluation = asyncEvaluationOf(options?._contextStack);
     let contextStack = options?._contextStack;
     if (evaluation === undefined)
@@ -4117,6 +4124,7 @@ export class BoxedFunction
         this.engine,
         contextStack
       ));
+    else contextStack = joinAsyncEvaluation(this.engine, contextStack!);
     const effects =
       options?._effects ??
       this.engine._evaluationEffects ??

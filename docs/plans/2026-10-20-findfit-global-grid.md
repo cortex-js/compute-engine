@@ -218,7 +218,8 @@ scan of about 400 points.
   cancel message: the slice finishes on its worker, its result is dropped,
   and the worker's reply sends the next slice of its queue.
 - Executor: `PoolFitExecutor(kernel, pool, problem, { deadline,
-  iterationLimit, signal })`
+  iterationLimit, signal, pacer, inStep })` (`pacer` and `inStep` added
+  2026-10-24, section 4.3)
   and `runFitPlanAsync`. The scan points of a batch go in one slice per
   worker; every returned prefix is committed by index; a rejected slice is
   solved on the calling thread; a slice cut short with no nonlinear point
@@ -235,12 +236,10 @@ scan of about 400 points.
   `prepareGlobalSearch` (shared with `solveGlobal`), and the plan runs on
   `PoolFitExecutor` when there is a pool and the search is separable and
   ships, inline otherwise. The deadline is the frame armed when
-  `findFitAsync` is called. On the public route this frame is normally
-  absent: the span of `withTimeLimit` closes before an `evaluateAsync`
-  handler runs (measured: `ce._deadlineFrame` is `undefined` at the
-  handler's start), so the asynchronous route is bounded by its `signal`,
-  as the other asynchronous evaluations are. The test of a deadline cut
-  calls `findFitAsync` inside a span.
+  `findFitAsync` is called. Until 2026-10-24 this frame was absent on the
+  public route: the span of `withTimeLimit` closed before an `evaluateAsync`
+  handler ran (Tycho's CE-314 feedback, ROADMAP CE-424). Section 4.3 says
+  how the frame now reaches the handler.
 - The abort: the fit on the calling thread (with or without a pool) checks
   the signal with the deadline, at each row and each solver iteration, so
   an abort stops it within a row. An abort rejects with a
@@ -271,6 +270,54 @@ calling thread (184 ms against 230 ms); the cause was not measured. The two
 call the same code through different wrappers: `run()` on the calling
 thread goes through a proxy (`ComputeEngineFunction`), the worker through
 the closure that `load()` returns.
+
+### 4.3 The time limit, the event loop and the route (2026-10-24, CE-424, CE-425.1, CE-428)
+
+Tycho's feedback on CE 0.164.0 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`, entry
+CE-314) found three gaps on the asynchronous route.
+
+- The time limit (CE-424). `ce.withTimeLimit(20, () => expr.evaluateAsync())`
+  ran the search to its end (270 ms). Now every asynchronous evaluation
+  records the deadline frame in force when `evaluateAsync()` is called
+  (`AsyncEvaluation.deadlineFrame`, `boxed-expression/evaluation-epoch.ts`),
+  and `runWithEvaluationEffects()` puts it back in the engine slot for each
+  synchronous part of the evaluation (`docs/TIMEOUT-MODEL.md` section 6.4).
+  The handler of `FindFit` reads it at its start, as before, so the setup,
+  the search on this thread and the workers (`deadline` of `fit-run`) all
+  have the limit. The report is the one of `evaluate()`: the record with
+  `timedOut: True` and `phase`. Measured: the 1,000-row search with a 20 ms
+  span answers in 21 ms.
+- The event loop (CE-425.1). On the calling thread the setup and the search
+  were one synchronous run: no timer could fire, so an `AbortSignal` that a
+  timer aborts was seen only at the end, and a page did not respond. The
+  search now runs in slices of about 8 ms (`EventLoopPacer`,
+  `common/cooperative-steps.ts`) and waits for a macrotask between two
+  slices (`setImmediate`, else a `MessageChannel`, else `setTimeout`): after
+  the setup, between two tasks of the plan (`InlineFitExecutor.runSteps`,
+  `AsyncInlineFitExecutor`), between two iterations of a solver run
+  (`levenbergMarquardtSteps`, `FitKernel.lmSteps`, `solveSteps`), and every
+  8 rows of a residual or Jacobian evaluation (`residualSteps`,
+  `jacobianSteps` of `makeCallbacks`, `ROWS_PER_STEP`). The work and the
+  record do not change. One step longer than a slice still runs in one
+  piece: the setup (about 15 ms on 1,000 rows, 30 ms for a first interpreted
+  `LogGamma` model), one grid point of the separable scan
+  (`linearScanSolve()`, shared with the workers: up to 17 ms measured on an
+  interpreted model). A fit with no `global` option of the interpreted
+  model on 200 rows (2.3 s) blocked for 2.3 s; its longest block is now
+  13 ms. The
+  5-row `LogGamma` fit of Tycho (4.1 to 4.5 s here) had no turn of the event
+  loop; it now has one at most every 25 ms. The 5-row, 200-row and
+  1,000-row compiled fits take about the same time as before: medians of 9
+  calls of `evaluateAsync()`, two rounds, 5.2 to 5.5, 34.5 to 34.8 and 230
+  to 231 ms, before 4.8 to 5.1, 33.1 to 33.3 and 222 to 229 ms (load average
+  2 to 4 on 18 cores). The new route is up to about 5 % slower; two rounds
+  of the same code differ by up to 3 %.
+- The route (CE-428). The record of the asynchronous route has `route`,
+  `'pool'` or `'calling-thread'`, and with `'calling-thread'` a `reason`:
+  `'no-pool'`, `'no-global-search'`, `'not-separable'`, `'not-compilable'`,
+  `'pool-declined'` (the pool rejected every slice), `'no-points-to-ship'`,
+  or `'setup-timeout'` (`FitRoute` in `nonlinear-fit.ts`). The record of
+  `evaluate()` has neither key.
 
 ## 5. Tests and records
 

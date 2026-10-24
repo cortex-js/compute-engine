@@ -328,9 +328,10 @@ describe('FindFit.evaluateAsync on a kernel pool', () => {
         fitCall(xs, ys, { b: [0.3, 628], c: [0, 2 * Math.PI] }) as any
       ) as any
     ).ops as BoxedExpression[];
-    // `evaluateAsync()` runs its handler after the span of a `withTimeLimit`
-    // call has closed, so the deadline is given to `findFitAsync` directly:
-    // it captures the frame armed when it is called. Raise the budget until
+    // `findFitAsync` is called directly inside the span: it captures the
+    // frame armed when it is called (the public route, `evaluateAsync()`
+    // inside a span, is tested in ce-424-425-findfit-async.test.ts). Raise
+    // the budget until
     // the setup fits in it; the first such budget is far too short for the
     // scan of 2,000 grid points.
     const fit = (ms: number): Promise<BoxedExpression | undefined> => {

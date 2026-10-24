@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-424.
+Next free reference: CE-430.
 
 **Entry format.**
 
@@ -5763,10 +5763,14 @@ compilation pass that emits both bodies.
 
 ### CE-314. Worker threads for parallel numeric kernels: the Epsil route and the API name
 
-**Status:** in progress; capability. User decision 2026-10-20: the Epsil
-asynchronous route waits for Tycho's integration feedback. Waits for Tycho:
-request filed 2026-10-22 in `~/dev/tycho/docs/COMPUTE_ENGINE.md`, section
-"Standing Tycho-side follow-ups"; continue when Tycho writes its feedback there.
+**Status:** open; capability. User decision 2026-10-20: the Epsil
+asynchronous route waits for Tycho's integration feedback. Tycho's feedback is
+written (2026-10-24, Tycho commit `74eea7228`,
+`~/dev/tycho/docs/COMPUTE_ENGINE.md`, entry CE-314: `FindFit.evaluateAsync()`
+on CE 0.164.0 and `broadcastAsync()` on CE 0.165.0). Its asks (a time limit
+and event-loop turns on the asynchronous routes, `inline: false`,
+`willUsePool()`, `shippable`, and the `route` of a batch or a fit) are done;
+CE-429 is what remains of them.
 Plan: `docs/plans/2026-10-20-worker-kernel-pool.md`,
 `docs/plans/2026-10-20-findfit-global-grid.md`.
 
@@ -5787,8 +5791,19 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 - **CE-314.1** The Epsil asynchronous route. Epsil has no keyword for parallel
   execution: the engine decides from purity, compilability and size, as it does
   for compilation (design section 5.7).
-- **CE-314.2** Name the array-evaluation pair: working name
-  `broadcast`/`broadcastAsync`, alternative `runMany`.
+- The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24:
+  "one formula, many points"; `runMany` says less).
+
+### CE-429. Two steps of `FindFit.evaluateAsync()` still block the calling thread
+
+**Status:** open; performance, small. Found 2026-10-24 while fixing CE-425
+(the asynchronous route now gives the event loop a turn about every 8 ms).
+
+Two steps run as one block on the calling thread: the setup of the asynchronous
+evaluation (about 15 ms on 1000 rows, 30 ms for a first interpreted model) and
+one grid point of the separable scan (up to 17 ms on an interpreted model).
+Splitting the setup needs a per-unit setup; splitting a grid point needs a
+change in `fit-scan.ts`, which the workers share.
 
 ### CE-317. An operator with only `evaluateAsync` walks the body at each asynchronous application
 

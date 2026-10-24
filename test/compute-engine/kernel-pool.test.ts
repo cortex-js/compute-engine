@@ -83,8 +83,9 @@ describe('broadcastAsync without a pool', () => {
     );
     ctl.abort();
     const { done } = await p;
-    // The first slice ran before the first yield; nothing after the abort.
-    expect(done).toBe(1000);
+    // The batch yields to the event loop before its first slice, so the
+    // abort right after the call stops it before any cell.
+    expect(done).toBe(0);
   });
 
   test('a deadline that has passed stops the loop before its first cell', async () => {

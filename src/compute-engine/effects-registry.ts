@@ -5,12 +5,18 @@ import type {
   EntropyHandler,
 } from './types-effects.js';
 import type { PrecisionWindow } from './types-kernel-evaluation.js';
+import type { DeadlineFrame } from '../common/interruptible.js';
+import {
+  deadlineFrameOf,
+  mergeDeadlineFrames,
+} from './boxed-expression/evaluation-epoch.js';
 
 // The host capability registry — the value behind `ce.effects`
 // (`docs/EFFECTS-MODEL.md`, "Host capabilities"). This module holds the
 // default handlers and the function that derives a new registry from
-// overrides. It imports no engine code, so the library and the evaluation
-// driver can both use it.
+// overrides. It imports no engine code (only the leaf module
+// `boxed-expression/evaluation-epoch.ts`, which imports nothing), so the
+// library and the evaluation driver can both use it.
 
 /** The capability names a registry holds. A derived registry rejects any
  * other key: a misspelled capability would otherwise be accepted and then
@@ -152,6 +158,18 @@ export function deriveEffectHandlers(
  *   also keeps a constant such as `Pi` from being cached at the raised
  *   precision.
  *
+ * - The deadline frame (`AsyncEvaluation.deadlineFrame`,
+ *   `boxed-expression/evaluation-epoch.ts`), when the evaluation that owns
+ *   `contextStack` started inside a `ce.withTimeLimit()` span. The span
+ *   closed when its synchronous callback returned, so the frame is put back
+ *   in the engine slot for each slice, merged with the frame
+ *   that the slot already holds (`mergeDeadlineFrames`): the earlier time
+ *   limit of the two, and the step budgets of both. The handlers and loops
+ *   that check the engine's deadline then see the time limit of the call
+ *   that started the evaluation, or of a nested call that joined it inside
+ *   a shorter span (`joinAsyncEvaluation`). The enclosing frame is put back
+ *   when the slice returns or throws.
+ *
  * This puts the right registry in the slot, and the evaluation's own array
  * in place of the engine's array (by reference, so that a scope `fn` pushes
  * and holds across a later `await` stays on that array), for the duration
@@ -165,6 +183,7 @@ export function runWithEvaluationEffects<T, C>(
     _evalContextStack: C[];
     _requestedPrecision?: number | undefined;
     _withTransientPrecision?: <R>(digits: number, fn: () => R) => R;
+    _deadlineFrame?: DeadlineFrame | undefined;
   },
   effects: EffectHandlers,
   fn: () => T,
@@ -174,10 +193,20 @@ export function runWithEvaluationEffects<T, C>(
   const enclosing = engine._evaluationEffects;
   const enclosingStack = engine._evalContextStack;
   const enclosingRequest = engine._requestedPrecision;
+  const enclosingFrame = engine._deadlineFrame;
+  // The frame in force for the slice: the earlier time limit of the two
+  // frames and the step budgets of both. `enclosingFrame` is put back on
+  // every exit (the `finally` below).
+  const frame = mergeDeadlineFrames(
+    enclosingFrame,
+    deadlineFrameOf(contextStack)
+  );
+  const installFrame = frame !== enclosingFrame;
   engine._evaluationEffects = effects;
   if (contextStack !== undefined) engine._evalContextStack = contextStack;
   if (precisionWindow?.requested !== undefined)
     engine._requestedPrecision = precisionWindow.requested;
+  if (installFrame) engine._deadlineFrame = frame;
   try {
     const working = precisionWindow?.working;
     if (working !== undefined && engine._withTransientPrecision)
@@ -188,6 +217,7 @@ export function runWithEvaluationEffects<T, C>(
     if (contextStack !== undefined) engine._evalContextStack = enclosingStack;
     if (precisionWindow?.requested !== undefined)
       engine._requestedPrecision = enclosingRequest;
+    if (installFrame) engine._deadlineFrame = enclosingFrame;
   }
 }
 

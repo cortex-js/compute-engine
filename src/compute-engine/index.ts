@@ -1921,8 +1921,10 @@ export class ComputeEngine implements IComputeEngine {
    * its first `await` while the span is still nominally open, so any work that
    * resumes after that point runs **outside** the deadline and is never
    * cancelled — the span is silently ineffective (see
-   * `docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
-   * `expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+   * `docs/TIMEOUT-MODEL.md` §6.4). An `expr.evaluateAsync()` call that `fn`
+   * makes before its first `await` is the exception: the evaluation keeps
+   * the span's deadline until it ends. For cancellation that is not a time
+   * limit, use `expr.evaluateAsync({ signal })` with an `AbortSignal`.
    */
   withTimeLimit<T>(
     limit: number | { ms: number; label?: string },

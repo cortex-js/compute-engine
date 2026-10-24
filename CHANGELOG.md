@@ -51,7 +51,73 @@
   gives `undefined` for an absent point, and for an absent list, at a
   `broadcastable<tuple<…>>` parameter; it declined.
 
+- **A time limit applies to an asynchronous evaluation** (ROADMAP CE-424,
+  Tycho's CE-314 feedback). `ce.withTimeLimit(20, () => { p =
+  expr.evaluateAsync(); })` had no effect: the limit was removed when the
+  callback returned, before the evaluation went on after its first `await`.
+  A `FindFit` global search ran to its end (270 ms). The evaluation now keeps
+  the limit (and a `withStepBudget` budget) that is in force when
+  `evaluateAsync()` is called, until it ends. A timeout is reported as by
+  `evaluate()`: the `FindFit` search answers its best point so far with
+  `timedOut: True` after 21 ms, and the time left is given to the workers of
+  a kernel pool.
+
+- **`broadcastAsync()` evaluates no cell before it returns** (ROADMAP
+  CE-425.2, Tycho's CE-314 feedback). A batch that stays on the calling
+  thread (no pool, a result that cannot run on a worker, or fewer cells than
+  the inline threshold) ran its first slice, up to 16 384 cells, before the
+  call returned. The batch now yields to the event loop (a macrotask turn)
+  before its first slice, as it already did between two slices. A signal
+  aborted right after the call now stops the batch before its first cell.
+
+### New Features
+
+- **The record of `FindFit.evaluateAsync()` says where the search ran**
+  (ROADMAP CE-428, Tycho's CE-314 feedback). The record of the asynchronous
+  route of `FindFit` and `FindRoot` has a `route` entry: `"pool"` when the
+  workers of the engine's kernel pool solved the grid points, or
+  `"calling-thread"`. With `"calling-thread"`, a `reason` entry says why the
+  pool did not take the search: `"no-pool"`, `"no-global-search"`,
+  `"not-separable"`, `"not-compilable"`, `"pool-declined"` (the pool
+  rejected every slice), `"no-points-to-ship"` or `"setup-timeout"`. The
+  record of `evaluate()` has neither entry.
+
+- **`broadcastAsync({ …, inline: false })` refuses the calling thread**
+  (ROADMAP CE-426). When the batch would not go to the worker pool, the call
+  resolves at once with `done: 0` and evaluates no cell; when a worker fails
+  during the batch, the call keeps the cells that the workers did and does
+  not complete the rest on the calling thread. `result.willUsePool(cells)`
+  of a compiled result says before the call whether a batch of that many
+  cells would go to the pool now.
+
+- **`result.shippable` says whether a compiled result can run on a worker**
+  (ROADMAP CE-427). It is `false` when the compiled code draws random numbers
+  from the engine, names a host global (a `vars` or `functions` entry given
+  by name), or has a caller `preamble`; such a result always runs on the
+  calling thread. It is present where `broadcastAsync` is.
+
+- **The result of `broadcastAsync()` says where the batch ran** (ROADMAP
+  CE-428). `route` is `'pool'` or `'calling-thread'`, and `reason`, present
+  when the pool did not take the whole batch, is one of `'no-pool'`,
+  `'pool-unusable'`, `'not-shippable'`, `'below-threshold'` and
+  `'pool-declined'`. The types `BroadcastAsyncRoute` and
+  `BroadcastAsyncReason` are exported.
+  `route` is a required field of `BroadcastAsyncResult`: code that builds
+  such an object itself (a mock, for example) must set it.
+
 ### Bug Fixes
+
+- **`FindFit.evaluateAsync()` lets timers run during a search on the calling
+  thread** (ROADMAP CE-425.1, Tycho's CE-314 feedback). With no kernel pool,
+  or when the pool does not take the search (a model that does not compile,
+  a search that is not separable, no `global` option), the whole search ran
+  in one piece: a 5-point fit of `a cos(b x + c) + d LogGamma(x + c)` blocked
+  the thread for more than 4 s, so a page did not respond and an
+  `AbortSignal` aborted by a timer was not seen until the end. The search now
+  gives the event loop a turn about every 8 ms (between grid points, solver
+  starts, solver iterations and groups of 8 data rows); the longest block of
+  that fit is now about 25 ms. The results do not change; a short fit is up
+  to about 5 % slower, near the noise of the measurement.
 
 - **`Equal` and `NotEqual` of two relations compare their truth values**
   (ROADMAP CE-411, Tycho row 433). `["Equal", ["LessEqual", "a", 0],

@@ -335,6 +335,10 @@ describe('the entry point has no engine in it', () => {
       /^src\/runtime\.ts$/,
       /^src\/common\/interruptible\.ts$/,
       /^src\/compute-engine\/effects-registry\.ts$/,
+      // The evaluation-epoch bookkeeping that `effects-registry.ts` reads to
+      // carry a time limit into an asynchronous evaluation (ROADMAP CE-424):
+      // a leaf module that imports one type and no engine code.
+      /^src\/compute-engine\/boxed-expression\/evaluation-epoch\.ts$/,
       /^src\/compute-engine\/numerics\/[\w-]+\.ts$/,
       /^src\/big-decimal\/[\w-]+\.ts$/,
       // `broadcast.ts` is the batch loop of `loadBroadcast()`: it imports

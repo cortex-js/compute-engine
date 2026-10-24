@@ -121,7 +121,9 @@ export type {
   BroadcastInputs,
   BroadcastOptions,
   BroadcastAsyncOptions,
+  BroadcastAsyncReason,
   BroadcastAsyncResult,
+  BroadcastAsyncRoute,
 } from './compute-engine/compilation/types.js';
 
 // ── Worker pool for `result.broadcastAsync()` (`ce.workers`) ────────

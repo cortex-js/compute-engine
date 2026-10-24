@@ -118,6 +118,32 @@ If the callback returns a promise, the synchronous span exits before later
 promise continuations run. Work after the first asynchronous boundary is not
 bounded by that span.
 
+One exception: an `expr.evaluateAsync()` call made while the span is open
+keeps the span's frame for the whole evaluation. `beginAsyncEvaluation()`
+(`boxed-expression/evaluation-epoch.ts`) records the engine's frame on the
+asynchronous evaluation when it starts (`AsyncEvaluation.deadlineFrame`), a
+nested evaluation and each statement of a program take the frame of the
+evaluation they belong to, and `runWithEvaluationEffects()`
+(`effects-registry.ts`) puts the frame back in the engine slot for each
+synchronous part of the evaluation, merged with the frame that the slot
+already holds (`mergeDeadlineFrames()`, `evaluation-epoch.ts`: the earlier
+time limit of the two frames, and the step budgets of both). The enclosing
+frame is put back when that part returns or throws. So the handlers, the loops and the `runAsync` drivers that check the
+engine's deadline after an `await` see the limit of the call, and a timeout
+is reported as on the synchronous route (a rejected `CancellationError`, or
+the in-band `timedOut` record of `FindFit`/`FindRoot`). The step budgets of
+the frame count the steps of the whole evaluation too.
+
+A nested `evaluateAsync(options)` call that receives the options of a
+pending evaluation (an asynchronous handler that evaluates an operand) is a
+part of that evaluation and does not start a new one. When such a call is
+made inside its own `ce.withTimeLimit()` (or step budget) span, and that
+span ends sooner than the evaluation's frame or adds a step budget,
+`joinAsyncEvaluation()` (`evaluation-epoch.ts`) gives the call a copy of the
+context stack that carries the merged frame. The shorter limit then applies
+to that call after its `await`s too, and not to the other parts of the
+evaluation (for example, a sibling operand evaluated at the same time).
+
 Asynchronous evaluation uses `evaluateAsync({ signal })` with an
 `AbortSignal`. The signal is also cooperative: only handlers and loops that
 consult it can stop. A plain promise or blocking host call cannot be forcibly

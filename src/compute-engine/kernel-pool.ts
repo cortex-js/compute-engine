@@ -30,13 +30,18 @@
  * helpers the code names).
  *
  * `broadcastAsync()` runs a batch inline, in slices between yields to the
- * event loop, when there is no pool, when the result is not shippable, or
- * when the batch is too small to pay for the transfer; otherwise it splits the
- * cells into one slice per worker (or `chunk` cells per slice), sends each
- * worker one slice at a time, and commits the returned slices in order. The
- * result reports `done`, the number of leading cells that are valid: all of
- * them, or fewer when the `deadline` or the `signal` stopped the batch. The
- * cells after `done` are never written.
+ * event loop (the first yield comes before the first slice, so that no cell
+ * runs before the call returns), when there is no pool, when the result is
+ * not shippable, or when the batch is too small to pay for the transfer;
+ * otherwise it splits the cells into one slice per worker (or `chunk` cells
+ * per slice), sends each worker one slice at a time, and commits the returned
+ * slices in order. The option `inline: false` refuses the inline route: the
+ * batch then resolves at once with no cell done. The result reports `done`,
+ * the number of leading cells that are valid: all of them, or fewer when the
+ * `deadline` or the `signal` stopped the batch. The cells after `done` are
+ * never written. It also reports `route` (`'pool'` or `'calling-thread'`)
+ * and, when the pool did not take the whole batch, `reason`
+ * (`offPoolReason()`, or `'pool-declined'` when a worker failed).
  *
  * An abort of the signal settles the batch's tasks at once. A task that a
  * worker runs at that time is cancelled through the worker's cancel flag
@@ -57,6 +62,7 @@ import type {
   BroadcastInputs,
   BroadcastOptions,
   BroadcastAsyncOptions,
+  BroadcastAsyncReason,
   BroadcastAsyncResult,
 } from './compilation/types.js';
 import {
@@ -68,6 +74,9 @@ import {
   type BroadcastSlice,
 } from './compilation/broadcast.js';
 import { RUNTIME_VERSION } from './compilation/javascript-runtime.js';
+// The inline slices yield a macrotask between them (and before the first), so
+// that rendering and input get their turn.
+import { yieldToEventLoop } from '../common/cooperative-steps.js';
 import { INTERVAL_RUNTIME_VERSION } from './interval/index.js';
 import type {
   KernelKind,
@@ -991,7 +1000,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
 }
 
 /** Whether `pool` is a pool this module (in any bundle) built. */
-function isKernelPool(pool: unknown): pool is KernelPoolImpl {
+export function isKernelPool(pool: unknown): pool is KernelPoolImpl {
   return (
     typeof pool === 'object' &&
     pool !== null &&
@@ -1050,37 +1059,6 @@ function recordCalibration(stored: object, cells: number, ms: number): void {
   calibration.set(stored, cells / ms);
 }
 
-/**
- * Yield to the event loop between two inline slices: a macrotask, so that
- * rendering and input get their turn, through the fastest channel there is.
- * Nested `setTimeout(0)` calls are delayed to 4 ms by browsers; a
- * `MessageChannel` is not.
- */
-const yieldToEventLoop: () => Promise<void> = (() => {
-  const g = globalThis as {
-    setImmediate?: (cb: () => void) => unknown;
-    MessageChannel?: new () => {
-      port1: { onmessage: ((e: unknown) => void) | null };
-      port2: { postMessage: (m: unknown) => void };
-    };
-  };
-  if (typeof g.setImmediate === 'function') {
-    const setImmediate = g.setImmediate;
-    return () => new Promise((resolve) => setImmediate(resolve));
-  }
-  if (typeof g.MessageChannel === 'function') {
-    const channel = new g.MessageChannel();
-    const waiting: (() => void)[] = [];
-    channel.port1.onmessage = () => waiting.shift()?.();
-    return () =>
-      new Promise((resolve) => {
-        waiting.push(resolve);
-        channel.port2.postMessage(undefined);
-      });
-  }
-  return () => new Promise((resolve) => setTimeout(resolve, 0));
-})();
-
 /** What a compile target gives `makeBroadcastAsync` for one result. */
 export interface BroadcastAsyncSpec {
   kind: KernelKind;
@@ -1107,6 +1085,35 @@ export interface BroadcastAsyncSpec {
   workers: () => KernelPool | undefined;
   /** The engine's iteration limit at call time, shipped to the worker. */
   iterationLimit: () => number | undefined;
+}
+
+/**
+ * Why `broadcastAsync()` keeps a batch of `count` cells off the pool, or
+ * `undefined` when it sends the batch to the pool. The checks read the pool
+ * and the calibrated threshold at the time of the call, in the order of the
+ * `BroadcastAsyncReason` type. A `count` that is not a number is below the
+ * threshold.
+ */
+function offPoolReason(
+  spec: BroadcastAsyncSpec,
+  count: number
+): BroadcastAsyncReason | undefined {
+  const pool = spec.workers();
+  if (!isKernelPool(pool)) return 'no-pool';
+  if (pool.unusable !== undefined) return 'pool-unusable';
+  if (!spec.shippable) return 'not-shippable';
+  if (!(count >= thresholdCells(spec.stored))) return 'below-threshold';
+  return undefined;
+}
+
+/**
+ * Build the `willUsePool` entry of a compilation result: whether
+ * `broadcastAsync()` would send a batch of `cells` cells to the pool now.
+ */
+export function makeWillUsePool(
+  spec: BroadcastAsyncSpec
+): (cells: number) => boolean {
+  return (cells) => offPoolReason(spec, cells) === undefined;
 }
 
 /** A positive integer option, or a `TypeError` naming it. */
@@ -1176,6 +1183,9 @@ export function makeBroadcastAsync(
       )
     )
       throw new TypeError('broadcastAsync: `deadline` must be a finite number');
+    if (options?.inline !== undefined && typeof options.inline !== 'boolean')
+      throw new TypeError('broadcastAsync: `inline` must be a boolean');
+    const allowInline = options?.inline !== false;
     const signal = options?.signal;
     const deadline =
       options?.deadline !== undefined
@@ -1215,20 +1225,22 @@ export function makeBroadcastAsync(
       return (inlineInputs = copy);
     };
 
-    /** Run the cells from `start` inline, in slices with a yield between
-     * two; returns the count of leading valid cells from `start`. */
+    /** Run the cells from `start` inline, in slices with a yield before
+     * each slice; returns the count of leading valid cells from `start`.
+     * The yield before the first slice is a macrotask turn too: without it,
+     * the first slice (up to `INLINE_SLICE` cells) would run before
+     * `broadcastAsync()` returns, since an async function runs on the
+     * caller's stack until its first `await`. */
     const inline = async (start: number): Promise<number> => {
       const chunk = chunkOption ?? INLINE_SLICE;
       let done = start;
       let sliceMs = 0;
-      let first = true;
       while (done < count) {
         // Checked before and after the yield: the abort usually arrives
         // while the batch waits for the event loop.
         if (signal?.aborted || pastDeadline()) break;
-        if (!first) await yieldToEventLoop();
+        await yieldToEventLoop();
         if (signal?.aborted || pastDeadline()) break;
-        first = false;
         const from = done;
         const to = Math.min(count, from + chunk);
         const t0 = Date.now();
@@ -1247,14 +1259,17 @@ export function makeBroadcastAsync(
       return done - start;
     };
 
-    const pool = spec.workers();
-    if (
-      !spec.shippable ||
-      !isKernelPool(pool) ||
-      pool.unusable !== undefined ||
-      count < thresholdCells(spec.stored)
-    )
-      return { out, done: await inline(0) };
+    const reason = offPoolReason(spec, count);
+    if (reason !== undefined)
+      return {
+        out,
+        done: allowInline ? await inline(0) : 0,
+        route: 'calling-thread',
+        reason,
+      };
+    // `offPoolReason()` returned `undefined`: the pool is a usable
+    // `KernelPoolImpl`.
+    const pool = spec.workers() as KernelPoolImpl;
 
     // One slice per worker, or `chunk` cells per slice, in order. Each
     // worker takes one slice at a time; the rest wait on the main thread.
@@ -1300,11 +1315,14 @@ export function makeBroadcastAsync(
       done += r.value.done;
       if (r.value.done < slice.to - slice.from) break;
     }
+    if (!failed) return { out, done, route: 'pool' };
     // A worker could not take a slice (a refused kernel, a failed worker):
     // the rest of the batch runs inline, with its yields, from the end of
-    // the valid prefix.
-    if (failed && done < count && !signal?.aborted && !pastDeadline())
+    // the valid prefix, unless `inline: false` refused the calling thread.
+    if (allowInline && done < count && !signal?.aborted && !pastDeadline()) {
       done += await inline(done);
-    return { out, done };
+      return { out, done, route: 'calling-thread', reason: 'pool-declined' };
+    }
+    return { out, done, route: 'pool', reason: 'pool-declined' };
   };
 }

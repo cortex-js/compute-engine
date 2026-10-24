@@ -1900,7 +1900,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'points are then solved again and refined on every row. ' +
         'With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` ' +
         'scans the grid on the workers and gives the record of `evaluate()`; ' +
-        'the solver runs stay on the calling thread.',
+        'the solver runs stay on the calling thread. The record of ' +
+        '`evaluateAsync()` also has `route`: "pool" when the workers scanned ' +
+        'the grid, or "calling-thread" with a `reason` ("no-pool", ' +
+        '"pool-unusable", "no-global-search", "not-separable", ' +
+        '"not-compilable", "pool-declined", "no-points-to-ship", ' +
+        '"step-budget", "setup-timeout"). On the ' +
+        'calling thread `evaluateAsync()` gives the event loop a turn about ' +
+        'every 8 ms, and it keeps the limit of a `withTimeLimit` span that ' +
+        'encloses the call.',
       complexity: 1200,
       broadcastable: false,
       // Hold the arguments: a parameter symbol may carry a seeded document
