@@ -871,3 +871,23 @@ describe('EPSIL MATCH — lazy list subjects', () => {
     ).toBe(2);
   });
 });
+
+describe('EPSIL MATCH — the location of an error in a case', () => {
+  const G = 'function g(x) { 1/x }\n';
+
+  test('the error of the body of the selected case is placed on that case', () => {
+    const source =
+      G + 'let n = 2\nlet v = match n {\n  1 => 0\n  _ => g("a")\n}\nv';
+    const { diagnostics } = run(source);
+    expect(diagnostics).toHaveLength(1);
+    const [start, end] = diagnostics[0].range;
+    expect(source.slice(start, end)).toBe('_ => g("a")');
+    expect(String(diagnostics[0].message[2])).toBe('in Match argument 3');
+  });
+
+  test('a case of a match that is not the selected one is not reported', () => {
+    const source =
+      G + 'let n = 1\nlet v = match n {\n  1 => 0\n  _ => g("a")\n}\nv';
+    expect(run(source).diagnostics).toEqual([]);
+  });
+});

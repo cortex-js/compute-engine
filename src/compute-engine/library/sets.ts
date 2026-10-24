@@ -62,6 +62,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   searchMayStillMatch,
   isWalkableFiniteCollection,
+  pushDistinct,
 } from '../collection-utils.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { isPrime as isPrimeExpression } from '../boxed-expression/predicates.js';
@@ -422,12 +423,14 @@ function cannotBeResidueClass(x: Expression): boolean {
  * absent, or `undefined` when none can: the declared result, the bare
  * `set`, applies then.
  *
- * The bare `set` admits values only. A set operation does not compute from
- * an element: it keeps each element as it is, absent ones included
- * (`Union({1, Missing}, {2})` is `{1, 2, Missing}`). So when the elements
- * of an operand can be absent (a `missing` arm, or `any`, which admits the
- * absence markers: `typeCouldHoldMissing`), the result type must admit the
- * absent element too.
+ * The bare `set` also admits absent elements (it matches `set<any>`), but
+ * its element type is open and can be refined from a later assignment. A
+ * set operation does not compute from an element: it keeps each element as
+ * it is, absent ones included (`Union({1, Missing}, {2})` is
+ * `{1, 2, Missing}`). So when the elements of an operand can be absent (a
+ * `missing` arm, or `any`, which admits the absence markers:
+ * `typeCouldHoldMissing`), the result type states the element types
+ * explicitly, with the absent arm, instead of leaving them open.
  * `sources` names the operands whose elements can be in the result: every
  * operand (`Union`, `SymmetricDifference`), or only the first one (the
  * result of `Intersection`, `SetMinus` and `Complement` is a part of the
@@ -1919,8 +1922,8 @@ function intersection(
   // Preserve set semantics of the result: dedup (the walked operand may be a
   // list with repeated elements).
   const unique: Expression[] = [];
-  for (const elem of elements)
-    if (unique.every((e) => !e.isSame(elem))) unique.push(elem);
+  const keptUnique = new Map<number, Expression[]>();
+  for (const elem of elements) pushDistinct(unique, keptUnique, elem);
 
   if (unique.length === 0) return ce.symbol('EmptySet');
   return literalSet(ce, unique);
@@ -2356,9 +2359,16 @@ function symmetricDifference(
   const elements: Expression[] = [];
   for (const elem of a.each())
     if (b.contains(elem) !== true) elements.push(elem);
+  // Each element of `b` is compared with the elements kept so far: group
+  // those by hash, so that only elements with the same hash are compared.
+  const kept = new Map<number, Expression[]>();
+  for (const e of elements) {
+    const bucket = kept.get(e.hash);
+    if (bucket === undefined) kept.set(e.hash, [e]);
+    else bucket.push(e);
+  }
   for (const elem of b.each())
-    if (a.contains(elem) !== true && elements.every((e) => !e.isSame(elem)))
-      elements.push(elem);
+    if (a.contains(elem) !== true) pushDistinct(elements, kept, elem);
 
   if (elements.length === 0) return ce.symbol('EmptySet');
   return literalSet(ce, elements);

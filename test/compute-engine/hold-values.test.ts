@@ -224,3 +224,12 @@ describe('HoldValues — .N() route leaves shielded symbols symbolic', () => {
     expect(r.isSame(ce.parse('\\frac{a+x}{x^2}'))).toBe(true);
   });
 });
+
+describe('A raw Function with no body inside Hold', () => {
+  it('does not throw when its type is read or when it is evaluated', () => {
+    const ce = new ComputeEngine();
+    const h = ce.box(['Hold', ['Function']] as any);
+    expect(() => h.type).not.toThrow();
+    expect(() => h.evaluate()).not.toThrow();
+  });
+});

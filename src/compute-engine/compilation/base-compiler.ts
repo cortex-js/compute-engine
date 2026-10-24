@@ -11213,6 +11213,39 @@ export class BaseCompiler {
   }
 
   /**
+   * `Max`, `Min` and the four ordering comparisons lower to the target's
+   * numeric `max`, `min` and `<`. An operand whose declared type is exactly a
+   * value type that is not a number (`color`, `regexp`, `object`) has no
+   * numeric reading, and the interpreter leaves the call unevaluated, so the
+   * compiled code would be a wrong value. Decline: with a `fallback`, the
+   * interpreter runs (CE-393). The test is the exact type, never `matches`,
+   * because a declared type is routinely wider than the run-time value.
+   */
+  private static assertOrderedOperandsAreNumbers(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): void {
+    if (
+      h !== 'Max' &&
+      h !== 'Min' &&
+      h !== 'Less' &&
+      h !== 'LessEqual' &&
+      h !== 'Greater' &&
+      h !== 'GreaterEqual'
+    )
+      return;
+    for (const arg of args) {
+      const t = arg.type.toString();
+      if (t === 'color' || t === 'regexp' || t === 'object')
+        throw new Error(
+          `Could not compile \`${h}\`: an operand of type '${t}' has no ` +
+            `numeric reading on target '${target.language ?? 'unknown'}'.`
+        );
+    }
+  }
+
+  /**
    * Compile a function expression
    */
   static compileExpr(
@@ -11492,6 +11525,10 @@ export class BaseCompiler {
         declinedByCustomHandler = true;
       }
     }
+
+    // After the per-operator handler: a user operator that supports these
+    // operand types lowers them itself.
+    BaseCompiler.assertOrderedOperandsAreNumbers(h, args, target);
 
     // `And`/`Or`/`Not` used as a VALUE over an operand that may be ABSENT
     // (typed `boolean | missing`, `undefined` or `None` at run time) follow
@@ -12562,7 +12599,19 @@ export class BaseCompiler {
             // as a division below, where the root becomes `Divide` (or the
             // unary `Negate` above it).
             let resultPrec = op[1];
-            if (args.length === 1) {
+            if (
+              args.length === 1 &&
+              (h === 'Add' || h === 'Multiply' || h === 'And' || h === 'Or')
+            ) {
+              // An n-ary operator with one operand is that operand. Only
+              // non-canonical input reaches here. Read as a prefix operator
+              // it would emit `* x` (CE-251.2).
+              resultStr = BaseCompiler.compileValueOperand(
+                args[0],
+                target,
+                op[1]
+              );
+            } else if (args.length === 1) {
               // Unary operator, assume prefix. Word operators get a space.
               const operandCode = BaseCompiler.compileValueOperand(
                 args[0],
@@ -13408,11 +13457,14 @@ export class BaseCompiler {
       BaseCompiler.assertScalarCondition(args[0], target);
       // Mixed real/complex arms: coerce every real arm to the `{re, im}`
       // convention, so the node has one representation whichever arm runs
-      // (`branchComplexCoercion`; Tycho item 60). Computed over BOTH arms even when one
-      // is dead (below): the node's shape, which its consumers read, still
-      // counts the dead arm.
+      // (`branchComplexCoercion`; Tycho item 60). The coercion, like
+      // `isComplexValued` of the node, reads only the arms that
+      // `liveSelectionArms` keeps: a dead arm is not emitted, so it does not
+      // decide the representation.
       const coerce = BaseCompiler.branchComplexCoercion(
-        [args[1], args[2]],
+        node !== undefined && isFunction(node, 'If')
+          ? BaseCompiler.liveSelectionArms(node)
+          : [args[1], args[2]],
         target
       );
       // Both arms are conditionally evaluated: each is its own region, so a
@@ -13501,7 +13553,9 @@ export class BaseCompiler {
       // complex-valued recursion compiled to a plain number, NaN-poisoning
       // every consumer of the `{ re, im }` slots).
       const coerce = BaseCompiler.branchComplexCoercion(
-        args.filter((_x, i) => i % 2 === 1),
+        node !== undefined && isFunction(node, 'Which')
+          ? BaseCompiler.liveSelectionArms(node)
+          : args.filter((_x, i) => i % 2 === 1),
         target
       );
       // A position no clause matched, and a position whose condition is
@@ -21354,6 +21408,31 @@ export class BaseCompiler {
     const elements = args.slice(1);
     const statements = javascriptStatements(target);
 
+    // An assignment to an index in the term writes the binding of that index
+    // for the rest of the iteration only (CE-226.1). The emitted loop binds
+    // the index as a `const`, so the write would fail at run time: decline,
+    // as `compileForLoop` does.
+    const indexNames = new Set(
+      elements.flatMap((e) =>
+        isFunction(e, 'Element') && e.ops[0] !== undefined
+          ? isFunction(e.ops[0], 'Tuple')
+            ? tuplePatternNames(e.ops[0])
+            : isSymbol(e.ops[0])
+              ? [e.ops[0].symbol]
+              : []
+          : []
+      )
+    );
+    const assigned =
+      indexNames.size > 0
+        ? BaseCompiler.nestedAssignmentsTo(body, indexNames)[0]
+        : undefined;
+    if (assigned !== undefined)
+      throw new Error(
+        `Could not compile \`Comprehension\`: the term assigns the index \`${assigned.name}\`. ` +
+          `The interpreter evaluates it instead.`
+      );
+
     const lang = target.language ?? '';
     if (lang === 'glsl' || lang === 'wgsl')
       throw new Error(
@@ -24122,11 +24201,9 @@ export class BaseCompiler {
     // over a wide `a` types `integer`; under the complex discipline
     // `a` is complex-shaped and both arms are lifted, and a parent reading
     // the node's type would consume the object as a number).
-    if (expr.operator === 'If')
-      return expr.ops.slice(1).some((a) => BaseCompiler.isComplexValued(a));
-    if (expr.operator === 'Which')
-      return expr.ops.some(
-        (a, i) => i % 2 === 1 && BaseCompiler.isComplexValued(a)
+    if (expr.operator === 'If' || expr.operator === 'Which')
+      return BaseCompiler.liveSelectionArms(expr).some((a) =>
+        BaseCompiler.isComplexValued(a)
       );
     // A `Block`'s value is its LAST statement, not any of them: an interior
     // statement that binds a complex LOCAL says nothing about the value the
@@ -24819,6 +24896,13 @@ export class BaseCompiler {
     // A `list` type that `aggregateComponentCount` declined to size: either
     // multi-axis (a matrix/tensor) or of unknown length. Non-scalar either way.
     if (typeof t !== 'string' && t.kind === 'list') return true;
+    // An `indexed_collection` or `collection` value can be a list at run time,
+    // so it is never a shader scalar either (CE-224).
+    if (
+      typeof t !== 'string' &&
+      (t.kind === 'indexed_collection' || t.kind === 'collection')
+    )
+      return true;
     return false;
   }
 
@@ -25981,6 +26065,32 @@ export class BaseCompiler {
     )
       return t.value;
     return undefined;
+  }
+
+  /**
+   * The value arms of an `If` or `Which` that the emitted code can reach: an
+   * arm behind a condition that `booleanClaim` proves false is dropped, and
+   * so is every arm after a condition that it proves true. Such an arm is not
+   * emitted, so it must not decide the lane of the node either (CE-230.5): a
+   * dead complex arm would put a real result on the complex lane.
+   */
+  static liveSelectionArms(
+    expr: { readonly operator: string; readonly ops: ReadonlyArray<Expression> }
+  ): ReadonlyArray<Expression> {
+    const ops = expr.ops;
+    if (expr.operator === 'If') {
+      const claim = BaseCompiler.booleanClaim(ops[0]);
+      if (claim === undefined) return ops.slice(1);
+      return claim ? ops.slice(1, 2) : ops.slice(2, 3);
+    }
+    const arms: Expression[] = [];
+    for (let i = 0; i + 1 < ops.length; i += 2) {
+      const claim = BaseCompiler.booleanClaim(ops[i]);
+      if (claim === false) continue;
+      arms.push(ops[i + 1]);
+      if (claim === true || isSymbol(ops[i], 'True')) break;
+    }
+    return arms;
   }
 
   /**

@@ -587,6 +587,33 @@ function isActivation(def: BoxedBaseDefinition): boolean {
 }
 
 /**
+ * The value a running function call gave to the parameter that `sym` denotes,
+ * or `undefined` when `sym` is not such a parameter (a global, a local
+ * variable, a loop index) or holds no value.
+ *
+ * A held operator that differentiates or integrates its operand needs this:
+ * the operand `f` of `g(f) = D(f, x)` is a parameter whose value, `x^2`, only
+ * exists once the call is running, so the operator must read it from the call
+ * frame instead of taking the symbol for a constant.
+ */
+export function parameterActivationValue(
+  ce: ComputeEngine,
+  sym: Expression & { symbol: string }
+): Expression | undefined {
+  // An operand that a held operator received unbound has no binding of its
+  // own, and `valueDefinitionInContext` then skips an activation to return the
+  // next binding of the name, so a global of the same name (created by any
+  // later parse of that name) would hide the parameter. Read the innermost
+  // binding of the name instead.
+  const def =
+    sym.valueDefinition === undefined
+      ? binderBindingOf(ce, sym.symbol)
+      : valueDefinitionInContext(ce, sym.symbol, sym.valueDefinition);
+  if (def === undefined || !isActivation(def)) return undefined;
+  return def.value;
+}
+
+/**
  * The binding a BINDER holds for `name`, looked up from `scope` outward, or
  * `undefined` when the innermost binding of the name is not a binder's
  * variable.

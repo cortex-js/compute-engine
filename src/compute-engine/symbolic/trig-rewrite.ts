@@ -501,6 +501,21 @@ function chooseRep(phi: Expression): { rep: Expression; positive: boolean } {
   return { rep: neg, positive: false };
 }
 
+/** Operators whose operands `trigReduce` reduces one by one. */
+const TRIG_REDUCE_PASS_THROUGH = new Set([
+  'Equal',
+  'NotEqual',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'And',
+  'Or',
+  'Not',
+  'Implies',
+  'Equivalent',
+]);
+
 /**
  * The inverse of `trigExpand`: rewrite products and integer powers of
  * trig/hyperbolic functions as a linear combination of trig/hyperbolic
@@ -513,6 +528,20 @@ function chooseRep(phi: Expression): { rep: Expression; positive: boolean } {
  */
 export function trigReduce(expr: Expression): Expression {
   const ce = expr.engine;
+
+  // An absent value stays as it is, as under `trigExpand`. The arithmetic
+  // below would turn `Missing` into `NaN`.
+  if (isSymbol(expr, 'Missing') || isSymbol(expr, 'Nothing')) return expr;
+
+  // A collection, an equation or a logical connective is not a sum of
+  // products: reduce each operand and keep the operator. (The exponential
+  // form of such a node is not a reduced form.)
+  const canonical = expr.canonical;
+  if (
+    isFunction(canonical) &&
+    (canonical.isCollection || TRIG_REDUCE_PASS_THROUGH.has(canonical.operator))
+  )
+    return ce.function(canonical.operator, canonical.ops.map(trigReduce));
 
   // 1. Convert to exponentials and expand into a flat sum of monomials.
   const ex = expandAll(trigToExp(expr.canonical));

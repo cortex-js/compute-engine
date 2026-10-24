@@ -207,6 +207,7 @@ import {
   classifyBigopDomain,
   hasOneSidedLimits,
   withDefaultBigOpBounds,
+  nestDependentLimits,
   constantBigOpOverInfiniteDomain,
   DEGENERATE_CAPTURE_UNSAFE,
   degenerateBigOpTerm,
@@ -3580,13 +3581,6 @@ function pointNestOf(t0: Type, seen?: AliasDescent): PointNest | undefined {
 }
 
 /**
- * The `'types'`-shape twin of `addType`
- * (`boxed-expression/arithmetic-add.ts`), which is `Add`'s result type and
- * is also called from the value path. Every branch, and the reason for it,
- * is documented at that function; only the operand reads differ — a type
- * and a descriptor's facts here, an expression there.
- */
-/**
  * The component-wise sum type of operands that are ALL tuples of one arity,
  * or `undefined` when the operands are not that shape (a non-tuple operand,
  * or tuples of different arities).
@@ -3835,6 +3829,12 @@ function nestedTensorSumType(types: ReadonlyArray<Type>): Type | undefined {
   };
 }
 
+/**
+ * The result type of `Add` for operands described by their types and facts.
+ * This is the only implementation of the `Add` result type: the type handler
+ * `addTypeHandler` calls it, and so do the handlers of the operators that
+ * build a sum.
+ */
 function addTypeOnTypes(
   args: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView
@@ -5039,8 +5039,9 @@ function gammaOfRealShifted(x: Expression): Expression | undefined {
 }
 
 /**
- * A value of Γ computed above machine precision, or undefined when it is 0.
- * Γ has no zeros, so a 0 means the value underflowed past the exponent
+ * A value of Γ computed above machine precision, or undefined when it is 0
+ * or NaN. Γ has no zeros, so a 0 (or the NaN that `bigGamma` gives for an
+ * underflow) means the value underflowed past the exponent
  * range of a big decimal (a decimal exponent below about −9·10¹⁵, where its
  * `exp` saturates to 0): `Γ(-10^15 - 0.5)` would print as an exact-looking
  * `0`, so the expression stays unevaluated. An overflow past that range is
@@ -5056,7 +5057,7 @@ function gammaInRange(
     value !== undefined &&
     bignumPreferred(ce) &&
     isNumber(value) &&
-    value.isSame(0)
+    (value.isSame(0) || value.isNaN)
   )
     return undefined;
   return value;
@@ -6357,8 +6358,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The Add handlers own these shapes: tensors and matrices (the matrix
       // sum, `addTensors`), numeric tuples (component-wise), collection-shaped
       // result types (`matrix + scalar` types `matrix`, computed by
-      // `addType`), and operands that only become collections at evaluation.
-      // The generic broadcast machinery must not re-map any of them.
+      // `addTypeOnTypes`), and operands that only become collections at
+      // evaluation. The generic broadcast machinery must not re-map any of
+      // them.
       broadcastExemptions: [
         'tensors',
         'tuples',
@@ -9666,7 +9668,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const tensorOps = ops.filter((x) => isTensorOperand(x));
         if (tensorOps.length === 1) {
           const others = ops.filter((x) => !isTensorOperand(x));
-          // Only SCALAR factors fold into the cells (see `addType`): a
+          // Only SCALAR factors fold into the cells (see `addTypeOnTypes`): a
           // collection-TYPED co-operand is a sibling collection (matrix
           // product / elementwise pair) — fall through to the collection
           // branch below for those. `isBroadcastCollectionType` is asked as
@@ -9704,8 +9706,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `matrix`, `2v` is `vector`. Scalar factors scale/combine
         // element-wise or via the matrix product, but the result carries the
         // collection type either way (shape-aware refinement is out of scope).
-        // Mirrors `addType`'s widening. Numeric tuples are handled above, and
-        // scalars/unknown-typed symbols are not collection types, so the
+        // Mirrors the widening of `addTypeOnTypes`. Numeric tuples are handled
+        // above, and scalars/unknown-typed symbols are not collection types, so the
         // all-scalar numeric paths below are untouched.
         // A factor typed `scalar | list<E>` is a sibling collection ONLY when
         // another factor is definitely a collection: on its own it may still
@@ -9734,7 +9736,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (collectionOps.length === 1) {
           // Scalar FACTORS fold into the cells elementwise — `(1..4)/2` (which
           // `canonicalDivide` rewrites to `Multiply(1/2, …)`), `0.5·L` — so
-          // they must widen the ELEMENT type, exactly as in `addType`.
+          // they must widen the ELEMENT type, exactly as in `addTypeOnTypes`.
           // Echoing the collection operand's type verbatim claimed `integer`
           // cells for a product whose values are rationals.
           // Only DECLARED scalar numbers participate — a literal, or a symbol
@@ -9938,8 +9940,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // already-`broadcastable<…>` inner node; an `any`/`value` operand is
         // answered above) makes the product
         // `broadcastable<T>`. Hoisted above the NaN/finiteness early-returns
-        // for the same reason as `addType`'s branch: a broadcastable inner node
-        // has no meaningful finiteness, and an `unknown`-typed leaf decides
+        // for the same reason as the branch of `addTypeOnTypes`: a
+        // broadcastable inner node has no meaningful finiteness, and an `unknown`-typed leaf decides
         // neither NaN-ness nor finiteness. The `imaginary` → `complex`
         // closure (i·i = −1 is real) is applied inside the helper.
         if (ops.some((x) => isPossiblyCollectionTypedOperand(x)))
@@ -13094,6 +13096,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A clause with no bounds runs over 1..+∞: see
         // `withDefaultBigOpBounds`.
         const bounds = withDefaultBigOpBounds(ce, ops.slice(1));
+        // A bound that names another index of the operator is evaluated as
+        // nested operators (CE-115).
+        const nested = nestDependentLimits('Product', ops[0], bounds, ce);
+        if (nested !== undefined)
+          return nested.evaluate({
+            numericApproximation: numeric,
+            signal: options.signal,
+            _effects: options.effects,
+            _contextStack: options._contextStack,
+            _precisionWindow: options._precisionWindow,
+          });
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(bounds)) return undefined;
         const mode = classifyBigopDomain(ops[0], bounds, ce);
@@ -13215,6 +13228,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A clause with no bounds runs over 1..+∞, as in the synchronous
         // handler.
         const bounds = withDefaultBigOpBounds(ce, ops.slice(1));
+        // A bound that names another index of the operator is evaluated as
+        // nested operators (CE-115).
+        const nested = nestDependentLimits('Product', ops[0], bounds, ce);
+        if (nested !== undefined)
+          return nested.evaluateAsync({
+            numericApproximation: numeric,
+            signal: options.signal,
+            _effects: options.effects,
+            _contextStack: options._contextStack,
+            _precisionWindow: options._precisionWindow,
+          });
         // A body holding an asynchronous-only application is evaluated per
         // term with `evaluateBigOpTermAsync`, whose promise the fold yields
         // to `runAsync`; the synchronous term evaluation cannot run such a
@@ -13419,7 +13443,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluate: (
         [first, ...rest],
-        { engine, numericApproximation, expression }
+        {
+          engine,
+          numericApproximation,
+          expression,
+          signal,
+          effects,
+          _contextStack,
+          _precisionWindow,
+        }
       ) => {
         // Arity-1 form over an operand that can be absent as a whole (typed
         // `missing | list<…>`: a lazy view over a row read of a list of
@@ -13498,6 +13530,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A clause with no bounds runs over 1..+∞: see
         // `withDefaultBigOpBounds`.
         rest = withDefaultBigOpBounds(engine, rest);
+        // A bound that names another index of the operator is evaluated as
+        // nested operators (CE-115).
+        const nested = nestDependentLimits('Sum', first, rest, engine);
+        if (nested !== undefined)
+          return nested.evaluate({
+            numericApproximation: numeric,
+            signal,
+            _effects: effects,
+            _contextStack,
+            _precisionWindow,
+          });
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(rest)) return undefined;
         const mode = classifyBigopDomain(first, rest, engine);
@@ -13707,6 +13750,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A clause with no bounds runs over 1..+∞, as in the synchronous
         // handler.
         rest = withDefaultBigOpBounds(engine, rest);
+        // A bound that names another index of the operator is evaluated as
+        // nested operators (CE-115).
+        const nested = nestDependentLimits('Sum', first, rest, engine);
+        if (nested !== undefined)
+          return nested.evaluateAsync({
+            numericApproximation: numeric,
+            signal,
+            _effects: effects,
+            _contextStack,
+            _precisionWindow,
+          });
         // A limit with only one bound has no value: see `hasOneSidedLimits`.
         if (hasOneSidedLimits(rest)) return undefined;
         {

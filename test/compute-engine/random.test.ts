@@ -606,6 +606,18 @@ describe('Draw-consumption contract (§4)', () => {
     expect(drawsConsumed(['RandomShuffle', ['List']])).toBe(0);
   });
 
+  it('a collection operator over a shuffle evaluates the shuffle once', () => {
+    // The same 4 draws as the shuffle alone: a source that is evaluated again
+    // for each facet query would consume more.
+    const shuffle = ['RandomShuffle', ['Range', 1, 5]];
+    const positive = ['Function', ['Greater', 'x', 2], 'x'];
+    expect(
+      drawsConsumed(['Map', ['Function', ['Add', 'x', 1], 'x'], shuffle])
+    ).toBe(4);
+    expect(drawsConsumed(['Filter', shuffle, positive])).toBe(4);
+    expect(drawsConsumed(['Any', shuffle, positive])).toBe(4);
+  });
+
   it('k = 0 and validation errors consume 0 — validation completes before the first draw', () => {
     expect(drawsConsumed(['RandomChoice', ['Range', 1, 6], 0])).toBe(0);
     expect(drawsConsumed(['RandomSample', ['Range', 1, 6], 0])).toBe(0);

@@ -110,6 +110,7 @@ import {
   topTypeOfTriggers,
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
+  isFixedShapeCollectionTypeOf,
   isPossiblyCollectionTypedView,
   isNumericScalarOperandView,
 } from './broadcast-lift-type.js';
@@ -441,6 +442,20 @@ let _lazyValueProvisionalReads = 0;
 let _effectsComputeCount = 0;
 
 /**
+ * Fold the hash of one operand into the running hash of a function
+ * expression. The order of the operands matters.
+ *
+ * The running hash is rotated (not shifted) before the operand is mixed in,
+ * and the result is multiplied by an odd constant. A plain shift moves the
+ * contribution of an operand out of the 32-bit word after 32 levels of
+ * nesting, so shapes such as `Add(e, e)` repeated, or a `Sin`/`Cos` chain,
+ * gave the same hash every 64 or 32 levels (CE-318).
+ */
+function mixOperandHash(h: number, operandHash: number): number {
+  return Math.imul(((h << 5) | (h >>> 27)) ^ operandHash, 0x9e3779b1) | 0;
+}
+
+/**
  * The signature of a partial application: `sig` applied to the arguments
  * `ops`, when they are fewer than its fixed parameters and the literal
  * would be curried by `makeLambda` (function-utils.ts) — a plain signature
@@ -552,6 +567,20 @@ let _effectsParanoidActive = false;
 /** `CE_CACHE_STATS` only: is a recomputed effect channel the same answer as
  * the entry it replaced? Structural equality over the `ComputedEffects`
  * shapes (`'any'` | label array | co-finite `{not}` | `undefined`). */
+/**
+ * The comparison operators. For present operands their element-wise answer
+ * has a present cell (`True` or `False`), so the type of such a result may
+ * drop the `missing` arm of its cells.
+ */
+const PRESENT_CELL_COMPARISONS: ReadonlySet<string> = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+]);
+
 function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
@@ -1304,7 +1333,7 @@ export class BoxedFunction
     if (store !== undefined) {
       // The same fold the boxed operands would give — each element's hash IS
       // the hash of `engine.number(v)` — computed without keeping the boxes.
-      for (const v of store) h = ((h << 1) ^ this.engine.number(v).hash) | 0;
+      for (const v of store) h = mixOperandHash(h, this.engine.number(v).hash);
     } else if (isUnorderedSet(this._operator, this._ops)) {
       // `isSame` compares the elements of a set literal in any order, so
       // their hashes are combined with an operation that does not depend on
@@ -1319,7 +1348,7 @@ export class BoxedFunction
         h = (h + (x ^ (x >>> 16))) | 0;
       }
     } else {
-      for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
+      for (const op of this._ops) h = mixOperandHash(h, op.hash);
     }
 
     h = (h ^ hashCode(this._operator)) | 0;
@@ -12192,7 +12221,60 @@ function type(expr: BoxedFunction): Type | BoxedType {
         // arms, by type alone (`armwiseUnionBroadcastResultType`).
         armCellResult: (cells) => cellHandlerResult(cells, true),
       });
-      if (lifted !== undefined) return maybeAbsorb(lifted);
+      if (lifted !== undefined) {
+        const result = maybeAbsorb(lifted);
+        // A `handle` operator that is not threaded (a comparison) answers
+        // `Missing` for the whole result when an operand that is a
+        // collection is absent as a whole (`L < 3` with
+        // `L: list<integer> | missing`), where an absent cell gives an absent
+        // cell. The lift types the cells only, so the type gains the arm.
+        // When every possibly absent operand is such a collection with no
+        // absent cell, the cells of the result are present too: the type is
+        // `list<boolean> | missing`, not `list<boolean | missing> | missing`.
+        // Only the comparisons give a present cell for present operands; any
+        // other `handle` operator may answer `Missing` for present inputs, so
+        // its cell type keeps the `missing` arm it declares.
+        if (def.resolvedMissingBehavior === 'handle' && !threadedAbsence) {
+          let absentWhole = false;
+          let absentElsewhere = false;
+          for (const x of expr.ops) {
+            if (!x.type.facts.containsMissing) continue;
+            const present = threadedPresentType(x.type.type);
+            if (
+              present !== undefined &&
+              (isBroadcastCollectionTypeOf(present) ||
+                isFixedShapeCollectionTypeOf(present))
+            ) {
+              absentWhole = true;
+              if (typeContainsMissing(present)) absentElsewhere = true;
+            } else absentElsewhere = true;
+          }
+          // An operand that is not typed as absent, but whose type can hold an
+          // absent value (`unknown`, `any`: the `Undefined` symbol), also
+          // gives absent cells.
+          if (
+            absentWhole &&
+            !absentElsewhere &&
+            expr.ops.some(
+              (x) =>
+                !x.type.facts.containsMissing && isSubtype('missing', x.type.type)
+            )
+          )
+            absentElsewhere = true;
+          if (absentWhole) {
+            const t = result instanceof BoxedType ? result.type : result;
+            const cells =
+              absentElsewhere || !PRESENT_CELL_COMPARISONS.has(expr.operator)
+                ? t
+                : stripMissingFromType(t);
+            return BoxedType.forResult(
+              widen('missing', cells),
+              expr.engine._typeResolver
+            );
+          }
+        }
+        return result;
+      }
     }
 
     // A list of points at a parameter declared as a point: the application
@@ -12927,6 +13009,9 @@ function applyFunctionLiteralWith(
   awaitBody = false
 ): Expression | Promise<Expression> {
   if (value && !value.type.matches('function')) {
+    // A symbol that holds an error is applied as the error, as it is when it
+    // is the callback of `Map`. (CE-108.1)
+    if (isFunction(value, 'Error')) return value;
     if (!value.isValid) return expr;
     return expr.engine.typeError('function', value.type, value.toString());
   }
@@ -13061,16 +13146,26 @@ function applyFunctionLiteralWith(
   const scalarConformance = (
     args: ReadonlyArray<Expression>,
     mapsCollections = paramsAreScalar(broadcastGateType)
-  ): Expression | undefined =>
-    !expr.engine.strict || def.inferredType || declaredType === undefined
-      ? undefined
-      : declaredScalarConformance(
-          expr.engine,
-          def,
-          def._signatureSkeleton ?? declaredType,
-          mapsCollections,
-          args
-        );
+  ): Expression | undefined => {
+    if (!expr.engine.strict || def.inferredType || declaredType === undefined)
+      return undefined;
+    // An argument that is an error is the value of the call, with the frame
+    // of this call, as when the signature is not declared. The conformance
+    // check would return the error as it is. (CE-105.4)
+    const failed = args.findIndex((x) => isFunction(x, 'Error'));
+    if (failed >= 0)
+      return errorValue(args[failed], {
+        operator: expr.operator,
+        index: failed + 1,
+      });
+    return declaredScalarConformance(
+      expr.engine,
+      def,
+      def._signatureSkeleton ?? declaredType,
+      mapsCollections,
+      args
+    );
+  };
   // The arguments as the literal receives them: an absent value at a
   // numeric parameter of the DECLARED signature is read as `NaN`
   // (`absentAsNaNAtDeclaredNumericParams`), under the same conditions as the

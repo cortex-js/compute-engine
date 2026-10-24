@@ -434,7 +434,11 @@ export function evaluateEquivalent(
   // no value of the other operand decides it. An absent operand makes the
   // equivalence absent, unless the other operand is an unknown: then the
   // equivalence stays symbolic, as `And(A, Missing)` does.
-  return undecidedWithAbsence('Equivalent', args, ce);
+  const absent = undecidedWithAbsence('Equivalent', args, ce);
+  if (absent) return absent;
+  // `p ⇔ p` is `True` for every `p` (no operand is absent here).
+  if (args[0].isSame(args[1])) return ce.True;
+  return undefined;
 }
 
 export function evaluateImplies(
@@ -458,7 +462,14 @@ export function evaluateImplies(
   // Kleene over absence: no side decided the implication, so an absent side
   // makes it absent (`True ⇒ Missing`, `Missing ⇒ False`), unless the other
   // side is an unknown: then it stays symbolic, as `And(A, Missing)` does.
-  return undecidedWithAbsence('Implies', args, ce);
+  const absent = undecidedWithAbsence('Implies', args, ce);
+  if (absent) return absent;
+  // No operand is absent here: `True ⇒ q` is `q`, `p ⇒ False` is `¬p` and
+  // `p ⇒ p` is `True`.
+  if (lhs === 'True') return args[1];
+  if (rhs === 'False') return ce.function('Not', [args[0]]);
+  if (args[0].isSame(args[1])) return ce.True;
+  return undefined;
 }
 
 export function evaluateXor(
@@ -557,6 +568,15 @@ export function evaluateNand(
 
   if (allTrue) return ce.False; // NOT(True) = False
 
+  // `True` operands and repeated operands do not change a conjunction: when
+  // one distinct operand is left, `Nand(True, A)` and `Nand(A, A)` are `¬A`.
+  const distinct: Expression[] = [];
+  for (const arg of args) {
+    if (sym(arg) === 'True') continue;
+    if (!distinct.some((x) => x.isSame(arg))) distinct.push(arg);
+  }
+  if (distinct.length === 1) return ce.function('Not', [distinct[0]]);
+
   return undefined;
 }
 
@@ -588,6 +608,15 @@ export function evaluateNor(
   }
 
   if (allFalse) return ce.True; // NOT(False) = True
+
+  // `False` operands and repeated operands do not change a disjunction: when
+  // one distinct operand is left, `Nor(False, A)` and `Nor(A, A)` are `¬A`.
+  const distinct: Expression[] = [];
+  for (const arg of args) {
+    if (sym(arg) === 'False') continue;
+    if (!distinct.some((x) => x.isSame(arg))) distinct.push(arg);
+  }
+  if (distinct.length === 1) return ce.function('Not', [distinct[0]]);
 
   return undefined;
 }

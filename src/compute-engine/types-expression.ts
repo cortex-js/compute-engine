@@ -2851,10 +2851,10 @@ export interface Expression {
    *   `false` for a materialized collection whose type is top
    *   (`unknown`/`any`), which `isCollection` reports `true`.
    *
-   * A shape test must spell the `<any>` FAMILY TOP, never the bare name:
-   * since the bare-synonym ruling (2026-08-17) bare `collection` is the
-   * values-only `collection<unknown>`, so `list<any>`, `list<nothing>` and
-   * `list<integer|missing>` — all collection-shaped — do NOT match it.
+   * A shape test should spell the `<any>` FAMILY TOP rather than the bare
+   * name. Since 0.160.0 the bare `collection` also matches `list<any>`,
+   * `list<nothing>` and `list<integer|missing>`, but the explicit top does
+   * not depend on how the bare name is read.
    * (`COLLECTION_SHAPE_TYPE` and friends in `common/type/primitive.ts` are
    * the same tops as `Type` constants, for `isSubtype` call sites.)
    *

@@ -490,3 +490,29 @@ describe('RANGE', () => {
     );
   });
 });
+
+describe('REDUCE SERIALIZATION', () => {
+  // The seed (third operand) must survive the LaTeX round trip (CE-292).
+  test('a seeded Reduce keeps its seed', () => {
+    const e = ce.box([
+      'Reduce',
+      ['List', 1, 2],
+      ['Function', ['Add', 'a', 'x'], 'a', 'x'],
+      10,
+    ]);
+    const tex = e.latex;
+    expect(tex).toContain(', 10\\right)');
+    expect(e.evaluate().toString()).toBe('13');
+    expect(ce.parse(tex).evaluate().toString()).toBe('13');
+  });
+
+  test('a seeded Reduce over Add does not use the \\sum shorthand', () => {
+    const e = ce.box(['Reduce', ['List', 1, 2], 'Add', 10]);
+    expect(e.latex).not.toContain('\\sum');
+    expect(ce.parse(e.latex).evaluate().toString()).toBe('13');
+  });
+
+  test('an unseeded Reduce over Add keeps the \\sum shorthand', () => {
+    expect(ce.box(['Reduce', ['List', 1, 2], 'Add']).latex).toContain('\\sum');
+  });
+});

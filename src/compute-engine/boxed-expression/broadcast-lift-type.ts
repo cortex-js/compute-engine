@@ -436,9 +436,11 @@ export interface AbstractCollectionCell {
  * The element of a bare `collection` is the placeholder `unknown`. A type
  * handler reads an `unknown` operand as "no evidence yet" and can type the
  * result from the other operands alone: `Add` answers `integer` for
- * `unknown + 1`, which a cell holding `0.5` contradicts. The elements of a
- * bare collection are values (the bare name excludes absence markers), so
- * the cell is typed as the values-only top `value` instead.
+ * `unknown + 1`, which a cell holding `0.5` contradicts. So the cell of a
+ * bare collection is typed as the top of values, `value`, instead. (The bare
+ * name admits absence markers too, but an absent cell is handled apart from
+ * the element type: the `missing` arm of a union is skipped, and the
+ * operators in `ABSENT_CELLS_PASS_THROUGH` pass absent cells through.)
  *
  * When the element is itself an indexed collection, the runtime broadcast
  * descends to its leaves, so the cell is the leaf type

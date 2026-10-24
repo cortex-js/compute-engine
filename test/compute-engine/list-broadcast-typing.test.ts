@@ -287,6 +287,20 @@ describe('a union with a collection alternative is possibly-a-collection', () =>
     expect(asScalar.box(['Multiply', 2, 'b']).evaluate().toString()).toBe('10');
   });
 
+  test('Abs of a list of integers has no infinite arm (CE-18)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Abs', ['List', 1, 2]]).type.toString()).toBe(
+      'list<integer<0..>^2>'
+    );
+    ce.declare('m', 'matrix<real^(2x2)>');
+    expect(ce.box(['Abs', 'm']).type.toString()).toBe(
+      'matrix<real<0..>^(2x2)>'
+    );
+    // A cell of unproven finiteness keeps the infinite arm
+    ce.declare('u', 'list<number>');
+    expect(ce.box(['Abs', 'u']).type.toString()).toContain('signed_infinity');
+  });
+
   test('a scalar-only union and atomic branches do not trigger the lift', () => {
     const ce = new ComputeEngine();
     ce.declare('s', 'integer | rational');

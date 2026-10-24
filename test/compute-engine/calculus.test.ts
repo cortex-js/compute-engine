@@ -1546,6 +1546,17 @@ describe('DOUBLY-INFINITE NUMERIC INTEGRATION (Tycho #28)', () => {
     ));
 });
 
+describe('DIVERGENT NUMERIC INTEGRAL AT A SINGULAR BOUND (CE-185.4)', () => {
+  test.each(['t^{-100}', 't^{-300}'])(
+    '\\int_0^1 %s dt is +oo, not a Measurement with a NaN error',
+    (f) => {
+      const r = engine.parse(`\\int_0^1 ${f} dt`).N();
+      expect(r.operator).not.toBe('Measurement');
+      expect(r.isSame(engine.PositiveInfinity)).toBe(true);
+    }
+  );
+});
+
 describe('LIMIT', () => {
   expect(
     engine
@@ -1610,6 +1621,42 @@ describe('LIMIT', () => {
       .expr(['NLimit', ['Function', ['Sinc', 'x'], 'x'], 'NegativeInfinity'])
       .evaluate();
     expect(Math.abs(r.re)).toBeLessThan(1e-8);
+  });
+
+  test('a function that rises before it decays to 0 has a numeric limit', () => {
+    // 7t/(t²+9) peaks near t = 3 (value 1.17 at the peak scale), so the first
+    // rungs of the ladder (t = 1, 8, …) lie outside the asymptotic region.
+    const r = engine
+      .expr([
+        'NLimit',
+        [
+          'Function',
+          ['Divide', ['Multiply', 7, 't'], ['Add', ['Square', 't'], 9]],
+          't',
+        ],
+        'PositiveInfinity',
+      ])
+      .evaluate();
+    expect(Math.abs(r.re)).toBeLessThan(1e-8);
+
+    // The imaginary part of (2t + i)/(t - 3i) tends to 0, the real part to 2.
+    const c = engine
+      .expr([
+        'NLimit',
+        [
+          'Function',
+          [
+            'Divide',
+            ['Add', ['Multiply', 2, 't'], 'ImaginaryUnit'],
+            ['Subtract', 't', ['Multiply', 3, 'ImaginaryUnit']],
+          ],
+          't',
+        ],
+        'PositiveInfinity',
+      ])
+      .evaluate();
+    expect(c.re).toBeCloseTo(2, 10);
+    expect(Math.abs(c.im)).toBeLessThan(1e-8);
   });
 
   test('variable-bound Sum in a limit at ∞ honors the deadline (γ)', () => {
@@ -2987,6 +3034,22 @@ describe('INTEGRATE: a nested integral agrees with the multi-limit form', () => 
     expect(reversed.N().toString()).toBe('-oo');
   });
 
+  test('a numeric limit that does not exist stays NaN after the retries from closer starts', () => {
+    // `limit()` retries from a start 8 and 64 times closer to the target
+    // when the first ladder is rejected. An oscillation has no limit at any
+    // start.
+    const nlimit = (body: unknown, at: unknown) =>
+      ce
+        .box(['NLimit', ['Function', body, 'x'], at] as any)
+        .evaluate()
+        .toString();
+    expect(nlimit(['Sin', 'x'], 'PositiveInfinity')).toBe('NaN');
+    expect(nlimit(['Multiply', 'x', ['Sin', 'x']], 'PositiveInfinity')).toBe(
+      'NaN'
+    );
+    expect(nlimit(['Sin', ['Divide', 1, 'x']], 0)).toBe('NaN');
+  });
+
   test('the multi-limit form negates for reversed outer bounds on both routes', () => {
     // Before: `.N()` gave `+oo` here, while `.evaluate()` gave `-oo`.
     const e = ce.box([
@@ -3287,5 +3350,33 @@ describe('INTEGRATE: exact bounds give an exact value', () => {
       1,
     ]);
     expect(reciprocal.evaluate().isSame(ce.ComplexInfinity)).toBe(true);
+  });
+});
+
+describe('INTEGRATE: Abs and Sign of a quadratic argument (CE-158.1)', () => {
+  // The interval is split at the real roots of the quadratic. Expected values
+  // checked by hand: for example ∫_0^3 |x²−3x+2| dx = 5/6 + 1/6 + 5/6.
+  const ce = new ComputeEngine();
+  const ev = (s: string) => ce.parse(s).evaluate();
+
+  test.each([
+    ['\\int_{-1}^{1} |x^2-\\frac14|\\,dx', '1/2'],
+    ['\\int_{0}^{3} |x^2-3x+2|\\,dx', '11/6'],
+    ['\\int_{-2}^{2} |x^2+1|\\,dx', '28/3'],
+    ['\\int_{-1}^{1} |x^2|\\,dx', '2/3'],
+    ['\\int_{-1}^{2} \\operatorname{sgn}(x^2-1)\\,dx', '-1'],
+    ['\\int_2^3 x\\operatorname{sgn}(x^2-1)\\,dx', '5/2'],
+  ])('%s', (latex, expected) => {
+    expect(ev(latex).toString()).toBe(expected);
+  });
+
+  test('irrational roots: ∫_0^2 |x²−2| dx = (8√2 − 4)/3', () => {
+    const v = ev('\\int_{0}^{2} |x^2-2|\\,dx');
+    expect(v.has('Integrate')).toBe(false);
+    expect(v.N().re).toBeCloseTo((8 * Math.SQRT2 - 4) / 3, 12);
+  });
+
+  test('a symbolic coefficient stays unevaluated', () => {
+    expect(ev('\\int_0^1 |x^2-c|\\,dx').operator).toBe('Integrate');
   });
 });

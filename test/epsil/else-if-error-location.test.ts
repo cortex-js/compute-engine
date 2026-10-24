@@ -126,7 +126,10 @@ describe('AN ELSE IF INSIDE ANOTHER CONSTRUCT', () => {
       G +
         'let n = 2\nlet v = match n {\n  1 => 0\n  2 => if n == 1 { 0 } else if n == 2 { g("a") } else { n }\n  _ => 3\n}\nv'
     );
-    expect(r.frames).toEqual(['in If argument 2, in If argument 3']);
+    // The frame of the selected case of the `match` comes last.
+    expect(r.frames).toEqual([
+      'in If argument 2, in If argument 3, in Match argument 3',
+    ]);
     expect(r.at).toEqual(['{ g("a") }']);
   });
 

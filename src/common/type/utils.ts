@@ -99,8 +99,8 @@ export function negativeRangeType(tier: NumericPrimitiveType): Type {
  * non-numeric intersection — is returned as is, by identity when nothing
  * changed.
  *
- * This is what a JOIN-based result computation (`addType`'s widen tail, the
- * cell absorption of `Add`/`Multiply`, the broadcastable element join) must
+ * This is what a JOIN-based result computation (the widen tail of
+ * `addTypeOnTypes`, the cell absorption of `Add`/`Multiply`, the broadcastable element join) must
  * apply to its inputs: a join is a set union, and neither a sum nor a
  * product of two values lies in the union of their ranges (`x, y > −1` does
  * not put `x + y` above −1). Bare tiers ARE closed under those operations,

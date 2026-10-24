@@ -237,10 +237,11 @@ let q = Q(n: 1)`);
 
   test('…and boxed AFTER the `let`, it still reports `state` — and why', () => {
     // The non-vacuous companion to the memo test above, and a warning about
-    // reading too much into it. `let p: R = {"age" -> 1}` leaves the BINDING's
-    // value type `unknown` — the dictionary literal does not narrow to `R` on
-    // its own — so a statement boxed after it still finds nothing that decides
-    // the receiver and takes the conservative `state`.
+    // reading too much into it. `R` is a nominal type, so
+    // `let p: R = {"age" -> 1}` is refused (`incompatible-type`): the
+    // dictionary literal is not an `R`. The refused declaration binds nothing
+    // (CE-116), so a statement boxed after it finds nothing that decides the
+    // receiver and takes the conservative `state`.
     //
     // The `scope` the test above observes is therefore not "records are always
     // `scope`": it is what the node reports once the type has actually been
@@ -249,11 +250,10 @@ let q = Q(n: 1)`);
     // type IS settled.
     const ce = new ComputeEngine();
     run('type R = record{age: integer}', ce);
-    run('let p: R = {"age" -> 1}', ce);
-    const def = ce.lookupDefinition('p') as never as {
-      value?: { type?: unknown };
-    };
-    expect(String(def.value?.type)).toBe('unknown');
+    expect(run('let p: R = {"age" -> 1}', ce).value).toMatch(
+      /incompatible-type/
+    );
+    expect(ce.lookupDefinition('p')).toBeUndefined();
     expect(
       ce.box(['Assign', ['Field', 'p', { str: 'age' }], 43] as never).effects
     ).toEqual(['state']);

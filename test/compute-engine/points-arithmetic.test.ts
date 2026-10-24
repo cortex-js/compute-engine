@@ -2970,3 +2970,58 @@ describe('POINT/TUPLE ARITHMETIC — rows of points times a nested list', () => 
     expect(value.type.matches(expr.type)).toBe(true);
   });
 });
+
+describe('the .mul() method keeps a variable of a point component (CE-121)', () => {
+  test('the product follows a later assignment', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 4);
+    const product = ce.number(2).mul(ce.box(['Tuple', 'w', 2]));
+    expect(product.toString()).toBe('(2w, 4)');
+    ce.assign('w', 5);
+    expect(product.evaluate().toString()).toBe('(10, 4)');
+  });
+
+  test('a zero factor does not hide a NaN held by the variable', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', ce.NaN);
+    const product = ce.Zero.mul(ce.box(['Tuple', 'w', 2]));
+    ce.assign('w', 4);
+    expect(product.evaluate().toString()).toBe('(0, 0)');
+    expect(product.toString()).toBe('(0w, 0)');
+  });
+
+  test('the same holds for a list', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 4);
+    const product = ce.number(2).mul(ce.box(['List', 'w', 2]));
+    expect(product.toString()).toBe('[2w,4]');
+    ce.assign('w', 5);
+    expect(product.evaluate().toString()).toBe('[10,4]');
+    // The `Multiply` operator reads the value when it is evaluated.
+    expect(
+      ce
+        .box(['Multiply', 2, ['List', 'w', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[10,4]');
+  });
+
+  test('a cell that does not read a variable is still evaluated', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 4);
+    for (const head of ['List', 'Tuple']) {
+      const product = ce.number(0.5).mul(ce.box([head, 'w', 'Pi']));
+      const cells = (product as any).ops.map((c: BoxedExpression) => c.toString());
+      expect(cells[0]).toBe('0.5 * w');
+      expect(cells[1]).toMatch(/^1\.5707963/);
+    }
+  });
+
+  test('a collection component is still broadcast', () => {
+    const ce = new ComputeEngine();
+    ce.assign('n', ce.box(['List', 1, 2]));
+    expect(ce.number(2).mul(ce.parse('(0.5n, 1)')).evaluate().toString()).toBe(
+      '[(1, 2),(2, 2)]'
+    );
+  });
+});

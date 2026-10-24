@@ -217,3 +217,25 @@ describe('multi-symbol inequalities entail no numeric bound', () => {
     expect(ce2.box(['Artanh', 't']).type.toString()).toBe('real');
   });
 });
+
+describe('isEqual reads bounds that pin a symbol to one number', () => {
+  test('b >= 0 and b <= 0 give b = 0', () => {
+    const ce = new ComputeEngine();
+    ce.declare('b', 'real');
+    ce.assume(ce.parse('b \\ge 0'));
+    ce.assume(ce.parse('b \\le 0'));
+    const b = ce.symbol('b');
+    expect(b.isEqual(0)).toBe(true);
+    expect(b.isEqual(ce.number(0))).toBe(true);
+    expect(b.isEqual(1)).toBe(false);
+    // The symbol can be on either side.
+    expect(ce.number(0).isEqual(b)).toBe(true);
+  });
+
+  test('a one-sided bound stays undecided', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'real');
+    ce.assume(ce.parse('c \\ge 0'));
+    expect(ce.symbol('c').isEqual(0)).toBeUndefined();
+  });
+});

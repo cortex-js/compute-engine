@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/types';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
+import { roundToDecimalPlace } from '../../src/compute-engine/numerics/strings';
 
 // A fresh engine so the `ce.assign('x', …)` cases don't leak into the shared
 // test engine.
@@ -895,5 +896,24 @@ describe('Measurement — ordered by the nominal in the extremum operators', () 
       .box(['Max', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
       .evaluate();
     expect(exact.isIndeterminate).toBe(true);
+  });
+
+  test('a Measurement with an error below 1e-100 prints (CE-185.8)', () => {
+    const text = ce.box(['Measurement', 1e-297, 1e-306]).toString();
+    expect(text).toBe('1.0000000000e-297 ± 1.0e-306');
+    expect(
+      ce.parse('\\int_0^1 10^{-300} t^{-0.999} dt').N().toString()
+    ).toMatch(/^9\.99\d+e-298 ± /);
+  });
+
+  test('rounding to a decimal place past 100 digits keeps that place', () => {
+    // A value whose first digit is past the requested place rounds to zero,
+    // or to one unit of that place when it is at least half of it.
+    expect(roundToDecimalPlace(1e-200, 101)).toBe('0');
+    expect(roundToDecimalPlace(-1e-200, 101)).toBe('0');
+    expect(roundToDecimalPlace(6e-102, 101)).toBe('1e-101');
+    expect(roundToDecimalPlace(-6e-102, 101)).toBe('-1e-101');
+    expect(roundToDecimalPlace(4e-102, 101)).toBe('0');
+    expect(roundToDecimalPlace(1.25e-297, 300)).toBe('1.250e-297');
   });
 });

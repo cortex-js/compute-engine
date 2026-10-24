@@ -22,7 +22,7 @@ import {
   wildcardName,
   wildcardType,
 } from './pattern-utils.js';
-import { errorOpsWithoutTrace } from './error-value.js';
+import { errorOpsWithoutTrace, withErrorFrames } from './error-value.js';
 import {
   isFiniteIndexedCollection,
   isTextAtom,
@@ -159,6 +159,9 @@ export interface CompiledCase {
   // fixed 2026-08-01).
   guard: Expression | undefined; // raw guard operand (undefined if no guard)
   body: Expression; // raw body operand
+  // The position of the `MatchCase` among the operands of `Match` (the
+  // subject is operand 0). An error frame names the selected case by it.
+  operandIndex: number;
   // Tier 0: dispatch keys (also used to seed the segment table/fallback scan).
   dispatchKeys?: { key: string; value: Expression }[];
   // Tier 1: any-of leaf tests.
@@ -507,7 +510,16 @@ function runCase(
 
   const bodyClosure = buildCaseClosure(ce, cc.body, cc.captureNames);
   if (bodyClosure === undefined) return ce.Nothing;
-  return apply(bodyClosure, args, options, 'bind');
+  const result = apply(bodyClosure, args, options, 'bind');
+  if (!isFunction(result, 'Error')) return result;
+  // `Match` reads its operands itself, so no framework step records which
+  // operand an error came from. Name the selected case in the breadcrumb, so
+  // a diagnostic can point at that case and not at the whole statement. The
+  // frame index counts the operands of `Match` from 1, the subject being the
+  // first, so it is one more than `operandIndex`.
+  return withErrorFrames(result, [
+    { operator: 'Match', index: cc.operandIndex + 1 },
+  ]);
 }
 
 /** Attempt to match a compiled case; return the capture substitution (possibly
@@ -795,8 +807,8 @@ function buildMatchPlan(
   const compiled: CompiledCase[] = [];
   let errorAlt: Expression | undefined;
 
-  for (const caseExpr of ops.slice(1)) {
-    if (!isFunction(caseExpr, 'MatchCase')) continue;
+  for (const [operandIndex, caseExpr] of ops.entries()) {
+    if (operandIndex === 0 || !isFunction(caseExpr, 'MatchCase')) continue;
     const cops = caseExpr.ops;
     if (cops.length < 2) continue;
     const patternRaw = cops[0];
@@ -820,6 +832,7 @@ function buildMatchPlan(
       hasGuard,
       guard,
       body,
+      operandIndex,
     };
 
     // Alternatives: binding check + weakest-tier classification.

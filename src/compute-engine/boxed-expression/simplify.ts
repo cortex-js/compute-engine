@@ -110,6 +110,22 @@ const ODD_EVEN_FUNCTIONS = new Set([
 ]);
 
 /**
+ * True when `expr` is, or contains, a quotient whose denominator is a constant
+ * that is not a number literal (`1/(2−√2)`).
+ */
+function containsConstantQuotient(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (
+    expr.operator === 'Divide' &&
+    !isNumber(expr.op2) &&
+    expr.op2.unknowns.length === 0 &&
+    expr.op2.isPure === true
+  )
+    return true;
+  return expr.ops.some(containsConstantQuotient);
+}
+
+/**
  * Check if an expression contains a call f(-x) of an odd or even function
  * f, where the argument is `Negate(x)` or a finite constant with a negative
  * value (`−1/2`, `−3 + 2√2`; see `negatedArgument()`). In
@@ -1078,6 +1094,11 @@ function simplifyOperands(
         !x.op2.isInteger
       )
         simplifiedOps.push(full(x, i));
+      // A quotient by a constant that is not a number literal (`π/(2−√2)`,
+      // or `arctan(1/(3+2√2))`) is rationalized at its own node. Without
+      // this, the terms of `1/(2−√2) − 1/(2+√2)` keep their radical
+      // denominators and do not combine into `√2` (CE-154.2, CE-141.1).
+      else if (containsConstantQuotient(x)) simplifiedOps.push(full(x, i));
       // Fold the constant subexpressions of every other operand
       else simplifiedOps.push(foldConstants(x));
     }
@@ -1107,10 +1128,20 @@ function simplifyOperands(
       // run (constant folding never iterates a sum). Other operands get
       // constant folding only, preserving factored polynomial structure for
       // the cancelCommonFactors rule.
+      // The operand kinds that an `Add` or `Multiply` simplifies fully (an
+      // odd or even function of a negated argument, `Ln`, `Abs`, a fractional
+      // power) are simplified fully here too: `(Si(1) − Si(−1))/2` needs
+      // `Si(−1) → −Si(1)` in its numerator (CE-155.1).
       if (
         containsConstructibleTrig(x) ||
+        containsNegatedOddEvenCall(x) ||
         x.operator === 'Sum' ||
-        x.operator === 'Product'
+        x.operator === 'Product' ||
+        x.operator === 'Ln' ||
+        x.operator === 'Abs' ||
+        (isFunction(x, 'Power') &&
+          x.op2?.isRational === true &&
+          !x.op2.isInteger)
       )
         simplifiedOps.push(
           simplifyOperandCapture(

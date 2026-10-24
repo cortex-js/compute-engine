@@ -38,6 +38,23 @@ export function roundToDecimalPlace(
   value: number | BigDecimal,
   k: number
 ): string {
+  // `toFixed` accepts at most 100 digits. For a machine number with a smaller
+  // magnitude than that allows (a value next to 1e-300 with an error 1e-9
+  // times smaller), write the number in exponential notation with the same
+  // last decimal place instead of throwing a `RangeError` (CE-185.8).
+  if (typeof value === 'number' && k > 100 && Number.isFinite(value)) {
+    if (value === 0) return '0';
+    const exponent = parseInt(value.toExponential().split('e')[1], 10);
+    // The first digit is at the place `10^exponent`. When it is past the
+    // requested place `10^-k`, the value rounds to `0`, or to one unit of
+    // that place when it is at least half of it.
+    if (exponent + k < 0) {
+      if (exponent + k === -1 && Math.abs(value) >= 0.5 * 10 ** -k)
+        return `${value < 0 ? '-' : ''}1e-${k}`;
+      return '0';
+    }
+    return value.toExponential(Math.min(100, exponent + k));
+  }
   return value.toFixed(k);
 }
 

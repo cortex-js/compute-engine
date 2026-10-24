@@ -188,3 +188,21 @@ describe('PRODUCT OF RADICALS WITH A LARGE RADICAND', () => {
     expect(det.N().re).toBeCloseTo(ce.box(['Determinant', m]).N().re, 6);
   });
 });
+
+// A float entry makes the field add keep exact and float constants of a sum
+// apart (`2x - 1 + 3`); the handlers evaluate such a result to fold them.
+describe('DETERMINANT WITH A FLOAT ENTRY FOLDS ITS CONSTANTS (CE-145.1)', () => {
+  const ce = new ComputeEngine();
+
+  test('symbolic determinant with a float entry', () => {
+    const m = ['List', ['List', ['Add', 'x', 1.5], 1], ['List', 1, 2]];
+    expect(ce.box(['Determinant', m]).evaluate().toString()).toBe('2x + 2');
+  });
+
+  test('characteristic polynomial with float entries', () => {
+    const m = ['List', ['List', 1.5, 2], ['List', 3, 5]];
+    expect(
+      ce.box(['CharacteristicPolynomial', m, 'x']).evaluate().toString()
+    ).toBe('x^2 - 6.5 * x + 1.5');
+  });
+});

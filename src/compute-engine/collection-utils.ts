@@ -3156,9 +3156,9 @@ function everyArmIsShaped(
  * components: `point(1, 2) = (1, 2)` is `False` (pinned in
  * `test/compute-engine/type-constructors.test.ts`).
  *
- * `couldMatch(t, 'tuple')` is not this test: the bare `tuple` admits values
- * only, so it rejects `tuple<integer, missing>`, and it rejects
- * `indexed_collection<integer>` although a tuple of integers is one.
+ * `couldMatch(t, 'tuple')` is not this test: it accepts `tuple<integer,
+ * missing>` (the bare `tuple` admits every arity and slot type), but it
+ * rejects `indexed_collection<integer>` although a tuple of integers is one.
  *
  * The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
  * self-referential alias stops when it reaches itself again, and that arm
@@ -5851,4 +5851,24 @@ export function collectionSourceOperands(
     default:
       return expr.ops;
   }
+}
+
+/**
+ * Append `x` to `elements` unless an `isSame` element is already there, and
+ * return whether it was appended. `kept` groups the elements by hash and
+ * belongs to the same loop as `elements`. Two `isSame` expressions always
+ * have the same hash, so `x` is compared only with the kept elements that
+ * have its hash, not with every kept element (CE-316).
+ */
+export function pushDistinct(
+  elements: Expression[],
+  kept: Map<number, Expression[]>,
+  x: Expression
+): boolean {
+  const bucket = kept.get(x.hash);
+  if (bucket === undefined) kept.set(x.hash, [x]);
+  else if (bucket.some((e) => e.isSame(x))) return false;
+  else bucket.push(x);
+  elements.push(x);
+  return true;
 }

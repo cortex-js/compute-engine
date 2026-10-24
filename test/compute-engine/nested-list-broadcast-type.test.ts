@@ -143,11 +143,13 @@ describe('A POWER OF A LIST OF LISTS', () => {
 });
 
 //
-// `Abs` over a list of integers is typed `list<real<0..> | signed_infinity>`.
-// Each element of the value `[1, 2]` is a member of the cell type. The type
-// of the value as a whole, `vector<integer^2>`, is not a subtype of it,
-// because the type of a list literal widens each element to its numeric
-// tier (`integer`) and drops its sign. So the check here is element-wise.
+// `Abs` over a list of integers is typed `list<integer<0..>>`: the cell type
+// keeps the integer tier of the operand and has no infinite arm, since no
+// integer is infinite. Each element of the value `[1, 2]` is a member of the
+// cell type. The type of the value as a whole, `vector<integer^2>`, is not a
+// subtype of it, because the type of a list literal widens each element to
+// its numeric tier (`integer`) and drops its sign. So the check here is
+// element-wise.
 //
 describe('ABS OVER A LIST OF INTEGERS', () => {
   test.each<[string, (ce: ComputeEngine) => Expression]>([
@@ -156,11 +158,11 @@ describe('ABS OVER A LIST OF INTEGERS', () => {
   ])('%s', (_, build) => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<integer>');
-    expect(build(ce).type.toString()).toBe('list<real<0..> | signed_infinity>');
+    expect(build(ce).type.toString()).toBe('list<integer<0..>>');
     ce.assign('L', ce.box(['List', 1, -2]));
     const v = build(ce).evaluate();
     expect(v.toString()).toBe('[1,2]');
-    const cell = ce.type('real<0..> | signed_infinity');
+    const cell = ce.type('integer<0..>');
     expect([...v.each()].every((x) => x.type.matches(cell))).toBe(true);
   });
 });
@@ -730,5 +732,32 @@ describe('PRODUCT OF ROWS OF POINTS AND NUMBERS', () => {
     expect(r.staticType).toBe(type);
     expect(r.value).toBe(evaluated);
     expect(r.sound).toBe(true);
+  });
+});
+
+describe('a vector beside a list of lists keeps the integer arm', () => {
+  // `L: list<list<integer>>` can hold a rectangular matrix. Then `[2, 3] * L`
+  // is the matrix product, `[11, 16]`, a list of integers, not a list of
+  // rows. So the type must keep the `integer` arm: `list<list<integer>>`
+  // would not hold this value.
+  test.each<[string, string]>([
+    ['Multiply', '[11,16]'],
+    ['Add', '[[3,4],[6,7]]'],
+  ])('%s', (op, evaluated) => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<list<integer>>');
+    const e = ce.box([op, ['List', 2, 3], 'L']);
+    expect(e.type.toString()).toBe('list<integer | list<integer>>');
+    ce.assign('L', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    const v = e.evaluate();
+    expect(v.toString()).toBe(evaluated);
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  test('a product of two points that may be point lists is an error (CE-48)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'tuple<number, number> | list<tuple<number, number>>');
+    ce.declare('Q', 'tuple<number, number> | list<tuple<number, number>>');
+    expect(ce.box(['Multiply', 'P', 'Q']).type.toString()).toBe('error');
   });
 });

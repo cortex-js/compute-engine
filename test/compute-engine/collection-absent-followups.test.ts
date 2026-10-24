@@ -502,3 +502,61 @@ describe('ZIP OF ABSENT CELLS, COMPILED AND WITH AN ERASED ITEM', () => {
     ]);
   });
 });
+
+describe('Absent whole collections and absent number cells (CE-44, CE-20)', () => {
+  test('a comparison of a list that may be absent is a list or Missing', () => {
+    const c = new ComputeEngine();
+    c.declare('L', 'list<integer> | missing');
+    expect(c.box(['Less', 'L', 3]).type.toString()).toBe(
+      'list<boolean> | missing'
+    );
+    expect(c.box(['Equal', 'L', 3]).type.toString()).toBe(
+      'list<boolean> | missing'
+    );
+    // An absent scalar gives an absent cell, not an absent list.
+    c.declare('n', 'integer | missing');
+    expect(c.box(['Less', 'n', ['List', 1, 2]]).type.toString()).toBe(
+      'list<boolean | missing^2>'
+    );
+    // The value is Missing for the whole list when L is absent.
+    expect(c.box(['Less', 'Missing', 3]).evaluate().json).toBe('Missing');
+  });
+
+  test('an operand typed unknown (Undefined) keeps the absent cells', () => {
+    const c = new ComputeEngine();
+    c.declare('L', 'list<integer> | missing');
+    const e = c.box(['Less', 'L', 'Undefined']);
+    expect(e.type.toString()).toBe('list<boolean | missing> | missing');
+    c.assign('L', c.box(['List', 1, 2]));
+    const v = e.evaluate();
+    expect(v.toString()).toBe('["Missing","Missing"]');
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  test('a custom handle operator keeps the absent arm of its cells', () => {
+    const c = new ComputeEngine();
+    c.declare('Pick', {
+      signature: '(integer, integer) -> integer | missing',
+      broadcastable: true,
+      missingBehavior: 'handle',
+      evaluate: () => c.Missing,
+    } as never);
+    c.declare('L', 'list<integer> | missing');
+    // The cells keep their absent arm: not `list<integer> | missing`.
+    expect(c.box(['Pick', 'L', 3]).type.toString()).toBe(
+      'list<integer | missing> | missing'
+    );
+  });
+
+  test('a list literal keeps its dimensions for number cells that may be absent', () => {
+    const c = new ComputeEngine();
+    expect(c.box(['List', 1, 'Missing']).type.toString()).toBe(
+      'list<integer | missing^2>'
+    );
+    expect(
+      c
+        .box(['List', ['List', 'Missing', -2], ['List', -3, 'Missing']])
+        .type.toString()
+    ).toBe('matrix<integer | missing^(2x2)>');
+  });
+});

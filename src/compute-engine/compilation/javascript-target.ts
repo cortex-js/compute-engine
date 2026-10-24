@@ -2071,10 +2071,10 @@ export function isIndexedCollectionOperand(
   // on such an operand fail closed, and the interpreter evaluates them.
   if (isTextAdmittingCollectionType(t.type)) return false;
   // This is a SHAPE question — "does this lower to a JS array?" — so it is
-  // asked against the absence-admitting family tops `list<any>` /
-  // `indexed_collection<any>`: a `list<any>` is array-shaped even though it
-  // is not a subtype of the values-only bare `list` (= `list<unknown>`,
-  // user ruling 2026-08-17).
+  // asked against the family tops `list<any>` / `indexed_collection<any>`,
+  // which state explicitly that absence markers are admitted. (Since 0.160.0
+  // the bare `list` admits the same values; the explicit spelling does not
+  // depend on how the bare name is read.)
   if (t.matches('list<any>') || t.matches('indexed_collection<any>'))
     return true;
   // A join over collections that are checked to be arrays at run time is an
@@ -3781,9 +3781,13 @@ function tryGetJSComplexParts(
       isSymbol(op) || isNumber(op) ? compile(op) : `(${compile(op)})`
     );
     if (scale !== 1) factors.unshift(String(scale));
+    // A negative scale makes `-0` of a zero factor (`-1 * y` at `y = 0`), and
+    // `atan2(-0, -3)` is `-π` where the interpreter holds the real number
+    // `-3` and answers `π`. Adding `0` makes the part `+0` (CE-262).
+    const im = factors.length === 0 ? '1' : join(factors, ' * ');
     return {
       re: '0',
-      im: factors.length === 0 ? '1' : join(factors, ' * '),
+      im: scale < 0 ? `(${im} + 0)` : im,
     };
   }
   if (isFunction(expr, 'Add')) {
@@ -7632,7 +7636,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         ([b, e]) => `_SYS.cpow(${b}, ${e})`
       );
     if (eConst === 0) return '1';
-    if (eConst === 1) return compile(base);
+    if (eConst === 1) return identityPassthrough(base, compile, target);
     const radical = realRadicalPower(base, eConst, compile, target);
     if (radical !== undefined) return radical;
     if (

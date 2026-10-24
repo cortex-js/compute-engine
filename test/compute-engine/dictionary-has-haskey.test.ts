@@ -1,5 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { isDictionary } from '../../src/compute-engine/boxed-expression/type-guards';
+import {
+  beginObjectDeps,
+  endObjectDeps,
+  objectDepsValid,
+} from '../../src/compute-engine/boxed-expression/object-deps';
 
 /**
  * `has()` is the symbol-occurrence test on every expression, dictionaries
@@ -194,5 +199,39 @@ describe('dictionary: has() is the symbol test, hasKey() is the key test', () =>
     expect(product.toString()).toMatchInlineSnapshot(
       `"prod_(k=1)^(3)(If(x < 1, {"v" -> k}, 1))"`
     );
+  });
+});
+
+describe('has() on a mutable object reads its field values (CE-99.2)', () => {
+  const ce = new ComputeEngine();
+  ce.declareType('Holder', 'object{item: any, next: any}');
+
+  test('finds a symbol and an operator in a field value', () => {
+    const o = ce._object('Holder', {
+      item: ce.box(['Sin', 'y']),
+      next: ce.number(1),
+    });
+    expect(o.has('y')).toBe(true);
+    expect(o.has('Sin')).toBe(true);
+    expect(o.has('z')).toBe(false);
+    expect(o.has(['z', 'y'])).toBe(true);
+  });
+
+  test('records an object read, so a cached answer follows a store', () => {
+    const o = ce._object('Holder', { item: ce.number(1), next: ce.number(2) });
+    const nested = ce._object('Holder', { item: o, next: ce.number(2) });
+    beginObjectDeps();
+    nested.has('y');
+    const deps = endObjectDeps();
+    expect(objectDepsValid(deps)).toBe(true);
+    (o as any)._store('item', ce.symbol('y'));
+    expect(objectDepsValid(deps)).toBe(false);
+    expect(nested.has('y')).toBe(true);
+  });
+
+  test('terminates on an object that holds itself', () => {
+    const o = ce._object('Holder', { item: ce.number(1), next: ce.number(2) });
+    (o as any)._store('next', o);
+    expect(o.has('y')).toBe(false);
   });
 });

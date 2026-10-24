@@ -460,6 +460,23 @@ describe('distribution operators', () => {
       expect(napp(['BetaRegularized', 0.3, 2, 3])).toBeCloseTo(0.3483, 12);
     });
 
+    test('Q(n, z) for n > 20 and z < 0: .N() sums the closed form (CE-197.2)', () => {
+      // mpmath, gammainc(a, z, regularized=True) at 20 digits:
+      // (25, -10) = 10226.529592661114152, (30, -15) = -1587112603.3512113312
+      // and (25, -5) = 1.00000238924711229.
+      expect(napp(['GammaRegularized', 25, -10]) / 10226.529592661114).toBeCloseTo(
+        1,
+        9
+      );
+      expect(napp(['GammaRegularized', 30, -15]) / -1587112603.3512113).toBeCloseTo(
+        1,
+        9
+      );
+      expect(napp(['GammaRegularized', 25, -5])).toBeCloseTo(1.00000238924711, 11);
+      // evaluate() keeps the long sum symbolic.
+      expect(ev(['GammaRegularized', 25, -2])).toBe('GammaRegularized(25, -2)');
+    });
+
     test('complex args stay symbolic', () => {
       expect(ev(['GammaRegularized', ['Complex', 1, 1], 2])).toContain(
         'GammaRegularized'

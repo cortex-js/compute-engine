@@ -232,6 +232,10 @@ const UNIT_INTERVAL = parseType('real<0..1>')!;
  */
 const MAX_GAMMA_Q_SERIES_ORDER = 20;
 
+/** The same cap under `.N()` for z < 0, where the sum is evaluated at once
+ * and the numeric kernel (which needs z ≥ 0) cannot answer. */
+const MAX_GAMMA_Q_SERIES_ORDER_NUMERIC = 200;
+
 /** Whether `x` is provably a positive, finite value. */
 function isProvablyPositiveFinite(x: Expression): boolean {
   return x.isPositive === true && x.isFinite === true;
@@ -537,8 +541,15 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           isRealLiteral(a) &&
           a.isInteger === true &&
           a.isPositive === true &&
-          a.isLessEqual(MAX_GAMMA_Q_SERIES_ORDER) === true &&
-          isRealLiteral(z)
+          isRealLiteral(z) &&
+          a.isLessEqual(
+            // Under `.N()` the sum is evaluated, not kept as an expression,
+            // so a larger order is affordable. The numeric kernel has no
+            // answer for z < 0 (CE-197.2).
+            numericApproximation && z.isNegative === true
+              ? MAX_GAMMA_Q_SERIES_ORDER_NUMERIC
+              : MAX_GAMMA_Q_SERIES_ORDER
+          ) === true
         )
           return gammaRegularizedSeries(
             Number(a.re),

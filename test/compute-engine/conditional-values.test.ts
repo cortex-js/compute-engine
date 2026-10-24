@@ -381,6 +381,12 @@ describe('Convergence guards (Phase 3a)', () => {
     expect(evalStr('\\int_0^1 x^n dx')).toBe('1 / (n + 1) {0 < n + 1}');
   });
 
+  it('∫₀^∞ xⁿ dx diverges for every n: it stays unevaluated (CE-383)', () => {
+    // The leaks `0^(n+1)` (a limit under `0 < n+1`) and `∞^(n+1)` (a limit
+    // under `n+1 < 0`) have guards that no `n` satisfies.
+    expect(evalStr('\\int_0^\\infty x^n dx')).toBe('int_(0)^(+oo)(x^n dx)');
+  });
+
   it('∫₁^∞ x^(−s) dx → 1/(s−1) {1 < s} (no leaked ∞^(1−s))', () => {
     expect(evalStr('\\int_1^\\infty x^{-s} dx')).toBe(
       '-1 / (1 - s) {1 - s < 0}'

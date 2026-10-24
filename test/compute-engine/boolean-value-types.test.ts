@@ -208,10 +208,10 @@ describe('boolean value types — compiler consumption', () => {
     );
   });
 
-  test('a proven If keeps the arms in one complex convention', () => {
-    expect(code(fn('If', [eq(), sym('x'), ce.parse('2i')]))).toBe(
-      '({ re: _.x, im: 0 })'
-    );
+  test('a proven If does not take the complex lane of its dead arm', () => {
+    // The dead arm `2i` is not emitted, so it does not put the result on the
+    // complex lane: the value is the real `x`, not `{ re: x, im: 0 }` (CE-230).
+    expect(code(fn('If', [eq(), sym('x'), ce.parse('2i')]))).toBe('_.x');
   });
 
   test('a dead Which clause is never compiled', () => {

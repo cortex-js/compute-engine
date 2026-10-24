@@ -377,3 +377,22 @@ describe('EVERY READER OF A RANGE USES THE EXACT COUNT', () => {
     expect(e.isNonNegative).toBeUndefined();
   });
 });
+
+describe('A RANGE HELD BY A SYMBOL', () => {
+  // A reducer that holds its operand (`Sum`) gets the symbol, not the Range
+  // it holds. The closed form reads the held Range, so there is no walk.
+  test('every reducer uses the closed form', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('r', ce2.box(['Range', 1, BIG]));
+    const value = (op: string) => ce2.box([op, 'r']).evaluate();
+    expect(value('Sum').isSame(5000000000000000000050000000000000000000n)).toBe(
+      true
+    );
+    expect(value('Mean').toString()).toBe('100000000000000000001/2');
+    expect(value('Median').toString()).toBe('100000000000000000001/2');
+    expect(value('Max').isSame(ce2.box(BIG).evaluate())).toBe(true);
+    expect(value('Min').isSame(1)).toBe(true);
+    expect(value('Variance').isExact).toBe(true);
+    expect(value('PopulationVariance').isExact).toBe(true);
+  });
+});

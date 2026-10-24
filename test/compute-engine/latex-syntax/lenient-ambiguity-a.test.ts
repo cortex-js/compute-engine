@@ -276,6 +276,9 @@ describe('ambiguous-radical', () => {
     '√x²',
     '√x²+y²',
     '3√8',
+    // The range infix groups tighter than the juxtaposition in the raw tree:
+    // the check reads the tree after the range repair (CE-298).
+    'ab√x..5',
   ]);
   expectNotReported('ambiguous-radical', [
     '√2',

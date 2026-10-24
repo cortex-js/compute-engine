@@ -1070,6 +1070,9 @@ function isNormalComplex(v: Complex): boolean {
   return Number.isFinite(a) && a >= 1e-300;
 }
 
+/** The largest Re z for which complex `gamma()` shifts the argument down (Γ
+ *  overflows a double a little past 171). */
+const GAMMA_SHIFT_MAX_RE = 172;
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
 const HALF_LOG_2PI = 0.5 * Math.log(2 * Math.PI);
 
@@ -1097,6 +1100,32 @@ export function gamma(c: Complex): Complex {
       .sub(gammaln(new Complex(1, 0).sub(c)));
     const e = l.exp();
     return Number.isFinite(e.re) && Number.isFinite(e.im) ? e : g;
+  }
+
+  // Past Re z = 2, the Lanczos form `t^(z + 1/2)` has a relative error that
+  // grows with |z| (about 100 ε at z = 54.7, because the power amplifies the
+  // rounding of `t·ln t`). As the real `gamma()` does, shift the argument down
+  // to the strip 1 ≤ Re w < 2 and multiply back the exact factors:
+  // Γ(z) = Γ(w) · w · (w + 1) ⋯ (w + n − 1), with n = ⌊Re z⌋ − 1. When the
+  // product overflows, the logarithmic form below is used (CE-192).
+  if (c.re >= 2 && c.re <= GAMMA_SHIFT_MAX_RE) {
+    const n = Math.floor(c.re) - 1;
+    const w = c.sub(n);
+    let pr = 1;
+    let pi = 0;
+    for (let k = 0; k < n; k++) {
+      const fr = w.re + k;
+      const nr = pr * fr - pi * w.im;
+      pi = pr * w.im + pi * fr;
+      pr = nr;
+    }
+    // Γ(w) can underflow for a large |Im w| (Γ(1 + 600i) is about 1e-409)
+    // while the product of the factors is large: then the product of the two
+    // would lose digits or be 0, so use the form below, which has no
+    // underflow.
+    const base = gamma(w);
+    const r = new Complex(pr, pi).mul(base);
+    if (isNormalComplex(base) && isNormalComplex(r)) return r;
   }
 
   const z = c.sub(1);
@@ -3731,10 +3760,11 @@ function cotFourierTerm(
   };
 }
 
-/** The highest order for which `cotPolynomialTerm` is tried. At order 100
- * the largest coefficient is about 2e217 and the sum of |aⱼ|·4ʲ about 2e269;
- * from order 120 on they overflow a double. */
-const COT_POLYNOMIAL_MAX_ORDER = 100;
+/** The highest order for which `cotPolynomialTerm` is tried. The coefficients
+ * are carried with a common power-of-two exponent, so they do not overflow;
+ * the Horner sum of |aⱼ|·|c|ʲ, with the largest coefficient scaled to at most
+ * 1 and |c| <= 4, stays a double up to this order (4^401 is about 1e241). */
+const COT_POLYNOMIAL_MAX_ORDER = 400;
 
 /**
  * −π·Pₘ(cot(πz)) = −π·dᵐ/dzᵐ cot(πz) for Im(z) >= 0, with log₂ of the largest
@@ -3750,16 +3780,35 @@ function cotPolynomialTerm(
   const c = cotPiUpperHalfPlane(z);
   const cAbs = Math.hypot(c.re, c.im);
   if (!(cAbs <= 4)) return undefined;
-  // Coefficients of Pₖ, lowest degree first. Pₖ has degree k + 1.
+  // Coefficients of Pₖ, lowest degree first, times 2^(−exponent). Pₖ has
+  // degree k + 1. The coefficients grow like k!·π^k and overflow a double
+  // from order 120 on, so they are divided by a power of two when the
+  // largest one passes 2^512 (an exact scaling).
   let a = [0, 1];
+  let exponent = 0;
   for (let k = 0; k < m; k++) {
     const next = new Array<number>(a.length + 1).fill(0);
+    let largest = 0;
     for (let j = 1; j < a.length; j++) {
       const b = -Math.PI * j * a[j]; // −π·(coefficient of c^(j−1) in Pₖ′)
       next[j - 1] += b;
       next[j + 1] += b;
     }
+    for (const x of next) largest = Math.max(largest, Math.abs(x));
+    if (largest > 2 ** 512) {
+      for (let j = 0; j < next.length; j++) next[j] /= 2 ** 512;
+      exponent += 512;
+    }
     a = next;
+  }
+  // Bring the largest coefficient to at most 1, so that the sum below stays
+  // finite for |c| <= 4.
+  let largest = 0;
+  for (const x of a) largest = Math.max(largest, Math.abs(x));
+  const shift = Math.max(0, Math.ceil(Math.log2(largest)));
+  if (shift > 0) {
+    for (let j = 0; j < a.length; j++) a[j] /= 2 ** shift;
+    exponent += shift;
   }
   let value = C_ZERO;
   let bound = 0;
@@ -3768,8 +3817,8 @@ function cotPolynomialTerm(
     bound = bound * cAbs + Math.abs(a[j]);
   }
   return {
-    value: scaledNormalize({ m: value.mul(-Math.PI), e: 0 }),
-    largestLog2: Math.log2(Math.PI * bound),
+    value: scaledNormalize({ m: value.mul(-Math.PI), e: exponent }),
+    largestLog2: Math.log2(Math.PI * bound) + exponent,
   };
 }
 

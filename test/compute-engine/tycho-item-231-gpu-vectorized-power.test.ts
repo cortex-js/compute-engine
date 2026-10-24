@@ -187,6 +187,25 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     expect(r.preamble).toContain('_gpu_pow2_v3(vec3 x)');
   });
 
+  it('the vecN helper restores the sign per component without sign(x) * r (CE-243)', () => {
+    // `sign(0) * pow(0, n)` is `0 * Infinity` for a negative odd `n`, which
+    // is NaN, where the scalar helper answers `+Infinity`. The helper
+    // multiplies by -1 where `x < 0` and by 1 elsewhere instead.
+    const ce = fresh();
+    ce.declare('n', 'integer');
+    const expr = ce.box(['Power', ['Add', 'x', V3], 'n'] as any);
+    const glsl = new GLSLTarget().compile(expr);
+    expect(glsl.preamble).toContain(
+      'mix(vec3(1.0), vec3(-1.0), lessThan(x, vec3(0.0))) * r'
+    );
+    expect(glsl.preamble).not.toContain('sign(x)');
+    const wgsl = new WGSLTarget().compile(expr);
+    expect(wgsl.preamble).toContain(
+      'select(vec3f(1.0), vec3f(-1.0), x < vec3f(0.0)) * r'
+    );
+    expect(wgsl.preamble).not.toContain('sign(x)');
+  });
+
   it('exponents with no integer form widen the scalar side of `pow`', () => {
     expect(g(['Power', ['Add', 'x', V3], 2.5])).toBe(
       'pow(x + vec3(1.0, 2.0, 3.0), vec3(2.5))'

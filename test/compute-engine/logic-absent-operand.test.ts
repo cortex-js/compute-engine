@@ -222,7 +222,7 @@ describe('LOGIC CONNECTIVES WITH AN ABSENT OPERAND — result type', () => {
     [['Nand', 'False', 'Missing'], 'boolean', 'True'],
     [['Nor', 'False', 'Missing'], 'missing', 'Missing'],
     [['Nor', 'True', 'Missing'], 'boolean', 'False'],
-    [['Nor', 'M', 'False'], 'boolean | missing', ['Nor', 'M', 'False']],
+    [['Nor', 'M', 'False'], 'boolean | missing', ['Not', 'M']],
   ];
   test.each(table)('%j is typed %s', (expr, type, value) => {
     const boxed = sc.box(expr);

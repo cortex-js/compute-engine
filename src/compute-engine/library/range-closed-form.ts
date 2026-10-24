@@ -1,5 +1,9 @@
 import type { Expression, IComputeEngine } from '../global-types.js';
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { rangeCount } from '../numerics/range-count.js';
 
@@ -255,7 +259,10 @@ export function machineRangeCountDiffers(
 function arithmeticRange(
   expr: Expression
 ): (ArithmeticRange & { inexact: boolean }) | undefined {
-  const r = rangeOperands(expr, true);
+  // A reducer that holds its operand (`Sum`) gets the symbol, not its value:
+  // read the `Range` the symbol holds. (CE-80.1)
+  const held = isSymbol(expr) ? expr.value : undefined;
+  const r = rangeOperands(held !== undefined ? held : expr, true);
   if (r === undefined) return undefined;
   if (!r.inexact)
     return {

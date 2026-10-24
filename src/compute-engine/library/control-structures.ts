@@ -6257,6 +6257,18 @@ function* runNested(
     state.domainError = collection;
     return;
   }
+  // A collection head keeps a failed operand in place instead of becoming the
+  // error: `1..t` with `t` read before it has a value evaluates to
+  // `Range(1, <error>)`, which is not a collection. The error in it is the
+  // value of the domain.
+  if (collection !== undefined && !collection.isCollection) {
+    const embedded = errorValue(collection);
+    if (embedded !== undefined) {
+      state.stopped = true;
+      state.domainError = embedded;
+      return;
+    }
+  }
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.
     return;

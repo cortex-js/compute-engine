@@ -49,7 +49,7 @@ describe('WGSL COMPILATION', () => {
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(
-        `((((x) % (y)) - (y) * floor(((x) % (y)) / (y))) % (y))`
+        `((((x) % (y)) - (y) * (((sign((x) % (y)) * sign((y))) - abs((sign((x) % (y)) * sign((y))))) * 0.5)) % (y))`
       );
     });
   });
@@ -987,7 +987,7 @@ describe('WGSL Mod with an impure operand draws once', () => {
     const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
     expect(code).toBe(
-      '((((x + 29.0) % (900.0)) - (900.0) * floor(((x + 29.0) % (900.0)) / (900.0))) % (900.0))'
+      '((((x + 29.0) % (900.0)) - (900.0) * (((sign((x + 29.0) % (900.0)) * sign((900.0))) - abs((sign((x + 29.0) % (900.0)) * sign((900.0))))) * 0.5)) % (900.0))'
     );
   });
 });
@@ -1299,5 +1299,35 @@ describe('WGSL - SQUARE OF A VECTOR', () => {
     expect(wgsl.compile(ce.box(['Power', list, 2] as never)).code).toBe(
       expected
     );
+  });
+});
+
+describe('WGSL Mod keeps the sign of the divisor when the quotient underflows (CE-246)', () => {
+  // The WGSL source is valid JavaScript once `sign` and `abs` exist, and
+  // JavaScript `%` is the truncated remainder, as in WGSL. Doubles stand in for
+  // `f32`: the dividend and the divisor are chosen so that `r / b` underflows
+  // to `-0` in a double too.
+  const ce = new ComputeEngine();
+  const code = new WGSLTarget().compile(ce.expr(['Mod', 'x', 'y'])).code;
+  const mod = new Function(
+    'x',
+    'y',
+    'sign',
+    'abs',
+    `return ${code};`
+  ) as (x: number, y: number, s: unknown, a: unknown) => number;
+  const at = (x: number, y: number) => mod(x, y, Math.sign, Math.abs);
+
+  it('adds the divisor for a tiny remainder of the opposite sign', () => {
+    expect(at(-1e-200, 1e200) === 0).toBe(true);
+    expect(at(1e-200, -1e200) === 0).toBe(true);
+  });
+
+  it('agrees with the floored modulo elsewhere', () => {
+    expect(at(-7, 3)).toBe(2);
+    expect(at(7, -3)).toBe(-2);
+    expect(at(7, 3)).toBe(1);
+    expect(at(-6, 3)).toBe(0);
+    expect(at(0, 3)).toBe(0);
   });
 });

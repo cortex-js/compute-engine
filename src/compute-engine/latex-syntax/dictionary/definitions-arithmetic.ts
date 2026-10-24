@@ -4489,10 +4489,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (!collection) return '';
 
       const f = operand(expr, 2);
-      if (symbol(f) === 'Add') {
+      const seed = operand(expr, 3);
+      // The `\sum` and `\prod` shorthands have no place for a seed, so they
+      // apply only to a reduction without one.
+      if (seed === null && symbol(f) === 'Add') {
         // This is a reduce over a collection -> \sum
         return `\\sum ${serializer.serialize(collection)}`;
-      } else if (symbol(f) === 'Multiply') {
+      } else if (seed === null && symbol(f) === 'Multiply') {
         // This is a reduce over a collection -> \prod
         return `\\prod ${serializer.serialize(collection)}`;
       }
@@ -4500,7 +4503,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // This is a reduce over a collection -> \operatorname{Reduce}
       return `\\operatorname{Reduce}\\left(${serializer.serialize(
         collection
-      )}, ${serializer.serialize(operand(expr, 2))}\\right)`;
+      )}, ${serializer.serialize(operand(expr, 2))}${
+        seed !== null ? ', ' + serializer.serialize(seed) : ''
+      }\\right)`;
     },
   },
   {

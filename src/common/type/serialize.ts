@@ -316,8 +316,9 @@ export function typeToString(type: Type, precedence = 0): string {
 
     case 'tuple':
       // Special case for tuples with 0 or 1 elements: use `tuple()` function
-      // since `()` and `(string)` are ambiguous
-      if (type.elements.length === 0) result = 'tuple';
+      // since `()` and `(string)` are ambiguous. The empty tuple prints as
+      // `tuple<>`: the bare name `tuple` parses as a tuple of any arity.
+      if (type.elements.length === 0) result = 'tuple<>';
       else if (type.elements.length === 1) {
         const [el] = type.elements;
         result = `tuple<${namedElement(el)}>`;

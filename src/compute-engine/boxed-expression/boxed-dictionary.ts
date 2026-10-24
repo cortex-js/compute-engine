@@ -92,6 +92,7 @@ export class BoxedDictionary
    * prototype-derived methods too — see `hasKey` and `match`. */
   private readonly _keyValues: Record<string, Expression> = Object.create(null);
   private _digest: string | undefined;
+  private _isValid: boolean | undefined;
   /** Memo for {@link type}, keyed on the composite cache generation
    * (`ce._cacheGeneration()`). A cell's type can be narrowed by an
    * assumption about a symbol it mentions — `{a: q}` with `q` assumed
@@ -190,7 +191,12 @@ export class BoxedDictionary
       // a list containing one — makes the WHOLE dictionary malformed. Without
       // this the nested error was dropped and the entry became a silently
       // empty dictionary inside an outer one reporting itself as valid.
-      if (!v.isValid) {
+      // A nested dictionary that was BUILT is not malformed even when it is
+      // invalid because a value of it is an error (`isValid` below): it is
+      // kept under its key, with its siblings. A nested dictionary that could
+      // not be built arrives here as its construction error, not as a
+      // dictionary, and is still rejected.
+      if (!v.isValid && !(v instanceof BoxedDictionary)) {
         this._constructionError ??= v;
         return;
       }
@@ -341,9 +347,18 @@ export class BoxedDictionary
     // the values with `isSame`, so the keys are sorted here and each value
     // contributes its own hash (not its serialization: `1/2` and `0.5` are
     // `isSame` but serialize differently).
+    // The running hash is rotated (not shifted) before an entry is mixed in,
+    // and multiplied by an odd constant: a plain shift moves the contribution
+    // of an entry out of the 32-bit word after 32 levels of nested
+    // dictionaries, so deeply nested dictionaries that differ got the same
+    // hash. This is the fold of `mixOperandHash` (`boxed-function.ts`).
     let h = hashCode('Dictionary');
     for (const key of this.keys.sort())
-      h = ((h << 1) ^ hashCode(key) ^ this._keyValues[key].hash) | 0;
+      h =
+        Math.imul(
+          ((h << 5) | (h >>> 27)) ^ hashCode(key) ^ this._keyValues[key].hash,
+          0x9e3779b1
+        ) | 0;
     return h;
   }
 
@@ -511,6 +526,24 @@ export class BoxedDictionary
    * once. */
   override has(v: string | string[]): boolean {
     return hasSymbolOrOperator(this, v);
+  }
+
+  /** A dictionary is valid when none of its values is invalid, as a list and
+   * a tuple are: a dictionary that holds an `Error` value reports
+   * `isValid === false`, and the error stays the value of its key.
+   * The entries are fixed at construction, so the answer is computed once:
+   * `isValid` is read often (at each canonical and evaluation step), and
+   * without the memo a nested dictionary walked all its values at each
+   * read, which made some suites run for hours. (CE-99.1) */
+  override get isValid(): boolean {
+    if (this._isValid !== undefined) return this._isValid;
+    this._isValid = true;
+    for (const key of Object.keys(this._keyValues))
+      if (!this._keyValues[key].isValid) {
+        this._isValid = false;
+        break;
+      }
+    return this._isValid;
   }
 
   /** True if the dictionary has an entry with the key `key`. */

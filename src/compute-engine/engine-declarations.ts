@@ -578,6 +578,7 @@ export function declareSymbolValue(
   // A FRESH declaration: the target scope held no binding of `name` before
   // this one. Read before the placeholder below is installed. See `updateDef`.
   const fresh = !scope.bindings.has(name);
+  const replaced = scope.bindings.get(name);
 
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
@@ -602,7 +603,29 @@ export function declareSymbolValue(
   // current window orphans it and must dispose it (§6 step 5).
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   noteScratchDeclaration(ce, scope, boxedDef);
-  updateDef(ce, name, boxedDef, def, scope, fresh);
+  // When the value or its type is refused (the value throws, or does not
+  // match the declared type), put back the binding that the placeholder
+  // replaced, or remove the name if there was none. Otherwise the name stays
+  // bound to the placeholder, a symbol of type `unknown` with no value, and a
+  // binding that the failed declaration was meant to replace is lost
+  // (CE-116). `updateDef` replaces the value half of the record in place and
+  // can throw AFTER that (when the rebuild of a definition that waited on
+  // this name fails). The new value is then committed and stays: the binding
+  // is restored only while the record still holds the placeholder value half.
+  const placeholderValue = isValueDef(boxedDef) ? boxedDef.value : undefined;
+  try {
+    updateDef(ce, name, boxedDef, def, scope, fresh);
+  } catch (e) {
+    if (
+      scope.bindings.get(name) === boxedDef &&
+      isValueDef(boxedDef) &&
+      boxedDef.value === placeholderValue
+    ) {
+      if (fresh) scope.bindings.delete(name);
+      else scope.bindings.set(name, replaced!);
+    }
+    throw e;
+  }
   // A symbol declared with a type that can hold a residue class (`r:
   // residue`, `f: (integer) -> residue`) lets an expression of the engine
   // hold a class before any class is made: the engine joins the set that

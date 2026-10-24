@@ -345,6 +345,56 @@ export function withDefaultBigOpBounds(
 }
 
 /**
+ * A `Sum` or `Product` with several `Limits` clauses where a bound of one
+ * clause names the index of another (`Sum(k, Limits(n, 1, 10), Limits(k, 1,
+ * n))`), written as nested operators: the clause whose bounds depend on no
+ * other index is the outermost one. Returns `undefined` when no bound names
+ * another index, when a clause is not a `Limits`, or when the dependencies
+ * form a cycle; the caller then evaluates the clauses as one multi-index
+ * walk, which cannot follow a bound that depends on another index.
+ * The result is not evaluated. (CE-115)
+ */
+export function nestDependentLimits(
+  kind: 'Sum' | 'Product',
+  body: Expression,
+  clauses: ReadonlyArray<Expression>,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (clauses.length < 2) return undefined;
+  const names: string[] = [];
+  const bounds: Expression[][] = [];
+  for (const c of clauses) {
+    if (!isFunction(c, 'Limits') || !isSymbol(c.op1)) return undefined;
+    names.push(c.op1.symbol);
+    bounds.push([c.op2, c.op3]);
+  }
+  // `after[i]`: the indexes that clause `i` must be inside of.
+  const after = clauses.map((_, i) =>
+    names.filter((n, j) => j !== i && bounds[i].some((b) => b.has(n)))
+  );
+  if (after.every((a) => a.length === 0)) return undefined;
+  // Order the clauses from the outermost to the innermost.
+  const order: number[] = [];
+  const placed = new Set<string>();
+  while (order.length < clauses.length) {
+    const next = clauses.findIndex(
+      (_, i) => !order.includes(i) && after[i].every((n) => placed.has(n))
+    );
+    if (next < 0) return undefined;
+    order.push(next);
+    placed.add(names[next]);
+  }
+  // The nested operators are built from the boxed operands, not from their
+  // JSON: a round trip through `.json` would drop the callable bindings a
+  // body captured (`f(k)` could then resolve a later declaration of `f`) and
+  // turn an embedded object into a snapshot of it.
+  let nested: Expression = body;
+  for (let i = order.length - 1; i >= 0; i--)
+    nested = ce.function(kind, [nested, clauses[order[i]]]);
+  return nested;
+}
+
+/**
  * The value of a `Sum` or `Product` with one indexing set over an infinite
  * domain, when its body does not depend on the index. A sum of 0 is 0, and
  * a product of a constant `c` is the limit of `cⁿ`: 1 for `c = 1`, 0 for
@@ -711,6 +761,74 @@ export function degenerateBigOpTerm(
   return body.subs({ [index]: lower }).evaluate({ numericApproximation });
 }
 
+/** Whether `e` is, or holds at any depth, an infinite number literal. */
+function holdsInfinity(e: Expression): boolean {
+  return isNumber(e)
+    ? e.isInfinity === true
+    : isFunction(e) && e.ops.some(holdsInfinity);
+}
+
+/**
+ * The difference `hi − lo` of the two ends of a telescoping sum. An infinity
+ * minus a term that holds no infinity is that infinity (the sum diverges),
+ * which `evaluate()` would not fold from the structural `Subtract`. The term
+ * at the finite bound must be provably finite: a substitution at a finite
+ * bound is returned unevaluated, so it can still be a pole (`Gamma(0)`), and
+ * `∞ − pole` has no value. When it is not provably finite, the result is
+ * `undefined` and the caller keeps the sum unevaluated.
+ */
+function telescopingDifference(
+  hi: Expression,
+  lo: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (isNumber(hi) && hi.isInfinity === true && !holdsInfinity(lo))
+    return isProvablyFinite(lo) ? hi : undefined;
+  if (isNumber(lo) && lo.isInfinity === true && !holdsInfinity(hi))
+    return isProvablyFinite(hi) ? lo.neg() : undefined;
+  return ce.function('Subtract', [hi, lo], { form: 'structural' });
+}
+
+/**
+ * Whether `e` evaluates to something that is not known to be a pole, NaN, an
+ * infinity, or an error. A term with a free symbol (`(x + 1)²`) has no known
+ * finiteness (`isFinite` is `undefined`), and it must still pass, so only a
+ * value known to be non-finite is refused: `Gamma(0)` evaluates to `~oo`.
+ */
+function isProvablyFinite(e: Expression): boolean {
+  const v = e.evaluate();
+  if (v.isNaN === true || v.isFinite === false) return false;
+  return !holdsError(v);
+}
+
+function holdsError(e: Expression): boolean {
+  return (
+    e.operator === 'Error' ||
+    (isSymbol(e) && e.symbol === 'Missing') ||
+    (isFunction(e) && e.ops.some(holdsError))
+  );
+}
+
+/**
+ * `term` with the index replaced by `bound`, for a closed form that substitutes
+ * a bound. At an infinite bound, the substitution is the limit of `term` only
+ * when it folds to a number: `1/(k+1)` at `+∞` is `0`, and `(x+k+1)²` is `+∞`.
+ * A result that still holds an infinity inside a larger expression (`x·∞`)
+ * is not a limit, so the closed form is not used (`undefined`) and the caller
+ * keeps the sum or product unevaluated (CE-142.1).
+ */
+function termAtBound(
+  term: Expression,
+  index: string,
+  bound: Expression
+): Expression | undefined {
+  const value = term.subs({ [index]: bound });
+  if (bound.isInfinity !== true) return value;
+  const folded = value.evaluate();
+  if (!holdsInfinity(folded)) return value;
+  return isNumber(folded) ? folded : undefined;
+}
+
 /**
  * Attempt a symbolic closed form for `Sum(body, [index, lower, upper])` when the
  * domain is symbolic (free bounds or a body with free variables beyond the
@@ -761,18 +879,16 @@ export function symbolicSumClosedForm(
     // (`g(b+1) − g(a)`) instead of folding to `Add(g(b+1), Negate(g(a)))`.
     if (forward) {
       // Σ (t(k+1) − t(k)) = t(b+1) − t(a), where t = neg (so pos = t(k+1)).
-      return ce.function(
-        'Subtract',
-        [pos.subs({ [index]: upper }), neg.subs({ [index]: lower })],
-        { form: 'structural' }
-      );
+      const hi = termAtBound(pos, index, upper);
+      const lo = termAtBound(neg, index, lower);
+      if (hi === undefined || lo === undefined) return undefined;
+      return telescopingDifference(hi, lo, ce);
     }
     // Σ (t(k) − t(k+1)) = t(a) − t(b+1), where t = pos (so neg = t(k+1)).
-    return ce.function(
-      'Subtract',
-      [pos.subs({ [index]: lower }), neg.subs({ [index]: upper })],
-      { form: 'structural' }
-    );
+    const hi = termAtBound(pos, index, lower);
+    const lo = termAtBound(neg, index, upper);
+    if (hi === undefined || lo === undefined) return undefined;
+    return telescopingDifference(hi, lo, ce);
   }
 
   return undefined;
@@ -930,21 +1046,36 @@ export function symbolicProductClosedForm(
     parts ? sameRationalFunction(x, y, index) : x.isSame(y);
   if (new Set(num.unknowns).has(index) && new Set(den.unknowns).has(index)) {
     // forward: den shifted by k→k+1 equals num ⇒ body = h(k+1)/h(k), h = den.
-    if (same(shiftIndex(den, index, ce), num))
-      return result(
-        ce.function('Divide', [
-          num.subs({ [index]: upper }),
-          den.subs({ [index]: lower }),
-        ])
-      );
+    if (same(shiftIndex(den, index, ce), num)) {
+      const hi = termAtBound(num, index, upper);
+      const lo = termAtBound(den, index, lower);
+      if (hi === undefined || lo === undefined) return undefined;
+      // `∞/(x+1)` has the sign of `x + 1`: no value without it. `∞/0` is a
+      // pole and `∞/(negative)` is `−∞`, so the divisor must be positive.
+      if (
+        upper.isInfinity === true &&
+        !(isNumber(lo) && lo.isPositive === true)
+      )
+        return undefined;
+      return result(ce.function('Divide', [hi, lo]));
+    }
     // mirror: num shifted by k→k+1 equals den ⇒ body = h(k)/h(k+1), h = num.
-    if (same(shiftIndex(num, index, ce), den))
-      return result(
-        ce.function('Divide', [
-          num.subs({ [index]: lower }),
-          den.subs({ [index]: upper }),
-        ])
-      );
+    if (same(shiftIndex(num, index, ce), den)) {
+      const hi = termAtBound(num, index, lower);
+      const lo = termAtBound(den, index, upper);
+      if (hi === undefined || lo === undefined) return undefined;
+      // An infinite numerator needs a positive divisor (see above), and an
+      // infinite divisor needs a numerator that is provably finite (not a pole).
+      if (
+        isNumber(hi) &&
+        hi.isInfinity === true &&
+        !(isNumber(lo) && lo.isPositive === true)
+      )
+        return undefined;
+      if (isNumber(lo) && lo.isInfinity === true && !isProvablyFinite(hi))
+        return undefined;
+      return result(ce.function('Divide', [hi, lo]));
+    }
   }
 
   return undefined;

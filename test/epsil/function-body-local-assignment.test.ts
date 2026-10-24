@@ -1491,6 +1491,19 @@ describe('AN ASSIGNMENT TO THE LOOP INDEX WRITES THE INDEX OF THE LOOP', () => {
       )
     ).toThrow(/assigns the loop index `k`/);
   });
+
+  test('the compiled comprehension is refused (CE-226.1)', () => {
+    const ce = new ComputeEngine();
+    const comprehension = ce.box([
+      'Comprehension',
+      ['Block', ['Assign', 'k', 5], 'k'],
+      ['Element', 'k', ['Range', 1, 3]],
+    ] as never);
+    expect(comprehension.evaluate().toString()).toBe('[5,5,5]');
+    expect(() =>
+      compile(comprehension, { to: 'javascript', fallback: false } as never)
+    ).toThrow(/the term assigns the index `k`/);
+  });
 });
 
 describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
@@ -1751,5 +1764,37 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
     expect(() => result.run!(false as never)).toThrow(
       /read-before-declaration/
     );
+  });
+});
+
+describe('AN ASSIGNMENT LOCAL IN A LOOP DOMAIN, A PIPE STAGE', () => {
+  test('a loop over a range with an unset local gives the read error', () => {
+    // `Range(1, t)` keeps the failed operand in place and is not a
+    // collection; the loop took it for an empty domain and answered `0`.
+    const { value } = run('function g() { for k in 1..t { t = 2 }; 0 }\ng()');
+    expect(JSON.stringify(value)).toContain('read-before-declaration');
+  });
+
+  test('a loop over a range with a bound local still runs', () => {
+    const { value, diagnostics } = run(
+      'function g() { t = 3; s = 0; for k in 1..t { s = s + k }; s }\ng()'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value).toBe(6);
+  });
+
+  test('a lambda of a pipe stage that assigns a name has no scope effect', () => {
+    const { diagnostics } = run(
+      'function g() { (1..3) |> map((k) => do { t = k * 2; t }) }\ng()'
+    );
+    expect(diagnostics).toEqual([]);
+  });
+
+  test('a lambda of a pipe stage that assigns an outer variable keeps the scope error', () => {
+    const { diagnostics } = run(
+      'let t = 1\nfunction g() { (1..3) |> map((k) => do { t = k * 2; t }) }\ng()'
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toContain(SCOPE_ERROR);
   });
 });

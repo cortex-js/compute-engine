@@ -1107,6 +1107,12 @@ export function inverseTrigBigDecimalValue(
     const real = !op.isComplex;
     const lost =
       (real && Math.abs(op.re) === 1) ||
+      // Next to a branch point at ±1 a double may differ from the exact
+      // value in its last digits, and the value changes a lot there
+      // (CE-180.2): read the exact operand again.
+      (BRANCH_POINT_AT_ONE.has(name) &&
+        real &&
+        Math.abs(Math.abs(op.re) - 1) < 0.01) ||
       (machine &&
         (mayBeOutside(op.re) ||
           (real ? onRealCut(name, op.re) : mayBeOutside(op.im))));

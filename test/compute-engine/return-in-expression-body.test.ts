@@ -163,3 +163,37 @@ describe('a Return in the body of an operator that takes an expression', () => {
     expect(errorOf(['D', ['Power', 'x', 2], 'x'])).toBe('2x');
   });
 });
+
+describe('Limit of a function literal whose body is a Return (CE-400)', () => {
+  test('the Return ends the literal with its value', () => {
+    expect(errorOf(['Limit', ['Function', ['Return', 'x'], 'x'], 0])).toBe('0');
+    expect(
+      errorOf([
+        'Limit',
+        ['Function', ['Block', ['Return', ['Add', 'x', 1]]], 'x'],
+        0,
+      ])
+    ).toBe('1');
+  });
+
+  test('the LaTeX route gives the same value', () => {
+    expect(
+      ce.parse('\\lim_{x\\to 0}\\operatorname{Return}(x)').evaluate().toString()
+    ).toBe('0');
+  });
+
+  test('a Return in a branch is not read: the limit stays', () => {
+    const r = ce
+      .box([
+        'Limit',
+        [
+          'Function',
+          ['If', ['Greater', 'x', 0], ['Return', 1], ['Return', 2]],
+          'x',
+        ],
+        3,
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Limit');
+  });
+});

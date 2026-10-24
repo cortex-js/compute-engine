@@ -83,6 +83,7 @@ import {
   shapedOrPlainListType,
   isNestedPointCollectionType,
   isBroadcastablePointType,
+  pushDistinct,
 } from '../collection-utils.js';
 import {
   MeasuredWalk,
@@ -1387,7 +1388,8 @@ function keyedViewElementType(expr: Expression): Type | undefined {
  * - A tuple gives a bare `list`, or `list<unknown | missing>` when a slot
  *   of the tuple can be absent: the callback can answer the absent slot as
  *   it is (`Map(x ↦ x, t)` with `t := (1, Missing)` is `[1, Missing]`), and
- *   the bare `list` holds values only. Only the slots themselves are read:
+ *   the bare `list` leaves its element type open, so the absent arm is stated.
+ *   Only the slots themselves are read:
  *   `tuple<tuple<integer, missing>, integer>` has no absent element.
  * - A dictionary gives `collection<unknown>`, or
  *   `collection<missing | unknown>` when its values can be absent (a bare
@@ -3740,9 +3742,9 @@ function listOfLengthType(length: number, element: Type): ListType {
  * ------------------------------------------------------------------------ */
 
 /** The absence-admitting `set` top, for shape gates on a descriptor's type.
- * The bare name `set` is the values-only synonym and would refuse an
- * absence-carrying element type, so a "is this operand set-shaped?" question
- * has to be asked against this. */
+ * The bare name `set` admits the same values since 0.160.0, absent elements
+ * included. This spelling states the family top explicitly, so a "is this
+ * operand set-shaped?" question does not depend on how the bare name is read. */
 const SET_SHAPE_TYPE: Type = Object.freeze({
   kind: 'set',
   elements: 'any',
@@ -5666,7 +5668,8 @@ function joinedElementTypeD(
 
 /**
  * The result type of an operator whose declared result is a collection type
- * that admits values only (`list`, `list<list>`, `dictionary<list>`), when
+ * that leaves its element type open (`list`, `list<list>`, `dictionary<list>`;
+ * these also admit absent cells, but do not state them), when
  * the cells of its collection operand `xs` can be absent (a `missing` arm,
  * or `any`, which admits the absence markers: `typeCouldHoldMissing`);
  * `undefined`
@@ -5723,11 +5726,11 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.some((op) => isSubtype(op.type, DICTIONARY_SHAPE_TYPE)))
     return 'dictionary';
   if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) {
-    // The bare `set` admits values only. That is correct when no operand
-    // can hold an absent element (a `missing` arm, or `any`, which admits
-    // the absence markers: `typeCouldHoldMissing`). When one can, the
+    // The bare `set` leaves the element type open. That is enough when no
+    // operand can hold an absent element (a `missing` arm, or `any`, which
+    // admits the absence markers: `typeCouldHoldMissing`). When one can, the
     // joined set holds it as it is (`Join({1, Missing}, {2})` is
-    // `{1, 2, Missing}`), so the type admits it: the set of the joined
+    // `{1, 2, Missing}`), so the type states it: the set of the joined
     // element types, or
     // `set<any>` when an operand does not say what its elements are. An
     // operand typed `unknown` (a call `q(1)` of a function declared
@@ -19602,10 +19605,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // set held by a symbol of a wider declared type by `evaluate`.
     signature:
       '((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)',
-    // The declared result, `list<list>`, admits values only. A group keeps
-    // the cells of the source as they are, absent ones included
-    // (`Chunk([1, Missing, 3], 2)` is `[[1, Missing], [3]]`), so when the
-    // cells of the source can be absent, the groups are typed with them
+    // The declared result, `list<list>`, also admits absent cells, but leaves
+    // their type open. A group keeps the cells of the source as they are,
+    // absent ones included (`Chunk([1, Missing, 3], 2)` is
+    // `[[1, Missing], [3]]`), so when the cells of the source can be absent,
+    // the groups are typed with them
     // (`absentCellsResultType`).
     type: ([xs], context) =>
       absentCellsResultType(xs, context, (elements) => ({
@@ -19909,10 +19913,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
-    // The declared result, `dictionary<list>`, admits values only. A group
-    // keeps the elements of the source as they are, absent ones included,
-    // so when the elements of the source can be absent, the groups are
-    // typed with them (`absentCellsResultType`).
+    // The declared result, `dictionary<list>`, also admits absent elements,
+    // but leaves their type open. A group keeps the elements of the source as
+    // they are, absent ones included, so when the elements of the source can
+    // be absent, the groups are typed with them (`absentCellsResultType`).
     type: ([xs], context) =>
       absentCellsResultType(xs, context, (elements) => ({
         kind: 'dictionary',
@@ -20016,7 +20020,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return BoxedType.forResult('list', context.engine._typeResolver);
       // The component is the source's element type as it is spelled: an
       // explicit `any` (`list<any>`, absence markers admitted) stays `any`,
-      // and a bare `list` gives `unknown` (values only).
+      // and a bare `list` gives `unknown` (an open element type).
       const elements = ops.map(
         (x) => x.facts.elementType ?? collectionElementType(x.type) ?? 'unknown'
       );
@@ -20122,12 +20126,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // uncallable). The primitive is shape-top and effect-top, which is the
     // honest statement of what is checkable here.
     signature: '(function, initial: any?) -> list',
-    // The bare `list` of the signature admits values only. An element can
-    // be absent when the initial value can be absent (`Iterate(x ↦ x,
-    // Missing)` is `[Missing, Missing, …]`) or when the function can answer
-    // `Missing` (`x ↦ If(x > 2, Missing, x + 1)`). The result type then
-    // admits an absent element: `list<any>`, because no other element type
-    // is known.
+    // The bare `list` of the signature also admits absent elements, but leaves
+    // the element type open. An element can be absent when the initial value
+    // can be absent (`Iterate(x ↦ x, Missing)` is `[Missing, Missing, …]`) or
+    // when the function can answer `Missing` (`x ↦ If(x > 2, Missing, x +
+    // 1)`). The result type then states an absent element: `list<any>`,
+    // because no other element type is known.
     //
     // A function whose result type is `unknown` says nothing about absence:
     // `missing ⊔ unknown` is `unknown`, so `x ↦ If(x > 0, Missing, x)` and
@@ -20370,8 +20374,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(list<any>) -> list',
-    // The declared result, the bare `list`, admits values only. The cycle
-    // repeats the cells of the source as they are, absent ones included,
+    // The declared result, the bare `list`, also admits absent cells, but
+    // leaves their type open. The cycle repeats the cells of the source as
+    // they are, absent ones included,
     // so when the cells of the source can be absent, the result is typed
     // with them (`absentCellsResultType`).
     type: ([xs], context) =>
@@ -20751,12 +20756,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(collection<any>) -> dictionary',
-    // The declared result, the bare `dictionary`, admits values only. An
-    // absent value of a pair is a value of the result as it is
-    // (`DictionaryFrom([("a", Missing)])` is `{"a" -> Missing}`), so when
-    // the source can hold an absent value (a `missing` arm, or `any`:
-    // `typeCouldHoldMissing`), the result is `dictionary<any>`, which admits
-    // the absent value. The source comes
+    // The declared result, the bare `dictionary`, also admits absent values,
+    // but leaves their type open. An absent value of a pair is a value of the
+    // result as it is (`DictionaryFrom([("a", Missing)])` is
+    // `{"a" -> Missing}`), so when the source can hold an absent value (a
+    // `missing` arm, or `any`: `typeCouldHoldMissing`), the result is
+    // `dictionary<any>`, which states the absent value. The source comes
     // with its `missing` arm (`ABSENT_CELLS_PASS_THROUGH`,
     // `broadcast-lift-type.ts`).
     type: ([xs], context) =>
@@ -22031,6 +22036,7 @@ function enumerateSetComprehension(
   // `{k mod 2 : k ∈ 1..4}` has two elements, `{0, 1}`.
   const isIdentity = isSymbol(body) && body.symbol === variable;
   const elements: Expression[] = [];
+  const kept = new Map<number, Expression[]>();
   for (const value of result.values) {
     // An extracted value is an OPERAND of the domain, not its evaluation:
     // an enumerable literal domain is extracted without evaluating its
@@ -22038,7 +22044,7 @@ function enumerateSetComprehension(
     const x = isIdentity
       ? value.evaluate(options)
       : body.subs({ [variable]: value }).evaluate(options);
-    if (!elements.some((y) => y.isSame(x))) elements.push(x);
+    pushDistinct(elements, kept, x);
   }
   return elements;
 }
@@ -22169,6 +22175,7 @@ async function enumerateSetComprehensionAsync(
   if (result.status !== 'success') return undefined;
   const isIdentity = isSymbol(body) && body.symbol === variable;
   const elements: Expression[] = [];
+  const kept = new Map<number, Expression[]>();
   for (const extracted of result.values) {
     // See the synchronous twin: an extracted value is a domain OPERAND.
     const value = await extracted.evaluateAsync(options);
@@ -22182,7 +22189,7 @@ async function enumerateSetComprehensionAsync(
     const x = isIdentity
       ? value
       : await body.subs({ [variable]: value }).evaluateAsync(options);
-    if (!elements.some((y) => y.isSame(x))) elements.push(x);
+    pushDistinct(elements, kept, x);
   }
   return elements;
 }

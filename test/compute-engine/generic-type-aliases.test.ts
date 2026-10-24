@@ -723,14 +723,15 @@ describe('GENERIC TYPE ALIASES — box route (`DeclareType`) parity', () => {
     expect(r.toString()).toContain('declared more than once');
   });
 
-  test('an arity error at a USE site surfaces as the declared-type parse throw', () => {
+  test('an arity error at a USE site surfaces as the declared-type parse error', () => {
     const ce = new ComputeEngine();
     boxDeclare(ce, false);
-    // `Declare` parses its declared type eagerly and lets a malformed one
-    // throw — pre-existing behavior, shared with `{str: 'nosuchtype'}`.
-    expect(() => ce.box(['Declare', 'p', { str: 'Pair' }]).evaluate()).toThrow(
-      /generic-alias-arity/
-    );
+    // `Declare` parses its declared type eagerly. A type that does not parse
+    // gives an `invalid-type-declaration` error with the message of the type
+    // parser, as `{str: 'nosuchtype'}` does (CE-101).
+    const r = ce.box(['Declare', 'p', { str: 'Pair' }]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toMatch(/generic-alias-arity/);
   });
 });
 

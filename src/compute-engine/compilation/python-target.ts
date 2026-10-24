@@ -1753,9 +1753,9 @@ function isPyCollectionOperand(e: Expression): boolean {
   // collection operations do not compile to Python at all and must FAIL
   // CLOSED here rather than lower as if the string were an array.
   if (t.matches('string')) return false;
-  // Shape question — asked against the absence-admitting family tops (bare
-  // names are the values-only synonyms since the 2026-08-17 ruling); a
-  // `list<any>` operand is still a NumPy array.
+  // Shape question — asked against the explicit family tops (since 0.160.0
+  // the bare names admit the same values); a `list<any>` operand is still a
+  // NumPy array.
   return t.matches('list<any>') || t.matches('indexed_collection<any>');
 }
 

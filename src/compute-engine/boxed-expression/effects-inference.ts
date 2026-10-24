@@ -50,6 +50,7 @@ import type {
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 
 import {
@@ -1519,7 +1520,10 @@ export function namedLiteralSignatureType(
 
 export function functionLiteralSignatureType(expr: Expression): Type {
   const ce = expr.engine;
-  const body = functionLiteralBody(expr)!;
+  const body = functionLiteralBody(expr);
+  // A `Function` with no body (raw input held unbound by `Hold`) has no
+  // signature to build: it is an error value, not a throw (CE-106).
+  if (body === undefined) return 'error';
   const params = functionLiteralParameters(expr);
 
   // Result type: an explicit return-type ascription (the §4.2 marker) is
@@ -1820,11 +1824,47 @@ interface WalkContext {
  */
 function withBlockLocals(block: Expression, ctx: WalkContext): WalkContext {
   const scope = block.localScope;
-  if (scope === undefined) return ctx;
-  const names = assignmentLocalsOf(scope);
+  const names =
+    scope === undefined
+      ? rawBlockAssignmentLocals(block, ctx)
+      : assignmentLocalsOf(scope);
   if (names === undefined || names.every((name) => ctx.declared.has(name)))
     return ctx;
   return { declared: new Set([...ctx.declared, ...names]) };
+}
+
+/**
+ * The assignment locals of a block that is not canonical, so that it has no
+ * scope to record them. Such a block is the body of a function literal that
+ * an operator holds unbound: the stage of a `Pipe`, as in
+ * `xs |> map((k) => do { t = k * 2; t })`. When the literal is canonicalized,
+ * its body owns each name that one of its statements assigns and that no
+ * enclosing scope declares (`canonicalBlock()`); the walk applies the same
+ * rule to the statements of the block, and to the scope that is current now.
+ * Only an assignment that is a statement of the block itself is read.
+ */
+function rawBlockAssignmentLocals(
+  block: Expression,
+  ctx: WalkContext
+): string[] | undefined {
+  if (!isFunction(block) || block.isCanonical) return undefined;
+  const ce = block.engine;
+  const names: string[] = [];
+  for (const statement of block.ops) {
+    if (!isFunction(statement, 'Assign')) continue;
+    const target = statement.ops[0];
+    const name = isSymbol(target) ? target.symbol : undefined;
+    if (name === undefined || name === 'Nothing' || ctx.declared.has(name))
+      continue;
+    let declared = false;
+    for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
+      if (s.bindings.has(name)) {
+        declared = true;
+        break;
+      }
+    if (!declared) names.push(name);
+  }
+  return names;
 }
 
 /**

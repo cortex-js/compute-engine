@@ -260,6 +260,26 @@ describe('TrigReduce', () => {
   });
 });
 
+describe('TrigReduce: collections, relations and absence', () => {
+  test('a list is reduced element by element', () => {
+    const r = ce.box(['TrigReduce', ['List', ['Multiply', ['Sin', 'x'], ['Cos', 'x']], 3]]).evaluate();
+    expect(r.toString()).toBe('[1/2 * sin(2x),3]');
+  });
+  test('an equation is reduced on both sides', () => {
+    const r = ce.box(['TrigReduce', ['Equal', ['Multiply', ['Sin', 'x'], ['Cos', 'x']], 3]]).evaluate();
+    expect(r.toString()).toBe('1/2 * sin(2x) == 3');
+  });
+  test('Missing stays Missing, as under TrigExpand', () => {
+    expect(ce.box(['TrigReduce', 'Missing']).evaluate().toString()).toBe('"Missing"');
+    expect(ce.box(['TrigExpand', 'Missing']).evaluate().toString()).toBe('"Missing"');
+  });
+  test('Nothing gives the same answer under both verbs', () => {
+    expect(ce.box(['TrigReduce', 'Nothing']).evaluate().toString()).toBe(
+      ce.box(['TrigExpand', 'Nothing']).evaluate().toString()
+    );
+  });
+});
+
 describe('Trig rewrite: round-trip serialization', () => {
   test('unevaluated form serializes and re-parses', () => {
     for (const op of ['TrigExpand', 'TrigToExp', 'TrigReduce']) {

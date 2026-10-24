@@ -4780,3 +4780,31 @@ describe('Norm of an empty collection of points of unknown rank', () => {
     expect(value.type.matches(expr.type)).toBe(true);
   });
 });
+
+describe('DOT OF TWO EMPTY VECTORS (CE-220)', () => {
+  test('of two lists declared as lists of numbers is the empty sum, 0', () => {
+    const e = new ComputeEngine();
+    // Two written `[]` may be two vectors or two point lists: nothing
+    // decides, so the product stays symbolic (see
+    // `dot-point-list-broadcast.test.ts`).
+    expect(e.box(['Dot', ['List'], ['List']]).evaluate().operator).toBe('Dot');
+    e.declare('a', 'list<number>');
+    e.declare('b', 'list<number>');
+    e.assign('a', e.box(['List']));
+    e.assign('b', e.box(['List']));
+    expect(e.box(['Dot', 'a', 'b']).evaluate().toString()).toBe('0');
+  });
+
+  test('two empty lists of points give the empty list, as the compiled code does', () => {
+    const e = new ComputeEngine();
+    e.declare('P', 'list<tuple<real, real>>');
+    e.declare('Q', 'list<tuple<real, real>>');
+    e.assign('P', e.box(['List']));
+    e.assign('Q', e.box(['List']));
+    const dot = e.box(['Dot', 'P', 'Q']);
+    expect(dot.type.toString()).toBe('list<real>');
+    expect(dot.evaluate().toString()).toBe('[]');
+    const compiled = compile(dot) as any;
+    expect(compiled.run({ P: [], Q: [] })).toEqual([]);
+  });
+});

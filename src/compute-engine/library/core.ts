@@ -5197,9 +5197,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'clause listing, attributes (the algebraic flags and `lazy`), ' +
         'description, examples, keywords, wikidata and url.',
       lazy: true,
-      // `dictionary<any>`, not bare `dictionary` (≡ `dictionary<unknown>`,
-      // values only): a `value` entry may legitimately be an absence marker
-      // such as `Missing`.
+      // `dictionary<any>` states that a `value` entry may legitimately be an
+      // absence marker such as `Missing`. (The bare `dictionary` admits the
+      // same values since 0.160.0, but leaves the value type open.)
       signature: '(any) -> dictionary<any>',
       examples: ['About(Pi)'],
       evaluate: ([x], { engine: ce }) => {
@@ -7101,6 +7101,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'describe the definition, e.g. to declare a constant. With a value, ' +
         'evaluates to that value; otherwise evaluates to `Nothing`.',
       lazy: true,
+      // The attributes dictionary of `let y = f(x)` holds the initial value,
+      // and a dictionary that holds an `Error` is invalid. The handler must
+      // run anyway: it evaluates the initial value, which gives the error
+      // with the frames of the failing calls.
+      inspectsErrors: true,
       // Introduces a binding in a scope that outlives the application: the
       // `scope` label (see `Assign`).
       // The attributes bag's entry VALUES are arbitrary expressions — a
@@ -7261,7 +7266,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (source === undefined) return undefined;
           // Parse WITH the resolver: the source is user-supplied and may name
           // a user-declared type (`ce.declareType()` / `DeclareType`).
-          const parsed = parseType(source, ce._typeResolver);
+          // A type string that does not parse gives an error value, not an
+          // exception: the host may be evaluating user input (CE-101).
+          let parsed: Type;
+          try {
+            parsed = parseType(source, ce._typeResolver);
+          } catch (e) {
+            return ce.error(
+              [
+                'invalid-type-declaration',
+                e instanceof Error ? e.message : String(e),
+              ],
+              sym(ops[0]) ?? undefined
+            );
+          }
           if (!isValidType(parsed)) return undefined;
           type = parsed;
           effectsDeclared = signatureEffects(parsed) !== undefined;

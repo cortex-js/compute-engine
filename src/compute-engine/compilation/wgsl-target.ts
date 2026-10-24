@@ -104,8 +104,17 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // temporaries; where there is no statement sink (a conditional arm), or
       // an operand is not a scalar, there is no safe reading — decline
       // (see `Remainder` in the shared GPU target).
-      const floored = (ca: string, cb: string) =>
-        `(((${ca} % ${cb}) - ${cb} * floor((${ca} % ${cb}) / ${cb})) % ${cb})`;
+      // The correction term `floor(r / b)` is written with signs instead:
+      // when `r` is tiny and has the sign opposite to `b`, `r / b`
+      // underflows to `-0` in `f32`, and `floor(-0)` is `-0`, not `-1`, so
+      // the divisor was never added and the result kept the wrong sign. With
+      // `p = sign(r) * sign(b)`, the term `(p - abs(p)) * 0.5` is `-1` for
+      // opposite signs and `0` otherwise (CE-246). It uses only componentwise
+      // operations that accept a scalar beside a vector.
+      const floored = (ca: string, cb: string) => {
+        const p = `(sign(${ca} % ${cb}) * sign(${cb}))`;
+        return `(((${ca} % ${cb}) - ${cb} * ((${p} - abs(${p})) * 0.5)) % ${cb})`;
+      };
       if (a.isPure === false || b.isPure === false) {
         if (
           !BaseCompiler.canHoist(target) ||

@@ -397,3 +397,39 @@ describe('A SUM OF EXACT CONSTANTS AT INFINITY', () => {
     expect(v.re).toBeCloseTo(1.5 + Math.sqrt(5), 12);
   });
 });
+
+describe('A RATIO OF TWO LOGARITHMS AT INFINITY (CE-147)', () => {
+  test('ln(3t)/ln(t) → 1', () => {
+    expect(
+      atPosInf(['Divide', ['Ln', ['Multiply', 3, 't']], ['Ln', 't']])
+    ).toBe('1');
+  });
+
+  test('ln(3t)/ln(t²) → 1/2', () => {
+    expect(
+      atPosInf([
+        'Divide',
+        ['Ln', ['Multiply', 3, 't']],
+        ['Ln', ['Power', 't', 2]],
+      ])
+    ).toBe('1/2');
+  });
+
+  test('ln(3t)/ln(t^π) → 1/π', () => {
+    const v = limit(
+      ['Divide', ['Ln', ['Multiply', 3, 't']], ['Ln', ['Power', 't', 'Pi']]],
+      'PositiveInfinity'
+    );
+    expect(v.toString()).toBe('1 / pi');
+    expect(v.N().re).toBeCloseTo(1 / Math.PI, 12);
+  });
+
+  test('an oscillating ratio (2 + sin t)/(3 + sin t) has no limit', () => {
+    const v = atPosInf([
+      'Divide',
+      ['Add', 2, ['Sin', 't']],
+      ['Add', 3, ['Sin', 't']],
+    ]);
+    expect(v).toMatch(/^lim/);
+  });
+});

@@ -673,10 +673,13 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     }
 
     // If the exponent is pure imaginary, the result is NaN
-    //(↓fix?:ensure both these cases narrow down to 'b' being a num./symbol literal)
-    // (the indeterminate form `Indeterminate`, or `NaN` with a float operand)
+    // (the indeterminate form `Indeterminate`, or `NaN` with a float operand).
+    // This holds for any expression of type `imaginary`.
     if (b.type.matches('imaginary')) return indeterminateFormAnswer(ce, [a, b]);
-    if (b.type.matches('complex') && !isNaN(b.re)) {
+    // The sign of the real part decides the other complex exponents. Only a
+    // number literal has a real part to read here: the value assigned to a
+    // symbol must not be folded into a canonical form.
+    if (isNumber(b) && b.type.matches('complex') && !isNaN(b.re)) {
       if (b.re > 0) return ce.ComplexInfinity;
       if (b.re < 0) return ce.Zero;
     }

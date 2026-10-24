@@ -159,6 +159,14 @@ describe('Collection Type Parser', () => {
     `);
   });
 
+  it('should print the empty tuple so that it parses back to the empty tuple', () => {
+    const empty = parseType('tuple<>');
+    expect(typeToString(empty)).toBe('tuple<>');
+    expect(parseType(typeToString(empty))).toEqual(empty);
+    // The bare name is the tuple of any arity, a different type
+    expect(typeToString(parseType('tuple'))).toBe('tuple');
+  });
+
   it('should parse a tuple expression with one element', () => {
     expect(parseType('tuple<integer>')).toMatchInlineSnapshot(`
       {
@@ -2287,6 +2295,38 @@ describe('Type-system correctness (REVIEW.md F11–F17)', () => {
 
   // F14: `narrow` of two disjoint types is `never` (it must not *widen* to a
   // common supertype).
+  it('a rank-1 tensor met with a plain list of lists never has list cells (CE-17)', () => {
+    const n = (x: string, y: string) =>
+      ts(narrow(parseType(x), parseType(y)));
+    const r = (x: string, y: string) =>
+      ts(reduceType(parseType(`${x} & ${y}`)));
+    for (const f of [n, r]) {
+      // No value of rank 1 has list cells, so a fixed positive length has
+      // no value. (The answer was `list<list^3>` and `list<list<any^2>^2>`,
+      // which the parser refuses.)
+      expect(f('list<any^3>', 'list<list>')).toBe('never');
+      expect(f('list<unknown^2>', 'list<list<any^2>>')).toBe('never');
+      expect(f('list<integer^2>', 'list<list<integer^3>>')).toBe('never');
+      // An open length keeps the empty list.
+      expect(f('vector<unknown>', 'list<list<any^2>>')).toBe('list<never>');
+    }
+  });
+
+  it('narrow of collections of different kinds that share values agrees with the reducer', () => {
+    const n = (x: string, y: string) =>
+      ts(narrow(parseType(x), parseType(y)));
+    expect(n('matrix<number>', 'collection<vector<integer>>')).toBe(
+      'matrix<integer>'
+    );
+    expect(n('collection<vector<integer>>', 'matrix<number>')).toBe(
+      'matrix<integer>'
+    );
+    // A pair the reducer keeps as an intersection is kept, not `never`
+    expect(n('matrix<number>', 'list<vector<integer>>')).not.toBe('never');
+    // Collections with no value in common stay `never`
+    expect(n('matrix<number>', 'collection<string>')).toBe('never');
+  });
+
   it('F14: narrow of disjoint types is `never`', () => {
     expect(ts(narrow('integer', 'string'))).toBe('never');
     expect(ts(narrow('integer', 'boolean'))).toBe('never');
@@ -2740,6 +2780,32 @@ describe('a `string` actual at a BROADCASTABLE pattern is atomic', () => {
   test('a COLLECTION-kind pattern still expands the string', () => {
     expect(infer('(indexed_collection<T>) -> T where T', 'string')).toBe(
       'character'
+    );
+  });
+});
+
+describe('isSubtype on a union whose arms are one shared node (CE-315)', () => {
+  // `Uₙ = Uₙ₋₁ | Uₙ₋₁` with shared nodes has 2^n paths. At depth 40 a walk
+  // of every path never ends, so finishing at all shows each node is tested
+  // once.
+  function doubled(depth: number): Type {
+    let u: Type = 'string';
+    for (let i = 0; i < depth; i++) u = { kind: 'union', types: [u, u] };
+    return u;
+  }
+
+  test('a primitive against the doubled union', () => {
+    const u = doubled(40);
+    expect(isSubtype('integer', u)).toBe(false);
+    expect(isSubtype('string', u)).toBe(true);
+  });
+
+  test('a union against the doubled union', () => {
+    const u = doubled(40);
+    const lhs: Type = { kind: 'union', types: ['integer', 'boolean'] };
+    expect(isSubtype(lhs, u)).toBe(false);
+    expect(isSubtype({ kind: 'union', types: ['string', 'string'] }, u)).toBe(
+      true
     );
   });
 });

@@ -667,6 +667,17 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
       Array.from({ length: 16 }, (_, k) => ((4 * k - 25) * pi) / 4),
     ],
     [
+      // `sin(2x)` is written with `sin x` and `cos x`, and the common factor
+      // `sin x` is taken out (`sin x · (1 + 2 cos x)`).
+      'sin x + sin(2x) = 0',
+      ['Add', ['Sin', 'x'], ['Sin', ['Multiply', 2, 'x']]],
+      0,
+      0.1,
+      7,
+      (x) => Math.sin(x) + Math.sin(2 * x),
+      [(2 * pi) / 3, pi, (4 * pi) / 3, 2 * pi],
+    ],
+    [
       // The periods 2π and 2π/√2 have no common multiple. The solver keeps
       // its roots only because the scan finds no other root.
       'sin(x) cos(√2 x) = 0 (no common period)',
@@ -698,10 +709,15 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
   const incomplete: Array<
     [name: string, lhs: Expression, lo: number, hi: number]
   > = [
-    // Roots: 2π/3, π, 4π/3, 2π. The solver finds none of them.
+    // Roots: 2π/3, π, 4π/3, 2π. The solver finds none of them: it does not
+    // take the common factor `sin x` out of a sum that has no multiple angle.
     [
-      'sin x + sin(2x) = 0',
-      ['Add', ['Sin', 'x'], ['Sin', ['Multiply', 2, 'x']]],
+      'sin x + 2 sin x cos x = 0',
+      [
+        'Add',
+        ['Sin', 'x'],
+        ['Multiply', 2, ['Sin', 'x'], ['Cos', 'x']],
+      ],
       0.1,
       7,
     ],

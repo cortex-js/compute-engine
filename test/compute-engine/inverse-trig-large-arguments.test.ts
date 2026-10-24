@@ -2542,3 +2542,21 @@ describe('Arctan: the type of a symbol operand', () => {
     expect(engine.box('y').type.toString()).toBe('complex | signed_infinity');
   });
 });
+
+describe('an exact real argument next to a branch point, at machine precision (CE-180.2)', () => {
+  // Reference values from mpmath at 30 digits:
+  // acoth(1 + 1e-10) = 11.8594990552752010747976340739
+  // acosh(1 + 1e-10) = 1.41421356236130993578262255631e-5
+  test.each([
+    ['Arcoth', 11.8594990552752],
+    ['Arcosh', 1.41421356236131e-5],
+  ])('%s(1 + 10^-10) reads the exact sum, not its double', (name, expected) => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    // A sum of two exact literals, not the single rational that
+    // `1 + 1/10^10` folds to.
+    const arg = machine.parse('1+10^{-10}');
+    const v = machine.function(name, [arg]).N();
+    expect(Math.abs(v.re / expected - 1)).toBeLessThan(1e-14);
+  });
+});

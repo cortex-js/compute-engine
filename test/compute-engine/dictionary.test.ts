@@ -491,6 +491,46 @@ describe('Dictionary', () => {
       );
     });
 
+    test('a dictionary that holds an Error value is invalid (CE-99.1)', () => {
+      const d = engine.box([
+        'Dictionary',
+        ['Tuple', { str: 'a' }, ['Error', { str: 'oops' }]],
+      ]);
+      expect(d.isValid).toBe(false);
+      expect(d.errors.length).toBe(1);
+      // The error stays the value of its key.
+      expect(d.toString()).toBe('{"a" -> Error("oops")}');
+      // Same as a list.
+      expect(engine.box(['List', 1, ['Error', { str: 'oops' }]]).isValid).toBe(
+        false
+      );
+    });
+
+    test('an inner dictionary that holds an error keeps its key and siblings', () => {
+      // The inner dictionary was built, so it is a value of the outer one,
+      // not a malformed entry: the outer dictionary keeps both entries and is
+      // invalid through the inner error.
+      const d = engine.box({
+        dict: {
+          a: {
+            fn: [
+              'Dictionary',
+              ['KeyValuePair', { str: 'b' }, ['Error', { str: 'missing' }]],
+            ],
+          },
+          c: 1,
+        },
+      } as any);
+      expect(d.operator).toBe('Dictionary');
+      expect(d.toString()).toBe('{"a" -> {"b" -> Error("missing")}, "c" -> 1}');
+      expect(d.isValid).toBe(false);
+      // An inner dictionary that cannot be built is still a construction
+      // error of the outer one.
+      expect(
+        engine.box({ dict: { a: { dict: { '': 1 } }, c: 1 } } as any).operator
+      ).toBe('Error');
+    });
+
     test('a well-formed dictionary is unaffected', () => {
       const d = engine.box(['Dictionary', ['Tuple', { str: 'a' }, 1]]);
       expect(d.isValid).toBe(true);

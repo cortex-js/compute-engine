@@ -633,7 +633,7 @@ function absorbScalarsIntoCellBody(
     // `i · i = -1` are both real. Each imaginary member of the join
     // (`imaginary`, or the `imaginary` arm of `imaginary | integer`) is
     // `complex`, which covers the closure — the same repair the scalar tail
-    // of `addType` applies to its final widen.
+    // of `addTypeOnTypes` applies to its final widen.
     const r = closeImaginaryUnderArithmetic(
       widen(stripNumericRanges(c as Type), ...scalars) as Type
     );

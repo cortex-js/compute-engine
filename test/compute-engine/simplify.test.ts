@@ -3037,3 +3037,50 @@ describe('simplify() keeps a float exponent out of the polynomial steps', () => 
     );
   });
 });
+
+describe('The numerator of a quotient is simplified like a term of a sum', () => {
+  // The numerator of a `Divide` node used to get constant folding only, so
+  // the sign of a negated argument stayed inside it (CE-155.1).
+  test('an odd function of a negated argument in a numerator', () => {
+    const num = ['Subtract', ['SinIntegral', 1], ['SinIntegral', -1]];
+    expect(ce.box(['Divide', num, 'y'] as Expression).simplify().toString()).toBe(
+      '(2SinIntegral(1)) / y'
+    );
+    expect(
+      ce.box(['Divide', num, ['Add', 'y', 'z']] as Expression).simplify().toString()
+    ).toBe('(2SinIntegral(1)) / (y + z)');
+  });
+});
+
+describe('An odd or even function of a pure imaginary negative literal', () => {
+  // `Complex(0, -1)` is the negation of `Complex(0, 1)` for the sign rules of
+  // odd and even functions (CE-154.1).
+  test.each<[Expression, string]>([
+    [['Add', ['Sin', ['Complex', 0, -1]], ['Sin', ['Complex', 0, 1]]], '0'],
+    [['Subtract', ['Cos', ['Complex', 0, -1]], ['Cos', ['Complex', 0, 1]]], '0'],
+    [['Add', ['Sin', ['Complex', 0, -2]], ['Sin', ['Complex', 0, 2]]], '0'],
+  ])('%j', (input, expected) => {
+    expect(ce.box(input).simplify().toString()).toBe(expected);
+  });
+});
+
+describe('A quotient by a constant inside a sum or a product', () => {
+  // The quotient is rationalized at its own node, so equal terms combine
+  // (CE-154.2, CE-141.1).
+  test('1/(2−√2) − 1/(2+√2)', () => {
+    expect(
+      ce.parse('\\frac{1}{2-\\sqrt2}-\\frac{1}{2+\\sqrt2}').simplify().toString()
+    ).toBe('sqrt(2)');
+  });
+
+  test('the two arctan terms of a Rubi value combine', () => {
+    expect(
+      ce
+        .parse(
+          '-\\frac{\\sqrt2}{2}\\arctan(\\frac{-1}{3+2\\sqrt2})+\\frac{\\sqrt2}{2}\\arctan(\\frac{1}{3+2\\sqrt2})'
+        )
+        .simplify()
+        .toString()
+    ).toBe('sqrt(2) * arctan(3 - 2sqrt(2))');
+  });
+});

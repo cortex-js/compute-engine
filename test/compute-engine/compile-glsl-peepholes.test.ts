@@ -208,7 +208,7 @@ describe('small emission peepholes', () => {
     // Any other divisor keeps the general lowering.
     expect(glsl(['Mod', 'x', 2]).code).toBe('mod(x, 2.0)');
     expect(wgsl(['Mod', 'x', 2]).code).toBe(
-      '((((x) % (2.0)) - (2.0) * floor(((x) % (2.0)) / (2.0))) % (2.0))'
+      '((((x) % (2.0)) - (2.0) * (((sign((x) % (2.0)) * sign((2.0))) - abs((sign((x) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
     );
     // A `vecN` dividend keeps it too: `fract` takes one argument, and the
     // operand-shape gate reads the emitted call against the head's two

@@ -106,12 +106,13 @@ describe('CSE over shared subtrees: linear analysis', () => {
   });
 
   it('keeps every shared level bound when the levels collide in one hash bucket and exceed the binding cap', () => {
-    // The structural hash of `e_k` repeats every 64 levels for this shape,
-    // and 99 candidates are more than the per-region binding cap.
+    // 99 candidates are more than the per-region binding cap. (The structural
+    // hash of `e_k` used to repeat every 64 levels for this shape, which put
+    // the levels in one bucket; since CE-318 it no longer does, so this test
+    // now checks the cap and the code size only.)
     const d = 100;
     expect(d - 1).toBeGreaterThan(CSE_MAX_BINDINGS_PER_REGION);
     const e = levels(d, doubling);
-    expect(e[1].hash).toBe(e[65].hash);
     const [result, ms] = timed(() =>
       compile(F('Floor', e[d]), { constantFold: false })
     );

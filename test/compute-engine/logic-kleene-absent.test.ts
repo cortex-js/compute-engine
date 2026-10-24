@@ -65,12 +65,12 @@ const TABLES: Record<string, Cell[][]> = {
   Implies: [
     ['T', 'F', 'S', 'M', 'M'],
     ['T', 'T', 'T', 'T', 'T'],
-    ['T', 'S', 'S', 'S', 'S'],
+    ['T', 'S', 'T', 'S', 'S'],
     ['T', 'M', 'S', 'M', 'M'],
     ['T', 'M', 'S', 'M', 'M'],
   ],
   // No operand decides `Xor` or `Equivalent`. `Xor(A, A)` is `False` for
-  // either value of `A`.
+  // either value of `A`, and `Implies(A, A)` and `Equivalent(A, A)` are `True`.
   Xor: [
     ['F', 'T', 'S', 'M', 'M'],
     ['T', 'F', 'S', 'M', 'M'],
@@ -81,7 +81,7 @@ const TABLES: Record<string, Cell[][]> = {
   Equivalent: [
     ['T', 'F', 'S', 'M', 'M'],
     ['F', 'T', 'S', 'M', 'M'],
-    ['S', 'S', 'S', 'S', 'S'],
+    ['S', 'S', 'T', 'S', 'S'],
     ['M', 'M', 'S', 'M', 'M'],
     ['M', 'M', 'S', 'M', 'M'],
   ],

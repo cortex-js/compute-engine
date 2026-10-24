@@ -2009,8 +2009,9 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   _blockLocal: boolean;
 
   /** When the declaration's type was a bare collection constructor (`list`,
-   * `set`, `dictionary`, `collection`, `indexed_collection` — the
-   * `<unknown>` synonyms), the declared skeleton: the constructor is the
+   * `set`, `dictionary`, `collection`, `indexed_collection` — the forms
+   * with an open element type, which admit arbitrary contents), the declared
+   * skeleton: the constructor is the
    * CONTRACT (assignments are validated against it and it never moves),
    * while `type` carries the element REFINEMENT the latest assignment
    * produced (`docs/INFERENCE_ROADMAP.md`, Phase 1, ruled 2026-08-18).

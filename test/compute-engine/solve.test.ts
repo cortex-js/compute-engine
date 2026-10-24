@@ -3107,7 +3107,11 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
     expect(
       parametricRoots(ce, '(x-1)(x-a)=0', a, (x) => (x - 1) * (x - a))
     ).toEqual(['1', 'a']);
-  });
+    // This test runs about ten solves, and the first one of each family is
+    // slow (up to 0.7 s when cold). The engine has no ambient time limit, so
+    // the only limit is the jest timeout of 5 s, which a loaded machine
+    // exceeds. The longer timeout makes the test independent of machine speed.
+  }, 60_000);
 
   test('a parameter declared complex: a root that can be complex is no answer', () => {
     const complexA = new ComputeEngine();

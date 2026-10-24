@@ -8,6 +8,7 @@ import {
   BARE_SET_STRUCTURAL_TYPE,
   COLLECTION_TYPES,
   COLLECTION_TYPES_SET,
+  cellTypeMayCarryDimensions,
   EXPRESSION_TYPES,
   NUMERIC_TYPES,
   NUMERIC_TYPES_SET,
@@ -671,6 +672,24 @@ function cycleDataKey(v: unknown): string {
     return `{${fields.join(',')}}`;
   }
   return `#${typeof v}`;
+}
+
+/** `arms.some(test)`, but an arm that is the same object as an earlier arm is
+ * not tested again. A union built by hand can name one node twice
+ * (`Uₙ = Uₙ₋₁ | Uₙ₋₁`); testing each name walks every path of the shared
+ * graph, which is exponential in its depth (CE-315). The test is a pure
+ * question about the arm, so the second answer equals the first. */
+function someDistinctArm<T>(arms: readonly T[], test: (arm: T) => boolean) {
+  let seen: Set<T> | undefined;
+  for (const arm of arms) {
+    if (typeof arm === 'object') {
+      seen ??= new Set();
+      if (seen.has(arm)) continue;
+      seen.add(arm);
+    }
+    if (test(arm)) return true;
+  }
+  return false;
 }
 
 /** Whether the union arm `arm` is a structural alias already being unfolded
@@ -2236,6 +2255,20 @@ export function meetListTypes(
       const cells = meet(plain.elements, tensor.elements);
       if (isEmptyType(cells) && dims!.length === 1 && dims![0] > 0)
         return 'never';
+      // The cells of a list with dimensions cannot be lists, so a cell
+      // meet that is a list type has no spelling as the cells of this
+      // tensor (`list<list^3>` is refused by the parser).
+      if (dims!.length === 1 && !cellTypeMayCarryDimensions(cells)) {
+        // No value of this rank has such cells. The tensor holds at most
+        // the empty list, which it does when its length is open.
+        const row = typeof cells === 'string' ? undefined : cells;
+        if (row === undefined || row.kind === 'list')
+          return dims![0] > 0
+            ? 'never'
+            : { kind: 'list', elements: 'never' };
+        // A union or an intersection that mixes list arms: keep as written.
+        return 'keep';
+      }
       return { ...tensor, elements: cells };
     }
     const rows = listElementType(tensor);
@@ -3100,10 +3133,12 @@ function isSubtypeRules(
             return broadcastableFitsUnion(lhsType);
           if (lhsType.kind === 'union') return isSubtype(lhsType, rhs);
         }
-        return rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType));
+        return someDistinctArm(rhsMembers, (rhsType) =>
+          isSubtype(lhsType, rhsType)
+        );
       });
     }
-    return rhsMembers.some((t) => isSubtype(lhs, t));
+    return someDistinctArm(rhsMembers, (t) => isSubtype(lhs, t));
   }
 
   //
@@ -4138,6 +4173,17 @@ export function meetNumericRangeMembers(
   return ranges;
 }
 
+/** The meet of two collection types of different kinds, set by `reduce.ts`
+ *  when it loads. `undefined` as an answer means the pair is not such a pair. */
+let collectionKindsMeet:
+  ((a: Type, b: Type) => Type | 'keep' | undefined) | undefined;
+
+export function registerCollectionKindsMeet(
+  fn: (a: Type, b: Type) => Type | 'keep' | undefined
+): void {
+  collectionKindsMeet = fn;
+}
+
 /** Given two types a and b, return the narrowest type common to a and b */
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === b) return a;
@@ -4179,9 +4225,9 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   // and a rank-1 tensor as that tensor), with this function as the meet of
   // the elements, so the answer agrees with the intersection reducer
   // (`reduce.ts`) for these pairs. A pair the rules keep as an
-  // intersection has no spelling here and answers `never`, as every other
-  // incomparable composite pair does (a known divergence from the reducer,
-  // recorded in `ROADMAP.md`).
+  // intersection is returned as that intersection, as the reducer keeps it:
+  // `matrix<number>` and `list<vector<integer>>` share the integer matrices,
+  // so `never` would be wrong.
   if (
     typeof a === 'object' &&
     typeof b === 'object' &&
@@ -4189,7 +4235,7 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
     b.kind === 'list'
   ) {
     const m = meetListTypes(a, b, (x, y) => narrow2(x, y) as Type);
-    return m === 'keep' ? 'never' : m;
+    return m === 'keep' ? { kind: 'intersection', types: [a, b] } : m;
   }
 
   // A union meets arm by arm: `(A | B) ∧ C` is `(A ∧ C) | (B ∧ C)`, with the
@@ -4233,6 +4279,20 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
       if (ranges.length === 0) return 'never';
       return ranges.reduce((u, t) => unionTypes(u, t));
     }
+  }
+
+  // Two collection types of different kinds, one inside the other
+  // (`matrix<number>` and `collection<vector<integer>>`), share values. The
+  // intersection reducer owns that rule (`meetCollectionKinds()` in
+  // `reduce.ts`, which imports this file, so it registers itself here at load
+  // time). A pair it cannot reduce is kept as an intersection, since `never`
+  // would claim that no value is in both types.
+  if (collectionKindsMeet !== undefined) {
+    const m = collectionKindsMeet(a as Type, b as Type);
+    if (m !== undefined)
+      return m === 'keep'
+        ? { kind: 'intersection', types: [a as Type, b as Type] }
+        : m;
   }
 
   // Disjoint types have no common subtype: the narrowest common type is the

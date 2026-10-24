@@ -177,7 +177,7 @@ describe('alias lift: cell-scaling handlers type the structure they build', () =
     [['At', 'L', 1], 'integer | nan'],
     [['First', 'L'], 'integer | nan'],
     // Other lifted heads.
-    [['Abs', 'L'], 'list<real<0..> | signed_infinity>'],
+    [['Abs', 'L'], 'list<integer<0..>>'],
     [['Sqrt', 'L'], 'list<number>'],
   ])('%j', (expr, type) => {
     const alias = ce.box(expr as any);

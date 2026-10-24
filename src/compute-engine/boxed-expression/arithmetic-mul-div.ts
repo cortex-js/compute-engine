@@ -3727,6 +3727,20 @@ function hasUnresolvedTupleCofactor(xs: ReadonlyArray<Expression>): boolean {
   return xs.some((x) => !isTuple(x) && isUnresolvedCollectionOperand(x));
 }
 
+/** True when `expr` names a symbol that holds a value which a later
+ * assignment can change (a constant never changes). */
+function readsAssignedVariable(ce: ComputeEngine, expr: Expression): boolean {
+  return expr.symbols.some((name) => {
+    const def = ce.lookupDefinition(name);
+    return (
+      def !== undefined &&
+      'value' in def &&
+      !def.value.isConstant &&
+      def.value.value !== undefined
+    );
+  });
+}
+
 /**
  * Multiply operands when at least one is a numeric tuple (point/vector in ℝⁿ).
  *
@@ -3791,6 +3805,18 @@ function mulTuples(
   // component as to a scalar product (`0.5 · (π, 1)` is `(1.57…, 0.5)`, like
   // `0.5 · π`); the `.N()` route has already floated it. See `mulTensors`.
   const components = tuple.ops.map((c) => {
+    // A component that names an assigned variable stays a product on the
+    // exact routes, as a scalar factor does: evaluating it would store the
+    // value that the variable holds now (`2·(w, 2)` with `w := 4` would be
+    // `(8, 4)` and would not follow a later `w := 5`). A collection component
+    // is still evaluated, because a cell product needs its elements.
+    // (CE-121)
+    if (
+      !numericApproximation &&
+      !c.type.matches('collection') &&
+      readsAssignedVariable(ce, c)
+    )
+      return multiply(scalar, c);
     const cv = numericApproximation ? c.N() : c.evaluate();
     // An absent component (`Missing` or `Undefined`) is `NaN` in this numeric
     // slot. `mulN()` keeps the symbol, so without this `(2·(1, Missing)).N()`
@@ -3848,6 +3874,37 @@ function mulTensors(
   const multiplyCell = numericApproximation
     ? multiply
     : (...xs: ReadonlyArray<Expression>) => multiply(...xs).evaluate();
+  // A flat list literal whose cells name assigned variables, times scalars:
+  // each cell stays a product on the exact routes, as a scalar factor does.
+  // Evaluating the cells would store the values that the variables hold now
+  // (`2·[w, 2]` with `w := 4` would be `[8, 4]` and would not follow a later
+  // `w := 5`). (CE-121)
+  if (!numericApproximation && xs.length >= 2) {
+    const lists = xs.filter((x) => isFunction(x, 'List'));
+    const list = lists[0];
+    if (
+      lists.length === 1 &&
+      isFunction(list) &&
+      list.ops.every((c) => c.type.matches('number')) &&
+      list.ops.some((c) => readsAssignedVariable(ce, c)) &&
+      xs.every(
+        (x) => x === list || (x.type.matches('number') && !x.isCollection)
+      )
+    ) {
+      const scalar = multiply(...xs.filter((x) => x !== list));
+      // Only the cells that read an assigned variable stay products; the
+      // other cells are evaluated as the cell product below does, so
+      // `0.5·[w, π]` still floats the `π` cell.
+      return ce._fn(
+        'List',
+        list.ops.map((c) => {
+          if (readsAssignedVariable(ce, c)) return multiply(scalar, c);
+          const cv = c.evaluate();
+          return multiplyCell(scalar, isAbsentSymbol(cv) ? ce.NaN : cv);
+        })
+      );
+    }
+  }
   // Separate evaluated operands into tensors and scalars, preserving order.
   const tensors: Expression[] = [];
   const scalars: Expression[] = [];

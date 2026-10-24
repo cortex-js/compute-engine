@@ -3358,7 +3358,42 @@ function antiderivativeInUnit(fn: Expression, index: string): Expression {
   );
 }
 
+/**
+ * The functions that are constant between jumps. Their derivative is 0
+ * almost everywhere, which is all that a substitution rule reads, but the
+ * function itself jumps.
+ */
+const STEP_FUNCTIONS = ['Floor', 'Ceil', 'Round', 'Truncate'];
+
+/**
+ * True when `expr` applies a step function to an argument that depends on
+ * `index`.
+ */
+function hasStepOfIndex(expr: Expression, index: string): boolean {
+  if (!isFunction(expr)) return false;
+  if (STEP_FUNCTIONS.includes(expr.operator) && expr.has(index)) return true;
+  return expr.ops.some((op) => hasStepOfIndex(op, index));
+}
+
 function antiderivativeInRadians(fn: Expression, index: string): Expression {
+  const result = antiderivativeCandidate(fn, index);
+  // A rule for a composite integrand `F(u(x))·u'(x)` reads the derivative of
+  // a step function as 0, so `∫ sin(x − Round(x))/(x − Round(x)) dx` came out
+  // as `Si(x − Round(x))`. That function jumps where `Round` does, so it is
+  // not an antiderivative over an interval that holds a jump, and the
+  // fundamental theorem gave a wrong definite integral (CE-138). A result
+  // that holds a step function of the variable, for an integrand that holds
+  // one, is not returned.
+  if (
+    !result.has('Integrate') &&
+    hasStepOfIndex(fn, index) &&
+    hasStepOfIndex(result, index)
+  )
+    return integrate(fn, index);
+  return result;
+}
+
+function antiderivativeCandidate(fn: Expression, index: string): Expression {
   // Preserve established primitive forms and avoid speculative work on ordinary
   // inputs. Only a still-unresolved expression enters the bounded new searches.
   const established = establishedAntiderivativeInRadians(fn, index);

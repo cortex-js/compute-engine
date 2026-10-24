@@ -246,6 +246,38 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
     expect(codeOf(ce, '\\arg(x + iy)')).toBe('Math.atan2(_.y, _.x)');
   });
 
+  test('arg(x - iy) at y = 0 answers pi for a negative x, as the interpreter does (CE-262)', () => {
+    const e = ce.parse('\\arg(x - iy)');
+    const run = compile(e, { to: 'javascript', fallback: false } as never).run!;
+    expect(run({ x: -3, y: 0 })).toBe(Math.PI);
+    expect(run({ x: 3, y: 0 })).toBe(0);
+    expect(run({ x: -3, y: 2 })).toBeCloseTo(Math.atan2(-2, -3), 12);
+  });
+
+  test('a one-operand sum or product, and a power of 1, keep their grouping (CE-251)', () => {
+    // Only non-canonical input has these shapes. The operand was spliced bare
+    // into the infix parent, or glued to a prefix operator (`3 * * x`).
+    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
+    const cases: unknown[] = [
+      ['Multiply', 3, ['Multiply', ['Add', 'x', 1]]],
+      ['Multiply', 3, ['Add', ['Add', 'x', 1]]],
+      ['Multiply', 3, ['Power', ['Add', 'x', 1], 1]],
+    ];
+    for (const to of ['javascript', 'glsl']) {
+      for (const json of cases) {
+        const code = compile(raw(json), { to, fallback: false } as never)
+          .code as string;
+        expect(code).toMatch(/^3(\.0)? \* \((_\.)?x \+ 1(\.0)?\)$/);
+      }
+    }
+    expect(
+      compile(raw(['Multiply', 3, ['Power', ['Add', 'x', 1], 1]]), {
+        to: 'javascript',
+        fallback: false,
+      } as never).run!({ x: 2 })
+    ).toBe(9);
+  });
+
   test('an opaque complex value keeps the object-building lowering', () => {
     expect(codeOf(ce, '\\arg(\\sin(x + iy))')).toContain('_SYS.carg(');
   });

@@ -1,13 +1,18 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
+  bigGamma,
   digamma,
   erfInv,
   gamma,
   trigamma,
 } from '../../src/compute-engine/numerics/special-functions';
-import { hypergeometric2F1Complex } from '../../src/compute-engine/numerics/numeric-complex';
+import {
+  gamma as gammaComplex,
+  hypergeometric2F1Complex,
+} from '../../src/compute-engine/numerics/numeric-complex';
 import { Complex } from 'complex.js';
+import { BigDecimal } from '../../src/big-decimal';
 import { engine } from '../utils';
 
 const ce = engine;
@@ -3155,5 +3160,31 @@ describe('THE ERROR FUNCTIONS APPLY TO EACH ELEMENT OF A LIST', () => {
         .evaluate()
         .toString()
     ).toBe('[Erf(1/2)]');
+  });
+});
+
+describe('bigGamma past the exponent range (CE-180.3)', () => {
+  test('a result smaller than the smallest number is NaN, not 0', () => {
+    const v = bigGamma(ce, new BigDecimal('-1000000000000000.5'));
+    expect(v.isNaN()).toBe(true);
+    // Just inside the range, the value is still computed.
+    const w = bigGamma(ce, new BigDecimal('-100000000000000.5'));
+    expect(w.isNaN()).toBe(false);
+    expect(w.isZero()).toBe(false);
+  });
+});
+
+describe('complex gamma at a large argument (CE-192)', () => {
+  // Reference values from mpmath at 30 digits.
+  test.each([
+    [54.731, 0, 7.8797874499767954e70, 0],
+    [120.3, 0.5, -1.7139346435729035e197, 1.5924680903037904e197],
+    [80.5, 0.25, 3.654391175236337e117, 7.100925854972333e117],
+  ])('Γ(%p + %pi) has a small relative error', (re, im, er, ei) => {
+    const g = gammaComplex(new Complex(re, im));
+    const err = Math.hypot(g.re - er, g.im - ei) / Math.hypot(er, ei);
+    // On the real axis the error was 1.9e-14 before the argument was shifted
+    // down; with the shift it is 7e-15.
+    expect(err).toBeLessThan(im === 0 ? 1e-14 : 3e-14);
   });
 });

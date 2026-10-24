@@ -639,3 +639,25 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
     });
   }
 });
+
+describe('A TUPLE COMPONENT TYPED indexed_collection IS NOT A SHADER SCALAR (CE-224)', () => {
+  for (const to of ['glsl', 'wgsl'] as const) {
+    for (const type of [
+      'list<real>',
+      'indexed_collection<real>',
+      'collection<real>',
+    ]) {
+      it(`${to}: a component of type ${type} is refused`, () => {
+        const ce = new ComputeEngine();
+        ce.declare('c', { type });
+        ce.declare('a', 'real');
+        expect(() =>
+          compile(ce.box(['Dot', ['Tuple', 'c', 'a'], ['Tuple', 1, 2]]), {
+            to,
+            fallback: false,
+          } as any)
+        ).toThrow(/vector-valued/);
+      });
+    }
+  }
+});

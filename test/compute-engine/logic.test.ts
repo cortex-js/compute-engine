@@ -1044,3 +1044,24 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     expect(run(['Or', ['Not', 'A'], ['Or', 'A', ['Not', 'C']]])).toBe('True');
   });
 });
+
+describe('Boolean identities beside an unknown', () => {
+  const T = { sym: 'True' };
+  const F = { sym: 'False' };
+
+  it('folds Nand, Nor, Implies and Equivalent with a constant or a repeated operand', () => {
+    expect(box(['Nand', T, 'A'])).toBe('!A');
+    expect(box(['Nor', F, 'A'])).toBe('!A');
+    expect(box(['Implies', T, 'A'])).toBe('A');
+    expect(box(['Implies', 'A', F])).toBe('!A');
+    expect(box(['Implies', 'A', 'A'])).toBe('"True"');
+    expect(box(['Nand', 'A', 'A'])).toBe('!A');
+    expect(box(['Nor', 'A', 'A'])).toBe('!A');
+    expect(box(['Equivalent', 'A', 'A'])).toBe('"True"');
+  });
+
+  it('leaves a connective with two distinct unknowns alone', () => {
+    expect(box(['Nand', T, 'A', 'B'])).toBe('Nand("True", A, B)');
+    expect(box(['Implies', 'A', 'B'])).toBe('Implies(A, B)');
+  });
+});

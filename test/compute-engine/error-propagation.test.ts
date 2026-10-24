@@ -522,6 +522,35 @@ describe('ERROR PROPAGATION — a non-callable value def reports the CALLEE', ()
   });
 });
 
+describe('ERROR PROPAGATION — a symbol that holds an error is the callee', () => {
+  const held = () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', ce.box(['Ln', { str: 'a' }]).evaluate());
+    const expected = ce.box('w').evaluate().toString();
+    expect(expected).toMatch(/^Error\(/);
+    return { ce, expected };
+  };
+
+  test('applied directly or through Apply, it gives the error (CE-108.1)', () => {
+    const { ce, expected } = held();
+    expect(ce.box(['w', 1]).evaluate().toString()).toBe(expected);
+    expect(ce.box(['Apply', 'w', 1]).evaluate().toString()).toBe(expected);
+  });
+
+  test('a declared function adds its frame to an error argument (CE-105.4)', () => {
+    const { ce } = held();
+    const fn = ce.box(['Function', ['Add', 'a', 0], 'a']);
+    ce.assign('plain', fn);
+    ce.declare('typed', { type: '(number) -> unknown', value: fn });
+    const frames = (name: string) =>
+      errorFrames(ce.box([name, 'w']).evaluate()).map(
+        (f) => `${f.operator} ${f.index}`
+      );
+    expect(frames('plain')).toEqual(['Ln 1', 'plain 1']);
+    expect(frames('typed')).toEqual(['Ln 1', 'typed 1']);
+  });
+});
+
 describe('ERROR PROPAGATION — IsError arity and purity', () => {
   test('`IsError()` is an arity error, not a boolean', () => {
     const ce = new ComputeEngine();

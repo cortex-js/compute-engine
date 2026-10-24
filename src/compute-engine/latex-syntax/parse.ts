@@ -4030,7 +4030,7 @@ export class _Parser implements Parser {
     this.index = start;
 
     const id = parseSymbol(this);
-    if (id !== null && !this.resolveSymbol(id)?.type.matches('error')) {
+    if (id !== null) {
       // Diagnostic: a symbol reference that resolves to no declaration —
       // neither a parser-local binding (sum index, Block/Function parameter,
       // tracked in `symbolTable`) nor a definition in the engine scope.
@@ -7993,7 +7993,16 @@ export function parse(
   // `_Parser.sourceOffsets()`), for `ambiguityErrors()`.
   const normalizedPercents: ParseDiagnostic[] = [];
   if (ambiguityChecks) {
-    adoptedParser._reportLineAmbiguities(expr, skippedTail);
+    // The checks read the tree after the range repair of
+    // `normalizeContinuationRanges()` below. The raw tree has the operation
+    // next to a range inside the range (`ab√x..5` is `ab·(√x..5)`), where a
+    // check that looks for a sequence of factors cannot see it. The repair
+    // returns a new tree and leaves `expr` unchanged, so the node spans
+    // that `ambiguityErrors()` reads stay valid.
+    adoptedParser._reportLineAmbiguities(
+      expr === null ? null : normalizeContinuationRanges(expr),
+      skippedTail
+    );
     // A `%` directly after a number (`y = 50%`) starts a comment that
     // discards the rest of the line, and a person means a percentage. The
     // span is the number and the `%`, in original-input coordinates, as for

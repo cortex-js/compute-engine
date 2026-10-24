@@ -7019,3 +7019,25 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
     });
   });
 });
+
+describe('COMPILING AN ORDERING OVER A NON-NUMBER VALUE TYPE (CE-393)', () => {
+  test.each(['color', 'regexp', 'object'])(
+    'Max, Min and Less decline an input of type %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.declare('k', type as never);
+      for (const head of ['Max', 'Min', 'Less', 'GreaterEqual']) {
+        for (const to of ['javascript', 'glsl'] as const) {
+          const result = compile(ce.box([head, 'k', 'x']), { to });
+          expect(result.success).toBe(false);
+        }
+      }
+    }
+  );
+
+  test('a number input still compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', 'real');
+    expect(compile(ce.box(['Max', 'k', 'x']), { to: 'javascript' }).success).toBe(true);
+  });
+});

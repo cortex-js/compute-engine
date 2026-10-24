@@ -961,6 +961,7 @@ function reliableLimitSamples(
   let peak = 0;
   let grew = false;
   let prev = NaN;
+  let prev2 = NaN;
   let prevH = NaN;
   for (let k = 1; k <= MAX; k++) {
     // Each rung multiplies the argument by 1/CONTRACT = 8×, so a rung can be
@@ -982,11 +983,21 @@ function reliableLimitSamples(
     if (Math.abs(a - prev) <= 1e-10 * Math.max(1, a))
       return settleIsReal(prevH, h, y) ? Infinity : 0;
     // Grew to an interior peak, then collapsed to ~0: catastrophic cancellation.
-    if (grew && peak > 1e-6 && a < 1e-8 * peak) return k - 1;
+    // A regular decay is not a cancellation: `7t/(t²+9)` rises to 0.77, then
+    // falls by a near-constant factor at each rung (the `7/t` tail). A
+    // cancellation collapses in an irregular way (a jump, a noise value or an
+    // exact 0), so it fails the constant-ratio test.
+    if (grew && peak > 1e-6 && a < 1e-8 * peak) {
+      const r1 = a / prev;
+      const r0 = prev / prev2;
+      const regular = a > 0 && r1 < 1 && r1 / r0 > 0.5 && r1 / r0 < 2;
+      if (!regular) return k - 1;
+    }
     if (a > peak) {
       grew = true;
       peak = a;
     }
+    prev2 = prev;
     prev = a;
     prevH = h;
     h *= CONTRACT;
@@ -1029,12 +1040,38 @@ export function limit(
     return (left + right) / 2;
   }
 
-  const step = dir > 0 ? 1 : -1;
+  // The ladder starts at distance 1 from the target. A function that varies on
+  // a scale larger than 1 (for example `7t/(t²+9)`, which peaks near t = 3)
+  // breaks the Richardson tableau on its first rungs, which lie outside the
+  // region where the asymptotic expansion holds. When the estimate is
+  // rejected, retry with a start closer to the target (8 and 64 times closer).
+  // No retry when the first ladder hit a floating-point horizon (overflow or
+  // cancellation): a later start would only sample the garbage region.
+  for (const scale of [1, 8, 64]) {
+    const result = limitFromStart(f, x, dir, scale, deadline);
+    if (!Number.isNaN(result.value)) return result.value;
+    if (result.horizon) return NaN;
+  }
+  return NaN;
+}
+
+function limitFromStart(
+  f: (x: number) => number,
+  x: number,
+  dir: number,
+  scale: number,
+  deadline?: number | DeadlineFrame
+): { value: number; horizon: boolean } {
+  // `extrapolate()` inverts the step for an infinite target, so a larger step
+  // moves the start closer to ∞ and a smaller step closer to a finite target.
+  const unit = dir > 0 ? 1 : -1;
+  const step = Number.isFinite(x) ? unit / scale : unit * scale;
   // Don't let floating-point overflow/cancellation past the numeric horizon
   // feed `extrapolate` garbage that masquerades as convergence (see
   // `reliableLimitSamples`).
   const clean = reliableLimitSamples(f, x, step, deadline);
-  if (clean === 0) return NaN; // no trustworthy samples -> not-evaluable
+  const horizon = Number.isFinite(clean);
+  if (clean === 0) return { value: NaN, horizon }; // no trustworthy samples
   const [val, err] = extrapolate(f, x, {
     step,
     deadline,
@@ -1045,8 +1082,8 @@ export function limit(
   // meaningless value with an error estimate of the same order. Converged
   // limits report err ≲ 1e-10 relative; require 1e-6.
   if (Number.isFinite(val) && err > 1e-6 * Math.max(1, Math.abs(val)))
-    return NaN;
-  return val;
+    return { value: NaN, horizon };
+  return { value: val, horizon };
 }
 
 /**

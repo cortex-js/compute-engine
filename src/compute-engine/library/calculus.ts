@@ -55,6 +55,7 @@ import {
   boundVariableBindings,
   boundVariableNamesInOperand,
   ownBindingRewriteCount,
+  parameterActivationValue,
   rewriteWithBinders,
   sameBindingDef,
 } from '../boxed-expression/binders.js';
@@ -425,6 +426,40 @@ function guardRealPart(p: Expression, ce: ComputeEngine): Expression {
   return ce.function('Real', [p]);
 }
 
+/** Integrands that `Integrate` is evaluating after it replaced the parameters
+ * of the running function call by their values (see the `Integrate`
+ * evaluate handler). */
+const substitutedIntegrands: Expression[] = [];
+
+/**
+ * Whether the convergence guards require an expression to be both positive
+ * and negative. Each guard is a comparison of an expression with 0
+ * (`0 < p`, `p < 0`, and the same inside an `And`). A set of guards that
+ * contradict each other holds for no value of the parameter, so a result
+ * under them has no value (`∫₀^∞ xⁿ dx` leaks `0^(n+1)`, a limit under
+ * `n + 1 > 0`, and `∞^(n+1)`, a limit under `n + 1 < 0`): the caller leaves
+ * the integral unevaluated instead of returning a value under a condition
+ * that nothing satisfies.
+ */
+function guardsContradict(guards: ReadonlyArray<Expression>): boolean {
+  const positive: Expression[] = [];
+  const negative: Expression[] = [];
+  const collect = (g: Expression): void => {
+    if (isFunction(g, 'And')) {
+      g.ops.forEach(collect);
+      return;
+    }
+    if (!isFunction(g, 'Less') && !isFunction(g, 'Greater')) return;
+    if (g.nops !== 2) return;
+    // `a < b` and `b > a` both say `b − a > 0`.
+    const [small, large] = g.operator === 'Less' ? g.ops : [g.op2, g.op1];
+    if (small.isSame(0)) positive.push(large);
+    else if (large.isSame(0)) negative.push(small);
+  };
+  guards.forEach(collect);
+  return positive.some((p) => negative.some((n) => p.isSame(n)));
+}
+
 /**
  * Walk an FTC result, replacing endpoint-limit leaks (`classifyEndpointLeak`)
  * by their resolved values and conjoining their convergence guards. Returns
@@ -450,6 +485,7 @@ function resolveEndpointLeaks(
     if (r.value !== op) changed = true;
     if (!isSymbol(r.guard, 'True')) guards.push(r.guard);
   }
+  if (guardsContradict(guards)) return null;
   const value = changed ? ce.function(expr.operator, newOps) : expr;
   const guard =
     guards.length === 0
@@ -533,13 +569,14 @@ function improperEndpointValue(
 }
 
 /** An `Abs(u)` or `Sign(u)` subexpression of an integrand whose argument is
- * linear in the integration variable, `u = k·x + m` with `k` and `m` free of
- * the variable. The integrand has a kink (or a jump) at `root = −m/k`. */
+ * a polynomial of degree 1 or 2 in the integration variable, with
+ * coefficients free of the variable. The integrand has a kink (or a jump) at
+ * each real `root` of `u` (none, one or two). `coefs` are the coefficients of
+ * `u`, constant term first. */
 type IntegrandKink = {
   arg: Expression;
-  k: Expression;
-  m: Expression;
-  root: Expression;
+  coefs: Expression[];
+  roots: Expression[];
 };
 
 /** Whether operand `index` of `expr` is inside a nested binder of the name
@@ -567,21 +604,65 @@ function collectIntegrandKinks(
   out: IntegrandKink[]
 ): void {
   if (!isFunction(expr)) return;
-  if (
+  const degree =
     (expr.operator === 'Abs' || expr.operator === 'Sign') &&
     expr.nops === 1 &&
-    expr.op1.has(variable) &&
-    polynomialDegree(expr.op1, variable) === 1 &&
+    expr.op1.has(variable)
+      ? polynomialDegree(expr.op1, variable)
+      : 0;
+  if (
+    (degree === 1 || degree === 2) &&
     !out.some((kink) => kink.arg.isSame(expr.op1))
   ) {
     const coefs = getPolynomialCoefficients(expr.op1, variable);
-    if (coefs && coefs.length === 2) {
+    if (coefs && coefs.length === degree + 1) {
       const ce = expr.engine;
-      const [m, k] = coefs.map((c) => c.evaluate());
-      if (!k.isSame(0)) {
-        const root = ce.function('Divide', [ce.function('Negate', [m]), k]);
-        out.push({ arg: expr.op1, k, m, root: root.evaluate() });
+      const [c, b, a] = coefs.map((x) => x.evaluate());
+      if (degree === 1 && !b.isSame(0)) {
+        const root = ce.function('Divide', [ce.function('Negate', [c]), b]);
+        out.push({ arg: expr.op1, coefs: [c, b], roots: [root.evaluate()] });
         return;
+      }
+      if (degree === 2 && !a.isSame(0)) {
+        // The real roots of `a·x² + b·x + c`. A discriminant whose sign
+        // cannot be decided leaves the quadratic out, as before.
+        const disc = ce
+          .function('Subtract', [
+            ce.function('Square', [b]),
+            ce.function('Multiply', [ce.number(4), a, c]),
+          ])
+          .evaluate();
+        const sign = decidedSign(disc);
+        if (sign !== undefined) {
+          const roots: Expression[] = [];
+          if (sign === 0)
+            roots.push(
+              ce
+                .function('Divide', [
+                  ce.function('Negate', [b]),
+                  ce.function('Multiply', [ce.number(2), a]),
+                ])
+                .evaluate()
+            );
+          else if (sign > 0)
+            for (const pm of [1, -1])
+              roots.push(
+                ce
+                  .function('Divide', [
+                    ce.function('Add', [
+                      ce.function('Negate', [b]),
+                      ce.function('Multiply', [
+                        ce.number(pm),
+                        ce.function('Sqrt', [disc]),
+                      ]),
+                    ]),
+                    ce.function('Multiply', [ce.number(2), a]),
+                  ])
+                  .evaluate()
+              );
+          out.push({ arg: expr.op1, coefs: [c, b, a], roots });
+          return;
+        }
       }
     }
   }
@@ -651,7 +732,7 @@ function integrateAcrossKinks(
     const n = e.N();
     return isNumber(n) && n.isComplex;
   };
-  if (kinks.some(({ k, m }) => notReal(k) || notReal(m))) return 'inert';
+  if (kinks.some(({ coefs }) => coefs.some(notReal))) return 'inert';
 
   const diff = (a: Expression, b: Expression) =>
     decidedSign(ce.function('Subtract', [a, b]));
@@ -666,7 +747,7 @@ function integrateAcrossKinks(
   // direction of integration. A kink at a bound or outside the bounds does
   // not cut the interval, but its `Abs`/`Sign` is still resolved below.
   const cuts: Expression[] = [];
-  for (const { root } of kinks) {
+  for (const root of kinks.flatMap((kink) => kink.roots)) {
     const afterLower = diff(root, lower);
     const beforeUpper = diff(upper, root);
     if (afterLower === undefined || beforeUpper === undefined) return undefined;
@@ -703,10 +784,15 @@ function integrateAcrossKinks(
             ? ce.function('Add', [p, ce.number(dir)])
             : ce.function('Divide', [ce.function('Add', [p, q]), ce.number(2)]);
     const signs: number[] = [];
-    for (const { k, m } of kinks) {
-      const s = decidedSign(
-        ce.function('Add', [ce.function('Multiply', [k, sample]), m])
-      );
+    for (const { coefs } of kinks) {
+      // The value of the polynomial at `sample`, by Horner's rule.
+      let value: Expression = coefs[coefs.length - 1];
+      for (let n = coefs.length - 2; n >= 0; n--)
+        value = ce.function('Add', [
+          ce.function('Multiply', [value, sample]),
+          coefs[n],
+        ]);
+      const s = decidedSign(value);
       if (s === undefined || s === 0) return undefined;
       signs.push(s);
     }
@@ -973,6 +1059,11 @@ function measurementFromParts(
   im?: { estimate: number; error: number }
 ): Expression {
   if (Number.isNaN(re.estimate)) return ce.NaN;
+  // A divergent real integral (an integrand that overflows at every node next
+  // to the singular bound) has an infinite estimate and an error that is NaN:
+  // answer the infinity itself, not `Measurement(∞, NaN)` (CE-185.4).
+  if (im === undefined && !Number.isFinite(re.estimate))
+    return ce.number(re.estimate);
   if (im === undefined)
     // A numeric estimate is a float, even when its value is an integer
     return ce.expr([
@@ -4787,6 +4878,20 @@ volumes
                 f = f.op1;
               }
 
+              // A parameter of the running function call that holds an
+              // expression of a differentiation variable is not constant in
+              // that variable: in `g(f) = D(f, x)`, the call `g(x^2)` gives
+              // `f` the value `x^2`, which `differentiate()` would not see
+              // through the bare symbol and would take as 0 (CE-157).
+              f = rewriteWithBinders(f, (s, shadowed) => {
+                if (shadowed?.has(s.symbol) || diffVars.includes(s.symbol))
+                  return s;
+                const v = parameterActivationValue(ce, s);
+                return v !== undefined && diffVars.some((n) => v.has(n))
+                  ? v
+                  : s;
+              });
+
               const params = ops.slice(1);
               if (params.length === 0) f = undefined;
               for (const param of params) {
@@ -5334,6 +5439,46 @@ volumes
           if (!isFunction(l, 'Limits')) continue;
           if ((sym(l.op2) === 'Nothing') !== (sym(l.op3) === 'Nothing'))
             return undefined;
+        }
+
+        // A parameter of the running function call that holds an expression
+        // of an integration variable is not constant in that variable: in
+        // `g(f) = ∫ f dx`, the call `g(x^2)` gives `f` the value `x^2`, which
+        // the integration would take for a constant (`x·x^2`) through the bare
+        // symbol. Integrate the integrand with the value in its place
+        // (CE-157).
+        {
+          const names = ops.slice(1).flatMap((l) => {
+            const v = isFunction(l) ? sym(l.op1) : undefined;
+            return v !== undefined && v !== 'Nothing' ? [v] : [];
+          });
+          const lifted = liftIntegrand(ops[0]);
+          // The integrand that a substitution produced and that is being
+          // integrated now takes no second substitution: a value can mention
+          // a symbol with the name of a parameter (`g(f + x)` gives `f` the
+          // value `f + x`), and substituting that symbol again would
+          // replace it by its value without end.
+          const substituted = substitutedIntegrands.some((e) =>
+            e.isSame(lifted)
+          );
+          const withValues = substituted
+            ? lifted
+            : rewriteWithBinders(lifted, (s, shadowed) => {
+                if (shadowed?.has(s.symbol) || names.includes(s.symbol))
+                  return s;
+                const v = parameterActivationValue(ce, s);
+                return v !== undefined && names.some((n) => v.has(n)) ? v : s;
+              });
+          if (withValues !== lifted) {
+            substitutedIntegrands.push(withValues);
+            try {
+              return ce
+                .function('Integrate', [withValues, ...ops.slice(1)])
+                .evaluate({ numericApproximation });
+            } finally {
+              substitutedIntegrands.pop();
+            }
+          }
         }
 
         // A user function called in the integrand reads a symbol with the

@@ -1,5 +1,6 @@
 import type { Expression } from '../types-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { errorValue } from './error-value.js';
 import {
   CancellationError,
   checkDeadline,
@@ -17,6 +18,10 @@ export interface ListRecursionPlan {
    * head, so that it has the same head as the result of the ordinary
    * evaluation of the definition. */
   head: 'Join' | 'ListJoin';
+  /** The name the recursive calls are written with (`F` in `F(n + 1)`). An
+   * error among the next arguments gets the frame of that call, as it does
+   * when the call is evaluated as an ordinary application. */
+  callee: string;
 }
 
 /**
@@ -57,6 +62,7 @@ export function listRecursionPlan(
     !containsSelf(expr) && expr.isPure;
   const clauses: Expression[] = [];
   let head: 'Join' | 'ListJoin' | undefined;
+  let callee: string | undefined;
   for (let i = 0; i < body.nops; i += 2) {
     const guard = body.ops[i];
     const arm = body.ops[i + 1];
@@ -89,10 +95,15 @@ export function listRecursionPlan(
       !call.ops.every(eligible)
     )
       return undefined;
+    // The recursive calls must all use one name, for the error frame of a
+    // failed next argument. Calls through different names are left to the
+    // ordinary evaluation.
+    if (callee !== undefined && callee !== call.operator) return undefined;
+    callee = call.operator;
     clauses.push(ce._fn('Tuple', [ce.One, prefix, ce._fn('Tuple', call.ops)]));
   }
-  return head !== undefined
-    ? { step: ce._fn('Which', clauses), head }
+  return head !== undefined && callee !== undefined
+    ? { step: ce._fn('Which', clauses), head, callee }
     : undefined;
 }
 
@@ -162,6 +173,18 @@ export function evaluateListRecursion(
     // The existing symbolic-recursion policy must continue to own calls
     // whose arguments are not numeric literals, including partial results.
     if (!next.ops.every(isNumber)) {
+      // A next argument that is an error is the value of the call, with the
+      // frame of that call, as in an ordinary application of a function with
+      // a typed signature (the `scalarConformance` step of
+      // `applyFunctionLiteralWith`, `boxed-function.ts`).
+      const failed = next.ops.findIndex((x) => isFunction(x, 'Error'));
+      if (failed >= 0) {
+        const err = errorValue(next.ops[failed], {
+          operator: plan.callee,
+          index: failed + 1,
+        });
+        if (err !== undefined) return finish(err);
+      }
       const tail = invokeStep(next.ops);
       if (tail === undefined) return undefined;
       return finish(tail);

@@ -139,6 +139,40 @@ describe('list-building recursion execution', () => {
     }
   );
 
+  test.each(['typed', 'untyped'])(
+    'an error in the second next argument of a %s function matches ordinary recursive evaluation',
+    (kind) => {
+      const run = (ordinary: boolean) => {
+        const ce = new ComputeEngine();
+        ce.declare('Fail', {
+          signature: '(number) -> number',
+          evaluate: ([n]) => (n.re === 0 ? ce.error('missing') : undefined),
+        });
+        // F(a, b): the next arguments are (a + 1, Fail(b - 1)), and
+        // Fail(0) is an error, so from F(0, 1) the error is in the second
+        // next argument.
+        const body: MathJsonExpression = [
+          'Which',
+          ['Equal', 'a', 3],
+          ['List', 'a'],
+          'True',
+          [
+            'Join',
+            ['List', 'a'],
+            ['F', ['Add', 'a', 1], ['Fail', ['Subtract', 'b', 1]]],
+          ],
+        ];
+        const fn = ordinary ? ['Block', 0, body] : body;
+        if (kind === 'typed') bindListBuilder(ce, fn, ['a', 'b']);
+        else ce.assign('F', ce.box(['Function', fn, 'a', 'b']));
+        return ce.box(['F', 0, 1]).evaluate().json;
+      };
+      const expected = run(true);
+      expect(JSON.stringify(expected)).toContain('"Error"');
+      expect(run(false)).toEqual(expected);
+    }
+  );
+
   test.each(['next argument', 'list element'])(
     'an error in a %s matches ordinary recursive evaluation',
     (position) => {

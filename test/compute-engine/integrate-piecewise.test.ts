@@ -450,3 +450,39 @@ describe('FINITE REAL PIECEWISE INTEGRALS', () => {
     ]);
   });
 });
+
+describe('A SUBSTITUTION RULE DOES NOT READ A STEP FUNCTION AS CONSTANT', () => {
+  // `sin(u)/u` with `u = x − Round(x)` came out as `Si(u)`, which jumps where
+  // `Round` does. The definite integral over [0, 64] was then 0, where the
+  // value is 128·Si(1/2) = 63.11774950951254 (CE-138).
+  const integrand: ExpressionInput = [
+    'Divide',
+    ['Sin', ['Subtract', 'x', ['Round', 'x']]],
+    ['Subtract', 'x', ['Round', 'x']],
+  ];
+
+  test('the indefinite integral stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Integrate', integrand, ['Limits', 'x', 'Nothing', 'Nothing']])
+      .evaluate();
+    expect(r.operator).toBe('Integrate');
+  });
+
+  test('the definite integral is not 0', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Integrate', integrand, ['Limits', 'x', 0, 64]]);
+    expect(r.evaluate().is(0)).toBe(false);
+    expect(r.N().re).toBeCloseTo(63.11774950951254, 8);
+  });
+
+  test('an integrand with a step function of another symbol is unaffected', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box([
+      'Integrate',
+      ['Multiply', ['Floor', 'a'], ['Sin', 'x']],
+      ['Limits', 'x', 0, 1],
+    ]);
+    expect(r.evaluate().operator).not.toBe('Integrate');
+  });
+});

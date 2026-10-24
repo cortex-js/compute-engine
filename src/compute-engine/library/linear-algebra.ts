@@ -101,6 +101,17 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { hasInexactLiteral } from '../boxed-expression/rational-body.js';
+
+/**
+ * A determinant computed with a float entry holds exact and float constants
+ * side by side (`x^2 - 5.5x - 6 + 6`: the field `add` keeps the exact and the
+ * float constants of a sum apart). Evaluating the sum folds them. An exact
+ * result is left as it is (CE-145.1).
+ */
+function foldInexactTerms(det: Expression): Expression {
+  return hasInexactLiteral(det) ? det.evaluate() : det;
+}
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -2009,8 +2020,8 @@ function hasRestrictedCell(ops: ReadonlyArray<Expression>): boolean {
  * The type of the sum of the component-wise products, from the product types
  * alone.
  *
- * This is the numeric tail of `addType` (`arithmetic-add.ts`) applied to
- * types: the products are scalars by construction — every component was
+ * This is the numeric tail of `addTypeOnTypes` (`library/arithmetic.ts`)
+ * applied to types:the products are scalars by construction — every component was
  * checked to be a number, and `Multiply`'s ladder maps numbers to numbers — so
  * none of that function's tuple, tensor, collection or broadcast branches can
  * apply, and what remains is the widening join plus two refinements it makes:
@@ -2022,7 +2033,7 @@ function hasRestrictedCell(ops: ReadonlyArray<Expression>): boolean {
  *   to 0, which is real — so each imaginary member of the join reports
  *   `complex` (`imaginary | nan` is `complex | nan`).
  *
- * A one-term sum is the term itself, as in `addType`'s single-argument
+ * A one-term sum is the term itself, as in `addTypeOnTypes`'s single-argument
  * shortcut: there is nothing to cancel, so an `imaginary` product stays
  * `imaginary` and a non-finite one keeps its own tier.
  */
@@ -2568,15 +2579,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value, integer?) -> list',
-      // The declared result, the bare `list`, admits values only. Flatten
-      // does not compute from an element: an absent element of the operand,
-      // at any depth, is an element of the result (`Flatten([[1, Missing],
-      // [2]])` is `[1, Missing, 2]`). So when the operand can hold an absent
-      // element (a `missing` arm, or `any`, which admits the absence
-      // markers: `typeCouldHoldMissing`), the result is `list<any>`, which
-      // admits the absent element. The element type is not computed: the depth operand and
-      // the tensor and string rules of the evaluate handler decide which
-      // elements are leaves.
+      // The declared result, the bare `list`, also admits absent elements (it
+      // matches `list<any>`), but its element type is open and can be refined
+      // from a later assignment. Flatten does not compute from an element: an
+      // absent element of the operand, at any depth, is an element of the
+      // result (`Flatten([[1, Missing], [2]])` is `[1, Missing, 2]`). So when
+      // the operand can hold an absent element (a `missing` arm, or `any`,
+      // which admits the absence markers: `typeCouldHoldMissing`), the result
+      // is `list<any>`, a fixed type that states the absent element. The
+      // element type is not computed: the depth operand and the tensor and
+      // string rules of the evaluate handler decide which elements are
+      // leaves.
       type: ([xs], context) =>
         xs !== undefined && typeCouldHoldMissing(xs.type)
           ? BoxedType.forResult('list<any>', context.engine._typeResolver)
@@ -2863,7 +2876,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // numeric matrix); box it so the operator yields a usable expression.
           return det === undefined
             ? undefined
-            : op1Tensor.field.expression(det);
+            : foldInexactTerms(op1Tensor.field.expression(det));
         }
 
         return undefined;
@@ -3805,6 +3818,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.NaN;
         }
 
+        // Two empty lists. The values do not tell vectors from point lists,
+        // so only the declared types of the operands can decide. A result
+        // type that is not a number means two lists of points, whose product
+        // is the empty list. Two operands declared as lists of numbers (not
+        // the type `list<never>` of a written `[]`) are two vectors, whose
+        // inner product is the empty sum, `0`. Otherwise nothing decides, and
+        // the product stays symbolic. The tensor product below needs a shape
+        // with a positive extent, so it cannot answer this case (CE-220).
+        if (
+          expression !== undefined &&
+          ops.length === 2 &&
+          ops.every((op) => isFunction(op, 'List') && op.nops === 0)
+        ) {
+          if (!expression.type.matches('number'))
+            return ce.function('List', []);
+          if (
+            isFunction(expression) &&
+            expression.ops.every(
+              (op) =>
+                op.type.matches('list<number>') &&
+                !op.type.matches('list<never>')
+            )
+          )
+            return ce.Zero;
+          return undefined;
+        }
+
         // A point list written as a tuple of coordinate lists — `(1, L)` with
         // `L` a list — has no tensor form `MatrixMultiply` accepts, so the
         // inner product is written out instead and left to the broadcast in
@@ -4509,7 +4549,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             .evaluate();
         const xIminusA = packStructural(ce, ce.function('List', rows));
         const det = xIminusA?.determinant();
-        return det === undefined ? undefined : xIminusA!.field.expression(det);
+        return det === undefined
+          ? undefined
+          : foldInexactTerms(xIminusA!.field.expression(det));
       },
     },
 

@@ -1499,7 +1499,7 @@ function compileGPUStatementSelection(
   const arms = args.filter((_, i) => i % 2 === 1);
   // In a complex selection the caller lifts each real scalar arm to a `vec2`
   // (`gpuSelectionArm`), so such an arm has the complex type here.
-  const complex = gpuSelectionIsComplex(arms);
+  const complex = gpuSelectionIsComplex('Which', args);
   const types = arms.map((a) =>
     complex && gpuOperandShape(a) === 'scalar'
       ? gpuVecType(2, isWGSL)
@@ -1867,10 +1867,15 @@ function gpuSelectionDecline(reason: string): never {
  * complex selection.
  */
 function gpuSelectionIsComplex(
-  values: ReadonlyArray<Expression | null | undefined>
+  operator: 'If' | 'Which',
+  ops: ReadonlyArray<Expression>
 ): boolean {
-  return values.some(
-    (v) => v !== null && v !== undefined && BaseCompiler.isComplexValued(v)
+  // Only the arms that `liveSelectionArms` keeps count, as in the shared shape
+  // analysis (`isComplexValued` of the selection): an arm behind a condition
+  // proved false is not emitted, so a dead complex arm must not put a real
+  // selection on the complex lane.
+  return BaseCompiler.liveSelectionArms({ operator, ops }).some((v) =>
+    BaseCompiler.isComplexValued(v)
   );
 }
 
@@ -2621,10 +2626,10 @@ export function gpuOperandShape(
  * BARE names `list` and `collection`, which the type representation carries as
  * primitive strings rather than as a `list` node.
  *
- * The question is asked against the absence-admitting top `collection<any>`,
- * not the bare name `collection`: a bare collection name is the values-only
- * synonym of its `<unknown>` form, so `list<any>` and `list<integer|missing>`
- * would not match it.
+ * The question is asked against the explicit top `collection<any>`. Since
+ * 0.160.0 the bare name `collection` also matches `list<any>` and
+ * `list<integer|missing>`, but the explicit spelling does not depend on how
+ * the bare name is read.
  *
  * A `string` is excluded. It matches `collection` in the lattice — its
  * elements are its grapheme clusters — but this target has no strings at all,
@@ -2969,6 +2974,22 @@ function gpuReshapesOperands(code: string): string | undefined {
  * source rather than from a list of heads: anything with a call or an operator
  * in it is a genuine compound emission and is judged as one.
  */
+/**
+ * `code` wrapped in parentheses when it has an operator at its top level (a
+ * space outside any brackets, as in `x + 1.0`), so that an emission which
+ * passes one operand through can be spliced into an infix parent without
+ * changing the grouping (CE-251.1).
+ */
+function gpuGroup(code: string): string {
+  let depth = 0;
+  for (const c of code) {
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === ' ' && depth === 0) return `(${code})`;
+  }
+  return code;
+}
+
 function gpuIsAtomicEmission(code: string): boolean {
   const s = code.trim();
   return (
@@ -6560,7 +6581,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Variadic arithmetic (for function-call form, e.g., with vectors)
   Add: (args, compile, target) => {
     if (args.length === 0) return '0.0';
-    if (args.length === 1) return compile(args[0]);
+    if (args.length === 1) return gpuGroup(compile(args[0]));
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       return foldTerms(
@@ -6601,7 +6622,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Multiply: (args, compile, target) => {
     if (args.length === 0) return '1.0';
-    if (args.length === 1) return compile(args[0]);
+    if (args.length === 1) return gpuGroup(compile(args[0]));
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       return foldTerms(
@@ -6898,7 +6919,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `If`: wrong number of arguments');
     gpuAssertSelectableArms('If', [args[1], args[2]]);
     // With one complex arm, a real arm is lifted to `vec2(v, 0.0)`.
-    const complex = gpuSelectionIsComplex([args[1], args[2]]);
+    const complex = gpuSelectionIsComplex('If', args);
     const arm = (i: 1 | 2): string =>
       gpuSelectionArm('If', args[i], compile(args[i], i), complex, target);
     // An arm that needs statements, or that repeats a subexpression a
@@ -6984,7 +7005,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     );
     // With one complex value, a real value is lifted to `vec2(v, 0.0)`, and
     // the fall-through NaN is a `vec2` too.
-    const complex = gpuSelectionIsComplex(args.filter((_, i) => i % 2 === 1));
+    const complex = gpuSelectionIsComplex('Which', args);
     const value = (i: number): string =>
       gpuSelectionArm('Which', args[i], compile(args[i], i), complex, target);
     // An arm, or a condition past the first, that needs statements takes the
@@ -7216,7 +7237,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // diagnostic it owns.
       return `_gpu_powi(${compile(base)}, 0.0)`;
     }
-    if (eConst === 1) return compile(base);
+    if (eConst === 1) return gpuGroup(compile(base));
     if (
       isSymbol(base, 'ExponentialE') &&
       gpuOperandShape(exp) === 'scalar' &&
@@ -15534,10 +15555,12 @@ fn _gpu_step_fix(m: f32, x: f32, k: f32) -> f32 {
  * is taken on `abs(n)`: GLSL `mod` is floored and WGSL `%` is truncated, so a
  * bare `n` would miss the odd branch on WGSL.
  *
- * The per-component sign is restored with `sign(x) * r` rather than the scalar
- * body's `-r`, because a vector has no single sign to branch on. The two
- * agree: for an odd exponent `sign(x)·|x|ⁿ` is `+r` where `x > 0`, `-r` where
- * `x < 0`, and `0` where `x == 0` — which is `pow(0, n)` for every `n > 0`.
+ * The per-component sign is restored by multiplying `r` with `-1` where
+ * `x < 0` and with `1` elsewhere, because a vector has no single sign to
+ * branch on. This is the scalar body's rule per component. It is not
+ * `sign(x) * r`: at `x == 0` with a negative exponent, `r` is `+∞` and
+ * `sign(0) * ∞` is `0 · ∞ = NaN`, where the scalar helper answers `+∞`
+ * (CE-243).
  *
  * The name carries the width because WGSL has no function overloading; GLSL
  * would accept one name for all four declarations, but one spelling serves
@@ -15553,7 +15576,7 @@ fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
   if (n == 3.0) { return x * x * x; }
   if (n == 4.0) { let s = x * x; return s * s; }
   let r = pow(abs(x), ${v}(n));
-  if ((abs(n) % 2.0) == 1.0) { return sign(x) * r; }
+  if ((abs(n) % 2.0) == 1.0) { return select(${v}(1.0), ${v}(-1.0), x < ${v}(0.0)) * r; }
   return r;
 }
 `;
@@ -15564,7 +15587,7 @@ ${v} _gpu_powi${n}(${v} x, float n) {
   if (n == 3.0) return x * x * x;
   if (n == 4.0) { ${v} s = x * x; return s * s; }
   ${v} r = pow(abs(x), ${v}(n));
-  if (mod(abs(n), 2.0) == 1.0) return sign(x) * r;
+  if (mod(abs(n), 2.0) == 1.0) return mix(${v}(1.0), ${v}(-1.0), lessThan(x, ${v}(0.0))) * r;
   return r;
 }
 `;
@@ -17872,6 +17895,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     declarations: ReadonlyArray<GPUShaderDeclaration> = [],
     constantFold?: boolean
   ): Array<{ variable: string; code: string; stmts: string[] }> {
+    // Put each body expression in the radian convention, as `compileOrThrow`
+    // does for a single expression: under a non-radian `angularUnit` the
+    // trigonometric calls would otherwise read their argument as radians
+    // (CE-282).
+    body = body.map((assignment) => ({
+      ...assignment,
+      expression: rewriteAngularUnit(assignment.expression),
+    }));
     // One name, two declarations (an input AND a uniform) is a redeclaration
     // neither language accepts — and on WGSL the two do not even resolve to
     // the same identifier (`input.v` vs the global `v`), so there is no

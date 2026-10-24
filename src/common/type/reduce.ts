@@ -12,6 +12,7 @@ import {
   meetNumericRangeMembers,
   provablyDisjoint,
   meetPrimitiveTypes,
+  registerCollectionKindsMeet,
 } from './subtype.js';
 import type {
   Type,
@@ -1903,3 +1904,7 @@ function reduceSignatureType(type: FunctionSignature): Type {
     result: reducedResult,
   });
 }
+
+// `narrow()` (`subtype.ts`) cannot import this file (it would be a cycle), so
+// it reads this rule through a registration.
+registerCollectionKindsMeet(meetCollectionKinds);

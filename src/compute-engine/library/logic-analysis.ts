@@ -151,10 +151,15 @@ export function extractFiniteDomainWithReason(
 
   // Handle Range: ["Range", start, end] or ["Range", start, end, step]
   if (isFunction(domain, 'Range')) {
-    const start = asSmallInteger(domain.op1);
-    const end = asSmallInteger(domain.op2);
+    // A bound can be a symbol with an assigned value (`Range(1, k)` with
+    // `k := 2`), as it can in a `Limits` clause, so evaluate it when it is not
+    // an integer literal.
+    const smallInteger = (x: Expression): number | null =>
+      asSmallInteger(x) ?? asSmallInteger(x.evaluate());
+    const start = smallInteger(domain.op1);
+    const end = smallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
-    const step = domain.ops.length >= 3 ? asSmallInteger(domain.op3) : 1;
+    const step = domain.ops.length >= 3 ? smallInteger(domain.op3) : 1;
 
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = rangeCount(start, end, step);

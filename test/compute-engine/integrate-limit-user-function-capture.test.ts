@@ -615,3 +615,114 @@ describe('the bound of a clause is outside the scope of its index', () => {
     expect(free).toEqual(['k']);
   });
 });
+
+// A parameter of a user function that is the operand of `D` or `Integrate`
+// takes its value from the call. `g(f) := d f/dx` was folded to 0 when it was
+// defined, because `f` was a symbol free of `x`, and `g(x^2)` stayed 0.
+describe('D and Integrate over a function parameter', () => {
+  test('D over the parameter of an assigned function', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\frac{d}{dx} f').evaluate();
+    expect(ce.parse('g(x^2)').evaluate().toString()).toBe('2x');
+  });
+
+  test('Integrate over the parameter of an assigned function', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\int f\\,dx').evaluate();
+    expect(ce.parse('g(x^2)').evaluate().toString()).toBe('1/3 * x^3');
+  });
+
+  // The substitution of a parameter by its value happens once per integral.
+  test('Integrate over a parameter, with the function nested in its argument', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\int f\\,dx').evaluate();
+    expect(ce.parse('g(g(x))').evaluate().toString()).toBe('1/6 * x^3');
+    expect(ce.parse('g(g(g(x)))').evaluate().toString()).toBe('1/24 * x^4');
+  });
+
+  test('Integrate over a parameter, with an argument that names the parameter', () => {
+    // The argument `f + x` mentions a symbol with the name of the parameter.
+    // The evaluation must end (it read the value again without bound if the
+    // substituted integrand were substituted a second time).
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\int f\\,dx').evaluate();
+    expect(() => ce.parse('g(f + x)').evaluate().toString()).not.toThrow();
+  });
+
+  test('a function literal applied on the box route', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Apply', ['Function', ['D', 'f', 'x'], 'f'], ['Power', 'x', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
+    expect(
+      ce
+        .box([
+          'Apply',
+          ['Function', ['Integrate', 'f', 'x'], 'f'],
+          ['Power', 'x', 2],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('1/3 * x^3');
+  });
+
+  test('a parameter that does not depend on the variable stays constant', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\frac{d}{dx} (f x)').evaluate();
+    expect(ce.parse('g(3)').evaluate().toString()).toBe('3');
+    ce.parse('h(f) := \\frac{d}{dx} f').evaluate();
+    expect(ce.parse('h(5)').evaluate().toString()).toBe('0');
+  });
+});
+
+// A call must not change the result of a later call on the same engine. The
+// operand `f` of the body reaches `Integrate` and `D` with no binding of its
+// own. Once a global `f` existed (any parse of the name `f` creates one, the
+// argument `f + x` of the first call included), the lookup of the parameter
+// skipped the call frame's `f` and returned the global one, so no later call
+// substituted its argument: `g(x^2)` gave `x·x^2`. In an argument, a symbol
+// named like the parameter is the caller's global symbol, not the parameter.
+describe('a parameter and a global symbol with the same name', () => {
+  test('integration: the self-named call comes first', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\int f\\,dx').evaluate();
+    // d/dx (x^2/2 + f x) = x + f
+    expect(ce.parse('g(f+x)').evaluate().toString()).toBe(
+      '1/2 * x^2 + f * x'
+    );
+    expect(ce.parse('g(a+x)').evaluate().toString()).toBe(
+      '1/2 * x^2 + a * x'
+    );
+    expect(ce.parse('g(x^2)').evaluate().toString()).toBe('1/3 * x^3');
+    expect(ce.parse('g(f)').evaluate().toString()).toBe('f * x');
+    expect(ce.parse('g(f+x)').evaluate().toString()).toBe(
+      '1/2 * x^2 + f * x'
+    );
+  });
+
+  test('integration: a global f created before the first call', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(f) := \\int f\\,dx').evaluate();
+    ce.parse('f');
+    expect(ce.parse('g(x^2)').evaluate().toString()).toBe('1/3 * x^3');
+  });
+
+  test('differentiation: the self-named call comes first', () => {
+    const ce = new ComputeEngine();
+    ce.parse('h(f) := \\frac{d}{dx} f').evaluate();
+    expect(ce.parse('h(f+x^2)').evaluate().toString()).toBe('2x');
+    expect(ce.parse('h(x^2)').evaluate().toString()).toBe('2x');
+    expect(ce.parse('h(a+x^3)').evaluate().toString()).toBe('3x^2');
+    expect(ce.parse('h(f)').evaluate().toString()).toBe('0');
+  });
+
+  test('differentiation: a global f created before the first call', () => {
+    const ce = new ComputeEngine();
+    ce.parse('h(f) := \\frac{d}{dx} f').evaluate();
+    ce.parse('f');
+    expect(ce.parse('h(x^2)').evaluate().toString()).toBe('2x');
+  });
+});

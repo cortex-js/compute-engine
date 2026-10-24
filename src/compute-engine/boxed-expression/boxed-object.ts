@@ -18,7 +18,10 @@ import type { Type, TypeReference } from '../../common/type/types.js';
 
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { isObjectType, objectLayoutOfType } from '../../common/type/subtype.js';
-import { _BoxedExpression } from './abstract-boxed-expression.js';
+import {
+  _BoxedExpression,
+  hasSymbolOrOperator,
+} from './abstract-boxed-expression.js';
 import { noteObjectConstructed, recordObjectRead } from './object-deps.js';
 import { objectJson } from './object-walk.js';
 import {
@@ -263,6 +266,12 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
    * none (dictionary precedent). Its fields are read with `_field()`. */
   get value(): Expression | undefined {
     return undefined;
+  }
+
+  /** True if a field value includes the symbol or operator `v`. The object
+   * is not a node with an operator of its own. (CE-99.2) */
+  override has(v: string | string[]): boolean {
+    return hasSymbolOrOperator(this, v);
   }
 
   get complexity(): number {

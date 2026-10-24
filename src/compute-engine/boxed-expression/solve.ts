@@ -3000,6 +3000,152 @@ function solveByZeroProduct(
 }
 
 /**
+ * True when `expr` has a `Sin` or a `Cos` of `n·x`, for an integer `n` with
+ * `|n| ≥ 2`.
+ */
+function hasMultipleAngleTrig(expr: Expression, x: string): boolean {
+  if (!isFunction(expr)) return false;
+  if (
+    (expr.operator === 'Sin' || expr.operator === 'Cos') &&
+    isFunction(expr.op1, 'Multiply') &&
+    expr.op1.nops === 2
+  ) {
+    const [a, b] = expr.op1.ops;
+    const n = isSymbol(b, x)
+      ? asExactSmallInteger(a)
+      : isSymbol(a, x)
+        ? asExactSmallInteger(b)
+        : null;
+    if (n !== null && Math.abs(n) >= 2) return true;
+  }
+  return expr.ops.some((op) => hasMultipleAngleTrig(op, x));
+}
+
+/**
+ * The roots of an equation with a sine or a cosine of a multiple of the
+ * unknown, `sin(x) + sin(2x) = 0` or `cos(2x) + cos(x) = 0`.
+ *
+ * The multiple angles are expanded (`TrigExpand`), which gives a polynomial
+ * in `s = sin(x)` and `c = cos(x)`. The common power of `s` and of `c` is
+ * taken out of it, and when the remaining factor has only even powers of
+ * `s`, they are written with `s² = 1 − c²`, which gives a polynomial in `c`.
+ * Then the factors are solved as a zero product: `sin(x)·(1 + 2cos(x))`, or
+ * `(2cos(x) − 1)·(cos(x) + 1)`. Returns `null` when the equation has no
+ * multiple angle, or has no such form. A candidate root is checked against the
+ * original equation by the caller.
+ */
+function solveByMultipleAngleTrig(
+  expr: Expression,
+  x: string,
+  depth: number,
+  trace?: RuleSteps,
+  stats?: { partial?: boolean; undecided?: boolean; userRule?: boolean }
+): ReadonlyArray<Expression> | null {
+  if (depth >= 3) return null;
+  if (!hasMultipleAngleTrig(expr, x)) return null;
+  const ce = expr.engine;
+  const expanded = ce.function('TrigExpand', [expr]).evaluate();
+  if (hasMultipleAngleTrig(expanded, x)) return null;
+
+  const isTrigOfX = (f: Expression, op: string): boolean =>
+    isFunction(f, op) && isSymbol(f.op1, x);
+  // One term as its power of `s`, its power of `c`, and the other factors.
+  // `undefined` for a term with another use of `sin(x)` or `cos(x)`.
+  const split = (
+    term: Expression
+  ): { s: number; c: number; rest: Expression[] } | undefined => {
+    const out = { s: 0, c: 0, rest: [] as Expression[] };
+    if (isFunction(term, 'Negate')) {
+      out.rest.push(ce.NegativeOne);
+      term = term.op1;
+    }
+    for (const f of isFunction(term, 'Multiply') ? term.ops : [term]) {
+      if (isTrigOfX(f, 'Sin')) out.s += 1;
+      else if (isTrigOfX(f, 'Cos')) out.c += 1;
+      else if (
+        isFunction(f, 'Power') &&
+        (isTrigOfX(f.op1, 'Sin') || isTrigOfX(f.op1, 'Cos'))
+      ) {
+        const n = asExactSmallInteger(f.op2);
+        if (n === null || n < 1) return undefined;
+        if (isTrigOfX(f.op1, 'Sin')) out.s += n;
+        else out.c += n;
+      } else if (f.has(x)) return undefined;
+      else out.rest.push(f);
+    }
+    return out;
+  };
+  const parts = (isFunction(expanded, 'Add') ? expanded.ops : [expanded]).map(
+    split
+  );
+  if (parts.some((p) => p === undefined)) return null;
+  const terms = parts as { s: number; c: number; rest: Expression[] }[];
+  const s = Math.min(...terms.map((t) => t.s));
+  const c = Math.min(...terms.map((t) => t.c));
+  const sinX = ce.function('Sin', [ce.symbol(x)]);
+  const cosX = ce.function('Cos', [ce.symbol(x)]);
+  const evenS = terms.every((t) => (t.s - s) % 2 === 0);
+  const quotient: Expression[] = terms.map((t) =>
+    ce.function('Multiply', [
+      ...t.rest,
+      ce.function('Power', [cosX, ce.number(t.c - c)]),
+      evenS
+        ? ce.function('Power', [
+            ce.function('Subtract', [ce.One, ce.function('Square', [cosX])]),
+            ce.number((t.s - s) / 2),
+          ])
+        : ce.function('Power', [sinX, ce.number(t.s - s)]),
+    ])
+  );
+  let rest: Expression = expand(ce.function('Add', quotient));
+  const bases: Expression[] = [];
+  if (s > 0) bases.push(sinX);
+  if (c > 0) bases.push(cosX);
+  if (rest.has(x)) bases.push(rest);
+  else if (rest.is(0)) return null;
+  if (bases.length === 0) return null;
+
+  if (trace)
+    traceStep(
+      trace,
+      'solve.factor-zero-product',
+      ce.function(
+        'List',
+        bases.map((b) => asEquation(b, x))
+      )
+    );
+  if (bases.length >= 2)
+    return solveByZeroProduct(
+      ce.function('Multiply', bases),
+      x,
+      depth,
+      undefined,
+      stats
+    );
+  const factorStats = {
+    candidates: false,
+    undecided: false,
+    partial: false,
+    userRule: false,
+  };
+  const roots = findUnivariateRoots(
+    bases[0],
+    x,
+    depth + 1,
+    undefined,
+    factorStats
+  );
+  if (stats) {
+    if (factorStats.partial) stats.partial = true;
+    if (factorStats.undecided) stats.undecided = true;
+    if (factorStats.userRule) stats.userRule = true;
+    if (roots.length === 0 && !factorHasNoRoot(bases[0], x, factorStats))
+      stats.partial = true;
+  }
+  return roots.length === 0 ? null : roots;
+}
+
+/**
  * Return `true` when the root finder can show that the factor `f` of a
  * product has no real root, after it gave no root for `f`:
  * - it found candidate roots, and it rejected each one by a decided check
@@ -5107,6 +5253,22 @@ export function findUnivariateRoots(
       if (productRoots) {
         trace?.push(...subTrace!);
         result = [...productRoots];
+      }
+    }
+
+    // Multiple angles: `sin(x) + sin(2x) = 0` is `sin(x)·(1 + 2cos(x)) = 0`.
+    if (result.length === 0) {
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const angleRoots = solveByMultipleAngleTrig(
+        originalExpr,
+        x,
+        depth,
+        subTrace,
+        stats
+      );
+      if (angleRoots) {
+        trace?.push(...subTrace!);
+        result = [...angleRoots];
       }
     }
 

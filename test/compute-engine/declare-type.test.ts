@@ -769,3 +769,31 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
     expect(ce.type('tuple<integer, integer>').matches('g1')).toBe(false);
   });
 });
+
+describe('Declare with a type string that does not parse', () => {
+  it('gives an error value instead of throwing', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Declare', 'r', { str: 'integer<<' }]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(JSON.stringify(r.json)).toContain('invalid-type-declaration');
+  });
+});
+
+describe('A declaration whose value is refused', () => {
+  it('leaves a new name undeclared', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare('w', { type: 'integer', value: ce.string('a') } as any)
+    ).toThrow();
+    expect(ce.lookupDefinition('w')).toBeUndefined();
+  });
+
+  it('keeps the previous binding of a name that is declared again', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', { type: 'integer', value: 3 });
+    expect(() =>
+      ce.declare('z', { type: 'integer', value: ce.string('a') } as any)
+    ).toThrow();
+    expect(ce.box('z').evaluate().toString()).toBe('3');
+  });
+});

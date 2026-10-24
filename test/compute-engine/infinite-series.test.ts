@@ -685,3 +685,55 @@ describe('Infinite product closed forms', () => {
     expect(e.isSame(0)).toBe(true);
   });
 });
+
+describe('Telescoping with a free parameter and an infinite bound (CE-142.1)', () => {
+  // The closed form substitutes the infinite bound into the term, which used
+  // to leave `(x + 1 + ∞)² − (x + 1)²` in the result.
+  test('a divergent telescoping sum is an infinity', () => {
+    expect(
+      ce.parse('\\sum_{k=1}^\\infty ((x+k+1)^2-(x+k)^2)').evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      ce.parse('\\sum_{k=1}^\\infty ((x+k)^2-(x+k+1)^2)').evaluate().toString()
+    ).toBe('-oo');
+  });
+
+  test('the product has no value without the sign of x + 1', () => {
+    const e = ce.parse('\\prod_{k=1}^\\infty \\frac{x+k+1}{x+k}').evaluate();
+    expect(e.operator).toBe('Product');
+  });
+
+  test('a convergent telescoping sum is unchanged', () => {
+    expect(
+      ce
+        .parse('\\sum_{k=1}^\\infty (\\frac{1}{k}-\\frac{1}{k+1})')
+        .evaluate()
+        .toString()
+    ).toBe('1');
+  });
+});
+
+describe('Telescoping closed forms refuse a pole at the finite bound', () => {
+  // A substitution at a finite bound is returned unevaluated, so the term at
+  // that bound can be a pole (`Gamma(0)`); `∞ − pole` has no value.
+  test('a sum whose lower-bound term is a pole stays unevaluated', () => {
+    const e = ce
+      .parse('\\sum_{k=-x}^{\\infty} (\\Gamma(k+x+1)-\\Gamma(k+x))')
+      .evaluate();
+    expect(e.operator).toBe('Sum');
+  });
+
+  test('a product with a zero divisor at the finite bound stays unevaluated', () => {
+    // The term at k = 0 of the denominator is 0, so the value would be ∞/0.
+    expect(
+      ce.parse('\\prod_{k=0}^\\infty \\frac{k+1}{k}').evaluate().operator
+    ).toBe('Product');
+  });
+
+  test('a product with a negative divisor at the finite bound stays unevaluated', () => {
+    // ∞/(−2) would be −∞, but the partial products alternate in sign.
+    expect(
+      ce.parse('\\prod_{k=-3}^\\infty \\frac{k+1}{k}').evaluate().operator
+    ).toBe('Product');
+  });
+});

@@ -209,7 +209,7 @@ describe('TRIG REWRITES OF AN OPERAND THAT MAY NOT BE A VALUE', () => {
     [
       'tuple under TrigReduce',
       ['TrigReduce', ['Tuple', ['Sin', 'a'], 3]],
-      'error',
+      'tuple<real, integer>',
     ],
   ])('%s', (_label, json, valueType) => {
     const expr = ce.box(json as any);

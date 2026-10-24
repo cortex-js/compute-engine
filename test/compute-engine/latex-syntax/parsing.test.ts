@@ -1406,3 +1406,16 @@ describe('uppercase-before-paren: scope overrides the predicate heuristic', () =
     }
   });
 });
+
+describe('SYMBOL OF TYPE error', () => {
+  // A symbol declared with type `error` is a valid term (CE-294).
+  test('parses as a symbol, in a sum and in an integrand', () => {
+    const local = new ComputeEngine();
+    local.declare('w', 'error');
+    expect(local.parse('w').json).toEqual('w');
+    expect(local.parse('w+1').json).toEqual(['Add', 'w', 1]);
+    expect(JSON.stringify(local.parse('\\int_0^1 w\\,dw').json)).not.toContain(
+      'unexpected-symbol'
+    );
+  });
+});

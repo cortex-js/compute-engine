@@ -369,7 +369,12 @@ export function canonicalFunctionLiteral(
   //      operand (a lazy operator's held callback), whose type still reads
   //      `unknown` and cannot answer the type-based predicate.
   //
-  if (denotesFunction(expr) || isQualifiedProtocolMember(expr)) return expr;
+  if (
+    denotesFunction(expr) ||
+    isQualifiedProtocolMember(expr) ||
+    isRawFunctionValuedApplication(expr)
+  )
+    return expr;
 
   //
   // 6/ Shorthand function literal,
@@ -2098,6 +2103,23 @@ function isQualifiedProtocolMember(e: Expression): boolean {
   if (def !== undefined && 'value' in def && def.value.value !== undefined)
     return false;
   return true;
+}
+
+/**
+ * The operators whose application always gives a function value
+ * (`InverseFunction(f)` is the inverse of `f`, `Derivative(f, n)` its
+ * `n`-th derivative). This is {@link denotesFunction}'s syntactic sibling for
+ * a RAW operand, such as the held callback of a lazy operator, whose type
+ * reads `unknown` and cannot answer the type-based predicate. Without it,
+ * `Map(InverseFunction(Sin), xs)` was read as a shorthand literal with no
+ * parameter and refused. (CE-129)
+ */
+function isRawFunctionValuedApplication(e: Expression): boolean {
+  return (
+    isFunction(e) &&
+    (e.operator === 'InverseFunction' || e.operator === 'Derivative') &&
+    freeAnonymousSlots(e).size === 0
+  );
 }
 
 /**

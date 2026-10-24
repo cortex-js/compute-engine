@@ -61,6 +61,7 @@ import {
   isNumber,
   isFunction,
   isDictionary,
+  isObject,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
 import { bindingInContext } from './binders.js';
@@ -75,6 +76,7 @@ import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
+import { recordObjectRead } from './object-deps.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -990,7 +992,27 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   isEqual(other: number | Expression): boolean | undefined {
-    return eq(this, other);
+    const equal = eq(this, other);
+    if (equal !== undefined) return equal;
+    // `eq()` reads no bounds. Two assumptions (`b ≥ 0` and `b ≤ 0`) that
+    // bound a symbol from both sides at the same number pin it (CE-104).
+    // Only a symbol is read: the comparison methods have no meaning for a
+    // relation such as `x < 5`. The symbol can be either operand, so that
+    // `a.isEqual(b)` and `b.isEqual(a)` agree.
+    if (
+      this.symbol !== undefined &&
+      this.isGreaterEqual(other) === true &&
+      this.isLessEqual(other) === true
+    )
+      return true;
+    if (
+      typeof other !== 'number' &&
+      isSymbol(other) &&
+      other.isGreaterEqual(this) === true &&
+      other.isLessEqual(this) === true
+    )
+      return true;
+    return undefined;
   }
 
   isIdenticallyEqual(other: number | Expression): boolean | undefined {
@@ -1614,6 +1636,18 @@ export function hasSymbolOrOperator(
       visited.add(e);
       if (matches(e.operator)) return true;
       for (const value of e.values) pending.push(value);
+    } else if (isObject(e)) {
+      // A mutable object is opaque as a node (its operator is a display word
+      // that never matches), but its field values are read, as the values of a
+      // dictionary are. The visited set also stops a cycle through a field
+      // that holds the object itself. (CE-99.2)
+      if (visited.has(e)) continue;
+      visited.add(e);
+      // Reading the fields is an object read: a cached answer derived from
+      // this walk must record the object's version, because a store changes
+      // the fields without advancing any engine cache generation.
+      recordObjectRead(e, e._version);
+      for (const value of e._slots.values()) pending.push(value);
     } else if (isSymbol(e)) {
       if (matches(e.symbol)) return true;
     }

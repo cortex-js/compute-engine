@@ -510,3 +510,27 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
     ).toBe('[pi * t - 1/6 * pi,pi * t + 1/6 * pi]');
   });
 });
+
+describe('SINE AND COSINE OF A MULTIPLE OF THE UNKNOWN', () => {
+  // The multiple angles are expanded to a polynomial in sin(x) and cos(x),
+  // whose factors are solved (CE-152).
+  test.each<[string, (x: number) => number]>([
+    ['\\sin(x)+\\sin(2x)=0', (x) => Math.sin(x) + Math.sin(2 * x)],
+    ['\\cos(2x)+\\cos(x)=0', (x) => Math.cos(2 * x) + Math.cos(x)],
+    ['\\sin(2x)=\\cos(x)', (x) => Math.sin(2 * x) - Math.cos(x)],
+    ['\\sin(3x)+\\sin(x)=0', (x) => Math.sin(3 * x) + Math.sin(x)],
+  ])('%s', (latex, f) => {
+    checkFamilies(solve(latex), f);
+  });
+
+  test('over a bounded domain', () => {
+    const r = ce
+      .parse('\\operatorname{Solve}(\\sin(x)+\\sin(2x)=0, x\\in[-7,7])')
+      .evaluate();
+    expect(r.nops).toBe(9);
+  });
+
+  test('an equation with no root stays empty', () => {
+    expect(solve('\\cos(2x)+3=0').toString()).toBe('[]');
+  });
+});

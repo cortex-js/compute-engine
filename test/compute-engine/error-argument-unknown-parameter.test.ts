@@ -644,9 +644,16 @@ describe('A SYMBOL HOLDING AN ERROR AT A PARAMETER THAT IS NOT A CALLBACK OF A C
     expect(ce.box(['Integrate', 'w', 'w']).evaluate().isValid).toBe(true);
   });
 
-  test('`Limit(w, 0)` and `Pipe(3, w)` are not the error', () => {
+  test('`Limit(w, 0)` is not the error', () => {
     expect(ce.box(['Limit', 'w', 0]).evaluate().operator).toBe('Limit');
-    expect(ce.box(['Pipe', 3, 'w']).evaluate().toString()).toBe('w(3)');
+  });
+
+  test('`Pipe(3, w)` applies `w`, so it is the error of `w` (CE-108.1)', () => {
+    // `w(3)` and `Apply(w, 3)` are the error too: a symbol that holds an error
+    // is the callee, as it is the callback of `Map`.
+    const expected = ce.box('w').evaluate().toString();
+    expect(ce.box(['Pipe', 3, 'w']).evaluate().toString()).toBe(expected);
+    expect(ce.box(['w', 3]).evaluate().toString()).toBe(expected);
   });
 
   test('a lazy operator that selects its operands still selects', () => {

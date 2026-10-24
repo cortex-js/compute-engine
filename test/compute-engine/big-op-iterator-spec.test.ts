@@ -159,3 +159,25 @@ describe('THE OTHER SPECIFICATIONS ARE UNCHANGED', () => {
     );
   });
 });
+
+describe('A Range bound in an Element clause', () => {
+  test('a symbol with an assigned value is read, as in a Limits clause', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('k', 2);
+    expect(
+      ce2.box(['Sum', 'j', ['Element', 'j', ['Range', 1, 'k']]]).evaluate().json
+    ).toBe(3);
+    expect(
+      ce2.box(['Product', 'j', ['Element', 'j', ['Range', 1, 'k']]]).evaluate()
+        .json
+    ).toBe(2);
+  });
+
+  test('a symbol with no value keeps the sum symbolic', () => {
+    const ce2 = new ComputeEngine();
+    expect(
+      ce2.box(['Sum', 'j', ['Element', 'j', ['Range', 1, 'q']]]).evaluate()
+        .operator
+    ).toBe('Sum');
+  });
+});

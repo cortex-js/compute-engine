@@ -1461,7 +1461,12 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
       return new BigDecimal(fact.toString());
     }
   }
-  return withGuardDigits(SPECIAL_FN_GUARD, () => gammaCore(ce, z));
+  const result = withGuardDigits(SPECIAL_FN_GUARD, () => gammaCore(ce, z));
+  // Γ has no zero at a finite argument. A zero result means the value is
+  // smaller than the smallest representable number (from about z = −10^15, by
+  // reflection), so answer NaN, not a value that a caller could use (CE-180.3).
+  if (result.isZero() && z.isFinite()) return BigDecimal.NAN;
+  return result;
 }
 
 function gammaCore(ce: ComputeEngine, z: BigNum): BigNum {

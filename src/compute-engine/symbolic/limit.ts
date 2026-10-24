@@ -85,6 +85,14 @@ export function symbolicLimit(
     let b = body;
     while (b.operator === 'Block' && oo(b)?.length === 1) b = o1(b);
 
+    // A `Return` ends the function literal with its value, so a body that is
+    // `Return(v)` has the limit of `v`. This code substitutes into the body
+    // and never runs it, so a `Return` anywhere else (a statement block, a
+    // branch) cannot be read here: decline and let the caller fall back
+    // (CE-400).
+    if (b.operator === 'Return' && oo(b)?.length === 1) b = o1(b);
+    else if (b.has('Return')) return undefined;
+
     // A transformer head (`Limit(Simplify(f), …)`, e.g. from the pipeline
     // `f |> Simplify |> Limit`) is a computation step: reduce it so the
     // structural strategies see the transformed expression rather than an
@@ -1395,7 +1403,19 @@ function limitRatioAtPosInf(
         if (k.isNegative === true) return ce.NegativeInfinity;
       }
     }
-    return leadingCoefficientRatio(n, d, x, ce);
+    // Same growth order but no ratio of leading coefficients (`ln(3x)` and
+    // `ln(x^π)`: both are logarithmic, and neither is a monomial): L'Hôpital
+    // below (CE-147). L'Hôpital applies only to an indeterminate form, so
+    // both parts must be shown to tend to infinity (or both to 0). A part
+    // that oscillates, as in `(2 + sin x)/(3 + sin x)`, has a leading order
+    // of the same growth as the other part but no limit: decline.
+    const lc = leadingCoefficientRatio(n, d, x, ce);
+    if (lc !== undefined) return lc;
+    const ln_ = limitAtPosInf(num, x, ce, depth + 1);
+    const ld = limitAtPosInf(den, x, ce, depth + 1);
+    const bothInfinite = ln_?.isInfinity === true && ld?.isInfinity === true;
+    const bothZero = ln_?.is(0) === true && ld?.is(0) === true;
+    if (!bothInfinite && !bothZero) return undefined;
   }
 
   // Growth comparison inconclusive: a genuine 0/0 or ∞/∞ that the asymptotic

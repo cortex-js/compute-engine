@@ -2604,3 +2604,74 @@ test('COMPILE COMPLEX - (2i)^0.5 is exactly 1 + i', () => {
     .N();
   expect([i.re, i.im]).toEqual([1, 1]);
 });
+
+describe('COMPILE COMPLEX - a dead arm of a selection does not set the lane (CE-230.5)', () => {
+  const radical = ['Sqrt', ['Subtract', 'y', 1]];
+  const cases: [string, unknown][] = [
+    [
+      'Which with a true first condition',
+      ['Add', 'x', ['Which', ['Greater', 1, 0], 'y', 'True', radical]],
+    ],
+    [
+      'Which with a false first condition',
+      ['Add', 'x', ['Which', ['Greater', 0, 1], radical, 'True', 'y']],
+    ],
+    [
+      'If with a true condition',
+      ['Add', 'x', ['If', ['Greater', 1, 0], 'y', radical]],
+    ],
+  ];
+  for (const mode of ['auto', 'strict'] as const) {
+    for (const [name, json] of cases) {
+      it(`${mode}: ${name} stays on the real lane`, () => {
+        const engine = new ComputeEngine();
+        const result = compile(engine.box(json as never), {
+          to: 'javascript',
+          mode,
+          fallback: false,
+        } as never) as any;
+        expect(result.code).not.toContain('re:');
+        expect(result.run({ x: 1, y: 2 })).toBe(3);
+      });
+    }
+  }
+
+  it('a live complex arm still puts the node on the complex lane', () => {
+    const engine = new ComputeEngine();
+    const result = compile(
+      engine.box([
+        'Add',
+        'x',
+        ['If', ['Less', 1, 0], 'y', ['Sqrt', ['Subtract', 'y', 1]]],
+      ]) as never,
+      { to: 'javascript', mode: 'auto', fallback: false } as never
+    ) as any;
+    expect(result.code).toContain('re:');
+  });
+});
+
+describe('COMPILE COMPLEX - GPU selection ignores a dead complex arm (CE-230.5)', () => {
+  // `constantFold: false` keeps the `True` condition in the emitted code, so
+  // the GPU emitter and the shared shape analysis both see the dead arm.
+  const cases: [string, unknown][] = [
+    [
+      'Which',
+      ['Abs', ['Which', 'True', 'x', 'True', 'ImaginaryUnit']],
+    ],
+    ['If', ['Abs', ['If', ['Greater', 1, 0], 'x', 'ImaginaryUnit']]],
+  ];
+  for (const to of ['glsl', 'wgsl'] as const) {
+    for (const [name, json] of cases) {
+      it(`${to}: ${name} with a dead complex arm stays real`, () => {
+        const engine = new ComputeEngine();
+        const result = compile(engine.box(json as never), {
+          to,
+          fallback: false,
+          constantFold: false,
+        } as never) as any;
+        expect(result.code).not.toMatch(/vec2/);
+        expect(result.code).not.toContain('length(');
+      });
+    }
+  }
+});

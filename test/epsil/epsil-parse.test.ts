@@ -2605,3 +2605,15 @@ describe('EPSIL TYPE TEST `is`', () => {
     ]);
   });
 });
+
+describe('A TYPE ERROR OF AN ANNOTATION KEEPS ITS HINT', () => {
+  test('a vector with two dimensions names the type to write', () => {
+    // The type parser refuses `vector<…^(2x3)>` with a message and a hint. The
+    // diagnostic carries both, not the first line only.
+    const [, diagnostics] = parseEpsil('let v: vector<integer^(2x3)>\nv');
+    expect(diagnostics).toHaveLength(1);
+    const text = diagnostics[0].message.map(String).join(' ');
+    expect(text).toContain('A vector has exactly one dimension');
+    expect(text).toContain('write `matrix<…>` for two dimensions');
+  });
+});

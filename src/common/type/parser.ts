@@ -1538,9 +1538,10 @@ export class Parser {
             // variable the enclosing `where` clause declares (`vector<T^N>`).
             const dims = this.parseCaretDimensions();
             if (dims.length !== 1)
+              // The hint is part of the message: the callers that report the
+              // bare message (the Epsil diagnostics) show no separate hint.
               this.error(
-                'A vector has exactly one dimension',
-                'Write `matrix<…>` for two dimensions, `tensor<…>` for more'
+                'A vector has exactly one dimension: write `matrix<…>` for two dimensions, `tensor<…>` for more'
               );
             dimension = dims[0];
           }
@@ -1619,8 +1620,7 @@ export class Parser {
       // numeral `2`. Name the spelling to use rather than "invalid type".
       if (this.current.type === 'IDENTIFIER' && /^x/.test(this.current.value))
         this.error(
-          'A tensor type has no leading shape',
-          'Write the shape after the cell type: `tensor<number^(2x3x4)>`'
+          'A tensor type has no leading shape: write the shape after the cell type, `tensor<number^(2x3x4)>`'
         );
       this.expect('>');
     }

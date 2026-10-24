@@ -839,3 +839,31 @@ describe('isEnumerableCollection separates empty from unwalkable', () => {
     });
   });
 });
+
+describe('an application that gives a function is a valid raw callback (CE-129)', () => {
+  // The callback of a lazy operator arrives raw, where its type reads
+  // `unknown`. `InverseFunction(f)` and `Derivative(f, n)` always give a
+  // function, so they are a callback, not the body of a shorthand literal.
+  it('`Map(InverseFunction(Sin), xs)` maps the inverse', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Map', ['InverseFunction', 'Sin'], ['List', 1, 0]]);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('[1/2 * pi,0]');
+  });
+
+  it('`Map(Derivative(Sin, 2), xs)` maps the second derivative', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Map', ['Derivative', 'Sin', 2], ['List', 0]]);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('[0]');
+  });
+
+  it('the parse route agrees', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse(
+      '\\operatorname{Map}(\\operatorname{InverseFunction}(\\sin), [1, 0])'
+    );
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('[1/2 * pi,0]');
+  });
+});

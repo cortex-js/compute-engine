@@ -277,9 +277,8 @@ const ARCTAN_CARRIER = parseType('complex | signed_infinity');
  *
  * Any other operand (a collection, a string, an absent value, an operand
  * whose type is not known) gives `undefined`: the declared result, `value`,
- * stands. A collection operand keeps its shape under `TrigExpand` and
- * `TrigToExp`, but `TrigReduce` of a tuple is an error, so no shape is
- * claimed for any of the three.
+ * stands. A collection operand keeps its shape under all three verbs, but
+ * no shape is claimed.
  *
  * The three verbs are `lazy`, so their operand is not evaluated first, but
  * their `canonical` handler binds it (`.canonical`, which evaluates

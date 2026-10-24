@@ -1082,6 +1082,30 @@ export function roundingFunctionType(
 export function absFunctionType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';
   if (hasErrorTypedOperand([x])) return 'error';
+  // A collection operand is read as ONE element, as the result-typing code
+  // re-adds the shape of the operand: without this, a `list<integer>` fell
+  // to the wide claim at the end of this function, with a `signed_infinity`
+  // arm that no cell of it can take. The facts of the whole operand (its sign
+  // and finiteness) say nothing about its cells, so they are dropped.
+  // Only a list (or tensor) whose cells are numbers is read so. A list of
+  // points keeps the wide claim, because the norm of a point is typed by
+  // `pointNormType`, and so does a set or another abstract collection, which
+  // broadcast does not map over.
+  if (x.facts.collection === true) {
+    let cell = x.type;
+    for (
+      let r = resolveTypeAlias(cell);
+      typeof r === 'object' && r.kind === 'list';
+      r = resolveTypeAlias(cell)
+    )
+      cell = r.elements;
+    if (cell !== x.type && isSubtype(cell, 'number'))
+      return absFunctionType({
+        type: cell,
+        facts: { ...x.facts, sgn: undefined, finite: undefined },
+        structureOf: x.structureOf,
+      });
+  }
   const t = x.type;
   const f = factsOf(t);
   // An operand the TYPE proves infinite — the signed pair `±∞` and the

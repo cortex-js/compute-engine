@@ -339,3 +339,75 @@ describe('LaTeX set-builder with a comma-separated condition list', () => {
     ]);
   });
 });
+
+// Removing duplicates compares an element only with the kept elements that
+// have its hash (CE-316). Before, each element was compared with every kept
+// element: 900 distinct elements cost about 810 000 `isSame` calls.
+describe('duplicate removal counts comparisons by hash bucket', () => {
+  /** Run `f` and return how many `isSame` calls the expression classes got. */
+  function countIsSame(ce: ComputeEngine, f: () => void): number {
+    let calls = 0;
+    const patched = new Set<object>();
+    const restore: Array<() => void> = [];
+    for (const sample of [ce.number(1), ce.number(2.5), ce.symbol('x')]) {
+      let p = Object.getPrototypeOf(sample);
+      while (p !== null && p !== Object.prototype) {
+        const own = Object.getOwnPropertyDescriptor(p, 'isSame');
+        if (own !== undefined && !patched.has(p)) {
+          patched.add(p);
+          const proto = p;
+          const original = own.value;
+          // Keep the method non-enumerable, as a class method is: an
+          // enumerable `isSame` would be copied into operator definitions.
+          Object.defineProperty(proto, 'isSame', {
+            ...own,
+            value: function (this: unknown, ...args: unknown[]) {
+              calls += 1;
+              return original.apply(this, args);
+            },
+          });
+          restore.push(() => Object.defineProperty(proto, 'isSame', own));
+        }
+        p = Object.getPrototypeOf(p);
+      }
+    }
+    try {
+      f();
+    } finally {
+      restore.forEach((r) => r());
+    }
+    return calls;
+  }
+
+  test('a comprehension over 900 elements', () => {
+    const ce = freshEngine();
+    const s = ce.expr([
+      'Set',
+      ['Multiply', 'k', 'k'],
+      ['Element', 'k', ['Range', 1, 900]],
+    ]);
+    let count: unknown;
+    const calls = countIsSame(ce, () => {
+      count = ce.expr(['Count', s]).evaluate().json;
+    });
+    expect(count).toBe(900);
+    expect(calls).toBeLessThan(20000);
+  });
+
+  test('a symmetric difference of two sets of 600 elements', () => {
+    const ce = freshEngine();
+    const range = (from: number) =>
+      Array.from({ length: 600 }, (_, i) => i + from);
+    const d = ce.expr([
+      'SymmetricDifference',
+      ['Set', ...range(0)],
+      ['Set', ...range(300)],
+    ]);
+    let result: ReturnType<typeof d.evaluate> | undefined;
+    const calls = countIsSame(ce, () => {
+      result = d.evaluate();
+    });
+    expect(result!.nops).toBe(600);
+    expect(calls).toBeLessThan(20000);
+  });
+});

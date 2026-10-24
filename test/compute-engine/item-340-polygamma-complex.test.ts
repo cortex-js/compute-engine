@@ -296,3 +296,16 @@ describe('PolyGamma JS compile: a complex-typed argument fails closed', () => {
     expect(Math.abs((got as number) - 0.22390584881725206)).toBeLessThan(1e-9);
   });
 });
+
+describe('PolyGamma of an order above 100 next to a half-integer (CE-189)', () => {
+  // The polynomial in cot(πz) is the only form that does not cancel there; its
+  // coefficients overflow a double from order 120 on, so they are carried
+  // with a power-of-two exponent. Reference values: mpmath at 30 digits.
+  test.each([
+    [120, -0.5, 1e-5, -3.2987648555065279e177, 8.6073259540523873e232],
+    [120, -0.5, 1e-4, -3.2986577240756578e177, 8.6064735137703544e233],
+  ])('PolyGamma(%p, %p + %pi)', (m, re, im, er, ei) => {
+    const v = polygammaN(m, re, im) as unknown as { re: number; im: number };
+    expectComplexRelative(v, er, ei, 1e-12);
+  });
+});
