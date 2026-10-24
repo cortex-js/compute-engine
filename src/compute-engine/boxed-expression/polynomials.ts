@@ -807,6 +807,12 @@ export function cancelCommonFactors(
   const numerator = expr.op1;
   const denominator = expr.op2;
 
+  // A quotient by the number 0 has no common factor to cancel. It is kept by
+  // `canonicalDivide` when the numerator may be zero (`x/0` is `0/0` at
+  // `x = 0`), and the division by the zero polynomial below folded it to
+  // `ComplexInfinity`.
+  if (isNumber(denominator) && denominator.isSame(0)) return expr;
+
   // Check if both are polynomials
   const numDeg = polynomialDegree(numerator, variable);
   const denDeg = polynomialDegree(denominator, variable);

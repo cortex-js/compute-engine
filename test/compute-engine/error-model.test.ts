@@ -3987,8 +3987,15 @@ describe('the arithmetic core declares its domains', () => {
     // handler runs in place of the signature validation.
     expect(ce.box(['Divide', 'vB11', 2]).type.toString()).toBe('number');
     expect(ce.box('vB11').type.toString()).toBe('number');
-    // A pole at a symbolic numerator is unchanged.
-    expect(ce.box(['Divide', 'xB11', 0]).evaluate().isSame(COO)).toBe(true);
+    // A symbolic numerator that may be zero keeps the quotient until it has
+    // a value: `xB11/0` is `0/0` at `xB11 = 0` (ROADMAP CE-95). A numerator
+    // that is not zero is a pole.
+    expect(ce.box(['Divide', 'xB11', 0]).evaluate().json).toEqual([
+      'Divide',
+      'xB11',
+      0,
+    ]);
+    expect(ce.box(['Divide', 'Pi', 0]).evaluate().isSame(COO)).toBe(true);
   });
 
   test('Negate: total on the extended complex plane', () => {

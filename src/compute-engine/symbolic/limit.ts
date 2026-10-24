@@ -2226,12 +2226,27 @@ function isIndeterminateRatio(n0: Expression, d0: Expression): boolean {
  * (complex) infinity nor NaN. Crucially this accepts finite *symbolic*
  * constants (`ln 5`, `π/4`, `e`), whose `.isFinite` is `undefined` because the
  * engine hasn't numericized them.
+ *
+ * A value that holds a quotient by the number 0 is not a limit value. The
+ * quotient is kept when its numerator may be zero (`a/0` with `a` a free
+ * symbol is `0/0` when `a` is 0, and `ComplexInfinity` otherwise), so the
+ * substitution `x = a` into `x/(x − a)` gives `a/0`, which the pole
+ * strategies must resolve.
  */
 function isDefiniteValue(e: Expression, x?: string): boolean {
   if (e.isNaN === true) return false;
   if (e.isInfinity === true) return false;
   if (x !== undefined && e.has(x)) return false;
+  if (hasQuotientByZero(e)) return false;
   return true;
+}
+
+/** Whether `e` holds a `Divide` whose divisor is the number 0. */
+function hasQuotientByZero(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'Divide' && isNumber(e.op2) && e.op2.isSame(0))
+    return true;
+  return e.ops.some(hasQuotientByZero);
 }
 
 function expOfLimit(

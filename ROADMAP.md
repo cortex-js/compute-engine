@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-397.
+Next free reference: CE-400.
 
 **Entry format.**
 
@@ -128,6 +128,49 @@ problem does not occur on its installed release). Report:
 - Not CE's: the inline `At` lambda (Tycho's own override), the "Unknown
   operator" declines (importer binding), and the 2× re-compile of every declined
   row.
+
+### CE-397. A predicate for "could a non-empty value have both types?" (Tycho row 429)
+
+**Status:** open; capability, small. Needs a user decision: a `couldMatch`
+option or a second method. Tycho row 429, filed 2026-10-23 on 0.162.0; still
+NOT READY on 0.163.0 (instrument run 2026-10-23).
+
+Since 0.162.0 `couldMatch()` answers `true` for two list types with no
+dimensions, whatever their elements, because the empty list is a value of both.
+This is the intended reading (CHANGELOG 0.162.0, "A list type with no dimensions
+is read by its elements"). Example: `ce.type('list<number>').couldMatch('list<tuple<number, number>>')`
+is `true` (it was `false` on 0.161.0). The same occurs for `collection<color>`,
+`list<string>`, `indexed_collection<boolean>`, `tensor<number>` and
+`broadcastable<number>` against a list of points. Tycho asks "could this row be
+a point list, a colour list, a boolean mask?" with `couldMatch`, so it now
+compares the element types itself (`couldMatchNonEmpty` in Tycho's
+`src/plot-core/ce-type-guards.ts`). Ask: an engine predicate that answers for a
+non-empty value. The `couldMatch` docstring (`src/common/type/boxed-type.ts`)
+said `list<integer>` could not be a `list<string>`; it was corrected on
+2026-10-23. Instrument:
+`~/dev/tycho/scripts/repros/2026-10-23-ce429-couldmatch-empty-list-overlap-repro.mts`
+(READY when every listed pair reads `false` and the three controls `true`; with
+a new predicate, Tycho changes the instrument to read it).
+
+### CE-398. The sum of a vector of reals and a list of `broadcastable<number>` has a `list<any>` element arm (Tycho row 430)
+
+**Status:** open; defect, small. Tycho row 430, filed 2026-10-23 on 0.162.0;
+still NOT READY on 0.163.0 (instrument run 2026-10-23).
+
+With `U: vector<real^3>` and `M: list<broadcastable<number>>`, `U + M` is typed
+`list<broadcastable<number> | list<any>>` (0.161.0:
+`list<broadcastable<number>>`). The `list<any>` arm says nothing true about the
+value: each element of `M` is a number or an array of numbers, and adding a
+real keeps that. Controls: `u + m` with `u: real`, `m: broadcastable<number>` is
+`broadcastable<number>`; `U + L` with `L: list<real>` is `list<real>`. Effect on
+Tycho: the compiled firing lane has no layout for `list<any>` ("unshaped type …
+has no CompiledValue layout"), so an action step `U \to U + \operatorname{Map}(r, N)`
+runs on the interpreter. Expected: `list<broadcastable<number>>`. Tycho also
+asks whether a type can spell a list of known length whose elements are not
+known to be scalars (`list<broadcastable<number>^3>` is a parse error since
+0.162.0). Instrument:
+`~/dev/tycho/scripts/repros/2026-10-23-ce430-add-broadcastable-list-type-repro.mts`
+(READY when the sum has no `list<any>` arm and the control does not change).
 
 ## Types and type inference
 
@@ -1365,6 +1408,32 @@ No case is known for any of these.
 
 ## Collections, absence and broadcasting
 
+### CE-399. A vector plus a matrix is an error on one route and a row-by-row broadcast on another
+
+**Status:** open; defect, small. Needs a user decision: which of the two
+values is correct. Found 2026-10-23 while fixing CE-398.
+
+With `M32 = [[1, 2], [3, 4], [5, 6]]` (3 rows of 2):
+
+- `ce.box(['Add', ['List', 1, 2, 3], M32]).evaluate()` is
+  `Error("incompatible-dimensions", "3 vs 3x2")`. The same error occurs when
+  the matrix is a symbol declared `matrix<number>` (`U + C`), or when the list
+  is a literal and the matrix is a symbol declared `broadcastable<number>`.
+- With `U: vector<real^3>` (or `list<number>`) holding `[1, 2, 3]` and
+  `B: broadcastable<number>` holding `M32`, `U + B` evaluates to
+  `[[2, 3], [5, 6], [8, 9]]`: element `i` of `U` is added to row `i` of `B`.
+- `Less(B, [1, 2])` with `B` a 2 by 3 matrix is a 2 by 3 matrix of booleans
+  (row `i` compared with element `i`), while `Add(B, [1, 2])` is an
+  `incompatible-dimensions` error.
+
+The static type of `U + C` is `matrix | vector<real^3>`, which says that the
+sum has a value. The type code of the element-wise broadcast
+(`broadcastShapedResultType` in `src/common/type/utils.ts`) describes the
+row-by-row reading ("a vector against a matrix broadcasts the vector over the
+rows"). Decide one meaning for every route, then align the value code and the
+types (CE-398 types the sum as a `tensor`, which holds both the matrix and the
+error).
+
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
 **Status:** open; defect, small. Plan:
@@ -1750,19 +1819,6 @@ Implement sticky evaluated results of unresolved calls together with function
 declaration hoisting across the sequential runner, the whole-block interpreter
 and the compiler. Keep earlier bindings, declared signatures and constructors.
 See also CE-312.
-
-### CE-95. `x/0` with a symbolic numerator folds to `ComplexInfinity` before `x` has a value
-
-**Status:** open; defect. Tycho row 413. User decision 2026-10-23: the fold
-waits for the value. `x/0` folds to `ComplexInfinity` only when the numerator is
-a nonzero number or provably nonzero; otherwise it stays `x/0` until `x` has a
-value. Measure the snapshot changes and report the count before landing.
-
-With `x: real` and no value, `\{x/0 > 0: 1, 0\}` canonicalizes `x/0` to
-`ComplexInfinity`. The compiled code is `(0 < Infinity) ? 1 : 0`, which gives 1
-at every `x`, including `x = 0`, where the value is `0/0`. A quotient by a
-literal zero with a symbolic numerator is a pole only when the numerator is not
-zero. Question for the canonical form: should the fold wait for the value?
 
 ### CE-96. A `Return` inside a `Sum` body stays in the value
 

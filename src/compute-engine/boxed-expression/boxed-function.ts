@@ -2177,6 +2177,11 @@ export class BoxedFunction
     if (isFunction(expr, 'Divide')) {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
+      // A quotient by zero has no coefficient: `a/0` is kept by
+      // `canonicalDivide` because `a` may be zero, and reading it as
+      // `(1/0)·a` gave the coefficient `+∞`, so `a/0 + 1` became
+      // `+∞·a + 1` when it was added.
+      if (coef2.isZero) return [ce._numericValue(1), this];
       const coef = coef1.div(coef2);
       if (denom.isSame(1)) return [coef, numer];
       return [coef, ce.function('Divide', [numer, denom])];

@@ -2674,7 +2674,8 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
     expect(ce.box(['Divide', 0, 0]).evaluate().toString()).toBe(
       'Indeterminate'
     );
-    expect(ce.box(['Divide', 'x', 0]).evaluate().toString()).toBe('~oo');
+    // `x` may be zero, so the quotient waits for its value (ROADMAP CE-95).
+    expect(ce.box(['Divide', 'x', 0]).evaluate().toString()).toBe('x / 0');
     expect(
       ce.box(['Divide', 5, 'PositiveInfinity']).evaluate().toString()
     ).toBe('0');

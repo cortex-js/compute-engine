@@ -20,6 +20,7 @@ import {
   tensorCellExpression,
 } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import { sgn } from './sgn.js';
 import { isStoredAsDouble } from './machine-broadcast.js';
 import {
   bignumPreferred,
@@ -181,6 +182,30 @@ function isLiteral(op: Expression, n: number): boolean {
   if (!isNumber(op)) return false;
   if (n !== 0 && !op.isExact) return false;
   return op.isSame(n);
+}
+
+/**
+ * Whether the numerator `x` of a quotient by zero is provably not zero, so
+ * that `x/0` is a pole and folds to `ComplexInfinity`. A numerator that may be
+ * zero keeps the quotient: `x/0` is `0/0`, the indeterminate form, when `x`
+ * is 0. With `x: real` and no value, `x/0` stays `x/0` until `x` has a value
+ * (user decision of 2026-10-23, ROADMAP CE-95).
+ *
+ * A number literal other than 0 is not zero (the caller handles the literal
+ * 0 and `NaN` first). Any other numerator is not zero when its sign, known
+ * from its type and the assumptions, excludes 0: `positive` (`π`,
+ * `x^2 + 1` with `x: real`, `e^x`), `negative`, or `not-zero` (a symbol
+ * declared `real & !0`, or one with the assumption `d ≠ 0`).
+ * A numerator that reads a variable with an assigned value keeps the
+ * quotient, because its sign comes from the value that the variable holds
+ * now, and a canonical form must not depend on that value: with `a := 5`, a
+ * folded `a/0` stayed `ComplexInfinity` after `a := 0`.
+ */
+function isProvablyNonZeroNumerator(x: Expression): boolean {
+  if (isNumber(x)) return !x.isNaN && !x.isSame(0);
+  const s = sgn(x);
+  if (s !== 'positive' && s !== 'negative' && s !== 'not-zero') return false;
+  return !hasAssignedVariable(x);
 }
 
 /**
@@ -807,10 +832,16 @@ export class Product {
       // so is `1/M`: it is not the inverse of `M`. So `A/M` is not `A·M^{-1}`,
       // and `(A/g(x))·A` is not `(A·A)/g(x)`. The quotient is tallied as one
       // term, which keeps its position in the product.
+      //
+      // A quotient by the number 0 is not split either. `canonicalDivide`
+      // keeps `x/0` when `x` may be zero, and its value is `0/0` or a pole
+      // depending on `x`. Split, the factor `0^{-1}` reached the zero arm
+      // above, which made the whole product 0: `(x/0)/2` was 0.
       const e = reducedRational(exponent);
       if (
         (isIntegerRational(e) || term.op2.isNonNegative === true) &&
-        !this.isNoncommutingTerm(term.op2)
+        !this.isNoncommutingTerm(term.op2) &&
+        !isLiteral(term.op2, 0)
       ) {
         this.mul(term.op1, exponent);
         this.mul(term.op2, neg(exponent));
@@ -1726,12 +1757,17 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // (1,2)/0 → (~oo, ~oo), and the shape the `Divide` TYPE handler claims for
   // the quotient. The type read is confined to these two degenerate-divisor
   // branches — an ordinary quotient never pays for it.
+  //
+  // A numerator that may be zero keeps the quotient (`isProvablyNonZeroNumerator()`):
+  // with `x: real` and no value, `x/0` is `0/0` when `x` is 0, so it is not
+  // folded to `ComplexInfinity`.
   if (isLiteral(op2, 0)) {
     if (typeMayCarryQuotientShape(op1.type.type))
       return ce._fn('Divide', [op1, op2]);
-    return isLiteral(op1, 0)
-      ? indeterminateFormAnswer(ce, [op1, op2])
-      : ce.ComplexInfinity;
+    if (isLiteral(op1, 0)) return indeterminateFormAnswer(ce, [op1, op2]);
+    return isProvablyNonZeroNumerator(op1)
+      ? ce.ComplexInfinity
+      : ce._fn('Divide', [op1, op2]);
   }
 
   // 0/a = 0 (a≠0, a is finite)
@@ -1819,6 +1855,12 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     op1 = op1.op1;
     op2 = op2.op1;
   }
+
+  // A divisor that is a quotient by the number 0 (`x/0`, kept because `x`
+  // may be zero) is not inverted: `1/(x/0)` would become `(1·0)/x`, which is
+  // 0, although its value at `x = 0` is `1/(0/0)`, which has none.
+  if (isFunction(op2, 'Divide') && isLiteral(op2.op2, 0))
+    return ce._fn('Divide', [op1, op2]);
 
   // (a/b)/(c/d) = (a*d)/(b*c)
   if (
@@ -2193,9 +2235,13 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // A shape-carrying numerator is exempt, exactly as in `canonicalDivide`:
     // the quotient stays an inert `Divide` so evaluation broadcasts the
     // division over the elements ([1,2]/0 → [~oo, ~oo]) instead of
-    // collapsing the shape to one scalar.
+    // collapsing the shape to one scalar. A numerator that may be zero keeps
+    // the quotient too, as in `canonicalDivide` (`isProvablyNonZeroNumerator()`).
     if (denom === 0) {
-      if (typeMayCarryQuotientShape(num.type.type))
+      if (
+        typeMayCarryQuotientShape(num.type.type) ||
+        !isProvablyNonZeroNumerator(num)
+      )
         return ce._fn('Divide', [num, ce.number(0)]);
       return ce.ComplexInfinity;
     }
@@ -2244,8 +2290,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // above (the boxed-zero case previously returned NaN). A shape-carrying
     // numerator stays an inert `Divide` that broadcasts at evaluation, as in
     // the JS-number path and `canonicalDivide`.
+    //
+    // A numerator that may be zero keeps the quotient too
+    // (`isProvablyNonZeroNumerator()`).
     if (isLiteral(denom, 0)) {
-      if (typeMayCarryQuotientShape(num.type.type))
+      if (
+        typeMayCarryQuotientShape(num.type.type) ||
+        !isProvablyNonZeroNumerator(num)
+      )
         return ce._fn('Divide', [num, denom]);
       return ce.ComplexInfinity;
     }

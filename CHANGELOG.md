@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`x/0` waits for the value of `x`** (ROADMAP CE-95, Tycho row 413). With
+  `x: real` and no value, `x/0` was canonicalized to `ComplexInfinity`, so
+  `\{x/0 > 0: 1, 0\}` compiled to `(0 < Infinity) ? 1 : 0` and gave 1 at every
+  `x`, including `x = 0`, where the value is `0/0`. A quotient by the number 0
+  now folds to `ComplexInfinity` only when the numerator is provably not zero:
+  a number other than 0 (`5/0`, `π/0`, `i/0`), or an expression whose sign is
+  known from its type and the assumptions (`(x^2+1)/0`, `e^x/0`). Otherwise the
+  quotient stays `x/0` through `evaluate()`, `.N()` and `simplify()`, and the
+  value decides: `Indeterminate` at `x = 0`, `ComplexInfinity` elsewhere. A
+  numerator that reads a variable with an assigned value is not folded when it
+  is boxed, so the answer follows a later assignment. The compiled branch above
+  now gives 0 at `x = 0`. A limit does not take such a quotient as its value:
+  `lim_{x→a⁺} x/(x−a)` with no assumption on `a` stays unevaluated.
+
 ## 0.163.0 _2026-10-23_
 
 ### Breaking Changes
